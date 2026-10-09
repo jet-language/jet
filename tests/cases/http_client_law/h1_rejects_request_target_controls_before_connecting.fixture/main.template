@@ -1,0 +1,12 @@
+
+use core.http.client as http
+fn run() {
+    if http.get("http://{cap:addr}/safe\nInjected: yes") == {
+        .Ok(_) -> print("accepted")
+        .Err(error) -> {
+            if error == .InvalidURL -> print("rejected")
+            else -> print("wrong error")
+        }
+        else -> print("unexpected")
+    }
+}

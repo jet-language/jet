@@ -1,0 +1,13 @@
+use py.ops as ops
+
+#Test("Python sidecar checks result and failure") {
+    assert_eq(ops.add(2, 3) ?? -1, 5)
+    assert_eq(ops.fail(7) ?? -1, -1)
+}
+
+fn run() -[FFI.Py, IO]> {
+    print(ops.add(2, 3) ?? panic("Python add failed"))
+    print(ops.negate(true) ?? true)
+    print(ops.fail(7) ?? 99)
+    print(ops.wrong_type(7) ?? 123)
+}

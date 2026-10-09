@@ -1,0 +1,48 @@
+# Port of tests/cli_parts/core.rs:698-752; original sources/predicates retained.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): new typed/data/relational forms are explicit.
+fixture: fixtures/budget_usage
+step: jet budget check --unknown
+exit: 2
+stdout: empty
+file: .jet absent
+step: jet budget update --baseline ci/linux --reason "no gate"
+exit: 2
+stdout: empty
+file: .jet absent
+step: jet budget report
+exit: 2
+stdout: empty
+file: .jet absent
+step: jet budget check --json --unknown
+exit: 2
+stdout: empty
+file: .jet absent
+step: jet budget check --unknown --json
+exit: 2
+stdout: empty
+file: .jet absent
+step: jet budget check --json --json
+exit: 2
+stdout: empty
+file: .jet absent
+step: jet budget check --annotations gitlab
+exit: 2
+stdout: empty
+file: .jet absent
+step: jet budget update --baseline CI/Linux
+exit: 2
+stdout: empty
+file: .jet absent
+step: jet budget update --baseline ci/linux --bootstrap --accept-regression --reason invalid
+exit: 2
+stdout: empty
+file: .jet absent
+step: jet budget update --baseline ci/linux --yes -y
+exit: 2
+stdout: empty
+file: .jet absent
+copy: malformed.source src/run.jet
+step: jet budget check
+exit: 1
+file: .jet absent

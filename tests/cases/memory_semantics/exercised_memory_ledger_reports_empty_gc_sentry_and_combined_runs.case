@@ -1,0 +1,30 @@
+# Port of tests/memory_semantics.rs:389-446; row() bytes expanded verbatim, existing CLI snapshots reused.
+# PENDING-GRAMMAR: concat (TestW3b batch two).
+fixture: fixtures/ledger
+env: NO_COLOR=1
+env: JET_MEMORY_LEDGER={work}/.jet/memory/ledger-v1.jsonl
+copy: empty.txt .jet/memory/ledger-v1.jsonl
+step: jet audit memory --json
+exit: 0
+stdout: = ../../cli/memory_audit_empty.txt
+stdout: ~ "\"coverage\":\"exercised runs only\"" # original predicate
+stdout: ~ "\"witnesses\":0" # original predicate
+copy: gc.txt .jet/memory/ledger-v1.jsonl
+step: jet audit memory --json
+exit: 0
+stdout: = ../../cli/memory_audit_gc.txt
+stdout: ~ "\"kind\":\"gc\"" # original predicate
+stdout: ~ "\"witnesses\":1" # original predicate
+copy: sentry.txt .jet/memory/ledger-v1.jsonl
+step: jet audit memory --json
+exit: 0
+stdout: = ../../cli/memory_audit_sentry.txt
+stdout: ~ "\"kind\":\"sentry\"" # original predicate
+stdout: ~ "\"witnesses\":1" # original predicate
+concat: .jet/memory/ledger-v1.jsonl gc.txt sentry.txt
+step: jet audit memory --json
+exit: 0
+stdout: = ../../cli/memory_audit_combined.txt
+stdout: ~ "\"kind\":\"gc\"" # original predicate
+stdout: ~ "\"kind\":\"sentry\"" # original predicate
+stdout: ~ "\"witnesses\":2" # original predicate

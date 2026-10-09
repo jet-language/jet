@@ -1,0 +1,8 @@
+Error [E1102]: `parallel result` can't cross a parallel worker boundary because `[fn(Int) -[]> Int]` isn't sendable
+  --> parallel_adapters_reject_unsafe_boundaries_before_codegen_5.jet:2:20
+    |
+  2 |     ignored :: [1].para_map((n: Int) -> (x: Int) -> x + n)
+    |                    ^^^^^^^^
+ Why: A function value carries executable state, not a worker data value; this concurrent boundary moves owned values between workers
+ Fix: Copy plain owned data into the worker, or keep this operation sequential
+More: jet-lang.dev/e/E1102

@@ -1,0 +1,12 @@
+# PORT tests/effects.rs:182-255.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Split: ; compiler-lib LEDGER-ONLY memory_projections main::run MemAllocBounded12 == Proven, bound11 == Violated, dynamic12 == OpenWorld reason contains loop iteration count; solved run contains IO for exact/dynamic; exact enum/state unavailable even when public diagnostics preserved; public CLI lacks this exact private fact projection (CmdInspect rights exports only inferred/direct/callees/maximal, types omits AST/ct); companion only covers original public subclaims
+fixture: strided_source_loop_projects_exact_arena_audit_multiplicity.fixture
+step: jet check exact.jet
+exit: 0
+step: jet check tight.jet
+exit: nonzero
+stdout+stderr: ~ "E0921"
+step: jet check dynamic.jet
+exit: nonzero
+stdout+stderr: ~ "E0921"

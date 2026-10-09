@@ -1,0 +1,25 @@
+# Port of tests/live_inspect.rs:19-119; program bytes unchanged.
+# PUBLIC-PROJECTION approved TestLead1: inspect live calls the same LiveInspect::read.
+# PENDING-GRAMMAR(batch-four), PENDING-SEAM(read_bytes); no reference receipt claimed.
+fixture: tasks.fixture
+step: jet build live.jet
+session app raw: built
+env: JET_OBSERVE=1
+stdout: null
+stderr: null
+poll snapshot: jet inspect live --attach {pid:app} --once --json until exit: 0 && stdout: ~ "\"wait\":\"channel receive\"" && stdout: ~ "\"depth\":1,\"capacity\":1" timeout 5s every 25ms
+stdout: ~ "\"parent\":1"
+stdout: ~ "\"label\":\"task@"
+stdout: ~ "\"spawn_site\":"
+stdout: ~ "\"effects\":"
+stdout: ~ "\"arena_bytes\":"
+stdout: !~ "TOP_SECRET_CHANNEL_PAYLOAD"
+stdout: !~ "payload"
+stdout: !~ "locals"
+step: jet inspect live --attach {pid:app} --once --json
+stdout: ~ "\"pid\":{pid:app}"
+stdout: ~ "\"wait\":\"channel receive\""
+stdout: !~ "TOP_SECRET_CHANNEL_PAYLOAD"
+signal app: KILL
+close app
+exit: any # original ChildGuard kills and ignores wait status

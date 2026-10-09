@@ -1,0 +1,49 @@
+
+struct Resource { name: String }
+
+impl Resource.Close {
+    fn close(^self) {
+        print("close {self.name}")
+    }
+}
+
+fn fail() -> Int String! {
+    return Err("stop")
+}
+
+fn returned() {
+    resource := Resource{ name: "return" }
+    defer close(^resource)
+    print("return body")
+    return
+}
+
+fn questioned() -> Int String! {
+    resource := Resource{ name: "question" }
+    defer close(^resource)
+    value := fail()
+    return Ok(value)
+}
+
+fn looped() {
+    loop n in [0, 1] {
+        resource := Resource{ name: if n == 0 -> "continue" else -> "break" }
+        defer close(^resource)
+        if n == 0 { next }
+        break
+    }
+}
+
+fn run() {
+    first := Resource{ name: "a" }
+    defer close(^first)
+    second := Resource{ name: "b" }
+    defer close(^second)
+    print("body")
+    returned()
+    questioned().drop("this path intentionally proves `?` cleanup")
+    looped()
+    unwind := Resource{ name: "unwind" }
+    defer close(^unwind)
+    panic("boom")
+}

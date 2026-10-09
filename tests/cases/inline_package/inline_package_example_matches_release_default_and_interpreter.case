@@ -1,0 +1,24 @@
+# Port of inline_package.rs:14-19 and tir_support/mod.rs:396-496; all three original hosted tiers retained.
+# PENDING-GRAMMAR: step env and stream label equality. No synthetic package.jet; cwd is isolated {work}.
+fixture: fixtures/inline_package_example_matches_release_default_and_interpreter
+# Original tir_support/mod.rs:456 creates each mode's Scratch root; its children remain absent.
+mkdir: cache/release
+step release: jet run --release {work}/inline_package.jet
+env: JET_STORE_DIR={work}/cache/release/cache
+env: JETPACK_ROOT={work}/cache/release/jetpack
+env: JETPACK_ENV=1
+stdout: = ../../../Examples/features/expected/packages/inline_package.out
+mkdir: cache/default
+step default: jet run {work}/inline_package.jet
+env: JET_STORE_DIR={work}/cache/default/cache
+env: JETPACK_ROOT={work}/cache/default/jetpack
+env: JETPACK_ENV=1
+stdout: = ../../../Examples/features/expected/packages/inline_package.out
+stdout: == release # Original helper's baseline parity.
+mkdir: cache/interpret
+step interpret: jet run --interpret {work}/inline_package.jet
+env: JET_STORE_DIR={work}/cache/interpret/cache
+env: JETPACK_ROOT={work}/cache/interpret/jetpack
+env: JETPACK_ENV=1
+stdout: = ../../../Examples/features/expected/packages/inline_package.out
+stdout: == release # Original helper's baseline parity.

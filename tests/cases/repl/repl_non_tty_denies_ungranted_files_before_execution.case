@@ -1,0 +1,13 @@
+# PORT tests/repl.rs:1992-2005; all original predicates, verbatim input literals.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Startup non-overlap: crates/jet-repl/src/Render.rs24-37,41-61,67-74; cooked mirror lib.rs2469-2470.
+fixture: repl_non_tty_denies_ungranted_files_before_execution.fixture
+mkdir: project
+step: jet repl --project {work}/project
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_non_tty_denies_ungranted_files_before_execution.fixture/input0.txt
+exit: any # original library predicates did not assert process status
+stdout|stderr: ~ "E1803" # original predicate
+stdout|stderr: ~ "FS.Write" # original predicate
+file: project/must-not-exist.txt absent

@@ -1,0 +1,12 @@
+
+use core.mem as mem
+
+fn run() {
+    arena := mem.Arena.new()
+    close(^arena)
+    bump := mem.Bump.new(capacity: 64)
+    defer close(^bump)
+    pool := mem.Pool.new(slots: 2)
+    close(^pool)
+    print("closed")
+}

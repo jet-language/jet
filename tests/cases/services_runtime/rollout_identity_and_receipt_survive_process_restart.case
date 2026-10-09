@@ -1,0 +1,28 @@
+# Port of tests/services_runtime.rs:574-609; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+fixture: rollout_identity_and_receipt_survive_process_restart.fixture
+step: jet build restart.jet
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/rollout.log
+env: JET_SERVICE_AUTH_PHASE=write
+stdout: = rollout_identity_and_receipt_survive_process_restart.rollout.log-write-aot.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/rollout.log
+env: JET_SERVICE_AUTH_PHASE=recover
+stdout: = rollout_identity_and_receipt_survive_process_restart.rollout.log-recover-aot.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/rollout-default.log
+env: JET_SERVICE_AUTH_PHASE=write
+stdout: = rollout_identity_and_receipt_survive_process_restart.rollout-default.log-write-default.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/rollout-default.log
+env: JET_SERVICE_AUTH_PHASE=recover
+stdout: = rollout_identity_and_receipt_survive_process_restart.rollout-default.log-recover-aot.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/rollout-aot-to-default.log
+env: JET_SERVICE_AUTH_PHASE=write
+stdout: = rollout_identity_and_receipt_survive_process_restart.rollout-aot-to-default.log-write-aot.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/rollout-aot-to-default.log
+env: JET_SERVICE_AUTH_PHASE=recover
+stdout: = rollout_identity_and_receipt_survive_process_restart.rollout-aot-to-default.log-recover-default.out

@@ -1,0 +1,7 @@
+# PORT tests/structural_merge.rs::delete_edit_and_duplicate_stable_identity_never_auto_merge
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
+fixture: delete_edit_and_duplicate_stable_identity_never_auto_merge.fixture
+step: jet merge --structural {work}/base.jet {work}/ours.jet {work}/theirs.jet --out {work}/must-not-exist.jet --json
+exit: 1
+file: must-not-exist.jet absent
+stderr: ~ "overlapping_edit" # Original contains predicate.

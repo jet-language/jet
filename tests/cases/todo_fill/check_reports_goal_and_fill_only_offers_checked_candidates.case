@@ -1,0 +1,16 @@
+# Port of tests/todo_fill.rs:8-52. Uses the exact committed example.
+# Runtime PENDING-SAME-HEAD.
+# trim_lines differs from trim_start only at line ends, which cannot change
+# the ASCII-digit prefix test or the "(checked)" containment predicate.
+env: NO_COLOR=1
+step: jet check {root}/Examples/features/tooling/todo_hole.jet
+exit: 0
+stdout+stderr: ~ "expected type: Int" # original predicate
+stdout+stderr: ~ "required effects: none" # original predicate
+stdout+stderr: ~ "required effects: [IO]" # original predicate
+step: jet fill {root}/Examples/features/tooling/todo_hole.jet
+exit: 0
+stdout: ~ "candidates:" # original predicate
+stdout: ~ "n (checked)" # original predicate
+stdout: ~ "0 (checked)" # original predicate
+stdout.trim_lines.filter(^= "0" "1" "2" "3" "4" "5" "6" "7" "8" "9"): each-line ~ "(checked)" # original trim_start ASCII-digit conditional

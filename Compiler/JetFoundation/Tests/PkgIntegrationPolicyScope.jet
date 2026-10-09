@@ -1,0 +1,53 @@
+// tests/policy_scope.rs:213-241,306-371. Existing Policy/Gates APIs only.
+// Private GateSet::parse spelling has no Jet counterpart; separately archived.
+fn s6_policy_declaration(key: PolicyKey, value: PolicyValue, scope: PolicyScope, source: String) -> PolicyDeclaration {
+    PolicyDeclaration{key: key, value: value, scope: scope, span: Span{start: 0, end: 0}, target: None, source: source}
+}
+
+#Test("organization obligations floor rejects package relaxation") {
+    declarations :: [PolicyDeclaration]{
+        s6_policy_declaration(PolicyKey.Unsafe, PolicyValue.Obligations, PolicyScope.Organization, "/admin/policy.jet"),
+        s6_policy_declaration(PolicyKey.Unsafe, PolicyValue.Relaxed, PolicyScope.Package, "package.jet")
+    }
+    widening :: if policy_resolve(PolicyKey.Unsafe, declarations) == {
+        .Err(error) -> if error == { .Widening(_, _, _, _) -> true else -> false }
+        .Ok(_) -> false
+    }
+    assert(widening)
+}
+
+#Test("audited gates share the five scope tightening ladder") {
+    loop row in POLICY_RULES {
+        if !policy_key_is_audited_gate(row.key) -> next
+        assert_eq(row.scopes.len(), 5)
+        assert_eq(row.combine, PolicyCombine.Tighten)
+        assert_eq(policy_key_parse(policy_key_name(row.key)), Val(row.key))
+        if policy_parse_value(row.key, ".Forbid") == {
+            .Ok(_) -> {}
+            .Err(_) -> panic("Forbid must parse")
+        }
+    }
+}
+
+#Test("audited gate invocations cannot widen an organization forbid") {
+    loop row in POLICY_RULES {
+        if !policy_key_is_audited_gate(row.key) -> next
+        declaration :: s6_policy_declaration(row.key, PolicyValue.Forbid, PolicyScope.Organization, "org-policy.jet")
+        widening :: if policy_resolve_with_gates(row.key, [declaration], GateSet{allowed: [row.key]}) == {
+            .Err(error) -> if error == { .Widening(_, _, _, _) -> true else -> false }
+            .Ok(_) -> false
+        }
+        assert(widening, policy_key_name(row.key))
+    }
+}
+
+#Test("audited gate invocations are allowed under tightening modes") {
+    loop row in POLICY_RULES {
+        if !policy_key_is_audited_gate(row.key) -> next
+        declaration :: s6_policy_declaration(row.key, PolicyValue.GateOnly, PolicyScope.Organization, "org-policy.jet")
+        if policy_resolve_with_gates(row.key, [declaration], GateSet{allowed: [row.key]}) == {
+            .Ok(_) -> {}
+            .Err(_) -> panic("GateOnly must allow the explicit invocation")
+        }
+    }
+}

@@ -1,0 +1,21 @@
+
+use core.encoding as encoding
+use core.encoding.jsonl as jsonl
+use core.files as files
+
+fn run() {
+    input :: files.open("{work}/jsonl/input.data") ?? panic("open")
+    reader :: jsonl.reader(^input) ?? panic("reader")
+    first :: reader.next() ?? panic("first")
+    if first == {
+        Val(v) -> print(v.text() ?? "bad")
+        None -> print("none")
+    }
+    second :: reader.next() ?? panic("second")
+    if second == {
+        Val(v) -> print(v.int() ?? -1)
+        None -> print("none2")
+    }
+    eof :: reader.next() ?? panic("eof")
+    if eof == None { print("eof") } else { print("bad-eof") }
+}

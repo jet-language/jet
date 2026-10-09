@@ -1,0 +1,136 @@
+# tests/datetime_accuracy.rs::datetime_accuracy_differential_and_properties
+# All vectors/corpus-shape/committed-oracle/golden/default/release predicates retained; PENDING-SAME-HEAD, runtime UNRUN.
+fixture: datetime_accuracy_differential_and_properties.fixture
+env: NO_COLOR=1
+env: JETPACK_ENV=1
+env: JET_TZDB_DIR={root}/Core/time/tzdb
+file: vectors.tsv ^= "# datetime-accuracy-v1\n"
+file.filter(where != "" && !^= "#"): vectors.tsv nonempty
+write: keys.txt empty.template
+write: batches.txt empty.template
+write: families.txt empty.template
+write: ids.txt empty.template
+write: operations.txt empty.template
+write: metadata.txt empty.template
+for line file.filter(where != "" && !^= "#") vectors.tsv as r
+cap:r: count "\t" = 5 # original fields.len == 6
+cap:r.split("\t", 0): nonempty
+capture: batch = text cap:r.split("\t", 0)
+cap:r.split("\t", 1): nonempty
+capture: family = text cap:r.split("\t", 1)
+cap:r.split("\t", 2): nonempty
+capture: ident = text cap:r.split("\t", 2)
+cap:r.split("\t", 3): nonempty
+capture: operation = text cap:r.split("\t", 3)
+cap:r.split("\t", 4): nonempty
+capture: metadata = text cap:r.split("\t", 4)
+cap:r.split("\t", 5): nonempty
+capture: oracle = text cap:r.split("\t", 5)
+cap:batch: each-line where = "epoch_parse" || = "civil_arithmetic" || = "zones"
+append: keys.txt "{cap:batch}\t{cap:family}\t{cap:ident}\t{cap:operation}\n"
+append: batches.txt "{cap:batch}\n"
+append: families.txt "{cap:family}\n"
+append: ids.txt "{cap:ident}\n"
+append: operations.txt "{cap:operation}\n"
+append: metadata.txt "{cap:metadata}\n"
+end for
+file: keys.txt unique-after "" # original HashSet tuple key insert
+file: batches.txt has-line "epoch_parse"
+file: batches.txt has-line "civil_arithmetic"
+file: batches.txt has-line "zones"
+file: families.txt has-line "CAL"
+file: families.txt has-line "F1"
+file: families.txt has-line "F2"
+file: families.txt has-line "F3"
+file: families.txt has-line "F4"
+file: families.txt has-line "F5"
+file: families.txt has-line "F6"
+file: families.txt has-line "PROP"
+file: ids.txt has-line "f2_000"
+file: ids.txt has-line "f2_001"
+file: ids.txt has-line "f2_002"
+file: ids.txt has-line "f2_003"
+file: ids.txt has-line "f1_edge_1900_feb28"
+file: ids.txt has-line "f1_edge_1900_mar01"
+file: ids.txt has-line "f1_edge_2000_feb28"
+file: ids.txt has-line "f1_edge_2000_feb29"
+file: ids.txt has-line "f1_edge_2000_mar01"
+file: ids.txt has-line "f1_edge_2100_feb28"
+file: ids.txt has-line "f1_edge_2100_mar01"
+file: ids.txt has-line "f1_edge_2400_feb28"
+file: ids.txt has-line "f1_edge_2400_feb29"
+file: ids.txt has-line "f1_edge_2400_mar01"
+file: ids.txt has-line "f5_malformed_leap_second"
+file: ids.txt has-line "f5_malformed_hour_24"
+file: ids.txt has-line "f5_malformed_offset_plus_24"
+file: operations.txt has-line "parse_format_round_trip"
+file: operations.txt has-line "diff_days_antisymmetry"
+file: operations.txt has-line "add_days_composition"
+file: operations.txt has-line "add_months_clamping"
+file: metadata.txt ~ "zone=Australia/Lord_Howe"
+file: metadata.txt ~ "zone=Asia/Kathmandu"
+file: metadata.txt ~ "zone=Pacific/Apia"
+file: metadata.txt ~ "zone=Pacific/Chatham"
+file: metadata.txt ~ "zone=Africa/Casablanca"
+file: metadata.txt ~ "zone=America/Sao_Paulo"
+file: metadata.txt ~ "zone=Asia/Tehran"
+file: metadata.txt ~ "zone=Europe/London"
+file: metadata.txt ~ "zone=America/New_York"
+file: metadata.txt ~ "zone=UTC"
+file: datetime_accuracy_epoch_parse.jet is-file
+write: epoch_parse.expected empty.template
+for line file.filter(^= "epoch_parse\t") vectors.tsv as r
+capture: ident = text cap:r.split("\t", 2)
+capture: operation = text cap:r.split("\t", 3)
+capture: oracle = text cap:r.split("\t", 5)
+append: epoch_parse.expected "CASE\t{cap:ident}\t{cap:operation}\t{cap:oracle}\n"
+end for
+file: epoch_parse.golden == epoch_parse.expected # original committed golden equals expected_output(rows,batch)
+capture: expected_epoch_parse = text file epoch_parse.expected
+step epoch_parse_default: jet run datetime_accuracy_epoch_parse.jet
+env: JET_STORE_DIR={work}/epoch_parse/default/run
+exit: 0
+stdout: = "{cap:expected_epoch_parse}" # exact line count/identity, including trailing empty split line
+step epoch_parse_release: jet run --release datetime_accuracy_epoch_parse.jet
+env: JET_STORE_DIR={work}/epoch_parse/release/run
+exit: 0
+stdout: = "{cap:expected_epoch_parse}" # exact line count/identity, including trailing empty split line
+stdout: == epoch_parse_default
+file: datetime_accuracy_civil_arithmetic.jet is-file
+write: civil_arithmetic.expected empty.template
+for line file.filter(^= "civil_arithmetic\t") vectors.tsv as r
+capture: ident = text cap:r.split("\t", 2)
+capture: operation = text cap:r.split("\t", 3)
+capture: oracle = text cap:r.split("\t", 5)
+append: civil_arithmetic.expected "CASE\t{cap:ident}\t{cap:operation}\t{cap:oracle}\n"
+end for
+file: civil_arithmetic.golden == civil_arithmetic.expected # original committed golden equals expected_output(rows,batch)
+capture: expected_civil_arithmetic = text file civil_arithmetic.expected
+step civil_arithmetic_default: jet run datetime_accuracy_civil_arithmetic.jet
+env: JET_STORE_DIR={work}/civil_arithmetic/default/run
+exit: 0
+stdout: = "{cap:expected_civil_arithmetic}" # exact line count/identity, including trailing empty split line
+step civil_arithmetic_release: jet run --release datetime_accuracy_civil_arithmetic.jet
+env: JET_STORE_DIR={work}/civil_arithmetic/release/run
+exit: 0
+stdout: = "{cap:expected_civil_arithmetic}" # exact line count/identity, including trailing empty split line
+stdout: == civil_arithmetic_default
+file: datetime_accuracy_zones.jet is-file
+write: zones.expected empty.template
+for line file.filter(^= "zones\t") vectors.tsv as r
+capture: ident = text cap:r.split("\t", 2)
+capture: operation = text cap:r.split("\t", 3)
+capture: oracle = text cap:r.split("\t", 5)
+append: zones.expected "CASE\t{cap:ident}\t{cap:operation}\t{cap:oracle}\n"
+end for
+file: zones.golden == zones.expected # original committed golden equals expected_output(rows,batch)
+capture: expected_zones = text file zones.expected
+step zones_default: jet run datetime_accuracy_zones.jet
+env: JET_STORE_DIR={work}/zones/default/run
+exit: 0
+stdout: = "{cap:expected_zones}" # exact line count/identity, including trailing empty split line
+step zones_release: jet run --release datetime_accuracy_zones.jet
+env: JET_STORE_DIR={work}/zones/release/run
+exit: 0
+stdout: = "{cap:expected_zones}" # exact line count/identity, including trailing empty split line
+stdout: == zones_default

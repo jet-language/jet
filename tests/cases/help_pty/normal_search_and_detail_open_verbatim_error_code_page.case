@@ -1,0 +1,16 @@
+# Port of tests/help_pty.rs:306-316. PENDING-GRAMMAR(batch-four); exact original inputs/delays/predicates.
+requires: os:unix
+refused: pty
+normalize: replace "\r" ""
+step: jet explain E0102 --color=never
+capture: canonical = text stdout
+step: jet ? --color=never
+pty: true size 24x120
+unset: NO_COLOR
+unset: FORCE_COLOR
+pty-send: "E0102" after 150ms
+pty-send: "\t" after 150ms
+pty-send: "\u001b" after 150ms
+pty-close: after 150ms
+exit: 0
+stdout: count "{cap:canonical}" >= 2 # original predicate: CR-normalized transcript.matches(canonical).count() >=2

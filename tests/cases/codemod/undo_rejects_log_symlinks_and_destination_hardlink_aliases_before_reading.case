@@ -1,0 +1,15 @@
+# HAND-PORT tests/codemod.rs:798-838 undo_rejects_log_symlinks_and_destination_hardlink_aliases_before_reading
+# PENDING-GRAMMAR: approved batch-two forms; no runtime parity claim.
+fixture: undo_rejects_log_symlinks_and_destination_hardlink_aliases_before_reading.fixture
+env: NO_COLOR=1
+requires: os:unix
+hardlink: Examples/a.jet Examples/b.jet
+write: .jet/codemods/Alias.log.json log.template
+symlink: {work}/.jet/codemods/Alias.log.json .jet/codemods/AliasLink.log.json
+step: jet inspect codemod undo .jet/codemods/AliasLink.log.json
+exit: nonzero
+stderr: ~ "regular non-link" # original predicate
+step: jet inspect codemod undo .jet/codemods/Alias.log.json
+exit: nonzero
+stderr: ~any "alias the same file" "regular file with one link" "multiple hard links" # original predicate
+

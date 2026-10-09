@@ -1,0 +1,80 @@
+use core.files as files
+use core.crypto as crypto
+
+fn s5_canvas_token() -> String {
+    text :: sys.get("S5_CANVAS") ?? panic("Canvas URL")
+    marker :: "session=".bytes()
+    bytes :: text.bytes()
+    start :: (s5_web_find(bytes, marker) ?? panic("session parameter")) + marker.len()
+    end := start
+    loop end < bytes.len() {
+        byte :: Int.from_u8(bytes[end])
+        if !((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)) -> break
+        end = end + 1
+    }
+    assert(end - start >= 32, "original Canvas session parser")
+    String.from_bytes_lossy(s5_web_bytes(bytes, start, end))
+}
+
+fn s5_canvas_get(path: String) -> S5HTTPResponse { s5_web_get(s5_web_port(), path, Val(s5_canvas_token())) ?? panic("Canvas GET") }
+fn s5_canvas_post(path: String, body: String) -> S5HTTPResponse { s5_web_post(s5_web_port(), path, body, Val(s5_canvas_token())) ?? panic("Canvas POST") }
+fn s5_canvas_body(response: S5HTTPResponse) -> String { String.from_bytes_lossy(response.body) }
+// ORACLE-PORT crates/jet-devserver/src/Canvas/source_model.rs:24-25, exact original source_revision expression.
+fn s5_canvas_revision(source: String) -> String { "sha256-{crypto.sha256(source.bytes()).hex()}" }
+fn s5_canvas_field(body: String, field: String) -> String {
+    marker :: "\"{field}\":\"".bytes()
+    bytes :: body.bytes()
+    start :: (s5_web_find(bytes, marker) ?? panic("json field")) + marker.len()
+    end := start
+    loop end < bytes.len() && Int.from_u8(bytes[end]) != 34 -> end = end + 1
+    assert(end < bytes.len(), "field terminator")
+    String.from_bytes_lossy(s5_web_bytes(bytes, start, end))
+}
+
+#Test("original live Canvas debug round trip") {
+    root :: sys.get("S5_ROOT") ?? panic("root")
+    source :: files.read(files.join(root, "app.jet")) ?? panic("source")
+    revision :: s5_canvas_revision(source)
+    first_response :: s5_canvas_post("/canvas/debug", (String.from_bytes([U8]{123,34,115,99,104,101,109,97,95,118,101,114,115,105,111,110,34,58,49,44,34,114,101,118,105,115,105,111,110,34,58,34,64,82,69,86,64,34,44,34,99,111,109,109,97,110,100,115,34,58,91,34,115,34,93,125}) ?? panic("literal UTF-8")).replace("@REV@", revision))
+    assert_eq(first_response.status, 200)
+    first :: s5_canvas_body(first_response)
+    assert(first.contains("\"protocol\":\"jet.canvas.debug\""))
+    assert(first.contains("\"state\":\"running\""))
+    assert(first.contains("\"tier\":\"jet-dev-interpreter\""))
+    assert(!first.contains("\"active_line\":null"))
+    protocol_marker :: "\"protocol\":\"jet.canvas.debug\"".bytes()
+    first_bytes :: first.bytes()
+    protocol_start :: (s5_web_find(first_bytes, protocol_marker) ?? panic("debug protocol")) + protocol_marker.len()
+    session :: s5_canvas_field(String.from_bytes_lossy(s5_web_bytes(first_bytes, protocol_start, first_bytes.len())), "id")
+    next_response :: s5_canvas_post("/canvas/debug", (String.from_bytes([U8]{123,34,115,99,104,101,109,97,95,118,101,114,115,105,111,110,34,58,49,44,34,114,101,118,105,115,105,111,110,34,58,34,64,82,69,86,64,34,44,34,115,101,115,115,105,111,110,95,105,100,34,58,34,64,83,69,83,83,73,79,78,64,34,44,34,99,111,109,109,97,110,100,115,34,58,91,34,115,34,93,125}) ?? panic("literal UTF-8")).replace("@REV@", revision).replace("@SESSION@", session))
+    assert_eq(next_response.status, 200)
+    next :: s5_canvas_body(next_response)
+    assert(next.contains("\"state\":\"running\""))
+    assert(!next.contains("\"active_line\":null"))
+    invalid_response :: s5_canvas_post("/canvas/debug", (String.from_bytes([U8]{123,34,115,99,104,101,109,97,95,118,101,114,115,105,111,110,34,58,49,44,34,114,101,118,105,115,105,111,110,34,58,34,64,82,69,86,64,34,44,34,115,101,115,115,105,111,110,95,105,100,34,58,34,64,83,69,83,83,73,79,78,64,34,44,34,99,111,109,109,97,110,100,115,34,58,91,34,116,101,108,101,112,111,114,116,34,93,125}) ?? panic("literal UTF-8")).replace("@REV@", revision).replace("@SESSION@", session))
+    assert_eq(invalid_response.status, 409)
+    invalid :: s5_canvas_body(invalid_response)
+    assert(invalid.contains("\"kind\":\"unsupported\""))
+    after_invalid_response :: s5_canvas_post("/canvas/debug", (String.from_bytes([U8]{123,34,115,99,104,101,109,97,95,118,101,114,115,105,111,110,34,58,49,44,34,114,101,118,105,115,105,111,110,34,58,34,64,82,69,86,64,34,44,34,115,101,115,115,105,111,110,95,105,100,34,58,34,64,83,69,83,83,73,79,78,64,34,44,34,99,111,109,109,97,110,100,115,34,58,91,34,115,34,93,125}) ?? panic("literal UTF-8")).replace("@REV@", revision).replace("@SESSION@", session))
+    assert_eq(after_invalid_response.status, 200)
+    after_invalid :: s5_canvas_body(after_invalid_response)
+    assert(after_invalid.contains("\"state\":\"running\""))
+    finish_response :: s5_canvas_post("/canvas/debug", (String.from_bytes([U8]{123,34,115,99,104,101,109,97,95,118,101,114,115,105,111,110,34,58,49,44,34,114,101,118,105,115,105,111,110,34,58,34,64,82,69,86,64,34,44,34,115,101,115,115,105,111,110,95,105,100,34,58,34,64,83,69,83,83,73,79,78,64,34,44,34,99,111,109,109,97,110,100,115,34,58,91,34,99,34,93,125}) ?? panic("literal UTF-8")).replace("@REV@", revision).replace("@SESSION@", session))
+    assert_eq(finish_response.status, 200)
+    finish :: s5_canvas_body(finish_response)
+    assert(finish.contains("\"state\":\"finished\""))
+    assert(finish.contains("\"active_line\":null"))
+    stale_breakpoint_response :: s5_canvas_post("/canvas/debug", (String.from_bytes([U8]{123,34,115,99,104,101,109,97,95,118,101,114,115,105,111,110,34,58,49,44,34,114,101,118,105,115,105,111,110,34,58,34,64,82,69,86,64,34,44,34,98,114,101,97,107,112,111,105,110,116,95,115,112,97,110,115,34,58,91,34,57,57,57,57,57,57,58,49,48,48,48,48,48,48,34,93,44,34,99,111,109,109,97,110,100,115,34,58,91,34,99,34,93,125}) ?? panic("literal UTF-8")).replace("@REV@", revision))
+    assert_eq(stale_breakpoint_response.status, 200)
+    stale_breakpoint :: s5_canvas_body(stale_breakpoint_response)
+    assert(stale_breakpoint.contains("\"state\":\"stale\""))
+    stale_revision_response :: s5_canvas_post("/canvas/debug", (String.from_bytes([U8]{123,34,115,99,104,101,109,97,95,118,101,114,115,105,111,110,34,58,49,44,34,114,101,118,105,115,105,111,110,34,58,34,115,104,97,50,53,54,45,115,116,97,108,101,34,44,34,99,111,109,109,97,110,100,115,34,58,91,34,115,34,93,125}) ?? panic("literal UTF-8")).replace("@REV@", revision))
+    assert_eq(stale_revision_response.status, 409)
+    stale_revision :: s5_canvas_body(stale_revision_response)
+    assert(stale_revision.contains("\"kind\":\"conflict\""))
+    ended_response :: s5_canvas_post("/canvas/debug", (String.from_bytes([U8]{123,34,115,99,104,101,109,97,95,118,101,114,115,105,111,110,34,58,49,44,34,114,101,118,105,115,105,111,110,34,58,34,64,82,69,86,64,34,44,34,115,101,115,115,105,111,110,95,105,100,34,58,34,64,83,69,83,83,73,79,78,64,34,44,34,99,111,109,109,97,110,100,115,34,58,91,34,115,34,93,125}) ?? panic("literal UTF-8")).replace("@REV@", revision).replace("@SESSION@", session))
+    assert_eq(ended_response.status, 409)
+    ended :: s5_canvas_body(ended_response)
+    assert(ended.contains("\"kind\":\"session\""))
+    assert_eq(files.read(files.join(root, "app.jet")) ?? panic("final source"), source)
+}

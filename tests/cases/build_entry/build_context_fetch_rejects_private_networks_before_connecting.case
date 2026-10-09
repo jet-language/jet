@@ -1,0 +1,13 @@
+# Port of tests/build_entry.rs:3471-3518; sources verbatim.
+# PENDING-SAME-HEAD; real 1s Core.net observer keeps the original no-connect Boolean.
+fixture: fixtures/build_context_fetch_rejects_private_networks_before_connecting
+step: jet build observer.jet
+spawn observer: {work}/.jet/build/observer {work}/port.txt
+await: file port.txt timeout 120s every 10ms
+capture: port = text file port.txt
+write: main.jet main.template
+step: jet build main.jet  --json
+exit: nonzero
+json: machine doc $.reports[?code="E3414"] #>= 1
+wait: observer
+exit: 0

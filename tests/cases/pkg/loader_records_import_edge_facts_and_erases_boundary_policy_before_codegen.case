@@ -1,0 +1,39 @@
+# Port of tests/pkg.rs:1685-1800; sources/helper-expanded manifest verbatim.
+# Rust generated-text !contains predicates1741-1742 RETIRED with emitter; all semantic/runtime claims retained.
+# Severity has only Error/Lint (Diagnostics.rs105-108), so check success preserves all diagnostics Lint.
+# Loader fact/GateLedger carriers checked via their public structure JSON projection, CmdStructure.rs267-347.
+# ORACLE-LITERAL one.out from original1770; rustc/wasm availability guard erased by reviewer Rust-exit ruling.
+fixture: fixtures/import-allowed
+env: NO_COLOR=1
+step: jet check ui.jet
+exit: 0
+step: jet inspect structure ui.jet
+exit: 0
+stdout: ~ "Structure.ImportEdge" # original predicate
+stdout: ~ "app.ui -> app.db" # original predicate
+stdout: ~ "manifest rule edit" # original predicate
+step: jet inspect structure ui.jet --json
+exit: 0
+json: stdout doc $.structure.facts[?kind="import-edge"][0].subject = "app.ui -> app.db"
+json: stdout doc $.structure.facts[?kind="import-edge"][0].status = "allowed"
+json: stdout doc $.structure.facts[?kind="import-edge"][0].gate = "manifest rule edit"
+json: stdout doc $.structure.gates[?kind="structure"][?scope="import-edge"][?subject="app.ui -> app.db"] #>= 1 # original predicate: any matching gate
+step: jet run --release ui.jet
+env: JET_STORE_DIR={work}/.cache/aot/build
+exit: 0
+stdout: = one.out
+step: jet run ui.jet
+env: JET_STORE_DIR={work}/.cache/jit/build
+exit: 0
+stdout: = one.out
+step: jet run --interpret ui.jet
+env: JET_STORE_DIR={work}/.cache/interpreter/build
+exit: 0
+stdout: = one.out
+step: jet dev ui.jet --watch=off
+env: JET_STORE_DIR={work}/.cache/dev/build
+exit: 0
+stdout: = one.out
+step: jet build --target=web ui.jet
+env: JET_STORE_DIR={work}/.cache/web
+exit: 0

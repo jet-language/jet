@@ -1,0 +1,14 @@
+# PORT tests/pkg.rs::registry_dependency_reports_transport_failure:3836-3874; original helpers min_manifest/manifest_with_deps/with_store retained.
+# KNOWN-FAILING #4833: Jet front-end has no fetch/locked dependency-resolution door.
+# PENDING-GRAMMAR(batch-four); no reference snapshot or runtime proof.
+# Rust CLI: main.rs3684-3691 -> CmdPkg.rs255-325 -> original Fetch::fetch options.
+fixture: fixtures/registry_dependency_reports_transport_failure
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+step: jet fetch
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1207]"
+stderr: ~ "Error [E1207]:"
+stderr: ~ "Why:"
+stderr: ~ "Fix:"
+stderr: = E1207.stderr

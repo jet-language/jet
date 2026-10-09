@@ -1,0 +1,116 @@
+# HAND-PORT tests/jetpack_engine.rs:8163-8509 package_transition_cli_covers_split_fold_init_restore_and_failures
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: package_transition_cli_covers_split_fold_init_restore_and_failures.fixture
+env: NO_COLOR=1
+mkdir: env
+mkdir: pkg
+mkdir: stale
+mkdir: duplicate
+mkdir: hosts
+mkdir: unknown
+mkdir: stale-hosts
+mkdir: ambiguous
+mkdir: invalid
+step: jet split env --check
+exit: 0
+cwd: env
+stdout: ~ "No files changed." # original contains predicate
+file: env/package/env.jet absent
+step: jet split env
+exit: 0
+cwd: env
+file: env/package/env.jet is-file
+step: jet fold package/env.jet --check
+exit: 0
+cwd: env
+stdout: ~ "No files changed." # original contains predicate
+step: jet fold package/env.jet
+exit: 0
+cwd: env
+file: env/package.jet = package_transition_cli_covers_split_fold_init_restore_and_failures.env.expected
+file: env/package/env.jet absent
+step: jet split package app --check
+exit: 0
+cwd: pkg
+step: jet split package app --check --json
+exit: 0
+cwd: pkg
+json: stdout doc $.before == $.after
+step: jet split package app
+exit: 0
+cwd: pkg
+file: pkg/packages/app/package.jet is-file
+step: jet fold packages/app/package.jet
+exit: 0
+cwd: pkg
+file: pkg/package.jet = package_transition_cli_covers_split_fold_init_restore_and_failures.pkg.expected
+step: jet split package app
+exit: 0
+cwd: stale
+append: stale/packages/app/package.jet "// changed after the plan\n"
+step: jet fold packages/app/package.jet
+exit: 1
+cwd: stale
+stderr: ~ "stale transition" # original contains predicate
+file: stale/packages/app/package.jet is-file
+step: jet split package app
+exit: 1
+cwd: duplicate
+stderr: ~ "member Package name `app` is declared more than once" # original contains predicate
+file: duplicate/package.jet = package_transition_cli_covers_split_fold_init_restore_and_failures.duplicate.expected
+file: duplicate/packages/app/package.jet absent
+step: jet split hosts server
+exit: 0
+cwd: hosts
+file: hosts/package/fleet.jet is-file
+step: jet fold package/fleet.jet
+exit: 0
+cwd: hosts
+step: jet split hosts missing
+exit: 1
+cwd: unknown
+stderr: ~ "outputs.missing" # original contains predicate
+file: unknown/package/fleet.jet absent
+step: jet split hosts server
+exit: 0
+cwd: stale-hosts
+append: stale-hosts/package/fleet.jet "// changed after the plan\n"
+step: jet fold package/fleet.jet
+exit: 1
+cwd: stale-hosts
+stderr: ~ "stale transition" # original contains predicate
+step: jet split hosts server
+exit: 0
+cwd: ambiguous
+capture: journal = first-entry ambiguous/.jet/package-transition
+copy: {cap:journal} ambiguous/.jet/package-transition/duplicate-journal
+step: jet fold package/fleet.jet
+exit: 1
+cwd: ambiguous
+stderr: ~ "found 2" # original contains predicate
+step: jet split hosts server/name
+exit: 1
+cwd: invalid
+stderr: ~ "E1206" # original contains predicate
+file: invalid/package/fleet.jet absent
+mkdir: legacy
+step: jet init --check
+exit: 0
+cwd: legacy
+stdout: ~ "No files changed." # original contains predicate
+step: jet init
+exit: 0
+cwd: legacy
+file: legacy/package.jet is-file
+step: jet init --restore-role-files --check
+exit: 0
+cwd: legacy
+step: jet init --restore-role-files
+exit: 0
+cwd: legacy
+file: legacy/pkg.jet = package_transition_cli_covers_split_fold_init_restore_and_failures.pkg.jet.expected
+file: legacy/env.jet = package_transition_cli_covers_split_fold_init_restore_and_failures.env.jet.expected
+file: legacy/workspace.jet = package_transition_cli_covers_split_fold_init_restore_and_failures.workspace.jet.expected
+file: legacy/config.jet = package_transition_cli_covers_split_fold_init_restore_and_failures.config.jet.expected
+file: legacy/package.jet absent
+

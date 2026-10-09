@@ -1,0 +1,19 @@
+
+use core.encoding as encoding
+use core.encoding.csv as csv
+use core.files as files
+
+fn run() {
+    input :: files.open("{work}/csv/input.data") ?? panic("open")
+    reader :: csv.reader(^input) ?? panic("reader")
+    first :: reader.next() ?? panic("first")
+    if first == {
+        Val(row) -> {
+            print(row.fields[0])
+            print(row.fields[1])
+        }
+        None -> print("none")
+    }
+    eof :: reader.next() ?? panic("eof")
+    if eof == None { print("eof") } else { print("bad") }
+}

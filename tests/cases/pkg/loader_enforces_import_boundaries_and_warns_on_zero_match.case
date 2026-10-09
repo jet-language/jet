@@ -1,0 +1,11 @@
+# KNOWN-FAILING #4833: Jet loader has no E0619/L0619 import-boundary projection.
+# Exact public projections of pkg.rs:1651-1683's two Loader calls.
+# Only first diagnostic's what field is searched for the two package aliases.
+fixture: fixtures/loader_import_boundaries
+step: jet check denied/ui.jet
+exit: nonzero
+stderr.after_first("Error ["): ^= "E0619]"
+stderr.after_first("Error [E0619]:").split("\n", 0): ~ "app.ui"
+stderr.after_first("Error [E0619]:").split("\n", 0): ~ "app.db"
+step: jet check unused/ui.jet
+stderr: ~ "[L0619]"

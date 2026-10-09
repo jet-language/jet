@@ -1,0 +1,27 @@
+# Original tests/failure_tier_parity.rs:197-245; verbatim input and every runtime parity assertion.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; exact .normalize_failure_journey_paths helper125-156 differs from CheckedText.
+fixture: core_net_error_conversion_renders_in_resident_jit.fixture
+step jit: jet run main.jet
+env: NO_COLOR=1
+exit: 1
+stdout: empty
+stderr: ~ "Error:"
+stderr.from_or_all("Error:"): ~ "network timeout must be non-negative"
+stderr.from_or_all("Error:"): ~ "(type: NetError)"
+stderr.from_or_all("Error:"): ~ "conversion"
+capture: jit_runtime = text stderr.from_or_all("Error:").normalize_failure_journey_paths
+step interpreter: jet run --interpret main.jet
+env: NO_COLOR=1
+exit: 1
+stdout: == jit
+stderr.normalize_failure_journey_paths: == jit
+when tool rustc
+step: jet build main.jet
+env: NO_COLOR=1
+exit: 0
+step aot: built
+exit: 1
+stdout: == jit
+stderr: ~ "Error:"
+stderr.from_or_all("Error:").normalize_failure_journey_paths: = "{cap:jit_runtime}"
+end when

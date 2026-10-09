@@ -1,0 +1,11 @@
+use core.files as s1_boundary_files
+
+// Port of tests/concurrency_boundaries.rs:11-41, document assertions unchanged.
+// Rust Syntax MARKER_LOCAL/SHARED constant-identity subclaims retire.
+#Test("architecture_states_datarace1_c_guarantee") {
+    architecture :: s1_boundary_files.read("Docs/spec/architecture.md") ?? panic("read architecture")
+    assert(architecture.contains("D-DATARACE1=C is law"), "architecture must state the ratified D-DATARACE1=C guarantee")
+    assert(architecture.contains("lock-ordered `Arc` storage") || architecture.contains("lock-ordered Arc storage"), "architecture must state synchronized reactive storage")
+    assert(!architecture.contains("own the open choice"), "architecture must not treat D-DATARACE1 as an open choice after ratification")
+    assert(!architecture.contains("leans on rustc"), "architecture must not leave reactive crossings on a rustc Send backstop")
+}

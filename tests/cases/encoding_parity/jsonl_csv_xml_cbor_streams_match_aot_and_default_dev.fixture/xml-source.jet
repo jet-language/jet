@@ -1,0 +1,53 @@
+
+use core.encoding as encoding
+use core.encoding.[xml as fmt]
+use core.files as files
+
+
+fn xml_name(local: String) -[]> DataTree {
+    return DataTree.Object([
+        "raw": DataTree.Text(~local),
+        "prefix": DataTree.Null,
+        "local": DataTree.Text(~local),
+        "namespace_uri": DataTree.Null,
+    ])
+}
+
+fn run() {
+    path := "{work}/doc.xml"
+    output :: files.create(path) ?? panic("create")
+    writer :: fmt.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
+    writer.write(DataTree.Object([
+        "$xml_event": DataTree.Text("document_start"),
+        "encoding": DataTree.Null,
+        "bom": DataTree.Array([]),
+    ])) ?? panic("document_start")
+    writer.write(DataTree.Object([
+        "$xml_event": DataTree.Text("element_start"),
+        "name": xml_name("r"),
+        "namespaces": DataTree.Array([]),
+        "attributes": DataTree.Array([]),
+        "empty_style": DataTree.Text("empty"),
+        "open_lexical": DataTree.Object([
+            "raw_text": DataTree.Null,
+            "raw_bytes": DataTree.Null,
+            "semantic": DataTree.Object([
+                "name": xml_name("r"),
+                "namespaces": DataTree.Array([]),
+                "attributes": DataTree.Array([]),
+                "empty_style": DataTree.Text("empty"),
+            ]),
+        ]),
+    ])) ?? panic("root")
+    writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_end")])) ?? panic("end")
+    writer.finish() ?? panic("finish")
+    input :: files.open(path) ?? panic("open")
+    reader :: fmt.reader(^input) ?? panic("reader")
+    first :: reader.next()
+    if first == {
+        .Val(_) -> print(true)
+        .None -> print(false)
+    }
+    print(files.read(path) ?? panic("read"))
+}
+

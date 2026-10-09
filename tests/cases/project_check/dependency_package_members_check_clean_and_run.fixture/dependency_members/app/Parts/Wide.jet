@@ -1,0 +1,30 @@
+use base.[Note, Shape, Span, make_span]
+
+// This file's import starts at byte 0 and it has three siblings, so the
+// package binding for `base` and the sibling bindings must keep distinct
+// spans.
+
+// Unannotated: its only call is a sibling file's `Never!` function, so the
+// failure solve proves it infallible across files.
+fn plain_width(span: Span) -> Int {
+    width_of(span) + 0
+}
+
+pub fn wide_label(span: Span) -> String? {
+    if plain_width(span) > 2 -> return Val("wide")
+    None
+}
+
+// The field reads the dependency's `Span?`; both arms join as that type.
+pub fn shift_note(note: &Note, by: Int) {
+    note.span = if note.span == {
+        .Val(span) -> Val(make_span(span.start + by, span.end + by))
+        .None -> None
+    }
+}
+
+// Reusing a dependency enum shares it; its payloads live in two files.
+pub fn twin_shapes(shape: Shape) -> Int Never! {
+    pair :: [Shape]{shape, shape}
+    pair.len()
+}

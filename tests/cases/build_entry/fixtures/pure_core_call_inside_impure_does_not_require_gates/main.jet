@@ -1,0 +1,12 @@
+
+use core.math as math
+fn build(b: BuildContext) -> BuildPlan {
+    #Impure("scope contains no ambient effect") {
+        value :: math.abs((-5))
+        if value == 5 {
+            b.error(b.program.functions()[0].span, "PURE", "pure", "executed", "ok")
+        }
+    }
+    return b.plan()
+}
+fn run() {}

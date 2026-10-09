@@ -1,0 +1,16 @@
+# Port of tests/help_pty.rs:454-471. PENDING-GRAMMAR(batch-four); exact original inputs/delays/predicates.
+requires: os:unix
+refused: pty
+normalize: replace "\r" ""
+step: jet ? --color=never
+pty: true size 8x60
+unset: NO_COLOR
+unset: FORCE_COLOR
+pty-send: "\r\t\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B" after 150ms
+pty-send: "\u001b" after 150ms
+pty-send: "q" after 150ms
+pty-close: after 150ms
+exit: 0
+# Helper port: help_pty.rs107-130 cursor_up_counts (not a generalized ANSI stripper).
+stdout.cursor_up_counts: each < 8 # original predicate: every redraw CSI<n>A count is below viewport rows (vacuous onempty)
+stdout: ~any "--target" "--profile" "F1 reference" # original predicate: detail scrolled to at least one later-content marker

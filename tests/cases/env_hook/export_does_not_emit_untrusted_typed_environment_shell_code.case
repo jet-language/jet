@@ -1,0 +1,21 @@
+# Port of tests/env_hook.rs::export_does_not_emit_untrusted_typed_environment_shell_code.
+# The original shell round-trip is UNIX-only; the product assertions run here too.
+# PENDING-GRAMMAR: tool expansion and step-scoped unset.
+requires: tool:bash
+requires: tool:env
+fixture: export_does_not_emit_untrusted_typed_environment_shell_code.fixture
+env: PATH=/usr/bin:/bin
+env: HOME={work}/home
+mkdir: home
+step: {tool:bash} --noprofile --norc -c 'exec "$1" env export bash > hook.sh' hook-export {jetpack}
+unset: JET_ENV_DISABLE
+unset: JETPACK_ENV
+unset: JETPACK_ENV_DIR
+unset: JETPACK_ENV_HASH
+unset: JETPACK_ENV_OLD_PATH
+unset: JETPACK_REF
+exit: 0
+file: hook.sh empty
+step: {tool:env} -i HOME={work}/home PATH=/usr/bin:/bin {tool:bash} --noprofile --norc -c 'source /dev/stdin < hook.sh; if [ -n "${PROMPT_COMMAND:-}" ]; then eval "$PROMPT_COMMAND"; fi'
+exit: 0
+file: envhook-pwned absent

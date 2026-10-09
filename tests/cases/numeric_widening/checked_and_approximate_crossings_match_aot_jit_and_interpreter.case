@@ -1,0 +1,60 @@
+# HAND-PORT tests/numeric_widening.rs:234-281 checked_and_approximate_crossings_match_aot_jit_and_interpreter
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# All original success+trap programs and guards. AOT requires runtime70; default/forced-interpreter permit ONLY70 raw trap or1 exact same-diagnostic E0953+why, matching original RunOutcome branches. No arbitrary nonzero acceptance.
+fixture: checked_and_approximate_crossings_match_aot_jit_and_interpreter.fixture
+env: NO_COLOR=1
+step successdefault: jet run success/main.jet
+exit: 0
+stdout: = checked_and_approximate_crossings_match_aot_jit_and_interpreter.successstdout.expected
+step successinterpret: jet run --interpret success/main.jet
+exit: 0
+stdout: = checked_and_approximate_crossings_match_aot_jit_and_interpreter.successstdout.expected
+when tool rustc
+step: jet build --profile=debug success/main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = checked_and_approximate_crossings_match_aot_jit_and_interpreter.successstdout.expected
+end when
+when tool rustc
+step: jet build --profile=debug Float/main.jet
+exit: 0
+step: built
+exit: 70
+stdout: empty
+stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
+stderr: ~ "[E3010]" # original runtime code
+end when
+step Floatdefault: jet run --json Float/main.jet
+exit: in [70, 1]
+when exit == 70: stdout: empty
+when exit == 70: stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
+when exit == 70: stderr: ~ "[E3010]" # original runtime code
+when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number cannot cross into the decimal without losing precision"] #>= 1
+step Floatinterpret: jet run --json --interpret Float/main.jet
+exit: in [70, 1]
+when exit == 70: stdout: empty
+when exit == 70: stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
+when exit == 70: stderr: ~ "[E3010]" # original runtime code
+when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number cannot cross into the decimal without losing precision"] #>= 1
+when tool rustc
+step: jet build --profile=debug F32/main.jet
+exit: 0
+step: built
+exit: 70
+stdout: empty
+stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
+stderr: ~ "[E3010]" # original runtime code
+end when
+step F32default: jet run --json F32/main.jet
+exit: in [70, 1]
+when exit == 70: stdout: empty
+when exit == 70: stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
+when exit == 70: stderr: ~ "[E3010]" # original runtime code
+when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number cannot cross into the decimal without losing precision"] #>= 1
+step F32interpret: jet run --json --interpret F32/main.jet
+exit: in [70, 1]
+when exit == 70: stdout: empty
+when exit == 70: stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
+when exit == 70: stderr: ~ "[E3010]" # original runtime code
+when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number cannot cross into the decimal without losing precision"] #>= 1

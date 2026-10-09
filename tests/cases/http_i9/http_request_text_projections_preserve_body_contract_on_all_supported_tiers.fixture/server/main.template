@@ -1,0 +1,101 @@
+
+use core.http.server as server
+use core.net as net
+
+fn request_text_default(req: HTTPRequest) -> String Never! {
+    if req.text() == {
+        .Ok(text) -> return "default={text}"
+        .Err(_) -> return "default=wrong-error"
+        else -> return "default=unexpected"
+    }
+}
+
+fn request_text_explicit(req: HTTPRequest) -> String Never! {
+    if req.text(5) == {
+        .Ok(text) -> return "explicit={text}"
+        .Err(error) -> {
+            if error == {
+                .BodyTooLarge(limit) -> return "explicit=BodyTooLarge:{limit}"
+                else -> return "explicit=wrong-error"
+            }
+        }
+        else -> return "explicit=unexpected"
+    }
+}
+
+fn request_text_over(req: HTTPRequest) -> String Never! {
+    if req.text(4) == {
+        .Ok(_) -> return "over=accepted"
+        .Err(error) -> {
+            if error == {
+                .BodyTooLarge(limit) -> return "over=BodyTooLarge:{limit}"
+                else -> return "over=wrong-error"
+            }
+        }
+        else -> return "over=unexpected"
+    }
+}
+
+fn request_text_consumed(req: HTTPRequest) -> String Never! {
+    if req.text() == {
+        .Ok(_) -> {
+            if req.text() == {
+                .Ok(_) -> return "consumed=reused"
+                .Err(error) -> {
+                    if error == {
+                        .BodyConsumed -> return "consumed=BodyConsumed"
+                        else -> return "consumed=wrong-error"
+                    }
+                }
+                else -> return "consumed=unexpected"
+            }
+        }
+        .Err(_) -> return "consumed=first-read-error"
+        else -> return "consumed=first-read-error"
+    }
+}
+
+fn request_text_binary(req: HTTPRequest) -> String Never! {
+    if req.text() == {
+        .Ok(_) -> return "binary=accepted"
+        .Err(error) -> {
+            if error == {
+                .UnsupportedEncoding -> return "binary=UnsupportedEncoding"
+                else -> return "binary=wrong-error"
+            }
+        }
+        else -> return "binary=unexpected"
+    }
+}
+
+fn request_text_classify(req: HTTPRequest) -> String Never! {
+    path :: req.path()
+    if path == "/default" -> return request_text_default(req)
+    if path == "/explicit" -> return request_text_explicit(req)
+    if path == "/over" -> return request_text_over(req)
+    if path == "/consumed" -> return request_text_consumed(req)
+    if path == "/binary" -> return request_text_binary(req)
+    return "unknown"
+}
+
+fn request_text_handler(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    return Ok(server.response(200, request_text_classify(req)))
+}
+
+fn run() (HTTPError | NetError | TaskFailure)! {
+    listener :: net.tcp_listen("127.0.0.1:__PORT__") ?? panic("listen")
+    mux :: server.mux()
+    mux.post("/default", request_text_handler)
+    mux.post("/explicit", request_text_handler)
+    mux.post("/over", request_text_handler)
+    mux.post("/consumed", request_text_handler)
+    mux.post("/binary", request_text_handler)
+    server_task :: task {
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+    }
+    server_task.join() ?? panic("join")
+}

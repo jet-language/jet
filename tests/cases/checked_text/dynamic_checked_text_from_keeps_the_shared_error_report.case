@@ -1,0 +1,23 @@
+# Original tests/checked_text.rs:251-298; exact original source and public assertions.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD.
+fixture: dynamic_checked_text_from_keeps_the_shared_error_report.fixture
+# RETIRED subclaims:4 generated-Rust marker assertions (backend-only).
+# .normalize_journey_paths = original tests/checked_text.rs135-155 verbatim line-slice helper.
+step: jet build main.jet
+exit: 0
+step jit: jet run main.jet
+exit: 1
+stdout: empty
+stderr: ^= "Error [E_PATTERN]: pattern rejected (type: PatternError)\n" # original jit_err.starts_with
+stderr: ~ "  cause: invalid shape\n" # original jit_err.contains
+stderr: ~ "  conversion: PatternError -> Err\n" # original jit_err.contains
+stderr: ~ ") — loading pattern\n" # original jit_err.contains
+stderr: ~ "Trail [E3002]" # original jit_err.contains
+step: jet run --interpret main.jet
+exit: == jit
+stdout: == jit
+stderr.normalize_journey_paths: == jit
+step: built
+exit: == jit
+stdout: == jit
+stderr.normalize_journey_paths: == jit

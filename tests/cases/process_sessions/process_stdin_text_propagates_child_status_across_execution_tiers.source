@@ -1,0 +1,32 @@
+
+use core.process as process
+
+fn run() {
+    process.stdin_text(
+        process.cmd(["{cap:shell}", "-c", "read input; [ \"$input\" = expected ]"]),
+        "expected\n",
+    ) ?? panic("stdin_text positive failed")
+    print("stdin:accepted")
+
+    if process.stdin_text(
+        process.cmd(["{cap:shell}", "-c", "cat >/dev/null; exit 7"]),
+        "payload",
+    ) == {
+        .Err(error) -> {
+            if error == {
+                .Other(context) -> {
+                    if context.operation == .Resolve &&
+                        (context.resource ?? "") == "{cap:shell}" &&
+                        context.os_code == None &&
+                        (context.cause ?? "") == "process exited unsuccessfully: code=7" {
+                        print("nonzero:typed")
+                    } else {
+                        print("nonzero:wrong-context")
+                }
+                }
+                else -> print("nonzero:wrong-category")
+            }
+        }
+        .Ok(_) -> print("nonzero:accepted")
+    }
+}

@@ -1,0 +1,12 @@
+# Port of tests/inline_package.rs:52-90; sources verbatim; original predicates.
+# PENDING-SAME-HEAD: authored, no reference/runtime proof.
+fixture: fixtures/inline_package_conflicts_with_manifest_for_every_entry
+file: workspace.jet = "module workspace { members: [] }\n"
+step: jet check other.jet
+env: JET_STORE_DIR={work}/cache-0
+env: JET_PACKAGE_STORE_DIR={work}/store-0
+env: JETPACK_ROOT={work}/jetpack-0
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E1363"

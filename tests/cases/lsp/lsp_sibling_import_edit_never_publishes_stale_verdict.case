@@ -1,0 +1,32 @@
+# Port of tests/lsp.rs:3370-3462; original source bytes/order/assertions.
+# PENDING-SEAM(read_bytes): Main ballot + CoreState2 + kit batch three.
+# PENDING-GRAMMAR: collection, negated JSON filters, capture/write and named-stream equality.
+fixture: fixtures/lsp_sibling_import_edit_never_publishes_stale_verdict
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/0.json
+recv lsp until $.id = 1
+send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/1.json
+send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/2.json
+send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/3.json
+send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/4.json
+recv lsp collect until $.id = 2
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/run.jet"] #= 1 # original predicate
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/run.jet"].diagnostics[?severity=1] #= 0 # original predicate
+send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/5.json
+send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/6.json
+recv lsp collect until $.id = 3
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/run.jet"] #= 1 # original predicate
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/run.jet"].diagnostics[?severity=1] #>= 1 # original predicate
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/other.jet"] #= 0 # original predicate
+send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/7.json
+send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/8.json
+send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/9.json
+recv lsp collect until $.id = 4
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/run.jet"] #= 1 # original predicate
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/run.jet"].diagnostics[?severity=1] #= 0 # original predicate
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/helper.jet"][?version!=4] #= 0 # original predicate
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/other.jet"] #= 0 # original predicate
+send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/10.json
+recv lsp until $.id = 99
+close lsp
+exit: 0

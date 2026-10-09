@@ -1,0 +1,19 @@
+# PORT tests/repl.rs:202-239 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-SEAM(read_bytes); runtime PENDING-SAME-HEAD.
+refused: read_bytes
+fixture: repl_history_parent_swap_stays_on_held_directory.fixture
+env: NO_COLOR=1
+requires: os:unix
+mkdir: outside
+env: XDG_STATE_HOME={work}/state
+session child raw: jet repl
+unset: JET_REPL_HISTORY
+await: dir state/jet timeout 2s every 10ms
+sleep: 50ms
+rename: state/jet state/held-jet
+symlink: {work}/outside state/jet
+send child: repl_history_parent_swap_stays_on_held_directory.fixture/input.in
+close child
+exit: 0
+file: outside/repl-history absent
+file: state/held-jet/repl-history lines = 1

@@ -1,0 +1,16 @@
+# Port of tests/corelib_parts/platform.rs:532-574; source and scripts verbatim after original Rust format expansion.
+# PENDING-SAME-HEAD; no snapshots blessed.
+fixture: fixtures/core_process_pipeline_honors_stage_timeout
+write: main.jet main.template
+write: slow.sh slow.sh.template
+chmod: slow.sh 755
+requires: os:unix
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "true\n"
+step rerun: built
+exit: 0
+stdout: = "true\n"
+elapsed: rerun < 800ms

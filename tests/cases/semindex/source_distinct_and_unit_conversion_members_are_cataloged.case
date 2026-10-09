@@ -1,0 +1,9 @@
+# Original tests/semindex.rs:131-166; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: source_distinct_and_unit_conversion_members_are_cataloged.fixture
+step: jet find "UserID.from_u8" source_numeric_members.jet --json
+exit: 0
+json: stdout doc $.matches[?name="UserID.from_u8"][0].signature = "UserID.from_u8(value: U8) -> UserID"
+step: jet find "Usd.from_int" source_numeric_members.jet --json
+exit: 0
+json: stdout doc $.matches[?name="Usd.from_int"] #>= 1

@@ -1,0 +1,13 @@
+# tests/output_callable.rs::nested_output_links_report_e1321_before_codegen
+# Exact original sources/predicates; runtime UNRUN.
+fixture: nested_output_links_report_e1321_before_codegen.fixture
+env: NO_COLOR=1
+step: jet check --json missing/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E1321"] #>= 1
+step: jet check --json private/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E1321"] #>= 1
+step: jet check --json escaped/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E1321"] #>= 1

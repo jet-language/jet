@@ -1,0 +1,22 @@
+# tests/compute_views.rs::tensor_bare_range_is_a_borrowed_read_view
+# ORACLE-LITERAL: exact original source and expected bytes; PENDING-SAME-HEAD; runtime UNRUN.
+# Rust compiler availability and generated-Rust compilation helper requirements retire with Rust; native build retains AOT execution.
+fixture: tensor_bare_range_is_a_borrowed_read_view.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build source-0.jet
+exit: 0
+step aot0: built
+exit: 0
+stdout: = tensor_bare_range_is_a_borrowed_read_view.out
+step default0: jet run source-0.jet
+stdin: null
+exit: 0
+stdout: = tensor_bare_range_is_a_borrowed_read_view.out
+step interpret0: jet run --interpret source-0.jet
+stdin: null
+exit: 0
+stdout: = tensor_bare_range_is_a_borrowed_read_view.out
+stderr: empty

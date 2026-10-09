@@ -1,0 +1,9 @@
+# Port of tests/structure_fact_plane.rs::structure_fact_declaration_erases_for_web_codegen (284-294); sources copied verbatim from original Rust literals/templates.
+# PENDING-SAME-HEAD; no runtime or snapshot receipt claimed.
+# Split: web JS absence and artifact presence retained; matching wasm_rust substring assertions RETIRE as generated Rust.
+fixture: fixtures/structure_fact_declaration_erases_for_web_codegen
+step: jet build --target=web main.jet
+file: .jet/build/app.js is-file
+file: .jet/build/app.js !~ "Structure.Liveness" # original predicate: web.js_app absence
+file: .jet/build/app.js !~ "$holds" # original predicate: web.js_app absence
+file: .jet/build/app.js !~ "manifest rule edit" # original predicate: web.js_app absence

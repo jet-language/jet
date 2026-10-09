@@ -1,0 +1,17 @@
+# PORT tests/repl.rs:3425-3466; verbatim inputs and original predicate forms.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Banner/prompt non-overlap: crates/jet-repl/src/Render.rs24-37,67-74; stderr discovery41-61.
+# lib.rs2469-2470 cooked floor mirrors transcript. No stripping/projection.
+fixture: repl_core_data_schema_empty_lists_and_row_law.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_core_data_schema_empty_lists_and_row_law.fixture/input.txt
+exit: any # original library predicates did not assert process status
+stdout: !~ "E0956" # original predicate
+stderr: !~ "E0956" # original predicate
+stdout|stderr: ~ "DataColumn(name: team, type_name: String)" # original predicate
+stdout|stderr: ~ "DataColumn(name: minutes, type_name: Float)" # original predicate
+stdout|stderr: ~ "DataColumn(name: value, type_name: Float)" # original predicate
+stdout|stderr: ~ "[] : List" # original predicate
+stdout|stderr: ~ "DataColumn(name: value, type_name: Int)" # original predicate

@@ -1,0 +1,19 @@
+# Port of tests/bind.rs:484-527; sources copied verbatim.
+# PENDING-SAME-HEAD: historical built artifact fails; no snapshot blessed.
+fixture: fixtures/xml_bind_generated_project_executes_typed_fields
+step: jet inspect bind xml "catalog.xml" --type "Catalog"
+file: .jet/bindings/catalog.jet = xml_bind_generated_project_executes_typed_fields.0.generated.jet.out
+# PENDING-GRAMMAR: concat preserves generated + newline + verbatim program.
+concat: main.jet .jet/bindings/catalog.jet separator program-1.jet
+step: jet check main.jet
+step: jet build --profile=debug main.jet
+step: built
+stdout: = xml_bind_generated_project_executes_typed_fields.0.out
+step: jet run main.jet
+env: JET_STORE_DIR={work}/run-cache
+stdout: = xml_bind_generated_project_executes_typed_fields.0.out
+stderr: = xml_bind_generated_project_executes_typed_fields.0.default.stderr
+step: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/interpreter-cache
+stdout: = xml_bind_generated_project_executes_typed_fields.0.out
+stderr: = xml_bind_generated_project_executes_typed_fields.0.interpreter.stderr

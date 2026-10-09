@@ -1,0 +1,16 @@
+# Port of tests/cli_parts/budget.rs:1195-1241; fixture sources copied verbatim.
+# PENDING-SAME-HEAD: original assertions authored; no runtime reference run.
+step: jet gc report
+env: NO_COLOR=1
+exit: 1
+stdout: empty
+stderr: = gc-missing.stderr
+stderr: ~ "Error [E2110]: GC trace cannot be reported" # original predicate
+stderr: ~ "Run `jet run --gc-trace <file.jet>`" # original predicate
+stderr: !~ "\u001b" # original predicate
+step: jet gc report --json
+exit: 1
+stderr: empty
+stdout: ~ "\"code\":\"E2110\"" # original predicate
+stdout: ~ "\"severity\":\"error\"" # original predicate
+stdout: !~ "\u001b" # original predicate

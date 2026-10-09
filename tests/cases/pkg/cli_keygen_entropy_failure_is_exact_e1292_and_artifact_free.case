@@ -1,0 +1,73 @@
+# Port of tests/pkg.rs:8793-8825; PENDING-SEAM(crypto-provider-failure).
+# Process-HOME-unchanged assertion8802 is covered by kit child-env isolation.
+# Original fixture recipe pkg.rs110-169 retained verbatim below. No guessed Rust cache path is materialized.
+# fn isolated_crypto_helper_paths(home: &Path) -> (PathBuf, PathBuf) {
+#     let real_helper = jetpack::FFI::cached_crypto_helper_path();
+#     let real_root = real_helper
+#         .ancestors()
+#         .find(|dir| dir.ends_with("ffi"))
+#         .expect("the crypto helper lives under the FFI cache root");
+#     let relative = real_helper.strip_prefix(real_root).unwrap();
+#     let helper = home.join(".cache/jet/ffi").join(relative);
+#     let cache_key = common::ffi_bridge_key(&helper);
+#     let rlib = helper
+#         .parent()
+#         .unwrap()
+#         .join(format!("libjet_ffi_{cache_key}.rlib"));
+#     (rlib, helper)
+# }
+#
+# /// Install a fake crypto helper AND its cache-verification sidecar
+# /// (`artifacts.sha256`) so `ensure_bridge_helper()`'s cache-hit fast path
+# /// (`bridge_cache_verified`) accepts these files instead of falling through to
+# /// a real `cargo build` that would silently bypass the fake helper.
+# #[cfg(unix)]
+# fn install_closed_status_crypto_helper(home: &Path) {
+#     use std::os::unix::fs::PermissionsExt;
+#
+#     let (rlib, helper) = isolated_crypto_helper_paths(home);
+#     let release = helper.parent().unwrap();
+#     fs::create_dir_all(release).unwrap();
+#
+#     let rlib_bytes = b"test cache sentinel".to_vec();
+#     fs::write(&rlib, &rlib_bytes).unwrap();
+#
+#     let crate_stem = rlib.file_stem().unwrap().to_str().unwrap().to_string();
+#     let cdylib = release.join(format!("{crate_stem}.{}", std::env::consts::DLL_EXTENSION));
+#     let cdylib_bytes = b"test cache cdylib sentinel".to_vec();
+#     fs::write(&cdylib, &cdylib_bytes).unwrap();
+#
+#     let signature = "00".repeat(64);
+#     let helper_bytes = format!(
+#         "#!/bin/sh\nIFS= read -r command\ncase \"$command\" in\n  keygen*) printf 'secret helper output' ; printf 'raw OS status and dependency text' >&2 ; exit 75 ;;\n  sign*) printf '%s\\n' '{signature}' ;;\n  verify*) exit 0 ;;\n  *) exit 1 ;;\nesac\n"
+#     )
+#     .into_bytes();
+#     fs::write(&helper, &helper_bytes).unwrap();
+#     fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+#
+#     // The sidecar sits beside the artifacts it blesses, one row per file, each
+#     // row's path relative to that shared release dir — i.e. a bare file name.
+#     let crate_name = crate_stem
+#         .strip_prefix("lib")
+#         .expect("bridge rlib is `lib*`");
+#     let mut manifest = String::from("jet-ffi-artifacts-v2\n");
+#     for (bytes, path) in [
+#         (&rlib_bytes, &rlib),
+#         (&cdylib_bytes, &cdylib),
+#         (&helper_bytes, &helper),
+#     ] {
+#         let relative = path.file_name().unwrap().to_str().unwrap();
+#         manifest.push_str(&format!("{} {relative}\n", jet::SHA256::sha256_hex(bytes)));
+#     }
+#     fs::write(release.join(format!("{crate_name}.sha256")), manifest).unwrap();
+# }
+requires: os:unix
+refused: crypto-provider-failure
+mkdir: home
+env: HOME={work}/home
+env: JET_KEYS_DIR={work}/keys
+step: jet registry keygen
+exit: 1
+stdout: empty
+stderr: = ../../fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr
+file: keys absent

@@ -1,0 +1,11 @@
+# Port of build_entry.rs:667-706. PENDING-GRAMMAR: json: assertions.
+fixture: fixtures/compiler-speed
+env: JET_STORE_DIR={work}/store
+env: NO_COLOR=1
+step: jet build --release main.jet
+file: .jet/build/main is-file
+step: jet inspect explain-build main.jet --json
+json: stdout doc $.schema = "jet.explain-build/v1"
+json: stdout doc $.program = "main.jet"
+# The original requires the nodes array but does not pin its volatile contents.
+json: stdout doc $.nodes : array # Original requires nodes array without pinning its volatile contents.

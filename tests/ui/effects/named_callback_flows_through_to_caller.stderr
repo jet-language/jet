@@ -1,0 +1,10 @@
+Error [E0740]: `caller` uses the effect `FS.Read`, which its signature doesn't allow
+  --> tests/ui/effects/named_callback_flows_through_to_caller.jet:5:15
+    |
+  5 | fn caller() -[Net]> String { return apply(readit) }
+    |               ^^^
+ Why: The signature declares `-[Net]>`, so the body may only use those; `FS.Read` is outside that set
+ Fix: Add `FS.Read` to the effect list, or stop using it in `caller`
+ Denial: invocation
+ Call chain: caller
+More: jet-lang.dev/e/E0740

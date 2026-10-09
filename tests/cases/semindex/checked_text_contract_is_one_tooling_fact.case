@@ -1,0 +1,11 @@
+# Original tests/semindex.rs:168-227; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: checked_text_contract_is_one_tooling_fact.fixture
+step: jet inspect semindex checked_text_contract.jet --json
+json: stdout doc $.semindex.definitions[?leaf_name="Pattern"][0].nominal_base = "String"
+json: stdout doc $.semindex.definitions[?leaf_name="Pattern"][0].trait_contracts[?trait="CheckedText"][0].associated_types = [{"name":"Error","type":"PatternError"}]
+json: stdout doc $.semindex.definitions[?leaf_name="Pattern"][0].trait_contracts[?trait="CheckedText"][0].methods any ~ "check" # original predicate
+json: stdout doc $.semindex.definitions[?leaf_name="Pattern"][0].trait_contracts[?trait="CheckedText"][0].methods any ~ "encode_hole" # original predicate
+stdout: ~ "\"nominal_base\":\"String\"" # original predicate
+stdout: ~ "\"trait\":\"CheckedText\"" # original predicate
+stdout: ~ "\"associated_types\":[{\"name\":\"Error\"" # original predicate

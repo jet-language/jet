@@ -1,0 +1,16 @@
+# tests/notebook.rs::notebook_declarations_are_file_wide_but_state_cells_stay_ordered
+# Verbatim original cell sources and exact public predicates; runtime UNRUN.
+fixture: notebook_declarations_are_file_wide_but_state_cells_stay_ordered.fixture
+env: NO_COLOR=1
+step: jet notebook document.jetnb --protocol
+stdin: commands.stdin
+exit: 0
+json: stdout ndjson $[0].body ^= "status=ok;"
+json: stdout ndjson $[1].body ^= "status=ok;"
+json: stdout ndjson $[2].body ^= "status=ok;"
+json: stdout ndjson $[3].body ^= "status=ok;"
+json: stdout ndjson $[4].body ^= "status=ok;"
+json: stdout ndjson $[6].body ^= "status=ok;"
+json: stdout ndjson $[7].body ^= "status=ok;"
+json: stdout ndjson $[5].body ^= "status=error;"
+stdout.line(7).after_first("text="): ~ "7" # exact bundle.text_plain contains 7; never turn/count prefix

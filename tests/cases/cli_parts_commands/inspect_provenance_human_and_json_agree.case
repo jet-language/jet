@@ -1,0 +1,25 @@
+# Port of tests/cli_parts/commands.rs:295-387; sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates/oracles authored; runtime not run.
+# Original human/JSON snapshots copied exactly.
+fixture: fixtures/provenance
+copy: lock.fixture .jet/lock
+step: jet inspect provenance
+exit: 0
+stdout: = provenance.out
+stdout: ~ "sha256:4be1…" # original predicate
+stdout: ~ "logged 2026-08-01" # original predicate
+stdout: ~ "ed25519:ak3f… \"textkit team\"" # original predicate
+stdout: ~ "slsa v1.0" # original predicate
+stdout: ~ "enforced" # original predicate
+stdout: ~ "verified" # original predicate
+stdout: ~ "recorded" # original predicate
+step: jet inspect provenance --json
+exit: 0
+stdout: = provenance.json
+json: stdout doc $ : object # original predicate: JSON parses (exact original object snapshot)
+stdout: ~ "\"integrity\"" # original predicate
+stdout: ~ "\"transparency\"" # original predicate
+stdout: ~ "\"publisher\"" # original predicate
+stdout: ~ "\"build\"" # original predicate
+stdout: ~ "\"evidence\":\"E1204\"" # original predicate
+stdout: ~ "\"status\":\"enforced\"" # original predicate

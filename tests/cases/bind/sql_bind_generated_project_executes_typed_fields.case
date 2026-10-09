@@ -1,0 +1,19 @@
+# Port of tests/bind.rs:427-482; sources copied verbatim.
+# PENDING-SAME-HEAD: historical default run exits 70 (unsupported receipt Named LocalDate); no snapshot blessed.
+fixture: fixtures/sql_bind_generated_project_executes_typed_fields
+step: jet inspect bind sql "schema.sql" --type "User"
+file: .jet/bindings/schema.jet = sql_bind_generated_project_executes_typed_fields.0.generated.jet.out
+# PENDING-GRAMMAR: concat preserves generated + newline + verbatim program.
+concat: main.jet .jet/bindings/schema.jet separator program-1.jet
+step: jet check main.jet
+step: jet build --profile=debug main.jet
+step: built
+stdout: = sql_bind_generated_project_executes_typed_fields.0.out
+step: jet run main.jet
+env: JET_STORE_DIR={work}/run-cache
+stdout: = sql_bind_generated_project_executes_typed_fields.0.out
+stderr: = sql_bind_generated_project_executes_typed_fields.0.default.stderr
+step: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/interpreter-cache
+stdout: = sql_bind_generated_project_executes_typed_fields.0.out
+stderr: = sql_bind_generated_project_executes_typed_fields.0.interpreter.stderr

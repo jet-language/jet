@@ -1,0 +1,15 @@
+# Port of tests/authority_manifest.rs:322-370.
+# PENDING-SAME-HEAD: historical inspect authority exits 2 (E2101).
+# Only Rust Manifest/Lock clone, Option and parser identity assertions retire.
+# The lock's complete authority block must equal the source manifest authority.
+fixture: fixtures/authority
+step: jet fetch
+exit: 0
+file: .jet/lock ~ authority = { holds: { allow: ["IO"], deny: ["Exec"] }, grants: { "image-codec": ["FS.Read"] }, trust: { default: prompt, ci: { prompt: deny }, services: { "stripe": allow }, require: none }, providers: { "nix": { registry: "nixpkgs", deny: ["openssl-1.0"] } } } # Lock also contains a nondeterministic build timestamp; pin the entire authority value captured from fetch.
+step: jet inspect authority --json run.jet
+exit: 0
+# The capture checker must first verify every original subject: authority.holds.allow,
+# authority.holds.deny, image-codec, authority.trust.default, authority.trust.ci,
+# authority.trust.services.stripe, authority.trust.require, authority.providers.nix;
+# it must also verify the .jet/lock provenance substring.
+stdout: = lock-authority-ledger.out

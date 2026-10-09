@@ -1,0 +1,25 @@
+requires: os:unix
+# Port of tests/jetpack_tool.rs:833-887; assertions preserved, pending same-head/case-grammar receipt.
+fixture: fixtures/managed_tool_projection_write_failure_is_registered_and_actionable
+mkdir: root
+mkdir: home
+mkdir: project
+mkdir: fx
+env: HOME={work}/home
+env: JETPACK_ROOT={work}/root
+copy: omp-1.0.0 fx/omp-1.0.0
+copy: native-1.0.0.json fx/jetpackage-omp.json
+step: jetpack tool install omp@releases#1.0.0 --no-color --offline --fixtures {work}/fx 
+cwd: project
+exit: 0
+capture: mode = permissions file home/.jet/bin
+step: jet run deny.jet -- {work}/home/.jet/bin
+exit: 0
+step: jetpack tool uninstall omp --no-color
+cwd: project
+exit: 2
+chmod: home/.jet/bin {cap:mode}
+stderr: ~ "Error [E1340]" # original contains predicate
+stderr: ~ "managed tool `omp`" # original contains predicate
+stderr: ~ "managed by jetpack" # original contains predicate
+stderr: ~ "jetpack update tools -y" # original contains predicate

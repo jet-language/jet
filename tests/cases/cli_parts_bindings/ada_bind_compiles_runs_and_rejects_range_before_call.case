@@ -1,0 +1,18 @@
+# Port of tests/cli_parts/bindings.rs:956-1046; sources copied verbatim.
+# PENDING-SAME-HEAD: authored original predicates/oracles; runtime proof not run.
+# PENDING-GRAMMAR: is-file, file negative substring.
+fixture: fixtures/ada_range
+step: jet inspect bind ada {work}/geodesy.ads --pkg geodesy
+exit: 0
+file: .jet/bindings/ada/libjet_ada_geodesy.a is-file
+file: .jet/bindings/ada/geodesy.provenance is-file
+file: .jet/bindings/ada/geodesy.jet ~ "pub fn double_lat(lat: Float) -[FFI.Ada]> Float AdaError!" # original predicate
+file: .jet/bindings/ada/geodesy.jet ~ "lat < -90.0 || lat > 90.0" # original predicate
+file: .jet/bindings/ada/geodesy.jet !~ "=>" # original predicate
+file: .jet/bindings/ada/geodesy.provenance ~ "source=" # original predicate
+file: .jet/bindings/ada/geodesy.provenance ~ "body=" # original predicate
+file: .jet/bindings/ada/geodesy.provenance ~ "runtime=" # original predicate
+file: .jet/bindings/ada/geodesy.provenance ~ "constraints=double_lat.lat=-90.0..90.0" # original predicate
+step: jet run --profile=debug main.jet
+exit: 0
+stdout: = ada_bind_compiles_runs_and_rejects_range_before_call.out

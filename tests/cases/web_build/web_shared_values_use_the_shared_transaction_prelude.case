@@ -1,0 +1,13 @@
+# HAND-PORT tests/web_build.rs:1338-1352 web_shared_values_use_the_shared_transaction_prelude
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Every original shared-transaction JavaScript marker/count retained exactly.
+fixture: web_shared_values_use_the_shared_transaction_prelude.fixture
+env: NO_COLOR=1
+step: jet build --target web --json main.jet
+exit: 0
+file: .jet/build/app.js ~ "jet_shared_new({" # original web.js_app predicate
+file: .jet/build/app.js count "jet_shared_read(" > 1 # original relational call count
+file: .jet/build/app.js count "jet_shared_edit(" > 1 # original relational call count
+file: .jet/build/app.js count "jet_stm_begin(" > 1 # original relational call count
+file: .jet/build/app.js count "jet_shared_edit_txn(" > 1 # original relational call count
+file: .jet/build/app.js count "jet_stm_commit(" > 1 # original relational call count

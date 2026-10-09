@@ -1,0 +1,11 @@
+# Port of tests/devtools.rs:204-283. PENDING-SAME-HEAD; original source bytes and assertions preserved.
+# Implementation writes cwd-relative paths (CmdDevTools.rs3578); no override flag or real-root mutation.
+step: jet self devtools new-example tooling/devtools_test_scaffold_{pid}_208
+file: Examples/features/tooling/devtools_test_scaffold_{pid}_208.jet is-file
+file: Examples/features/expected/tooling/devtools_test_scaffold_{pid}_208.out is-file
+step: jet check Examples/features/tooling/devtools_test_scaffold_{pid}_208.jet
+step: jet build Examples/features/tooling/devtools_test_scaffold_{pid}_208.jet
+step: built
+capture: actual = text stdout
+write: actual.stdout devtools_new_example_scaffolds_a_passing_golden_pair.capture-template
+file: actual.stdout == Examples/features/expected/tooling/devtools_test_scaffold_{pid}_208.out

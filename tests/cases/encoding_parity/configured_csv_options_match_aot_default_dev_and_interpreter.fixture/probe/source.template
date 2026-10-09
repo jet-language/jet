@@ -1,0 +1,21 @@
+
+use core.encoding.csv as csv
+
+fn run() {
+    raw :: String.from_bytes([U8]{"name\tnote\x0D\x0A\x0D\x0Aada\t\"line1\x0D\x0Aline2\"\x0D\x0A"}) ?? panic("fixture")
+    crlf :: String.from_bytes([U8]{"\x0D\x0A"}) ?? panic("crlf")
+    rows :: csv.rows(raw, delimiter: "\t", header: true, skip_blank: true) ?? panic("rows")
+    print(rows.len())
+    print(rows[0].line)
+    print(rows[0].fields[0])
+    note :: rows[0].fields[1]
+    print(&note.replace(crlf, "|"))
+    parsed :: csv.parse(raw, delimiter: "\t", header: true, skip_blank: true) ?? panic("parse")
+    print(parsed.len())
+    malformed :: String.from_bytes([U8]{"name\tnote\x0D\x0A\"unterminated"}) ?? panic("malformed")
+    _attempted :: csv.parse(malformed, delimiter: "\t", header: true, skip_blank: true) ?? {
+        print(true)
+        return
+    }
+    print(false)
+}

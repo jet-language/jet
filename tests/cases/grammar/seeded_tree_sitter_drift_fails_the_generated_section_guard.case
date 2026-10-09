@@ -1,0 +1,22 @@
+# Original tests/grammar.rs:125-142; verbatim sources and original predicates.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference-run or PASS claim.
+fixture: seeded_tree_sitter_drift_fails_the_generated_section_guard.fixture
+copy: {root}/tests/cases/grammar/support.fixture/Section.jet oracle/run.jet
+copy: {root}/Tools/editors/vscode/syntaxes/jet.tmLanguage.json Tools/editors/vscode/syntaxes/jet.tmLanguage.json
+copy: {root}/Tools/editors/jet.tmGrammar Tools/editors/jet.tmGrammar
+copy: {root}/Tools/editors/tree-sitter/grammar.js Tools/editors/tree-sitter/grammar.js
+copy: {root}/Tools/editors/zed/languages/jet/highlights.scm Tools/editors/zed/languages/jet/highlights.scm
+copy: Tools/editors/tree-sitter/grammar.js original.js
+step: jet self devtools grammars
+exit: 0
+step baseline: jet run oracle
+env: S5_FILE={work}/Tools/editors/tree-sitter/grammar.js
+exit: 0
+capture: baseline stdout doc $
+copy: original.js Tools/editors/tree-sitter/grammar.js
+step: jet run seed
+exit: 0
+step: jet run oracle
+env: S5_FILE={work}/Tools/editors/tree-sitter/grammar.js
+exit: 0
+json: stdout doc $ != "{cap:baseline}"

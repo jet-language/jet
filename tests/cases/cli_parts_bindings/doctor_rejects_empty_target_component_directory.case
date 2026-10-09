@@ -1,0 +1,12 @@
+# Port of tests/cli_parts/bindings.rs:292-313 and fake_rustc_fixture.
+# PENDING-GRAMMAR: step-scoped environment.
+requires: os:unix
+fixture: fixtures/fake_rustc_good
+chmod: bin/rustc 755
+mkdir: sysroot/lib/rustlib/wasm32-unknown-unknown/lib
+step: jet self doctor --target=web
+env: PATH={work}/bin
+env: HOME={work}
+env: JET_FAKE_SYSROOT={work}/sysroot
+exit: 1
+stdout: ~ web: target-specific standard-library component is missing or empty # Doctor contains host paths and cache counts; preserve original membership assertion.

@@ -1,0 +1,35 @@
+
+use core.process as process
+
+fn run() -[Exec, IO, Time.Wait]> {
+    plain :: process.run_spec(process.cmd(["echo", "plain-ok"]).stdout(.Capture)) ?? panic("default run failed")
+    print(plain.output.trim())
+
+    run_result :: process.run_spec(process.cmd(["printf", "run-ok"]).terminal()) ?? panic("terminal run failed")
+    print(run_result.output.contains("run-ok"))
+
+    child :: process.cmd(["printf", "spawn-ok"]).terminal().spawn() ?? panic("terminal spawn failed")
+    if child.terminal == {
+        .Val(session) -> {
+            session.resize(TerminalSize{ cols: 100, rows: 30 }) ?? panic("resize failed")
+            print("spawn: session")
+        }
+        .None -> { print("spawn: no session") }
+    }
+    waited :: child.wait() ?? panic("terminal wait failed")
+    print(waited.output.contains("spawn-ok"))
+
+    if process.pipeline([process.cmd(["echo", "a"]), process.cmd(["cat"]).terminal()]) == {
+        .Ok(_) -> { print("pipeline: accepted") }
+        .Err(_) -> { print("pipeline: refused") }
+    }
+    if process.run_spec(process.cmd([]).terminal()) == {
+        .Ok(_) -> { print("empty: accepted") }
+        .Err(e) -> {
+            if e == {
+                .InvalidInput(_) -> { print("empty: invalid") }
+                else -> { print("empty: wrong error") }
+            }
+        }
+    }
+}

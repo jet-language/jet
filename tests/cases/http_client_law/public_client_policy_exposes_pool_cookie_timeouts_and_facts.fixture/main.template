@@ -1,0 +1,19 @@
+
+use core.http.client as http
+fn run() {
+    client :: http.Client.new()
+        .cookies(.Memory)
+        .redirects(.Follow{ max: 2, same_origin_credentials: true })
+        .protocols(false, true, false)
+        .timeouts(1000, 1000, 1000, 1000, 1000, 1000, 5000)
+        .raw_encoding()
+    first :: client.send(http.request("GET", "http://{cap:addr}/first")) ?? panic("first")
+    _ :: first.body().bytes(8) ?? panic("first body")
+    second :: client.send(http.request("GET", "http://{cap:addr}/second")) ?? panic("second")
+    print(second.body().text(8) ?? panic("second body"))
+    print(second.protocol())
+    print(second.redirect_history().len())
+    print(second.timings().len())
+    print(second.reused_connection())
+    print(second.raw_content_encoding() ?? "none")
+}

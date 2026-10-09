@@ -1,0 +1,44 @@
+fn empty_bytes() -> [U8] {
+    return [U8]{}
+}
+fn empty_floats() -> [Float] {
+    return [Float]{}
+}
+fn empty_names() -> [String] {
+    return [String]{}
+}
+fn count_bytes(xs: [U8]) -> Int {
+    return xs.len()
+}
+fn count_floats(xs: [Float]) -> Int {
+    return xs.len()
+}
+fn count_names(xs: [String]) -> Int {
+    return xs.len()
+}
+fn run() {
+    bytes :: [U8]{}
+    floats :: [Float]{}
+    names :: [String]{}
+    print(bytes == [U8]{})
+    print(floats == [Float]{})
+    print(names == [String]{})
+    print([U8]{} != bytes)
+    print([Float]{} == floats)
+    print([String]{} == names)
+    print(count_bytes([U8]{}) + count_floats([Float]{}) + count_names([String]{}))
+    print(empty_bytes() == bytes)
+    print(empty_floats() == floats)
+    print(empty_names() == names)
+    picked :: if bytes.len() == 0 -> { [U8]{} } else -> { [U8]{7} }
+    print(picked == bytes)
+    scaled :: if floats.len() > 0 -> { [Float]{1.5} } else -> { [Float]{} }
+    print(scaled == floats)
+    table :: [String: [Float]]{ "a": [Float]{} }
+    print(table["a"] == floats)
+    pair :: (left: [U8]{}, right: [String]{})
+    print(pair.left == bytes)
+    print(pair.right == names)
+    fresh :: () -> { [U8]{} }
+    print(fresh() == bytes)
+}

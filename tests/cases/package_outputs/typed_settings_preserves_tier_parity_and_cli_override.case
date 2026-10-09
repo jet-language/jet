@@ -1,0 +1,31 @@
+# Port of tests/package_outputs.rs:552-640; existing source/on golden reused; off is ORACLE-LITERAL helper():549.
+fixture: ../../../Examples/features/packages/typed_settings
+step: jet run
+exit: 0
+stdout: = ../../../Examples/features/expected/packages/typed_settings.out
+step: jet run --interpret
+exit: 0
+stdout: = ../../../Examples/features/expected/packages/typed_settings.out
+step: jet build
+artifact: run
+exit: 0
+step: built
+exit: 0
+stdout: = ../../../Examples/features/expected/packages/typed_settings.out
+step: jet explain build.settings.tls
+exit: 0
+stdout: ~ "Build.Settings.tls = true" # original predicate
+stdout: ~ "[effective] declaration / package" # original predicate
+stdout: !~ "CLI: --set tls=<value>" # original predicate
+stdout: !~ "default: Bool = true" # original predicate
+step: jet explain build.settings.tls --profile=release --set tls=true
+exit: 0
+stdout: ~ "[shadowed] optimization bundle / package false" # original predicate
+stdout: ~ "[effective] command line / package true" # original predicate
+remove: .jet/build
+step: jet build --set tls=false
+artifact: run
+exit: 0
+step: built
+exit: 0
+stdout: = typed-settings-off.out

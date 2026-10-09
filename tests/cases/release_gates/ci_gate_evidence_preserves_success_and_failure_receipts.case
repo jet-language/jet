@@ -1,0 +1,83 @@
+# Port of tests/release_gates.rs::ci_gate_evidence_preserves_success_and_failure_receipts; all original predicates, runtime UNRUN.
+step: bash {root}/Tools/ci/ci-evidence.sh --report-dir {work}/success -- bash -c "printf 'gate-ok\\n'"
+cwd: {root}
+unset: GITHUB_ACTIONS
+env: RUNNER_OS=Linux
+env: RUNNER_ARCH=X64
+exit: 0
+stdout: = "gate-ok\n"
+capture: candidate = text file.filter(^= "candidate_commit=").line(0).strip_prefix("candidate_commit=") success/receipt.txt
+cap:candidate: len = 40
+file: success/receipt.txt ~ "schema=jet.ci-evidence.v1" # Original success receipt.contains.
+file: success/receipt.txt ~ "status=pass" # Original success receipt.contains.
+file: success/receipt.txt ~ "candidate_commit={cap:candidate}" # Original success receipt.contains.
+file: success/receipt.txt ~ "source_candidate_commit={cap:candidate}" # Original candidate binding.
+file: success/receipt.txt ~ "toolchain_candidate_commit={cap:candidate}" # Original candidate binding.
+file: success/receipt.txt ~ "artifact_candidate_commit={cap:candidate}" # Original candidate binding.
+file: success/receipt.txt ~ "signature_candidate_commit={cap:candidate}" # Original candidate binding.
+file: success/receipt.txt ~ "test_candidate_commit={cap:candidate}" # Original candidate binding.
+file: success/receipt.txt ~ "support_matrix_candidate_commit={cap:candidate}" # Original candidate binding.
+file: success/receipt.txt ~ "provenance_candidate_commit={cap:candidate}" # Original candidate binding.
+file: success/receipt.txt ~ "release_metadata_candidate_commit={cap:candidate}" # Original candidate binding.
+file: success/candidate.txt ~ "schema=jet.ci-candidate.v1" # Original candidate manifest.contains.
+file: success/candidate.txt ~ "candidate_commit={cap:candidate}" # Original candidate manifest.contains.
+file: success/candidate.txt ~ "source_candidate_commit={cap:candidate}" # Original candidate manifest.contains.
+file: success/candidate.txt ~ "toolchain_candidate_commit={cap:candidate}" # Original candidate manifest.contains.
+file: success/candidate.txt ~ "artifact_candidate_commit={cap:candidate}" # Original candidate manifest.contains.
+file: success/candidate.txt ~ "signature_candidate_commit={cap:candidate}" # Original candidate manifest.contains.
+file: success/candidate.txt ~ "test_candidate_commit={cap:candidate}" # Original candidate manifest.contains.
+file: success/candidate.txt ~ "support_matrix_candidate_commit={cap:candidate}" # Original candidate manifest.contains.
+file: success/candidate.txt ~ "provenance_candidate_commit={cap:candidate}" # Original candidate manifest.contains.
+file: success/candidate.txt ~ "release_metadata_candidate_commit={cap:candidate}" # Original candidate manifest.contains.
+file: success/candidate.txt ~ "signature=not-required-for-ci-test-gate" # Original candidate manifest.contains.
+file: success/receipt.txt ~ "command_exit=0" # Original success receipt.contains.
+file: success/receipt.txt ~ "support_matrix=Linux/X64" # Original success receipt.contains.
+file: success/receipt.txt ~ "artifact_name=not-published" # Original success receipt.contains.
+file: success/receipt.txt ~ "provenance=github-actions:local/1" # Original success receipt.contains.
+file: success/receipt.txt ~ "source_manifest_sha256=" # Original success receipt.contains.
+file: success/receipt.txt ~ "toolchain_sha256=" # Original success receipt.contains.
+file: success/command.stdout = "gate-ok\n"
+step: bash {root}/Tools/ci/ci-evidence.sh --report-dir {work}/failure -- bash -c "printf 'gate-failed\\n' >&2; exit 23"
+cwd: {root}
+env: GITHUB_SHA={cap:candidate}
+env: RUNNER_OS=Linux
+env: RUNNER_ARCH=X64
+exit: 23
+file: failure/receipt.txt ~ "status=fail" # Original failure receipt.contains.
+file: failure/receipt.txt ~ "command_exit=23" # Original failure receipt.contains.
+file: failure/command.stderr = "gate-failed\n"
+file: failure/toolchain.txt is-file
+step: bash {root}/Tools/ci/ci-evidence.sh --report-dir {work}/missing-runner -- bash -c "printf 'must-not-run\\n'"
+cwd: {root}
+env: GITHUB_ACTIONS=true
+env: GITHUB_SHA={cap:candidate}
+unset: RUNNER_OS
+unset: RUNNER_ARCH
+unset: GITHUB_RUNNER_OS
+unset: GITHUB_RUNNER_ARCH
+exit: 78
+file: missing-runner/command.stdout = ""
+file: missing-runner/receipt.txt ~ "status=fail" # Original receipt.contains.
+file: missing-runner/command.stderr ~ "runner OS identity is missing" # Original missing runner rejection.contains.
+mkdir: stale
+write: stale/receipt.txt = "status=pass\\n"
+step: bash {root}/Tools/ci/ci-evidence.sh --report-dir {work}/stale -- bash -c "printf 'must-not-run\\n'"
+cwd: {root}
+unset: GITHUB_ACTIONS
+env: GITHUB_SHA={cap:candidate}
+env: RUNNER_OS=Linux
+env: RUNNER_ARCH=X64
+exit: 78
+file: stale/command.stdout = ""
+file: stale/receipt.txt ~ "status=fail" # Original stale receipt.contains.
+file: stale/command.stderr ~ "stale file" # Original stale rejection.contains.
+step: bash {root}/Tools/ci/ci-evidence.sh --report-dir {work}/artifact-mismatch -- bash -c "printf 'must-not-run\\n'"
+cwd: {root}
+unset: GITHUB_ACTIONS
+env: GITHUB_SHA={cap:candidate}
+env: JET_CI_ARTIFACT_NAME=ci-gate-evidence-shard-0-stale
+exit: 78
+file: artifact-mismatch/receipt.txt ~ "status=fail" # Original mismatch receipt.contains.
+file: artifact-mismatch/command.stderr ~ "artifact name does not identify candidate" # Original mismatch rejection.contains.
+file: artifact-mismatch/candidate.txt is-file
+

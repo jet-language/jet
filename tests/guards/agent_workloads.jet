@@ -1,0 +1,135 @@
+use core.files as files
+use core.sys as sys
+use core.text.parse as parse
+
+fn s4_agent_adapter_has_all(adapter: String, needles: [String]) {
+    source :: files.read("tests/agent_workloads/adapters/{adapter}") ?? panic("read {adapter}")
+    loop needle in needles {
+        assert(source.contains(needle), "{adapter} no longer reaches the production path containing {needle}")
+    }
+}
+
+// Port of tests/agent_workloads.rs:2015-2044; all original adapter/needle pairs.
+#Test("repository_and_git_jet_adapters_use_production_paths") {
+    s4_agent_adapter_has_all("repository_marker_scan.jet", [String]{"core.files", "fs.walk"})
+    s4_agent_adapter_has_all("repository_semantic_inspection.jet", [String]{"inspect", "semindex"})
+    s4_agent_adapter_has_all("repository_semantic_edit.jet", [String]{"inspect", "codemod", "--yes"})
+    s4_agent_adapter_has_all("git_diff_review.jet", [String]{"git", "diff", "--no-index", "--name-status"})
+}
+
+// Port of tests/agent_workloads.rs:2046-2093; no production path checks retired.
+#Test("structured_data_database_http_jet_adapters_use_production_paths") {
+    s4_agent_adapter_has_all("structured_data.jet", [String]{
+        "use core.encoding.json", "fs.read(input)", "json.decode<Batch>", "json.to_string",
+    })
+    s4_agent_adapter_has_all("database_access.jet", [String]{
+        "use core.db", "db.open_memory()", "db.migrate", "scoped.execute(", "scoped.query_one(", "scoped.close()",
+    })
+    s4_agent_adapter_has_all("http_api.jet", [String]{
+        "use core.http.client", "use core.http.server", "net.tcp_listen(",
+        "http_server.serve_once_listener", "http_client.request(", "request.send()",
+    })
+}
+
+// Port of tests/agent_workloads.rs:2095-2154; include hostile and cleanup paths.
+#Test("mcp_terminal_service_jet_adapters_use_production_paths") {
+    s4_agent_adapter_has_all("mcp_resource.jet", [String]{
+        "process.cmd([jet, \"self\", \"lsp\"])", "resources/list", "resources/read",
+        "child.stdin.write", "jet://environment", "-32002", "/agent-secret",
+    })
+    s4_agent_adapter_has_all("interactive_terminal.jet", [String]{
+        ".terminal(TerminalPolicy", ".spawn()", "terminal_session.sh", "session.resize",
+        "child.wait()", "Name: ", "Hello Ada", "Choice blue", "terminal_closed.sh",
+        "interactive-terminal-closed", ".timeout(",
+    })
+    s4_agent_adapter_has_all("service_lifecycle.jet", [String]{
+        "JETPACK_FAKE_SYSTEMD_STATE", "\"services\", \"up\"", "\"services\", \"health\"",
+        "\"services\", \"wait\"", "\"services\", \"logs\"", "\"services\", \"down\"",
+        "E1261", "supervisor.error", "phase=failed", "recovery=startup-failed",
+    })
+}
+
+// Original read_native_os_matrix/read_jet_baseline/read_tasks schema and
+// version checks are part of each caller's assertions, not a bypassed parser.
+fn s4_agent_tsv_rows(path: String, header: String, width: Int) -> [String] {
+    source :: files.read(path) ?? panic("read {path}")
+    rows := [String]{}
+    first := true
+    loop line in source.lines() {
+        if first {
+            assert(line == header, "{path}: schema drifted")
+            first = false
+            next
+        }
+        if line != "" {
+            fields :: line.split("\t").to_list()
+            assert(fields.len() == width, "{path}: bad row {line}")
+            assert(fields[0] == "1", "{path}: unsupported version {line}")
+            &rows.push(line.to_string())
+        }
+    }
+    assert(!first, "{path}: missing header")
+    return rows
+}
+
+// Same predicate as validate_corpus_relative_path: splitting both separators
+// rejects absolute paths as well as empty, dot, and parent components.
+fn s4_agent_relative_fixture_path(relative: String) {
+    assert(relative != "" && !relative.contains(":"), "invalid corpus fixture path: {relative}")
+    normalized :: relative.replace("\\", "/")
+    loop part in normalized.split("/") {
+        assert(part != "" && part != "." && part != "..", "invalid corpus fixture path: {relative}")
+    }
+}
+
+// Port of tests/agent_workloads.rs:2280-2313 plus read_native_os_matrix.
+fn s4_agent_native_os_matrix_is_frozen_and_names_current_host() {
+    rows :: s4_agent_tsv_rows("tests/agent_workloads/native_os_matrix.tsv", "version\tos\tarch_policy\trequirement\tadapters\treason", 6)
+    expected :: [String]{
+        "1\tlinux\tx86_64\trequired\tjet,bash,python,node\tnative",
+        "1\tmacos\tany\trequired\tjet,bash,python,node\tnative",
+        "1\twindows\tany\texcluded\tjet,python,node\tbash-not-native;exclusion=D-PLATFORM-EVIDENCE1;expires=2026-11-24;reopen=windows-native-bash-adapter-lands",
+    }
+    assert(rows == expected, "native OS matrix changed without a frozen review")
+    host :: sys.name()
+    architecture :: sys.arch()
+    found := false
+    loop row in rows {
+        fields :: row.split("\t").to_list()
+        if fields[1] == host {
+            found = true
+            assert(fields[2] == "any" || fields[2] == architecture, "current host architecture {architecture} is absent from the frozen native OS matrix")
+        }
+    }
+    assert(found, "current host {host} is absent from the frozen native OS matrix")
+}
+
+#Test("native_os_matrix_is_frozen_and_names_current_host") {
+    s4_agent_native_os_matrix_is_frozen_and_names_current_host()
+}
+
+// Port of tests/agent_workloads.rs:2315-2339, including both reader contracts.
+fn s4_agent_jet_baseline_is_frozen_and_each_loss_has_an_owner() {
+    tasks :: s4_agent_tsv_rows("tests/agent_workloads/manifest.tsv", "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards", 13)
+    baseline :: s4_agent_tsv_rows("tests/agent_workloads/jet_baseline.tsv", "version\ttask_id\tjet_status\tloss_owner", 4)
+    assert(baseline.len() == tasks.len(), "Jet baseline must contain one row per corpus task")
+    loop (index, workload_row) in tasks {
+        task_fields :: workload_row.split("\t").to_list()
+        s4_agent_relative_fixture_path(task_fields[5].to_string())
+        s4_agent_relative_fixture_path(task_fields[6].to_string())
+        row :: baseline[index].to_string()
+        fields :: row.split("\t").to_list()
+        assert(fields[1] == task_fields[1], "Jet baseline task order drifted")
+        assert(fields[2] == "pass", "baseline must freeze a passing Jet task")
+        assert(fields[3] == task_fields[12], "baseline loss owner drifted")
+        owners :: fields[3].to_string()
+        loop owner in owners.split(";") {
+            pair :: parse.split_once(owner.to_string(), "=")
+            assert(pair.found && (pair.tail.starts_with("#") || pair.tail.starts_with("non-goal:")), "Jet loss owner must name a card or ratified non-goal: {owner}")
+        }
+    }
+}
+
+#Test("jet_baseline_is_frozen_and_each_loss_has_an_owner") {
+    s4_agent_jet_baseline_is_frozen_and_each_loss_has_an_owner()
+}

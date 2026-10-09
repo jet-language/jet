@@ -1,0 +1,21 @@
+# HAND-PORT tests/reflect.rs:23-46 direct_layout_fact_feeds_top_level_binding
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# ORACLE-PORT approved by TestLead1: exact original source, target-dependent size/alignment expression via independent U64 representation; no fixed host output.
+fixture: direct_layout_fact_feeds_top_level_binding.fixture
+env: NO_COLOR=1
+step oracle: jet run oracle/oracle.jet
+exit: 0
+capture: expected = text stdout
+step default: jet run main.jet
+exit: 0
+stdout: = "{cap:expected}"
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = "{cap:expected}"
+stderr: == default
+step: jet build --profile=debug main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "{cap:expected}"
+stderr: == default

@@ -1,0 +1,50 @@
+# tests/web_browser.rs::forms_table_browser_submit_reaches_typed_action
+# NEST-P001 predicates run BEFORE browser availability guard, exactly as original.
+# Browser JS is the original inline CDP algorithm, unchanged apart from root/port transport.
+# PENDING-SAME-HEAD/PENDING-GRAMMAR(batch-four probes), runtime UNRUN.
+env: NO_COLOR=1
+copy: {root}/tests/cases/web_browser/fixtures/nest {work}/nest
+file: nest/run.jet size = 298
+file: nest/run.jet sha256 = "e5c1707a9ab751897c662ece76a9047622a999c58eb56b4d03c853101f74deca"
+step: jet run run.jet
+cwd: {work}/nest
+exit: 0
+stdout: ~ "name=Ada" # original NEST-P001 assertion
+stdout: ~ "<form method=\"post\" action=\"/actions/save\" aria-busy=\"false\">" # original NEST-P001 assertion
+stdout: ~ "<input name=\"name\" id=\"Input-name\" type=\"text\" aria-label=\"name\" aria-invalid=\"false\" required value=\"Ada\">" # original NEST-P001 assertion
+stdout: ~ "<button type=\"submit\">Submit</button>" # original NEST-P001 assertion
+stdout+stderr: !~ "source bytes 0..0" # original excludes old lowering ICE
+stdout+stderr: !~ "selected entry is not a top-level function" # original excludes old lowering ICE
+step: jet run --interpret run.jet
+cwd: {work}/nest
+exit: 0
+stdout: ~ "name=Ada" # original NEST-P001 assertion
+stdout: ~ "<form method=\"post\" action=\"/actions/save\" aria-busy=\"false\">" # original NEST-P001 assertion
+stdout: ~ "<input name=\"name\" id=\"Input-name\" type=\"text\" aria-label=\"name\" aria-invalid=\"false\" required value=\"Ada\">" # original NEST-P001 assertion
+stdout: ~ "<button type=\"submit\">Submit</button>" # original NEST-P001 assertion
+stdout+stderr: !~ "source bytes 0..0" # original excludes old lowering ICE
+stdout+stderr: !~ "selected entry is not a top-level function" # original excludes old lowering ICE
+step: jet run --profile=debug run.jet
+cwd: {work}/nest
+exit: 0
+stdout: ~ "name=Ada" # original NEST-P001 assertion
+stdout: ~ "<form method=\"post\" action=\"/actions/save\" aria-busy=\"false\">" # original NEST-P001 assertion
+stdout: ~ "<input name=\"name\" id=\"Input-name\" type=\"text\" aria-label=\"name\" aria-invalid=\"false\" required value=\"Ada\">" # original NEST-P001 assertion
+stdout: ~ "<button type=\"submit\">Submit</button>" # original NEST-P001 assertion
+stdout+stderr: !~ "source bytes 0..0" # original excludes old lowering ICE
+stdout+stderr: !~ "selected entry is not a top-level function" # original excludes old lowering ICE
+when probe {env:JET_WEB_CHROMIUM|env:CHROMIUM|chromium} --version stdout+stderr: ~any "Chromium" "Chrome"
+when probe {env:JET_WEB_NODE|env:NODE|node} --version stdout: ^= "v0" | ^= "v1" | ^= "v2" | ^= "v3" | ^= "v4" | ^= "v5" | ^= "v6" | ^= "v7" | ^= "v8" | ^= "v9"
+spawn app: jet run {root}/Examples/features/web/forms_table.jet
+env: JET_APP_PORT={free-port:forms}
+stdout: null
+poll ready: jet run {root}/tests/cases/web_browser/fixtures/http-ready.jet 127.0.0.1:{free-port:forms} / - write until stdout: ^= "HTTP/1.1 200" timeout 30s every 50ms
+write: browser.mjs forms_table_browser_submit_reaches_typed_action.template
+step: {env:JET_WEB_NODE|env:NODE|node} {work}/browser.mjs
+env: CHROMIUM={env:JET_WEB_CHROMIUM|env:CHROMIUM|chromium}
+exit: 0
+signal app: KILL
+wait: app
+exit: any # original server cleanup ignores kill status
+end when
+end when

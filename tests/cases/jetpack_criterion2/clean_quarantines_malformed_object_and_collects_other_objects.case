@@ -1,0 +1,28 @@
+# Port of tests/jetpack_criterion2.rs:11-63, card297 criterion2.
+# PENDING-SEAM(hangar-fixture-backdate), reviewer-approved refusal: no fake meta mutation.
+# Full original setup (support/jetpack_fixtures.rs:623-664): authenticated Store::ingest_tree
+# twice, root={work}/root, sharedCAS={work}/shared, source payloads respectively
+# "fixture payload: criterion2-stale" and "fixture payload: criterion2-fresh".
+# name/version stale/1.0 and fresh/1.0; reference fixture:<id>; cache_identity has
+# source_fingerprint sha256-fixture-source-<id>, recipe_fingerprint sha256-fixture-recipe-<id>,
+# policy_fingerprint policy=fixture, platform host_platform; no references/signature,
+# outputs out=<source directory>, provenance fixture, platform_artifact_kind empty.
+# Via authenticated closure-journal backdater set stale last_used_at=1 and fresh
+# last_used_at=now_secs(), remove input sources. Bind actual entry IDs as stale_id/fresh_id.
+# Create root/hangar/nix-index/payload with exact bytes "metadata missing" and no meta.json.
+# This recipe must be supplied by the owning package fixture seam, NOT a Jet CLI driver.
+refused: hangar-fixture-backdate
+mkdir: root
+mkdir: shared
+env: JETPACK_ROOT={work}/root
+env: JETPACK_SHARED_CAS={work}/shared
+step: jetpack hangar clean --no-color --yes
+exit: 0
+file: root/hangar/{cap:stale_id} !exists
+file: root/hangar/{cap:fresh_id} exists
+file: root/hangar/nix-index !exists
+# Original read_dir result must contain ONE filename with BOTH substrings;
+# two unrelated filename matches must never satisfy this assertion.
+file: root/hangar-quarantine entries any ~ "nix-index" and ~ "missing-metadata" # original compound predicate, pending seam/grammar
+stderr: ~ "quarantined 1 invalid object" # original predicate
+stderr: ~ "clean" # original predicate

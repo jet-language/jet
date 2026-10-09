@@ -1,0 +1,41 @@
+
+use core.game as game
+
+module perf.game {
+    budgets: [
+        Budget{ name: "frame", scope: .Scene("arcade"), metric: .FrameTime(.P99), provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(16ms) },
+        Budget{ name: "memory", scope: .Scene("arcade"), metric: .MemoryHighWater, provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(96MiB) },
+        Budget{ name: "assets", scope: .Scene("arcade"), metric: .SceneAssetBytes, provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(256KiB) },
+        Budget{ name: "draws", scope: .Scene("arcade"), metric: .DrawCalls(.P99), provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(4) },
+    ]
+}
+
+struct Position { x: Int }
+struct Velocity { dx: Int }
+
+fn run() {
+    scene := game.Scene.new("arcade")
+    scene.assets.image("assets/player.png") ?? panic("image")
+    scene.assets.sound("assets/jump.wav") ?? panic("sound")
+    scene.input.bind("jump", "Space")
+    scene.component<Position>()
+    scene.component<Velocity>()
+    hits :: scene.query<Position, Velocity>()
+    print("query {hits.len()}")
+    print("row {hits[0]}")
+    backend := game.Backend.headless()
+    n := 0
+    loop {
+        if !backend.should_continue() { break }
+        backend.present()
+        n += 1
+    }
+    print("budget {n}")
+    scene.on_frame((frame) -> {
+        if frame.input.pressed("jump") {
+            print("hook jump {frame.index}")
+        }
+    })
+    replay :: game.Replay.record("runs/demo.jetreplay")
+    print(game.run(scene, replay: replay))
+}

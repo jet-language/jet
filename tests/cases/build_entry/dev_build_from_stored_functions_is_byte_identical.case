@@ -1,0 +1,14 @@
+# Port of build_entry.rs:857-897. PENDING-GRAMMAR: copy/remove/file equality.
+# Preserve the original's effective duplicate JET_STORE_DIR assignment (run-cache).
+# It nevertheless deletes store/cas; do not repair that original assertion here.
+fixture: fixtures/function-cache
+env: JET_STORE_DIR={work}/run-cache
+env: NO_COLOR=1
+step: jet build main.jet
+copy: .jet/build/main first-image
+remove: .jet/build/main
+remove: store/cas
+step: jet build main.jet
+file: .jet/build/main == first-image
+step: built
+stdout: = function-cache.out

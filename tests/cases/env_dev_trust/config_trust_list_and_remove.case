@@ -1,0 +1,12 @@
+# Port of tests/env_dev_trust.rs:570-597, every original predicate retained.
+# PENDING-GRAMMAR: file? !~ (TestW3b batch two).
+mkdir: home
+env: HOME={work}/home
+step: jetpack config trust add "/some/project/*" --no-color
+exit: any # original predicate: the add command's exit was not asserted
+step: jetpack config trust list --no-color
+exit: 0
+stderr: ~ "/some/project/*" # original predicate
+step: jetpack config trust remove "/some/project/*" --no-color
+exit: 0
+file?: home/.jet/trust !~ "/some/project/*" # original predicate: read_to_string(...).unwrap_or_default() excludes pattern

@@ -1,0 +1,21 @@
+use core.http.client as http
+fn run() {
+    client :: http.Client.new().protocols(true, false, true)
+    first :: client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("send")
+    assert_eq(first.status(), 200)
+    saw_error := false
+    loop chunk in first.body().chunks(65536) {
+        if chunk == {
+            .Ok(_) -> panic("original FIRST read must fail")
+            .Err(error) -> {
+                if error == {
+                    .InvalidFraming -> saw_error = true
+                    else -> panic("expected InvalidFraming")
+                }
+                break
+            }
+        }
+    }
+    assert(saw_error)
+    // Original explicit raw closes have ordinary same-scope lifetime/drop here.
+}

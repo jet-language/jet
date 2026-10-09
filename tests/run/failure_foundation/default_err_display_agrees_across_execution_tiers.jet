@@ -1,0 +1,17 @@
+
+fn fails(n: Int) -> Int Err! {
+    if n < 0 -> return Err("negative: {n}")
+    Ok(n)
+}
+
+fn run() {
+    a :: fails(-1) ?? {
+        print("fallback: {err}")
+        0
+    }
+    print(a)
+    if fails(-2) == {
+        .Ok(n) -> print(n)
+        .Err(e) -> print("failed: {e}")
+    }
+}

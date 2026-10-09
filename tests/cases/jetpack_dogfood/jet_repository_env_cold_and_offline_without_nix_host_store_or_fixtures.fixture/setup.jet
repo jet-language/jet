@@ -1,0 +1,40 @@
+use core.files as dogfood_files
+use core.sys as dogfood_sys
+use core.process as dogfood_process
+
+// Original preconditions (26-43,85-90) and SETUP-PORT (44-60).
+// No historical fixture environment/catalog/package bytes are staged: the live
+// repository env.jet is copied and other entries retain their original symlink setup.
+fn run() {
+    args :: dogfood_process.args()
+    base :: args[0]
+    repo :: args[1]
+    jet :: args[2]
+    assert(dogfood_files.is_absolute(base) && dogfood_files.is_dir(base), "dogfood root must be an existing absolute directory")
+    canonical :: dogfood_files.canonicalize(base) ?? panic("canonical dogfood scratch")
+    assert(!canonical.starts_with("/tmp"), "dogfood scratch must be disk-backed")
+    assert(dogfood_sys.get("JETPACK_FIXTURES") == None, "live proof must not use fixtures")
+    project :: dogfood_files.join(base, "project")
+    assert(!dogfood_files.exists(project), "use a fresh dogfood root; do not overwrite a previous receipt")
+    assert(!dogfood_files.exists(dogfood_files.join(base, "store")), "cold proof requires an empty Hangar")
+    directories :: [String]{project, dogfood_files.join(base, "home"), dogfood_files.join(base, "tmp")}
+    loop directory in directories {
+        dogfood_files.create_dir_all(directory) ?? panic("create dogfood directory")
+    }
+    entries :: dogfood_files.list_dir(repo) ?? panic("read live repository")
+    loop entry in entries {
+        name :: entry.name
+        if name == ".git" || name == ".jet" || name == "target" || name.starts_with("target-") -> next
+        destination :: dogfood_files.join(project, name)
+        if name == "env.jet" {
+            dogfood_files.copy2(entry.path, destination) ?? panic("copy live environment")
+        } else {
+            dogfood_files.symlink(entry.path, destination) ?? panic("link live repository entry")
+        }
+    }
+    // The admitted native binary replaces only Rust bootstrap cargo build.
+    // Original read_exact(first four) + ELF equality, never a shell stand-in.
+    bytes :: dogfood_files.read_bytes(jet) ?? panic("read admitted native binary")
+    assert(bytes.len() >= 4, "read_exact ELF magic")
+    assert_eq(bytes[0..3], [U8]{127, 69, 76, 70}, "compiler proof must execute a real compiled binary, not a shell fixture")
+}

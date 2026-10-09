@@ -1,0 +1,23 @@
+# tests/encoding_parity.rs::cbor_typed_schema_matches_comptime_default_dev_and_deopt
+# Original source bytes and assertions; PENDING-SAME-HEAD, runtime UNRUN.
+# Expected literals below come from the Rust assertions, not captured/blessed output.
+env: NO_COLOR=1
+fixture: cbor_typed_schema_matches_comptime_default_dev_and_deopt.fixture
+capture: source = text file.replace("@DIR@", "{work}/probe") probe/source.template
+write: probe/run.jet = "{cap:source}"
+step: jet check probe/run.jet
+exit: 0
+step: jet build probe/run.jet
+exit: 0
+step probe_aot: built
+cwd: probe
+exit: 0
+stdout: = "42dead|a262696407677061796c6f616442dead\n42dead|a262696407677061796c6f616442dead\n"
+step probe_dev: jet run probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+step: jet run --interpret probe/run.jet
+stdin: null
+exit: any # original helper either checks only stdout or permits the named interpreter gap
+stdout: == probe_aot

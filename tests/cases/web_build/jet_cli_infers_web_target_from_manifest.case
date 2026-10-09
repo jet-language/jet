@@ -1,0 +1,16 @@
+# HAND-PORT tests/web_build.rs:812-875 jet_cli_infers_web_target_from_manifest
+# Original predicates; same-head kit verification pending.
+fixture: jet_cli_infers_web_target_from_manifest.fixture
+env: NO_COLOR=1
+requires: tool:rustc
+step: jet build main.jet
+exit: 0
+file: .jet/build/app.js is-file
+file: .jet/build/app.wasm is-file
+step: jet run main.jet
+exit: nonzero
+stdout: empty
+stderr: ~ "E-WEB-RUN" # original predicate
+stderr: ~ "jet dev" # original predicate
+stderr: ~ "jet build --target=web" # original predicate
+

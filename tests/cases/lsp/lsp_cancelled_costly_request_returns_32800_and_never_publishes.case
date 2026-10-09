@@ -1,0 +1,26 @@
+# Port of tests/lsp.rs:3477-3550; original source bytes/order/assertions.
+# PENDING-SEAM(read_bytes): Main ballot + CoreState2 + kit batch three.
+# PENDING-GRAMMAR: collection, negated JSON filters, capture/write and named-stream equality.
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_cancelled_costly_request_returns_32800_and_never_publishes/0.json
+recv lsp until $.id = 1
+send lsp: messages/lsp_cancelled_costly_request_returns_32800_and_never_publishes/1.json
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate; unrelated metadata varies
+stdout: ~ "\"version\":1" # original predicate; unrelated metadata varies
+send lsp: messages/lsp_cancelled_costly_request_returns_32800_and_never_publishes/2.json
+send lsp: messages/lsp_cancelled_costly_request_returns_32800_and_never_publishes/3.json
+send lsp: messages/lsp_cancelled_costly_request_returns_32800_and_never_publishes/4.json
+recv lsp collect until $.id = 50
+json: stdout ndjson $[?id=50].error.code = -32800
+stdout: !~ "\"result\":" # original cancelled response has no result; preceding frames are notifications
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file:///tmp/lsp_cancelled_costly_request.jet"][?version!=2] #= 0 # original predicate
+send lsp: messages/lsp_cancelled_costly_request_returns_32800_and_never_publishes/5.json
+recv lsp collect until $.id = 51
+json: stdout ndjson $[?id=50] #= 0 # original predicate
+json: stdout ndjson $[?id=51].result[?name="marker_new"] #>= 1 # original predicate
+json: stdout ndjson $[?id=51].result[?name~="marker_old"] #= 0 # original predicate
+send lsp: messages/lsp_cancelled_costly_request_returns_32800_and_never_publishes/6.json
+recv lsp until $.id = 99
+close lsp
+exit: 0

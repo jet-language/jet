@@ -1,0 +1,15 @@
+# Port of tests/corelib_parts/platform.rs:1031-1100; source and scripts verbatim after original Rust format expansion.
+# PENDING-SAME-HEAD; no snapshots blessed.
+fixture: fixtures/core_process_wait_cancellation_reaps_the_full_process_tree
+write: main.jet main.template
+write: cancel-tree.sh cancel-tree.sh.template
+chmod: cancel-tree.sh 755
+requires: os:unix
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "cancelled\n"
+capture: descendant = text file.trim descendant.pid
+repeat while process {cap:descendant} alive timeout 1s every 10ms fail "cancelled process descendant survived"
+end repeat

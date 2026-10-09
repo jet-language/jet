@@ -1,0 +1,14 @@
+use project.env.dev
+
+module perf.package {
+    budgets: [Budget{
+        name: "readiness",
+        scope: .Service("mydb"),
+        metric: .ServiceReadiness,
+        provider: .ServiceProbe("mydb"),
+        comparison: .AbsoluteFrom("local/mydb"),
+        limit: .AtMost(500ms),
+        enforcement: .Warn,
+    }],
+}
+fn run() {}

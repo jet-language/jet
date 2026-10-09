@@ -1,0 +1,32 @@
+# Original tests/semindex.rs:112-129; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+mkdir: empty
+step: jet find "Int.parse" --json
+cwd: {work}/empty
+exit: 0
+json: stdout doc $.matches[?name="Int.parse"] #>= 1
+step: jet find "Float.parse" --json
+cwd: {work}/empty
+exit: 0
+json: stdout doc $.matches[?name="Float.parse"] #>= 1
+step: jet find "F32.from_float" --json
+cwd: {work}/empty
+exit: 0
+json: stdout doc $.matches[?name="F32.from_float"] #>= 1
+json: stdout doc $.matches[?name="F32.from_float"][0].signature $= "-> F32 !String" # original predicate
+step: jet find "U8.from_u64" --json
+cwd: {work}/empty
+exit: 0
+json: stdout doc $.matches[?name="U8.from_u64"] #>= 1
+step: jet find "Float.from_i8" --json
+cwd: {work}/empty
+exit: 0
+json: stdout doc $.matches[?name="Float.from_i8"] #>= 1
+step: jet find "I64.from_f32" --json
+cwd: {work}/empty
+exit: 0
+json: stdout doc $.matches[?name="I64.from_f32"] #>= 1
+step: jet find "F64.from_u32" --json
+cwd: {work}/empty
+exit: 0
+json: stdout doc $.matches[?name="F64.from_u32"] #>= 1

@@ -1,0 +1,23 @@
+# Port of build_entry.rs::explain_build_reports_package_reuse_reasons.
+# PENDING-GRAMMAR: filtered/projected JSON, count/prefix/relational operations.
+fixture: fixtures/package-reasons
+env: JET_STORE_DIR={work}/store
+step: jet check main.jet
+step first: jet inspect explain-build main.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="package"] #>= 2
+json: stdout doc $.nodes[?kind="package"][*].why_ran = "first-run"
+copy: body-edit.txt deps/dep_b/dep_b.jet
+step: jet check main.jet
+step body: jet inspect explain-build main.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="package"][?subject~="dep_b"][*].why_ran = "red:source+cutoff" # Original find-first lookup has a unique match.
+json: stdout doc $.nodes[?kind="package"][?subject!~="dep_b"][*].why_ran = "green:key"
+copy: interface-edit.txt deps/dep_b/dep_b.jet
+step: jet check main.jet
+step interface: jet inspect explain-build main.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="package"][?subject~="dep_b"][*].why_ran = "red:source" # Original find-first lookup has a unique match.
+json: stdout doc $.nodes[?kind="package"][?subject="pkg:."][*].why_ran ^= "red:dependency:"
+step: jet inspect explain-build main.jet
+stdout: line ^= "package\t" ~ "red:dependency:" # Original same-line prefix and reason; build log includes volatile duration_ms.

@@ -1,0 +1,43 @@
+
+fn source(value: Int) -> Int {
+    if value == 0 {
+        return Err("source failed")
+    }
+    return value
+}
+
+fn source_flag(value: Int) -> Bool {
+    if value == 0 {
+        return Err("source failed")
+    }
+    return value > 1
+}
+
+fn add_one(value: Int) -> Int { value + 1 }
+fn retain_flag(value: Bool) -> Bool { value }
+
+fn run() {
+    values :: [1, 2]
+    mapped :: values.map((value: Int) -> add_one(source(value))) ?? []
+    filtered :: values.filter((value: Int) -> retain_flag(source_flag(value))) ?? []
+    mapped_block :: values.map((value: Int) -> {
+        add_one(source(value))
+    }) ?? []
+    filtered_block :: values.filter((value: Int) -> {
+        retain_flag(source_flag(value))
+    }) ?? []
+    mapped_failed :: [0, 1].map((value: Int) -> {
+        add_one(source(value))
+    }) ?? []
+    filtered_failed :: [0, 1].filter((value: Int) -> {
+        retain_flag(source_flag(value))
+    }) ?? []
+    print(mapped[0])
+    print(mapped[1])
+    print(filtered.len())
+    print(mapped_block[0])
+    print(mapped_block[1])
+    print(filtered_block.len())
+    print(mapped_failed.len())
+    print(filtered_failed.len())
+}

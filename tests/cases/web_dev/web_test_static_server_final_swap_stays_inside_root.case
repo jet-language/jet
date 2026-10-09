@@ -1,0 +1,46 @@
+# Original tests/web_dev.rs:901-982; exact original HTTP bytes, statuses, forbidden-byte predicate and aggregate counters.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference/PASS claim.
+fixture: web_test_static_server_final_swap_stays_inside_root.fixture
+requires: tool:node
+env: S5_PORT={free-port:web}
+env: S5_ROOT={work}
+requires: os:unix
+copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet ready/HTTP.jet
+copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet requests/HTTP.jet
+session app raw: node {root}/Tools/web-test/serve.mjs --port {free-port:web} --root {work}/root
+stdout: null
+stderr: null
+step: jet run ready
+exit: 0
+spawn swapper: jet run swapper
+await: file swapper-ready timeout 60s
+spawn request0: jet run requests
+env: S5_WORKER=0
+spawn request1: jet run requests
+env: S5_WORKER=1
+spawn request2: jet run requests
+env: S5_WORKER=2
+spawn request3: jet run requests
+env: S5_WORKER=3
+wait: request0
+exit: 0
+stdout.trim: = "false" # original OR-combined leaked flag must be false in every worker
+wait: request1
+exit: 0
+stdout.trim: = "false" # original OR-combined leaked flag must be false in every worker
+wait: request2
+exit: 0
+stdout.trim: = "false" # original OR-combined leaked flag must be false in every worker
+wait: request3
+exit: 0
+stdout.trim: = "false" # original OR-combined leaked flag must be false in every worker
+write: stop = ""
+wait: swapper
+exit: 0
+capture: swaps = text stdout.trim
+json: cap:swaps doc $ > 0
+step: jet test aggregate/run.jet
+exit: 0
+signal app: KILL
+close app
+exit: any # original WebTestStaticServer drop ignores kill/wait status

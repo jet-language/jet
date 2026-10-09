@@ -1,0 +1,61 @@
+use core.net as net
+use core.files as files
+use core.process as process
+use core.sys as sys
+use core.time as time
+
+fn fixture_build(address: String) {
+    original :: files.read("guest.template") ?? panic("read original guest")
+    source :: original.replace("@ADDR@", address)
+    files.write("guest.jet", source) ?? panic("write guest")
+    jet :: sys.get("JET_BIN") ?? panic("JET_BIN missing")
+    build :: process.cmd([jet, "build", "guest.jet"]).stdout(.Capture).stderr(.Capture).run() ?? panic("build guest")
+    assert(build.code == 0, "original guest compilation must succeed")
+}
+fn fixture_run() -> ProcessReceipt {
+    process.cmd([".jet/build/guest"]).stdout(.Capture).stderr(.Capture).run() ?? panic("run original guest")
+}
+
+fn http_body_bytes(byte: U8, n: Int) -> [U8] {
+    out := [U8]{}
+    loop _i in 0..<n -> &out.push(byte)
+    out
+}
+fn http_bounds_original() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    peer :: task {
+        loop i in 0..<10 {
+            stream :: net.tcp_accept(listener) ?? panic("accept")
+            net.set_read_timeout(stream, 5000) ?? panic("timeout")
+            _request :: net.tcp_read_bytes(stream, 4096) ?? panic("read")
+            if i >= 8 {
+                bytes :: files.read_bytes("case-{i}.response") ?? panic("response")
+                net.tcp_write_all_bytes(stream, bytes) ?? panic("write response")
+            } else {
+                header :: files.read_bytes("case-{i}.header") ?? panic("header")
+                net.tcp_write_all_bytes(stream, header) ?? panic("write header")
+                body := [U8]{}
+                if i == 0 -> body = http_body_bytes(U8{97}, 8388608)
+                else if i == 1 -> body = [U8]{255}
+                else if i == 2 -> body = "missing".bytes()
+                else if i == 3 -> body = http_body_bytes(U8{98}, 8388609)
+                else if i == 4 -> body = http_body_bytes(U8{99}, 8388608)
+                else if i == 5 -> body = http_body_bytes(U8{100}, 8388609)
+                else -> body = "no".bytes()
+                _body_write_result :: net.tcp_write_all_bytes(stream, body)
+                if i == 4 || i == 5 || i == 7 {
+                    tail :: files.read_bytes(if i == 7 -> "partial-chunk-end.bin" else -> "chunk-end.bin") ?? panic("chunk tail")
+                    _tail_write_result :: net.tcp_write_all_bytes(stream, tail)
+                }
+            }
+            net.tcp_close(stream) ?? panic("drop peer stream")
+        }
+    }
+    fixture_build(address)
+    observed :: fixture_run()
+    peer.join() ?? panic("peer")
+    assert(observed.code == 0, "original guest exit")
+    assert(observed.output == "8388608\nunsupported HTTP body encoding\n404:missing\nHTTP body exceeds 8388608-byte limit\n8388608\nHTTP body exceeds 8388608-byte limit\nHTTP I/O failed during transport\nHTTP I/O failed during transport\ninvalid HTTP framing\ninvalid HTTP header\n", "original exact ten-case output")
+}
+#Test("core_http_client_bounds_and_strictly_decodes_response_bodies") { http_bounds_original() }

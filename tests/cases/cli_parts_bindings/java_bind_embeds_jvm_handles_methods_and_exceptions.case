@@ -1,0 +1,13 @@
+# Port of tests/cli_parts/bindings.rs:723-782. Sources copied verbatim.
+# ORACLE-LITERAL tests/cli_parts/bindings.rs:780 (stdout bytes 42\n5.0\n-7\n).
+# PENDING-GRAMMAR: exact file-kind assertions.
+fixture: fixtures/java_counter
+step: jet inspect bind java {work}/Counter.java --pkg counter
+exit: 0
+file: .jet/bindings/java/libjet_java_counter.a is-file
+file: .jet/bindings/java/counter.classes/Counter.class is-file
+file: .jet/bindings/java/counter.provenance is-file
+step: jet run --profile=debug main.jet
+exit: 0
+stdout: = java-counter.out
+stderr: !~ hidden foreign detail # Original forbids leaking the Java exception payload.

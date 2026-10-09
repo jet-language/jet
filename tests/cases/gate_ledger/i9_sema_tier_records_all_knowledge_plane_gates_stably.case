@@ -1,0 +1,29 @@
+# Port of tests/gate_ledger.rs:560-581 including assert_knowledge_ledger():173-225.
+# PENDING-GRAMMAR: count and before (TestW3b batch two).
+fixture: fixtures/knowledge
+step first: jet inspect gates --json tier.jet
+exit: 0
+stdout: ^= "{\"schema\":\"jet.status/v1\"" # original predicate
+stdout: ~ "\"gates\":{\"entries\":[" # original predicate
+stdout: ~ "\"subject\":\"approx\"" # original predicate
+stdout: ~ "\"subject\":\"wrapping\"" # original predicate
+stdout: ~ "\"subject\":\"from_half_rounded\"" # original predicate
+stdout: ~ "\"subject\":\".raw\"" # original predicate
+stdout: ~ "\"subject\":\"#Transition(_, Pending)\"" # original predicate
+stdout: ~ "\"subject\":\"#Transition(Pending, Confirmed)\"" # original predicate
+stdout: ~ "\"subject\":\"#Scrub(Input)\"" # original predicate
+stdout: count "\"kind\":\"state_transition\"" = 2 # original predicate
+stdout: count "\"kind\":\"taint_scrub\"" = 1 # original predicate
+stdout: count "\"kind\":\"precision_demotion\"" = 5 # original predicate
+stdout: before "\"kind\":\"taint_scrub\"" "\"kind\":\"state_transition\"" # original predicate
+stdout: before "\"kind\":\"state_transition\"" "\"kind\":\"precision_demotion\"" # original predicate
+stdout: ~ "\"span\":{\"start\":" # original predicate
+stdout: ~ "\"reason\":\"#Transition(Pending, Confirmed)\"" # original predicate
+stdout: ~ "tier.jet:" # original predicate
+step: jet inspect gates --json tier.jet
+exit: 0
+stdout: == first
+step: jet inspect gates --kind state_transition tier.jet
+exit: 0
+stdout: ~ "state_transition: 2" # original predicate
+stdout: ~ "#Transition(Pending, Confirmed)" # original predicate

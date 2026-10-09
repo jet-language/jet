@@ -1,0 +1,11 @@
+# Port of tests/jetpack_jetos.rs:2447-2489; runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_build_bare_host_uses_current_repo_config.fixture
+mkdir: package-root
+chmod: project/jet-pkgs/pkgs/cachyos-kernel/source/build.sh 0755
+step build: jet os build box --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+exit: 0
+stderr: ~ "box" # original discovered repo host

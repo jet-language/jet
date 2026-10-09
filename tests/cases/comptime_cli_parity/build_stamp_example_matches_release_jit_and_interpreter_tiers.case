@@ -1,0 +1,15 @@
+# Port of comptime_cli_parity.rs:1601-1643. PENDING-GRAMMAR: step env.
+fixture: fixtures/build-stamp
+# Original run_jet (comptime_cli_parity.rs:70) creates each cache root, not its run child.
+mkdir: cache/release
+step: jet run --release build_stamp.jet
+env: JET_STORE_DIR={work}/cache/release/run
+stdout: = ../../../Examples/features/expected/comptime/build_stamp.out
+mkdir: cache/default
+step: jet run build_stamp.jet
+env: JET_STORE_DIR={work}/cache/default/run
+stdout: = ../../../Examples/features/expected/comptime/build_stamp.out
+mkdir: cache/interpreter
+step: jet dev build_stamp.jet --interpret --watch=off
+env: JET_STORE_DIR={work}/cache/interpreter/run
+stdout: = ../../../Examples/features/expected/comptime/build_stamp.out

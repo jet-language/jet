@@ -1,0 +1,19 @@
+# PORT tests/review.rs::review_diagnostics_mode_compares_error_occurrences_without_receipts; helpers review.rs17-176 preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference snapshot claim.
+fixture: review_diagnostics_mode_compares_error_occurrences_without_receipts.fixture
+step: jet review {work}/clean/run.jet {work}/broken/run.jet --diagnostics --json
+exit: 0
+stdout: ^= "{\"schema\":\"jet.diagnostic-review/v1\"" # Original starts_with.
+stdout: ~ "\"base\"" # Original contains predicate.
+stdout: ~ "\"head\"" # Original contains predicate.
+stdout: ~ "\"valid\":true" # Original contains predicate.
+stdout: ~ "\"valid\":false" # Original contains predicate.
+stdout: ~ "\"origin\"" # Original contains predicate.
+stdout: ~ "\"cause\"" # Original contains predicate.
+stdout: !~ "jet.status/v1" # Original negative predicate.
+step: jet review {work}/broken/run.jet {work}/clean/run.jet --diagnostics --json
+exit: 0
+stdout: ~ "\"status\":\"resolved\"" # Original contains predicate.
+step: jet review {work}/broken/run.jet {work}/broken/run.jet --diagnostics --json
+exit: 0
+stdout: ~ "\"status\":\"existing\"" # Original contains predicate.

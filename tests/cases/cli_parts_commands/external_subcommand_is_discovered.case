@@ -1,0 +1,10 @@
+# Port of tests/cli_parts/commands.rs:1264-1295; fixture sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates and oracles, no runtime run.
+# PENDING-GRAMMAR(batch-four): Unix-only mode setup; source PATH separator kept literally.
+fixture: fixtures/external_plugin
+when os unix: step: chmod 755 bin/jet-greet
+when os unix: exit: 0
+step: jet greet world
+env: PATH={work}/bin:{env:PATH|}
+exit: any # original predicate: status ignored
+stdout: ~ "hi from plugin world" # original predicate

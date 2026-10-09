@@ -1,0 +1,35 @@
+
+use core.data as data
+use core.data.stream as stream
+use core.files as files
+
+#Codable
+struct Event {
+    service: String
+    latency_ms: Float
+}
+
+fn run() {
+    input :: files.open("{work}/events.csv") ?? panic("open")
+    limits := data.DataLimits.safe()
+    limits.max_groups = 1
+    reader :: data.csv_reader<Event>(^input, limits) ?? panic("reader")
+    first :: stream.next(&reader) ?? panic("next")
+    print("first:{first.service}")
+    rows :: stream.collect(&reader) ?? panic("collect")
+    if data.query(rows)
+        .group_by((e) -> e.service)
+        .mean((e) -> e.latency_ms)
+        .collect() == {
+        .Ok(_) -> print("unexpected ok")
+        .Err(error) -> print("{error.kind} {error.operation}")
+    }
+    if data.mean([Float]{}) == {
+        .Ok(_) -> print("unexpected mean")
+        .Err(error) -> print("{error.kind} {error.operation}")
+    }
+    if data.quantile([1.0, 2.0], 1.5) == {
+        .Ok(_) -> print("unexpected q")
+        .Err(error) -> print("{error.kind} {error.operation}")
+    }
+}

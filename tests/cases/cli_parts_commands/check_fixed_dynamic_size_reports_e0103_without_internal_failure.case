@@ -1,0 +1,37 @@
+# Port of tests/cli_parts/commands.rs:1422-1575; fixture sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates and oracles, no runtime run.
+# PENDING-GRAMMAR: copy from {root}, count.
+fixture: fixtures/fixed_size
+copy: {root}/tests/fuzz/sema/invalid/ui_fixed_dynamic_size.E0103.jet invalid.jet
+step: jet check {work}/invalid.jet
+exit: 1
+stderr: ~ "Error [E0103]" # original predicate
+stderr: !~ "panicked at" # original predicate
+stderr: !~ "entered unreachable code" # original predicate
+stderr: !~ "internal error" # original predicate
+stderr: !~ "generated Rust" # original predicate
+step: jet check mixed.jet
+exit: 1
+stderr: ~ "Error [E0103]" # original predicate
+stderr: !~ "panicked at" # original predicate
+stderr: !~ "internal error" # original predicate
+step: jet check compare_chain.jet
+exit: 0
+step: jet check higher_order_valid.jet
+exit: 0
+step: jet check higher_order_isolation.jet
+exit: 1
+stderr: count "Error [E0103]" = 1 # original predicate
+stderr: !~ "panicked at" # original predicate
+stderr: !~ "entered unreachable code" # original predicate
+stderr: !~ "internal error" # original predicate
+step: jet check lambda_value.jet
+exit: 0
+step: jet check helper.jet
+exit: 0
+stderr: !~ "panicked at" # original predicate
+stderr: !~ "internal error" # original predicate
+step: jet check main.jet
+exit: 0
+stderr: !~ "panicked at" # original predicate
+stderr: !~ "internal error" # original predicate

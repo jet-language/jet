@@ -1,0 +1,8 @@
+# Port of tests/typestate.rs::typestate_graph_runs_on_resident_jit_without_runtime_state; original guest source preserved.
+# ORACLE-LITERAL: tests/typestate.rs:38.
+fixture: fixtures/typestate_graph_runs_on_resident_jit_without_runtime_state
+step: jet check fixture.jet --json --verbose
+json: stdout doc $.reports #= 0
+step: jet run fixture.jet
+exit: any # original RunOutcome::Ran branch asserts stdout only
+stdout: = typestate_graph_runs_on_resident_jit_without_runtime_state.out

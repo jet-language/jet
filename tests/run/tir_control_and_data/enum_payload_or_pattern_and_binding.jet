@@ -1,0 +1,23 @@
+enum Conn {
+    Active(Int)
+    Reconnecting(Int)
+    Blocked(String)
+    Idle(Int)
+    Closed
+}
+fn describe(c: Conn) -> String {
+    if c == {
+        .Active(id) | .Reconnecting(id) -> { return "live:{id}" }
+        .Blocked(id) -> { return "blocked:{id}" }
+        .Idle(_) -> { return "idle" }
+        .Closed -> { return "closed" }
+    }
+    return "unknown"
+}
+fn run() {
+    print(describe(Conn.Active(42)))
+    print(describe(Conn.Reconnecting(7)))
+    print(describe(Conn.Blocked("waiting")))
+    print(describe(Conn.Idle(99)))
+    print(describe(Conn.Closed))
+}

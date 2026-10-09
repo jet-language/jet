@@ -1,0 +1,21 @@
+# Port of tests/jetpack_dispatch.rs:59-100. PENDING-SAME-HEAD and batch-four grammar.
+# Sources/literal predicates copied verbatim, helper templates expanded exactly.
+fixture: fixtures/jet_shared_store_status_does_not_default_to_install
+mkdir: root
+env: JETPACK_ROOT={work}/root
+mkdir: home
+mkdir: data
+env: HOME={work}/home
+env: XDG_DATA_HOME={work}/data
+env: XDG_STATE_HOME={work}/state
+step: jet shared-store status --no-color
+unset: JETPACK_ROOT
+exit: 0
+stderr: ~ "shared-store broker is not installed." # original contains predicate
+stderr: !~ "Error [E1340]" # original absent predicate
+stderr: !~ "shared-store install failed" # original absent predicate
+stderr: !~ "sudo" # original absent predicate
+stderr: !~ "jetpack hangar shared install" # original absent predicate
+file: state/jet/hangar/marker is-file
+file: data/jet/hangar absent
+file: data/jet/shared-store absent

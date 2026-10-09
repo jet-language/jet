@@ -1,0 +1,31 @@
+
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+
+fn run() {
+    input :: files.open("{work}/cbor/input.data") ?? panic("open")
+    reader :: cbor.reader(^input) ?? panic("reader")
+    count := 0
+    loop count < 16 {
+        result :: reader.next()
+        if result == {
+            .Ok(maybe) -> {
+                if maybe == None { break }
+                count += 1
+            }
+            .Err(first) -> {
+                again :: reader.next()
+                if again == {
+                    .Ok(_) -> { print("not-latched") }
+                    .Err(second) -> {
+                        print(first.byte_offset == second.byte_offset && first.reason == second.reason)
+                    }
+                }
+                break
+            }
+        }
+    }
+    print(count)
+    print("eof")
+}

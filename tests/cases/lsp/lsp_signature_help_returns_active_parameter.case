@@ -1,0 +1,26 @@
+# Port of tests/lsp.rs:2516-2577; source bytes copied verbatim.
+# PENDING-GRAMMAR: generic framed sessions in TestW3b batch three; no reference snapshot needed for original predicates.
+# PENDING-SEAM(read_bytes): D-CHILD-READ-BYTES1 + CoreState2 + kit batch three.
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_signature_help_returns_active_parameter/0.json
+recv lsp
+stdout: ~ "signatureHelpProvider" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_signature_help_returns_active_parameter/1.json
+send lsp: messages/lsp_signature_help_returns_active_parameter/2.json
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_signature_help_returns_active_parameter/3.json
+recv lsp
+stdout: ~ "fn connect(host: String, /, timeout seconds: Int, *, tls enabled: Bool, rest: ...String) -[IO]> String" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"activeParameter\":2" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "tls enabled: Bool" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_signature_help_returns_active_parameter/4.json
+recv lsp
+stdout: ~ "\"activeParameter\":1" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "timeout seconds: Int" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_signature_help_returns_active_parameter/5.json
+recv lsp
+stdout: ~ "result" # original predicate; other response fields contain variable metadata/paths
+close lsp
+# Original transcript only waited; it did not assert process status.
+exit: any

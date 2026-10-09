@@ -1,0 +1,14 @@
+# tests/same_subject_dispatch.rs::braced_rewrite_is_formatter_stable_and_compiles
+# Original fixtures and exact assertions; PENDING-SAME-HEAD, runtime UNRUN.
+fixture: braced_rewrite_is_formatter_stable_and_compiles.fixture
+env: NO_COLOR=1
+step: jet check run.jet --json
+exit: 0
+json: stdout doc $.reports[?code="L0514"][?fix_edits!=null] #>= 1
+apply-edits: stdout doc $.reports[?code="L0514"][0].fix_edits[*]
+capture: fixed = text file run.jet
+step: jet fmt run.jet
+exit: 0
+file: run.jet = "{cap:fixed}"
+step: jet check run.jet
+exit: 0

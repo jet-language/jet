@@ -1,0 +1,61 @@
+// Exact public engine-policy claims; PENDING-SEAM(package-tests), no runtime proof claimed.
+fn engine_policy_manifest_error(raw: String) -> Diagnostic {
+    if Manifest.parse("package.jet", raw) == {
+        .Ok(_) -> panic("expected manifest refusal")
+        .Err(error) -> return error.diagnostic
+    }
+}
+
+// ported from jetpack_engine.rs:1779-1810
+#Test("package_policy_authorizes_spdx_and_source_mapping_through_publish_seam") {
+    manifest :: Manifest.parse("package.jet", "\nname: \"consumer\"\nversion: \"0.1.0\"\nlicense: \"MIT\"\npolicy: {{\n    licenses: .Allow([\"MIT\", \"Apache-2.0\"]),\n    sources: {{ \"Acme.*\": [\"internal\"] }},\n}}\n") ?? panic("policy manifest")
+    assert_eq(manifest.policy.licenses, Val([String]{"MIT", "Apache-2.0"}))
+    assert_eq(manifest.policy.source_maps, [PolicySourceMap]{PolicySourceMap{pattern: "Acme.*", sources: [String]{"internal"}}})
+    receipt :: publication_policy_test_receipt(publication_authorize_package_candidate(manifest.policy, "Acme.Widget", "1.2.3", Val("MIT OR Apache-2.0"), "internal"))
+    assert(publication_policy_receipt_summary(receipt).contains("source-rule=Acme.*"))
+    assert(publication_policy_receipt_summary(receipt).contains("fingerprint=sha256-"))
+}
+
+// ported from jetpack_engine.rs:1812-1842
+#Test("package_policy_parses_exact_expiring_source_exception") {
+    manifest :: Manifest.parse("package.jet", "\nname: \"consumer\"\nversion: \"0.1.0\"\npolicy: {{\n    exceptions: [PolicyException{{\n        id: \"JSA-2026-0001\",\n        scope: \"Acme.Widget#1.2.3\",\n        reason: \"urgent security fix\",\n        expires: 9999999999,\n    }}],\n}}\n") ?? panic("source policy exception")
+    assert_eq(manifest.policy.exceptions.len(), 1)
+    exception :: manifest.policy.exceptions[0]
+    assert_eq(exception.id, "JSA-2026-0001")
+    assert_eq(exception.scope, "Acme.Widget#1.2.3")
+    assert(exception.matches("Acme.Widget", "1.2.3"))
+    assert(exception.summary().contains("reason=urgent security fix"))
+    invalid :: engine_policy_manifest_error("name: \"consumer\"\nversion: \"0.1.0\"\npolicy: {{ exceptions: [PolicyException{{ id: \"JSA-1\", scope: \"Acme.Widget#^1.2\", reason: \"why\", expires: 10 }}] }}\n")
+    assert_eq(invalid.code, "E1206")
+    assert(invalid.why.contains("PolicyException.scope"))
+}
+
+// ported from jetpack_engine.rs:1844-1865
+#Test("package_policy_drops_expired_source_exception_from_receipt") {
+    policy := PackagePolicy.default()
+    policy.exceptions = [PackagePolicyException]{PackagePolicyException{id: "JSA-EXPIRED", scope: "Acme.Widget#1.2.3", reason: "old waiver", expires_at: 0}}
+    receipt :: publication_policy_test_receipt(publication_authorize_package_candidate(policy, "Acme.Widget", "1.2.3", Val("MIT"), "public"))
+    assert_eq(receipt.exception, None)
+    assert(!publication_policy_receipt_summary(receipt).contains("exception="))
+}
+
+// ported from jetpack_engine.rs:1867-1906
+#Test("package_policy_rejects_unmapped_or_non_spdx_candidates_before_ingest") {
+    policy := PackagePolicy.default()
+    policy.licenses = Val([String]{"MIT"})
+    policy.source_maps = [PolicySourceMap]{PolicySourceMap{pattern: "Acme.*", sources: [String]{"internal"}}}
+    source_error :: publication_policy_test_error(publication_authorize_package_candidate(policy, "Acme.Widget", "1.2.3", Val("MIT"), "public"))
+    assert(source_error.detail.contains("not allowed"))
+    license_error :: publication_policy_test_error(publication_validate_published_license("Acme.Widget", "1.2.3", Val("not a license")))
+    assert(license_error.detail.contains("invalid SPDX"))
+    diagnostic :: publication_package_policy_diagnostic(license_error)
+    assert_eq(diagnostic.code, "E2607")
+    assert(diagnostic.what.contains("invalid SPDX"))
+    assert(diagnostic.why.contains("security-sensitive"))
+    assert(diagnostic.fix.contains("valid SPDX expression"))
+    malformed :: engine_policy_manifest_error("name: \"consumer\"\nversion: \"0.1.0\"\npolicy: {{ licenses: .Allow([\"MIT\", \"MIT\"]) }}\n")
+    assert_eq(malformed.code, "E1206")
+    assert(malformed.what.contains("package.jet"))
+    assert(malformed.why.contains("package metadata policy is malformed"))
+    assert(malformed.fix.contains("syntax-decisions.md"))
+}

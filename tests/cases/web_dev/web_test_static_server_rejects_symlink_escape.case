@@ -1,0 +1,17 @@
+# Original tests/web_dev.rs:768-824; exact source bytes and original assertions.
+# PENDING-GRAMMAR(batch-four); PENDING-SEAM(read_bytes/DFileRaw).
+fixture: web_test_static_server_rejects_symlink_escape.fixture
+copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet claims/HTTP.jet
+env: S5_PORT={free-port:web}
+requires: tool:node
+requires: os:unix
+env: S5_OUTSIDE={work}/outside
+symlink: {work}/outside root/escape.js
+session app raw: node {root}/Tools/web-test/serve.mjs --port {free-port:web} --root {work}/root
+stdout: null
+stderr: null
+step: jet test claims
+exit: 0
+signal app: KILL
+close app
+exit: any # original KillOnDrop ignores child status

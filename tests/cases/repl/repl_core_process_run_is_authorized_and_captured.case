@@ -1,0 +1,13 @@
+# PORT tests/repl.rs:1631-1643; verbatim inputs and original predicate forms.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Banner/prompt non-overlap: crates/jet-repl/src/Render.rs24-37,67-74; stderr discovery41-61.
+# lib.rs2469-2470 cooked floor mirrors transcript. No stripping/projection.
+fixture: repl_core_process_run_is_authorized_and_captured.fixture
+step: jet repl --allow=Exec --deny=IO
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_core_process_run_is_authorized_and_captured.fixture/input.txt
+exit: any # original library predicates did not assert process status
+stdout|stderr: ~ "repl-process-ok" # original predicate
+stdout: !~ "E1803" # original predicate
+stderr: !~ "E1803" # original predicate

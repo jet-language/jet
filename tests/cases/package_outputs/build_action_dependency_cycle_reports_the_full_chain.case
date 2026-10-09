@@ -1,0 +1,7 @@
+# Port of tests/package_outputs.rs:783-791 incl cycle_diagnostic():759-779.
+# PENDING-GRAMMAR: first-line selector (TestW3b batch two).
+fixture: fixtures/cycle
+env: NO_COLOR=1
+step: jet build run.jet
+exit: nonzero
+stderr: first-line ~ "build plan is invalid" ~ "`alpha` -> `gamma` -> `beta` -> `alpha`" # original predicate

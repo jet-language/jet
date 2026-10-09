@@ -1,0 +1,13 @@
+# PORT tests/repl.rs:2308-2326; all original predicates, verbatim input literals.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Startup non-overlap: crates/jet-repl/src/Render.rs24-37,41-61,67-74; cooked mirror lib.rs2469-2470.
+fixture: docs_lookup_builtin_list_filter_matches_ratified_mock.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: docs_lookup_builtin_list_filter_matches_ratified_mock.fixture/input0.txt
+exit: any # original library predicates did not assert process status
+stdout|stderr: line ^= "1 user> List.filter(f: fn(T) -> Bool) -> List<T>" # original starts_with; Render.rs67-74 prompt+turn, lib.rs3111-3112 raw Docs text follows immediately
+stdout|stderr: ~ "Keeps items where f(item) is true." # original predicate
+stdout|stderr: ~ "Source:" # original predicate
+stdout|stderr: ~ "Example:" # original predicate

@@ -1,0 +1,14 @@
+// D-COMPUTE-BACKEND1=D: browser-owned WebGPU compute stays on the shared
+// compute surface while the JS adapter awaits queue submission and readback.
+#Target(Web)
+use core.compute as compute
+
+#Target(JS)
+fn run() {
+    seed :: compute.matrix(1, 1, 2.0) ?? panic("seed")
+    tile :: compute.matmul_f32_tile(seed, seed) ?? panic("tile")
+    gpu :: compute.on_device(tile, compute.device_webgpu()) ?? panic("webgpu")
+    doubled :: compute.add(gpu, gpu) ?? panic("add")
+    print(compute.to_list(doubled))
+    print(compute.placement(doubled))
+}

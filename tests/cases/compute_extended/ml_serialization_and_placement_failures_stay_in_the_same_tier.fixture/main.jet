@@ -1,0 +1,12 @@
+
+use core.compute as compute
+
+fn run() {
+    left :: compute.matrix(1, 1, 2.0) ?? panic("left")
+    right :: compute.matrix(1, 1, 3.0) ?? panic("right")
+    model :: compute.matmul_f32_tile(left, right) ?? panic("model")
+    wire :: compute.serialize(model) ?? panic("wire")
+    print("wire:{wire}")
+    round :: compute.deserialize(wire) ?? panic("round")
+    print("round:{compute.to_list(round)}")
+}

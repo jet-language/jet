@@ -1,0 +1,17 @@
+Error [E0357]: State `open` must be PascalCase
+  --> tests/ui/typestate/state_section_shape_diagnostics_are_distinct_4.jet:1:23
+    |
+  1 | struct Door { state { open } open: Bool }
+    |                       ^^^^
+ Why: Jet enforces PascalCase for type-like names, snake_case for value-like names, and ALL_CAPS (SCREAMING_SNAKE_CASE) for module-global constants (D-SHAPE-CASE1)
+ Fix: Rename it to `Open`
+More: jet-lang.dev/e/E0357
+
+Error [E0167]: State `open` collides with a member of `Door`
+  --> tests/ui/typestate/state_section_shape_diagnostics_are_distinct_4.jet:1:23
+    |
+  1 | struct Door { state { open } open: Bool }
+    |                       ^^^^
+ Why: State facts and ordinary members share the owning type's namespace
+ Fix: Rename the state or the member so `Type.State.open` is unique
+More: jet-lang.dev/e/E0167

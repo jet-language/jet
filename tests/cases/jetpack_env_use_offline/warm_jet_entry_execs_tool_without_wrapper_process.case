@@ -1,0 +1,20 @@
+# Port of tests/jetpack_env_use_offline.rs:50-117; original sources/predicates retained, runtime PENDING-SAME-HEAD.
+requires: os-name:linux
+fixture: warm_jet_entry_execs_tool_without_wrapper_process.fixture
+mkdir: package-root
+mkdir: home
+env: JETPACK_ROOT={work}/package-root
+env: HOME={work}/home
+step: jetpack env --prep --yes --trust --offline --no-color --fixtures {work}/fixtures
+cwd: project
+exit: 0
+remove: fixtures/jetpackage-omp.json
+remove: fixtures/omp-1.0.0
+spawn tool: jet env --trust --offline --no-color -- omp
+cwd: project
+env: JETPACK_DENY_NETWORK=1
+unset: JETPACK_FIXTURES
+wait: tool
+exit: 0
+stdout.trim: = "{pid:tool}" # original parsed u32 exactly equals spawned child PID
+

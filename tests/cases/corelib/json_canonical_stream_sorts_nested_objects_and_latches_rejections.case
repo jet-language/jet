@@ -1,0 +1,11 @@
+# Port of tests/corelib_parts/encoding_streams.rs::json_canonical_stream_sorts_nested_objects_and_latches_rejections; guest source unchanged.
+# ORACLE-CONSTRUCTED: encoding_streams.rs:444-448 expected + literal LF/true/true suffix; original AOT-only (#1583).
+fixture: fixtures/json_canonical_stream_sorts_nested_objects_and_latches_rejections
+write: guest.jet fixtures/json_canonical_stream_sorts_nested_objects_and_latches_rejections/fixture.template
+step aot: jet build guest.jet
+step aot_run: built
+stdout: = json_canonical_stream_sorts_nested_objects_and_latches_rejections.expected-stream
+stderr: empty
+file: canonical.json = json_canonical_stream_sorts_nested_objects_and_latches_rejections.canonical.json.expected
+file: duplicate.json = json_canonical_stream_sorts_nested_objects_and_latches_rejections.duplicate.json.expected
+file: limited.json = json_canonical_stream_sorts_nested_objects_and_latches_rejections.limited.json.expected

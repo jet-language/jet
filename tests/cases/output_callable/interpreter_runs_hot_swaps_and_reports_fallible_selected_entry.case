@@ -1,0 +1,9 @@
+# tests/output_callable.rs::interpreter_runs_hot_swaps_and_reports_fallible_selected_entry
+# Exact original sources/predicates; runtime UNRUN.
+fixture: interpreter_runs_hot_swaps_and_reports_fallible_selected_entry.fixture
+env: NO_COLOR=1
+step: jet run --interpret v1/main.jet
+stdin: null
+exit: 0
+stdout: = "v1\n"
+# PENDING-SEAM(compiler-lib): same-thread sized compiler-stack development session InterpreterBackend.DevInterpret; first typed RunOutcome.Ran stdout=v1\n exit0; hot_swap_interpreter_bundle(start,v2,false,policy).expect then typed RunOutcome.Ran stderr=Error: selected boom\n exit1 (do not substitute fresh-run success for persistent swap)

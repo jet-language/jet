@@ -1,0 +1,32 @@
+# HAND-PORT tests/web_build.rs:2464-2530 web_todo_runs_through_shared_stop_on_js_and_wasm
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Both original JS/Wasm inputs, displayed source paths, exact original harness bytes, and EVERY conjunct in runtime diagnostic predicates retained.
+requires: tool:node
+fixture: web_todo_runs_through_shared_stop_on_js_and_wasm.fixture
+env: NO_COLOR=1
+step: jet build --target web tests/fixtures/web_todo_js.jet
+exit: 0
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: tests/fixtures/.jet/build/app.wasm is-file
+copy: harness.mjs tests/fixtures/.jet/build/harness.mjs
+step: node harness.mjs
+cwd: tests/fixtures/.jet/build
+exit: 0
+stdout: ~ "code=E3011" # original contains predicate
+stdout: ~ "Why: this code is deliberately incomplete and reached a running program." # original contains predicate
+stdout: ~ "Fix: implement the missing code before running the program." # original contains predicate
+stdout: ~ "Stop [E3011]: `#Todo at tests/fixtures/web_todo_js.jet:3 — expected Int`" # original exact Todo frame substring
+step: jet build --target web tests/fixtures/web_todo_wasm.jet
+exit: 0
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: tests/fixtures/.jet/build/app.wasm is-file
+copy: harness.mjs tests/fixtures/.jet/build/harness.mjs
+step: node harness.mjs
+cwd: tests/fixtures/.jet/build
+exit: 0
+stdout: ~ "code=E3011" # original contains predicate
+stdout: ~ "Why: this code is deliberately incomplete and reached a running program." # original contains predicate
+stdout: ~ "Fix: implement the missing code before running the program." # original contains predicate
+stdout: ~ "Stop [E3011]: `#Todo at tests/fixtures/web_todo_wasm.jet:3 — expected Int`" # original exact Todo frame substring

@@ -1,0 +1,10 @@
+# HAND-PORT tests/fact_reads.rs:98-116 runtime_fact_reads_are_refused_before_codegen
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Original first matching diagnostic predicates; every required what/why/fix read refers to the SAME first report.
+fixture: runtime_fact_reads_are_refused_before_codegen.fixture
+env: NO_COLOR=1
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0302"][0].what ~ "compile-time only" # original first matching diagnostic
+json: stdout doc $.reports[?code="E0302"][0].why ~ "never selects runtime behavior" # original first matching diagnostic
+json: stdout doc $.reports[?code="E0302"][0].fix ~ "binding" # original first matching diagnostic

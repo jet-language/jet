@@ -1,0 +1,10 @@
+# Port of tests/jetpack_jetos.rs:405-426; runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_import_live_eval_failure_is_loud.fixture
+chmod: tools/nix 0755
+step: jet os import {work}/src --host halcyon --no-color
+env: PATH={work}/tools
+exit: 2
+stderr: ~ "E1289" # original code
+stderr: ~ "attribute missing" # original cause
+stderr: ~ "--facts-only" # original fix

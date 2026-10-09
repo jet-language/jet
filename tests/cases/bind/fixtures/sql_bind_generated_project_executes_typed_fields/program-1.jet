@@ -1,0 +1,33 @@
+
+use core.encoding.json as json
+
+fn run() {
+    canonical := "{{\"id\":7,\"name\":\"Ada\",\"active\":true,\"born\":\"2024-01-02\",\"opened\":\"03:04:05\",\"created\":\"2024-01-02T03:04:05Z\",\"price\":\"12.34\",\"data\":[65,66]}}"
+    wire := json.parse(canonical) ?? panic("parse")
+    user := wire.decode<User>() ?? panic("decode")
+    encoded := user.encode()
+    reencoded := json.to_string(encoded)
+    roundtrip_wire := json.parse(reencoded) ?? panic("reparse")
+    roundtrip := roundtrip_wire.decode<User>() ?? panic("decode roundtrip")
+    if roundtrip.id != user.id { panic("id roundtrip") }
+    if roundtrip.name != user.name { panic("name roundtrip") }
+    if roundtrip.active != user.active { panic("active roundtrip") }
+    if roundtrip.data.len() != user.data.len() { panic("data length roundtrip") }
+    if roundtrip.data[0] != user.data[0] { panic("data roundtrip") }
+    if roundtrip.data[1] != user.data[1] { panic("data roundtrip") }
+    if roundtrip.born.to_string() != user.born.to_string() { panic("born roundtrip") }
+    if roundtrip.opened.to_string() != user.opened.to_string() { panic("opened roundtrip") }
+    if roundtrip.created.format_rfc3339() != user.created.format_rfc3339() {
+        panic("created roundtrip")
+    }
+    if roundtrip.price.to_string() != user.price.to_string() { panic("price roundtrip") }
+    print(user.id)
+    print(user.name)
+    print(user.active)
+    print(user.data[0])
+    print(user.data.len())
+    print(user.born.to_string())
+    print(user.opened.to_string())
+    print(user.created.format_rfc3339())
+    print(user.price.to_string())
+}

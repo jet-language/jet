@@ -1,0 +1,23 @@
+# Original tests/failure_tier_parity.rs:280-288; verbatim input and every runtime parity assertion.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; exact .normalize_failure_journey_paths helper125-156 differs from CheckedText.
+fixture: failure_contract_matrix_matches_comptime_and_hosted_tiers.fixture
+step jit: jet run main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: = expected.out
+step interpreter: jet run --interpret main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: == jit
+stderr: == jit
+when tool rustc
+step: jet build aot/main.jet
+env: NO_COLOR=1
+exit: 0
+step aot: built
+exit: 0
+stdout: == jit
+stderr: == jit
+stdout: == interpreter
+stderr: == interpreter
+end when

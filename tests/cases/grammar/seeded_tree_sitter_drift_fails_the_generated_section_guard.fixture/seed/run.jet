@@ -1,0 +1,11 @@
+// SETUP-PORT tests/grammar.rs:125-138; original replacen(...,1).
+use core.files as files
+fn run() {
+    path :: "Tools/editors/tree-sitter/grammar.js"
+    source :: files.read(path) ?? panic("read")
+    marker :: "END GENERATED JET SYNTAX HIGHLIGHTS"
+    start :: source.find(marker) ?? panic("end marker")
+    before :: source.slice(0..<start)
+    after :: source.slice(start + marker.len()..<source.len())
+    files.write(path, "{before}// seeded generated-grammar drift\nEND GENERATED JET SYNTAX HIGHLIGHTS{after}") ?? panic("seed")
+}

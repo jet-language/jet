@@ -1,0 +1,16 @@
+// D-MEM-SENTRY1: default dev-tier sentries quarantine and poison an arena
+// allocation before a raw pointer can read it again.
+use core.mem
+
+fn run() {
+    arena :: mem.Arena.new()
+    #Unsafe("pointer is used only after arena reset to prove quarantine") {
+        allocation :: arena.alloc(7)
+        // Erase the static arena lifetime at the audited numeric-address boundary:
+        // this fixture exercises the runtime sentry, not a statically stale pointer.
+        address :: mem.address_of(allocation.*)
+        &arena.reset()
+        stale :: mem.Ptr<Int>.from_addr(address)
+        print(stale.*)
+    }
+}

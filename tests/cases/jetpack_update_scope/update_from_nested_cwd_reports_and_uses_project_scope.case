@@ -1,0 +1,14 @@
+# Port of tests/jetpack_update_scope.rs:10-58; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+fixture: update_from_nested_cwd_reports_and_uses_project_scope.fixture
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+mkdir: root
+mkdir: home
+mkdir: src/nested
+step: jetpack update --no-color --yes --fixtures channels
+cwd: src/nested
+stderr: ~ "scope: project" # original predicate
+stderr: !~ "scope: user tools" # original predicate
+stderr: ~ "{work}" # original predicate
+file: jet.lock ~ "exact = \"github:acme/tools#v1.2.0\"" # original predicate

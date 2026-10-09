@@ -1,0 +1,11 @@
+# Port of tests/tir_core_and_closures.rs:1391-1412; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+# Original compile/edit assertions use library diagnostics, not an asserted CLI stream.
+# Public check --json projects those diagnostics on stdout; stderr was a port bug.
+fixture: card_2877_if_arm_explicit_copy_requires_tilde.fixture
+step: jet check run.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E0120"] #>= 1 # original predicate
+json: stdout doc $.reports[?code="E0120"].fix_edits[0].new_text = "~"
+capture: insertion stdout doc $.reports[?code="E0120"].fix_edits[0].span.start
+json: stdout doc $.reports[?code="E0120"].fix_edits[0].span.end = {cap:insertion}

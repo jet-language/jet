@@ -1,0 +1,16 @@
+# Port of tests/inline_package.rs:515-545; sources verbatim; original predicates.
+# PENDING-SAME-HEAD: authored, no reference/runtime proof.
+fixture: fixtures/inline_package_rejects_stale_lock_metadata_with_lock_provenance
+file: workspace.jet = "module workspace { members: [] }\n"
+step: jet check run.jet --json
+env: JET_STORE_DIR={work}/cache-0
+env: JET_PACKAGE_STORE_DIR={work}/store-0
+env: JETPACK_ROOT={work}/jetpack-0
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: nonzero
+json: machine doc $.reports[0].code = "E1202"
+capture: failure_file machine doc $.reports[0].file
+cap:failure_file: $= ".jet/lock"
+file: .jet/lock = "stale lock bytes\n"
+file: run.jet = "package {\n    name: \"locked-inline\"\n    version: \"0.1.0\"\n    deps: { dep: ./dep }\n}\nfn run() {}\n"

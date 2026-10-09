@@ -1,0 +1,11 @@
+# Port of tests/jetpack_build_debug.rs:83-110. PENDING-SAME-HEAD, PENDING-GRAMMAR(batch-four).
+fixture: fixtures/top_level_explain_dispatches_to_jetpack
+mkdir: root
+env: JETPACK_ROOT={work}/root
+step: jetpack build --no-color
+exit: any # original setup build result was discarded
+step: jet explain weirdctl --no-color
+exit: 0
+stdout: ~ "ref      adapt:weirdctl:./vendor/weirdctl" # original contains predicate, literal bytes
+stdout: ~ "failed" # original contains predicate, literal bytes
+stdout: ~ "jet logs weirdctl" # original contains predicate, literal bytes

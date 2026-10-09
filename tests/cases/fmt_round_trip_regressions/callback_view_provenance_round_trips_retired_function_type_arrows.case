@@ -1,0 +1,10 @@
+# Port of tests/fmt_round_trip_regressions.rs:97-113. Sources copied verbatim from the original include_str! paths.
+fixture: fixtures/callback_view_provenance_round_trips_retired_function_type_arrows
+step: jet fmt view_from_callback.jet
+exit: 0
+file: view_from_callback.jet ~ pick: fn(String, String) -> View<str> from _0 # Original formatter substring assertion.
+file: view_from_callback.jet ~ ) View<str> from input { # Original formatter substring assertion.
+copy: view_from_callback.jet view_from_callback.jet.once
+step: jet fmt view_from_callback.jet
+exit: 0
+file: view_from_callback.jet == view_from_callback.jet.once

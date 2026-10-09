@@ -1,0 +1,22 @@
+# tests/regex.rs::repeated_regex_queries_keep_exact_matches at tests/regex.rs:285; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# ORACLE-LITERAL: original expected bytes; PENDING-SAME-HEAD; no captures blessed.
+# RETIRED helper subclaims: Rust FFI option/crate/unsafe text and rustc compilation, not Jet runtime assertions.
+# PENDING-GRAMMAR(batch-four): indexed .line(n) exactly preserves Rust lines()[n], permits extra output lines.
+fixture: repeated_regex_queries_keep_exact_matches.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step default: jet run run.jet
+exit: 0
+stdout: = repeated_regex_queries_keep_exact_matches.out
+step interpret: jet run --interpret run.jet
+exit: == default
+stdout: == default
+stderr: == default
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: == default
+stdout: == default
+stderr: == default

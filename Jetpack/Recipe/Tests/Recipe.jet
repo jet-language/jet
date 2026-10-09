@@ -36,11 +36,12 @@ fn recipe_test_has_stage_leftover(base: String) -[FS]> Bool {
 }
 
 #Test("recipe build denies ambient network") {
+    // Ported from build_sandbox.rs:108-130; same invalid locked fetch and E1236 oracle.
     // A fetch with no locked sha256 is ungranted ambient network: E1236.
     base :: recipe_test_scratch("net")
     src :: files.join(base, "src")
     files.create_dir_all(src) ?? panic("src")
-    recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Fetch{url: "https://example.invalid/src.tar", sha256: ""}}}
+    recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Fetch{url: "https://example.invalid/x.tar", sha256: ""}}}
     error :: recipe_test_run_error(recipe, recipe_test_ctx(src, files.join(base, "out"), files.join(base, "cache"), false))
     assert_eq(error.code, "E1236")
     files.remove_all(base).drop("test cleanup")
@@ -66,6 +67,7 @@ fn recipe_test_has_stage_leftover(base: String) -[FS]> Bool {
 }
 
 #Test("recipe build output is confined") {
+    // Ported from build_sandbox.rs:132-155; dest "../escape" must return E1237.
     // An install targeting a path outside the output root: E1237.
     base :: recipe_test_scratch("confine")
     src :: files.join(base, "src")
@@ -83,12 +85,31 @@ fn recipe_test_has_stage_leftover(base: String) -[FS]> Bool {
 }
 
 #Test("recipe build tool must be a realized dependency") {
+    // Ported from build_sandbox.rs:157-180; validate must reject without executing.
     // An exec naming a tool that is not a realized dep: E1238.
     base :: recipe_test_scratch("tool")
     src :: files.join(base, "src")
     files.create_dir_all(src) ?? panic("src")
     recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "gcc", args: [String]{}}}}
+    if recipe_validate(recipe, recipe_test_ctx(src, files.join(base, "out"), files.join(base, "cache"), false)) == {
+        .Ok(_) -> panic("gcc without a realized dependency must not validate")
+        .Err(error) -> assert_eq(error.code, "E1238")
+    }
     assert_eq(recipe_test_run_error(recipe, recipe_test_ctx(src, files.join(base, "out"), files.join(base, "cache"), false)).code, "E1238")
+    files.remove_all(base).drop("test cleanup")
+}
+
+// Ported from build_sandbox.rs:182-206; a declared relative path is not a realized tool.
+#Test("recipe validate rejects a relative realized tool path") {
+    base :: recipe_test_scratch("relative-tool")
+    src :: files.join(base, "src")
+    files.create_dir_all(src) ?? panic("src")
+    ctx :: RecipeBuildContext{source_dir: src, output_root: files.join(base, "out"), tools: [String: String]{"cc": "cc"}, fetch_cache: files.join(base, "cache"), offline: false}
+    recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "cc", args: [String]{}}}}
+    if recipe_validate(recipe, ctx) == {
+        .Ok(_) -> panic("a relative tool path must not validate")
+        .Err(error) -> assert_eq(error.code, "E1238")
+    }
     files.remove_all(base).drop("test cleanup")
 }
 

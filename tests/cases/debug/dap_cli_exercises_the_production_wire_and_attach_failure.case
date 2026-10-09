@@ -1,0 +1,24 @@
+# tests/debug.rs::dap_cli_exercises_the_production_wire_and_attach_failure
+# Original source and wire predicates; PENDING-GRAMMAR(batch-four), PENDING-SAME-HEAD; runtime UNRUN.
+# Native compiler rustc availability guard retires at Jet backend cutover.
+fixture: dap_cli_exercises_the_production_wire_and_attach_failure.fixture
+env: NO_COLOR=1
+session dap content-length: jet debug --dap {work}/main.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/main.jet\"},\"breakpoints\":[{\"line\":7}]}}"
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{\"processId\":0}}"
+close dap
+exit: 0
+stdout.find_block("Content-Length:", ~ "\"request_seq\":1,"): ~ "\"type\":\"response\"" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":1,"): ~ "\"command\":\"initialize\"" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":1,"): ~ "\"success\":true" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":2,"): ~ "\"type\":\"response\"" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":2,"): ~ "\"command\":\"setBreakpoints\"" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":2,"): ~ "\"verified\":true" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":2,"): ~ "\"id\":1,\"verified\":true,\"line\":7" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":3,"): ~ "\"type\":\"response\"" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":3,"): ~ "\"command\":\"attach\"" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":3,"): ~ "\"success\":false" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":3,"): ~ "\"id\":22032" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":3,"): ~ "\"code\":\"E2236\"" # original substring predicate
+stdout: !~ "\"event\":\"stopped\"" # original substring predicate

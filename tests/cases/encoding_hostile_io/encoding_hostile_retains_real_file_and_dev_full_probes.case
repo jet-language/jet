@@ -1,0 +1,24 @@
+# HAND-PORT tests/encoding_hostile_io.rs:776-845 encoding_hostile_retains_real_file_and_dev_full_probes
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Exact original source helper format expansions; original codec bytes, env hooks, every stdout/file/exit/stderr predicate retained.
+requires: os-name:linux
+fixture: encoding_hostile_retains_real_file_and_dev_full_probes.fixture
+env: NO_COLOR=1
+write: program/main.jet program/source.template
+step: jet build program/main.jet
+exit: 0
+step base: built
+cwd: .
+exit: 0
+stderr: empty
+stdout: = encoding_hostile_retains_real_file_and_dev_full_probes.stdout.expected
+write: program/main.jet program/source.template
+step: jet build program/main.jet
+exit: 0
+step host: built
+env: JET_ENC_HOSTILE_IO=1
+env: JET_ENC_HOSTILE_WRITE_MAX=1
+cwd: .
+exit: 0
+stderr: empty
+stdout: = encoding_hostile_retains_real_file_and_dev_full_probes.stdout.expected

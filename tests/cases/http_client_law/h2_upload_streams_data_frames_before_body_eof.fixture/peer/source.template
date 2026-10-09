@@ -1,0 +1,104 @@
+use core.net as net
+use core.files as files
+use core.time as time
+PEER_CRLF :: prep { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
+
+fn prefix(raw: [U8], want: [U8]) -> Bool {
+    if raw.len() < want.len() -> return false
+    loop i in 0..<want.len() { if raw[i] != want[i] -> return false }
+    return true
+}
+fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
+    if raw.len() < want.len() -> return false
+    loop start in 0..<(raw.len() - want.len() + 1) {
+        same := true
+        loop i in 0..<want.len() {
+            n := Int.from_u8(raw[start + i])
+            if ascii_casefold && n >= 65 && n <= 90 -> n += 32
+            if n != Int.from_u8(want[i]) -> same = false
+        }
+        if same -> return true
+    }
+    return false
+}
+fn request_head(stream: TCPStream) -> [U8] {
+    // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
+    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
+    request := [U8]{}
+    loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
+        block :: stream.read(512) ?? panic("request read")
+        assert(block.len() > 0)
+        loop byte in block { &request.push(byte) }
+        assert(request.len() <= 65536)
+    }
+    return request
+}
+fn publish(listener: TCPListener, path: String) {
+    address :: listener.local_addr() ?? panic("address")
+    files.write_atomic(path, address.bytes()) ?? panic("publish address")
+}
+// Test-only raw HTTP/2 frame transport: literal port of http_client_law.rs25-45.
+struct Frame {
+    kind: Int
+    flags: Int
+    id: Int
+    payload: [U8]
+}
+fn read_exact(stream: TCPStream, size: Int) -> [U8] {
+    out := [U8]{}
+    loop out.len() < size {
+        chunk :: stream.read(size - out.len()) ?? panic("frame read_exact")
+        assert(chunk.len() > 0)
+        loop byte in chunk { &out.push(byte) }
+    }
+    return out
+}
+fn read_frame(stream: TCPStream) -> Frame {
+    head :: read_exact(stream, 9)
+    size :: (Int.from_u8(head[0]) << 16) | (Int.from_u8(head[1]) << 8) | Int.from_u8(head[2])
+    id :: ((Int.from_u8(head[5]) << 24) | (Int.from_u8(head[6]) << 16) | (Int.from_u8(head[7]) << 8) | Int.from_u8(head[8])) & 2147483647
+    return Frame{kind: Int.from_u8(head[3]), flags: Int.from_u8(head[4]), id: id, payload: read_exact(stream, size)}
+}
+fn write_frame(stream: TCPStream, kind: Int, flags: Int, id: Int, payload: [U8]) {
+    size :: payload.len()
+    head :: [U8]{(U8{(size >> 16) & 255}), (U8{(size >> 8) & 255}), (U8{size & 255}), (U8{kind}), (U8{flags}), (U8{(id >> 24) & 255}), (U8{(id >> 16) & 255}), (U8{(id >> 8) & 255}), (U8{id & 255})}
+    stream.write_all(head) ?? panic("frame head write_all")
+    stream.write_all(payload) ?? panic("frame payload write_all")
+}
+fn first_headers(stream: TCPStream) -> Frame {
+    loop {
+        frame :: read_frame(stream)
+        if frame.kind == 1 -> return frame
+    }
+}
+fn preface(stream: TCPStream, timeout: Int) {
+    net.set_read_timeout(stream, timeout) ?? panic("read timeout")
+    assert_eq(read_exact(stream, 24), "PRI * HTTP/2.0{PEER_CRLF}{PEER_CRLF}SM{PEER_CRLF}{PEER_CRLF}".bytes())
+    assert(read_frame(stream).kind == 4)
+    write_frame(stream, 4, 0, 0, [U8]{})
+}
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    publish(listener, "{work}/addr.txt")
+    stream :: &listener.accept() ?? panic("accept")
+    files.write_atomic("{work}/accepted", "yes".bytes()) ?? panic("accepted flag")
+    preface(stream, 5000)
+    got := 0
+    end := false
+    seen := false
+    loop !end {
+        frame :: read_frame(stream)
+        if frame.kind == 6 && (frame.flags & 1) == 0 { write_frame(stream, 6, 1, 0, frame.payload); next }
+        if frame.kind == 1 -> next
+        if frame.kind == 0 {
+            got += frame.payload.len()
+            if got >= 16384 -> seen = true
+            if (frame.flags & 1) != 0 -> end = true
+        }
+    }
+    assert_eq(got, 40960)
+    write_frame(stream, 1, 4, 1, [U8]{136,15,13,1,50})
+    write_frame(stream, 0, 1, 1, "ok".bytes())
+    _ :: read_frame(stream)
+    assert(seen)
+}

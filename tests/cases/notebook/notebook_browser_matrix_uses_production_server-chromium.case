@@ -1,0 +1,20 @@
+# tests/notebook.rs::notebook_browser_matrix_uses_production_server (chromium branch)
+# Both available browser branches are discovered; both absent => SKIP-HOST, matching original ran guard.
+# Public protocol produces original merge source with the same cwd environment hash; no synthetic serializer bytes.
+# PENDING-SAME-HEAD, runtime UNRUN.
+requires: probe {env:NODE|node} --version stdout: len >= 0
+requires: probe {env:CHROMIUM|chromium} --version stdout: len >= 0
+fixture: notebook_browser_matrix_uses_production_server-chromium.fixture
+step: jet notebook merge.jetnb --protocol
+stdin: notebook_browser_matrix_uses_production_server-chromium.fixture/merge.stdin
+exit: 0
+spawn server: jet notebook {work}/journey.jetnb --bind 127.0.0.1:{free-port:notebook} --token notebook-browser-test-token
+stdin: null
+stdout: null
+stderr: null
+poll ready: jet run {root}/tests/cases/web_browser/fixtures/http-ready.jet 127.0.0.1:{free-port:notebook} /health notebook-browser-test-token - until stdout: ^= "HTTP/1.1 200" && stdout: ~ "\"ok\":true" timeout 10s every 25ms
+step: {env:NODE|node} {root}/Tools/notebook-test/acceptance.mjs --browser chromium --port {free-port:notebook} --token notebook-browser-test-token --save-path {work}/journey.jetnb --merge-path {work}/merge.jetnb
+exit: 0
+signal server: KILL
+wait: server
+exit: any # original RunningNotebook cleanup ignores kill status

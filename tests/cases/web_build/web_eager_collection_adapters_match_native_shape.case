@@ -1,0 +1,18 @@
+# HAND-PORT tests/web_build.rs:383-420 web_eager_collection_adapters_match_native_shape
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates and exact runtime oracles retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_eager_collection_adapters_match_native_shape.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js ~ "jet_runtime_stop(" # original generated JavaScript/runtime predicate
+file: .jet/build/app.js ~ "\"<core.collections>\"," # original generated JavaScript/runtime predicate
+file: .jet/build/app.js !~ "throw new Error(\"lazy collection view was already consumed\")" # original generated JavaScript/runtime predicate
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_eager_collection_adapters_match_native_shape.stdout.expected

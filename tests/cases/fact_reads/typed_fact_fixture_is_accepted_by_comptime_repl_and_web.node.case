@@ -1,0 +1,12 @@
+# HAND-PORT tests/fact_reads.rs:319-325 helper43-95 typed_fact_fixture_is_accepted_by_comptime_repl_and_web NODE branch
+# PENDING-KIT; original generated JS execution, not a repo helper / no NODE-DEBT.
+requires: tool:node
+fixture: typed_fact_fixture_is_accepted_by_comptime_repl_and_web.fixture
+env: NO_COLOR=1
+step: jet build --target=web Examples/features/reflection/fact_reads.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = typed_fact_fixture_is_accepted_by_comptime_repl_and_web.stdout.expected

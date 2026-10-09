@@ -1,0 +1,35 @@
+use core.net as net
+use core.files as files
+use core.process as process
+use core.sys as sys
+
+fn fixture_build(address: String) {
+    original :: files.read("guest.template") ?? panic("read original guest")
+    source :: original.replace("@ADDR@", address)
+    files.write("guest.jet", source) ?? panic("write guest")
+    jet :: sys.get("JET_BIN") ?? panic("JET_BIN missing")
+    build :: process.cmd([jet, "build", "guest.jet"]).stdout(.Capture).stderr(.Capture).run() ?? panic("build guest")
+    assert(build.code == 0, "original guest compilation must succeed")
+}
+fn fixture_run() -> ProcessReceipt {
+    process.cmd([".jet/build/guest"]).stdout(.Capture).stderr(.Capture).run() ?? panic("run original guest")
+}
+#Test("core_http_client_exposes_binary_body_once") {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    server :: task {
+        stream :: net.tcp_accept(listener) ?? panic("accept")
+        _request :: net.tcp_read_bytes(stream, 4096) ?? panic("read")
+        header :: files.read_bytes("response.header") ?? panic("response header")
+        response := header
+        &response.push(U8{0})
+        &response.push(U8{255})
+        &response.push(U8{1})
+        net.tcp_write_all_bytes(stream, response) ?? panic("response")
+    }
+    fixture_build(address)
+    observed :: fixture_run()
+    server.join() ?? panic("peer failed")
+    assert(observed.code == 0, "guest exit")
+    assert(observed.output == "2\none\ntwo\n3\n0\n255\nconsumed\n", "original binary/header/body-consumed predicates")
+}

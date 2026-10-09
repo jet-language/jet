@@ -1,0 +1,30 @@
+use core.net as net
+use core.net.ws as ws
+use core.http.server as server
+fn handle(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    sock :: ws.upgrade(req) ?? panic("upgrade")
+    return Ok(server.response(500, "unused"))
+}
+fn run() {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR")
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    addr :: listener.local_addr() ?? panic("address")
+    mux :: server.mux()
+    mux.get("/live", (req: HTTPRequest) -> handle(req))
+    serving :: task { server.serve_once_listener(listener, mux) ?? panic("serve") }
+    stream :: net.tcp_connect(addr) ?? panic("connect")
+    stream.write_all("GET /live HTTP/1.1{cr}\nHost: local{cr}\nUpgrade: websocket{cr}\nConnection: Upgrade{cr}\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=={cr}\nSec-WebSocket-Version: 13{cr}\n{cr}\n".bytes()) ?? panic("handshake")
+    headers := ""
+    loop !headers.contains("{cr}\n{cr}\n") {
+        part :: stream.read_text(8192) ?? panic("response headers")
+        assert(part != "", "upgrade response unexpectedly ended")
+        headers = "{headers}{part}"
+    }
+    accept := String?{None}
+    loop line in headers.split("{cr}\n") {
+        if line.starts_with("Sec-WebSocket-Accept: ") -> accept = Val(line.removeprefix("Sec-WebSocket-Accept: "))
+    }
+    assert_eq(accept ?? panic("missing accept value"), "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
+    stream.close() ?? panic("close")
+    ^serving.join() ?? panic("server join")
+}

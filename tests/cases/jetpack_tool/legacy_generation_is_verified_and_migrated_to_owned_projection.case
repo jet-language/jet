@@ -1,0 +1,34 @@
+# Port of tests/jetpack_tool.rs:1255-1329; assertions preserved, pending same-head/case-grammar receipt.
+fixture: fixtures/legacy_generation_is_verified_and_migrated_to_owned_projection
+mkdir: root
+mkdir: home
+mkdir: project
+mkdir: fx
+env: HOME={work}/home
+env: JETPACK_ROOT={work}/root
+mkdir: root/hangar/provider-fixture-greet/bin
+copy: greet root/hangar/provider-fixture-greet/bin/greet
+when os unix: chmod: root/hangar/provider-fixture-greet/bin/greet 0555
+when os unix: chmod: root/hangar/provider-fixture-greet/bin 0555
+when os unix: chmod: root/hangar/provider-fixture-greet 0555
+write: fx/nixpkgs-greet.json greet.json
+step: jetpack tool install greet@nixpkgs --no-color --offline --fixtures {work}/fx 
+cwd: project
+exit: 0
+capture: hash = text file.after_first("\"output_hash\": \"").split("\"", 0) home/.jet/tools/generations/1/meta.json
+capture: store = text file.after_first("\"store_root\": \"").split("\"", 0) home/.jet/tools/generations/1/meta.json
+step: jet run legacy-setup.jet -- {cap:store} {cap:hash} {work}/home
+exit: 0
+remove: home/.jet/tools/current
+remove: home/.jet/tools/profile.json
+step: jetpack tool list --no-color
+cwd: project
+exit: 0
+file: home/.jet/tools/legacy-generations/generation-1 is-dir
+when os unix: file: home/.jet/tools/generations/2/bin/greet is-file
+when os windows: file: home/.jet/tools/generations/2/bin/greet.exe is-file
+file: home/.jet/tools/current ~ "generation\t2" # original contains predicate
+when os unix: step: {work}/home/.jet/bin/greet
+when os windows: step: {work}/home/.jet/bin/greet.exe
+exit: 0
+stdout.trim: = fixtures/legacy_generation_is_verified_and_migrated_to_owned_projection/migrated.out

@@ -1,0 +1,64 @@
+# Port of tests/fact_declaration_tiers.rs:268-286; census guard -> CLI case: all assertions are executable example tier parity.
+# Existing sources and expected goldens reused verbatim, no new snapshot.
+env: NO_COLOR=1
+env: JETPACK_ENV=1
+mkdir: arrays-release
+mkdir: arrays-default
+mkdir: arrays-interpret
+mkdir: linalg-release
+mkdir: linalg-default
+mkdir: linalg-interpret
+mkdir: units-release
+mkdir: units-default
+mkdir: units-interpret
+step arrays_release: jet run --release {root}/Examples/features/collections/fixed_arrays.jet
+env: JET_STORE_DIR={work}/arrays-release/cache
+env: JETPACK_ROOT={work}/arrays-release/jetpack
+exit: 0
+stdout: = ../../../Examples/features/expected/collections/fixed_arrays.out
+step: jet run {root}/Examples/features/collections/fixed_arrays.jet
+env: JET_STORE_DIR={work}/arrays-default/cache
+env: JETPACK_ROOT={work}/arrays-default/jetpack
+exit: 0
+stdout: = ../../../Examples/features/expected/collections/fixed_arrays.out
+stdout: == arrays_release
+step: jet run --interpret {root}/Examples/features/collections/fixed_arrays.jet
+env: JET_STORE_DIR={work}/arrays-interpret/cache
+env: JETPACK_ROOT={work}/arrays-interpret/jetpack
+exit: 0
+stdout: = ../../../Examples/features/expected/collections/fixed_arrays.out
+stdout: == arrays_release
+step linalg_release: jet run --release {root}/Examples/features/tooling/compute_linalg.jet
+env: JET_STORE_DIR={work}/linalg-release/cache
+env: JETPACK_ROOT={work}/linalg-release/jetpack
+exit: 0
+stdout: = ../../../Examples/features/expected/tooling/compute_linalg.out
+step: jet run {root}/Examples/features/tooling/compute_linalg.jet
+env: JET_STORE_DIR={work}/linalg-default/cache
+env: JETPACK_ROOT={work}/linalg-default/jetpack
+exit: 0
+stdout: = ../../../Examples/features/expected/tooling/compute_linalg.out
+stdout: == linalg_release
+step: jet run --interpret {root}/Examples/features/tooling/compute_linalg.jet
+env: JET_STORE_DIR={work}/linalg-interpret/cache
+env: JETPACK_ROOT={work}/linalg-interpret/jetpack
+exit: 0
+stdout: = ../../../Examples/features/expected/tooling/compute_linalg.out
+stdout: == linalg_release
+step units_release: jet run --release {root}/Examples/features/types/dimensional_quantities.jet
+env: JET_STORE_DIR={work}/units-release/cache
+env: JETPACK_ROOT={work}/units-release/jetpack
+exit: 0
+stdout: = ../../../Examples/features/expected/types/dimensional_quantities.out
+step: jet run {root}/Examples/features/types/dimensional_quantities.jet
+env: JET_STORE_DIR={work}/units-default/cache
+env: JETPACK_ROOT={work}/units-default/jetpack
+exit: 0
+stdout: = ../../../Examples/features/expected/types/dimensional_quantities.out
+stdout: == units_release
+step: jet run --interpret {root}/Examples/features/types/dimensional_quantities.jet
+env: JET_STORE_DIR={work}/units-interpret/cache
+env: JETPACK_ROOT={work}/units-interpret/jetpack
+exit: 0
+stdout: = ../../../Examples/features/expected/types/dimensional_quantities.out
+stdout: == units_release

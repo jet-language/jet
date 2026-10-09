@@ -1,0 +1,28 @@
+
+struct Marker {
+    name: String
+}
+
+impl Marker.Close {
+    fn close(^self) {
+        print("closed: {self.name}")
+    }
+}
+
+fn values() -[]> Stream<Int> {
+    marker := Marker{name: "stream"}
+    defer close(^marker)
+    print("before")
+    yield 1
+    print("after")
+    yield 2
+}
+
+fn run() {
+    loop value in values() {
+        print("value: {value}")
+        break
+    }
+}
+
+:run

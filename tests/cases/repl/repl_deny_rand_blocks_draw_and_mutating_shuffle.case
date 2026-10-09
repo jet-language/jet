@@ -1,0 +1,12 @@
+# PORT tests/repl.rs:1549-1567; all original predicates, verbatim input literals.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Startup non-overlap: crates/jet-repl/src/Render.rs24-37,41-61,67-74; cooked mirror lib.rs2469-2470.
+fixture: repl_deny_rand_blocks_draw_and_mutating_shuffle.fixture
+step: jet repl --allow=Rand --deny=Rand
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_deny_rand_blocks_draw_and_mutating_shuffle.fixture/input0.txt
+exit: any # original library predicates did not assert process status
+stdout|stderr: ~ "Rand.Draw" # original predicate
+stdout|stderr: ~ "[1, 2, 3]" # original predicate
+stdout+stderr: count "E1803" >= 2 # original count predicate; no startup needle overlap

@@ -1,0 +1,16 @@
+# Port of tests/jetpack_build_debug.rs:41-77. PENDING-SAME-HEAD, PENDING-GRAMMAR(batch-four).
+fixture: fixtures/failed_adapter_preserves_scratch_and_json_logs
+mkdir: root
+env: JETPACK_ROOT={work}/root
+step: jetpack build --no-color
+exit: nonzero
+stderr: ~ "E1273" # original contains predicate, literal bytes
+stderr: ~ "jet logs weirdctl" # original contains predicate, literal bytes
+stderr: ~ "--shell-on-fail" # original contains predicate, literal bytes
+step: jetpack logs weirdctl --json --no-color
+exit: 0
+stdout: ~ "\"package\":\"weirdctl\"" # original contains predicate, literal bytes
+stdout: ~ "\"status\":\"failed\"" # original contains predicate, literal bytes
+stdout: ~ "\"scratch_dir\":\"" # original contains predicate, literal bytes
+stdout: ~ "missing-bin" # original contains predicate, literal bytes
+entries: root/hangar/failed-scratch >= 1 # original read_dir().next().is_some()

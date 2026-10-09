@@ -1,0 +1,16 @@
+# Port of tests/help_pty.rs:142-163. PENDING-GRAMMAR(batch-four); exact original inputs/delays/predicates.
+requires: os:unix
+refused: pty
+normalize: replace "\r" ""
+step: jet ? --color=never
+pty: true size 24x120
+unset: NO_COLOR
+unset: FORCE_COLOR
+pty-send: "\r\r" after 150ms
+pty-close: after 150ms
+exit: 0
+stdout: ~ "selected: jet run" # original predicate: transcript contains these exact bytes
+stdout: ~ "not inserted" # original predicate: transcript contains these exact bytes
+stdout: ~ "jet env hook" # original predicate: transcript contains these exact bytes
+stdout: !~ "Examples/features/basics/hello.jet" # original predicate: transcript does not contain these bytes
+stdout: !~ "Hello, Jet!" # original predicate: transcript does not contain these bytes

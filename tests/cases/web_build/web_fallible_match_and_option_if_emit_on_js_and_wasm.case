@@ -1,0 +1,12 @@
+# HAND-PORT tests/web_build.rs:1862-1976 web_fallible_match_and_option_if_emit_on_js_and_wasm
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Every original public predicate retained; generated-Rust representation-only subassertions retire per S4 review.
+fixture: web_fallible_match_and_option_if_emit_on_js_and_wasm.fixture
+env: NO_COLOR=1
+step: jet build --target web --json main.jet
+exit: 0
+file: .jet/build/app.js ~ "tag === \"Ok\"" # original web.js_app predicate
+file: .jet/build/app.js ~ "tag === \"Err\"" # original web.js_app predicate
+file: .jet/build/app.js ~any "tag: \"None\"" "\"None\"" # original disjunction
+file: .jet/build/app.js ~ "tag === \"On\"" # original web.js_app predicate
+file: .jet/build/app.js ~ "if (flag)" # original web.js_app predicate

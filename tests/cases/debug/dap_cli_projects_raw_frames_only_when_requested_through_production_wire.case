@@ -1,0 +1,78 @@
+# tests/debug.rs::dap_cli_projects_raw_frames_only_when_requested_through_production_wire
+# Original source and wire predicates; PENDING-GRAMMAR(batch-four), PENDING-SAME-HEAD; runtime UNRUN.
+# Native compiler rustc availability guard retires at Jet backend cutover.
+requires: tool:lldb
+fixture: dap_cli_projects_raw_frames_only_when_requested_through_production_wire.fixture
+env: NO_COLOR=1
+session dap content-length: jet debug --dap {work}/main.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}"
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/main.jet\",\"stopOnEntry\":true,\"args\":[],\"env\":{}}}"
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap until $.event = "stopped" timeout 30s every 100ms
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1,\"showRawFrames\":\"yes\"}}"
+recv dap until $.request_seq = 4 timeout 30s every 100ms
+json: stdout doc $.type = "response"
+json: stdout doc $.command = "stackTrace"
+json: stdout doc $.success = false
+stdout: ~ "\"id\":22032" # original substring predicate
+stdout: ~ "\"code\":\"E2236\"" # original substring predicate
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 5 timeout 30s every 100ms
+json: stdout doc $.type = "response"
+json: stdout doc $.command = "stackTrace"
+json: stdout doc $.success = true
+stdout: !~ "__jet_" # original substring predicate
+stdout: !~ "main.rs" # original substring predicate
+capture: safe_frame stdout doc $.body.stackFrames[0].id
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{\"frameId\":{cap:safe_frame}}}"
+recv dap until $.request_seq = 6 timeout 30s every 100ms
+json: stdout doc $.type = "response"
+json: stdout doc $.command = "scopes"
+json: stdout doc $.success = true
+stdout: ~ "\"name\":\"Locals\"" # original substring predicate
+stdout: !~ "[raw]" # original substring predicate
+capture: safe_scope stdout doc $.body.scopes[?name="Locals"][0].variablesReference
+send dap: "{\"seq\":7,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{\"variablesReference\":{cap:safe_scope}}}"
+recv dap until $.request_seq = 7 timeout 30s every 100ms
+json: stdout doc $.type = "response"
+json: stdout doc $.command = "variables"
+json: stdout doc $.success = true
+stdout: !~ "__jet_" # original substring predicate
+stdout: !~ "main.rs" # original substring predicate
+send dap: "{\"seq\":8,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1,\"showRawFrames\":true}}"
+recv dap until $.request_seq = 8 timeout 30s every 100ms
+json: stdout doc $.type = "response"
+json: stdout doc $.command = "stackTrace"
+json: stdout doc $.success = true
+stdout: ~ "\"name\":\"[raw]" # original substring predicate
+stdout: ~ "\"path\":\"main.rs\"" # original substring predicate
+capture: raw_frame stdout doc $.body.stackFrames[?name^="[raw]"][0].id
+send dap: "{\"seq\":9,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{\"frameId\":{cap:raw_frame}}}"
+recv dap until $.request_seq = 9 timeout 30s every 100ms
+json: stdout doc $.type = "response"
+json: stdout doc $.command = "scopes"
+json: stdout doc $.success = true
+stdout: ~ "\"name\":\"[raw] Locals\"" # original substring predicate
+capture: raw_scope stdout doc $.body.scopes[?name="[raw] Locals"][0].variablesReference
+send dap: "{\"seq\":10,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{\"variablesReference\":{cap:raw_scope}}}"
+recv dap until $.request_seq = 10 timeout 30s every 100ms
+json: stdout doc $.type = "response"
+json: stdout doc $.command = "variables"
+json: stdout doc $.success = true
+send dap: "{\"seq\":11,\"type\":\"request\",\"command\":\"next\",\"arguments\":{\"threadId\":1}}"
+recv dap collect until ndjson $[?request_seq=11][?type="response"][?command="next"][?success=true] #>= 1 && ndjson $[?event="stopped"] #>= 1 timeout 30s
+json: stdout ndjson $[?request_seq=11][0].success = true
+send dap: "{\"seq\":12,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{\"variablesReference\":{cap:safe_scope}}}"
+recv dap until $.request_seq = 12 timeout 30s every 100ms
+json: stdout doc $.type = "response"
+json: stdout doc $.command = "variables"
+json: stdout doc $.success = false
+stdout: ~ "\"id\":22036" # original substring predicate
+stdout: ~ "\"code\":\"E2238\"" # original substring predicate
+send dap: "{\"seq\":13,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{\"terminateDebuggee\":true}}"
+recv dap until $.request_seq = 13 timeout 30s every 100ms
+json: stdout doc $.type = "response"
+json: stdout doc $.command = "disconnect"
+json: stdout doc $.success = true
+close dap
+exit: 0

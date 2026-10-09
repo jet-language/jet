@@ -1,0 +1,10 @@
+use core.mem
+#Test("wrong unsafe region") {
+    arena :: mem.Arena.new()
+    #Unsafe("test deliberately reads after arena reset") {
+        stale :: *Int{*arena.alloc(7)}
+        arena.reset()
+        print(stale.*)
+    }
+}
+fn run() {}

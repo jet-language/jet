@@ -1,0 +1,24 @@
+# Port of tests/jetpack_jetos.rs:2378-2443; runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+mkdir: package-root
+copy: {root}/tests/fixtures/jetpack-config project
+step: jetos user plan nate --json --no-color
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+exit: 0
+stdout: ~ "\"kind\":\"jetos.user-generation\"" # original kind
+stdout: ~ "\"user\":\"nate\"" # original user
+step: jetos user build nate --name user-gen --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+exit: 0
+file: package-root/systems/generations/user-gen/users/nate/profile.json is-file
+step: jetos user prove nate --json --no-color
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+exit: 0
+stdout: ~ "\"user\":\"nate\"" # original user
+stdout: ~ "user-gen" # original named generation

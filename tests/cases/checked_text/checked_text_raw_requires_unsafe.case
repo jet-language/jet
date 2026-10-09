@@ -1,0 +1,7 @@
+# Original tests/checked_text.rs:213-233; exact original source and public assertions.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD.
+# HISTORICAL parse exclusion: dev-595e0dca3 reports E0432+E0003 on verbatim Error!/bare-return fixture, not expected E0387; original governs until same-head run.
+fixture: checked_text_raw_requires_unsafe.fixture
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0387"] #>= 1

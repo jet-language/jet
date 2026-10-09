@@ -1,0 +1,11 @@
+# Port of tests/cli_parts/expand.rs:1423-1451; exact original sources and assertions.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): setup actions and prepend/append line transforms.
+# Original malformed workspace bytes in .source; copied to original workspace.jet before command, not parsed as positive fixture.
+fixture: fixtures/invalid_workspace
+copy: malformed-workspace.source workspace.jet
+step: jet run
+env: NO_COLOR=1
+exit: 1
+stdout: !~ "SHOULD-NOT-RUN" # original predicate
+stderr: ~any "E0995" "E0003" # original predicate

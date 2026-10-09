@@ -1,0 +1,18 @@
+# HAND-PORT tests/jetdoc.rs:190-223 package_fixture_rejects_order_and_content_drift
+# Original predicates; same-head kit verification pending.
+fixture: package_fixture_rejects_order_and_content_drift.fixture
+env: NO_COLOR=1
+step first: jet doc --json {work}/ordered.jet
+exit: 0
+step: jet doc --json {work}/ordered.jet
+exit: 0
+stdout: == first
+stdout: ~ "\"summary\":\"Alpha API.\"" # original predicate
+stdout: ~ "\"signature\":\"pub fn alpha() -> Int\\nfailure: Int (implicit default !Err)\"" # original predicate
+stdout: ~ "\"summary\":\"Zulu API.\"" # original predicate
+stdout: ~ "\"signature\":\"pub fn zulu() -> Int\\nfailure: Int (implicit default !Err)\"" # original predicate
+stdout: ~ "\"link\":\"ordered.jet#L7\"" # original predicate
+stdout: ~ "\"link\":\"ordered.jet#L4\"" # original predicate
+stdout: before "\"qualified_name\":\"alpha\"" "\"qualified_name\":\"run\"" # original predicate
+stdout: before "\"qualified_name\":\"run\"" "\"qualified_name\":\"zulu\"" # original predicate
+

@@ -1,0 +1,42 @@
+# Port of tests/library_outputs.rs:932-962; all source bytes unchanged.
+# PENDING-GRAMMAR(batch-four): capture transformed text, relational count, relative truncate, ends-with.
+refused: build-target
+fixture: ../../../Examples/features/packages/library_loadable
+step: jet build --target={jet-build-target} library.jet
+exit: nonzero
+stdout+stderr: ~ "E1341" # original predicate
+file: .jet/build/libloadable.a absent
+file: .jet/build/loadable.h absent
+file: .jet/build/loadable.jetlib absent
+file: .jet/build/libloadable{sys:dll-suffix} absent
+# Original body/assertions preserved verbatim below; Cargo TARGET becomes the future own-build-target token.
+# 
+#     assert!(have_rustc(), "Library target diagnostic proof requires rustc");
+#     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+#         .join("Examples/features/packages/library_loadable");
+#     let scratch = Scratch::new("library-target");
+#     copy_tree(&fixture, &scratch.path);
+#     let target = format!("--target={}", env!("JET_BUILD_TARGET"));
+#     let rejected = run_jet(&scratch.path, &["build", target.as_str(), "library.jet"]);
+#     assert!(
+#         !rejected.status.success(),
+#         "cross-target Library build unexpectedly succeeded:\n{}",
+#         compiler_text(&rejected)
+#     );
+#     let text = compiler_text(&rejected);
+#     assert!(text.contains("E1341"), "missing unsupported-target diagnostic:\n{text}");
+#     let shared = if cfg!(target_os = "macos") {
+#         scratch.path.join(".jet/build/libloadable.dylib")
+#     } else if cfg!(target_os = "windows") {
+#         scratch.path.join(".jet/build/libloadable.dll")
+#     } else {
+#         scratch.path.join(".jet/build/libloadable.so")
+#     };
+#     assert!(
+#         !scratch.path.join(".jet/build/libloadable.a").exists()
+#             && !scratch.path.join(".jet/build/loadable.h").exists()
+#             && !scratch.path.join(".jet/build/loadable.jetlib").exists()
+#             && !shared.exists(),
+#         "unsupported Library target published artifacts"
+#     );
+# 

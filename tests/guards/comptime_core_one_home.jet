@@ -1,0 +1,85 @@
+use core.files as files
+use core.text as text
+
+// Same whitespace collapse as the original split_whitespace().join(" ").
+fn s6_comptime_collapse_whitespace(source: String) -> String {
+    words := [String]{}
+    current := [String]{}
+    loop scalar in source.chars() {
+        rendered :: "{scalar}"
+        if {
+            text.is_whitespace(rendered) -> {
+                if current.len() > 0 {
+                    &words.push(current.join(""))
+                    current = [String]{}
+                }
+            }
+            else -> &current.push(rendered)
+        }
+    }
+    if current.len() > 0 -> &words.push(current.join(""))
+    return words.join(" ")
+}
+
+// Port of comptime_core_one_home.rs:25-47. TestLead1 ruling: derive from the
+// canonical Jet Core table, not the retiring Rust comptime dispatch registry.
+// KNOWN-FAILING #4800: 60 canonical Core namespaces lack architecture.md rows.
+// 2026-10-07 exact set difference: Rust 61, Jet 110; Jet-only 78, Rust-only 29.
+// Jet-only: core.args, core.build, core.collections, core.collections.set,
+// core.compiler, core.compiler.lang, core.crypto.uuid, core.crypto.vault,
+// core.data.arrow, core.data.loader, core.data.plot, core.data.sketch,
+// core.data.sketch.cms, core.data.sketch.hll, core.data.sketch.reservoir,
+// core.data.sketch.tdigest, core.data.stream, core.db, core.encoding.base32,
+// core.encoding.base64, core.encoding.binary, core.encoding.cbor,
+// core.encoding.csv, core.encoding.hex, core.encoding.ini, core.encoding.json,
+// core.encoding.jsonl, core.encoding.toml, core.encoding.xml, core.encoding.yaml,
+// core.event, core.files.path, core.font, core.game, core.game.raylib, core.http,
+// core.http.client, core.http.server, core.jobs, core.math.combinatorics,
+// core.math.stats, core.mem, core.mod, core.net.ip, core.net.mime, core.net.url,
+// core.net.ws, core.plugin, core.prelude, core.reactive, core.reflect, core.rt,
+// core.tasks, core.text, core.text.html, core.text.parse, core.text.wrap,
+// core.time.calendar, core.time.expiring, core.tui, core.ui.host,
+// core.ui.host.accessibility, core.ui.host.clipboard, core.ui.host.drag_drop,
+// core.ui.host.ime, core.ui.host.shortcuts, core.watcher, core.web.browser,
+// core.web.devserver, core.web.forms, core.web.query, core.web.router,
+// core.web.storage, core.web.storage.local, core.web.storage.session,
+// core.web.store, core.web.table, core.web.virtual.
+// Rust-only: core.builtin, core.event constructor route was not selected,
+// core.files.write_bytes expects [U8], core.files.write_bytes received an invalid U8,
+// core.handle, core.log expects a Bool argument, core.log expects a List[LogField],
+// core.log expects a LogField, core.log expects a LogSpan, core.log expects a String argument,
+// core.log fields row was not selected, core.log level row was not selected,
+// core.log span row was not selected, core.time.parse_rfc3339 pure-parity evaluator is registered,
+// core.time.parse_rfc3339 row is registered, core.tui color profile takes no arguments,
+// core.tui expected a structure, core.tui expected {expected}, core.tui expected {type_name},
+// core.tui structure has no `{wanted}` field, core.tui.io_event() needs [Byte],
+// core.tui.layout() needs Rect, core.tui.layout() needs [TUIConstraint],
+// core.tui.list() needs [String], core.tui.table() needs [String] headers,
+// core.tui.table() needs [[String]] rows, core.ui.box() needs UINode children,
+// core.ui.box() needs [UINode], core.ui.node_role(): missing role.
+// Diagnostic-message entries above are what the original unfiltered extractor
+// actually finds; they are not reinterpreted as namespaces in the new table.
+#Test("architecture classifies every comptime Core namespace") {
+    source :: files.read("Compiler/JetCli/Source/Cli/CoreSources.jet") ?? panic("read canonical Core sources")
+    architecture :: files.read("Docs/spec/architecture.md") ?? panic("read architecture classification")
+    loop row in source.split("module_name: \"") {
+        if row.starts_with("core.") {
+            namespace :: row.split("\"").to_list()[0].to_string()
+            assert(architecture.contains("| `{namespace}` |"), "architecture classification is missing {namespace}")
+        }
+    }
+}
+
+// Port of comptime_core_one_home.rs:228-268. Rust kernel include/fingerprint
+// scans retire; both reference documentation predicates remain unchanged.
+#Test("measurement has one semantic home") {
+    source :: files.read("Docs/spec/reference/core-library.md") ?? panic("read Core reference")
+    docs :: s6_comptime_collapse_whitespace(source)
+    statements :: [String]{
+        "first-order linear propagation with uncorrelated inputs",
+        "Correlated errors are out of scope",
+    }
+    loop statement in statements {
+        assert(docs.contains(statement), "measurement docs omit `{statement}`")
+    }
+}

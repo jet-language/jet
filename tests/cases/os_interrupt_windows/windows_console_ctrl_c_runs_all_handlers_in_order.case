@@ -1,0 +1,22 @@
+# Port of tests/os_interrupt_windows.rs:68-143. Original guest source verbatim.
+# Windows raw console provider must FreeConsole/AllocConsole then protect driver
+# via SetConsoleCtrlHandler(None,1), spawn child, and deliver GenerateConsoleCtrlEvent(CTRL_C_EVENT=0, group=0).
+# No POSIX kill substitution. Every allocation/protection/delivery API return is nonzero.
+# PENDING-GRAMMAR(batch-four): per-call recv timeout and unread-remainder close.
+requires: os:windows
+refused: win-console-ctrl
+fixture: fixtures/windows_console_ctrl_c_runs_all_handlers_in_order
+step: jet build main.jet
+exit: 0
+session child line: built
+recv child timeout 10s
+stdout: lines = ["ready"]
+signal child: INT
+repeat while process {pid:child} alive timeout 10s every 10ms fail "generated child did not handle CTRL_C_EVENT within 10 seconds"
+end repeat
+recv child timeout 1s
+stdout: lines = ["second"]
+close child
+exit: 0
+stdout: empty
+stderr: ~ "panic: first handler failed" # original interrupt boundary diagnostic predicate

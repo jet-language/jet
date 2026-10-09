@@ -1,0 +1,23 @@
+
+use core.net as net
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    expired :: Duration.milliseconds(0) ?? panic("duration")
+    if &listener.accept(deadline: expired) == {
+        .Ok(_) -> panic("expired accept succeeded")
+        .Err(error) -> print(net.error_operation(error))
+    }
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    client := net.tcp_connect(address) ?? panic("connect")
+    server := &listener.accept() ?? panic("accept")
+    if server.read(1, deadline: expired) == {
+        .Ok(_) -> panic("expired read succeeded")
+        .Err(error) -> print(net.error_operation(error))
+    }
+    byte :: [U8]{ 1 }
+    if client.write(byte, deadline: expired) == {
+        .Ok(_) -> panic("expired write succeeded")
+        .Err(error) -> print(net.error_operation(error))
+    }
+}

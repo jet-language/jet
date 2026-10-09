@@ -1,0 +1,8 @@
+
+use core.process as process
+tag Untrusted { from: [source], deny: [Exec] }
+fn source() -> String { "untrusted" }
+fn run() {
+    value := source()
+    process.run(["echo", value]) ?? return Err("test")
+}

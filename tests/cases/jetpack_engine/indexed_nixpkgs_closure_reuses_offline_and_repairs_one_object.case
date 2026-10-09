@@ -1,0 +1,84 @@
+# Port of tests/jetpack_engine.rs:4971-5167; support peer is the Jet port of
+# tests/support/nix_index_cache_server.rs. No Nix process or provider fixtures.
+# PENDING-GRAMMAR(batch-four): await:file, capture:text, quoted JSON members,
+# cap subject, scoped .split capture, mkdir/chmod. All original assertions remain.
+fixture: indexed-nix.fixture
+artifact: peer
+env: JETPACK_ROOT={work}/root
+env: PATH=/usr/bin
+env: JETPACK_DEBUG_NIX_CACHE=1
+mkdir: root
+copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet {work}/peer/IndexCodec.jet
+step: jet build peer
+exit: 0
+spawn peer: built serve {work}/root {work}/peer.port {work}/nix-index-cache-nar-source
+await: file {work}/peer.port timeout 30s
+capture: port = text file {work}/peer.port
+step online-initial: jetpack env --no-color --trust -- rg --version
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 0
+stdout: ~ "ripgrep 15.2.0" # original predicate: successful indexed package command
+step offline-reuse: jetpack env --no-color --trust --offline -- rg --version
+isolate: no-nix network=disabled
+unset: JETPACK_FIXTURES
+exit: 0
+stdout: ~ "ripgrep 15.2.0" # original predicate: cached package survives no store and no network
+step: jetpack explain ripgrep-15.2.0@nixpkgs --json
+exit: 0
+json: stdout doc $.explain.provider.producer_facts["nix.store-path"] = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ripgrep-15.2.0"
+capture: root_digest stdout doc $.explain.entry.output_hash
+step: jetpack explain ripgrep-lib-1.0@nixpkgs --json
+exit: 0
+json: stdout doc $.explain.provider.producer_facts["nix.store-path"] = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-ripgrep-lib-1.0"
+capture: library_digest stdout doc $.explain.entry.output_hash
+step: jetpack explain ripgrep-runtime-1.0@nixpkgs --json
+exit: 0
+json: stdout doc $.explain.provider.producer_facts["nix.store-path"] = "/nix/store/cccccccccccccccccccccccccccccccc-ripgrep-runtime-1.0"
+capture: runtime_digest stdout doc $.explain.entry.output_hash
+step: jetpack explain ripgrep@nixpkgs --json
+exit: 0
+capture: package_id stdout doc $.explain.entry.id
+capture: index_proof stdout doc $.explain.provider.producer_facts["nix.index.proof.v1"]
+cap:index_proof: nonempty
+capture: output_proof stdout doc $.explain.provider.producer_facts["nix.cache.output.out.proof.sha256"]
+cap:output_proof: nonempty
+capture: closure_receipt stdout doc $.explain.provider.producer_facts["nix.cache.closure.receipt.sha256"]
+cap:closure_receipt: nonempty
+json: stdout doc $.explain.entry.output_hash = "{cap:root_digest}"
+json: stdout doc $.explain.graph.direct_dependencies #= 1
+json: stdout doc $.explain.graph.direct_dependencies[0].digest = "{cap:library_digest}"
+json: stdout doc $.explain.graph.dependencies has {"digest":"{cap:runtime_digest}"}
+step: jetpack audit --no-color
+exit: 0
+capture: refs stdout.split("{cap:package_id}", 1) after "Closure:" trim
+cap:refs: first-line = "{cap:library_digest}"
+step: jetpack explain ripgrep-lib-1.0@nixpkgs --json
+exit: 0
+json: stdout doc $.explain.graph.direct_dependencies #= 1
+json: stdout doc $.explain.graph.direct_dependencies[0].digest = "{cap:runtime_digest}"
+# The original makes the sealed object tree writable before deleting it.
+chmod: root/hangar/objects/{cap:runtime_digest} 0777
+chmod: root/hangar/objects/{cap:runtime_digest}/share 0777
+chmod: root/hangar/objects/{cap:runtime_digest}/share/marker 0666
+remove: root/hangar/objects/{cap:runtime_digest}
+step offline-missing: jetpack env --no-color --trust --offline -- rg --version
+isolate: no-nix network=disabled
+unset: JETPACK_FIXTURES
+exit: 2
+stderr: ~ E1350 # original predicate: offline missing object is fail-closed
+stderr: ~ /nix/store/cccccccccccccccccccccccccccccccc-ripgrep-runtime-1.0 # original predicate: error names missing reference
+step online-repair: jetpack env --no-color --trust -- rg --version
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 0
+stdout: ~ "ripgrep 15.2.0" # original predicate: online repair completes the same package closure
+step: built counts {cap:port}
+exit: 0
+json: stdout doc $.root = 2
+json: stdout doc $.lib = 2
+json: stdout doc $.runtime = 4
+step: built stop {cap:port}
+exit: 0
+wait: peer
+exit: 0

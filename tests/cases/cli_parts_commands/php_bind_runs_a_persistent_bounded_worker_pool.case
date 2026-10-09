@@ -1,0 +1,20 @@
+# Port of tests/cli_parts/commands.rs:518-603; sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates/oracles authored; runtime not run.
+# KNOWN-FAILING #4799: original copies missing main.jet; keep the failure and EVERY later probe predicate.
+# Original C probe and example expected.out copied verbatim.
+# PENDING-GRAMMAR: file kind/negative ASCII-case substring, read-only source copy.
+fixture: fixtures/php_roundtrip
+requires: tool:php
+step: jet inspect bind php {work}/ops.php --pkg ops
+exit: 0
+file: .jet/bindings/php/libjet_php_ops.a is-file
+file: .jet/bindings/php/ops_worker.php is-file
+file: .jet/bindings/php/ops.provenance ~ "pool_workers=4" # original predicate
+copy: {root}/Examples/interop/php/main.jet main.jet
+step: jet run --profile=debug main.jet
+exit: 0
+stdout: = php_bind_runs_a_persistent_bounded_worker_pool.out
+step: cc pool.c -L.jet/bindings/php -l:libjet_php_ops.a -lpthread -o pool
+exit: 0
+step: {work}/pool
+exit: 0

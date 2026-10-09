@@ -1,0 +1,25 @@
+
+use core.http.client as client
+
+fn run() {
+    response :: client.get("http://@ADDR@/") ?? panic("request")
+    values :: response.headers.all("x-a")
+    print(values.len())
+    print(values[0])
+    print(values[1])
+    body :: response.body()
+    bytes :: body.bytes(8) ?? panic("body")
+    print(bytes.len())
+    print(bytes[0])
+    print(bytes[1])
+    second :: body.bytes(8)
+    if second == {
+        .Ok(_) -> { print("reused") }
+        .Err(error) -> {
+            if error == {
+                .BodyConsumed -> { print("consumed") }
+                else -> { print("wrong-error") }
+            }
+        }
+    }
+}

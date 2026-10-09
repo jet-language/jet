@@ -1,0 +1,17 @@
+
+fn fail(message: String) -> Int Err! {
+    return Err(message)
+}
+fn run() {
+    value :: fail("outer") ?? {
+        print(err.message)
+        inner :: fail("inner") ?? {
+            print(err.message)
+            0
+        }
+        read_outer :: () -> err.message
+        print(read_outer())
+        inner + 1
+    }
+    print(value)
+}

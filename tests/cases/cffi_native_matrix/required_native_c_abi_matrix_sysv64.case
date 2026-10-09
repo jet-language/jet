@@ -1,0 +1,16 @@
+# Port of tests/cffi_native_matrix.rs:39-264; ABI=sysv64. PENDING-GRAMMAR(batch-four),PENDING-SAME-HEAD.
+# Retired only4 generated-Rust text predicates and direct rustc mechanics; all native output assertions remain.
+requires: env:JET_CFFI_MATRIX_REQUIRED=1
+requires: env:JET_CFFI_ABI=sysv64
+fixture: fixtures/required_native_c_abi_matrix/sysv64
+when env JET_CFFI_RUST_LINKER: refused: cross-linker
+# Original selected rustc -C linker={JET_CFFI_RUST_LINKER}; jet build has no public linker selector.
+step: {env-words:JET_CFFI_CC} -c {work}/matrix.c -o {work}/matrix.o
+step: {env-words:JET_CFFI_AR} rcs {work}/libjetmatrix.a {work}/matrix.o
+write: package.jet required_native_c_abi_matrix.package-template
+step: jet check matrix.jet
+when env JET_CFFI_RUST_TARGET: step: jet build --target {env:JET_CFFI_RUST_TARGET} matrix.jet
+when env !JET_CFFI_RUST_TARGET: step: jet build matrix.jet
+when env JET_CFFI_RUNNER: step: {env-words:JET_CFFI_RUNNER} {work}/.jet/build/matrix
+when env !JET_CFFI_RUNNER: step: built
+stdout: lines = ["7","7","341","24","8","8","42","10","70","status 9","42","42"] # original predicate: exact12 Rust .lines() strings

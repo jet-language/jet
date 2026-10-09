@@ -1,0 +1,34 @@
+# HAND-PORT tests/web_build.rs:2532-2607 web_contracts_execute_with_canonical_e3005_on_js_and_wasm
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Both original JS/Wasm inputs, displayed source paths, exact original harness bytes, and EVERY conjunct in runtime diagnostic predicates retained.
+requires: tool:node
+fixture: web_contracts_execute_with_canonical_e3005_on_js_and_wasm.fixture
+env: NO_COLOR=1
+step: jet build --target web tests/fixtures/web_contract_js.jet
+exit: 0
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: tests/fixtures/.jet/build/app.wasm is-file
+copy: harness.mjs tests/fixtures/.jet/build/harness.mjs
+step: node harness.mjs
+cwd: tests/fixtures/.jet/build
+exit: 0
+stdout: ~ "code=E3005" # original contains predicate
+stdout: ~ "Why: A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime." # original contains predicate
+stdout: ~ "Fix: fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result)." # original contains predicate
+stdout: ~ "Stop [E3005]: #Pre contract failed: positive" # original contract frame substring
+stdout: ~ "--> tests/fixtures/web_contract_js.jet:7" # original contract source location
+step: jet build --target web tests/fixtures/web_contract_wasm.jet
+exit: 0
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: tests/fixtures/.jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: tests/fixtures/.jet/build/app.wasm is-file
+copy: harness.mjs tests/fixtures/.jet/build/harness.mjs
+step: node harness.mjs
+cwd: tests/fixtures/.jet/build
+exit: 0
+stdout: ~ "code=E3005" # original contains predicate
+stdout: ~ "Why: A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime." # original contains predicate
+stdout: ~ "Fix: fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result)." # original contains predicate
+stdout: ~ "Stop [E3005]: #Post contract failed: grows" # original contract frame substring
+stdout: ~ "--> tests/fixtures/web_contract_wasm.jet:1" # original contract source location

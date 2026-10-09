@@ -1,0 +1,6 @@
+module perf.ci {
+    compile_workloads: { rename_route: CompilerWorkload.Edit{target: "unsupported", patch: "edits/rename-route.patch"} }
+    budgets: [Budget]{{name: "clean-compile", scope: .Target("unsupported"), metric: .CompileTime(.P95), provider: .CompilerProbe(.Clean), comparison: .RelativeTo("ci/linux-x64"), limit: .RegressionAtMost(100pct)}, {name: "no-change-compile", scope: .Target("unsupported"), metric: .CompileTime(.P95), provider: .CompilerProbe(.NoChange), comparison: .RelativeTo("ci/linux-x64"), limit: .RegressionAtMost(100pct)}, {name: "edit-compile", scope: .Target("unsupported"), metric: .CompileTime(.P95), provider: .CompilerProbe(.Edit("rename_route")), comparison: .RelativeTo("ci/linux-x64"), limit: .RegressionAtMost(100pct)}}
+}
+
+fn run() {}

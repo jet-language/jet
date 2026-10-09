@@ -1,0 +1,20 @@
+# Port of tests/pkg.rs:75-100; ORACLE-LITERAL expected stderr from original lines85/94.
+# These files are literal predicates, not newly blessed reference snapshots.
+# PENDING-GRAMMAR(batch-four): mkdir.
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+step: jet registry key
+exit: nonzero
+stderr: = key-route.err
+step: jet publish sentinel
+exit: 2
+stderr: = publish-route.err
+step: jet keygen sentinel
+exit: 2
+stderr: = keygen-route.err
+step: jet key sentinel
+exit: 2
+stderr: = key-bare-route.err
+step: jet yank sentinel
+exit: 2
+stderr: = yank-route.err

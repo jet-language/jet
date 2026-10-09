@@ -1,0 +1,24 @@
+// D-CTIO1: `embed_bytes` is the binary-safe sibling of `embed_file`. It bakes
+// a file's raw bytes into the binary at compile time as a `[U8]` — no runtime
+// I/O, and no UTF-8 requirement, so it works for images, fonts, or any blob.
+// A `comptime require` audits the bytes while compiling: if it fails you get a
+// compile error, not a runtime surprise.
+LOGO :: prep { embed_bytes("logo.bin") }
+
+SIZE :: prep { byte_count(LOGO) }
+
+FIFTH :: prep { LOGO[5] }
+
+OK :: prep { nonempty(LOGO) }
+
+fn byte_count(bytes: [U8]) -> Int { bytes.len() }
+
+fn nonempty(bytes: [U8]) -> Bool {
+    assert((bytes.len() > 0), "logo.bin must not be empty")
+    return true
+}
+
+fn run() {
+    print("logo is {SIZE} bytes")
+    print("byte 5 is {FIFTH}")
+}

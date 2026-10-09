@@ -1,0 +1,12 @@
+# PORT tests/measurement_tiers.rs:124-141.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+fixture: measurement_repl_matches_the_known_result.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: measurement_repl_matches_the_known_result.fixture/input.txt
+exit: any
+# Original library asserts no process exit status; startup banner/prompt cannot contain either original needle.
+stdout: !~ "error ["
+stderr: !~ "error ["
+stdout|stderr: ~ "15.0 ± 0.223606797749979"

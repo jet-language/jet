@@ -1,0 +1,20 @@
+# tests/bitwise_not.rs::bit_not_agrees_on_every_tier at tests/bitwise_not.rs:123; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# ORACLE-LITERAL: original expected bytes; PENDING-SAME-HEAD; no captures blessed.
+fixture: bit_not_agrees_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step default: jet run run.jet
+exit: 0
+stdout: = bit_not_agrees_on_every_tier.out
+step interpret: jet run --interpret run.jet
+exit: == default
+stdout: == default
+stderr: == default
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: == default
+stdout: == default
+stderr: == default

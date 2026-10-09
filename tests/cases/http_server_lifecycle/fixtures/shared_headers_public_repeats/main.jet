@@ -1,0 +1,11 @@
+// Exact public repeat subclaim of tests/http_server_lifecycle.rs:614-618.
+// Private parser/error/debug predicates stay in the complete original archive.
+use core.http as http
+fn run() {
+    headers := http.headers()
+    headers = http.headers_append(headers, "X-Trace", "one")
+    headers = http.headers_append(headers, "x-trace", "two")
+    headers = http.headers_append(headers, "Authorization", "Bearer secret")
+    assert_eq(http.headers_get(headers, "X-TRACE"), Val("one"))
+    assert_eq(http.headers_all(headers, "x-trace"), [String]{"one", "two"})
+}

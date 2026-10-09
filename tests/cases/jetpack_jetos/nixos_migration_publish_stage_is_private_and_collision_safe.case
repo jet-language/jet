@@ -1,0 +1,59 @@
+# Port of tests/jetpack_jetos.rs:3591-3714. All original predicates, fixture sources verbatim.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: nixos_migration_publish_stage_is_private_and_collision_safe.fixture
+mkdir: package-root
+requires: os-name:linux
+requires: tool:cc
+requires: tool:strace
+mkdir: tools
+mkdir: tool-outputs
+env: JETPACK_ROOT={work}/package-root
+env: JET_TEST_TOOL_ROOT={work}/tool-outputs
+env: JET_TEST_REQUIRE_OFFLINE=1
+env: JET_TEST_REQUIRE_COMPOSED_METADATA=1
+env: TMPDIR={work}/package-root
+step: cc -std=c11 -O0 migration-tool.c -o tools/migration-tool
+exit: 0
+hardlink: tools/migration-tool tools/nix
+hardlink: tools/migration-tool tools/qemu-system-x86_64
+hardlink: tools/migration-tool tools/qemu-img
+step: strace -f -s 4096 -o {work}/publish-success.trace -e trace=%file -- {jet} os migrate compare-nixos halcyon-gnome --out {work}/published --no-color --offline
+cwd: project
+env: PATH={work}/tools:{env:PATH|}
+exit: 0
+stdout: ~ "{work}/published/nixos/halcyon-gnome/system.qcow2" # original published path predicate
+file: published/nixos/halcyon-gnome/system.qcow2 is-file
+stdout: ~ "{work}/published/nixos/halcyon-gnome/proof.json" # original published path predicate
+file: published/nixos/halcyon-gnome/proof.json is-file
+stdout: ~ "{work}/published/nixos/halcyon-gnome/receipt.json" # original published path predicate
+file: published/nixos/halcyon-gnome/receipt.json is-file
+when os unix: file: published mode = 0700
+file: published/nixos/halcyon-gnome/proof.json ~ "\"image\":\"system.qcow2\""
+file: published/nixos/halcyon-gnome/receipt.json ~ "\"boot_proof\":\"proof.json\""
+file: published/nixos/halcyon-gnome/build-boot-plan.json count "\"--offline\"" = 2
+copy: publish-success.trace trace.log
+step: jet run observe/trace.jet
+exit: 0
+json: stdout doc $.mkdir >= 0
+json: stdout doc $.protected[0] >= 0
+json: stdout doc $.first_output >= 0
+capture: mkdir stdout doc $.mkdir
+capture: first_output stdout doc $.first_output
+json: stdout doc $.protected[0] > {cap:mkdir}
+json: stdout doc $.protected[0] < {cap:first_output}
+step: strace -f -s 4096 -o {work}/publish-json.trace -e trace=%file -- {jet} os migrate compare-nixos halcyon-gnome --out {work}/json-output --no-color --offline --json
+cwd: project
+env: PATH={work}/tools:{env:PATH|}
+exit: 0
+stdout: = "{\"kind\":\"nixos.migration.comparison\",\"state\":\"proved\",\"host\":\"halcyon-gnome\",\"image\":\"{work}/json-output/nixos/halcyon-gnome/system.qcow2\",\"proof\":\"{work}/json-output/nixos/halcyon-gnome/proof.json\",\"receipt\":\"{work}/json-output/nixos/halcyon-gnome/receipt.json\"}\n" # original format literal3684
+step: strace -f -s 4096 -o {work}/publish-collision.trace -e trace=%file -- {jet} os migrate compare-nixos halcyon-gnome --out {work}/collision-output --no-color --offline
+cwd: project
+env: PATH={work}/tools:{env:PATH|}
+env: JET_TEST_COLLIDE_PUBLISH={work}
+exit: 2
+file: collision-output absent
+copy: publish-collision.trace trace.log
+step: jet run observe/trace.jet
+exit: 0
+json: stdout doc $.collision = true # original atomic EEXIST private mkdir predicate

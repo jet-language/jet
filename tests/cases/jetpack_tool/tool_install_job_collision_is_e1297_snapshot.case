@@ -1,0 +1,20 @@
+# Port of tests/jetpack_tool.rs:1411-1458; assertions preserved, pending same-head/case-grammar receipt.
+fixture: fixtures/tool_install_job_collision_is_e1297_snapshot
+mkdir: root
+mkdir: home
+mkdir: project
+mkdir: fx
+env: HOME={work}/home
+env: JETPACK_ROOT={work}/root
+mkdir: root/hangar/provider-fixture-serve/bin
+copy: serve root/hangar/provider-fixture-serve/bin/serve
+when os unix: chmod: root/hangar/provider-fixture-serve/bin/serve 0555
+when os unix: chmod: root/hangar/provider-fixture-serve/bin 0555
+when os unix: chmod: root/hangar/provider-fixture-serve 0555
+write: fx/nixpkgs-serve.json serve.json
+step: jetpack tool install serve@nixpkgs --no-color --offline --fixtures {work}/fx 
+cwd: project
+exit: 2
+stderr.from_or_all("\n  error[E1297]"): = tool_install_job_collision_is_e1297_snapshot.stderr
+when os unix: file: home/.jet/bin/serve absent
+when os windows: file: home/.jet/bin/serve.exe absent

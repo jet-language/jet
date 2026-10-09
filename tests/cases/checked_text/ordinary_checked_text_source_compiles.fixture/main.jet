@@ -1,0 +1,23 @@
+
+#Error
+enum TextError { Bad }
+
+Pattern :: distinct String
+
+impl Pattern.CheckedText {
+    type Error = TextError
+
+    fn check(text: String) TextError! -[]> {
+        if text == "" { return Err(TextError.Bad) }
+        return Ok()
+    }
+
+    fn encode_hole<T: Printable>(value: T) -[]> String {
+        return "{hole}"
+    }
+}
+
+fn run() {
+    value :: Pattern{"hello"}
+    print("{value.raw()}")
+}

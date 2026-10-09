@@ -1,0 +1,41 @@
+
+use core.db as db
+
+fn run() {
+    conn := db.open_memory()
+    if db.policy("9tasks", "true") == {
+        .Ok(_) -> {
+            print("digit-table:accepted")
+        }
+        .Err(_) -> {
+            print("digit-table:rejected")
+        }
+    }
+    if db.policy("two words", "true") == {
+        .Ok(_) -> {
+            print("spaced-table:accepted")
+        }
+        .Err(_) -> {
+            print("spaced-table:rejected")
+        }
+    }
+    if db.policy("tasks", "owner != user") == {
+        .Ok(_) -> {
+            print("other-expr:accepted")
+        }
+        .Err(_) -> {
+            print("other-expr:rejected")
+        }
+    }
+    padded :: db.policy("  tasks  ", "owner == user") ?? panic("padded policy")
+    scoped := conn.with_policy(padded, "alice")
+    _created :: db.migrate(scoped, "tasks-v1", [SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"}]) ?? panic("create")
+    owner :: "bob"
+    title :: "one"
+    _one :: scoped.execute(
+        SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {title})"}
+    ) ?? panic("insert")
+    rows :: scoped.query(SQL{"SELECT title FROM tasks"}) ?? panic("query")
+    print("padded-rows:{rows.len()}")
+    _closed :: scoped.close()
+}

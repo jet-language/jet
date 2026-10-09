@@ -1,0 +1,28 @@
+# HAND-PORT tests/impl_shape_matrix.rs:321-364 impl_shape_matrix_covers_all_contexts_and_resolution_seams
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Public sema success + release/default/interpreter exact output and exit parity+extra default output; original stderr unasserted. AST matrix/admission/resolution subclaims retained in compiler-lib ledger, not replaced by this success.
+fixture: impl_shape_matrix_covers_all_contexts_and_resolution_seams.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+step release: jet run --release main.jet
+env: JET_STORE_DIR={tmp}/release/cache
+env: JETPACK_ROOT={tmp}/release/jetpack
+env: JETPACK_ENV=1
+exit: 0
+stdout: = impl_shape_matrix_covers_all_contexts_and_resolution_seams.stdout.expected
+step default: jet run main.jet
+env: JET_STORE_DIR={tmp}/default/cache
+env: JETPACK_ROOT={tmp}/default/jetpack
+env: JETPACK_ENV=1
+exit: 0
+stdout: = impl_shape_matrix_covers_all_contexts_and_resolution_seams.stdout.expected
+step interpret: jet run --interpret main.jet
+env: JET_STORE_DIR={tmp}/interpret/cache
+env: JETPACK_ROOT={tmp}/interpret/jetpack
+env: JETPACK_ENV=1
+exit: 0
+stdout: = impl_shape_matrix_covers_all_contexts_and_resolution_seams.stdout.expected
+step: jet run main.jet
+exit: 0
+stdout: = impl_shape_matrix_covers_all_contexts_and_resolution_seams.stdout.expected

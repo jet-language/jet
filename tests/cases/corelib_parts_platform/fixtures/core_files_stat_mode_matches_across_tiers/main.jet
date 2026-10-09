@@ -1,0 +1,24 @@
+
+use core.files as fs
+use core.process as process
+use core.sys as sys
+
+fn run() {
+    args :: process.argv().skip(1).to_list()
+    family :: sys.family()
+    absolute :: fs.absolute("regular.txt") ?? panic("absolute")
+    fs.set_mode(args[0], 0o644) ?? panic("regular mode setup")
+    fs.set_mode(args[2], 0o755) ?? panic("directory mode setup")
+    fs.symlink(args[0], args[3]) ?? panic("symlink setup")
+    regular :: fs.stat(args[0]) ?? panic("regular stat")
+    executable :: fs.stat(args[1]) ?? panic("executable stat")
+    directory :: fs.stat(args[2]) ?? panic("directory stat")
+    symlink :: fs.stat(args[3]) ?? panic("symlink stat")
+    fs.set_mode(args[0], 0o600) ?? panic("regular mode mutation")
+    fs.set_mode(args[2], 0o700) ?? panic("directory mode mutation")
+    regular_after :: fs.stat(args[0]) ?? panic("regular after stat")
+    directory_after :: fs.stat(args[2]) ?? panic("directory after stat")
+    print("family:{family}")
+    print("absolute:{absolute}")
+    print("{regular.mode},{executable.mode},{directory.mode},{symlink.mode},{regular_after.mode},{directory_after.mode}")
+}

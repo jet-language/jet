@@ -1,0 +1,16 @@
+# HAND-PORT tests/web_build.rs:2954-3018 malformed_wasm_error_json_preserves_typed_host_status
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Exact original harness, including its intentionally hostile host fixture, tests the LIVE canonical Prelude JS via reviewer-approved copy: {root}/...; original exact stdout retained.
+requires: tool:node
+fixture: malformed_wasm_error_json_preserves_typed_host_status.fixture
+env: NO_COLOR=1
+mkdir: build
+copy: package.json build/package.json
+copy: {root}/crates/jet-codegen/src/Prelude/DomRuntime.js build/jet_dom_runtime.mjs
+copy: {root}/crates/jet-codegen/src/Prelude/Core/RuntimeStop.js build/runtime_stop.mjs
+append: build/runtime_stop.mjs "\nexport { jet_web_wasm_host_error };\n"
+copy: harness.mjs build/harness.mjs
+step: node harness.mjs
+cwd: build
+exit: 0
+stdout: = malformed_wasm_error_json_preserves_typed_host_status.stdout.expected

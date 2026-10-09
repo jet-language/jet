@@ -1,0 +1,13 @@
+# HAND-PORT tests/web_build.rs:4445-4464 codable_struct_wasm_bridge_reconstructs_typed_argument
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Every original public predicate retained; generated-Rust representation-only subassertions retire per S4 review.
+fixture: codable_struct_wasm_bridge_reconstructs_typed_argument.fixture
+env: NO_COLOR=1
+step: jet build --target web --json main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture predicate
+file: .jet/build/app.wasm is-file
+step: node .jet/build/app.js
+exit: 0
+stdout: = codable_struct_wasm_bridge_reconstructs_typed_argument.stdout.expected

@@ -1,0 +1,19 @@
+# Original tests/semindex.rs:537-565; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: semindex_reconstructs_checked_output_callable.fixture
+step: jet inspect semindex output_callable.jet --json
+json: stdout doc $.semindex.outputs[0].binding = "app"
+json: stdout doc $.semindex.outputs[0].kind = "Executable"
+json: stdout doc $.semindex.outputs[0].name = "checked-output"
+json: stdout doc $.semindex.outputs[0].entry.name = "launch"
+json: stdout doc $.semindex.outputs[0].entry.failure_contract = "!Err"
+json: stdout doc $.semindex.outputs[0].entry.failure_source = "implicit default !Err"
+json: stdout doc $.semindex.outputs[0].entry.authority = "safe-jet"
+json: stdout doc $.semindex.outputs[0].entry.identity $= "::launch" # original predicate
+json: stdout doc $.semindex.outputs[0].entry.definition_span != $.semindex.outputs[0].entry.reference_span
+stdout: ~ "\"outputs\":[{" # original predicate
+stdout: ~ "\"entry\":{\"identity\"" # original predicate
+stdout: ~ "\"failure_contract\":\"!Err\"" # original predicate
+stdout: ~ "\"failure_source\":\"implicit default !Err\"" # original predicate
+stdout: ~ "\"authority\":\"safe-jet\"" # original predicate
+stdout: ~ "\"effects\":[\"IO\"]" # original predicate

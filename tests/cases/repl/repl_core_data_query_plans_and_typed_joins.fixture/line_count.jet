@@ -1,0 +1,12 @@
+use core.files as files
+fn run() {
+    outputs :: [String]{files.read("transcript.out") ?? panic("stdout capture"), files.read("transcript.err") ?? panic("stderr capture")}
+    found := false
+    loop output in outputs {
+        loop line in output.lines() {
+            count :: line.split("DataJoin(left: 1, right: 1)").to_list().len() - 1
+            if count == 4 -> found = true
+        }
+    }
+    assert(found, "inner join multiplicity lost")
+}

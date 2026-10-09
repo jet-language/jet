@@ -1,0 +1,20 @@
+# Port of tests/crypto_diagnostics.rs:110-153; sources verbatim; original predicates.
+# PENDING-SAME-HEAD: authored, no reference/runtime proof.
+fixture: fixtures/multiple_e2702_diagnostics_are_independent_json_lines
+# volatile: current source emits a newer report envelope
+env: NO_COLOR=1
+step: jet check main.jet --json
+exit: 1
+stdout: = ""
+stderr: lines = 2
+stderr.line(0): ^= "{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""
+stderr.line(0): ~ "\"code\":\"E2702\""
+stderr.line(0): ~ "\"reason\":\"output_length\""
+stderr.line(0): ~ "\"operation\":\"hkdf_sha256\""
+stderr.line(0): ~ "\"actual\":8161"
+stderr.line(1): ^= "{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""
+stderr.line(1): ~ "\"code\":\"E2702\""
+stderr.line(1): ~ "\"reason\":\"output_length\""
+stderr.line(1): ~ "\"operation\":\"hkdf_sha256\""
+stderr.line(1): ~ "\"actual\":8162"
+file: .jet/build absent

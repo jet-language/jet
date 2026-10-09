@@ -1,0 +1,15 @@
+# PORT tests/repl.rs:2140-2167; all original predicates, verbatim input literals.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Startup non-overlap: crates/jet-repl/src/Render.rs24-37,41-61,67-74; cooked mirror lib.rs2469-2470.
+fixture: repl_allow_fs_rejects_symlink_components_before_open.fixture
+requires: os:unix
+mkdir: project
+mkdir: outside
+symlink: {work}/outside project/escape
+step: jet repl --project {work}/project --allow=FS
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_allow_fs_rejects_symlink_components_before_open.fixture/input0.txt
+exit: any # original library predicates did not assert process status
+stdout|stderr: ~ "E1803" # original predicate
+file: outside/must-not-exist.txt absent

@@ -1,0 +1,11 @@
+# PORT tests/policy_scope.rs:53-102.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Split: ; compiler-lib: ONLY Loader.bundle.package_guarantees.dependency_names exact ordered [a_denied,m_allowed,z_denied]; CLI diagnostic count/order/what predicates retained
+fixture: package_dependency_policy_checks_source_less_dependencies_once_in_order.fixture
+step: jet check --json main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E2960"] #= 2
+json: machine doc $.reports[?code="E2960"][0].what ~ "a_denied" # original predicate
+json: machine doc $.reports[?code="E2960"][1].what ~ "z_denied" # original predicate
+json: machine doc $.reports[?code="E2960"].what ~ "package.jet" # original predicate
+json: machine doc $.reports[?code="E2960"][?what~="m_allowed"] #= 0

@@ -1,0 +1,20 @@
+# Port of tests/web_app_graph.rs:76-125; runtime PENDING-SAME-HEAD.
+# Exact serializer crates/jet-foundation/src/App.rs474-795 (routes485-520, actions619-650, queries711-717, stores727, mounts735-750, policy769-791).
+# Wrapper $.web_app Source/CmdDevTools.rs4177-4184.
+# KNOWN-FAILING #4830: Jet Compiler/JetCli/Source/Cli/Front.jet829 returns not_ported.
+# Field helper mappings App.rs986-1015: ty→type;loader.handler→handler.
+step: jet explain --web-graph {root}/Examples/features/web/tanstack_start/run.jet --json
+exit: 0
+json: stdout doc $.web_app.routes[*].path = ["/","/orders","/orders/:id","/settings"]
+json: stdout doc $.web_app.routes[?path="/orders"][0].handler = "orders_page"
+json: stdout doc $.web_app.routes[?path="/orders"][0].loader.handler = "load_orders"
+json: stdout doc $.web_app.routes[?path="/orders"][0].search_params has {"name":"q","type":"String"}
+json: stdout doc $.web_app.actions has {"name":"ship-order","endpoint":"/actions/ship-order"}
+json: stdout doc $.web_app.actions has {"name":"ship-order-progressive","endpoint":"/actions/ship-order-progressive"}
+json: stdout doc $.web_app.queries #= 1
+json: stdout doc $.web_app.queries[0].key = "orders.list"
+json: stdout doc $.web_app.queries[0].footprint = "orders"
+json: stdout doc $.web_app.stores #= 1
+json: stdout doc $.web_app.stores[0].name = "Cart"
+json: stdout doc $.web_app.stores[0].history_limit = "8"
+

@@ -1,0 +1,16 @@
+# Port of tests/text_unicode.rs:495-555; original source verbatim.
+# ORACLE-LITERAL tests/text_unicode.rs551; runtime PENDING-SAME-HEAD.
+fixture: unicode_grapheme_zwj_requires_pictographic_context_on_all_run_tiers.fixture
+env: NO_COLOR=1
+step: jet run --release run.jet
+env: JET_STORE_DIR={work}/release-build
+exit: 0
+stdout: = grapheme-zwj.out
+step: jet run  run.jet
+env: JET_STORE_DIR={work}/default-build
+exit: 0
+stdout: = grapheme-zwj.out
+step: jet run --interpret run.jet
+env: JET_STORE_DIR={work}/interpret-build
+exit: 0
+stdout: = grapheme-zwj.out

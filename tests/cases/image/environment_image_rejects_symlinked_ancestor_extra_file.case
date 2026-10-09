@@ -1,0 +1,103 @@
+# Port of tests/image.rs:1047-1086; PENDING-SEAM(store-ingest), approved by TestLead1.
+# Store is not a consumable library; native hangar ingest has no CacheIdentity/platform/provenance options.
+# Exact original setup and ALL assertions follow. No fake records or substitute references.
+refused: store-ingest
+fixture: environment_image_rejects_symlinked_ancestor_extra_file.fixture
+# Intended command (AFTER original Store::ingest_tree setup):
+# step: jetpack image server
+# env: NO_COLOR=1
+# env: JETPACK_ROOT={work}/hangar-root (project path for supervised services)
+# Do not execute against an unpopulated Hangar or treat REFUSED as PASS.
+# fn ingest_executable(root: &Path, name: &str, reference: &str, binary: &str) {
+#     ingest_executable_for_platform(
+#         root,
+#         name,
+#         reference,
+#         binary,
+#         &jetpack::Envelope::host_platform(),
+#     );
+# }
+# 
+# fn ingest_executable_for_platform(
+#     root: &Path,
+#     name: &str,
+#     reference: &str,
+#     binary: &str,
+#     platform: &str,
+# ) {
+#     let source = root.join(format!("source-{name}"));
+#     fs::create_dir_all(source.join("bin")).unwrap();
+#     fs::write(source.join("bin").join(binary), b"#!/bin/sh\necho image\n").unwrap();
+#     #[cfg(unix)]
+#     {
+#         use std::os::unix::fs::PermissionsExt;
+#         let path = source.join("bin").join(binary);
+#         let mut permissions = fs::metadata(&path).unwrap().permissions();
+#         permissions.set_mode(0o755);
+#         fs::set_permissions(path, permissions).unwrap();
+#     }
+#     let roots = Store::Roots {
+#         root: root.to_path_buf(),
+#         dev_mode: false,
+#     };
+#     Store::ingest_tree(
+#         &roots,
+#         &Store::IngestRequest {
+#             name: name.to_string(),
+#             version: "1.0.0".to_string(),
+#             reference: reference.to_string(),
+#             cache_identity: Store::CacheIdentity {
+#                 source_fingerprint: format!("sha256-source-{name}"),
+#                 recipe_fingerprint: format!("sha256-recipe-{name}"),
+#                 policy_fingerprint: "policy=image-test".to_string(),
+#                 platform: platform.to_string(),
+#             },
+#             references: Vec::new(),
+#             outputs: std::collections::BTreeMap::from([("out".to_string(), source)]),
+#             signature: String::new(),
+#             provenance: "image-test".to_string(),
+#             platform_artifact_kind: String::new(),
+#         },
+#     )
+#     .unwrap();
+# }
+# #[test]
+# fn environment_image_rejects_symlinked_ancestor_extra_file() {
+#     use std::os::unix::fs::symlink;
+# 
+#     let project = Scratch::new("environment-image-symlink-ancestor-file");
+#     let root = Scratch::new("environment-image-symlink-ancestor-root");
+#     let outside = Scratch::new("environment-image-symlink-ancestor-outside");
+#     fs::write(
+#         project.path.join("env.jet"),
+#         "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"nested/payload.bin\"] }\n",
+#     )
+#     .unwrap();
+#     fs::write(outside.path.join("payload.bin"), b"must not be read\n").unwrap();
+#     symlink(&outside.path, project.path.join("nested")).unwrap();
+#     ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
+# 
+#     let out = jetpack()
+#         .args(["image", "server"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("NO_COLOR", "1")
+#         .output()
+#         .unwrap();
+#     let stderr = String::from_utf8_lossy(&out.stderr);
+#     assert_eq!(
+#         out.status.code(),
+#         Some(2),
+#         "symlinked ancestor image file must fail: {stderr}"
+#     );
+#     assert!(
+#         stderr.contains("not a symlink")
+#             || stderr.contains("symlink")
+#             || stderr.contains("not a directory"),
+#         "stderr: {stderr}"
+#     );
+#     assert_eq!(
+#         fs::read_to_string(outside.path.join("payload.bin")).unwrap(),
+#         "must not be read\n"
+#     );
+# }

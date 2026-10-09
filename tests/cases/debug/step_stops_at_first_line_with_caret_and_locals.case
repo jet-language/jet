@@ -1,0 +1,12 @@
+# tests/debug.rs::step_stops_at_first_line_with_caret_and_locals
+# Public production debugger transcript; original source/commands unchanged, PENDING-SAME-HEAD.
+fixture: step_stops_at_first_line_with_caret_and_locals.fixture
+env: NO_COLOR=1
+step: jet debug jet_debug_step.jet
+stdin: step_stops_at_first_line_with_caret_and_locals.stdin
+exit: any # original transcript-only helper asserts no process code
+stdout+stderr: ~ "breakpoint hit  jet_debug_step.jet:2  in main()" # original contains predicate
+stdout+stderr: ~ "<- here" # original contains predicate
+stdout+stderr: ~ "locals:" # original contains predicate
+stdout+stderr: ~ "total is 6" # original contains predicate
+stdout+stderr: ~ "program finished" # original contains predicate

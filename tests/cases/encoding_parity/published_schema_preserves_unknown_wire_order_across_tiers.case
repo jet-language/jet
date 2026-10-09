@@ -1,0 +1,25 @@
+# tests/encoding_parity.rs::published_schema_preserves_unknown_wire_order_across_tiers
+# Original source bytes and assertions; PENDING-SAME-HEAD, runtime UNRUN.
+# Expected literals below come from the Rust assertions, not captured/blessed output.
+env: NO_COLOR=1
+fixture: published_schema_preserves_unknown_wire_order_across_tiers.fixture
+capture: source = text file.replace("@DIR@", "{work}/probe") probe/source.template
+write: probe/run.jet = "{cap:source}"
+step: jet check probe/run.jet
+exit: 0
+step: jet build probe/run.jet
+exit: 0
+step probe_aot: built
+cwd: probe
+exit: 0
+stdout: = "{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}\n{\"known\":7}\nE2412: unknown field `extra`\nmalformed rejected\n{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}\n"
+step probe_dev: jet run probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+stderr: == probe_aot
+step: jet run --interpret probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+stderr: == probe_aot

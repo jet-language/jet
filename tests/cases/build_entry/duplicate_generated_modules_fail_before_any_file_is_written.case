@@ -1,0 +1,9 @@
+# Port of tests/build_entry.rs:2806-2834; original sources verbatim, canonical machine diagnostics.
+# PENDING-SAME-HEAD; source acceptance != complete direct-driver nominal proof.
+fixture: fixtures/duplicate_generated_modules_fail_before_any_file_is_written
+step: jet build main.jet --allow-exec --allow-fs --json
+exit: nonzero
+json: machine doc $.reports[?code="E3511"] #>= 1
+json: machine doc $.reports[?code="E3511"][?what~="generated twice"][?what~="alpha"] #>= 1 # all original conjunctions on same diagnostic
+file: .jet/generated/main/alpha.jet absent
+file: .jet/generated/main/beta.jet absent

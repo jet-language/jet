@@ -1,0 +1,10 @@
+
+struct Counter { value: Int }
+fn run() {
+    counter := shared Counter{ value: 0 }
+    handle :: task {
+        counter.value += 1
+    }
+    handle.join() ?? panic("task failed")
+    print(counter.value)
+}

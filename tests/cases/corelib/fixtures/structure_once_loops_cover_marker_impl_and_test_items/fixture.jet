@@ -1,0 +1,36 @@
+
+marker AddFields($sites: [.Type]) {
+    type_name :: target.$name
+    prep loop field in target.$fields {
+        method :: "field_{field.$name}"
+        impl $type_name {
+            fn $method(self) -> String { field.$name }
+        }
+    }
+}
+
+struct Case { n: Int }
+
+#AddFields
+struct Person { first: String  last: String }
+
+CASES :: prep { [Case]{ Case{ n: 1 }, Case{ n: 2 } } }
+
+prep loop T in [Person] {
+    impl T {
+        fn generated(self) -> String { "generated" }
+    }
+}
+
+prep loop case in CASES {
+    #Test("case {case.n}") {
+        assert(case.n > 0)
+    }
+}
+
+fn run() {
+    person :: Person{ first: "a", last: "b" }
+    print(person.field_first())
+    print(person.field_last())
+    print(person.generated())
+}

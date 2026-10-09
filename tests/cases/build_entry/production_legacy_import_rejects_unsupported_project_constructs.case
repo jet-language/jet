@@ -1,0 +1,6 @@
+# Port of tests/build_entry.rs:1683-1734; exact original files, no unsupported-construct suppression.
+# PENDING-SAME-HEAD; original inspect-only failure occurs before declared action execution.
+fixture: fixtures/production_legacy_import_rejects_unsupported_project_constructs
+step: jet build main.jet --allow-exec --allow-fs --json
+exit: nonzero
+json: machine doc $.reports[?what~="unsupported construct"][?what~="add_custom_command"] #>= 1 # original any conjunction on ONE diagnostic

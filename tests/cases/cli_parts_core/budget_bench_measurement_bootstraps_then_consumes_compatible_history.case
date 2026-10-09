@@ -1,0 +1,62 @@
+# Port of tests/cli_parts/core.rs:1129-1258; original sources/predicates retained.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): new typed/data/relational forms are explicit.
+fixture: fixtures/bench_history
+step first: jet budget update --baseline ci/linux --bootstrap --reason "initial benchmark" --yes --json
+exit: 0
+json: stdout canonical # original predicate
+json: stdout doc $ : object # original pattern
+json: stdout doc $.budget : object # canonical_field
+json: stdout doc $.budget.report : object # original pattern
+json: stdout doc $.budget.report.content : object # original pattern
+json: stdout doc $.budget.report.content.measurements : array # original pattern
+json: stdout doc $.budget.report.content.measurements[0] : object # original pattern
+json: stdout doc $.budget.report.content.measurements[0].samples : array # original pattern
+json: stdout doc $.budget.report.content.measurements[0].samples #= 20
+json: stdout doc $.budget.report.content.measurements[0].statistics : object # original predicate
+json: stdout doc $.budget.report.content.measurements[0].policy : object # original predicate
+json: stdout doc $.budget.report.content.measurements[0].history has # original BTreeMap index
+json: stdout doc $.budget.report.content.measurements[0].history = null
+json: stdout doc $.budget.report.content.measurements[0].baseline has # original BTreeMap index
+json: stdout doc $.budget.report.content.measurements[0].baseline = null
+json: stdout doc $.budget.report.content.measurements[0].provider : object # original pattern
+json: stdout doc $.budget.report.content.measurements[0].provider.kind = "BenchMeasurement"
+json: stdout doc $.budget.report.content.measurements[0].provider.identity = "parse"
+json: stdout doc $.budget.report.report_id : string # original pattern
+capture: first_id stdout doc $.budget.report.report_id
+step: jet budget check --json
+exit: in [0, 1] # original predicate
+json: stdout canonical # original predicate
+json: stdout doc $ : object # original pattern
+json: stdout doc $.budget : object # canonical_field
+json: stdout doc $.budget.report : object # original pattern
+json: stdout doc $.budget.report.content : object # original pattern
+json: stdout doc $.budget.report.content.measurements : array # original pattern
+json: stdout doc $.budget.report.content.measurements[0] : object # original pattern
+json: stdout doc $.budget.report.content.measurements[0].history : object # original pattern
+json: stdout doc $.budget.report.content.measurements[0].history.report_ids : array # original pattern
+json: stdout doc $.budget.report.content.measurements[0].history.report_ids = ["{cap:first_id}"]
+json: stdout doc $.budget.report.content.measurements[0].baseline : object # original pattern
+json: stdout doc $.budget.report.content.measurements[0].baseline.pooled_samples : array # original pattern
+json: stdout doc $.budget.report.content.measurements[0].baseline.pooled_samples #= 20
+json: stdout doc $.budget.report.content.measurements[0].decision : object # original pattern
+json: stdout doc $.budget.report.content.measurements[0].decision.evidence has # original predicate: BTreeMap index must exist
+json: stdout doc $.budget.report.content.measurements[0].decision.evidence != "unavailable" # original predicate
+json: stdout doc $.budget.results : array # original pattern
+json: stdout doc $.budget.results[0] : object # original pattern
+json: stdout doc $.budget.results[0].baseline_report_ids = ["{cap:first_id}"]
+json: stdout doc $.budget.results[0].metric has # original BTreeMap index
+json: stdout doc $.budget.report.content.measurements[0].metric has # original BTreeMap index
+json: stdout doc $.budget.results[0].metric == $.budget.report.content.measurements[0].metric # original predicate
+json: stdout doc $.budget.results[0].lower95 has # original BTreeMap index
+json: stdout doc $.budget.report.content.measurements[0].decision.lower95 has # original BTreeMap index
+json: stdout doc $.budget.results[0].lower95 == $.budget.report.content.measurements[0].decision.lower95 # original predicate
+json: stdout doc $.budget.results[0].upper95 has # original BTreeMap index
+json: stdout doc $.budget.report.content.measurements[0].decision.upper95 has # original BTreeMap index
+json: stdout doc $.budget.results[0].upper95 == $.budget.report.content.measurements[0].decision.upper95 # original predicate
+json: stdout doc $.budget.results[0].trend has # original BTreeMap index
+json: stdout doc $.budget.report.content.measurements[0].decision.trend has # original BTreeMap index
+json: stdout doc $.budget.results[0].trend == $.budget.report.content.measurements[0].decision.trend # original predicate
+json: stdout doc $.budget.results[0].reason has # original BTreeMap index
+json: stdout doc $.budget.report.content.measurements[0].decision.reason has # original BTreeMap index
+json: stdout doc $.budget.results[0].reason == $.budget.report.content.measurements[0].decision.reason # original predicate

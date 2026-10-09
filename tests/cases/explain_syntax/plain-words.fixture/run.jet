@@ -1,0 +1,54 @@
+// Original tests/explain_syntax.rs103-129; public positioned text + exact ASCII word scanner.
+use core.files as files
+
+fn s5_explain_word(code: Int) -> Bool {
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45
+}
+
+fn s5_explain_token(word: String) {
+    if word.starts_with("SIGIL_") || word.starts_with("OP_") || word.starts_with("D-") {
+        print("offending token: {word}")
+        assert(false, "default explanation leaks an internal token")
+    }
+}
+
+#Test("positioned meanings, nonempty examples, and no internal words") {
+    plain :: files.read("plain.txt") ?? panic("captured plain explanation")
+    what :: files.read("what.txt") ?? panic("captured JSON what")
+    assert(plain.contains("Example:"))
+    bytes :: plain.bytes()
+    start := 0
+    loop index in 0..<bytes.len() {
+        if !s5_explain_word(Int.from_u8(bytes[index])) {
+            s5_explain_token(plain.slice(start..<index))
+            start = index + 1
+        }
+    }
+    s5_explain_token(plain.slice(start..<bytes.len()))
+    positioned := 0
+    examples := 0
+    in_example := false
+    nonempty := false
+    loop line in what.lines() {
+        if !line.starts_with(" ") && line.ends_with(":") {
+            assert(line.len() > 1, "meaning position must be nonempty")
+            positioned = positioned + 1
+        }
+        if line.trim() == "Example:" {
+            if in_example -> assert(nonempty, "meaning example must not be whitespace")
+            examples = examples + 1
+            in_example = true
+            nonempty = false
+        } else if in_example {
+            if line.starts_with("    ") {
+                if line.trim() != "" -> nonempty = true
+            } else {
+                assert(nonempty, "meaning example must not be whitespace")
+                in_example = false
+            }
+        }
+    }
+    if in_example -> assert(nonempty, "meaning example must not be whitespace")
+    assert(examples > 0)
+    assert_eq(positioned, examples)
+}

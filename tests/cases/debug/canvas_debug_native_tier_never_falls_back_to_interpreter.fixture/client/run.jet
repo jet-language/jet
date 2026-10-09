@@ -1,0 +1,25 @@
+// Real Core.net HTTP transport for production Canvas; no test assertions hidden here.
+use core.net as net
+use core.files as files
+use core.sys as sys
+CRLF :: prep { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
+fn run() {
+    url :: sys.get("S1_CANVAS_URL") ?? panic("URL")
+    address :: url.split("://")[1].split("/")[0]
+    secret :: url.split("session=")[1]
+    method :: sys.get("S1_METHOD") ?? "POST"
+    target :: sys.get("S1_PATH") ?? "/__jet_canvas/debug"
+    body :: if method == "POST" -> files.read("request.json") ?? panic("request") else -> ""
+    stream :: net.tcp_connect(address) ?? panic("connect")
+    net.set_read_timeout(stream, 5000) ?? panic("timeout")
+    request :: "{method} {target} HTTP/1.1{CRLF}Host: {address}{CRLF}Origin: http://{address}{CRLF}Authorization: Bearer {secret}{CRLF}Content-Type: application/json{CRLF}Content-Length: {body.bytes().len()}{CRLF}Connection: close{CRLF}{CRLF}{body}"
+    stream.write_all(request.bytes()) ?? panic("write")
+    bytes := [U8]{}
+    loop {
+        block :: stream.read(4096) ?? panic("read")
+        if block.is_empty() -> break
+        loop byte in block -> &bytes.push(byte)
+    }
+    response :: String.from_bytes(bytes) ?? panic("response")
+    print(response)
+}

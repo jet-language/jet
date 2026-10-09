@@ -1,0 +1,33 @@
+# HAND-PORT tests/http_client_law.rs:2108-2209 public_client_proxy_none_ignores_environment_proxy
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Complete original direct request/output/four proxy env/two removals AND exact400ms no-traffic observer: Timeout(WouldBlock) polls, EVERY other accept error fails. D-NET-NONBLOCKING1 lead ruling; real Core.net deadline accepts, no error-message or elapsed heuristic.
+fixture: public_client_proxy_none_ignores_environment_proxy.fixture
+env: NO_COLOR=1
+write: origin/main.jet origin/source.template
+step: jet build origin/main.jet
+exit: 0
+spawn origin: built
+write: proxy/main.jet proxy/source.template
+step: jet build proxy/main.jet
+exit: 0
+spawn proxy: built
+await: file origin.txt timeout 30s
+capture: origin = text file origin.txt
+await: file proxy.txt timeout 30s
+capture: proxy = text file proxy.txt
+write: main.jet main.template
+step: jet build main.jet
+exit: 0
+step: built
+env: http_proxy=http://{cap:proxy}
+env: HTTP_PROXY=http://{cap:proxy}
+env: all_proxy=http://{cap:proxy}
+env: ALL_PROXY=http://{cap:proxy}
+unset: no_proxy
+unset: NO_PROXY
+exit: 0
+stdout: = public_client_proxy_none_ignores_environment_proxy.stdout.expected
+wait: origin
+exit: 0
+wait: proxy
+exit: 0

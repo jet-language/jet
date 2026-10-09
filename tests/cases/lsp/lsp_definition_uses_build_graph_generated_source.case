@@ -1,0 +1,21 @@
+# Port of tests/lsp.rs:4415-4469; source bytes/order/assertions unchanged.
+# PENDING-GRAMMAR(batch-three/four), PENDING-SEAM(read_bytes).
+fixture: lsp_definition_uses_build_graph_generated_source.fixture
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp
+stdout: ~ "definitionProvider" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"fn build(b: BuildContext) -> BuildPlan {\\n    b.generate(\\\"made\\\") {\\n        fn generated_value() -> String { \\\"hi\\\" }\\n    }\\n    app :: b.add_executable(\\\"app\\\", [\\\"main.jet\\\", \\\".jet/generated/main/made.jet\\\"], [])\\n    return b.plan(app)\\n}\\nfn run() { print(generated_value()) }\\n\"}}}"
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":7,\"character\":20}}}"
+recv lsp
+stdout: ~ ".jet/generated/main/made.jet" # original predicate
+stdout: ~ "range" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp
+stdout: ~ "result" # original predicate
+close lsp
+exit: any # run_transcript child.wait status ignored

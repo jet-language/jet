@@ -1,0 +1,11 @@
+# HAND-PORT tests/web_build.rs:1296-1316 web_template_literals_keep_hostile_text_as_data
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# All four original JS escaping substring predicates; source verbatim, no snapshot.
+fixture: web_template_literals_keep_hostile_text_as_data.fixture
+env: NO_COLOR=1
+step: jet build --target web --json main.jet
+exit: 0
+file: .jet/build/app.js ~ "\\`" # original web.js_app predicate
+file: .jet/build/app.js ~ "\\${owned}" # original web.js_app predicate
+file: .jet/build/app.js ~ "\\\\" # original web.js_app predicate
+file: .jet/build/app.js ~ "\\n" # original web.js_app predicate

@@ -1,0 +1,28 @@
+# Port of tests/cli_parts/commands.rs:1132-1166; fixture sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates and oracles, no runtime run.
+# ORACLE-LITERAL commands.rs:1151.
+fixture: fixtures/threads
+step: jet check run.jet --threads 1
+exit: 0
+step: jet check run.jet --threads=2
+exit: 0
+step: jet run run.jet --threads 1
+exit: 0
+stdout: = threads.out
+step: jet build run.jet --jobs 2
+exit: 2
+stderr: ~ "Error [E2102]: `--jobs` isn't a flag jet understands" # original predicate
+stderr: ~ "Fix: Write `--threads N` to cap the compiler at N threads" # original predicate
+step: jet build run.jet -j 2
+exit: 2
+stderr: ~ "Error [E2102]: `-j` isn't a flag jet understands" # original predicate
+stderr: ~ "Fix: Write `--threads N` to cap the compiler at N threads" # original predicate
+step: jet check run.jet --threads 0
+exit: 2
+stderr: ~ "Error [E2104]: `--threads` needs a whole number of compiler threads, at least 1, not `0`" # original predicate
+step: jet check run.jet --threads x
+exit: 2
+stderr: ~ "Error [E2104]: `--threads` needs a whole number of compiler threads, at least 1, not `x`" # original predicate
+step: jet fmt run.jet --threads 2
+exit: 2
+stderr: ~ "Error [E2102]: `--threads` is only valid with a command that compiles" # original predicate

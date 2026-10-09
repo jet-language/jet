@@ -1,0 +1,19 @@
+
+use core.encoding.xml as xml
+
+fn run() {
+    document := xml.parse("<catalog>before<book id=\"7\"><title>Jet</title></book>after</catalog>") ?? panic("xml")
+    root := xml.root(document) ?? panic("root")
+    content := &root.field("children") ?? panic("content")
+    middle := content.at(1) ?? panic("middle")
+    book_content := &middle.field("children") ?? panic("book content")
+    book := CatalogBook{ id: "7", content: book_content, title: "Jet" }
+    catalog := Catalog{ content: content, book: book }
+    print(catalog.book.id)
+    print(catalog.book.title)
+    first := catalog.content.at(0) ?? panic("first")
+    last := catalog.content.at(2) ?? panic("last")
+    print((&first.field("$xml") ?? panic("first tag")).text() ?? "bad")
+    print((&middle.field("$xml") ?? panic("middle tag")).text() ?? "bad")
+    print((&last.field("$xml") ?? panic("last tag")).text() ?? "bad")
+}

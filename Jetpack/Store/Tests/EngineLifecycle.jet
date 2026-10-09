@@ -1,0 +1,42 @@
+// Exact production Store engine claims; PENDING-SEAM(package-tests), no runtime proof claimed.
+
+// ported from jetpack_engine.rs:115-128
+#Test("checked_hangar_listing_rejects_oversized_metadata") {
+    scratch :: files.tmpdir("jet-engine-oversized-meta-") ?? panic("fixture root")
+    roots :: HangarRoots.at(scratch)
+    verification := StoreVerification.new()
+    object :: files.join(roots.hangar_dir(), "oversized")
+    files.create_dir_all(object) ?? panic("fixture object")
+    files.write(files.join(object, "meta.json"), "x".repeat((1 << 20) + 1)) ?? panic("oversized fixture bytes")
+    if store_list_checked(&verification, roots) == {
+        .Ok(_) -> panic("oversized metadata was accepted")
+        .Err(error) -> assert(error.message().contains("exceeds 1048576 bytes"))
+    }
+    store_test_drop_roots(roots)
+}
+
+// ported from jetpack_engine.rs:3385-3432
+#Test("clean_reclaims_unreachable_canonical_hangar_objects") {
+    root :: files.tmpdir("jet-engine-canonical-gc-root-") ?? panic("root fixture")
+    source :: files.tmpdir("jet-engine-canonical-gc-source-") ?? panic("source fixture")
+    files.write(files.join(source, "payload"), "orphaned bytes\n") ?? panic("source payload")
+    roots :: HangarRoots{root: root, dev_mode: false}
+    verification := StoreVerification.new()
+    request :: IngestRequest{name: "canonical-gc", version: "1", reference: "path:canonical-gc", cache_identity: CacheIdentity{source_fingerprint: "sha256:canonical-gc-source", recipe_fingerprint: "sha256:canonical-gc-recipe", policy_fingerprint: "sha256:canonical-gc-policy", platform: pkg_host_platform()}, references: [String]{}, outputs: [String: String]{"out": source}, signature: "", provenance: "canonical GC test", platform_artifact_kind: ""}
+    entry :: (store_ingest_tree(&verification, roots, request) ?? panic("canonical ingest")).entry
+    output :: entry.out
+    receipt :: files.join(files.join(roots.hangar_dir(), "receipts"), entry.receipt)
+    assert(files.is_dir(output))
+    assert(files.is_file(receipt))
+    assert(store_remove_closure_record(&verification, roots, entry.id) ?? panic("remove closure record"))
+    plan :: store_clean_plan(&verification, roots) ?? panic("clean plan")
+    assert(plan.removed_objects >= 1)
+    assert_eq(plan.removed_receipts, 1)
+    report :: store_clean(&verification, roots) ?? panic("clean")
+    assert(report.removed_objects >= 1)
+    assert_eq(report.removed_receipts, 1)
+    assert(!files.exists(output))
+    assert(!files.exists(receipt))
+    store_test_drop_roots(roots)
+    files.remove_all(source).drop("source cleanup")
+}

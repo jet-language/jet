@@ -1,0 +1,7 @@
+# Original tests/semindex.rs:1439-1478; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: semindex_dossier_preserves_method_call_contract.fixture
+step: jet inspect semindex dossier_method_contract.jet --json
+json: stdout doc $.semindex.members[?owner="Client"][?name="connect"][0].signature ~ "timeout seconds: Int" # original predicate
+json: stdout doc $.semindex.members[?owner="Client"][?name="connect"][0].signature ~ "*, tls enabled: Bool" # original predicate
+json: stdout doc $.semindex.members[?owner="Client"][?name="connect"][0].signature ~ "rest: ...String" # original predicate

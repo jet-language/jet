@@ -1,0 +1,22 @@
+# Port of tests/jetpack_services.rs:329-363; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+requires: os-name:linux
+# PENDING-GRAMMAR(batch-four): mkdir, chmod and host-name conditional.
+fixture: services_up_readiness_timeout_preserves_startup_failure_receipt.fixture
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+mkdir: root
+mkdir: home
+when os-name linux: mkdir: state
+when os-name linux: chmod: bin/systemd-run 755
+when os-name linux: chmod: bin/systemctl 755
+step: jetpack services up timeout --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+env: JETPACK_SERVICE_HEALTH_TIMEOUT_MS=500
+exit: nonzero
+stdout+stderr: ~ "E1261" # original predicate
+file: .jet/services/timeout/lifecycle ~ "phase=failed" # original predicate
+file: .jet/services/timeout/lifecycle ~ "recovery=startup-failed" # original predicate
+file: .jet/services/timeout/supervisor.error is-file
+file: .jet/services/timeout/pid absent

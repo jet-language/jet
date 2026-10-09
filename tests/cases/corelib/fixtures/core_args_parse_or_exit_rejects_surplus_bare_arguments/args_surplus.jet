@@ -1,0 +1,11 @@
+
+use core.args as args
+use core.process as process
+
+fn run() {
+    spec :: args.spec()
+        .option("name", "display name", "NAME")
+        .positional("name", "display name")
+    parsed :: spec.parse_or_exit(process.argv())
+    print(parsed.option("name") ?? "none")
+}

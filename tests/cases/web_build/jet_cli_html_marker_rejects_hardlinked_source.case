@@ -1,0 +1,11 @@
+# HAND-PORT tests/web_build.rs:1173-1206 jet_cli_html_marker_rejects_hardlinked_source
+# PENDING-GRAMMAR: approved batch-two forms; no runtime parity claim.
+fixture: jet_cli_html_marker_rejects_hardlinked_source.fixture
+env: NO_COLOR=1
+requires: tool:rustc
+requires: os:unix
+hardlink: {work}/outside.html custom.html
+step: jet build app.jet
+exit: nonzero
+file: outside.html = jet_cli_html_marker_rejects_hardlinked_source.outside.expected
+

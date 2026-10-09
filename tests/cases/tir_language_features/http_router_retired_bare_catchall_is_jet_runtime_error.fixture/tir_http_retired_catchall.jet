@@ -1,0 +1,12 @@
+use core.http as http
+use core.http.server as server
+use core.sys as env
+fn handle(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    return Ok(server.response(200, "ok"))
+}
+fn run() {
+    router :: http.router()
+    dynamic :: env.get("JET_HTTP_TEST_MARKER") ?? "*"
+    pattern :: "/assets/{dynamic}"
+    router.get(pattern, handle)
+}

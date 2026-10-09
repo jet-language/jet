@@ -1,0 +1,45 @@
+# Port of tests/generics.rs::generic_module_fact_value_example_has_profile_and_tier_parity (99-243); all original source bytes/assertions retained.
+# PENDING-GRAMMAR(batch4 semantic-index nested filters/distinct/projection); runtime PENDING-SAME-HEAD.
+# ORACLE-LITERAL profile bytes rs116-117; other output uses committed golden.
+fixture: facts.fixture
+env: NO_COLOR=1
+step: jet run --profile=compact {work}/fact_value_arguments.jet
+exit: 0
+stdout: = compact.out
+step: jet dev {work}/fact_value_arguments.jet --profile=compact --interpret --watch=off
+exit: 0
+stdout: = compact.out
+step: jet run --release --set cache_slots=2 {work}/fact_value_arguments.jet
+exit: 0
+stdout: = compact.out
+step: jet run --set cache_slots=2 {work}/fact_value_arguments.jet
+exit: 0
+stdout: = compact.out
+step: jet run --profile=spacious {work}/fact_value_arguments.jet
+exit: 0
+stdout: = spacious.out
+step: jet dev {work}/fact_value_arguments.jet --profile=spacious --interpret --watch=off
+exit: 0
+stdout: = spacious.out
+step: jet run --release --set cache_slots=5 {work}/fact_value_arguments.jet
+exit: 0
+stdout: = spacious.out
+step: jet run --set cache_slots=5 {work}/fact_value_arguments.jet
+exit: 0
+stdout: = spacious.out
+step: jet explain tuned.slots {work}/fact_value_arguments.jet --profile=compact
+exit: 0
+stdout: ~ value:2 # original predicate
+stdout: ~ build.compact.settings.cache_slots # original predicate
+step: jet run --release {work}/fact_value_arguments.jet
+exit: 0
+stdout: = facts.out
+step: jet run {work}/fact_value_arguments.jet
+exit: 0
+stdout: = facts.out
+step: jet run --interpret {work}/fact_value_arguments.jet
+exit: 0
+stdout: = facts.out
+step: jet dev {work}/fact_value_arguments.jet --interpret --watch=off
+exit: 0
+stdout: = facts.out

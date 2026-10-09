@@ -1,0 +1,23 @@
+# Port of tests/process_sessions.rs:266-309; source verbatim.
+# ORACLE-LITERAL; PENDING-SAME-HEAD; have_rustc guard erased.
+requires: os:unix
+requires: tool:python3
+requires: tool:wc
+requires: tool:cat
+requires: tool:yes
+requires: tool:head
+requires: tool:sh
+fixture: process_pipeline_streaming_lifecycle_matches_all_execution_tiers.fixture
+step default: jet run run.jet
+exit: 0
+stdout: = process_pipeline_streaming_lifecycle_matches_all_execution_tiers.out
+step: jet run --interpret run.jet
+exit: == default
+stdout: == default
+stderr: == default
+step: jet build run.jet
+exit: 0
+step: built
+exit: == default
+stdout: == default
+stderr: == default

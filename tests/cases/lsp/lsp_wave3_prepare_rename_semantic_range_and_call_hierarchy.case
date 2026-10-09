@@ -1,0 +1,45 @@
+# Port of tests/lsp.rs:2834-2938; source bytes copied verbatim.
+# PENDING-GRAMMAR: generic framed sessions in TestW3b batch three; no reference snapshot needed for original predicates.
+# PENDING-SEAM(read_bytes): D-CHILD-READ-BYTES1 + CoreState2 + kit batch three.
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy/0.json
+recv lsp
+stdout: ~ "\"prepareProvider\": true" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"range\": true" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"callHierarchyProvider\": true" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy/1.json
+send lsp: messages/lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy/2.json
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy/3.json
+recv lsp
+stdout: ~ "\"placeholder\":\"add\"" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"start\":{\"line\":0,\"character\":3}" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"end\":{\"line\":0,\"character\":6}" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy/4.json
+recv lsp
+stdout: ~ "\"error\"" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "`fn` is Jet syntax, not a name you can rename" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy/5.json
+recv lsp
+stdout: ~ "\"data\":[" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy/6.json
+recv lsp
+stdout: ~ "\"name\":\"add\"" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"kind\":12" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy/7.json
+recv lsp
+stdout: ~ "\"from\"" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"name\":\"caller\"" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"fromRanges\"" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy/8.json
+recv lsp
+stdout: ~ "\"to\"" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"name\":\"add\"" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"fromRanges\"" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy/9.json
+recv lsp
+stdout: ~ "result" # original predicate; other response fields contain variable metadata/paths
+close lsp
+# Original transcript only waited; it did not assert process status.
+exit: any

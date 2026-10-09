@@ -1,0 +1,14 @@
+# Port of tests/jetpack_jetos.rs:2710-2749; original sources/predicates retained, runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_cachyos_kernel_requires_boot_artifacts.fixture
+mkdir: package-root
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+step diagnostic: jet os build box --no-color --offline
+cwd: project
+exit: 2
+capture: diagnostic = text stderr
+when diagnostic.stderr ~ "\n  error[E1282]": capture: diagnostic = text stderr.after_first("\n  error[E1282]").prepend("\n  error[E1282]")
+capture: expected = text file.trim_end expected.stderr
+cap:diagnostic.trim_end: = "{cap:expected}"
+

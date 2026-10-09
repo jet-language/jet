@@ -1,0 +1,25 @@
+
+use core.db as db
+
+fn count_people<T: Driver>(&conn: T) -> Int DBError! {
+    row :: conn.query_one(SQL{"SELECT COUNT(*) AS n FROM person"})
+    found :: row ?? panic("missing")
+    missing :: conn.query_one(SQL{"SELECT id, name FROM person WHERE id = 99"})
+    if missing == .None { print("absent") } else { panic("unexpected row") }
+    return .Ok(db.row_int(found, "n") ?? 0)
+}
+
+fn run() {
+    conn := db.open_memory()
+    policy :: db.policy("person", "true") ?? panic("policy")
+    scoped := conn.with_policy(policy, "owner")
+    _ :: db.migrate(scoped, "person-v1", [
+        SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)"}
+    ]) ?? panic("create")
+    _ :: scoped.execute(
+        SQL{"INSERT INTO person (id, name) VALUES (1, 'Ada')"}
+    ) ?? panic("insert")
+    n :: count_people(&scoped) ?? panic("count")
+    print(n)
+    _closed :: scoped.close()
+}

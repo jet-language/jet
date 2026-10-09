@@ -1,0 +1,19 @@
+
+use core.encoding.yaml as yaml
+
+fn run() {
+    alias_items :: "  - *a\n".repeat(32768)
+    alias_raw :: "base: &a\n  value: x\nitems:\n{alias_items}"
+    if yaml.parse(alias_raw) == {
+        .Ok(_) -> { print("alias:accepted") }
+        .Err(_) -> { print("alias:rejected") }
+    }
+
+    open :: "[".repeat(65)
+    close :: "]".repeat(65)
+    depth_raw :: "{open}0{close}"
+    if yaml.parse(depth_raw) == {
+        .Ok(_) -> { print("depth:accepted") }
+        .Err(_) -> { print("depth:rejected") }
+    }
+}

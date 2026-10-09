@@ -1,0 +1,18 @@
+# Port of tests/output_callable.rs::inspect_output_reports_selected_callable_facts; original sources and predicates.
+# ORACLE-LITERAL; PENDING-SAME-HEAD (heavy lane paused); no reference capture blessed.
+fixture: inspect_output_reports_selected_callable_facts.fixture
+env: NO_COLOR=1
+step: jet inspect output Examples/features/tooling/output_callable.jet
+exit: 0
+stdout: ~ "selected: Executable \"checked-output\"" # original predicate
+stdout: ~ "entry: launch" # original predicate
+stdout: ~ "source path: " # original predicate
+stdout: ~ "callable identity: output_callable::launch" # original predicate
+stdout: ~ "failure contract: !Err" # original predicate
+stdout: ~ "implicit default !Err" # original predicate
+stdout: ~ "effects: IO" # original predicate
+stdout: ~ "selection reason: sole compatible Output" # original predicate
+step: jet inspect output Examples/features/tooling/output_callable.jet --json
+exit: 0
+stdout: ~ "\"failure_contract\":\"!Err\"" # original predicate
+stdout: ~ "\"failure_source\":\"implicit default !Err\"" # original predicate

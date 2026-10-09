@@ -1,0 +1,12 @@
+# Port of tests/cli_parts/commands.rs:1700-1745; fixture sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates and oracles, no runtime run.
+# ORACLE-LITERAL original trimmed stdout; PENDING-GRAMMAR: trim.
+fixture: fixtures/passthrough
+step: jet run --profile=debug {work}/args.jet -- --version 1.0.0
+exit: 0
+stdout.trim: = passthrough_forwards_version_flag_and_value_after_separator.out # original predicate
+step: jet --version
+exit: 0
+stdout: ^= "Jet " # original predicate
+stdout: ~ "supported editions:" # original predicate
+stdout: ~ "registry protocol: v" # original predicate

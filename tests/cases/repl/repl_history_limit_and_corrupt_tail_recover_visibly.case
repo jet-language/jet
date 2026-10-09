@@ -1,0 +1,21 @@
+# PORT tests/repl.rs:103-134 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: repl_history_limit_and_corrupt_tail_recover_visibly.fixture
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+env: JET_REPL_HISTORY_LIMIT=2
+step: jet repl
+stdin: repl_history_limit_and_corrupt_tail_recover_visibly.fixture/first.in
+unset: JET_REPL_HISTORY
+exit: 0
+append: state/jet/repl-history "broken-tail"
+step: jet repl
+stdin: repl_history_limit_and_corrupt_tail_recover_visibly.fixture/second.in
+unset: JET_REPL_HISTORY
+exit: any # Original second session status unasserted rs118-132.
+stdout: !~ "1 + 1" # Original excluded-retention predicate rs121.
+stdout: ~ "2 + 2" # Original retained pair conjunction rs122-125.
+stdout: ~ "3 + 3" # Original retained pair conjunction rs122-125.
+stderr: ~ "corrupt history tail" # Original warning conjunction rs127.
+stderr: ~ "discarded" # Original warning conjunction rs127.
+file: state/jet/repl-history !~ "broken-tail" # Original corrupt-tail removal rs130-132.

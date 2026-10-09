@@ -1,0 +1,80 @@
+# Port of tests/jetpack_tool.rs:392-574; assertions preserved, pending same-head/case-grammar receipt.
+fixture: fixtures/tool_install_publishes_real_projection_and_generation
+mkdir: root
+mkdir: home
+mkdir: project
+mkdir: fx
+env: HOME={work}/home
+env: JETPACK_ROOT={work}/root
+mkdir: root/hangar/provider-fixture-greet/bin
+copy: greet root/hangar/provider-fixture-greet/bin/greet
+when os unix: chmod: root/hangar/provider-fixture-greet/bin/greet 0555
+when os unix: chmod: root/hangar/provider-fixture-greet/bin 0555
+when os unix: chmod: root/hangar/provider-fixture-greet 0555
+write: fx/nixpkgs-greet.json greet.json
+step: jetpack tool install greet@nixpkgs --no-color --offline --fixtures {work}/fx 
+cwd: project
+exit: 0
+when os unix: file: home/.jet/bin/greet = fixtures/tool_install_publishes_real_projection_and_generation/expected.bin
+when os windows: file: home/.jet/bin/greet.exe = fixtures/tool_install_publishes_real_projection_and_generation/expected.bin
+when os unix
+step: {work}/home/.jet/bin/greet
+env: PATH={work}/home/.jet/bin:{env:PATH}
+exit: 0
+stdout.trim: = fixtures/tool_install_publishes_real_projection_and_generation/invoked.out
+end when
+when os windows
+step: {work}/home/.jet/bin/greet.exe
+env: PATH={work}/home/.jet/bin;{env:PATH}
+exit: 0
+stdout.trim: = fixtures/tool_install_publishes_real_projection_and_generation/invoked.out
+end when
+file: home/.jet/tools/generations/1/meta.json is-file
+file: home/.jet/tools/generations/1/meta.json ~ "\"generation\": 1" # original contains predicate
+file: home/.jet/tools/generations/1/meta.json ~ "greet@nixpkgs" # original contains predicate
+capture: hash = text file.after_first("\"output_hash\": \"").split("\"", 0) home/.jet/tools/generations/1/meta.json
+cap:hash: ^= "sha256-" # original metadata_output_hash prefix
+file: home/.jet/tools/generations/1/complete is-file
+file: home/.jet/tools/profile.json ~ "\"current\": 1" # original contains predicate
+file: home/.jet/tools/manifest.json ~ "\"reference\":\"greet@nixpkgs\"" # original contains predicate
+file: home/.jet/tools/manifest.json ~ "\"resolved\":\"greet@nixpkgs\"" # original contains predicate
+file: home/.jet/tools/current ~ "generation\t1" # original contains predicate
+file: home/.jet/tools/current ~ "checksum\tsha256-" # original contains predicate
+capture: wire = concat-files root/hangar/lifecycle-db/journal sorted
+cap:wire: ~ "{cap:hash}" # original lifecycle_wire sorted concatenation contains predicate
+cap:wire: ~ "70726f66696c652d67656e65726174696f6e3a757365723a746f6f6c733a31" # original lifecycle_wire sorted concatenation contains predicate
+step: jetpack hangar clean --no-color --yes
+cwd: project
+exit: 0
+when os unix: file: home/.jet/bin/greet exists
+when os windows: file: home/.jet/bin/greet.exe exists
+step: jetpack tool list --no-color
+cwd: project
+exit: 0
+stdout: ~ "greet" # original contains predicate
+when os unix: capture: projection = text file home/.jet/tools/generations/1/bin/greet
+when os windows: capture: projection = text file home/.jet/tools/generations/1/bin/greet.exe
+when os unix: capture: permissions = permissions file home/.jet/tools/generations/1/bin/greet
+when os windows: capture: permissions = permissions file home/.jet/tools/generations/1/bin/greet.exe
+when os unix
+step: jet run writable.jet -- {work}/home/.jet/tools/generations/1/bin/greet
+exit: 0
+copy: corrupted home/.jet/tools/generations/1/bin/greet
+step: jetpack tool list --no-color
+cwd: project
+exit: 2
+stderr: ~ "projection proof mismatch" # original contains predicate
+write: home/.jet/tools/generations/1/bin/greet = "{cap:projection}"
+chmod: home/.jet/tools/generations/1/bin/greet {cap:permissions}
+end when
+# Windows corruption + restoration subclaim: PENDING-SEAM(core-files-set-readonly); full original in map.
+step: jetpack tool uninstall greet --no-color
+cwd: project
+exit: 0
+when os unix: file: home/.jet/bin/greet absent
+when os windows: file: home/.jet/bin/greet.exe absent
+file: home/.jet/tools/generations/2/meta.json ~ "\"tools\": [\n  ]" # original contains predicate
+file: home/.jet/tools/generations/2/complete is-file
+file: home/.jet/tools/profile.json ~ "\"current\": 2" # original contains predicate
+capture: after_empty = concat-files root/hangar/lifecycle-db/journal sorted
+cap:after_empty: !~ "70726f66696c652d67656e65726174696f6e3a757365723a746f6f6c733a32" # original lifecycle_wire sorted concatenation contains predicate

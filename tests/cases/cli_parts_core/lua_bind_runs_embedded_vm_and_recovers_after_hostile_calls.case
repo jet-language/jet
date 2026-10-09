@@ -1,0 +1,23 @@
+# Port of tests/cli_parts/core.rs:125-209; original sources/predicates retained.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): new typed/data/relational forms are explicit.
+# KNOWN-FAILING #4799: original missing main.jet copy BEFORE bind, every later assertion/C probe retained.
+fixture: fixtures/lua_vm
+requires: tool:lua
+copy: {root}/Examples/interop/lua/main.jet main.jet
+step: jet inspect bind lua ops.lua --pkg ops
+exit: 0
+file: .jet/bindings/lua/libjet_lua_ops.a is-file
+file: .jet/bindings/lua/ops.provenance ~ "state=per-session\ntransport=datatree+table-view\ntable-view=zero-copy\nhook=instructions\n" # original predicate
+file: .jet/bindings/lua/ops.jet ~ "pub struct TableView" # original predicate
+file: .jet/bindings/lua/ops.jet ~ "pub fn counters_view(session: Session, deadline_ms: Int) -> TableView LuaError! {" # original predicate
+file: .jet/bindings/lua/ops.jet ~ "pub fn view_get_int(view: TableView, key: String) -> Int LuaError! {" # original predicate
+file: .jet/bindings/lua/ops.jet ~ "pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! {" # original predicate
+step: jet run --profile=debug main.jet
+exit: 0
+stdout: = lua-vm.out
+capture: lua_dir = text file.trim .jet/bindings/lua/ops.lua-path
+step: cc lifecycle.c -L.jet/bindings/lua -l:libjet_lua_ops.a -L{cap:lua_dir} -Wl,-rpath,{cap:lua_dir} -llua -lpthread -ldl -lm -o lifecycle
+exit: 0
+step: {work}/lifecycle
+exit: 0

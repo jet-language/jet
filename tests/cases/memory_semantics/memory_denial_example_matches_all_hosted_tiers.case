@@ -1,0 +1,23 @@
+# Port of tests/memory_semantics.rs:101-107; census guard -> public CLI example parity case.
+env: NO_COLOR=1
+env: JETPACK_ENV=1
+mkdir: release
+mkdir: default
+mkdir: interpret
+step release: jet run --release {root}/Examples/features/memory/effect_denials.jet
+env: JET_STORE_DIR={work}/release/cache
+env: JETPACK_ROOT={work}/release/jetpack
+exit: 0
+stdout: = ../../../Examples/features/expected/memory/effect_denials.out
+step: jet run {root}/Examples/features/memory/effect_denials.jet
+env: JET_STORE_DIR={work}/default/cache
+env: JETPACK_ROOT={work}/default/jetpack
+exit: 0
+stdout: = ../../../Examples/features/expected/memory/effect_denials.out
+stdout: == release
+step: jet run --interpret {root}/Examples/features/memory/effect_denials.jet
+env: JET_STORE_DIR={work}/interpret/cache
+env: JETPACK_ROOT={work}/interpret/jetpack
+exit: 0
+stdout: = ../../../Examples/features/expected/memory/effect_denials.out
+stdout: == release

@@ -1,0 +1,13 @@
+# Port of tests/corelib_parts/encoding_streams.rs::csv_stream_records_are_incremental_rfc4180_bounded_and_terminal; guest source unchanged.
+# ORACLE-LITERAL: tests/corelib_parts/encoding_streams.rs:1770.
+fixture: fixtures/csv_stream_records_are_incremental_rfc4180_bounded_and_terminal
+write: guest.jet fixtures/csv_stream_records_are_incremental_rfc4180_bounded_and_terminal/fixture.template
+step aot: jet build guest.jet
+step aot_run: built
+stdout: = csv_stream_records_are_incremental_rfc4180_bounded_and_terminal.out
+stderr: empty
+file: output.csv = csv_stream_records_are_incremental_rfc4180_bounded_and_terminal.output.csv.expected
+step: jet run guest.jet
+stdout: = csv_stream_records_are_incremental_rfc4180_bounded_and_terminal.out
+stderr: empty
+file: output.csv = csv_stream_records_are_incremental_rfc4180_bounded_and_terminal.output.csv.expected

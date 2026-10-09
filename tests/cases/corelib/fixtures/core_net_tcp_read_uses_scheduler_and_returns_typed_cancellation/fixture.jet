@@ -1,0 +1,23 @@
+
+use core.net as net
+use core.tasks as tasks
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    address :: net.socket_to_string(typed_address)
+    (ready_tx, ready_rx) :: channel<Int>()
+    server :: task {
+        stream := net.tcp_accept(listener) ?? panic("accept")
+        ready_tx.send(1)
+        if stream.read(1) == {
+            .Ok(_) -> print("unexpected read")
+            .Err(error) -> print(net.error_message(error))
+        }
+    }
+    _client :: net.tcp_connect(address) ?? panic("connect")
+    _ready :: ready_rx.receive() ?? panic("ready")
+    server.cancel()
+    server.join() ?? panic("server task failed")
+}
+

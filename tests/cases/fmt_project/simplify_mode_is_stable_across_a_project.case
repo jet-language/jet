@@ -1,0 +1,18 @@
+# Port of tests/fmt_project.rs:673-732; original corpus paths kept verbatim.
+# The original writes docs/spec/reference/sample.jet but selects docs/reference: no adaptation.
+# ORACLE-LITERAL files: tests/fmt_project.rs:706-711.
+# PENDING-SAME-HEAD: verify original expectations, never bless historical mismatch.
+fixture: simplify-project.fixture
+step: jet fmt --simplify {work}/examples {work}/tests {work}/docs/reference
+exit: 0
+file: examples/answer.jet = answer.out
+file: tests/double.jet = double.out
+file: docs/spec/reference/sample.jet = label.out
+copy: examples/answer.jet answer.before
+copy: tests/double.jet double.before
+copy: docs/spec/reference/sample.jet label.before
+step: jet fmt --simplify --check {work}/examples {work}/tests {work}/docs/reference
+exit: 0
+file: examples/answer.jet == answer.before
+file: tests/double.jet == double.before
+file: docs/spec/reference/sample.jet == label.before

@@ -1,0 +1,120 @@
+// Reviewed tests/pkg.rs:7964-8030 and9082-9145, exact original predicates.
+// PENDING-SEAM(package-tests); no case is blessed or weakened on casing.
+fn publication_pkg_integration_registry_root(label: String) -[FS, Env]> String Never! {
+    root :: files.join(sys.temp_dir(), "jet-pkg-integration-{label}-{sys.pid()}")
+    files.remove_all(root).drop("fixture may be absent")
+    files.create_dir_all(root) ?? panic("mkdir fixture")
+    root
+}
+fn publication_pkg_integration_registry_restore(name: String, previous: String?) -[Env]> {
+    if previous == {
+        .Val(value) -> sys.set(name, value)
+        .None -> { _ :: sys.unset(name) ?? panic("restore environment") }
+    }
+}
+fn publication_pkg_integration_entry(name: String, version: String, hash: String, key: String, signature: String) -> PublicationIndexEntry Never! {
+    PublicationIndexEntry{name: name, version: version, content_hash: hash, fingerprint: "sha256-fp", yanked: false, tier: .Core, gate_status: publication_core_reviewed(), public_key: key, signature: signature}
+}
+#Test("pkg integration registry_transport_rejects_and_redacts_embedded_credentials") {
+    registry :: PublicationRegistryConfig.private("scratch", "https://user:super-secret@example.invalid/registry.git", false)
+    assert_eq(publication_redact_registry_url(registry.url), "https://example.invalid/registry.git")
+    assert_eq(publication_redact_registry_url("https://example.invalid/registry.git?access_token=super-secret#fragment"), "https://example.invalid/registry.git")
+    if publication_ensure_index_clone(registry) == {
+        .Err(error) -> {
+            rendered :: diagnostic_render(error.diagnostic, "package.jet", "", false)
+            assert(rendered.contains("E1235"))
+            assert(!rendered.contains("super-secret"))
+        }
+        .Ok(_) -> panic("embedded credentials accepted")
+    }
+    query :: PublicationRegistryConfig.private("scratch", "https://example.invalid/registry.git?access_token=super-secret", false)
+    if publication_ensure_index_clone(query) == {
+        .Err(error) -> {
+            rendered :: diagnostic_render(error.diagnostic, "package.jet", "", false)
+            assert(rendered.contains("E1235"))
+            assert(!rendered.contains("super-secret"))
+        }
+        .Ok(_) -> panic("credential-bearing parameters accepted")
+    }
+    file :: PublicationRegistryConfig.private("scratch", "file:///tmp/registry.git?access_token=super-secret", false)
+    if publication_ensure_index_clone(file) == {
+        .Err(error) -> assert(!diagnostic_render(error.diagnostic, "package.jet", "", false).contains("super-secret"))
+        .Ok(_) -> panic("credential-bearing file URL accepted")
+    }
+    detail :: publication_e1235("https://example.invalid/registry.git", "git helper failed after receiving password super-secret")
+    assert(!diagnostic_render(detail, "package.jet", "", false).contains("super-secret"))
+}
+#Test("pkg integration takeover_requires_review_and_resigning") {
+    root :: publication_pkg_integration_registry_root("takeover")
+    previous :: sys.get("JET_KEYS_DIR")
+    sys.set("JET_KEYS_DIR", files.join(root, "keys"))
+    key_a :: publication_keygen("jet", false) ?? panic("keygen a")
+    original_seed :: files.read_bytes(key_a.seed_path) ?? panic("original seed")
+    key_b :: publication_keygen("other", false) ?? panic("keygen b")
+    assert(key_a.public_key_hex != key_b.public_key_hex)
+    hash1 :: "sha256-v1v1v1"
+    hash2 :: "sha256-v2v2v2"
+    v1 :: publication_pkg_integration_entry("textkit", "1.0.0", hash1, key_a.public_key_hex, publication_sign(key_a.seed_path, hash1) ?? panic("sign first"))
+    wrong :: publication_pkg_integration_entry("textkit", "2.0.0", hash2, key_b.public_key_hex, publication_sign(key_a.seed_path, hash2) ?? panic("sign old key"))
+    v2 :: publication_pkg_integration_entry("textkit", "2.0.0", hash2, key_b.public_key_hex, publication_sign(key_b.seed_path, hash2) ?? panic("sign new key"))
+    repo :: files.join(root, "registry")
+    files.create_dir_all(repo) ?? panic("registry")
+    publication_write_index_entry(repo, v1) ?? panic("write first")
+    if publication_write_index_entry(repo, v2) == {
+        .Err(error) -> assert("{error}".contains("no approved registry review"))
+        .Ok(_) -> panic("missing review must refuse takeover")
+    }
+    review :: files.join(repo, "reviews/textkit/2.0.0.review")
+    files.create_dir_all(files.dirname(review)) ?? panic("review dir")
+    files.write(review, "jet-registry-core-review-v1\npackage=textkit\nversion=2.0.0\nreviewer=registry-owner\ndecision=approved\n") ?? panic("review")
+    if publication_write_index_entry(repo, wrong) == {
+        // The original's lowercase needle stays exact. Existing RegistryVerify
+        // changes it to sentence casing; that is not parity evidence for this row.
+        .Err(error) -> assert("{error}".contains("signature verification failed"))
+        .Ok(_) -> panic("old signer must refuse takeover")
+    }
+    publication_write_index_entry(repo, v2) ?? panic("reviewed takeover")
+    all :: publication_read_entries(repo, "textkit") ?? panic("read index")
+    publication_verify_index_entry(all, v2, false, "jet") ?? panic("verify reviewed takeover")
+    assert_eq(files.read_bytes(key_a.seed_path) ?? panic("seed unchanged"), original_seed)
+    publication_pkg_integration_registry_restore("JET_KEYS_DIR", previous)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+fn publication_pkg_integration_git(args: [String], cwd: String) -[Env, Exec, Time.Wait]> {
+    receipt :: process.cmd(args).cwd(cwd).stdout(.Capture).stderr(.Capture).run() ?? panic("git fixture command")
+    assert(receipt.success)
+}
+// pkg.rs:8033-8080; original bare_registry/seed_core_review fixture bytes.
+#Test("pkg integration registry_refresh_failure_preserves_previous_cache") {
+    root :: publication_pkg_integration_registry_root("registry_stale_cache")
+    bare :: files.join(root, "registry.git")
+    work :: files.join(root, "registry.review-{sys.pid()}")
+    publication_pkg_integration_git([String]{"git", "init", "--bare", bare}, root)
+    publication_pkg_integration_git([String]{"git", "--git-dir", bare, "symbolic-ref", "HEAD", "refs/heads/main"}, root)
+    publication_pkg_integration_git([String]{"git", "clone", "file://{bare}", work}, root)
+    review :: files.join(work, "reviews/stale-kit/1.0.0.review")
+    files.create_dir_all(files.dirname(review)) ?? panic("review dir")
+    files.write(review, "jet-registry-core-review-v1\npackage=stale-kit\nversion=1.0.0\nreviewer=test-maintainer\ndecision=approved\n") ?? panic("review")
+    publication_pkg_integration_git([String]{"git", "config", "user.email", "test@jet.test"}, work)
+    publication_pkg_integration_git([String]{"git", "config", "user.name", "Jet Test"}, work)
+    publication_pkg_integration_git([String]{"git", "add", "."}, work)
+    publication_pkg_integration_git([String]{"git", "commit", "-m", "approve core package"}, work)
+    publication_pkg_integration_git([String]{"git", "push", "origin", "HEAD:main"}, work)
+    files.remove_all(work) ?? panic("seed helper cleanup")
+    cache :: files.join(root, "cache")
+    previous :: sys.get("JET_REGISTRY_CACHE_DIR")
+    sys.set("JET_REGISTRY_CACHE_DIR", cache)
+    registry :: PublicationRegistryConfig.private("scratch", "file://{bare}", false)
+    repo :: publication_ensure_index_clone(registry) ?? panic("initial registry clone")
+    before :: files.read_bytes(files.join(repo, "reviews/stale-kit/1.0.0.review")) ?? panic("previous cache")
+    files.remove_all(bare) ?? panic("remove remote")
+    if publication_ensure_index_clone(registry) == {
+        .Err(error) -> assert_eq(error.diagnostic.code, "E1235")
+        .Ok(_) -> panic("failed refresh must not replace cache")
+    }
+    assert_eq(files.read_bytes(files.join(repo, "reviews/stale-kit/1.0.0.review")) ?? panic("retained cache"), before)
+    loop name in files.listdir(files.dirname(repo)) ?? panic("cache parent") -> assert(!name.contains(".partial-") && !name.contains(".backup-"))
+    publication_pkg_integration_registry_restore("JET_REGISTRY_CACHE_DIR", previous)
+    files.remove_all(root) ?? panic("cleanup")
+}

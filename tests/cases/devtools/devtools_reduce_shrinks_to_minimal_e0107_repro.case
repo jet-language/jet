@@ -1,0 +1,10 @@
+# Port of tests/devtools.rs:52-118. PENDING-SAME-HEAD; original source bytes and assertions preserved.
+fixture: fixtures/devtools_reduce_shrinks_to_minimal_e0107_repro
+step: jet self devtools reduce {work}/repro.jet --code E0107
+file: repro.reduced.jet !~ "helper_a" # original predicate: unused helper_a absent
+file: repro.reduced.jet !~ "helper_b" # original predicate: unused helper_b absent
+file: repro.reduced.jet ~ "nonexistent_symbol_for_reduce_test" # original predicate: reproducing symbol retained
+file: repro.reduced.jet lines <= 3 # original predicate: reduced.lines().count() <=3
+step: jet check repro.reduced.jet
+exit: any # original predicate: recheck exit unasserted
+stderr: ~ "E0107" # original predicate: recheck stderr contains E0107

@@ -1,0 +1,18 @@
+# Port of tests/inline_deps.rs::jet_lock_writes_sidecar (157-194); original predicates retained.
+# PENDING-SAME-HEAD: no reference snapshot/blessing.
+fixture: loose.fixture
+env: JET_STORE_DIR={work}/.jet-test-cache
+step: jet fetch --lock stats.jet
+exit: 0
+file: stats.jet.lock is-file
+file: stats.jet.lock ~ "version = 1" # original predicate
+file: stats.jet.lock ~ "script_hash = \"sha256-" # original predicate
+file: stats.jet.lock ~ "[[dep]]" # original predicate
+file: stats.jet.lock ~ "name = \"textkit\"" # original predicate
+file: stats.jet.lock ~ "selector = \"1.4\"" # original predicate
+file: stats.jet.lock ~ "resolved = \"1.4.2\"" # original predicate
+file: stats.jet.lock ~ "content_hash = \"sha256-" # original predicate
+copy: stats.jet.lock first-lock.txt
+step: jet fetch --lock stats.jet
+exit: 0
+file: stats.jet.lock == first-lock.txt

@@ -1,0 +1,21 @@
+# HAND-PORT tests/compute_extended.rs:189-234 ml_serialization_and_placement_failures_stay_in_the_same_tier
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Exact unchanged source and original literal/existing golden; original extra default trace run retained. Load/check success flows through real CLI compilation.
+fixture: ml_serialization_and_placement_failures_stay_in_the_same_tier.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = ml_serialization_and_placement_failures_stay_in_the_same_tier.stdout.expected
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = ml_serialization_and_placement_failures_stay_in_the_same_tier.stdout.expected
+stderr: == default
+step: jet build --profile=debug main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = ml_serialization_and_placement_failures_stay_in_the_same_tier.stdout.expected
+stderr: == default
+step trace: jet run main.jet
+exit: 0
+stdout: = ml_serialization_and_placement_failures_stay_in_the_same_tier.stdout.expected

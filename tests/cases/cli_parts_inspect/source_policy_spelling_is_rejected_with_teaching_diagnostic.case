@@ -1,0 +1,12 @@
+# Port of tests/cli_parts/inspect.rs:305-335; exact original sources and assertions.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): setup actions and prepend/append line transforms.
+# KNOWN-FAILING #4806: original filter drops More: but original snapshot includes More: (line4); all bytes/predicates kept.
+fixture: fixtures/source_policy
+step: jet check main.jet
+env: NO_COLOR=1
+exit: 1
+stderr: ~ "Error [E0355]" # original predicate
+stderr: ~ "contain" # original predicate
+stderr: ~ "not a scoped policy" # original predicate
+stderr.filter(^= "Error [" " Why:" " Fix:").append("\n"): = inspect_guarantees_source_policy.txt # original predicate

@@ -1,0 +1,16 @@
+
+use core.mem
+fn read(value: &Int) -> Int {
+    cell :: value
+    #Unsafe("the borrowed value is live in the caller") {
+        addr :: mem.address_of(cell)
+        pointer :: mem.Ptr<Int>.from_addr(addr)
+        print(pointer.*)
+        via_volatile :: mem.volatile_read(pointer)
+        return via_volatile
+    }
+}
+fn run() {
+    value := 23
+    print(read(&value))
+}

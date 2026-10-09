@@ -1,0 +1,177 @@
+// Exact tests/jetpack_engine.rs:9379-9702 staged-plan engine claims.
+// PENDING-SEAM(package-tests): source-authored; no execution proof claimed.
+fn engine_staged_platform() -> String {
+    host :: PlatformKey.host()
+    "{host.os}-{host.arch}"
+}
+fn engine_staged_action(name: String, digest: String, platform: String) -> StagedPlanAction {
+    StagedPlanAction.new(name, 0, 1, [PlanInput]{PlanInput.new("manifest", digest)}, PlanAuthority{tools: [String]{"planner"}, effects: [BuildEffect]{BuildEffect.Exec}, platform})
+}
+fn engine_staged_fragment(tool: String, output: String, platform: String) -> BuildPlanFragment {
+    emitted := PlanFragmentAction.new("step", tool)
+    emitted.inputs = [String]{"manifest"}
+    emitted.outputs = [String]{output}
+    emitted.effects = [BuildEffect]{BuildEffect.Exec}
+    emitted.platform = platform
+    BuildPlanFragment{actions: [PlanFragmentAction]{emitted}}
+}
+fn engine_staged_compile(platform: String, with_args: Bool) -> BuildPlanFragment {
+    emitted := PlanFragmentAction.new("compile", "planner")
+    if with_args {
+        emitted.args = [String]{"--stable"}
+        emitted.env = [String: String]{"STAGED_INPUT": "manifest"}
+    }
+    emitted.inputs = [String]{"manifest"}
+    emitted.outputs = [String]{"result.bin"}
+    emitted.effects = [BuildEffect]{BuildEffect.Exec, BuildEffect.FS}
+    emitted.platform = platform
+    BuildPlanFragment{actions: [PlanFragmentAction]{emitted}}
+}
+fn engine_staged_error(action: StagedPlanAction, context: StagedPlanContext, tools: [String: String], emitter: StagedPlanEmitter) -> RecipeDiagnostic {
+    if recipe_run_staged_plan_action(action, context, tools, emitter) == {
+        .Ok(_) -> panic("the original staged plan must fail")
+        .Err(error) -> error
+    }
+}
+#Test("staged_plan_action_production_path_is_deterministic_and_complete") {
+    root :: files.tmpdir("jet-engine-staged-success-") ?? panic("root")
+    source :: files.join(root, "source")
+    artifacts :: files.join(root, "artifacts")
+    files.create_dir_all(source) ?? panic("source")
+    input :: "declared staged input".bytes()
+    files.write_bytes(files.join(source, "manifest"), input) ?? panic("manifest")
+    digest :: "sha256-{pkg_sha256_hex(input)}"
+    platform :: engine_staged_platform()
+    action :: StagedPlanAction.new("discover", 0, 1, [PlanInput]{PlanInput.new("manifest", digest)}, PlanAuthority{tools: [String]{"planner", "planner-alt"}, effects: [BuildEffect]{BuildEffect.Exec, BuildEffect.FS}, platform})
+    executable :: sys.executable()
+    tools :: [String: String]{"planner": executable, "planner-alt": executable}
+    context :: StagedPlanContext{source_dir: source, artifact_root: artifacts}
+    emitter :: StagedPlanEmitter{emit: sandbox -> {
+        assert_eq(sandbox.read_input("manifest") ?? panic("declared input"), input)
+        Ok(engine_staged_compile(platform, true))
+    }}
+    first :: recipe_run_staged_plan_action(action, context, tools, emitter) ?? panic("first")
+    second :: recipe_run_staged_plan_action(action, context, tools, emitter) ?? panic("second")
+    assert_eq(first.action_identity, second.action_identity)
+    assert_eq(first.fragment_digest, second.fragment_digest)
+    assert_eq(first.plan_fingerprint, second.plan_fingerprint)
+    assert_eq(first.artifact_dir, second.artifact_dir)
+    assert_eq(first.lock.inputs[0].digest, digest)
+    assert(first.lock.encode().contains("tool=planner\n"))
+    assert(first.lock.encode().contains("effect=exec\n"))
+    assert(first.lock.encode().contains("platform={platform}\n"))
+    assert(files.is_file(files.join(first.artifact_dir, "fragment.plan")))
+    assert(files.is_file(files.join(first.artifact_dir, "lock")))
+    assert(files.is_file(files.join(first.artifact_dir, "plan.fingerprint")))
+    plan :: recipe_lower_staged_plan_action(action, engine_staged_compile(platform, false), tools) ?? panic("lower")
+    assert_eq(plan.actions().len(), 2)
+    has_input := false
+    has_output := false
+    has_planner_label := false
+    loop item in plan.actions() {
+        if item.inputs.contains("manifest") -> has_input = true
+        if item.outputs.contains("result.bin") -> has_output = true
+        assert_eq(item.labels.get("staged.platform"), Val(platform))
+        planner_label :: if item.labels.get("authority.tool.0") == {
+            .Val(value) -> value == "planner"
+            .None -> false
+        }
+        if planner_label -> has_planner_label = true
+    }
+    assert(has_input)
+    assert(has_output)
+    assert(has_planner_label)
+    reordered := action
+    reordered.authority.tools = [String]{"planner-alt", "planner"}
+    reordered.authority.effects = [BuildEffect]{BuildEffect.FS, BuildEffect.Exec}
+    reordered_plan :: recipe_lower_staged_plan_action(reordered, engine_staged_compile(platform, false), tools) ?? panic("reordered")
+    assert_eq(recipe_plan_fingerprint(plan) ?? panic("fingerprint"), recipe_plan_fingerprint(reordered_plan) ?? panic("reordered fingerprint"))
+    files.remove_all(root).drop("fixture cleanup")
+}
+#Test("staged_plan_action_rejects_sandbox_and_graph_failures_without_artifact") {
+    root :: files.tmpdir("jet-engine-staged-failures-") ?? panic("root")
+    source :: files.join(root, "source")
+    artifacts :: files.join(root, "artifacts")
+    files.create_dir_all(source) ?? panic("source")
+    input :: "declared staged input".bytes()
+    files.write_bytes(files.join(source, "manifest"), input) ?? panic("manifest")
+    digest :: "sha256-{pkg_sha256_hex(input)}"
+    platform :: engine_staged_platform()
+    tools :: [String: String]{"planner": sys.executable()}
+    context :: StagedPlanContext{source_dir: source, artifact_root: artifacts}
+    denied :: StagedPlanEmitter{emit: sandbox -> {
+        assert(sandbox.read_store("private/store") == .Err(_))
+        assert(sandbox.resolve_package("unlocked") == .Err(_))
+        sandbox.read_input("not-declared")
+        panic("read_input must reject undeclared access")
+    }}
+    error :: engine_staged_error(engine_staged_action("undeclared", digest, platform), context, tools, denied)
+    assert_eq(error.code, "E1238")
+    assert(error.why.contains("staged plan action denied"))
+    assert(!files.exists(artifacts))
+    cycle_a := PlanFragmentAction.new("a", "planner")
+    cycle_a.inputs = [String]{"manifest"}
+    cycle_a.outputs = [String]{"a.out"}
+    cycle_a.dependencies = [String]{"b"}
+    cycle_a.effects = [BuildEffect]{BuildEffect.Exec}
+    cycle_a.platform = platform
+    cycle_b := PlanFragmentAction.new("b", "planner")
+    cycle_b.inputs = [String]{"manifest"}
+    cycle_b.outputs = [String]{"b.out"}
+    cycle_b.dependencies = [String]{"a"}
+    cycle_b.effects = [BuildEffect]{BuildEffect.Exec}
+    cycle_b.platform = platform
+    error2 :: engine_staged_error(engine_staged_action("cycle", digest, platform), context, tools, StagedPlanEmitter{emit: _ -> Ok(BuildPlanFragment{actions: [PlanFragmentAction]{cycle_a, cycle_b}})})
+    assert_eq(error2.code, "E1238")
+    assert(error2.why.contains("cycle"))
+    assert(!files.exists(artifacts))
+    error3 :: engine_staged_error(engine_staged_action("unauthorized-tool", digest, platform), context, tools, StagedPlanEmitter{emit: _ -> Ok(engine_staged_fragment("other-tool", "tool.out", platform))})
+    assert_eq(error3.code, "E1238")
+    assert(error3.why.contains("undeclared tool `other-tool`"))
+    assert(!files.exists(artifacts))
+    error4 :: engine_staged_error(engine_staged_action("missing-realized-tool", digest, platform), context, [String: String]{}, StagedPlanEmitter{emit: _ -> Ok(engine_staged_fragment("planner", "missing-tool.out", platform))})
+    assert_eq(error4.code, "E1238")
+    assert(error4.what.contains("not a realized dependency"))
+    assert(!files.exists(artifacts))
+    unauthorized_effect := engine_staged_fragment("planner", "effect.out", platform)
+    unauthorized_effect.actions[0].effects = [BuildEffect]{BuildEffect.FS}
+    error5 :: engine_staged_error(engine_staged_action("unauthorized-effect", digest, platform), context, tools, StagedPlanEmitter{emit: _ -> Ok(unauthorized_effect)})
+    assert_eq(error5.code, "E1238")
+    assert(error5.why.contains("undeclared effect `fs`"))
+    assert(!files.exists(artifacts))
+    mismatched_platform := engine_staged_fragment("planner", "platform.out", platform)
+    mismatched_platform.actions[0].platform = "other-platform"
+    error6 :: engine_staged_error(engine_staged_action("platform-mismatch", digest, platform), context, tools, StagedPlanEmitter{emit: _ -> Ok(mismatched_platform)})
+    assert_eq(error6.code, "E1238")
+    assert(error6.why.contains("not declared platform"))
+    assert(!files.exists(artifacts))
+    error7 :: engine_staged_error(engine_staged_action("invalid-output", digest, platform), context, tools, StagedPlanEmitter{emit: _ -> Ok(engine_staged_fragment("planner", "../escape", platform))})
+    assert_eq(error7.code, "E1238")
+    assert(error7.why.contains("output `../escape`"))
+    assert(!files.exists(artifacts))
+    overlapping := engine_staged_fragment("planner", "overlap.out", platform)
+    nested := PlanFragmentAction.new("nested", "planner")
+    nested.inputs = [String]{"manifest"}
+    nested.outputs = [String]{"overlap.out/child"}
+    nested.effects = [BuildEffect]{BuildEffect.Exec}
+    nested.platform = platform
+    &overlapping.actions.push(nested)
+    error8 :: engine_staged_error(engine_staged_action("overlapping-output", digest, platform), context, tools, StagedPlanEmitter{emit: _ -> Ok(overlapping)})
+    assert_eq(error8.code, "E1238")
+    assert(error8.why.contains("overlap"))
+    assert(!files.exists(artifacts))
+    mismatch := engine_staged_action("input-mismatch", "sha256-0000000000000000000000000000000000000000000000000000000000000000", platform)
+    error9 :: engine_staged_error(mismatch, context, tools, StagedPlanEmitter{emit: _ -> Ok(engine_staged_fragment("planner", "mismatch.out", platform))})
+    assert_eq(error9.code, "E1238")
+    assert(error9.why.contains("digest mismatch"))
+    assert(!files.exists(artifacts))
+    error10 :: engine_staged_error(engine_staged_action("failed", digest, platform), context, tools, StagedPlanEmitter{emit: _ -> Err(StagedPlanActionError.Failed("boom"))})
+    assert_eq(error10.code, "E1238")
+    assert(error10.why.contains("failed before publication"))
+    assert(!files.exists(artifacts))
+    error11 :: engine_staged_error(engine_staged_action("cancelled", digest, platform), context, tools, StagedPlanEmitter{emit: _ -> Err(StagedPlanActionError.Cancelled)})
+    assert_eq(error11.code, "E1238")
+    assert(error11.what.contains("cancelled"))
+    assert(!files.exists(artifacts))
+    files.remove_all(root).drop("fixture cleanup")
+}

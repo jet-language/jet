@@ -1,0 +1,35 @@
+
+use core.process as process
+use core.time as time
+
+fn dropped(path: String) {
+    child :: process.cmd(["{work}/tree.sh", path]).terminal().spawn() ?? panic("drop spawn failed")
+    time.sleep(100ms)
+}
+
+fn run() -[Exec, IO, Time.Wait]> {
+    interrupt :: process.cmd(["{work}/tree.sh", "{work}/interrupt.pid"]).terminal().spawn() ?? panic("interrupt spawn failed")
+    time.sleep(100ms)
+    interrupt.interrupt() ?? panic("interrupt failed")
+    interrupt_result :: interrupt.wait() ?? panic("interrupt wait failed")
+    print(interrupt_result.success)
+
+    terminate :: process.cmd(["{work}/tree.sh", "{work}/terminate.pid"]).terminal().spawn() ?? panic("terminate spawn failed")
+    time.sleep(100ms)
+    terminate.terminate() ?? panic("terminate failed")
+    terminate_result :: terminate.wait() ?? panic("terminate wait failed")
+    print(terminate_result.success)
+
+    kill :: process.cmd(["{work}/tree.sh", "{work}/kill.pid"]).terminal().spawn() ?? panic("kill spawn failed")
+    time.sleep(100ms)
+    kill.kill() ?? panic("kill failed")
+    kill_result :: kill.wait() ?? panic("kill wait failed")
+    print(kill_result.success)
+
+    timeout :: Duration.milliseconds(100) ?? panic("timeout duration failed")
+    timed :: process.run_spec(process.cmd(["{work}/tree.sh", "{work}/timeout.pid"]).terminal().timeout(timeout)) ?? panic("timeout run failed")
+    print(timed.timed_out)
+
+    dropped("{work}/drop.pid")
+    print("drop returned")
+}

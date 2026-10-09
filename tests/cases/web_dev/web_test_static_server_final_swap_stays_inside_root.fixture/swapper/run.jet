@@ -1,0 +1,26 @@
+// SETUP-PORT tests/web_dev.rs:934-950; concurrent process replaces original swap thread.
+use core.files as files
+use core.sys as sys
+use core.time as time
+fn s5h_link(outside: String, target: String) -> Bool {
+    files.symlink(outside, target) ?? return false
+    true
+}
+fn s5h_swap(target: String, parked: String, outside: String) -> Bool {
+    files.remove(parked).drop("original ignores cleanup failure")
+    files.rename(target, parked) ?? return false
+    made :: s5h_link(outside, target)
+    files.remove(target).drop("original ignores unlink failure")
+    files.rename(parked, target).drop("original ignores restore failure")
+    time.sleep(time.duration_ns(50000))
+    made
+}
+fn run() {
+    root :: sys.get("S5_ROOT") ?? panic("root")
+    swaps := 0
+    files.write(files.join(root, "swapper-ready"), "ready") ?? panic("ready")
+    loop !files.exists(files.join(root, "stop")) {
+        if s5h_swap(files.join(root, "root/race.js"), files.join(root, "root/race.js.parked"), files.join(root, "outside.js")) -> swaps = swaps + 1
+    }
+    print(swaps)
+}

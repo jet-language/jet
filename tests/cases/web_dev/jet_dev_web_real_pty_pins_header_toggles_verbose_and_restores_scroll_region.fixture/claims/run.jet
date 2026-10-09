@@ -1,0 +1,117 @@
+use core.files as files
+
+struct S5PTYContext { port: Int, token: String }
+fn s5_pty_root() -> String { sys.get("S5_ROOT") ?? panic("root") }
+fn s5_pty_text() -> String { files.read(files.join(s5_pty_root(), "terminal.typescript")) ?? "" }
+fn s5_pty_marker() -> String { String.from_bytes([U8]{27, 91, 51, 114}) ?? panic("ESC 3r") }
+fn s5_pty_count(text: String) -> Int {
+    bytes :: text.bytes()
+    marker :: s5_pty_marker().bytes()
+    count := 0
+    index := 0
+    loop index + marker.len() <= bytes.len() {
+        same := true
+        loop part in 0..<marker.len() { if bytes[index + part] != marker[part] -> same = false }
+        if same {
+            count = count + 1
+            index = index + marker.len()
+        } else {
+            index = index + 1
+        }
+    }
+    count
+}
+fn s5_pty_context() -> S5PTYContext {
+    started :: time.start()
+    transcript := ""
+    loop {
+        transcript = s5_pty_text()
+        if transcript.contains("Canvas: http://") -> break
+        assert(time.elapsed(started).ns <= 20000000000, "PTY startup has no Canvas URL")
+        time.sleep(time.duration_ms(50))
+    }
+    loop line in transcript.lines() {
+        if line.starts_with("Canvas: ") {
+            url :: line.split("://").get(1) ?? panic("Canvas URL protocol")
+            authority :: url.split("/").get(0) ?? panic("Canvas URL authority")
+            port :: s5_web_u16(authority.split(":").get(1) ?? panic("Canvas URL port")) ?? panic("Canvas u16")
+            token_tail :: line.split("session=").get(1) ?? panic("Canvas session")
+            bytes :: token_tail.bytes()
+            end := 0
+            loop end < bytes.len() {
+                byte :: Int.from_u8(bytes[end])
+                if !((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)) -> break
+                end = end + 1
+            }
+            assert(end >= 32)
+            return S5PTYContext{port, token: String.from_bytes_lossy(s5_web_bytes(bytes, 0, end))}
+        }
+    }
+    panic("PTY startup did not include a Canvas URL")
+}
+fn s5_pty_status(context: S5PTYContext, client: String, state: String, timeout_ms: Int) -> String {
+    started :: time.start()
+    loop {
+        if s5_web_get(context.port, "/__jet_dev_status?client={client}", Val(context.token)) == .Val(response) {
+            body :: String.from_bytes_lossy(response.body)
+            if response.status == 200 && body.contains("\"state\":\"{state}\"") -> return body
+        }
+        assert(time.elapsed(started).ns <= timeout_ms * 1000000, "PTY dev status missing")
+        time.sleep(time.duration_ms(100))
+    }
+}
+fn s5_pty_state(name: String) -> Int {
+    text :: files.read(files.join(s5_pty_root(), name)) ?? panic("PTY observation")
+    Int.parse(text) ?? panic("PTY integer observation")
+}
+
+#Test("original real PTY interaction observations") {
+    phase :: sys.get("S5_PHASE") ?? panic("phase")
+    context :: s5_pty_context()
+    if phase == "ready" {
+        s5_web_wait_up(context.port, 20000)
+        ready :: s5_pty_status(context, "pty-tab", "ready", 5000)
+        assert(ready.contains("\"clients\":1"))
+    } else if phase == "request" {
+        _ :: s5_web_get(s5_web_port(), "/app.js", None) ?? panic("request while verbose")
+    } else if phase == "error" {
+        _ :: s5_pty_status(context, "pty-tab", "error", 10000)
+    } else if phase == "collapsed" {
+        // ORACLE-PORT web_dev.rs:1430: exact original text.matches(ESC3r).count().
+        files.write(files.join(s5_pty_root(), "collapsed-count"), "{s5_pty_count(s5_pty_text())}") ?? panic("collapsed count")
+    } else if phase == "before-eof" {
+        before :: s5_pty_state("collapsed-count")
+        started :: time.start()
+        loop {
+            text :: s5_pty_text()
+            if s5_pty_count(text) > before {
+                files.write(files.join(s5_pty_root(), "before-eof"), "{text.bytes().len()}") ?? panic("before EOF length")
+                break
+            }
+            assert(time.elapsed(started).ns <= 5000000000, "PTY did not reactivate verbose scroll region")
+            time.sleep(time.duration_ms(50))
+        }
+    } else if phase == "after-eof" {
+        before :: s5_pty_state("before-eof")
+        marker :: String.from_bytes([U8]{27, 91, 114}) ?? panic("ESC r")
+        started :: time.start()
+        loop {
+            text :: s5_pty_text()
+            bytes :: text.bytes()
+            assert(before <= bytes.len())
+            tail :: String.from_bytes_lossy(s5_web_bytes(bytes, before, bytes.len()))
+            if tail.contains(marker) {
+                files.write(files.join(s5_pty_root(), "after-eof-count"), "{s5_pty_count(text)}") ?? panic("after EOF count")
+                break
+            }
+            assert(time.elapsed(started).ns <= 5000000000, "EOF did not restore active scroll region")
+            time.sleep(time.duration_ms(50))
+        }
+    } else {
+        count :: s5_pty_state("after-eof-count")
+        _ :: s5_pty_status(context, "post-eof-tab", "error", 5000)
+        time.sleep(time.duration_ms(100))
+        text :: files.read(files.join(s5_pty_root(), "terminal.typescript")) ?? panic("post-refresh transcript")
+        assert_eq(s5_pty_count(text), count)
+    }
+}

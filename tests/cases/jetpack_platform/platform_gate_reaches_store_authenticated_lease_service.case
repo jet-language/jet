@@ -1,0 +1,236 @@
+# Port of tests/jetpack_platform.rs:175-283; public assertions exact, runtime PENDING-SAME-HEAD.
+# Setup requires the named authentic fixture seam; no forged Store receipts/output identities.
+# Direct library claims LEDGER-ONLY in SEAMS.tsv; full original setup and predicates below.
+refused: hangar-verified-realization
+requires: os-name:linux
+mkdir: package-root
+mkdir: fixtures
+mkdir: staging
+mkdir: missing-tools
+env: JETPACK_ROOT={work}/package-root
+env: JETPACK_FIXTURES={work}/fixtures
+env: PATH={work}/missing-tools
+spawn run: jetpack use omp@releases#1.0.0 -y --no-color --offline --fixtures {work}/fixtures -- omp{sys:exe-suffix} --hold
+await: entry package-root/lease-service/leases with-file "generations/1/receipt" with-file "generations/1/complete" readable "generations/1/receipt" timeout 5s every 10ms capture record
+file: {cap:record}/generations/1/receipt ^= "JET-EXECUTABLE-LEASE/1 receipt\n" # original receipt header
+file: {cap:record}/generations/1/receipt ~ "\ngeneration=1\n" # original generation receipt
+file.strip_prefix_lines("mac=").line(0): {cap:record}/generations/1/receipt len = 64 # original receipt mac length
+file.strip_prefix_lines("mac=").line(0): {cap:record}/generations/1/receipt each-line hex # original ascii hex mac bytes
+file.trim: {cap:record}/generations/1/complete len = 71 # original witness length
+file.trim: {cap:record}/generations/1/complete ^= "sha256-" # original witness prefix
+step: jetpack hangar recover --no-color
+exit: 0
+file: {cap:record}/generations/1/receipt is-file
+wait: run
+exit: 0
+step: jetpack hangar recover --no-color
+exit: 0
+when dir-readable package-root/lease-service/leases: entries: package-root/lease-service/leases = 0
+
+# Verbatim original setup/subclaims (never executed as Rust):
+# pub fn write_native_jetpack_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> PathBuf {
+#     fs::create_dir_all(fixtures).unwrap();
+#     let bin = staging_dir.join("bin");
+#     fs::create_dir_all(&bin).unwrap();
+#     let name = format!("jetpack{}", std::env::consts::EXE_SUFFIX);
+#     let executable = bin.join(&name);
+#     let source = staging_dir
+#         .parent()
+#         .unwrap_or(staging_dir)
+#         .join("native-jetpack-fixture.rs");
+#     fs::write(
+#         &source,
+#         r#"fn main() {
+#     if std::env::args().nth(1).as_deref() == Some("--hold") {
+#         std::thread::sleep(std::time::Duration::from_secs(5));
+#     }
+#     if std::env::args().nth(1).as_deref() == Some("--help") {
+#         println!("jetpack platform fixture");
+#     }
+# }
+# "#,
+#     )
+#     .unwrap();
+#     let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+#     let output = Command::new(rustc)
+#         .args(["--edition=2021", "-C", "debuginfo=0", "-C", "opt-level=0"])
+#         .arg(&source)
+#         .arg("-o")
+#         .arg(&executable)
+#         .output()
+#         .unwrap_or_else(|error| panic!("could not compile native platform fixture: {error}"));
+#     assert!(
+#         output.status.success(),
+#         "native platform fixture compilation failed: {}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     let artifact_name = format!("omp-native-jetpack-fixture{}", std::env::consts::EXE_SUFFIX);
+#     let artifact = fixtures.join(&artifact_name);
+#     fs::copy(&executable, &artifact).unwrap();
+#     let artifact_digest = jetpack::SHA256::sha256_file_hex(&artifact).unwrap();
+#     let out_dir = seed_hangar_object(root, staging_dir);
+#     let json = format!(
+#         "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+#         out_dir.to_string_lossy()
+#     );
+#     fs::write(fixtures.join("nixpkgs-native-jetpack.json"), &json).unwrap();
+#     fs::write(
+#         fixtures.join("jetpackage-omp.json"),
+#         format!(
+#             "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{artifact_digest}\",\"artifact\":{artifact_name:?}}}"
+#         ),
+#     )
+#     .unwrap();
+#     out_dir
+# }
+# pub fn write_hangar_meta(
+#     root: &Path,
+#     id: &str,
+#     name: &str,
+#     version: &str,
+#     last_used_at: Option<u64>,
+# ) -> (PathBuf, String) {
+#     let roots = jetpack::Store::Roots {
+#         root: root.to_path_buf(),
+#         dev_mode: false,
+#     };
+#     let src = root.join(format!("hangar-meta-src-{id}"));
+#     fs::create_dir_all(&src).unwrap();
+#     fs::write(src.join("payload"), format!("fixture payload: {id}")).unwrap();
+#     let entry = jetpack::Store::ingest_tree(
+#         &roots,
+#         &jetpack::Store::IngestRequest {
+#             name: name.to_string(),
+#             version: version.to_string(),
+#             reference: format!("fixture:{id}"),
+#             cache_identity: jetpack::Store::CacheIdentity {
+#                 source_fingerprint: format!("sha256-fixture-source-{id}"),
+#                 recipe_fingerprint: format!("sha256-fixture-recipe-{id}"),
+#                 policy_fingerprint: "policy=fixture".to_string(),
+#                 platform: jetpack::Envelope::host_platform(),
+#             },
+#             references: Vec::new(),
+#             outputs: std::collections::BTreeMap::from([("out".to_string(), src.clone())]),
+#             signature: String::new(),
+#             provenance: "fixture".to_string(),
+#             platform_artifact_kind: String::new(),
+#         },
+#     )
+#     .unwrap()
+#     .entry;
+#     fs::remove_dir_all(&src).ok();
+#     if let Some(ts) = last_used_at {
+#         jetpack::Store::test_backdate_last_used_at(&roots, &entry.id, ts).unwrap();
+#     }
+#     let dir = root.join("hangar").join(&entry.id);
+#     (dir, entry.envelope.output_hash)
+# }
+# #[test]
+# #[cfg(target_os = "linux")]
+# fn platform_gate_reaches_store_authenticated_lease_service() {
+#     let root = Scratch::new("platform-authenticated-lease-root");
+#     let fixtures = Scratch::new("platform-authenticated-lease-fixtures");
+#     let staging = Scratch::new("platform-authenticated-lease-staging");
+#     let missing_tools = Scratch::new("platform-authenticated-lease-missing-tools");
+#     write_native_jetpack_fixture(&fixtures.path, &root.path, &staging.path);
+#     let program = format!("omp{}", std::env::consts::EXE_SUFFIX);
+# 
+#     let mut run = jetpack()
+#         .args([
+#             "use",
+#             "omp@releases#1.0.0",
+#             "-y",
+#             "--no-color",
+#             "--offline",
+#             "--fixtures",
+#         ])
+#         .arg(&fixtures.path)
+#         .args(["--", &program, "--hold"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .env("PATH", &missing_tools.path)
+#         .spawn()
+#         .unwrap();
+# 
+#     let records = root.path.join("lease-service/leases");
+#     let deadline = Instant::now() + Duration::from_secs(5);
+#     let found = loop {
+#         let found = fs::read_dir(&records).ok().and_then(|entries| {
+#             entries.flatten().find_map(|entry| {
+#                 let generation = entry.path().join("generations/1");
+#                 let receipt = generation.join("receipt");
+#                 let complete = generation.join("complete");
+#                 if receipt.is_file() && complete.is_file() {
+#                     fs::read_to_string(&receipt)
+#                         .ok()
+#                         .map(|contents| (entry.path(), contents))
+#                 } else {
+#                     None
+#                 }
+#             })
+#         });
+#         if found.is_some() || Instant::now() >= deadline {
+#             break found;
+#         }
+#         std::thread::sleep(Duration::from_millis(10));
+#     };
+#     let Some((record, receipt)) = found else {
+#         let _ = run.kill();
+#         let output = run.wait_with_output().unwrap();
+#         panic!(
+#             "production run did not publish a complete authenticated lease receipt: {}",
+#             String::from_utf8_lossy(&output.stderr)
+#         );
+#     };
+#     assert!(receipt.starts_with("JET-EXECUTABLE-LEASE/1 receipt\n"));
+#     assert!(receipt.contains("\ngeneration=1\n"), "receipt: {receipt}");
+#     let mac = receipt
+#         .lines()
+#         .find_map(|line| line.strip_prefix("mac="))
+#         .expect("authenticated lease receipt tag");
+#     assert_eq!(mac.len(), 64);
+#     assert!(mac.bytes().all(|byte| byte.is_ascii_hexdigit()));
+#     let witness = fs::read_to_string(record.join("generations/1/complete")).unwrap();
+#     assert_eq!(witness.trim().len(), 71);
+#     assert!(witness.trim().starts_with("sha256-"));
+# 
+#     let recover = jetpack()
+#         .args(["hangar", "recover", "--no-color"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("PATH", &missing_tools.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         recover.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&recover.stderr)
+#     );
+#     assert!(
+#         record.join("generations/1/receipt").is_file(),
+#         "recovery removed a live authenticated lease"
+#     );
+# 
+#     let run_output = run.wait_with_output().unwrap();
+#     assert!(
+#         run_output.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&run_output.stderr)
+#     );
+#     let recover_after_exit = jetpack()
+#         .args(["hangar", "recover", "--no-color"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("PATH", &missing_tools.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         recover_after_exit.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&recover_after_exit.stderr)
+#     );
+#     assert!(
+#         fs::read_dir(&records)
+#             .map(|entries| entries.flatten().next().is_none())
+#             .unwrap_or(true),
+#         "idle authenticated lease record survived recovery"
+#     );
+# }

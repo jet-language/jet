@@ -1,0 +1,9 @@
+# Port of tests/release_gates.rs::cbor_deprecation_release_fixture; all original predicates, runtime UNRUN.
+fixture: fixtures/cbor_deprecation_release_fixture
+write: package.jet = "name: \"cbor_release\"\nversion: \"0.1.0\"\nedition: \"2027\"\n"
+step: jet check --verbose run.jet
+exit: 0
+write: package.jet = "name: \"cbor_release\"\nversion: \"0.1.0\"\nedition: \"2028\"\n"
+step: jet check --verbose run.jet
+exit: nonzero
+

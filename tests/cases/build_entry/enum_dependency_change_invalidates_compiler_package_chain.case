@@ -1,0 +1,9 @@
+# Port of tests/build_entry.rs:399-600; original sources and compatible edit verbatim.
+# PENDING-SAME-HEAD + PENDING-SEAM(build-plan-exec) nominal metrics/events/source labels; no success substitution.
+fixture: fixtures/enum_dependency_change_invalidates_compiler_package_chain
+step: jet run setup.jet -- {work} cold.template
+step: jet build main.jet --allow-exec --allow-fs
+step: jet run setup.jet -- {work} changed.template
+step: jet build main.jet --allow-exec --allow-fs
+step: jet run setup.jet -- {work} compatible.template
+step: jet build main.jet --allow-exec --allow-fs

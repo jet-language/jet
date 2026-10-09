@@ -1,0 +1,28 @@
+# HAND-PORT tests/web_build.rs:264-338 web_named_task_all_maps_heterogeneous_reverse_completion_on_js_and_wasm
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original JS source replace operations reproduced exactly; both independent source builds and exact stdout preserved; Rust named-field representation assertions retire.
+requires: tool:node
+fixture: web_named_task_all_maps_heterogeneous_reverse_completion_on_js_and_wasm.fixture
+env: NO_COLOR=1
+step: jet build --target web js/main.jet
+exit: 0
+file: js/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: js/.jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: js/.jet/build/app.wasm is-file
+file: js/.jet/build/app.js ~ "await jet_task_all_named(" # original generated JavaScript/runtime predicate
+file: js/.jet/build/app.js ~ "[\"z\", \"a\"]" # original generated JavaScript/runtime predicate
+file: js/.jet/build/app.js ~ "[\"a\", \"z\"]" # original generated JavaScript/runtime predicate
+step: node app.js
+cwd: js/.jet/build
+exit: 0
+stdout: = web_named_task_all_maps_heterogeneous_reverse_completion_on_js_and_wasm.stdout.expected
+step: jet build --target web wasm/main.jet
+exit: 0
+file: wasm/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: wasm/.jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: wasm/.jet/build/app.wasm is-file
+copy: harness.mjs wasm/.jet/build/harness.mjs
+step: node harness.mjs
+cwd: wasm/.jet/build
+exit: 0
+stdout: = web_named_task_all_maps_heterogeneous_reverse_completion_on_js_and_wasm.stdout.expected

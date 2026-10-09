@@ -1,0 +1,16 @@
+# Port of tests/cli_parts/commands.rs:235-261; sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates/oracles authored; runtime not run.
+# PENDING-GRAMMAR(batch-four): history filtered line predicates; pure source rustc availability guard erased for Jet-native execution.
+fixture: fixtures/test_passes_when_optional_history_cannot_persist
+requires: os:unix
+mkdir: .jet/records
+chmod: .jet/records 555
+step: jet test --capture=all
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stdout: ~ "1 passed, 0 failed" # original predicate
+stderr: !~ "E2105" # original predicate
+stderr.filter(^= "history: "): each-line ^= "history: optional persistence failed while " # original predicate
+stderr.filter(^= "history: "): each-line ~ "; fix: " # original predicate
+stderr.filter(^= "history: "): unique-after "; fix: " # original predicate
+chmod: .jet/records 755

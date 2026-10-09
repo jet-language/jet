@@ -1,0 +1,14 @@
+# HAND-PORT tests/web_build.rs:3639-3670 web_file_module_wasm_export_uses_qualified_bridge
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_file_module_wasm_export_uses_qualified_bridge.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js ~ "await bridge___jet_math__value()" # original JavaScript/runtime predicate
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_file_module_wasm_export_uses_qualified_bridge.stdout.expected

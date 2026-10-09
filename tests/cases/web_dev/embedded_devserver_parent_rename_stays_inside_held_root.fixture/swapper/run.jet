@@ -1,0 +1,31 @@
+// Original tests/web_dev.rs:3871-3882; process replaces load thread, not server subject.
+use core.files as files
+use core.sys as sys
+use core.time as time
+
+fn s5_link(outside: String, target: String) -> Bool {
+    files.symlink(outside, target) ?? return false
+    true
+}
+
+fn s5_swap(target: String, parked: String, outside: String) -> Bool {
+    files.remove_dir(parked).drop("original ignores parked cleanup failure")
+    files.rename(target, parked) ?? return false
+    made :: s5_link(outside, target)
+    files.remove(target).drop("original ignores unlink failure")
+    files.rename(parked, target).drop("original ignores restore failure")
+    made
+}
+
+fn run() {
+    root :: sys.get("S5_ROOT") ?? panic("root")
+    target :: files.join(root, "build/nested")
+    parked :: files.join(root, "build/nested.parked")
+    outside :: files.join(root, "outside-parent")
+    swaps := 0
+    files.write(files.join(root, "swapper-ready"), "ready") ?? panic("swapper ready")
+    loop !files.exists(files.join(root, "stop")) {
+        if s5_swap(target, parked, outside) -> swaps = swaps + 1
+    }
+    print(swaps)
+}

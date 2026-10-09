@@ -1,0 +1,9 @@
+use core.crypto.uuid as uuid
+#Test("uuid_entropy_shared_seam_live") {
+    first :: uuid.v4() ?? panic("v4")
+    second :: uuid.v4() ?? panic("v4")
+    assert_ne(first, second)
+    clock := Clock.new(1700000000000)
+    ordered :: uuid.v7(&clock) ?? panic("v7")
+    assert_eq(ordered.slice(14, 15), "7")
+}

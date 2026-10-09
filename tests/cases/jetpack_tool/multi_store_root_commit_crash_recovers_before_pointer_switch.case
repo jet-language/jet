@@ -1,0 +1,42 @@
+# Port of tests/jetpack_tool.rs:1180-1253; assertions preserved, pending same-head/case-grammar receipt.
+fixture: fixtures/multi_store_root_commit_crash_recovers_before_pointer_switch
+mkdir: root
+mkdir: home
+mkdir: project
+mkdir: fx
+env: HOME={work}/home
+env: JETPACK_ROOT={work}/root
+mkdir: left-root
+mkdir: right-root
+mkdir: left-root/hangar/provider-fixture-left/bin
+copy: left left-root/hangar/provider-fixture-left/bin/left
+when os unix: chmod: left-root/hangar/provider-fixture-left/bin/left 0555
+when os unix: chmod: left-root/hangar/provider-fixture-left/bin 0555
+when os unix: chmod: left-root/hangar/provider-fixture-left 0555
+write: fx/nixpkgs-left.json left.json
+mkdir: right-root/hangar/provider-fixture-right/bin
+copy: right right-root/hangar/provider-fixture-right/bin/right
+when os unix: chmod: right-root/hangar/provider-fixture-right/bin/right 0555
+when os unix: chmod: right-root/hangar/provider-fixture-right/bin 0555
+when os unix: chmod: right-root/hangar/provider-fixture-right 0555
+write: fx/nixpkgs-right.json right.json
+step: jetpack tool install left@nixpkgs --no-color --offline --fixtures {work}/fx
+cwd: project
+env: JETPACK_ROOT={work}/left-root
+exit: 0
+step: jetpack tool install right@nixpkgs --no-color --offline --fixtures {work}/fx
+cwd: project
+env: JETPACK_ROOT={work}/right-root
+env: JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT=between-root-commits
+exit: 2
+file: home/.jet/tools/generations/2/complete is-file
+file: home/.jet/tools/current ~ "generation\t1" # original contains predicate
+step: jetpack tool list --no-color
+cwd: project
+env: JETPACK_ROOT={work}/left-root
+exit: 0
+file: home/.jet/tools/current ~ "generation\t2" # original contains predicate
+capture: left = concat-files left-root/hangar/lifecycle-db/journal sorted
+capture: right = concat-files right-root/hangar/lifecycle-db/journal sorted
+cap:left: ~ "70726f66696c652d67656e65726174696f6e3a757365723a746f6f6c733a32" # original lifecycle_wire sorted concatenation contains predicate
+cap:right: ~ "70726f66696c652d67656e65726174696f6e3a757365723a746f6f6c733a32" # original lifecycle_wire sorted concatenation contains predicate

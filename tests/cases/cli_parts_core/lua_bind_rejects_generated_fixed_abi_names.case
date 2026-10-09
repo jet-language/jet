@@ -1,0 +1,17 @@
+# Port of tests/cli_parts/core.rs:254-291; original sources/predicates retained.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): new typed/data/relational forms are explicit.
+fixture: fixtures/lua_reserved
+requires: tool:luac
+step: jet inspect bind lua {work}/take_error.lua --pkg reserved_take_error
+exit: 1
+stderr: ~ "Error [E3208]" # original predicate
+stderr: ~ "`take_error` cannot be exported" # original predicate
+stderr: !~ "E0105" # original predicate
+file: .jet/bindings/lua/reserved_take_error.jet absent
+step: jet inspect bind lua {work}/view_release.lua --pkg reserved_view_release
+exit: 1
+stderr: ~ "Error [E3208]" # original predicate
+stderr: ~ "`view_release` cannot be exported" # original predicate
+stderr: !~ "E0105" # original predicate
+file: .jet/bindings/lua/reserved_view_release.jet absent

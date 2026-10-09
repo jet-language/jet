@@ -1,0 +1,40 @@
+#Target(Web)
+enum Packet {
+    Data(Int)
+    Empty
+}
+
+#Target(JS)
+fn make_packet(n: Int) -> Packet { .Data(n) }
+
+#Target(JS)
+fn make_opt(n: Int) -> Int? { .Val(n) }
+
+#Target(JS)
+fn bind_opt(n: Int) -[]> Int {
+    if make_opt(n) == .Val(value) { return value }
+    return 0
+}
+
+#Target(JS)
+fn classify_range(n: Int) -[]> Int {
+    packet :: make_packet(n)
+    if packet == {
+        .Data(1..3) -> return 1
+        else -> return 0
+    }
+}
+
+#Target(Wasm)
+fn wasm_packet(n: Int) -> Packet { .Data(n) }
+
+#WasmExport
+fn wasm_classify(n: Int) -[]> Int {
+    packet :: wasm_packet(n)
+    if packet == {
+        .Data(1..3) -> return 1
+        else -> return 0
+    }
+}
+
+fn run() {}

@@ -1,0 +1,21 @@
+
+use core.mem
+
+struct Node {
+    payload: Int
+    hops: Int
+}
+
+struct Pair {
+    left: Node
+    right: Node
+}
+
+fn run() {
+    pair := Pair{left: Node{payload: 1, hops: 0}, right: Node{payload: 2, hops: 0}}
+    first :: mem.pin(&pair.left)
+    second :: mem.pin(&pair.right)
+    first.hops += 1
+    second.hops += 2
+    print("{(first.hops)} {(second.hops)}")
+}

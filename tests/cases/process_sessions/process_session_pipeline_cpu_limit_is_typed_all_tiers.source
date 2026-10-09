@@ -1,0 +1,18 @@
+
+use core.process as process
+
+fn run() {
+    cpu_budget :: Duration.milliseconds(1000) ?? panic("duration failed")
+    if process.pipeline([
+        process.cmd(["{work}/session_fixture", "cpu"]).cpu_time_limit(cpu_budget),
+        process.cmd(["cat"])
+    ]) == {
+        .Ok(_) -> print("cpu:missed")
+        .Err(error) -> {
+            if error == {
+                .ResourceLimit(limit) -> print(if limit == .CpuTime -> "cpu:typed" else -> "cpu:wrong")
+                else -> print("cpu:wrong")
+            }
+        }
+    }
+}

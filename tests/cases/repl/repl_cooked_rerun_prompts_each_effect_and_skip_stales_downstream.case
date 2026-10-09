@@ -1,0 +1,13 @@
+# PORT tests/repl.rs:2632-2660, helper343-357 where used; exact bytes/predicates, no reference snapshot.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: repl_cooked_rerun_prompts_each_effect_and_skip_stales_downstream.fixture
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+step: jet repl
+unset: JET_REPL_HISTORY
+stdin: repl_cooked_rerun_prompts_each_effect_and_skip_stales_downstream.fixture/input.in
+exit: 0
+stdout.replace("\r", ""): count-lines = "COOKED_EFFECT" = 1 # Original exact-line count over CR-stripped output rs2644-2649.
+stdout.replace("\r", ""): ~ "Replay effect turn 2?" # Original stripped output predicate rs2652.
+stdout.replace("\r", ""): ~ "#2 ok stale" # Original stripped conjunction rs2656.
+stdout.replace("\r", ""): ~ "#3 ok stale" # Original stripped conjunction rs2656.

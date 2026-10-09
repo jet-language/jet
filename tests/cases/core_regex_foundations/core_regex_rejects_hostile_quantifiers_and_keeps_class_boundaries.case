@@ -1,0 +1,19 @@
+# Port of tests/core_regex_foundations.rs:6-43. PENDING-SAME-HEAD; original source bytes and assertions preserved.
+fixture: fixtures/core_regex_rejects_hostile_quantifiers_and_keeps_class_boundaries
+step default: jet run main.jet
+cwd: {work}/default
+env: JET_STORE_DIR={work}/default/cache
+env: JETPACK_ROOT={work}/default/jetpack
+stdout: = core_regex_rejects_hostile_quantifiers_and_keeps_class_boundaries.out
+step interpreted: jet run --interpret main.jet
+cwd: {work}/interpret
+env: JET_STORE_DIR={work}/interpret/cache
+env: JETPACK_ROOT={work}/interpret/jetpack
+stdout: = core_regex_rejects_hostile_quantifiers_and_keeps_class_boundaries.out
+stderr: == default # original predicate: interpreter runtime stderr equals default
+step: jet build --profile=debug main.jet
+cwd: {work}/aot
+step native: built
+cwd: {work}/aot
+stdout: = core_regex_rejects_hostile_quantifiers_and_keeps_class_boundaries.out
+stderr: == default # original predicate: AOT runtime stderr equals default/interpreter

@@ -1,0 +1,15 @@
+# tests/encoding_parity.rs::csv_to_string_rejects_values_that_are_not_rows_or_records
+# Original source bytes and assertions; PENDING-SAME-HEAD, runtime UNRUN.
+# Expected literals below come from the Rust assertions, not captured/blessed output.
+env: NO_COLOR=1
+fixture: csv_to_string_rejects_values_that_are_not_rows_or_records.fixture
+capture: source = text file.replace("@DIR@", "{work}/scalar") scalar/source.template
+write: scalar/run.jet = "{cap:source}"
+step: jet check scalar/run.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E0112"] #>= 1
+capture: source_list = text file.replace("@DIR@", "{work}/scalar-list") scalar-list/source.template
+write: scalar-list/run.jet = "{cap:source_list}"
+step: jet check scalar-list/run.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E0112"] #>= 1

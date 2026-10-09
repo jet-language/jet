@@ -1,0 +1,24 @@
+{
+  "host": "halcyon",
+  "target": "linux.x64",
+  "nixpkgs": "NixOS/nixpkgs/nixos-24.05@github",
+  "packages": ["git", "ripgrep", "jetbrains.idea-ultimate"],
+  "services": ["openssh", "pipewire"],
+  "options": {
+    "network.hostName": "halcyon",
+    "services.openssh.enable": true,
+    "boot.loader": ".Limine"
+  },
+  "flakePartsModules": ["./nix/hosts/halcyon.nix"],
+  "homeManagerModules": ["./home/nate.nix"],
+  "users": [
+    {
+      "name": "nate",
+      "home": "/home/nate",
+      "groups": ["wheel"],
+      "packages": ["neovim", "ghostty"],
+      "homeManager": true
+    }
+  ],
+  "omissions": ["programs.firefox.profiles need profile-specific Canvas editing"]
+}

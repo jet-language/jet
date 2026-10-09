@@ -1,0 +1,83 @@
+use core.files as files
+use core.process as process
+use core.text as text
+use core.encoding.json as json
+
+struct Report {
+    count: Int
+    name: String
+    note: String
+}
+
+fn fail(path: String, line: Int, reason: String) {
+    eprint("{path}:{line}:{reason}")
+    process.exit(1)
+}
+
+fn run() {
+    path :: process.argv().get(1) ?? panic("missing report path")
+    source :: files.read(path) ?? panic("read failed")
+
+    name := ""
+    count_text := ""
+    note := ""
+    count_line := 0
+    seen_name := false
+    seen_count := false
+    seen_note := false
+    line_number := 0
+
+    loop line in source.lines() {
+        line_number += 1
+        parts :: text.splitn(line, "\t", 3)
+        if parts.len() != 2 -> fail(~path, line_number, "what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>")
+
+        key_raw :: parts.get(0) ?? panic("missing report key")
+        key :: ~(key_raw.trim())
+        value :: ~(parts.get(1) ?? panic("missing report value"))
+        if key.is_empty() -> fail(~path, line_number, "what=empty TSV key; why=each row needs a named report field; fix=write name, count, or note before the tab")
+
+        if {
+            key == "name" -> {
+                if {
+                    seen_name -> fail(~path, line_number, "what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row")
+                    else -> {
+                        name = value
+                        seen_name = true
+                    }
+                }
+            }
+            key == "count" -> {
+                if {
+                    seen_count -> fail(~path, line_number, "what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row")
+                    else -> {
+                        count_text = value
+                        count_line = line_number
+                        seen_count = true
+                    }
+                }
+            }
+            key == "note" -> {
+                if {
+                    seen_note -> fail(~path, line_number, "what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row")
+                    else -> {
+                        note = value
+                        seen_note = true
+                    }
+                }
+            }
+            else -> fail(~path, line_number, "what=unknown TSV key; why=only name, count, and note are valid report fields; fix=use one of the required keys")
+        }
+    }
+
+    if !seen_name || !seen_count || !seen_note -> fail(~path, line_number + 1, "what=missing required TSV key; why=report needs name, count, and note; fix=add the missing row")
+    count :: count_text.to_int() ?? {
+        fail(~path, count_line, "what=invalid count value; why=count must be a decimal integer; fix=write a whole-number count")
+        0
+    }
+    report :: Report{count: count, name: name, note: note}
+    encoded_name :: json.to_string(report.name)
+    encoded_note :: json.to_string(report.note)
+    encoded :: "{{\"count\":{report.count},\"name\":{encoded_name},\"note\":{encoded_note}}}"
+    print(encoded)
+}

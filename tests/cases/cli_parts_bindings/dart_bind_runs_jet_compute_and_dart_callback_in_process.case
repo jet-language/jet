@@ -1,0 +1,22 @@
+# Port of tests/cli_parts/bindings.rs:1317-1378; sources copied verbatim.
+# PENDING-SAME-HEAD: authored original predicates/oracles; runtime proof not run.
+# PENDING-GRAMMAR: is-file, file before/negative substring, write:, {sys:dll-suffix} (Lead-approved host selection).
+fixture: fixtures/dart_roundtrip
+step: jet inspect bind dart {work}/callbacks.dart --jet {work}/compute.jet --pkg callbacks
+exit: 0
+file: .jet/bindings/dart/libjet_dart_callbacks.a is-file
+file: .jet/bindings/dart/libjet_dart_callbacks_compute{sys:dll-suffix} is-file
+file: .jet/bindings/dart/callbacks_host.dart is-file
+file: .jet/bindings/dart/callbacks.provenance is-file
+file: .jet/bindings/dart/callbacks.jet ~ "pub fn dart_double(value: Int) -[FFI.Dart]> Int DartError!" # original predicate
+file: .jet/bindings/dart/callbacks.jet ~ "pub fn dart_half(value: Float) -[FFI.Dart]> Float DartError!" # original predicate
+file: .jet/bindings/dart/callbacks.jet !~ "=>" # original predicate
+file: .jet/bindings/dart/callbacks_host.dart ~ "NativeCallable<Int64 Function(Int64)>.isolateLocal" # original predicate
+file: .jet/bindings/dart/callbacks_host.dart before "reset();" "callback.close();" # original predicate
+file: .jet/bindings/dart/callbacks.provenance ~ "compute=" # original predicate
+file: .jet/bindings/dart/callbacks.provenance ~ "contract_provenance_sha256=" # original predicate
+file: .jet/bindings/dart/callbacks.provenance ~ "sdk=" # original predicate
+write: host.dart dart-host.template
+step: dart run host.dart
+exit: 0
+stdout: = dart_bind_runs_jet_compute_and_dart_callback_in_process.out

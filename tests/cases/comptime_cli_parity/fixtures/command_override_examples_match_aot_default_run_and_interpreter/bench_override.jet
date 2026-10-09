@@ -1,0 +1,19 @@
+// D-CLAIM-BENCH1=A: measurement is selected by `jet test --measure`; the
+// command override remains the ordinary `fn test` path.
+use core.testing as testing
+
+fn test(suite: TestSuite) {
+    print("test setup")
+    print("test suite {suite.iteration}:{suite.result}")
+    suite.run()
+    print("test teardown")
+}
+
+#Test("override body") {
+    .measure {
+        print("test body")
+        assert(true)
+    }
+}
+
+fn run() { test(testing.test_suite()) }

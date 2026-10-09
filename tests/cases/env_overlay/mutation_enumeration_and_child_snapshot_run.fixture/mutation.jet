@@ -1,0 +1,28 @@
+
+use core.sys as env
+use core.process as process
+
+fn run() {
+    env.set("JET_OVERLAY_A", "one")
+    env.set("JET_OVERLAY_B", "two")
+    print(env.get("JET_OVERLAY_A") ?? "missing")
+    names :: env.vars() ?? panic("vars failed")
+    print(names.join(",").contains("JET_OVERLAY_A,JET_OVERLAY_B"))
+    print(env.unset("JET_OVERLAY_A") ?? false)
+    print(env.unset("JET_OVERLAY_A") ?? true)
+    inherited :: process.cmd(["/usr/bin/env"]).run() ?? panic("child failed")
+    print(inherited.output.contains("JET_OVERLAY_B=two"))
+    print(!inherited.output.contains("JET_OVERLAY_A="))
+    cleared :: process.cmd(["/usr/bin/env"])
+        .env_clear()
+        .env("ONLY_THIS", "yes")
+        .env_remove("JET_OVERLAY_B")
+        .run() ?? panic("clear child failed")
+    print(cleared.output == "ONLY_THIS=yes\n")
+    removed_wins :: process.cmd(["/usr/bin/env"])
+        .env_clear()
+        .env("SAME_KEY", "set-first")
+        .env_remove("SAME_KEY")
+        .run() ?? panic("precedence child failed")
+    print(!removed_wins.output.contains("SAME_KEY="))
+}

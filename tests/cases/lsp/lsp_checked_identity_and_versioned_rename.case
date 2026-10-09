@@ -1,0 +1,48 @@
+# Port of tests/lsp.rs:3798-3926; fixture bytes unchanged.
+# PENDING-GRAMMAR(batch-three/four), PENDING-SEAM(read_bytes).
+fixture: lsp_checked_identity_and_versioned_rename.fixture
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"initialize\",\"params\":{\"capabilities\":{\"workspace\":{\"workspaceEdit\":{\"documentChanges\":true}}}}}"
+recv lsp until $.id = 7
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use scoring as grades\\nuse \\\"util\\\"\\nfn run() {\\n    print(grades.letter(91))\\n    print(util.letter(91))\\n}\\nfn shadow(letter: Int) { print(letter) }\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/scoring.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"pub fn letter(score: Int) -> String { \\\"A\\\" }\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/util.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"pub fn letter(score: Int) -> String { \\\"unrelated\\\" }\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/scoring.jet\",\"version\":2},\"contentChanges\":[{\"text\":\"// unsaved 🚀\\n\\npub fn letter(score: Int) -> String { \\\"A\\\" }\\n\"}]}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":3,\"character\":19}}}"
+recv lsp until $.id = 7
+json: stdout doc $.result.uri = "file://{work}/scoring.jet"
+json: stdout doc $.result.range = {"start":{"line":2,"character":7},"end":{"line":2,"character":13}}
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/references\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":3,\"character\":19},\"context\":{\"includeDeclaration\":true}}}"
+recv lsp until $.id = 7
+json: stdout doc $.result #= 2
+json: stdout doc $.result[*].uri in ["file://{work}/run.jet", "file://{work}/scoring.jet"]
+json: stdout doc each $.result[?uri="file://{work}/run.jet"] as r: {r}.range = {"start":{"line":3,"character":17},"end":{"line":3,"character":23}} # original per-row predicate, vacuous on empty
+json: stdout doc each $.result[?uri!="file://{work}/run.jet"] as r: {r}.range = {"start":{"line":2,"character":7},"end":{"line":2,"character":13}} # original per-row predicate, vacuous on empty
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/prepareRename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":3,\"character\":19}}}"
+recv lsp until $.id = 7
+json: stdout doc $.result.range = {"start":{"line":3,"character":17},"end":{"line":3,"character":23}}
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":3,\"character\":19},\"newName\":\"grade\"}}"
+recv lsp until $.id = 7
+json: stdout doc $.result.documentChanges #= 2
+json: stdout doc $.result.documentChanges[*].textDocument.uri in ["file://{work}/run.jet", "file://{work}/scoring.jet"]
+json: stdout doc each $.result.documentChanges[?textDocument.uri="file://{work}/run.jet"] as r: {r}.textDocument.version = 1 # original per-row predicate, vacuous on empty
+json: stdout doc each $.result.documentChanges[?textDocument.uri="file://{work}/run.jet"] as r: {r}.edits #= 1 # original per-row predicate, vacuous on empty
+json: stdout doc each $.result.documentChanges[?textDocument.uri="file://{work}/run.jet"] as r: {r}.edits[0].range = {"start":{"line":3,"character":17},"end":{"line":3,"character":23}} # original per-row predicate, vacuous on empty
+json: stdout doc each $.result.documentChanges[?textDocument.uri="file://{work}/run.jet"] as r: {r}.edits[0].newText = "grade" # original per-row predicate, vacuous on empty
+json: stdout doc each $.result.documentChanges[?textDocument.uri!="file://{work}/run.jet"] as r: {r}.textDocument.version = 2 # original per-row predicate, vacuous on empty
+json: stdout doc each $.result.documentChanges[?textDocument.uri!="file://{work}/run.jet"] as r: {r}.edits #= 1 # original per-row predicate, vacuous on empty
+json: stdout doc each $.result.documentChanges[?textDocument.uri!="file://{work}/run.jet"] as r: {r}.edits[0].range = {"start":{"line":2,"character":7},"end":{"line":2,"character":13}} # original per-row predicate, vacuous on empty
+json: stdout doc each $.result.documentChanges[?textDocument.uri!="file://{work}/run.jet"] as r: {r}.edits[0].newText = "grade" # original per-row predicate, vacuous on empty
+json: stdout doc $.result.semantic_ops[0].targets #= 1
+json: stdout doc $.result.semantic_ops[0].targets[0].before = "fn:module:scoring::letter"
+json: stdout doc $.result.semantic_ops[0].targets[0].after = "fn:module:scoring::grade"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\",\"version\":3},\"contentChanges\":[{\"text\":\"// moved\\nuse scoring as grades\\nuse \\\"util\\\"\\nfn run() {\\n    print(\\\"🚀\\\"); print(grades.letter(91))\\n    print(util.letter(91))\\n}\\nfn shadow(letter: Int) { print(letter) }\\n\"}]}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":4,\"character\":31},\"newName\":\"grade\"}}"
+recv lsp until $.id = 7
+json: stdout doc $.result.documentChanges #= 2
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/run.jet"][0].textDocument.version = 3
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/run.jet"][0].edits[0].range = {"start":{"line":4,"character":30},"end":{"line":4,"character":36}}
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 7
+close lsp

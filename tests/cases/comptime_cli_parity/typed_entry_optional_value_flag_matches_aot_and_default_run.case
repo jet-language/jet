@@ -1,0 +1,20 @@
+# Port of comptime_cli_parity.rs:906-960. ORACLE-LITERAL at original lines927-928, not captured/re-blessed.
+# PENDING-GRAMMAR: step environment removal and step env.
+fixture: fixtures/typed_entry_optional_value_flag_matches_aot_and_default_run
+step: jet build typed_entry_args.jet
+step: built -v --config prod.toml
+unset: PORT
+stdout: = typed_entry_optional_value_flag_matches_aot_and_default_run.present.out
+step: jet run typed_entry_args.jet -- -v --config prod.toml
+unset: PORT
+env: JET_STORE_DIR={work}/cache/run
+env: JET_STORE_DIR={work}/cache/run-build
+stdout: = typed_entry_optional_value_flag_matches_aot_and_default_run.present.out
+step: built
+unset: PORT
+stdout: = typed_entry_optional_value_flag_matches_aot_and_default_run.absent.out
+step: jet run typed_entry_args.jet --
+unset: PORT
+env: JET_STORE_DIR={work}/cache/run
+env: JET_STORE_DIR={work}/cache/run-build
+stdout: = typed_entry_optional_value_flag_matches_aot_and_default_run.absent.out

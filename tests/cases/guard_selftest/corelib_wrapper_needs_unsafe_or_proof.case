@@ -1,0 +1,31 @@
+# Port of tests/guard_selftest.rs:61-64 -> tests/unsafe_ratchet.rs:129-199; ALL six stages preserved.
+# PENDING-GRAMMAR: concat (TestW3b batch two). Transitional Node debt in NODE-DEBT.tsv.
+requires: tool:node
+fixture: fixtures/ratchet
+copy: laundering.txt Core/sys/sys.jet
+step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md --update
+exit: nonzero
+stderr: ~ "fn fork opens #Unsafe" # original predicate
+copy: ungated.txt Core/sys/sys.jet
+step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md --update
+exit: nonzero
+stderr: ~ "POSIX control outside an audited #Unsafe gate" # original predicate
+copy: audited.txt Core/sys/sys.jet
+step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md --update
+exit: 0
+step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md
+exit: 0
+copy: laundering.txt Core/sys/sys.jet
+copy: safety.md prior-baseline.txt
+concat: safety.md prior-baseline.txt abstraction.txt
+step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md --update
+exit: 0
+step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md
+exit: 0
+copy: audited.txt Core/sys/sys.jet
+step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md --update
+exit: any # original predicate: seed_allowing_corelib asserts stdout only
+stdout: ~ "baseline updated" # original predicate
+step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md
+exit: nonzero
+stderr: ~ "stale safe-abstraction row" # original predicate

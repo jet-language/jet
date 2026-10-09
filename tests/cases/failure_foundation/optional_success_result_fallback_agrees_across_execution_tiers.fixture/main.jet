@@ -1,0 +1,21 @@
+
+#Error
+enum TestFailure {
+    Missing
+}
+
+fn optional_success_result(value: Int) -> Int? TestFailure! {
+    if value == -1 {
+        return Err(TestFailure.Missing)
+    }
+    if value == 0 {
+        return None
+    }
+    return Ok(Val(value))
+}
+
+fn run() {
+    print(optional_success_result(8080) ?? 0)
+    print(optional_success_result(0) ?? 0)
+    print(optional_success_result(-1) ?? 0)
+}

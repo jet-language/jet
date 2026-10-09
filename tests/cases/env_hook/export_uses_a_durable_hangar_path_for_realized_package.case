@@ -1,0 +1,39 @@
+# Port of tests/env_hook.rs::export_uses_a_durable_hangar_path_for_realized_package.
+# ORACLE-LITERAL trim stdout: tests/env_hook.rs:370-371 (cached, no newline).
+# Fixture artifact checksum is the real SHA256 of the original literal bytes.
+# PENDING-GRAMMAR: capture/write tokens, remove, trim, raw file predicates, step env/unset.
+requires: tool:bash
+requires: tool:env
+fixture: durable-hangar.fixture
+env: JETPACK_ROOT={work}/package-root
+env: HOME={work}/home
+env: JETPACK_DENY_NETWORK=1
+mkdir: package-root
+mkdir: home
+step: jetpack env --prep --yes --trust --offline --no-color --fixtures {work}/fixtures
+cwd: project
+exit: 0
+remove: fixtures/jetpackage-omp.json
+remove: fixtures/omp-1.0.0
+step: jetpack hangar list --json
+cwd: project
+exit: 0
+json: stdout doc $.packages[0].output_hash ^= "sha256-" # original object-directory filter
+capture: object stdout doc $.packages[0].output_hash
+step: {tool:bash} --noprofile --norc -c 'exec "$1" env --trust --offline export bash > activation.sh' export-package {jetpack}
+cwd: project
+env: PATH=/usr/bin:/bin
+unset: JET_ENV_DISABLE
+unset: JETPACK_ENV
+unset: JETPACK_ENV_DIR
+unset: JETPACK_ENV_HASH
+unset: JETPACK_ENV_OLD_PATH
+unset: JETPACK_REF
+exit: 0
+file: project/activation.sh !~ "/proc/self/fd/" # original predicate
+file: package-root/hangar/objects/{cap:object}/bin is-dir
+file: project/activation.sh ~ "export PATH='{work}/package-root/hangar/objects/{cap:object}/bin:" # original durable-bin predicate; real CLI output hash
+step: {tool:env} -i HOME={work}/home PATH=/usr/bin:/bin {tool:bash} --noprofile --norc -c 'source /dev/stdin < activation.sh; omp'
+cwd: project
+exit: 0
+stdout.trim: = cached.out # original predicate

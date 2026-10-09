@@ -1,0 +1,56 @@
+// D-ONCE-WORD1 / D-CONC-STREAM1: a generator returns `Stream<T>` and uses
+// `yield` to hand a value to the consumer, suspending until the next pull. One
+// keyword, one type; consumers are ordinary loops — no async/await coloring.
+// Breaking the loop cancels the producer task at the D-CANCELMODEL1=C wait
+// point and runs deferred cleanup.
+struct CleanupMarker {
+    name: String
+}
+
+impl CleanupMarker.Close {
+    fn close(^self) { print("cleanup: {self.name}") }
+}
+
+fn count(n: Int) -> Stream<Int> {
+    i := 0
+    loop i < n {
+        yield i
+        i += 1
+    }
+}
+
+fn stop_after_one() -> Stream<Int> {
+    print("producer: before")
+    yield 1
+    print("producer: after-close")
+    yield 2
+}
+
+fn nested() -> Stream<Int> {
+    yield 10
+    loop value in count(2) -> print("nested: {value + 20}")
+    yield 99
+}
+
+fn cleanup_after_break() -> Stream<Int> {
+    marker := CleanupMarker{name: "stream"}
+    defer close(^marker)
+    print("cleanup: before")
+    yield 7
+    print("cleanup: after")
+    yield 8
+}
+
+fn run() {
+    loop x in count(3) -> print("{x}")
+    loop x in stop_after_one() {
+        print("consumer: {x}")
+        break
+    }
+    loop x in nested() -> print("nested: {x}")
+    loop x in cleanup_after_break() {
+        print("cleanup: {x}")
+        break
+    }
+    print("closed")
+}

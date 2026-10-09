@@ -1,0 +1,15 @@
+# Port of comptime_cli_parity.rs:317-399. PENDING-GRAMMAR: step env.
+# Retired only generated Rust token __jet_First = 41; native front-end/build and all runtime goldens remain.
+fixture: fixtures/computed_constants_match_aot_default_and_interpreter
+step: jet build computed_constants.jet
+env: JET_STORE_DIR={work}/cache/build
+step: built
+stdout: = ../../../Examples/features/expected/comptime/computed_constants.out
+step: jet run computed_constants.jet
+env: JET_STORE_DIR={work}/cache/run
+env: JET_STORE_DIR={work}/cache/default
+stdout: = ../../../Examples/features/expected/comptime/computed_constants.out
+step: jet run --interpret computed_constants.jet
+env: JET_STORE_DIR={work}/cache/interpret-run
+env: JET_STORE_DIR={work}/cache/interpret-build
+stdout: = ../../../Examples/features/expected/comptime/computed_constants.out

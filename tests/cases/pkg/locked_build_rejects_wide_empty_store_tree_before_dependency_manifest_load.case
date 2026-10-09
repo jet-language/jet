@@ -1,0 +1,147 @@
+# PORT tests/pkg.rs::locked_build_rejects_wide_empty_store_tree_before_dependency_manifest_load:3671-3727; original helpers min_manifest/manifest_with_deps/with_store retained.
+# KNOWN-FAILING #4833: Jet front-end has no fetch/locked dependency-resolution door.
+# PENDING-GRAMMAR(batch-four); no reference snapshot or runtime proof.
+# Rust CLI: main.rs3684-3691 -> CmdPkg.rs255-325 -> original Fetch::fetch options.
+fixture: fixtures/locked_build_rejects_wide_empty_store_tree_before_dependency_manifest_load
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+mkdir: greeter/empty-0
+mkdir: greeter/empty-1
+mkdir: greeter/empty-2
+mkdir: greeter/empty-3
+mkdir: greeter/empty-4
+mkdir: greeter/empty-5
+mkdir: greeter/empty-6
+mkdir: greeter/empty-7
+mkdir: greeter/empty-8
+mkdir: greeter/empty-9
+mkdir: greeter/empty-10
+mkdir: greeter/empty-11
+mkdir: greeter/empty-12
+mkdir: greeter/empty-13
+mkdir: greeter/empty-14
+mkdir: greeter/empty-15
+mkdir: greeter/empty-16
+mkdir: greeter/empty-17
+mkdir: greeter/empty-18
+mkdir: greeter/empty-19
+mkdir: greeter/empty-20
+mkdir: greeter/empty-21
+mkdir: greeter/empty-22
+mkdir: greeter/empty-23
+mkdir: greeter/empty-24
+mkdir: greeter/empty-25
+mkdir: greeter/empty-26
+mkdir: greeter/empty-27
+mkdir: greeter/empty-28
+mkdir: greeter/empty-29
+mkdir: greeter/empty-30
+mkdir: greeter/empty-31
+mkdir: greeter/empty-32
+mkdir: greeter/empty-33
+mkdir: greeter/empty-34
+mkdir: greeter/empty-35
+mkdir: greeter/empty-36
+mkdir: greeter/empty-37
+mkdir: greeter/empty-38
+mkdir: greeter/empty-39
+mkdir: greeter/empty-40
+mkdir: greeter/empty-41
+mkdir: greeter/empty-42
+mkdir: greeter/empty-43
+mkdir: greeter/empty-44
+mkdir: greeter/empty-45
+mkdir: greeter/empty-46
+mkdir: greeter/empty-47
+mkdir: greeter/empty-48
+mkdir: greeter/empty-49
+mkdir: greeter/empty-50
+mkdir: greeter/empty-51
+mkdir: greeter/empty-52
+mkdir: greeter/empty-53
+mkdir: greeter/empty-54
+mkdir: greeter/empty-55
+mkdir: greeter/empty-56
+mkdir: greeter/empty-57
+mkdir: greeter/empty-58
+mkdir: greeter/empty-59
+mkdir: greeter/empty-60
+mkdir: greeter/empty-61
+mkdir: greeter/empty-62
+mkdir: greeter/empty-63
+mkdir: greeter/empty-64
+mkdir: greeter/empty-65
+mkdir: greeter/empty-66
+mkdir: greeter/empty-67
+mkdir: greeter/empty-68
+mkdir: greeter/empty-69
+mkdir: greeter/empty-70
+mkdir: greeter/empty-71
+mkdir: greeter/empty-72
+mkdir: greeter/empty-73
+mkdir: greeter/empty-74
+mkdir: greeter/empty-75
+mkdir: greeter/empty-76
+mkdir: greeter/empty-77
+mkdir: greeter/empty-78
+mkdir: greeter/empty-79
+mkdir: greeter/empty-80
+mkdir: greeter/empty-81
+mkdir: greeter/empty-82
+mkdir: greeter/empty-83
+mkdir: greeter/empty-84
+mkdir: greeter/empty-85
+mkdir: greeter/empty-86
+mkdir: greeter/empty-87
+mkdir: greeter/empty-88
+mkdir: greeter/empty-89
+mkdir: greeter/empty-90
+mkdir: greeter/empty-91
+mkdir: greeter/empty-92
+mkdir: greeter/empty-93
+mkdir: greeter/empty-94
+mkdir: greeter/empty-95
+mkdir: greeter/empty-96
+mkdir: greeter/empty-97
+mkdir: greeter/empty-98
+mkdir: greeter/empty-99
+mkdir: greeter/empty-100
+mkdir: greeter/empty-101
+mkdir: greeter/empty-102
+mkdir: greeter/empty-103
+mkdir: greeter/empty-104
+mkdir: greeter/empty-105
+mkdir: greeter/empty-106
+mkdir: greeter/empty-107
+mkdir: greeter/empty-108
+mkdir: greeter/empty-109
+mkdir: greeter/empty-110
+mkdir: greeter/empty-111
+mkdir: greeter/empty-112
+mkdir: greeter/empty-113
+mkdir: greeter/empty-114
+mkdir: greeter/empty-115
+mkdir: greeter/empty-116
+mkdir: greeter/empty-117
+mkdir: greeter/empty-118
+mkdir: greeter/empty-119
+mkdir: greeter/empty-120
+mkdir: greeter/empty-121
+mkdir: greeter/empty-122
+mkdir: greeter/empty-123
+mkdir: greeter/empty-124
+mkdir: greeter/empty-125
+mkdir: greeter/empty-126
+mkdir: greeter/empty-127
+step: jet fetch
+exit: 0
+capture: entry = sole-entry store kind dir name ^= "greeter-0.1.0-"
+capture: lock_before = opt-bytes file .jet/lock
+file: {cap:entry}/empty-127 is-dir
+write: {cap:entry}/package.jet malformed-manifest.template
+# Rust build: CmdCompile4161-4181 -> Driver/mod.rs3491-3492 -> Loader3305-3480.
+step: jet build --locked run.jet
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1204]"
+file: {cap:entry}/package.jet = "not a package\n"
+file: .jet/lock same-as {cap:lock_before}

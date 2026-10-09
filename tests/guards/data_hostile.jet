@@ -1,0 +1,50 @@
+use core.files as files
+
+// Repository-root paths deliberately match tests/data_hostile.rs.
+// KNOWN-FAILING #4802: the original requires `Limit group_mean:`, but the checked-in golden says `Limit query.group_by.mean:`. Keep the assertion unchanged.
+fn s3_guard_hostile_corpus() {
+    output :: files.read("Examples/features/expected/tooling/data_hostile.out") ?? panic("read hostile data golden")
+    needles :: [String]{
+        "empty_mean: Empty mean:",
+        "empty_quantile: Empty quantile:",
+        "empty_variance: Empty variance:",
+        "missing_count: 3",
+        "dup_join_count: 5",
+        "pivot: row=a|b col=c sum=12.0",
+        "tie_order: 3.0,1.0,2.0",
+        "nan_mean: NonFinite",
+        "inf_sum: NonFinite",
+        "signed_zero_sum: 0.0",
+        "signed_zero_mean: 0.0",
+        "pop_variance: 0.6666666666666666",
+        "one_variance: 0.0",
+        "bad_quantile: InvalidArgument quantile:",
+        "bad_window: InvalidArgument rolling_mean:",
+        "hostile_svg_escaped: true",
+        "large_limit: Limit group_mean:",
+        "cancellation_sum: 1.0",
+        "cancellation_mean: 0.3333333333333333",
+    }
+    loop needle in needles {
+        assert(output.contains(needle), "hostile golden missing required class: {needle}")
+    }
+}
+
+#Test("hostile corpus covers required failure classes") {
+    s3_guard_hostile_corpus()
+}
+
+fn s3_guard_flagship_pipeline() {
+    output :: files.read("Examples/features/expected/tooling/data_analysis.out") ?? panic("read flagship data golden")
+    needles :: [String]{
+        "tickets: 5", "focused: 4", "owned: Core", "mean: Core", "describe: count=5",
+        "Core | ## 2", "svg bytes:", "status: core.data.csv native",
+    }
+    loop needle in needles {
+        assert(output.contains(needle), "flagship golden missing: {needle}")
+    }
+}
+
+#Test("flagship example covers analysis pipeline") {
+    s3_guard_flagship_pipeline()
+}

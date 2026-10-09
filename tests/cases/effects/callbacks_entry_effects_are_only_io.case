@@ -1,0 +1,8 @@
+# PORT tests/effects.rs:16-36.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+step: jet check {root}/Examples/features/basics/callbacks.jet
+exit: 0
+step: jet inspect rights {root}/Examples/features/basics/callbacks.jet --json
+exit: 0
+json: stdout doc $.callables[?name="run"] #= 1
+json: stdout doc $.callables[?name="run"][*].inferred_effects = ["IO"]

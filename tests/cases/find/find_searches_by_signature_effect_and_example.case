@@ -1,0 +1,14 @@
+# Port of tests/find.rs:14-71; same checked-in example and original substring assertions.
+# Read-only CLI queries use the repository example directly; no source is rewritten.
+step: jet find "Int -> Int" {root}/Examples/features/effects/effects.jet
+exit: 0
+stdout: ~ square # Original signature query assertion.
+step: jet find --effect IO report {root}/Examples/features/effects/effects.jet
+exit: 0
+stdout: ~ report # Original effect query name assertion.
+stdout: ~ holds IO # Original effect reason assertion.
+stdout: ~ why: # Original effect explanation assertion.
+step: jet find --example "4 -> 16" {root}/Examples/features/effects/effects.jet
+exit: 0
+stdout: ~ square # Original example query name assertion.
+stdout: ~ why: # Original example explanation assertion.

@@ -1,0 +1,30 @@
+
+use core.service as service
+
+fn worker() {}
+
+fn run() {
+    tree := service.tree("drain-handoff")
+    endpoint :: tree.worker("api", worker, capacity: 2) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.send(endpoint, "queued") ?? panic("queued")
+    tree.directory_register("api", endpoint) ?? panic("directory")
+    tree.drain_worker(endpoint) ?? panic("drain")
+
+    late :: endpoint.send("late")
+    if late == {
+        .Ok(_) -> { print("late:accepted") }
+        .Err(_) -> { print("late:rejected") }
+    }
+    print("drained:{tree.receive(endpoint) ?? panic("receive")}")
+
+    tree.stop() ?? panic("restart stop")
+    tree.start() ?? panic("restart start")
+    tree.directory_register("api", endpoint) ?? panic("restart directory")
+    generation :: tree.handoff_generation() ?? panic("handoff")
+    current :: tree.directory_resolve("api") ?? panic("resolve")
+    current.send("after") ?? panic("after send")
+    print("handoff:{generation}:{current.show()}")
+    print("after:{tree.receive(current) ?? panic("after receive")}")
+    tree.stop() ?? panic("stop")
+}

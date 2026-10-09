@@ -1,0 +1,49 @@
+# Port of tests/lsp.rs:4073-4192; source bytes/order/assertions unchanged.
+# PENDING-GRAMMAR(batch-three/four), PENDING-SEAM(read_bytes).
+fixture: lsp_checked_text_contract_survives_editor_navigation.fixture
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp
+stdout: ~ "hoverProvider" # original predicate
+stdout: ~ "completionProvider" # original predicate
+stdout: ~ "definitionProvider" # original predicate
+stdout: ~ "referencesProvider" # original predicate
+stdout: ~ "renameProvider" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"#Error\\nenum PatternError { Bad }\\nPattern :: distinct String\\nimpl Pattern.CheckedText {\\n    type Error = PatternError\\n    fn check(text: String) PatternError! -[]> {\\n        return\\n    }\\n    fn encode_hole<T: Printable>(value: T) -[]> String {\\n        return \\\"\\\"\\n    }\\n}\\nfn use_pattern(value: Pattern) {\\n    return\\n}\\nfn run() {\\n    \\n}\\n\"}}}"
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\"},\"position\":{\"line\":2,\"character\":1}}}"
+recv lsp
+stdout: ~ "type Pattern :: distinct String" # original predicate
+stdout: ~ "implements CheckedText" # original predicate
+stdout: ~ "type Error = PatternError" # original predicate
+stdout: ~ "encode_hole" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\"},\"position\":{\"line\":15,\"character\":4}}}"
+recv lsp
+stdout: ~ "Pattern" # original predicate
+stdout: ~ "implements CheckedText" # original predicate
+stdout: ~ "encode_hole" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\"},\"position\":{\"line\":12,\"character\":23}}}"
+recv lsp
+stdout: ~ "range" # original predicate
+stdout: ~ "nominal_base" # original predicate
+stdout: ~ "CheckedText" # original predicate
+stdout: ~ "encode_hole" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/references\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\"},\"position\":{\"line\":2,\"character\":1},\"context\":{\"includeDeclaration\":true}}}"
+recv lsp
+stdout: ~ "nominal_base" # original predicate
+stdout: ~ "CheckedText" # original predicate
+stdout: ~ "Pattern" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\"},\"position\":{\"line\":2,\"character\":1},\"newName\":\"Pattern2\"}}"
+recv lsp
+stdout: ~ "documentChanges" # original predicate
+stdout: ~ "\"newText\":\"Pattern2\"" # original predicate
+stdout: ~ "nominal_base" # original predicate
+stdout: ~ "CheckedText" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp
+stdout: ~ "result" # original predicate
+close lsp
+exit: any # run_transcript child.wait status ignored

@@ -1,0 +1,33 @@
+
+use core.net as net
+use core.tasks as tasks
+
+fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] IOError! {
+    return stream.read(limit)
+}
+
+fn send_four<T: Writer>(&stream: T) -[IO]> Int IOError! {
+    stream.write_all([1, 2, 3, 4])
+    return Ok(4)
+}
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    address :: net.socket_to_string(typed_address)
+    server :: task {
+        stream := net.tcp_accept(listener) ?? panic("accept")
+        if receive(&stream, 0) == {
+            .Ok(_) -> panic("zero limit looked like EOF")
+            .Err(_) -> print("invalid")
+        }
+        bytes :: receive(&stream, 4) ?? panic("read")
+        print("read:{bytes.len()}")
+        eof :: receive(&stream, 4) ?? panic("eof")
+        if eof.len() == 0 { print("eof") }
+    }
+    client := net.tcp_connect(address) ?? panic("connect")
+    _count :: send_four(&client) ?? panic("write")
+    client.close() ?? panic("close")
+    server.join() ?? panic("server task failed")
+}

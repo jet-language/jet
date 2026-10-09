@@ -1,0 +1,7 @@
+alias Boxed<T> :: T
+enum CallbackPayload { Callback(Boxed<fn(Int) -> Int>) }
+fn bump(n: Int) -> Int { return n + 1 }
+fn run() {
+    payloads :: [CallbackPayload]{ CallbackPayload.Callback(bump) }
+    ignored :: payloads.para_map((payload: CallbackPayload) -> 1)
+}

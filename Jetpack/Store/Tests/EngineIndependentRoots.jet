@@ -1,0 +1,93 @@
+use core.files.path as engine_paths
+// Exact independent-root engine claims; PENDING-SEAM(package-tests), no runtime proof claimed.
+// Fixture ported from support/jetpack_fixtures.rs:681-711 without weaker stand-ins.
+fn engine_independent_root_fixture() -> (base: String, roots: HangarRoots, repo: String, table: SourceTable, spec: RefSpec, ctx: ProviderCtx) {
+    base :: files.tmpdir("jet-engine-independent-root-") ?? panic("base fixture")
+    repo :: files.join(base, "jet-pkgs")
+    project :: files.join(base, "proj")
+    root :: files.join(base, "root")
+    hello :: files.join(repo, "pkgs/hello")
+    bin :: files.join(hello, "bin")
+    files.create_dir_all(bin) ?? panic("bin fixture")
+    files.create_dir_all(project) ?? panic("project fixture")
+    files.write(files.join(hello, "hello.jet"), "module hello {{ }}\n") ?? panic("hello source")
+    files.write(files.join(repo, "package.jet"), "name: \"fixture\"\nversion: \"0.1.0\"\npackages: {{ hello: executable }}\n") ?? panic("repo manifest")
+    greet :: files.join(bin, "hello")
+    files.write(greet, "#!/bin/sh\necho hello from jet-pkgs\n") ?? panic("hello executable")
+    if sys.is_unix() -> files.chmod(greet, 0o755) ?? panic("hello mode")
+    files.write(files.join(project, "env.jet"), "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{repo}\", \"core\"),\n        pkg.packages([\"hello@mine\"])\n    ]\n}}\n") ?? panic("env source")
+    roots :: HangarRoots.at(root)
+    table :: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "mine", upstream: "path:{repo}", via: ProviderKind.Core}})
+    spec :: RefSpec.classify_in("hello@mine", table) ?? panic("reference")
+    ctx :: ProviderCtx{fixtures: None, store_dir: roots.hangar_dir(), offline: true, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
+    (base: base, roots: roots, repo: repo, table: table, spec: spec, ctx: ctx)
+}
+fn engine_independent_root_cleanup(base: String) {
+    store_make_tree_writable_for_removal(base).drop("fixture cleanup")
+    files.remove_all(base).drop("fixture cleanup")
+}
+
+// ported from jetpack_engine.rs:8851-8895
+#Test("independent_root_runner_promotes_only_agreed_source_output") {
+    fixture :: engine_independent_root_fixture()
+    verification := StoreVerification.new()
+    result :: store_certify_independent_root_build(&verification, fixture.roots, fixture.ctx, RealizeRequest.Package(spec: fixture.spec, table: fixture.table), IndependentRootOptions.default()) ?? panic("independent certification")
+    assert(result.attestation.starts_with("independent-agreeing-v1:"))
+    objects :: files.join(fixture.roots.hangar_dir(), "objects")
+    assert(engine_paths.is_relative_to(engine_paths.of(result.entry.out), engine_paths.of(objects)))
+    producer :: ProducerRecord.decode(result.entry.producer_record) ?? panic("producer record")
+    assert_eq(producer.facts.get("cache.reproducibility"), Val(result.attestation))
+    assert(!files.exists(files.join(fixture.roots.root, "private/unreproducible")))
+    staging :: files.join(fixture.roots.hangar_dir(), "reproducibility-staging")
+    if files.list_dir(staging) == {
+        .Ok(entries) -> assert_eq(entries.len(), 0)
+        .Err(_) -> {} // Original read_dir().unwrap_or(false) accepts an absent/unreadable staging directory.
+    }
+    engine_independent_root_cleanup(fixture.base)
+}
+
+// ported from jetpack_engine.rs:8897-8954
+#Test("independent_root_runner_rejects_divergence_before_registration") {
+    fixture :: engine_independent_root_fixture()
+    verification := StoreVerification.new()
+    checks := 0
+    source :: files.join(fixture.repo, "pkgs/hello/bin/hello")
+    changed :: () -> {
+        checks += 1
+        if checks == 2 -> files.write(source, "#!/bin/sh\necho divergent\n") ?? panic("divergent source")
+        false
+    }
+    options :: IndependentRootOptions{retries: 0, cancelled: Val(changed)}
+    if store_certify_independent_root_build(&verification, fixture.roots, fixture.ctx, RealizeRequest.Package(spec: fixture.spec, table: fixture.table), options) == {
+        .Ok(_) -> panic("divergent roots were promoted")
+        .Err(error) -> assert(error.message().contains("conflicting independent roots"))
+    }
+    assert_eq(store_list(&verification, fixture.roots).len(), 0)
+    reports :: files.list_dir(files.join(fixture.roots.root, "private/unreproducible")) ?? panic("divergence reports")
+    report_path := String?{None}
+    loop entry in reports {
+        if files.suffix(entry.path) == ".json" {
+            report_path = Val(entry.path)
+            break
+        }
+    }
+    report :: files.read(report_path ?? panic("divergence evidence")) ?? panic("report read")
+    assert(report.contains("\"kind\":\"action-identity\""))
+    assert(report.contains("\"left_action_key\""))
+    assert(report.contains("\"right_action_key\""))
+    engine_independent_root_cleanup(fixture.base)
+}
+
+// ported from jetpack_engine.rs:8956-8993
+#Test("independent_root_runner_cancellation_leaves_no_store_result") {
+    fixture :: engine_independent_root_fixture()
+    verification := StoreVerification.new()
+    cancelled :: () -> { true }
+    options :: IndependentRootOptions{retries: 1, cancelled: Val(cancelled)}
+    if store_certify_independent_root_build(&verification, fixture.roots, fixture.ctx, RealizeRequest.Package(spec: fixture.spec, table: fixture.table), options) == {
+        .Ok(_) -> panic("cancelled certification was promoted")
+        .Err(error) -> assert(error.message().contains("cancelled"))
+    }
+    assert_eq(store_list(&verification, fixture.roots).len(), 0)
+    engine_independent_root_cleanup(fixture.base)
+}

@@ -1,0 +1,11 @@
+# Port of tests/jetpack_services.rs:467-487; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+# Config-module env.jet is excluded from ordinary program parse.
+fixture: services_up_unrecognized_field_is_e1262.fixture
+mkdir: root
+mkdir: home
+step: jetpack services up --no-color
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+exit: 2
+stderr: ~ "E1262" # original predicate

@@ -1,0 +1,13 @@
+# HAND-PORT tests/measure_symbolic_specialization.rs:135-170 symbolic_fixed_length_resolves_at_module_specialization
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Exact original lex/parse/compile success; private Rust GenericModule/Struct/FixedList/Measure symbols and emitted array text retire. Source remains capacity-symbol/module-three specialization unchanged.
+fixture: symbolic_fixed_length_resolves_at_module_specialization.fixture
+env: NO_COLOR=1
+step: jet inspect compiler lex main.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics #= 0
+step: jet inspect compiler parse main.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics #= 0
+step: jet check main.jet
+exit: 0

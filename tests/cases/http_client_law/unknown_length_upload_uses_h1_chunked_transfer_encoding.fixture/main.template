@@ -1,0 +1,11 @@
+
+use core.http.client as http
+use core.http as message
+use core.files as files
+fn run() {
+    input :: files.open("{work}/upload.fifo") ?? panic("open")
+    body :: message.Body.reader(^input) ?? panic("reader")
+    req :: http.request("POST", "http://{cap:addr}/chunked").body(body).redirects(0)
+    resp :: req.send() ?? panic("send")
+    print(resp.body().text(8) ?? panic("body"))
+}

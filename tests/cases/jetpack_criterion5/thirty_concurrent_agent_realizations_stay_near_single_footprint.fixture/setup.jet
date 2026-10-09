@@ -1,0 +1,8 @@
+// SETUP-PORT of tests/jetpack_criterion5.rs36-40; exact x payload4MiB.
+use core.files as files
+fn run() {
+    files.create_dir_all("source") ?? panic("mkdir source")
+    payload := [U8]{}
+    loop _ in 0..<(4 * 1024 * 1024) -> &payload.push(U8{120})
+    files.write_bytes("source/payload", payload) ?? panic("write payload")
+}

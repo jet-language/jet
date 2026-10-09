@@ -1,0 +1,13 @@
+# HAND-PORT tests/codemod.rs:130-174 codemod_undo_refuses_changed_file
+# Original predicates; same-head kit verification pending.
+fixture: codemod_undo_refuses_changed_file.fixture
+env: NO_COLOR=1
+write: rename.codemod.json object.template
+step: jet inspect codemod apply rename.codemod.json
+exit: 0
+copy: changed.jet Examples/main.jet
+step: jet inspect codemod undo .jet/codemods/StaleRename.log.json
+exit: nonzero
+stderr: ~ "checkpoint mismatch" # original predicate
+file: Examples/main.jet ~ "changed" # original predicate
+

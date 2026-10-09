@@ -1,0 +1,25 @@
+
+use core.service as services
+use core.testing as testing
+
+fn durable_worker() {}
+
+fn run() {
+    tree := services.tree("app")
+    tree.set_delivery(services.delivery_durable()) ?? panic("delivery")
+    temp := testing.temp_dir("services-delivery-eventlog")
+    store_path :: Path.from(temp).join("state.log").to_string()
+    store :: services.state_store(store_path) ?? panic("state store")
+    tree.set_state_event_log(store, "app-events", 1, "reversible") ?? panic("state")
+    worker :: tree.worker("a", durable_worker, capacity: 4) ?? panic("worker")
+    tree.start() ?? panic("start")
+
+    first :: tree.send_durable(worker, "ping", key: "k1") ?? panic("durable send")
+    first.status() ?? panic("first status")
+    tree.append_event("after-durable-send") ?? panic("append after durable send")
+    second :: tree.send_durable(worker, "pong", key: "k2") ?? panic("second durable send")
+    second.status() ?? panic("second status")
+    tree.append_event("after-second-send") ?? panic("append after second send")
+
+    print("events:{tree.event_count()}")
+}

@@ -1,0 +1,20 @@
+# Port of tests/lsp.rs:4558-4597; source bytes copied verbatim.
+# PENDING-GRAMMAR: generic framed sessions in TestW3b batch three; no reference snapshot needed for original predicates.
+# PENDING-SEAM(read_bytes): D-CHILD-READ-BYTES1 + CoreState2 + kit batch three.
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_semantic_tokens_returns_data/0.json
+recv lsp
+stdout: ~ "semanticTokensProvider" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_semantic_tokens_returns_data/1.json
+send lsp: messages/lsp_semantic_tokens_returns_data/2.json
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_semantic_tokens_returns_data/3.json
+recv lsp
+stdout: ~ "data" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_semantic_tokens_returns_data/4.json
+recv lsp
+stdout: ~ "result" # original predicate; other response fields contain variable metadata/paths
+close lsp
+# Original transcript only waited; it did not assert process status.
+exit: any

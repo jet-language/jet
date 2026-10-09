@@ -1,0 +1,10 @@
+// tests/jetpack_engine.rs:3913-3931; source literal unchanged at runtime.
+// PENDING-SEAM(package-tests): source-authored, no execution proof.
+#Test("declared_source_package_named_like_provider_resolves_as_package") {
+    source :: "\nmodule env.dev {{\n    sources: {{ default: NixOS/nixpkgs/nixos-unstable@github }}\n    packages: [default.[cargo]]\n}}\n"
+    plan :: envmodel_evaluate_env(source, envmodel_test_repo_root()) ?? panic("environment plan")
+    assert_eq(plan.package_refs, [String]{"cargo@default"})
+    spec :: RefSpec.classify_in(plan.package_refs[0], plan.table) ?? panic("declared ref")
+    assert_eq(spec.package, "cargo")
+    assert_eq(spec.source, RefSource.Named("default"))
+}

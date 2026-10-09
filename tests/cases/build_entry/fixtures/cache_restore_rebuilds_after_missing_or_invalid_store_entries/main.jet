@@ -1,0 +1,10 @@
+
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("write declared cached output") {
+        emit :: b.action("emit", [], ["artifact"], ["sh", "-c", "printf fresh > artifact"], ["Exec", "FS"])
+        app :: b.add_executable("app", ["main.jet"], [emit])
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}

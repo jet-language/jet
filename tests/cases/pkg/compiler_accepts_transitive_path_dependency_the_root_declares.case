@@ -1,0 +1,8 @@
+# KNOWN-FAILING #4833: Jet CLI does not resolve the original declared path dependency graph.
+# Exact public subclaim of pkg.rs:3545-3574: success is NOT required.
+# The original allows any returned failure provided every code differs E1206.
+fixture: fixtures/compiler_transitive_path_root_declared
+step: jet build run.jet
+exit: any
+# Reason: original result.as_ref().err().map_or(true, errors.all(code != E1206)).
+stderr: !~ "[E1206]"

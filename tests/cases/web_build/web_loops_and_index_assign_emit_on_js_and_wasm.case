@@ -1,0 +1,13 @@
+# HAND-PORT tests/web_build.rs:1739-1860 web_loops_and_index_assign_emit_on_js_and_wasm
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Every original public predicate retained; generated-Rust representation-only subassertions retire per S4 review.
+fixture: web_loops_and_index_assign_emit_on_js_and_wasm.fixture
+env: NO_COLOR=1
+step: jet build --target web --json main.jet
+exit: 0
+file: .jet/build/app.js ~ "while (true)" # original web.js_app predicate
+file: .jet/build/app.js ~ "break;" # original web.js_app predicate
+file: .jet/build/app.js ~ "while ((i < n))" # original web.js_app predicate
+file: .jet/build/app.js ~ "continue;" # original web.js_app predicate
+file: .jet/build/app.js ~ "__jet___loop_first" # original web.js_app predicate
+file: .jet/build/app.js ~any "] = " "[0] =" # original disjunction, not strengthened

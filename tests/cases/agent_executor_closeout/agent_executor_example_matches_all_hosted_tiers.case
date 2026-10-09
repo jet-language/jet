@@ -1,0 +1,35 @@
+# Port of tests/agent_executor_closeout.rs:210-218/helper12-13 and tir_support/mod.rs411-497.
+# Source copied verbatim. ORACLE-LITERAL214/216, runtime PENDING-SAME-HEAD.
+# Public sandbox-level projection from ConfigCommand84-95/env_detect_sandbox35-47; no guessed availability.
+fixture: agent_executor_example_matches_all_hosted_tiers.fixture
+step sandbox: jet os config sandbox status
+exit: 0
+step release: jet run --release main.jet
+env: JET_STORE_DIR={work}/release/cache
+env: JETPACK_ROOT={work}/release/jetpack
+env: NO_COLOR=1
+env: JETPACK_ENV=1
+exit: 0
+when os-name linux|macos: when sandbox.stdout+stderr ~ "sandbox: Strong via": stdout: = agent_executor_example_matches_all_hosted_tiers.native.out
+when os-name linux|macos: when sandbox.stdout+stderr !~ "sandbox: Strong via": stdout: = agent_executor_example_matches_all_hosted_tiers.unsupported.out
+when os-name !linux: when os-name !macos: stdout: = agent_executor_example_matches_all_hosted_tiers.unsupported.out
+step default: jet run main.jet
+env: JET_STORE_DIR={work}/default/cache
+env: JETPACK_ROOT={work}/default/jetpack
+env: NO_COLOR=1
+env: JETPACK_ENV=1
+exit: 0
+when os-name linux|macos: when sandbox.stdout+stderr ~ "sandbox: Strong via": stdout: = agent_executor_example_matches_all_hosted_tiers.native.out
+when os-name linux|macos: when sandbox.stdout+stderr !~ "sandbox: Strong via": stdout: = agent_executor_example_matches_all_hosted_tiers.unsupported.out
+when os-name !linux: when os-name !macos: stdout: = agent_executor_example_matches_all_hosted_tiers.unsupported.out
+stdout: == release # original tier baseline equality
+step interpret: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/interpret/cache
+env: JETPACK_ROOT={work}/interpret/jetpack
+env: NO_COLOR=1
+env: JETPACK_ENV=1
+exit: 0
+when os-name linux|macos: when sandbox.stdout+stderr ~ "sandbox: Strong via": stdout: = agent_executor_example_matches_all_hosted_tiers.native.out
+when os-name linux|macos: when sandbox.stdout+stderr !~ "sandbox: Strong via": stdout: = agent_executor_example_matches_all_hosted_tiers.unsupported.out
+when os-name !linux: when os-name !macos: stdout: = agent_executor_example_matches_all_hosted_tiers.unsupported.out
+stdout: == release # original tier baseline equality

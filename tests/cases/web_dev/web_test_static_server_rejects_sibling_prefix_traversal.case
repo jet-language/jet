@@ -1,0 +1,15 @@
+# Original tests/web_dev.rs:826-862; exact original HTTP bytes, statuses, forbidden-byte predicate and aggregate counters.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference/PASS claim.
+fixture: web_test_static_server_rejects_sibling_prefix_traversal.fixture
+requires: tool:node
+env: S5_PORT={free-port:web}
+env: S5_ROOT={work}
+copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet claims/HTTP.jet
+session app raw: node {root}/Tools/web-test/serve.mjs --port {free-port:web} --root {work}/root
+stdout: null
+stderr: null
+step: jet test claims/run.jet
+exit: 0
+signal app: KILL
+close app
+exit: any # original WebTestStaticServer drop ignores kill/wait status

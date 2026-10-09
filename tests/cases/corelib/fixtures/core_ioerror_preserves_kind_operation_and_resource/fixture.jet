@@ -1,0 +1,81 @@
+
+use core.files as fs
+use core.net as net
+use core.process as process
+
+fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] IOError! {
+    return stream.read(limit)
+}
+
+fn operation_name(operation: IOOperation) -[]> String {
+    if operation == {
+        .Read -> return "read"
+        .Write -> return "write"
+        .Flush -> return "flush"
+        .Connect -> return "connect"
+        .Accept -> return "accept"
+        .Close -> return "close"
+        .Resolve -> return "resolve"
+        .Codec -> return "codec"
+    }
+}
+
+fn run() -[Exec, FS, IO, Net, Time.Wait]> {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    client := net.tcp_connect(address) ?? panic("connect")
+    if receive(&client, 0) == {
+        .Ok(_) -> panic("zero read succeeded")
+        .Err(error) -> {
+            if error == {
+                .InvalidInput(context) -> print(if operation_name(context.operation) == "read" -> "invalid-read" else -> "invalid-other")
+                else -> { print("other") }
+            }
+        }
+    }
+    if fs.read("definitely-missing/ioerror-tree") == {
+        .Ok(_) -> panic("missing file read succeeded")
+        .Err(error) -> {
+            if error == {
+                .NotFound(context) -> print(context.resource ?? "missing-resource")
+                else -> { print("other") }
+            }
+        }
+    }
+    if fs.write(".", "cannot replace directory") == {
+        .Ok(_) -> panic("directory write succeeded")
+        .Err(error) -> {
+            if error == {
+                .Other(context) -> print(if operation_name(context.operation) == "write" -> "write" else -> "wrong-write-operation")
+                else -> { print("wrong-write-kind") }
+            }
+        }
+    }
+    if process.run_spec(process.cmd([])) == {
+        .Ok(_) -> panic("empty command succeeded")
+        .Err(error) -> {
+            if error == {
+                .InvalidInput(context) -> print(if operation_name(context.operation) == "resolve" -> "empty-command" else -> "wrong-command-operation")
+                else -> { print("wrong-command-kind") }
+            }
+        }
+    }
+    if process.pipeline([]) == {
+        .Ok(_) -> panic("empty pipeline succeeded")
+        .Err(error) -> {
+            if error == {
+                .InvalidInput(context) -> print(if operation_name(context.operation) == "resolve" -> "empty-pipeline" else -> "wrong-pipeline-operation")
+                else -> { print("wrong-pipeline-kind") }
+            }
+        }
+    }
+    if process.run_spec(process.cmd(["unused"]).env("BAD=NAME", "value")) == {
+        .Ok(_) -> panic("invalid environment succeeded")
+        .Err(error) -> {
+            if error == {
+                .InvalidInput(context) -> print(if operation_name(context.operation) == "resolve" -> context.resource ?? "missing-env-resource" else -> "wrong-env-operation")
+                else -> { print("wrong-env-kind") }
+            }
+        }
+    }
+}

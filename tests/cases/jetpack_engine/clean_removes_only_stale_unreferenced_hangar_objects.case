@@ -1,0 +1,40 @@
+# HAND-PORT tests/jetpack_engine.rs:3229-3254 clean_removes_only_stale_unreferenced_hangar_objects
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+env: NO_COLOR=1
+refused: hangar-fixture-backdate
+# Verbatim original setup and ALL predicates; no passing substitute for the named seam.
+# #[test]
+# fn clean_removes_only_stale_unreferenced_hangar_objects() {
+#     let root = Scratch::new("root");
+#     let stale = write_hangar_meta(&root.path, "old-1", "old", "1.0", Some(1)).0;
+#     let fresh = write_hangar_meta(&root.path, "fresh-1", "fresh", "1.0", Some(now_secs())).0;
+#     fs::write(stale.join("payload"), "old bytes").unwrap();
+#     fs::write(fresh.join("payload"), "fresh bytes").unwrap();
+# 
+#     let out = jetpack()
+#         .args(["hangar", "clean", "--no-color", "--yes"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         out.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&out.stderr)
+#     );
+#     assert!(!stale.exists(), "stale object should be collected");
+#     assert!(fresh.exists(), "fresh object should be kept");
+#     let stderr = String::from_utf8_lossy(&out.stderr);
+#     assert!(
+#         stderr.contains("removed 2 stale object"),
+#         "stderr: {stderr}"
+#     );
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack hangar clean --no-color --yes
+exit: 0
+stderr: ~ "removed 2 stale object" # original contains predicate
+

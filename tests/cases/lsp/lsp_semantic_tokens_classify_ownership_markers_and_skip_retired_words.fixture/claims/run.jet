@@ -1,0 +1,119 @@
+// Exact test algorithm port: tests/lsp.rs214-280 and4696-4769.
+// Original semantic_data_from_response ignores non-u32 comma fields and chunks remainder.
+use core.files as files
+use core.sys as sys
+
+struct S5SemanticToken { text: String, token_type: Int, modifiers: Int }
+
+fn s5_token_find(text: String, marker: String, offset: Int) -> Int {
+    bytes :: text.bytes()
+    pattern :: marker.bytes()
+    index := offset
+    loop index + pattern.len() <= bytes.len() {
+        same := true
+        loop part in 0..<pattern.len() {
+            if bytes[index + part] != pattern[part] -> same = false
+        }
+        if same -> return index
+        index = index + 1
+    }
+    panic("semantic token data delimiter missing")
+}
+
+fn s5_token_slice(text: String, start: Int, end: Int) -> String {
+    bytes :: text.bytes()
+    if start < 0 || end < start || end > bytes.len() -> return ""
+    selected := [U8]{}
+    loop index in start..<end -> &selected.push(bytes[index])
+    String.from_bytes(selected) ?? ""
+}
+
+fn s5_token_u32(text: String) -> Int? {
+    bytes :: text.bytes()
+    if bytes.len() == 0 -> return None
+    index := 0
+    if Int.from_u8(bytes[0]) == 43 -> index = 1
+    if index == bytes.len() -> return None
+    value := 0
+    loop index < bytes.len() {
+        digit :: Int.from_u8(bytes[index]) - 48
+        if digit < 0 || digit > 9 -> return None
+        if value > (4294967295 - digit) /% 10 -> return None
+        value = value * 10 + digit
+        index = index + 1
+    }
+    Val(value)
+}
+
+fn s5_token_decode(source: String, response: String) -> [S5SemanticToken] {
+    key :: s5_token_find(response, "\"data\"", 0)
+    first :: s5_token_find(response, "[", key + 6) + 1
+    last :: s5_token_find(response, "]", first)
+    values := [Int]{}
+    loop field in s5_token_slice(response, first, last).split(",").to_list() {
+        if s5_token_u32(field.trim()) == .Val(value) -> &values.push(value)
+    }
+    lines :: source.lines()
+    tokens := [S5SemanticToken]{}
+    line_index := 0
+    column := 0
+    offset := 0
+    loop offset + 5 <= values.len() {
+        delta :: values[offset]
+        line_index = line_index + delta
+        column = if delta == 0 -> column + values[offset + 1] else -> values[offset + 1]
+        length :: values[offset + 2]
+        text :: if line_index < lines.len() -> s5_token_slice(lines[line_index], column, column + length) else -> ""
+        &tokens.push(S5SemanticToken{text, token_type: values[offset + 3], modifiers: values[offset + 4]})
+        offset = offset + 5
+    }
+    tokens
+}
+
+fn s5_token_assert(tokens: [S5SemanticToken], text: String, kind: Int, modifier: Int) {
+    found := false
+    loop token in tokens {
+        if token.text == text && token.token_type == kind && (token.modifiers /% modifier) % 2 != 0 -> found = true
+    }
+    assert(found, "missing semantic token {text} type {kind} modifier {modifier}")
+}
+
+fn s5_token_count(tokens: [S5SemanticToken], text: String, kind: Int) -> Int {
+    count := 0
+    loop token in tokens {
+        if token.text == text && token.token_type == kind -> count = count + 1
+    }
+    count
+}
+
+fn s5_token_absent(tokens: [S5SemanticToken], text: String) {
+    loop token in tokens -> assert(token.text != text, "retired token {text}")
+}
+
+fn s5_token_original_assertions() {
+    source :: files.read(sys.get("S5_SOURCE") ?? panic("source path")) ?? panic("source bytes")
+    response :: files.read(sys.get("S5_RESPONSE") ?? panic("response path")) ?? panic("response bytes")
+    tokens :: s5_token_decode(source, response)
+    if (sys.get("S5_EDITED") ?? "") == "1" {
+        s5_token_absent(tokens, "view")
+        assert(s5_token_count(tokens, "View", 1) > 0)
+        return
+    }
+    s5_token_assert(tokens, "copy", 12, 16)
+    s5_token_assert(tokens, "^", 12, 4)
+    s5_token_assert(tokens, "&", 12, 8)
+    s5_token_assert(tokens, "Test", 13, 32)
+    s5_token_assert(tokens, "Unsafe", 13, 32)
+    s5_token_assert(tokens, "#", 13, 32)
+    assert(s5_token_count(tokens, "View", 1) > 0)
+    assert(s5_token_count(tokens, "while", 3) > 0)
+    assert(s5_token_count(tokens, "for", 3) > 0)
+    assert_eq(s5_token_count(tokens, "next", 0), 4)
+    assert_eq(s5_token_count(tokens, "next", 3), 5)
+    retired_words :: [String]{"val", "mut", "take", "view"}
+    loop retired in retired_words -> s5_token_absent(tokens, retired)
+}
+
+#Test("semantic ownership tokens retain every original assertion") {
+    s5_token_original_assertions()
+}

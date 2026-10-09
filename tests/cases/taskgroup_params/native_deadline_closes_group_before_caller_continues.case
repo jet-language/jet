@@ -1,0 +1,10 @@
+# Port of tests/taskgroup_params.rs:466-490; originals retained; runtime PENDING-SAME-HEAD.
+fixture: native_deadline_closes_group_before_caller_continues.fixture
+step: jet check main.jet
+exit: 0
+step: jet run main.jet
+exit: nonzero
+stdout: = "settled\n"
+stdout: !~ "caller"
+stderr: ~ "E3003"
+stderr: any-line words-prefix ["run", "tier1", "native"] # original native tier attribution

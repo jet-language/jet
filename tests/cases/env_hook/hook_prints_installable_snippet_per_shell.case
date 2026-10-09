@@ -1,0 +1,19 @@
+# Port of tests/env_hook.rs::hook_prints_installable_snippet_per_shell.
+step: jetpack env hook bash
+exit: 0
+stdout: ~ "PROMPT_COMMAND" # original predicate
+stdout: ~ "command jet env export bash" # original predicate
+stdout: ~ "__jet_help_prefill" # original predicate
+stdout: !~ "__jetpack_" # original predicate
+step: jetpack env hook zsh
+exit: 0
+stdout: ~ "add-zsh-hook precmd __jet_env_hook" # original predicate
+stdout: ~ "command jet env export zsh" # original predicate
+stdout: ~ "__jet_help_prefill" # original predicate
+stdout: !~ "__jetpack_" # original predicate
+step: jetpack env hook fish
+exit: 0
+stdout: ~ "--on-event fish_prompt" # original predicate
+stdout: ~ "command jet env export fish" # original predicate
+stdout: ~ "__jet_help_prefill" # original predicate
+stdout: !~ "__jetpack_" # original predicate

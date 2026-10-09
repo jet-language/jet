@@ -1,0 +1,8 @@
+# Port of run_interpret.rs:274-326. PENDING-GRAMMAR: labels/stream equality/step env.
+fixture: fixtures/unused-c-members
+step default: jet run main.jet
+env: JET_STORE_DIR={work}/cache-default/build
+step: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/cache-interpreter/build
+stdout: == default
+stderr: !~ E2201 # Original explicitly forbids interpreter deopt diagnostic.

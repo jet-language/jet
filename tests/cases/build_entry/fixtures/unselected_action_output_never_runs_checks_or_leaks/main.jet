@@ -1,0 +1,11 @@
+
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("declare selected closure") {
+    bad :: b.action("unselected", [], ["missing-generated.jet"], ["sh", "-c", "exit 77"], ["Exec", "FS"])
+    ignored :: b.add_executable("ignored", ["missing-generated.jet"], [bad])
+    app :: b.add_executable("app", ["main.jet"], [])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}

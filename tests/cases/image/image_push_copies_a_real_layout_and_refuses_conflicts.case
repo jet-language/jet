@@ -1,0 +1,18 @@
+# Port of tests/image.rs:355-408, write_project43-66 verbatim.
+# ORACLE-LITERAL conflict bytes rs393,404-406; sorted blob filename equality retained.
+# PENDING-GRAMMAR(batch4 names equality); runtime verification PENDING-SAME-HEAD.
+fixture: image-push.fixture
+env: NO_COLOR=1
+mkdir: destination
+step: jetpack image server --push file://{work}/destination/published
+cwd: project
+exit: 0
+file: project/.jet/images/server/index.json == destination/published/index.json
+file: project/.jet/images/server/oci-layout == destination/published/oci-layout
+file: project/.jet/images/server/blobs/sha256 names == destination/published/blobs/sha256
+copy: conflict.bytes destination/published/index.json
+step: jetpack image server --push file://{work}/destination/published
+cwd: project
+exit: 2
+stderr: ~ byte-identical # original predicate
+file: destination/published/index.json = conflicting-layout.out

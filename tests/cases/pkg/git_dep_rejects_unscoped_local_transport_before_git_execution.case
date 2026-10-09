@@ -1,0 +1,27 @@
+# PORT tests/pkg.rs::git_dep_rejects_unscoped_local_transport_before_git_execution:4526-4581; original helpers min_manifest/manifest_with_deps/with_store retained.
+# KNOWN-FAILING #4833: Jet front-end has no fetch/locked dependency-resolution door.
+# PENDING-GRAMMAR(batch-four); no reference snapshot or runtime proof.
+# Rust CLI: main.rs3684-3691 -> CmdPkg.rs255-325 -> original Fetch::fetch options.
+fixture: fixtures/git_dep_rejects_unscoped_local_transport_before_git_execution
+requires: tool:git
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+mkdir: outside
+mkdir: project0
+mkdir: project0/store
+write: project0/package.jet package0.template
+step: jet fetch
+cwd: project0
+env: JET_PACKAGE_STORE_DIR={work}/project0/store
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1203]"
+file: project0/.jet absent
+mkdir: project1
+mkdir: project1/store
+write: project1/package.jet package1.template
+step: jet fetch
+cwd: project1
+env: JET_PACKAGE_STORE_DIR={work}/project1/store
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1203]"
+file: project1/.jet absent

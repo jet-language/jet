@@ -1,0 +1,30 @@
+# tests/jet_env_boundary.rs::declared_package_import_refuses_run_without_prepare_and_gates_dev_test_without_acquiring at tests/jet_env_boundary.rs:67; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# PENDING-SAME-HEAD; source bytes/predicates unchanged; no captures blessed.
+# env.jet is original configuration-module syntax, not an ordinary-program positive parse input.
+fixture: declared_package_import_refuses_run_without_prepare_and_gates_dev_test_without_acquiring.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/jetpack-root-must-not-be-created
+step: jet run run.jet --no-prepare
+unset: JETPACK_ENV
+unset: JETPACK_ENV_DIR
+unset: JETPACK_ENV_HASH
+exit: 1
+stderr: ~ "Error [E1355]" # original predicate
+stderr: ~ "Import: `use helper`" # original predicate
+step: jet dev run.jet --watch=off
+unset: JETPACK_ENV
+unset: JETPACK_ENV_DIR
+unset: JETPACK_ENV_HASH
+exit: 1
+stderr: ~ "Error [E1355]" # original predicate
+stderr: ~ "Import: `use helper`" # original predicate
+step: jet test run.jet
+unset: JETPACK_ENV
+unset: JETPACK_ENV_DIR
+unset: JETPACK_ENV_HASH
+exit: 1
+stderr: ~ "Error [E1355]" # original predicate
+stderr: ~ "Import: `use helper`" # original predicate
+stderr: = declared_package_import_refuses_run_without_prepare_and_gates_dev_test_without_acquiring.stderr
+file: .jet absent
+file: jetpack-root-must-not-be-created absent

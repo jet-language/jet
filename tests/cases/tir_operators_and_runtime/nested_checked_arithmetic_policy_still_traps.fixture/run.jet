@@ -1,0 +1,13 @@
+
+use core.sys as env
+
+fn run() {
+    raw :: Int.parse(env.get("JET_ARITHMETIC_VALUE") ?? "0") ?? 0
+    value :: U8.from_int(raw) ?? U8{0}
+    #Arithmetic(.Wrapping) {
+        print(value + U8{100})
+        #Arithmetic(.Checked) {
+            print(value + U8{100})
+        }
+    }
+}

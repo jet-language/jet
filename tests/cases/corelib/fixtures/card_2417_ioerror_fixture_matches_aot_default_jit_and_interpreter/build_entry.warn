@@ -1,0 +1,26 @@
+Warning [L0530] (redundant_final_return): An explicit `return` is used on the final value line
+  --> build_entry_liveness.jet:2:5
+    |
+  2 |     return b.plan()
+    |     ^^^^^^
+ Why: An unadorned expression on the final value line is Jet's implicit return; `return` is for early exits
+ Fix: Remove the final `return` and leave the expression as the block tail
+More: jet-lang.dev/e/L0530
+
+Warning [L0520] (display_migration): `MissingDisplay` has no `Display` impl; use the explicit debug selector for this interpolation.
+  --> build_entry_liveness.jet:13:13
+    |
+ 13 |     print("{value}")
+    |             ^^^^^
+ Why: Bare interpolation is moving to the explicit `Display` hook (D-DISPLAY-SHAPE); the canonical migration edit keeps the value user-owned.
+ Fix: Replace `value` with `{value:Debug}`.
+More: jet-lang.dev/e/L0520
+
+Warning [L0104] (unused_private_fn): Private function `unused_private` is never called or used as a value.
+  --> build_entry_liveness.jet:9:4
+    |
+  9 | fn unused_private() {}
+    |    ^^^^^^^^^^^^^^
+ Why: A private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.
+ Fix: Remove the function, or rename `unused_private` to `_unused_private` when it is intentional.
+More: jet-lang.dev/e/L0104

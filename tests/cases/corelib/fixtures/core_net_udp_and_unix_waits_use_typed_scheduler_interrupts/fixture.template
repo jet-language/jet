@@ -1,0 +1,38 @@
+
+use core.net as net
+use core.tasks as tasks
+
+fn run() {
+    udp_timeout :: net.udp_bind("127.0.0.1:0") ?? panic("udp timeout bind")
+    net.udp_set_timeout(udp_timeout, 20) ?? panic("udp timeout")
+    if net.udp_receive(udp_timeout, 8) == {
+        .Ok(_) -> panic("udp timeout returned data")
+        .Err(error) -> print(net.error_message(error))
+    }
+
+    udp :: net.udp_bind("127.0.0.1:0") ?? panic("udp bind")
+    (udp_ready_tx, udp_ready_rx) :: channel<Int>()
+    udp_wait :: task {
+        udp_ready_tx.send(1)
+        if net.udp_receive(udp, 8) == {
+            .Ok(_) -> panic("udp cancel returned data")
+            .Err(error) -> print(net.error_message(error))
+        }
+    }
+    _udp_ready :: udp_ready_rx.receive() ?? panic("udp ready")
+    udp_wait.cancel()
+    udp_wait.join() ?? panic("udp wait task failed")
+
+    listener :: net.unix_listen("{work}/i.sock") ?? panic("unix listen")
+    (unix_ready_tx, unix_ready_rx) :: channel<Int>()
+    unix_wait :: task {
+        unix_ready_tx.send(1)
+        if net.unix_accept(listener) == {
+            .Ok(_) -> panic("unix cancel accepted stream")
+            .Err(error) -> print(net.error_message(error))
+        }
+    }
+    _unix_ready :: unix_ready_rx.receive() ?? panic("unix ready")
+    unix_wait.cancel()
+    unix_wait.join() ?? panic("udp wait task failed")
+}

@@ -1,0 +1,11 @@
+# Port of tests/image.rs:466-490, write_project43-66 verbatim.
+# Original PATH points at an empty isolated directory.
+# Runtime verification PENDING-SAME-HEAD.
+fixture: built-app.fixture
+env: NO_COLOR=1
+mkdir: empty-path
+step: jetpack image server --push http://127.0.0.1:9/demo/server:1
+env: PATH={work}/empty-path
+exit: 2
+stderr: ~ "OCI registry adapter could not start" # original predicate
+stderr: ~ "couldn't publish image" # original predicate

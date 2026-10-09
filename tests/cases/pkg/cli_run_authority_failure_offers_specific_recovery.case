@@ -1,0 +1,14 @@
+# Port of tests/pkg.rs:5527-5552; UNIX cfg and all source/predicates retained.
+# PENDING-GRAMMAR(batch-four): symlink/mkdir. Target written verbatim, not canonicalized.
+requires: os:unix
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+copy: {root}/tests/cases/pkg/fixtures/manifests/authority.txt package.jet
+copy: {root}/tests/cases/pkg/fixtures/sources/real.txt real.jet
+symlink: real.jet run.jet
+step: jet run
+exit: nonzero
+stderr: ~ "Error [E1334]:" # original predicate
+stderr: ~ "run.jet" # original predicate
+stderr: ~ "symlink" # original predicate
+stderr: ~ "replace the symlink with the expected regular file" # original predicate

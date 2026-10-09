@@ -1,0 +1,23 @@
+# HAND-PORT tests/lint_visibility_wave_a.rs:53-101 check_and_build_show_advisories_while_execution_can_request_them
+# PENDING-GRAMMAR: approved batch-two forms; no runtime parity claim.
+fixture: check_and_build_show_advisories_while_execution_can_request_them.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+stdout+stderr: ~ "[L0101]" # original predicate
+step: jet build --profile=debug main.jet
+exit: 0
+stdout+stderr: ~ "[L0101]" # original predicate
+step: jet run main.jet
+exit: 0
+stdout: = check_and_build_show_advisories_while_execution_can_request_them.stdout.expected
+stdout+stderr: !~ "[L0101]" # original predicate
+step: jet run --verbose main.jet
+exit: 0
+stdout+stderr: ~ "[L0101]" # original predicate
+stdout: = check_and_build_show_advisories_while_execution_can_request_them.stdout.expected
+step: jet run main.jet -- --verbose --json
+exit: 0
+stdout: = check_and_build_show_advisories_while_execution_can_request_them.stdout.expected
+stdout+stderr: !~ "[L0101]" # original predicate
+

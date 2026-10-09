@@ -1,0 +1,12 @@
+
+use core.net.ws as ws
+fn run() {
+    if ws.connect("ws://{cap:addr}/live\nInjected: yes") == {
+        .Ok(_) -> print("accepted")
+        .Err(error) -> {
+            if error == .InvalidURL -> print("rejected")
+            else -> print("wrong error")
+        }
+        else -> print("unexpected")
+    }
+}

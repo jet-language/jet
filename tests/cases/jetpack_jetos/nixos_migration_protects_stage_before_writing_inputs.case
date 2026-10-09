@@ -1,0 +1,23 @@
+# Port of tests/jetpack_jetos.rs:3315-3390. All original predicates, fixture sources verbatim.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: nixos_migration_protects_stage_before_writing_inputs.fixture
+mkdir: package-root
+requires: tool:strace
+env: JETPACK_ROOT={work}/package-root
+step: strace -f -s 4096 -o {work}/stage.trace -e trace=%file -- {jet} os migrate compare-nixos halcyon-gnome --out {work}/published --no-color
+cwd: project
+env: NIX_REMOTE=invalid
+exit: 2
+file: published absent
+copy: stage.trace trace.log
+step: jet run observe/trace.jet
+exit: 0
+json: stdout doc $.mkdir >= 0
+json: stdout doc $.first_input >= 0
+json: stdout doc $.protected #= 2
+json: stdout doc $.insecure = false
+capture: mkdir stdout doc $.mkdir
+capture: first_input stdout doc $.first_input
+json: stdout doc $.protected[0] > {cap:mkdir}
+json: stdout doc $.protected[1] < {cap:first_input}

@@ -1,0 +1,48 @@
+
+use core.service as services
+use core.testing as testing
+
+fn failure_worker() {}
+
+fn run() {
+    tree := services.tree("delivery")
+    tree.set_delivery(services.delivery_durable()) ?? panic("delivery")
+    temp := testing.temp_dir("service-failure")
+    store_path :: Path.from(temp).join("delivery.state").to_string()
+    store :: services.state_store(store_path) ?? panic("state store")
+    tree.set_state_event_log(store, "delivery-events", 1, "reversible") ?? panic("state")
+    worker :: tree.worker("worker", failure_worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+
+    first :: tree.send_durable(worker, "first", key: "k1") ?? panic("first")
+    first.status() ?? panic("first status")
+    duplicate :: tree.send_durable(worker, "first", key: "k1") ?? panic("duplicate")
+    duplicate.status() ?? panic("duplicate status")
+    conflicting :: tree.send_durable(worker, "different", key: "k1")
+    if conflicting == {
+        .Ok(delivery) -> {
+            cancelled :: delivery.cancel() ?? panic("unexpected conflict delivery")
+            cancelled.status() ?? panic("unexpected conflict status")
+            print("conflict:accepted")
+        }
+        .Err(_) -> { print("conflict:rejected") }
+    }
+    full :: tree.send_durable(worker, "second", key: "k2")
+    if full == {
+        .Ok(delivery) -> {
+            cancelled :: delivery.cancel() ?? panic("unexpected full delivery")
+            cancelled.status() ?? panic("unexpected full status")
+            print("full:accepted")
+        }
+        .Err(_) -> { print("full:rejected") }
+    }
+    print("dead_letters:{tree.dead_letter_count()}")
+
+    tree.receive(worker) ?? panic("receive")
+    tree.drain_worker(worker) ?? panic("drain")
+    stopped_receive :: tree.receive(worker)
+    if stopped_receive == {
+        .Ok(_) -> { print("drained_receive:accepted") }
+        .Err(_) -> { print("drained_receive:rejected") }
+    }
+}

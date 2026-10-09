@@ -1,0 +1,1 @@
+library broken; type TCounter = class end; function counter_new(Value: Int64): Pointer; cdecl; begin Result := ; end; function counter_add(Handle: Pointer; Delta: Int64): Int64; cdecl; begin Result := 0; end; procedure counter_free(Handle: Pointer); cdecl; begin end; exports counter_new, counter_add, counter_free; begin end.

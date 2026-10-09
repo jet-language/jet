@@ -1,0 +1,12 @@
+use plan
+use core.encoding.json as json
+
+fn run() {
+    wire :: plan.list_json("ok")
+    print(wire)
+    print(plan.round_trip(wire))
+    report :: json.decode<plan.ListReport>(wire) ?? panic("consumer decode")
+    print(report.schema)
+    print(plan.mk().label())
+    print(wire.len())
+}

@@ -1,0 +1,18 @@
+# PORT tests/repl.rs:1800-1868 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+fixture: repl_tty_compute_interrupt_returns_within_100ms.fixture
+env: NO_COLOR=1
+requires: os-name:linux
+# Also PENDING-SEAM(read_bytes); recv latency bound starts at the preceding send, not case startup.
+env: JET_REPL_HISTORY=off
+session app raw: jet repl
+pty: true
+recv app until ~ "1 user>" within 2s every 50ms optional # Original ready-or-2s startup does not assert readiness rs1831-1836.
+send app: repl_tty_compute_interrupt_returns_within_100ms.fixture/loop.in
+sleep: 20ms
+send app: repl_tty_compute_interrupt_returns_within_100ms.fixture/interrupt.in
+recv app until ~ "Interrupted. External effects already performed were not rolled back." within 100ms every 5ms # Original latency.is_some rs1843-1866.
+send app: repl_tty_compute_interrupt_returns_within_100ms.fixture/quit.in
+close app
+exit: any # Original final status unasserted; only interruption latency is asserted rs1855-1866.

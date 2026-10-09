@@ -1,0 +1,25 @@
+# Port of tests/cli_parts/surface.rs:1764-1808; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/inline_authority
+copy: gradient.jet original.bytes
+step: jet run gradient.jet
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E1803" # original predicate
+stderr: ~ "allow: [FS, IO]" # original predicate
+file: out.txt absent
+step: jet fix gradient.jet
+env: NO_COLOR=1
+exit: 0
+file: gradient.jet == original.bytes
+stdout: ~ "1 suggestion" # original predicate
+step: jet fix gradient.jet --all
+env: NO_COLOR=1
+exit: 0
+file: gradient.jet = gradient-fixed.bytes
+step: jet run gradient.jet
+env: NO_COLOR=1
+exit: 0
+stdout: = wrote.out
+file: out.txt = hi.bytes

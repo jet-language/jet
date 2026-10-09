@@ -1,0 +1,19 @@
+# Port of run_regressions.rs:141-163; source copied verbatim, exact oracle 12/12/3.5/3.
+# ORACLE-LITERAL: exact original stdout bytes at run_regressions.rs:162; never re-bless.
+# PENDING-GRAMMAR: step-scoped env (fresh store and jetpack root for each tier).
+fixture: fixtures/root_calls
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+# Original run_tier creates a Scratch root, not its cache/jetpack children.
+mkdir: cache/default
+step: jet run main.jet
+env: JET_STORE_DIR={work}/cache/default/cache
+env: JETPACK_ROOT={work}/cache/default/jetpack
+stdout: = root_calls.out
+stderr: empty
+mkdir: cache/interpreter
+step: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/cache/interpreter/cache
+env: JETPACK_ROOT={work}/cache/interpreter/jetpack
+stdout: = root_calls.out
+stderr: empty

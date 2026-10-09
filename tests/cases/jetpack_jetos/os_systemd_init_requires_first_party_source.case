@@ -1,0 +1,14 @@
+# Port of tests/jetpack_jetos.rs:2626-2663; original sources/predicates retained, runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_systemd_init_requires_first_party_source.fixture
+mkdir: package-root
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+when os unix: chmod: project/jet-pkgs/pkgs/cachyos-kernel/source/build.sh 0755
+step diagnostic: jet os build box --no-color --offline
+cwd: project
+exit: 2
+capture: diagnostic = text stderr
+when diagnostic.stderr ~ "\n  error[E1281]": capture: diagnostic = text stderr.after_first("\n  error[E1281]").prepend("\n  error[E1281]")
+cap:diagnostic: = os_systemd_init_requires_first_party_source.fixture/expected.stderr
+

@@ -1,0 +1,18 @@
+# Original tests/ui_backend.rs:77-110; verbatim input and asserted predicates.
+# PENDING-SAME-HEAD; expected files are original asserted constants, not blessed captures.
+fixture: tui_backend_reactive_conditional_capture.fixture
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step aot: jet build main.jet
+exit: 0
+step native: built
+exit: 0
+stdout: = expected.out
+step default: jet run main.jet
+exit: == native
+stdout: == native
+stderr: == native
+step: jet run --interpret main.jet
+exit: == native
+stdout: == native
+stderr: == native

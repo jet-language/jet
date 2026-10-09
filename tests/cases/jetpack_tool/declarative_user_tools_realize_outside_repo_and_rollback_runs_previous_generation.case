@@ -1,0 +1,49 @@
+# Port of tests/jetpack_tool.rs:889-1027; assertions preserved, pending same-head/case-grammar receipt.
+fixture: fixtures/declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_generation
+mkdir: root
+mkdir: home
+mkdir: project
+mkdir: fx
+env: HOME={work}/home
+env: JETPACK_ROOT={work}/root
+mkdir: outside
+when os unix: chmod: repo/pkgs/hello/bin/hello 0755
+write: home/.jet/tools/manifest.json mine.json
+step: jetpack profile switch tools --no-color --offline
+cwd: outside
+exit: 0
+step: {work}/home/.jet/bin/hello
+exit: any # original invocation status was not asserted
+stdout.trim: = fixtures/declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_generation/hello_from_jet-pkgs.out
+file: home/.jet/tools/current ~ "generation\t1" # original contains predicate
+file: home/.jet/tools/profile.json ~ "\"current\": 1" # original contains predicate
+mkdir: repo-two/pkgs/hello/bin
+copy: repo/package.jet repo-two/package.jet
+copy: repo/pkgs/hello/hello.jet repo-two/pkgs/hello/hello.jet
+copy: hello-two repo-two/pkgs/hello/bin/hello
+when os unix: chmod: repo-two/pkgs/hello/bin/hello 0755
+write: home/.jet/tools/manifest.json mine-two.json
+step: jetpack profile switch tools --no-color --offline
+cwd: outside
+exit: 0
+step: {work}/home/.jet/bin/hello
+exit: any # original invocation status was not asserted
+stdout.trim: = fixtures/declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_generation/hello_from_user-tools_generation_two.out
+file: home/.jet/tools/current ~ "generation\t2" # original contains predicate
+file: home/.jet/tools/profile.json ~ "\"current\": 2" # original contains predicate
+step: jetpack profile rollback tools --no-color
+cwd: outside
+exit: 0
+step: {work}/home/.jet/bin/hello
+exit: any # original invocation status was not asserted
+stdout.trim: = fixtures/declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_generation/hello_from_jet-pkgs.out
+file: home/.jet/tools/current ~ "generation\t1" # original contains predicate
+file: home/.jet/tools/profile.json ~ "\"current\": 1" # original contains predicate
+step: jetpack profile generations tools --no-color --json
+cwd: outside
+exit: 0
+stdout: ~ "\"profile_bytes\":" # original contains predicate
+stdout: ~ "\"generations_bytes\":" # original contains predicate
+stdout: ~ "\"generation\":1" # original contains predicate
+stdout: ~ "\"generation\":2" # original contains predicate
+stdout: ~ "\"current\":true" # original contains predicate

@@ -1,0 +1,12 @@
+# Port of tests/canvas_cli_lifecycle.rs:8-34.
+# Existing probe preserves all lifecycle assertions; only the Jet source is staged.
+# PENDING-GRAMMAR: effective-env argv default token.
+# PENDING-SAME-HEAD: historical probe exits 1 because E2105 says Can't rather than the original regex can't.
+requires: tool:node
+fixture: fixtures
+env: JET_BIN={jet}
+env: JET_SOURCE=Examples/features/tooling/canvas_blueprint_demo.jet
+env: TMPDIR={scratch}
+step: {env:JET_CANVAS_NODE|node} {root}/Tools/canvas-test/native-lifecycle.mjs
+exit: 0
+stdout: = lifecycle.out

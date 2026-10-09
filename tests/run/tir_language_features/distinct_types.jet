@@ -1,0 +1,24 @@
+UserID :: distinct Int
+#Numeric Meters :: distinct Float
+#UnitFamily(Currency) { usd }
+
+fn greet(id: UserID) -> String {
+    return "user {(id.raw())}"
+}
+fn run() {
+    uid :: UserID.from_int(42)
+    print(greet(uid))
+    a :: Meters.from_float(3.0)
+    b :: Meters.from_float(1.5)
+    c :: a + b
+    print("{(c.raw())} m")
+    x :: UserID.from_int(7)
+    y :: UserID.from_int(7)
+    print("{(x == y)}")
+    from_byte :: UserID.from_u8(8)
+    from_float :: UserID.from_float(9.9) ?? UserID.from_int(0)
+    print("{(from_byte.raw())} {(from_float.raw())}")
+    meters :: Meters.from_int(3)
+    dollars :: Usd.from_int(5)
+    print("{(meters.raw())} {(dollars.raw())}")
+}

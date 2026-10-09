@@ -1,0 +1,57 @@
+use core.tasks as tasks
+
+fn s5_reset(error: NetError) -> Bool {
+    if error == { .ConnectionReset(_) -> true else -> false }
+}
+struct S5ReadEnd { bytes: Int, closed: Bool }
+fn s5_read_end(stream: net.TCPStream) -> S5ReadEnd {
+    count := 0
+    loop {
+        if net.tcp_read_bytes(stream, 8192) == {
+            .Ok(part) -> {
+                if part.is_empty() -> return S5ReadEnd{bytes: count, closed: true}
+                count = count + part.len()
+            }
+            .Err(error) -> return S5ReadEnd{bytes: count, closed: s5_reset(error)}
+        }
+    }
+}
+
+fn s5_probe_write(probe: net.TCPStream) -> Bool {
+    crlf :: s5_web_crlf()
+    net.tcp_write_all_bytes(probe, "GET /__jet_dev_version HTTP/1.1{crlf}{crlf}".bytes()) ?? return false
+    true
+}
+
+#Test("original sixty-fifth connection is dropped at admission") {
+    port :: s5_web_port()
+    s5_web_wait_up(port, 30000)
+    holders := [net.TCPStream]{}
+    loop index in 0..<64 {
+        holder :: net.tcp_connect("127.0.0.1:{port}") ?? panic("connect holder")
+        net.set_write_timeout(holder, 1000) ?? panic("holder timeout")
+        net.tcp_write_all_bytes(holder, "G".bytes()) ?? panic("holder write")
+        &holders.push(holder)
+    }
+    started :: time.start()
+    dropped := false
+    loop time.elapsed(started).ns < 5000000000 {
+        probe :: net.tcp_connect("127.0.0.1:{port}") ?? { dropped = true
+            break }
+        net.set_read_timeout(probe, 200) ?? panic("probe timeout")
+        if !s5_probe_write(probe) {
+            dropped = true
+            net.tcp_close(probe).drop("original probe drop ignores close failure")
+            break
+        }
+        net.tcp_shutdown(probe, .Write).drop("original ignores probe half-close failure")
+        read :: s5_read_end(probe)
+        net.tcp_close(probe).drop("original probe drop ignores close failure")
+        if read.bytes == 0 && read.closed { dropped = true
+            break }
+        tasks.yield_now()
+    }
+    loop holder in holders -> net.tcp_close(holder).drop("original holder drop ignores close failure")
+    assert(dropped, "the connection after64 occupied admission slots was not dropped or refused")
+    s5_web_wait_up(port, 3000)
+}

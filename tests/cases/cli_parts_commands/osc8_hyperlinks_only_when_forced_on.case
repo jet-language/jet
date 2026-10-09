@@ -1,0 +1,26 @@
+# Port of tests/cli_parts/commands.rs:1297-1333; fixture sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates and oracles, no runtime run.
+fixture: fixtures/osc8
+step: jet check {work}/bad.jet
+env: NO_COLOR=1
+exit: any # original predicate: status ignored for pipe-CLI part
+stderr: !~ "\u001b]8;;" # original predicate
+# PENDING-SEAM(compiler-lib): direct renderer subclaims, mapped separately in SEAMS.tsv.
+#     let src = "fn run() {}\n";
+#     let d = jet::Diagnostics::Diagnostic::error(
+#         "E0001",
+#         "x".into(),
+#         "y".into(),
+#         "z".into(),
+#         Some(jet::Diagnostics::Span::new(3, 7)),
+#     );
+#     let linked = d.render_linked("a.jet", src, true, true);
+#     assert!(
+#         linked.contains("\x1b]8;;"),
+#         "render_linked(hyperlinks=true) should emit OSC 8"
+#     );
+#     let plain = d.render_linked("a.jet", src, true, false);
+#     assert!(
+#         !plain.contains("\x1b]8;;"),
+#         "render_linked(hyperlinks=false) must not"
+#     );

@@ -1,0 +1,43 @@
+
+fn activate_core() -[IO]> String {
+    return input() ?? ""
+}
+
+fn fail() -[]> Int IOError! {
+    return Err(IOError.InvalidInput(IOContext{
+        operation: .Read,
+        resource: None,
+        os_code: None,
+        cause: Val("debug"),
+    }))
+}
+
+fn fail_other() -[]> Int IOError! {
+    return Err(IOError.Other(IOContext{
+        cause: Val("denied"),
+        os_code: Val(13),
+        resource: Val("out.txt"),
+        operation: .Write,
+    }))
+}
+
+fn run() {
+    print("{42:Debug}")
+    debug :: "debug"
+    print("{debug:Debug}")
+    print("{[1, 2, 3]:Debug}")
+    if fail() == {
+        .Ok(_) -> panic("failure succeeded")
+        .Err(error) -> {
+            print("{error:Debug}")
+            print("{error}")
+        }
+    }
+    if fail_other() == {
+        .Ok(_) -> panic("other failure succeeded")
+        .Err(error) -> {
+            print("{error:Debug}")
+            print("{error}")
+        }
+    }
+}

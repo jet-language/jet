@@ -1,0 +1,239 @@
+# HAND-PORT tests/agent_workloads.rs:2633-2820 equivalent_adapters_complete_declared_tasks
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# LIVE original manifest/schema/version/path/authority/closed exact and starts_with stem mapping, every4adapter cold/warm120s/1MiB/exactstdout/stability/input contents+paths or SHA unchanged/precise scratch assertions; competitor pins exact live receipt23fields/all3adapters+same actual version every row. Windows FAIL (not SKIP). Original JET_CORPUS_BASELINE_DIR presence skips Jet only; recorder/metrics are lead-approved retired unasserted Rust receipt layer. No pinned-version relaxation or generated reference receipt.
+fixture: equivalent_adapters_complete_declared_tasks.fixture
+env: NO_COLOR=1
+when os-name windows: step: fail "Bash is explicitly unavailable as a native Windows adapter; this task cannot pass"
+step version_jet: jet --version
+limit: time=120
+exit: 0
+stdout+stderr: len <= 1048576
+step version_bash: bash --version
+limit: time=120
+exit: 0
+stdout+stderr: len <= 1048576
+when version_bash.stdout != "": capture: version_bash = text stdout.line(0).trim
+when version_bash.stdout = "": capture: version_bash = text stderr.line(0).trim
+step version_python: python3 --version
+limit: time=120
+exit: 0
+stdout+stderr: len <= 1048576
+when version_python.stdout != "": capture: version_python = text stdout.line(0).trim
+when version_python.stdout = "": capture: version_python = text stderr.line(0).trim
+step version_node: node --version
+limit: time=120
+exit: 0
+stdout+stderr: len <= 1048576
+when version_node.stdout != "": capture: version_node = text stdout.line(0).trim
+when version_node.stdout = "": capture: version_node = text stderr.line(0).trim
+step version_git: git --version
+limit: time=120
+exit: 0
+stdout+stderr: len <= 1048576
+copy: {root}/tests/agent_workloads/baselines/receipt.tsv pins.tsv
+file: pins.tsv first-line = "version\trun_id\tmachine\tadapter\ttask_id\texpressibility\tfinding\tinput_sha256\texpected_sha256\texit_code\tsource_tokens\tstdout_file\tstdout_sha256\tstderr_file\tstderr_sha256\tcold_ns\twarm_ns\twarm_stdout_sha256\twarm_stderr_sha256\toutput_stable\tscoring\ttool_version\tpolicy_digest"
+for line file pins.tsv.after_first("\n").filter(!= "") as pin
+write: pin.row = "{pin}"
+file: pin.row.append("_").replace("\t", "\n") lines = 23
+capture: adapter = text file pin.row.split("\t", 3)
+when !(cap:adapter in ["bash","python","node"]): step: fail "unknown pinned adapter"
+capture: pin_version = text file pin.row.split("\t", 21)
+cap:pin_version: nonempty
+cap:pin_version: != "unknown"
+when cap:adapter = "bash"
+cap:pin_version: = "{cap:version_bash}"
+capture: seen_bash += text "x\n"
+end when
+when cap:adapter = "python"
+cap:pin_version: = "{cap:version_python}"
+capture: seen_python += text "x\n"
+end when
+when cap:adapter = "node"
+cap:pin_version: = "{cap:version_node}"
+capture: seen_node += text "x\n"
+end when
+end for
+cap:seen_bash: nonempty
+cap:seen_python: nonempty
+cap:seen_node: nonempty
+copy: {root}/tests/agent_workloads/policy.tsv policy.tsv
+capture: policy_version = prefixed file policy.tsv "version="
+capture: policy_plan = prefixed file policy.tsv "plan="
+capture: policy_launch_transaction = prefixed file policy.tsv "launch_transaction="
+capture: policy_descendants = prefixed file policy.tsv "descendants="
+capture: policy_limits = prefixed file policy.tsv "limits="
+capture: policy_outputs = prefixed file policy.tsv "outputs="
+capture: policy_receipt = prefixed file policy.tsv "receipt="
+capture: policy_authority = prefixed file policy.tsv "authority="
+copy: {root}/tests/agent_workloads/manifest.tsv manifest.tsv
+file: manifest.tsv first-line = "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards"
+for line file manifest.tsv.after_first("\n").filter(!= "") as row
+write: task.row = "{row}"
+file: task.row.append("_").replace("\t", "\n") lines = 13
+capture: version = text file task.row.split("\t", 0)
+cap:version: = "1"
+capture: id = text file task.row.split("\t", 1)
+capture: input = text file task.row.split("\t", 5)
+capture: expected_path = text file task.row.split("\t", 6)
+capture: authority = text file task.row.split("\t", 7)
+cap:authority: = "{cap:policy_authority}"
+cap:input: nonempty
+cap:input: !~ ":" # original corpus relative-path colon rejection
+cap:input.replace("\\", "/").append("/marker").replace("/", "\n"): each-line where != "" && != "." && != ".."
+cap:expected_path: nonempty
+cap:expected_path: !~ ":" # original corpus relative-path colon rejection
+cap:expected_path.replace("\\", "/").append("/marker").replace("/", "\n"): each-line where != "" && != "." && != ".."
+write: selected.txt = ""
+when cap:id in ["repository-marker-scan","repository-marker-scan-empty"]: write: selected.txt = "repository_marker_scan"
+when cap:id in ["repository-semantic-inspection"]: write: selected.txt = "repository_semantic_inspection"
+when cap:id in ["repository-semantic-edit"]: write: selected.txt = "repository_semantic_edit"
+when cap:id in ["git-diff-review","git-diff-empty"]: write: selected.txt = "git_diff_review"
+when cap:id in ["build-test-failure-recovery"]: write: selected.txt = "build_test_recovery"
+when cap:id in ["browser-automation-preflight"]: write: selected.txt = "browser_automation_preflight"
+when cap:id in ["desktop-interaction-focus"]: write: selected.txt = "desktop_interaction_focus"
+when cap:id in ["document-markdown-inspection"]: write: selected.txt = "document_markdown_inspection"
+when cap:id in ["media-asset-inventory"]: write: selected.txt = "media_asset_inventory"
+when cap:id ^= "incident-report-": write: selected.txt = "incident_report"
+when cap:id ^= "structured-data-": write: selected.txt = "structured_data"
+when cap:id ^= "database-": write: selected.txt = "database_access"
+when cap:id ^= "http-": write: selected.txt = "http_api"
+when cap:id ^= "process-batch-": write: selected.txt = "process_batch"
+when cap:id ^= "mcp-environment-": write: selected.txt = "mcp_resource"
+when cap:id ^= "interactive-terminal-": write: selected.txt = "interactive_terminal"
+when cap:id ^= "service-lifecycle-": write: selected.txt = "service_lifecycle"
+capture: stem = text file selected.txt
+cap:stem: nonempty
+copy: {root}/tests/agent_workloads/{cap:expected_path} expected.out
+capture: expected = text file expected.out
+copy: {root}/tests/agent_workloads/{cap:input} input.before
+when dir-readable input.before: capture: before = tree-contents input.before recursive
+when !dir-readable input.before: capture: before = sha256 file input.before
+when !env-set JET_CORPUS_BASELINE_DIR
+mkdir: run_jet
+copy: sources/{cap:stem}.jet run_jet/{cap:stem}.jet
+copy: package.source run_jet/package.jet
+step jet_cold: jet run --release {cap:stem}.jet -- {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+env: JET_RECEIPT_BYPASS=1
+cwd: run_jet
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576
+step jet_warm: jet run --release {cap:stem}.jet -- {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+env: JET_RECEIPT_BYPASS=1
+cwd: run_jet
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576
+stdout: == jet_cold
+copy: {root}/tests/agent_workloads/{cap:input} input.after
+when dir-readable input.after: capture: after = tree-contents input.after recursive
+when !dir-readable input.after: capture: after = sha256 file input.after
+cap:after: = "{cap:before}"
+remove: input.after
+remove: run_jet/package.jet
+remove: run_jet/{cap:stem}.jet
+file: run_jet/.jet is-dir
+file: run_jet/.jet not-symlink
+file: run_jet/.jet/build is-dir
+file: run_jet/.jet/build not-symlink
+file: run_jet/.jet/build/{cap:stem} is-file
+entries: run_jet name != ".jet" = 0
+entries: run_jet/.jet name != "build" = 0
+entries: run_jet/.jet/build name != "{cap:stem}" name != "{cap:stem}.rs" = 0
+for file run_jet/.jet/build as artifact
+file: {artifact.path} is-file
+file: {artifact.path} not-symlink
+end for
+remove: run_jet
+end when
+mkdir: run_bash
+step bash_cold: bash {root}/tests/agent_workloads/adapters/{cap:stem}.bash {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+cwd: run_bash
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576
+step bash_warm: bash {root}/tests/agent_workloads/adapters/{cap:stem}.bash {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+cwd: run_bash
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576
+stdout: == bash_cold
+copy: {root}/tests/agent_workloads/{cap:input} input.after
+when dir-readable input.after: capture: after = tree-contents input.after recursive
+when !dir-readable input.after: capture: after = sha256 file input.after
+cap:after: = "{cap:before}"
+remove: input.after
+entries: run_bash recursive = 0
+remove: run_bash
+mkdir: run_python
+step python_cold: python3 {root}/tests/agent_workloads/adapters/{cap:stem}.py {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+cwd: run_python
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576
+step python_warm: python3 {root}/tests/agent_workloads/adapters/{cap:stem}.py {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+cwd: run_python
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576
+stdout: == python_cold
+copy: {root}/tests/agent_workloads/{cap:input} input.after
+when dir-readable input.after: capture: after = tree-contents input.after recursive
+when !dir-readable input.after: capture: after = sha256 file input.after
+cap:after: = "{cap:before}"
+remove: input.after
+entries: run_python recursive = 0
+remove: run_python
+mkdir: run_node
+step node_cold: node {root}/tests/agent_workloads/adapters/{cap:stem}.js {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+cwd: run_node
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576
+step node_warm: node {root}/tests/agent_workloads/adapters/{cap:stem}.js {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+cwd: run_node
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576
+stdout: == node_cold
+copy: {root}/tests/agent_workloads/{cap:input} input.after
+when dir-readable input.after: capture: after = tree-contents input.after recursive
+when !dir-readable input.after: capture: after = sha256 file input.after
+cap:after: = "{cap:before}"
+remove: input.after
+entries: run_node recursive = 0
+remove: run_node
+remove: input.before
+end for

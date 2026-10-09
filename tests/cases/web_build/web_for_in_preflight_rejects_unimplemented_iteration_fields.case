@@ -1,0 +1,11 @@
+# HAND-PORT tests/web_build.rs:3357-3394 web_for_in_preflight_rejects_unimplemented_iteration_fields
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Both original unsupported ForIn programs and exact diagnostic retained.
+fixture: web_for_in_preflight_rejects_unimplemented_iteration_fields.fixture
+env: NO_COLOR=1
+step: jet build --target web --json source0.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E-WEB-TIR-UNSUPPORTED"] #>= 1
+step: jet build --target web --json source1.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E-WEB-TIR-UNSUPPORTED"] #>= 1

@@ -1,0 +1,10 @@
+# HAND-PORT tests/closures.rs:435-493 block_callback_return_mismatch_names_expected_success_row
+# PENDING-KIT; no runtime/reference proof.
+# Both original E0113+what contains String conjuncts on same diagnostics.
+fixture: block_callback_return_mismatch_names_expected_success_row.fixture
+step: jet check --json cell/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E0113"][?what~="String"] #>= 1
+step: jet check --json inferred/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E0113"][?what~="String"] #>= 1

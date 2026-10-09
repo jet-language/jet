@@ -1,0 +1,10 @@
+
+extern rust "std" {
+    #Undo(undo_mutate) fn mutate(left: Int, right: Int) -> Int = "std::cmp::max"
+}
+fn undo_mutate(left: Int, right: Int) { print(left + right) }
+fn run() {
+    #Transact(tx) {
+        mutate(1, 2)
+    }
+}

@@ -1,0 +1,32 @@
+
+use core.auth as auth
+
+fn run() {
+    key :: [U8]{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
+    if auth.verify_jwt("eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOi0xfQ.yRAgC1Ke3NLZGUJwpQiL79zT6beBocwErDo9JHPRLyY", key: key, audience: "gateway") == {
+        .Ok(claims) -> {
+            negative_iat :: claims.issued_at
+            negative_copy :: negative_iat
+            if negative_copy == .Val(value) {
+                print("iat-neg")
+                print(value)
+            } else {
+                print("iat-neg:none")
+            }
+        }
+        .Err(_) -> { print("iat-neg:error") }
+    }
+    if auth.verify_jwt("eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjkyMjMzNzIwMzY4NTQ3NzU4MDd9.zDWiLRbRimZTEb4pLgECI-XHZGA2X2DlQe7zijtrqrY", key: key, audience: "gateway") == {
+        .Ok(claims) -> {
+            maximum_iat :: claims.issued_at
+            maximum_copy :: maximum_iat
+            if maximum_copy == .Val(value) {
+                print("iat-max")
+                print(value)
+            } else {
+                print("iat-max:none")
+            }
+        }
+        .Err(_) -> { print("iat-max:error") }
+    }
+}

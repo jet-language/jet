@@ -1,0 +1,15 @@
+# Port of tests/cli_parts/runtime.rs:77-119; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/print
+copy: run.jet original.bytes
+step: jet fix run.jet --dry-run
+env: NO_COLOR=1
+exit: 0
+stderr: ~ "would apply 3 fixes" # original predicate
+stderr: ~ "rewrote 3 retired print-family spellings (D-ONCE-PRINT1=A)" # original predicate
+file: run.jet == original.bytes
+step: jet fix run.jet
+env: NO_COLOR=1
+exit: 0
+file: run.jet = print-fixed.bytes

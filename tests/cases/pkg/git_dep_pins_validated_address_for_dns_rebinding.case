@@ -1,0 +1,55 @@
+# PORT tests/pkg.rs::git_dep_pins_validated_address_for_dns_rebinding:4156-4361; original helpers min_manifest/manifest_with_deps/with_store retained.
+# KNOWN-FAILING #4833: Jet front-end has no fetch/locked dependency-resolution door.
+# PENDING-GRAMMAR(batch-four); no reference snapshot or runtime proof.
+# Rust CLI: main.rs3684-3691 -> CmdPkg.rs255-325 -> original Fetch::fetch options.
+fixture: fixtures/git_dep_pins_validated_address_for_dns_rebinding
+requires: os:unix
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+mkdir: home
+mkdir: .git
+write: .git/config git-config.template
+chmod: bin/git 0755
+step: jet fetch
+env: PATH={work}/bin:{env:PATH}
+env: HOME={work}/home
+env: JET_TEST_GIT_LOG={work}/git-args.log
+env: GIT_CONFIG_COUNT=1
+env: GIT_CONFIG_KEY_0=url.file:///outside/.insteadOf
+env: GIT_CONFIG_VALUE_0=https://8.8.8.8/
+env: GIT_CONFIG_PARAMETERS=url.file:///outside/.insteadOf
+env: GIT_EXEC_PATH={work}/evil-exec
+env: GIT_TEMPLATE_DIR={work}/evil-template
+env: GIT_CONFIG_SYSTEM={work}/system-config
+env: GIT_CONFIG_GLOBAL={work}/global-config
+env: GIT_CONFIG_LOCAL={work}/local-config
+env: GIT_DIR={work}/evil.git
+env: GIT_NAMESPACE=evil
+env: GIT_NO_REPLACE_OBJECTS=1
+env: GIT_REPLACE_REF_BASE=refs/evil/
+env: GIT_ALLOW_PROTOCOL=ext:file
+env: GIT_PROTOCOL_FROM_USER=1
+env: http_proxy=http://127.0.0.1:9
+env: GIT_PROXY_COMMAND=touch hostile
+exit: 0
+file: git-args.log count-lines = "http.followRedirects=false" = 2
+file: git-args.log count-lines = "http.proxy=" = 2
+file: git-args.log count-lines = "http.sslVerify=true" = 2
+file: git-args.log count-lines = "http.curloptResolve=8.8.8.8:443:8.8.8.8" = 2
+file: git-args.log count-lines = "https://8.8.8.8/repository.git" = 2
+file: git-args.log count-lines = "cwd=/" = 2
+file: git-args.log count-lines = "config-count=0" = 2
+file: git-args.log count-lines = "config-system=/dev/null" = 2
+file: git-args.log count-lines = "config-global=/dev/null" = 2
+file: git-args.log count-lines = "config-local=/dev/null" = 2
+file: git-args.log count-lines = "config-parameters=" = 2
+file: git-args.log count-lines = "git-exec-path=" = 2
+file: git-args.log count-lines = "git-template-dir=" = 2
+file: git-args.log count-lines = "git-dir=" = 2
+file: git-args.log count-lines = "git-namespace=" = 2
+file: git-args.log count-lines = "git-no-replace-objects=" = 2
+file: git-args.log count-lines = "git-replace-ref-base=" = 2
+file: git-args.log count-lines = "git-allow-protocol=" = 2
+file: git-args.log count-lines = "git-protocol-from-user=" = 2
+file: git-args.log count-lines = "http-proxy=" = 2
+file: git-args.log count-lines = "git-proxy=" = 2

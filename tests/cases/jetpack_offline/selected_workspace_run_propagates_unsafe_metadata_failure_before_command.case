@@ -1,0 +1,124 @@
+# Port of tests/jetpack_offline.rs:135-195; runtime PENDING-SAME-HEAD.
+refused: hangar-verified-realization
+requires: os:unix
+mkdir: project
+mkdir: package-root
+mkdir: fixtures
+mkdir: staging/bin
+env: JETPACK_ROOT={work}/package-root
+# Before execution, helper seals the output with lua-path ../outside\n, then writes the original workspace/package/hello/env sources.
+step: jetpack run -p hello --offline --trust --fixtures {work}/fixtures -- sh -c 'printf executed > "$1"' jet-test {work}/project/command-ran
+cwd: project
+exit: 1
+file: project/command-ran absent
+stderr: count "couldn't compose package environment" = 1 # original predicate
+# Original authentic helper14-60 + test, retained verbatim:
+# fn write_runnable_fixture(
+#     fixtures: &Path,
+#     root: &Path,
+#     staging_dir: &Path,
+#     lua_path: Option<&str>,
+# ) -> PathBuf {
+#     fs::create_dir_all(fixtures).unwrap();
+#     let bin = staging_dir.join("bin");
+#     fs::create_dir_all(&bin).unwrap();
+#     let greet = bin.join(if cfg!(windows) { "greet.bat" } else { "greet" });
+#     #[cfg(windows)]
+#     fs::write(&greet, "@echo hello from offline cache\r\n").unwrap();
+#     #[cfg(not(windows))]
+#     {
+#         fs::write(&greet, "#!/bin/sh\necho hello from offline cache\n").unwrap();
+#         use std::os::unix::fs::PermissionsExt;
+#         fs::set_permissions(&greet, fs::Permissions::from_mode(0o755)).unwrap();
+#     }
+#     if let Some(lua_path) = lua_path {
+#         fs::write(staging_dir.join("lua-path"), lua_path).unwrap();
+#     }
+#     jetpack::Store::seal_local_output(staging_dir).unwrap();
+#     let digest = jetpack::Envelope::try_output_hash_of(&staging_dir.to_string_lossy()).unwrap();
+#     let out_dir = root.join("hangar").join("objects").join(&digest);
+#     fs::create_dir_all(out_dir.parent().unwrap()).unwrap();
+#     let mut staging_permissions = fs::metadata(staging_dir).unwrap().permissions();
+#     #[cfg(unix)]
+#     {
+#         use std::os::unix::fs::PermissionsExt;
+#         staging_permissions.set_mode(staging_permissions.mode() | 0o200);
+#     }
+#     #[cfg(not(unix))]
+#     staging_permissions.set_readonly(false);
+#     fs::set_permissions(staging_dir, staging_permissions).unwrap();
+#     fs::rename(staging_dir, &out_dir).unwrap();
+#     jetpack::Store::seal_local_output(&out_dir).unwrap();
+#     assert_eq!(
+#         jetpack::Envelope::try_output_hash_of(&out_dir.to_string_lossy()).unwrap(),
+#         digest,
+#         "published fixture must retain its content-addressed identity"
+#     );
+#     let json = format!(
+#         "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+#         out_dir.to_string_lossy()
+#     );
+#     fs::write(fixtures.join("nixpkgs-greet.json"), json).unwrap();
+#     out_dir
+# }
+# #[test]
+# fn selected_workspace_run_propagates_unsafe_metadata_failure_before_command() {
+#     let project = Scratch::new("unsafe-metadata-project");
+#     let root = Scratch::new("unsafe-metadata-root");
+#     let fixtures = Scratch::new("unsafe-metadata-fixtures");
+#     let out_dir = Scratch::new("unsafe-metadata-out");
+#     write_runnable_fixture(
+#         &fixtures.path,
+#         &root.path,
+#         &out_dir.path,
+#         Some("../outside\n"),
+#     );
+# 
+#     let member = project.path.join("packages/hello");
+#     fs::create_dir_all(&member).unwrap();
+#     fs::write(
+#         project.path.join("workspace.jet"),
+#         "module workspace { members: find(\"./packages\") }\n",
+#     )
+#     .unwrap();
+#     fs::write(
+#         member.join("package.jet"),
+#         "name: \"hello\"\nversion: \"0.1.0\"\n",
+#     )
+#     .unwrap();
+#     fs::write(
+#         member.join("hello.jet"),
+#         "module hello { pub fn greeting() -[]> String { return \"hello\" } }\n",
+#     )
+#     .unwrap();
+#     fs::write(
+#         project.path.join("env.jet"),
+#         "module env.dev { packages: [nixpkgs.greet] }\n",
+#     )
+#     .unwrap();
+# 
+#     let sentinel = project.path.join("command-ran");
+#     let output = jetpack()
+#         .args(["run", "-p", "hello", "--offline", "--trust", "--fixtures"])
+#         .arg(&fixtures.path)
+#         .args(["--", "sh", "-c", "printf executed > \"$1\"", "jet-test"])
+#         .arg(&sentinel)
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .output()
+#         .unwrap();
+# 
+#     assert_eq!(output.status.code(), Some(1), "{output:?}");
+#     assert!(
+#         !sentinel.exists(),
+#         "requested command ran after compose failure"
+#     );
+#     let stderr = String::from_utf8_lossy(&output.stderr);
+#     assert_eq!(
+#         stderr
+#             .matches("couldn't compose package environment")
+#             .count(),
+#         1,
+#         "stderr: {stderr}"
+#     );
+# }

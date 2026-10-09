@@ -1,0 +1,13 @@
+use core.files as files
+
+#Test("original in-root baseline and race aggregate") {
+    root :: sys.get("S5_ROOT") ?? panic("root")
+    if (sys.get("S5_PHASE") ?? panic("phase")) == "baseline" {
+        s5_web_wait_up(s5_web_port(), 30000)
+        response :: s5_web_get(s5_web_port(), "/nested/race.js", None) ?? panic("initial static GET")
+        assert_eq(response.status, 200)
+        assert_eq(response.body, "inside-parent".bytes())
+    } else {
+        // Parent original has no served-count predicate.
+    }
+}

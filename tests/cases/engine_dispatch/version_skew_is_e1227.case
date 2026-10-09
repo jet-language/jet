@@ -1,0 +1,14 @@
+# Port of tests/engine_dispatch.rs:90-120; script templates preserve original write_script/format! bytes.
+requires: os:unix
+# PENDING-GRAMMAR: copy allows read-only {jet} source; destination stays inside work.
+fixture: fixtures/version_skew_is_e1227
+# PENDING-GRAMMAR(batch-four): original Scratch directories start genuinely empty.
+mkdir: isolated
+mkdir: path
+copy: {jet} isolated/jet
+copy: fake-template path/jetpack
+step: {work}/isolated/jet env
+env: PATH={work}/path
+exit: 1
+stderr: ~ "E1227" # original predicate; diagnostics include the isolated executable/path
+stderr: ~ "0.0.0-skew-test" # original predicate; diagnostics include the isolated executable/path

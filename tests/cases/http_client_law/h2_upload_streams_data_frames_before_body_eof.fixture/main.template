@@ -1,0 +1,20 @@
+// Public companion; original bridge callback64KiB fill schedule remains runtime-http-internals.
+use core.http.client as http
+use core.http as message
+use core.files as files
+fn run() {
+    input :: files.open("{work}/upload.fifo") ?? panic("open")
+    body :: message.Body.reader(^input, 40960) ?? panic("reader")
+    client :: http.Client.new().protocols(true, false, true)
+    response :: client.send(http.request("POST", "http://{cap:addr}/h2").body(body).redirects(0)) ?? panic("send")
+    // SAME body handle FIRST read max8 == Some(ok); original does NOT read normal EOF.
+    saw := false
+    loop chunk in response.body().chunks(8) {
+        bytes :: chunk ?? panic("first read")
+        assert_eq(bytes, "ok".bytes())
+        saw = true
+        break
+    }
+    assert(saw)
+    assert_eq(response.protocol(), "HTTP/2")
+}

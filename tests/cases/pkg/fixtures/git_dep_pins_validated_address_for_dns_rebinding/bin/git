@@ -1,0 +1,51 @@
+#!/bin/sh
+case " $* " in
+    *" --version"*)
+        exit 0
+        ;;
+esac
+clone_dir=""
+previous=""
+for arg in "$@"; do
+    if [ "$previous" = "-C" ]; then
+        clone_dir="$arg"
+    fi
+    previous="$arg"
+done
+if [ -n "$clone_dir" ]; then
+    exit 0
+fi
+printf '%s\n' "$@" >> "$JET_TEST_GIT_LOG"
+printf 'cwd=%s\n' "$(pwd -P)" >> "$JET_TEST_GIT_LOG"
+printf 'config-count=%s\n' "${GIT_CONFIG_COUNT-}" >> "$JET_TEST_GIT_LOG"
+printf 'config-system=%s\n' "${GIT_CONFIG_SYSTEM-}" >> "$JET_TEST_GIT_LOG"
+printf 'config-global=%s\n' "${GIT_CONFIG_GLOBAL-}" >> "$JET_TEST_GIT_LOG"
+printf 'config-local=%s\n' "${GIT_CONFIG_LOCAL-}" >> "$JET_TEST_GIT_LOG"
+printf 'config-parameters=%s\n' "${GIT_CONFIG_PARAMETERS-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-exec-path=%s\n' "${GIT_EXEC_PATH-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-template-dir=%s\n' "${GIT_TEMPLATE_DIR-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-dir=%s\n' "${GIT_DIR-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-namespace=%s\n' "${GIT_NAMESPACE-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-no-replace-objects=%s\n' "${GIT_NO_REPLACE_OBJECTS-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-replace-ref-base=%s\n' "${GIT_REPLACE_REF_BASE-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-allow-protocol=%s\n' "${GIT_ALLOW_PROTOCOL-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-protocol-from-user=%s\n' "${GIT_PROTOCOL_FROM_USER-}" >> "$JET_TEST_GIT_LOG"
+printf 'http-proxy=%s\n' "${http_proxy-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-proxy=%s\n' "${GIT_PROXY_COMMAND-}" >> "$JET_TEST_GIT_LOG"
+case " $* " in
+    *" ls-remote "*)
+        printf '%s\trefs/heads/main\n' '0000000000000000000000000000000000000000'
+        exit 0
+        ;;
+esac
+last=""
+for arg in "$@"; do
+    last="$arg"
+done
+case " $* " in
+    *" clone "*)
+        mkdir -p "$last"
+        printf '%s\n' 'name: "rebind"' 'version: "0.1.0"' 'jet: ">=0.1.0"' 'description: ""' 'license: "MIT"' 'repository: ""' > "$last/package.jet"
+        ;;
+esac
+exit 0

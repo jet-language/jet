@@ -1,0 +1,13 @@
+# PORT tests/review.rs::review_joins_meaning_authority_and_receipt_changes; helpers review.rs17-176 preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference snapshot claim.
+fixture: review_joins_meaning_authority_and_receipt_changes.fixture
+step: jet review {work}/base/run.jet {work}/head/run.jet --base-receipt {work}/base.jetproof --receipt {work}/head.jetproof --json
+exit: 0
+stdout: machine-output = [status]
+stdout: ^= "{\"schema\":\"jet.status/v1\"" # Original starts_with predicate.
+stdout: ~ "\"kind\":\"review\"" # Original contains predicate.
+stdout: ~ "body_changed" # Original contains predicate.
+stdout: ~ "\"status\":\"widened\"" # Original contains predicate.
+stdout: ~ "\"status\":\"lost\"" # Original contains predicate.
+stdout: ~ "\"status\":\"gained\"" # Original contains predicate.
+stdout: !~ "text_diff" # Original negative predicate.

@@ -1,0 +1,28 @@
+# Port of tests/cli_parts/core.rs:1019-1127; original sources/predicates retained.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): new typed/data/relational forms are explicit.
+fixture: fixtures/build_gates
+write: src/run.jet failing-source.template
+step: jet build src/run.jet
+exit: 1
+stdout: !~ "built:" # original predicate
+stderr: ~ "Error [E2907]: performance budget public-api regressed" # original predicate
+entries: .jet/perf/reports = 1 # original predicate
+write: src/run.jet passing-source.template
+step: jet build src/run.jet
+exit: 0
+stderr: ~ "budgets: 2 budgets passed · report " # original predicate
+entries: .jet/perf/reports = 2 # original predicate
+step: jet build src/run.jet
+exit: 0
+entries: .jet/perf/reports = 2 # original predicate
+step: jet build src/run.jet --profile=ci
+exit: 0
+entries: .jet/perf/reports = 3 # original predicate
+json: files .jet/perf/reports canonical # original predicate
+json: files .jet/perf/reports doc $[*] : object # original pattern
+json: files .jet/perf/reports doc $[*].content : object # original pattern
+json: files .jet/perf/reports doc $[*].content.subject : object # original pattern
+json: files .jet/perf/reports doc $[*].content.subject.profile : string # original predicate
+json: files .jet/perf/reports doc $[?content.subject.profile="dev"] #>= 1 # original predicate
+json: files .jet/perf/reports doc $[?content.subject.profile="ci"] #>= 1 # original predicate

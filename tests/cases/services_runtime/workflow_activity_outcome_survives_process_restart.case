@@ -1,0 +1,20 @@
+# Port of tests/services_runtime.rs:1220-1249; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+fixture: workflow_activity_outcome_survives_process_restart.fixture
+step: jet build restart.jet
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow-outcome.log
+env: JET_SERVICE_AUTH_PHASE=write
+stdout: = workflow_activity_outcome_survives_process_restart.workflow-outcome.log-write-aot.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow-outcome.log
+env: JET_SERVICE_AUTH_PHASE=read
+stdout: = workflow_activity_outcome_survives_process_restart.workflow-outcome.log-read-aot.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/workflow-outcome-default.log
+env: JET_SERVICE_AUTH_PHASE=write
+stdout: = workflow_activity_outcome_survives_process_restart.workflow-outcome-default.log-write-default.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/workflow-outcome-default.log
+env: JET_SERVICE_AUTH_PHASE=read
+stdout: = workflow_activity_outcome_survives_process_restart.workflow-outcome-default.log-read-default.out

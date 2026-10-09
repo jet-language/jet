@@ -1,0 +1,52 @@
+# Port of tests/jetpack_jetos.rs:3810-3956. Original fixtures verbatim; native tools are original helper549-594.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four) where used.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_vm_prove_writes_media_bound_harness.fixture
+mkdir: package-root
+write: tools/limine os_vm_prove_writes_media_bound_harness.limine.template
+chmod: tools/limine 0755
+env: JETPACK_ROOT={work}/package-root
+env: PATH={work}/tools
+step: jet os vm prove halcyon --disk halcyon.qcow2 --name vm-proof --no-color --offline
+cwd: project
+exit: 2
+stderr: ~ "error[E1285]" # original harness-only refusal
+capture: proof = first-entry package-root/systems/vm-proofs ext = "json"
+file: {cap:proof} ~ "\"state\":\"harness-ready\"" # original predicate
+file: {cap:proof} ~ "\"proof_tier\":\"plumbing\"" # original predicate
+file: {cap:proof} ~ "\"disk\":\"halcyon.qcow2\"" # original predicate
+file: {cap:proof} ~ "\"media_proof\":" # original predicate
+file: {cap:proof} ~ "\"expected_guest_proof\":" # original predicate
+file: {cap:proof} ~ "\"sha256\":" # original predicate
+file: {cap:proof} ~ "rollback-generation-bootable" # original predicate
+file: {cap:proof} ~ "terminal-login-ready" # original predicate
+file: {cap:proof} ~ "desktop-session-ready" # original predicate
+file: {cap:proof} ~ "graphical-console-ready" # original predicate
+file: {cap:proof} ~ "desktop-launchers-run" # original predicate
+file: {cap:proof} ~ "\"phase\":\"boot-installer\"" # original predicate
+file: {cap:proof} ~ "\"phase\":\"boot-installed-disk\"" # original predicate
+file: {cap:proof} ~ "\"phase\":\"boot-graphical-desktop\"" # original predicate
+file: {cap:proof} ~ "\"-cdrom\"" # original predicate
+file: {cap:proof} ~ "jetos-installer-halcyon.iso" # original predicate
+file.split("\"phase\":\"boot-installed-disk\"", 1).split("\"phase\":\"boot-graphical-desktop\"", 0): {cap:proof} ~ "\"-boot\",\"c\"" # original installed-disk predicate
+file.split("\"phase\":\"boot-installed-disk\"", 1).split("\"phase\":\"boot-graphical-desktop\"", 0): {cap:proof} ~ "file=halcyon.qcow2,format=qcow2,if=ide" # original installed-disk predicate
+file.split("\"phase\":\"boot-installed-disk\"", 1).split("\"phase\":\"boot-graphical-desktop\"", 0): {cap:proof} !~ "\"-kernel\"" # original installed-disk exclusion
+file.split("\"phase\":\"boot-installed-disk\"", 1).split("\"phase\":\"boot-graphical-desktop\"", 0): {cap:proof} !~ "\"-initrd\"" # original installed-disk exclusion
+file.split("\"phase\":\"boot-installed-disk\"", 1).split("\"phase\":\"boot-graphical-desktop\"", 0): {cap:proof} !~ "\"-append\"" # original installed-disk exclusion
+file: {cap:proof} ~ "\"-kernel\"" # original predicate
+file: {cap:proof} ~ "/boot/kernel" # original predicate
+file: {cap:proof} ~ "\"-initrd\"" # original predicate
+file: {cap:proof} ~ "/boot/initrd" # original predicate
+file: {cap:proof} ~ "jetos.mode=desktop-verify" # original predicate
+file: {cap:proof} ~ "\"-display\"" # original predicate
+file: {cap:proof} ~ "vnc=127.0.0.1:0" # original predicate
+file: {cap:proof} ~ "\"-vga\"" # original predicate
+file: {cap:proof} ~ "\"std\"" # original predicate
+file: {cap:proof} ~ "qemu-xhci,id=xhci" # original predicate
+file: {cap:proof} ~ "usb-kbd,bus=xhci.0" # original predicate
+file: {cap:proof} ~ "usb-tablet,bus=xhci.0" # original predicate
+file: {cap:proof} ~ "rdinit=/jetos/init" # original predicate
+file: {cap:proof} ~ "jetos.generation=vm-proof" # original predicate
+file: {cap:proof} ~ "console=ttyS0" # original predicate
+file: package-root/systems/vm-proofs/halcyon-vm-proof-vm-proof.run/boot-graphical-desktop.stdout is-file
+file: package-root/systems/images/jetos-installer-halcyon.iso.proof.json is-file

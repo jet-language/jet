@@ -1,0 +1,26 @@
+# Port of tests/comptime_cli_parity.rs::builder_cli_named_value_overrides_positional_on_all_native_tiers; exact original predicates, runtime UNRUN.
+# ORIGINAL-TEST-BUG: duplicate JET_STORE_DIR assignments preserved (last wins).
+fixture: fixtures/builder_cli_named_value_overrides_positional_on_all_native_tiers
+mkdir: cache/build
+step: jet build builder_named.jet
+env: JET_STORE_DIR={work}/cache/build/build
+env: JET_STORE_DIR={work}/cache/build/run
+exit: 0
+step aot: built bare-loses --name named-wins
+exit: 0
+stdout: = "named-wins\n"
+mkdir: cache/named-default
+step default: jet run builder_named.jet -- bare-loses --name named-wins
+env: JET_STORE_DIR={work}/cache/named-default/build
+env: JET_STORE_DIR={work}/cache/named-default/run
+exit: 0
+stdout: = "named-wins\n"
+stdout: == aot # Original stdout byte equality.
+mkdir: cache/named-interpreter
+step interpreter: jet run --interpret builder_named.jet -- bare-loses --name named-wins
+env: JET_STORE_DIR={work}/cache/named-interpreter/build
+env: JET_STORE_DIR={work}/cache/named-interpreter/run
+exit: 0
+stdout: = "named-wins\n"
+stdout: == aot # Original stdout byte equality.
+

@@ -1,0 +1,34 @@
+# Port of tests/jetpack_jetos.rs:3171-3194; runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_vm_run_requires_proved_installed_disk.fixture
+mkdir: package-root
+copy: {root}/tests/fixtures/jetpack-config project
+chmod: tools/xorriso 0755
+chmod: tools/qemu-img 0755
+chmod: tools/zstd 0755
+chmod: tools/mkfs.ext4 0755
+chmod: tools/mkfs.vfat 0755
+chmod: tools/sfdisk 0755
+chmod: tools/blockdev 0755
+chmod: tools/mmd 0755
+chmod: tools/mcopy 0755
+chmod: tools/qemu-system-x86_64 0755
+write: tools/limine limine.template
+chmod: tools/limine 0755
+chmod: tools/cat 0755
+chmod: tools/cp 0755
+chmod: tools/ln 0755
+chmod: tools/mkdir 0755
+chmod: tools/mount 0755
+chmod: tools/rm 0755
+chmod: tools/setsid 0755
+chmod: tools/sleep 0755
+chmod: tools/sync 0755
+chmod: tools/poweroff 0755
+chmod: tools/halt 0755
+step: jet os vm run halcyon --disk halcyon.qcow2 --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: PATH={work}/tools
+exit: 2
+stderr: = os_vm_run_requires_proved_installed_disk.fixture/expected.stderr

@@ -1,0 +1,12 @@
+# PORT tests/structural_merge.rs::structural_diff_add_remove_reorder_rename_edit_is_deterministic
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
+fixture: structural_diff_add_remove_reorder_rename_edit_is_deterministic.fixture
+step first: jet diff --structural {work}/before.jet {work}/after.jet --json
+exit: 0
+step second: jet diff --structural {work}/before.jet {work}/after.jet --json
+exit: any # Original second status unasserted.
+stdout: == first
+stdout: ~ "\"kind\":\"added\"" # Original contains predicate.
+stdout: ~ "\"kind\":\"removed\"" # Original contains predicate.
+stdout: ~ "\"kind\":\"renamed\"" # Original contains predicate.
+stdout: ~ "\"kind\":\"body_changed\"" # Original contains predicate.

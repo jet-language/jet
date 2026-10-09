@@ -1,0 +1,265 @@
+# Port of tests/jetpack_platform.rs:327-449; public assertions exact, runtime PENDING-SAME-HEAD.
+# Setup requires the named authentic fixture seam; no forged Store receipts/output identities.
+# Direct library claims LEDGER-ONLY in SEAMS.tsv; full original setup and predicates below.
+refused: hangar-verified-realization
+requires: os-name:linux
+mkdir: package-root
+mkdir: fixtures
+mkdir: staging
+mkdir: missing-tools
+env: JETPACK_ROOT={work}/package-root
+step: jetpack use omp@releases#1.0.0 --no-color --offline -- omp{sys:exe-suffix} --help
+env: JETPACK_FIXTURES={work}/fixtures
+env: PATH={work}/missing-tools
+exit: 0
+stdout: ~ "jetpack" # original native child stdout
+entries: package-root/leases = 0
+# write_hangar_meta authenticated fixture supplies exactly original good_object (store-ingest seam).
+mkdir: package-root/leases/4294967294-1-platform-diagnostics-good/snapshot
+write: package-root/leases/4294967294-1-platform-diagnostics-good/snapshot/partial platform_tier_gate_exercises_native_lease_diagnostics_and_audit.interrupted.template
+step: jetpack doctor --json --offline
+exit: any # original doctor status unasserted
+stdout: ~ "stale executable lease(s) found" # original doctor predicate
+file: package-root/leases/4294967294-1-platform-diagnostics-good is-dir
+step: jetpack audit --no-color
+exit: 0
+stderr: ~ "Leases:" # original audit label
+stderr: ~ "0 active, 1 stale" # original lease count
+mkdir: package-root/hangar/closure-db/journal
+write: package-root/hangar/closure-db/journal/00000000000000000099-corrupt.txn.partial platform_tier_gate_exercises_native_lease_diagnostics_and_audit.interrupted.template
+step: jetpack audit --no-color
+exit: 2
+stderr: ~ "Error [E1340]:" # original registered diagnostic
+stderr: ~ "Why:" # original diagnostic reason
+stderr: ~ "Fix:" # original diagnostic fix
+stderr: ~ "More: jet-lang.dev/e/E1340" # original diagnostic link
+file: package-root/hangar/closure-db/journal/00000000000000000099-corrupt.txn.partial is-file
+file: {cap:good_object}/meta.json is-file
+remove: package-root/hangar/closure-db/journal/00000000000000000099-corrupt.txn.partial
+step: jetpack hangar recover --no-color
+env: PATH={work}/missing-tools
+exit: 0
+file: package-root/leases/4294967294-1-platform-diagnostics-good absent
+file: {cap:good_object}/meta.json is-file
+
+# Verbatim original setup/subclaims (never executed as Rust):
+# pub fn write_native_jetpack_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> PathBuf {
+#     fs::create_dir_all(fixtures).unwrap();
+#     let bin = staging_dir.join("bin");
+#     fs::create_dir_all(&bin).unwrap();
+#     let name = format!("jetpack{}", std::env::consts::EXE_SUFFIX);
+#     let executable = bin.join(&name);
+#     let source = staging_dir
+#         .parent()
+#         .unwrap_or(staging_dir)
+#         .join("native-jetpack-fixture.rs");
+#     fs::write(
+#         &source,
+#         r#"fn main() {
+#     if std::env::args().nth(1).as_deref() == Some("--hold") {
+#         std::thread::sleep(std::time::Duration::from_secs(5));
+#     }
+#     if std::env::args().nth(1).as_deref() == Some("--help") {
+#         println!("jetpack platform fixture");
+#     }
+# }
+# "#,
+#     )
+#     .unwrap();
+#     let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+#     let output = Command::new(rustc)
+#         .args(["--edition=2021", "-C", "debuginfo=0", "-C", "opt-level=0"])
+#         .arg(&source)
+#         .arg("-o")
+#         .arg(&executable)
+#         .output()
+#         .unwrap_or_else(|error| panic!("could not compile native platform fixture: {error}"));
+#     assert!(
+#         output.status.success(),
+#         "native platform fixture compilation failed: {}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     let artifact_name = format!("omp-native-jetpack-fixture{}", std::env::consts::EXE_SUFFIX);
+#     let artifact = fixtures.join(&artifact_name);
+#     fs::copy(&executable, &artifact).unwrap();
+#     let artifact_digest = jetpack::SHA256::sha256_file_hex(&artifact).unwrap();
+#     let out_dir = seed_hangar_object(root, staging_dir);
+#     let json = format!(
+#         "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+#         out_dir.to_string_lossy()
+#     );
+#     fs::write(fixtures.join("nixpkgs-native-jetpack.json"), &json).unwrap();
+#     fs::write(
+#         fixtures.join("jetpackage-omp.json"),
+#         format!(
+#             "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{artifact_digest}\",\"artifact\":{artifact_name:?}}}"
+#         ),
+#     )
+#     .unwrap();
+#     out_dir
+# }
+# pub fn write_hangar_meta(
+#     root: &Path,
+#     id: &str,
+#     name: &str,
+#     version: &str,
+#     last_used_at: Option<u64>,
+# ) -> (PathBuf, String) {
+#     let roots = jetpack::Store::Roots {
+#         root: root.to_path_buf(),
+#         dev_mode: false,
+#     };
+#     let src = root.join(format!("hangar-meta-src-{id}"));
+#     fs::create_dir_all(&src).unwrap();
+#     fs::write(src.join("payload"), format!("fixture payload: {id}")).unwrap();
+#     let entry = jetpack::Store::ingest_tree(
+#         &roots,
+#         &jetpack::Store::IngestRequest {
+#             name: name.to_string(),
+#             version: version.to_string(),
+#             reference: format!("fixture:{id}"),
+#             cache_identity: jetpack::Store::CacheIdentity {
+#                 source_fingerprint: format!("sha256-fixture-source-{id}"),
+#                 recipe_fingerprint: format!("sha256-fixture-recipe-{id}"),
+#                 policy_fingerprint: "policy=fixture".to_string(),
+#                 platform: jetpack::Envelope::host_platform(),
+#             },
+#             references: Vec::new(),
+#             outputs: std::collections::BTreeMap::from([("out".to_string(), src.clone())]),
+#             signature: String::new(),
+#             provenance: "fixture".to_string(),
+#             platform_artifact_kind: String::new(),
+#         },
+#     )
+#     .unwrap()
+#     .entry;
+#     fs::remove_dir_all(&src).ok();
+#     if let Some(ts) = last_used_at {
+#         jetpack::Store::test_backdate_last_used_at(&roots, &entry.id, ts).unwrap();
+#     }
+#     let dir = root.join("hangar").join(&entry.id);
+#     (dir, entry.envelope.output_hash)
+# }
+# #[test]
+# #[cfg(target_os = "linux")]
+# fn platform_tier_gate_exercises_native_lease_diagnostics_and_audit() {
+#     let root = Scratch::new("platform-diagnostics-root");
+#     let fixtures = Scratch::new("platform-diagnostics-fixtures");
+#     let staging = Scratch::new("platform-diagnostics-staging");
+#     let missing_tools = Scratch::new("platform-diagnostics-missing-tools");
+#     write_native_jetpack_fixture(&fixtures.path, &root.path, &staging.path);
+#     let program = format!("omp{}", std::env::consts::EXE_SUFFIX);
+#     let run = jetpack()
+#         .args([
+#             "use",
+#             "omp@releases#1.0.0",
+#             "--no-color",
+#             "--offline",
+#             "--",
+#             &program,
+#             "--help",
+#         ])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .env("PATH", &missing_tools.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         run.status.success(),
+#         "native lease handoff failed: {}",
+#         String::from_utf8_lossy(&run.stderr)
+#     );
+#     assert!(
+#         String::from_utf8_lossy(&run.stdout).contains("jetpack"),
+#         "native lease child did not run: {}",
+#         String::from_utf8_lossy(&run.stdout)
+#     );
+#     assert!(
+#         fs::read_dir(root.join("leases"))
+#             .unwrap()
+#             .next()
+#             .is_none(),
+#         "production child exit left an executable lease behind"
+#     );
+# 
+#     let (good_object, _) = write_hangar_meta(
+#         &root.path,
+#         "platform-diagnostics-good",
+#         "platform-diagnostics-good",
+#         "1.0",
+#         None,
+#     );
+#     let stale = root
+#         .join("leases")
+#         .join("4294967294-1-platform-diagnostics-good");
+#     fs::create_dir_all(stale.join("snapshot")).unwrap();
+#     fs::write(stale.join("snapshot/partial"), "interrupted").unwrap();
+# 
+#     let doctor = jetpack()
+#         .args(["doctor", "--json", "--offline"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .output()
+#         .unwrap();
+#     let doctor_json = String::from_utf8_lossy(&doctor.stdout);
+#     assert!(
+#         doctor_json.contains("stale executable lease(s) found"),
+#         "doctor missed stale lease: {doctor_json}"
+#     );
+#     assert!(stale.is_dir(), "doctor changed lease state");
+# 
+#     let audit = jetpack()
+#         .args(["audit", "--no-color"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         audit.status.success(),
+#         "audit stderr: {}",
+#         String::from_utf8_lossy(&audit.stderr)
+#     );
+#     let audit_text = String::from_utf8_lossy(&audit.stderr);
+#     assert!(audit_text.contains("Leases:"), "audit omitted lease state");
+#     assert!(
+#         audit_text.contains("0 active, 1 stale"),
+#         "audit missed stale lease: {audit_text}"
+#     );
+# 
+#     let journal = root.path.join("hangar/closure-db/journal");
+#     fs::create_dir_all(&journal).unwrap();
+#     let partial = journal.join("00000000000000000099-corrupt.txn.partial");
+#     fs::write(&partial, "interrupted").unwrap();
+#     let broken = jetpack()
+#         .args(["audit", "--no-color"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .output()
+#         .unwrap();
+#     assert_eq!(broken.status.code(), Some(2));
+#     let broken_text = String::from_utf8_lossy(&broken.stderr);
+#     assert!(broken_text.contains("Error [E1340]:"), "{broken_text}");
+#     assert!(broken_text.contains("Why:"), "{broken_text}");
+#     assert!(broken_text.contains("Fix:"), "{broken_text}");
+#     assert!(
+#         broken_text.contains("More: jet-lang.dev/e/E1340"),
+#         "{broken_text}"
+#     );
+#     assert!(partial.is_file(), "audit repaired partial journal");
+#     assert!(good_object.join("meta.json").is_file());
+# 
+#     fs::remove_file(&partial).unwrap();
+#     let recover = jetpack()
+#         .args(["hangar", "recover", "--no-color"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("PATH", &missing_tools.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         recover.status.success(),
+#         "lease recovery stderr: {}",
+#         String::from_utf8_lossy(&recover.stderr)
+#     );
+#     assert!(!stale.exists(), "production recovery left stale lease");
+#     assert!(
+#         good_object.join("meta.json").is_file(),
+#         "production recovery removed the last good Hangar object"
+#     );
+# }

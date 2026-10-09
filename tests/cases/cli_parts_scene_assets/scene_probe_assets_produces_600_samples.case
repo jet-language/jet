@@ -1,0 +1,97 @@
+# Port tests/cli_parts/scene_assets.rs:13-17; support.rs625-694.
+# PENDING-SEAM(budget-verify): verify_budget_report(bytes) at support.rs677.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+refused: budget-verify
+fixture: fixtures/project
+step: jet self devtools probe src/main.jet
+exit: 0
+entries: .jet/perf/reports = 1 # original predicate
+json: files .jet/perf/reports canonical # original predicate
+json: files .jet/perf/reports doc $[0] : object # original pattern
+json: files .jet/perf/reports doc $[0].content : object # original pattern
+json: files .jet/perf/reports doc $[0].content.measurements : array # original pattern
+json: files .jet/perf/reports doc $[0].content.measurements #= 1
+json: files .jet/perf/reports doc $[0].content.measurements[0] : object # original pattern
+json: files .jet/perf/reports doc $[0].content.measurements[0].provider : object # original pattern
+json: files .jet/perf/reports doc $[0].content.measurements[0].provider.kind = "SceneProbe"
+json: files .jet/perf/reports doc $[0].content.measurements[0].provider.identity = "main"
+json: files .jet/perf/reports doc $[0].content.measurements[0].metric : object # original pattern
+json: files .jet/perf/reports doc $[0].content.measurements[0].metric.name = "SceneAssetBytes"
+json: files .jet/perf/reports doc $[0].content.measurements[0].samples : array # original pattern
+json: files .jet/perf/reports doc $[0].content.measurements[0].samples #= 600
+# Original fn and helper predicates (verbatim):
+# #[test]
+# fn scene_probe_assets_produces_600_samples() {
+#     let (_dir, report) = scene_probe_once("scene_probe_assets", ASSETS_BUDGET);
+#     assert_scene_probe_measurement(&report, "SceneAssetBytes");
+# }
+# pub fn scene_probe_project(tag: &str, budget: &str) -> PathBuf {
+#     let dir = isolated_cwd(tag);
+#     fs::create_dir_all(dir.join("src")).unwrap();
+#     fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
+#     let source = r#"use core.game as game
+# 
+# module perf.game {
+#     budgets: [
+#         __SCENE_BUDGET__,
+#     ]
+# }
+# 
+# fn run() {
+#     scene := game.Scene.new("main")
+#     counter := 0
+#     scene.on_frame((frame) -> {
+#         counter = counter + 1
+#     })
+#     transcript :: game.run(scene)
+#     print(transcript)
+# }
+# "#
+#     .replace("__SCENE_BUDGET__", budget);
+#     fs::write(dir.join("src/main.jet"), source).unwrap();
+#     dir
+# }
+# 
+# pub fn scene_probe_run(dir: &Path) -> Output {
+#     Command::new(jet())
+#         .args(["self", "devtools", "probe", "src/main.jet"])
+#         .current_dir(dir)
+#         .output()
+#         .unwrap()
+# }
+# 
+# pub fn scene_probe_once(tag: &str, budget: &str) -> (PathBuf, CanonicalJson) {
+#     let dir = scene_probe_project(tag, budget);
+#     let output = scene_probe_run(&dir);
+#     assert_eq!(
+#         output.status.code(),
+#         Some(0),
+#         "stdout: {}\nstderr: {}",
+#         String::from_utf8_lossy(&output.stdout),
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     let reports = dir.join(".jet/perf/reports");
+#     let paths = fs::read_dir(&reports)
+#         .unwrap()
+#         .map(|entry| entry.unwrap().path())
+#         .collect::<Vec<_>>();
+#     assert_eq!(paths.len(), 1, "expected exactly one report; got {paths:?}");
+#     let bytes = fs::read(&paths[0]).unwrap();
+#     jet_foundation::PerformanceBudget::verify_budget_report(&bytes).unwrap();
+#     (dir, CanonicalJson::parse_canonical(&bytes).unwrap())
+# }
+# 
+# pub fn assert_scene_probe_measurement(report: &CanonicalJson, expected_metric: &str) {
+#     let CanonicalJson::Object(report) = report else { panic!("report") };
+#     let CanonicalJson::Object(content) = &report["content"] else { panic!("content") };
+#     let CanonicalJson::Array(measurements) = &content["measurements"] else { panic!("measurements") };
+#     assert_eq!(measurements.len(), 1, "expected one SceneProbe measurement");
+#     let CanonicalJson::Object(measurement) = &measurements[0] else { panic!("measurement") };
+#     let CanonicalJson::Object(provider) = &measurement["provider"] else { panic!("provider") };
+#     assert_eq!(provider["kind"], CanonicalJson::String("SceneProbe".into()));
+#     assert_eq!(provider["identity"], CanonicalJson::String("main".into()));
+#     let CanonicalJson::Object(metric) = &measurement["metric"] else { panic!("metric") };
+#     assert_eq!(metric["name"], CanonicalJson::String(expected_metric.into()));
+#     let CanonicalJson::Array(samples) = &measurement["samples"] else { panic!("samples") };
+#     assert_eq!(samples.len(), 600, "SceneProbe must produce exactly 600 measured samples");
+# }

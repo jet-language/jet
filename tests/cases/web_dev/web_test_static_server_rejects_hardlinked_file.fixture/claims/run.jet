@@ -1,0 +1,11 @@
+use core.files as files
+
+#Test("original hardlink outside bytes are not served") {
+    port :: s5_web_port()
+    s5_web_wait_root(port, true)
+    response :: s5_web_get(port, "/hard.js", None) ?? panic("hardlink request")
+    assert_eq(response.status, 400)
+    assert(s5_web_find(response.body, "hardlink-secret".bytes()) == None)
+    outside :: files.read(sys.get("S5_OUTSIDE") ?? panic("outside path")) ?? panic("read outside")
+    assert_eq(outside, "hardlink-secret\n")
+}

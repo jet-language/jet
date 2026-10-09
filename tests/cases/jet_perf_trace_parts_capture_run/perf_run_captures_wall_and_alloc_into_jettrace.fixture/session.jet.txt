@@ -1,0 +1,41 @@
+use core.crypto as crypto
+use core.mem as mem
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+
+fn probe_work() {
+    // Present only so source_identity must parse a non-entry function spelling.
+}
+
+fn run() {
+    // Channel setup before arena so spawn panic cannot capture the arena view.
+    (ready_sender, ready) :: channel<Int>()
+    (hold_sender, blocked) :: channel<Int>(1)
+    child :: task {
+        ready_sender.send(1)
+        time.sleep(700ms)
+        blocked.receive() ?? panic("closed")
+    }
+    child.detach()
+    // Both waiters have finite completion paths. The channel waiter wakes after
+    // the observation window; the accept waiter gets a real client after it.
+    listener :: net.tcp_listen("127.0.0.1:{free-port:trace}") ?? panic("bind")
+    io_child :: task {
+        _ :: &listener.accept() ?? panic("accept")
+    }
+    io_child.detach()
+    ready.receive() ?? panic("closed")
+    // hold_sender stays live so the blocked receive keeps real waiters.
+    arena :: mem.Arena.new()
+    x :: arena.alloc(42)
+    probe_work()
+    digest := crypto.sha256("trace-work".bytes())
+    loop i in 0..16384 {
+        digest = crypto.sha256(digest.hex().bytes())
+    }
+    print("READY {digest.hex().len()}")
+    time.sleep(1200ms)
+    hold_sender.send(1)
+    _client :: net.tcp_connect("127.0.0.1:{free-port:trace}") ?? panic("connect")
+}

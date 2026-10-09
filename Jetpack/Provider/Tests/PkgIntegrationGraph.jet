@@ -1,0 +1,75 @@
+// Assertion-for-assertion reviewed ports of tests/pkg.rs:299-310,387-496.
+// PENDING-SEAM(package-tests); no public API or source-syntax migration.
+
+// Ported from pkg.rs:299-310, preserving all three nodes and their edges.
+fn provider_pkg_integration_graph() -> PackageGraph Never! {
+    graph := PackageGraph.new()
+    &graph.add_package(PackageNode.new("app").with_deps([String]{"ui"}).with_transitives([String]{"log"}))
+    &graph.add_package(PackageNode.new("ui").with_deps([String]{"log"}))
+    &graph.add_package(PackageNode.new("worker").with_transitives([String]{"log"}))
+    graph
+}
+
+fn provider_pkg_integration_hidden(graph: PackageGraph, dep: String) -> MissingDependency Never! {
+    if graph.check_visible("app", dep) == {
+        .Err(error) -> error
+        .Ok(_) -> panic("original requires an invisible dependency")
+    }
+}
+
+// Ported from pkg.rs:387-394.
+#Test("pkg integration strict_graph_rejects_transitive_import") {
+    error :: provider_pkg_integration_hidden(provider_pkg_integration_graph(), "log")
+    assert(error.reason.contains("direct deps"))
+    assert_eq(error.requested, "log")
+}
+
+// Ported from pkg.rs:397-404.
+#Test("pkg integration strict_graph_accepts_direct_dep") {
+    edge :: provider_pkg_integration_graph().check_visible("app", "ui") ?? panic("direct dep visible")
+    assert_eq(edge.dependency, "ui")
+    assert_eq(edge.kind, VisibleEdgeKind.DirectDep)
+}
+
+// Ported from pkg.rs:407-423.
+#Test("pkg integration catalog_edge_behaves_like_direct_dep_after_selection") {
+    graph := provider_pkg_integration_graph()
+    &graph.add_catalog(CatalogEntry{logical_name: "log", provider_ref: "core.log@1.2.3", version_rule: "1.2", allowed_packages: [String]{"app"}, owner_workspace: "root", rationale: "workspace selected shared logging version"})
+    edge :: graph.check_visible("app", "log") ?? panic("catalog edge visible")
+    assert_eq(edge.kind, VisibleEdgeKind.Catalog)
+    assert_eq(edge.provider_ref, "core.log@1.2.3")
+}
+
+// Ported from pkg.rs:457-463.
+#Test("pkg integration missing_dep_fix_prefers_direct_add_for_single_package") {
+    error :: provider_pkg_integration_hidden(provider_pkg_integration_graph(), "only-app")
+    assert(error.fix_text().contains("jet add only-app --path ../only-app"))
+}
+
+// Ported from pkg.rs:466-475.
+#Test("pkg integration missing_dep_fix_does_not_catalog_without_hidden_use_evidence") {
+    graph := provider_pkg_integration_graph()
+    &graph.add_package(PackageNode.new("direct-only").with_deps([String]{"shared"}))
+    error :: provider_pkg_integration_hidden(graph, "shared")
+    direct :: if error.fix == {
+        .DirectAddPath(_, _) -> true
+        else -> false
+    }
+    assert(direct)
+}
+
+// Ported from pkg.rs:478-484.
+#Test("pkg integration missing_dep_fix_prefers_catalog_for_workspace_reuse") {
+    error :: provider_pkg_integration_hidden(provider_pkg_integration_graph(), "log")
+    assert(error.fix_text().contains("catalog data"))
+    assert(error.fix_text().contains("app"))
+    assert(error.fix_text().contains("worker"))
+}
+
+// Ported from pkg.rs:487-496; the exact ordered list is asserted.
+#Test("pkg integration lsp_completion_hides_transitive_deps") {
+    visible := [String]{}
+    loop edge in provider_pkg_integration_graph().visible_edges("app") -> &visible.push(edge.dependency)
+    assert_eq(visible, [String]{"ui"})
+    assert(!visible.contains("log"))
+}

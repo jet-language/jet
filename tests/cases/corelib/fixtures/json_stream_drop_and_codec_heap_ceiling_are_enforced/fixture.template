@@ -1,0 +1,55 @@
+
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+
+fn write_unfinished(path: String) {
+    output :: files.create(path) ?? panic("create partial")
+    writer :: json.writer(^output) ?? panic("writer")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+    writer.write(encoding.DataEvent.Int(7)) ?? panic("int")
+    &writer.flush() ?? panic("flush")
+    // no finish — Drop must close the handle without claiming success
+}
+
+fn run() {
+    write_unfinished("{work}/partial.json")
+    // Same-path reopen after Drop: unfinished bytes still on this path.
+    leftover :: files.read("{work}/partial.json") ?? panic("same-path read after Drop")
+    print(leftover == "[7")
+    // Same-path recreate: Drop must have released the unfinished writer handle.
+    reopen_out :: files.create("{work}/partial.json") ?? panic("same-path recreate after Drop")
+    reopen_writer :: json.writer(^reopen_out) ?? panic("reopen writer")
+    reopen_writer.write(encoding.DataEvent.Null) ?? panic("reopen write")
+    reopen_writer.finish() ?? panic("reopen finish")
+    finished :: files.read("{work}/partial.json") ?? panic("same-path read after finish")
+    print(finished == "null")
+
+    limits := encoding.EncodingLimits.safe()
+    limits.buffer_bytes = 4096
+    limits.max_depth = 1
+    limits.max_item_bytes = 100000
+    limits.max_expansion_bytes = 0
+    input :: files.open("{work}/heap.json") ?? panic("heap open")
+    reader :: json.reader(^input, limits) ?? panic("heap reader")
+    count := 0
+    loop count < 4 {
+        result :: reader.next()
+        if result == {
+            .Ok(_) -> { count++ }
+            .Err(first) -> {
+                again :: reader.next()
+                if again == {
+                    .Ok(_) -> { print("heap-not-latched") }
+                    .Err(second) -> {
+                        print(first.byte_offset)
+                        print(first.path)
+                        print(first.reason)
+                        print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                    }
+                }
+                break
+            }
+        }
+    }
+}

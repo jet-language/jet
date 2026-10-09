@@ -1,0 +1,51 @@
+// Port tests/fleet.rs exact reachable predicates; no invented override API.
+// Full override predicates remain jetos-fleet-model ledger-only, not passing claims.
+// PENDING-SAME-HEAD nested package-test admission.
+
+#Test("fleet_host_unknown_system_is_e1242") {
+    source :: "module fleet.prod {{ hosts: {{ web1: system.ghost }} }}"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
+    assert_eq(error.code, "E1242")
+    rendered :: envmodel_test_render("env.jet", source, error)
+    assert(rendered.contains("host `web1` names an unknown system `ghost`"))
+}
+
+#Test("fleet_unknown_field_is_e1244") {
+    source :: "module fleet.prod {{ region: \"us\" }}"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
+    assert_eq(error.code, "E1244")
+}
+
+#Test("fleet_missing_hosts_is_e1245") {
+    source :: "module fleet.prod {{ }}"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
+    assert_eq(error.code, "E1245")
+}
+
+#Test("fleet valid independent host projection; overrides remain ledger-only") {
+    source :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{\n    hosts: {{\n        web1: system.web.{{ region: \"us-east\" }},\n        web2: system.web,\n    }}\n}}\n"
+    plan :: envmodel_evaluate_env(source, envmodel_test_base_dir()) ?? panic("valid fleet evaluates")
+    assert_eq(plan.fleets.len(), 1)
+    fleet :: plan.fleets[0]
+    assert_eq(fleet.name, "prod")
+    assert_eq(fleet.hosts.len(), 2)
+    assert_eq(fleet.hosts[0].system, "web")
+}
+
+fn s5_fleet_committed_claim(root: String) {
+    base :: files.join(root, "tests/fixtures/jetpack-typed")
+    source :: files.read(files.join(base, "fleet.jet")) ?? panic("read committed fleet fixture")
+    plan :: envmodel_evaluate_env(source, base) ?? panic("committed fleet evaluates")
+    assert_eq(plan.systems.len(), 1)
+    assert_eq(plan.systems[0].name, "web")
+    assert_eq(plan.fleets.len(), 1)
+    assert_eq(plan.fleets[0].name, "prod")
+    names := [String]{}
+    loop host in plan.fleets[0].hosts -> &names.push(host.name)
+    assert_eq(names, [String]{"web1", "web2", "web3"})
+    loop host in plan.fleets[0].hosts -> assert_eq(host.system, "web")
+}
+
+#Test("committed_fleet_example_field_checks_clean") {
+    s5_fleet_committed_claim(envmodel_test_repo_root())
+}

@@ -1,0 +1,24 @@
+# Port of tests/output_callable.rs:510-542; all4 rejection sources verbatim.
+# PENDING-SAME-HEAD; original predicates, including no ICE/no rustc rejection.
+fixture: invalid_output_selection_stops_in_jet_before_codegen.fixture
+env: NO_COLOR=1
+step: jet run lib.jet
+exit: nonzero
+stderr: ~ "Error [E0101]" # original predicate
+stderr: !~ "internal compiler error" # original predicate
+stderr: !~ "rustc rejected" # original predicate
+step: jet run service.jet
+exit: nonzero
+stderr: ~ "Error [E0101]" # original predicate
+stderr: !~ "internal compiler error" # original predicate
+stderr: !~ "rustc rejected" # original predicate
+step: jet run --output release check.jet
+exit: nonzero
+stderr: ~ "Error [E1321]" # original predicate
+stderr: !~ "internal compiler error" # original predicate
+stderr: !~ "rustc rejected" # original predicate
+step: jet run stale.jet
+exit: nonzero
+stderr: ~ "Error [E1321]" # original predicate
+stderr: !~ "internal compiler error" # original predicate
+stderr: !~ "rustc rejected" # original predicate

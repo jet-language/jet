@@ -1,0 +1,16 @@
+
+use core.http.server as server
+use core.net as net
+
+fn run() (HTTPError | NetError | TaskFailure)! {
+    listener :: net.tcp_listen("127.0.0.1:__PORT__") ?? panic("listen")
+    mux :: server.mux()
+    mux.post("/", (req: HTTPRequest) -> {
+        body :: req.body().text(1024) ?? "rejected"
+        return Ok(server.response(200, body))
+    })
+    server_task :: task {
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+    }
+    server_task.join() ?? panic("serve")
+}

@@ -1,0 +1,18 @@
+# HAND-PORT tests/db_policy.rs:325-332 sqlite_blob_round_trip_preserves_bytes_across_tiers
+# PENDING-KIT; PENDING-GRAMMAR, no historical failure captures blessed.
+# ORACLE-LITERAL; exact original scope/hostile/blob tier matrices.
+fixture: sqlite_blob_round_trip_preserves_bytes_across_tiers.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = sqlite_blob_round_trip_preserves_bytes_across_tiers.stdout.expected
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = sqlite_blob_round_trip_preserves_bytes_across_tiers.stdout.expected
+stderr: == default
+step: jet build --profile=debug main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = sqlite_blob_round_trip_preserves_bytes_across_tiers.stdout.expected
+stderr: == default

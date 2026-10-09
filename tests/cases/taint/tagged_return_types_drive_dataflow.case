@@ -1,0 +1,8 @@
+# HAND-PORT tests/taint.rs:173 tagged_return_types_drive_dataflow
+# PENDING-SAME-HEAD runtimeGap=original-assert; no historical failure captures blessed.
+# Original codes helper compile success or exact E0721 count, not historical failing outputs.
+fixture: tagged_return_types_drive_dataflow.fixture
+env: NO_COLOR=1
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0721"] #= 1

@@ -1,0 +1,19 @@
+# PORT tests/pkg.rs::git_dep_rejects_ssh_userinfo_option_before_transport_execution:4741-4830; original helpers min_manifest/manifest_with_deps/with_store retained.
+# KNOWN-FAILING #4833: Jet front-end has no fetch/locked dependency-resolution door.
+# PENDING-GRAMMAR(batch-four); no reference snapshot or runtime proof.
+# Rust CLI: main.rs3684-3691 -> CmdPkg.rs255-325 -> original Fetch::fetch options.
+fixture: fixtures/git_dep_rejects_ssh_userinfo_option_before_transport_execution
+requires: tool:git
+requires: os:unix
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+chmod: bin/git 0755
+step: jet fetch
+env: PATH={work}/bin:{env:PATH}
+env: JET_TEST_GIT_LOG={work}/git-args.log
+env: JET_TEST_GIT_INVOKED={work}/git-transport-invoked
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1203]"
+file: git-args.log absent
+file: git-transport-invoked absent
+file: .jet absent

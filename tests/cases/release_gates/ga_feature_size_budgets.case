@@ -1,0 +1,28 @@
+# Port of tests/release_gates.rs::ga_feature_size_budgets; all original predicates, runtime UNRUN.
+requires: tool:rustc
+mkdir: .jet/build
+step: jet build --small {root}/Examples/features/basics/hello.jet
+exit: 0
+file: .jet/build/hello size > 0
+file: .jet/build/hello size <= 512000
+step: jet build --small {root}/Examples/features/io/cli.jet
+exit: 0
+file: .jet/build/cli size > 0
+file: .jet/build/cli size <= 524288
+step: jet build --small {root}/Examples/features/net/http_server_tasks.jet
+exit: 0
+file: .jet/build/http_server_tasks size > 0
+file: .jet/build/http_server_tasks size <= 3145728
+step: jet build --small {root}/Examples/features/modules/library.jet
+exit: 0
+file: .jet/build/library size > 0
+file: .jet/build/library size <= 4194304
+step: jet build --small {root}/Examples/features/lowlevel/lowlevel.jet
+exit: 0
+file: .jet/build/lowlevel size > 0
+file: .jet/build/lowlevel size <= 4194304
+step: jet build --small {root}/Examples/features/lowlevel/freestanding.jet
+exit: 0
+file: .jet/build/freestanding size > 0
+file: .jet/build/freestanding size <= 4194304
+

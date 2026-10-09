@@ -1,0 +1,412 @@
+use core.time as time
+
+fn field(meta: String, key: String) -> String {
+    loop part in meta.split(";") {
+        pair :: part.split_once("=") ?? next
+        if pair.before == key -> return pair.after
+    }
+    return ""
+}
+
+fn i(meta: String, key: String) -> Int { Int.parse(field(meta, key)) ?? panic(key) }
+
+fn unix_ms(meta: String) -> Int {
+    raw :: field(meta, "utc_ms")
+    if raw != "" -> return Int.parse(raw) ?? panic("utc_ms")
+    resolved :: field(meta, "resolved_utc_ms")
+    if resolved != "" -> return Int.parse(resolved) ?? panic("resolved_utc_ms")
+    sec :: field(meta, "utc_seconds")
+    if sec != "" -> return (Int.parse(sec) ?? panic("sec")) * 1000
+    return i(meta, "base_utc_ms")
+}
+
+fn shown(op: String, meta: String) -> String {
+    zone :: time.zone(field(meta, "zone")) ?? panic("zone")
+    pattern :: "yyyy-MM-dd HH:mm:ss VV XXX"
+    if op == "view_format" || op == "skipped_format" -> return time.zoned(time.from_unix_ms(unix_ms(meta)), zone).format(pattern)
+    if op == "view_offset" || op == "skipped_offset" -> return "{time.zoned(time.from_unix_ms(unix_ms(meta)), zone).offset_seconds()}"
+    if op == "view_dst" || op == "skipped_dst" -> return "{time.zoned(time.from_unix_ms(unix_ms(meta)), zone).is_dst()}"
+    if op == "duration_format" || op == "duration_offset" || op == "duration_dst" || op == "duration_utc_ms" {
+        zoned :: time.zoned(time.from_unix_ms(i(meta, "base_utc_ms")), zone)
+        value :: zoned.add_duration(Duration.hours(24) ?? panic("duration"))
+        if op == "duration_format" -> return value.format(pattern)
+        if op == "duration_offset" -> return "{value.offset_seconds()}"
+        if op == "duration_dst" -> return "{value.is_dst()}"
+        return "{value.to_datetime().to_unix_ms()}"
+    }
+    if op == "period_format" || op == "period_offset" || op == "period_dst" || op == "period_utc_ms" || op == "period_candidate_valid" {
+        zoned :: time.zoned(time.from_unix_ms(i(meta, "base_utc_ms")), zone)
+        value :: zoned.add_period(time.period_days(1))
+        if op == "period_format" -> return value.format(pattern)
+        if op == "period_offset" -> return "{value.offset_seconds()}"
+        if op == "period_dst" -> return "{value.is_dst()}"
+        if op == "period_utc_ms" -> return "{value.to_datetime().to_unix_ms()}"
+        ms :: value.to_datetime().to_unix_ms()
+        first :: i(meta, "candidate_fold0_ms")
+        second :: i(meta, "candidate_fold1_ms")
+        return "{(ms == first) || (ms == second)}"
+    }
+    panic(op)
+}
+
+fn run() {
+    table :: """
+f4_Europe_London_t0_-3600	view_format	zone=Europe/London;utc_seconds=1774742400;transition=1774746000;delta=-3600;utc_ms=1774742400000
+f4_Europe_London_t0_-3600	view_offset	zone=Europe/London;utc_seconds=1774742400;transition=1774746000;delta=-3600;utc_ms=1774742400000
+f4_Europe_London_t0_-3600	view_dst	zone=Europe/London;utc_seconds=1774742400;transition=1774746000;delta=-3600;utc_ms=1774742400000
+f4_Europe_London_t0_-1	view_format	zone=Europe/London;utc_seconds=1774745999;transition=1774746000;delta=-1;utc_ms=1774745999000
+f4_Europe_London_t0_-1	view_offset	zone=Europe/London;utc_seconds=1774745999;transition=1774746000;delta=-1;utc_ms=1774745999000
+f4_Europe_London_t0_-1	view_dst	zone=Europe/London;utc_seconds=1774745999;transition=1774746000;delta=-1;utc_ms=1774745999000
+f4_Europe_London_t0_+0	view_format	zone=Europe/London;utc_seconds=1774746000;transition=1774746000;delta=0;utc_ms=1774746000000
+f4_Europe_London_t0_+0	view_offset	zone=Europe/London;utc_seconds=1774746000;transition=1774746000;delta=0;utc_ms=1774746000000
+f4_Europe_London_t0_+0	view_dst	zone=Europe/London;utc_seconds=1774746000;transition=1774746000;delta=0;utc_ms=1774746000000
+f4_Europe_London_t0_+1	view_format	zone=Europe/London;utc_seconds=1774746001;transition=1774746000;delta=1;utc_ms=1774746001000
+f4_Europe_London_t0_+1	view_offset	zone=Europe/London;utc_seconds=1774746001;transition=1774746000;delta=1;utc_ms=1774746001000
+f4_Europe_London_t0_+1	view_dst	zone=Europe/London;utc_seconds=1774746001;transition=1774746000;delta=1;utc_ms=1774746001000
+f4_Europe_London_t0_+3600	view_format	zone=Europe/London;utc_seconds=1774749600;transition=1774746000;delta=3600;utc_ms=1774749600000
+f4_Europe_London_t0_+3600	view_offset	zone=Europe/London;utc_seconds=1774749600;transition=1774746000;delta=3600;utc_ms=1774749600000
+f4_Europe_London_t0_+3600	view_dst	zone=Europe/London;utc_seconds=1774749600;transition=1774746000;delta=3600;utc_ms=1774749600000
+f4_Europe_London_t1_-3600	view_format	zone=Europe/London;utc_seconds=1792886400;transition=1792890000;delta=-3600;utc_ms=1792886400000
+f4_Europe_London_t1_-3600	view_offset	zone=Europe/London;utc_seconds=1792886400;transition=1792890000;delta=-3600;utc_ms=1792886400000
+f4_Europe_London_t1_-3600	view_dst	zone=Europe/London;utc_seconds=1792886400;transition=1792890000;delta=-3600;utc_ms=1792886400000
+f4_Europe_London_t1_-1	view_format	zone=Europe/London;utc_seconds=1792889999;transition=1792890000;delta=-1;utc_ms=1792889999000
+f4_Europe_London_t1_-1	view_offset	zone=Europe/London;utc_seconds=1792889999;transition=1792890000;delta=-1;utc_ms=1792889999000
+f4_Europe_London_t1_-1	view_dst	zone=Europe/London;utc_seconds=1792889999;transition=1792890000;delta=-1;utc_ms=1792889999000
+f4_Europe_London_t1_+0	view_format	zone=Europe/London;utc_seconds=1792890000;transition=1792890000;delta=0;utc_ms=1792890000000
+f4_Europe_London_t1_+0	view_offset	zone=Europe/London;utc_seconds=1792890000;transition=1792890000;delta=0;utc_ms=1792890000000
+f4_Europe_London_t1_+0	view_dst	zone=Europe/London;utc_seconds=1792890000;transition=1792890000;delta=0;utc_ms=1792890000000
+f4_Europe_London_t1_+1	view_format	zone=Europe/London;utc_seconds=1792890001;transition=1792890000;delta=1;utc_ms=1792890001000
+f4_Europe_London_t1_+1	view_offset	zone=Europe/London;utc_seconds=1792890001;transition=1792890000;delta=1;utc_ms=1792890001000
+f4_Europe_London_t1_+1	view_dst	zone=Europe/London;utc_seconds=1792890001;transition=1792890000;delta=1;utc_ms=1792890001000
+f4_Europe_London_t1_+3600	view_format	zone=Europe/London;utc_seconds=1792893600;transition=1792890000;delta=3600;utc_ms=1792893600000
+f4_Europe_London_t1_+3600	view_offset	zone=Europe/London;utc_seconds=1792893600;transition=1792890000;delta=3600;utc_ms=1792893600000
+f4_Europe_London_t1_+3600	view_dst	zone=Europe/London;utc_seconds=1792893600;transition=1792890000;delta=3600;utc_ms=1792893600000
+f4_Europe_London_midyear	view_format	zone=Europe/London;utc_ms=1780272000000;baseline=midyear
+f4_Europe_London_midyear	view_offset	zone=Europe/London;utc_ms=1780272000000;baseline=midyear
+f4_Europe_London_midyear	view_dst	zone=Europe/London;utc_ms=1780272000000;baseline=midyear
+f4_Europe_London_pre1970	view_format	zone=Europe/London;utc_ms=-123456789000;baseline=pre1970
+f4_Europe_London_pre1970	view_offset	zone=Europe/London;utc_ms=-123456789000;baseline=pre1970
+f4_Europe_London_pre1970	view_dst	zone=Europe/London;utc_ms=-123456789000;baseline=pre1970
+f4_America_New_York_t0_-3600	view_format	zone=America/New_York;utc_seconds=1772949600;transition=1772953200;delta=-3600;utc_ms=1772949600000
+f4_America_New_York_t0_-3600	view_offset	zone=America/New_York;utc_seconds=1772949600;transition=1772953200;delta=-3600;utc_ms=1772949600000
+f4_America_New_York_t0_-3600	view_dst	zone=America/New_York;utc_seconds=1772949600;transition=1772953200;delta=-3600;utc_ms=1772949600000
+f4_America_New_York_t0_-1	view_format	zone=America/New_York;utc_seconds=1772953199;transition=1772953200;delta=-1;utc_ms=1772953199000
+f4_America_New_York_t0_-1	view_offset	zone=America/New_York;utc_seconds=1772953199;transition=1772953200;delta=-1;utc_ms=1772953199000
+f4_America_New_York_t0_-1	view_dst	zone=America/New_York;utc_seconds=1772953199;transition=1772953200;delta=-1;utc_ms=1772953199000
+f4_America_New_York_t0_+0	view_format	zone=America/New_York;utc_seconds=1772953200;transition=1772953200;delta=0;utc_ms=1772953200000
+f4_America_New_York_t0_+0	view_offset	zone=America/New_York;utc_seconds=1772953200;transition=1772953200;delta=0;utc_ms=1772953200000
+f4_America_New_York_t0_+0	view_dst	zone=America/New_York;utc_seconds=1772953200;transition=1772953200;delta=0;utc_ms=1772953200000
+f4_America_New_York_t0_+1	view_format	zone=America/New_York;utc_seconds=1772953201;transition=1772953200;delta=1;utc_ms=1772953201000
+f4_America_New_York_t0_+1	view_offset	zone=America/New_York;utc_seconds=1772953201;transition=1772953200;delta=1;utc_ms=1772953201000
+f4_America_New_York_t0_+1	view_dst	zone=America/New_York;utc_seconds=1772953201;transition=1772953200;delta=1;utc_ms=1772953201000
+f4_America_New_York_t0_+3600	view_format	zone=America/New_York;utc_seconds=1772956800;transition=1772953200;delta=3600;utc_ms=1772956800000
+f4_America_New_York_t0_+3600	view_offset	zone=America/New_York;utc_seconds=1772956800;transition=1772953200;delta=3600;utc_ms=1772956800000
+f4_America_New_York_t0_+3600	view_dst	zone=America/New_York;utc_seconds=1772956800;transition=1772953200;delta=3600;utc_ms=1772956800000
+f4_America_New_York_t1_-3600	view_format	zone=America/New_York;utc_seconds=1793509200;transition=1793512800;delta=-3600;utc_ms=1793509200000
+f4_America_New_York_t1_-3600	view_offset	zone=America/New_York;utc_seconds=1793509200;transition=1793512800;delta=-3600;utc_ms=1793509200000
+f4_America_New_York_t1_-3600	view_dst	zone=America/New_York;utc_seconds=1793509200;transition=1793512800;delta=-3600;utc_ms=1793509200000
+f4_America_New_York_t1_-1	view_format	zone=America/New_York;utc_seconds=1793512799;transition=1793512800;delta=-1;utc_ms=1793512799000
+f4_America_New_York_t1_-1	view_offset	zone=America/New_York;utc_seconds=1793512799;transition=1793512800;delta=-1;utc_ms=1793512799000
+f4_America_New_York_t1_-1	view_dst	zone=America/New_York;utc_seconds=1793512799;transition=1793512800;delta=-1;utc_ms=1793512799000
+f4_America_New_York_t1_+0	view_format	zone=America/New_York;utc_seconds=1793512800;transition=1793512800;delta=0;utc_ms=1793512800000
+f4_America_New_York_t1_+0	view_offset	zone=America/New_York;utc_seconds=1793512800;transition=1793512800;delta=0;utc_ms=1793512800000
+f4_America_New_York_t1_+0	view_dst	zone=America/New_York;utc_seconds=1793512800;transition=1793512800;delta=0;utc_ms=1793512800000
+f4_America_New_York_t1_+1	view_format	zone=America/New_York;utc_seconds=1793512801;transition=1793512800;delta=1;utc_ms=1793512801000
+f4_America_New_York_t1_+1	view_offset	zone=America/New_York;utc_seconds=1793512801;transition=1793512800;delta=1;utc_ms=1793512801000
+f4_America_New_York_t1_+1	view_dst	zone=America/New_York;utc_seconds=1793512801;transition=1793512800;delta=1;utc_ms=1793512801000
+f4_America_New_York_t1_+3600	view_format	zone=America/New_York;utc_seconds=1793516400;transition=1793512800;delta=3600;utc_ms=1793516400000
+f4_America_New_York_t1_+3600	view_offset	zone=America/New_York;utc_seconds=1793516400;transition=1793512800;delta=3600;utc_ms=1793516400000
+f4_America_New_York_t1_+3600	view_dst	zone=America/New_York;utc_seconds=1793516400;transition=1793512800;delta=3600;utc_ms=1793516400000
+f4_America_New_York_midyear	view_format	zone=America/New_York;utc_ms=1780272000000;baseline=midyear
+f4_America_New_York_midyear	view_offset	zone=America/New_York;utc_ms=1780272000000;baseline=midyear
+f4_America_New_York_midyear	view_dst	zone=America/New_York;utc_ms=1780272000000;baseline=midyear
+f4_America_New_York_pre1970	view_format	zone=America/New_York;utc_ms=-123456789000;baseline=pre1970
+f4_America_New_York_pre1970	view_offset	zone=America/New_York;utc_ms=-123456789000;baseline=pre1970
+f4_America_New_York_pre1970	view_dst	zone=America/New_York;utc_ms=-123456789000;baseline=pre1970
+f4_Australia_Lord_Howe_t0_-3600	view_format	zone=Australia/Lord_Howe;utc_seconds=1775311200;transition=1775314800;delta=-3600;utc_ms=1775311200000
+f4_Australia_Lord_Howe_t0_-3600	view_offset	zone=Australia/Lord_Howe;utc_seconds=1775311200;transition=1775314800;delta=-3600;utc_ms=1775311200000
+f4_Australia_Lord_Howe_t0_-3600	view_dst	zone=Australia/Lord_Howe;utc_seconds=1775311200;transition=1775314800;delta=-3600;utc_ms=1775311200000
+f4_Australia_Lord_Howe_t0_-1	view_format	zone=Australia/Lord_Howe;utc_seconds=1775314799;transition=1775314800;delta=-1;utc_ms=1775314799000
+f4_Australia_Lord_Howe_t0_-1	view_offset	zone=Australia/Lord_Howe;utc_seconds=1775314799;transition=1775314800;delta=-1;utc_ms=1775314799000
+f4_Australia_Lord_Howe_t0_-1	view_dst	zone=Australia/Lord_Howe;utc_seconds=1775314799;transition=1775314800;delta=-1;utc_ms=1775314799000
+f4_Australia_Lord_Howe_t0_+0	view_format	zone=Australia/Lord_Howe;utc_seconds=1775314800;transition=1775314800;delta=0;utc_ms=1775314800000
+f4_Australia_Lord_Howe_t0_+0	view_offset	zone=Australia/Lord_Howe;utc_seconds=1775314800;transition=1775314800;delta=0;utc_ms=1775314800000
+f4_Australia_Lord_Howe_t0_+0	view_dst	zone=Australia/Lord_Howe;utc_seconds=1775314800;transition=1775314800;delta=0;utc_ms=1775314800000
+f4_Australia_Lord_Howe_t0_+1	view_format	zone=Australia/Lord_Howe;utc_seconds=1775314801;transition=1775314800;delta=1;utc_ms=1775314801000
+f4_Australia_Lord_Howe_t0_+1	view_offset	zone=Australia/Lord_Howe;utc_seconds=1775314801;transition=1775314800;delta=1;utc_ms=1775314801000
+f4_Australia_Lord_Howe_t0_+1	view_dst	zone=Australia/Lord_Howe;utc_seconds=1775314801;transition=1775314800;delta=1;utc_ms=1775314801000
+f4_Australia_Lord_Howe_t0_+3600	view_format	zone=Australia/Lord_Howe;utc_seconds=1775318400;transition=1775314800;delta=3600;utc_ms=1775318400000
+f4_Australia_Lord_Howe_t0_+3600	view_offset	zone=Australia/Lord_Howe;utc_seconds=1775318400;transition=1775314800;delta=3600;utc_ms=1775318400000
+f4_Australia_Lord_Howe_t0_+3600	view_dst	zone=Australia/Lord_Howe;utc_seconds=1775318400;transition=1775314800;delta=3600;utc_ms=1775318400000
+f4_Australia_Lord_Howe_t1_-3600	view_format	zone=Australia/Lord_Howe;utc_seconds=1791037800;transition=1791041400;delta=-3600;utc_ms=1791037800000
+f4_Australia_Lord_Howe_t1_-3600	view_offset	zone=Australia/Lord_Howe;utc_seconds=1791037800;transition=1791041400;delta=-3600;utc_ms=1791037800000
+f4_Australia_Lord_Howe_t1_-3600	view_dst	zone=Australia/Lord_Howe;utc_seconds=1791037800;transition=1791041400;delta=-3600;utc_ms=1791037800000
+f4_Australia_Lord_Howe_t1_-1	view_format	zone=Australia/Lord_Howe;utc_seconds=1791041399;transition=1791041400;delta=-1;utc_ms=1791041399000
+f4_Australia_Lord_Howe_t1_-1	view_offset	zone=Australia/Lord_Howe;utc_seconds=1791041399;transition=1791041400;delta=-1;utc_ms=1791041399000
+f4_Australia_Lord_Howe_t1_-1	view_dst	zone=Australia/Lord_Howe;utc_seconds=1791041399;transition=1791041400;delta=-1;utc_ms=1791041399000
+f4_Australia_Lord_Howe_t1_+0	view_format	zone=Australia/Lord_Howe;utc_seconds=1791041400;transition=1791041400;delta=0;utc_ms=1791041400000
+f4_Australia_Lord_Howe_t1_+0	view_offset	zone=Australia/Lord_Howe;utc_seconds=1791041400;transition=1791041400;delta=0;utc_ms=1791041400000
+f4_Australia_Lord_Howe_t1_+0	view_dst	zone=Australia/Lord_Howe;utc_seconds=1791041400;transition=1791041400;delta=0;utc_ms=1791041400000
+f4_Australia_Lord_Howe_t1_+1	view_format	zone=Australia/Lord_Howe;utc_seconds=1791041401;transition=1791041400;delta=1;utc_ms=1791041401000
+f4_Australia_Lord_Howe_t1_+1	view_offset	zone=Australia/Lord_Howe;utc_seconds=1791041401;transition=1791041400;delta=1;utc_ms=1791041401000
+f4_Australia_Lord_Howe_t1_+1	view_dst	zone=Australia/Lord_Howe;utc_seconds=1791041401;transition=1791041400;delta=1;utc_ms=1791041401000
+f4_Australia_Lord_Howe_t1_+3600	view_format	zone=Australia/Lord_Howe;utc_seconds=1791045000;transition=1791041400;delta=3600;utc_ms=1791045000000
+f4_Australia_Lord_Howe_t1_+3600	view_offset	zone=Australia/Lord_Howe;utc_seconds=1791045000;transition=1791041400;delta=3600;utc_ms=1791045000000
+f4_Australia_Lord_Howe_t1_+3600	view_dst	zone=Australia/Lord_Howe;utc_seconds=1791045000;transition=1791041400;delta=3600;utc_ms=1791045000000
+f4_Australia_Lord_Howe_midyear	view_format	zone=Australia/Lord_Howe;utc_ms=1780272000000;baseline=midyear
+f4_Australia_Lord_Howe_midyear	view_offset	zone=Australia/Lord_Howe;utc_ms=1780272000000;baseline=midyear
+f4_Australia_Lord_Howe_midyear	view_dst	zone=Australia/Lord_Howe;utc_ms=1780272000000;baseline=midyear
+f4_Australia_Lord_Howe_pre1970	view_format	zone=Australia/Lord_Howe;utc_ms=-123456789000;baseline=pre1970
+f4_Australia_Lord_Howe_pre1970	view_offset	zone=Australia/Lord_Howe;utc_ms=-123456789000;baseline=pre1970
+f4_Australia_Lord_Howe_pre1970	view_dst	zone=Australia/Lord_Howe;utc_ms=-123456789000;baseline=pre1970
+f4_Asia_Kathmandu_midyear	view_format	zone=Asia/Kathmandu;utc_ms=1780272000000;baseline=midyear
+f4_Asia_Kathmandu_midyear	view_offset	zone=Asia/Kathmandu;utc_ms=1780272000000;baseline=midyear
+f4_Asia_Kathmandu_midyear	view_dst	zone=Asia/Kathmandu;utc_ms=1780272000000;baseline=midyear
+f4_Asia_Kathmandu_pre1970	view_format	zone=Asia/Kathmandu;utc_ms=-123456789000;baseline=pre1970
+f4_Asia_Kathmandu_pre1970	view_offset	zone=Asia/Kathmandu;utc_ms=-123456789000;baseline=pre1970
+f4_Asia_Kathmandu_pre1970	view_dst	zone=Asia/Kathmandu;utc_ms=-123456789000;baseline=pre1970
+f4_Pacific_Apia_midyear	view_format	zone=Pacific/Apia;utc_ms=1780272000000;baseline=midyear
+f4_Pacific_Apia_midyear	view_offset	zone=Pacific/Apia;utc_ms=1780272000000;baseline=midyear
+f4_Pacific_Apia_midyear	view_dst	zone=Pacific/Apia;utc_ms=1780272000000;baseline=midyear
+f4_Pacific_Apia_pre1970	view_format	zone=Pacific/Apia;utc_ms=-123456789000;baseline=pre1970
+f4_Pacific_Apia_pre1970	view_offset	zone=Pacific/Apia;utc_ms=-123456789000;baseline=pre1970
+f4_Pacific_Apia_pre1970	view_dst	zone=Pacific/Apia;utc_ms=-123456789000;baseline=pre1970
+f4_Pacific_Chatham_t0_-3600	view_format	zone=Pacific/Chatham;utc_seconds=1775307600;transition=1775311200;delta=-3600;utc_ms=1775307600000
+f4_Pacific_Chatham_t0_-3600	view_offset	zone=Pacific/Chatham;utc_seconds=1775307600;transition=1775311200;delta=-3600;utc_ms=1775307600000
+f4_Pacific_Chatham_t0_-3600	view_dst	zone=Pacific/Chatham;utc_seconds=1775307600;transition=1775311200;delta=-3600;utc_ms=1775307600000
+f4_Pacific_Chatham_t0_-1	view_format	zone=Pacific/Chatham;utc_seconds=1775311199;transition=1775311200;delta=-1;utc_ms=1775311199000
+f4_Pacific_Chatham_t0_-1	view_offset	zone=Pacific/Chatham;utc_seconds=1775311199;transition=1775311200;delta=-1;utc_ms=1775311199000
+f4_Pacific_Chatham_t0_-1	view_dst	zone=Pacific/Chatham;utc_seconds=1775311199;transition=1775311200;delta=-1;utc_ms=1775311199000
+f4_Pacific_Chatham_t0_+0	view_format	zone=Pacific/Chatham;utc_seconds=1775311200;transition=1775311200;delta=0;utc_ms=1775311200000
+f4_Pacific_Chatham_t0_+0	view_offset	zone=Pacific/Chatham;utc_seconds=1775311200;transition=1775311200;delta=0;utc_ms=1775311200000
+f4_Pacific_Chatham_t0_+0	view_dst	zone=Pacific/Chatham;utc_seconds=1775311200;transition=1775311200;delta=0;utc_ms=1775311200000
+f4_Pacific_Chatham_t0_+1	view_format	zone=Pacific/Chatham;utc_seconds=1775311201;transition=1775311200;delta=1;utc_ms=1775311201000
+f4_Pacific_Chatham_t0_+1	view_offset	zone=Pacific/Chatham;utc_seconds=1775311201;transition=1775311200;delta=1;utc_ms=1775311201000
+f4_Pacific_Chatham_t0_+1	view_dst	zone=Pacific/Chatham;utc_seconds=1775311201;transition=1775311200;delta=1;utc_ms=1775311201000
+f4_Pacific_Chatham_t0_+3600	view_format	zone=Pacific/Chatham;utc_seconds=1775314800;transition=1775311200;delta=3600;utc_ms=1775314800000
+f4_Pacific_Chatham_t0_+3600	view_offset	zone=Pacific/Chatham;utc_seconds=1775314800;transition=1775311200;delta=3600;utc_ms=1775314800000
+f4_Pacific_Chatham_t0_+3600	view_dst	zone=Pacific/Chatham;utc_seconds=1775314800;transition=1775311200;delta=3600;utc_ms=1775314800000
+f4_Pacific_Chatham_t1_-3600	view_format	zone=Pacific/Chatham;utc_seconds=1790427600;transition=1790431200;delta=-3600;utc_ms=1790427600000
+f4_Pacific_Chatham_t1_-3600	view_offset	zone=Pacific/Chatham;utc_seconds=1790427600;transition=1790431200;delta=-3600;utc_ms=1790427600000
+f4_Pacific_Chatham_t1_-3600	view_dst	zone=Pacific/Chatham;utc_seconds=1790427600;transition=1790431200;delta=-3600;utc_ms=1790427600000
+f4_Pacific_Chatham_t1_-1	view_format	zone=Pacific/Chatham;utc_seconds=1790431199;transition=1790431200;delta=-1;utc_ms=1790431199000
+f4_Pacific_Chatham_t1_-1	view_offset	zone=Pacific/Chatham;utc_seconds=1790431199;transition=1790431200;delta=-1;utc_ms=1790431199000
+f4_Pacific_Chatham_t1_-1	view_dst	zone=Pacific/Chatham;utc_seconds=1790431199;transition=1790431200;delta=-1;utc_ms=1790431199000
+f4_Pacific_Chatham_t1_+0	view_format	zone=Pacific/Chatham;utc_seconds=1790431200;transition=1790431200;delta=0;utc_ms=1790431200000
+f4_Pacific_Chatham_t1_+0	view_offset	zone=Pacific/Chatham;utc_seconds=1790431200;transition=1790431200;delta=0;utc_ms=1790431200000
+f4_Pacific_Chatham_t1_+0	view_dst	zone=Pacific/Chatham;utc_seconds=1790431200;transition=1790431200;delta=0;utc_ms=1790431200000
+f4_Pacific_Chatham_t1_+1	view_format	zone=Pacific/Chatham;utc_seconds=1790431201;transition=1790431200;delta=1;utc_ms=1790431201000
+f4_Pacific_Chatham_t1_+1	view_offset	zone=Pacific/Chatham;utc_seconds=1790431201;transition=1790431200;delta=1;utc_ms=1790431201000
+f4_Pacific_Chatham_t1_+1	view_dst	zone=Pacific/Chatham;utc_seconds=1790431201;transition=1790431200;delta=1;utc_ms=1790431201000
+f4_Pacific_Chatham_t1_+3600	view_format	zone=Pacific/Chatham;utc_seconds=1790434800;transition=1790431200;delta=3600;utc_ms=1790434800000
+f4_Pacific_Chatham_t1_+3600	view_offset	zone=Pacific/Chatham;utc_seconds=1790434800;transition=1790431200;delta=3600;utc_ms=1790434800000
+f4_Pacific_Chatham_t1_+3600	view_dst	zone=Pacific/Chatham;utc_seconds=1790434800;transition=1790431200;delta=3600;utc_ms=1790434800000
+f4_Pacific_Chatham_midyear	view_format	zone=Pacific/Chatham;utc_ms=1780272000000;baseline=midyear
+f4_Pacific_Chatham_midyear	view_offset	zone=Pacific/Chatham;utc_ms=1780272000000;baseline=midyear
+f4_Pacific_Chatham_midyear	view_dst	zone=Pacific/Chatham;utc_ms=1780272000000;baseline=midyear
+f4_Pacific_Chatham_pre1970	view_format	zone=Pacific/Chatham;utc_ms=-123456789000;baseline=pre1970
+f4_Pacific_Chatham_pre1970	view_offset	zone=Pacific/Chatham;utc_ms=-123456789000;baseline=pre1970
+f4_Pacific_Chatham_pre1970	view_dst	zone=Pacific/Chatham;utc_ms=-123456789000;baseline=pre1970
+f4_Africa_Casablanca_t0_-3600	view_format	zone=Africa/Casablanca;utc_seconds=1771117200;transition=1771120800;delta=-3600;utc_ms=1771117200000
+f4_Africa_Casablanca_t0_-3600	view_offset	zone=Africa/Casablanca;utc_seconds=1771117200;transition=1771120800;delta=-3600;utc_ms=1771117200000
+f4_Africa_Casablanca_t0_-3600	view_dst	zone=Africa/Casablanca;utc_seconds=1771117200;transition=1771120800;delta=-3600;utc_ms=1771117200000
+f4_Africa_Casablanca_t0_-1	view_format	zone=Africa/Casablanca;utc_seconds=1771120799;transition=1771120800;delta=-1;utc_ms=1771120799000
+f4_Africa_Casablanca_t0_-1	view_offset	zone=Africa/Casablanca;utc_seconds=1771120799;transition=1771120800;delta=-1;utc_ms=1771120799000
+f4_Africa_Casablanca_t0_-1	view_dst	zone=Africa/Casablanca;utc_seconds=1771120799;transition=1771120800;delta=-1;utc_ms=1771120799000
+f4_Africa_Casablanca_t0_+0	view_format	zone=Africa/Casablanca;utc_seconds=1771120800;transition=1771120800;delta=0;utc_ms=1771120800000
+f4_Africa_Casablanca_t0_+0	view_offset	zone=Africa/Casablanca;utc_seconds=1771120800;transition=1771120800;delta=0;utc_ms=1771120800000
+f4_Africa_Casablanca_t0_+0	view_dst	zone=Africa/Casablanca;utc_seconds=1771120800;transition=1771120800;delta=0;utc_ms=1771120800000
+f4_Africa_Casablanca_t0_+1	view_format	zone=Africa/Casablanca;utc_seconds=1771120801;transition=1771120800;delta=1;utc_ms=1771120801000
+f4_Africa_Casablanca_t0_+1	view_offset	zone=Africa/Casablanca;utc_seconds=1771120801;transition=1771120800;delta=1;utc_ms=1771120801000
+f4_Africa_Casablanca_t0_+1	view_dst	zone=Africa/Casablanca;utc_seconds=1771120801;transition=1771120800;delta=1;utc_ms=1771120801000
+f4_Africa_Casablanca_t0_+3600	view_format	zone=Africa/Casablanca;utc_seconds=1771124400;transition=1771120800;delta=3600;utc_ms=1771124400000
+f4_Africa_Casablanca_t0_+3600	view_offset	zone=Africa/Casablanca;utc_seconds=1771124400;transition=1771120800;delta=3600;utc_ms=1771124400000
+f4_Africa_Casablanca_t0_+3600	view_dst	zone=Africa/Casablanca;utc_seconds=1771124400;transition=1771120800;delta=3600;utc_ms=1771124400000
+f4_Africa_Casablanca_t1_-3600	view_format	zone=Africa/Casablanca;utc_seconds=1774141200;transition=1774144800;delta=-3600;utc_ms=1774141200000
+f4_Africa_Casablanca_t1_-3600	view_offset	zone=Africa/Casablanca;utc_seconds=1774141200;transition=1774144800;delta=-3600;utc_ms=1774141200000
+f4_Africa_Casablanca_t1_-3600	view_dst	zone=Africa/Casablanca;utc_seconds=1774141200;transition=1774144800;delta=-3600;utc_ms=1774141200000
+f4_Africa_Casablanca_t1_-1	view_format	zone=Africa/Casablanca;utc_seconds=1774144799;transition=1774144800;delta=-1;utc_ms=1774144799000
+f4_Africa_Casablanca_t1_-1	view_offset	zone=Africa/Casablanca;utc_seconds=1774144799;transition=1774144800;delta=-1;utc_ms=1774144799000
+f4_Africa_Casablanca_t1_-1	view_dst	zone=Africa/Casablanca;utc_seconds=1774144799;transition=1774144800;delta=-1;utc_ms=1774144799000
+f4_Africa_Casablanca_t1_+0	view_format	zone=Africa/Casablanca;utc_seconds=1774144800;transition=1774144800;delta=0;utc_ms=1774144800000
+f4_Africa_Casablanca_t1_+0	view_offset	zone=Africa/Casablanca;utc_seconds=1774144800;transition=1774144800;delta=0;utc_ms=1774144800000
+f4_Africa_Casablanca_t1_+0	view_dst	zone=Africa/Casablanca;utc_seconds=1774144800;transition=1774144800;delta=0;utc_ms=1774144800000
+f4_Africa_Casablanca_t1_+1	view_format	zone=Africa/Casablanca;utc_seconds=1774144801;transition=1774144800;delta=1;utc_ms=1774144801000
+f4_Africa_Casablanca_t1_+1	view_offset	zone=Africa/Casablanca;utc_seconds=1774144801;transition=1774144800;delta=1;utc_ms=1774144801000
+f4_Africa_Casablanca_t1_+1	view_dst	zone=Africa/Casablanca;utc_seconds=1774144801;transition=1774144800;delta=1;utc_ms=1774144801000
+f4_Africa_Casablanca_t1_+3600	view_format	zone=Africa/Casablanca;utc_seconds=1774148400;transition=1774144800;delta=3600;utc_ms=1774148400000
+f4_Africa_Casablanca_t1_+3600	view_offset	zone=Africa/Casablanca;utc_seconds=1774148400;transition=1774144800;delta=3600;utc_ms=1774148400000
+f4_Africa_Casablanca_t1_+3600	view_dst	zone=Africa/Casablanca;utc_seconds=1774148400;transition=1774144800;delta=3600;utc_ms=1774148400000
+f4_Africa_Casablanca_midyear	view_format	zone=Africa/Casablanca;utc_ms=1780272000000;baseline=midyear
+f4_Africa_Casablanca_midyear	view_offset	zone=Africa/Casablanca;utc_ms=1780272000000;baseline=midyear
+f4_Africa_Casablanca_midyear	view_dst	zone=Africa/Casablanca;utc_ms=1780272000000;baseline=midyear
+f4_Africa_Casablanca_pre1970	view_format	zone=Africa/Casablanca;utc_ms=-123456789000;baseline=pre1970
+f4_Africa_Casablanca_pre1970	view_offset	zone=Africa/Casablanca;utc_ms=-123456789000;baseline=pre1970
+f4_Africa_Casablanca_pre1970	view_dst	zone=Africa/Casablanca;utc_ms=-123456789000;baseline=pre1970
+f4_America_Sao_Paulo_midyear	view_format	zone=America/Sao_Paulo;utc_ms=1780272000000;baseline=midyear
+f4_America_Sao_Paulo_midyear	view_offset	zone=America/Sao_Paulo;utc_ms=1780272000000;baseline=midyear
+f4_America_Sao_Paulo_midyear	view_dst	zone=America/Sao_Paulo;utc_ms=1780272000000;baseline=midyear
+f4_America_Sao_Paulo_pre1970	view_format	zone=America/Sao_Paulo;utc_ms=-123456789000;baseline=pre1970
+f4_America_Sao_Paulo_pre1970	view_offset	zone=America/Sao_Paulo;utc_ms=-123456789000;baseline=pre1970
+f4_America_Sao_Paulo_pre1970	view_dst	zone=America/Sao_Paulo;utc_ms=-123456789000;baseline=pre1970
+f4_America_Sao_Paulo_historical	view_format	zone=America/Sao_Paulo;utc_ms=1541300400000;baseline=historical
+f4_America_Sao_Paulo_historical	view_offset	zone=America/Sao_Paulo;utc_ms=1541300400000;baseline=historical
+f4_America_Sao_Paulo_historical	view_dst	zone=America/Sao_Paulo;utc_ms=1541300400000;baseline=historical
+f4_Asia_Tehran_midyear	view_format	zone=Asia/Tehran;utc_ms=1780272000000;baseline=midyear
+f4_Asia_Tehran_midyear	view_offset	zone=Asia/Tehran;utc_ms=1780272000000;baseline=midyear
+f4_Asia_Tehran_midyear	view_dst	zone=Asia/Tehran;utc_ms=1780272000000;baseline=midyear
+f4_Asia_Tehran_pre1970	view_format	zone=Asia/Tehran;utc_ms=-123456789000;baseline=pre1970
+f4_Asia_Tehran_pre1970	view_offset	zone=Asia/Tehran;utc_ms=-123456789000;baseline=pre1970
+f4_Asia_Tehran_pre1970	view_dst	zone=Asia/Tehran;utc_ms=-123456789000;baseline=pre1970
+f4_UTC_midyear	view_format	zone=UTC;utc_ms=1780272000000;baseline=midyear
+f4_UTC_midyear	view_offset	zone=UTC;utc_ms=1780272000000;baseline=midyear
+f4_UTC_midyear	view_dst	zone=UTC;utc_ms=1780272000000;baseline=midyear
+f4_UTC_pre1970	view_format	zone=UTC;utc_ms=-123456789000;baseline=pre1970
+f4_UTC_pre1970	view_offset	zone=UTC;utc_ms=-123456789000;baseline=pre1970
+f4_UTC_pre1970	view_dst	zone=UTC;utc_ms=-123456789000;baseline=pre1970
+f4_Pacific_Apia_skipped_day	skipped_format	zone=Pacific/Apia;requested_local=2011-12-30T12:00:00;python_fold=0;resolved_utc_ms=1325282400000
+f4_Pacific_Apia_skipped_day	skipped_offset	zone=Pacific/Apia;requested_local=2011-12-30T12:00:00;python_fold=0;resolved_utc_ms=1325282400000
+f4_Pacific_Apia_skipped_day	skipped_dst	zone=Pacific/Apia;requested_local=2011-12-30T12:00:00;python_fold=0;resolved_utc_ms=1325282400000
+f6_Europe_London_0	duration_format	zone=Europe/London;base_utc=2026-03-29T00:00:00+00:00;base_local=2026-03-29T00:00:00+00:00;transition_bases=true;base_utc_ms=1774742400000
+f6_Europe_London_0	duration_utc_ms	zone=Europe/London;base_utc=2026-03-29T00:00:00+00:00;base_local=2026-03-29T00:00:00+00:00;transition_bases=true;base_utc_ms=1774742400000
+f6_Europe_London_0	duration_offset	zone=Europe/London;base_utc=2026-03-29T00:00:00+00:00;base_local=2026-03-29T00:00:00+00:00;transition_bases=true;base_utc_ms=1774742400000
+f6_Europe_London_0	duration_dst	zone=Europe/London;base_utc=2026-03-29T00:00:00+00:00;base_local=2026-03-29T00:00:00+00:00;transition_bases=true;base_utc_ms=1774742400000
+f6_Europe_London_0	period_format	zone=Europe/London;base_utc=2026-03-29T00:00:00+00:00;base_local=2026-03-29T00:00:00+00:00;transition_bases=true;base_utc_ms=1774742400000
+f6_Europe_London_0	period_utc_ms	zone=Europe/London;base_utc=2026-03-29T00:00:00+00:00;base_local=2026-03-29T00:00:00+00:00;transition_bases=true;base_utc_ms=1774742400000
+f6_Europe_London_0	period_offset	zone=Europe/London;base_utc=2026-03-29T00:00:00+00:00;base_local=2026-03-29T00:00:00+00:00;transition_bases=true;base_utc_ms=1774742400000
+f6_Europe_London_0	period_dst	zone=Europe/London;base_utc=2026-03-29T00:00:00+00:00;base_local=2026-03-29T00:00:00+00:00;transition_bases=true;base_utc_ms=1774742400000
+f6_Europe_London_1	duration_format	zone=Europe/London;base_utc=2026-03-29T02:00:00+00:00;base_local=2026-03-29T03:00:00+01:00;transition_bases=true;base_utc_ms=1774749600000
+f6_Europe_London_1	duration_utc_ms	zone=Europe/London;base_utc=2026-03-29T02:00:00+00:00;base_local=2026-03-29T03:00:00+01:00;transition_bases=true;base_utc_ms=1774749600000
+f6_Europe_London_1	duration_offset	zone=Europe/London;base_utc=2026-03-29T02:00:00+00:00;base_local=2026-03-29T03:00:00+01:00;transition_bases=true;base_utc_ms=1774749600000
+f6_Europe_London_1	duration_dst	zone=Europe/London;base_utc=2026-03-29T02:00:00+00:00;base_local=2026-03-29T03:00:00+01:00;transition_bases=true;base_utc_ms=1774749600000
+f6_Europe_London_1	period_format	zone=Europe/London;base_utc=2026-03-29T02:00:00+00:00;base_local=2026-03-29T03:00:00+01:00;transition_bases=true;base_utc_ms=1774749600000
+f6_Europe_London_1	period_utc_ms	zone=Europe/London;base_utc=2026-03-29T02:00:00+00:00;base_local=2026-03-29T03:00:00+01:00;transition_bases=true;base_utc_ms=1774749600000
+f6_Europe_London_1	period_offset	zone=Europe/London;base_utc=2026-03-29T02:00:00+00:00;base_local=2026-03-29T03:00:00+01:00;transition_bases=true;base_utc_ms=1774749600000
+f6_Europe_London_1	period_dst	zone=Europe/London;base_utc=2026-03-29T02:00:00+00:00;base_local=2026-03-29T03:00:00+01:00;transition_bases=true;base_utc_ms=1774749600000
+f6_Europe_London_2	duration_format	zone=Europe/London;base_utc=2026-10-25T00:00:00+00:00;base_local=2026-10-25T01:00:00+01:00;transition_bases=true;base_utc_ms=1792886400000
+f6_Europe_London_2	duration_utc_ms	zone=Europe/London;base_utc=2026-10-25T00:00:00+00:00;base_local=2026-10-25T01:00:00+01:00;transition_bases=true;base_utc_ms=1792886400000
+f6_Europe_London_2	duration_offset	zone=Europe/London;base_utc=2026-10-25T00:00:00+00:00;base_local=2026-10-25T01:00:00+01:00;transition_bases=true;base_utc_ms=1792886400000
+f6_Europe_London_2	duration_dst	zone=Europe/London;base_utc=2026-10-25T00:00:00+00:00;base_local=2026-10-25T01:00:00+01:00;transition_bases=true;base_utc_ms=1792886400000
+f6_Europe_London_2	period_format	zone=Europe/London;base_utc=2026-10-25T00:00:00+00:00;base_local=2026-10-25T01:00:00+01:00;transition_bases=true;base_utc_ms=1792886400000
+f6_Europe_London_2	period_utc_ms	zone=Europe/London;base_utc=2026-10-25T00:00:00+00:00;base_local=2026-10-25T01:00:00+01:00;transition_bases=true;base_utc_ms=1792886400000
+f6_Europe_London_2	period_offset	zone=Europe/London;base_utc=2026-10-25T00:00:00+00:00;base_local=2026-10-25T01:00:00+01:00;transition_bases=true;base_utc_ms=1792886400000
+f6_Europe_London_2	period_dst	zone=Europe/London;base_utc=2026-10-25T00:00:00+00:00;base_local=2026-10-25T01:00:00+01:00;transition_bases=true;base_utc_ms=1792886400000
+f6_Europe_London_ambiguous_fallback	duration_format	zone=Europe/London;base_utc=2026-10-24T00:29:59+00:00;base_local=2026-10-24T01:29:59+01:00;target_ambiguous_local=2026-10-25T01:29:59;candidate_fold0_ms=1792888199000;candidate_fold1_ms=1792891799000;compatible_utc_ms=1792888199000;python_fold=0;base_utc_ms=1792801799000
+f6_Europe_London_ambiguous_fallback	duration_utc_ms	zone=Europe/London;base_utc=2026-10-24T00:29:59+00:00;base_local=2026-10-24T01:29:59+01:00;target_ambiguous_local=2026-10-25T01:29:59;candidate_fold0_ms=1792888199000;candidate_fold1_ms=1792891799000;compatible_utc_ms=1792888199000;python_fold=0;base_utc_ms=1792801799000
+f6_Europe_London_ambiguous_fallback	duration_offset	zone=Europe/London;base_utc=2026-10-24T00:29:59+00:00;base_local=2026-10-24T01:29:59+01:00;target_ambiguous_local=2026-10-25T01:29:59;candidate_fold0_ms=1792888199000;candidate_fold1_ms=1792891799000;compatible_utc_ms=1792888199000;python_fold=0;base_utc_ms=1792801799000
+f6_Europe_London_ambiguous_fallback	duration_dst	zone=Europe/London;base_utc=2026-10-24T00:29:59+00:00;base_local=2026-10-24T01:29:59+01:00;target_ambiguous_local=2026-10-25T01:29:59;candidate_fold0_ms=1792888199000;candidate_fold1_ms=1792891799000;compatible_utc_ms=1792888199000;python_fold=0;base_utc_ms=1792801799000
+f6_Europe_London_ambiguous_fallback	period_format	zone=Europe/London;base_utc=2026-10-24T00:29:59+00:00;base_local=2026-10-24T01:29:59+01:00;target_ambiguous_local=2026-10-25T01:29:59;candidate_fold0_ms=1792888199000;candidate_fold1_ms=1792891799000;compatible_utc_ms=1792888199000;python_fold=0;base_utc_ms=1792801799000
+f6_Europe_London_ambiguous_fallback	period_utc_ms	zone=Europe/London;base_utc=2026-10-24T00:29:59+00:00;base_local=2026-10-24T01:29:59+01:00;target_ambiguous_local=2026-10-25T01:29:59;candidate_fold0_ms=1792888199000;candidate_fold1_ms=1792891799000;compatible_utc_ms=1792888199000;python_fold=0;base_utc_ms=1792801799000
+f6_Europe_London_ambiguous_fallback	period_offset	zone=Europe/London;base_utc=2026-10-24T00:29:59+00:00;base_local=2026-10-24T01:29:59+01:00;target_ambiguous_local=2026-10-25T01:29:59;candidate_fold0_ms=1792888199000;candidate_fold1_ms=1792891799000;compatible_utc_ms=1792888199000;python_fold=0;base_utc_ms=1792801799000
+f6_Europe_London_ambiguous_fallback	period_dst	zone=Europe/London;base_utc=2026-10-24T00:29:59+00:00;base_local=2026-10-24T01:29:59+01:00;target_ambiguous_local=2026-10-25T01:29:59;candidate_fold0_ms=1792888199000;candidate_fold1_ms=1792891799000;compatible_utc_ms=1792888199000;python_fold=0;base_utc_ms=1792801799000
+f6_Europe_London_ambiguous_fallback	period_candidate_valid	zone=Europe/London;base_utc=2026-10-24T00:29:59+00:00;base_local=2026-10-24T01:29:59+01:00;target_ambiguous_local=2026-10-25T01:29:59;candidate_fold0_ms=1792888199000;candidate_fold1_ms=1792891799000;compatible_utc_ms=1792888199000;python_fold=0;base_utc_ms=1792801799000
+f6_America_New_York_0	duration_format	zone=America/New_York;base_utc=2026-03-08T06:00:00+00:00;base_local=2026-03-08T01:00:00-05:00;transition_bases=true;base_utc_ms=1772949600000
+f6_America_New_York_0	duration_utc_ms	zone=America/New_York;base_utc=2026-03-08T06:00:00+00:00;base_local=2026-03-08T01:00:00-05:00;transition_bases=true;base_utc_ms=1772949600000
+f6_America_New_York_0	duration_offset	zone=America/New_York;base_utc=2026-03-08T06:00:00+00:00;base_local=2026-03-08T01:00:00-05:00;transition_bases=true;base_utc_ms=1772949600000
+f6_America_New_York_0	duration_dst	zone=America/New_York;base_utc=2026-03-08T06:00:00+00:00;base_local=2026-03-08T01:00:00-05:00;transition_bases=true;base_utc_ms=1772949600000
+f6_America_New_York_0	period_format	zone=America/New_York;base_utc=2026-03-08T06:00:00+00:00;base_local=2026-03-08T01:00:00-05:00;transition_bases=true;base_utc_ms=1772949600000
+f6_America_New_York_0	period_utc_ms	zone=America/New_York;base_utc=2026-03-08T06:00:00+00:00;base_local=2026-03-08T01:00:00-05:00;transition_bases=true;base_utc_ms=1772949600000
+f6_America_New_York_0	period_offset	zone=America/New_York;base_utc=2026-03-08T06:00:00+00:00;base_local=2026-03-08T01:00:00-05:00;transition_bases=true;base_utc_ms=1772949600000
+f6_America_New_York_0	period_dst	zone=America/New_York;base_utc=2026-03-08T06:00:00+00:00;base_local=2026-03-08T01:00:00-05:00;transition_bases=true;base_utc_ms=1772949600000
+f6_America_New_York_1	duration_format	zone=America/New_York;base_utc=2026-03-08T08:00:00+00:00;base_local=2026-03-08T04:00:00-04:00;transition_bases=true;base_utc_ms=1772956800000
+f6_America_New_York_1	duration_utc_ms	zone=America/New_York;base_utc=2026-03-08T08:00:00+00:00;base_local=2026-03-08T04:00:00-04:00;transition_bases=true;base_utc_ms=1772956800000
+f6_America_New_York_1	duration_offset	zone=America/New_York;base_utc=2026-03-08T08:00:00+00:00;base_local=2026-03-08T04:00:00-04:00;transition_bases=true;base_utc_ms=1772956800000
+f6_America_New_York_1	duration_dst	zone=America/New_York;base_utc=2026-03-08T08:00:00+00:00;base_local=2026-03-08T04:00:00-04:00;transition_bases=true;base_utc_ms=1772956800000
+f6_America_New_York_1	period_format	zone=America/New_York;base_utc=2026-03-08T08:00:00+00:00;base_local=2026-03-08T04:00:00-04:00;transition_bases=true;base_utc_ms=1772956800000
+f6_America_New_York_1	period_utc_ms	zone=America/New_York;base_utc=2026-03-08T08:00:00+00:00;base_local=2026-03-08T04:00:00-04:00;transition_bases=true;base_utc_ms=1772956800000
+f6_America_New_York_1	period_offset	zone=America/New_York;base_utc=2026-03-08T08:00:00+00:00;base_local=2026-03-08T04:00:00-04:00;transition_bases=true;base_utc_ms=1772956800000
+f6_America_New_York_1	period_dst	zone=America/New_York;base_utc=2026-03-08T08:00:00+00:00;base_local=2026-03-08T04:00:00-04:00;transition_bases=true;base_utc_ms=1772956800000
+f6_America_New_York_2	duration_format	zone=America/New_York;base_utc=2026-11-01T05:00:00+00:00;base_local=2026-11-01T01:00:00-04:00;transition_bases=true;base_utc_ms=1793509200000
+f6_America_New_York_2	duration_utc_ms	zone=America/New_York;base_utc=2026-11-01T05:00:00+00:00;base_local=2026-11-01T01:00:00-04:00;transition_bases=true;base_utc_ms=1793509200000
+f6_America_New_York_2	duration_offset	zone=America/New_York;base_utc=2026-11-01T05:00:00+00:00;base_local=2026-11-01T01:00:00-04:00;transition_bases=true;base_utc_ms=1793509200000
+f6_America_New_York_2	duration_dst	zone=America/New_York;base_utc=2026-11-01T05:00:00+00:00;base_local=2026-11-01T01:00:00-04:00;transition_bases=true;base_utc_ms=1793509200000
+f6_America_New_York_2	period_format	zone=America/New_York;base_utc=2026-11-01T05:00:00+00:00;base_local=2026-11-01T01:00:00-04:00;transition_bases=true;base_utc_ms=1793509200000
+f6_America_New_York_2	period_utc_ms	zone=America/New_York;base_utc=2026-11-01T05:00:00+00:00;base_local=2026-11-01T01:00:00-04:00;transition_bases=true;base_utc_ms=1793509200000
+f6_America_New_York_2	period_offset	zone=America/New_York;base_utc=2026-11-01T05:00:00+00:00;base_local=2026-11-01T01:00:00-04:00;transition_bases=true;base_utc_ms=1793509200000
+f6_America_New_York_2	period_dst	zone=America/New_York;base_utc=2026-11-01T05:00:00+00:00;base_local=2026-11-01T01:00:00-04:00;transition_bases=true;base_utc_ms=1793509200000
+f6_America_New_York_ambiguous_fallback	duration_format	zone=America/New_York;base_utc=2026-10-31T05:29:59+00:00;base_local=2026-10-31T01:29:59-04:00;target_ambiguous_local=2026-11-01T01:29:59;candidate_fold0_ms=1793510999000;candidate_fold1_ms=1793514599000;compatible_utc_ms=1793510999000;python_fold=0;base_utc_ms=1793424599000
+f6_America_New_York_ambiguous_fallback	duration_utc_ms	zone=America/New_York;base_utc=2026-10-31T05:29:59+00:00;base_local=2026-10-31T01:29:59-04:00;target_ambiguous_local=2026-11-01T01:29:59;candidate_fold0_ms=1793510999000;candidate_fold1_ms=1793514599000;compatible_utc_ms=1793510999000;python_fold=0;base_utc_ms=1793424599000
+f6_America_New_York_ambiguous_fallback	duration_offset	zone=America/New_York;base_utc=2026-10-31T05:29:59+00:00;base_local=2026-10-31T01:29:59-04:00;target_ambiguous_local=2026-11-01T01:29:59;candidate_fold0_ms=1793510999000;candidate_fold1_ms=1793514599000;compatible_utc_ms=1793510999000;python_fold=0;base_utc_ms=1793424599000
+f6_America_New_York_ambiguous_fallback	duration_dst	zone=America/New_York;base_utc=2026-10-31T05:29:59+00:00;base_local=2026-10-31T01:29:59-04:00;target_ambiguous_local=2026-11-01T01:29:59;candidate_fold0_ms=1793510999000;candidate_fold1_ms=1793514599000;compatible_utc_ms=1793510999000;python_fold=0;base_utc_ms=1793424599000
+f6_America_New_York_ambiguous_fallback	period_format	zone=America/New_York;base_utc=2026-10-31T05:29:59+00:00;base_local=2026-10-31T01:29:59-04:00;target_ambiguous_local=2026-11-01T01:29:59;candidate_fold0_ms=1793510999000;candidate_fold1_ms=1793514599000;compatible_utc_ms=1793510999000;python_fold=0;base_utc_ms=1793424599000
+f6_America_New_York_ambiguous_fallback	period_utc_ms	zone=America/New_York;base_utc=2026-10-31T05:29:59+00:00;base_local=2026-10-31T01:29:59-04:00;target_ambiguous_local=2026-11-01T01:29:59;candidate_fold0_ms=1793510999000;candidate_fold1_ms=1793514599000;compatible_utc_ms=1793510999000;python_fold=0;base_utc_ms=1793424599000
+f6_America_New_York_ambiguous_fallback	period_offset	zone=America/New_York;base_utc=2026-10-31T05:29:59+00:00;base_local=2026-10-31T01:29:59-04:00;target_ambiguous_local=2026-11-01T01:29:59;candidate_fold0_ms=1793510999000;candidate_fold1_ms=1793514599000;compatible_utc_ms=1793510999000;python_fold=0;base_utc_ms=1793424599000
+f6_America_New_York_ambiguous_fallback	period_dst	zone=America/New_York;base_utc=2026-10-31T05:29:59+00:00;base_local=2026-10-31T01:29:59-04:00;target_ambiguous_local=2026-11-01T01:29:59;candidate_fold0_ms=1793510999000;candidate_fold1_ms=1793514599000;compatible_utc_ms=1793510999000;python_fold=0;base_utc_ms=1793424599000
+f6_America_New_York_ambiguous_fallback	period_candidate_valid	zone=America/New_York;base_utc=2026-10-31T05:29:59+00:00;base_local=2026-10-31T01:29:59-04:00;target_ambiguous_local=2026-11-01T01:29:59;candidate_fold0_ms=1793510999000;candidate_fold1_ms=1793514599000;compatible_utc_ms=1793510999000;python_fold=0;base_utc_ms=1793424599000
+f6_Australia_Lord_Howe_0	duration_format	zone=Australia/Lord_Howe;base_utc=2026-04-04T14:00:00+00:00;base_local=2026-04-05T01:00:00+11:00;transition_bases=true;base_utc_ms=1775311200000
+f6_Australia_Lord_Howe_0	duration_utc_ms	zone=Australia/Lord_Howe;base_utc=2026-04-04T14:00:00+00:00;base_local=2026-04-05T01:00:00+11:00;transition_bases=true;base_utc_ms=1775311200000
+f6_Australia_Lord_Howe_0	duration_offset	zone=Australia/Lord_Howe;base_utc=2026-04-04T14:00:00+00:00;base_local=2026-04-05T01:00:00+11:00;transition_bases=true;base_utc_ms=1775311200000
+f6_Australia_Lord_Howe_0	duration_dst	zone=Australia/Lord_Howe;base_utc=2026-04-04T14:00:00+00:00;base_local=2026-04-05T01:00:00+11:00;transition_bases=true;base_utc_ms=1775311200000
+f6_Australia_Lord_Howe_0	period_format	zone=Australia/Lord_Howe;base_utc=2026-04-04T14:00:00+00:00;base_local=2026-04-05T01:00:00+11:00;transition_bases=true;base_utc_ms=1775311200000
+f6_Australia_Lord_Howe_0	period_utc_ms	zone=Australia/Lord_Howe;base_utc=2026-04-04T14:00:00+00:00;base_local=2026-04-05T01:00:00+11:00;transition_bases=true;base_utc_ms=1775311200000
+f6_Australia_Lord_Howe_0	period_offset	zone=Australia/Lord_Howe;base_utc=2026-04-04T14:00:00+00:00;base_local=2026-04-05T01:00:00+11:00;transition_bases=true;base_utc_ms=1775311200000
+f6_Australia_Lord_Howe_0	period_dst	zone=Australia/Lord_Howe;base_utc=2026-04-04T14:00:00+00:00;base_local=2026-04-05T01:00:00+11:00;transition_bases=true;base_utc_ms=1775311200000
+f6_Australia_Lord_Howe_1	duration_format	zone=Australia/Lord_Howe;base_utc=2026-04-04T16:00:00+00:00;base_local=2026-04-05T02:30:00+10:30;transition_bases=true;base_utc_ms=1775318400000
+f6_Australia_Lord_Howe_1	duration_utc_ms	zone=Australia/Lord_Howe;base_utc=2026-04-04T16:00:00+00:00;base_local=2026-04-05T02:30:00+10:30;transition_bases=true;base_utc_ms=1775318400000
+f6_Australia_Lord_Howe_1	duration_offset	zone=Australia/Lord_Howe;base_utc=2026-04-04T16:00:00+00:00;base_local=2026-04-05T02:30:00+10:30;transition_bases=true;base_utc_ms=1775318400000
+f6_Australia_Lord_Howe_1	duration_dst	zone=Australia/Lord_Howe;base_utc=2026-04-04T16:00:00+00:00;base_local=2026-04-05T02:30:00+10:30;transition_bases=true;base_utc_ms=1775318400000
+f6_Australia_Lord_Howe_1	period_format	zone=Australia/Lord_Howe;base_utc=2026-04-04T16:00:00+00:00;base_local=2026-04-05T02:30:00+10:30;transition_bases=true;base_utc_ms=1775318400000
+f6_Australia_Lord_Howe_1	period_utc_ms	zone=Australia/Lord_Howe;base_utc=2026-04-04T16:00:00+00:00;base_local=2026-04-05T02:30:00+10:30;transition_bases=true;base_utc_ms=1775318400000
+f6_Australia_Lord_Howe_1	period_offset	zone=Australia/Lord_Howe;base_utc=2026-04-04T16:00:00+00:00;base_local=2026-04-05T02:30:00+10:30;transition_bases=true;base_utc_ms=1775318400000
+f6_Australia_Lord_Howe_1	period_dst	zone=Australia/Lord_Howe;base_utc=2026-04-04T16:00:00+00:00;base_local=2026-04-05T02:30:00+10:30;transition_bases=true;base_utc_ms=1775318400000
+f6_Australia_Lord_Howe_2	duration_format	zone=Australia/Lord_Howe;base_utc=2026-10-03T14:30:00+00:00;base_local=2026-10-04T01:00:00+10:30;transition_bases=true;base_utc_ms=1791037800000
+f6_Australia_Lord_Howe_2	duration_utc_ms	zone=Australia/Lord_Howe;base_utc=2026-10-03T14:30:00+00:00;base_local=2026-10-04T01:00:00+10:30;transition_bases=true;base_utc_ms=1791037800000
+f6_Australia_Lord_Howe_2	duration_offset	zone=Australia/Lord_Howe;base_utc=2026-10-03T14:30:00+00:00;base_local=2026-10-04T01:00:00+10:30;transition_bases=true;base_utc_ms=1791037800000
+f6_Australia_Lord_Howe_2	duration_dst	zone=Australia/Lord_Howe;base_utc=2026-10-03T14:30:00+00:00;base_local=2026-10-04T01:00:00+10:30;transition_bases=true;base_utc_ms=1791037800000
+f6_Australia_Lord_Howe_2	period_format	zone=Australia/Lord_Howe;base_utc=2026-10-03T14:30:00+00:00;base_local=2026-10-04T01:00:00+10:30;transition_bases=true;base_utc_ms=1791037800000
+f6_Australia_Lord_Howe_2	period_utc_ms	zone=Australia/Lord_Howe;base_utc=2026-10-03T14:30:00+00:00;base_local=2026-10-04T01:00:00+10:30;transition_bases=true;base_utc_ms=1791037800000
+f6_Australia_Lord_Howe_2	period_offset	zone=Australia/Lord_Howe;base_utc=2026-10-03T14:30:00+00:00;base_local=2026-10-04T01:00:00+10:30;transition_bases=true;base_utc_ms=1791037800000
+f6_Australia_Lord_Howe_2	period_dst	zone=Australia/Lord_Howe;base_utc=2026-10-03T14:30:00+00:00;base_local=2026-10-04T01:00:00+10:30;transition_bases=true;base_utc_ms=1791037800000
+f6_Australia_Lord_Howe_ambiguous_fallback	duration_format	zone=Australia/Lord_Howe;base_utc=2026-04-03T14:44:59+00:00;base_local=2026-04-04T01:44:59+11:00;target_ambiguous_local=2026-04-05T01:44:59;candidate_fold0_ms=1775313899000;candidate_fold1_ms=1775315699000;compatible_utc_ms=1775313899000;python_fold=0;base_utc_ms=1775227499000
+f6_Australia_Lord_Howe_ambiguous_fallback	duration_utc_ms	zone=Australia/Lord_Howe;base_utc=2026-04-03T14:44:59+00:00;base_local=2026-04-04T01:44:59+11:00;target_ambiguous_local=2026-04-05T01:44:59;candidate_fold0_ms=1775313899000;candidate_fold1_ms=1775315699000;compatible_utc_ms=1775313899000;python_fold=0;base_utc_ms=1775227499000
+f6_Australia_Lord_Howe_ambiguous_fallback	duration_offset	zone=Australia/Lord_Howe;base_utc=2026-04-03T14:44:59+00:00;base_local=2026-04-04T01:44:59+11:00;target_ambiguous_local=2026-04-05T01:44:59;candidate_fold0_ms=1775313899000;candidate_fold1_ms=1775315699000;compatible_utc_ms=1775313899000;python_fold=0;base_utc_ms=1775227499000
+f6_Australia_Lord_Howe_ambiguous_fallback	duration_dst	zone=Australia/Lord_Howe;base_utc=2026-04-03T14:44:59+00:00;base_local=2026-04-04T01:44:59+11:00;target_ambiguous_local=2026-04-05T01:44:59;candidate_fold0_ms=1775313899000;candidate_fold1_ms=1775315699000;compatible_utc_ms=1775313899000;python_fold=0;base_utc_ms=1775227499000
+f6_Australia_Lord_Howe_ambiguous_fallback	period_format	zone=Australia/Lord_Howe;base_utc=2026-04-03T14:44:59+00:00;base_local=2026-04-04T01:44:59+11:00;target_ambiguous_local=2026-04-05T01:44:59;candidate_fold0_ms=1775313899000;candidate_fold1_ms=1775315699000;compatible_utc_ms=1775313899000;python_fold=0;base_utc_ms=1775227499000
+f6_Australia_Lord_Howe_ambiguous_fallback	period_utc_ms	zone=Australia/Lord_Howe;base_utc=2026-04-03T14:44:59+00:00;base_local=2026-04-04T01:44:59+11:00;target_ambiguous_local=2026-04-05T01:44:59;candidate_fold0_ms=1775313899000;candidate_fold1_ms=1775315699000;compatible_utc_ms=1775313899000;python_fold=0;base_utc_ms=1775227499000
+f6_Australia_Lord_Howe_ambiguous_fallback	period_offset	zone=Australia/Lord_Howe;base_utc=2026-04-03T14:44:59+00:00;base_local=2026-04-04T01:44:59+11:00;target_ambiguous_local=2026-04-05T01:44:59;candidate_fold0_ms=1775313899000;candidate_fold1_ms=1775315699000;compatible_utc_ms=1775313899000;python_fold=0;base_utc_ms=1775227499000
+f6_Australia_Lord_Howe_ambiguous_fallback	period_dst	zone=Australia/Lord_Howe;base_utc=2026-04-03T14:44:59+00:00;base_local=2026-04-04T01:44:59+11:00;target_ambiguous_local=2026-04-05T01:44:59;candidate_fold0_ms=1775313899000;candidate_fold1_ms=1775315699000;compatible_utc_ms=1775313899000;python_fold=0;base_utc_ms=1775227499000
+f6_Australia_Lord_Howe_ambiguous_fallback	period_candidate_valid	zone=Australia/Lord_Howe;base_utc=2026-04-03T14:44:59+00:00;base_local=2026-04-04T01:44:59+11:00;target_ambiguous_local=2026-04-05T01:44:59;candidate_fold0_ms=1775313899000;candidate_fold1_ms=1775315699000;compatible_utc_ms=1775313899000;python_fold=0;base_utc_ms=1775227499000
+f6_Pacific_Chatham_0	duration_format	zone=Pacific/Chatham;base_utc=2026-04-04T13:00:00+00:00;base_local=2026-04-05T02:45:00+13:45;transition_bases=true;base_utc_ms=1775307600000
+f6_Pacific_Chatham_0	duration_utc_ms	zone=Pacific/Chatham;base_utc=2026-04-04T13:00:00+00:00;base_local=2026-04-05T02:45:00+13:45;transition_bases=true;base_utc_ms=1775307600000
+f6_Pacific_Chatham_0	duration_offset	zone=Pacific/Chatham;base_utc=2026-04-04T13:00:00+00:00;base_local=2026-04-05T02:45:00+13:45;transition_bases=true;base_utc_ms=1775307600000
+f6_Pacific_Chatham_0	duration_dst	zone=Pacific/Chatham;base_utc=2026-04-04T13:00:00+00:00;base_local=2026-04-05T02:45:00+13:45;transition_bases=true;base_utc_ms=1775307600000
+f6_Pacific_Chatham_0	period_format	zone=Pacific/Chatham;base_utc=2026-04-04T13:00:00+00:00;base_local=2026-04-05T02:45:00+13:45;transition_bases=true;base_utc_ms=1775307600000
+f6_Pacific_Chatham_0	period_utc_ms	zone=Pacific/Chatham;base_utc=2026-04-04T13:00:00+00:00;base_local=2026-04-05T02:45:00+13:45;transition_bases=true;base_utc_ms=1775307600000
+f6_Pacific_Chatham_0	period_offset	zone=Pacific/Chatham;base_utc=2026-04-04T13:00:00+00:00;base_local=2026-04-05T02:45:00+13:45;transition_bases=true;base_utc_ms=1775307600000
+f6_Pacific_Chatham_0	period_dst	zone=Pacific/Chatham;base_utc=2026-04-04T13:00:00+00:00;base_local=2026-04-05T02:45:00+13:45;transition_bases=true;base_utc_ms=1775307600000
+f6_Pacific_Chatham_1	duration_format	zone=Pacific/Chatham;base_utc=2026-04-04T15:00:00+00:00;base_local=2026-04-05T03:45:00+12:45;transition_bases=true;base_utc_ms=1775314800000
+f6_Pacific_Chatham_1	duration_utc_ms	zone=Pacific/Chatham;base_utc=2026-04-04T15:00:00+00:00;base_local=2026-04-05T03:45:00+12:45;transition_bases=true;base_utc_ms=1775314800000
+f6_Pacific_Chatham_1	duration_offset	zone=Pacific/Chatham;base_utc=2026-04-04T15:00:00+00:00;base_local=2026-04-05T03:45:00+12:45;transition_bases=true;base_utc_ms=1775314800000
+f6_Pacific_Chatham_1	duration_dst	zone=Pacific/Chatham;base_utc=2026-04-04T15:00:00+00:00;base_local=2026-04-05T03:45:00+12:45;transition_bases=true;base_utc_ms=1775314800000
+f6_Pacific_Chatham_1	period_format	zone=Pacific/Chatham;base_utc=2026-04-04T15:00:00+00:00;base_local=2026-04-05T03:45:00+12:45;transition_bases=true;base_utc_ms=1775314800000
+f6_Pacific_Chatham_1	period_utc_ms	zone=Pacific/Chatham;base_utc=2026-04-04T15:00:00+00:00;base_local=2026-04-05T03:45:00+12:45;transition_bases=true;base_utc_ms=1775314800000
+f6_Pacific_Chatham_1	period_offset	zone=Pacific/Chatham;base_utc=2026-04-04T15:00:00+00:00;base_local=2026-04-05T03:45:00+12:45;transition_bases=true;base_utc_ms=1775314800000
+f6_Pacific_Chatham_1	period_dst	zone=Pacific/Chatham;base_utc=2026-04-04T15:00:00+00:00;base_local=2026-04-05T03:45:00+12:45;transition_bases=true;base_utc_ms=1775314800000
+f6_Pacific_Chatham_2	duration_format	zone=Pacific/Chatham;base_utc=2026-09-26T13:00:00+00:00;base_local=2026-09-27T01:45:00+12:45;transition_bases=true;base_utc_ms=1790427600000
+f6_Pacific_Chatham_2	duration_utc_ms	zone=Pacific/Chatham;base_utc=2026-09-26T13:00:00+00:00;base_local=2026-09-27T01:45:00+12:45;transition_bases=true;base_utc_ms=1790427600000
+f6_Pacific_Chatham_2	duration_offset	zone=Pacific/Chatham;base_utc=2026-09-26T13:00:00+00:00;base_local=2026-09-27T01:45:00+12:45;transition_bases=true;base_utc_ms=1790427600000
+f6_Pacific_Chatham_2	duration_dst	zone=Pacific/Chatham;base_utc=2026-09-26T13:00:00+00:00;base_local=2026-09-27T01:45:00+12:45;transition_bases=true;base_utc_ms=1790427600000
+f6_Pacific_Chatham_2	period_format	zone=Pacific/Chatham;base_utc=2026-09-26T13:00:00+00:00;base_local=2026-09-27T01:45:00+12:45;transition_bases=true;base_utc_ms=1790427600000
+f6_Pacific_Chatham_2	period_utc_ms	zone=Pacific/Chatham;base_utc=2026-09-26T13:00:00+00:00;base_local=2026-09-27T01:45:00+12:45;transition_bases=true;base_utc_ms=1790427600000
+f6_Pacific_Chatham_2	period_offset	zone=Pacific/Chatham;base_utc=2026-09-26T13:00:00+00:00;base_local=2026-09-27T01:45:00+12:45;transition_bases=true;base_utc_ms=1790427600000
+f6_Pacific_Chatham_2	period_dst	zone=Pacific/Chatham;base_utc=2026-09-26T13:00:00+00:00;base_local=2026-09-27T01:45:00+12:45;transition_bases=true;base_utc_ms=1790427600000
+f6_Pacific_Chatham_ambiguous_fallback	duration_format	zone=Pacific/Chatham;base_utc=2026-04-03T13:29:59+00:00;base_local=2026-04-04T03:14:59+13:45;target_ambiguous_local=2026-04-05T03:14:59;candidate_fold0_ms=1775309399000;candidate_fold1_ms=1775312999000;compatible_utc_ms=1775309399000;python_fold=0;base_utc_ms=1775222999000
+f6_Pacific_Chatham_ambiguous_fallback	duration_utc_ms	zone=Pacific/Chatham;base_utc=2026-04-03T13:29:59+00:00;base_local=2026-04-04T03:14:59+13:45;target_ambiguous_local=2026-04-05T03:14:59;candidate_fold0_ms=1775309399000;candidate_fold1_ms=1775312999000;compatible_utc_ms=1775309399000;python_fold=0;base_utc_ms=1775222999000
+f6_Pacific_Chatham_ambiguous_fallback	duration_offset	zone=Pacific/Chatham;base_utc=2026-04-03T13:29:59+00:00;base_local=2026-04-04T03:14:59+13:45;target_ambiguous_local=2026-04-05T03:14:59;candidate_fold0_ms=1775309399000;candidate_fold1_ms=1775312999000;compatible_utc_ms=1775309399000;python_fold=0;base_utc_ms=1775222999000
+f6_Pacific_Chatham_ambiguous_fallback	duration_dst	zone=Pacific/Chatham;base_utc=2026-04-03T13:29:59+00:00;base_local=2026-04-04T03:14:59+13:45;target_ambiguous_local=2026-04-05T03:14:59;candidate_fold0_ms=1775309399000;candidate_fold1_ms=1775312999000;compatible_utc_ms=1775309399000;python_fold=0;base_utc_ms=1775222999000
+f6_Pacific_Chatham_ambiguous_fallback	period_format	zone=Pacific/Chatham;base_utc=2026-04-03T13:29:59+00:00;base_local=2026-04-04T03:14:59+13:45;target_ambiguous_local=2026-04-05T03:14:59;candidate_fold0_ms=1775309399000;candidate_fold1_ms=1775312999000;compatible_utc_ms=1775309399000;python_fold=0;base_utc_ms=1775222999000
+f6_Pacific_Chatham_ambiguous_fallback	period_utc_ms	zone=Pacific/Chatham;base_utc=2026-04-03T13:29:59+00:00;base_local=2026-04-04T03:14:59+13:45;target_ambiguous_local=2026-04-05T03:14:59;candidate_fold0_ms=1775309399000;candidate_fold1_ms=1775312999000;compatible_utc_ms=1775309399000;python_fold=0;base_utc_ms=1775222999000
+f6_Pacific_Chatham_ambiguous_fallback	period_offset	zone=Pacific/Chatham;base_utc=2026-04-03T13:29:59+00:00;base_local=2026-04-04T03:14:59+13:45;target_ambiguous_local=2026-04-05T03:14:59;candidate_fold0_ms=1775309399000;candidate_fold1_ms=1775312999000;compatible_utc_ms=1775309399000;python_fold=0;base_utc_ms=1775222999000
+f6_Pacific_Chatham_ambiguous_fallback	period_dst	zone=Pacific/Chatham;base_utc=2026-04-03T13:29:59+00:00;base_local=2026-04-04T03:14:59+13:45;target_ambiguous_local=2026-04-05T03:14:59;candidate_fold0_ms=1775309399000;candidate_fold1_ms=1775312999000;compatible_utc_ms=1775309399000;python_fold=0;base_utc_ms=1775222999000
+f6_Pacific_Chatham_ambiguous_fallback	period_candidate_valid	zone=Pacific/Chatham;base_utc=2026-04-03T13:29:59+00:00;base_local=2026-04-04T03:14:59+13:45;target_ambiguous_local=2026-04-05T03:14:59;candidate_fold0_ms=1775309399000;candidate_fold1_ms=1775312999000;compatible_utc_ms=1775309399000;python_fold=0;base_utc_ms=1775222999000
+    """
+    loop line in table.lines() {
+        if line != "" {
+            id_rest :: line.split_once("\t") ?? panic("row")
+            op_rest :: id_rest.after.split_once("\t") ?? panic("row")
+            result :: shown(op_rest.before, op_rest.after)
+            print("CASE\t{id_rest.before}\t{op_rest.before}\t{result}")
+        }
+    }
+}
+
