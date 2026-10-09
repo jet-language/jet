@@ -942,6 +942,22 @@ fn jet_eval_route_byte_find(haystack: [U8], needle: [U8]) -> Int? {
     None
 }
 
+// The `jet_list_slice` window: start and end clamp into `0..len`, and an end
+// before the start is an empty window at the start.
+fn jet_eval_route_clamped_window(len: Int, start: Int, end: Int) -> (from: Int, to: Int) Never! {
+    from :: if {
+        start < 0 -> 0
+        start > len -> len
+        else -> start
+    }
+    to :: if {
+        end < from -> from
+        end > len -> len
+        else -> end
+    }
+    (from: from, to: to)
+}
+
 fn jet_eval_route_string_operand(args: [TComptimeValue], index: Int, member: String, machine: &JetEvalMachine, span: Span) -> String? {
     if index >= args.len() {
         jet_eval_compiler_fail(&machine, span, "MIR {member} route is missing a String operand")
@@ -1253,6 +1269,21 @@ fn jet_eval_route_builtin(member: String, symbol: String, args: [TComptimeValue]
             index :: jet_eval_route_int_value(args[1], &machine, span) ?? return None
             if index >= 0 && index < items.len() -> items[index] = args[2]
             Val(JetEvalRuntimeValue.Data{value: TComptimeValue.List{values: items}})
+        }
+        // `jet_list_slice`: start and end clamp into the list, and an empty
+        // or inverted window is an empty list. A `[U8]` carrier may be packed
+        // bytes.
+        "list_slice" -> {
+            if args.len() != 3 -> return jet_eval_route_not_supported(&machine, span, "List.slice without a start and end")
+            start :: jet_eval_route_int_value(args[1], &machine, span) ?? return None
+            end :: jet_eval_route_int_value(args[2], &machine, span) ?? return None
+            if args[0] == .Bytes(bytes) {
+                window :: jet_eval_route_clamped_window(bytes.len(), start, end)
+                return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bytes{value: bytes[window.from..<window.to]}})
+            }
+            items :: jet_eval_route_list(args[0]) ?? return jet_eval_route_not_supported(&machine, span, "List.slice on a non-list")
+            window :: jet_eval_route_clamped_window(items.len(), start, end)
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.List{values: items[window.from..<window.to]}})
         }
         // `jet_map_merge` (D-MAP-MERGE1=E): the right map wins on shared keys.
         "map_merge" -> {

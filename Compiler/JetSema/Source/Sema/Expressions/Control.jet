@@ -43,7 +43,10 @@ use jet_foundation.[
     type_name,
 ]
 
-fn sema_expression_panic_location(environment: SemaScopeEnvironment, span: Span) -> TPanicLoc Never! {
+// The source location of a panic at `span`, naming the function being checked:
+// `scopes.location_function` on a compiler thread, which never writes the
+// shared environment, else the environment's `function_name`.
+fn sema_expression_panic_location(environment: SemaScopeEnvironment, scopes: SemaScopeTable, span: Span) -> TPanicLoc Never! {
     file := environment.source_file
     line := 0
     column := 0
@@ -67,7 +70,8 @@ fn sema_expression_panic_location(environment: SemaScopeEnvironment, span: Span)
             column = local - segment.line_starts[line_index]
         }
     }
-    TPanicLoc{file: file, source_line: "", line: line, column: column, caret: column, function: environment.function_name, locals: [TPanicLocal]{}}
+    function :: scopes.location_function ?? environment.function_name
+    TPanicLoc{file: file, source_line: "", line: line, column: column, caret: column, function: function, locals: [TPanicLocal]{}}
 }
 
 fn sema_expression_failure_carrier(ty: Type) -> TFailureCarrier Never! {
@@ -697,7 +701,7 @@ fn sema_expression_auto_propagate(expr: Expr, value: TExpr, expected: Type?, env
     span :: expr_span(expr)
     conversion :: sema_expression_propagation_conversion(value, Val(expr), span, true, environment, &scopes, &context, &diagnostics) ?? return None
     payload :: sema_expression_carrier_payload(value.ty) ?? return None
-    location :: sema_expression_panic_location(environment, span)
+    location :: sema_expression_panic_location(environment, scopes, span)
     propagated :: sema_tir_expr(payload, TExprKind.TryWithContext{inner: value, note: None, convert: conversion, file: location.file, line: location.line, function: location.function}, span)
     sema_expr_expected(propagated, expected, environment, &diagnostics)
 }
@@ -721,7 +725,7 @@ fn sema_expression_try(value: Expr, span: Span, conversion: TryConvert, context_
     if context_expr == .Val(context_source) {
         context_state := sema_ownership_state_snapshot(state)
         note :: sema_check_expression(context_source, Val(Type.String), environment, &scopes, &context_state, &tail_store, &check_context, &diagnostics) ?? return None
-        location :: sema_expression_panic_location(environment, span)
+        location :: sema_expression_panic_location(environment, scopes, span)
         value_tir = sema_tir_expr(value_tir.ty, TExprKind.TryWithContext{inner: inner, note: Val(note), convert: try_conversion, file: location.file, line: location.line, function: location.function}, span)
     }
     sema_expr_expected(value_tir, expected, environment, &diagnostics)
@@ -1067,7 +1071,7 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
                 return None
             }
             message :: sema_check_expression(args[0].expr, Val(Type.String), environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
-            fallback_tir = Val(TOrFallback.Panic{message: message, location: sema_expression_panic_location(environment, name_span)})
+            fallback_tir = Val(TOrFallback.Panic{message: message, location: sema_expression_panic_location(environment, scopes, name_span)})
         }
         .Break(route_span) -> {
             if outer_loop_depth <= 0 {

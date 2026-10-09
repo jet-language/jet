@@ -91,14 +91,14 @@ fn sema_value_method_tuple_struct(result: Type) -> String Never! {
     }
 }
 
-fn sema_value_method_kind(row: BuiltinMethodRow, method: String, receiver_value: TExpr, typed: [TExpr], result: Type, line: Int, span: Span, environment: SemaScopeEnvironment) -> TExprKind {
+fn sema_value_method_kind(row: BuiltinMethodRow, method: String, receiver_value: TExpr, typed: [TExpr], result: Type, line: Int, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> TExprKind {
     if row.lowering == {
         .Builtin(operation) -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: operation, args: typed}
         .StringSlice -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.Slice{line: line}, args: typed}
         .StringRangeSlice -> {
             zero_start := sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
             zero_end := sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
-            TExprKind.Slice{base: receiver_value, start: zero_start, end: zero_end, range: Val(typed[0]), location: sema_expression_panic_location(environment, span)}
+            TExprKind.Slice{base: receiver_value, start: zero_start, end: zero_end, range: Val(typed[0]), location: sema_expression_panic_location(environment, scopes, span)}
         }
         .StringSplitOnce -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringSplitOnce{tuple_struct: sema_value_method_tuple_struct(result)}, args: typed}
         .StringCutLast -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringCutLast{tuple_struct: sema_value_method_tuple_struct(result)}, args: typed}
@@ -191,6 +191,6 @@ pub fn sema_call_try_value_method(receiver: Expr, receiver_value: TExpr, method:
     if !sema_effect_record_intrinsic_effects(environment, &scopes, &context, "{owner}.{method}", span, effect_row, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     result := builtin_method_bind(row.result, receiver_value.ty)
     line :: sema_source_line_at(environment.source_segments, span) ?? 0
-    value := sema_tir_expr(result, sema_value_method_kind(row, method, receiver_value, typed, result, line, span, environment), span)
+    value := sema_tir_expr(result, sema_value_method_kind(row, method, receiver_value, typed, result, line, span, environment, scopes), span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }

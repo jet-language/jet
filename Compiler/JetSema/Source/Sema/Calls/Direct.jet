@@ -455,7 +455,7 @@ fn sema_call_check_ambient_panic(call: Call, environment: SemaScopeEnvironment, 
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     text :: message ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    location := sema_expression_panic_location(environment, call.name_span)
+    location := sema_expression_panic_location(environment, scopes, call.name_span)
     stop := sema_tir_expr(Type.Named{name: "Never"}, TExprKind.RequireStop{kind: TRequireKind.Panic{msg: text}, location: location, always_stops: true}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
 }
@@ -492,7 +492,7 @@ fn sema_call_check_ambient_assert(call: Call, environment: SemaScopeEnvironment,
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     checked_condition :: condition ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    location := sema_expression_panic_location(environment, call.name_span)
+    location := sema_expression_panic_location(environment, scopes, call.name_span)
     stop := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.Require{cond: checked_condition, msg: message}, location: location, always_stops: false}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
 }
@@ -519,7 +519,7 @@ fn sema_call_check_ambient_assert_eq(call: Call, environment: SemaScopeEnvironme
         &diagnostics.push(sema_error("E0312", call.name_span, "`assert_eq` can't compare values of type `{sema_type_show(left_value.ty)}`", "this type doesn't support `==`", "compare fields individually, or use a different check"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    location := sema_expression_panic_location(environment, call.name_span)
+    location := sema_expression_panic_location(environment, scopes, call.name_span)
     stop := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.RequireEq{left: left_value, right: right_value}, location: location, always_stops: false}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
 }

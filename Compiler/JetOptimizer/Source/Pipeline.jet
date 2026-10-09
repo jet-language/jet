@@ -227,9 +227,10 @@ fn mir_pass_step_completes(step: Int) -> MIROptimizationPassID? Never! {
     None
 }
 
-// The read-only rows every thread of a wave receives (a copy each; they are
-// small). `cleanup` says the previous fixed-reduction normalization rewrote
-// some function, which a wave starting at step 7 or 8 acts on.
+// The read-only rows every function's steps read. A wave on several threads
+// shares one copy of them behind a `Shared` handle (mir_pass_wave).
+// `cleanup` says the previous fixed-reduction normalization rewrote some
+// function, which a wave starting at step 7 or 8 acts on.
 struct MIRPassWaveInputs {
     pub prelude_calls: [MIRPreludeCall]
     pub purity: [U64:Bool]
@@ -342,16 +343,23 @@ fn mir_pass_function_steps(function: &MIRFunction, first: Int, last: Int, inputs
 // A thread is admitted for at least this many MIR instructions, so a small
 // program optimizes on the calling thread.
 MIR_PASS_MIN_INSTRUCTIONS_PER_THREAD :: 20000
-// Estimated bytes per MIR instruction of a function with its values, places,
-// and facts: a thread steps its own copy of each function, and a pass's
-// scratch grows with the largest function a thread holds.
+// Estimated scratch bytes per MIR instruction of the largest function a
+// thread steps: a pass's working rows grow with the function it rewrites.
 MIR_PASS_BYTES_PER_INSTRUCTION :: 512
+
+// One thread's part of a wave: its functions, last-first. The part moves into
+// the slot and back out by single-element moves, and its thread steps the
+// functions in place behind the slot's guard, so no function is copied.
+struct MIRPassWaveSlot {
+    pub functions: [MIRFunction]
+}
 
 // Steps `first` through `last` on every function of `program`. One admitted
 // thread steps each function in place, in program order. More threads take
-// consecutive parts of the function list (moved out of the program), step
-// copies of their functions, and hand them back in part order, so the
-// program and the counts are the same either way.
+// consecutive parts of the function list (moved out of the program into one
+// slot each), step them in place, and the parts move back in part order.
+// Each function's steps read only that function and the shared inputs, and
+// the counts are sums, so the program and the counts are the same either way.
 fn mir_pass_wave(program: &MIRProgram, first: Int, last: Int, inputs: MIRPassWaveInputs, threads: CompilerThreads) -> MIRPassWaveCounts {
     counts := mir_pass_wave_counts()
     weights := [Int]{}
@@ -364,7 +372,7 @@ fn mir_pass_wave(program: &MIRProgram, first: Int, last: Int, inputs: MIRPassWav
         total += size
         if size > largest -> largest = size
     }
-    workers :: compiler_threads_admit(threads, program.functions.len(), total, MIR_PASS_MIN_INSTRUCTIONS_PER_THREAD, largest * MIR_PASS_BYTES_PER_INSTRUCTION, total * MIR_PASS_BYTES_PER_INSTRUCTION)
+    workers :: compiler_threads_admit(threads, program.functions.len(), total, MIR_PASS_MIN_INSTRUCTIONS_PER_THREAD, largest * MIR_PASS_BYTES_PER_INSTRUCTION, 0)
     if workers <= 1 {
         loop index in 0..<program.functions.len() {
             function_window := &program.functions[index]
@@ -381,52 +389,61 @@ fn mir_pass_wave(program: &MIRProgram, first: Int, last: Int, inputs: MIRPassWav
         part = compiler_threads_part_of(bounds, part, program.functions.len())
         &parts[part].push(function)
     }
-    &parts.reverse()
-    done := mir_pass_wave_parts(^parts, first, last, inputs)
-    loop {
-        finished := &done.pop() ?? break
-        mir_pass_wave_counts_add(&counts, finished.counts)
-        functions := ^finished.functions
-        &program.functions.extend(functions)
+    slots := [Shared<MIRPassWaveSlot>]{}
+    loop _ in 0..<workers {
+        slot :: shared MIRPassWaveSlot{functions: [MIRFunction]{}}
+        &slots.push(slot)
+    }
+    filled := workers
+    loop filled > 0 {
+        filled -= 1
+        functions := &parts.pop() ?? break
+        mir_pass_wave_fill(slots[filled], ^functions)
+    }
+    shared_inputs :: shared inputs
+    counts = mir_pass_wave_slots(slots, 0, first, last, shared_inputs)
+    loop slot in slots -> mir_pass_wave_restore(&program, slot)
+    counts
+}
+
+// Moves one part's functions into its slot.
+fn mir_pass_wave_fill(slot: Shared<MIRPassWaveSlot>, functions: ^[MIRFunction]) {
+    permit :: slot.guard_edit()
+    permit.value.functions = ^functions
+}
+
+// Moves a slot's functions back onto the end of the program: the slot holds
+// them last-first, so popping restores program order.
+fn mir_pass_wave_restore(program: &MIRProgram, slot: Shared<MIRPassWaveSlot>) {
+    permit :: slot.guard_edit()
+    loop permit.value.functions.len() > 0 {
+        function :: &permit.value.functions.pop() ?? break
+        &program.functions.push(function)
+    }
+}
+
+// One thread: steps every function of its slot in place.
+fn mir_pass_wave_slot(slot: Shared<MIRPassWaveSlot>, first: Int, last: Int, shared_inputs: Shared<MIRPassWaveInputs>) -> MIRPassWaveCounts {
+    counts := mir_pass_wave_counts()
+    inputs :: shared_inputs.guard_read()
+    permit := slot.guard_edit()
+    loop index in 0..<permit.value.functions.len() {
+        mir_pass_function_steps(&permit.value.functions[index], first, last, inputs.value, &counts)
     }
     counts
 }
 
-// One thread's functions after its steps, with what the steps did.
-struct MIRPassWavePart {
-    pub functions: [MIRFunction]
-    pub counts: MIRPassWaveCounts
-}
-
-// One thread: its functions, held last-first, stepped and returned
-// first-first.
-fn mir_pass_wave_part(functions: [MIRFunction], first: Int, last: Int, inputs: MIRPassWaveInputs) -> MIRPassWavePart {
+// Steps `slots[from..]`, one task per slot and the last slot on this thread,
+// and returns the summed counts.
+fn mir_pass_wave_slots(slots: [Shared<MIRPassWaveSlot>], from: Int, first: Int, last: Int, shared_inputs: Shared<MIRPassWaveInputs>) -> MIRPassWaveCounts {
+    if from >= slots.len() - 1 -> return mir_pass_wave_slot(slots[from], first, last, shared_inputs)
     counts := mir_pass_wave_counts()
-    stepped := [MIRFunction]{}
-    index := functions.len()
-    loop index > 0 {
-        index -= 1
-        function := functions[index]
-        mir_pass_function_steps(&function, first, last, inputs, &counts)
-        &stepped.push(^function)
-    }
-    MIRPassWavePart{functions: ^stepped, counts: counts}
-}
-
-// Steps the parts popped from `parts` (first part on top), one task per part
-// and the last part on this thread. Returns the parts last part first, so
-// popping yields them in part order.
-fn mir_pass_wave_parts(parts: ^[[MIRFunction]], first: Int, last: Int, inputs: MIRPassWaveInputs) -> [MIRPassWavePart] {
-    remaining := ^parts
-    functions :: &remaining.pop() ?? return [MIRPassWavePart]{}
-    if remaining.len() == 0 -> return [MIRPassWavePart]{mir_pass_wave_part(functions, first, last, inputs)}
-    done := [MIRPassWavePart]{}
     task.group optimizer_threads {
-        head :: task mir_pass_wave_part(functions, first, last, inputs)
-        done = mir_pass_wave_parts(^remaining, first, last, inputs)
-        &done.push(^^head.join() ?? panic(compiler_threads_failure_text(err)))
+        head :: task mir_pass_wave_slot(slots[from], first, last, shared_inputs)
+        counts = mir_pass_wave_slots(slots, from + 1, first, last, shared_inputs)
+        mir_pass_wave_counts_add(&counts, head.join() ?? panic(compiler_threads_failure_text(err)))
     }
-    done
+    counts
 }
 
 // Legality, then MIR Lint when `lint` is set: the entry check.

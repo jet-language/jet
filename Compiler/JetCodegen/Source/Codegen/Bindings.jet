@@ -17,57 +17,57 @@ use jet_foundation.[
     mir_source_file_id,
 ]
 
-fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span) {
+fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, program: JetCodegenProgram, temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span) {
     subject := if {
         move_fields -> {
-            source_place := jet_codegen_lower_expression_place(&builder, init, MIRAccess.Move)
+            source_place := jet_codegen_lower_expression_place(&builder, program, init, MIRAccess.Move)
             if source_place == {
-                .Val(place) -> jet_codegen_emit_value(&builder, span, init.ty, MIROperation.MovePlace{place: place})
-                .None -> jet_codegen_lower_expr(&builder, init)
+                .Val(place) -> jet_codegen_emit_value(&builder, program, span, init.ty, MIROperation.MovePlace{place: place})
+                .None -> jet_codegen_lower_expr(&builder, program, init)
             }
         }
-        else -> jet_codegen_lower_expr(&builder, init)
+        else -> jet_codegen_lower_expr(&builder, program, init)
     }
     temporary := MIRPlaceID?{None}
     if move_fields {
-        place := jet_codegen_bind_local(&builder, temp, init.ty, true, None, None, false)
-        move_place := jet_codegen_place_access(&builder, place, MIRAccess.Move)
-        _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: move_place, value: subject})
+        place := jet_codegen_bind_local(&builder, program, temp, init.ty, true, None, None, false)
+        move_place := jet_codegen_place_access(&builder, program, place, MIRAccess.Move)
+        _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: move_place, value: subject})
         temporary = Val(move_place)
     }
     loop binding in binds {
-        field_type := jet_codegen_checked_host_field_type(builder, init.ty, binding.field)
-        field_id := jet_codegen_host_field_id(builder, init.ty, binding.field)
+        field_type := jet_codegen_checked_host_field_type(builder, program, init.ty, binding.field)
+        field_id := jet_codegen_host_field_id(builder, program, init.ty, binding.field)
         value := if temporary == {
             .Val(place) -> {
-                field_place := jet_codegen_project_field_place(&builder, place, span, field_type, field_id)
-                jet_codegen_emit_value(&builder, span, field_type, MIROperation.MovePlace{place: field_place})
+                field_place := jet_codegen_project_field_place(&builder, program, place, span, field_type, field_id)
+                jet_codegen_emit_value(&builder, program, span, field_type, MIROperation.MovePlace{place: field_place})
             }
             .None -> {
-                projected := jet_codegen_emit_value(&builder, span, field_type, MIROperation.Field{base: subject, field: field_id})
-                jet_codegen_emit_value(&builder, span, field_type, MIROperation.Copy{value: projected, fact: MIRCopyFact.Materialize})
+                projected := jet_codegen_emit_value(&builder, program, span, field_type, MIROperation.Field{base: subject, field: field_id})
+                jet_codegen_emit_value(&builder, program, span, field_type, MIROperation.Copy{value: projected, fact: MIRCopyFact.Materialize})
             }
         }
-        destination := jet_codegen_bind_local(&builder, binding.local, field_type, binding.local.mutable, None, None, false)
-        _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: destination, value: value})
+        destination := jet_codegen_bind_local(&builder, program, binding.local, field_type, binding.local.mutable, None, None, false)
+        _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: destination, value: value})
     }
 }
 
-fn jet_codegen_lower_list_destructure(builder: &JetCodegenBuilder, init: TExpr, count: Int, elements: [TLocal], span: Span) {
-    subject := jet_codegen_lower_expr(&builder, init)
+fn jet_codegen_lower_list_destructure(builder: &JetCodegenBuilder, program: JetCodegenProgram, init: TExpr, count: Int, elements: [TLocal], span: Span) {
+    subject := jet_codegen_lower_expr(&builder, program, init)
     element_type := if init.ty == {
         .List(element) | .FixedList(element, _) -> element
         else -> init.ty
     }
-    checked_location := jet_codegen_assignment_panic_location(&builder, span, false)
+    checked_location := jet_codegen_assignment_panic_location(&builder, program, span, false)
     location := MIRPanicLoc{file: mir_source_file_id(checked_location.file), line: checked_location.line, column: checked_location.column}
     context := MIRPanicContext{function: checked_location.function, source_line: checked_location.source_line, caret: checked_location.caret, locals: [MIRPanicLocal]{}}
-    call := jet_codegen_index_route(&builder, MIRIndexKind.List, MIRAccess.Read, jet_codegen_failure_carrier_for_type(element_type))
+    call := jet_codegen_index_route(&builder, program, MIRIndexKind.List, MIRAccess.Read, jet_codegen_failure_carrier_for_type(element_type))
     loop (index, local) in elements {
         if index >= count -> break
-        index_value := jet_codegen_emit_value(&builder, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: index, width: None, spelling: None}})
-        projected := jet_codegen_emit_value(&builder, span, element_type, MIROperation.Index{call: call, base: subject, index: index_value, kind: MIRIndexKind.List, access: MIRAccess.Read, location: location, context: context})
-        destination := jet_codegen_bind_local(&builder, local, element_type, local.mutable, None, None, false)
-        _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: destination, value: projected})
+        index_value := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: index, width: None, spelling: None}})
+        projected := jet_codegen_emit_value(&builder, program, span, element_type, MIROperation.Index{call: call, base: subject, index: index_value, kind: MIRIndexKind.List, access: MIRAccess.Read, location: location, context: context})
+        destination := jet_codegen_bind_local(&builder, program, local, element_type, local.mutable, None, None, false)
+        _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: destination, value: projected})
     }
 }
