@@ -5005,13 +5005,8 @@ fn run_wants_watch(raw: &[String]) -> bool {
 /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): resolve the effective `--target=` value for
 /// `file`. Precedence: an explicit CLI flag always wins; else the canonical Package
 /// context's `target: "web"` (inline in the entry or a managed package's package.jet);
-/// else a lightweight parse of `file` for a top-level `#Target(Web)` marker (a loose
-/// file's own default, for standalone examples with no manifest at all).
-/// Reparses the file/manifest — wasteful compared to threading the fact
-/// through the real compile pipeline, but `jet` recompiles from scratch on
-/// every invocation anyway (no incremental compilation), so a couple of
-/// extra cheap lex+parse passes are negligible, and it keeps this CLI-only
-/// concern out of `ProgramBundle`/codegen entirely.
+/// else a marker-only parse for a top-level `#Target(Web)` default. Function,
+/// module and type bodies are never parsed by this CLI preflight.
 ///
 /// `jet run` also resolves the package/file web default so the execution
 /// boundary can reject it with a teaching diagnostic before attempting a
@@ -5025,12 +5020,121 @@ fn effective_target(_cmd: &str, file: &str, explicit: Option<&str>) -> Option<St
     }
     let src = fs::read_to_string(file).ok()?;
     let src = jet::Package::mask_inline_package_source(&src).ok()?.0;
-    let (toks, lex_diags) = jet::Lexer::lex(&src);
-    if !lex_diags.is_empty() {
+    source_default_target(&src)
+}
+
+fn source_default_target(source: &str) -> Option<String> {
+    use jet::Lexer::{TokKind, Token};
+    // Raw tokens avoid both the terminator pass and a second full token copy.
+    // Only selected file-marker tokens are passed to the ordinary parser, so
+    // its registered marker/group argument rules remain the single authority.
+    let (tokens, diagnostics) = jet::Lexer::lex_raw(source);
+    if !diagnostics.is_empty() {
         return None;
     }
-    let prog = jet::Parser::parse_with_source(&toks, &src).ok()?;
-    prog.default_target
+    let mut markers = Vec::new();
+    let mut braces = 0usize;
+    let mut parens = 0usize;
+    let mut brackets = 0usize;
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = &tokens[index];
+        if braces == 0 && parens == 0 && brackets == 0 && token.kind == TokKind::Hash {
+            let mut name = index + 1;
+            while tokens.get(name).is_some_and(|token| jet::Lexer::is_comment(&token.kind)) {
+                name += 1;
+            }
+            let grouped = tokens.get(name).is_some_and(|token| token.kind == TokKind::LBracket);
+            let target = tokens.get(name).is_some_and(|token|
+                matches!(&token.kind, TokKind::Ident(name) if name == jet::Syntax::MARKER_TARGET));
+            if grouped || target {
+                let opener = if grouped { name } else { name + 1 };
+                let open_kind = if grouped { TokKind::LBracket } else { TokKind::LParen };
+                let close_kind = if grouped { TokKind::RBracket } else { TokKind::RParen };
+                let mut open = opener;
+                while tokens.get(open).is_some_and(|token| jet::Lexer::is_comment(&token.kind)) {
+                    open += 1;
+                }
+                if tokens.get(open).is_some_and(|token| token.kind == open_kind) {
+                    let mut depth = 1usize;
+                    let mut end = open + 1;
+                    while end < tokens.len() && depth != 0 {
+                        if tokens[end].kind == open_kind {
+                            depth += 1;
+                        } else if tokens[end].kind == close_kind {
+                            depth -= 1;
+                        }
+                        end += 1;
+                    }
+                    if depth != 0 {
+                        return None;
+                    }
+                    if target || tokens[open..end].iter().any(|token|
+                        matches!(&token.kind, TokKind::Ident(name) if name == jet::Syntax::MARKER_TARGET))
+                    {
+                        markers.extend_from_slice(&tokens[index..end]);
+                    }
+                    index = end;
+                    continue;
+                }
+            }
+        }
+        match token.kind {
+            TokKind::LBrace => braces += 1,
+            TokKind::RBrace => braces = braces.saturating_sub(1),
+            TokKind::LParen => parens += 1,
+            TokKind::RParen => parens = parens.saturating_sub(1),
+            TokKind::LBracket => brackets += 1,
+            TokKind::RBracket => brackets = brackets.saturating_sub(1),
+            _ => {}
+        }
+        index += 1;
+    }
+    if markers.is_empty() {
+        return None;
+    }
+    markers.push(Token {
+        kind: TokKind::Eof,
+        span: jet::Diagnostics::Span::new(source.len(), source.len()),
+    });
+    jet::Parser::parse_with_source(&markers, source).ok()?.default_target
+}
+
+#[cfg(test)]
+mod target_preflight_tests {
+    use super::source_default_target;
+
+    #[test]
+    fn file_markers_use_registered_parser_rules_without_parsing_bodies() {
+        for source in [
+            "#Target(Web)\nfn run() { this is not a valid body }\n",
+            "#Target(/* argument */ Web)\nfn run() {}\n",
+            "#[NoPrelude, Target(Web)]\nfn run() {}\n",
+            "fn first() {}\n#Target(Web)\nfn run() {}\n",
+        ] {
+            assert_eq!(
+                source_default_target(source).as_deref(),
+                Some(jet::Syntax::BUILD_TARGET_WEB),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_markers_strings_and_partition_targets_are_not_file_defaults() {
+        for source in [
+            "fn run() { #Target(Web) }\n",
+            "module nested { #Target(Web) }\n",
+            "TEXT :: raw\"#Target(Web)\"\nfn run() {}\n",
+            "// #Target(Web)\nfn run() {}\n",
+            "#Target(JS)\nfn run() {}\n",
+            "#Target(Wasm)\nfn run() {}\n",
+            "#Target(Unknown)\nfn run() {}\n",
+            "#Target(Web",
+        ] {
+            assert_eq!(source_default_target(source), None, "{source}");
+        }
+    }
 }
 
 /// D-WEBRUN1=A: native `jet run` has no web execution backend for ordinary

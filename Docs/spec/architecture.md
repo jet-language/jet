@@ -446,6 +446,11 @@ module-item snapshots concurrently. Checker rows initially contain metadata
 only; their item snapshots are materialized for every module after the
 comptime rows are released, before registration can inspect sibling nominals.
 
+CLI default-target discovery scans raw tokens and parses only top-level target
+markers and target-bearing marker groups with the registered marker parser.
+It does not construct an AST for function, module or type bodies; the actual
+front end remains responsible for their diagnostics.
+
 This is a scoped Rust call boundary, not a C ABI or a promise about Rust
 `Vec`, enum or pointer layout. The worker transports a Rust panic payload
 unchanged back to its Rust caller; it does not relabel an ICE as a successful
