@@ -193,7 +193,12 @@ impl<'a> Checker<'a> {
                     widen_approx: false,
                 };
                 *inner = Box::new(self.default_err_value(call, false));
-                payload = Type::Named(Syntax::TYPE_ERR.to_string());
+                // The synthesized literal must pass the normal record checker:
+                // it supplies canonical private field defaults from the Prelude.
+                payload = self.infer_with_expected(
+                    inner,
+                    &Type::Named(Syntax::TYPE_ERR.to_string()),
+                )?;
             }
             let ok_payload = payload == err_ty
                 || matches!(&err_ty, Type::Union(members) if members.iter().any(|m| m == &payload));

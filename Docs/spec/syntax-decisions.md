@@ -1760,6 +1760,8 @@ readings. `fn run()` is fallible by default; an expert may pin `fn run() !E`.
 Returned default errors print one report frame and exit non-zero. Cross-type
 `?` conversion uses declared `impl Source -> Target`; the retired
 default-conversion trait, helper, and compiler arm are deleted by D-FAIL-CONV1.
+Compiler-synthesized default-error records pass the ordinary record checker,
+including Prelude-owned private field defaults; they are not a parallel layout.
 
 **D-ERRCTX1 — Error context** *(amended by D-FAIL-CTX1)*: contextual `?(text)`
 carries a lazy string note. Every fallible call joins the failure journey

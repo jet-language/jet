@@ -4,6 +4,11 @@ fn fails(n: Int) -> Int Err! {
     Ok(n)
 }
 
+// A string value takes the same checked default-error constructor as a literal.
+fn fails_with_message(message: String) -> Int Err! {
+    Err(message)
+}
+
 fn run() {
     a :: fails(-1) ?? {
         print("fallback: {err}")
@@ -13,5 +18,9 @@ fn run() {
     if fails(-2) == {
         .Ok(n) -> print(n)
         .Err(e) -> print("failed: {e}")
+    }
+    if fails_with_message("stored message") == {
+        .Ok(n) -> print(n)
+        .Err(failure) -> print("failed from value: {failure}")
     }
 }
