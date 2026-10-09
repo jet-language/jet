@@ -166,19 +166,19 @@ pub fn sema_string_view_check_read(name: String, span: Span, scopes: SemaScopeTa
 
 // D-MEM-COPYSEM1=A: a string view read at an owning `String` destination is
 // materialized into an owned copy (Rust `insert_implicit_copy`).
-pub fn sema_string_view_materialize(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+pub fn sema_string_view_materialize(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     previous_borrow := context.borrow_ctx
     previous_read := context.allow_string_view_read
     context.borrow_ctx = true
     context.allow_string_view_read = true
-    checked_value := sema_expr_check_identifier(name, span, None, environment, &scopes, &state, &context, &diagnostics)
+    checked_value := sema_expr_check_identifier(name, span, None, environment, program, &scopes, &state, &context, &diagnostics)
     context.borrow_ctx = previous_borrow
     context.allow_string_view_read = previous_read
     checked :: checked_value ?? return None
-    facts := sema_copy_classify(checked.ty, SemaCopyIntent.Materialize, environment, context.generic_params, true)
-    if !facts.accepted -> return sema_expr_expected(checked, expected, environment, &diagnostics)
+    facts := sema_copy_classify(checked.ty, SemaCopyIntent.Materialize, environment, program, context.generic_params, true)
+    if !facts.accepted -> return sema_expr_expected(checked, expected, environment, program, &diagnostics)
     if sema_copy_effect_name(facts) != None || sema_copy_memory_operation(facts) != None -> &context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
-    sema_expr_expected(sema_tir_expr(facts.target, TExprKind.MaterializeView{value: checked}, span), expected, environment, &diagnostics)
+    sema_expr_expected(sema_tir_expr(facts.target, TExprKind.MaterializeView{value: checked}, span), expected, environment, program, &diagnostics)
 }
 
 // The owning `String` destinations that materialize a string view.
@@ -206,10 +206,10 @@ fn sema_string_view_stable_owner(scopes: SemaScopeTable, state: SemaOwnershipSta
 // #1163/#1164: a declared `View<str>` struct field takes a live string view
 // with a stable owner, or a `trim`/`after`/`before` call on a `String` name.
 // An owned `String` is not a view (Rust `report_owned_string_as_view_str`).
-pub fn sema_string_view_check_field(value: Expr, field_ty: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+pub fn sema_string_view_check_field(value: Expr, field_ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     previous_read := context.allow_string_view_read
     context.allow_string_view_read = true
-    checked_value := sema_check_expression_with_lambda_escapes(value, None, environment, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
+    checked_value := sema_check_expression_with_lambda_escapes(value, None, environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
     context.allow_string_view_read = previous_read
     checked :: checked_value ?? return None
     if checked.ty != Type.String -> return Val(checked)
@@ -246,10 +246,10 @@ pub fn sema_string_view_return_source(value: Expr, scopes: SemaScopeTable, state
     sema_string_view_call_sources(value, scopes, &state).len() > 0
 }
 
-pub fn sema_string_view_return_value(value: Expr, success: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+pub fn sema_string_view_return_value(value: Expr, success: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     previous_read := context.allow_string_view_read
     context.allow_string_view_read = true
-    checked_value := sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    checked_value := sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     context.allow_string_view_read = previous_read
     checked :: checked_value ?? return None
     if checked.ty != Type.String -> return Val(checked)

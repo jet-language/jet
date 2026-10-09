@@ -73,10 +73,10 @@ fn parser_expression_form_loop_binding(state: &JetParserState) -> ParserExpressi
         second :: parser_expect_name(&state, "as the second loop variable")
         if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
         parser_expect(&state, TOKEN_RPAREN, "after the two loop variables")
-        return ParserExpressionFormLoopClause{var: first.payload.decoded, var_span: first.span, var2: Val(NamedSpan{name: second.payload.decoded, span: second.span}), kind: ForKind.In{collection: Expr.Unit{span: first.span}, step: None}}
+        return ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: Val(NamedSpan{name: parser_value(state, second), span: second.span}), kind: ForKind.In{collection: Expr.Unit{span: first.span}, step: None}}
     }
     first :: parser_expect_name(&state, "as the loop variable")
-    ParserExpressionFormLoopClause{var: first.payload.decoded, var_span: first.span, var2: None, kind: ForKind.In{collection: Expr.Unit{span: first.span}, step: None}}
+    ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: None, kind: ForKind.In{collection: Expr.Unit{span: first.span}, step: None}}
 }
 
 fn parser_expression_form_loop_separator(state: &JetParserState) {
@@ -247,7 +247,7 @@ fn parser_expression_form_parse_counted_loop(state: &JetParserState, start: Span
     name :: parser_expect_name(&state, "as the counted-loop binding")
     sigil :: parser_expect(&state, TOKEN_COLON_EQ, "after the counted-loop binding name")
     initial :: parser_parse_expression_no_struct_lit(&state, depth + 1)
-    init :: ast_binding(name.payload.decoded, name.span, true, initial.expr, Val(sigil.span))
+    init :: ast_binding(parser_value(state, name), name.span, true, initial.expr, Val(sigil.span))
     parser_expression_form_loop_header_separator(&state, "after the counted-loop initializer")
     condition :: parser_parse_expression_no_struct_lit(&state, depth + 1)
     step := Stmt?{None}

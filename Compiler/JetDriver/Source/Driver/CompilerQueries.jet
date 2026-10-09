@@ -375,8 +375,9 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
             registration_inputs[index].program = input.parsed.parsed.program
         }
     }
+    registration_count :: registration_inputs.len()
     registration := sema_registration_prepare_graph(
-        registration_inputs,
+        ^registration_inputs,
         load.imports,
         load.package_identity,
         load.entry_module_identity,
@@ -393,8 +394,10 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
     loop diagnostic in output_diagnostics -> &registration.diagnostics.push(diagnostic)
     if jet_driver_has_errors(output_diagnostics) -> registration.complete = false
     if registration.internal_problem == .Val(problem) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(problem))
-    stage := sema_collect_comptime_declarations(registration, jet_driver_compiler_check_package_policies(load), input.request.eval_config.host_hooks, input.request.compiler_threads, input.request.trace_sink)
-    if !stage.complete || stage.modules.len() != registration_inputs.len() || jet_driver_has_errors(stage.diagnostics) {
+    // The declaration pass takes its own graph; `registration` stays for the
+    // provisional finalizations and the packet.
+    stage := sema_collect_comptime_declarations(~registration, jet_driver_compiler_check_package_policies(load), input.request.eval_config.host_hooks, input.request.compiler_threads, input.request.trace_sink)
+    if !stage.complete || stage.modules.len() != registration_count || jet_driver_has_errors(stage.diagnostics) {
         jet_driver_comptime_diagnostics_add(&load.diagnostics, stage.diagnostics)
         if stage.modules.len() == registration_inputs.len() {
             provisional := sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, input.request.eval_config.host_hooks, input.request.compiler_threads, None, input.request.trace_sink)
@@ -402,7 +405,7 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
             packet := jet_driver_compiler_check_diagnostic_packet(input, ^registration, ^provisional, module_sources, load.diagnostics)
             if packet == .Val(result) -> return result
         }
-        if !jet_driver_has_errors(load.diagnostics) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(jet_driver_incomplete_graph_problem("semantic declaration checking did not return a complete resolved package graph ({stage.modules.len()} of {registration_inputs.len()} modules checked)", stage.modules)))
+        if !jet_driver_has_errors(load.diagnostics) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(jet_driver_incomplete_graph_problem("semantic declaration checking did not return a complete resolved package graph ({stage.modules.len()} of {registration_count} modules checked)", stage.modules)))
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
     }
     initial_values := [SemaComptimeItemValue]{ }
@@ -410,12 +413,16 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
     // diagnostics, so this existing stage boundary travels beside the load.
     stage_diagnostics := load.diagnostics
     load.diagnostics = [Diagnostic]{}
-    // The declaration pass's graph copy becomes the run's environment graph.
+    // The declaration pass's graph becomes the run's environment graph,
+    // and its modules move into the run, which hands them back.
     staged_graph := ^stage.graph
     stage.graph = None
+    run_staged := ^staged_graph ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the declaration pass lost its registration graph"))
+    declared_modules := ^stage.modules
+    stage.modules = [SemaGraphModuleResult]{}
     run := jet_driver_run_comptime(
-        registration,
-        ^staged_graph,
+        ^run_staged,
+        ^declared_modules,
         stage.sources,
         stage.names,
         initial_values,
@@ -424,6 +431,7 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
         input.request,
         &stage_diagnostics,
     )
+    jet_driver_comptime_return_declared(&stage, &run)
     load.diagnostics = stage_diagnostics
     if run.soft_stop -> return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, None)
     if !run.complete {

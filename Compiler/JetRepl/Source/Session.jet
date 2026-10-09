@@ -1,7 +1,7 @@
 // One checked, retained REPL pipeline: classify -> canonical statement checker
 // -> canonical incremental MIR lowering -> canonical JetEval run boundary.
 use jet_foundation.[Diagnostic, Func, MIRFunctionID, MIRProgram, MIRSourceFile, Span, TFunc, mir_source_file_id]
-use jet_lexer.[lex_generated, lex_shift_token]
+use jet_lexer.[lex_generated, token_shift_spans]
 use jet_parser.parse_lexed_with_source
 use jet_sema.[ReplSetupError, SemaGraphModuleResult, SemaRegistrationGraph, SemaReplSession, SemaSourceOrigin, SemaSourceSegment, sema_registration_module_index, sema_repl_session_new, sema_repl_type_check_stmts, sema_repl_session_finalize]
 use jet_codegen.[JetCodegenReplSession, jet_codegen_repl_session_new, jet_codegen_repl_initial_program, jet_codegen_repl_append, jet_codegen_repl_close]
@@ -78,8 +78,8 @@ pub fn repl_session_step(session: &ReplSession, text: String) -> ReplStepResult 
             if byte == (U8{10}) -> &session.line_starts.push(session.source.len())
         }
         lexed := lex_generated(wrapper.bytes())
-        loop index in 0..<lexed.tokens.len() -> lex_shift_token(&lexed.tokens[index], offset)
-        parsed :: parse_lexed_with_source(lexed, session.source, session.line_starts)
+        loop index in 0..<lexed.tokens.len() -> token_shift_spans(&lexed.tokens[index], offset, &lexed.tables.literals)
+        parsed :: parse_lexed_with_source(^lexed, session.source, session.line_starts)
         if parsed.diagnostics.len() > 0 {
             loop session.source.len() > offset -> _ :: &session.source.pop()
             loop session.line_starts.len() > lines_mark -> _ :: &session.line_starts.pop()

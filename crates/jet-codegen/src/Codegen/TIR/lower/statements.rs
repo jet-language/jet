@@ -5013,6 +5013,8 @@ fn hardware_dma_channel(expr: &crate::AST::Expr, cx: &Cx) -> Option<String> {
 #[cfg(all(test, debug_assertions))]
 mod handoff_assert_tests {
     use super::*;
+    use crate::Codegen::build_cx;
+    use crate::Diagnostics::Span;
 
     fn empty_cx() -> Cx {
         let src = "fn run() {}\n";

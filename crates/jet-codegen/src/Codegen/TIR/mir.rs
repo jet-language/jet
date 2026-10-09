@@ -2375,6 +2375,29 @@ fn lower_impl_rows(
     registry: &FunctionRegistry,
     types: &[MirTypeDef],
 ) -> Result<Vec<MirImplDef>, LowerError> {
+    // Indexes over `functions`, built once instead of rescanning every
+    // function for each impl method key (rows x methods x functions): each
+    // function's registry ID (`id_for` is pure over the immutable registry),
+    // the first function carrying each ID (the scan's `find` order), and the
+    // method functions by (module, method base leaf), the two cheap
+    // conjuncts of `impl_method_matches`. Candidates keep function order.
+    let function_ids: Vec<Option<MirFunctionId>> =
+        functions.iter().map(|function| registry.id_for(function).ok()).collect();
+    let mut first_function_with_id: HashMap<MirFunctionId, usize> = HashMap::new();
+    for (index, id) in function_ids.iter().enumerate() {
+        if let Some(id) = id {
+            first_function_with_id.entry(*id).or_insert(index);
+        }
+    }
+    let mut method_functions: HashMap<(&str, &str), Vec<usize>> = HashMap::new();
+    for (index, function) in functions.iter().enumerate() {
+        if tfunc_method_owner(function).is_some() {
+            method_functions
+                .entry((function.module.as_str(), method_base_leaf(&function.name)))
+                .or_default()
+                .push(index);
+        }
+    }
     let mut result = Vec::new();
     for row in rows {
         let declared_self_type =
@@ -2384,18 +2407,22 @@ fn lower_impl_rows(
         for method_key in &row.methods {
             let mut candidates = Vec::new();
             if let Some(id) = resolve_function_key(method_key, &row.module, registry) {
-                if let Some(function) = functions
-                    .iter()
-                    .find(|function| registry.id_for(function).ok() == Some(id))
-                {
-                    candidates.push((id, function));
+                if let Some(index) = first_function_with_id.get(&id) {
+                    candidates.push((id, &functions[*index]));
                 }
             }
-            for function in functions
-                .iter()
-                .filter(|function| impl_method_matches(function, row, method_key))
-            {
-                let id = registry.id_for(function)?;
+            let same_leaf = method_functions
+                .get(&(row.module.as_str(), method_base_leaf(method_key)))
+                .map_or(&[][..], Vec::as_slice);
+            for index in same_leaf {
+                let function = &functions[*index];
+                if !impl_method_matches(function, row, method_key) {
+                    continue;
+                }
+                let id = match function_ids[*index] {
+                    Some(id) => id,
+                    None => registry.id_for(function)?,
+                };
                 if !candidates.iter().any(|(candidate, _)| *candidate == id) {
                     candidates.push((id, function));
                 }
@@ -2514,10 +2541,7 @@ fn lower_impl_rows(
     // Keep only checked method references; a method that did not enter the
     // executable TIR cannot be represented as a valid MIR edge. The checked
     // function ids are collected once (not rescanned per impl method).
-    let checked_ids: HashSet<MirFunctionId> = functions
-        .iter()
-        .filter_map(|function| registry.id_for(function).ok())
-        .collect();
+    let checked_ids: HashSet<MirFunctionId> = function_ids.iter().flatten().copied().collect();
     result.retain(|row| row.methods.iter().all(|id| checked_ids.contains(id)));
     result.sort_unstable_by_key(|row| row.id);
     Ok(result)
@@ -4809,18 +4833,17 @@ fn canonical_nominal_name(
     if let Some(carrier) = crate::Codegen::TIR::tir_to_mir_types::core_term_stream_carrier(name) {
         return Ok(carrier.to_string());
     }
-    let exact = type_defs
-        .iter()
-        .filter(|ty| ty.key == name)
-        .collect::<Vec<_>>();
-    if let [ty] = exact.as_slice() {
-        return Ok(ty.key.clone());
-    }
-    if exact.len() > 1 {
-        return Err(LowerError::new(
-            span,
-            format!("ambiguous checked MIR type key `{name}`"),
-        ));
+    // At most two matches decide each lookup: unique or ambiguous.
+    let mut exact = type_defs.iter().filter(|ty| ty.key == name);
+    match (exact.next(), exact.next()) {
+        (Some(ty), None) => return Ok(ty.key.clone()),
+        (Some(_), Some(_)) => {
+            return Err(LowerError::new(
+                span,
+                format!("ambiguous checked MIR type key `{name}`"),
+            ));
+        }
+        _ => {}
     }
     // D-UNIONTYPE1=A: a module-qualified anonymous-union spelling names the
     // one structural carrier row (`fold_anonymous_union_declarations`).

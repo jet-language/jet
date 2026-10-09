@@ -6,10 +6,11 @@ use jet_foundation.[
     CORE_BARE_SOURCE_MODULES,
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
+    DeriveBodyItem,
     Diagnostic,
+    Func,
     ImportDecl,
     ImportKind,
-    ImportedItem,
     InlineVersion,
     Item,
     MIRAllocatorPolicy,
@@ -17,6 +18,7 @@ use jet_foundation.[
     MIRRuntimeLayer,
     MIRSourceFile,
     NamedSpan,
+    Param,
     ParseResult,
     PolicyDeclaration,
     Program,
@@ -68,6 +70,7 @@ use jet_sema.[
     sema_effect_parse_name,
     sema_effect_root,
     sema_registration_unit_family_type_names,
+    sema_source_words,
 ]
 
 JET_DRIVER_LATEST_EDITION :: prep { "2028" }
@@ -191,12 +194,12 @@ fn jet_driver_is_ui_capability(name: String) -> Bool Never! {
     false
 }
 
-fn jet_driver_parse_authority_needs(source: String, tokens: [Token], open_index: Int, close_index: Int, span: Span, diagnostics: &[Diagnostic]) -> [String] {
+fn jet_driver_parse_authority_needs(source: String, tokens: [Token], tables: TokenTables, open_index: Int, close_index: Int, span: Span, diagnostics: &[Diagnostic]) -> [String] {
     needs := [String]{}
     needs_seen := false
     index := open_index + 1
     loop index < close_index {
-        if tokens[index].kind == TOKEN_IDENT && tokens[index].payload.decoded == "needs" && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
+        if tokens[index].kind == TOKEN_IDENT && token_decoded(tables, tokens[index]) == "needs" && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
             if needs_seen -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.needs` is declared more than once"))
             needs_seen = true
             list_open_index := index + 2
@@ -215,7 +218,7 @@ fn jet_driver_parse_authority_needs(source: String, tokens: [Token], open_index:
                 item :: jet_driver_manifest_field_value(source, tokens, item_index)
                 name := item.text.trim().replace(" ", "").replace("\t", "").replace(String.from_bytes([U8]{U8{13}}) ?? "", "").replace("\n", "")
                 if item.next_index == item_index + 1 && jet_driver_is_manifest_string(tokens[item_index].kind) {
-                    name = tokens[item_index].payload.decoded
+                    name = token_decoded(tables, tokens[item_index])
                 }
                 if name.starts_with(".") -> name = name.slice(1, name.len())
                 if {
@@ -250,7 +253,7 @@ struct JetDriverParsedAuthorityList {
     next_index: Int
 }
 
-fn jet_driver_parse_authority_effect_list(source: String, tokens: [Token], start_index: Int, close_index: Int, span: Span, field: String, diagnostics: &[Diagnostic]) -> JetDriverParsedAuthorityList {
+fn jet_driver_parse_authority_effect_list(source: String, tokens: [Token], tables: TokenTables, start_index: Int, close_index: Int, span: Span, field: String, diagnostics: &[Diagnostic]) -> JetDriverParsedAuthorityList {
     list_open_index := start_index
     if list_open_index < close_index && tokens[list_open_index].kind == TOKEN_DOT -> list_open_index += 1
     list_close :: jet_driver_manifest_matching_bracket(tokens, list_open_index, close_index) ?? {
@@ -266,7 +269,7 @@ fn jet_driver_parse_authority_effect_list(source: String, tokens: [Token], start
         }
         item :: jet_driver_manifest_field_value(source, tokens, item_index)
         name := item.text.trim().replace(" ", "").replace("\t", "").replace(String.from_bytes([U8]{U8{13}}) ?? "", "").replace("\n", "")
-        if item.next_index == item_index + 1 && jet_driver_is_manifest_string(tokens[item_index].kind) -> name = tokens[item_index].payload.decoded
+        if item.next_index == item_index + 1 && jet_driver_is_manifest_string(tokens[item_index].kind) -> name = token_decoded(tables, tokens[item_index])
         if {
             name.len() == 0 -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{field}:` must be a list like `[DB, Net]`"))
             sema_effect_parse_name(sema_effect_root(name)) == None -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
@@ -287,12 +290,12 @@ fn jet_driver_parse_authority_effect_list(source: String, tokens: [Token], start
     JetDriverParsedAuthorityList{values: Val(names), next_index: list_close + 1}
 }
 
-fn jet_driver_parse_authority_holds(source: String, tokens: [Token], open_index: Int, close_index: Int, span: Span, diagnostics: &[Diagnostic]) -> JetDriverAuthorityHolds {
+fn jet_driver_parse_authority_holds(source: String, tokens: [Token], tables: TokenTables, open_index: Int, close_index: Int, span: Span, diagnostics: &[Diagnostic]) -> JetDriverAuthorityHolds {
     result := JetDriverAuthorityHolds{allow: None, deny: None}
     holds_seen := false
     index := open_index + 1
     loop index < close_index {
-        if tokens[index].kind == TOKEN_IDENT && tokens[index].payload.decoded == "holds" && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
+        if tokens[index].kind == TOKEN_IDENT && token_decoded(tables, tokens[index]) == "holds" && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
             if holds_seen -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.holds` is declared more than once"))
             holds_seen = true
             holds_open_index := index + 2
@@ -308,20 +311,20 @@ fn jet_driver_parse_authority_holds(source: String, tokens: [Token], open_index:
             loop hold_index < holds_close {
                 if {
                     hold_index + 1 < holds_close && tokens[hold_index].kind == TOKEN_IDENT && tokens[hold_index + 1].kind == TOKEN_COLON -> {
-                        hold_name :: tokens[hold_index].payload.decoded
+                        hold_name :: token_decoded(tables, tokens[hold_index])
                         list_start :: hold_index + 2
                         if hold_name == {
                             "allow" -> {
                                 if allow_seen -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.holds.allow` is declared more than once"))
                                 allow_seen = true
-                                parsed :: jet_driver_parse_authority_effect_list(source, tokens, list_start, holds_close, span, "authority.holds.allow", &diagnostics)
+                                parsed :: jet_driver_parse_authority_effect_list(source, tokens, tables, list_start, holds_close, span, "authority.holds.allow", &diagnostics)
                                 result.allow = parsed.values
                                 hold_index = parsed.next_index
                             }
                             "deny" -> {
                                 if deny_seen -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.holds.deny` is declared more than once"))
                                 deny_seen = true
-                                parsed :: jet_driver_parse_authority_effect_list(source, tokens, list_start, holds_close, span, "authority.holds.deny", &diagnostics)
+                                parsed :: jet_driver_parse_authority_effect_list(source, tokens, tables, list_start, holds_close, span, "authority.holds.deny", &diagnostics)
                                 result.deny = parsed.values
                                 hold_index = parsed.next_index
                             }
@@ -341,12 +344,12 @@ fn jet_driver_parse_authority_holds(source: String, tokens: [Token], open_index:
     result
 }
 
-fn jet_driver_validate_authority_fields(tokens: [Token], open_index: Int, close_index: Int, span: Span, diagnostics: &[Diagnostic]) {
+fn jet_driver_validate_authority_fields(tokens: [Token], tables: TokenTables, open_index: Int, close_index: Int, span: Span, diagnostics: &[Diagnostic]) {
     nesting := 0
     loop index in open_index + 1..<close_index {
         token :: tokens[index]
         if nesting == 0 && token.kind == TOKEN_IDENT && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
-            field :: token.payload.decoded
+            field :: token_decoded(tables, token)
             if field != "needs" && field != "holds" {
                 &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.{field}` is not supported by the current compiler package-policy boundary"))
             }
@@ -362,7 +365,7 @@ fn jet_driver_valid_dependency_name(name: String) -> Bool Never! {
     name.len() > 0 && name != "." && name != ".." && !name.contains("/") && !name.contains("\\") && !name.contains(":")
 }
 
-fn jet_driver_parse_dependency_entries(source: String, source_path: String, tokens: [Token], open_index: Int, close_index: Int, diagnostics: &[Diagnostic]) -> [JetDriverPackageDependency] {
+fn jet_driver_parse_dependency_entries(source: String, source_path: String, tokens: [Token], tables: TokenTables, open_index: Int, close_index: Int, diagnostics: &[Diagnostic]) -> [JetDriverPackageDependency] {
     dependencies := [JetDriverPackageDependency]{}
     source_bytes :: source.bytes()
     index := open_index + 1
@@ -377,7 +380,7 @@ fn jet_driver_parse_dependency_entries(source: String, source_path: String, toke
             index += 1
             next
         }
-        name :: token.payload.decoded
+        name :: token_decoded(tables, token)
         if !jet_driver_valid_dependency_name(name) {
             &diagnostics.push(jet_driver_diagnostic_at_source("E0003", Val(token.span), source_path, 0, "a package dependency name is not a safe path component", "dependency names select one package root", "use a dependency name without path separators or `.`/`..`"))
         }
@@ -411,7 +414,7 @@ fn jet_driver_parse_dependency_entries(source: String, source_path: String, toke
             !has_value -> &diagnostics.push(jet_driver_diagnostic_at_source("E0003", Val(token.span), source_path, 0, "a package dependency source is empty", "every declared dependency needs one source reference", "provide a path or package version reference"))
             else -> {
                 value :: if {
-                    cursor == value_index + 1 && jet_driver_is_manifest_string(tokens[value_index].kind) -> tokens[value_index].payload.decoded
+                    cursor == value_index + 1 && jet_driver_is_manifest_string(tokens[value_index].kind) -> token_decoded(tables, tokens[value_index])
                     else -> {
                         value_start :: tokens[value_index].span.start
                         if value_start >= 0 && value_end >= value_start && value_end <= source_bytes.len() -> (String.from_bytes(source_bytes[value_start..<value_end]) ?? "").trim() else -> ""
@@ -810,12 +813,12 @@ fn jet_driver_resolve_package_dependencies(packages: &[JetDriverPackageInfo], sn
     }
 }
 
-fn jet_driver_manifest_entry_function(source_path: String, tokens: [Token], open_index: Int, close_index: Int, diagnostics: &[Diagnostic]) -> JetDriverPackageEntry? {
+fn jet_driver_manifest_entry_function(source_path: String, tokens: [Token], tables: TokenTables, open_index: Int, close_index: Int, diagnostics: &[Diagnostic]) -> JetDriverPackageEntry? {
     entry := JetDriverPackageEntry?{None}
     index := open_index + 1
     loop index < close_index {
         token :: tokens[index]
-        if token.kind == TOKEN_IDENT && token.payload.decoded == "entry" && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
+        if token.kind == TOKEN_IDENT && token_decoded(tables, token) == "entry" && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
             value_index :: index + 2
             if value_index >= close_index || (tokens[value_index].kind != TOKEN_IDENT && !jet_driver_is_manifest_string(tokens[value_index].kind)) {
                 &diagnostics.push(jet_driver_diagnostic_at_source("E0003", Val(token.span), source_path, 0, "a package output entry must name a function", "the private driver binds the selected package entry to one typed MIR function identity", "write `entry: function_name` or `entry: module_alias.function_name`"))
@@ -825,10 +828,10 @@ fn jet_driver_manifest_entry_function(source_path: String, tokens: [Token], open
             module_alias := String?{None}
             function_index := value_index
             if tokens[value_index].kind == TOKEN_IDENT && value_index + 2 < close_index && tokens[value_index + 1].kind == TOKEN_DOT && tokens[value_index + 2].kind == TOKEN_IDENT {
-                module_alias = Val(tokens[value_index].payload.decoded)
+                module_alias = Val(token_decoded(tables, tokens[value_index]))
                 function_index = value_index + 2
             }
-            name :: tokens[function_index].payload.decoded
+            name :: token_decoded(tables, tokens[function_index])
             if !jet_driver_valid_dependency_name(name) {
                 &diagnostics.push(jet_driver_diagnostic_at_source("E0003", Val(tokens[function_index].span), source_path, 0, "a package output entry is not a safe function name", "entry binding resolves within the selected package graph", "use one function name without path separators"))
             }
@@ -859,12 +862,12 @@ fn jet_driver_no_package_outputs() -> JetDriverPackageOutputs Never! {
 
 // D-MOD-CYCLE1=A: the output kinds an `outputs:` block declares and, by owner
 // ruling B, the member file each Executable `entry: stem.run` names.
-fn jet_driver_manifest_outputs(tokens: [Token], open_index: Int, close_index: Int) -> JetDriverPackageOutputs Never! {
+fn jet_driver_manifest_outputs(tokens: [Token], tables: TokenTables, open_index: Int, close_index: Int) -> JetDriverPackageOutputs Never! {
     outputs := jet_driver_no_package_outputs()
     index := open_index + 1
     loop index < close_index {
         token :: tokens[index]
-        kind_name :: if token.kind == TOKEN_IDENT -> token.payload.decoded else -> ""
+        kind_name :: if token.kind == TOKEN_IDENT -> token_decoded(tables, token) else -> ""
         if kind_name != "Library" && kind_name != "Executable" {
             index += 1
             next
@@ -877,12 +880,12 @@ fn jet_driver_manifest_outputs(tokens: [Token], open_index: Int, close_index: In
         body_close :: jet_driver_manifest_matching_brace(tokens, index + 1) ?? close_index
         if kind_name == "Executable" {
             loop field_index in index + 2..<body_close {
-                if tokens[field_index].kind != TOKEN_IDENT || tokens[field_index].payload.decoded != "entry" || field_index + 2 >= body_close || tokens[field_index + 1].kind != TOKEN_COLON -> next
+                if tokens[field_index].kind != TOKEN_IDENT || token_decoded(tables, tokens[field_index]) != "entry" || field_index + 2 >= body_close || tokens[field_index + 1].kind != TOKEN_COLON -> next
                 value :: tokens[field_index + 2]
-                if value.kind == TOKEN_IDENT && field_index + 4 < body_close && tokens[field_index + 3].kind == TOKEN_DOT && tokens[field_index + 4].kind == TOKEN_IDENT && tokens[field_index + 4].payload.decoded == "run" {
-                    &outputs.entry_modules.push(value.payload.decoded)
+                if value.kind == TOKEN_IDENT && field_index + 4 < body_close && tokens[field_index + 3].kind == TOKEN_DOT && tokens[field_index + 4].kind == TOKEN_IDENT && token_decoded(tables, tokens[field_index + 4]) == "run" {
+                    &outputs.entry_modules.push(token_decoded(tables, value))
                 }
-                text :: value.payload.decoded
+                text :: token_decoded(tables, value)
                 if jet_driver_is_manifest_string(value.kind) && text.ends_with(".run") -> &outputs.entry_modules.push(text.slice(0, text.len() - 4))
             }
         }
@@ -981,6 +984,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     lexed :: lex_config(source.bytes())
     loop diagnostic in lexed.diagnostics -> &diagnostics.push(diagnostic)
     tokens :: lexed.tokens
+    tables :: lexed.tables
     name := ""
     version := String?{None}
     edition := JET_DRIVER_LATEST_EDITION
@@ -1010,7 +1014,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         token := tokens[index]
         if token.kind == TOKEN_EOF -> break
         if brace_depth == 0 && token.kind == TOKEN_IDENT && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_COLON {
-            field :: token.payload.decoded
+            field :: token_decoded(tables, token)
             value_index :: index + 2
             if field == {
                 "name" | "version" | "edition" -> {
@@ -1019,7 +1023,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                         "name" -> {
                             if name_seen -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package name is declared more than once", "one manifest root has one package identity", "keep one `name:` field"))
                             name_seen = true
-                            if valid_string -> name = tokens[value_index].payload.decoded else -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package name must be a string", "package identity uses the manifest's declared name", "write `name: \"package_name\"`"))
+                            if valid_string -> name = token_decoded(tables, tokens[value_index]) else -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package name must be a string", "package identity uses the manifest's declared name", "write `name: \"package_name\"`"))
                         }
                         "version" -> {
                             if version_seen -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package version is declared more than once", "dependency selection uses one declared package version", "keep one `version:` field"))
@@ -1030,7 +1034,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                             if edition_seen -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package edition is declared more than once", "one manifest root selects one language edition", "keep one `edition:` field"))
                             edition_seen = true
                             if {
-                                valid_string -> edition = tokens[value_index].payload.decoded
+                                valid_string -> edition = token_decoded(tables, tokens[value_index])
                                 else -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package edition must be a string", "language edition selection comes from the canonical package manifest", "write `edition: \"2028\"`"))
                             }
                         }
@@ -1044,7 +1048,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                     runtime_value := ""
                     if {
                         runtime_value_index < tokens.len() && (jet_driver_is_manifest_string(tokens[runtime_value_index].kind) || tokens[runtime_value_index].kind == TOKEN_IDENT) -> {
-                            runtime_value = tokens[runtime_value_index].payload.decoded
+                            runtime_value = token_decoded(tables, tokens[runtime_value_index])
                             runtime_layer := jet_ring_parse_manifest_layer(runtime_value)
                             if {
                                 runtime_layer == None -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package runtime ceiling is unsupported", "runtime ceilings are the canonical core, alloc, or hosted layers", "select `runtime: core`, `runtime: alloc`, or `runtime: hosted`"))
@@ -1067,9 +1071,9 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                                 authority_close_index == None -> &diagnostics.push(jet_driver_authority_diagnostic(token.span, "`authority:` must be a closed record value"))
                                 else -> {
                                     authority_close :: authority_close_index ?? authority_open_index
-                                    jet_driver_validate_authority_fields(tokens, authority_open_index, authority_close, token.span, &diagnostics)
-                                    authority_needs = jet_driver_parse_authority_needs(source, tokens, authority_open_index, authority_close, token.span, &diagnostics)
-                                    authority_holds :: jet_driver_parse_authority_holds(source, tokens, authority_open_index, authority_close, token.span, &diagnostics)
+                                    jet_driver_validate_authority_fields(tokens, tables, authority_open_index, authority_close, token.span, &diagnostics)
+                                    authority_needs = jet_driver_parse_authority_needs(source, tokens, tables, authority_open_index, authority_close, token.span, &diagnostics)
+                                    authority_holds :: jet_driver_parse_authority_holds(source, tokens, tables, authority_open_index, authority_close, token.span, &diagnostics)
                                     authority_allow = authority_holds.allow
                                     authority_deny = authority_holds.deny
                                     index = authority_close
@@ -1114,7 +1118,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                             if {
                                 close_index == None -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "the package dependency block is not closed", "dependency names and values are delimited by one balanced block", "close the `deps: .{{ ... }}` block"))
                                 else -> {
-                                    dependencies = jet_driver_parse_dependency_entries(source, manifest_path, tokens, block_open_index, close_index, &diagnostics)
+                                    dependencies = jet_driver_parse_dependency_entries(source, manifest_path, tokens, tables, block_open_index, close_index, &diagnostics)
                                     index = close_index
                                 }
                             }
@@ -1133,8 +1137,8 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                             if {
                                 close_index == None -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "the package outputs block is not closed", "output entry bindings are delimited by one balanced block", "close the `outputs: .{{ ... }}` block"))
                                 else -> {
-                                    entry = jet_driver_manifest_entry_function(manifest_path, tokens, block_open_index, close_index, &diagnostics)
-                                    outputs = jet_driver_manifest_outputs(tokens, block_open_index, close_index)
+                                    entry = jet_driver_manifest_entry_function(manifest_path, tokens, tables, block_open_index, close_index, &diagnostics)
+                                    outputs = jet_driver_manifest_outputs(tokens, tables, block_open_index, close_index)
                                     index = close_index
                                 }
                             }
@@ -1998,20 +2002,174 @@ fn jet_driver_namespace_item_names(items: [Item]) -> [NamedSpan] Never! {
     names
 }
 
-// The first zero-width span at or after `start` that no import of `imports`
-// already occupies, so every compiler-owned import keeps its own edge identity.
-fn jet_driver_free_binding_span(imports: [ImportDecl], start: Int) -> Span Never! {
-    candidate := start
-    loop {
-        taken :: loop declaration in imports {
-            if declaration.span.start == candidate && declaration.span.end == candidate {
-                break true
-            }
-        } ?? false
-        if !taken -> break
-        candidate += 1
+// The source bytes a module was parsed from; none for a host-implemented
+// Core module.
+fn jet_driver_module_source_bytes(unit: JetDriverSourceUnit, roots: [JetDriverAuthorizedSourceRoot], core_sources: [JetDriverCoreSource]) -> [U8] Never! {
+    if jet_driver_unit_is_core(unit) {
+        if unit.file_index < 0 || unit.file_index >= core_sources.len() -> return [U8]{}
+        return core_sources[unit.file_index].source.bytes()
     }
-    Span{start: candidate, end: candidate}
+    if unit.root_index < 0 || unit.root_index >= roots.len() || unit.file_index < 0 || unit.file_index >= roots[unit.root_index].files.len() -> return [U8]{}
+    roots[unit.root_index].files[unit.file_index].source.bytes()
+}
+
+// D-MOD-CYCLE1=A: the source bytes of one default (a parameter default or
+// precondition, or a field default or computed value) that a call or struct
+// literal splices into the calling module's body, where its names resolve.
+// `key` is the name the caller spells (function or method); "" marks a
+// default reached from every module: a field default (a literal or derived
+// `Default` may not spell its struct), a trait method's (dispatch may be
+// implicit), or one inside a template body (its generated owner may carry a
+// name no source spells). A default's range runs from the declared type to
+// the next declaration, so it covers the whole default expression.
+struct JetDriverDefaultRegion {
+    key: String
+    module_index: Int
+    start: Int
+    end: Int
+}
+
+fn jet_driver_param_default_regions(key: String, params: [Param], last_end: Int, module_index: Int, regions: &[JetDriverDefaultRegion]) Never! {
+    loop index in 0..<params.len() {
+        if params[index].default == None -> next
+        end :: if index + 1 < params.len() -> params[index + 1].name_span.start else -> last_end
+        &regions.push(JetDriverDefaultRegion{key: key, module_index: module_index, start: params[index].ty_span.end, end: end})
+    }
+}
+
+fn jet_driver_default_key(template: Bool, name: String) -> String Never! {
+    if template -> return ""
+    ~name
+}
+
+fn jet_driver_func_default_regions(function: Func, template: Bool, module_index: Int, regions: &[JetDriverDefaultRegion]) Never! {
+    key :: jet_driver_default_key(template, function.name)
+    last_end := function.span.end
+    if function.return_type_span == .Val(span) -> last_end = span.start
+    jet_driver_param_default_regions(key, function.params, last_end, module_index, &regions)
+    // A precondition is checked at each call site, in the caller's scope.
+    loop clause in function.pre {
+        end :: if clause.message_span.end > clause.span.end -> clause.message_span.end else -> clause.span.end
+        &regions.push(JetDriverDefaultRegion{key: key, module_index: module_index, start: clause.span.start, end: end})
+    }
+}
+
+fn jet_driver_default_regions(items: [Item], template: Bool, module_index: Int, regions: &[JetDriverDefaultRegion]) Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> jet_driver_func_default_regions(function, template, module_index, &regions)
+            .Struct(definition) -> {
+                loop index in 0..<definition.fields.len() {
+                    field :: definition.fields[index]
+                    if field.default == None && field.computed == None -> next
+                    end := definition.span.end
+                    if index + 1 < definition.fields.len() -> end = definition.fields[index + 1].name_span.start
+                    loop method in definition.methods {
+                        if method.span.start > field.ty_span.end && method.span.start < end -> end = method.span.start
+                    }
+                    &regions.push(JetDriverDefaultRegion{key: "", module_index: module_index, start: field.ty_span.end, end: end})
+                }
+                loop method in definition.methods -> jet_driver_func_default_regions(method, template, module_index, &regions)
+            }
+            .Enum(definition) -> loop method in definition.methods -> jet_driver_func_default_regions(method, template, module_index, &regions)
+            .Impl(definition) -> loop method in definition.methods -> jet_driver_func_default_regions(method, template || definition.trait_name != None, module_index, &regions)
+            .Trait(definition) -> loop method in definition.methods -> jet_driver_param_default_regions("", method.params, method.span.end, module_index, &regions)
+            .ExternRust(block) -> loop function in block.functions -> jet_driver_param_default_regions(jet_driver_default_key(template, function.name), function.params, function.span.end, module_index, &regions)
+            .CModule(block) -> loop function in block.functions -> jet_driver_param_default_regions(jet_driver_default_key(template, function.name), function.params, function.span.end, module_index, &regions)
+            .CodeModule(definition) -> jet_driver_default_regions(definition.body ?? [Item]{}, template, module_index, &regions)
+            .GenericModule(definition) -> jet_driver_default_regions(definition.body, template, module_index, &regions)
+            .TemplateLoop(definition) -> jet_driver_template_default_regions(definition.body, module_index, &regions)
+            .UserDerive(definition) -> jet_driver_template_default_regions(definition.body, module_index, &regions)
+            else -> {}
+        }
+    }
+}
+
+fn jet_driver_template_default_regions(body: [DeriveBodyItem], module_index: Int, regions: &[JetDriverDefaultRegion]) Never! {
+    loop entry in body {
+        if entry == {
+            .Item(item) -> jet_driver_default_regions([Item]{item}, true, module_index, &regions)
+            .Loop(_, _, _, nested, _) -> jet_driver_template_default_regions(nested, module_index, &regions)
+            .Stmt(_) -> {}
+        }
+    }
+}
+
+// D-MOD-CYCLE1=A: the names of other members each package member can reach,
+// stored as its `namespace_refs`. Semantic registration binds only these in
+// the member's module scope, so a module scope holds the names its body can
+// spell rather than every name of the package (M files x N names). A member
+// reaches a sibling name its source spells, or one spelled by a default that
+// a call or literal in it can splice in (closed over defaults of defaults);
+// registration adds the Prelude derive vocabulary and falls back to the whole
+// namespace for a module whose items come from a template elsewhere.
+// `members` and `owners` hold each package of two or more members: its
+// module positions and its name -> member position table.
+fn jet_driver_namespace_reach(modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], roots: [JetDriverAuthorizedSourceRoot], core_sources: [JetDriverCoreSource], members: [[Int]], owners: [[String:Int]]) {
+    regions := [JetDriverDefaultRegion]{}
+    loop module_index in 0..<modules.len() -> jet_driver_default_regions(modules[module_index].program.items, false, module_index, &regions)
+    // Default key -> slot of its words; each default keeps the words that
+    // name a namespace member or another default.
+    default_slots := [String:Int]{}
+    default_words := [[String]]{}
+    default_seen := [[String:Bool]]{}
+    loop region in regions {
+        if default_slots.get(region.key) != None -> next
+        default_slots[region.key] = default_words.len()
+        &default_words.push([String]{})
+        &default_seen.push([String:Bool]{})
+    }
+    namespace_names := [String:Bool]{}
+    loop table_index in 0..<members.len() {
+        loop module_index in members[table_index] {
+            loop name in modules[module_index].namespace_names -> namespace_names[name] = true
+        }
+    }
+    bytes := [U8]{}
+    bytes_module := -1
+    loop region in regions {
+        if region.module_index != bytes_module {
+            bytes = jet_driver_module_source_bytes(source_units[modules[region.module_index].source_unit_index], roots, core_sources)
+            bytes_module = region.module_index
+        }
+        slot :: default_slots.get(region.key) ?? next
+        words := [String]{}
+        sema_source_words(bytes, region.start, region.end, &default_seen[slot], &words)
+        loop word in words {
+            if namespace_names.get(word) != None || default_slots.get(word) != None -> &default_words[slot].push(word)
+        }
+    }
+    always := [String]{}
+    if default_slots.get("") == .Val(slot) -> always = default_words[slot]
+    loop table_index in 0..<members.len() {
+        loop (position, module_index) in members[table_index] {
+            source :: jet_driver_module_source_bytes(source_units[modules[module_index].source_unit_index], roots, core_sources)
+            seen := [String:Bool]{}
+            words := [String]{}
+            sema_source_words(source, 0, source.len(), &seen, &words)
+            loop word in always {
+                if seen.get(word) != None -> next
+                seen[word] = true
+                &words.push(word)
+            }
+            refs := [String]{}
+            cursor := 0
+            loop cursor < words.len() {
+                word :: words[cursor]
+                cursor += 1
+                if owners[table_index].get(word) == .Val(owner) {
+                    if owner != position -> &refs.push(word)
+                }
+                slot :: default_slots.get(word) ?? next
+                loop extra in default_words[slot] {
+                    if seen.get(extra) != None -> next
+                    seen[extra] = true
+                    &words.push(extra)
+                }
+            }
+            modules[module_index].namespace_refs = refs
+        }
+    }
 }
 
 fn jet_driver_path_leaf(path: String) -> String Never! {
@@ -2020,20 +2178,23 @@ fn jet_driver_path_leaf(path: String) -> String Never! {
 }
 
 // D-MOD-CYCLE1=A: make every package one namespace. A name declared in two
-// member files is E0624, a library package declaring `fn run` is E0625, and
-// each member receives compiler-owned bindings for its siblings' top-level
-// names. Those bindings are ordinary file-import and member-list edges, so
-// sema, lowering, and every tier resolve a sibling name exactly like an
-// imported one. Their zero-width spans are not written source; they never
-// render. The binding aliases start with `__jet_pkg_`.
+// member files is E0624 and a library package declaring `fn run` is E0625.
+// Each member records its package (`namespace`) and the names it contributes
+// (`namespace_names`); semantic registration keeps ONE name -> declaring
+// member table per package and consults it after a module's own
+// declarations and imports (Rust `NameLedger::namespace_owner`). No member
+// receives import rows or edges for its siblings.
 fn jet_driver_bind_package_namespaces(
     modules: &[JetDriverLoadedModule],
-    edges: &[SemaRegistrationImportEdge],
     source_units: [JetDriverSourceUnit],
     packages: [JetDriverPackageInfo],
     roots: [JetDriverAuthorizedSourceRoot],
+    core_sources: [JetDriverCoreSource],
     diagnostics: &[Diagnostic],
 ) -> Bool {
+    // Packages of two or more members, for jet_driver_namespace_reach.
+    shared_members := [[Int]]{}
+    shared_owners := [[String:Int]]{}
     loop package in packages {
         members := [Int]{}
         loop module_index in 0..<modules.len() {
@@ -2094,37 +2255,18 @@ fn jet_driver_bind_package_namespaces(
                 }
             }
         }
-        loop module_index in members {
-            next_start := 0
-            loop sibling_position in 0..<members.len() {
-                sibling_index :: members[sibling_position]
-                if sibling_index == module_index || names[sibling_position].len() == 0 -> next
-                sibling_unit :: source_units[modules[sibling_index].source_unit_index]
-                alias :: "__jet_pkg_{sibling_unit.module_name}"
-                file_span :: jet_driver_free_binding_span(modules[module_index].program.imports, next_start)
-                list_span :: jet_driver_free_binding_span(modules[module_index].program.imports, file_span.start + 1)
-                next_start = list_span.start + 1
-                items := [ImportedItem]{}
-                item_spans := [Span]{}
-                loop declared in names[sibling_position] {
-                    &items.push(ImportedItem{original: declared.name, alias: None})
-                    &item_spans.push(list_span)
-                }
-                file_import :: ImportDecl{kind: ImportKind.File{path: sibling_unit.relative_path, span: file_span}, alias: alias, alias_span: file_span, span: file_span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
-                list_import :: ImportDecl{kind: ImportKind.Unqualified{module_alias: alias, module_alias_span: list_span, items: items, items_span: list_span, span: list_span}, alias: alias, alias_span: list_span, span: list_span, item_spans: item_spans, local_spans: item_spans, is_pub: false, is_package_pub: false, inline_version: None}
-                &modules[module_index].program.imports.push(file_import)
-                &modules[module_index].program.imports.push(list_import)
-                &edges.push(SemaRegistrationImportEdge{source_module_identity: modules[module_index].module_identity, target_module_identity: modules[sibling_index].module_identity, target_package_identity: sibling_unit.package_identity, declaration: file_import, foreign_binding: None})
-                &edges.push(SemaRegistrationImportEdge{source_module_identity: modules[module_index].module_identity, target_module_identity: modules[sibling_index].module_identity, target_package_identity: sibling_unit.package_identity, declaration: list_import, foreign_binding: None})
-            }
+        namespace :: source_units[modules[members[0]].source_unit_index].package_identity
+        loop position in 0..<members.len() {
+            modules[members[position]].namespace = namespace
+            modules[members[position]].namespace_names = loop declared in names[position] -> declared.name
+        }
+        if members.len() > 1 {
+            &shared_members.push(members)
+            &shared_owners.push(owners)
         }
     }
+    if shared_members.len() > 0 -> jet_driver_namespace_reach(&modules, source_units, roots, core_sources, shared_members, shared_owners)
     true
-}
-
-// A compiler-owned package sibling binding (D-MOD-CYCLE1=A).
-fn jet_driver_is_namespace_binding(declaration: ImportDecl) -> Bool Never! {
-    declaration.alias.starts_with("__jet_pkg_")
 }
 
 // Root component of every embedded Core module path (`<corelib>/Core/perf/perf.jet`),
@@ -3300,7 +3442,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
             diagnostics[import_diagnostic_index] = diagnostic_with_source_path(diagnostics[import_diagnostic_index], unit.path, 0)
         }
     }
-    if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(&modules, &resolved_imports, source_units, catalog.packages, request.authorized_sources.roots, &diagnostics) {
+    if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(&modules, source_units, catalog.packages, request.authorized_sources.roots, request.core_sources, &diagnostics) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
     }
     modules = jet_driver_order_core_modules(^modules, source_units, request.core_sources, bare_modules)

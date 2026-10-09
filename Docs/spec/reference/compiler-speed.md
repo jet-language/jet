@@ -91,6 +91,32 @@ architecture constraints, not a claim about which stage has already moved.
    ship step, while the default development path avoids work that does not
    affect the current edit.
 
+### Front-end storage and ordered parallel work
+
+Lexer tokens carry source-local `Name` IDs and literal-table row indices.
+Repeated spellings share one first-seen-order name table; interpolation tokens
+use that same table. Parser, formatter, manifest readers and REPL relocation
+must retain the tables alongside the tokens. IDs from independent lexed
+sources are not interchangeable, and AST names still resolve to their source
+spellings at the parser boundary.
+
+Emitter manifest symbol maps and identity indexes use the existing U64
+identity directly, rather than allocating its decimal spelling for each
+lookup. Textual names and composite textual keys remain textual.
+
+Parallel body checking, lowering and emission retain source/program ordering
+when collecting results. Module-local authority and Core-usage finalization
+runs only after global failure/effect solving; it reads shared immutable
+inputs and combines diagnostics and usage rows in module order. Thread
+admission uses the compiler's existing work and memory limits. Neither thread
+count nor completion order may change diagnostics, emitted code or semantics.
+
+Timing receipts distinguish front-end compilation through emitted source
+from backend compilation and execution. Compare feature checkpoints with the
+same dev baseline, corpus, CPU affinity and build profile; report their
+measured deltas, not projections from older or differently configured runs.
+
+
 ## Performance gate and dated evidence
 
 The repository gate compares each matched cell and metric independently. Every
