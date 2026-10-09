@@ -515,6 +515,14 @@ const rustOutcomeAlias = (rustPath) => {
   const disabled = [...noRustPrelude].some((module) => !module || decl.path === module || decl.path.startsWith(`${module}::`));
   return decl.visible && !decl.gated && (target !== "Result" || !shadow && !disabled);
 };
+const nominalOutcome = [...types].some(([key, decls]) => key.split("::").pop() === "JetOutcome" &&
+  decls.some((decl) => decl.visible && !decl.gated && (decl.kind === "struct" || decl.kind === "enum")));
+const rustOutcomeAlias = (rustPath) => {
+  const found = declarationOf(rustPath.replace(/^crate::/, ""));
+  if (!found?.decls.some((decl) => decl.kind === "rust-sum-alias")) return false;
+  if (found.decls.length !== 1 || nominalOutcome) throw new Error("JetOutcome sum alias: visible nominal declaration is ambiguous");
+  return found.decls[0].visible && !found.decls[0].gated;
+};
 
 // Computed route families (TIR routes.rs): precise_builtin_route spells every
 // precise-numeric entry point `jet_<type>_<func>` and geometry_method_route
