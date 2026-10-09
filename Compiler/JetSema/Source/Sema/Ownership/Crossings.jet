@@ -21,6 +21,7 @@ pub enum SemaSendCrossing {
     Kernel
     InterruptCallback
     SharedStorage
+    FrozenSnapshot
 }
 
 pub enum SemaSendProblemKind {
@@ -31,6 +32,7 @@ pub enum SemaSendProblemKind {
     ThreadConfined(name: String)
     LocalReactive(name: String)
     ViewBorrow
+    SharedMutation
     UnknownType(name: String)
 }
 
@@ -227,7 +229,8 @@ fn sema_ownership_crossing_type_inner(ty: Type, crossing: SemaSendCrossing, clos
         .InlineRange(base, _, _) -> {
             return if cell_only -> sema_ownership_crossing_type_inner(base, crossing, true, strict_callable, cell_only, environment, context, &walk) else -> None
         }
-        .List(inner) | .Shared(inner) | .Option(inner) -> sema_ownership_crossing_type_inner(inner, crossing, true, strict_callable, cell_only, environment, context, &walk)
+        .List(inner) | .Option(inner) -> sema_ownership_crossing_type_inner(inner, crossing, true, strict_callable, cell_only, environment, context, &walk)
+        .Shared(inner) -> if crossing == SemaSendCrossing.FrozenSnapshot -> Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.SharedMutation)) else -> sema_ownership_crossing_type_inner(inner, crossing, true, strict_callable, cell_only, environment, context, &walk)
         .Map(key, _, value) -> {
             key_problem :: sema_ownership_crossing_type_inner(key, crossing, true, strict_callable, cell_only, environment, context, &walk)
             if key_problem != None -> return key_problem
@@ -356,6 +359,7 @@ pub fn sema_ownership_crossing_describe(problem: SemaSendabilityProblem) -> Stri
         .ThreadConfined(name) -> "`{name}` owns thread-local state and must stay on the thread that created it"
         .LocalReactive(name) -> "`#Local` keeps `{name}` in the fast one-thread form"
         .ViewBorrow -> "a view is a borrow, not an owned value"
+        .SharedMutation -> "the value contains `Shared`, whose lock-backed handle would keep shared mutation"
         .UnknownType(name) -> "the compiler has no registered ownership facts for `{name}`"
     }
 }
