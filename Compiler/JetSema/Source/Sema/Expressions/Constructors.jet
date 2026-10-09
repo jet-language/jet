@@ -1545,6 +1545,15 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
     sema_expression_typed_literal_mismatch(result_head, span, &diagnostics)
 }
 
+// D-DOTCTOR3 scalar heads use parameter acceptance, never a numeric retag.
+fn sema_expression_typed_literal_float_to_integer(head: Type, offered: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    if (offered == Type.Float || offered == Type.Float32) && sema_expr_is_integer(head) {
+        &diagnostics.push(sema_error("E0112", span, "a `{type_name(offered)}` can't be used where a `{type_name(head)}` is expected", "a typed literal accepts its body like a parameter; converting a decimal value to a whole number must be explicit", "use `{type_name(head)}.from_float(value)` and handle its failure, or `math.round(value)` to round to the nearest Int"))
+        return true
+    }
+    false
+}
+
 // Integer heads own an explicit conversion, including narrowing fixed carriers.
 // A changed result annotation alone cannot change the value's representation.
 fn sema_expression_typed_literal_fixed_conversion(source: Type, head: Type) -> Bool {

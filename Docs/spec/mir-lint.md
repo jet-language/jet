@@ -9,6 +9,10 @@ its rule-by-rule fixtures are `Compiler/JetOptimizer/Tests/LintFixtures.jet`
 (assembled by `Compiler/JetOptimizer/Tests/run-lint-fixtures.mjs`). The
 archived Rust bootstrap compiler does not carry the lint.
 
+The owned-payload and owned-read Phi fixtures observe the stored destination
+through `lf_borrowed_len`, a borrowed `core.builtin::list_len` receiver. This
+observation must not consume the destination before its final owner is dropped.
+
 ## When it runs
 
 - Once on the program the optimizer returns, on every compile and in every
@@ -145,6 +149,13 @@ second proof of exclusivity, view validity, and sendability. On the Rust path,
 rustc's borrow checker and `Send` checks re-prove them for the generated code.
 The native backend has no such re-check. These families use only facts the
 MIR already carries, never sema's alias graph:
+
+The callee index retains capture access and return-view provenance as well as
+ordinary parameters and solved effects. Function, type, value, place and block
+lookups use raw `U64` IDs; decimal identities belong only to the separate
+String-keyed safety/path tables. A physical transfer demands an owner only
+when its `Yes` consumption fact has `requires_owner: true`; a `Through`
+carrier transfer does not add that demand.
 
 - **Places.** Two places overlap when they share a root and no projection
   separates them. Different fields are disjoint, and so are index projections

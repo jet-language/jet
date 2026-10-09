@@ -424,6 +424,10 @@ fn lf_push(b: &FxBuilder, place: MIRPlaceID) Never! {
     fx_do(&b, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "list_push"), receiver: pointer, receiver_place: Val(place), args: [MIRValueID]{four}, aggregate_fields: None}})
 }
 
+fn lf_borrowed_len(b: &FxBuilder, value: MIRValueID) Never! {
+    _ := fx_copy(&b, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "list_len"), receiver: value, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+}
+
 // The element `root[index]`.
 fn lf_index_place(b: &FxBuilder, root: MIRPlaceID, index: MIRValueID, ty: MIRType) -> MIRPlaceID Never! {
     base := MIRPlaceBase.Static{name: ""}

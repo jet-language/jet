@@ -31,6 +31,6 @@ fn run() {
     loop byte in 0..<32 -> &bytes.push(U8{byte})
     controls :: String.from_bytes(bytes) ?? panic("C0 text")
     encoded :: ast_comptime_value_json(CtValue.Str(controls)) ?? panic("C0 JSON")
-    assert_eq(encoded, ast_comptime_json_quote(controls))
+    assert_eq(encoded, foundation_json_quote(controls))
     assert(encoded.contains("\\u001f"))
 }
