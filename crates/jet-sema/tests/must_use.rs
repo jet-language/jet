@@ -202,3 +202,27 @@ fn embedded_generic_methods_keep_owner_and_method_scopes() {
     let codes = err_codes(include_str!("../../../tests/ui/embedded_generic_method_scope.jet"));
     assert!(codes.is_empty(), "unexpected errors: {codes:?}");
 }
+
+#[test]
+fn fallible_sibling_supplies_uncontextual_err_arm_carrier() {
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/ErrArmJoinFixtures.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}
+
+#[test]
+fn deferred_err_arm_keeps_branch_bindings_and_optional_flow() {
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/ErrArmScopeFixtures.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}
+
+#[test]
+fn deferred_err_arm_joins_actual_moves_and_checks_scope_end_after_payload() {
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/ErrArmFlowFixtures.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}
+
+#[test]
+fn user_err_function_keeps_ordinary_branch_call_semantics() {
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/ErrArmShadowFixtures.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}

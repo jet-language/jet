@@ -1129,10 +1129,10 @@ impl<'a> Checker<'a> {
     }
 
     /// Check a body that may not run at all: a lambda or `task { … }` body,
-    /// or a `??` fallback block. A `return` inside such a body still returns
-    /// the enclosing function (that targeting is correct and the corpus
-    /// depends on it), but only when the body runs — so it is a CONDITIONAL
-    /// return, not an unconditional one. Statements after the construct stay
+    /// or a `??` fallback block. Return targeting belongs to the active
+    /// callable contract: lambda returns exit the lambda (D-TAIL-RETURN1),
+    /// while inline fallback returns exit the enclosing callable. Either
+    /// way, the body may not run, so statements after the construct stay
     /// reachable.
     ///
     /// Without this, `check_stmt` sees `flow.reachable == false` for every
