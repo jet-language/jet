@@ -265,6 +265,21 @@ own source manifest. The
 checks that boundary; the
 [`MIR schema grammar guard`](../../Compiler/JetBackend/Tests/mir-schema.test.mjs)
 keeps observation aligned with public-by-default declarations and private fields.
+
+Proof chains use one shared
+[`git-archive source export`](../../Tools/agent/proof-source.mjs) per full commit,
+not a moving checkout. `node Tools/agent/proof-source.mjs <full-sha> [repository]`
+prints its source directory; the sibling manifest records the commit, tree,
+tracked blob hashes and executable modes. Each phase calls
+`assertPinnedSource(source, sha)` before consuming it. Regeneration uses a
+writable copy outside the shared export. `proofTargetDirectory(sha)` provides
+the corresponding external Cargo target; set `CARGO_TARGET_DIR` only after
+export creation, before invoking the exported `jet-env`. When creating the
+export through the live checkout's `jet-env`, unset `CARGO_TARGET_DIR` so that
+checkout does not stamp the proof target as its own. The
+[`proof source guard`](../../Tools/agent/proof-source.test.mjs) checks tracked
+bytes, symlink targets and executable modes without requiring dev to stand still.
+
 The private startup-output factory packages supplied environment bytes and
 terminal facts as an ordinary checked Source value, retaining owned typed bytes.
 Native suppliers must match that value's checked layout and ownership.
