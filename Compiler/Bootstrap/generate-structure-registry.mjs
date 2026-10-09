@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { factDeclarations } from './fact-declarations.mjs';
+import { parseCoreSource } from '../../Tools/agent/check-core-surface-ledger.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const corePath = 'crates/jet-codegen/src/Prelude/Core.jet';
@@ -14,40 +15,21 @@ const core = await readFile(resolve(root, corePath), 'utf8');
 const facts = await readFile(resolve(root, factsPath), 'utf8');
 const quote = value => JSON.stringify(value).replaceAll('{', '{{').replaceAll('}', '}}');
 const strings = values => `[String]{${values.map(quote).join(', ')}}`;
-const names = text => text.split(',').map(value => value.trim()).filter(Boolean);
-const bootstrap = [];
-const modules = [];
-let roots;
-for (const raw of core.split('\n')) {
-  const line = raw.trim();
-  if (!line || line.startsWith('//')) continue;
-  if (line.startsWith('bootstrap ')) {
-    const match = line.match(/^bootstrap (\w+) depends_on \[([^\]]*)\]$/);
-    if (!match) throw new Error(`invalid bootstrap declaration: ${line}`);
-    bootstrap.push(`    JetCLICoreBootstrap{name: ${quote(match[1])}, dependencies: ${strings(names(match[2]))}},`);
-  } else if (line.startsWith('root_types ')) {
-    const match = line.match(/^root_types \{([^}]*)\}$/);
-    if (!match || roots) throw new Error(`invalid root_types declaration: ${line}`);
-    roots = names(match[1]);
-  } else if (line.startsWith('module ')) {
-    const match = line.match(/^module (\S+) exports \{([^}]*)\}(?: types \{([^}]*)\})? depends_on \[([^\]]*)\]$/);
-    if (!match) throw new Error(`invalid core module declaration: ${line}`);
-    const types = [];
-    for (const item of names(match[3] ?? '')) {
-      const type = item.match(/^(\w+):(plain|crypto_nominal|generic)(?:\(([^)]*)\))?$/);
-      if (!type) throw new Error(`invalid type export: ${item}`);
-      let kind;
-      if (type[2] === 'plain') kind = type[3] === undefined ? 'CoreLeafKind.Plain' : `CoreLeafKind.Enum{variants: ${strings(type[3].split('|'))}}`;
-      else if (type[2] === 'crypto_nominal') kind = 'CoreLeafKind.CryptoNominal';
-      else {
-        if (!/^\d+$/.test(type[3] ?? '')) throw new Error(`invalid generic arity: ${item}`);
-        kind = `CoreLeafKind.Generic{arity: ${type[3]}}`;
-      }
-      types.push(`CoreModuleTypeExport{name: ${quote(type[1])}, kind: ${kind}}`);
-    }
-    modules.push(`    CoreModuleDeclaration{module_name: ${quote(match[1])}, members: ${strings(names(match[2]))}, type_exports: [CoreModuleTypeExport]{${types.join(', ')}}, dependencies: ${strings(names(match[4]))}},`);
-  }
-}
+const declarations = parseCoreSource(core, root);
+const bootstrap = declarations.bootstraps.map(step =>
+  `    JetCLICoreBootstrap{name: ${quote(step.name)}, dependencies: ${strings(step.dependencies)}},`);
+const roots = declarations.rootTypes;
+const modules = declarations.modules.map(module => {
+  const types = module.types.map(type => {
+    const kind = type.genericArity
+      ? `CoreLeafKind.Generic{arity: ${type.genericArity}}`
+      : type.variants.length
+        ? `CoreLeafKind.Enum{variants: ${strings(type.variants)}}`
+        : type.kind === 'crypto_nominal' ? 'CoreLeafKind.CryptoNominal' : 'CoreLeafKind.Plain';
+    return `CoreModuleTypeExport{name: ${quote(type.name)}, kind: ${kind}}`;
+  });
+  return `    CoreModuleDeclaration{module_name: ${quote(module.module)}, members: ${strings(module.members)}, type_exports: [CoreModuleTypeExport]{${types.join(', ')}}, dependencies: ${strings(module.dependencies)}},`;
+});
 const rows = [];
 for (const row of factDeclarations(facts)) {
   if (!row.name.startsWith('Structure.')) continue;
