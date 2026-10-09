@@ -25,38 +25,38 @@ fn jet_cli_perf_capture_observations(capture: &JetCLIPerfCapture, observations: 
         if live.pid != first.live.pid || live.start_id != first.live.start_id || live.session_id != first.live.session_id || live.source_id != first.live.source_id || live.build_id != first.live.build_id || live.revision != first.live.revision || live.world_id != first.live.world_id -> return Err(jet_cli_read_error("perf observations cross a process/session/source/build revision boundary"))
         if observed.at_ns < previous -> return Err(jet_cli_read_error("perf observation clock is not monotonic"))
         previous = observed.at_ns
-        loop task in live.tasks {
-            if ![String]{"running", "queued", "blocked", "done"}.contains(task.state) -> continue
-            fact :: TraceTask{id: task.id, parent: task.parent, state: task.state, wait: task.wait, cancelled: task.cancelled, symbol: symbol}
-            if task_indexes.has_key(task.id) {
-                index :: task_indexes[task.id]
-                if capture.tasks[index].parent != task.parent -> return Err(jet_cli_read_error("observed task parent changed"))
+        loop observed_task in live.tasks {
+            if ![String]{"running", "queued", "blocked", "done"}.contains(observed_task.state) -> continue
+            fact :: TraceTask{id: observed_task.id, parent: observed_task.parent, state: observed_task.state, wait: observed_task.wait, cancelled: observed_task.cancelled, symbol: symbol}
+            if task_indexes.has_key(observed_task.id) {
+                index :: task_indexes[observed_task.id]
+                if capture.tasks[index].parent != observed_task.parent -> return Err(jet_cli_read_error("observed task parent changed"))
                 capture.tasks[index] = fact
             } else {
                 if capture.tasks.len() >= 4096 {
                     capture.policy.task_rows_truncated = true
                     continue
                 }
-                task_indexes[task.id] = capture.tasks.len()
-                first_seen[task.id] = observed.at_ns
+                task_indexes[observed_task.id] = capture.tasks.len()
+                first_seen[observed_task.id] = observed.at_ns
                 &capture.tasks.push(fact)
             }
-            last_seen[task.id] = observed.at_ns
+            last_seen[observed_task.id] = observed.at_ns
         }
     }
     loop index in 0..<capture.tasks.len() {
-        task :: capture.tasks[index]
-        if task.parent != U64{0} && !task_indexes.has_key(task.parent) -> return Err(jet_cli_read_error("observed task has an unobserved parent"))
+        observed_task :: capture.tasks[index]
+        if observed_task.parent != U64{0} && !task_indexes.has_key(observed_task.parent) -> return Err(jet_cli_read_error("observed task has an unobserved parent"))
         stable_id :: U64{index + 1}
-        stable_parent :: if task.parent == U64{0} -> U64{0} else -> U64{task_indexes[task.parent] + 1}
+        stable_parent :: if observed_task.parent == U64{0} -> U64{0} else -> U64{task_indexes[observed_task.parent] + 1}
         capture.tasks[index].id = stable_id
         capture.tasks[index].parent = stable_parent
-        if observations.len() > 1 -> &capture.spans.push(TraceSpan{clock: "monotonic", start_ns: Val(first_seen[task.id]), end_ns: Val(last_seen[task.id]), kind: "task_observed", parent_task_id: if stable_parent == U64{0} -> None else -> Val(stable_parent), reason: "", status: "captured", symbol: symbol, task_id: Val(stable_id)})
+        if observations.len() > 1 -> &capture.spans.push(TraceSpan{clock: "monotonic", start_ns: Val(first_seen[observed_task.id]), end_ns: Val(last_seen[observed_task.id]), kind: "task_observed", parent_task_id: if stable_parent == U64{0} -> None else -> Val(stable_parent), reason: "", status: "captured", symbol: symbol, task_id: Val(stable_id)})
     }
     if capture.spans.len() == 0 -> &capture.spans.push(TraceSpan{clock: "monotonic", start_ns: None, end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", status: "unavailable", symbol: symbol, task_id: None})
     // Instantaneous blocked facts, not invented syscall duration intervals.
-    loop task in latest.live.tasks {
-        if task_indexes.has_key(task.id) && task.state == "blocked" && trace_io_kind_for_wait(task.wait) == .Val(kind) -> &capture.io.push(TraceIO{start_ns: latest.at_ns, end_ns: latest.at_ns, kind: kind, task_id: U64{task_indexes[task.id] + 1}, wait: task.wait, symbol: symbol})
+    loop observed_task in latest.live.tasks {
+        if task_indexes.has_key(observed_task.id) && observed_task.state == "blocked" && trace_io_kind_for_wait(observed_task.wait) == .Val(kind) -> &capture.io.push(TraceIO{start_ns: latest.at_ns, end_ns: latest.at_ns, kind: kind, task_id: U64{task_indexes[observed_task.id] + 1}, wait: observed_task.wait, symbol: symbol})
     }
     loop channel in latest.live.channels {
         if channel.send_waiters == U64{0} && channel.recv_waiters == U64{0} -> continue
@@ -64,7 +64,12 @@ fn jet_cli_perf_capture_observations(capture: &JetCLIPerfCapture, observations: 
     }
     if latest.live.arena_allocations > U64{0} || latest.live.arena_bytes > U64{0} -> &capture.allocations.push(TraceAllocation{count: latest.live.arena_allocations, bytes: latest.live.arena_bytes, symbol: symbol})
     root := U64?{None}
-    loop task in capture.tasks { if task.parent == U64{0} { root = Val(task.id); break } }
+    loop observed_task in capture.tasks {
+        if observed_task.parent == U64{0} {
+            root = Val(observed_task.id)
+            break
+        }
+    }
     jet_cli_perf_window(&capture.profile, latest.live.runtime)
     if latest.live.runtime == .Val(window) {
         &capture.samples.push(TraceSample{domain: "wall", duration_ns: window.elapsed_ns, symbol: symbol})
