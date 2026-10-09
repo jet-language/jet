@@ -741,7 +741,7 @@ fn jet_raylib_load_texture_atlas(path: &str) -> RaylibTextureAtlas {
     let spec = jet_raylib_load_texture_atlas_spec(path);
     let native_texture = spec
         .texture_path
-        .as_ref()
+        .as_deref()
         .and_then(jet_raylib_native_texture);
     RaylibTextureAtlas {
         path: spec.path,

@@ -448,7 +448,9 @@ enum EmbeddedPreludePartSource {
 }
 
 fn push_embedded_encoding_json(out: &mut String) {
-    let mut source = include_str!("../../../jet-foundation/src/EncodingJson.rs");
+    let embedded_source = include_str!("../../../jet-foundation/src/EncodingJson.rs")
+        .replace("crate::Outcome::", "crate::");
+    let mut source = embedded_source.as_str();
     out.push_str("\nmod jet_encoding_json {\n");
     for (marker, body) in [
         (
@@ -470,6 +472,15 @@ fn push_embedded_encoding_json(out: &mut String) {
     out.push_str("\n}\n\n#[allow(non_snake_case)]\nmod EncodingJson { pub use crate::jet_encoding_json::*; }\n");
 }
 
+fn push_nested_foundation_import(out: &mut String, source: &str, marker: &str) {
+    let (before, after) = source.split_once(marker)
+        .expect("nested Foundation kernel module marker must exist");
+    out.push_str(before);
+    out.push_str(marker);
+    out.push_str("        use crate::jet_foundation;\n");
+    out.push_str(after);
+}
+
 #[cfg(test)]
 mod encoding_json_embedding_tests {
     #[test]
@@ -477,6 +488,7 @@ mod encoding_json_embedding_tests {
         let mut source = String::new();
         super::push_embedded_encoding_json(&mut source);
         assert!(!source.contains("include!("));
+        assert!(!source.contains("crate::Outcome::"));
         assert_eq!(source.matches("pub enum EncodingFormat {").count(), 1);
         assert_eq!(source.matches("pub struct EncodingError {").count(), 1);
         assert_eq!(source.matches("fn jet_encoding_error_kernel_show(").count(), 1);
@@ -663,6 +675,7 @@ const FOUNDATION_PLACEMENTS: &[(&str, FoundationPlacement)] = &[
     ("SHA256", FoundationPlacement::Module("SHA256")),
     ("PerformanceBudget", FoundationPlacement::Module("PerformanceBudget")),
     ("Numeric", FoundationPlacement::Module("jet_foundation_numeric")),
+    ("Monotonic", FoundationPlacement::Root),
     ("Facts", FoundationPlacement::Module("Facts")),
     ("ResourceSchedule", FoundationPlacement::Module("ResourceSchedule")),
     (
@@ -865,6 +878,9 @@ fn push_prelude_part(out: &mut String, name: &str, emitted: &mut HashSet<&'stati
         push_prelude_part(out, dependency, emitted);
     }
     match &part.source {
+        EmbeddedPreludePartSource::Static(source) if *source == FILE_HANDLES_PRELUDE => {
+            push_nested_foundation_import(out, source, "mod jet_file_lock_native {\n");
+        }
         EmbeddedPreludePartSource::Static(source) => out.push_str(source),
         EmbeddedPreludePartSource::Outcome => push_embedded_outcome(out),
         EmbeddedPreludePartSource::EncodingJson => push_embedded_encoding_json(out),
@@ -1993,7 +2009,6 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/EncodingTypes.rs"),
     JETSTD_COMMON_TYPES_PRELUDE,
     MAPPED_FILE_PRELUDE,
-    FILE_HANDLES_PRELUDE,
     JETSTD_XML_OPTIONS_PRELUDE,
     include_str!("../Prelude/CommandSuite.rs"),
     // D-DBPOLICY1=A: the closed row-policy language, compiled once. `DBPluginWire`
@@ -3674,7 +3689,7 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/Core/FileHandleOwners.rs"));
 
     for part in CORELIB_KERNEL_PARTS {
-        if (!needs_mapped_file && (*part == MAPPED_FILE_PRELUDE || *part == FILE_HANDLES_PRELUDE))
+        if (!needs_mapped_file && *part == MAPPED_FILE_PRELUDE)
             || (!needs_shared && *part == SHARED_ROUTES_PRELUDE)
         {
             continue;
@@ -3691,12 +3706,17 @@ fn push_corelib_prelude_body(
         } else {
             std::borrow::Cow::Borrowed(*part)
         };
-        // Host crates include UrlMime.rs directly, so it includes its sibling
-        // MIME kernel. AOT already embeds that kernel as the preceding part.
-        out.push_str(
-            part.strip_prefix("    include!(\"Mime.rs\");\n\n")
-                .unwrap_or(&part),
-        );
+        let part = part
+            .strip_prefix("    include!(\"Mime.rs\");\n\n")
+            .unwrap_or(&part);
+        // Nested host kernels must import the generated Foundation facade:
+        // unlike a Cargo dependency, that crate-root module is not in the
+        // Rust 2018 extern prelude.
+        if part == include_str!("../Prelude/CoreLib/JetStd/YAML.rs") {
+            push_nested_foundation_import(out, part, "    pub mod yaml {\n");
+        } else {
+            out.push_str(part);
+        }
     }
     // Typed query plans are shared semantic facts. Keep the root-level
     // definitions available to JetStd's Query carrier even when no optional
@@ -3748,6 +3768,13 @@ fn push_corelib_prelude_body(
          // AUDIT: D-EXEC1 keeps the raw handle, byte-slice and allocator\n\
          // adapters of the Jet-native backend's runtime ABI in this module.\n",
     );
+    // The AOT C-ABI seed adapters need the same generated physical headers,
+    // but not native-backend wrappers over optional source-owned net records.
+    let host_carriers = include_str!("../Prelude/Core/CAbiHost.rs")
+        .split_once("    unsafe extern \"C\" {\n")
+        .expect("host carrier declarations must precede extern functions").0;
+    out.push_str(host_carriers);
+    out.push_str("\n}\n");
     out.push_str(include_str!("../Prelude/Core/CAbi.rs"));
     out.push_str("\n// JET_VETTED_UNSAFE_END: jet_c_abi\n");
     out.push_str(include_str!("../Prelude/Core/CAbiSession.rs"));
@@ -4348,7 +4375,7 @@ fn push_mem_prelude(out: &mut String) {
     out.push_str("mod jet_uninit_semantics {\n");
     out.push_str(UNINIT_PRELUDE);
     out.push_str("\n}\n");
-    out.push_str("mod jet_mem {\n    mod jet_sentry {\n");
+    out.push_str("mod jet_mem {\n    use crate::jet_foundation;\n    mod jet_sentry {\n");
     out.push_str(MEM_SENTRY_PRELUDE);
     out.push_str("\n    }\n");
     out.push_str(MEM_PRELUDE);
@@ -4485,14 +4512,19 @@ fn data_plot_prelude_body() -> String {
 
 /// One flat fragment's source as the assembler emits it: its own imports removed,
 /// because `FLAT_PRELUDE_IMPORTS` declares them for the whole module instead.
-/// DataQuery.rs include!s SqlQuery.rs relative to the Prelude tree. AOT pastes
-/// that source into build/.work.*, where the nested include cannot resolve.
-/// Inline the kernel so rustc never sees a Prelude-relative path.
+/// DataQuery.rs includes SQL and CSV-read kernels relative to the Prelude tree.
+/// AOT pastes that source into build/.work.*, where nested includes cannot resolve.
+/// Inline both kernels so rustc never sees a Prelude-relative path.
 fn data_query_prelude_source() -> String {
-    include_str!("../Prelude/CoreLib/Top/DataQuery.rs").replace(
-        "    include!(\"../../Core/SqlQuery.rs\");\n",
-        include_str!("../Prelude/Core/SqlQuery.rs"),
-    )
+    include_str!("../Prelude/CoreLib/Top/DataQuery.rs")
+        .replace(
+            "    include!(\"../../Core/SqlQuery.rs\");\n",
+            include_str!("../Prelude/Core/SqlQuery.rs"),
+        )
+        .replace(
+            "include!(\"../../Core/CsvQueryRead.rs\");\n",
+            include_str!("../Prelude/Core/CsvQueryRead.rs"),
+        )
 }
 
 fn flat_prelude_body(source: &str) -> String {
@@ -4750,6 +4782,32 @@ fn uses_native_scheduler_for(used_core: &std::collections::HashSet<String>) -> b
 mod tests {
     use super::*;
     use crate::Sema::CompileMode;
+
+    #[test]
+    fn emitted_mem_has_one_private_byte_carrier_implementation() {
+        let mut source = String::new();
+        push_mem_prelude(&mut source);
+        for name in [
+            "jet_string_data",
+            "jet_string_byte_len",
+            "jet_foreign_bytes_len",
+            "jet_bytes_pack",
+            "jet_bytes_pack_iter",
+            "jet_bytes_free",
+            "jet_bytes_unpack",
+        ] {
+            assert_eq!(source.matches(&format!("fn {name}(")).count(), 1, "{name}");
+        }
+        assert!(source.contains("pub fn jet_bytes_pack(value: &[u8])"));
+    }
+
+    #[test]
+    fn emitted_data_query_inlines_both_relative_kernels() {
+        let source = data_query_prelude_source();
+        assert!(!source.contains("include!(\"../../Core/"));
+        assert_eq!(source.matches("fn jet_data_query_read_bounded(").count(), 1);
+        assert!(source.contains("fn parse_sql_query("));
+    }
 
     #[test]
     fn aot_ffi_host_installs_bridge_reporter() {
@@ -5109,12 +5167,27 @@ mod tests {
             &ReleaseDevtoolsPolicy::development(),
         );
         assert!(out.contains(JETSTD_COMMON_TYPES_PRELUDE));
-        assert!(out.contains(FILE_HANDLES_PRELUDE));
-        assert_eq!(out.matches(FILE_HANDLES_PRELUDE).count(), 1);
+        assert_eq!(out.matches("mod jet_file_lock_native {\n").count(), 1);
+        assert!(out.contains("mod jet_file_lock_native {\n        use crate::jet_foundation;\n"));
         assert!(
             !out.contains(MAPPED_FILE_PRELUDE),
             "unreferenced optional mapping must remain outside the text closure"
         );
+    }
+
+    #[test]
+    fn mapped_file_keeps_one_file_handle_dependency() {
+        let files = HashSet::from(["core.files::open".to_string()]);
+        let mut out = String::new();
+        push_corelib_prelude_with_policy(
+            &mut out,
+            &files,
+            false,
+            &ReleaseDevtoolsPolicy::development(),
+        );
+        assert!(out.contains(MAPPED_FILE_PRELUDE));
+        assert_eq!(out.matches("mod jet_file_lock_native {\n").count(), 1);
+        assert_eq!(out.matches("pub(crate) struct JetFsLockCall {").count(), 1);
     }
 
 

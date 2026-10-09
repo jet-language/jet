@@ -518,7 +518,7 @@ where
         Err(sql_error(format!("{label} references unknown field `{field}`")))
     })
 }
-pub fn jet_data_query_validate_fields_raw(fields: &[String], sql: &String) -> Result<(), String> {
+pub fn jet_data_query_validate_fields_raw(fields: &[String], sql: &str) -> Result<(), String> {
     let query = parse_sql_query(sql)?;
     validate_sql_query_schema(
         &query, |field| fields.iter().any(|known| known == field), "analytics query",
