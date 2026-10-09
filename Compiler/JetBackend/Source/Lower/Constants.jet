@@ -102,13 +102,20 @@ fn lower_constant_store(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 // which constant form was rejected.
 fn lower_constant_reject(m: &LowerModule, f: &LowerFunction, constant: MIRConstant) -> Bool Never! {
     name :: if constant == {
-        .Bytes(_) -> "Bytes"
         .Map(_) -> "Map"
         else -> ""
     }
     if name == "" -> return false
     lower_fail(&m, &f, "{name} constants are not lowered at O0 yet")
     true
+}
+
+// Bytes is the compact MIR spelling of a packed U8 List, not a String.
+fn lower_constant_bytes_type(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    aggregate :: lower_inline_type(p, ty) ?? return false
+    if aggregate.kind != .List(_) && aggregate.kind != .FixedList(_, _) -> return false
+    elem :: lower_list_element(aggregate) ?? return false
+    lower_narrow_bits(elem) == 8 && !lower_narrow_signed(elem)
 }
 
 // An exact Int constant: an inline word, or beyond the inline range a runtime
@@ -328,6 +335,25 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
             loop (index, value) in values {
                 lower_constant_store(p, c, &m, &f, data, stride * index, elem, value)
                 if f.failed -> return None
+            }
+        }
+        .Bytes(values) -> {
+            if !lower_constant_bytes_type(p, ty) {
+                lower_fail(&m, &f, "Bytes constant without a U8 List type is not lowered at O0 yet")
+                return None
+            }
+            lower_storage_into(p, &f, dst, ty)
+            if values.len() == 0 {
+                zero :: lower_const(&f, 0)
+                loop offset in ([Int]{0, 8, 16}) -> lower_emit(&f, LIRInst.Store{base: dst, offset: offset, value: zero})
+            } else {
+                // Share the frozen representation and the packed List clone
+                // loop. Unicode tables must not expand to one LIR store per byte.
+                frozen :: lower_static_tree(p, &m, &f, ty, constant) ?? return None
+                data :: frozen.data ?? return None
+                source :: lower_pointer(&f)
+                lower_emit(&f, LIRInst.DataAddress{dst: source, data: data})
+                lower_inline_clone(p, &m, &f, source, dst, ty)
             }
         }
         .Failed(report) -> {

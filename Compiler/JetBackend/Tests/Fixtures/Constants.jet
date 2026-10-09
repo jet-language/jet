@@ -8,6 +8,7 @@ use jet_foundation.[
     MIRConstantID,
     MIRConstEnumArg,
     MIRConstField,
+    MIRCopyFact,
     MIRConstReport,
     MIRDropKind,
     MIRField,
@@ -278,4 +279,36 @@ fn fx_f32_constants() -> MIRProgram Never! {
     program := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{fx_type_def("F32ConstantRecord", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("F32ConstantRecord", "number", scalar)}, methods: [MIRFunctionID]{}})})
     program.constants = [MIRConstantDef]{MIRConstantDef{id: MIRConstantID{value: 901}, module_id: MIRModuleID{value: 0}, key: "fixture.f32", name: "f32", span: fx_span(), visibility: MIRVisibility.Private, ty: scalar, is_storage: false, value: constant}}
     program
+}
+
+// Compact MIR Bytes preserves binary values, not UTF-8 text. The odd-length
+// buffer, nested empty List and owned copy exercise packed loads and drops.
+// expect-stdout constants-bytes: "9\n0\n128\n255\n255\ntrue\n27\n"
+// expect-static-only constants-bytes
+fn fx_constants_bytes() -> MIRProgram Never! {
+    b := fx_builder()
+    byte :: fx_narrow(false, 8)
+    bytes :: fx_list_type(byte)
+    input :: fx_owned(&b, bytes, MIROperation.Constant{value: MIRConstant.Bytes{value: [U8]{U8{0}, U8{128}, U8{255}, U8{1}, U8{2}, U8{3}, U8{4}, U8{5}, U8{255}}}})
+    fx_print(&b, fx_list_method(&b, "len", input, None, [MIRValueID]{}, fx_int(), false))
+    zero :: fx_int_const(&b, 0)
+    one :: fx_int_const(&b, 1)
+    last :: fx_int_const(&b, 8)
+    fx_print(&b, fx_list_index(&b, input, zero, byte, false))
+    fx_print(&b, fx_list_index(&b, input, one, byte, false))
+    fx_print(&b, fx_list_index(&b, input, last, byte, false))
+    copy :: fx_owned(&b, bytes, MIROperation.Copy{value: input, fact: MIRCopyFact.Explicit})
+    fx_do(&b, MIROperation.Drop{value: input, kind: MIRDropKind.Value})
+    fx_print(&b, fx_list_index(&b, copy, last, byte, false))
+    fx_do(&b, MIROperation.Drop{value: copy, kind: MIRDropKind.Value})
+    nested :: fx_owned(&b, fx_list_type(bytes), MIROperation.Constant{value: MIRConstant.List{values: [MIRConstant]{
+        MIRConstant.Bytes{value: [U8]{}}, MIRConstant.Bytes{value: [U8]{U8{27}}},
+    }}})
+    empty :: fx_list_index(&b, nested, zero, bytes, false)
+    fx_print(&b, fx_list_method(&b, "is_empty", empty, None, [MIRValueID]{}, fx_bool(), false))
+    nonempty :: fx_list_index(&b, nested, one, bytes, false)
+    fx_print(&b, fx_list_index(&b, nonempty, zero, byte, false))
+    fx_do(&b, MIROperation.Drop{value: nested, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_program(b)
 }

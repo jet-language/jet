@@ -93,6 +93,18 @@ fn lower_static_fill(p: MIRProgram, m: &LowerModule, f: &LowerFunction, object: 
         }
         return
     }
+    if constant == .Bytes(values) {
+        if !lower_constant_bytes_type(p, aggregate) -> return lower_fail(&m, &f, "Bytes constant without a U8 List type is not lowered at O0 yet")
+        // Even an empty frozen List needs non-null data for its drop guard.
+        data :: if values.len() == 0 -> lower_static_object(&m, 0) else -> {
+            id :: LIRDataID{value: m.data.len()}
+            &m.data.push(LIRData{id: id, bytes: values.copy(), align: 1, relocs: [LIRDataReloc]{}})
+            id
+        }
+        lower_static_store(&m, object, offset, lower_static_word(values.len()))
+        lower_static_store(&m, object, offset + 16, lower_static_pointer(data))
+        return
+    }
     if constant == .Struct(name, fields) {
         if aggregate.kind == .Tuple(_) {
             loop member in lower_inline_members(p, aggregate) {
@@ -234,7 +246,7 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
             lower_fail(&m, &f, "Failed constant without a Result Told payload is not lowered at O0 yet")
             return None
         }
-        .List(_) -> {
+        .List(_) | .Bytes(_) -> {
             id :: lower_static_object(&m, 24)
             lower_static_fill(p, &m, &f, id, 0, ty, constant)
             if f.failed -> return None
@@ -247,7 +259,6 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
             }
             return Val(lower_static_runtime(&m, decimal, "jet_rt_int_from_static"))
         }
-        .Bytes(_) -> lower_fail(&m, &f, "Bytes constants are not lowered at O0 yet")
         .SharedSite(_) -> lower_fail(&m, &f, "Shared publication sites must be read through their checked getter, not frozen as constant payloads")
         .Map(_) -> lower_fail(&m, &f, "Map constants are not lowered at O0 yet")
     }
