@@ -321,6 +321,7 @@ fn trap_native_index_range_root() {
 #Export(c) fn jet_rt_panic_list_bounds(len: I64, index: Int) {
     native :: I64.from_int(index) ?? {
         trap_native_index_range_stop()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return
         return
     }
     // Outcome.rs:2463-2466 supplies the one list-index reason. Reuse the

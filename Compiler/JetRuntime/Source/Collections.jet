@@ -1112,6 +1112,7 @@ fn coll_chain_value(chain: I64, key: I64) -> I64 {
             values :: trap_word(layer + I64{24})
             if (found >= values) {
                 jet_rt_panic_list_bounds(values, Int.from_i64(found))
+                if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
                 return I64{0}
             }
             return trap_word(trap_word(layer + I64{40}) + found * I64{8})
