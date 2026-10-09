@@ -72,7 +72,7 @@ mod tests {
     }
 
     #[test]
-    fn encoding_backing_signatures_use_dyn() {
+    fn dynamic_backing_signatures_use_dyn() {
         use crate::AST::AccessConvention::{Move, Read};
         let dyn_ty = Type::Named("Dyn".to_string());
         let entry = Type::Tuple(vec![
@@ -82,6 +82,20 @@ mod tests {
         assert_eq!(
             core_fixed_sig("core.encoding", "__object_from_entries"),
             Some((vec![(Move, Type::List(Box::new(entry.clone())))], Some(dyn_ty.clone()))),
+        );
+        assert_eq!(
+            core_fixed_sig("core.sys", "__config_object"),
+            Some((vec![(Move, Type::List(Box::new(entry.clone())))], Some(dyn_ty.clone()))),
+        );
+        assert_eq!(
+            core_fixed_sig("core.web.browser", "__command"),
+            Some((vec![
+                (Read, Type::Named("Browser".to_string())),
+                (Read, Type::String),
+                (Move, dyn_ty.clone()),
+            ], Some(super::super::alloc_ptrs::result_ty(
+                dyn_ty.clone(), Type::Named("BrowserError".to_string()),
+            )))),
         );
         assert_eq!(
             core_fixed_sig("core.encoding", "__typed_text"),
