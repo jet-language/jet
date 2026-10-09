@@ -12,6 +12,7 @@ use core as core
 use core.files as files
 use core.sys as sys
 use core.math.random as random
+use core.testing.[__evidence_read, __record_failure, __clear_failure, __temp_facts, __temp_join, __temp_remove, __temp_create, __text_window, __suite_snapshot, __histories_with_provenance]
 
 // D-VIS-REEXPORT1 / D-ALIAS-BIND2: a second spelling, never a second owner.
 alias RNG :: random.RNG
@@ -110,45 +111,45 @@ fn snap(name: String, value: String) -[FS, Env]> Bool Never! {
 }
 
 fn golden(name: String, value: String) -[FS]> Bool Never! {
-    read :: core.testing.__evidence_read(name)
+    read :: __evidence_read(name)
     if !read.ok {
         reason :: if read.missing -> "golden file is missing: {name}" else -> "golden file cannot be read: {name}"
-        core.testing.__record_failure(reason, "path: {name}")
+        __record_failure(reason, "path: {name}")
         return false
     }
     if read.text == value {
-        core.testing.__clear_failure()
+        __clear_failure()
         return true
     }
     diff :: testing_unified_diff(name, read.text, value)
-    core.testing.__record_failure("golden file differs: {name}", "path: {name}\n{diff}")
+    __record_failure("golden file differs: {name}", "path: {name}\n{diff}")
     false
 }
 
 fn fixture(name: String) -[FS]> String Never! {
-    read :: core.testing.__evidence_read(name)
+    read :: __evidence_read(name)
     if read.ok {
-        core.testing.__clear_failure()
+        __clear_failure()
         return read.text
     }
     reason :: if read.missing -> "fixture is missing: {name}" else -> "fixture cannot be read: {name}"
-    core.testing.__record_failure(reason, "path: {name}")
+    __record_failure(reason, "path: {name}")
     ""
 }
 
 fn temp_dir(prefix: String) -[FS]> String Never! {
-    facts :: core.testing.__temp_facts()
+    facts :: __temp_facts()
     safe :: testing_ascii_name(prefix, false)
     thread :: testing_ascii_name(facts.thread, true)
     // __TempPath.path is opaque platform encoding produced by the host.
     // Never construct, slice, decode, or edit it; only pass it back unchanged.
-    location :: core.testing.__temp_join("jet_test_{safe}_{facts.pid}_{thread}")
+    location :: __temp_join("jet_test_{safe}_{facts.pid}_{thread}")
     path :: location.text
-    removed :: core.testing.__temp_remove(location.path)
+    removed :: __temp_remove(location.path)
     if !removed.ok && !removed.missing {
         panic(testing_temp_error("remove_temp_dir", path, removed.cause))
     }
-    created :: core.testing.__temp_create(location.path)
+    created :: __temp_create(location.path)
     if !created.ok -> panic(testing_temp_error("create_temp_dir", path, created.cause))
     path
 }
@@ -298,7 +299,7 @@ fn fake_city(state: &U64, locale: Int) -> String Never! {
 }
 
 /// The Prelude `TestSuite` carrying the current harness iteration and result.
-fn test_suite() -> TestSuite Never! { core.testing.__suite_snapshot() }
+fn test_suite() -> TestSuite Never! { __suite_snapshot() }
 
 fn histories<T>(
     seed: Int,
@@ -307,13 +308,13 @@ fn histories<T>(
     model: fn([T]) -> Dyn,
     actual: fn([T]) -> Dyn,
     observe: fn(Dyn) -> Dyn,
-) -> TestComparison String! {
-    // TestingHistory.rs:426-443: fresh command copies precede model/actual,
-    // and observation receives its own copy. The engine owns execution only.
-    model_copy :: (commands: [T]) -> model(commands.copy())
-    actual_copy :: (commands: [T]) -> actual(commands.copy())
-    observe_copy :: (value: Dyn) -> observe(value.copy())
-    core.testing.__histories_with_provenance<T>(seed, cases, strategy, model_copy, actual_copy, observe_copy)
+) -> TestComparison Err! {
+    // Fresh command/observation copies precede callbacks. Host validation
+    // messages enter the default typed Err rail, never a String failure domain.
+    model_copy :: (commands: [T]) -> { model(commands.copy()) }
+    actual_copy :: (commands: [T]) -> { actual(commands.copy()) }
+    observe_copy :: (value: Dyn) -> { observe(value.copy()) }
+    __histories_with_provenance<T>(seed, cases, strategy, model_copy, actual_copy, observe_copy) ?? return Err(err)
 }
 
 // I9: exact interpreter DiagnosticErr cleanup needs an error-capture rail.
@@ -368,7 +369,7 @@ fn testing_boundary(text: String, end: Int) -> Int Never! {
 }
 
 fn testing_window(text: String, start: Int, end: Int) -> String Never! {
-    core.testing.__text_window(text, U64{start}, U64{end})
+    __text_window(text, U64{start}, U64{end})
 }
 
 fn testing_owned_text(bytes: ^[U8]) -> String Never! {
