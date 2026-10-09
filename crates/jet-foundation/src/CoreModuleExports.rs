@@ -1289,6 +1289,29 @@ pub fn core_source_value_hook(name: &str, operation: &str) -> Option<&'static st
     }
 }
 
+/// Private semantic routes for exact source declaration identities. These
+/// routes do not grant user-visible Clone, Display, or Debug implementations.
+pub fn core_source_value_hook(name: &str, operation: &str) -> Option<&'static str> {
+    if !name.strip_prefix(crate::Diagnostics::CORE_SOURCE_ROOT).is_some_and(|rest| rest.starts_with('/')) {
+        return None;
+    }
+    if name.ends_with("::Core/time/time.jet::Clock") {
+        return match operation {
+            "clone" => Some("__fork"),
+            "show" | "debug" => Some("__show"),
+            _ => None,
+        };
+    }
+    if name.ends_with("::Core/watcher/watcher.jet::WatchEvent") {
+        return match operation {
+            "show" => Some("__show"),
+            "debug" => Some("__debug"),
+            _ => None,
+        };
+    }
+    None
+}
+
 /// The canonical bootstrap ordering consumed by sema and future MIR.
 pub const fn core_bootstrap_order() -> &'static [CoreBootstrapStep] {
     CORE_BOOTSTRAP_ORDER

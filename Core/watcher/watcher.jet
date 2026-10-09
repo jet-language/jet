@@ -88,13 +88,85 @@ pub enum WatchEventKind {
     Ready
 }
 
+// WatchEvent.kind has always exposed WatchKind in checked programs. The
+// independently exported WatchEventKind above remains a distinct public enum.
+pub enum WatchKind {
+    Created
+    Modified
+    Removed
+    Error
+    Exited
+    Ready
+}
+
+fn watch_domain_tag(value: WatchDomain) -> Int Never! {
+    if value == { .File -> 0; .Process -> 1; .Port -> 2 }
+}
+fn watch_kind_tag(value: WatchKind) -> Int Never! {
+    if value == { .Created -> 0; .Modified -> 1; .Removed -> 2; .Error -> 3; .Exited -> 4; .Ready -> 5 }
+}
+fn watch_domain_name(value: WatchDomain) -> String Never! {
+    if value == { .File -> "File"; .Process -> "Process"; .Port -> "Port" }
+}
+fn watch_kind_name(value: WatchKind) -> String Never! {
+    if value == { .Created -> "Created"; .Modified -> "Modified"; .Removed -> "Removed"; .Error -> "Error"; .Exited -> "Exited"; .Ready -> "Ready" }
+}
+impl WatchDomain.Equatable {
+    fn equal(self, other: WatchDomain) -> Bool Never! { watch_domain_tag(self) == watch_domain_tag(other) }
+}
+impl WatchKind.Equatable {
+    fn equal(self, other: WatchKind) -> Bool Never! { watch_kind_tag(self) == watch_kind_tag(other) }
+}
+
 pub struct WatchEvent {
     pub domain: WatchDomain
-    pub kind: WatchEventKind
+    pub kind: WatchKind
     pub path: String
     pub detail: String
     pub pid: Int
     pub port: Int
+}
+
+impl WatchEvent {
+    pub fn __show(self) -> String Never! {
+        "WatchEvent {{ domain: {watch_domain_name(self.domain)}, kind: {watch_kind_name(self.kind)}, path: {self.path}, detail: {self.detail} }}"
+    }
+    pub fn __debug(self) -> String Never! {
+        "WatchEvent {{ domain: {watch_domain_name(self.domain)}, kind: {watch_kind_name(self.kind)}, path: {self.path:Debug}, detail: {self.detail:Debug}, pid: {self.pid}, port: {self.port} }}"
+    }
+}
+impl WatchEvent.Equatable {
+    fn equal(self, other: WatchEvent) -> Bool Never! {
+        self.domain == other.domain && self.kind == other.kind && self.path == other.path &&
+        self.detail == other.detail && self.pid == other.pid && self.port == other.port
+    }
+}
+
+#Test("WatchEvent source layout keeps all fields and independent copies") {
+    event :: WatchEvent{domain: .Process, kind: .Exited, path: "p", detail: "gone", pid: -1, port: 65535}
+    copy := ~event
+    assert(event.equal(copy))
+    copy.path = "changed"
+    assert_eq(event.path, "p")
+    assert(!event.equal(copy))
+    assert_eq(event.pid, -1)
+    assert_eq(event.port, 65535)
+    assert_eq(watch_domain_tag(event.domain), 1)
+    assert_eq(watch_kind_tag(event.kind), 4)
+    assert_eq(event.__show(), "WatchEvent { domain: Process, kind: Exited, path: p, detail: gone }")
+    assert_eq(event.__debug(), "WatchEvent { domain: Process, kind: Exited, path: \"p\", detail: \"gone\", pid: -1, port: 65535 }")
+}
+
+#Test("WatchEvent enum tags retain the native order and old exported enum") {
+    assert_eq(watch_domain_tag(.File), 0)
+    assert_eq(watch_domain_tag(.Port), 2)
+    assert_eq(watch_kind_tag(.Created), 0)
+    assert_eq(watch_kind_tag(.Modified), 1)
+    assert_eq(watch_kind_tag(.Removed), 2)
+    assert_eq(watch_kind_tag(.Error), 3)
+    assert_eq(watch_kind_tag(.Ready), 5)
+    old :: WatchEventKind.Ready
+    assert(if old == { .Ready -> true; else -> false })
 }
 
 pub fn recursive(path: String) -[FS]> WatchHandle IOError! {

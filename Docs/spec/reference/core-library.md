@@ -1698,6 +1698,11 @@ filesystem error is not replaced by a source-only empty-path error.
 handling a closed event enum. See
 [`watcher.jet`](../../../Examples/features/io/watcher.jet).
 
+The checked `WatchEvent.kind` field has type `WatchKind`, with the same six
+variant names; it is distinct from the independently exported `WatchEventKind`.
+Event equality includes all six stored fields. Show prints domain, kind, path,
+and detail; Debug additionally prints pid and port and quotes the text fields.
+
 ### `core.term` — terminal input and output
 
 `core.term` owns UTF-8 stdio, prompts, raw-key input, terminal size, and ANSI
