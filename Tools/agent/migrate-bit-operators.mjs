@@ -21,8 +21,14 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const SCRATCH = resolve(homedir(), '.cache/jet-dev/scratch/BitOpsMigration');
 const methods = { '&': 'bit_and', '|': 'bit_or', '~|': 'bit_xor', '^': 'pow' };
 const precedence = { '??': 1, '..': 2, '..<': 2, '||': 3, '&&': 4, '==': 5, '!=': 5, '<': 5, '<=': 5, '>': 5, '>=': 5, '<=>': 5, '|': 6, '~|': 7, '&': 8, '<<': 10, '>>': 10, '+': 11, '-': 11, '*': 12, '/': 12, '/%': 12, '%': 12, '%%': 12, '^': 14 };
-const keywords = new Set(['fn', 'if', 'else', 'loop', 'return', 'break', 'next', 'yield', 'in', 'use', 'as', 'struct', 'enum', 'trait', 'type', 'impl', 'prep', 'let', 'where', 'task', 'shared']);
+const keywords = new Set(['fn', 'if', 'else', 'loop', 'return', 'break', 'yield', 'in', 'use', 'as', 'struct', 'enum', 'trait', 'type', 'impl', 'prep', 'let', 'where', 'task', 'shared']);
 const groups = new Set(['(', '[', '{']);
+// Loop-control `next` is a whole statement (Statements.jet:552-554). Elsewhere it is an ordinary identifier operand (`next & x`, `x | next`).
+function loopNext(ts, n) {
+  const t = ts[n], prev = ts[n - 1], following = ts[n + 1];
+  if (t?.text !== 'next' || (prev && !prev.beforeTerminator && ![';', '{', '}'].includes(prev.text))) return false;
+  return t.beforeTerminator || !following || following.text === ';' || following.text === '}' || (following.text === '(' && ts[n + 2]?.kind === 'identifier' && ts[n + 3]?.text === ')');
+}
 // Each line was reviewed for meaning; XOR rows are latent power-vs-XOR bugs.
 const caretDecisions = new Map([
   ['Compiler/JetCli/Source/Cli/Dev/DbOptions.jet:310', ['pow', 'UTF-8 payload modulus is two raised to payload width']],
@@ -94,6 +100,8 @@ function contexts(ts, source) {
       const close = ts[k]?.close;
       if (close !== undefined) {
         for (let j = k + 1; j < close; j++) {
+          // Method signatures nest parameter annotations; only field colons at body depth declare fields.
+          if (groups.has(ts[j].text) && ts[j].close !== undefined) { j = ts[j].close; continue; }
           if (ts[j].text !== ':') continue;
           let end = j + 1;
           while (end < close && ![',', ';', '=', '::', ':='].includes(ts[end].text) && !ts[end].beforeTerminator) {
@@ -158,7 +166,7 @@ export function migrate(source, { caretAt = () => 'pow' } = {}) {
   const method = (token) => token.text === '^' ? token.caretMethod : methods[token.text];
   function parse(n, minimum = 1) {
     const t = ts[n];
-    if (!t || blocked.has(n) || t.template || keywords.has(t.text)) return null;
+    if (!t || blocked.has(n) || t.template || (t.text === 'next' ? loopNext(ts, n) : keywords.has(t.text))) return null;
     let next = n + 1, simple = true, children = [];
     if (['-', '!', '&', '^', '~', '*', '...'].includes(t.text)) {
       const inner = parse(n + 1, 13);
@@ -306,6 +314,14 @@ function selfTest() {
     ['v: A | B = f()', 'v: A | B = f()'],
     ['a /* keep */ | b', 'a.bit_or( /* keep */  b)'],
     ['prep if x { a | b } else { c & d }\nx | y', 'prep if x { a | b } else { c & d }\nx.bit_or(y)'],
+    ['trait T {\n    fn m(x: A) { x & y }\n}', 'trait T {\n    fn m(x: A) { x.bit_and(y) }\n}'],
+    ['trait T {\n    fn m(a: A, b: B) -> Int { a & b }\n}', 'trait T {\n    fn m(a: A, b: B) -> Int { a.bit_and(b) }\n}'],
+    ['next ~| x', 'next.bit_xor(x)'],
+    ['next & x', 'next.bit_and(x)'],
+    ['x & next', 'x.bit_and(next)'],
+    ['loop {\n    next\n    a & b\n}', 'loop {\n    next\n    a.bit_and(b)\n}'],
+    ['loop {\n    if c { next }\n    a | b\n}', 'loop {\n    if c { next }\n    a.bit_or(b)\n}'],
+    ['fn __helper(x: U64) -> U64 { x & 255 | __flag }\nfn __next(next: U64) -> U64 { next ~| __helper(next) }\nstruct __Box { __v: A | B\n next: &T }', 'fn __helper(x: U64) -> U64 { x.bit_and(255).bit_or(__flag) }\nfn __next(next: U64) -> U64 { next.bit_xor(__helper(next)) }\nstruct __Box { __v: A | B\n next: &T }'],
   ];
   for (const [input, expected] of cases) {
     assert.equal(migrate(input).source, expected, input);
