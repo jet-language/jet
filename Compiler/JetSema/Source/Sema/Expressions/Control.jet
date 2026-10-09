@@ -737,7 +737,7 @@ fn sema_expression_propagated(inner: TExpr, conversion: TTryConvert, span: Span)
 // Result carrier propagates; an optional result is an ordinary value. The
 // propagation site joins the failure journey like an explicit `?(text)` hop,
 // without a note (D-ERRCTX1, #3713).
-fn sema_expression_auto_propagate(expr: Expr, value: ^TExpr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_auto_propagate(expr: Expr, value: ^TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     // Own only the checked tree, never the READ source AST. Carrier metadata
     // and conversion reads finish before its owner enters the replacement.
     if sema_expr_unwrap_tag(value.ty) == {
@@ -748,20 +748,8 @@ fn sema_expression_auto_propagate(expr: Expr, value: ^TExpr, expected: Type?, en
     span :: expr_span(expr)
     conversion :: sema_expression_propagation_conversion(value, Val(expr), span, true, environment, program, &scopes, &context, &diagnostics) ?? return None
     payload :: sema_expression_carrier_payload(value.ty) ?? return None
-    location :: sema_expression_panic_location(environment, scopes, span)
-    propagated :: sema_tir_expr(payload, TExprKind.TryWithContext{inner: ^value, note: None, convert: conversion, file: location.file, line: location.line, function: location.function}, span)
-    sema_expr_expected(propagated, expected, environment, &diagnostics)
-}
-
-// The automatic propagation of a call root that propagates
-// (sema_expression_auto_propagates). The propagation site joins the failure
-// journey like an explicit `?(text)` hop, without a note (D-ERRCTX1, #3713).
-fn sema_expression_auto_propagate(expr: Expr, value: TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    span :: expr_span(expr)
-    conversion :: sema_expression_propagation_conversion(value, Val(expr), span, true, environment, program, &scopes, &context, &diagnostics) ?? return None
-    payload :: sema_expression_carrier_payload(value.ty) ?? return None
     location :: sema_expression_panic_location(environment, program, scopes, span)
-    propagated :: sema_tir_expr(payload, TExprKind.TryWithContext{inner: value, note: None, convert: conversion, file: location.file, line: location.line, function: location.function}, span)
+    propagated :: sema_tir_expr(payload, TExprKind.TryWithContext{inner: ^value, note: None, convert: conversion, file: location.file, line: location.line, function: location.function}, span)
     sema_expr_expected(propagated, expected, environment, program, &diagnostics)
 }
 

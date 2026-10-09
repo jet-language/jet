@@ -531,33 +531,6 @@ fn sema_call_check_term_input(record: CoreCallRecord, args: [CallArg], span: Spa
     SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
 }
 
-fn sema_call_check_term_eprint(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
-    complete := true
-    if args.len() == 0 {
-        &diagnostics.push(sema_error("E0103", span, "`eprint` needs at least one thing to print", "printing nothing isn't meaningful", "e.g. io.eprint(\"warning\")"))
-        complete = false
-    }
-    unit :: Type.Named{name: "Unit"}
-    parts := [TStrPart]{}
-    loop argument in args {
-        checked :: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
-            complete = false
-            next
-        }
-        if !sema_expression_typed_literal_printable(checked.ty, environment, program) && checked.ty != unit {
-            &diagnostics.push(sema_error("E0112", expr_span(argument.expr), "{sema_type_show(checked.ty)} can't be printed yet", "`io.eprint` prints the same values as `print`, but writes to stderr", "print one of its fields, or make it a printable type"))
-            complete = false
-            next
-        }
-        if parts.len() > 0 -> &parts.push(TStrPart.Literal{text: "\n"})
-        &parts.push(TStrPart.Interpolation{value: checked, format: TStrFormat.Display})
-    }
-    if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
-    if !sema_call_core_record_effects(record, span, [Type]{}, unit, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    joined :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: parts}, span)
-    SemaDirectSpecialCheck{handled: true, value: sema_call_core_tir(record, [TExpr]{joined}, span, [Type]{}, [Bool]{false}, None, unit, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)}
-}
-
 // `panic(message)` stops with one String message; the stop is a `Never`
 // value and its `__jet_panic__` reachability edge comes from the TIR walk.
 fn sema_call_check_ambient_panic(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {

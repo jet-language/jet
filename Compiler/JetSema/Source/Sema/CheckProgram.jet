@@ -3348,19 +3348,12 @@ fn sema_check_module_function(ready: &[SemaPreparedBody], queries: &[Int:SemaBod
 SEMA_BODY_MIN_BYTES_PER_THREAD :: 32768
 // Estimated bytes of one thread's copy of the module scope, per module item.
 SEMA_BODY_SCOPE_BYTES_PER_ITEM :: 4096
-// A wave gathers modules until its function source covers this many minimum
-// shares of every thread the pass may use, so each thread gets several jobs
-// to balance; and at most SEMA_BODY_WAVE_MODULES modules, whose post-summary
-// scopes it holds at once.
-SEMA_BODY_WAVE_SHARES :: 4
-SEMA_BODY_WAVE_MODULES :: 256
 
-// What every body-check thread reads: the pass environment, program tables
-// and memory plan, each moved in as the one row of its list for the pass and
-// moved out between modules, so none is copied.
+// What every body-check thread reads: the pass environment and memory plan,
+// each moved in as the one row of its list for the pass and moved out
+// between modules, so neither is copied.
 struct SemaCheckShared {
     environments: [SemaScopeEnvironment]
-    programs: [SemaProgramTables]
     memory_plans: [SemaFunctionMemoryPlan]
 }
 
@@ -3672,17 +3665,7 @@ fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, module_index: Int
     part := workers
     loop part > 0 {
         part -= 1
-        sema_check_body_part_drain(slots[part], &module_bodies, &module_method_bodies)
-    }
-    // Popped last module first, as the result lists them.
-    prepared := [SemaPreparedBodies]{}
-    loop modules.len() > 0 {
-        wave_module := &modules.pop() ?? break
-        bodies := &module_bodies.pop() ?? break
-        method_bodies := &module_method_bodies.pop() ?? break
-        ready := SemaPreparedBodies{scopes: [SemaScopeTable]{}, bodies: ^bodies, method_bodies: ^method_bodies}
-        &ready.scopes.push(^wave_module.scopes)
-        &prepared.push(^ready)
+        sema_check_body_part_drain(slots[part], &prepared.bodies)
     }
     ^prepared
 }
@@ -3698,289 +3681,6 @@ fn sema_check_body_part_fill(slot: Shared<SemaBodyPart>, scopes: ^SemaScopeTable
 
 // Moves a part's bodies onto `bodies`, last item first.
 fn sema_check_body_part_drain(slot: Shared<SemaBodyPart>, bodies: &[SemaPreparedBody]) {
-    permit :: slot.guard_edit()
-    loop permit.value.bodies.len() > 0 {
-        body :: &permit.value.bodies.pop() ?? break
-        if body.method {
-            &module_method_bodies[body.position].push(body)
-        } else {
-            &module_bodies[body.position].push(body)
-        }
-    }
-}
-
-// Checks `slots[from..]`, one task per slot and the last slot on this
-// thread; returns how many bodies they checked.
-fn sema_check_body_parts(shared: Shared<SemaCheckShared>, wave_state: Shared<SemaBodyWave>, slots: [Shared<SemaBodyPart>], from: Int) -> Int {
-    if from >= slots.len() - 1 -> return sema_check_body_part(shared, wave_state, slots[from])
-    checked := 0
-    task.group sema_threads {
-        head :: task sema_check_body_part(shared, wave_state, slots[from])
-        checked = sema_check_body_parts(shared, wave_state, slots, from + 1)
-        checked += head.join() ?? panic(compiler_threads_failure_text(err))
-    }
-    checked
-}
-
-// One thread: checks its part's functions and methods in order, on its own
-// copy of each module's scope (and, for methods, environment). Host callbacks
-// are withheld; a check that wanted one is marked, and the body loop checks
-// that body again on the calling thread.
-fn sema_check_body_part(shared: Shared<SemaCheckShared>, wave_state: Shared<SemaBodyWave>, slot: Shared<SemaBodyPart>) -> Int {
-    inputs :: shared.guard_read()
-    wave :: wave_state.guard_read()
-    permit := slot.guard_edit()
-    // Passed straight through: a local binding of a guarded row would copy it.
-    sema_check_body_part_in(wave.value.modules, inputs.value.programs[0], inputs.value.memory_plans[0], &permit.value)
-}
-
-
-// A method job on a compiler thread: sema_check_registration_method up to its
-// body check, from the same pure inputs (memory plan row, normalized owner,
-// owner generic parameters set on `environment`, the thread's copy of the
-// module's environment), with the reports before the body check discarded
-// (the body loop raises them itself), then the body check of
-// sema_check_module_method. `ordinal` is the method's body-loop ordinal.
-fn sema_check_parallel_method(source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, registered: SemaRegistrationFunction, owner_type: Type, trait_symbol: Symbol?, position: Int, ordinal: Int, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, wanted: Shared<SemaHostHookWanted>) -> SemaParallelBody {
-    memory_position := sema_function_memory_position(memory_plan, source_module.module_identity, sema_type_graph_base_name(owner_type) ?? "", registered.declaration.span)
-    memory_func := registered.declaration
-    if memory_position == .Val(position) {
-        if memory_plan.functions[position].function == .Val(planned) -> memory_func = planned
-    }
-    base_generic_params :: ~environment.generic_params
-    method_generic_params := ~environment.generic_params
-    normalized_owner_type := owner_type
-    normalized :: sema_comptime_normalize_owner(environment, program, owner_type, source_module.module_identity)
-    if normalized == .Val(owner) {
-        normalized_owner_type = owner
-        discarded := [Diagnostic]{}
-        owner_generic_complete := true
-        method_generic_params = sema_comptime_owner_generic_params(environment, program, normalized_owner_type, source_module.module_identity, &discarded, &owner_generic_complete)
-    }
-    function_kind := sema_comptime_method_kind(memory_func, normalized_owner_type, trait_symbol)
-    environment.generic_params = method_generic_params
-    sema_host_hook_unwant(wanted)
-    diagnostics := [Diagnostic]{}
-    call_facts := [SemaCallSiteFact]{}
-    comptime_requests := [SemaComptimeRequest]{}
-    name_references := [SemaNameReferenceFact]{}
-    checked := sema_function_check(memory_func, registered.symbol.id, function_kind, registered.raw_protocol_return, &environment, program, &scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted}), &diagnostics, &call_facts, &comptime_requests, &name_references)
-    environment.generic_params = ~base_generic_params
-    SemaParallelBody{position: position, item_index: ordinal, method: true, checked: Val(checked), diagnostics: diagnostics, call_facts: call_facts, comptime_requests: comptime_requests, name_references: name_references, wanted_hooks: sema_host_hook_was_wanted(wanted)}
-}
-
-fn sema_host_hook_unwant(wanted: Shared<SemaHostHookWanted>) {
-    permit :: wanted.guard_edit()
-    permit.value.wanted = false
-}
-
-fn sema_host_hook_was_wanted(wanted: Shared<SemaHostHookWanted>) -> Bool {
-    permit :: wanted.guard_read()
-    permit.value.wanted
-}
-
-// D-MEM-VIEWRET1=B (Rust `check_module_bodies`): resolve callable view
-// summaries before the real body pass so declaration order cannot affect a
-// public owner contract. Only functions whose declared return type
-// structurally contains a view are summary jobs, checked in name order; each
-// check discards its diagnostics and other products and publishes only the
-// return-view provenance into `scopes`. A round that reproduces the previous
-// round's per-job provenance is the fixed point; jobs + 1 rounds is the upper
-// bound, and no jobs means no summary checks.
-fn sema_check_view_summaries(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int]) {
-    summary_jobs := [Func]{}
-    loop item in source_module.program.items {
-        if item == .Func(func) {
-            if func.inline_foreign != None -> next
-            return_type :: func.return_type ?? next
-            seen := [String:Bool]{}
-            if sema_check_type_contains_view(graph, source_module.module_identity, return_type, &seen) -> &summary_jobs.push(func)
-        }
-    }
-    sema_check_sort_view_summary_jobs(&summary_jobs)
-    previous_round := [ViewProvenanceMap?]{}
-    summary_round := 0
-    loop summary_jobs.len() > 0 && summary_round <= summary_jobs.len() {
-        round := [ViewProvenanceMap?]{}
-        loop func in summary_jobs {
-            provenance := ViewProvenanceMap?{None}
-            function_key := symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name).key
-            cached := sema_comptime_find_checked_function(comptime_functions, comptime_rows, source_module.module_identity, function_key)
-            if cached == {
-                .Val(checked_function) -> {
-                    if checked_function.function == .Val(function) {
-                        _ := sema_function_publish_return_views(&scopes, function)
-                        provenance = function.return_view_provenance
-                    }
-                }
-                .None -> {
-                    summary_diagnostics := [Diagnostic]{}
-                    summary_calls := [SemaCallSiteFact]{}
-                    summary_comptime_requests := [SemaComptimeRequest]{}
-                    summary_name_references := [SemaNameReferenceFact]{}
-                    memory_position := sema_function_memory_position(memory_plan, source_module.module_identity, "", func.span)
-                    summary_func := func
-                    if memory_position == .Val(position) {
-                        if memory_plan.functions[position].function == .Val(planned) -> summary_func = planned
-                    }
-                    checked := sema_function_check(summary_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), TFuncKind.TopLevel, false, &environment, &scopes, host_hooks, &summary_diagnostics, &summary_calls, &summary_comptime_requests, &summary_name_references)
-                    if checked.value == .Val(function) {
-                        _ := sema_function_publish_return_views(&scopes, function)
-                        provenance = function.return_view_provenance
-                    }
-                }
-            }
-            &round.push(provenance)
-        }
-        if summary_round > 0 && sema_check_view_rounds_equal(previous_round, round) -> break
-        previous_round = round
-        summary_round += 1
-    }
-}
-
-// SP15: a module's top-level function bodies checked on compiler threads.
-// The parallel pass (sema_check_bodies_parallel) checks every body
-// sema_check_parallel_jobs selects against the module scope as it stands
-// after the view summaries, each thread on its own copy of that scope and
-// all of them on the one shared environment. The module's serial body loop
-// then takes each prepared result in item order instead of checking the
-// function again (sema_check_module_function). It checks a function itself
-// when the prepared result no longer applies: an earlier body published a
-// return view that changed the module scope, or the check wanted a host
-// callback, which never runs on a compiler thread. Reports, facts and
-// functions are appended in item order either way, so the module result is
-// the same for any thread count.
-struct SemaParallelBody {
-    item_index: Int
-    checked: SemaFunctionResult
-    diagnostics: [Diagnostic]
-    call_facts: [SemaCallSiteFact]
-    comptime_requests: [SemaComptimeRequest]
-    name_references: [SemaNameReferenceFact]
-    wanted_hooks: Bool
-}
-
-// A module's parallel body pass: the post-summary module scope (one row, or
-// none when the module checks serially) and the prepared bodies, last item
-// first, so the body loop pops them in item order.
-struct SemaPreparedBodies {
-    scopes: [SemaScopeTable]
-    bodies: [SemaParallelBody]
-}
-
-fn sema_check_prepared_none() -> SemaPreparedBodies Never! {
-    SemaPreparedBodies{scopes: [SemaScopeTable]{}, bodies: [SemaParallelBody]{}}
-}
-
-// The check of the top-level function at `item_index` in the module's body
-// loop: its prepared body while that still applies, else checked here.
-fn sema_check_module_function(ready: &[SemaParallelBody], item_index: Int, scopes_changed: Bool, func: Func, owner_id: SymbolID, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
-    loop ready.len() > 0 && ready[ready.len() - 1].item_index < item_index -> _ := &ready.pop()
-    if ready.len() > 0 && ready[ready.len() - 1].item_index == item_index {
-        body := &ready.pop() ?? panic("a prepared function body left the parallel body list")
-        if !scopes_changed && !body.wanted_hooks {
-            loop diagnostic in body.diagnostics -> &diagnostics.push(diagnostic)
-            loop fact in body.call_facts -> &call_facts.push(fact)
-            loop request in body.comptime_requests -> &comptime_requests.push(request)
-            loop reference in body.name_references -> &name_references.push(reference)
-            return ^body.checked
-        }
-    }
-    sema_function_check(func, owner_id, TFuncKind.TopLevel, false, &environment, &scopes, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
-}
-
-// A compiler thread is admitted for at least this many bytes of function
-// source, so a small module checks its bodies on the calling thread.
-SEMA_BODY_MIN_BYTES_PER_THREAD :: 32768
-// Estimated bytes of one thread's copy of the module scope, per module item.
-SEMA_BODY_SCOPE_BYTES_PER_ITEM :: 4096
-
-// What every body-check thread of a module reads: the pass environment and
-// memory plan, each moved in as the one row of its list for the module's
-// parallel pass and moved back out after it, so neither is copied.
-struct SemaCheckShared {
-    environments: [SemaScopeEnvironment]
-    memory_plans: [SemaFunctionMemoryPlan]
-}
-
-// One thread's part of a module's bodies: its own copy of the post-summary
-// module scope, the item indexes it checks in order, and their bodies.
-struct SemaBodyPart {
-    scopes: SemaScopeTable
-    items: [Int]
-    bodies: [SemaParallelBody]
-}
-
-// The item indexes of module `module_index`'s top-level functions a compiler
-// thread can check, in item order: not foreign (the foreign stage checks
-// those), not already checked by comptime (the body loop takes that result),
-// and without generic parameters (sema_function_check_shared). `weights`
-// gets each one's source bytes.
-fn sema_check_parallel_jobs(graph: SemaRegistrationGraph, module_index: Int, comptime_rows: [String:Int], weights: &[Int]) -> [Int] Never! {
-    source_module :: graph.modules[module_index]
-    jobs := [Int]{}
-    item_index := 0
-    loop item in source_module.program.items {
-        if item == .Func(func) {
-            key :: symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name).key
-            if func.inline_foreign == None && func.type_params.len() == 0 && comptime_rows.get("{source_module.module_identity}\n{key}") == None {
-                &jobs.push(item_index)
-                &weights.push(func.span.end - func.span.start)
-            }
-        }
-        item_index += 1
-    }
-    jobs
-}
-
-// The module scope the body loop of module `module_index` checks against:
-// the registered module scope after the view summaries, built as
-// sema_check_registration_module builds it (whose reports here are its own).
-// Leaves `environment` entered in the module.
-fn sema_check_module_summary_scopes(graph: SemaRegistrationGraph, environment: &SemaScopeEnvironment, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int]) -> SemaScopeTable {
-    source_module :: graph.modules[module_index]
-    scopes := sema_scope_init(source_module.module_identity)
-    discarded := [Diagnostic]{}
-    _ := sema_registration_apply_graph_module(graph, source_module.module_identity, &scopes, &discarded)
-    sema_scope_environment_enter_module(&environment, source_module, sema_comptime_body_values_from_items(values))
-    sema_check_view_summaries(graph, source_module, &environment, &scopes, host_hooks, memory_plan, comptime_functions, comptime_rows)
-    scopes
-}
-
-// The parallel body pass of module `module_index` on `workers` threads:
-// `jobs` (sema_check_parallel_jobs) cut into consecutive parts by `weights`,
-// one part per thread, each part checked in item order on its own copy of
-// `scopes` against the environment and memory plan in `shared`.
-fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, module_index: Int, scopes: ^SemaScopeTable, jobs: [Int], weights: [Int], workers: Int) -> SemaPreparedBodies {
-    bounds :: compiler_threads_partition(weights, workers)
-    slots := [Shared<SemaBodyPart>]{}
-    loop part in 0..<workers {
-        items := [Int]{}
-        loop position in bounds[part]..<bounds[part + 1] -> &items.push(jobs[position])
-        slot :: shared SemaBodyPart{scopes: sema_scope_init(""), items: [Int]{}, bodies: [SemaParallelBody]{}}
-        sema_check_body_part_fill(slot, ~scopes, ^items)
-        &slots.push(slot)
-    }
-    _ := sema_check_body_parts(shared, slots, 0, module_index)
-    prepared := SemaPreparedBodies{scopes: [SemaScopeTable]{}, bodies: [SemaParallelBody]{}}
-    &prepared.scopes.push(^scopes)
-    part := workers
-    loop part > 0 {
-        part -= 1
-        sema_check_body_part_drain(slots[part], &prepared.bodies)
-    }
-    prepared
-}
-
-// Moves a thread's scope copy and item indexes into its slot.
-fn sema_check_body_part_fill(slot: Shared<SemaBodyPart>, scopes: ^SemaScopeTable, items: ^[Int]) {
-    permit :: slot.guard_edit()
-    permit.value.scopes = ^scopes
-    permit.value.items = ^items
-}
-
-// Moves a part's bodies onto `bodies`, last item first.
-fn sema_check_body_part_drain(slot: Shared<SemaBodyPart>, bodies: &[SemaParallelBody]) {
     permit :: slot.guard_edit()
     loop permit.value.bodies.len() > 0 {
         body :: &permit.value.bodies.pop() ?? break
@@ -4006,31 +3706,19 @@ fn sema_check_body_parts(shared: Shared<SemaCheckShared>, slots: [Shared<SemaBod
 // the body loop checks that function again on the calling thread.
 fn sema_check_body_part(shared: Shared<SemaCheckShared>, slot: Shared<SemaBodyPart>, module_index: Int) -> Int {
     inputs :: shared.guard_read()
-    permit :: slot.guard_edit()
-    environment :: inputs.value.environments[0]
-    memory_plan :: inputs.value.memory_plans[0]
-    graph_option :: environment.registration_graph
-    graph :: graph_option ?? return 0
-    source_module :: graph.modules[module_index]
-    wanted :: shared SemaHostHookWanted{wanted: false}
-    loop index in 0..<permit.value.items.len() {
-        item_index :: permit.value.items[index]
-        if source_module.program.items[item_index] == .Func(func) {
-            memory_func := func
-            memory_position := sema_function_memory_position(memory_plan, source_module.module_identity, "", func.span)
-            if memory_position == .Val(position) {
-                if memory_plan.functions[position].function == .Val(planned) -> memory_func = planned
-            }
-            sema_host_hook_unwant(wanted)
-            diagnostics := [Diagnostic]{}
-            call_facts := [SemaCallSiteFact]{}
-            comptime_requests := [SemaComptimeRequest]{}
-            name_references := [SemaNameReferenceFact]{}
-            checked := sema_function_check_shared(memory_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), environment, &permit.value.scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted}), &diagnostics, &call_facts, &comptime_requests, &name_references)
-            &permit.value.bodies.push(SemaParallelBody{item_index: item_index, checked: checked, diagnostics: diagnostics, call_facts: call_facts, comptime_requests: comptime_requests, name_references: name_references, wanted_hooks: sema_host_hook_was_wanted(wanted)})
-        }
-    }
-    permit.value.bodies.len()
+    permit := slot.guard_edit()
+    // Passed straight through: a local binding of a guarded row would copy it.
+    sema_check_body_part_in(inputs.value.environments[0], inputs.value.memory_plans[0], &permit.value, module_index)
+}
+
+fn sema_host_hook_unwant(wanted: Shared<SemaHostHookWanted>) {
+    permit :: wanted.guard_edit()
+    permit.value.wanted = false
+}
+
+fn sema_host_hook_was_wanted(wanted: Shared<SemaHostHookWanted>) -> Bool {
+    permit :: wanted.guard_read()
+    permit.value.wanted
 }
 
 // `environment` is the graph pass's one environment (sema_check_pass_environment):
@@ -5664,12 +5352,6 @@ fn sema_comptime_staged_keys(values: [SemaComptimeItemValue], staged: &[String:B
     }
 }
 
-// The scope half of a staging run's one environment: every comptime item and
-// function check re-targets it (sema_scope_environment_enter_probe_module).
-fn sema_comptime_environment() -> SemaScopeEnvironment Never! {
-    sema_scope_environment_init("", "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
-}
-
 // The program tables of a staging run: they own `graph` (moved in, never
 // copied here) with `values` applied (recorded on `trail`), beside the run's
 // one environment. The caller applies each later value to their graph in
@@ -6015,7 +5697,6 @@ fn sema_check_module_item_count_in_shared(shared_state: Shared<SemaCheckShared>,
 fn sema_check_prepare_module(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], jobs: [SemaBodyJob], weights: [Int], workers: Int, session: SemaIncrementalCache?, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaPreparedBodies {
     if workers <= 1 -> return sema_check_prepared_none()
     environment := sema_check_shared_take_environment(shared_state)
-    program := sema_check_shared_take_program(shared_state)
     memory_plan := sema_check_shared_take_memory_plan(shared_state)
     scopes := sema_check_module_summary_scopes(&environment, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, counter_phase, trace_sink)
     memo := sema_incremental_module(session, environment, &scopes)
@@ -6026,7 +5707,6 @@ fn sema_check_prepare_module(shared_state: Shared<SemaCheckShared>, host_hooks: 
 
 fn sema_check_module_in_shared(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, prepared: ^SemaPreparedBodies, threads: CompilerThreads, session: SemaIncrementalCache?, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaGraphModuleResult {
     environment := sema_check_shared_take_environment(shared_state)
-    program := sema_check_shared_take_program(shared_state)
     memory_plan := sema_check_shared_take_memory_plan(shared_state)
     checked := sema_check_registration_module(^environment, host_hooks, ^memory_plan, module_index, values, comptime_functions, comptime_rows, true, pending_obligations, ^prepared, None, session, counter_phase, trace_sink)
     restored_environment := ^checked.environment
@@ -6035,30 +5715,9 @@ fn sema_check_module_in_shared(shared_state: Shared<SemaCheckShared>, host_hooks
     ^checked.module_result
 }
 
-// sema_check_registration_module of a body pass, on the graph of the borrowed
-// program tables read in place.
-fn sema_check_pass_module(environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, prepared: ^SemaPreparedBodies, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaGraphModuleResult {
-    graph :: program.registration_graph ?? panic("the body-check pass lost its registration graph")
-    sema_check_registration_module(graph, &environment, program, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows, true, pending_obligations, ^prepared, counter_phase, trace_sink)
-}
-
-// Moves the pass environment, program tables and memory plan into the
-// threads' shared state.
-fn sema_check_shared_fill(shared_state: Shared<SemaCheckShared>, environment: ^SemaScopeEnvironment, program: ^SemaProgramTables, memory_plan: ^SemaFunctionMemoryPlan) {
-    permit :: shared_state.guard_edit()
-    &permit.value.environments.push(^environment)
-    &permit.value.programs.push(^program)
-    &permit.value.memory_plans.push(^memory_plan)
-}
-
 fn sema_check_shared_take_environment(shared_state: Shared<SemaCheckShared>) -> SemaScopeEnvironment {
     permit :: shared_state.guard_edit()
     &permit.value.environments.pop() ?? panic("the body-check environment left the threads' shared state")
-}
-
-fn sema_check_shared_take_program(shared_state: Shared<SemaCheckShared>) -> SemaProgramTables {
-    permit :: shared_state.guard_edit()
-    &permit.value.programs.pop() ?? panic("the body-check program tables left the threads' shared state")
 }
 
 fn sema_check_shared_take_memory_plan(shared_state: Shared<SemaCheckShared>) -> SemaFunctionMemoryPlan {

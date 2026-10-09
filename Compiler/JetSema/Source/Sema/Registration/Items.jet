@@ -1405,29 +1405,6 @@ fn sema_registration_compiler_owned_codec_trait(module_identity: String, referen
         compiler_owned: true,
         generated_provenance: None,
     }
-    nominals
-}
-
-fn sema_registration_compiler_owned_codec_trait(module_identity: String, reference: MIRTraitRef) -> SemaRegistrationNominal {
-    span :: Span{start: 0, end: 0}
-    ty :: Type.Named{name: reference.name}
-    symbol :: sema_registration_named_symbol(module_identity, reference.name, span, SymbolKind.Trait, None, true, false)
-    SemaRegistrationNominal{
-        symbol: symbol,
-        kind: SemaRegistrationNominalKind.Trait,
-        source: SemaRegistrationNominalSource.CompilerBuiltinTrait{value: reference},
-        ty: ty,
-        identity: type_identity(ty),
-        identity_key: sema_registration_identity_key(module_identity, ty),
-        generic_params: [SemaRegistrationGenericParam]{},
-        generic_identity_key: symbol.id.key,
-        fields: [SemaRegistrationField]{},
-        variants: [SemaRegistrationVariant]{},
-        methods: [SemaRegistrationFunction]{},
-        trait_methods: [SemaRegistrationTraitMethod]{},
-        compiler_owned: true,
-        generated_provenance: None,
-    }
 }
 
 fn sema_registration_is_compiler_owned(nominal: SemaRegistrationNominal) -> Bool Never! {
