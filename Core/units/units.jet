@@ -251,7 +251,7 @@ fn is_zero(m: Measurement<Float>) -> Bool Never! {
     optional :: __measurement_optional(Val(-12.0), -0.025) ?? panic("conversion")
     assert_eq(optional.value(), -12.0)
     assert_eq(math.to_bits(optional.uncertainty()), 4599075939470750516)
-    if __measurement_result(Err(Err("unit conversion is not exactly representable")), 0.025) == {
+    if __measurement_result<Err>(Err(Err("unit conversion is not exactly representable")), 0.025) == {
         .Ok(_) -> panic("lost scalar conversion error")
         .Err(error) -> assert_eq(error.message, "unit conversion is not exactly representable")
     }
