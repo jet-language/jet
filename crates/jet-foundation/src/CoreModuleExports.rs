@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: c525977a1b6842b1a2981ff548b1d53ee77e81ed53e29d521412ccc2dc09dcd4
+// Source SHA-256: b8556ae49fa62baa11dfea5427b1d9276b4af00f945945596165849ca25c2224
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -309,8 +309,8 @@ const CORE_MODULE_31_MEMBERS: &[&str] = &["Address", "Attachment", "DKIMConfig",
 const CORE_MODULE_31_TYPES: &[(&str, CoreLeafKind)] = &[("Address", CoreLeafKind::Plain), ("Message", CoreLeafKind::Plain), ("Attachment", CoreLeafKind::Plain), ("Envelope", CoreLeafKind::Plain), ("SMTPSecurity", CoreLeafKind::Enum(&["StartTLS", "TLS"])), ("RecipientPolicy", CoreLeafKind::Enum(&["RequireAll", "DeliverAccepted"])), ("RecipientReport", CoreLeafKind::Plain), ("SendReport", CoreLeafKind::Plain), ("EmailError", CoreLeafKind::Enum(&["Configuration", "DNS", "Connect", "TLS", "Auth", "Protocol", "Rejected", "Transient", "TimedOut", "Cancelled", "DeliveryUnknown"])), ("Limits", CoreLeafKind::Plain), ("SMTPAuth", CoreLeafKind::Enum(&["None", "Password"])), ("TLSTrust", CoreLeafKind::Enum(&["System", "SystemPlusCa"])), ("DKIMConfig", CoreLeafKind::Plain), ("SMTPConfig", CoreLeafKind::Plain), ("Mailer", CoreLeafKind::Plain), ("HTML", CoreLeafKind::Plain), ("__EmailAddressView", CoreLeafKind::Plain), ("__EmailAttachmentView", CoreLeafKind::Plain), ("__EmailMessageView", CoreLeafKind::Plain)];
 const CORE_MODULE_31_DEPENDENCIES: &[&str] = &["core.crypto", "core.crypto.expert", "core.encoding.base64", "core.encoding.hex", "core.net", "core.sys", "core.text"];
 
-const CORE_MODULE_32_MEMBERS: &[&str] = &["DataEvent", "DataTree", "EncodingCause", "EncodingError", "EncodingErrorKind", "EncodingFormat", "EncodingLimits", "Reader", "hex_nibble", "hex_value", "bytes_to_hex", "hex_to_bytes", "wrap32", "HexError", "__edition"];
-const CORE_MODULE_32_TYPES: &[(&str, CoreLeafKind)] = &[("DataTree", CoreLeafKind::Enum(&["Null", "Bool", "Int", "Float", "Text", "Array", "Object"])), ("EncodingLimits", CoreLeafKind::Plain), ("EncodingError", CoreLeafKind::Plain), ("EncodingCause", CoreLeafKind::Plain), ("EncodingFormat", CoreLeafKind::Enum(&["JSON", "JSONL", "CSV", "TOML", "YAML", "XML", "CBOR"])), ("EncodingErrorKind", CoreLeafKind::Enum(&["Syntax", "Truncated", "Unsupported", "Limit", "IO", "State"])), ("DataEvent", CoreLeafKind::Enum(&["Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "ArrayStart", "ArrayEnd", "ObjectStart", "Key", "ObjectEnd"])), ("Reader", CoreLeafKind::Plain), ("HexError", CoreLeafKind::Plain)];
+const CORE_MODULE_32_MEMBERS: &[&str] = &["DataEvent", "Dyn", "EncodingCause", "EncodingError", "EncodingErrorKind", "EncodingFormat", "EncodingLimits", "Reader", "hex_nibble", "hex_value", "bytes_to_hex", "hex_to_bytes", "wrap32", "HexError", "__edition"];
+const CORE_MODULE_32_TYPES: &[(&str, CoreLeafKind)] = &[("Dyn", CoreLeafKind::Enum(&["Null", "Bool", "Int", "Float", "Text", "Array", "Object"])), ("EncodingLimits", CoreLeafKind::Plain), ("EncodingError", CoreLeafKind::Plain), ("EncodingCause", CoreLeafKind::Plain), ("EncodingFormat", CoreLeafKind::Enum(&["JSON", "JSONL", "CSV", "TOML", "YAML", "XML", "CBOR"])), ("EncodingErrorKind", CoreLeafKind::Enum(&["Syntax", "Truncated", "Unsupported", "Limit", "IO", "State"])), ("DataEvent", CoreLeafKind::Enum(&["Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "ArrayStart", "ArrayEnd", "ObjectStart", "Key", "ObjectEnd"])), ("Reader", CoreLeafKind::Plain), ("HexError", CoreLeafKind::Plain)];
 const CORE_MODULE_32_DEPENDENCIES: &[&str] = &["core"];
 
 const CORE_MODULE_33_MEMBERS: &[&str] = &["decode", "encode", "is_base32", "b32encode", "b32decode", "b32hexencode", "b32hexdecode", "Base32Error"];
