@@ -179,6 +179,8 @@ Retired free namespaces have no aliases or re-exports, and there is no
 **D-CORE-USELIST1=A — Bracketed grouped use** *(ratified 2026-08-06)*: grouped imports use `use path.[a as x, b]`. A missing
 `as` uses the final path segment. Braces and wildcards are not grouped-import
 syntax.
+The compiler's checked-build projections select Core graph record types with
+`use core.build.[BuildGraphFile]` and `use core.build.[BuildGraphNode]`.
 
 **D-SOLVER-LIB1 — Explicit solver library**: `core.compute.solve` ships a finite
 solver API with explicit `Solver` state, deterministic insertion-order
