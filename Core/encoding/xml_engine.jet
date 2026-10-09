@@ -547,8 +547,8 @@ fn attribute_value(attribute: Attribute) -> Dyn Never! {
 fn wire_bytes(text: String, encoding: WireEncoding) -> [U8] Never! {
     target :: if encoding == {
         .UTF8 -> RenderEncoding.UTF8
-        .Utf16Le -> RenderEncoding.Utf16Le
-        .Utf16Be -> RenderEncoding.Utf16Be
+        .UTF16Le -> RenderEncoding.UTF16Le
+        .UTF16Be -> RenderEncoding.UTF16Be
     }
     encode_text(text, target)
 }
@@ -592,8 +592,8 @@ fn stream_event_value(item: StreamEvent) -> Dyn Never! {
             loop byte in item.bom -> &bom.push(Dyn.Int(Int{byte}))
             label :: if encoding == {
                 .UTF8 -> "UTF-8"
-                .Utf16Le -> "UTF-16LE"
-                .Utf16Be -> "UTF-16BE"
+                .UTF16Le -> "UTF-16LE"
+                .UTF16Be -> "UTF-16BE"
             }
             object([(key: "$xml_event", value: text("document_start")), (key: "encoding", value: text(label)), (key: "bom", value: Dyn.Array(^bom))])
         }
@@ -1046,7 +1046,7 @@ fn render_document(value: Dyn) -> String String! {
     ^output
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1782
-enum RenderEncoding { UTF8 UTF8Bom Utf16Le Utf16Be }
+enum RenderEncoding { UTF8 UTF8Bom UTF16Le UTF16Be }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1790
 enum LexicalPolicy { PreserveValid Deterministic }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1795
@@ -1195,12 +1195,6 @@ fn render_document_bytes(value: Dyn, encoding: RenderEncoding, lexical: LexicalP
     }
     output
 }
-impl XMLFault {
-    // Rust: crates/jet-foundation/src/XmlPull.rs:2057
-    fn shape(reason: String) -> XMLFault Never! { XMLFault.at_kind(0, Reason.Shape, reason) }
-    // Rust: crates/jet-foundation/src/XmlPull.rs:2060
-    fn state(reason: String) -> XMLFault Never! { XMLFault.at_kind(0, Reason.Shape, "[state] {reason}") }
-}
 // Rust: crates/jet-foundation/src/XmlPull.rs:2065
 fn exact_keys(value: Dyn, expected: [String]) XMLFault! {
     if value == .Object(_) {} else { return Err(XMLFault.shape("XML event must be an Object")) }
@@ -1331,8 +1325,8 @@ fn source_encoding_matches(source: String?, bom: [U8], target: RenderEncoding) -
     if target == {
         .UTF8 -> (source ?? "") == "UTF-8" && bom.is_empty()
         .UTF8Bom -> (source ?? "") == "UTF-8" && bom == [U8]{U8{0xef}, U8{0xbb}, U8{0xbf}}
-        .Utf16Le -> (source ?? "") == "UTF-16LE" && bom == [U8]{U8{0xff}, U8{0xfe}}
-        .Utf16Be -> (source ?? "") == "UTF-16BE" && bom == [U8]{U8{0xfe}, U8{0xff}}
+        .UTF16Le -> (source ?? "") == "UTF-16LE" && bom == [U8]{U8{0xff}, U8{0xfe}}
+        .UTF16Be -> (source ?? "") == "UTF-16BE" && bom == [U8]{U8{0xfe}, U8{0xff}}
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2360
@@ -1340,22 +1334,22 @@ fn target_bom(target: RenderEncoding) -> [U8] Never! {
     if target == {
         .UTF8 -> [U8]{}
         .UTF8Bom -> [U8]{U8{0xef}, U8{0xbb}, U8{0xbf}}
-        .Utf16Le -> [U8]{U8{0xff}, U8{0xfe}}
-        .Utf16Be -> [U8]{U8{0xfe}, U8{0xff}}
+        .UTF16Le -> [U8]{U8{0xff}, U8{0xfe}}
+        .UTF16Be -> [U8]{U8{0xfe}, U8{0xff}}
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2368
 fn encoding_declaration(target: RenderEncoding) -> String Never! {
     if target == {
         .UTF8 | .UTF8Bom -> "UTF-8"
-        .Utf16Le | .Utf16Be -> "UTF-16"
+        .UTF16Le | .UTF16Be -> "UTF-16"
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2374
 fn validate_declared_encoding(name: String, target: RenderEncoding) XMLFault! {
     ok :: if target == {
         .UTF8 | .UTF8Bom -> ascii_equal(name, "UTF-8")
-        .Utf16Le | .Utf16Be -> ascii_equal(name, "UTF-16") || ascii_equal(name, "UTF-16LE") || ascii_equal(name, "UTF-16BE")
+        .UTF16Le | .UTF16Be -> ascii_equal(name, "UTF-16") || ascii_equal(name, "UTF-16LE") || ascii_equal(name, "UTF-16BE")
     }
     if !ok -> return Err(XMLFault.at_kind(0, Reason.InvalidEncoding, "XML declaration conflicts with selected output encoding"))
 }
@@ -1365,10 +1359,10 @@ fn encode_text(value: String, target: RenderEncoding) -> [U8] Never! {
     output := [U8]{}
     loop scalar in value.chars() {
         code :: Int{scalar}
-        if code < 0x10000 -> utf16_word(&output, code, target == RenderEncoding.Utf16Le)
+        if code < 0x10000 -> utf16_word(&output, code, target == RenderEncoding.UTF16Le)
         else {
-            utf16_word(&output, 0xd800 + (code - 0x10000) / 1024, target == RenderEncoding.Utf16Le)
-            utf16_word(&output, 0xdc00 + (code - 0x10000) % 1024, target == RenderEncoding.Utf16Le)
+            utf16_word(&output, 0xd800 + (code - 0x10000) / 1024, target == RenderEncoding.UTF16Le)
+            utf16_word(&output, 0xdc00 + (code - 0x10000) % 1024, target == RenderEncoding.UTF16Le)
         }
     }
     ^output
@@ -1742,6 +1736,12 @@ struct XMLFault {
     reason: String
 }
 impl XMLFault {
+    // Rust: crates/jet-foundation/src/XmlPull.rs:2057
+    fn shape(reason: String) -> XMLFault Never! { XMLFault.at_kind(0, Reason.Shape, reason) }
+    // Rust: crates/jet-foundation/src/XmlPull.rs:2060
+    fn state(reason: String) -> XMLFault Never! { XMLFault.at_kind(0, Reason.Shape, "[state] {reason}") }
+}
+impl XMLFault {
     // Rust: crates/jet-foundation/src/XmlPull.rs:4718
     fn at(offset: Int, reason: String) -> XMLFault Never! { XMLFault.at_kind(offset, Reason.Malformed, reason) }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4721
@@ -1817,7 +1817,7 @@ impl ParseOptions {
      fn safe() -> ParseOptions Never! { ParseOptions{entities: EntityPolicy.Preserve, limits: Limits.safe()} }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:4873
- enum WireEncoding { UTF8 Utf16Le Utf16Be }
+ enum WireEncoding { UTF8 UTF16Le UTF16Be }
 // Rust: crates/jet-foundation/src/XmlPull.rs:4880
  enum TokenKind { Text Entity Markup }
 // Rust: crates/jet-foundation/src/XmlPull.rs:4887
@@ -1861,16 +1861,16 @@ impl ByteLexer {
             self.bom = take_bytes(&self.undecided, 3)
             self.wire_offset = 3
         } else if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{0xff, 0xfe}[0..<2]) {
-            self.encoding = Val(WireEncoding.Utf16Le)
+            self.encoding = Val(WireEncoding.UTF16Le)
             self.bom = take_bytes(&self.undecided, 2)
             self.wire_offset = 2
         } else if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{0xfe, 0xff}[0..<2]) {
-            self.encoding = Val(WireEncoding.Utf16Be)
+            self.encoding = Val(WireEncoding.UTF16Be)
             self.bom = take_bytes(&self.undecided, 2)
             self.wire_offset = 2
         } else if self.undecided.len() >= 4 {
-            if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{0, 60, 0, 63}[0..<4]) -> self.encoding = Val(WireEncoding.Utf16Be)
-            else if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{60, 0, 63, 0}[0..<4]) -> self.encoding = Val(WireEncoding.Utf16Le)
+            if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{0, 60, 0, 63}[0..<4]) -> self.encoding = Val(WireEncoding.UTF16Be)
+            else if byte_prefix(self.undecided[0..<self.undecided.len()], 0, [U8]{60, 0, 63, 0}[0..<4]) -> self.encoding = Val(WireEncoding.UTF16Le)
             else { self.encoding = Val(WireEncoding.UTF8) }
         } else if final_input || self.undecided.len() >= 3 { self.encoding = Val(WireEncoding.UTF8) }
         if self.encoding != None {
@@ -1888,14 +1888,14 @@ impl ByteLexer {
         } else {
             loop byte in bytes -> &self.pending.push(byte)
         }
-        &self.decode(false)
+        &self.decode_pending(false)
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4989
     fn finish_input(self: &ByteLexer) XMLFault! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         self.eof = true
         &self.choose_encoding(true) ?? return Err(err)
-        &self.decode(true)
+        &self.decode_pending(true)
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4997
     fn retain(self: &ByteLexer, scalar: Char, raw: ^[U8]) XMLFault! {
@@ -1907,7 +1907,7 @@ impl ByteLexer {
         &self.units.push(DecodedUnit{scalar: scalar, raw: ^raw})
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5009
-    fn decode(self: &ByteLexer, final_input: Bool) XMLFault! {
+    fn decode_pending(self: &ByteLexer, final_input: Bool) XMLFault! {
         encoding :: self.encoding ?? return
         loop {
             if self.boundary() != None -> break
@@ -1921,9 +1921,9 @@ impl ByteLexer {
                     raw :: take_bytes(&self.pending, width)
                     &self.retain(scalar, ^raw) ?? return Err(err)
                 }
-                .Utf16Le | .Utf16Be -> {
+                .UTF16Le | .UTF16Be -> {
                     if self.pending.len() < 2 -> break
-                    little :: encoding == WireEncoding.Utf16Le
+                    little :: encoding == WireEncoding.UTF16Le
                     unit :: read_word(self.pending[0..<self.pending.len()], 0, little)
                     width :: if unit >= 0xd800 && unit <= 0xdbff -> 4 else -> 2
                     if self.pending.len() < width -> break
@@ -1988,7 +1988,7 @@ impl ByteLexer {
     // Rust: crates/jet-foundation/src/XmlPull.rs:5154
     fn next_token(self: &ByteLexer) -> ByteToken? XMLFault! {
         if self.terminal == .Val(error) -> return Err(error.copy())
-        &self.decode(self.eof) ?? return Err(err)
+        &self.decode_pending(self.eof) ?? return Err(err)
         boundary :: self.boundary() ?? {
             if self.eof && !self.units.is_empty() -> return &self.fail(Reason.Malformed, "unterminated XML token at end of input")
             return None

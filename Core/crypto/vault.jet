@@ -191,13 +191,13 @@ fn __wrapped_from_bytes(bytes: ^[U8]) -> WrappedVaultKey KeyWrapError! {
 fn __wrapped_bytes(wrapped: WrappedVaultKey) -> [U8] Never! { wrapped.encoded.copy() }
 
 impl WrappedVaultKey.Display {
-    fn display(self) -> String Never! {
+    fn display(self) -> String {
         mode :: if self.mode == 1 -> "recipient" else -> "passphrase"
         key_type :: if self.key_type == 1 -> "signing" else -> "x25519"
         "WrappedVaultKey(mode:{mode},type:{key_type},origin:{self.origin_name}@v{self.origin_generation})"
     }
 }
-impl WrappedVaultKey.Debug { fn debug(^self) -> String Never! { self.display() } }
+impl WrappedVaultKey.Debug { fn debug(^self) -> String { self.display() } }
 
 struct KeyUnlock {
     kind: Int

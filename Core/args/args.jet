@@ -199,9 +199,21 @@ fn put_entry(entries: &[(key: String, value: Dyn)], key: String, value: Dyn) {
             }
         }
         else -> {
-            entries[key] = value
+            object_set(&entries, key, value)
         }
     }
+}
+
+#Test("repeated value options replace their tuple slot without changing order") {
+    entries := [(key: String, value: Dyn)]{
+        (key: "first", value: Dyn.Text("old")),
+        (key: "second", value: Dyn.Int(2)),
+    }
+    put_entry(&entries, "first", Dyn.Text("new"))
+    assert(entries.len() == 2)
+    assert(entries[0].key == "first")
+    assert(entries[1].key == "second")
+    assert(object_get(entries, "first") == Val(Dyn.Text("new")))
 }
 
 
