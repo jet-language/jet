@@ -8,8 +8,8 @@
 //
 // 1. member types (struct, enum, trait, tag, impl) lift beside the module
 //    under `module_type_name` (`bank.Account` -> `M4BankAccount`); the bare and
-//    qualified spellings resolve inside the module, and only a `pub` member's
-//    qualified spelling resolves in the rest of the file;
+//    qualified spellings resolve inside the module, and the qualified spelling
+//    resolves in its enclosing file, including members of `priv module`s;
 // 2. a top-level module's member functions lift under `member_name`
 //    (`bank.open` -> `__jet_bank_dopen`) with their sibling calls renamed, so
 //    registration, body checking and lowering see ordinary functions;
@@ -76,6 +76,9 @@ use jet_foundation.[
     VariantPayload,
     measure_kind,
     measure_literal_value,
+    ast_func,
+    ast_program,
+    ast_struct,
 ]
 
 // A member reached through a `use` inside a module: an inline module member
@@ -88,7 +91,7 @@ struct SemaInlineTarget {
 
 struct SemaInlineModuleSurface {
     name: String
-    // Member function name -> written `pub`.
+    // Member function names reachable by this enclosing file.
     functions: [String:Bool]
     // `pub use` inside the module: re-exported local name -> its owner.
     reexports: [String:SemaInlineTarget]
@@ -1008,12 +1011,10 @@ fn sema_inline_hoist_module(code_module: CodeModule, source_path: String, hoist:
         // module's compiler-owned spelling; normalize it to this identity.
         direct_types[sema_inline_type_name(display_alias, name)] = resolved
         &direct_names.push(name)
-        // The file reaches a public member only by its full module path; a
-        // nested module's own name is a relative spelling inside its parent.
-        if is_pub {
-            hoist.exported["{source_path}.{name}"] = resolved
-            hoist.has_exported = true
-        }
+        // D-VIS-MODULE1: the enclosing file reaches private member types by
+        // their full module path too. Do not export a nested relative name.
+        hoist.exported["{source_path}.{name}"] = resolved
+        hoist.has_exported = true
     }
     kept := [Item]{}
     lifted := [Item]{}
@@ -1087,8 +1088,8 @@ fn sema_inline_hoist_module(code_module: CodeModule, source_path: String, hoist:
     SemaInlineHoisted{code_module: updated, paths: all_paths, types: all_types}
 }
 
-// Rust `rewrite_exported_inline_types`: public member types reach every
-// function of the file (and of its inline modules) by their qualified name.
+// Rust `rewrite_exported_inline_types`: member types reach every function of
+// the enclosing file (and its inline modules) by their qualified name.
 fn sema_inline_rewrite_exported(items: [Item], rewrite: &SemaInlineRewrite) -> [Item] Never! {
     mapped := [Item]{}
     loop item in items {
@@ -1323,7 +1324,7 @@ fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> S
     }
     if !has_module -> return SemaInlinePreparedBindings{imports: [String:SemaInlineFunctionBinding]{}, modules: [SemaInlineModuleSurface]{}}
 
-    // 1. Member types, in item order, then the public qualified spellings.
+    // 1. Member types, in item order, then the enclosing file's qualified names.
     hoist := SemaInlineHoist{declarations: [Item]{}, exported: [String:Type]{}, has_exported: false}
     hoisted_items := [Item]{}
     loop item in program.items {
@@ -1415,4 +1416,35 @@ fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> S
     program.imports = imports
     loop diagnostic in calls.diagnostics -> &diagnostics.push(diagnostic)
     SemaInlinePreparedBindings{imports: ^calls.imported, modules: ^calls.modules}
+}
+
+#Test("private inline member types resolve in the enclosing file without becoming public") {
+    span :: Span{start: 0, end: 1}
+    carrier :: ast_struct("OrderedRow", span, span)
+    helper :: ast_func("compare", span, span)
+    internal :: CodeModule{name: "internal", name_span: span, is_pub: false, is_package_pub: false, body: Val([Item]{Item.Struct{value: carrier}, Item.Func{value: helper}}), imports: [ImportDecl]{}, web_target: None, instance_identity: None, span: span}
+    consumer := ast_func("execute", span, span)
+    consumer.is_pub = true
+    consumer.return_type = Val(Type.List{element: Type.Named{name: "internal.OrderedRow"}})
+    program := ast_program()
+    program.items = [Item]{Item.CodeModule{value: internal}, Item.Func{value: consumer}}
+    diagnostics := [Diagnostic]{}
+    _ :: sema_inline_modules_lower(&program, &diagnostics)
+    assert(diagnostics.is_empty())
+    resolved := false
+    private_type := false
+    private_function := false
+    loop item in program.items {
+        if item == {
+            .Func(function) -> {
+                if function.name == "execute" -> resolved = function.return_type == Val(Type.List{element: Type.Named{name: sema_inline_type_name("internal", "OrderedRow")}})
+                if function.name == sema_inline_member_name("internal", "compare") -> private_function = !function.is_pub && !function.is_package_pub
+            }
+            .Struct(definition) -> {
+                if definition.name == sema_inline_type_name("internal", "OrderedRow") -> private_type = !definition.is_pub && !definition.is_package_pub
+            }
+            else -> {}
+        }
+    }
+    assert(resolved && private_type && private_function)
 }
