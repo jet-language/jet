@@ -130,7 +130,9 @@ fn attribute(element: Dyn, selector: String) -> String? XMLError! {
     if kernel.lookup_attribute(element, selector) == {
         .Val(value) -> Val(value)
         .None -> None
-        .Err(error) -> return Err(kernel.public_error(error))
+        .Err(error) -> {
+            return Err(kernel.public_error(error))
+        }
     }
 }
 
@@ -171,7 +173,9 @@ struct XMLReader {
             candidate :: if &self.scanner.next() == {
                 .Val(event) -> Val(event)
                 .None -> None
-                .Err(error) -> return &self.fail(stream_error(error))
+                .Err(error) -> {
+                    return &self.fail(stream_error(error))
+                }
             }
             if candidate == .Val(event) {
                 slot :: mem.__type_size<Dyn>()
