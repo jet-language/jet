@@ -4038,6 +4038,34 @@ impl Ord for MirConstKey {
     }
 }
 
+/// Core-owned publication sites share the canonical `Global` storage path.
+/// The initializer's declaration identity, never a use location, keys a site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirSharedLifetime {
+    Process,
+    World,
+    Thread,
+    Attempt,
+}
+
+impl MirSharedLifetime {
+    pub fn core_member(name: &str) -> Option<Self> {
+        match name {
+            "__process_shared" => Some(Self::Process),
+            "__world_shared" => Some(Self::World),
+            "__thread_shared" => Some(Self::Thread),
+            "__attempt_shared" => Some(Self::Attempt),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirSharedSite {
+    pub initializer: MirFunctionId,
+    pub lifetime: MirSharedLifetime,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum MirConstant {
     Int {
