@@ -3326,8 +3326,8 @@ allocator and L1/L3 canonical allocator/split providers are existing Jet bodies.
 
 `JetBackend/Source/DataABI.jet` single-sources canonical Dyn's raw variant
 words and payload offsets; these are never a Rust allocation layout.
-The retained `JetRuntime/Source/DataTree.jet` filename and private
-`data_tree_*` helpers describe generic storage, not a second public type.
+The `JetRuntime/Source/Dyn.jet` provider retains private `data_tree_*`
+helpers for generic storage, not a second public type.
 All exported lifecycle, constructor, getter and sequence symbols use `Dyn`;
 obsolete `DataTree` exports and `TypedText` are removed.
 Constructors clone borrowed text and exact Int owners, consume sequence

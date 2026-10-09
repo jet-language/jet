@@ -93,13 +93,13 @@ fn compiler_json_fixture_value(text: I64, kind: I64, payload: I64, rendered: I64
     if !compiler_json_fixture_error(rt_static_text(" null"), rt_static_text("expected a JSON value"), I64{1}) -> return I64{42}
     nested :: jet_rt_string_builder_new()
     at := I64{0}
-    loop (at < I64{64}) {
+    loop at < (I64{64}) {
         rt_text_push_scalar(nested, I64{91})
         at += I64{1}
     }
     rt_text_push_scalar(nested, I64{48})
     at = I64{0}
-    loop (at < I64{64}) {
+    loop at < (I64{64}) {
         rt_text_push_scalar(nested, I64{93})
         at += I64{1}
     }
@@ -108,7 +108,7 @@ fn compiler_json_fixture_value(text: I64, kind: I64, payload: I64, rendered: I64
     if !accepted -> return I64{43}
     too_deep :: jet_rt_string_builder_new()
     at = I64{0}
-    loop (at < I64{65}) {
+    loop at < (I64{65}) {
         rt_text_push_scalar(too_deep, I64{91})
         at += I64{1}
     }
@@ -119,7 +119,7 @@ fn compiler_json_fixture_value(text: I64, kind: I64, payload: I64, rendered: I64
     // the million-digit validator. Its boundary is inclusive.
     large :: rt_text_builder_with_capacity(I64{1000001})
     at = I64{0}
-    loop (at < I64{1000000}) {
+    loop at < (I64{1000000}) {
         rt_text_push_scalar(large, I64{57})
         at += I64{1}
     }
@@ -145,13 +145,13 @@ fn compiler_json_fixture_value(text: I64, kind: I64, payload: I64, rendered: I64
     exact :: jet_rt_int_from_static(rt_text_data(decimal), rt_text_len(decimal))
     integer :: jet_rt_record_new_Dyn_Int(exact)
     jet_rt_int_drop(exact)
-    copy :: jet_rt_handle_clone_Dyn(integer)
-    projected :: jet_rt_record_get_Dyn_Int(copy)
-    rendered :: jet_rt_handle_show_Dyn(copy)
-    int_ok :: jet_rt_handle_eq_Dyn(integer, copy) && jet_rt_string_eq(rendered, decimal)
+    cloned_dyn :: jet_rt_handle_clone_Dyn(integer)
+    projected :: jet_rt_record_get_Dyn_Int(cloned_dyn)
+    rendered :: jet_rt_handle_show_Dyn(cloned_dyn)
+    int_ok :: jet_rt_handle_eq_Dyn(integer, cloned_dyn) && jet_rt_string_eq(rendered, decimal)
     jet_rt_string_drop(rendered)
     jet_rt_handle_drop_Dyn(integer)
-    jet_rt_handle_drop_Dyn(copy)
+    jet_rt_handle_drop_Dyn(cloned_dyn)
     projected_text :: jet_rt_int_to_string(projected)
     projection_ok :: jet_rt_string_eq(projected_text, decimal)
     jet_rt_string_drop(projected_text)

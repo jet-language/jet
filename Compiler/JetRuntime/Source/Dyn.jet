@@ -2,12 +2,12 @@
 // foundation/Dyn.rs:136-148 owns tags and structural PartialEq;
 // JetStd/JSONDyn.rs:24-91 owns ordered JSON render semantics.
 // Exact Int words retain shared owners. Text constructors clone, sequence
-// constructors adopt, sequence getters lend; no obsolete DataTree exports.
+// constructors adopt, sequence getters lend; Dyn is the sole public carrier.
 fn data_tree_word(address: I64) -> I64 {
-    #Unsafe("address borrows an initialized word in a live native DataTree or List") { return os_load_i64(address) }
+    #Unsafe("address borrows an initialized word in a live native Dyn or List") { return os_load_i64(address) }
 }
 fn data_tree_store(address: I64, value: I64) {
-    #Unsafe("address owns a writable word in a native DataTree or List") { os_store_i64(address, value) }
+    #Unsafe("address owns a writable word in a native Dyn or List") { os_store_i64(address, value) }
 }
 fn data_tree_new(kind: I64, payload: I64) -> I64 {
     tree :: jet_rt_alloc(DATA_TREE_BYTES, I64{8})
@@ -311,7 +311,7 @@ fn data_dyn_datetime_text(value: I64) -> I64 {
         rt_text_push_scalar(target, I64{46})
         digits := I64{9}
         fraction := nanos
-        loop (fraction %% I64{10} == I64{0}) {
+        loop fraction %% (I64{10}) == (I64{0}) {
             fraction /= I64{10}
             digits -= I64{1}
         }

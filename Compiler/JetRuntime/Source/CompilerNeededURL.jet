@@ -127,7 +127,7 @@ fn compiler_url_puny_adapt(delta: I64, points: I64, first: Bool) -> I64 {
     d := if first -> delta /% I64{700} else -> delta /% I64{2}
     d += d /% points
     k := I64{0}
-    loop (d > I64{455}) {
+    loop d > (I64{455}) {
         d = d /% I64{35}
         k += I64{36}
     }
@@ -213,7 +213,7 @@ fn compiler_url_puny(out: I64, value: I64, start: I64, end: I64, err: I64) -> Bo
 fn compiler_url_host(value: I64, start: I64, end: I64, err: I64) -> I64 {
     lower :: compiler_url_lower(value, start, end)
     stop := rt_text_len(lower)
-    loop (stop > I64{0} && rt_text_byte(rt_text_data(lower) + stop - I64{1}) == I64{46}) -> stop -= I64{1}
+    loop stop > (I64{0}) && rt_text_byte(rt_text_data(lower) + stop - I64{1}) == (I64{46}) -> stop -= I64{1}
     out :: jet_rt_string_builder_new()
     at := I64{0}
     loop {
@@ -331,7 +331,7 @@ fn compiler_url_dot_path(path: I64) -> I64 {
 fn compiler_url_new() -> I64 {
     value :: jet_rt_alloc(I64{80}, I64{8})
     offset := I64{0}
-    loop (offset < I64{80}) {
+    loop offset < (I64{80}) {
         rt_text_store(value + offset, if (offset == I64{32}) -> I64{-1} else -> I64{0})
         offset += I64{8}
     }
@@ -528,7 +528,7 @@ fn compiler_url_parse_body(input: I64, value: I64, err: I64) -> Bool {
     }
     // Materialize only genuinely absent Text fields after all fallible work.
     offset := I64{0}
-    loop (offset < I64{72}) {
+    loop offset < (I64{72}) {
         if (offset != I64{32} && offset != I64{40} && rt_text_word(value + offset) == I64{0}) -> rt_text_store(value + offset, jet_rt_string_builder_new())
         offset += I64{8}
     }
@@ -548,7 +548,7 @@ fn compiler_url_trim_view(value: I64) -> I64 {
     }
     loop end > start {
         at := end - I64{1}
-        loop (at > start && (rt_text_byte(data + at) & I64{192}) == I64{128}) -> at -= I64{1}
+        loop at > start && (rt_text_byte(data + at) & I64{192}) == (I64{128}) -> at -= I64{1}
         if !unicode_is_white_space(rt_text_decode(data + at)) -> break
         end = at
     }
@@ -574,7 +574,7 @@ fn compiler_url_trim_view(value: I64) -> I64 {
 #Export(c) fn jet_rt_handle_drop_JetURL(value: I64) {
     if (value == I64{0}) -> return
     offset := I64{0}
-    loop (offset < I64{80}) {
+    loop offset < (I64{80}) {
         if (offset != I64{32} && offset != I64{40}) -> jet_rt_string_drop(rt_text_word(value + offset))
         offset += I64{8}
     }
@@ -583,7 +583,7 @@ fn compiler_url_trim_view(value: I64) -> I64 {
 #Export(c) fn jet_rt_handle_clone_JetURL(value: I64) -> I64 {
     out :: jet_rt_alloc(I64{80}, I64{8})
     offset := I64{0}
-    loop (offset < I64{80}) {
+    loop offset < (I64{80}) {
         word :: rt_text_word(value + offset)
         rt_text_store(out + offset, if (offset == I64{32} || offset == I64{40}) -> word else -> jet_rt_string_clone(word))
         offset += I64{8}
@@ -592,7 +592,7 @@ fn compiler_url_trim_view(value: I64) -> I64 {
 }
 #Export(c) fn jet_rt_handle_eq_JetURL(a: I64, b: I64) -> Bool {
     offset := I64{0}
-    loop (offset < I64{80}) {
+    loop offset < (I64{80}) {
         left :: rt_text_word(a + offset)
         right :: rt_text_word(b + offset)
         if (offset == I64{32} || offset == I64{40}) { if left != right -> return false } else { if !jet_rt_string_eq(left, right) -> return false }
