@@ -1,0 +1,19 @@
+// CAbiRoutes8223-8232 List.Byte four-route family. Existing DataSequences
+// 6d4fa9ba6 supplies native List24 geometry/reserve/index checks at composition.
+// Byte payloads are packed stride1, not word lanes; capacity/length are raw
+// machine counts, and u64 item conversion is checked before any mutation.
+#Export(c) fn jet_rt_record_seq_List_Byte_new(capacity: I64) -> I64 {
+    data_sequence_new(capacity, I64{1})
+}
+#Export(c) fn jet_rt_record_seq_List_Byte_len(value: I64) -> I64 {
+    rt_text_word(value + DATA_SEQUENCE_LENGTH)
+}
+#Export(c) fn jet_rt_record_seq_List_Byte_get(value: I64, index: I64) -> U64 {
+    U64{rt_text_byte(data_sequence_slot(value, index, I64{1}))}
+}
+#Export(c) fn jet_rt_record_seq_List_Byte_push(value: I64, item: U64) {
+    if (item > U64{255}) -> trap_native_index_range_stop()
+    slot :: data_sequence_reserve(value, I64{1})
+    rt_text_put(slot, I64{item})
+    rt_text_store(value + DATA_SEQUENCE_LENGTH, rt_text_word(value + DATA_SEQUENCE_LENGTH) + I64{1})
+}
