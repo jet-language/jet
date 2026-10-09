@@ -1899,8 +1899,8 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, program: JetCodeg
     // ones bound after that exit. Entry-block writes dominate every path.
     resume_block := builder.current
     builder.current = builder.entry
-    cleared := jet_codegen_emit_value(&builder, owner_span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: false}})
-    _ := jet_codegen_emit(&builder, owner_span, None, MIROperation.WritePlace{place: live_place, value: cleared})
+    cleared := jet_codegen_emit_value(&builder, program, owner_span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: false}})
+    _ := jet_codegen_emit(&builder, program, owner_span, None, MIROperation.WritePlace{place: live_place, value: cleared})
     builder.current = resume_block
     record := JetCodegenDropLive{
         place: place,
