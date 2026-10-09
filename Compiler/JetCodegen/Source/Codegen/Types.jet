@@ -351,7 +351,7 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
             }
         }
         loop owner in semantic_module.declarations.core_builtin_owners {
-            if name == owner.name || name == owner.symbol.key {
+            if (semantic_module.module_identity == current_module_identity && name == owner.name) || name == owner.symbol.key {
                 found = jet_codegen_merge_nominal_identity(found, jet_codegen_core_owner_identity(owner, semantic_module))
             } else {
                 jet_codegen_check_core_owner(owner, semantic_module)

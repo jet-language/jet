@@ -1189,11 +1189,11 @@ pub(super) fn lower_or_fallback(
         let Some(return_ty) = env.ret_ty.clone() else {
             return value;
         };
-        // A typed empty list is rewritten by sema to `ListLit([])`, so its
-        // element type is absent from the AST by the time TIR lowers it.
-        // Restore the enclosing return payload before constructing the carrier.
+        // Contextual literals have no payload from which to recover their
+        // checked type. A Result's success slot, not its outer carrier,
+        // supplies the type of `None` in `T? E!`.
         let payload_ty = match &return_ty {
-            Type::Result { ok, .. } | Type::Option(ok) => ok.as_ref(),
+            Type::Result { ok, .. } => ok.as_ref(),
             other => other,
         };
         // A bare `None` takes the return's Option slot: the callable's own
