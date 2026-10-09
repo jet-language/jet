@@ -9,6 +9,8 @@
 // Rendering bindings distinguish element names, namespace prefixes, attributes,
 // and child node kinds; nested scopes do not redeclare an enclosing binding.
 // Integer wire packing uses truncating division; String windows use slice.
+// Collection compaction swaps owned slots and pops tails; projections preserve
+// their insertion order without moving fields out of indexed borrowed storage.
 use core.encoding.[Dyn]
 use core.encoding as encoding
 use core.text as unicode
@@ -1483,7 +1485,7 @@ fn canonical_document(value: Dyn, options: CanonicalOptions) -> String XMLFault!
 // Rust: crates/jet-foundation/src/XmlPull.rs:2475
 fn canonical_node(value: Dyn, options: CanonicalOptions, parent_scope: NamespaceScope, parent_rendered: NamespaceScope, output: &String) XMLFault! {
     kind :: required_text(value, "$xml") ?? return Err(err)
-    if kind != "element" -> return canonical_leaf(value, kind, output)
+    if kind != "element" -> return canonical_leaf(value, kind, &output)
     name :: parse_name(field(value, "name") ?? return Err(XMLFault.shape("element lacks name"))) ?? return Err(err)
     scope := parent_scope.copy()
     namespaces :: array_value(field(value, "namespaces")) ?? return Err(XMLFault.shape("element namespaces must be an array"))
@@ -1538,7 +1540,7 @@ fn canonical_node(value: Dyn, options: CanonicalOptions, parent_scope: Namespace
     loop child in children {
         child_kind :: required_text(child, "$xml") ?? return Err(err)
         if child_kind == "comment" && !options.comments -> next
-        canonical_node(child, options, scope, rendered, output) ?? return Err(err)
+        canonical_node(child, options, scope, rendered, &output) ?? return Err(err)
     }
     output += "</{name.raw}>"
 }
@@ -1628,7 +1630,7 @@ fn entity_err(path: String, reason: String) -> XMLFault Never! {
 // Rust: crates/jet-foundation/src/XmlPull.rs:2743
 fn clark_key(local: String, namespace_uri: String?) -> String Never! {
     if namespace_uri == .Val(uri) && !uri.is_empty() -> return "{{{uri}}}{local}"
-    local
+    local.copy()
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2750
 fn read_name_parts(name: Dyn, path: String) -> Name XMLFault! {
@@ -1796,15 +1798,20 @@ fn project_element_value(element: Dyn, path: String) -> Dyn XMLFault! {
         child_path :: if path == "$" -> key else -> "{path}.{key}"
         projected :: project_element_value(child, child_path) ?? return Err(err)
         if key_index.get(key) == .Val(index) {
-            prior := ^child_keys[index].value
+            last :: child_keys.len() - 1
+            &child_keys.__swap(index, last)
+            entry := &child_keys.pop() ?? panic("indexed XML projection entry must exist")
+            prior := ^entry.value
             if prior == {
                 .Array(items) -> {
                     values := ^items
                     &values.push(projected)
-                    child_keys[index].value = Dyn.Array(^values)
+                    entry.value = Dyn.Array(^values)
                 }
-                else -> child_keys[index].value = Dyn.Array([Dyn]{^prior, projected})
+                else -> entry.value = Dyn.Array([Dyn]{^prior, projected})
             }
+            &child_keys.push(^entry)
+            &child_keys.__swap(index, last)
         } else {
             key_index[key] = child_keys.len()
             &child_keys.push((key: key, value: projected))
@@ -1842,11 +1849,11 @@ impl XMLFault {
     fn at(offset: Int, reason: String) -> XMLFault Never! { XMLFault.at_kind(offset, Reason.Malformed, reason) }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4721
     fn at_kind(offset: Int, kind: Reason, reason: String) -> XMLFault Never! {
-        XMLFault{kind: kind, offset: offset, line: None, column: None, path: "$", reason: ^reason}
+        XMLFault{kind: kind, offset: offset, line: None, column: None, path: "$", reason: reason.copy()}
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4731
     fn limit(reason: String) -> XMLFault Never! {
-        XMLFault{kind: Reason.Limit, offset: 0, line: None, column: None, path: "", reason: ^reason}
+        XMLFault{kind: Reason.Limit, offset: 0, line: None, column: None, path: "", reason: reason.copy()}
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4742
     fn located(self: ^XMLFault, source: View<U8>, path: ^String) -> XMLFault Never! {
@@ -1864,10 +1871,8 @@ impl XMLFault {
             }
             cursor += scalar.width
         }
-        self.line = Val(line)
-        self.column = Val(column)
-        self.path = ^path
-        ^self
+        XMLFault{kind: self.kind, offset: self.offset, line: Val(line),
+            column: Val(column), path: ^path, reason: ^self.reason}
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:4759
@@ -2108,8 +2113,8 @@ impl ByteLexer {
 }
 fn drop_prefix<T>(values: &[T], count: Int) Never! {
     remaining :: values.len() - count
-    loop index in 0..<remaining -> values[index] = ^values[index + count]
-    &values.truncate(remaining)
+    loop index in 0..<remaining -> &values.__swap(index, index + count)
+    loop values.len() > remaining -> _ :: &values.pop()
 }
 fn take_bytes(values: &[U8], count: Int) -> [U8] Never! {
     out := [U8]{}
@@ -2154,7 +2159,7 @@ impl StreamScanner {
     // Rust: crates/jet-foundation/src/XmlPull.rs:5211
     fn new(max_item_bytes: Int, options: ParseOptions) -> StreamScanner XMLFault! {
         options.limits.validate() ?? return Err(err)
-        StreamScanner{lexer: ByteLexer.new(max_item_bytes), options: ^options, started: false, ended: false, root_seen: false, root_closed: false, declaration_seen: false, doctype_seen: false, declared_entities: [String:DeclaredEntityKind]{}, stack: [], nodes: 0, text_bytes: 0, entity_replacement_bytes: 0, wire_consumed: 0, line: 1, column: 1, terminal: None}
+        StreamScanner{lexer: ByteLexer.new(max_item_bytes), options: options.copy(), started: false, ended: false, root_seen: false, root_closed: false, declaration_seen: false, doctype_seen: false, declared_entities: [String:DeclaredEntityKind]{}, stack: [], nodes: 0, text_bytes: 0, entity_replacement_bytes: 0, wire_consumed: 0, line: 1, column: 1, terminal: None}
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5233
     fn push(self: &StreamScanner, bytes: View<U8>) XMLFault! {
@@ -2211,7 +2216,8 @@ impl StreamScanner {
         event :: if &scanner.next() == {
             .Val(value) -> ^value
             .None -> { return Err(&self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "XML token produced no event"))) }
-            .Err(error) -> {
+            .Err(fault) -> {
+                error := ^fault
                 local_scalars :: scalar_count(scanner.source[0..<scanner.source.len()], math.min(error.offset, scanner.source.len()))
                 error.offset = self.wire_consumed
                 loop index in 0..<local_scalars -> error.offset += token.scalar_bytes[index]
@@ -2314,7 +2320,7 @@ fn normalize_attribute_text(raw: String) -> String Never! {
         bytes[write] = byte
         write += 1
     }
-    &bytes.truncate(write)
+    loop bytes.len() > write -> _ :: &bytes.pop()
     #Unsafe("attribute whitespace compaction preserves the already validated UTF-8 byte sequence") {
         encoding.__bytes_into_text(^bytes)
     }
@@ -2534,7 +2540,7 @@ fn visit(node: String, edges: &[String:[String]], color: &[String:Color]) -> Boo
 // Rust: crates/jet-foundation/src/XmlPull.rs:5662
 fn entity_reference_graph_has_cycle(edges: &[String:[String]]) -> Bool Never! {
     color := [String:Color]{}
-    names := edges.keys()
+    names := edges.keys().collect()
     &names.sort()
     loop name in names -> color[name.copy()] = Color.White
     loop name in names {
@@ -2589,7 +2595,7 @@ fn declared_entity_table(subset: String?) -> DeclaredEntityTable XMLFault! {
         search_from = start + 8
     }
     edges := [String:[String]]{}
-    ordered := replacements.keys()
+    ordered := replacements.keys().collect()
     &ordered.sort()
     loop name in ordered {
         targets := [String]{}
@@ -2816,7 +2822,8 @@ impl Scanner {
                 resolved := if &self.resolve_entity(name) == {
                     .Val(value) -> Val(^value)
                     .None -> String?{None}
-                    .Err(error) -> {
+                    .Err(fault) -> {
+                        error := ^fault
                         error.offset = source_base + start
                         return Err(^error)
                     }
@@ -3096,7 +3103,7 @@ impl Scanner {
             if declaration_count > self.options.limits.max_entity_declarations {
                 return Err(self.limit("XML document exceeds max_entity_declarations ({self.options.limits.max_entity_declarations})"))
             }
-            ordered := declared_entities.keys()
+            ordered := declared_entities.keys().collect()
             &ordered.sort()
             loop entity_name in ordered -> self.check_name(entity_name, "entity name") ?? return Err(err)
             self.declared_entities = ^declared_entities
@@ -3150,7 +3157,8 @@ impl Scanner {
         value :: if &self.next_inner() == {
             .Val(event) -> ^event
             .None -> { return None }
-            .Err(error) -> {
+            .Err(fault) -> {
+                error := ^fault
                 Scanner.classify(&error)
                 return Err(error.located(self.source[0..<self.source.len()], self.path()))
             }
@@ -3185,7 +3193,7 @@ impl Scanner {
     assert(&prefixes.insert(Val("z")))
     ordered := [String?]{None, Val(""), Val("z")}
     loop prefix in ordered -> assert(prefixes.contains(prefix))
-    names := prefixes.named.keys()
+    names := prefixes.named.keys().collect()
     &names.sort()
     assert_eq(names, [String]{"", "z"})
 }
@@ -3201,7 +3209,7 @@ impl Scanner {
     assert(!&names.insert(None, "b"))
     assert(!&names.insert(Val(""), "b"))
     assert(!&names.insert(Val("z"), "b"))
-    uris := names.namespaced.keys()
+    uris := names.namespaced.keys().collect()
     &uris.sort()
     assert_eq(uris, [String]{"", "z"})
 }
