@@ -1,6 +1,18 @@
+package {
+    name: "core.db.sql"
+    version: "0.0.1"
+    edition: "2026"
+    description: "Pure SQL grammar, scalar policy, and row selection."
+    license: "MIT"
+    outputs: {
+        sql: .Library{ entry: sql }
+    }
+}
+
 // SqlQuery.rs:1–1086, D-SQL-SURFACE1=A: sole grammar and row-selection kernel.
-// Publication is Main-owned. #4483 gates the selected core.sys.usize_max()
-// fact (ordinals, LIMIT, ORDER exclusion); never substitute host pointer width.
+// Public grammar and row-selection source; no database connection authority.
+// #4483 gates core.sys.usize_max() (ordinals, LIMIT, ORDER exclusion);
+// never substitute host pointer width.
 // #4500 gates retaining payload/list loans and allocation-free scalar lowering.
 // #4494/#4409 are not used: this kernel has no OS, pointer or IO operations.
 // #4499 is not used: Rust itself groups on escaped String keys; these are not
@@ -15,6 +27,7 @@ use core.text.runtime.assets.unicode_white_space as sql_whitespace
 use core.math as sql_math
 use core.sys as sql_sys
 use core.prelude.runtime.kernel_fixed_arithmetic as sql_fixed
+use internal.[sql_error, push_token, ascii_alpha, keyword, clause_keyword, token_at, token_is, parse_alias, parse_select_item, projection_shape_error, decimal_magnitude, parse_usize, parse_i64, parse_float, group_field, query_shape_error, float_compare, sql_number, sql_escape, sql_group_key, sum_add, sum_i64, count_increment, count_cast, sql_project_group, SQLOrderedRow, source_indices_compare, reverse_order]
 
 // Rust JetSqlAggregate:8–28.
 #Equatable
@@ -27,8 +40,8 @@ enum JetSQLAggregate {
 }
 impl JetSQLAggregate {
     // Rust as_str:18–26.
-    // Private static-label value projection only. Rust's &'static str ABI/
-    // storage contract is held at native cutover, not an allocation receipt.
+    // Static aggregate label; Rust's &'static str ABI/storage contract is held
+    // at native cutover, not an allocation receipt.
     fn as_str(self) -> String Never! {
         if self == {
             .Count -> "count"
@@ -40,7 +53,7 @@ impl JetSQLAggregate {
     }
 }
 
-// Rust JetSqlSelectItem:30–74. Private-module carrier, no new public DB API.
+// Rust JetSqlSelectItem:30–74. Public projection carrier for SQL consumers.
 #Equatable
 enum JetSQLSelectItem {
     Wildcard
@@ -78,14 +91,6 @@ impl JetSQLSelectItem {
     }
 }
 
-// Rust sql_error:176–178 is identity; each caller uses the canonical Err rail.
-fn sql_error(message: ^String) -> String Never! { message }
-
-// Rust push_token:180–184. One scalar-builder buffer; no scalar list/parser.
-fn push_token(tokens: &[String], token: [U8]) -> [U8] Never! {
-    if token.len() > 0 -> &tokens.push(String.from_bytes(token) ?? panic("SQL token builder produced invalid UTF-8"))
-    [U8]{}
-}
 
 // Rust sql_tokens:186–263. Byte cursor advances only by the canonical decoder.
 fn sql_tokens(sql: String) -> [String] Err! {
@@ -185,7 +190,6 @@ fn unquote(value: String) -> String Never! {
     String.from_bytes(out) ?? panic("SQL unquote builder produced invalid UTF-8")
 }
 
-fn ascii_alpha(cp: Int) -> Bool Never! { (cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122) }
 
 // Rust identifier:278–295. Quoting exempts ONLY the first scalar restriction.
 fn identifier(value: String?, role: String) -> String Err! {
@@ -208,109 +212,6 @@ fn identifier(value: String?, role: String) -> String Err! {
     name
 }
 
-// ASCII-insensitive keywords only; Unicode case folding is not SQL grammar.
-fn keyword(token: String, expected: String) -> Bool Never! {
-    raw :: sql_text.utf8_bytes(token)
-    wanted :: sql_text.utf8_bytes(expected)
-    if raw.len() != wanted.len() -> return false
-    loop i in 0..<raw.len() {
-        byte := raw[i]
-        if byte >= (U8{65}) && byte <= (U8{90}) -> byte += U8{32}
-        if byte != wanted[i] -> return false
-    }
-    true
-}
-
-// Rust clause_keyword:297–304.
-fn clause_keyword(token: String) -> Bool Never! {
-    keyword(token, "from") || keyword(token, "where") || keyword(token, "group") || keyword(token, "order") || keyword(token, "limit") || token == ";"
-}
-
-fn token_at(tokens: [String], at: Int) -> String? {
-    if at < 0 || at >= tokens.len() -> return None
-    Val(tokens[at])
-}
-
-fn token_is(tokens: [String], at: Int, expected: String) -> Bool Never! {
-    if token_at(tokens, at) == .Val(token) -> return token == expected
-    false
-}
-
-// Rust parse_alias:306–325. The next cursor is a scalar tuple, not an owner.
-fn parse_alias(tokens: [String], cursor: Int) -> (alias: String?, cursor: Int) Err! {
-    if token_at(tokens, cursor) == .Val(token) {
-        if keyword(token, "as") {
-            alias :: identifier(token_at(tokens, cursor + 1), "SELECT alias") ?? return Err(err)
-            return (alias: Val(alias), cursor: cursor + 2)
-        }
-        if token != "," && !clause_keyword(token) {
-            alias :: identifier(Val(token), "SELECT alias") ?? return Err(err)
-            return (alias: Val(alias), cursor: cursor + 1)
-        }
-    }
-    (alias: None, cursor: cursor)
-}
-
-// Rust parse_select_item:327–384. No GROUP/ORDER/LIMIT or width assumptions.
-fn parse_select_item(tokens: [String], cursor: Int) -> (item: JetSQLSelectItem, cursor: Int) Err! {
-    first :: token_at(tokens, cursor) ?? return Err(sql_error("SQL SELECT needs a projection"))
-    at := cursor + 1
-    if first == "*" {
-        if token_at(tokens, at) == .Val(next_token) {
-            if keyword(next_token, "as") -> return Err(sql_error("SQL wildcard projection cannot have an alias"))
-        }
-        return (item: JetSQLSelectItem.Wildcard, cursor: at)
-    }
-    name :: identifier(Val(first), "SELECT column or function") ?? return Err(err)
-    if !token_is(tokens, at, "(") {
-        alias :: parse_alias(tokens, at) ?? return Err(err)
-        return (item: JetSQLSelectItem.Field{field: name, alias: alias.alias}, cursor: alias.cursor)
-    }
-    at += 1
-    function := JetSQLAggregate.Count
-    lower :: sql_text.ascii_lower(name)
-    if lower == {
-        "count" -> function = JetSQLAggregate.Count
-        "sum" -> function = JetSQLAggregate.Sum
-        "avg" -> function = JetSQLAggregate.Avg
-        "average" -> function = JetSQLAggregate.Avg
-        "min" -> function = JetSQLAggregate.Min
-        "max" -> function = JetSQLAggregate.Max
-        else -> return Err(sql_error("unsupported SQL aggregate `{name}`; accepted functions are COUNT, SUM, AVG, MIN, and MAX"))
-    }
-    field := String?{None}
-    if token_is(tokens, at, "*") {
-        at += 1
-        if function != JetSQLAggregate.Count -> return Err(sql_error("SQL `*` is only valid inside COUNT(*)"))
-    } else {
-        column :: identifier(token_at(tokens, at), "aggregate column") ?? return Err(err)
-        field = Val(column)
-        at += 1
-    }
-    if !token_is(tokens, at, ")") -> return Err(sql_error("SQL aggregate call is missing its closing `)`"))
-    at += 1
-    alias :: parse_alias(tokens, at) ?? return Err(err)
-    (item: JetSQLSelectItem.Aggregate{function: function, field: field, alias: alias.alias}, cursor: alias.cursor)
-}
-
-// Rust query_shape_error:410–435. Kept as its independently tested prefix;
-// full query validation below always invokes it before checking GROUP BY.
-fn projection_shape_error(projection: [JetSQLSelectItem], grouped: Bool) -> String? {
-    if projection.len() == 0 -> return Val("SQL SELECT needs at least one projection")
-    wildcard := false
-    loop item in projection {
-        if item == .Wildcard -> wildcard = true
-    }
-    if wildcard && projection.len() != 1 -> return Val("SQL wildcard projection cannot be combined with another projection")
-    if wildcard && grouped -> return Val("SQL GROUP BY needs explicit projected columns")
-    names := Set.from([String]{})
-    loop item in projection {
-        name :: item.output_name()
-        if names.has(name) -> return Val("SQL SELECT repeats output column `{name}`")
-        &names.add(name)
-    }
-    None
-}
 
 // Rust JetSqlGroupKey:76–80, JetSqlQuery:82–90.
 #Equatable
@@ -340,102 +241,6 @@ impl JetSQLQuery {
     }
 }
 
-// Rust str::parse::<usize/i64> law at :132,491,615,648,682,738,944.
-// One strict decimal byte scan: no exact Int, whitespace, prefixes or separators.
-// The checked bound is tested BEFORE multiplication; arbitrarily long leading
-// zeroes remain valid, and overflow fails without changing error precedence.
-fn decimal_magnitude(text: String, signed: Bool, positive_max: U64, negative_max: U64) -> (negative: Bool, magnitude: U64)? Never! {
-    bytes :: sql_text.utf8_bytes(text)
-    if bytes.len() == 0 -> return None
-    at := 0
-    negative := false
-    if bytes[0] == (U8{43}) -> at = 1
-    if bytes[0] == (U8{45}) {
-        if !signed -> return None
-        at = 1
-        negative = true
-    }
-    if at == bytes.len() -> return None
-    bound :: if negative -> negative_max else -> positive_max
-    quotient :: bound /% U64{10}
-    remainder :: bound %% U64{10}
-    value := U64{0}
-    loop at < bytes.len() {
-        byte :: bytes[at]
-        if byte < (U8{48}) || byte > (U8{57}) -> return None
-        digit :: U64.from_u8(byte - U8{48})
-        if value > quotient || (value == quotient && digit > remainder) -> return None
-        value = value * U64{10} + digit
-        at += 1
-    }
-    Val((negative: negative, magnitude: value))
-}
-fn parse_usize(text: String) -> U64? Never! {
-    value :: decimal_magnitude(text, false, sql_sys.usize_max(), U64{0}) ?? return None // #4483
-    Val(value.magnitude)
-}
-fn parse_i64(text: String) -> I64? Never! {
-    value :: decimal_magnitude(text, true, U64{9223372036854775807}, U64{9223372036854775808}) ?? return None
-    if value.negative {
-        if value.magnitude == (U64{9223372036854775808}) -> return Val(I64{-9223372036854775807} - I64{1})
-        return Val(-(I64.from_u64(value.magnitude) ?? panic("bounded SQL integer magnitude")))
-    }
-    Val(I64.from_u64(value.magnitude) ?? panic("bounded SQL positive integer"))
-}
-fn parse_float(text: String) -> Float? Never! {
-    trimmed := sql_text.trim(text) // #4303: compare view without copying.
-    if trimmed != text -> return None
-    value :: Float.parse(text) ?? return None
-    Val(value)
-}
-
-// Rust group_field:387–408.
-fn group_field(query: JetSQLQuery, key: JetSQLGroupKey) -> String Err! {
-    if key == {
-        .Field(field) -> field.copy()
-        .Ordinal(ordinal) -> {
-            if ordinal == (U64{0}) || ordinal > (U64.from_int(query.projection.len()) ?? panic("SQL projection length")) -> return Err("SQL GROUP BY ordinal {ordinal} is outside the SELECT list")
-            item :: query.projection[Int.from_u64(ordinal - U64{1})] // #4500: retaining loan.
-            if item == {
-                .Field(field, _) -> field.copy()
-                .Wildcard -> return Err("SQL GROUP BY ordinal cannot reference a wildcard projection")
-                .Aggregate(_, _, _) -> return Err("SQL GROUP BY ordinal must reference a non-aggregate projection")
-            }
-        }
-    }
-}
-
-// Rust query_shape_error:410–465. Separate scalar key sets preserve derived
-// enum equality without an encoded composite key or Rust's quadratic prefix scan.
-fn query_shape_error(query: JetSQLQuery) -> String? Never! {
-    prefix :: projection_shape_error(query.projection, query.group_by.len() != 0)
-    if prefix != None -> return prefix
-    fields := Set.from([String]{})
-    ordinals := Set.from([U64]{})
-    grouped_fields := Set.from([String]{})
-    loop key in query.group_by {
-        field :: group_field(query, key) ?? return Val(err.message)
-        if key == {
-            .Field(name) -> {
-                if fields.has(name) -> return Val("SQL GROUP BY repeats a grouping key")
-                &fields.add(name.copy())
-            }
-            .Ordinal(ordinal) -> {
-                if ordinals.has(ordinal) -> return Val("SQL GROUP BY repeats a grouping key")
-                &ordinals.add(ordinal)
-            }
-        }
-        &grouped_fields.add(field)
-    }
-    aggregate :: query.has_aggregate()
-    loop item in query.projection {
-        if item == .Field(field, _) && !grouped_fields.has(field) {
-            if aggregate -> return Val("SQL SELECT column `{field}` must appear in GROUP BY when an aggregate is selected")
-            if query.group_by.len() != 0 -> return Val("SQL SELECT column `{field}` must appear in GROUP BY")
-        }
-    }
-    None
-}
 
 // Rust sql_query_fields:469–496. ORDER outputs and valid usize tokens are
 // excluded, including zero; callback order and repeated visits stay unchanged.
@@ -616,12 +421,6 @@ struct JetSQLResultRow {
     source_indices: [U64]
 }
 
-// Rust :701–752. NaN partial_cmp is Equal here, NOT Float's total sort policy.
-fn float_compare(left: Float, right: Float) -> Ordering Never! {
-    if left < right -> return Ordering.Less
-    if left > right -> return Ordering.Greater
-    Ordering.Equal
-}
 fn sql_compare_values(left: JetSQLValue, right: JetSQLValue) -> Ordering Never! {
     if left == .Null {
         if right == .Null -> return Ordering.Equal
@@ -662,61 +461,6 @@ fn compare_sql_cell(left: String, operator: String, right: String) -> Bool Never
         else -> {}
     }
     sql_compare(value ?? JetSQLValue.Text(left.copy()), operator, literal)
-}
-fn sql_number(value: Float) -> String Never! {
-    if value == (Float{0.0}) -> return "0"
-    if sql_math.is_finite(value) -> return "{value}"
-    if sql_math.is_nan(value) -> return "NaN"
-    if value > (Float{0.0}) -> "inf" else -> "-inf"
-}
-fn sql_escape(value: String) -> String Never! {
-    out := [U8]{}
-    loop byte in sql_text.utf8_bytes(value) {
-        if byte == (U8{92}) || byte == (U8{124}) || byte == (U8{61}) -> &out.push(U8{92})
-        &out.push(byte)
-    }
-    String.from_bytes(out) ?? panic("SQL escaping preserves UTF-8")
-}
-
-// Rust sql_group_key:777–792. Caller supplies a singleton slice without
-// allocating Rust's temporary one-element Vec for each row.
-fn sql_group_key(group: View<U64>, query: JetSQLQuery, key: JetSQLGroupKey, cell: fn(U64, String) -> JetSQLValue?) -> String Err! {
-    field :: group_field(query, key) ?? return Err(err)
-    value := JetSQLValue.Null
-    if group.len() != 0 -> value = cell(group[0], field) ?? JetSQLValue.Null
-    "{field}={value.canonical_key()}"
-}
-
-// Rust i128::saturating_add at :829, using the canonical two-word carrier.
-// Only I64 additions occur; sign extension plus low-word carry changes high
-// by at most one. Every primitive operation is bounded or explicitly wrapping.
-fn sum_add(sum: sql_fixed.JetFixedWide, value: I64) -> sql_fixed.JetFixedWide Never! {
-    word :: if value >= (I64{0}) -> U64.from_i64(value) ?? panic("SQL sum word") else -> U64{0}.wrapping_sub((U64.from_i64(-(value + I64{1})) ?? panic("SQL sum magnitude")) + U64{1})
-    low :: sum.low.wrapping_add(word)
-    carry :: low < sum.low
-    high := sum.high
-    if value >= (I64{0}) && carry {
-        if high == (I64{9223372036854775807}) -> return sql_fixed.JetFixedWide{high: high, low: U64{18446744073709551615}}
-        high += I64{1}
-    }
-    if value < (I64{0}) && !carry {
-        if high == (I64{-9223372036854775807} - I64{1}) -> return sql_fixed.JetFixedWide{high: high, low: U64{0}}
-        high -= I64{1}
-    }
-    sql_fixed.JetFixedWide{high: high, low: low}
-}
-fn sum_i64(sum: sql_fixed.JetFixedWide) -> I64? Never! {
-    if sum.high == (I64{0}) -> return I64.from_u64(sum.low)
-    if sum.high != (I64{-1}) || sum.low < (U64{9223372036854775808}) -> return None
-    magnitude :: I64.from_u64(sum.low - U64{9223372036854775808}) ?? panic("SQL signed sum word")
-    Val((I64{-9223372036854775807} - I64{1}) + magnitude)
-}
-fn count_increment(count: I64) -> I64 Never! {
-    if count == (I64{9223372036854775807}) -> count else -> count + I64{1}
-}
-fn count_cast(length: U64) -> I64 Never! {
-    if length < (U64{9223372036854775808}) -> return I64.from_u64(length) ?? panic("SQL row count")
-    (I64{-9223372036854775807} - I64{1}) + (I64.from_u64(length - U64{9223372036854775808}) ?? panic("SQL row count low word"))
 }
 
 // Rust sql_aggregate_value:794–889. Numeric nonfinite inputs are skipped even
@@ -779,29 +523,6 @@ fn sql_aggregate_value(group: [U64], function: JetSQLAggregate, field: String?, 
     }
 }
 
-// Rust sql_project_group:891–941. Transfer the consumed grouping positions
-// into the result rather than cloning the otherwise dead Rust group Vec.
-fn sql_project_group(fields: [String], query: JetSQLQuery, group: ^[U64], cell: fn(U64, String) -> JetSQLValue?) -> JetSQLResultRow Never! {
-    projected := [(field: String, value: JetSQLValue)]{}
-    loop item in query.projection {
-        if item == {
-            .Wildcard -> {
-                loop field in fields {
-                    value := JetSQLValue.Null
-                    if group.len() != 0 -> value = cell(group[0], field) ?? JetSQLValue.Null
-                    &projected.push((field: field.copy(), value: ^value))
-                }
-            }
-            .Field(field, alias) -> {
-                value := JetSQLValue.Null
-                if group.len() != 0 -> value = cell(group[0], field) ?? JetSQLValue.Null
-                &projected.push((field: alias ?? field.copy(), value: ^value))
-            }
-            .Aggregate(function, field, _) -> &projected.push((field: item.output_name(), value: sql_aggregate_value(group, function, field, cell)))
-        }
-    }
-    JetSQLResultRow{fields: projected, source_indices: ^group}
-}
 // Rust sql_output_value:943–954: a parsed but invalid ordinal does NOT fall
 // back to searching a column named with the numeric token.
 fn sql_output_value(row: JetSQLResultRow, field: String) -> JetSQLValue? Never! {
@@ -813,20 +534,6 @@ fn sql_output_value(row: JetSQLResultRow, field: String) -> JetSQLValue? Never! 
         if entry.field == field -> return Val(entry.value.copy())
     }
     None
-}
-struct SQLOrderedRow { row: JetSQLResultRow, order: JetSQLValue? }
-fn source_indices_compare(left: [U64], right: [U64]) -> Ordering Never! {
-    length :: if left.len() < right.len() -> left.len() else -> right.len()
-    loop index in 0..<length {
-        order :: left[index] <=> right[index]
-        if order != Ordering.Equal -> return order
-    }
-    left.len() <=> right.len()
-}
-fn reverse_order(order: Ordering) -> Ordering Never! {
-    if order == Ordering.Less -> return Ordering.Greater
-    if order == Ordering.Greater -> return Ordering.Less
-    Ordering.Equal
 }
 
 // Rust execute_sql_rows:959–1041. String map lookup + one sorted key pass
@@ -941,4 +648,315 @@ fn compare_sql_order_values(left: String, right: String) -> Ordering Never! {
         if parse_float(right) == .Val(b) -> return float_compare(a, b)
     }
     left <=> right
+}
+
+// Private implementation details: parser cursors, fixed-wide accumulation,
+// grouping keys, and sort carriers are not part of the public SQL surface.
+priv module internal {
+// Rust sql_error:176–178 is identity; each caller uses the canonical Err rail.
+fn sql_error(message: ^String) -> String Never! { message }
+
+// Rust push_token:180–184. One scalar-builder buffer; no scalar list/parser.
+fn push_token(tokens: &[String], token: [U8]) -> [U8] Never! {
+    if token.len() > 0 -> &tokens.push(String.from_bytes(token) ?? panic("SQL token builder produced invalid UTF-8"))
+    [U8]{}
+}
+fn ascii_alpha(cp: Int) -> Bool Never! { (cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122) }
+// ASCII-insensitive keywords only; Unicode case folding is not SQL grammar.
+fn keyword(token: String, expected: String) -> Bool Never! {
+    raw :: sql_text.utf8_bytes(token)
+    wanted :: sql_text.utf8_bytes(expected)
+    if raw.len() != wanted.len() -> return false
+    loop i in 0..<raw.len() {
+        byte := raw[i]
+        if byte >= (U8{65}) && byte <= (U8{90}) -> byte += U8{32}
+        if byte != wanted[i] -> return false
+    }
+    true
+}
+
+// Rust clause_keyword:297–304.
+fn clause_keyword(token: String) -> Bool Never! {
+    keyword(token, "from") || keyword(token, "where") || keyword(token, "group") || keyword(token, "order") || keyword(token, "limit") || token == ";"
+}
+
+fn token_at(tokens: [String], at: Int) -> String? {
+    if at < 0 || at >= tokens.len() -> return None
+    Val(tokens[at])
+}
+
+fn token_is(tokens: [String], at: Int, expected: String) -> Bool Never! {
+    if token_at(tokens, at) == .Val(token) -> return token == expected
+    false
+}
+
+// Rust parse_alias:306–325. The next cursor is a scalar tuple, not an owner.
+fn parse_alias(tokens: [String], cursor: Int) -> (alias: String?, cursor: Int) Err! {
+    if token_at(tokens, cursor) == .Val(token) {
+        if keyword(token, "as") {
+            alias :: identifier(token_at(tokens, cursor + 1), "SELECT alias") ?? return Err(err)
+            return (alias: Val(alias), cursor: cursor + 2)
+        }
+        if token != "," && !clause_keyword(token) {
+            alias :: identifier(Val(token), "SELECT alias") ?? return Err(err)
+            return (alias: Val(alias), cursor: cursor + 1)
+        }
+    }
+    (alias: None, cursor: cursor)
+}
+
+// Rust parse_select_item:327–384. No GROUP/ORDER/LIMIT or width assumptions.
+fn parse_select_item(tokens: [String], cursor: Int) -> (item: JetSQLSelectItem, cursor: Int) Err! {
+    first :: token_at(tokens, cursor) ?? return Err(sql_error("SQL SELECT needs a projection"))
+    at := cursor + 1
+    if first == "*" {
+        if token_at(tokens, at) == .Val(next_token) {
+            if keyword(next_token, "as") -> return Err(sql_error("SQL wildcard projection cannot have an alias"))
+        }
+        return (item: JetSQLSelectItem.Wildcard, cursor: at)
+    }
+    name :: identifier(Val(first), "SELECT column or function") ?? return Err(err)
+    if !token_is(tokens, at, "(") {
+        alias :: parse_alias(tokens, at) ?? return Err(err)
+        return (item: JetSQLSelectItem.Field{field: name, alias: alias.alias}, cursor: alias.cursor)
+    }
+    at += 1
+    function := JetSQLAggregate.Count
+    lower :: sql_text.ascii_lower(name)
+    if lower == {
+        "count" -> function = JetSQLAggregate.Count
+        "sum" -> function = JetSQLAggregate.Sum
+        "avg" -> function = JetSQLAggregate.Avg
+        "average" -> function = JetSQLAggregate.Avg
+        "min" -> function = JetSQLAggregate.Min
+        "max" -> function = JetSQLAggregate.Max
+        else -> return Err(sql_error("unsupported SQL aggregate `{name}`; accepted functions are COUNT, SUM, AVG, MIN, and MAX"))
+    }
+    field := String?{None}
+    if token_is(tokens, at, "*") {
+        at += 1
+        if function != JetSQLAggregate.Count -> return Err(sql_error("SQL `*` is only valid inside COUNT(*)"))
+    } else {
+        column :: identifier(token_at(tokens, at), "aggregate column") ?? return Err(err)
+        field = Val(column)
+        at += 1
+    }
+    if !token_is(tokens, at, ")") -> return Err(sql_error("SQL aggregate call is missing its closing `)`"))
+    at += 1
+    alias :: parse_alias(tokens, at) ?? return Err(err)
+    (item: JetSQLSelectItem.Aggregate{function: function, field: field, alias: alias.alias}, cursor: alias.cursor)
+}
+
+// Rust query_shape_error:410–435. Kept as its independently tested prefix;
+// full query validation below always invokes it before checking GROUP BY.
+fn projection_shape_error(projection: [JetSQLSelectItem], grouped: Bool) -> String? {
+    if projection.len() == 0 -> return Val("SQL SELECT needs at least one projection")
+    wildcard := false
+    loop item in projection {
+        if item == .Wildcard -> wildcard = true
+    }
+    if wildcard && projection.len() != 1 -> return Val("SQL wildcard projection cannot be combined with another projection")
+    if wildcard && grouped -> return Val("SQL GROUP BY needs explicit projected columns")
+    names := Set.from([String]{})
+    loop item in projection {
+        name :: item.output_name()
+        if names.has(name) -> return Val("SQL SELECT repeats output column `{name}`")
+        &names.add(name)
+    }
+    None
+}
+// Rust str::parse::<usize/i64> law at :132,491,615,648,682,738,944.
+// One strict decimal byte scan: no exact Int, whitespace, prefixes or separators.
+// The checked bound is tested BEFORE multiplication; arbitrarily long leading
+// zeroes remain valid, and overflow fails without changing error precedence.
+fn decimal_magnitude(text: String, signed: Bool, positive_max: U64, negative_max: U64) -> (negative: Bool, magnitude: U64)? Never! {
+    bytes :: sql_text.utf8_bytes(text)
+    if bytes.len() == 0 -> return None
+    at := 0
+    negative := false
+    if bytes[0] == (U8{43}) -> at = 1
+    if bytes[0] == (U8{45}) {
+        if !signed -> return None
+        at = 1
+        negative = true
+    }
+    if at == bytes.len() -> return None
+    bound :: if negative -> negative_max else -> positive_max
+    quotient :: bound /% U64{10}
+    remainder :: bound %% U64{10}
+    value := U64{0}
+    loop at < bytes.len() {
+        byte :: bytes[at]
+        if byte < (U8{48}) || byte > (U8{57}) -> return None
+        digit :: U64.from_u8(byte - U8{48})
+        if value > quotient || (value == quotient && digit > remainder) -> return None
+        value = value * U64{10} + digit
+        at += 1
+    }
+    Val((negative: negative, magnitude: value))
+}
+fn parse_usize(text: String) -> U64? Never! {
+    value :: decimal_magnitude(text, false, sql_sys.usize_max(), U64{0}) ?? return None // #4483
+    Val(value.magnitude)
+}
+fn parse_i64(text: String) -> I64? Never! {
+    value :: decimal_magnitude(text, true, U64{9223372036854775807}, U64{9223372036854775808}) ?? return None
+    if value.negative {
+        if value.magnitude == (U64{9223372036854775808}) -> return Val(I64{-9223372036854775807} - I64{1})
+        return Val(-(I64.from_u64(value.magnitude) ?? panic("bounded SQL integer magnitude")))
+    }
+    Val(I64.from_u64(value.magnitude) ?? panic("bounded SQL positive integer"))
+}
+fn parse_float(text: String) -> Float? Never! {
+    trimmed := sql_text.trim(text) // #4303: compare view without copying.
+    if trimmed != text -> return None
+    value :: Float.parse(text) ?? return None
+    Val(value)
+}
+
+// Rust group_field:387–408.
+fn group_field(query: JetSQLQuery, key: JetSQLGroupKey) -> String Err! {
+    if key == {
+        .Field(field) -> field.copy()
+        .Ordinal(ordinal) -> {
+            if ordinal == (U64{0}) || ordinal > (U64.from_int(query.projection.len()) ?? panic("SQL projection length")) -> return Err("SQL GROUP BY ordinal {ordinal} is outside the SELECT list")
+            item :: query.projection[Int.from_u64(ordinal - U64{1})] // #4500: retaining loan.
+            if item == {
+                .Field(field, _) -> field.copy()
+                .Wildcard -> return Err("SQL GROUP BY ordinal cannot reference a wildcard projection")
+                .Aggregate(_, _, _) -> return Err("SQL GROUP BY ordinal must reference a non-aggregate projection")
+            }
+        }
+    }
+}
+
+// Rust query_shape_error:410–465. Separate scalar key sets preserve derived
+// enum equality without an encoded composite key or Rust's quadratic prefix scan.
+fn query_shape_error(query: JetSQLQuery) -> String? Never! {
+    prefix :: projection_shape_error(query.projection, query.group_by.len() != 0)
+    if prefix != None -> return prefix
+    fields := Set.from([String]{})
+    ordinals := Set.from([U64]{})
+    grouped_fields := Set.from([String]{})
+    loop key in query.group_by {
+        field :: group_field(query, key) ?? return Val(err.message)
+        if key == {
+            .Field(name) -> {
+                if fields.has(name) -> return Val("SQL GROUP BY repeats a grouping key")
+                &fields.add(name.copy())
+            }
+            .Ordinal(ordinal) -> {
+                if ordinals.has(ordinal) -> return Val("SQL GROUP BY repeats a grouping key")
+                &ordinals.add(ordinal)
+            }
+        }
+        &grouped_fields.add(field)
+    }
+    aggregate :: query.has_aggregate()
+    loop item in query.projection {
+        if item == .Field(field, _) && !grouped_fields.has(field) {
+            if aggregate -> return Val("SQL SELECT column `{field}` must appear in GROUP BY when an aggregate is selected")
+            if query.group_by.len() != 0 -> return Val("SQL SELECT column `{field}` must appear in GROUP BY")
+        }
+    }
+    None
+}
+// Rust :701–752. NaN partial_cmp is Equal here, NOT Float's total sort policy.
+fn float_compare(left: Float, right: Float) -> Ordering Never! {
+    if left < right -> return Ordering.Less
+    if left > right -> return Ordering.Greater
+    Ordering.Equal
+}
+fn sql_number(value: Float) -> String Never! {
+    if value == (Float{0.0}) -> return "0"
+    if sql_math.is_finite(value) -> return "{value}"
+    if sql_math.is_nan(value) -> return "NaN"
+    if value > (Float{0.0}) -> "inf" else -> "-inf"
+}
+fn sql_escape(value: String) -> String Never! {
+    out := [U8]{}
+    loop byte in sql_text.utf8_bytes(value) {
+        if byte == (U8{92}) || byte == (U8{124}) || byte == (U8{61}) -> &out.push(U8{92})
+        &out.push(byte)
+    }
+    String.from_bytes(out) ?? panic("SQL escaping preserves UTF-8")
+}
+
+// Rust sql_group_key:777–792. Caller supplies a singleton slice without
+// allocating Rust's temporary one-element Vec for each row.
+fn sql_group_key(group: View<U64>, query: JetSQLQuery, key: JetSQLGroupKey, cell: fn(U64, String) -> JetSQLValue?) -> String Err! {
+    field :: group_field(query, key) ?? return Err(err)
+    value := JetSQLValue.Null
+    if group.len() != 0 -> value = cell(group[0], field) ?? JetSQLValue.Null
+    "{field}={value.canonical_key()}"
+}
+
+// Rust i128::saturating_add at :829, using the canonical two-word carrier.
+// Only I64 additions occur; sign extension plus low-word carry changes high
+// by at most one. Every primitive operation is bounded or explicitly wrapping.
+fn sum_add(sum: sql_fixed.JetFixedWide, value: I64) -> sql_fixed.JetFixedWide Never! {
+    word :: if value >= (I64{0}) -> U64.from_i64(value) ?? panic("SQL sum word") else -> U64{0}.wrapping_sub((U64.from_i64(-(value + I64{1})) ?? panic("SQL sum magnitude")) + U64{1})
+    low :: sum.low.wrapping_add(word)
+    carry :: low < sum.low
+    high := sum.high
+    if value >= (I64{0}) && carry {
+        if high == (I64{9223372036854775807}) -> return sql_fixed.JetFixedWide{high: high, low: U64{18446744073709551615}}
+        high += I64{1}
+    }
+    if value < (I64{0}) && !carry {
+        if high == (I64{-9223372036854775807} - I64{1}) -> return sql_fixed.JetFixedWide{high: high, low: U64{0}}
+        high -= I64{1}
+    }
+    sql_fixed.JetFixedWide{high: high, low: low}
+}
+fn sum_i64(sum: sql_fixed.JetFixedWide) -> I64? Never! {
+    if sum.high == (I64{0}) -> return I64.from_u64(sum.low)
+    if sum.high != (I64{-1}) || sum.low < (U64{9223372036854775808}) -> return None
+    magnitude :: I64.from_u64(sum.low - U64{9223372036854775808}) ?? panic("SQL signed sum word")
+    Val((I64{-9223372036854775807} - I64{1}) + magnitude)
+}
+fn count_increment(count: I64) -> I64 Never! {
+    if count == (I64{9223372036854775807}) -> count else -> count + I64{1}
+}
+fn count_cast(length: U64) -> I64 Never! {
+    if length < (U64{9223372036854775808}) -> return I64.from_u64(length) ?? panic("SQL row count")
+    (I64{-9223372036854775807} - I64{1}) + (I64.from_u64(length - U64{9223372036854775808}) ?? panic("SQL row count low word"))
+}
+// Rust sql_project_group:891–941. Transfer the consumed grouping positions
+// into the result rather than cloning the otherwise dead Rust group Vec.
+fn sql_project_group(fields: [String], query: JetSQLQuery, group: ^[U64], cell: fn(U64, String) -> JetSQLValue?) -> JetSQLResultRow Never! {
+    projected := [(field: String, value: JetSQLValue)]{}
+    loop item in query.projection {
+        if item == {
+            .Wildcard -> {
+                loop field in fields {
+                    value := JetSQLValue.Null
+                    if group.len() != 0 -> value = cell(group[0], field) ?? JetSQLValue.Null
+                    &projected.push((field: field.copy(), value: ^value))
+                }
+            }
+            .Field(field, alias) -> {
+                value := JetSQLValue.Null
+                if group.len() != 0 -> value = cell(group[0], field) ?? JetSQLValue.Null
+                &projected.push((field: alias ?? field.copy(), value: ^value))
+            }
+            .Aggregate(function, field, _) -> &projected.push((field: item.output_name(), value: sql_aggregate_value(group, function, field, cell)))
+        }
+    }
+    JetSQLResultRow{fields: projected, source_indices: ^group}
+}
+struct SQLOrderedRow { row: JetSQLResultRow, order: JetSQLValue? }
+fn source_indices_compare(left: [U64], right: [U64]) -> Ordering Never! {
+    length :: if left.len() < right.len() -> left.len() else -> right.len()
+    loop index in 0..<length {
+        order :: left[index] <=> right[index]
+        if order != Ordering.Equal -> return order
+    }
+    left.len() <=> right.len()
+}
+fn reverse_order(order: Ordering) -> Ordering Never! {
+    if order == Ordering.Less -> return Ordering.Greater
+    if order == Ordering.Greater -> return Ordering.Less
+    Ordering.Equal
+}
 }
