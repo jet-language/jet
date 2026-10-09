@@ -8065,6 +8065,12 @@ ordinary runtime constant. `#Static NAME :: prep { value }` and
 declaration teaches E0388 with the behavior-preserving edit
 `NAME :: prep { value }`, and a retired `@NAME` read teaches `NAME` (retirement
 row `comptime-constant-mark`); prefix `@` in code now marks a D-MEMREF1 link.
+The supported value block holds exactly one final expression: setup bindings
+must be separate prepared bindings, and validation can be a conditional within
+the final expression. `Core/sys/sys.jet` follows this form for selected-target
+pointer size and `usize_max()`, keeping layout facts inside preparation rather
+than reading them in an ordinary function. Multi-statement value blocks,
+mutable `:= prep` bindings, and expression-nested `prep` still teach E0391.
 
 **2026-09-28 — D-PREP-BRANCH1=A, D-PREP-FN1=A, D-CONSTGEN2=A shipped**
 *(card #3662)*: `prep if` and `prep loop` replace `@if` and `@loop` in

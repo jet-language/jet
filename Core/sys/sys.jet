@@ -23,11 +23,13 @@ struct SysTargetPointer { pointer: *Int }
 
 // Layout facts must be evaluated inside the selected-target prep boundary,
 // not through an ordinary function checked outside compile-time context.
+// Each prepared binding has one final expression (D-PREP-SURFACE2=A).
+SYS_TARGET_POINTER_BYTES :: prep { SysTargetPointer.$layout.size ?? panic("selected target has no concrete pointer layout") }
 SYS_TARGET_USIZE_MAX :: prep {
-    layout :: SysTargetPointer.$layout
-    size :: layout.size ?? panic("selected target has no concrete pointer layout")
-    if size <= 0 || size > 8 -> panic("selected target pointer width does not fit the U64 carrier")
-    if size == 8 -> U64{0xffffffffffffffff} else -> (U64{1} << (8 * size)) - U64{1}
+    if SYS_TARGET_POINTER_BYTES <= 0 || SYS_TARGET_POINTER_BYTES > 8 ->
+        panic("selected target pointer width does not fit the U64 carrier")
+    else -> if SYS_TARGET_POINTER_BYTES == 8 -> U64{0xffffffffffffffff}
+    else -> (U64{1} << (8 * SYS_TARGET_POINTER_BYTES)) - U64{1}
 }
 
 fn usize_max() -> U64 Never! { SYS_TARGET_USIZE_MAX }
