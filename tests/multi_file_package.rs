@@ -60,3 +60,50 @@ fn sibling_calls_keep_private_generic_functions_live() {
     assert!(!diagnostics.iter().any(|d| d.code == "L0104"),
         "sibling calls must reach their private declaring functions: {diagnostics:#?}");
 }
+
+// Residual-orphan repro: a qualified/import-aliased generic callable receives a
+// function-typed argument whose nominal crosses the same file boundary.
+const CALLABLE_FILES: &[(&str, &str)] = &[
+    ("package.jet", "name: \"orphan_callable\"\nversion: \"0.1.0\"\n"),
+    ("values.jet", "pub struct Item { weight: Int }\npub struct Pool<T> { items: [T] }\npub BASE :: 4\n"),
+    ("functions.jet", r#"
+use values.[Item, Pool]
+pub fn apply<T>(value: T, transform: fn(T) -> T) -> T { transform(value) }
+pub fn duplicate<T>(value: T) -> T { ~value }
+pub fn pool_copy<T>(pool: Pool<T>) -> Pool<T> { ~pool }
+pub fn total(pool: Pool<Item>) -> Int { pool.items[0].weight }
+"#),
+    ("run.jet", r#"
+use values.[Item as Weight, Pool as Store, BASE as OFFSET]
+use functions as calls
+use functions.[apply as transform, duplicate, pool_copy, total]
+fn run() {
+    first :: transform(Weight{weight: OFFSET}, (item: Weight) -> Weight{weight: item.weight + 1})
+    second :: calls.apply(first, (item: Weight) -> Weight{weight: item.weight + 2})
+    copied :: duplicate(second)
+    pool :: Store<Weight>{items: [copied]}
+    print(total(pool_copy(pool)))
+}
+"#),
+];
+
+#[test]
+fn residual_cross_file_callable_default() {
+    let (code, out, err) = tir_support::run_default_multi("orphan_callable", "run.jet", CALLABLE_FILES);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out, "7\n");
+}
+
+#[test]
+fn residual_cross_file_callable_interpreter() {
+    let (code, out, err) = tir_support::run_interpret_multi("orphan_callable", "run.jet", CALLABLE_FILES);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out, "7\n");
+}
+
+#[test]
+fn residual_cross_file_callable_aot() {
+    let (code, out) = tir_support::build_release_and_run_multi("orphan_callable", "run.jet", CALLABLE_FILES);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(out, "7\n");
+}

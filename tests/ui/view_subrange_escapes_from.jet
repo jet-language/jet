@@ -1,0 +1,12 @@
+// A view subrange keeps its owner: `right[..]` borrows `right`, which the
+// declared `from left` does not name.
+fn pick(left: View<U8>, right: View<U8>) -> View<U8> from left {
+    right[0..<1]
+}
+
+fn run() {
+    data :: [U8{1}, U8{2}]
+    left :: data[0..<1]
+    right :: data[1..<2]
+    print(pick(left, right).len())
+}
