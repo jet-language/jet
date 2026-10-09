@@ -7,6 +7,8 @@ if [[ -n "$SHA" && ! "$SHA" =~ ^[a-f0-9]{40}$ ]]; then echo 'full source SHA req
 C=/mnt/jetscratch/candidates/RuntimeLead12/s5-r4
 Q=/home/nate/.cache/jet-dev/proofq/queue
 P=Main-RuntimeLead12-s5
+HOST=${S5_SHARED_HOST_JOB:-Main-DevGreen-host-r2}
+PACK=${S5_SHARED_PACK_JOB:-Main-RuntimePackLead-native-pack-r1}
 mkdir -p "$C"
 if [[ -n "$SHA" ]]; then
   SOURCE=/mnt/jetscratch/candidates/source-${SHA}/source
@@ -17,12 +19,13 @@ job() {
   local file="$Q/$P-$phase-r4.sh.mainhold"
   {
     printf '#!/usr/bin/env bash\n'
-    printf '# proofq: mem=%sG time=%sM kind=run after=Main-DevGreen-host-r1,Main-RuntimePackLead-native-pack-r1%s\n' "$memory" "$minutes" "${dependencies:+,$dependencies}"
+    printf '# proofq: mem=%sG time=%sM kind=run after=%s,%s%s\n' "$memory" "$minutes" "$HOST" "$PACK" "${dependencies:+,$dependencies}"
     printf '# queue rc = completed, NOT pass; inspect driver.rc and steps.json/verdict.txt\n'
     printf '# PQ-OUTPUT: %s\n' "$C"
     printf "export JET_SHARED_SOURCE_SHA='%s'\n" "$SHA"
     printf 'export S5_PHASE=%s S5_OUT=%s/%s\n' "$phase" "$C" "$phase"
     printf 'export S5_BUILD=%s/build S5_GATES=%s/gates S5_RUNTIME=%s/runtime S5_BOUNDARY=%s/boundary S5_GOLDENS=%s/goldens S5_INPUTS=%s/inputs\n' "$C" "$C" "$C" "$C" "$C" "$C"
+    printf 'export S5_SHARED_HOST_JOB=%s S5_SHARED_PACK_JOB=%s\n' "$HOST" "$PACK"
     printf 'export PQ_JOB=%s-%s-r4\n' "$P" "$phase"
     cat <<'PREFLIGHT'
 export S5_RUN_ID="${PQ_JOB}-$(date +%s%N)-$$"

@@ -84,6 +84,8 @@ Receipts are published atomically; interruption preserves partial evidence
 and records a driver failure. A pack publication binds its runtime key and
 digest to `native.key` and the selected object. Prepared golden corpora are
 hash-checked and consumed without rerunning preparation.
+`S5_SHARED_HOST_JOB` and `S5_SHARED_PACK_JOB` select the producer job names
+when drafting holds; artifact schemas and source-pin checks remain unchanged.
 
 The compiler frontend receipt must retain the full foreign Cargo diagnostics,
 including cached bridge fingerprint output when an inline-FFI error hides

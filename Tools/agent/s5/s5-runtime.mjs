@@ -26,7 +26,7 @@ try {
   const publication = readSharedPack({directory: process.env.S5_SHARED_PACK_DIRECTORY, head: P.head, source: W});
   produced = true;
   env.JET_RUNTIME_PACK = publication.pack;
-  P.receipt('runtime-pack', 'PASS', {receipt: receiptPath, runtimeKey: publication.key, packSha256: publication.receipt.packSha256, producer: 'Main-RuntimePackLead-native-pack-r1'});
+  P.receipt('runtime-pack', 'PASS', {receipt: receiptPath, runtimeKey: publication.key, packSha256: publication.receipt.packSha256, producer: process.env.S5_SHARED_PACK_JOB ?? 'Main-RuntimePackLead-native-pack-r1'});
 } catch (error) { blocked('runtime-pack', error.message); }
 
 // The publisher is the sole compiler/lowerer. Verify its real object, pack,
