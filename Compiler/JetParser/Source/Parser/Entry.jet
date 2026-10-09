@@ -112,6 +112,18 @@ pub fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMar
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
 }
 
+pub fn parse_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+    lexed := lex(source)
+    lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
+    parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
+}
+
+pub fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+    lexed := lex_generated(source)
+    lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
+    parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
+}
+
 pub fn parse_lexed(lexed: Lexed) -> ParseResult {
     parser_parse_lexed_lines(~lexed, [U8]{}, [Int]{}, false)
 }
