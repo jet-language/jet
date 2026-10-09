@@ -92,7 +92,7 @@ fn rt_text_decode(ptr: I64) -> I64 {
 
 // Positive = valid scalar width; negative = Rust Utf8Error's invalid subpart
 // length. An incomplete tail is replaced once, not once per remaining byte.
-fn rt_text_valid_width(ptr: I64, remaining: I64) -> I64 {
+fn rt_text_valid_width(ptr: I64, remaining: I64, stride: I64) -> I64 {
     lead :: rt_text_byte(ptr)
     if (lead < I64{128}) { return I64{1} }
     width := I64{0}
@@ -103,9 +103,10 @@ fn rt_text_valid_width(ptr: I64, remaining: I64) -> I64 {
         else -> return I64{-1}
     }
     at := I64{1}
+    next_byte := ptr + stride
     loop at < width {
         if at == remaining -> return -at
-        byte :: rt_text_byte(ptr + at)
+        byte :: rt_text_byte(next_byte)
         low := I64{128}
         high := I64{191}
         if (at == I64{1}) {
@@ -116,6 +117,7 @@ fn rt_text_valid_width(ptr: I64, remaining: I64) -> I64 {
         }
         if byte < low || byte > high -> return -at
         at += I64{1}
+        next_byte += stride
     }
     width
 }
@@ -255,7 +257,7 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
         return I64{0}
     }
     loop at < len {
-        width :: rt_text_valid_width(ptr + at, len - at)
+        width :: rt_text_valid_width(ptr + at, len - at, I64{1})
         if {
             (width < I64{0}) -> {
                 rt_text_push_scalar(result, I64{65533})
@@ -774,7 +776,7 @@ fn rt_c_string_stop(kind: I64) {
     loop rt_text_byte(ptr + len) != (I64{0}) {
         // UTF-8 is at most four bytes. The validator rejects NUL as a
         // continuation before reading any byte beyond that terminator.
-        width :: rt_text_valid_width(ptr + len, I64{4})
+        width :: rt_text_valid_width(ptr + len, I64{4}, I64{1})
         if (width < I64{0}) {
             rt_c_string_stop(I64{2})
             return I64{0}
