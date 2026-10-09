@@ -272,6 +272,17 @@ native carrier, or retired helper; source receiver impls may still extend native
 nominals. Generated Core tables preserve that distinction rather than inventing
 source shadows for compiler-provided operations.
 
+The Jet Driver carries each installed Core row's runtime classification into
+its parse job. Runtime dependencies retain all functions but omit their test
+controls; only an entry with the installed unit's exact path and bytes keeps
+those controls. Nested runtime imports bind to the longest installed unit, and
+member imports are rewritten on the load thread, not in parallel parse jobs.
+User imports cannot gain access merely because a runtime unit was already
+loaded. Inline-package masking is unchanged. Core-library loading roots the
+whole installed catalog; program loading begins with the selected real entry.
+[`RuntimeUnitImports.jet`](../../Compiler/JetDriver/Tests/RuntimeUnitImports.jet)
+records these loader contracts independently of backend linking.
+
 Proof chains use one shared
 [`git-archive source export`](../../Tools/agent/proof-source.mjs) per full commit,
 not a moving checkout. `node Tools/agent/proof-source.mjs <full-sha> [repository]`

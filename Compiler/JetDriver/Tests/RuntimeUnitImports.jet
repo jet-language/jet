@@ -1,0 +1,97 @@
+// Runtime loader restoration: installed-unit identity, parse controls, import
+// rewriting and Core-private admission are independent of the linker live set.
+fn jet_driver_runtime_test_row(module_name: String, path: String, runtime: Bool) -> JetDriverCoreSource Never! {
+    JetDriverCoreSource{module_name: module_name, alias: module_name, path: path, owner: "", owned_members: [String]{}, runtime: runtime, source: "fn word() -> Int Never! {{ 7 }}\n"}
+}
+
+#Test("runtime parse jobs retain all functions but only exact entries retain controls") {
+    source :: "fn decode() -> Int Never! {{ 1 }}\nfn helper() -> Int Never! {{ 2 }}\n#Test(\"control\") {{ assert(true) }}\n"
+    runtime :: jet_driver_parse_one(JetDriverParseJob.Core{text: source, module_name: "core.args", owned_members: [String]{}, runtime: true})
+    assert(!jet_driver_has_errors(runtime.parsed.diagnostics))
+    functions := [String]{}
+    controls := 0
+    loop item in runtime.parsed.program.items {
+        if item == {
+            .Func(value) -> &functions.push(value.name)
+            .Test(_) -> controls += 1
+            else -> {}
+        }
+    }
+    assert_eq(functions, [String]{"decode", "helper"})
+    assert_eq(controls, 0)
+    ordinary :: jet_driver_parse_one(JetDriverParseJob.Core{text: source, module_name: "core.args", owned_members: [String]{}, runtime: false})
+    assert(!jet_driver_has_errors(ordinary.parsed.diagnostics))
+    ordinary_functions := [String]{}
+    loop item in ordinary.parsed.program.items {
+        if item == .Func(value) -> &ordinary_functions.push(value.name)
+    }
+    assert_eq(ordinary_functions, [String]{"helper"})
+    entry :: jet_driver_parse_one(JetDriverParseJob.RuntimeEntry{text: source})
+    assert(!jet_driver_has_errors(entry.parsed.diagnostics))
+    entry_controls := 0
+    loop item in entry.parsed.program.items {
+        if item == .Test(_) -> entry_controls += 1
+    }
+    assert_eq(entry_controls, 1)
+}
+
+#Test("runtime unit lookup selects the longest installed nested unit") {
+    rows :: [JetDriverCoreSource]{
+        jet_driver_runtime_test_row("core.text.runtime.assets", "Core/text/runtime/assets.jet", true),
+        jet_driver_runtime_test_row("core.text.runtime.assets.x", "Core/text/runtime/assets/x.jet", true),
+        jet_driver_runtime_test_row("core.text.runtime.assets.x.word", "Core/text/not-runtime.jet", false),
+    }
+    assert_eq(jet_driver_core_runtime_row(rows, "core.text.runtime.assets.x.word"), Val(1))
+    assert_eq(jet_driver_core_runtime_row(rows, "core.text.runtime.assets.x"), Val(1))
+    assert_eq(jet_driver_core_runtime_row(rows, "core.text.runtime.assets.word"), Val(0))
+    assert_eq(jet_driver_core_runtime_row(rows, "core.text.runtime.assets_extra.word"), None)
+    parsed := jet_driver_parse_one(JetDriverParseJob.RuntimeEntry{text: "use core.text.runtime.assets.x.word as read\nuse core.text.runtime.assets.x\nfn run() {{}}\n"})
+    assert(!jet_driver_has_errors(parsed.parsed.diagnostics))
+    jet_driver_core_runtime_member_imports(&parsed.parsed.program, rows)
+    assert_eq(parsed.parsed.program.imports.len(), 2)
+    if parsed.parsed.program.imports[0].kind == {
+        .Unqualified(owner, _, members, _, _) -> {
+            assert_eq(owner, "core.text.runtime.assets.x")
+            assert_eq(members.len(), 1)
+            assert_eq(members[0].original, "word")
+            assert_eq(members[0].alias, Val("read"))
+        }
+        else -> panic("runtime member import was not rewritten")
+    }
+    if parsed.parsed.program.imports[1].kind == {
+        .Module(name, _) -> assert_eq(name, "core.text.runtime.assets.x")
+        else -> panic("exact nested unit became a sibling member")
+    }
+}
+
+#Test("runtime entry privileges require both the installed path and exact bytes") {
+    row :: jet_driver_runtime_test_row("core.text.runtime.assets", "Core/text/runtime/assets.jet", true)
+    rows :: [JetDriverCoreSource]{row}
+    unit :: jet_driver_core_source_unit(row.module_name, row.path, 0, row.source)
+    assert_eq(jet_driver_runtime_entry_row(rows, unit, row.source), Val(0))
+    assert_eq(jet_driver_runtime_entry_row(rows, unit, row.source + "\n"), None)
+    other :: jet_driver_core_source_unit(row.module_name, "Core/text/runtime/other.jet", 0, row.source)
+    assert_eq(jet_driver_runtime_entry_row(rows, other, row.source), None)
+    public_row :: jet_driver_runtime_test_row(row.module_name, row.path, false)
+    assert_eq(jet_driver_runtime_entry_row([JetDriverCoreSource]{public_row}, unit, row.source), None)
+}
+
+#Test("an already loaded runtime unit stays private to Core importers") {
+    row :: jet_driver_runtime_test_row("core.text.runtime.assets", "Core/text/runtime/assets.jet", true)
+    rows :: [JetDriverCoreSource]{row}
+    units := [JetDriverSourceUnit]{jet_driver_core_source_unit(row.module_name, row.path, 0, row.source)}
+    queued := [Bool]{true}
+    pending := [Int]{}
+    generated := [MIRSourceFile]{}
+    diagnostics := [Diagnostic]{}
+    denied :: jet_driver_core_unit(&units, &queued, &pending, &generated, rows, row.module_name, false, "", -1, Span{start: 0, end: 1}, &diagnostics)
+    assert_eq(denied, None)
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E1001")
+    allowed_diagnostics := [Diagnostic]{}
+    allowed :: jet_driver_core_unit(&units, &queued, &pending, &generated, rows, row.module_name, true, "", -1, Span{start: 0, end: 1}, &allowed_diagnostics)
+    assert_eq(allowed, Val(0))
+    assert_eq(allowed_diagnostics.len(), 0)
+    catalog :: jet_driver_core_library_catalog(rows)
+    assert(catalog.complete && catalog.source_units.len() == rows.len())
+}

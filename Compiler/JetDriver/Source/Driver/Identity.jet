@@ -171,17 +171,18 @@ struct JetDriverDocModule {
 }
 
 // One Core library source module the host embeds, mirroring a Rust
-// `CoreModuleExports::CORE_SOURCE_MODULES` row or a compiler-private part from
-// `CoreSourceParts` (both generated from Prelude/Core.jet). `path` is the
-// repository path (`Core/perf/perf.jet`); `owner` names the public module that
-// schedules a private part and is "" for a public row; `owned_members` lists
-// the public functions that have crossed the Core cutover.
+// `CoreModuleExports::CORE_SOURCE_MODULES` row, a compiler-private part from
+// `CoreSourceParts`, or a private runtime unit. `path` is the repository path;
+// `owner` schedules private parts, and `owned_members` selects the public
+// functions that crossed the Core cutover. Runtime units retain every function
+// and may import other runtime units; only an exact runtime entry keeps tests.
 struct JetDriverCoreSource {
     module_name: String
     alias: String
     path: String
     owner: String
     owned_members: [String]
+    runtime: Bool
     source: String
 }
 
