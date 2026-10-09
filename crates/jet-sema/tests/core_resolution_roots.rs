@@ -217,6 +217,42 @@ fn native_core_enum_and_error_constructors_resolve_without_public_exports() {
 }
 
 #[test]
+fn source_owned_clock_methods_precede_native_time_contracts() {
+    let core = r#"
+use core as core
+struct Clock { value: Int }
+impl Clock {
+    fn now(self) -> Int Never! { self.value }
+    fn set(&self, value: Int) Never! { self.value = value }
+    fn tick(&self, millis: Int) -> Int Never! {
+        &self.set(self.now() + millis)
+        self.now()
+    }
+    fn advance(&self, to_ms: Int) -> Int Never! {
+        &self.set(to_ms)
+        self.now()
+    }
+    fn wait(&self, duration: Duration) -> Int Never! { &self.tick(duration.ns) }
+    fn equal(self, other: Clock) -> Bool Never! { self.now() == other.now() }
+}
+fn monotonic() -> Int Never! { core.time.__clock_mono_ns() }
+fn sample(clock: &Clock, other: Clock, duration: Duration) -> Int Never! {
+    &clock.set(1)
+    tick :: &clock.tick(2)
+    advance :: &clock.advance(3)
+    wait :: &clock.wait(duration)
+    equal :: clock.equal(other)
+    if equal -> tick + advance + wait else -> clock.now()
+}
+"#;
+    let errors = check_sources(&[
+        ("<corelib>/Core/time/time.jet", "core_time", core, &[]),
+        ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+    ]);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
 fn retained_core_arguments_accept_fresh_values_but_not_unmarked_places() {
     let source = "use core as core\nfn append(tree: &ServiceTree, event: String) Never! { core.service.__tree_event_push(&tree, event.copy()) }\n";
     for value in ["event.copy()", "\"fresh\""] {
