@@ -345,9 +345,9 @@ fn pkg_data_xml_name_rest(scalar: String) -> Bool Never! {
 fn pkg_data_scalar_of(code: Int) -> String Never! {
     bytes :: if {
         code < 0x80 -> [U8]{U8{code}}
-        code < 0x800 -> [U8]{U8{0xC0 + (code >> 6)}, U8{0x80 + (code & 0x3F)}}
-        code < 0x10000 -> [U8]{U8{0xE0 + (code >> 12)}, U8{0x80 + ((code >> 6) & 0x3F)}, U8{0x80 + (code & 0x3F)}}
-        else -> [U8]{U8{0xF0 + (code >> 18)}, U8{0x80 + ((code >> 12) & 0x3F)}, U8{0x80 + ((code >> 6) & 0x3F)}, U8{0x80 + (code & 0x3F)}}
+        code < 0x800 -> [U8]{U8{0xC0 + (code >> 6)}, U8{0x80 + ((code).bit_and(0x3F))}}
+        code < 0x10000 -> [U8]{U8{0xE0 + (code >> 12)}, U8{0x80 + (((code >> 6)).bit_and(0x3F))}, U8{0x80 + ((code).bit_and(0x3F))}}
+        else -> [U8]{U8{0xF0 + (code >> 18)}, U8{0x80 + (((code >> 12)).bit_and(0x3F))}, U8{0x80 + (((code >> 6)).bit_and(0x3F))}, U8{0x80 + ((code).bit_and(0x3F))}}
     }
     pkg_bytes_text(bytes, 0, bytes.len())
 }

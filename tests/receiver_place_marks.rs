@@ -29,11 +29,11 @@ fn spaced_operators_continue_the_previous_line() {
 }
 
 #[test]
-fn formatter_spaces_continued_operators_and_keeps_place_marks() {
-    let source = "fn run() {\n    total := 6\n    mask := total\n        & 3\n    power := total\n        ^ 2\n    buf := [1]\n    &buf.push(2)\n    print(\"{mask} {power} {buf}\")\n}\n";
+fn formatter_keeps_numeric_methods_and_place_marks() {
+    let source = "fn run() {\n    total := 6\n    mask := total.bit_and(3)\n    power := total.pow(2)\n    buf := [1]\n    &buf.push(2)\n    print(\"{mask} {power} {buf}\")\n}\n";
     let formatted = jet::format_source(source).expect("receiver marks format");
-    assert!(formatted.contains("mask := total & 3"), "{formatted}");
-    assert!(formatted.contains("power := total ^ 2"), "{formatted}");
+    assert!(formatted.contains("mask := total.bit_and(3)"), "{formatted}");
+    assert!(formatted.contains("power := total.pow(2)"), "{formatted}");
     assert!(formatted.contains("    &buf.push(2)\n"), "{formatted}");
     assert_eq!(
         jet::format_source(&formatted).expect("formatted source is stable"),

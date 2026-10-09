@@ -4986,37 +4986,31 @@ impl<'a> Checker<'a> {
                             None
                         }
                     }
-                    // D-BITNOT1=A: `!` flips every bit it is given. On a Bool
-                    // that is the one bit, so a yes becomes a no. On a whole
-                    // number it is the bitwise complement, and the width comes
-                    // back unchanged.
+                    // D-SIGIL-ALGEBRA1=B: only Bool uses prefix `!`.
                     UnOp::Not => {
-                        if let Type::InlineRange { base, .. } = &t {
-                            self.require_knowledge_gate(
-                                crate::Sema::KnowledgePlane::Range,
-                                crate::Sema::KnowledgeGate::BoundedArithmetic,
-                                *span,
-                            );
-                            Some(base.as_ref().erased_inline_ranges())
-                        } else if t == Type::Bool || t.is_integer() {
+                        if t == Type::Bool {
                             Some(t)
                         } else if crate::Sema::CheckerCoreLib::is_dyn_type(&t) {
                             self.diags.push(Diagnostic::from_row("E0170", &[], Some(*span)));
                             None
                         } else {
-                            self.diags.push(Diagnostic::error(
-                                "E0109",
-                                format!(
-                                    "`!` needs {} or a whole number, but this is {}",
-                                    Type::Bool.show(),
-                                    t.show()
-                                ),
-                                "`!` flips bits: a yes becomes a no, and a whole number \
-                                 gets every bit turned over"
-                                    .to_string(),
-                                "compare the value to something first, e.g. `!(x > 0)`".to_string(),
+                            let mut diagnostic = Diagnostic::error(
+                                if t.is_integer() { "E0398" } else { "E0109" },
+                                "`!` needs Bool; use `bit_not` to flip integer bits".to_string(),
+                                "marks express ownership and outcomes; arithmetic uses named methods (D-SIGIL-ALGEBRA1=B)".to_string(),
+                                "write `value.bit_not()` for an integer, or compare the value to produce Bool".to_string(),
                                 Some(*span),
-                            ));
+                            );
+                            if t.is_integer() {
+                                let operand = Span::new(span.start + 1, span.end);
+                                if let Some(text) = self.source.get(operand.start..operand.end) {
+                                    diagnostic = diagnostic.with_edit(crate::Diagnostics::TextEdit {
+                                        span: *span,
+                                        new_text: format!("({text}).bit_not()"),
+                                    });
+                                }
+                            }
+                            self.diags.push(diagnostic);
                             None
                         }
                     }

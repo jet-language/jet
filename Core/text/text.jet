@@ -369,9 +369,9 @@ fn decode_indexed(text: String) -> [IndexedCp] Never! {
             next
         }
         cp := 0
-        if width == 2 -> cp = first & 31
-        if width == 3 -> cp = first & 15
-        if width == 4 -> cp = first & 7
+        if width == 2 -> cp = (first).bit_and(31)
+        if width == 3 -> cp = (first).bit_and(15)
+        if width == 4 -> cp = (first).bit_and(7)
         valid := true
         k := 1
         loop k < width {
@@ -380,7 +380,7 @@ fn decode_indexed(text: String) -> [IndexedCp] Never! {
                 valid = false
                 break
             }
-            cp = (cp << 6) | (byte & 63)
+            cp = ((cp << 6)).bit_or(((byte).bit_and(63)))
             k = k + 1
         }
         if !valid {

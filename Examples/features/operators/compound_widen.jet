@@ -5,7 +5,7 @@
 // FNV-1a style fold: `hash: U64` absorbs each `U8` byte widened to `U64`.
 fn fold(text: String) -> U64 {
     hash := U64{5}
-    loop byte in text.bytes() -> hash ~|= U64{byte}
+    loop byte in text.bytes() -> hash = (hash).bit_xor(U64{byte})
     hash
 }
 
@@ -22,14 +22,14 @@ fn unsigned64(byte: U8) -> [[U64]] {
     value *= U64{byte}
     step3 :: step2 * U64{byte}
     &rows.push([value, step3])
-    value &= U64{byte}
-    step4 :: step3 & U64{byte}
+    value = (value).bit_and(U64{byte})
+    step4 :: (step3).bit_and(U64{byte})
     &rows.push([value, step4])
-    value |= U64{byte}
-    step5 :: step4 | U64{byte}
+    value = (value).bit_or(U64{byte})
+    step5 :: (step4).bit_or(U64{byte})
     &rows.push([value, step5])
-    value ~|= U64{byte}
-    step6 :: step5 ~| U64{byte}
+    value = (value).bit_xor(U64{byte})
+    step6 :: (step5).bit_xor(U64{byte})
     &rows.push([value, step6])
     value = U64{byte}
     value <<= 3
@@ -53,14 +53,14 @@ fn unsigned32(small: U16) -> [[U32]] {
     value *= U32{small}
     step3 :: step2 * U32{small}
     &rows.push([value, step3])
-    value &= U32{small}
-    step4 :: step3 & U32{small}
+    value = (value).bit_and(U32{small})
+    step4 :: (step3).bit_and(U32{small})
     &rows.push([value, step4])
-    value |= U32{small}
-    step5 :: step4 | U32{small}
+    value = (value).bit_or(U32{small})
+    step5 :: (step4).bit_or(U32{small})
     &rows.push([value, step5])
-    value ~|= U32{small}
-    step6 :: step5 ~| U32{small}
+    value = (value).bit_xor(U32{small})
+    step6 :: (step5).bit_xor(U32{small})
     &rows.push([value, step6])
     value = U32{small}
     value <<= 4
@@ -84,14 +84,14 @@ fn signed64(delta: I32) -> [[I64]] {
     value *= I64{delta}
     step3 :: step2 * I64{delta}
     &rows.push([value, step3])
-    value &= I64{delta}
-    step4 :: step3 & I64{delta}
+    value = (value).bit_and(I64{delta})
+    step4 :: (step3).bit_and(I64{delta})
     &rows.push([value, step4])
-    value |= I64{delta}
-    step5 :: step4 | I64{delta}
+    value = (value).bit_or(I64{delta})
+    step5 :: (step4).bit_or(I64{delta})
     &rows.push([value, step5])
-    value ~|= I64{delta}
-    step6 :: step5 ~| I64{delta}
+    value = (value).bit_xor(I64{delta})
+    step6 :: (step5).bit_xor(I64{delta})
     &rows.push([value, step6])
     value = I64{delta} * I64{-7}
     value <<= 2

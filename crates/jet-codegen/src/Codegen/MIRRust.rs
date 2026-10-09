@@ -35093,7 +35093,14 @@ impl<'a> RustEmitter<'a> {
     ) -> String {
         match operation {
             MirSemanticOp::MathBuiltin { call, args, .. }
-            | MirSemanticOp::PreciseBuiltin { call, args, .. } => self.prelude_values(*call, args),
+            | MirSemanticOp::PreciseBuiltin { call, args, .. } => {
+                let emitted = self.prelude_values(*call, args);
+                result
+                    .and_then(|value| {
+                        self.native_int_result(&emitted, self.value_type(function, value))
+                    })
+                    .unwrap_or(emitted)
+            }
             MirSemanticOp::Print { call, value } => {
                 let test_print = self.print_consumes_value();
                 // Printing only reads its value: it borrows it, in the place a

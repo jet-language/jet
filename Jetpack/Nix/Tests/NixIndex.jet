@@ -313,7 +313,7 @@ fn nix_test_generation_rejected(client: NixIndexClient, generation: Int, issued:
     nix_index_verify_index_signature(public_key, "test-key", signature, built.decoded) ?? panic("the real bytes verify")
     forged := built.decoded
     position :: forged.len() - 2
-    forged[position] = U8{Int.from_u8(forged[position]) ~| 1}
+    forged[position] = U8{(Int.from_u8(forged[position])).bit_xor(1)}
     if nix_index_verify_index_signature(public_key, "test-key", signature, forged) == {
         .Ok(_) -> panic("mutated bytes must not verify")
         else -> {}

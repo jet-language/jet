@@ -134,7 +134,7 @@ struct RecipeCanonicalWriter {
     fn push_count(&self, value: Int) Never! {
         shift := 56
         loop shift >= 0 {
-            byte :: (value >> shift) & 255
+            byte :: ((value >> shift)).bit_and(255)
             &self.bytes.push(U8{byte})
             shift -= 8
         }

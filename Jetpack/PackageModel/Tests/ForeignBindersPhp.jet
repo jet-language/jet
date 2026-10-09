@@ -97,9 +97,9 @@ class Hidden { function method($input) {} }
     child.stdin.write_all(request) ?? panic("write request")
     header :: pkg_binders_test_read_exact(&child, 12)
     length := 0
-    loop index in 0..<4 -> length = length | (Int.from_u8(header[index]) << (index * 8))
+    loop index in 0..<4 -> length = (length).bit_or((Int.from_u8(header[index]) << (index * 8)))
     id := 0
-    loop index in 0..<8 -> id = id | (Int.from_u8(header[4 + index]) << (index * 8))
+    loop index in 0..<8 -> id = (id).bit_or((Int.from_u8(header[4 + index]) << (index * 8)))
     assert_eq(id, 7)
     response :: pkg_binders_test_read_exact(&child, length)
     assert_eq(String.from_bytes(response) ?? "", "{{\"id\":7,\"ok\":true,\"value\":42}}")

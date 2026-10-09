@@ -756,20 +756,20 @@ fn utf8_bytes(cp: Int) -> [U8] Never! {
         return out
     }
     if cp < 2048 {
-        &out.push(U8{192 | (cp >> 6)})
-        &out.push(U8{128 | (cp & 63)})
+        &out.push(U8{(192).bit_or((cp >> 6))})
+        &out.push(U8{(128).bit_or(((cp).bit_and(63)))})
         return out
     }
     if cp < 65536 {
-        &out.push(U8{224 | (cp >> 12)})
-        &out.push(U8{128 | ((cp >> 6) & 63)})
-        &out.push(U8{128 | (cp & 63)})
+        &out.push(U8{(224).bit_or((cp >> 12))})
+        &out.push(U8{(128).bit_or((((cp >> 6)).bit_and(63)))})
+        &out.push(U8{(128).bit_or(((cp).bit_and(63)))})
         return out
     }
-    &out.push(U8{240 | (cp >> 18)})
-    &out.push(U8{128 | ((cp >> 12) & 63)})
-    &out.push(U8{128 | ((cp >> 6) & 63)})
-    &out.push(U8{128 | (cp & 63)})
+    &out.push(U8{(240).bit_or((cp >> 18))})
+    &out.push(U8{(128).bit_or((((cp >> 12)).bit_and(63)))})
+    &out.push(U8{(128).bit_or((((cp >> 6)).bit_and(63)))})
+    &out.push(U8{(128).bit_or(((cp).bit_and(63)))})
     out
 }
 

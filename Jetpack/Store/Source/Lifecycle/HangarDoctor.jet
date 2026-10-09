@@ -236,7 +236,7 @@ fn store_doctor_hex8(value: Int) -> String Never! {
     digits :: "0123456789abcdef".bytes()
     out := [U8]{}
     shifts :: [Int]{28, 24, 20, 16, 12, 8, 4, 0}
-    loop shift in shifts -> &out.push(digits[(value >> shift) & 15])
+    loop shift in shifts -> &out.push(digits[((value >> shift)).bit_and(15)])
     pkg_bytes_text(out, 0, out.len())
 }
 

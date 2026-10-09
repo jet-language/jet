@@ -9,7 +9,7 @@ use crate::Sema::{KnowledgeGate, KnowledgePlane};
 use crate::AST::{BinOp, CtValue, Dimension, Expr, StrPart, Type};
 use std::collections::HashMap;
 
-/// D-EXPSEM1=A: a written-out negative exponent, such as the `-1` in `2 ^ -1`.
+/// D-EXPSEM1=A: a written negative exponent, such as `-1` in `(2).pow(-1)`.
 /// Only a spelled numeral counts. An exponent whose sign the checker cannot
 /// see keeps the whole-number result type, and the Prelude traps if the value
 /// turns out negative at run time.
@@ -1530,6 +1530,7 @@ impl<'a> Checker<'a> {
                     .push(crate::Sema::e3403("Clock comparison", Some(span)));
             }
         }
+
 
         let joins_numeric = matches!(
             op,

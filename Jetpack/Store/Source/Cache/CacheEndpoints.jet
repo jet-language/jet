@@ -434,7 +434,7 @@ fn store_cache_bounded_stderr(text: String) -> String Never! {
     // back off to its lead byte and render the partial scalar as U+FFFD,
     // as Rust's lossy decoding does.
     end := STORE_CACHE_STDERR_LIMIT
-    loop end > 0 && (Int.from_u8(raw[end]) & 0xC0) == 0x80 -> end -= 1
+    loop end > 0 && ((Int.from_u8(raw[end])).bit_and(0xC0)) == 0x80 -> end -= 1
     kept :: pkg_bytes_text(raw, 0, end)
     if end == STORE_CACHE_STDERR_LIMIT -> return kept.trim()
     "{kept}�".trim()

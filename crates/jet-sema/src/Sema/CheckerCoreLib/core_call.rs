@@ -891,6 +891,14 @@ fn crypto_misuse_diagnostic(
     ))
 }
 
+fn core_math_float_contract(name: &str) -> bool {
+    matches!(
+        name,
+        "is_nan" | "is_inf" | "is_finite"
+            | "atan2" | "hypot" | "lerp" | "copysign" | "log" | "fma" | "muladd"
+    )
+}
+
 fn resolved_core_fixed_sig(
     module: &str,
     name: &str,
@@ -5278,13 +5286,13 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(arg) = args.get_mut(0) {
                     let ty = self.infer(&mut arg.expr)?;
-                    if !matches!(ty, Type::Float | Type::Float32) {
+                    if ty != Type::Int {
                         self.diags.push(Diagnostic::error(
                             "E0112",
-                            format!("`sign` needs Float or F32, not {}", ty.show()),
-                            "`sign` classifies a floating-point value as negative, zero, or positive"
+                            format!("`sign` needs Int, not {}", ty.show()),
+                            "`sign` classifies a whole number as negative, zero, or positive"
                                 .to_string(),
-                            "pass a Float or F32 value".to_string(),
+                            "pass an Int value".to_string(),
                             Some(arg.expr.span()),
                         ));
                         return None;
@@ -5615,39 +5623,6 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(name, idx, &Type::Int, arg);
                 }
                 return Some(Type::Int);
-            }
-            ("core.math", "pow") => {
-                if args.len() != 2 {
-                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-                }
-                let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
-                    for a in args.iter_mut().skip(1) {
-                        self.infer(&mut a.expr);
-                    }
-                    return None;
-                };
-                if !matches!(first, Type::Float | Type::Float32) {
-                    self.diags.push(Diagnostic::error(
-                        "E0112",
-                        format!("`pow` needs Float or F32, not {}", first.show()),
-                        "`pow` operates on floating-point numbers".to_string(),
-                        "pass a Float or F32 base".to_string(),
-                        Some(args[0].expr.span()),
-                    ));
-                    return None;
-                }
-                if let Some(second) = args.get_mut(1).and_then(|a| self.infer(&mut a.expr)) {
-                    if second != first {
-                        self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!("`pow` needs both arguments to have the same float type, but base is {} and exponent is {}", first.show(), second.show()),
-                                "D-FLOATW1: mixing float widths is not allowed — use the same width for both".to_string(),
-                                "convert with `F32.from_float(value)` or `Float.from_f32(value)` to match".to_string(),
-                                Some(args[1].expr.span()),
-                            ));
-                    }
-                }
-                return Some(first);
             }
             ("core.math", "abs") => {
                 if args.len() != 1 {

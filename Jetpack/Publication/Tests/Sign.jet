@@ -124,7 +124,7 @@ fn publication_sign_test_root(label: String) -[FS, Env]> String Never! {
     publication_write_private_seed(path, seed, true) ?? panic("protected force seed")
     assert_eq(files.read(target) ?? panic("sentinel read"), "sentinel")
     assert_eq(files.read_bytes(path) ?? panic("seed read"), seed)
-    assert_eq((files.stat(path) ?? panic("seed stat")).mode & 4095, 384)
+    assert_eq(((files.stat(path) ?? panic("seed stat")).mode).bit_and(4095), 384)
     files.remove_all(root) ?? panic("cleanup")
 }
 // Original tests/pkg.rs :9148. Entropy #3597 and exact held-directory
@@ -134,8 +134,8 @@ fn publication_sign_test_root(label: String) -[FS, Env]> String Never! {
     previous :: sys.get("JET_KEYS_DIR")
     sys.set("JET_KEYS_DIR", files.join(root, "keys"))
     first :: publication_keygen("jet", false) ?? panic("first keygen")
-    assert_eq((files.stat(first.seed_path) ?? panic("private mode")).mode & 4095, 384)
-    assert_eq((files.stat(first.public_key_path) ?? panic("public mode")).mode & 4095, 420)
+    assert_eq(((files.stat(first.seed_path) ?? panic("private mode")).mode).bit_and(4095), 384)
+    assert_eq(((files.stat(first.public_key_path) ?? panic("public mode")).mode).bit_and(4095), 420)
     if publication_keygen("jet", false) == {
         .Err(error) -> assert_eq(error.diagnostic.code, "E1248")
         .Ok(_) -> panic("existing key overwritten")

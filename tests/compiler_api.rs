@@ -141,13 +141,13 @@ fn reserved_in_diagnostic_teaches_postfix_member_carve_out() {
 }
 
 #[test]
-fn single_bar_is_bitwise_or() {
+fn named_bitwise_or_parses() {
     let parsed = jet::Compiler::parse_source(
-        "fn run() {\n    left :: 1\n    right :: 2\n    value :: left | right\n}\n",
+        "fn run() {\n    left :: 1\n    right :: 2\n    value :: left.bit_or(right)\n}\n",
     );
     assert!(
         parsed.diagnostics.is_empty(),
-        "D-BITOREXPR1=A admits value `|` as bitwise OR: {:?}",
+        "D-SIGIL-ALGEBRA1=B admits named bitwise OR: {:?}",
         parsed.diagnostics
     );
 }

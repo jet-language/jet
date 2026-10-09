@@ -261,7 +261,7 @@
         .Ok(_) -> panic("a blocked quarantine must fail")
         .Err(error) -> assert(error == .InvalidData(_))
     }
-    assert_eq((files.stat(hangar) ?? panic("stat")).mode & 511, 365)
+    assert_eq(((files.stat(hangar) ?? panic("stat")).mode).bit_and(511), 365)
     assert(files.exists(files.join(hangar, ingested.entry.id)))
     files.set_mode(hangar, 493) ?? panic("chmod 0755")
     assert(store_find_by_reference(&verification, roots, ingested.entry.reference) != None)
@@ -481,7 +481,7 @@
     proved :: store_profile_file_proof(destination) ?? panic("profile proof")
     assert_eq(proved.digest, copied.digest)
     assert_eq(proved.mode, copied.mode)
-    if sys.is_unix() -> assert((copied.mode & 0o111) != 0)
+    if sys.is_unix() -> assert(((copied.mode).bit_and(0o111)) != 0)
     if lease.copy_profile_executable("z-tool", destination) == {
         .Err(error) -> assert(error == .AlreadyExists(_))
         .Ok(_) -> panic("exclusive profile create overwrote a destination")

@@ -323,7 +323,7 @@ fn checked_pow(base: Int, exponent: Int) -> Int? Never! {
     factor := base
     power := exponent
     loop power > 0 {
-        if (power & 1) != 0 {
+        if ((power).bit_and(1)) != 0 {
             result = checked_mul(result, factor) ?? return None
         }
         power = power /% 2
@@ -404,7 +404,7 @@ fn powmod(base: Int, exponent: Int, modulus: Int) -> Int? Never! {
     if factor < 0 -> factor = factor + modulus
     power := exponent
     loop power > 0 {
-        if (power & 1) != 0 {
+        if ((power).bit_and(1)) != 0 {
             product :: checked_mul(result, factor) ?? return None
             result = product %% modulus
         }

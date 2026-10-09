@@ -136,9 +136,9 @@ pub enum TokKind {
     /// D-COPY-WORD1=A: prefix `~x` is the retired copy sigil; it lexes only so
     /// the parser can teach E0941 and its rewrite to `x.copy()`.
     Tilde,
-    /// D-XORSPELL1=A: `a ~| b` is bitwise exclusive-or.
+    /// D-SIGIL-ALGEBRA1=B: retired exclusive-or, lexed to teach `bit_xor`.
     TildePipe,
-    /// D-XORSPELL1=A: `a ~|= b` is exclusive-or-assign.
+    /// D-SIGIL-ALGEBRA1=B: retired exclusive-or assignment, lexed for E0398.
     TildePipeEq,
     /// Retired external-method connector. Longest-match before `~` so parser
     /// can teach E0325.

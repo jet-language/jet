@@ -356,7 +356,7 @@ struct HangarArchiveReader {
     fn u32(&self) -> Int StoreError! {
         taken :: &self.take_bytes(4)
         value := 0
-        loop index in 0..<4 -> value = value | (Int.from_u8(taken[index]) << (8 * index))
+        loop index in 0..<4 -> value = (value).bit_or((Int.from_u8(taken[index]) << (8 * index)))
         Ok(value)
     }
 
@@ -365,7 +365,7 @@ struct HangarArchiveReader {
     fn u64(&self) -> Int StoreError! {
         taken :: &self.take_bytes(8)
         value := 0
-        loop index in 0..<8 -> value = value | (Int.from_u8(taken[index]) << (8 * index))
+        loop index in 0..<8 -> value = (value).bit_or((Int.from_u8(taken[index]) << (8 * index)))
         Ok(value)
     }
 
@@ -389,11 +389,11 @@ fn store_archive_put_u32(out: &[U8], value: Int) StoreError! {
 }
 
 fn store_archive_put_raw_u32(out: &[U8], value: Int) Never! {
-    loop index in 0..<4 -> &out.push(U8{(value >> (8 * index)) & 255})
+    loop index in 0..<4 -> &out.push(U8{((value >> (8 * index))).bit_and(255)})
 }
 
 fn store_archive_put_u64(out: &[U8], value: Int) Never! {
-    loop index in 0..<8 -> &out.push(U8{(value >> (8 * index)) & 255})
+    loop index in 0..<8 -> &out.push(U8{((value >> (8 * index))).bit_and(255)})
 }
 
 fn store_archive_put_string(out: &[U8], value: String) StoreError! {

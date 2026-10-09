@@ -692,10 +692,10 @@ fn sema_expr_binary_name(op: BinOp) -> String Never! {
         .FloorDiv -> "/%"
         .Mod -> "%"
         .Rem -> "rem"
-        .Pow -> "**"
-        .BitAnd -> "&"
-        .BitOr -> "|"
-        .BitXor -> "^"
+        .Pow -> "pow"
+        .BitAnd -> "bit_and"
+        .BitOr -> "bit_or"
+        .BitXor -> "bit_xor"
         .Shl -> "<<"
         .Shr -> ">>"
         .Eq -> "=="
@@ -794,7 +794,7 @@ fn sema_expr_byte_text(value: U8) -> String Never! {
     byte :: Int.from_u8(value)
     if byte < 128 -> return String.from_bytes([U8]{value}) ?? ""
     first :: U8{192 + (byte >> 6)}
-    second :: U8{128 + (byte & 63)}
+    second :: U8{128 + ((byte).bit_and(63))}
     String.from_bytes([U8]{first, second}) ?? ""
 }
 
@@ -3171,7 +3171,11 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
         result_ty := if value.ty == Type.Bool -> Type.Bool else -> sema_expr_numeric_base(value.ty)
         return sema_expr_expected(sema_tir_expr(result_ty, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span), expected, environment, program, &diagnostics)
     }
-    &diagnostics.push(sema_error("E0109", span, "logical `!` needs a Bool or whole number", "logical negation flips a yes-or-no value and bitwise negation flips every integer bit", "compare the value to produce Bool, or use a whole-number value"))
+    if sema_expr_is_integer(value.ty) {
+        &diagnostics.push(sema_retired_integer_not(span, Span{start: span.start + 1, end: span.end}))
+        return None
+    }
+    &diagnostics.push(sema_error("E0109", span, "logical `!` needs Bool", "arithmetic uses named methods (D-SIGIL-ALGEBRA1=B)", "compare the value to produce Bool; use `value.bit_not()` for an integer"))
     None
 }
 
@@ -3361,6 +3365,10 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
             }
             else -> {}
         }
+    }
+    if op == BinOp.Pow && ((lhs.ty == Type.Float && rhs.ty == Type.Float32) || (lhs.ty == Type.Float32 && rhs.ty == Type.Float)) {
+        &diagnostics.push(sema_error("E0109", span, "`pow` needs both float operands to have the same width", "D-FLOATW1: mixing float widths is not allowed", "convert the operands to the same float width"))
+        return None
     }
     line :: sema_source_line_at(environment.source_segments, span) ?? return None
     if sema_dyn_is_type(sema_expr_expected_type(lhs.ty, environment)) || sema_dyn_is_type(sema_expr_expected_type(rhs.ty, environment)) {

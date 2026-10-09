@@ -141,9 +141,10 @@ pub fn validate_typed_boundary_before_lowering(e: &Expr) -> Option<Diagnostic> {
 
 pub(crate) fn operator_label(op: BinOp) -> String {
     match op {
-        BinOp::BitAnd => "the bitwise and operator `&`".to_string(),
-        BinOp::Pow => "the power operator `^`".to_string(),
-        BinOp::BitXor => "the bitwise xor operator `~|`".to_string(),
+        BinOp::BitAnd => "`bit_and`".to_string(),
+        BinOp::BitOr => "`bit_or`".to_string(),
+        BinOp::Pow => "`pow`".to_string(),
+        BinOp::BitXor => "`bit_xor`".to_string(),
         _ => format!("`{}`", op.spell()),
     }
 }

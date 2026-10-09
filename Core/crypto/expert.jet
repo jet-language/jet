@@ -30,14 +30,14 @@ C_BLAKE2B_IV :: [Int]{
 fn wrap32(n: Int) -> Int Never! { n & C_MASK32 }
 
 fn rotl32(x: Int, n: Int) -> Int Never! {
-    v :: x & C_MASK32
-    r :: n & 31
+    v :: (x).bit_and(C_MASK32)
+    r :: (n).bit_and(31)
     if r == 0 -> return v
-    ((v << r) | (v >> (32 - r))) & C_MASK32
+    ((((v << r)).bit_or((v >> (32 - r))))).bit_and(C_MASK32)
 }
 
 fn to_u8(n: Int) -> U8 Never! {
-    v :: n & 255
+    v :: (n).bit_and(255)
     U8{v}
 }
 
@@ -124,18 +124,18 @@ fn chacha20_block(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
 
 fn qr(s: &[Int], a: Int, b: Int, c: Int, d: Int) Never! {
     s[a] = wrap32(s[a] + s[b])
-    s[d] = rotl32(s[d] ~| s[a], 16)
+    s[d] = rotl32((s[d]).bit_xor(s[a]), 16)
     s[c] = wrap32(s[c] + s[d])
-    s[b] = rotl32(s[b] ~| s[c], 12)
+    s[b] = rotl32((s[b]).bit_xor(s[c]), 12)
     s[a] = wrap32(s[a] + s[b])
-    s[d] = rotl32(s[d] ~| s[a], 8)
+    s[d] = rotl32((s[d]).bit_xor(s[a]), 8)
     s[c] = wrap32(s[c] + s[d])
-    s[b] = rotl32(s[b] ~| s[c], 7)
+    s[b] = rotl32((s[b]).bit_xor(s[c]), 7)
 }
 
 fn u32le(bytes: [U8], off: Int) -> Int Never! {
     if off + 3 >= bytes.len() -> return 0
-    (u8_int(bytes[off]) | (u8_int(bytes[off + 1]) << 8) | (u8_int(bytes[off + 2]) << 16) | (u8_int(bytes[off + 3]) << 24)) & C_MASK32
+    (((((u8_int(bytes[off])).bit_or((u8_int(bytes[off + 1]) << 8))).bit_or((u8_int(bytes[off + 2]) << 16))).bit_or((u8_int(bytes[off + 3]) << 24)))).bit_and(C_MASK32)
 }
 
 fn chacha20_xor(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never! {
@@ -814,7 +814,7 @@ fn argon2id_raw(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, la
                         else -> lane_length - segment_length - (if index == 0 -> 1 else -> 0)
                     }
                     start :: if pass != 0 && slice != 3 -> (slice + 1) * segment_length else -> 0
-                    reference_index :: (start + argon2_mapping(random_word & U64{0xffffffff}, area)) %% lane_length
+                    reference_index :: (start + argon2_mapping((random_word).bit_and(U64{0xffffffff}), area)) %% lane_length
                     reference_position :: reference_lane * lane_length + reference_index
                     argon2_fill_block(&memory, &work, &saved, previous_position * 128, reference_position * 128, position * 128, pass != 0)
                 }
@@ -824,7 +824,7 @@ fn argon2id_raw(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, la
     loop word in 0..<128 -> work[word] = U64{0}
     loop lane in 0..<lanes {
         last :: (lane * lane_length + lane_length - 1) * 128
-        loop word in 0..<128 -> work[word] = work[word] ~| memory[last + word]
+        loop word in 0..<128 -> work[word] = (work[word]).bit_xor(memory[last + word])
     }
     result_bytes := [U8]{}
     loop word in work {
@@ -837,7 +837,7 @@ fn argon2id_raw(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, la
 fn load_le64(bytes: [U8], off: Int, end: Int) -> U64 Never! {
     n := U64{0}
     loop i in 0..<8 {
-        if off + i < end -> n |= U64.from_u8(bytes[off + i]) << (i * 8)
+        if off + i < end -> n = (n).bit_or(U64.from_u8(bytes[off + i]) << (i * 8))
     }
     n
 }
@@ -885,24 +885,24 @@ fn argon2_next_addresses(address_block: &[U64], input_block: &[U64], saved: &[U6
     }
     argon2_permute(&address_block)
     loop i in 0..<128 {
-        mixed :: address_block[i] ~| saved[i]
+        mixed :: (address_block[i]).bit_xor(saved[i])
         address_block[i] = mixed
         saved[i] = mixed
     }
     argon2_permute(&address_block)
-    loop i in 0..<128 -> address_block[i] = address_block[i] ~| saved[i]
+    loop i in 0..<128 -> address_block[i] = (address_block[i]).bit_xor(saved[i])
 }
 
 /// Compress block `previous` with block `reference` into block `next` of
 /// `memory` (word offsets); later passes XOR into the existing block.
 fn argon2_fill_block(memory: &[U64], work: &[U64], saved: &[U64], previous: Int, reference: Int, next: Int, with_xor: Bool) Never! {
     loop i in 0..<128 {
-        mixed :: memory[previous + i] ~| memory[reference + i]
+        mixed :: (memory[previous + i]).bit_xor(memory[reference + i])
         work[i] = mixed
-        if with_xor -> saved[i] = mixed ~| memory[next + i] else -> saved[i] = mixed
+        if with_xor -> saved[i] = (mixed).bit_xor(memory[next + i]) else -> saved[i] = mixed
     }
     argon2_permute(&work)
-    loop i in 0..<128 -> memory[next + i] = work[i] ~| saved[i]
+    loop i in 0..<128 -> memory[next + i] = (work[i]).bit_xor(saved[i])
 }
 
 /// Argon2 permutation P over a 128-word block, in place: eight row rounds of
@@ -938,14 +938,14 @@ fn argon2_g(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int) Never! {
     b := v[ib]
     c := v[ic]
     d := v[id]
-    a = a + b + U64{2} * (a & lo) * (b & lo)
-    d = (d ~| a).rotate_right(32)
-    c = c + d + U64{2} * (c & lo) * (d & lo)
-    b = (b ~| c).rotate_right(24)
-    a = a + b + U64{2} * (a & lo) * (b & lo)
-    d = (d ~| a).rotate_right(16)
-    c = c + d + U64{2} * (c & lo) * (d & lo)
-    b = (b ~| c).rotate_right(63)
+    a = a + b + U64{2} * ((a).bit_and(lo)) * ((b).bit_and(lo))
+    d = ((d).bit_xor(a)).rotate_right(32)
+    c = c + d + U64{2} * ((c).bit_and(lo)) * ((d).bit_and(lo))
+    b = ((b).bit_xor(c)).rotate_right(24)
+    a = a + b + U64{2} * ((a).bit_and(lo)) * ((b).bit_and(lo))
+    d = ((d).bit_xor(a)).rotate_right(16)
+    c = c + d + U64{2} * ((c).bit_and(lo)) * ((d).bit_and(lo))
+    b = ((b).bit_xor(c)).rotate_right(63)
     v[ia] = a
     v[ib] = b
     v[ic] = c
@@ -957,7 +957,7 @@ fn argon2_g(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int) Never! {
 fn blake2b(data: [U8], out_len: Int) -> [U8] Never! {
     h := [U64]{}
     loop word in C_BLAKE2B_IV -> &h.push(U64{word})
-    h[0] = h[0] ~| U64{0x01010000 | out_len}
+    h[0] = (h[0]).bit_xor(U64{(0x01010000).bit_or(out_len)})
     v := [U64]{}
     m := [U64]{}
     loop _ in 0..<16 {
@@ -1178,8 +1178,8 @@ fn blake2b_compress(h: &[U64], v: &[U64], m: &[U64], data: [U8], start: Int, end
         v[i] = h[i]
         v[i + 8] = U64{C_BLAKE2B_IV[i]}
     }
-    v[12] = v[12] ~| U64{end}
-    if last -> v[14] = v[14] ~| U64.MAX
+    v[12] = (v[12]).bit_xor(U64{end})
+    if last -> v[14] = (v[14]).bit_xor(U64.MAX)
     loop r in 0..<12 {
         base :: r * 16
         blake2b_mix(&v, 0, 4, 8, 12, m[C_BLAKE2B_SIGMA[base]], m[C_BLAKE2B_SIGMA[base + 1]])
@@ -1191,7 +1191,7 @@ fn blake2b_compress(h: &[U64], v: &[U64], m: &[U64], data: [U8], start: Int, end
         blake2b_mix(&v, 2, 7, 8, 13, m[C_BLAKE2B_SIGMA[base + 12]], m[C_BLAKE2B_SIGMA[base + 13]])
         blake2b_mix(&v, 3, 4, 9, 14, m[C_BLAKE2B_SIGMA[base + 14]], m[C_BLAKE2B_SIGMA[base + 15]])
     }
-    loop i in 0..<8 -> h[i] = h[i] ~| v[i] ~| v[i + 8]
+    loop i in 0..<8 -> h[i] = ((h[i]).bit_xor(v[i])).bit_xor(v[i + 8])
 }
 
 /// BLAKE2b G (RFC 7693 3.1): right rotations by 32, 24, 16 and 63.
@@ -1202,13 +1202,13 @@ fn blake2b_mix(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int, x: U64, y: U64) Ne
     c := v[ic]
     d := v[id]
     a = a + b + x
-    d = (d ~| a).rotate_right(32)
+    d = ((d).bit_xor(a)).rotate_right(32)
     c += d
-    b = (b ~| c).rotate_right(24)
+    b = ((b).bit_xor(c)).rotate_right(24)
     a = a + b + y
-    d = (d ~| a).rotate_right(16)
+    d = ((d).bit_xor(a)).rotate_right(16)
     c += d
-    b = (b ~| c).rotate_right(63)
+    b = ((b).bit_xor(c)).rotate_right(63)
     v[ia] = a
     v[ib] = b
     v[ic] = c

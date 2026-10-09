@@ -21,12 +21,11 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.math", "max")
             | ("core.text.fmt", "pretty" | "decimal")
             | ("core.math", "clamp")
-            // D-FLOATW1: sqrt/floor/ceil/pow are width-generic (Float→Float, F32→F32);
+            // D-FLOATW1: sqrt/floor/ceil are width-generic (Float→Float, F32→F32);
             // their return type is arg-type-dependent, so they use resolved_ret.
             | ("core.math", "sqrt")
             | ("core.math", "floor")
             | ("core.math", "ceil")
-            | ("core.math", "pow")
             | ("core.math", "sin")
             | ("core.math", "cos")
             | ("core.math", "tan")
@@ -264,19 +263,19 @@ pub fn core_call_surface_signature(
         ))
     };
     match (module, name) {
-        ("core.math", "abs") => Some((vec![(read, int.clone())], Some(int))),
+        ("core.math", "abs" | "sign") => Some((vec![(read, int.clone())], Some(int))),
         (
             "core.math",
             "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh"
             | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "trunc" | "truncate" | "fract"
-            | "sign" | "real" | "imag" | "conj" | "float32" | "float64" | "degrees" | "radians"
+            | "real" | "imag" | "conj" | "float32" | "float64" | "degrees" | "radians"
             | "fabs" | "expm1",
         ) => Some((vec![(read, float.clone())], Some(float))),
         ("core.math", "round") => Some((vec![(read, float)], Some(int))),
         ("core.math", "gcd" | "lcm") => {
             Some((vec![(read, int.clone()), (read, int.clone())], Some(int)))
         }
-        ("core.math", "pow" | "atan2" | "hypot") => Some((
+        ("core.math", "atan2" | "hypot") => Some((
             vec![(read, float.clone()), (read, float.clone())],
             Some(Type::Float),
         )),
@@ -2413,7 +2412,7 @@ fn core_fixed_sig_raw(
             ],
             Some(Type::Option(Box::new(int.clone()))),
         )),
-        ("core.math", "abs_diff" | "xor") => Some((
+        ("core.math", "abs_diff") => Some((
             vec![(read, int.clone()), (read, int.clone())],
             Some(int.clone()),
         )),

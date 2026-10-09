@@ -46,7 +46,7 @@ fn x64_cond_code(cond: X64Cond) -> Int Never! {
 }
 
 fn x64_byte(code: &[U8], value: Int) Never! {
-    &code.push(U8{value & 255})
+    &code.push(U8{(value).bit_and(255)})
 }
 
 fn x64_u32(code: &[U8], value: Int) Never! {
@@ -77,7 +77,7 @@ fn x64_rex_indexed(code: &[U8], wide: Bool, reg: Int, base: Int, index: Int) Nev
 }
 
 fn x64_modrm_reg(code: &[U8], reg: Int, rm: Int) Never! {
-    x64_byte(&code, 0xc0 | ((reg & 7) << 3) | (rm & 7))
+    x64_byte(&code, ((0xc0).bit_or((((reg).bit_and(7)) << 3))).bit_or(((rm).bit_and(7))))
 }
 
 // [base + disp]: rsp/r12 need a SIB byte, and rbp/r13 have no disp-free form.
@@ -90,7 +90,7 @@ fn x64_modrm_mem(code: &[U8], reg: Int, base: Int, disp: Int) Never! {
 fn x64_modrm_indexed(code: &[U8], reg: Int, base: Int, index: Int, scale: Int, disp: Int) Never! {
     assert(index != X64_RSP)
     mode :: if {
-        disp == 0 && (base & 7) != 5 -> 0
+        disp == 0 && ((base).bit_and(7)) != 5 -> 0
         x64_fits_i8(disp) -> 1
         else -> 2
     }
@@ -120,7 +120,7 @@ fn x64_mov_ri(code: &[U8], dst: Int, value: Int) Never! {
         x64_u32(&code, value)
     } else {
         x64_rex(&code, true, 0, dst)
-        x64_byte(&code, 0xb8 + (dst & 7))
+        x64_byte(&code, 0xb8 + ((dst).bit_and(7)))
         x64_u64(&code, value)
     }
 }
@@ -315,7 +315,7 @@ pub fn x64_integer_width(code: &[U8], dst: Int, src: Int, bytes: Int) Never! {
 fn x64_lea_rip(code: &[U8], dst: Int) -> Int Never! {
     x64_rex(&code, true, dst, 0)
     x64_byte(&code, 0x8d)
-    x64_byte(&code, ((dst & 7) << 3) | 5)
+    x64_byte(&code, ((((dst).bit_and(7)) << 3)).bit_or(5))
     at :: code.len()
     x64_u32(&code, 0)
     at
@@ -413,12 +413,12 @@ fn x64_movzx_r8(code: &[U8], dst: Int, src: Int) Never! {
 // push r64 (50+r) and pop r64 (58+r)
 fn x64_push(code: &[U8], reg: Int) Never! {
     if reg >= 8 -> x64_byte(&code, 0x41)
-    x64_byte(&code, 0x50 + (reg & 7))
+    x64_byte(&code, 0x50 + ((reg).bit_and(7)))
 }
 
 fn x64_pop(code: &[U8], reg: Int) Never! {
     if reg >= 8 -> x64_byte(&code, 0x41)
-    x64_byte(&code, 0x58 + (reg & 7))
+    x64_byte(&code, 0x58 + ((reg).bit_and(7)))
 }
 
 fn x64_ret(code: &[U8]) Never! { x64_byte(&code, 0xc3) }
@@ -465,7 +465,7 @@ fn x64_jcc_rel32(code: &[U8], cond: X64Cond) -> Int Never! {
 // Point the rel32 field at `at` to `target`; both are offsets in `code`.
 fn x64_patch_rel32(code: &[U8], at: Int, target: Int) Never! {
     relative :: target - (at + 4)
-    loop shift in 0..<4 -> code[at + shift] = U8{(relative >> (8 * shift)) & 255}
+    loop shift in 0..<4 -> code[at + shift] = U8{((relative >> (8 * shift))).bit_and(255)}
 }
 
 // SSE scalar double/single and register bit moves. Mandatory prefix precedes

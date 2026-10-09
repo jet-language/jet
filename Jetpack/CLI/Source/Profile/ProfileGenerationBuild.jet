@@ -455,7 +455,7 @@ fn cli_copy_projection_file(source: String, destination: String, expected: Strin
     info :: files.stat(source)
     if info.is_symlink || !info.is_file -> return Err(CLIError.Other("profile projection source is not a regular file"))
     files.copy2(source, destination)
-    if sys.is_unix() -> files.set_mode(destination, info.mode & TOOL_PROFILE_PERMISSION_BITS)
+    if sys.is_unix() -> files.set_mode(destination, (info.mode).bit_and(TOOL_PROFILE_PERMISSION_BITS))
     actual :: "sha256-{foundation_sha256_file_hex(destination)}"
     if actual != expected -> return Err(CLIError.Other("profile projection source changed while copying"))
 }

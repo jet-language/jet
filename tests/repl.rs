@@ -1376,13 +1376,13 @@ fn repl_core_grouped_math_use_list_inline() {
 }
 
 #[test]
-fn repl_core_math_pow_inline() {
-    // Another effect-approved math function: math.pow(2.0, 10.0) = 1024.
-    let inputs = &["use core.math as math", "math.pow(2.0, 10.0)"];
+fn repl_float_pow_inline() {
+    // D-SIGIL-ALGEBRA1=B: power needs no Core import.
+    let inputs = &["(2.0).pow(10.0)"];
     let out = run_transcript(inputs, None);
     assert!(
         out.contains("1024") && !out.contains("E0956"),
-        "math.pow(2.0, 10.0) should produce 1024 inline, got: {:?}",
+        "(2.0).pow(10.0) should produce 1024 inline, got: {:?}",
         out
     );
 }

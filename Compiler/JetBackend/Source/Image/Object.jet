@@ -374,7 +374,7 @@ fn x64_object_functions(program: LIRModule, functions: [X64CompiledFunction], ex
     }
     elf64_pad(&bytes, 8)
     shoff :: bytes.len()
-    loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{(shoff >> (8 * shift)) & 255}
+    loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{((shoff >> (8 * shift))).bit_and(255)}
     elf64_section_header(&bytes, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     // .text: PROGBITS, ALLOC | EXECINSTR
     elf64_section_header(&bytes, name_offsets[1], 1, 6, section_offsets[0], text.len(), 0, 0, X64_FUNCTION_ALIGN, 0)
