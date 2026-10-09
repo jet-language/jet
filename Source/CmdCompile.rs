@@ -3501,8 +3501,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             .map(|projection| projection.diagnostics.clone())
             .unwrap_or_default();
         if let Some(projection) = checked.as_ref() {
-            if let Err(error) =
-                crate::CmdDevTools::merge_cost_diagnostics(&projection.bundle, &mut all_diags)
+            if let Err(error) = crate::CmdDevTools::merge_cost_diagnostics(
+                &projection.bundle, &projection.checked_nominals, &mut all_diags,
+            )
             {
                 crate::CmdDevTools::exit_cost_projection_error(file, &error);
             }

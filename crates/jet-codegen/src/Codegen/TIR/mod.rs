@@ -5368,13 +5368,13 @@ fn lower_checked_tir_program_on_stack(
     debug_linemap: bool,
 ) -> Result<TirProgram, LowerError> {
     if checked_nominals.len() != bundle.modules.len() {
-        return Err(LowerError::new(Span::new(0, 0), "missing checked nominal module facts"));
+        return Err(LowerError::new(crate::Diagnostics::Span::new(0, 0), "missing checked nominal module facts"));
     }
     for (module_idx, facts) in checked_nominals.iter().enumerate() {
         if facts.module_idx != module_idx
-            || bundle.name_ledger.module_identity(module_idx) != Some(facts.module_identity.as_str())
+            || bundle.name_ledger.module_identity_ref(module_idx) != Some(facts.module_identity.as_str())
         {
-            return Err(LowerError::new(Span::new(0, 0), "checked nominal module context disagrees with its bundle"));
+            return Err(LowerError::new(crate::Diagnostics::Span::new(0, 0), "checked nominal module context disagrees with its bundle"));
         }
     }
     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
@@ -11459,13 +11459,18 @@ fn cost_coverage_gaps(bundle: &ProgramBundle, program: &TirProgram) -> Vec<Strin
 /// Project typed cost facts from the frozen TIR.  Lowering remains the sole
 /// producer of the fact channel; CLI tooling and linting consume this one
 /// report instead of reconstructing cost from emitted Rust.
-pub fn cost_report(bundle: &ProgramBundle) -> Result<TCostReport, TCostReportError> {
+/// Nominal facts must be the retained result of checking this same bundle;
+/// cost tooling does not rebuild or substitute a second declaration context.
+pub fn cost_report(
+    bundle: &ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
+) -> Result<TCostReport, TCostReportError> {
     let request = MirArtifactRequest::new(
         jet_foundation::MIR::MirArtifactTarget::RustAot,
         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
         MirArtifactBuildMode::Dev,
     );
-    let program = match lower_checked_tir_program_for(bundle, request) {
+    let program = match lower_checked_tir_program_for(bundle, checked_nominals, request) {
         Ok(program) => program,
         Err(error)
             if matches!(

@@ -4296,7 +4296,7 @@ pub(crate) fn run_explain_cost(
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let report = match jet::Codegen::TIR::cost_report(&projection.bundle) {
+    let report = match jet::Codegen::TIR::cost_report(&projection.bundle, &projection.checked_nominals) {
         Ok(report) => report,
         Err(error) => exit_cost_projection_error(file, &error),
     };
@@ -8326,9 +8326,10 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode, emit_metadata: bool) {
 /// only.
 pub(crate) fn cost_diagnostics(
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     sema_diagnostics: &[jet::Diagnostics::Diagnostic],
 ) -> Result<Vec<jet::Diagnostics::Diagnostic>, jet::Codegen::TIR::TCostReportError> {
-    let report = jet::Codegen::TIR::cost_report(bundle)?;
+    let report = jet::Codegen::TIR::cost_report(bundle, checked_nominals)?;
     Ok(cost_diagnostics_from_report(&report, sema_diagnostics))
 }
 
@@ -8401,10 +8402,11 @@ fn dedup_cost_diagnostics(diagnostics: &mut Vec<jet::Diagnostics::Diagnostic>) {
 
 pub(crate) fn merge_cost_diagnostics(
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     diagnostics: &mut Vec<jet::Diagnostics::Diagnostic>,
 ) -> Result<(), jet::Codegen::TIR::TCostReportError> {
     dedup_cost_diagnostics(diagnostics);
-    let cost_diagnostics = cost_diagnostics(bundle, diagnostics)?;
+    let cost_diagnostics = cost_diagnostics(bundle, checked_nominals, diagnostics)?;
     for diagnostic in cost_diagnostics {
         if !diagnostics
             .iter()
@@ -8437,7 +8439,7 @@ pub(crate) fn run_lint_cost(file: &str, mode: OutputMode) {
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let lints = match cost_diagnostics(&projection.bundle, &projection.diagnostics) {
+    let lints = match cost_diagnostics(&projection.bundle, &projection.checked_nominals, &projection.diagnostics) {
         Ok(lints) => lints,
         Err(error) => exit_cost_projection_error(file, &error),
     };
