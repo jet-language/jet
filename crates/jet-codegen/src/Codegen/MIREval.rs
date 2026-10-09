@@ -132,32 +132,103 @@ fn mir_ui_field<'a>(value: &'a CtValue, name: &str) -> Option<&'a CtValue> {
     }
 }
 
-fn mir_core_files_type_id(
-    program: &jet_foundation::MIR::MirProgram,
-    id: jet_foundation::MIR::MirTypeId,
-    name: &str,
-) -> bool {
-    let Some(definition) = program.types.iter().find(|definition| definition.id == id) else {
-        return false;
-    };
-    if definition.name != name {
-        return false;
+#[derive(Clone, Copy)]
+enum MirFieldLocation {
+    Struct(usize, usize),
+    Enum(usize, usize, usize),
+    Flat(usize),
+}
+
+/// Immutable row positions, shared by every interpreter machine for a program.
+struct ProgramLookups {
+    types: HashMap<jet_foundation::MIR::MirTypeId, usize>,
+    core_files_types: HashSet<jet_foundation::MIR::MirTypeId>,
+    fields: HashMap<MirFieldId, MirFieldLocation>,
+}
+
+impl ProgramLookups {
+    fn new(program: &jet_foundation::MIR::MirProgram) -> Self {
+        let mut types = HashMap::with_capacity(program.types.len());
+        let mut fields = HashMap::new();
+        for (type_index, definition) in program.types.iter().enumerate() {
+            // A linear ID lookup selects the first row, even for malformed MIR.
+            types.entry(definition.id).or_insert(type_index);
+            match &definition.kind {
+                MirTypeDefKind::Struct { fields: members, .. } => {
+                    for (field_index, field) in members.iter().enumerate() {
+                        fields.entry(field.id)
+                            .or_insert(MirFieldLocation::Struct(type_index, field_index));
+                    }
+                }
+                MirTypeDefKind::Enum { variants, .. } => {
+                    for (variant_index, variant) in variants.iter().enumerate() {
+                        if let jet_foundation::MIR::MirVariantPayload::Named(members) = &variant.payload {
+                            for (field_index, field) in members.iter().enumerate() {
+                                fields.entry(field.id).or_insert(MirFieldLocation::Enum(
+                                    type_index, variant_index, field_index,
+                                ));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Checked declarations take precedence over the legacy flat table.
+        for (field_index, row) in program.fields.iter().enumerate() {
+            fields.entry(row.id).or_insert(MirFieldLocation::Flat(field_index));
+        }
+        let core_modules: HashSet<_> =
+            jet_foundation::CoreModuleExports::core_source_module("core.files")
+                .into_iter()
+                .flat_map(|source| program.modules.iter()
+                    .filter(move |module| module.path == source.path)
+                    .map(|module| (module.id, module.key.as_str())))
+                .collect();
+        let core_files_types = types.iter().filter_map(|(id, position)| {
+            let definition = &program.types[*position];
+            let owner = definition.key.strip_suffix(&definition.name)?.strip_suffix("::")?;
+            core_modules.contains(&(definition.module, owner)).then_some(*id)
+        }).collect();
+        Self { types, core_files_types, fields }
     }
-    let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.files") else {
-        return false;
-    };
-    program.modules.iter().any(|module| {
-        module.id == definition.module
-            && module.path == source.path
-            && definition
-                .key
-                .strip_prefix(&module.key)
-                .is_some_and(|leaf| leaf == format!("::{name}"))
-    })
+
+    fn core_files_type_id(
+        &self,
+        program: &jet_foundation::MIR::MirProgram,
+        id: jet_foundation::MIR::MirTypeId,
+        name: &str,
+    ) -> bool {
+        self.core_files_types.contains(&id)
+            && self.types.get(&id).is_some_and(|index| program.types[*index].name == name)
+    }
+
+    fn field_name(&self, program: &jet_foundation::MIR::MirProgram, id: MirFieldId) -> Option<String> {
+        let field = match *self.fields.get(&id)? {
+            MirFieldLocation::Struct(type_index, field_index) => {
+                let MirTypeDefKind::Struct { fields, .. } = &program.types[type_index].kind else {
+                    unreachable!("indexed struct field");
+                };
+                &fields[field_index]
+            }
+            MirFieldLocation::Enum(type_index, variant_index, field_index) => {
+                let MirTypeDefKind::Enum { variants, .. } = &program.types[type_index].kind else {
+                    unreachable!("indexed enum field");
+                };
+                let jet_foundation::MIR::MirVariantPayload::Named(fields) = &variants[variant_index].payload else {
+                    unreachable!("indexed named variant field");
+                };
+                &fields[field_index]
+            }
+            MirFieldLocation::Flat(field_index) => &program.fields[field_index].field,
+        };
+        Some(field.name.clone())
+    }
 }
 
 fn mir_core_files_type(
     program: &jet_foundation::MIR::MirProgram,
+    lookups: &ProgramLookups,
     ty: &MirType,
     name: &str,
 ) -> bool {
@@ -165,27 +236,28 @@ fn mir_core_files_type(
         MirTypeKind::Apply { name, .. } => Some(name.id),
         _ => ty.identity,
     };
-    id.is_some_and(|id| mir_core_files_type_id(program, id, name))
+    id.is_some_and(|id| lookups.core_files_type_id(program, id, name))
 }
 
 fn mir_contains_file_owner(
     program: &jet_foundation::MIR::MirProgram,
+    lookups: &ProgramLookups,
     ty: &MirType,
     visiting: &mut Vec<jet_foundation::MIR::MirTypeId>,
 ) -> bool {
     if ["TempFile", "TempDir", "FileLock", "FileReader", "FileWriter"]
-        .iter().any(|name| mir_core_files_type(program, ty, name))
+        .iter().any(|name| mir_core_files_type(program, lookups, ty, name))
     {
         return true;
     }
     if let Some(fields) = ty.tuple_fields() {
-        return fields.iter().any(|(_, field)| mir_contains_file_owner(program, field, visiting));
+        return fields.iter().any(|(_, field)| mir_contains_file_owner(program, lookups, field, visiting));
     }
     let MirTypeKind::Apply { name, args } = ty.kind() else { return false };
     if visiting.contains(&name.id) {
         return false;
     }
-    let Some(definition) = program.types.iter().find(|row| row.id == name.id) else {
+    let Some(definition) = lookups.types.get(&name.id).map(|index| &program.types[*index]) else {
         return false;
     };
     if !matches!(definition.ownership,
@@ -199,9 +271,9 @@ fn mir_contains_file_owner(
         .map(|(param, arg)| (param.name.clone(), arg.clone())).collect();
     let contains = fields.iter().filter(|field| !field.computed).any(|field| {
         if args.is_empty() {
-            mir_contains_file_owner(program, &field.ty, visiting)
+            mir_contains_file_owner(program, lookups, &field.ty, visiting)
         } else {
-            mir_contains_file_owner(program, &substitute_print_type(&field.ty, &substitutions), visiting)
+            mir_contains_file_owner(program, lookups, &substitute_print_type(&field.ty, &substitutions), visiting)
         }
     });
     visiting.pop();
@@ -2597,6 +2669,7 @@ impl MirForwardedOutput {
 #[derive(Clone)]
 struct MirClosureHost {
     program: Arc<jet_foundation::MIR::MirProgram>,
+    lookups: Arc<ProgramLookups>,
     function: MirFunctionId,
     captures: Vec<CtValue>,
     config: MirEvalConfig,
@@ -2652,12 +2725,15 @@ impl MirClosureHost {
                 .collect::<Result<_, _>>()?,
         )?;
         let mut data_pipeline = crate::Comptime::DataPipelineState::default();
-        let mut machine = Machine::new(
+        let mut machine = Machine::new_with_static_values(
             &self.program,
             &self.config,
             vec![frame],
             None,
+            Rc::new(RefCell::new(BTreeMap::new())),
+            true,
             Some(&mut data_pipeline),
+            Arc::clone(&self.lookups),
         );
         machine.forwarded_output = self.output.clone();
         machine.forwards_output = true;
@@ -4081,7 +4157,7 @@ struct Machine<'a, 'state> {
     deadline_guards: Vec<(usize, MirScopeId, crate::scheduler::JetDeadlineGuard)>,
     drop_only_values: HashMap<MirFunctionId, HashSet<MirValueId>>,
     close_facts: super::MIRRust::CloseFacts,
-    source_value_hook_types: HashMap<jet_foundation::MIR::MirTypeId, usize>,
+    lookups: Arc<ProgramLookups>,
     source_value_hook_memos: RefCell<HashMap<&'static str, SourceValueHookMemo>>,
     /// Held for the machine's lifetime so the scoped Web runtime policy is
     /// restored on drop; never read directly.
@@ -4114,6 +4190,7 @@ impl<'a, 'state> Machine<'a, 'state> {
             Rc::new(RefCell::new(BTreeMap::new())),
             true,
             data_pipeline,
+            Arc::new(ProgramLookups::new(program)),
         )
     }
     fn new_with_static_values(
@@ -4124,6 +4201,7 @@ impl<'a, 'state> Machine<'a, 'state> {
         static_values: Rc<RefCell<BTreeMap<String, RuntimeValue>>>,
         hardware_setup_pending: bool,
         data_pipeline: Option<&'state mut crate::Comptime::DataPipelineState>,
+        lookups: Arc<ProgramLookups>,
     ) -> Self {
         Self::new_with_realtime_tasks(
             program,
@@ -4138,6 +4216,7 @@ impl<'a, 'state> Machine<'a, 'state> {
             Rc::new(RefCell::new(BTreeMap::new())),
             Rc::new(RefCell::new(1)),
             data_pipeline,
+            lookups,
         )
     }
     fn new_with_realtime_tasks(
@@ -4153,6 +4232,7 @@ impl<'a, 'state> Machine<'a, 'state> {
         process_stdin_tokens: Rc<RefCell<BTreeMap<i64, MirHandleToken>>>,
         next_dma_transfer_id: Rc<RefCell<u64>>,
         data_pipeline: Option<&'state mut crate::Comptime::DataPipelineState>,
+        lookups: Arc<ProgramLookups>,
     ) -> Self {
         let web_runtime_policy = crate::Comptime::AppLite::set_web_runtime_policy(
             !config.release_devtools_policy.is_release()
@@ -4188,13 +4268,7 @@ impl<'a, 'state> Machine<'a, 'state> {
             deadline_guards: Vec::new(),
             drop_only_values: HashMap::new(),
             close_facts: super::MIRRust::CloseFacts::default(),
-            source_value_hook_types: {
-                let mut rows = HashMap::with_capacity(program.types.len());
-                for (index, definition) in program.types.iter().enumerate() {
-                    rows.entry(definition.id).or_insert(index);
-                }
-                rows
-            },
+            lookups,
             source_value_hook_memos: RefCell::new(HashMap::new()),
             _web_runtime_policy: web_runtime_policy,
             forwarded_output: Arc::new(MirForwardedOutput::default()),
@@ -4321,6 +4395,7 @@ impl<'a, 'state> Machine<'a, 'state> {
             self.process_stdin_tokens.clone(),
             self.next_dma_transfer_id.clone(),
             self.data_pipeline.as_deref_mut(),
+            Arc::clone(&self.lookups),
         );
         nested.restore_deadline_scopes(span)?;
         nested.forwarded_output = self.forwarded_output.clone();
@@ -6091,7 +6166,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                 .get(base)
                 .cloned()
                 .map(|mut alias| {
-                    let name = field_name(self.program, *field)
+                    let name = self.lookups.field_name(self.program, *field)
                         .ok_or_else(|| mir_error_at("MIR field ID is missing", span))?;
                     alias.steps.push(MoveStep::Field {
                         field: *field,
@@ -6104,7 +6179,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                 let mut alias = self.frames[frame_index].value_aliases.get(base).cloned();
                 if let Some(alias_value) = alias.as_mut() {
                     for field in members {
-                        let name = field_name(self.program, *field)
+                        let name = self.lookups.field_name(self.program, *field)
                             .ok_or_else(|| mir_error_at("MIR field ID is missing", span))?;
                         alias_value.steps.push(MoveStep::Field {
                             field: *field,
@@ -6455,7 +6530,7 @@ impl<'a, 'state> Machine<'a, 'state> {
             MirOperation::ReadPlace(place)
             | MirOperation::AddressOf { place, access: MirAccess::Read }
                 if result_ty.is_some_and(|ty| {
-                    mir_contains_file_owner(self.program, ty, &mut Vec::new())
+                    mir_contains_file_owner(self.program, &self.lookups, ty, &mut Vec::new())
                 }) =>
             {
                 Ok(RuntimeValue::Address(Address {
@@ -6784,7 +6859,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                         let field = arg
                             .field
                             .map(|field| {
-                                field_name(self.program, field).ok_or_else(|| {
+                                self.lookups.field_name(self.program, field).ok_or_else(|| {
                                     mir_error_at("MIR enum argument field ID is missing", span)
                                 })
                             })
@@ -7180,12 +7255,9 @@ impl<'a, 'state> Machine<'a, 'state> {
                             span,
                         )?))
                     }
-                    RuntimeValue::CellGuard(guard) => cell_payload_read(
-                        self.program,
-                        &guard.payload,
-                        &guard.path,
-                        span,
-                    ),
+                    RuntimeValue::CellGuard(guard) => cell_payload_read(self.program, &self.lookups, &guard.payload,
+                    &guard.path,
+                    span,),
 
                     RuntimeValue::Address(address) => {
                         require_address_access(&address, MirAccess::Read, span)?;
@@ -12165,7 +12237,7 @@ impl<'a, 'state> Machine<'a, 'state> {
         }
         let mut mapped = target.path.clone();
         mapped.extend_from_slice(path);
-        let _ = cell_payload_read(self.program, &target.payload, &mapped, span)?;
+        let _ = cell_payload_read(self.program, &self.lookups, &target.payload, &mapped, span)?;
         Ok(MirCellGuard {
             payload: target.payload.clone(),
             path: mapped,
@@ -12427,7 +12499,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                 let field = u64::try_from(*field).map_err(|_| {
                     mir_error_at("MIR SharedGuard protocol field ID is negative", span)
                 })?;
-                field_name(self.program, MirFieldId(field)).ok_or_else(|| {
+                self.lookups.field_name(self.program, MirFieldId(field)).ok_or_else(|| {
                     mir_error_at(
                         "MIR SharedGuard protocol field ID has no canonical field row",
                         span,
@@ -13029,7 +13101,7 @@ impl<'a, 'state> Machine<'a, 'state> {
         guard: Rc<MirCellGuard>,
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
-        cell_payload_read(self.program, &guard.payload, &guard.path, span)
+        cell_payload_read(self.program, &self.lookups, &guard.payload, &guard.path, span)
     }
 
     fn materialize_cell_result(
@@ -13182,7 +13254,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                 let value = self.cell_callback_value(guard.clone(), span)?;
                 if member == "Cell.edit" {
                     let (result, value) = self.invoke_edit_callback(callback, value, span)?;
-                    write_cell_guard(self.program, &guard, value, span)?;
+                    write_cell_guard(self.program, &self.lookups, &guard, value, span)?;
                     self.materialize_cell_result(result, result_ty, span)
                 } else {
                     let result = self.invoke_callback(callback, value, span)?;
@@ -13239,7 +13311,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                     ));
                 };
                 self.materialize_cell_result(
-                    cell_payload_read(self.program, &guard.payload, &guard.path, span)?,
+                    cell_payload_read(self.program, &self.lookups, &guard.payload, &guard.path, span)?,
                     result_ty,
                     span,
                 )
@@ -13261,7 +13333,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                         span,
                     ));
                 };
-                write_cell_guard(self.program, &guard, value, span)?;
+                write_cell_guard(self.program, &self.lookups, &guard, value, span)?;
                 Ok(RuntimeValue::Data(MirEvalValue::Unit))
             }
             "CellReadGuard.read" | "CellEditGuard.read" | "CellEditGuard.edit" => {
@@ -13289,7 +13361,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                 let value = self.cell_callback_value(guard.clone(), span)?;
                 if member == "CellEditGuard.edit" {
                     let (result, value) = self.invoke_edit_callback(callback, value, span)?;
-                    write_cell_guard(self.program, &guard, value, span)?;
+                    write_cell_guard(self.program, &self.lookups, &guard, value, span)?;
                     self.materialize_cell_result(result, result_ty, span)
                 } else {
                     let result = self.invoke_callback(callback, value, span)?;
@@ -13820,7 +13892,7 @@ impl<'a, 'state> Machine<'a, 'state> {
             MirTypeKind::Tuple(fields) => fields.iter().any(|(_, ty)| self.contains_source_value_hook_inner(ty, operation, visiting, memo, changed_cycle)),
             _ => {
                 let Some(def) = ty.nominal_id().and_then(|id|
-                    self.source_value_hook_types.get(&id).map(|index| &self.program.types[*index]))
+                    self.lookups.types.get(&id).map(|index| &self.program.types[*index]))
                 else { return false };
                 // A complete negative query remains negative with additional
                 // ancestors. Positive rows cannot be reused inside a walk:
@@ -14298,7 +14370,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                 let fields = fields
                     .into_iter()
                     .map(|(field, value)| {
-                        let name = field_name(self.program, field).ok_or_else(|| {
+                        let name = self.lookups.field_name(self.program, field).ok_or_else(|| {
                             mir_error_at("MIR aggregate field ID is missing", span)
                         })?;
                         let value = runtime_to_data(value, span)?;
@@ -14948,7 +15020,7 @@ impl<'a, 'state> Machine<'a, 'state> {
             runtime_to_data(self.materialize_runtime(self.value(frame_index, index, span)?, span)?, span)?,
             span,
         )?;
-        let field = field_name(self.program, column)
+        let field = self.lookups.field_name(self.program, column)
             .ok_or_else(|| mir_error_at("MIR columnar field ID is missing", span))?;
         let value = crate::fixed_list::jet_fixed_list_index(rows.len(), index, |row| {
             match &rows[row] {
@@ -19497,7 +19569,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                 span,
             ));
         }
-        let field = field_name(self.program, field)
+        let field = self.lookups.field_name(self.program, field)
             .ok_or_else(|| mir_error_at("MIR carrier fact field ID is missing", span))?;
         let receiver = runtime_to_data(receiver, span)?;
         let report = |value: &MirEvalValue| match value {
@@ -20060,7 +20132,7 @@ impl<'a, 'state> Machine<'a, 'state> {
         let names = fields
             .iter()
             .map(|(field, _)| {
-                field_name(self.program, *field)
+                self.lookups.field_name(self.program, *field)
                     .ok_or_else(|| mir_error_at("MIR aggregate field ID is missing", span))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -20106,7 +20178,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                 let fields = fields
                     .into_iter()
                     .map(|(field, value)| {
-                        let name = field_name(self.program, field).ok_or_else(|| {
+                        let name = self.lookups.field_name(self.program, field).ok_or_else(|| {
                             mir_error_at("MIR aggregate field ID is missing", span)
                         })?;
                         Ok((name, self.runtime_to_ct(value, span)?))
@@ -20206,6 +20278,7 @@ impl<'a, 'state> Machine<'a, 'state> {
             .collect::<Result<Vec<_>, _>>()?;
         let host = MirClosureHost {
             program: Arc::new(self.program.clone()),
+            lookups: Arc::clone(&self.lookups),
             function: closure.function,
             captures,
             config: self.config.clone(),
@@ -22428,7 +22501,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                 result_ty
                     .and_then(|ty| ty.result_parts())
                     .is_some_and(|(success, _)| {
-                        mir_core_files_type(self.program, success, name)
+                        mir_core_files_type(self.program, &self.lookups, success, name)
                     })
             }) {
                 let [path] = args.as_slice() else {
@@ -24632,12 +24705,9 @@ impl<'a, 'state> Machine<'a, 'state> {
                     Ok((RuntimeValue::Moved, value))
                 }
                 RuntimeValue::CellGuard(guard) if rest.is_empty() => {
-                    let value = cell_payload_read(
-                        self.program,
-                        &guard.payload,
-                        &guard.path,
-                        span,
-                    )?;
+                    let value = cell_payload_read(self.program, &self.lookups, &guard.payload,
+                    &guard.path,
+                    span,)?;
                     Ok((RuntimeValue::Moved, value))
                 }
                 RuntimeValue::SharedGuard(_)
@@ -25191,12 +25261,9 @@ impl<'a, 'state> Machine<'a, 'state> {
                         span,
                     )?))
                 }
-                RuntimeValue::CellGuard(guard) => cell_payload_read(
-                    self.program,
-                    &guard.payload,
-                    &guard.path,
-                    span,
-                ),
+                RuntimeValue::CellGuard(guard) => cell_payload_read(self.program, &self.lookups, &guard.payload,
+                &guard.path,
+                span,),
                 RuntimeValue::Moved
                 | RuntimeValue::Stream(_)
                 | RuntimeValue::StreamCursor(_)
@@ -25629,7 +25696,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                             }
                         }
                     }
-                    write_cell_guard(self.program, &mapped, replacement, span)?;
+                    write_cell_guard(self.program, &self.lookups, &mapped, replacement, span)?;
                     Ok(RuntimeValue::CellGuard(guard))
                 }
 
@@ -26100,7 +26167,7 @@ impl<'a, 'state> Machine<'a, 'state> {
         field: MirFieldId,
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
-        let name = field_name(self.program, field)
+        let name = self.lookups.field_name(self.program, field)
             .ok_or_else(|| mir_error_at("MIR field ID is missing", span))?;
         self.project_field_name(value, field, &name, span)
     }
@@ -30111,6 +30178,7 @@ fn shared_payload_read(
 }
 fn cell_payload_read(
     program: &jet_foundation::MIR::MirProgram,
+    lookups: &ProgramLookups,
     payload: &Rc<RefCell<RuntimeValue>>,
     path: &[MirFieldId],
     span: Span,
@@ -30118,7 +30186,7 @@ fn cell_payload_read(
     let names = path
         .iter()
         .map(|field| {
-            field_name(program, *field)
+            lookups.field_name(program, *field)
                 .ok_or_else(|| mir_error_at("MIR CellGuard field ID is missing", span))
         })
         .collect::<Result<Vec<_>, Diagnostic>>()?;
@@ -30135,6 +30203,7 @@ fn cell_payload_read(
 }
 fn write_cell_guard(
     program: &jet_foundation::MIR::MirProgram,
+    lookups: &ProgramLookups,
     guard: &MirCellGuard,
     value: RuntimeValue,
     span: Span,
@@ -30149,7 +30218,7 @@ fn write_cell_guard(
         .path
         .iter()
         .map(|field| {
-            field_name(program, *field)
+            lookups.field_name(program, *field)
                 .ok_or_else(|| mir_error_at("MIR CellGuard field ID is missing", span))
         })
         .collect::<Result<Vec<_>, Diagnostic>>()?;
@@ -31607,17 +31676,6 @@ fn project_field(value: RuntimeValue, name: &str, span: Span) -> Result<RuntimeV
         .ok_or_else(|| mir_error_at(&format!("MIR field `{name}` is not present"), span))
 }
 
-#[allow(dead_code)]
-fn project_field_id(
-    program: &jet_foundation::MIR::MirProgram,
-    value: RuntimeValue,
-    field: MirFieldId,
-    span: Span,
-) -> Result<RuntimeValue, Diagnostic> {
-    let name =
-        field_name(program, field).ok_or_else(|| mir_error_at("MIR field ID is missing", span))?;
-    project_field_id_named(program, value, field, &name, span)
-}
 
 fn project_field_id_named(
     _program: &jet_foundation::MIR::MirProgram,
@@ -32043,37 +32101,6 @@ fn indexed_value_type(ty: &MirType, kind: MirIndexKind) -> MirType {
     }
 }
 
-fn field_name(program: &jet_foundation::MIR::MirProgram, id: MirFieldId) -> Option<String> {
-    // Checked type definitions are the source-of-truth projection rows. The
-    // flat field table is only a compatibility fallback for older MIR.
-    for ty in &program.types {
-        match &ty.kind {
-            MirTypeDefKind::Struct { fields, .. } => {
-                if let Some(field) = fields.iter().find(|field| field.id == id) {
-                    return Some(field.name.clone());
-                }
-            }
-            MirTypeDefKind::Enum { variants, .. } => {
-                for variant in variants {
-                    if let jet_foundation::MIR::MirVariantPayload::Named(fields) = &variant.payload
-                    {
-                        if let Some(field) = fields.iter().find(|field| field.id == id) {
-                            return Some(field.name.clone());
-                        }
-                    }
-                }
-            }
-            MirTypeDefKind::Distinct { .. }
-            | MirTypeDefKind::Alias { .. }
-            | MirTypeDefKind::UnitFamily { .. } => {}
-        }
-    }
-    program
-        .fields
-        .iter()
-        .find(|row| row.id == id)
-        .map(|row| row.field.name.clone())
-}
 
 fn checked_nominal_name(
     program: &jet_foundation::MIR::MirProgram,
@@ -33798,6 +33825,86 @@ mod source_value_hook_tests {
             type_instances: Vec::new(), codec_migrations: HashMap::new(),
             unreachable: Vec::new(),
         }
+    }
+
+    fn field(id: u64, name: &str) -> MirField {
+        MirField {
+            id: MirFieldId(id), name: name.into(),
+            shape_names: jet_foundation::Shape::ShapeFieldNames::from_source(name),
+            skip: false, ty: MirType::from_kind(MirTypeKind::Int),
+            span: Span::new(0, 0), public: false, package_public: false,
+            computed: false, has_default: false, redact: false,
+        }
+    }
+
+    #[test]
+    fn core_files_index_preserves_source_owner_and_first_type_id() {
+        let source = jet_foundation::CoreModuleExports::core_source_module("core.files")
+            .expect("registered Core files source");
+        let module = |id, key: &str, path: &str| MirModule {
+            id: MirModuleId(id), key: key.into(), name: "files".into(), path: path.into(),
+            source_file: MirSourceFileId(id), imports: Vec::new(),
+            children: Vec::new(), item_order: Vec::new(),
+        };
+        let mut valid = alias("FileReader", MirType::from_kind(MirTypeKind::Int));
+        valid.id = MirTypeId(1);
+        valid.key = "owner::FileReader".into();
+        let mut wrong_key = valid.clone();
+        wrong_key.id = MirTypeId(2);
+        wrong_key.key = "user::FileReader".into();
+        let mut wrong_path = valid.clone();
+        wrong_path.id = MirTypeId(3);
+        wrong_path.module = MirModuleId(2);
+        let mut first_duplicate = wrong_key.clone();
+        first_duplicate.id = MirTypeId(4);
+        let mut later_duplicate = valid.clone();
+        later_duplicate.id = MirTypeId(4);
+        let mut program = program(vec![
+            valid, wrong_key, wrong_path, first_duplicate, later_duplicate,
+        ]);
+        program.modules = vec![
+            module(1, "wrong", "user.jet"),
+            module(1, "owner", source.path),
+            module(2, "owner", "user.jet"),
+        ];
+        let index = ProgramLookups::new(&program);
+        assert!(index.core_files_type_id(&program, MirTypeId(1), "FileReader"));
+        assert!(!index.core_files_type_id(&program, MirTypeId(1), "FileWriter"));
+        for id in [2, 3, 4, 99] {
+            assert!(!index.core_files_type_id(&program, MirTypeId(id), "FileReader"));
+        }
+    }
+
+    #[test]
+    fn field_index_preserves_checked_order_named_variants_and_legacy_fallback() {
+        let mut structure = alias("Record", MirType::from_kind(MirTypeKind::Int));
+        let mut computed = field(1, "checked");
+        computed.computed = true;
+        structure.kind = MirTypeDefKind::Struct {
+            fields: vec![computed, field(1, "later-struct")], methods: Vec::new(),
+        };
+        let mut enumeration = alias("Choice", MirType::from_kind(MirTypeKind::Int));
+        enumeration.kind = MirTypeDefKind::Enum {
+            variants: vec![MirVariant {
+                name: "Case".into(), wire_name: "Case".into(), span: Span::new(0, 0),
+                payload: MirVariantPayload::Named(vec![
+                    field(1, "later-enum"), field(2, "named"),
+                ]),
+                discriminant: None,
+            }],
+            methods: Vec::new(),
+        };
+        let mut program = program(vec![structure, enumeration]);
+        program.fields = vec![
+            MirFieldRow { id: MirFieldId(1), owner: MirTypeId(1), field: field(1, "flat-shadow") },
+            MirFieldRow { id: MirFieldId(3), owner: MirTypeId(1), field: field(99, "legacy") },
+            MirFieldRow { id: MirFieldId(3), owner: MirTypeId(1), field: field(3, "later-flat") },
+        ];
+        let index = ProgramLookups::new(&program);
+        assert_eq!(index.field_name(&program, MirFieldId(1)).as_deref(), Some("checked"));
+        assert_eq!(index.field_name(&program, MirFieldId(2)).as_deref(), Some("named"));
+        assert_eq!(index.field_name(&program, MirFieldId(3)).as_deref(), Some("legacy"));
+        assert_eq!(index.field_name(&program, MirFieldId(99)), None);
     }
 
     #[test]

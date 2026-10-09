@@ -454,6 +454,15 @@ only its root, because an intermediate negative may depend on an ancestor
 cycle cut. Generic cycles with changing arguments retain the nominal recursion
 guard without publishing context-dependent intermediate negatives.
 
+Lowering shares a checked nominal-key index across the frozen program's
+functions and lambdas. Exact-key ambiguity, anonymous-union carriers, Core
+source ownership, declaring-scope resolution, and generic-parameter shadowing
+remain semantic checks rather than global leaf-name guesses. Interpreter
+machines, resumed generators, and standalone callbacks share immutable type,
+Core-file-owner, and field-position indices. Duplicate IDs retain first-row
+selection; checked struct and named enum fields precede the legacy flat field
+table, without copying the declarations into the indices.
+
 CLI default-target discovery scans raw tokens and parses only top-level target
 markers and target-bearing marker groups with the registered marker parser.
 It does not construct an AST for function, module or type bodies; the actual
