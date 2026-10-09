@@ -786,7 +786,7 @@ const jetNormalizeTablesOut = jetNormalizeHeader
     return [key, key, c];
   }), "I64{-1}", (row) => `I64{${row[2]}}`) + "\n"
   + "fn unicode_normal_compose(a: I64, b: I64) -> I64 Never! {\n"
-  + "    unicode_normal_compose_key((a << I64{21}) | b)\n}\n";
+  + "    unicode_normal_compose_key((a << I64{21}).bit_or(b))\n}\n";
 
 const outPaths = [
   ["crates/jet-foundation/src/generated/UnicodeString.rs", stringModuleOut],

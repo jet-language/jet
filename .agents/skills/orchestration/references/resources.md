@@ -46,5 +46,11 @@ builds and immutable source exports. Generator freshness checks use `--check`
 without rewriting their outputs; diagnostic row generation follows this same
 contract.
 
+Jet-emitting generators must use the current `.bit_and`, `.bit_or`, `.bit_xor`
+and `.copy()` forms in their emitted bodies. Keep JavaScript bit operations,
+foreign bodies, and deliberate retired-syntax diagnostic inputs unchanged.
+Fix stale output at its template, regenerate canonically, and run the read-only
+checks; editing a generated Jet file alone is not a generator repair.
+
 Use fresh artifacts for runtime claims. A source check, worker receipt, or stale
 binary cannot establish runtime, tier, snapshot, golden, or I9 evidence.

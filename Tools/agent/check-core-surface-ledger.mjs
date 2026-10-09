@@ -1517,7 +1517,7 @@ function translateCoreCoverage(expression, context) {
     if (constant) return "CORE_CALL_COVERAGE_" + constant[1];
     return translateRustInteger(part, context);
   });
-  return "CoreCallCoverage{bits: " + bits.join(" | ") + "}";
+  return "CoreCallCoverage{bits: " + bits.slice(1).reduce((left, right) => "(" + left + ").bit_or(" + right + ")", bits[0]) + "}";
 }
 
 function translateResourceAccess(expression, context) {

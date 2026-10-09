@@ -411,6 +411,7 @@ class Gen {
 // ---------------------------------------------------------------- renderer
 
 const PREC = { "||": 1, "&&": 2, "==": 3, "!=": 3, "<": 3, ">": 3, "<=": 3, ">=": 3, "|": 4, "~|": 5, "&": 6, "<<": 7, ">>": 7, "+": 8, "-": 8, "*": 9, "/%": 9, "%": 9, "%%": 9 };
+const BIT_METHODS = { "&": "bit_and", "|": "bit_or", "~|": "bit_xor" };
 const ATOM = 11;
 
 function render(e) {
@@ -429,6 +430,8 @@ function render(e) {
     case "neg": return atom(`(-${grouped(e.e)})`);
     case "not": return { text: `!${grouped(e.e)}`, prec: 10 };
     case "bin": {
+      const method = BIT_METHODS[e.op];
+      if (method) return atom(`${grouped(e.l)}.${method}(${expr(e.r)})`);
       const p = PREC[e.op];
       const l = render(e.l);
       const r = render(e.r);

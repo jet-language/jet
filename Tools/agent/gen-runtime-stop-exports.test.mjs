@@ -122,7 +122,7 @@ fn runtime_export_can_stop(symbol: String) -> Bool Never! {
 test("shift and less-or-equal operators cannot open generic call arguments", () => {
   assert.deepEqual(closure(`
 fn rotate(word: I64, shift: I64) -> I64 {
-    ((word << shift) | (word >> (I64{32} - shift))) & I64{0xffffffff}
+    (word << shift).bit_or(word >> (I64{32} - shift)).bit_and(I64{0xffffffff})
 }
 #Export(c) fn ordinary(word: I64) -> I64 { rotate(word, I64{7}) }
 #Export(c) fn checked(word: I64, limit: I64) {
