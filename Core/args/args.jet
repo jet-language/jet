@@ -15,7 +15,7 @@ use core as core
 //
 // `ArgsSpec` and typed `decode`/`merge` use the one checked native contract.
 // Source helpers below inspect untyped argv trees; they do not redeclare the
-// builder or replace #CLI projection with a generic DataTree parser.
+// builder or replace #CLI projection with a generic Dyn parser.
 fn slice_str(text: String, start: Int, end: Int) -> String {
     raw :: text.bytes()
     s := start
@@ -38,10 +38,10 @@ fn drop_prefix(text: String, count: Int) -> String {
 
 
 
-fn decode_argv(argv: [String]) -> DataTree Never! {
+fn decode_argv(argv: [String]) -> Dyn Never! {
     // D-DATATREE-ORDER1=A: options keep their argv order.
-    entries := [(key: String, value: DataTree)]{}
-    positionals := [DataTree]{}
+    entries := [(key: String, value: Dyn)]{}
+    positionals := [Dyn]{}
     i := 0
     // Skip argv[0] (program name) when present.
     if argv.len() > 0 -> i = 1
@@ -102,9 +102,9 @@ fn decode_argv(argv: [String]) -> DataTree Never! {
         &positionals.push(Dyn.Text(~a))
         i = i + 1
     }
-    if argv.len() > 0 -> put_entry(&entries, "0", DataTree.Text(~argv[0]))
-    &entries.push((key: "_", value: DataTree.Array(positionals)))
-    DataTree.Object(entries)
+    if argv.len() > 0 -> put_entry(&entries, "0", Dyn.Text(~argv[0]))
+    &entries.push((key: "_", value: Dyn.Array(positionals)))
+    Dyn.Object(entries)
 }
 
 
@@ -145,7 +145,7 @@ fn negative_number(text: String) -> Bool {
 }
 
 // The first value named `key`, scanning the object's ordered pairs.
-fn object_get(entries: [(key: String, value: DataTree)], key: String) -> DataTree? {
+fn object_get(entries: [(key: String, value: Dyn)], key: String) -> Dyn? {
     loop pair in entries {
         if pair.key == key -> return Val(pair.value)
     }
@@ -153,7 +153,7 @@ fn object_get(entries: [(key: String, value: DataTree)], key: String) -> DataTre
 }
 
 // Bind `key` to `value`: an existing key keeps its place, a new key goes last.
-fn object_set(entries: &[(key: String, value: DataTree)], key: String, value: DataTree) {
+fn object_set(entries: &[(key: String, value: Dyn)], key: String, value: Dyn) {
     loop i in 0..<entries.len() {
         if entries[i].key == key {
             entries[i] = (key: key, value: value)
@@ -163,18 +163,18 @@ fn object_set(entries: &[(key: String, value: DataTree)], key: String, value: Da
     &entries.push((key: key, value: value))
 }
 
-fn add_flag_entry(entries: &[(key: String, value: DataTree)], key: String, old: DataTree, value: DataTree) {
+fn add_flag_entry(entries: &[(key: String, value: Dyn)], key: String, old: Dyn, value: Dyn) {
     if old == {
         .Bool(previous) -> {
             if previous {
-                object_set(&entries, key, DataTree.Int(2))
+                object_set(&entries, key, Dyn.Int(2))
             } else {
                 object_set(&entries, key, value)
             }
         }
         .Int(count) -> {
             if count > 0 {
-                object_set(&entries, key, DataTree.Int(count + 1))
+                object_set(&entries, key, Dyn.Int(count + 1))
             } else {
                 object_set(&entries, key, value)
             }
@@ -183,7 +183,7 @@ fn add_flag_entry(entries: &[(key: String, value: DataTree)], key: String, old: 
     }
 }
 
-fn put_entry(entries: &[(key: String, value: DataTree)], key: String, value: DataTree) {
+fn put_entry(entries: &[(key: String, value: Dyn)], key: String, value: Dyn) {
     old :: object_get(entries, key)
     if old == .None {
         &entries.push((key: key, value: value))
@@ -410,7 +410,7 @@ fn apply_defaults(tree: Dyn, defs: [ArgDef]) -> Dyn Never! {
                 if object_get(entries, d.dest) == .None && object_get(entries, d.name) == .None {
                     next_entries := ~entries
                     &next_entries.push((key: d.dest, value: parse_atom(d.default_text)))
-                    out = DataTree.Object(next_entries)
+                    out = Dyn.Object(next_entries)
                 }
             }
             else -> { _ := 0 }

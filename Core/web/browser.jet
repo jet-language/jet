@@ -2,7 +2,7 @@ use core as core
 use core.text as text
 use core.text.parse as parse
 use core.net.ws.[WsError]
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use core.encoding.stream as tree
 
 // core.web.browser — headed/headless browser control for tests.
@@ -222,13 +222,13 @@ fn connect_profile(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net
     conn :: core.net.ws.__connect(endpoint) ? value -> value ! error -> return Err(browser_ws_error(error))
     core.web.browser.__ws_set_timeout(conn, t.milliseconds) ? unit -> unit ! error -> return Err(browser_ws_error(error))
     browser :: core.web.browser.__from_connection(^conn, p, t)
-    empty :: tree.object_from_entries(^[(key: String, value: DataTree)]{})
+    empty :: tree.object_from_entries(^[(key: String, value: Dyn)]{})
     status :: core.web.browser.__command(browser, "session.status", ^empty) ? value -> value ! error -> return Err(error)
     if !browser_true_field(status, "ready") || !browser_text_field(status, "message") ->
         return Err(BrowserError{kind: "protocol"})
-    params :: tree.object_from_entries(^[(key: String, value: DataTree)]{
-        (key: "capabilities", value: tree.object_from_entries(^[(key: String, value: DataTree)]{
-            (key: "alwaysMatch", value: tree.object_from_entries(^[(key: String, value: DataTree)]{}))
+    params :: tree.object_from_entries(^[(key: String, value: Dyn)]{
+        (key: "capabilities", value: tree.object_from_entries(^[(key: String, value: Dyn)]{
+            (key: "alwaysMatch", value: tree.object_from_entries(^[(key: String, value: Dyn)]{}))
         }))
     })
     session :: core.web.browser.__command(browser, "session.new", ^params) ? value -> value ! error -> return Err(error)
@@ -248,7 +248,7 @@ fn browser_ws_error(error: WsError) -> BrowserError Never! {
     }
 }
 
-fn browser_true_field(value: DataTree, key: String) -> Bool Never! {
+fn browser_true_field(value: Dyn, key: String) -> Bool Never! {
     if value != .Object(_) -> return false
     loop entry in tree.object_entries(value) {
         if entry.key == key {
@@ -259,7 +259,7 @@ fn browser_true_field(value: DataTree, key: String) -> Bool Never! {
     false
 }
 
-fn browser_text_field(value: DataTree, key: String) -> Bool Never! {
+fn browser_text_field(value: Dyn, key: String) -> Bool Never! {
     if value != .Object(_) -> return false
     loop entry in tree.object_entries(value) {
         if entry.key == key -> return entry.value == .Text(_) || entry.value == .TypedText(_)
@@ -267,7 +267,7 @@ fn browser_text_field(value: DataTree, key: String) -> Bool Never! {
     false
 }
 
-fn browser_session_cdp(session: DataTree) -> Bool BrowserError! {
+fn browser_session_cdp(session: Dyn) -> Bool BrowserError! {
     if !browser_text_field(session, "sessionId") -> return Err(BrowserError{kind: "protocol"})
     loop entry in tree.object_entries(session) {
         if entry.key == "capabilities" {
@@ -760,35 +760,35 @@ fn write_report_text(path: String, rendered: String) BrowserError! {
 }
 
 #Test("browser handshake checks preserve native first-match and protocol rules") {
-    ready :: tree.object_from_entries(^[(key: String, value: DataTree)]{
-        (key: "ready", value: DataTree.Bool(true)),
-        (key: "message", value: DataTree.Text("ready"))
+    ready :: tree.object_from_entries(^[(key: String, value: Dyn)]{
+        (key: "ready", value: Dyn.Bool(true)),
+        (key: "message", value: Dyn.Text("ready"))
     })
     assert(browser_true_field(ready, "ready"))
     assert(browser_text_field(ready, "message"))
-    assert(!browser_true_field(DataTree.Null, "ready"))
-    assert(!browser_text_field(DataTree.Null, "message"))
-    duplicate_ready :: tree.object_from_entries(^[(key: String, value: DataTree)]{
-        (key: "ready", value: DataTree.Bool(false)),
-        (key: "ready", value: DataTree.Bool(true))
+    assert(!browser_true_field(Dyn.Null, "ready"))
+    assert(!browser_text_field(Dyn.Null, "message"))
+    duplicate_ready :: tree.object_from_entries(^[(key: String, value: Dyn)]{
+        (key: "ready", value: Dyn.Bool(false)),
+        (key: "ready", value: Dyn.Bool(true))
     })
     assert(!browser_true_field(duplicate_ready, "ready"))
-    caps :: tree.object_from_entries(^[(key: String, value: DataTree)]{
-        (key: "goog:cdp", value: DataTree.Bool(false)),
-        (key: "goog:cdp", value: DataTree.Bool(true))
+    caps :: tree.object_from_entries(^[(key: String, value: Dyn)]{
+        (key: "goog:cdp", value: Dyn.Bool(false)),
+        (key: "goog:cdp", value: Dyn.Bool(true))
     })
-    session :: tree.object_from_entries(^[(key: String, value: DataTree)]{
-        (key: "sessionId", value: DataTree.Text("")),
+    session :: tree.object_from_entries(^[(key: String, value: Dyn)]{
+        (key: "sessionId", value: Dyn.Text("")),
         (key: "capabilities", value: ^caps)
     })
     assert_eq(browser_session_cdp(session), Ok(false))
     typed_text :: tree.typed_string(^"typed")
-    typed_session :: tree.object_from_entries(^[(key: String, value: DataTree)]{
+    typed_session :: tree.object_from_entries(^[(key: String, value: Dyn)]{
         (key: "sessionId", value: ^typed_text),
-        (key: "capabilities", value: tree.object_from_entries(^[(key: String, value: DataTree)]{}))
+        (key: "capabilities", value: tree.object_from_entries(^[(key: String, value: Dyn)]{}))
     })
     assert_eq(browser_session_cdp(typed_session), Ok(false))
-    if browser_session_cdp(DataTree.Null) == {
+    if browser_session_cdp(Dyn.Null) == {
         .Ok(_) -> panic("non-object session accepted")
         .Err(error) -> assert_eq(error.kind, "protocol")
     }

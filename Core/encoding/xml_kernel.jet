@@ -1,17 +1,17 @@
 // Public XML adapters share the private engine's validation and lexical policy.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use core.encoding.xml.[XMLError, XMLReason, XMLParseOptions, XMLEntityPolicy, XMLEncoding, XMLLexicalPolicy, XMLCanonical, XMLCanonicalMode]
 use __core_encoding_xml_engine as xml
 use __core_encoding_stream as stream
 
 struct ErrorLocation { line: Int?, column: Int? }
 
-fn checked(value: DataTree) -> DataTree xml.XMLFault! {
+fn checked(value: Dyn) -> Dyn xml.XMLFault! {
     validate_tree(value) ?? return Err(err)
     xml.clean(value)
 }
 
-fn validate_tree(value: DataTree) xml.XMLFault! {
+fn validate_tree(value: Dyn) xml.XMLFault! {
     if value == {
         .Null | .Bool(_) | .Int(_) | .Text(_) -> {}
         .Array(values) -> { loop item in values -> validate_tree(item) ?? return Err(err) }
@@ -27,57 +27,57 @@ fn shape_error(reason: String) -> xml.XMLFault Never! {
     xml.XMLFault{kind: .Shape, offset: 0, line: None, column: None, path: "", reason: reason}
 }
 
-fn parse_document(text: String) -> DataTree xml.XMLFault! {
+fn parse_document(text: String) -> Dyn xml.XMLFault! {
     parsed :: xml.parse_document(text) ?? return Err(err)
     xml.clean(parsed)
 }
 
-fn parse_document_with(text: String, options: xml.ParseOptions) -> DataTree xml.XMLFault! {
+fn parse_document_with(text: String, options: xml.ParseOptions) -> Dyn xml.XMLFault! {
     parsed :: xml.parse_document_with(text, options) ?? return Err(err)
     xml.clean(parsed)
 }
 
-fn parse_document_bytes_with(bytes: [U8], options: xml.ParseOptions) -> DataTree xml.XMLFault! {
+fn parse_document_bytes_with(bytes: [U8], options: xml.ParseOptions) -> Dyn xml.XMLFault! {
     parsed :: xml.parse_document_bytes_with(bytes, options) ?? return Err(err)
     xml.clean(parsed)
 }
 
-fn render_document(value: DataTree) -> String xml.XMLFault! {
+fn render_document(value: Dyn) -> String xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.render_document(tree) ?? return Err(shape_error(err))
 }
 
-fn render_document_bytes(value: DataTree, encoding: xml.RenderEncoding, lexical: xml.LexicalPolicy) -> [U8] xml.XMLFault! {
+fn render_document_bytes(value: Dyn, encoding: xml.RenderEncoding, lexical: xml.LexicalPolicy) -> [U8] xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.render_document_bytes(tree, encoding, lexical)
 }
 
-fn canonical_document(value: DataTree, options: xml.CanonicalOptions) -> String xml.XMLFault! {
+fn canonical_document(value: Dyn, options: xml.CanonicalOptions) -> String xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.canonical_document(tree, options)
 }
 
-fn document_root(value: DataTree) -> DataTree xml.XMLFault! {
+fn document_root(value: Dyn) -> Dyn xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.document_root(tree)
 }
 
-fn expanded_name_parts(value: DataTree) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) xml.XMLFault! {
+fn expanded_name_parts(value: Dyn) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.expanded_name_parts(tree)
 }
 
-fn lookup_attribute(value: DataTree, name: String) -> String? xml.XMLFault! {
+fn lookup_attribute(value: Dyn, name: String) -> String? xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.lookup_attribute(tree, name)
 }
 
-fn element_content(value: DataTree) -> [DataTree] xml.XMLFault! {
+fn element_content(value: Dyn) -> [Dyn] xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.element_content(tree)
 }
 
-fn project_document_for_decode(value: DataTree) -> DataTree xml.XMLFault! {
+fn project_document_for_decode(value: Dyn) -> Dyn xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.project_document_for_decode(tree)
 }

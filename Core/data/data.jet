@@ -1872,7 +1872,7 @@ fn data_loader_quote(out: &[U8], text: String) Never! {
     &out.push(U8{34})
 }
 
-fn data_loader_render(out: &[U8], tree: encoding.DataTree) Never! {
+fn data_loader_render(out: &[U8], tree: encoding.Dyn) Never! {
     #Unsafe("inspect existing private Decode carriers only inside checked Core data source") {
         if tree == .Number(text) {
             data_loader_put_text(&out, text)
@@ -1920,7 +1920,7 @@ fn data_loader_render(out: &[U8], tree: encoding.DataTree) Never! {
             }
             &out.push(U8{125})
         }
-        else -> panic("unknown native DataTree carrier")
+        else -> panic("unknown native Dyn carrier")
     }
 }
 

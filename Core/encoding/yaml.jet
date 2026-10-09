@@ -1,4 +1,4 @@
-use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat]
+use core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat]
 use __core_encoding_stream as stream
 
 fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
@@ -162,10 +162,10 @@ fn strip_indent(text: String, columns: Int) -> String Never! {
 }
 
 
-fn parse_map(rows: [String], indent: Int) -> DataTree EncodingError! {
+fn parse_map(rows: [String], indent: Int) -> Dyn EncodingError! {
     // D-DATATREE-ORDER1=A: keys keep arrival order; the temporary key set
     // rejects a repeated name and is freed with the map.
-    entries := [(key: String, value: DataTree)]{}
+    entries := [(key: String, value: Dyn)]{}
     seen := [String: Bool]{}
     i := 0
     loop i < rows.len() {
@@ -188,7 +188,7 @@ fn parse_map(rows: [String], indent: Int) -> DataTree EncodingError! {
         i += 1
         if rest == "|" || rest == ">" {
             block :: parse_block_scalar(rows, i - 1, pad, rest == ">")
-            &entries.push((key: key, value: DataTree.Text(block.value)))
+            &entries.push((key: key, value: Dyn.Text(block.value)))
             i = block.next
         } else if rest.len() == 0 {
             child_rows := [String]{}
@@ -328,7 +328,7 @@ fn parse_scalar(text: String) -> Dyn EncodingError! {
     Ok(Dyn.Text(unquote(clean)))
 }
 
-fn render_yaml(value: DataTree, indent: Int) -> String Never! {
+fn render_yaml(value: Dyn, indent: Int) -> String Never! {
     if value == {
         .Object(_) -> render_yaml_object(value, indent)
         .Array(items) -> render_yaml_array(items, indent)
@@ -336,7 +336,7 @@ fn render_yaml(value: DataTree, indent: Int) -> String Never! {
     }
 }
 
-fn nonempty_collection(value: DataTree) -> Bool Never! {
+fn nonempty_collection(value: Dyn) -> Bool Never! {
     if value == {
         .Object(_) -> stream.object_entries(value).len() > 0
         .Array(items) -> items.len() > 0
@@ -344,7 +344,7 @@ fn nonempty_collection(value: DataTree) -> Bool Never! {
     }
 }
 
-fn render_yaml_array(items: [DataTree], indent: Int) -> String Never! {
+fn render_yaml_array(items: [Dyn], indent: Int) -> String Never! {
     pad :: spaces(indent)
     out := ""
     loop item in items {
@@ -357,7 +357,7 @@ fn render_yaml_array(items: [DataTree], indent: Int) -> String Never! {
     out
 }
 
-fn render_yaml_object(value: DataTree, indent: Int) -> String Never! {
+fn render_yaml_object(value: Dyn, indent: Int) -> String Never! {
     pad :: spaces(indent)
     entries :: stream.object_entries(value)
     if entries.len() == 0 -> return "{pad}{{}}\n"
@@ -382,8 +382,8 @@ fn yaml_key(key: String) -> String Never! {
     key
 }
 
-fn yaml_leaf(value: DataTree) -> String Never! {
-    #Unsafe("inspect compiler-private Bytes and typed carriers; public DataTree variants are unchanged") {
+fn yaml_leaf(value: Dyn) -> String Never! {
+    #Unsafe("inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged") {
         return if value == {
             .Null -> "null"
             .Bool(v) -> "{v}"
@@ -586,9 +586,9 @@ fn unquote(text: String) -> String Never! {
 }
 
 #Test("YAML renderer preserves scalar quoting") {
-    assert(to_string(DataTree.Text("é")) == "é")
-    assert(to_string(DataTree.Text("NULL")) == "\"NULL\"")
-    assert(to_string(DataTree.Text("a b")) == "a b")
-    assert(to_string(DataTree.Text("a: b")) == "\"a: b\"")
-    assert(to_string(DataTree.Array([DataTree]{})) == "{{}}")
+    assert(to_string(Dyn.Text("é")) == "é")
+    assert(to_string(Dyn.Text("NULL")) == "\"NULL\"")
+    assert(to_string(Dyn.Text("a b")) == "a b")
+    assert(to_string(Dyn.Text("a: b")) == "\"a: b\"")
+    assert(to_string(Dyn.Array([Dyn]{})) == "{{}}")
 }

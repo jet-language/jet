@@ -176,7 +176,7 @@ struct Secret {
 // D-CONFIG-ENV1: configuration codecs construct the nominal secret from text.
 // There is deliberately no Encode implementation that could reveal its bytes.
 impl Secret.Decode {
-    fn decode(tree: DataTree) -> Secret [FieldError]! {
+    fn decode(tree: Dyn) -> Secret [FieldError]! {
         if tree == .Text(text) -> return Ok(Secret.from_text(text))
         return Err([FieldError{path: "", reason: "expected a string"}])
     }

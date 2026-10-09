@@ -15,7 +15,7 @@
 // `to_string` writes one compact JSON value per record and a trailing newline so
 // concatenation of documents stays a valid JSONL stream. There is no pretty
 // form; pretty JSON contains newlines and would break the line protocol.
-use core.encoding.[DataTree, EncodingError, EncodingFormat, EncodingLimits]
+use core.encoding.[Dyn, EncodingError, EncodingFormat, EncodingLimits]
 use core.encoding.json as json
 use __core_encoding_stream as stream
 use core.files.[FileWriter]
@@ -23,7 +23,7 @@ use core.files.[FileWriter]
 /// Bounded JSONL output uses the native-shipped delayed-LF policy in Jet.
 struct JSONLWriter {
     output: stream.JSONLinesPush
-    fn write(&self, value: ^DataTree) EncodingError! -[IO]> { &self.output.write(^value) }
+    fn write(&self, value: ^Dyn) EncodingError! -[IO]> { &self.output.write(^value) }
     fn flush(&self) EncodingError! -[IO]> { &self.output.flush() }
     fn finish(&self) EncodingError! -[IO]> { &self.output.finish() }
 }
@@ -33,9 +33,9 @@ fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[
     Ok(JSONLWriter{output: ^output})
 }
 
-/// Parse every non-empty record as JSON. Allocates one `DataTree` per record.
-fn parse(text: String) -> [DataTree] EncodingError! {
-    rows := [DataTree]{}
+/// Parse every non-empty record as JSON. Allocates one `Dyn` per record.
+fn parse(text: String) -> [Dyn] EncodingError! {
+    rows := [Dyn]{}
     cursor := reader(text)
     loop {
         row :: &cursor.next()
@@ -46,7 +46,7 @@ fn parse(text: String) -> [DataTree] EncodingError! {
 }
 
 /// Compact JSONL text. Always ends with a newline when `rows` is non-empty.
-fn to_string(rows: [DataTree]) -> String EncodingError! {
+fn to_string(rows: [Dyn]) -> String EncodingError! {
     out := [U8]{}
     record_index := 0
     loop row in rows {
@@ -65,7 +65,7 @@ struct JSONLReader {
     line: Int
     records_read: Int
 
-    fn next(&self) -> DataTree? EncodingError! {
+    fn next(&self) -> Dyn? EncodingError! {
         loop {
             record :: &self.next_record() ?? return Ok(None)
             if is_blank(record.text) -> next
@@ -105,7 +105,7 @@ fn reader(text: String) -> JSONLReader Never! {
 
 fn loads(text: String) -> [Dyn] EncodingError! { parse(text) }
 
-fn dumps(rows: [DataTree]) -> String EncodingError! { to_string(rows) }
+fn dumps(rows: [Dyn]) -> String EncodingError! { to_string(rows) }
 
 fn count_rows(text: String) -> Int Never! {
     n := 0
@@ -124,7 +124,7 @@ fn count_rows(text: String) -> Int Never! {
     n
 }
 
-fn append_line(text: String, value: DataTree) -> String EncodingError! {
+fn append_line(text: String, value: Dyn) -> String EncodingError! {
     needs_lf :: text.count_bytes() > 0 && stream.byte_at(text, text.count_bytes() - 1) != (U8{10})
     encoded :: json.to_string(value) ?? {
         offset := text.count_bytes()
@@ -143,7 +143,7 @@ fn append_line(text: String, value: DataTree) -> String EncodingError! {
     Ok("{text}\n{encoded}\n")
 }
 
-fn first(text: String) -> DataTree? EncodingError! {
+fn first(text: String) -> Dyn? EncodingError! {
     cursor := reader(text)
     &cursor.next()
 }
@@ -194,7 +194,7 @@ fn is_blank(text: String) -> Bool Never! {
     first :: &cursor.next() ?? panic("first record")
     if first == .Val(row) -> assert_eq(json.to_string(row) ?? panic("encode first record"), "{{\"z\":1,\"a\":2}}") else -> panic("missing row")
     second :: &cursor.next() ?? panic("second record")
-    assert_eq(second, Val(DataTree.Int(3)))
+    assert_eq(second, Val(Dyn.Int(3)))
     assert_eq(&cursor.next() ?? panic("EOF"), None)
     assert_eq(count_rows("\t{cr}\n{{\"z\":1}}{cr}\n \n3"), 2)
 }
@@ -217,7 +217,7 @@ fn is_blank(text: String) -> Bool Never! {
     assert_eq(count_rows(" \t{cr}"), 1)
     assert_eq(count_rows("1\n{cr}"), 2)
     cursor := reader("1{cr}")
-    assert_eq(&cursor.next() ?? panic("JSON value with trailing whitespace"), Val(DataTree.Int(1)))
+    assert_eq(&cursor.next() ?? panic("JSON value with trailing whitespace"), Val(Dyn.Int(1)))
     assert_eq(&cursor.next() ?? panic("EOF"), None)
     if parse(cr) == .Err(error) {
         assert_eq(error.byte_offset, 1)
@@ -227,8 +227,8 @@ fn is_blank(text: String) -> Bool Never! {
 }
 
 #Test("JSONL text errors preserve record locations without a dollar suffix") {
-    bad :: DataTree.Float(Float.NAN)
-    if to_string([DataTree]{bad}) == {
+    bad :: Dyn.Float(Float.NAN)
+    if to_string([Dyn]{bad}) == {
         .Ok(_) -> panic("first non-finite row accepted")
         .Err(error) -> {
             assert(error.format == .JSONL)
@@ -239,7 +239,7 @@ fn is_blank(text: String) -> Bool Never! {
             assert_eq(error.line, Val(1))
         }
     }
-    if dumps([DataTree]{DataTree.Int(12), bad}) == {
+    if dumps([Dyn]{Dyn.Int(12), bad}) == {
         .Ok(_) -> panic("second non-finite row accepted")
         .Err(error) -> {
             assert_eq(error.path, "/1")

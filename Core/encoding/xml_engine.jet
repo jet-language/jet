@@ -1,10 +1,10 @@
 // XML lossless tree/event policy reused from origin/port/compiler@3aab69fde.
 // One Core-private implementation; compiler consumers use core.encoding.xml.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use core.encoding as encoding
 use __core_encoding_stream as stream
 
-struct DocumentStart { encoding: DataTree, bom: DataTree }
+struct DocumentStart { encoding: Dyn, bom: Dyn }
 struct CanonicalAttribute { namespace_uri: String, local: String, raw: String, value: String }
 struct NamespaceBinding { prefix: String?, uri: String }
 struct LimitCheck { name: String, value: Int, minimum: Int, maximum: Int }
@@ -213,42 +213,42 @@ fn scalar_count(bytes: View<U8>, end: Int) -> Int Never! {
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:251
 
-fn text(value: String) -> DataTree Never! { DataTree.Text(~value) }
+fn text(value: String) -> Dyn Never! { Dyn.Text(~value) }
 // Rust: crates/jet-foundation/src/XmlPull.rs:264
-fn optional_text(value: String?) -> DataTree Never! {
+fn optional_text(value: String?) -> Dyn Never! {
     if value == {
-        .Val(s) -> DataTree.Text(^s)
-        .None -> DataTree.Null
+        .Val(s) -> Dyn.Text(^s)
+        .None -> Dyn.Null
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:268
-fn object(entries: ^[(key: String, value: DataTree)]) -> DataTree Never! { stream.object_from_entries(^entries) }
+fn object(entries: ^[(key: String, value: Dyn)]) -> Dyn Never! { stream.object_from_entries(^entries) }
 // Rust: crates/jet-foundation/src/XmlPull.rs:277
-fn field(value: DataTree, key: String) -> DataTree? Never! {
+fn field(value: Dyn, key: String) -> Dyn? Never! {
     if value == .Object(_) {
         loop entry in stream.object_entries(value) { if entry.key == key -> return Val(~entry.value) }
     }
     None
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:287
-fn name_value(name: Name) -> DataTree Never! {
+fn name_value(name: Name) -> Dyn Never! {
     object([(key: "raw", value: text(name.raw)), (key: "prefix", value: optional_text(name.prefix)), (key: "local", value: text(name.local)), (key: "namespace_uri", value: optional_text(name.namespace_uri))])
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:296
-fn lexical(raw: String, semantic: ^DataTree) -> DataTree Never! {
-    object([(key: "raw_text", value: text(raw)), (key: "raw_bytes", value: DataTree.Null), (key: "semantic", value: ^semantic)])
+fn lexical(raw: String, semantic: ^Dyn) -> Dyn Never! {
+    object([(key: "raw_text", value: text(raw)), (key: "raw_bytes", value: Dyn.Null), (key: "semantic", value: ^semantic)])
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:304
-fn strip_lexical(value: DataTree) -> DataTree Never! {
+fn strip_lexical(value: Dyn) -> Dyn Never! {
     if value == {
         .Array(values) -> {
-            out := [DataTree]{}
+            out := [Dyn]{}
             &out.reserve(values.len())
             loop item in values -> &out.push(strip_lexical(item))
-            DataTree.Array(^out)
+            Dyn.Array(^out)
         }
         .Object(_) -> {
-            out := [(key: String, value: DataTree)]{}
+            out := [(key: String, value: Dyn)]{}
             loop entry in stream.object_entries(value) {
                 if entry.key != "lexical" && entry.key != "open_lexical" && entry.key != "close_lexical" -> &out.push((key: ~entry.key, value: strip_lexical(entry.value)))
             }
@@ -258,7 +258,7 @@ fn strip_lexical(value: DataTree) -> DataTree Never! {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:320
-fn has_exact_xml_keys(entries: View<(key: String, value: DataTree)>, keys: [String]) -> Bool Never! {
+fn has_exact_xml_keys(entries: View<(key: String, value: Dyn)>, keys: [String]) -> Bool Never! {
     if entries.len() != keys.len() -> return false
     loop key in keys {
         found := false
@@ -268,25 +268,25 @@ fn has_exact_xml_keys(entries: View<(key: String, value: DataTree)>, keys: [Stri
     true
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:327
-fn xml_entry(entries: View<(key: String, value: DataTree)>, key: String) -> DataTree? Never! {
+fn xml_entry(entries: View<(key: String, value: Dyn)>, key: String) -> Dyn? Never! {
     loop entry in entries { if entry.key == key -> return Val(~entry.value) }
     None
 }
-fn text_value(value: DataTree?) -> String? Never! {
+fn text_value(value: Dyn?) -> String? Never! {
     item :: value ?? return None
     if item == {
         .Text(body) -> Val(~body)
         else -> None
     }
 }
-fn array_value(value: DataTree?) -> [DataTree]? Never! {
+fn array_value(value: Dyn?) -> [Dyn]? Never! {
     item :: value ?? return None
     if item == {
         .Array(items) -> Val(~items)
         else -> None
     }
 }
-fn field_kind(value: DataTree?) -> String Never! {
+fn field_kind(value: Dyn?) -> String Never! {
     item :: value ?? return "missing"
     if item == {
         .Text(_) -> "text"
@@ -298,7 +298,7 @@ fn field_kind(value: DataTree?) -> String Never! {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:335
-fn xml_schema_order(entries: View<(key: String, value: DataTree)>) -> [String]? Never! {
+fn xml_schema_order(entries: View<(key: String, value: Dyn)>) -> [String]? Never! {
     text_field :: (key: String) -> {
         text_value(xml_entry(entries, key))
     }
@@ -346,7 +346,7 @@ fn xml_schema_order(entries: View<(key: String, value: DataTree)>) -> [String]? 
     if has_exact_xml_keys(entries, order) -> Val(^order) else -> None
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:451
-fn xml_schema_types_are_valid(entries: View<(key: String, value: DataTree)>) -> Bool Never! {
+fn xml_schema_types_are_valid(entries: View<(key: String, value: Dyn)>) -> Bool Never! {
     text :: (key: String) -> field_kind(xml_entry(entries, key)) == "text"
     optional_text :: (key: String) -> text(key) || field_kind(xml_entry(entries, key)) == "null"
     array :: (key: String) -> field_kind(xml_entry(entries, key)) == "array"
@@ -409,7 +409,7 @@ fn xml_schema_types_are_valid(entries: View<(key: String, value: DataTree)>) -> 
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:592
-fn has_canonical_xml_object(value: DataTree) -> Bool Never! {
+fn has_canonical_xml_object(value: Dyn) -> Bool Never! {
     if value == .Object(_) {} else { return false }
     entries :: stream.object_entries(value)
     order :: xml_schema_order(entries) ?? return false
@@ -417,7 +417,7 @@ fn has_canonical_xml_object(value: DataTree) -> Bool Never! {
     xml_schema_types_are_valid(entries)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:604
-fn has_canonical_xml_shape(value: DataTree) -> Bool Never! {
+fn has_canonical_xml_shape(value: Dyn) -> Bool Never! {
     if value == {
         .Array(values) -> values.all(item -> has_canonical_xml_shape(item))
         .Object(_) -> {
@@ -429,7 +429,7 @@ fn has_canonical_xml_shape(value: DataTree) -> Bool Never! {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:617
-fn lexical_evidence_matches(lexical: DataTree, expected: DataTree) -> Bool Never! {
+fn lexical_evidence_matches(lexical: Dyn, expected: Dyn) -> Bool Never! {
     if lexical == .Object(_) {} else { return false }
     entries :: stream.object_entries(lexical)
     if entries.len() != 3 || entries[0].key != "raw_text" || entries[1].key != "raw_bytes" || entries[2].key != "semantic" || !has_canonical_xml_shape(expected) -> return false
@@ -446,7 +446,7 @@ fn lexical_evidence_matches(lexical: DataTree, expected: DataTree) -> Bool Never
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:644
-fn lexical_semantic(value: DataTree, key: String) -> DataTree? Never! {
+fn lexical_semantic(value: Dyn, key: String) -> Dyn? Never! {
     if !has_canonical_xml_object(value) -> return None
     whole_kind :: text_value(field(value, "$xml"))
     event_kind :: text_value(field(value, "$xml_event"))
@@ -466,7 +466,7 @@ fn lexical_semantic(value: DataTree, key: String) -> DataTree? Never! {
         if !legal.contains(kind) -> return None
         semantic := strip_lexical(value)
         if kind != "namespace" && kind != "attribute" && field_kind(field(field(value, key) ?? return None, "raw_bytes")) == "array" {
-            fields := [(key: String, value: DataTree)]{}
+            fields := [(key: String, value: Dyn)]{}
             loop entry in stream.object_entries(semantic) {
                 if entry.key != "$xml" -> &fields.push((key: ~entry.key, value: ~entry.value))
             }
@@ -476,22 +476,22 @@ fn lexical_semantic(value: DataTree, key: String) -> DataTree? Never! {
     }
     kind :: event_kind ?? return None
     if kind == "namespace" || kind == "attribute" || !legal.contains(kind) -> return None
-    out := [(key: String, value: DataTree)]{}
+    out := [(key: String, value: Dyn)]{}
     loop entry in stream.object_entries(value) {
         if entry.key != "$xml_event" && entry.key != "lexical" && entry.key != "open_lexical" && entry.key != "close_lexical" -> &out.push((key: ~entry.key, value: strip_lexical(entry.value)))
     }
     Val(object(^out))
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:740
-fn clean(value: DataTree) -> DataTree Never! {
+fn clean(value: Dyn) -> Dyn Never! {
     if value == {
         .Array(values) -> {
-            out := [DataTree]{}
+            out := [Dyn]{}
             loop item in values -> &out.push(clean(item))
-            DataTree.Array(^out)
+            Dyn.Array(^out)
         }
         .Object(_) -> {
-            out := [(key: String, value: DataTree)]{}
+            out := [(key: String, value: Dyn)]{}
             loop entry in stream.object_entries(value) {
                 lexical :: entry.key == "lexical" || entry.key == "open_lexical" || entry.key == "close_lexical"
                 trusted :: if lexical -> {
@@ -502,9 +502,9 @@ fn clean(value: DataTree) -> DataTree Never! {
                 } else -> true
                 item := clean(entry.value)
                 if !trusted && item == .Object(_) {
-                    fields := [(key: String, value: DataTree)]{}
+                    fields := [(key: String, value: Dyn)]{}
                     loop slot in stream.object_entries(item) {
-                        body :: if slot.key == "raw_text" || slot.key == "raw_bytes" -> DataTree.Null else -> ~slot.value
+                        body :: if slot.key == "raw_text" || slot.key == "raw_bytes" -> Dyn.Null else -> ~slot.value
                         &fields.push((key: ~slot.key, value: body))
                     }
                     item = object(^fields)
@@ -517,31 +517,31 @@ fn clean(value: DataTree) -> DataTree Never! {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:777
-fn leaf(kind: String, fields: ^[(key: String, value: DataTree)], raw: String) -> DataTree Never! {
-    semantic_fields := [(key: String, value: DataTree)]{(key: "$xml", value: text(kind))}
+fn leaf(kind: String, fields: ^[(key: String, value: Dyn)], raw: String) -> Dyn Never! {
+    semantic_fields := [(key: String, value: Dyn)]{(key: "$xml", value: text(kind))}
     loop entry in fields -> &semantic_fields.push(~entry)
     semantic :: strip_lexical(object(^semantic_fields))
-    node_fields := [(key: String, value: DataTree)]{(key: "$xml", value: text(kind))}
+    node_fields := [(key: String, value: Dyn)]{(key: "$xml", value: text(kind))}
     loop entry in fields -> &node_fields.push(^entry)
     &node_fields.push((key: "lexical", value: lexical(raw, ^semantic)))
     object(^node_fields)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:787
-fn part_value(part: Part) -> DataTree Never! {
+fn part_value(part: Part) -> Dyn Never! {
     if part == {
         .Text(value, raw) -> leaf("text", [(key: "value", value: text(value))], raw)
         .Entity(name, resolved, raw) -> leaf("entity_ref", [(key: "name", value: text(name)), (key: "resolved_value", value: optional_text(resolved))], raw)
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:805
-fn namespace_value(namespace: Namespace) -> DataTree Never! {
+fn namespace_value(namespace: Namespace) -> Dyn Never! {
     leaf("namespace", [(key: "prefix", value: optional_text(namespace.prefix)), (key: "namespace_uri", value: text(namespace.namespace_uri)), (key: "quote", value: text(if namespace.quote == (Char{39}) -> "single" else -> "double"))], namespace.raw)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:824
-fn attribute_value(attribute: Attribute) -> DataTree Never! {
-    parts := [DataTree]{}
+fn attribute_value(attribute: Attribute) -> Dyn Never! {
+    parts := [Dyn]{}
     loop part in attribute.parts -> &parts.push(part_value(part))
-    leaf("attribute", [(key: "name", value: name_value(attribute.name)), (key: "parts", value: DataTree.Array(^parts)), (key: "normalized_value", value: optional_text(attribute.normalized)), (key: "quote", value: text(if attribute.quote == (Char{39}) -> "single" else -> "double"))], attribute.raw)
+    leaf("attribute", [(key: "name", value: name_value(attribute.name)), (key: "parts", value: Dyn.Array(^parts)), (key: "normalized_value", value: optional_text(attribute.normalized)), (key: "quote", value: text(if attribute.quote == (Char{39}) -> "single" else -> "double"))], attribute.raw)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:847
 fn wire_bytes(text: String, encoding: WireEncoding) -> [U8] Never! {
@@ -553,27 +553,27 @@ fn wire_bytes(text: String, encoding: WireEncoding) -> [U8] Never! {
     encode_text(text, target)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:855
-fn byte_lexical(raw: ^[U8], semantic: ^DataTree) -> DataTree Never! {
-    bytes := [DataTree]{}
+fn byte_lexical(raw: ^[U8], semantic: ^Dyn) -> Dyn Never! {
+    bytes := [Dyn]{}
     &bytes.reserve(raw.len())
-    loop byte in raw -> &bytes.push(DataTree.Int(Int{byte}))
-    object([(key: "raw_text", value: DataTree.Null), (key: "raw_bytes", value: DataTree.Array(^bytes)), (key: "semantic", value: ^semantic)])
+    loop byte in raw -> &bytes.push(Dyn.Int(Int{byte}))
+    object([(key: "raw_text", value: Dyn.Null), (key: "raw_bytes", value: Dyn.Array(^bytes)), (key: "semantic", value: ^semantic)])
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:865
-fn lexical_value_to_wire(value: ^DataTree, encoding: WireEncoding) -> DataTree Never! {
+fn lexical_value_to_wire(value: ^Dyn, encoding: WireEncoding) -> Dyn Never! {
     if value == .Object(_) {} else { return ^value }
-    output := [(key: String, value: DataTree)]{}
+    output := [(key: String, value: Dyn)]{}
     loop entry in stream.object_entries(value) {
         item := ~entry.value
         if entry.key == "lexical" && item == .Object(_) {
-            raw :: field(item, "raw_text") ?? DataTree.Null
+            raw :: field(item, "raw_text") ?? Dyn.Null
             if raw == .Text(text) {
                 bytes :: wire_bytes(text, encoding)
-                payload := [DataTree]{}
-                loop byte in bytes -> &payload.push(DataTree.Int(Int{byte}))
-                lexical := [(key: String, value: DataTree)]{}
+                payload := [Dyn]{}
+                loop byte in bytes -> &payload.push(Dyn.Int(Int{byte}))
+                lexical := [(key: String, value: Dyn)]{}
                 loop slot in stream.object_entries(item) {
-                    body :: if slot.key == "raw_text" -> DataTree.Null else if slot.key == "raw_bytes" -> DataTree.Array(~payload) else -> ~slot.value
+                    body :: if slot.key == "raw_text" -> Dyn.Null else if slot.key == "raw_bytes" -> Dyn.Array(~payload) else -> ~slot.value
                     &lexical.push((key: ~slot.key, value: body))
                 }
                 item = object(^lexical)
@@ -584,27 +584,27 @@ fn lexical_value_to_wire(value: ^DataTree, encoding: WireEncoding) -> DataTree N
     object(^output)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:888
-fn stream_event_value(item: StreamEvent) -> DataTree Never! {
+fn stream_event_value(item: StreamEvent) -> Dyn Never! {
     encoding :: item.encoding
     if item.event == {
         .DocumentStart -> {
-            bom := [DataTree]{}
-            loop byte in item.bom -> &bom.push(DataTree.Int(Int{byte}))
+            bom := [Dyn]{}
+            loop byte in item.bom -> &bom.push(Dyn.Int(Int{byte}))
             label :: if encoding == {
                 .UTF8 -> "UTF-8"
                 .Utf16Le -> "UTF-16LE"
                 .Utf16Be -> "UTF-16BE"
             }
-            object([(key: "$xml_event", value: text("document_start")), (key: "encoding", value: text(label)), (key: "bom", value: DataTree.Array(^bom))])
+            object([(key: "$xml_event", value: text("document_start")), (key: "encoding", value: text(label)), (key: "bom", value: Dyn.Array(^bom))])
         }
         .DocumentEnd -> object([(key: "$xml_event", value: text("document_end"))])
         .Declaration(version, declared, standalone, _) -> {
             standalone_value :: if standalone == {
-                .Val(b) -> DataTree.Bool(b)
-                .None -> DataTree.Null
+                .Val(b) -> Dyn.Bool(b)
+                .None -> Dyn.Null
             }
-            fields := [(key: String, value: DataTree)]{(key: "version", value: text(version)), (key: "encoding", value: optional_text(declared)), (key: "standalone", value: standalone_value)}
-            out := [(key: String, value: DataTree)]{(key: "$xml_event", value: text("declaration"))}
+            fields := [(key: String, value: Dyn)]{(key: "version", value: text(version)), (key: "encoding", value: optional_text(declared)), (key: "standalone", value: standalone_value)}
+            out := [(key: String, value: Dyn)]{(key: "$xml_event", value: text("declaration"))}
             loop entry in fields -> &out.push(~entry)
             &out.push((key: "lexical", value: byte_lexical(~item.raw_bytes, strip_lexical(object(^fields)))))
             object(^out)
@@ -621,12 +621,12 @@ fn stream_event_value(item: StreamEvent) -> DataTree Never! {
             object([(key: "$xml_event", value: text("element_end")), (key: "name", value: name_value(name)), (key: "close_lexical", value: byte_lexical(~item.raw_bytes, ^semantic))])
         }
         .ElementStart(name, namespaces, attributes, empty, _) -> {
-            ns_values := [DataTree]{}
+            ns_values := [Dyn]{}
             loop ns in namespaces -> &ns_values.push(lexical_value_to_wire(namespace_value(ns), encoding))
-            attr_values := [DataTree]{}
+            attr_values := [Dyn]{}
             loop attr in attributes -> &attr_values.push(lexical_value_to_wire(attribute_value(attr), encoding))
-            ns :: DataTree.Array(^ns_values)
-            attrs :: DataTree.Array(^attr_values)
+            ns :: Dyn.Array(^ns_values)
+            attrs :: Dyn.Array(^attr_values)
             style :: text(if empty -> "empty" else -> "explicit")
             semantic :: strip_lexical(object([(key: "name", value: name_value(name)), (key: "namespaces", value: ~ns), (key: "attributes", value: ~attrs), (key: "empty_style", value: ~style)]))
             object([(key: "$xml_event", value: text("element_start")), (key: "name", value: name_value(name)), (key: "namespaces", value: ^ns), (key: "attributes", value: ^attrs), (key: "empty_style", value: ^style), (key: "open_lexical", value: byte_lexical(~item.raw_bytes, ^semantic))])
@@ -634,40 +634,40 @@ fn stream_event_value(item: StreamEvent) -> DataTree Never! {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1032
-fn leaf_event(kind: String, fields: ^[(key: String, value: DataTree)], raw: ^[U8]) -> DataTree Never! {
+fn leaf_event(kind: String, fields: ^[(key: String, value: Dyn)], raw: ^[U8]) -> Dyn Never! {
     semantic :: strip_lexical(object(~fields))
-    out := [(key: String, value: DataTree)]{(key: "$xml_event", value: text(kind))}
+    out := [(key: String, value: Dyn)]{(key: "$xml_event", value: text(kind))}
     loop entry in fields -> &out.push(^entry)
     &out.push((key: "lexical", value: byte_lexical(^raw, ^semantic)))
     object(^out)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1040
-struct ElementFrame { name: Name, namespaces: [DataTree], attributes: [DataTree], children: [DataTree], open_raw: String }
+struct ElementFrame { name: Name, namespaces: [Dyn], attributes: [Dyn], children: [Dyn], open_raw: String }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1048
-struct ByteElementFrame { name: DataTree, namespaces: DataTree, attributes: DataTree, children: [DataTree], empty_style: DataTree, open_lexical: DataTree }
+struct ByteElementFrame { name: Dyn, namespaces: Dyn, attributes: Dyn, children: [Dyn], empty_style: Dyn, open_lexical: Dyn }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1057
-fn finish_element(frame: ^ElementFrame, close_raw: String?) -> DataTree Never! {
+fn finish_element(frame: ^ElementFrame, close_raw: String?) -> Dyn Never! {
     empty :: close_raw == None
     name :: name_value(frame.name)
     style :: text(if empty -> "empty" else -> "explicit")
-    semantic :: strip_lexical(object([(key: "name", value: ~name), (key: "namespaces", value: DataTree.Array(~frame.namespaces)), (key: "attributes", value: DataTree.Array(~frame.attributes)), (key: "empty_style", value: ~style)]))
+    semantic :: strip_lexical(object([(key: "name", value: ~name), (key: "namespaces", value: Dyn.Array(~frame.namespaces)), (key: "attributes", value: Dyn.Array(~frame.attributes)), (key: "empty_style", value: ~style)]))
     close :: if close_raw == {
         .Val(raw) -> lexical(raw, object([(key: "name", value: name_value(frame.name))]))
-        .None -> DataTree.Null
+        .None -> Dyn.Null
     }
-    object([(key: "$xml", value: text("element")), (key: "name", value: ^name), (key: "namespaces", value: DataTree.Array(^frame.namespaces)), (key: "attributes", value: DataTree.Array(^frame.attributes)), (key: "children", value: DataTree.Array(^frame.children)), (key: "empty_style", value: ^style), (key: "open_lexical", value: lexical(frame.open_raw, ^semantic)), (key: "close_lexical", value: ^close)])
+    object([(key: "$xml", value: text("element")), (key: "name", value: ^name), (key: "namespaces", value: Dyn.Array(^frame.namespaces)), (key: "attributes", value: Dyn.Array(^frame.attributes)), (key: "children", value: Dyn.Array(^frame.children)), (key: "empty_style", value: ^style), (key: "open_lexical", value: lexical(frame.open_raw, ^semantic)), (key: "close_lexical", value: ^close)])
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1081
-fn finish_byte_element(frame: ^ByteElementFrame, close_lexical: ^DataTree) -> DataTree Never! {
-    object([(key: "$xml", value: text("element")), (key: "name", value: ^frame.name), (key: "namespaces", value: ^frame.namespaces), (key: "attributes", value: ^frame.attributes), (key: "children", value: DataTree.Array(^frame.children)), (key: "empty_style", value: ^frame.empty_style), (key: "open_lexical", value: ^frame.open_lexical), (key: "close_lexical", value: ^close_lexical)])
+fn finish_byte_element(frame: ^ByteElementFrame, close_lexical: ^Dyn) -> Dyn Never! {
+    object([(key: "$xml", value: text("element")), (key: "name", value: ^frame.name), (key: "namespaces", value: ^frame.namespaces), (key: "attributes", value: ^frame.attributes), (key: "children", value: Dyn.Array(^frame.children)), (key: "empty_style", value: ^frame.empty_style), (key: "open_lexical", value: ^frame.open_lexical), (key: "close_lexical", value: ^close_lexical)])
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1095
-fn parse_document(source: String) -> DataTree XMLFault! { parse_document_with(source, ParseOptions.safe()) }
+fn parse_document(source: String) -> Dyn XMLFault! { parse_document_with(source, ParseOptions.safe()) }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1100
-fn parse_document_with(source: String, options: ParseOptions) -> DataTree XMLFault! {
+fn parse_document_with(source: String, options: ParseOptions) -> Dyn XMLFault! {
     options.limits.validate() ?? return Err(err)
     scanner := Scanner.with_options(source.bytes(), options) ?? return Err(err)
-    document_children := [DataTree]{}
+    document_children := [Dyn]{}
     stack := [ElementFrame]{}
     loop {
         candidate :: &scanner.next() ?? return Err(err)
@@ -676,17 +676,17 @@ fn parse_document_with(source: String, options: ParseOptions) -> DataTree XMLFau
             .DocumentStart | .DocumentEnd -> next
             .Declaration(version, encoding, standalone, raw) -> {
                 standalone_value :: if standalone == {
-                    .Val(b) -> DataTree.Bool(b)
-                    .None -> DataTree.Null
+                    .Val(b) -> Dyn.Bool(b)
+                    .None -> Dyn.Null
                 }
                 Val(leaf("declaration", [(key: "version", value: text(version)), (key: "encoding", value: optional_text(encoding)), (key: "standalone", value: standalone_value)], raw))
             }
             .DocumentWhitespace(value, raw) -> Val(leaf("document_whitespace", [(key: "value", value: text(value))], raw))
             .Doctype(name, public_id, system_id, internal_subset, raw) -> Val(leaf("doctype", [(key: "name", value: text(name)), (key: "public_id", value: optional_text(public_id)), (key: "system_id", value: optional_text(system_id)), (key: "internal_subset", value: optional_text(internal_subset))], raw))
             .ElementStart(name, namespaces, attributes, empty, raw) -> {
-                ns := [DataTree]{}
+                ns := [Dyn]{}
                 loop n in namespaces -> &ns.push(namespace_value(n))
-                attrs := [DataTree]{}
+                attrs := [Dyn]{}
                 loop a in attributes -> &attrs.push(attribute_value(a))
                 frame :: ElementFrame{name: ^name, namespaces: ^ns, attributes: ^attrs, children: [], open_raw: ^raw}
                 if empty -> Val(finish_element(^frame, None)) else -> {
@@ -709,17 +709,17 @@ fn parse_document_with(source: String, options: ParseOptions) -> DataTree XMLFau
             else -> &stack[stack.len() - 1].children.push(^item)
         }
     }
-    object([(key: "$xml", value: text("document")), (key: "encoding", value: DataTree.Null), (key: "bom", value: DataTree.Array([])), (key: "children", value: DataTree.Array(^document_children))])
+    object([(key: "$xml", value: text("document")), (key: "encoding", value: Dyn.Null), (key: "bom", value: Dyn.Array([])), (key: "children", value: Dyn.Array(^document_children))])
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1214
- fn parse_document_bytes(bytes: [U8]) -> DataTree XMLFault! { parse_document_bytes_with(bytes, ParseOptions.safe()) }
+ fn parse_document_bytes(bytes: [U8]) -> Dyn XMLFault! { parse_document_bytes_with(bytes, ParseOptions.safe()) }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1218
-fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XMLFault! {
+fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> Dyn XMLFault! {
     options.limits.validate() ?? return Err(err)
     scanner := StreamScanner.new(bytes.len().max(4), options) ?? return Err(err)
     &scanner.push(bytes[0..<bytes.len()]) ?? return Err(err)
     &scanner.finish_input() ?? return Err(err)
-    events := [DataTree]{}
+    events := [Dyn]{}
     loop {
         candidate :: &scanner.next() ?? return Err(err)
         if candidate == {
@@ -730,9 +730,9 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XML
     fold_events(events)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1233
- fn fold_events(events: [DataTree]) -> DataTree XMLFault! {
+ fn fold_events(events: [Dyn]) -> Dyn XMLFault! {
     document_start := DocumentStart?{None}
-    document_children := [DataTree]{}
+    document_children := [Dyn]{}
     stack := [ByteElementFrame]{}
     ended := false
     loop event in events {
@@ -769,7 +769,7 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XML
                     empty_style: field(event, "empty_style") ?? return Err(XMLFault.shape("element_start lacks empty_style")),
                     open_lexical: field(event, "open_lexical") ?? return Err(XMLFault.shape("element_start lacks open_lexical"))
                 }
-                if empty -> Val(finish_byte_element(^frame, DataTree.Null)) else -> {
+                if empty -> Val(finish_byte_element(^frame, Dyn.Null)) else -> {
                     &stack.push(^frame)
                     None
                 }
@@ -787,7 +787,7 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XML
                 if document_start == None -> return Err(XMLFault.shape("XML event before document_start"))
                 if event == .Object(_) {} else { return Err(XMLFault.shape("XML event must be an Object")) }
                 found := false
-                entries := [(key: String, value: DataTree)]{}
+                entries := [(key: String, value: Dyn)]{}
                 loop entry in stream.object_entries(event) {
                     key := ~entry.key
                     if key == "$xml_event" {
@@ -812,13 +812,13 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XML
         if kind == "element" -> roots += 1
     }
     if roots != 1 -> return Err(XMLFault.shape("XML document must contain exactly one root element"))
-    object([(key: "$xml", value: text("document")), (key: "encoding", value: ^start.encoding), (key: "bom", value: ^start.bom), (key: "children", value: DataTree.Array(^document_children))])
+    object([(key: "$xml", value: text("document")), (key: "encoding", value: ^start.encoding), (key: "bom", value: ^start.bom), (key: "children", value: Dyn.Array(^document_children))])
 }
     // Rust: crates/jet-foundation/src/XmlPull.rs:1389
-    fn event_from_node(value: DataTree) -> DataTree XMLFault! {
+    fn event_from_node(value: Dyn) -> Dyn XMLFault! {
         if value == .Object(_) {} else { return Err(XMLFault.shape("XML node must be an Object")) }
         found := false
-        entries := [(key: String, value: DataTree)]{}
+        entries := [(key: String, value: Dyn)]{}
         loop entry in stream.object_entries(value) {
             key := ~entry.key
             if key == "$xml" {
@@ -831,7 +831,7 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XML
         object(^entries)
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:1400
-    fn push_node(value: DataTree, output: &[DataTree]) XMLFault! {
+    fn push_node(value: Dyn, output: &[Dyn]) XMLFault! {
         kind :: required_text(value, "$xml") ?? return Err(XMLFault.shape(err))
         if kind == "element" {
             exact_keys(value, ["$xml", "name", "namespaces", "attributes", "children", "empty_style", "open_lexical", "close_lexical"]) ?? return Err(err)
@@ -865,12 +865,12 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XML
         &output.push(event_from_node(value) ?? return Err(err))
     }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1388
- fn unfold_events(value: DataTree) -> [DataTree] XMLFault! {
+ fn unfold_events(value: Dyn) -> [Dyn] XMLFault! {
     exact_keys(value, ["$xml", "encoding", "bom", "children"]) ?? return Err(err)
     kind :: required_text(value, "$xml") ?? return Err(XMLFault.shape(err))
     if kind != "document" -> return Err(XMLFault.shape("XML whole value must be a document"))
     children :: array_value(field(value, "children")) ?? return Err(XMLFault.shape("XML document children must be an Array"))
-    output := [DataTree]{object([(key: "$xml_event", value: text("document_start")),
+    output := [Dyn]{object([(key: "$xml_event", value: text("document_start")),
         (key: "encoding", value: field(value, "encoding") ?? return Err(XMLFault.shape("document lacks encoding"))),
         (key: "bom", value: field(value, "bom") ?? return Err(XMLFault.shape("document lacks bom")))])}
     loop child in children -> push_node(child, &output) ?? return Err(err)
@@ -878,13 +878,13 @@ fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XML
     ^output
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1533
-fn lexical_raw(value: DataTree, key: String, semantic: DataTree) -> String? Never! {
+fn lexical_raw(value: Dyn, key: String, semantic: Dyn) -> String? Never! {
     evidence :: field(value, key) ?? return None
     if !has_canonical_xml_object(value) || !lexical_evidence_matches(evidence, semantic) -> return None
     text_value(field(evidence, "raw_text"))
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1544
-fn required_text(value: DataTree, key: String) -> String String! {
+fn required_text(value: Dyn, key: String) -> String String! {
     item :: field(value, key) ?? return Err("XML {key} must be text")
     if item == {
         .Text(s) -> ~s
@@ -892,7 +892,7 @@ fn required_text(value: DataTree, key: String) -> String String! {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1551
-fn optional_text_field(value: DataTree, key: String) -> String? String! {
+fn optional_text_field(value: Dyn, key: String) -> String? String! {
     item :: field(value, key) ?? return Err("XML {key} must be text or null")
     if item == {
         .Text(s) -> Val(~s)
@@ -908,7 +908,7 @@ fn escape_attribute(value: String, quote: Char) -> String Never! {
     if quote == (Char{39}) -> escaped.replace("'", "&apos;") else -> escaped.replace("\"", "&quot;")
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1572
-fn deterministic_leaf(value: DataTree, kind: String) -> String String! {
+fn deterministic_leaf(value: Dyn, kind: String) -> String String! {
     if kind == {
         "document_whitespace" -> required_text(value, "value") ?? return Err(err)
         "declaration" -> {
@@ -969,7 +969,7 @@ fn deterministic_leaf(value: DataTree, kind: String) -> String String! {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1638
-fn render_element_open(value: DataTree, output: &String) String! {
+fn render_element_open(value: Dyn, output: &String) String! {
     name :: field(value, "name") ?? return Err("XML element lacks name")
     raw_name :: required_text(name, "raw") ?? return Err(err)
     output += "<{raw_name}"
@@ -1007,7 +1007,7 @@ fn render_element_open(value: DataTree, output: &String) String! {
     if style == "empty" -> output += "/>" else -> output += ">"
 }
     // Rust: crates/jet-foundation/src/XmlPull.rs:1702
-    fn render_node(value: DataTree, output: &String) String! {
+    fn render_node(value: Dyn, output: &String) String! {
         kind :: required_text(value, "$xml") ?? return Err(err)
         if kind == "document" {
             children :: array_value(field(value, "children")) ?? return Err("XML document children must be an array")
@@ -1026,7 +1026,7 @@ fn render_element_open(value: DataTree, output: &String) String! {
             loop child in children -> render_node(child, &output) ?? return Err(err)
             close_semantic :: object([(key: "name", value: ~name)])
             if lexical_raw(value, "close_lexical", close_semantic) == .Val(raw) -> output += raw
-            else if style == (DataTree.Text("explicit")) {
+            else if style == (Dyn.Text("explicit")) {
                 raw_name :: required_text(name, "raw") ?? return Err(err)
                 output += "</{raw_name}>"
             }
@@ -1040,7 +1040,7 @@ fn render_element_open(value: DataTree, output: &String) String! {
         }
     }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1701
-fn render_document(value: DataTree) -> String String! {
+fn render_document(value: Dyn) -> String String! {
     output := ""
     render_node(value, &output) ?? return Err(err)
     ^output
@@ -1075,7 +1075,7 @@ impl StreamWriter {
     // Rust: crates/jet-foundation/src/XmlPull.rs:1827
      fn is_finished(self: StreamWriter) -> Bool Never! { self.ended }
     // Rust: crates/jet-foundation/src/XmlPull.rs:1831
-     fn write(self: &StreamWriter, event: DataTree) -> [U8] XMLFault! {
+     fn write(self: &StreamWriter, event: Dyn) -> [U8] XMLFault! {
         if self.ended -> return Err(XMLFault.state("XML writer received an event after document_end"))
         next := ~self
         bytes :: &next.write_inner(event) ?? return Err(err)
@@ -1083,7 +1083,7 @@ impl StreamWriter {
         bytes
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:1843
-    fn write_inner(self: &StreamWriter, event: DataTree) -> [U8] XMLFault! {
+    fn write_inner(self: &StreamWriter, event: Dyn) -> [U8] XMLFault! {
         kind :: required_text(event, "$xml_event") ?? return Err(XMLFault.shape(err))
         deterministic := ""
         if kind == "document_start" {
@@ -1185,7 +1185,7 @@ impl StreamWriter {
 }
 
 // Rust: crates/jet-foundation/src/XmlPull.rs:2042
-fn render_document_bytes(value: DataTree, encoding: RenderEncoding, lexical: LexicalPolicy) -> [U8] XMLFault! {
+fn render_document_bytes(value: Dyn, encoding: RenderEncoding, lexical: LexicalPolicy) -> [U8] XMLFault! {
     events :: unfold_events(value) ?? return Err(err)
     writer := StreamWriter.new(encoding, lexical)
     output := [U8]{}
@@ -1202,7 +1202,7 @@ impl XMLFault {
     fn state(reason: String) -> XMLFault Never! { XMLFault.at_kind(0, Reason.Shape, "[state] {reason}") }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2065
-fn exact_keys(value: DataTree, expected: [String]) XMLFault! {
+fn exact_keys(value: Dyn, expected: [String]) XMLFault! {
     if value == .Object(_) {} else { return Err(XMLFault.shape("XML event must be an Object")) }
     entries :: stream.object_entries(value)
     if entries.len() != expected.len() -> return Err(XMLFault.shape("XML event has missing, duplicate, or unknown keys"))
@@ -1213,7 +1213,7 @@ fn exact_keys(value: DataTree, expected: [String]) XMLFault! {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2085
-fn exact_leaf_keys(value: DataTree, kind: String) XMLFault! {
+fn exact_leaf_keys(value: Dyn, kind: String) XMLFault! {
     if kind == {
         "text" | "cdata" | "comment" -> exact_keys(value, ["$xml_event", "value", "lexical"])
         "entity_ref" -> exact_keys(value, ["$xml_event", "name", "resolved_value", "lexical"])
@@ -1222,7 +1222,7 @@ fn exact_leaf_keys(value: DataTree, kind: String) XMLFault! {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2096
-fn byte_array(value: DataTree) -> [U8] XMLFault! {
+fn byte_array(value: Dyn) -> [U8] XMLFault! {
     values :: if value == {
         .Array(items) -> items
         else -> { return Err(XMLFault.shape("XML byte value must be an Array<Int>")) }
@@ -1243,7 +1243,7 @@ fn base_namespaces() -> NamespaceScope Never! {
     NamespaceScope{default_uri: None, named: [String:String]{"xml": "http://www.w3.org/XML/1998/namespace"}}
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2118
-fn parse_name(value: DataTree) -> Name XMLFault! {
+fn parse_name(value: Dyn) -> Name XMLFault! {
     exact_keys(value, ["raw", "prefix", "local", "namespace_uri"]) ?? return Err(err)
     raw :: required_text(value, "raw") ?? return Err(XMLFault.shape(err))
     prefix :: optional_text_field(value, "prefix") ?? return Err(XMLFault.shape(err))
@@ -1255,7 +1255,7 @@ fn parse_name(value: DataTree) -> Name XMLFault! {
     Name{raw: raw, prefix: prefix, local: local, namespace_uri: namespace_uri}
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2159
-fn validate_start(event: DataTree, name: Name, inherited: ^NamespaceScope) -> NamespaceScope XMLFault! {
+fn validate_start(event: Dyn, name: Name, inherited: ^NamespaceScope) -> NamespaceScope XMLFault! {
     context := ^inherited
     namespaces :: array_value(field(event, "namespaces")) ?? return Err(XMLFault.shape("element namespaces must be an Array"))
     declared := NamespaceSet.new()
@@ -1294,7 +1294,7 @@ fn validate_start(event: DataTree, name: Name, inherited: ^NamespaceScope) -> Na
     ^context
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2287
-fn event_element_node(event: DataTree) -> DataTree XMLFault! {
+fn event_element_node(event: Dyn) -> Dyn XMLFault! {
     object([
         (key: "$xml", value: text("element")),
         (key: "name", value: field(event, "name") ?? return Err(XMLFault.shape("element lacks name"))),
@@ -1304,16 +1304,16 @@ fn event_element_node(event: DataTree) -> DataTree XMLFault! {
     ])
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2317
-fn deterministic_event_node(event: DataTree, kind: String) -> String XMLFault! {
+fn deterministic_event_node(event: Dyn, kind: String) -> String XMLFault! {
     if event == .Object(_) {} else { return Err(XMLFault.shape("XML event must be an Object")) }
-    fields := [(key: String, value: DataTree)]{(key: "$xml", value: text(kind))}
+    fields := [(key: String, value: Dyn)]{(key: "$xml", value: text(kind))}
     loop entry in stream.object_entries(event) {
         if entry.key != "$xml_event" && entry.key != "lexical" && entry.key != "open_lexical" && entry.key != "close_lexical" -> &fields.push((key: ~entry.key, value: ~entry.value))
     }
     deterministic_leaf(object(^fields), kind) ?? return Err(XMLFault.shape(err))
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2336
-fn valid_event_raw_bytes(event: DataTree, kind: String) -> [U8]? Never! {
+fn valid_event_raw_bytes(event: Dyn, kind: String) -> [U8]? Never! {
     key :: if kind == {
         "element_start" -> "open_lexical"
         "element_end" -> "close_lexical"
@@ -1398,7 +1398,7 @@ enum CanonicalMode { Inclusive11 Exclusive10 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2408
 struct CanonicalOptions { mode: CanonicalMode, comments: Bool, inclusive_prefixes: [String] }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2416
-fn canonical_document(value: DataTree, options: CanonicalOptions) -> String XMLFault! {
+fn canonical_document(value: Dyn, options: CanonicalOptions) -> String XMLFault! {
     if options.mode == CanonicalMode.Inclusive11 && !options.inclusive_prefixes.is_empty() -> return Err(XMLFault.shape("inclusive_prefixes is legal only for Exclusive10"))
     kind :: required_text(value, "$xml") ?? return Err(XMLFault.shape(err))
     if kind != "document" -> return Err(XMLFault.shape("XML canonical input must be a document"))
@@ -1433,7 +1433,7 @@ fn canonical_document(value: DataTree, options: CanonicalOptions) -> String XMLF
     output
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2475
-fn canonical_node(value: DataTree, options: CanonicalOptions, parent_scope: NamespaceScope, parent_rendered: NamespaceScope, output: &String) XMLFault! {
+fn canonical_node(value: Dyn, options: CanonicalOptions, parent_scope: NamespaceScope, parent_rendered: NamespaceScope, output: &String) XMLFault! {
     kind :: required_text(value, "$xml") ?? return Err(XMLFault.shape(err))
     if kind != "element" -> return canonical_leaf(value, kind, output)
     name :: parse_name(field(value, "name") ?? return Err(XMLFault.shape("element lacks name"))) ?? return Err(err)
@@ -1491,7 +1491,7 @@ fn canonical_node(value: DataTree, options: CanonicalOptions, parent_scope: Name
     output += "</{name.raw}>"
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2624
-fn canonical_attribute_value(attribute: DataTree) -> String XMLFault! {
+fn canonical_attribute_value(attribute: Dyn) -> String XMLFault! {
     normalized :: optional_text_field(attribute, "normalized_value") ?? return Err(XMLFault.shape(err))
     if normalized == .Val(content) -> return content
     parts :: array_value(field(attribute, "parts")) ?? return Err(XMLFault.shape("attribute parts must be an array"))
@@ -1510,7 +1510,7 @@ fn canonical_attribute_value(attribute: DataTree) -> String XMLFault! {
     output
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2652
-fn canonical_leaf(value: DataTree, kind: String, output: &String) XMLFault! {
+fn canonical_leaf(value: Dyn, kind: String, output: &String) XMLFault! {
     if kind == {
         "text" | "cdata" -> {
             content :: required_text(value, "value") ?? return Err(XMLFault.shape(err))
@@ -1550,7 +1550,7 @@ fn canonical_attr_escape(value: String) -> String Never! {
     value.replace("&", "&amp;").replace("<", "&lt;").replace("\"", "&quot;").replace("\t", "&#x9;").replace("\n", "&#xA;").replace("{Char{13}}", "&#xD;")
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2714
-fn xml_tag_of(value: DataTree) -> String? Never! {
+fn xml_tag_of(value: Dyn) -> String? Never! {
     text_value(field(value, "$xml"))
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2721
@@ -1567,7 +1567,7 @@ fn clark_key(local: String, namespace_uri: String?) -> String Never! {
     local
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2750
-fn read_name_parts(name: DataTree, path: String) -> Name XMLFault! {
+fn read_name_parts(name: Dyn, path: String) -> Name XMLFault! {
     raw :: required_text(name, "raw") ?? return Err(projection_err(path, err))
     prefix :: optional_text_field(name, "prefix") ?? return Err(projection_err(path, err))
     local :: required_text(name, "local") ?? return Err(projection_err(path, err))
@@ -1585,7 +1585,7 @@ fn selector_matches(local: String, namespace_uri: String?, selector: String) -> 
     local == selector && (namespace_uri == None || namespace_uri == (Val("")))
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2780
-fn text_like_chars(node: DataTree) -> String? XMLFault! {
+fn text_like_chars(node: Dyn) -> String? XMLFault! {
     kind :: xml_tag_of(node) ?? return None
     if kind == {
         "text" | "cdata" -> {
@@ -1597,7 +1597,7 @@ fn text_like_chars(node: DataTree) -> String? XMLFault! {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2797
-fn is_simple_content(children: [DataTree]) -> Bool Never! {
+fn is_simple_content(children: [Dyn]) -> Bool Never! {
     loop child in children {
         kind :: xml_tag_of(child)
         if kind != Val("text") && kind != Val("cdata") && kind != Val("entity_ref") -> return false
@@ -1608,14 +1608,14 @@ fn is_simple_content(children: [DataTree]) -> Bool Never! {
     true
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2808
-fn document_root(document: DataTree) -> DataTree XMLFault! {
+fn document_root(document: Dyn) -> Dyn XMLFault! {
     if xml_tag_of(document) != Val("document") -> return Err(projection_err("$", "XML root expects a document node"))
     content :: field(document, "children") ?? return Err(projection_err("$", "XML document children missing"))
     children :: if content == {
         .Array(items) -> items
         else -> { return Err(projection_err("$", "XML document children must be an array")) }
     }
-    root := DataTree?{None}
+    root := Dyn?{None}
     loop child in children {
         if (xml_tag_of(child) ?? "") == "element" {
             if root != None -> return Err(projection_err("$", "XML document must contain exactly one root element"))
@@ -1625,7 +1625,7 @@ fn document_root(document: DataTree) -> DataTree XMLFault! {
     root ?? return Err(projection_err("$", "XML document must contain exactly one root element"))
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2836
-fn expanded_name_parts(node: DataTree) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) XMLFault! {
+fn expanded_name_parts(node: Dyn) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) XMLFault! {
     kind :: xml_tag_of(node) ?? return Err(projection_err("$", "expanded_name requires a tagged XML node"))
     if kind == {
         "element" | "attribute" | "namespace" -> {}
@@ -1636,7 +1636,7 @@ fn expanded_name_parts(node: DataTree) -> (raw: String, prefix: String?, local: 
     (raw: ^parts.raw, prefix: ^parts.prefix, local: ^parts.local, namespace_uri: ^parts.namespace_uri)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2856
-fn lookup_attribute(element: DataTree, name: String) -> String? XMLFault! {
+fn lookup_attribute(element: Dyn, name: String) -> String? XMLFault! {
     if xml_tag_of(element) != Val("element") -> return Err(projection_err("$", "attribute helper requires an element node"))
     content :: field(element, "attributes") ?? return Err(projection_err("$", "XML element attributes missing"))
     attributes :: if content == {
@@ -1655,7 +1655,7 @@ fn lookup_attribute(element: DataTree, name: String) -> String? XMLFault! {
     None
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2900
-fn element_content(element: DataTree) -> [DataTree] XMLFault! {
+fn element_content(element: Dyn) -> [Dyn] XMLFault! {
     if xml_tag_of(element) != Val("element") -> return Err(projection_err("$", "content helper requires an element node"))
     content :: field(element, "children") ?? return Err(projection_err("$", "XML element children missing"))
     if content == {
@@ -1664,7 +1664,7 @@ fn element_content(element: DataTree) -> [DataTree] XMLFault! {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2915
-fn project_element_value(element: DataTree, path: String) -> DataTree XMLFault! {
+fn project_element_value(element: Dyn, path: String) -> Dyn XMLFault! {
     if xml_tag_of(element) != Val("element") -> return Err(projection_err(path, "Codable projection requires an element node"))
     attr_value :: field(element, "attributes") ?? return Err(projection_err(path, "XML element attributes missing"))
     attributes :: if attr_value == {
@@ -1676,7 +1676,7 @@ fn project_element_value(element: DataTree, path: String) -> DataTree XMLFault! 
         .Array(items) -> items
         else -> { return Err(projection_err(path, "XML element children must be an array")) }
     }
-    entries := [(key: String, value: DataTree)]{}
+    entries := [(key: String, value: Dyn)]{}
     loop attribute in attributes {
         if xml_tag_of(attribute) != Val("attribute") -> return Err(projection_err(path, "XML attributes array must contain attribute nodes"))
         attr_name :: field(attribute, "name") ?? return Err(projection_err(path, "XML attribute name missing"))
@@ -1685,18 +1685,18 @@ fn project_element_value(element: DataTree, path: String) -> DataTree XMLFault! 
         child_path :: if path == "$" -> key else -> "{path}.{key}"
         normalized :: optional_text_field(attribute, "normalized_value") ?? return Err(projection_err(child_path, err))
         content :: normalized ?? return Err(entity_err(child_path, "attribute has an unresolved entity"))
-        &entries.push((key: key, value: DataTree.Text(content)))
+        &entries.push((key: key, value: Dyn.Text(content)))
     }
     if is_simple_content(children) {
         content := ""
         loop child in children -> content += text_like_chars(child) ?? return Err(entity_err(path, "simple content has an unresolved entity"))
-        if entries.is_empty() -> return DataTree.Text(content)
-        &entries.push((key: "$text", value: DataTree.Text(content)))
+        if entries.is_empty() -> return Dyn.Text(content)
+        &entries.push((key: "$text", value: Dyn.Text(content)))
         return object(^entries)
     }
-    child_keys := [(key: String, value: DataTree)]{}
+    child_keys := [(key: String, value: Dyn)]{}
     key_index := [String:Int]{}
-    content := [DataTree]{}
+    content := [Dyn]{}
     loop child in children {
         &content.push(~child)
         if xml_tag_of(child) != Val("element") -> next
@@ -1711,9 +1711,9 @@ fn project_element_value(element: DataTree, path: String) -> DataTree XMLFault! 
                 .Array(items) -> {
                     values := ^items
                     &values.push(projected)
-                    child_keys[index].value = DataTree.Array(^values)
+                    child_keys[index].value = Dyn.Array(^values)
                 }
-                else -> child_keys[index].value = DataTree.Array([DataTree]{^prior, projected})
+                else -> child_keys[index].value = Dyn.Array([Dyn]{^prior, projected})
             }
         } else {
             key_index[key] = child_keys.len()
@@ -1721,11 +1721,11 @@ fn project_element_value(element: DataTree, path: String) -> DataTree XMLFault! 
         }
     }
     loop entry in child_keys -> &entries.push(^entry)
-    &entries.push((key: "$content", value: DataTree.Array(^content)))
+    &entries.push((key: "$content", value: Dyn.Array(^content)))
     object(^entries)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:3030
-fn project_document_for_decode(document: DataTree) -> DataTree XMLFault! {
+fn project_document_for_decode(document: Dyn) -> Dyn XMLFault! {
     root :: document_root(document) ?? return Err(err)
     project_element_value(root, "$") ?? return Err(err)
 }

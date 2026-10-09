@@ -1,13 +1,13 @@
 // Compiler-private encoding stream policy shared by JSON and JSONL.
 // The public wrappers preserve the shipped text/file return shapes.
-use core.encoding.[DataEvent, DataTree, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
+use core.encoding.[DataEvent, Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.encoding as encoding
 use core.files.[FileReader, FileWriter]
 use core.mem as mem
 use core.math as math
 
 // #4737: preserve insertion order without materializing a map or cloning a tree.
-fn object_entries(value: DataTree) -> View<(key: String, value: DataTree)> from value {
+fn object_entries(value: Dyn) -> View<(key: String, value: Dyn)> from value {
     if value == .Object(_) {
         #Unsafe("the Object variant was checked immediately before borrowing its ordered backing") {
             return encoding.__object_entries_view(value)
@@ -16,26 +16,26 @@ fn object_entries(value: DataTree) -> View<(key: String, value: DataTree)> from 
     panic("Object entry view requires an Object")
 }
 
-fn object_from_entries(entries: ^[(key: String, value: DataTree)]) -> DataTree Never! {
+fn object_from_entries(entries: ^[(key: String, value: Dyn)]) -> Dyn Never! {
     #Unsafe("transfer the owned ordered entries allocation into the native Object carrier") {
         return encoding.__object_from_entries(^entries)
     }
 }
 
-fn bytes_payload(value: DataTree) -> View<U8> from value {
+fn bytes_payload(value: Dyn) -> View<U8> from value {
     #Unsafe("check the private Bytes variant immediately before borrowing its backing") {
         if value == .Bytes(_) -> return encoding.__bytes_view(value)
     }
     panic("byte payload requires a Bytes carrier")
 }
 
-fn typed_number(text: ^String) -> DataTree Never! {
+fn typed_number(text: ^String) -> Dyn Never! {
     #Unsafe("the shared parser validated this exact numeric lexeme") {
-        return DataTree.Number(text)
+        return Dyn.Number(text)
     }
 }
 
-fn typed_string(text: ^String) -> DataTree Never! {
+fn typed_string(text: ^String) -> Dyn Never! {
     #Unsafe("retain decoded JSON text until the target Decode contract is known") {
         return encoding.__typed_text(^text)
     }
@@ -383,10 +383,10 @@ struct JSONPull {
         }
         value :: Float.parse(text) ?? {
             self.allocation.release(capacity)
-            return Err(stream_error(.Unsupported, start, self.line, self.column, "JSON number is outside the DataTree numeric range"))
+            return Err(stream_error(.Unsupported, start, self.line, self.column, "JSON number is outside the Dyn numeric range"))
         }
         self.allocation.release(capacity)
-        if !math.is_finite(value) -> return Err(stream_error(.Unsupported, start, self.line, self.column, "JSON number is outside the DataTree numeric range"))
+        if !math.is_finite(value) -> return Err(stream_error(.Unsupported, start, self.line, self.column, "JSON number is outside the Dyn numeric range"))
         Ok(DataEvent.Float(value))
     }
 
@@ -562,33 +562,33 @@ struct JSONPull {
     }
 
 
-    fn fold(&self, event: ^DataEvent, heap: &FoldBudget) -[IO, Time.Wait]> DataTree EncodingError! {
+    fn fold(&self, event: ^DataEvent, heap: &FoldBudget) -[IO, Time.Wait]> Dyn EncodingError! {
         #Unsafe("the private numeric event is projected only into the matching typed tree carrier") {
             if event == .Number(value) {
                 text :: self.fold_text(^value, &heap)
-                return Ok(DataTree.Number(text))
+                return Ok(Dyn.Number(text))
             }
         }
         if event == {
-            .Null -> { self.fold_charge(1, &heap); return Ok(DataTree.Null) }
-            .Bool(value) -> { self.fold_charge(1, &heap); return Ok(DataTree.Bool(value)) }
-            .Int(value) -> { self.fold_charge(8, &heap); return Ok(DataTree.Int(value)) }
-            .Float(value) -> { self.fold_charge(8, &heap); return Ok(DataTree.Float(value)) }
-            .Text(value) -> { text :: self.fold_text(^value, &heap); return Ok(DataTree.Text(text)) }
+            .Null -> { self.fold_charge(1, &heap); return Ok(Dyn.Null) }
+            .Bool(value) -> { self.fold_charge(1, &heap); return Ok(Dyn.Bool(value)) }
+            .Int(value) -> { self.fold_charge(8, &heap); return Ok(Dyn.Int(value)) }
+            .Float(value) -> { self.fold_charge(8, &heap); return Ok(Dyn.Float(value)) }
+            .Text(value) -> { text :: self.fold_text(^value, &heap); return Ok(Dyn.Text(text)) }
             .ArrayStart -> {
-                values := [DataTree]{}
+                values := [Dyn]{}
                 loop {
                     child :: &self.next()
                     if child == None -> return Err(self.error(.Truncated, "unterminated JSON array"))
                     item :: child
-                    if item == .ArrayEnd -> return Ok(DataTree.Array(values))
+                    if item == .ArrayEnd -> return Ok(Dyn.Array(values))
                     value :: &self.fold(^item, &heap)
-                    fold_reserve<DataTree>(self, &values, &heap)
+                    fold_reserve<Dyn>(self, &values, &heap)
                     &values.push(value)
                 }
             }
             .ObjectStart -> {
-                entries := [(key: String, value: DataTree)]{}
+                entries := [(key: String, value: Dyn)]{}
                 loop {
                     child :: &self.next()
                     if child == None -> return Err(self.error(.Truncated, "unterminated JSON object"))
@@ -602,7 +602,7 @@ struct JSONPull {
                         first :: &self.next()
                         if first == None -> return Err(self.error(.Truncated, "object key has no value"))
                         value :: &self.fold(^first, &heap)
-                        fold_reserve<(key: String, value: DataTree)>(self, &entries, &heap)
+                        fold_reserve<(key: String, value: Dyn)>(self, &entries, &heap)
                         &entries.push((key: owned_key, value: value))
                     } else { return Err(self.error(.State, "expected an object key")) }
                 }
@@ -1475,7 +1475,7 @@ struct JSONLinesPull {
     record_index: Int
     terminal: EncodingError?
 
-    fn next(&self) -[IO, Time.Wait]> DataTree? EncodingError! {
+    fn next(&self) -[IO, Time.Wait]> Dyn? EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         value :: if &self.next_inner() == {
             .Ok(row) -> row
@@ -1491,7 +1491,7 @@ struct JSONLinesPull {
         Ok(value)
     }
 
-    fn next_inner(&self) -[IO, Time.Wait]> DataTree? EncodingError! {
+    fn next_inner(&self) -[IO, Time.Wait]> Dyn? EncodingError! {
         loop {
             &self.parser.skip_ws()
             byte :: &self.parser.fill()
@@ -1536,7 +1536,7 @@ fn jsonl_reader(input: ^FileReader, limits: EncodingLimits, typed_numbers: Bool)
     Ok(JSONLinesPull{parser: parser, record_index: 0, terminal: None})
 }
 
-fn write_tree(writer: &JSONPush, value: DataTree) EncodingError! -[IO]> {
+fn write_tree(writer: &JSONPush, value: Dyn) EncodingError! -[IO]> {
     if value == {
         .Null -> &writer.write(DataEvent.Null)
         .Bool(v) -> &writer.write(DataEvent.Bool(v))
@@ -1566,7 +1566,7 @@ fn jsonl_under(error: EncodingError, segment: String) -> EncodingError Never! {
     out
 }
 
-fn jsonl_tree_size(value: DataTree, depth: Int, limits: EncodingLimits) -> Int EncodingError! {
+fn jsonl_tree_size(value: Dyn, depth: Int, limits: EncodingLimits) -> Int EncodingError! {
     if (value == .Array(_) || value == .Object(_)) && depth >= limits.max_depth {
         out := stream_error(.Limit, 0, 1, 1, "max_depth {limits.max_depth} exceeded")
         out.path = "$"
@@ -1620,7 +1620,7 @@ fn jsonl_wire_add(writer: JSONPush, left: Int, right: Int) -> Int EncodingError!
     Ok(left + right)
 }
 
-fn jsonl_wire_size(writer: JSONPush, value: DataTree) -> Int EncodingError! {
+fn jsonl_wire_size(writer: JSONPush, value: Dyn) -> Int EncodingError! {
     if value == {
         .Null -> Ok(4)
         .Bool(flag) -> Ok(if flag -> 4 else -> 5)
@@ -1663,7 +1663,7 @@ struct JSONLinesPush {
     record_index: Int
     pending_lf: Bool
 
-    fn write(&self, value: ^DataTree) EncodingError! -[IO]> {
+    fn write(&self, value: ^Dyn) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return &self.fail(self.writer.state_error("write called after finish"))
         if self.pending_lf {
@@ -1727,9 +1727,9 @@ fn jsonl_writer(output: ^FileWriter, limits: EncodingLimits) -> JSONLinesPush En
 }
 
 #Test("borrowed Object entries preserve insertion order") {
-    tree :: object_from_entries(^[(key: String, value: DataTree)]{
-        (key: "z", value: DataTree.Int(1)),
-        (key: "a", value: DataTree.Text("kept")),
+    tree :: object_from_entries(^[(key: String, value: Dyn)]{
+        (key: "z", value: Dyn.Int(1)),
+        (key: "a", value: Dyn.Text("kept")),
     })
     entries :: object_entries(tree)
     assert_eq(entries.len(), 2)
@@ -1761,9 +1761,9 @@ fn jsonl_writer(output: ^FileWriter, limits: EncodingLimits) -> JSONLinesPush En
 
 #Test("JSONL preflight counts decoded tree bytes and retains nested error paths") {
     limits := EncodingLimits.safe()
-    assert_eq(jsonl_tree_size(DataTree.Int(4), 0, limits) ?? panic("size"), 8)
+    assert_eq(jsonl_tree_size(Dyn.Int(4), 0, limits) ?? panic("size"), 8)
     limits.max_item_bytes = 4
-    value :: object_from_entries([(key: "a", value: DataTree.Text("longer"))])
+    value :: object_from_entries([(key: "a", value: Dyn.Text("longer"))])
     if jsonl_tree_size(value, 0, limits) == {
         .Err(error) -> {
             assert_eq(error.kind, EncodingErrorKind.Limit)

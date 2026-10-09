@@ -14,7 +14,7 @@ use core.files as files
 use core.process as process
 use core.text.parse as text
 
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use __core_files_path_components as host_path
 // Reused from Foundation CLISchema/TargetWidth (a736ba79d). This pointer
 // record measures the selected build target, never the compiler host.
@@ -702,7 +702,7 @@ fn has_nul(value: String) -> Bool {
 // selection and the typed codec remain the compiler's established lowering.
 // Everything between metadata and codec, and error provenance afterwards,
 // is source policy rather than a second codec or host environment writer.
-fn __decode_tree(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS.Read, Env]> (tree: DataTree, origins: [(name: String, path: String)]) [FieldError]! {
+fn __decode_tree(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS.Read, Env]> (tree: Dyn, origins: [(name: String, path: String)]) [FieldError]! {
     platform :: if core.files.__path_windows() -> host_path.PathPlatform.Windows else -> host_path.PathPlatform.Unix
     path :: host_path.from_text(file, platform)
     if host_path.is_absolute(path) -> return Err(config_error("E2416: Dotenv.file must be project-relative"))
@@ -925,12 +925,12 @@ fn config_insert(^tree: ConfigTree, segments: [String], at: Int, value: String) 
     }
 }
 
-fn config_tree(^tree: ConfigTree) -> DataTree Never! {
+fn config_tree(^tree: ConfigTree) -> Dyn Never! {
     owned := ^tree
     if ^owned == {
-        .Text(text) -> DataTree.Text(^text)
+        .Text(text) -> Dyn.Text(^text)
         .Object(pairs) -> {
-            encoded := [(key: String, value: DataTree)]{}
+            encoded := [(key: String, value: Dyn)]{}
             loop pair in ^pairs {
                 &encoded.push((key: pair.key, value: config_tree(^pair.value)))
             }

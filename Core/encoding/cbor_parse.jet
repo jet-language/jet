@@ -1,5 +1,5 @@
 // Whole-value CBOR parser; policy and allocation accounting stay in Jet.
-use core.encoding.[DataTree]
+use core.encoding.[Dyn]
 use core.encoding as encoding
 use core.encoding.cbor.[CBOROptions, CBORError, CBORErrorKind]
 use __core_encoding_stream as stream
@@ -42,7 +42,7 @@ fn failure(kind: CBORErrorKind, offset: Int, path: String, reason: String) -> CB
     CBORError{kind: kind, byte_offset: offset, path: path, reason: reason}
 }
 
-fn parse(bytes: [U8], options: CBOROptions) -> DataTree CBORError! {
+fn parse(bytes: [U8], options: CBOROptions) -> Dyn CBORError! {
     if options.max_depth < 1 || options.max_depth > 4096 -> return Err(failure(.Limit, 0, "$", "max_depth must be in 1..4096"))
     if options.max_items < 1 || options.max_items > 1000000000 -> return Err(failure(.Limit, 0, "$", "max_items must be in 1..1000000000"))
     if options.max_bytes < 0 || options.max_bytes > 1073741824 -> return Err(failure(.Limit, 0, "$", "max_bytes must be in 0..1073741824"))
@@ -114,7 +114,7 @@ impl Parser {
         Ok(Argument{value: number, outside_int: outside})
     }
 
-    fn string(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String, major: Int) -> DataTree CBORError! {
+    fn string(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String, major: Int) -> Dyn CBORError! {
         if additional == 31 {
             self.indefinite(start, path) ?? return Err(err)
             if depth + 1 > self.options.max_depth -> return Err(failure(.Limit, start, path, "max_depth {self.options.max_depth} exceeded"))
@@ -140,7 +140,7 @@ impl Parser {
                 self.cursor += length.value
             }
             text :: String.from_bytes(bytes) ?? return Err(failure(.Syntax, start, path, "CBOR text is not UTF-8"))
-            return Ok(DataTree.Text(text))
+            return Ok(Dyn.Text(text))
         }
         length :: &self.argument(input, additional, start, path) ?? return Err(err)
         if length.value > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR byte/text string is truncated"))
@@ -152,18 +152,18 @@ impl Parser {
             self.cursor += 1
         }
         text :: String.from_bytes(bytes) ?? return Err(failure(.Syntax, start, path, "CBOR text is not UTF-8"))
-        Ok(DataTree.Text(text))
+        Ok(Dyn.Text(text))
     }
 
-    fn array(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String) -> DataTree CBORError! {
+    fn array(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String) -> Dyn CBORError! {
         if depth + 1 > self.options.max_depth -> return Err(failure(.Limit, start, path, "max_depth {self.options.max_depth} exceeded"))
-        items := [DataTree]{}
+        items := [Dyn]{}
         length := -1
         if additional == 31 -> self.indefinite(start, path) ?? return Err(err)
         else {
             argument :: &self.argument(input, additional, start, path) ?? return Err(err)
             length = argument.value
-            &self.reserve<DataTree>(&items, length, 32, start, path, "CBOR array") ?? return Err(err)
+            &self.reserve<Dyn>(&items, length, 32, start, path, "CBOR array") ?? return Err(err)
         }
         index := 0
         loop length < 0 || index < length {
@@ -180,7 +180,7 @@ impl Parser {
             &self.charge(charged, offset, path, "CBOR path") ?? return Err(err)
             if length < 0 {
                 if self.items >= self.options.max_items -> return Err(failure(.Limit, self.cursor, child_path, "max_items {self.options.max_items} exceeded"))
-                &self.reserve<DataTree>(&items, 1, 32, self.cursor, child_path, "CBOR array") ?? return Err(err)
+                &self.reserve<Dyn>(&items, 1, 32, self.cursor, child_path, "CBOR array") ?? return Err(err)
             }
             child :: &self.value(input, depth + 1, child_path) ?? {
                 self.live -= charged
@@ -190,18 +190,18 @@ impl Parser {
             &items.push(child)
             index += 1
         }
-        Ok(DataTree.Array(items))
+        Ok(Dyn.Array(items))
     }
 
-    fn object(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String) -> DataTree CBORError! {
+    fn object(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String) -> Dyn CBORError! {
         if depth + 1 > self.options.max_depth -> return Err(failure(.Limit, start, path, "max_depth {self.options.max_depth} exceeded"))
-        entries := [(key: String, value: DataTree)]{}
+        entries := [(key: String, value: Dyn)]{}
         length := -1
         if additional == 31 -> self.indefinite(start, path) ?? return Err(err)
         else {
             argument :: &self.argument(input, additional, start, path) ?? return Err(err)
             length = argument.value
-            &self.reserve<(key: String, value: DataTree)>(&entries, length, 56, start, path, "CBOR map") ?? return Err(err)
+            &self.reserve<(key: String, value: Dyn)>(&entries, length, 56, start, path, "CBOR map") ?? return Err(err)
         }
         prior_start := -1
         prior_end := -1
@@ -214,7 +214,7 @@ impl Parser {
                     break
                 }
                 if self.items >= self.options.max_items -> return Err(failure(.Limit, self.cursor, path, "max_items {self.options.max_items} exceeded"))
-                &self.reserve<(key: String, value: DataTree)>(&entries, 1, 56, self.cursor, path, "CBOR map") ?? return Err(err)
+                &self.reserve<(key: String, value: Dyn)>(&entries, 1, 56, self.cursor, path, "CBOR map") ?? return Err(err)
             }
             key_start :: self.cursor
             key_value :: &self.value(input, depth + 1, path) ?? return Err(err)
@@ -251,7 +251,7 @@ impl Parser {
         Ok(stream.object_from_entries(^entries))
     }
 
-    fn float(&self, input: [U8], additional: Int, start: Int, path: String) -> DataTree CBORError! {
+    fn float(&self, input: [U8], additional: Int, start: Int, path: String) -> Dyn CBORError! {
         width :: if additional == 25 -> 2 else if additional == 26 -> 4 else -> 8
         name :: if width == 2 -> "Float16" else if width == 4 -> "Float32" else -> "Float64"
         if width > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR {name} is truncated"))
@@ -270,10 +270,10 @@ impl Parser {
                 return Err(failure(.NonCanonical, start, path, "CBOR Float does not use its preferred shortest encoding"))
             }
         }
-        Ok(DataTree.Float(value))
+        Ok(Dyn.Float(value))
     }
 
-    fn value(&self, input: [U8], depth: Int, path: String) -> DataTree CBORError! {
+    fn value(&self, input: [U8], depth: Int, path: String) -> Dyn CBORError! {
         if self.cursor == input.len() -> return Err(failure(.Truncated, input.len(), path, "CBOR value is missing"))
         start :: self.cursor
         head :: Int.from_u8(input[self.cursor])
@@ -284,15 +284,15 @@ impl Parser {
         if major == 0 || major == 1 {
             number :: &self.argument(input, additional, start, path) ?? return Err(err)
             if number.outside_int -> return Err(failure(.Unsupported, start, path, "CBOR integer is outside Jet Int"))
-            return Ok(DataTree.Int(if major == 0 -> number.value else -> -number.value - 1))
+            return Ok(Dyn.Int(if major == 0 -> number.value else -> -number.value - 1))
         }
         if major == 2 || major == 3 -> return &self.string(input, additional, start, depth, path, major)
         if major == 4 -> return &self.array(input, additional, start, depth, path)
         if major == 5 -> return &self.object(input, additional, start, depth, path)
         if major == 6 -> return Err(failure(.Unsupported, start, path, "CBOR tags are unsupported"))
-        if additional == 20 -> return Ok(DataTree.Bool(false))
-        if additional == 21 -> return Ok(DataTree.Bool(true))
-        if additional == 22 -> return Ok(DataTree.Null)
+        if additional == 20 -> return Ok(Dyn.Bool(false))
+        if additional == 21 -> return Ok(Dyn.Bool(true))
+        if additional == 22 -> return Ok(Dyn.Null)
         if additional >= 25 && additional <= 27 -> return &self.float(input, additional, start, path)
         if additional == 31 -> return Err(failure(.Syntax, start, path, "CBOR break outside an indefinite container"))
         Err(failure(.Unsupported, start, path, "unsupported CBOR simple value {additional}"))

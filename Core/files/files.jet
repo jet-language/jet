@@ -1654,7 +1654,7 @@ fn lock_contended(code: Int, platform: Int) -> Bool Never! {
 }
 
 // Project native errno exactly as jet_std::io_error_at
-// (JetStd/JSONDataTree.rs:2-34) projects std::io::ErrorKind. Unknown kinds stay
+// (JetStd/JSONDyn.rs:2-34) projects std::io::ErrorKind. Unknown kinds stay
 // Other. In particular EBADF/ERROR_INVALID_HANDLE are NOT Closed: the shared
 // mapper reserves Closed for NotConnected/BrokenPipe.
 fn lock_errno(path: String, code: Int, platform: Int) -> IOError Never! {
@@ -1682,7 +1682,7 @@ fn lock_errno(path: String, code: Int, platform: Int) -> IOError Never! {
         if code == 17 -> return IOError.AlreadyExists(context)
         if code == 32 || (platform == 1 && code == 107) || (platform == 2 && code == 57) -> return IOError.Closed(context)
         if (platform == 1 && code == 110) || (platform == 2 && code == 60) -> return IOError.TimedOut(context)
-        // JSONDataTree.rs:14-22: Unsupported override plus std ENOSYS.
+        // JSONDyn.rs:14-22: Unsupported override plus std ENOSYS.
         if (platform == 1 && (code == 38 || code == 95)) || (platform == 2 && (code == 45 || code == 78 || code == 102)) -> return IOError.Unsupported(context)
         // Existing no-follow-open rule, FileHandles.rs:381-395.
         if (platform == 1 && code == 40) || (platform == 2 && code == 62) {

@@ -2,8 +2,8 @@
 // core.encoding.json — RFC 8259 JSON as Dyn.
 //
 // `parse` is the strict codec: objects keep insertion order, whole numbers
-// become `DataTree.Int` (exact `Int`, not binary64), fractions become
-// `DataTree.Float`, and `NaN` / `Infinity` are syntax errors. Untyped `decode`
+// become `Dyn.Int` (exact `Int`, not binary64), fractions become
+// `Dyn.Float`, and `NaN` / `Infinity` are syntax errors. Untyped `decode`
 // applies the historical lenient coercion walk and emits an audit line for
 // each coercion. Typed `decode<T>` keeps its existing compiler lowering.
 //
@@ -29,7 +29,7 @@
 
 
 use core as core
-use core.encoding.[DataEvent, DataTree, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
+use core.encoding.[DataEvent, Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.files.[FileWriter]
 use core.math as math
 use __core_encoding_stream as stream
@@ -90,7 +90,7 @@ fn parse(text: String) -> Dyn EncodingError! { parse_json(text, false) }
 fn parse_allow_duplicates(text: String) -> Dyn EncodingError! { parse_json(text, true) }
 
 /// D-JSON3: coerce strings that are exactly booleans or finite numbers.
-fn decode(text: String) -> DataTree EncodingError! {
+fn decode(text: String) -> Dyn EncodingError! {
     tree :: parse(text) ?? {
         return Err(EncodingError.new(.JSON, .Syntax, 0, err.line, None, "", err.reason))
     }
@@ -112,28 +112,28 @@ fn coerce_line(path: String, target: String) -> String Never! {
     "{{\"level\":\"info\",\"body\":\"json coerce: field \"{label}\" string → {target}\",\"ts\":{timestamp}}}"
 }
 
-fn coerce_tree(value: DataTree, path: String, emit: fn(String)) -> DataTree Never! {
+fn coerce_tree(value: Dyn, path: String, emit: fn(String)) -> Dyn Never! {
     if value == {
         .Text(text) -> {
             if text == "true" || text == "false" {
                 emit(coerce_line(path, "boolean"))
-                return DataTree.Bool(text == "true")
+                return Dyn.Bool(text == "true")
             }
             if Float.parse(text) == .Ok(number) {
                 if math.is_finite(number) {
                     emit(coerce_line(path, "number"))
-                    return DataTree.Float(number)
+                    return Dyn.Float(number)
                 }
             }
             return ~value
         }
         .Array(items) -> {
-            out := [DataTree]{}
+            out := [Dyn]{}
             loop i in 0..<items.len() -> &out.push(coerce_tree(items[i], "{path}[{i}]", emit))
-            return DataTree.Array(out)
+            return Dyn.Array(out)
         }
         .Object(_) -> {
-            out := [(key: String, value: DataTree)]{}
+            out := [(key: String, value: Dyn)]{}
             loop entry in stream.object_entries(value) {
                 child_path :: if path == "" -> entry.key else -> "{path}.{entry.key}"
                 &out.push((key: ~entry.key, value: coerce_tree(entry.value, child_path, emit)))
@@ -164,9 +164,9 @@ fn load(text: String) -> Dyn EncodingError! { parse(text) }
 /// Compact JSON text. Object keys keep insertion order.
 fn to_string<T: Encode>(value: T) -> String EncodingError! { render_json(value.encode(), false) }
 /// Python-compatible spelling for compact JSON serialization.
-fn dumps(value: DataTree) -> String EncodingError! { render_json(value, false) }
+fn dumps(value: Dyn) -> String EncodingError! { render_json(value, false) }
 /// Python-compatible file-shaped spelling for JSON serialization.
-fn dump(value: DataTree) -> String EncodingError! { render_json(value, false) }
+fn dump(value: Dyn) -> String EncodingError! { render_json(value, false) }
 
 /// Two-space indented JSON text.
 fn to_string_pretty<T: Encode>(value: T) -> String EncodingError! { render_json(value.encode(), true) }
@@ -407,7 +407,7 @@ impl Parser {
                 } else {
                     if n == 34 {
                         s :: &self.parse_string()
-                        value = if self.typed_numbers -> stream.typed_string(^s) else -> DataTree.Text(s)
+                        value = if self.typed_numbers -> stream.typed_string(^s) else -> Dyn.Text(s)
                     } else {
                         if n != 45 && (n < 48 || n > 57) -> return Err(self.err("expected a JSON value (object, array, string, number, true, false, or null)"))
                         value = &self.parse_number()
@@ -562,10 +562,10 @@ impl Parser {
         if fractional || exp {
             f :: Float.parse(token) ?? return Err(self.err("number does not fit in Float"))
             if !math.is_finite(f) -> return Err(self.err("non-finite JSON numbers are not allowed"))
-            return Ok(DataTree.Float(f))
+            return Ok(Dyn.Float(f))
         }
         n :: Int.parse(token) ?? return Err(self.err("number does not fit in Int"))
-        Ok(DataTree.Int(n))
+        Ok(Dyn.Int(n))
     }
 
     fn parse_array(&self) -> Dyn EncodingError! {
@@ -606,7 +606,7 @@ impl Parser {
         if !&self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
         if !&self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
         if self.recording -> &self.pending.push(DataEvent.ObjectStart)
-        entries := [(key: String, value: DataTree)]{}
+        entries := [(key: String, value: Dyn)]{}
         positions := [String: Int]{}
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         if (self.peek() ?? (U8{0})) == (U8{125}) {
@@ -690,7 +690,7 @@ fn parse_json(text: String, allow_duplicates: Bool) -> Dyn EncodingError! {
     Ok(value)
 }
 // Compiler-private typed decoder entry; number lexemes retain their target-free carriers.
-fn __parse_typed(text: String) -> DataTree EncodingError! {
+fn __parse_typed(text: String) -> Dyn EncodingError! {
     raw :: text.bytes()
     if raw.len() > safe_limits().max_item_bytes -> return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds EncodingLimits.safe().max_item_bytes"))
     parser := Parser.new(raw, false, false)
@@ -702,8 +702,8 @@ fn __parse_typed(text: String) -> DataTree EncodingError! {
 }
 
 
-fn append_events(value: DataTree) -> [DataEvent] Never! {
-    #Unsafe("preserve the native compiler-private DataTree carriers in Core JSON event projection") {
+fn append_events(value: Dyn) -> [DataEvent] Never! {
+    #Unsafe("preserve the native compiler-private Dyn carriers in Core JSON event projection") {
         if value == .Number(text) -> return [DataEvent]{DataEvent.Number(text)}
         if value == .TypedText(text) -> return [DataEvent]{DataEvent.Text(text)}
         if value == .Bytes(bytes) -> return [DataEvent]{DataEvent.Bytes(bytes)}
@@ -773,7 +773,7 @@ fn utf8_bytes(cp: Int) -> [U8] Never! {
     out
 }
 
-fn render_json(value: DataTree, pretty: Bool) -> String EncodingError! {
+fn render_json(value: Dyn, pretty: Bool) -> String EncodingError! {
     out := [U8]{}
     write_json(&out, value, pretty, 0) ?? return Err(err)
     text :: stream.text_from_bytes(^out) ?? return Err(value_error(EncodingErrorKind.State, "", "JSON renderer produced invalid UTF-8"))
@@ -866,7 +866,7 @@ fn write_canonical(out: &[U8], value: Dyn, path: &[String], depth: Int) -> Bool 
 }
 
 
-fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) EncodingError! {
+fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) EncodingError! {
     #Unsafe("Core JSON rendering borrows native private payloads without exposing their constructors") {
         if value == .Number(text) {
             write_ascii(&out, text)
@@ -1157,19 +1157,19 @@ struct PatchOp {
 }
 
 // The first member named `name`, scanning the object's ordered pairs.
-fn object_member(members: [(key: String, value: DataTree)], name: String) -> DataTree? {
+fn object_member(members: [(key: String, value: Dyn)], name: String) -> Dyn? {
     loop pair in members {
         if pair.key == name -> return Val(pair.value)
     }
     None
 }
 
-fn patch_field(members: [(key: String, value: DataTree)], index: Int, name: String) -> DataTree EncodingError! {
+fn patch_field(members: [(key: String, value: Dyn)], index: Int, name: String) -> Dyn EncodingError! {
     value :: object_member(members, name) ?? return Err(value_error(EncodingErrorKind.Syntax, "/{index}", "operation {index} needs a `{name}` member"))
     Ok(value)
 }
 
-fn patch_pointer_field(members: [(key: String, value: DataTree)], index: Int, name: String, limits: EncodingLimits) -> [String] EncodingError! {
+fn patch_pointer_field(members: [(key: String, value: Dyn)], index: Int, name: String, limits: EncodingLimits) -> [String] EncodingError! {
     raw :: patch_field(members, index, name)
     text := ""
     valid := false
@@ -1200,7 +1200,7 @@ fn patch_operations(ops: Dyn, limits: EncodingLimits) -> [PatchOp] EncodingError
     if !is_array -> return Err(value_error(EncodingErrorKind.Syntax, "", "a JSON Patch document is an array of operation objects"))
     list := [PatchOp]{}
     loop index in 0..<items.len() {
-        members := [(key: String, value: DataTree)]{}
+        members := [(key: String, value: Dyn)]{}
         is_object := false
         if items[index] == {
             .Object(fields) -> {
@@ -1249,7 +1249,7 @@ fn patch_edit(node: Dyn, segments: [String], depth: Int, kind: Int, value: Dyn) 
     last :: depth + 1 == segments.len()
     if node == {
         .Object(entries) -> {
-            out := [(key: String, value: DataTree)]{}
+            out := [(key: String, value: Dyn)]{}
             found := false
             loop pair in entries {
                 if pair.key != segment {
@@ -1447,7 +1447,7 @@ fn patch_step(doc: Dyn, op: PatchOp) -> Dyn EncodingError! {
 #Test("JSON text serializers reject non-finite Float on the EncodingError rail") {
     numbers :: [Float]{math.nan(), math.infinity(), -math.infinity()}
     loop number in numbers {
-        tree :: DataTree.Array([DataTree]{DataTree.Float(number)})
+        tree :: Dyn.Array([Dyn]{Dyn.Float(number)})
         if to_string(tree) == {
             .Ok(_) -> panic("non-finite compact JSON accepted")
             .Err(error) -> {
@@ -1464,7 +1464,7 @@ fn patch_step(doc: Dyn, op: PatchOp) -> Dyn EncodingError! {
         if dump(tree) == .Ok(_) -> panic("non-finite dump accepted")
         if to_string_pretty(tree) == .Ok(_) -> panic("non-finite pretty JSON accepted")
     }
-    assert_eq(to_string(DataTree.Int(9007199254740993)) ?? panic("exact Int JSON"), "9007199254740993")
+    assert_eq(to_string(Dyn.Int(9007199254740993)) ?? panic("exact Int JSON"), "9007199254740993")
 }
 
 #Test("JSON text encodes Char and C0 with lowercase string escapes") {
@@ -1475,5 +1475,5 @@ fn patch_step(doc: Dyn, op: PatchOp) -> Dyn EncodingError! {
     controls :: String.from_bytes(bytes) ?? panic("C0 text")
     wire :: to_string(controls) ?? panic("C0 encode")
     assert(wire.contains("\\u001f"))
-    assert_eq(parse(wire) ?? panic("C0 decode"), DataTree.Text(controls))
+    assert_eq(parse(wire) ?? panic("C0 decode"), Dyn.Text(controls))
 }

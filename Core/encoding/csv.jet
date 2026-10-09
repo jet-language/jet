@@ -1,5 +1,5 @@
 use core as core
-use core.encoding.[DataTree, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
+use core.encoding.[Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.encoding.json as json
 use __core_encoding_stream as stream
 use core.encoding as encoding
@@ -77,10 +77,10 @@ fn decode<T: Decode>(text: String) -> [T] [FieldError]! {
     errors := [FieldError]{}
     loop index in 1..<rows.len() {
         row :: rows[index]
-        entries := [(key: String, value: DataTree)]{}
+        entries := [(key: String, value: Dyn)]{}
         loop column in 0..<header.len() {
             cell :: if column < row.len() -> row[column] else -> ""
-            &entries.push((key: ~header[column], value: DataTree.Text(cell)))
+            &entries.push((key: ~header[column], value: Dyn.Text(cell)))
         }
         tree :: stream.object_from_entries(^entries)
         if tree.decode<T>() == {
@@ -277,7 +277,7 @@ fn to_string<T: Encode>(rows: [T]) -> String Never! {
     out
 }
 
-fn csv_cell(value: DataTree) -> String Never! {
+fn csv_cell(value: Dyn) -> String Never! {
     if value == {
         .Text(text) -> text
         .Int(n) -> "{n}"

@@ -304,15 +304,15 @@ fn histories<T>(
     seed: Int,
     cases: Int,
     strategy: HistoryStrategy<T>?{None},
-    model: fn([T]) -> DataTree,
-    actual: fn([T]) -> DataTree,
-    observe: fn(DataTree) -> DataTree,
+    model: fn([T]) -> Dyn,
+    actual: fn([T]) -> Dyn,
+    observe: fn(Dyn) -> Dyn,
 ) -> TestComparison String! {
     // TestingHistory.rs:426-443: fresh command copies precede model/actual,
     // and observation receives its own copy. The engine owns execution only.
     model_copy :: (commands: [T]) -> model(~commands)
     actual_copy :: (commands: [T]) -> actual(~commands)
-    observe_copy :: (value: DataTree) -> observe(~value)
+    observe_copy :: (value: Dyn) -> observe(~value)
     core.testing.__histories_with_provenance<T>(seed, cases, strategy, model_copy, actual_copy, observe_copy)
 }
 
