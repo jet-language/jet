@@ -131,8 +131,12 @@ test("sanitizer cannot green on empty/missing/uninstrumented/link-failed native 
   mkdirSync(join(out, "lower"), { recursive: true });
   const runtime = join(root, "runtime.a");
   writeFileSync(runtime, "!<arch>\n");
+  const jetObject = join(root, "runtime.o");
+  const cc = process.env.SANITIZE_CC ?? "clang";
+  const compile = spawnSync(cc, ["-x", "c", "-c", "-", "-o", jetObject], { input: "", encoding: "utf8" });
+  assert.equal(compile.status, 0, compile.error?.message ?? compile.stderr);
   const invoke = (extra = []) => spawnSync(process.execPath, [resolve("Compiler/JetBackend/Tests/run-sanitized.mjs"), out, "--runtime-library", runtime, ...extra], {
-    cwd: resolve("."), encoding: "utf8", env: { ...process.env, JET_GOLDEN_FEATURES: features, RUSTC: "/nonexistent-rustc" },
+    cwd: resolve("."), encoding: "utf8", env: { ...process.env, JET_GOLDEN_FEATURES: features, JET_RUNTIME_JET_OBJECT: jetObject, SANITIZE_CC: cc, RUSTC: "/nonexistent-rustc" },
   });
   writeFileSync(join(out, "results.tsv"), "");
   assert.equal(invoke().status, 1);

@@ -66,7 +66,7 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === "--no-leaks") leaks = false;
   else throw new Error(`unknown option ${args[i]}\n${usage}`);
 }
-if (!runtimeSource) throw new Error(usage);
+if (!runtimeSource && !suppliedRuntime || runtimeSource && suppliedRuntime) throw new Error(usage);
 const jetObject = process.env.JET_RUNTIME_JET_OBJECT ? resolve(process.env.JET_RUNTIME_JET_OBJECT) : null;
 if (!jetObject || !existsSync(jetObject)) throw new Error("JET_RUNTIME_JET_OBJECT must name the native pack's Jet runtime object");
 
