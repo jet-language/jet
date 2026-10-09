@@ -212,6 +212,29 @@ mod tests {
     }
 
     #[test]
+    fn jet_int_c_carrier_numeric_projections_borrow_limbs_without_allocating() {
+        for text in [
+            "9223372036854775808",
+            "-9223372036854775809",
+            "170141183460469231731687303715884105727",
+            "340282366920938463463374607431768211455",
+            "1000000000000000000000000000000000000000000",
+            "-1000000000000000000000000000000000000000000",
+        ] {
+            let value = JetInt::from_big(super::CtBigInt::from_str(text).unwrap());
+            assert!(!value.is_inline());
+            let expected_i128 = text.parse::<i128>().ok();
+            let expected_f64 = text.parse::<f64>().unwrap();
+            let before = thread_allocations();
+            let integer = black_box(&value).to_i128();
+            let float = black_box(&value).to_f64();
+            assert_eq!(thread_allocations(), before, "spilled numeric projection allocated");
+            assert_eq!(integer, expected_i128, "{text}");
+            assert_eq!(float.to_bits(), expected_f64.to_bits(), "{text}");
+        }
+    }
+
+    #[test]
     fn jet_int_c_carrier_layout_and_ownership() {
         use super::JetIntNode;
         use std::mem::{align_of, offset_of, size_of};
@@ -959,22 +982,26 @@ impl CtBigInt {
     /// spelling. Keep the conversion here so Decimal and Fraction share one
     /// correctly rounded numeric boundary.
     fn to_f64(&self) -> f64 {
-        if self.is_zero() {
+        Self::limbs_to_f64(&self.limbs, self.negative)
+    }
+
+    fn limbs_to_f64(source: &[u32], negative: bool) -> f64 {
+        if ctbi_limb_is_zero(source) {
             return 0.0;
         }
-        if let Some(value) = self.try_i128() {
+        if let Some(value) = Self::limbs_try_i128(source, negative) {
             return value as f64;
         }
-        if ctbi_limb_decimal_digits(&self.limbs) > 309 {
-            return ctbi_ratio_inf(self.negative);
+        if ctbi_limb_decimal_digits(source) > 309 {
+            return ctbi_ratio_inf(negative);
         }
 
-        let length = ctbi_limb_len(&self.limbs);
+        let length = ctbi_limb_len(source);
         if length > 35 {
-            return ctbi_ratio_inf(self.negative);
+            return ctbi_ratio_inf(negative);
         }
         let mut limbs = [0u32; 35];
-        limbs[..length].copy_from_slice(&self.limbs[..length]);
+        limbs[..length].copy_from_slice(&source[..length]);
         let mut top = 0u64;
         let mut bit_index = 0usize;
         let mut guard = false;
@@ -1010,14 +1037,14 @@ impl CtBigInt {
             }
         }
         if exponent > 1023 {
-            return ctbi_ratio_inf(self.negative);
+            return ctbi_ratio_inf(negative);
         }
         let bits = if bit_index <= 53 {
             (top as f64).to_bits()
         } else {
             ((exponent as u64 + 1023) << 52) | (top & ((1u64 << 52) - 1))
         };
-        let bits = if self.negative {
+        let bits = if negative {
             bits | (1u64 << 63)
         } else {
             bits
@@ -1193,13 +1220,17 @@ impl CtBigInt {
     }
 
     pub fn try_i128(&self) -> Option<i128> {
+        Self::limbs_try_i128(&self.limbs, self.negative)
+    }
+
+    fn limbs_try_i128(limbs: &[u32], negative: bool) -> Option<i128> {
         let mut value = 0u128;
-        for &limb in self.limbs.iter().rev() {
+        for &limb in limbs.iter().rev() {
             value = value.checked_mul(CTBI_BASE as u128)?;
             value = value.checked_add(limb as u128)?;
         }
         let magnitude = i128::try_from(value).ok()?;
-        Some(if self.negative { -magnitude } else { magnitude })
+        Some(if negative { -magnitude } else { magnitude })
     }
 
     /// Project the exact integer into the low 64 bits with the same
@@ -3485,7 +3516,10 @@ impl JetInt {
             Some(i128::from(self.0 as i64))
         } else {
             // SAFETY: this borrowed owner keeps the immutable numeric node alive.
-            unsafe { (*jet_int_pointer(self.0)).value.try_i128() }
+            unsafe {
+                let node = &*jet_int_pointer(self.0);
+                CtBigInt::limbs_try_i128(node.limbs(), node.negative != 0)
+            }
         }
     }
 
@@ -3502,7 +3536,10 @@ impl JetInt {
             self.0 as i64 as f64
         } else {
             // SAFETY: this borrowed owner keeps the immutable numeric node alive.
-            unsafe { (*jet_int_pointer(self.0)).value.to_f64() }
+            unsafe {
+                let node = &*jet_int_pointer(self.0);
+                CtBigInt::limbs_to_f64(node.limbs(), node.negative != 0)
+            }
         }
     }
 
