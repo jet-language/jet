@@ -1941,6 +1941,7 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         loop value in lower_lazy_stored_operands(p, instruction.operation) -> &stored.push(value)
         loop value in lower_task_stored_operands(p, instruction.operation) -> &stored.push(value)
         loop value in lower_parallel_stored_operands(p, instruction.operation) -> &stored.push(value)
+        loop value in lower_atomic_stored_operands(p, instruction.operation) -> &stored.push(value)
         args := [MIRCallArg]{}
         if instruction.operation == {
             .Call(_, call_args, _) | .IndirectCall(_, call_args, _) | .CoreCall(_, _, call_args, _, _, _) -> args = call_args
@@ -3705,6 +3706,7 @@ fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFu
     if glue.helper != "drop.structural" {
         if lower_close_method(p, m.close_methods, glue.ty) == .Val(method) -> return lower_close_drop_glue(p, &m, glue, method)
     }
+    if lower_atomic_needs_drop(p, glue.ty) -> return lower_atomic_drop_glue(&m, glue)
     if lower_trait_ref(p, glue.ty) != None -> return lower_trait_glue(p, &m, glue)
     if lower_is_transaction(glue.ty) -> return lower_transaction_drop_glue(&m, glue)
     if lower_is_iter_cursor(glue.ty) -> return lower_iter_drop_glue(p, &m, glue)

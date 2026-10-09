@@ -830,6 +830,14 @@ fn run() {
         print("issue atomic-mir-layout: canonical six scalar word layouts failed")
         clean = false
     }
+    if !fx_atomic_copy_rejected() {
+        print("issue atomic-copy: non-Clone carrier reached an owning native copy")
+        clean = false
+    }
+    if !fx_report_runtime("atomic-scalars", fx_atomic_scalars()) -> clean = false
+    if !fx_report_runtime("atomic-record", fx_atomic_record()) -> clean = false
+    if !fx_report_runtime("atomic-try-add", fx_atomic_try_add()) -> clean = false
+    if !fx_report_runtime("atomic-int-leaks", fx_atomic_int_leaks()) -> clean = false
     if !fx_runtime_bitcast_refusals() {
         print("issue runtime-bitcast: scalar layout/drop refusals failed")
         clean = false
