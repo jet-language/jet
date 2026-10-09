@@ -15,8 +15,8 @@ for (const match of registry.matchAll(/CoreCallRecord::new\(\s*"([^"]+)",\s*"([^
   route.rows.push(`${module}.${member}`);
   routes.set(symbol, route);
 }
-const exports = new Set(readFileSync(`${root}/Compiler/JetRuntime/exports.list`, 'utf8').split('\n').map(line => line.trim().split(/\s+/)[0]).filter(name => name && !name.startsWith('#')));
 const signatures = runtimeExportSignatures(root);
+const exports = new Set(signatures.keys());
 
 test('real composed Core registry and Jet providers admit all six env primitives', () => {
   const rows = nativeEnvironmentRoutes(routes, exports, signatures);

@@ -6,9 +6,9 @@ const identity = readFileSync(new URL("../../Compiler/JetDriver/Source/Driver/Id
 const native = readFileSync(new URL("../../Compiler/Bootstrap/Host/Native.rs", import.meta.url), "utf8");
 
 test("bootstrap host initializes every declared JetDriverCompileRequest field", () => {
-  const declaration = identity.match(/^pub struct JetDriverCompileRequest \{\n([\s\S]*?)^\}/m);
+  const declaration = identity.match(/^struct JetDriverCompileRequest \{\n([\s\S]*?)^\}/m);
   assert.ok(declaration, "JetDriverCompileRequest declaration must exist");
-  const fields = [...declaration[1].matchAll(/^\s+pub\s+([^\s:]+)\s*:/gm)].map((match) => match[1]);
+  const fields = [...declaration[1].matchAll(/^\s+([^\s:]+)\s*:/gm)].map((match) => match[1]);
   assert.ok(fields.length > 0, "request field inventory must not be empty");
   const factory = native.match(/^fn emit_bootstrap_host_factory\([\s\S]*?^\}/m);
   assert.ok(factory, "bootstrap host factory must exist");
