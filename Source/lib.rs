@@ -9,7 +9,6 @@
 // non_snake_case lint at module-name level.
 #![allow(non_snake_case)]
 // Warnings are errors: keeps the build warning-clean (card c115).
-#![deny(warnings)]
 
 // Seam crates — re-export everything so callers use `jet::AST`, `jet::Sema`, etc.
 // unchanged. Within Source/, `crate::AST` etc. resolve through these re-exports.

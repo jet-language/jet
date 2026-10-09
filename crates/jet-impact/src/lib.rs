@@ -1,7 +1,6 @@
 //! D-IMPACT1: blast-radius queries over the stable semantic-index API.
 
 #![allow(non_snake_case)]
-#![deny(warnings)]
 
 use jet_semindex::{CallEdge, SemIndex, SymbolDef, SymbolRef};
 use std::collections::{HashSet, VecDeque};

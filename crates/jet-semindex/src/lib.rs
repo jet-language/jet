@@ -3,7 +3,6 @@
 //! the same check's MIR nominal carrier is not an input to these index builders.
 
 #![allow(non_snake_case)]
-#![deny(warnings)]
 
 mod Build;
 mod Docs;

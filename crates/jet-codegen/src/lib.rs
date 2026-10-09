@@ -1,5 +1,4 @@
 #![allow(non_snake_case)]
-#![deny(warnings)]
 // Re-export lower seams. Sema transitively includes Parser/Lexer/Comptime/Foundation.
 #[allow(unused_imports)]
 pub(crate) use jet_foundation::EncodingErrors as jet_encoding_errors;

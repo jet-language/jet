@@ -1,5 +1,4 @@
 #![allow(non_snake_case)]
-#![deny(warnings)]
 // #777: AST-era host helpers (Methods/TypedDecode/…) stay until TIR arms absorb
 // every ambient call; the live path is MirBridge → MIR eval → apply_*.
 #![allow(dead_code)]

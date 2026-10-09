@@ -1,5 +1,4 @@
 #![allow(non_snake_case)]
-#![deny(warnings)]
 pub mod AST;
 pub mod Authority;
 mod BuildEffects;

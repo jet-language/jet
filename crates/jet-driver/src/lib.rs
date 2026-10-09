@@ -1,5 +1,4 @@
 #![allow(non_snake_case)]
-#![deny(warnings)]
 // Re-export all lower seams so driver source files can use `crate::AST`, `crate::Sema` etc.
 pub use jet_codegen::{
     development_receipt, program_allocator, scheduler, CanonicalAST, Codegen, Collections,

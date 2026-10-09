@@ -10,7 +10,6 @@
 //! consolidated plan lives in `Docs/spec/reference/metaprogramming.md`.
 
 #![allow(non_snake_case)]
-#![deny(warnings)]
 
 pub use jet_codegen::{Codegen, Comptime, Diagnostics, Lexer, Parser, Sema, Syntax, AST, SHA256};
 

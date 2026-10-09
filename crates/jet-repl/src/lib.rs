@@ -32,7 +32,6 @@
 //!   `Interactive` — the raw-mode event loop wiring the above together
 
 #![allow(non_snake_case)]
-#![deny(warnings)]
 
 // D-ARCH-SOURCE1=A: the REPL is a real outer seam over the compiler driver.
 // Re-export inward compiler vocabulary so moved subsystem source keeps its

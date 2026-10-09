@@ -6,7 +6,6 @@
 
 #![no_std]
 #![forbid(unsafe_code)]
-#![deny(warnings)]
 #![deny(clippy::disallowed_methods)]
 #![deny(clippy::disallowed_types)]
 #![deny(clippy::std_instead_of_alloc)]

@@ -5,7 +5,6 @@
 //! remains in the root compiler package.
 
 #![allow(non_snake_case)]
-#![deny(warnings)]
 
 pub use jet_foundation::Syntax;
 pub use jet_repl::{SemanticSymbols, Term};

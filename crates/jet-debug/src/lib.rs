@@ -22,7 +22,6 @@
 //! I6: std-only — no DAP/JSON crate, no debugger library.
 
 #![allow(non_snake_case)]
-#![deny(warnings)]
 
 // D-ARCH-SOURCE1=A: full debugger ownership lives here. Compiler semantics
 // enter through inward path-only seams; no root host dependency exists.

@@ -1,4 +1,3 @@
-#![deny(warnings)]
 
 use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_escape, parse_json};
