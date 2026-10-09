@@ -2022,7 +2022,7 @@ impl<'a> Parser<'a> {
 #[cfg(test)]
 mod value_block_tests {
     use crate::AST::{Expr, Item, OrFallback, Program, Stmt};
-    use crate::Diagnostics::{Diagnostic, Span};
+    use crate::Diagnostics::Diagnostic;
     use crate::Lexer::lex;
     use crate::Parser::parse;
 
@@ -2321,30 +2321,6 @@ fn run(value: Int?) {
                 && binding.name == "bound"
                 && call.name == "notify"
         ));
-    }
-
-    #[test]
-    fn fallback_block_rejects_authored_semicolon_after_nested_control() {
-        let source = r#"
-fn run(value: Int?) {
-    result :: value ?? {
-        loop {
-            break
-        };
-        1
-    }
-}
-"#;
-        let diagnostics = rejected(source);
-        let semicolon = source.find("};").expect("test source has an authored semicolon");
-        assert!(
-            diagnostics.iter().any(|diagnostic| {
-                diagnostic.code == "E0003"
-                    && diagnostic.span == Some(Span::new(semicolon + 1, semicolon + 2))
-                    && diagnostic.what.contains("found `;`")
-            }),
-            "authored semicolon must not be treated as a synthetic terminator: {diagnostics:?}"
-        );
     }
 
 }

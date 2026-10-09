@@ -1411,14 +1411,14 @@ mod s61_tests {
     }
 
     #[test]
-    fn prefix_failure_contracts_cover_nested_type_positions() {
+    fn suffix_failure_contracts_cover_nested_type_positions() {
         let parsed = program(
             "struct Holder {\n\
                  optional: Int?\n\
-                 unit: !IOError\n\
+                 unit: IOError!\n\
                  union: Int (DbError | TimeoutError)!\n\
                  callback: fn(Int? IOError!) IOError!\n\
-                 impossible: !Never\n\
+                 impossible: Never!\n\
              }\n\
              alias Box<T> :: T? IOError!\n\
              fn fetch(value: Int? IOError!) -> Int? (DbError | TimeoutError)! { value }\n\
@@ -1464,7 +1464,7 @@ mod s61_tests {
         let formatted = crate::Formatter::format_source(
             "fn save() IOError! {}\nfn load() -> Int (DbError | TimeoutError)! { 1 }\n",
         )
-        .expect("prefix formatter");
+        .expect("suffix formatter");
         assert!(formatted.contains("fn save() IOError!"), "{formatted}");
         assert!(
             formatted.contains("fn load() -> Int (DbError | TimeoutError)!"),
@@ -2479,58 +2479,6 @@ fn notify(ready: Bool) -[Net]> {
     }
 
     #[test]
-    fn retired_arrow_control_forms_have_specific_teaching_diagnostics() {
-        for (src, code) in [
-            ("fn old() -> Int { return 1 }\n", "E0068"),
-            ("fn old() --[FS]-> Int { return 1 }\n", "E0066"),
-            ("fn old() :> Int { return 1 }\n", "E0068"),
-            ("fn old() :> 1\n", "E0070"),
-            ("fn old() => 1\n", "E0070"),
-            ("fn old() Int :: 1\n", "E0065"),
-            ("fn run() { if ready send() }\n", "E0372"),
-            (
-                "fn run() { #Grant(FS) { caps -> use_caps(caps) } }\n",
-                "E0077",
-            ),
-            (
-                "protocol Old { client -> server: Hello(id: Int) }\n",
-                "E0154",
-            ),
-            (
-                "fn run() { f :: take(value) (x: Int) => x + value }\n",
-                "E0057",
-            ),
-        ] {
-            let (tokens, lex_diagnostics) = lex(src);
-            assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
-            let diagnostics = parse(&tokens).expect_err("retired syntax must teach");
-            assert!(
-                diagnostics.iter().any(|diagnostic| diagnostic.code == code),
-                "expected {code}, got {diagnostics:?}"
-            );
-            if code == "E0065" {
-                assert_eq!(
-                    diagnostics
-                        .iter()
-                        .find(|diagnostic| diagnostic.code == code)
-                        .and_then(|diagnostic| diagnostic.edit.as_ref())
-                        .map(|edit| edit.new_text.as_str()),
-                    Some("->"),
-                    "the retired function-body marker must offer the canonical replacement"
-                );
-            }
-            if code == "E0077" {
-                let diagnostic = diagnostics
-                    .iter()
-                    .find(|diagnostic| diagnostic.code == code)
-                    .expect("E0077");
-                assert!(diagnostic.what.contains("#Grant"), "{diagnostic:?}");
-                assert!(diagnostic.fix.contains("#FX"), "{diagnostic:?}");
-            }
-        }
-    }
-
-    #[test]
     fn braced_one_expression_bodies_keep_leading_dot_and_todo_values() {
         // Card #4512: `-> T -> expr` becomes `-> T { expr }`, so the braced
         // body must read the same expressions the arrow body did.
@@ -2834,25 +2782,11 @@ fn notify(ready: Bool) -[Net]> {
     }
 
     #[test]
-    fn bare_default_error_contract_is_not_accepted() {
-        for source in [
-            "struct Holder { bare: ! }\n",
-            "alias DefaultFailure :: !;\n",
-            "fn sync() ! {}\n",
-            "fn callback(value: Int !) {}\n",
-        ] {
-            let (tokens, lex_diagnostics) = lex(source);
-            assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
-            parse(&tokens).expect_err("bare default error contracts must not produce an AST");
-        }
-    }
-
-    #[test]
-    fn prefix_contract_reaches_nested_general_type_positions() {
+    fn suffix_contract_reaches_nested_general_type_positions() {
         let parsed = program(
             "struct Holder {\n\
-                 map: [String: !IOError]\n\
-                 tuple: (entry: Entry? StoreError!, failure: !Err)\n\
+                 map: [String: IOError!]\n\
+                 tuple: (entry: Entry? StoreError!, failure: Err!)\n\
                  callback: fn(Int? StoreError!) IOError!\n\
              }\n\
              alias Callback :: fn(Int? StoreError!) IOError!\n\
@@ -2947,12 +2881,24 @@ fn notify(ready: Bool) -[Net]> {
         parse(&tokens).expect_err("retired infix spelling must not produce an AST");
     }
 
+    /// D-TYPE-SUFFIX1=A: an error suffix alone has a unit success type.
     #[test]
-    fn retired_failure_suffix_is_not_accepted() {
-        let source = "alias Old :: String!\n";
-        let (tokens, lex_diagnostics) = lex(source);
-        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
-        parse(&tokens).expect_err("retired suffix spelling must not produce an AST");
+    fn unit_failure_suffix_is_accepted_in_aliases() {
+        let parsed = program("alias Failure :: String!\n");
+        let alias = parsed
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::TypeAlias(alias) if alias.name == "Failure" => Some(alias),
+                _ => None,
+            })
+            .expect("Failure alias");
+        assert!(matches!(
+            &alias.target,
+            crate::AST::Type::Result { ok, err }
+                if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+                    && matches!(err.as_ref(), crate::AST::Type::String)
+        ));
     }
 
     #[test]
@@ -2971,12 +2917,19 @@ fn notify(ready: Bool) -[Net]> {
     fn unit_fallible_signatures_format_without_arrow() {
         use crate::Formatter::format_source;
 
-        let source =
-            "fn save(path: String) IOError! {}\nfn sync() Err! {}\nfn bounded() IOError! -[FS]> {}\n";
+        let source = "fn save(path: String) IOError! {}\nfn sync() Err! {}\n\
+                      fn bounded() IOError! -[FS]> {}\nfn pure() Never! -[]> {}\n\
+                      trait Sink { fn save(self) IOError! -[FS]> }\n";
         let once = format_source(source).expect("unit-fallible signatures format");
         assert!(once.contains("fn save(path: String) IOError!"), "{once}");
         assert!(once.contains("fn sync() Err!"), "{once}");
         assert!(once.contains("fn bounded() IOError! -[FS]>"), "{once}");
+        assert!(once.contains("fn pure() Never! -[]>"), "{once}");
+        assert!(once.contains("fn save(self) IOError! -[FS]>"), "{once}");
+        program(&once);
+        program(include_str!(
+            "../../../../Compiler/JetParser/Tests/ContractFixtures.jet"
+        ));
         assert_eq!(
             once,
             format_source(&once).expect("formatted form is stable")

@@ -1234,6 +1234,8 @@ fn jfmt_fmt_trait(f: &JetFmt, t: TraitDef) {
         param_source :: jfmt_source_list_span_after(f, m.name_span.end, JFMT_DELIM_PAREN)
         jfmt_fmt_param_list(&f, m.params, param_source)
         jfmt_write(&f, ")")
+        unit_fallible :: if m.return_type == .Val(ret) -> jfmt_is_unit_fallible_type(ret) else -> false
+        if unit_fallible && m.return_type == .Val(ret) -> jfmt_fmt_unit_fallible_return(&f, ret)
         if m.declared_effects == .Val(effects) {
             source :: jfmt_source_effect_row_span_after(f, m.name_span.end)
             jfmt_write(&f, " ")
@@ -1245,10 +1247,8 @@ fn jfmt_fmt_trait(f: &JetFmt, t: TraitDef) {
             jfmt_write(&f, "-[")
             jfmt_write(&f, "]>")
         }
-        if m.return_type == .Val(ret) {
-            if jfmt_is_unit_fallible_type(ret) {
-                jfmt_fmt_unit_fallible_return(&f, ret)
-            } else if m.declared_effects != None || m.is_pure {
+        if !unit_fallible && m.return_type == .Val(ret) {
+            if m.declared_effects != None || m.is_pure {
                 jfmt_write(&f, " ")
                 jfmt_fmt_return_type(&f, ret)
             } else {
@@ -1645,7 +1645,8 @@ fn jfmt_fmt_func(f: &JetFmt, func: Func, top_level: Bool) {
     }
     jfmt_write(&f, ")")
     unit_fallible :: if func.return_type == .Val(ret) -> jfmt_is_unit_fallible_type(ret) else -> false
-    // D-SIG-AFTER1=A: the one arrow, then optional return facts.
+    // D-CALLABLE-ONE1 / D-FAIL-UNIT1: the unit error contract precedes effects.
+    if unit_fallible && func.return_type == .Val(ret) -> jfmt_fmt_unit_fallible_return(&f, ret)
     has_effect_row :: func.declared_effects != None || func.effect_via != None || func.is_pure
     if has_effect_row {
         if func.declared_effects == .Val(effects) {
@@ -1667,21 +1668,13 @@ fn jfmt_fmt_func(f: &JetFmt, func: Func, top_level: Bool) {
             jfmt_write(&f, via.name)
             jfmt_write(&f, "]>")
         }
-        if func.return_type == .Val(ret) {
-            if unit_fallible {
-                jfmt_fmt_unit_fallible_return(&f, ret)
-            } else {
-                jfmt_write(&f, " ")
-                jfmt_fmt_type_at(&f, ret, func.return_type_span)
-            }
-        }
-    } else if func.return_type == .Val(ret) {
-        if unit_fallible {
-            jfmt_fmt_unit_fallible_return(&f, ret)
-        } else {
-            jfmt_write(&f, " -> ")
+        if !unit_fallible && func.return_type == .Val(ret) {
+            jfmt_write(&f, " ")
             jfmt_fmt_type_at(&f, ret, func.return_type_span)
         }
+    } else if !unit_fallible && func.return_type == .Val(ret) {
+        jfmt_write(&f, " -> ")
+        jfmt_fmt_type_at(&f, ret, func.return_type_span)
     }
     if func.declared_return_view_provenance == .Val(map) -> jfmt_fmt_declared_return_view_from(&f, map, func.params)
     saved_return_type :: ~f.expected_return_type
