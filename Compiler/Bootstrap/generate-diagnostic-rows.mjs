@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// usage: node Compiler/Bootstrap/generate-diagnostic-rows.mjs [--check]
+// --check compares the canonical projection without changing generated files.
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -325,5 +327,10 @@ const output = [
   "// END GENERATED DIAGNOSTIC ROWS",
   "",
 ].join("\n");
-await writeFile(outputPath, output, "utf8");
-console.log(`generated ${outputPath.replace(`${repoRoot}/`, "")} (${rows.length} rows, source ${sourceHash})`);
+if (process.argv.includes("--check")) {
+  const current = await readFile(outputPath, "utf8").catch(() => "");
+  if (current !== output) fail(`${outputPath.replace(`${repoRoot}/`, "")} is stale; run node Compiler/Bootstrap/generate-diagnostic-rows.mjs`);
+} else {
+  await writeFile(outputPath, output, "utf8");
+  console.log(`generated ${outputPath.replace(`${repoRoot}/`, "")} (${rows.length} rows, source ${sourceHash})`);
+}
