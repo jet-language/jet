@@ -13,6 +13,10 @@
 // --stop-predicate consumes the shared op table. --probe additionally requires
 // --rust-predicate-results from the Rust shared_stop_predicate_table test
 // (JET_STOP_PREDICATE_RESULTS=PATH), and compares every input/result byte.
+// run-front-feed.mjs OUT --explicit-cleanup-order --assemble|--probe BINARY
+// --probe also requires --rust-explicit-cleanup-test TEST_BINARY. The exact
+// checked Rust test transports its input fixture and exercised rows; the
+// harness binds its binary, argv and successful status before comparing Jet.
 // --assemble writes probe/unit.jet; build it with the reference compiler at
 // --release, then run --probe with JET_RUNTIME_PACK pointing to the SAME pack
 // used for the baseline. Preparation/census never claims differential success.
@@ -31,9 +35,10 @@ const argv = process.argv.slice(2);
 const output = argv.shift();
 if (!output) throw new Error('expected OUT --baseline results.tsv [--rust-mir DIR|--rust-jet BINARY] --assemble|--probe BINARY|--bootstrap JETC0');
 const options = {};
-while (argv.length) { const flag = argv.shift(); if (flag === '--assemble') options.assemble = true; else if (flag === '--cleanup-stop') options.cleanupStop = true; else if (flag === '--stop-predicate') options.stopPredicate = true; else if (['--baseline', '--rust-mir', '--rust-jet', '--probe', '--bootstrap', '--rust-predicate-results'].includes(flag)) options[flag.slice(2)] = argv.shift(); else throw new Error(`unknown option ${flag}`); }
-const focused = options.cleanupStop || options.stopPredicate;
-if ((!options.baseline && !focused) || [options.assemble, options.probe, options.bootstrap].filter(Boolean).length !== 1 || (focused && options.bootstrap) || (options.cleanupStop && options.stopPredicate)) throw new Error('require baseline (or one focused witness) and exactly one of assemble, probe, bootstrap');
+while (argv.length) { const flag = argv.shift(); if (flag === '--assemble') options.assemble = true; else if (flag === '--cleanup-stop') options.cleanupStop = true; else if (flag === '--stop-predicate') options.stopPredicate = true; else if (flag === '--explicit-cleanup-order') options.explicitCleanupOrder = true; else if (['--baseline', '--rust-mir', '--rust-jet', '--probe', '--bootstrap', '--rust-predicate-results', '--rust-explicit-cleanup-test'].includes(flag)) options[flag.slice(2)] = argv.shift(); else throw new Error(`unknown option ${flag}`); }
+const focusedCount = [options.cleanupStop, options.stopPredicate, options.explicitCleanupOrder].filter(Boolean).length;
+const focused = focusedCount > 0;
+if ((!options.baseline && !focused) || [options.assemble, options.probe, options.bootstrap].filter(Boolean).length !== 1 || (focused && options.bootstrap) || focusedCount > 1) throw new Error('require baseline (or one focused witness) and exactly one of assemble, probe, bootstrap');
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
 const entries = new Map(collectGoldenEntries(join(repo, 'Examples/features')).map(e => [e.stem, e]));
@@ -61,7 +66,7 @@ const cases = passing.map(stem => {
   const prefix = join(out, 'feeds', slug); mkdirSync(dirname(prefix), { recursive: true });
   return { stem, slug, entry, work, file, root, prefix, expected: readFileSync(join(repo, 'Examples/features/expected', `${stem}.out`)), stdin: stdinTable.get(stem) ?? '' };
 });
-writeFileSync(join(out, 'manifest.json'), JSON.stringify({ baseline: options.baseline ? resolve(options.baseline) : null, focused_cleanup_stop: !!options.cleanupStop, focused_stop_predicate: !!options.stopPredicate, baseline_sha256: createHash('sha256').update(baselineText).digest('hex'), cases: cases.map(c => ({ stem: c.stem, file: c.file, prefix: c.prefix })) }, null, 2) + '\n');
+writeFileSync(join(out, 'manifest.json'), JSON.stringify({ baseline: options.baseline ? resolve(options.baseline) : null, focused_cleanup_stop: !!options.cleanupStop, focused_stop_predicate: !!options.stopPredicate, focused_explicit_cleanup_order: !!options.explicitCleanupOrder, baseline_sha256: createHash('sha256').update(baselineText).digest('hex'), cases: cases.map(c => ({ stem: c.stem, file: c.file, prefix: c.prefix })) }, null, 2) + '\n');
 const results = [];
 function save(mode) {
   const ranked = [...gaps.values()].sort((a, b) => b.cases.size - a.cases.size || a.category.localeCompare(b.category) || a.key.localeCompare(b.key)).map((row, i) => ({ rank: i + 1, category: row.category, key: row.key, affected: row.cases.size, cases: [...row.cases].sort(), samples: row.samples }));
@@ -186,6 +191,51 @@ if (options.bootstrap) {
       const verified = probe.status === 0 && probe.stdout?.includes('normal cleanup: first consumed; remaining once; duplicate rejected');
       writeFileSync(join(out, 'cleanup-stop-result.json'), JSON.stringify({ mode: 'focused-production-cleanup', status: probe.status, signal: probe.signal, verified }, null, 2) + '\n');
       if (!verified) throw new Error('focused production cleanup witness failed; see cleanup-stop.log');
+    }
+    process.exit(0);
+  }
+  if (options.explicitCleanupOrder) {
+    const fixture = join(repo, 'tests/fixtures/mir_explicit_cleanup_order.jet');
+    const text = readFileSync(fixture);
+    const file = join(probeDir, 'explicit-cleanup-order.jet');
+    writeFileSync(file, text);
+    writeFileSync(join(probeDir, 'front-explicit-cleanup-order.txt'), file + '\n');
+    const resultPath = join(probeDir, 'front-explicit-cleanup-results.tsv');
+    const rustPath = join(probeDir, 'front-explicit-cleanup-rust-results.tsv');
+    const rustFixturePath = `${rustPath}.fixture.jet`;
+    for (const path of [resultPath, rustPath, rustFixturePath]) rmSync(path, { force: true });
+    const receipt = { mode: 'focused-explicit-stop-cleanup-parity', source: fixture, fixture_sha256: createHash('sha256').update(text).digest('hex'), verified: false };
+    if (options.probe) {
+      if (!options['rust-explicit-cleanup-test']) throw new Error('explicit cleanup parity requires --rust-explicit-cleanup-test');
+      const rustBinary = resolve(options['rust-explicit-cleanup-test']);
+      const rustArgs = ['--exact', 'explicit_process_stops_close_defers_before_guards', '--nocapture'];
+      const rustIdentity = createHash('sha256').update(readFileSync(rustBinary)).digest('hex');
+      const rustRun = spawnSync(rustBinary, rustArgs, { cwd: probeDir, env: { ...process.env, JET_EXPLICIT_CLEANUP_ORDER_RESULTS: rustPath }, timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), encoding: 'utf8', maxBuffer: 1 << 27 });
+      writeFileSync(join(out, 'explicit-cleanup-rust.log'), `${rustRun.stdout ?? ''}${rustRun.stderr ?? ''}`);
+      const rust = existsSync(rustPath) ? readFileSync(rustPath) : null;
+      const rustFixture = existsSync(rustFixturePath) ? readFileSync(rustFixturePath) : null;
+      receipt.rust_producer = { binary: rustBinary, binary_sha256: rustIdentity, argv: rustArgs, status: rustRun.status, signal: rustRun.signal, error: rustRun.error?.message ?? null, fixture_matches: rustFixture !== null && rustFixture.equals(text) };
+      const expected = Buffer.from('exit_case\tsecond\tfirst\t_guard_2\t_guard_1\nstop_case\tsecond\tfirst\t_guard_2\t_guard_1\n');
+      if (rust) receipt.rust_sha256 = createHash('sha256').update(rust).digest('hex');
+      if (rustFixture) receipt.rust_producer.fixture_sha256 = createHash('sha256').update(rustFixture).digest('hex');
+      if (rustRun.status !== 0 || !rustRun.stdout?.includes('test result: ok. 1 passed; 0 failed;') || !receipt.rust_producer.fixture_matches || rust === null || !rust.equals(expected)) {
+        writeFileSync(join(out, 'explicit-cleanup-order-result.json'), JSON.stringify(receipt, null, 2) + '\n');
+        throw new Error('Rust explicit cleanup producer did not exercise the current checked fixture and stop order; see explicit-cleanup-rust.log');
+      }
+      const version = readFileSync(join(repo, 'Cargo.toml'), 'utf8').match(/^version = "([^"]+)"$/m)?.[1];
+      if (!version) throw new Error('compiler package has no exact version');
+      const identity = createHash('sha256').update(readFileSync(resolve(options.probe))).digest('hex');
+      receipt.probe_sha256 = identity;
+      const probe = spawnSync(resolve(options.probe), [], { cwd: probeDir, env: { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_COMPILER_IDENTITY: `jet@${version}#${identity}` }, timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), encoding: 'utf8', maxBuffer: 1 << 27 });
+      writeFileSync(join(out, 'explicit-cleanup-order.log'), `${probe.stdout ?? ''}${probe.stderr ?? ''}`);
+      receipt.status = probe.status; receipt.signal = probe.signal;
+      const jet = existsSync(resultPath) ? readFileSync(resultPath) : null;
+      receipt.verified = probe.status === 0 && jet !== null && jet.equals(rust) && probe.stdout?.includes('explicit process.exit/os.stop: Rust and Jet cleanup order agree');
+      if (jet) receipt.jet_sha256 = createHash('sha256').update(jet).digest('hex');
+      writeFileSync(join(out, 'explicit-cleanup-order-result.json'), JSON.stringify(receipt, null, 2) + '\n');
+      if (!receipt.verified) throw new Error('Rust/Jet explicit cleanup parity failed; see explicit-cleanup-order.log');
+    } else {
+      writeFileSync(join(out, 'explicit-cleanup-order-result.json'), JSON.stringify(receipt, null, 2) + '\n');
     }
     process.exit(0);
   }

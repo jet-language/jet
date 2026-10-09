@@ -4,7 +4,7 @@
 use core.files as ff_files
 use jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
 use jet_cli.[jet_cli_compile_file]
-use jet_foundation.[DIAGNOSTIC_ERROR, Effect, Span, MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRCallArg, MIRCallFallibility, MIRCallSignature, MIRCallee, MIRConversion, MIRCoreCallID, MIRDimension, MIRDimensionAxis, MIRIndexKind, MIRPanicContext, MIRPanicLoc, MIRPanicLocal, MIRPlace, MIRPlaceBase, MIRPreludeABI, MIRPreludeCall, MIRPreludeCallID, MIRPreludeFamily, MIRProgram, MIRFunctionID, MIRPlaceID, MIRBlockID, MIRInstruction, MIROperation, MIROpID, MIRProjection, MIRRequireKind, MIRScopeID, MIRScopeKind, MIRSemanticOp, MIRSourceFileID, MIRSymbol, MIRTagMarker, MIRType, MIRTypeKind, MIRUnaryOp, MIRValueID, MIRValueFact, mir_operation_can_stop, mir_operation_can_panic, mir_type_from_kind, mir_terminator_targets]
+use jet_foundation.[DIAGNOSTIC_ERROR, Effect, Span, MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRCallArg, MIRCallFallibility, MIRCallSignature, MIRCallee, MIRCaptureOperand, MIRConstant, MIRConversion, MIRCoreCallID, MIRDimension, MIRDimensionAxis, MIRFunction, MIRIndexKind, MIRPanicContext, MIRPanicLoc, MIRPanicLocal, MIRPlace, MIRPlaceBase, MIRPreludeABI, MIRPreludeCall, MIRPreludeCallID, MIRPreludeFamily, MIRProgram, MIRFunctionID, MIRPlaceID, MIRBlockID, MIRInstruction, MIROperation, MIROpID, MIRProjection, MIRRequireKind, MIRScopeID, MIRScopeKind, MIRSemanticOp, MIRSourceFileID, MIRSymbol, MIRTagMarker, MIRTerminator, MIRType, MIRTypeKind, MIRUnaryOp, MIRValueID, MIRValueFact, mir_operation_can_stop, mir_operation_can_panic, mir_type_from_kind, mir_terminator_targets]
 
 fn ff_native(name: String, program: MIRProgram, entry_id: MIRFunctionID, pack: GLPack) -> String {
     lowered :: lir_lower_entry(program, entry_id)
@@ -286,6 +286,136 @@ fn ff_cleanup_case(file: String) {
     }
 }
 
+// The explicit stop ordering law is independent of ordinary return/Err/cancel.
+// Walk each production MIR's actual normal path and compare exercised Rust rows.
+fn ff_explicit_cleanup_function(program: MIRProgram, function: MIRFunction) -> String {
+    owners := [U64:String]{}
+    loop local in function.locals {
+        if local.name == "first" || local.name == "second" || local.name == "_guard_1" || local.name == "_guard_2" -> owners[local.place.value] = local.name
+    }
+    if owners.len() != 4 -> panic("{function.name} lost a checked cleanup owner")
+    values := [U64:String]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            result :: instruction.result ?? next
+            if instruction.operation == {
+                .ReadPlace(place) | .MovePlace(place) | .AddressOf(place, _) | .RawAddressOf(place) -> {
+                    if owners.get(place.value) == .Val(owner) -> values[result.value] = owner
+                }
+                .Move(value) | .Copy(value, _) -> {
+                    if values.get(value.value) == .Val(owner) -> values[result.value] = owner
+                }
+                .Closure(_, captures, _) -> {
+                    loop capture in captures {
+                        owner :: if capture == {
+                            .Place(place) -> owners.get(place.value)
+                            .Value(value) -> values.get(value.value)
+                        }
+                        if owner == .Val(name) {
+                            if name == "first" || name == "second" -> values[result.value] = name
+                        }
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+    booleans := [U64:Bool]{}
+    flags := [U64:Bool]{}
+    seen := [U64:Bool]{}
+    order := [String]{}
+    current := function.entry
+    loop {
+        if seen.get(current.value) != None -> panic("{function.name} cleanup path cycles")
+        seen[current.value] = true
+        block := MIRBlockID?{None}
+        next_block := MIRBlockID?{None}
+        reached := false
+        loop candidate in function.blocks {
+            if candidate.id != current -> next
+            block = Val(candidate.id)
+            loop instruction in candidate.instructions {
+                if instruction.operation == {
+                    .Constant(constant) -> if constant == .Bool(value) {
+                        if instruction.result == .Val(result) -> booleans[result.value] = value
+                    }
+                    .ReadPlace(place) -> {
+                        if flags.get(place.value) == .Val(value) && instruction.result == .Val(result) -> booleans[result.value] = value
+                    }
+                    .WritePlace(place, value) -> {
+                        if booleans.get(value.value) == .Val(state) -> flags[place.value] = state
+                    }
+                    .MovePlace(place) -> {
+                        if owners.get(place.value) == .Val(owner) {
+                            if owner == "_guard_1" || owner == "_guard_2" -> &order.push(owner)
+                        }
+                    }
+                    .IndirectCall(callee, _, _) -> {
+                        if values.get(callee.value) == .Val(owner) {
+                            if owner == "first" || owner == "second" -> &order.push(owner)
+                        }
+                    }
+                    .CoreCall(call, _, _, _, _, _) -> {
+                        loop row in program.core_calls {
+                            if row.id != call -> next
+                            if (row.module == "core.process" && row.member == "exit") || (row.module == "core.sys" && row.member == "stop") -> reached = true
+                        }
+                    }
+                    else -> {}
+                }
+                if reached -> break
+            }
+            if reached -> break
+            if candidate.terminator == {
+                .Jump(target) -> next_block = Val(target)
+                .Poll(_, resume, _) -> next_block = Val(resume)
+                .Branch(condition, then_target, else_target) -> {
+                    state :: booleans.get(condition.value) ?? panic("cleanup witness live flag has no checked state")
+                    next_block = Val(if state -> then_target else -> else_target)
+                }
+                else -> panic("{function.name} left its normal path before the explicit stop")
+            }
+            break
+        }
+        if block == None -> panic("cleanup witness names a missing block")
+        if reached {
+            if order != [String]{"second", "first", "_guard_2", "_guard_1"} -> panic("{function.name} explicit cleanup order: {order}")
+            return "{function.name}\t{order.join("\t")}\n"
+        }
+        current = next_block ?? panic("cleanup witness has no normal successor")
+    }
+}
+
+fn ff_explicit_cleanup_case(file: String) {
+    compiled :: jet_cli_compile_file(file, false, false, Val(1), JetDriverCompileMode.Program)
+    if compiled == {
+        .Refused(refusal) -> panic("explicit cleanup witness refused: {refusal.stderr}")
+        .Compiled(result, snapshot) -> {
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("explicit cleanup witness diagnostic {diagnostic.code}: {diagnostic.what}")
+            }
+            if result.internal_problem == .Val(problem) -> panic("explicit cleanup witness compiler ICE: {problem}")
+            if !result.complete -> panic("explicit cleanup witness front end incomplete")
+            program :: result.mir ?? panic("explicit cleanup witness lost checked MIR")
+            rendered := ""
+            loop name in [String]{"exit_case", "stop_case"} {
+                found := false
+                loop function in program.functions {
+                    if function.name != name -> next
+                    rendered = "{rendered}{ff_explicit_cleanup_function(program, function)}"
+                    found = true
+                    break
+                }
+                if !found -> panic("explicit cleanup witness lost {name}")
+            }
+            rust :: ff_files.read("front-explicit-cleanup-rust-results.tsv") ?? panic("explicit cleanup parity requires exercised Rust results")
+            if rendered != rust -> panic("Rust and Jet explicit cleanup order differ")
+            ff_files.write("front-explicit-cleanup-results.tsv", rendered) ?? panic("cannot write exercised Jet cleanup order")
+            print("explicit process.exit/os.stop: Rust and Jet cleanup order agree")
+        }
+    }
+}
+
 fn run() {
     if ff_files.read("front-stop-predicate.tsv") == .Val(table) {
         ff_stop_predicate(table)
@@ -293,6 +423,10 @@ fn run() {
     }
     if ff_files.read("front-cleanup-stop.txt") == .Val(file) {
         ff_cleanup_case(file.trim())
+        return
+    }
+    if ff_files.read("front-explicit-cleanup-order.txt") == .Val(file) {
+        ff_explicit_cleanup_case(file.trim())
         return
     }
     pack :: gl_pack() ?? panic("front-feed differential requires the shared runtime pack")

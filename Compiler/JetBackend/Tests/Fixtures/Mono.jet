@@ -368,7 +368,7 @@ fn fx_mono_recursive() -> MIRProgram Never! {
     _ := fx_owned(&c, fx_mono_parameter("T"), MIROperation.Capture{slot: 0})
     fx_block(&c, 0, MIRTerminator.Return{value: None})
     captured := fx_mono_template("unused_captured", c, fx_unit())
-    captured.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "x", span: fx_span(), ty: fx_mono_parameter("T"), access: MIRAccess.Read, ownership: fx_borrow()}}
+    captured.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "x", span: fx_span(), ty: fx_mono_parameter("T"), access: MIRAccess.Read, ownership: fx_borrow(), place_only: false}}
     fx_program([MIRFunction]{captured, fx_mono_recursive_template("recur", "recur"), fx_mono_recursive_template("even", "odd"), fx_mono_recursive_template("odd", "even"), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
 }
 

@@ -1444,7 +1444,12 @@ fn lower_helper_list_remove(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
         stop :: lower_new_block(&f)
         lower_seal(&f, LIRTerminator.Branch{condition: invalid, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(removal, [LIRValueID]{operand})})
         lower_start(&f, stop, [LIRValueID]{})
-        lower_noreturn_call(&m, &f, "jet_rt_panic_list_bounds", [LIRValueID]{length, operand})
+        lower_call_runtime(&m, &f, "jet_rt_panic_list_bounds", [LIRValueID]{length, operand}, None)
+        // The borrowed list and scalar index remain untouched. Its caller's
+        // Propagate edge runs before this unwritten Optional is inspected.
+        null :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+        lower_seal(&f, LIRTerminator.Return{value: Val(null)})
     } else {
         head :: lower_new_block(&f)
         body :: lower_new_block(&f)

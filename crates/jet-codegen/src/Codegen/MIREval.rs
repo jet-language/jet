@@ -6602,6 +6602,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
             }
             MirOperation::Capture { slot } => {
+                // A place-only capture is a checked borrowed Address, never an
+                // owned capture cell. Retain the address without reading storage.
                 let cell = self.frames[frame_index]
                     .capture_cells
                     .get(*slot)
@@ -26419,6 +26421,12 @@ fn validate_captures(function: &MirFunction, captures: &[RuntimeValue]) -> Resul
                 capture.span,
             ));
         };
+        if capture.place_only && !matches!(value, RuntimeValue::Address(_)) {
+            return Err(mir_error_at(
+                "place-only MIR capture must retain an actual place address",
+                capture.span,
+            ));
+        }
         let valid = match (capture.access, value) {
             (MirAccess::Read | MirAccess::Write, value)
                 if matches!(capture.ownership.mode, MirOwnershipMode::Owned)

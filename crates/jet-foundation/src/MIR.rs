@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-pub const MIR_SCHEMA_VERSION: u16 = 6;
+pub const MIR_SCHEMA_VERSION: u16 = 7;
 
 macro_rules! mir_id {
     ($name:ident) => {
@@ -3619,6 +3619,8 @@ pub struct MirCaptureParam {
     pub ty: MirType,
     pub access: MirAccess,
     pub ownership: MirOwnership,
+    /// Address-only capture: its result may anchor a place, never an SSA use.
+    pub place_only: bool,
 }
 #[derive(Debug, Clone)]
 pub enum MirCaptureOperand {
@@ -8359,6 +8361,16 @@ fn validate_function_types(
     }
     for capture in &function.capture_params {
         validate_mir_type(&capture.ty, type_ids)?;
+        if capture.place_only
+            && !matches!((capture.access, capture.ownership.mode),
+                (MirAccess::Read, MirOwnershipMode::ReadBorrow)
+                | (MirAccess::Write, MirOwnershipMode::WriteBorrow))
+        {
+            return Err(MirValidationError::InvalidOperation {
+                function: function.id,
+                message: "place-only capture must lend a borrowed address".to_string(),
+            });
+        }
     }
     for (slot, capture) in function.capture_params.iter().enumerate() {
         if capture.slot != slot {
@@ -8746,6 +8758,28 @@ fn validate_function(
             value: *value,
         });
     }
+    // Check every place, including an unused row. Only the Capture base is
+    // an address association; an index/range or another base is an SSA use.
+    for place in &function.places {
+        for (position, value) in place_value_uses(place).enumerate() {
+            if let Some(&(definition_block, definition_index)) = values.get(&value) {
+                let definition = &function.blocks[blocks[&definition_block]].instructions[definition_index];
+                validate_capture_value_use(
+                    function,
+                    definition,
+                    position == 0 && matches!(place.base, MirPlaceBase::Capture(_)),
+                )?;
+            }
+        }
+    }
+    for scope in &function.scopes {
+        if let Some(value) = scope.deadline {
+            if let Some(&(definition_block, definition_index)) = values.get(&value) {
+                let definition = &function.blocks[blocks[&definition_block]].instructions[definition_index];
+                validate_capture_value_use(function, definition, false)?;
+            }
+        }
+    }
     let dominators = MirDominators::compute(function, [function.entry]);
     for block in &function.blocks {
         for (index, instruction) in block.instructions.iter().enumerate() {
@@ -8757,16 +8791,16 @@ fn validate_function(
                         return Err(MirValidationError::InvalidTerminator { function: function.id, block: *predecessor });
                     }
                     // Defined anywhere in the predecessor precedes its exit.
-                    ensure_use(function, &values, &dominators, &blocks, *predecessor, usize::MAX, *value, instruction.span)?;
+                    ensure_use(function, &values, &dominators, &blocks, *predecessor, usize::MAX, *value, instruction.span, false)?;
                 }
             } else {
                 for value in instruction.operation.value_uses() {
-                    ensure_use(function, &values, &dominators, &blocks, block.id, index, value, instruction.span)?;
+                    ensure_use(function, &values, &dominators, &blocks, block.id, index, value, instruction.span, false)?;
                 }
             }
             for place_id in operation_places(&instruction.operation) {
                 if let Some(place) = place_rows.get(&place_id) {
-                    for value in place_value_uses(place) {
+                    for (position, value) in place_value_uses(place).enumerate() {
                         ensure_use(
                             function,
                             &values,
@@ -8776,13 +8810,14 @@ fn validate_function(
                             index,
                             value,
                             instruction.span,
+                            position == 0 && matches!(place.base, MirPlaceBase::Capture(_)),
                         )?;
                     }
                 }
             }
         }
         for value in block.terminator.value_uses() {
-            ensure_use(function, &values, &dominators, &blocks, block.id, block.instructions.len(), value, block.span)?;
+            ensure_use(function, &values, &dominators, &blocks, block.id, block.instructions.len(), value, block.span, false)?;
         }
         if let MirTerminator::Yield { value, .. } = &block.terminator {
             let Some(generator) = &function.generator else {
@@ -9319,6 +9354,7 @@ fn ensure_use(
     use_index: usize,
     value: MirValueId,
     span: Span,
+    address_anchor: bool,
 ) -> Result<(), MirValidationError> {
     let Some((definition_block, definition_index)) = values.get(&value).copied() else {
         return Err(MirValidationError::MissingValue { function: function.id, value });
@@ -9331,6 +9367,26 @@ fn ensure_use(
     };
     if !valid || !blocks.contains_key(&definition_block) {
         return Err(MirValidationError::UseBeforeDefinition { function: function.id, value, span });
+    }
+    let definition = &function.blocks[blocks[&definition_block]].instructions[definition_index];
+    validate_capture_value_use(function, definition, address_anchor)?;
+    Ok(())
+}
+
+fn validate_capture_value_use(
+    function: &MirFunction,
+    definition: &MirInstruction,
+    address_anchor: bool,
+) -> Result<(), MirValidationError> {
+    if !address_anchor {
+        if let MirOperation::Capture { slot } = &definition.operation {
+            if function.capture_params.get(*slot).is_some_and(|capture| capture.place_only) {
+                return Err(MirValidationError::InvalidOperation {
+                    function: function.id,
+                    message: "place-only Capture result is used as an SSA value".to_string(),
+                });
+            }
+        }
     }
     Ok(())
 }

@@ -1,0 +1,38 @@
+// Shared Rust/Jet lowering witness: only explicit process exit/stop ordering.
+// Ordinary return, Err, panic and cancellation are not ordering oracles here.
+package {
+    name: "mir_explicit_cleanup_order"
+    authority: { holds: { allow: [Exec, Env, IO, Mem.Alloc] } }
+}
+use core.process as process
+use core.sys as os
+use core.mem.scope as scope
+
+struct Resource { name: String }
+impl Resource.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+fn exit_case() {
+    first := Resource{name: "first"}
+    defer close(^first)
+    _guard_1 :: scope.guard(() -> print("guard 1"))
+    second := Resource{name: "second"}
+    defer close(^second)
+    _guard_2 :: scope.guard(() -> print("guard 2"))
+    process.exit(0)
+}
+fn stop_case() {
+    first := Resource{name: "first"}
+    defer close(^first)
+    _guard_1 :: scope.guard(() -> print("guard 1"))
+    second := Resource{name: "second"}
+    defer close(^second)
+    _guard_2 :: scope.guard(() -> print("guard 2"))
+    #Unsafe("exercise the explicit process-stop cleanup boundary") {
+        os.stop(0)
+    }
+}
+fn run() {
+    args :: process.argv()
+    if args.len() > 1 -> stop_case() else -> exit_case()
+}

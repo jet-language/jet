@@ -337,7 +337,7 @@ fn jet_codegen_lower_task_group(builder: &JetCodegenBuilder, program: JetCodegen
     close := TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "jet_std::JetTaskGroup", generics: [TPreludeArg]{}}, owner_type: None, method: close_method, type_args: [Type]{}, args: [TCallArg]{close_arg}}, span: span, integer_bounds: None, cost: None}
     group_symbol :: group.symbol_id ?? panic("checked task-group local has no symbol identity")
     thunk := jet_codegen_lower_defer_thunk(&builder, program, close, group_symbol, scope.value, span)
-    jet_codegen_register_deferred_call(&builder, program, thunk)
+    jet_codegen_register_deferred_call(&builder, program, thunk, close.ty)
 
     jet_codegen_lower_block(&builder, program, body)
     jet_codegen_leave_scope(&builder, program, scope)
@@ -2293,7 +2293,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
                             value := jet_codegen_lower_expr(&builder, program, init)
                             place := jet_codegen_bind_local(&builder, program, local, init.ty, local.mutable, None, None, string_view)
                             if gc_root -> jet_codegen_mark_gc_root(&builder, program, place)
-                            _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: place, value: value})
+                            jet_codegen_initialize_retained_place(&builder, program, span, place, value)
                         }
                     }
                 }
@@ -2372,7 +2372,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
         .TaskGroup(group, limit, body, span) -> jet_codegen_lower_task_group(&builder, program, group, limit, body, span)
         .DeferClose(close, resource, scope_id, span) -> {
             thunk := jet_codegen_lower_defer_thunk(&builder, program, close, resource, scope_id, span)
-            jet_codegen_register_deferred_call(&builder, program, thunk)
+            jet_codegen_register_deferred_call(&builder, program, thunk, close.ty)
         }
         .RefutableBind(pattern, init, fallback, span) -> jet_codegen_lower_refutable_bind(&builder, program, pattern, init, fallback, span)
         .Match(subject, arms, exhaustive, span) -> jet_codegen_lower_pattern_match(&builder, program, subject, false, arms, None, exhaustive, "checked exhaustive match", span)
