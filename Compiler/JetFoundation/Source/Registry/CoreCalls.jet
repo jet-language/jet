@@ -278,7 +278,7 @@ fn core_call_effect_leaf_for(module_name: String, member: String) -> String? {
         // TLS waits.
         module_name == "core.net.tls" && core_call_one_of(member, [String]{"client", "read", "read_text", "write", "write_all", "write_text", "close", "__read", "__write", "__write_all", "__client_stream", "__client_deadline", "__client_config_deadline"}) -> Val("Time.Wait")
         // HTTP waits.
-        (module_name == "core.http.client" && core_call_one_of(member, [String]{"get", "post", "request", "__get", "__post", "__request"})) || (module_name == "core.http" && member == "get") || (module_name == "core.http.server" && core_call_one_of(member, [String]{"serve", "serve_once", "serve_once_listener", "__serve_once", "__serve_once_listener", "__serve"})) -> Val("Time.Wait")
+        (module_name == "core.http.client" && core_call_one_of(member, [String]{"get", "post", "request", "__get", "__post", "__request", "jet_http_build_resolve", "jet_http_build_get"})) || (module_name == "core.http" && member == "get") || (module_name == "core.http.server" && core_call_one_of(member, [String]{"serve", "serve_once", "serve_once_listener", "__serve_once", "__serve_once_listener", "__serve"})) -> Val("Time.Wait")
         // Encoding readers and writers.
         (core_call_one_of(module_name, [String]{
             "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor"

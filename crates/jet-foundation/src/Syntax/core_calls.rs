@@ -1616,7 +1616,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: b8556ae49fa62baa11dfea5427b1d9276b4af00f945945596165849ca25c2224
+// Source SHA-256: 22f6f46253ac7c9a2baef90b03b0223b8fd4143b8c3ad7fcec7b60a484653dc2
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.crypto", "__jetc_open_directory"),
@@ -1737,6 +1737,8 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.files", "__xattr_set"),
     ("core.files", "__reader_stat"),
     ("core.files", "__writer_stat"),
+    ("core.http.client", "jet_http_build_resolve"),
+    ("core.http.client", "jet_http_build_get"),
     ("core.files", "__fault_should_fail"),
     ("core.files", "__os_family"),
     ("core.files", "__map_raw"),
@@ -2168,7 +2170,7 @@ pub static CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::source_owned("core.files", "temp_dir", &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.files", "temp_file", &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.files", "lock", &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.files", "__link_reader_at", "jet_files_link_reader_at_raw", true, &[true, false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "jet_files_link_reader_at_raw", "jet_files_link_reader_at_raw", true, &[true, false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__directory_fd", "jet_std::jet_fs_directory_fd_raw", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__fault_should_fail", "jet_fault_should_fail", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__os_family", "jet_std_os_family", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -3180,6 +3182,8 @@ pub static CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.http.client", "__post", "jet_http_client_post", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.http.client", "request", &[true, true]),
     CoreCallRecord::new("core.http.client", "__request", "jet_http_client_request_new", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.http.client", "jet_http_build_resolve", "jet_http_build_resolve", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.http.client", "jet_http_build_get", "jet_http_build_get", true, &[true, true, true, false, true, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.regex", "flags", "jet_std::jet_regex_flags", true, &[false, false, false], ),
     CoreCallRecord::new( "core.regex", "escape", "jet_std::jet_regex_escape", true, &[true], ),
     CoreCallRecord::new( "core.regex", "compile", "jet_std::jet_regex_compile", true, &[true], ),

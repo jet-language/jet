@@ -76,6 +76,8 @@ core.files __xattr_set String,String,[u8] Result<Unit,IOError>
 core.files __reader_stat FileReader Result<[Int],IOError>
 core.files __writer_stat FileWriter Result<[Int],IOError>
 core.files __writer_set_mode FileWriter,Int Result<Unit,IOError>
+core.http.client jet_http_build_resolve String,Int Result<[[u8]],String>
+core.http.client jet_http_build_get String,String,String,Bool,[[u8]],Int,Int,Int Result<[[u8]],String>
 core.watcher files|__files Union<String,Path> Result<WatchHandle,IOError>
 core.watcher process_pid|__process_pid Int WatchHandle
 core.watcher port|__port String,Int WatchHandle
@@ -380,19 +382,19 @@ core.tasks __channel_new - (sender:Sender<T>,receiver:Receiver<T>) T
 core.tasks __channel_bounded Int (sender:Sender<T>,receiver:Receiver<T>) T
 core.tasks __condition_notify_one|__condition_notify_all Condition Unit
 core.prelude __receipt_attach T,String,String,String Unit T
-core.encoding.json parse|loads|decode String Result<DataTree,EncodingError>
-core.encoding.json to_string|to_string_pretty|dumps|dump DataTree Result<String,EncodingError>
-core.encoding.json canonical DataTree String
-core.encoding.json events DataTree String
+core.encoding.json parse|loads|decode String Result<Dyn,EncodingError>
+core.encoding.json to_string|to_string_pretty|dumps|dump Dyn Result<String,EncodingError>
+core.encoding.json canonical Dyn String
+core.encoding.json events Dyn String
 core.encoding.json reader ^FileReader,EncodingLimits Result<JSONReader,EncodingError>
 core.encoding.json writer ^FileWriter,EncodingLimits,Bool Result<JSONWriter,EncodingError>
-core.encoding.jsonl parse|loads String Result<[DataTree],EncodingError>
-core.encoding.jsonl to_string|dumps [DataTree] Result<String,EncodingError>
+core.encoding.jsonl parse|loads String Result<[Dyn],EncodingError>
+core.encoding.jsonl to_string|dumps [Dyn] Result<String,EncodingError>
 core.encoding.jsonl reader ^FileReader,EncodingLimits Result<JSONLReader,EncodingError>
 core.encoding.jsonl writer ^FileWriter,EncodingLimits Result<JSONLWriter,EncodingError>
 core.encoding.jsonl count_rows String Int
-core.encoding.jsonl append_line String,DataTree Result<String,EncodingError>
-core.encoding.jsonl first String Result<DataTree?,EncodingError>
+core.encoding.jsonl append_line String,Dyn Result<String,EncodingError>
+core.encoding.jsonl first String Result<Dyn?,EncodingError>
 core.encoding.csv parse String,String,Bool,Bool Result<[[String]],String>
 core.encoding.csv to_string [[String]] String
 core.encoding.csv reader ^FileReader,EncodingLimits,String,Bool,Bool Result<CSVReader,EncodingError>

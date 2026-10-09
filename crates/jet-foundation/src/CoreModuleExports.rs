@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: b8556ae49fa62baa11dfea5427b1d9276b4af00f945945596165849ca25c2224
+// Source SHA-256: 22f6f46253ac7c9a2baef90b03b0223b8fd4143b8c3ad7fcec7b60a484653dc2
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -389,7 +389,7 @@ const CORE_MODULE_51_MEMBERS: &[&str] = &["__router", "__parse", "__dispatch", "
 const CORE_MODULE_51_TYPES: &[(&str, CoreLeafKind)] = &[("Body", CoreLeafKind::Enum(&["Empty", "Text", "Bytes"])), ("Cookie", CoreLeafKind::Plain), ("HTTPError", CoreLeafKind::Enum(&["InvalidMethod", "InvalidURL", "InvalidHeader", "InvalidStatus", "BodyConsumed", "InvalidFraming", "UnsupportedEncoding", "Cancelled", "BodyTooLarge", "Resolve", "Connect", "TLS", "Timeout", "Proxy", "Redirect", "Protocol", "IO", "Policy", "ResourceUnavailable", "Internal", "UnsupportedTarget"])), ("HTTPOperation", CoreLeafKind::Enum(&["ClientConnect", "ServerBind", "ServeListener"])), ("HTTPRequest", CoreLeafKind::Plain), ("HTTPResponse", CoreLeafKind::Plain), ("Header", CoreLeafKind::Plain), ("Headers", CoreLeafKind::Plain), ("Method", CoreLeafKind::Enum(&["Get", "Head", "Post", "Put", "Patch", "Delete", "Options", "Trace", "Connect", "Custom"])), ("Query", CoreLeafKind::Plain), ("QueryPair", CoreLeafKind::Plain), ("Status", CoreLeafKind::Plain), ("StatusLine", CoreLeafKind::Plain), ("Version", CoreLeafKind::Enum(&["HTTP10", "HTTP11", "HTTP2", "HTTP3"])), ("CorsPolicy", CoreLeafKind::Plain), ("HTTPMux", CoreLeafKind::Plain), ("HTTPRoute", CoreLeafKind::Plain), ("HTTPServerTLS", CoreLeafKind::Plain)];
 const CORE_MODULE_51_DEPENDENCIES: &[&str] = &["core.net"];
 
-const CORE_MODULE_52_MEMBERS: &[&str] = &["__get", "__post", "__request", "Client", "Proxy", "RedirectPolicy", "delete", "get", "head", "header", "patch", "post", "put", "request", "send", "set_header", "timeout_redirects", "session", "session_header", "session_timeout", "session_retries", "session_redirects", "session_auth", "session_proxy", "session_cookie", "cookie_header", "session_request", "session_get", "session_post", "session_put", "session_patch", "session_delete", "session_head", "session_json", "session_form", "redirect_limit", "with_proxy", "user_agent", "bearer", "accept", "content_type", "Session"];
+const CORE_MODULE_52_MEMBERS: &[&str] = &["__get", "__post", "__request", "Client", "Proxy", "RedirectPolicy", "delete", "get", "head", "header", "patch", "post", "put", "request", "send", "set_header", "timeout_redirects", "session", "session_header", "session_timeout", "session_retries", "session_redirects", "session_auth", "session_proxy", "session_cookie", "cookie_header", "session_request", "session_get", "session_post", "session_put", "session_patch", "session_delete", "session_head", "session_json", "session_form", "redirect_limit", "with_proxy", "user_agent", "bearer", "accept", "content_type", "Session", "jet_http_build_resolve", "jet_http_build_get"];
 const CORE_MODULE_52_TYPES: &[(&str, CoreLeafKind)] = &[("Session", CoreLeafKind::Plain), ("Client", CoreLeafKind::Plain), ("Proxy", CoreLeafKind::Plain), ("RedirectPolicy", CoreLeafKind::Enum(&["Disabled", "Limited", "All"]))];
 const CORE_MODULE_52_DEPENDENCIES: &[&str] = &["core.http"];
 
