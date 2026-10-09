@@ -958,7 +958,8 @@ pub(crate) fn jet_native_comptime_begin(fuel: u64, max_depth: u64) -> bool {
 // compiler's comptime worker protocol calls this, and descriptor 3 stays open
 // for the whole process lifetime. Violating it borrows a closed or unrelated
 // descriptor: the duplicate fails (reported as None) or writes the envelope to
-// the wrong file.
+// the wrong file. Only unix hosts run the worker; wasm guests omit the module.
+#[cfg(all(unix, not(target_arch = "wasm32")))]
 mod jet_native_comptime_channel {
     use std::os::fd::BorrowedFd;
 
@@ -982,6 +983,7 @@ pub(crate) fn jet_native_comptime_fail(status: u32, message: &str) -> ! {
     let (_, owner, start, end) = JET_NATIVE_COMPTIME_FRAME.with(std::cell::Cell::get);
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
+    #[cfg(all(unix, not(target_arch = "wasm32")))]
     if let Some(mut channel) = jet_native_comptime_channel::protocol_channel() {
         let header = format!("JCT1 {status} {owner} {start} {end} {}\n", message.len());
         let _ = channel.write_all(header.as_bytes());
