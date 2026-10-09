@@ -12,8 +12,8 @@ fn subject(mode: String, path: String) -> ProcessReceipt {
     artifact := ""
     loop line in build.output.split("\n") {
         if line.starts_with("built: ") {
-            rest :: ~line.slice(7..<line.len())
-            artifact = ~rest.split(" (").to_list()[0].trim()
+            rest :: line.slice(7..<line.len()).copy()
+            artifact = rest.split(" (").to_list()[0].trim().copy()
             break
         }
     }

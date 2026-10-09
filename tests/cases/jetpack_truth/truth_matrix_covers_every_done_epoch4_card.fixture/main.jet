@@ -24,14 +24,14 @@ fn truth_matrix_rows(raw: String) -> [Int: TruthMatrixRow] {
     rows := [Int: TruthMatrixRow]{}
     loop line in raw.lines() {
         if !line.starts_with("| #") -> next
-        stripped := ~line
+        stripped := line.copy()
         // Rust trim_matches('|') removes every leading and trailing pipe.
         loop stripped.starts_with("|") -> stripped = truth_slice(stripped, 1, stripped.bytes().len())
         loop stripped.ends_with("|") -> stripped = truth_slice(stripped, 0, stripped.bytes().len() - 1)
         cells := [String]{}
-        loop cell in truth_text.split(stripped, "|") -> &cells.push(~cell.trim())
+        loop cell in truth_text.split(stripped, "|") -> &cells.push(cell.trim().copy())
         assert_eq(cells.len(), 4, "malformed truth row: {line}")
-        number_text := ~cells[0]
+        number_text := cells[0].copy()
         loop number_text.starts_with("#") -> number_text = truth_slice(number_text, 1, number_text.bytes().len())
         num :: Int.parse(number_text) ?? panic("truth row card number")
         assert(!rows.has_key(num), "duplicate truth row for #{num}")
@@ -121,7 +121,7 @@ fn run() {
     rows :: truth_matrix_rows(raw)
     git :: truth_process.cmd([String]{"git", "rev-parse", "--path-format=absolute", "--git-common-dir"}).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? panic("locate Git common dir")
     assert(git.success, "cannot locate live Git common dir")
-    live_root :: truth_files.dirname(~git.output.trim())
+    live_root :: truth_files.dirname(git.output.trim().copy())
     cards :: truth_tower_cards(live_root)
     audited := rows.keys().to_list()
     &audited.sort()

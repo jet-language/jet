@@ -38,7 +38,7 @@ fn s1_repair_parse_report(value: encoding.Dyn) -> S1RepairReport {
     loop edit in s1_repair_array(s1_repair_field(value, "fix_edits")) {
         span :: s1_repair_field(edit, "span")
         &edits.push(S1RepairEdit{
-            code: ~code, file: s1_repair_string(edit, "file"),
+            code: code.copy(), file: s1_repair_string(edit, "file"),
             start: s1_repair_usize(span, "start"), end: s1_repair_usize(span, "end"),
             new_text: s1_repair_string(edit, "new_text"),
         })
@@ -57,7 +57,7 @@ fn s1_repair_check(dir: String, jet: String, state: [S1RepairFile]) -> [S1Repair
     loop file in state {
         output :: process.cmd([String]{jet, "check", file.path, "--json"}).cwd(dir).env("NO_COLOR", "1").run() ?? panic("check spawn")
         assert_eq(output.errors, "", "JSON check wrote stderr")
-        status :: json.parse(~output.output.trim()) ?? panic("JSON check must emit one status object")
+        status :: json.parse(output.output.trim().copy()) ?? panic("JSON check must emit one status object")
         assert_eq(s1_repair_string(status, "schema"), "jet.status/v1")
         assert_eq(s1_repair_string(status, "action"), "check")
         rows :: s1_repair_parse_reports(status)
@@ -155,7 +155,7 @@ fn s1_repair_loop(initial: [S1RepairFile], max_rounds: Int, dir: String, jet: St
             if introduced.len() != 0 -> return Err("fix_edit regression introduced report code(s): {introduced.join(", ")}")
         }
         if round == max_rounds -> return Err("round bound {max_rounds} exceeded; offending code(s): {codes.join(", ")}")
-        &seen.push(~state)
+        &seen.push(state.copy())
         if s1_repair_apply(state, reports) == {
             .Ok(next_state) -> state = next_state
             .Err(error) -> return Err(error)
@@ -192,7 +192,7 @@ fn s1_repair_loop(initial: [S1RepairFile], max_rounds: Int, dir: String, jet: St
     loop count in counts -> assert(count > 0, "one repair-loop round must report edits for every fixture file")
     assert(counts[1] >= 3, "run.jet needs several errors")
     assert(counts[0] >= 3, "helper.jet needs several errors")
-    if s1_repair_loop(~initial, 0, dir, jet) == {
+    if s1_repair_loop(initial.copy(), 0, dir, jet) == {
         .Err(error) -> assert(error.contains("round bound 0") && error.contains("E0102"), "bound failure must name offending code")
         .Ok(_) -> panic("expected bound failure")
     }

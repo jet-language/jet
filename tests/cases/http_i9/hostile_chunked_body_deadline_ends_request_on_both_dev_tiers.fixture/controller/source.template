@@ -51,8 +51,8 @@ fn subject(mode: String, path: String) -> ProcessReceipt {
     artifact := ""
     loop line in build.output.split("\n") {
         if line.starts_with("built: ") {
-            rest :: ~line.slice(7..<line.len())
-            artifact = ~rest.split(" (").to_list()[0].trim()
+            rest :: line.slice(7..<line.len()).copy()
+            artifact = rest.split(" (").to_list()[0].trim().copy()
             break
         }
     }
@@ -79,7 +79,7 @@ fn run() {
     modes :: [String]{"default", "interpret"}
     loop mode in modes {
         address :: reserve_address()
-        port :: ~address.split(":").to_list()[1]
+        port :: address.split(":").to_list()[1].copy()
         source :: files.read("{work}/server/main.template") ?? panic("source")
         files.write("{work}/server/main.jet", source.replace("__PORT__", port)) ?? panic("stage")
         runner :: task { return subject(mode, "{work}/server/main.jet") }

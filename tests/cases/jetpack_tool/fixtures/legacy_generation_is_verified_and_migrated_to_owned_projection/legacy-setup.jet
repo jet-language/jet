@@ -13,7 +13,7 @@ fn run(store: String, hash: String, home: String) {
     entries :: files.list_dir(store + "/hangar")
     loop entry in entries {
         path :: entry.path + "/meta.json"
-        if files.is_file(~path) {
+        if files.is_file(path.copy()) {
             meta :: files.read(path)
             if meta.contains("greet@nixpkgs") {
                 target :: field(meta, "bin") + "/greet"

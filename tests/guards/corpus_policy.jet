@@ -105,7 +105,7 @@ fn policy_relative_path(path: String) -> String? {
 }
 fn policy_selector_path(selector: String) -> String {
     if selector.starts_with("root:") || selector.starts_with("file:") -> return policy_slice_bytes(selector, 5, selector.bytes().len())
-    ~selector
+    selector.copy()
 }
 fn policy_selector_error(value: String) -> String? {
     if !value.starts_with("root:") && !value.starts_with("file:") -> return Val("selector must start with root: or file: ({value})")
@@ -115,7 +115,7 @@ fn policy_producer_error(value: String) -> String? {
     if !value.starts_with("producer:") -> return Val("producer selector must start with producer: ({value})")
     parts :: policy_slice_bytes(value, 9, value.bytes().len()).split("#").to_list()
     if parts.len() < 2 -> return Val("producer selector must name a symbol ({value})")
-    if policy_relative_path(parts[0]) == .Val(error) -> return Val(~error)
+    if policy_relative_path(parts[0]) == .Val(error) -> return Val(error.copy())
     if parts.len() != 2 || parts[1].is_empty() -> return Val("producer selector must name one non-empty symbol ({value})")
     None
 }
@@ -300,7 +300,7 @@ fn policy_validate_manifest(manifest: PolicyManifest) -> [String] {
     }
     loop producer in manifest.producers {
         if policy_protocol_error(producer.protocol) == .Val(error) {
-            path :: ~policy_slice_bytes(producer.selector, 9, producer.selector.bytes().len()).split("#").to_list()[0]
+            path :: policy_slice_bytes(producer.selector, 9, producer.selector.bytes().len()).split("#").to_list()[0].copy()
             message :: policy_violation(path, "generated-protocol-override", "manifest:generated-protocol@0..0")
             &errors.push("{message} ({error})")
         }
@@ -341,7 +341,7 @@ fn policy_validate_manifest(manifest: PolicyManifest) -> [String] {
 }
 
 fn policy_join(root: String, path: String) -> String {
-    if root.is_empty() || root == "." -> return ~path
+    if root.is_empty() || root == "." -> return path.copy()
     if root.ends_with("/") -> return "{root}{path}"
     "{root}/{path}"
 }
@@ -353,7 +353,7 @@ fn policy_validate_manifest_paths(manifest: PolicyManifest, root: String) -> [St
         if !exists -> &errors.push("manifest source selector does not exist: {source.selector}")
     }
     loop producer in manifest.producers {
-        path :: ~policy_slice_bytes(producer.selector, 9, producer.selector.bytes().len()).split("#").to_list()[0]
+        path :: policy_slice_bytes(producer.selector, 9, producer.selector.bytes().len()).split("#").to_list()[0].copy()
         if !policy_files.is_file(policy_join(root, path)) -> &errors.push("manifest producer source does not exist: {producer.selector}")
     }
     loop exception in manifest.exceptions {
@@ -450,13 +450,13 @@ fn policy_manifest() -> PolicyManifest {
 }
 fn policy_manifest_failure(text: String) -> String {
     if policy_parse_manifest(text) == {
-        .Err(error) -> return ~error.message
+        .Err(error) -> return error.message.copy()
         .Ok(_) -> panic("invalid manifest unexpectedly accepted")
     }
 }
 fn policy_exception_failure(manifest: PolicyManifest, path: String, candidates: [PolicyOccurrence]) -> String {
     if policy_apply_exceptions(manifest, path, candidates) == {
-        .Err(error) -> return ~error.message
+        .Err(error) -> return error.message.copy()
         .Ok(_) -> panic("invalid exception occurrences unexpectedly accepted")
     }
 }

@@ -7,7 +7,7 @@ use core.sys
 use core.encoding.hex
 use core.encoding.json
 fn visit(root: String, path: String) {
-    info :: files.stat(~path)
+    info :: files.stat(path.copy())
     kind := 4
     if info.is_symlink -> kind = 3
     else if info.is_dir -> kind = 1
@@ -18,10 +18,10 @@ fn visit(root: String, path: String) {
         if info.readonly -> mode = 1
     }
     bytes := ""
-    if info.is_file -> bytes = hex.encode(files.read_bytes(~path))
+    if info.is_file -> bytes = hex.encode(files.read_bytes(path.copy()))
     // Hex is injective over bytes; JSON quoting is injective over relative paths.
     relative := ""
-    if path != root -> relative = files.relative(~path, ~root)
+    if path != root -> relative = files.relative(path.copy(), root.copy())
     shown :: json.to_string(Dyn.Text(relative))
     modified :: info.modified.to_unix_ns() ?? panic("mtime outside Unix nanosecond range")
     print("{shown}\t{kind}\t{info.size}\t{mode}\tsome:{modified}\t{bytes}")
@@ -30,8 +30,8 @@ fn visit(root: String, path: String) {
     children := [String]{}
     loop entry in entries -> &children.push(entry.path)
     &children.sort()
-    loop child in children -> visit(~root, child)
+    loop child in children -> visit(root.copy(), child)
 }
 fn run(root: String) {
-    visit(~root, root)
+    visit(root.copy(), root)
 }

@@ -29,10 +29,10 @@ fn policy_parse_program(source_label: String, source: String) -> Program PolicyE
 fn policy_strip_inline_package(source: String, tokens: [Token]) -> String {
     first := 0
     loop first < tokens.len() && (tokens[first].kind == TOKEN_LINE_COMMENT || tokens[first].kind == TOKEN_BLOCK_COMMENT) -> first += 1
-    if first == tokens.len() || tokens[first].kind != TOKEN_IDENT || tokens[first].payload.text != "package" -> return ~source
+    if first == tokens.len() || tokens[first].kind != TOKEN_IDENT || tokens[first].payload.text != "package" -> return source.copy()
     opener := first + 1
     loop opener < tokens.len() && tokens[opener].kind != TOKEN_LBRACE -> opener += 1
-    if opener == tokens.len() -> return ~source
+    if opener == tokens.len() -> return source.copy()
     depth := 0
     loop index in opener..<tokens.len() {
         token :: tokens[index]
@@ -42,7 +42,7 @@ fn policy_strip_inline_package(source: String, tokens: [Token]) -> String {
             if depth == 0 -> return policy_slice_bytes(source, token.span.end, source.bytes().len())
         }
     }
-    ~source
+    source.copy()
 }
 
 fn policy_ast_test_compiler_dependency() {

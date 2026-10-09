@@ -37,7 +37,7 @@ fn decode_old() -[]> String {
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
         0x09
     }
-    profile :: cbor.decode<Profile>(~bytes) ?? panic("decode")
+    profile :: cbor.decode<Profile>(bytes.copy()) ?? panic("decode")
     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
 }
 
@@ -52,7 +52,7 @@ fn forced_deopt() -[]> String {
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
         0x09
     }
-    profile :: cbor.decode<Profile>(~bytes) ?? panic("decode")
+    profile :: cbor.decode<Profile>(bytes.copy()) ?? panic("decode")
     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
 }
 
@@ -66,7 +66,7 @@ fn failed_change() -[]> String {
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
         0x09
     }
-    cbor.decode<Profile>(~bytes) ? _value -> return "accepted" ! error -> return "{error[0].path}:{error[0].reason}"
+    cbor.decode<Profile>(bytes.copy()) ? _value -> return "accepted" ! error -> return "{error[0].path}:{error[0].reason}"
 }
 
 fn run() {

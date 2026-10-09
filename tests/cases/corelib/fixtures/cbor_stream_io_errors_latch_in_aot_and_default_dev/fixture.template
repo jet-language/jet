@@ -25,14 +25,14 @@ fn run() {
     directory_input :: files.open("{work}") ?? panic("directory open")
     directory_reader := cbor.reader(^directory_input) ?? panic("directory reader")
     if directory_reader.next() == {
-        .Err(first) -> print(reader_terminal(&directory_reader, ~first.reason))
+        .Err(first) -> print(reader_terminal(&directory_reader, first.reason.copy()))
         .Ok(_) -> print(false)
     }
     full_output :: files.create("/dev/full") ?? panic("full open")
     full_writer := cbor.writer(^full_output) ?? panic("full writer")
     full_writer.write(encoding.DataEvent.Null) ?? panic("full buffered write")
     if &full_writer.flush() == {
-        .Err(first) -> print(writer_terminal(&full_writer, ~first.reason))
+        .Err(first) -> print(writer_terminal(&full_writer, first.reason.copy()))
         .Ok(_) -> print(false)
     }
 }
