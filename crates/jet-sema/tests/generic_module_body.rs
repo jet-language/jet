@@ -207,6 +207,13 @@ fn run() {\n\
     value :: sys.EnvError.InvalidValue\n\
     unicode :: sys.EnvError.NonUnicode\n\
 }\n",
+        "use core.event.[EventConfigError as ConfigError]\n\
+fn run() {\n\
+    error :: ConfigError.InvalidCapacity\n\
+    called :: ConfigError.InvalidCapacity()\n\
+}\n",
+        "use core.event as event\n\
+fn run() { error :: event.EventConfigError.InvalidCapacity }\n",
     ] {
         let (_, diagnostics) = check(source);
         assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
@@ -215,6 +222,17 @@ fn run() {\n\
         "use core.sys.[EnvError]\nfn run() { error :: EnvError.NotACase }\n",
     );
     assert!(!error_codes(&diagnostics).is_empty(), "unknown variants must fail");
+}
+
+#[test]
+fn native_core_enum_cases_in_embedded_source_keep_the_native_leaf() {
+    let source = "use core.event.[EventConfigError]\n\
+fn failure() -> EventConfigError Never! { EventConfigError.InvalidCapacity }\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/event/event.jet", source, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
 }
 
 #[test]
@@ -282,6 +300,60 @@ fn core_source_decimal_decl_and_display_impl_replace_builtin_name() {
     ]);
     let errors: Vec<_> = diagnostics.iter().filter(|d| d.severity == Severity::Error).collect();
     assert!(errors.is_empty(), "Core Decimal errors: {errors:?}");
+}
+
+#[test]
+fn core_data_error_display_is_source_owned_and_duplicates_still_fail() {
+    let core = "#[Equatable, Error]\nstruct DataError { reason: String }\n\
+impl DataError.Display { fn display(self) -> String { self.reason.copy() } }\n";
+    let user = "use core.data\nfn show(error: data.DataError) -> String { \"{error}\" }\nfn run() {}\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/data/data.jet", core, &[]),
+        ("pkg-a/src/main.jet", user, &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    let duplicate = format!("{core}\nimpl DataError.Display {{ fn display(self) -> String {{ \"duplicate\" }} }}\n");
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/data/data.jet", &duplicate, &[]),
+        ("pkg-a/src/main.jet", user, &[]),
+    ]);
+    assert!(diagnostics.iter().any(|d| d.code == "E0908"), "{diagnostics:?}");
+}
+
+#[test]
+fn qualified_writer_nominal_wins_over_builtin_trait() {
+    let provider = "pub struct Writer { prefix: String }\n\
+pub fn make() -> Writer { Writer{prefix: \"written\"} }\n";
+    let user = "use \"writer.jet\" as jetc\n\
+fn prefix(writer: jetc.Writer) -> String { writer.prefix.copy() }\n\
+fn run() { print(prefix(jetc.make())) }\n";
+    let (bundle, diagnostics) = check_modules(&[
+        ("pkg-a/src/writer.jet", provider, &[]),
+        ("pkg-a/src/main.jet", user, &[("jetc", 0)]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    let function = bundle.modules[1].items.iter().find_map(|item| match item {
+        Item::Func(function) if function.name == "prefix" => Some(function),
+        _ => None,
+    }).unwrap();
+    assert!(matches!(&function.params[0].ty, Type::Named(name) if name.ends_with("::Writer")));
+}
+
+#[test]
+fn core_crypto_qualified_self_import_matches_local_secret_fields() {
+    let crypto = "use core.crypto\nuse \"jetc.jet\" as jetc\n\
+struct Secret { bytes: [U8] }\n\
+fn verify(reader: jetc.Reader) -> Int {\n\
+    key: Secret = reader.key\n\
+    key.bytes.len()\n\
+}\n";
+    let jetc = "use core.crypto\npub struct Reader { key: crypto.Secret }\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/crypto/crypto.jet", crypto, &[("jetc", 1)]),
+        ("<corelib>/Core/crypto/jetc.jet", jetc, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
 }
 
 #[test]

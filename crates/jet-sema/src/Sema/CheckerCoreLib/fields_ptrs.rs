@@ -38,33 +38,17 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        // Native EnvError has no source enum and is a plain exported nominal
-        // in the Core catalog. Its canonical variant table still owns cases.
-        if module == "core.sys"
-            && self.core_item_imports.get(alias).is_some_and(|item| item == "EnvError")
-            && super::core_types::CORE_ENV_ERROR_VARIANT_NAMES.contains(&name)
-        {
-            self.record_import_alias_reference(alias, alias_span);
-            return Some(Type::Named("EnvError".to_string()));
-        }
-        // Canonical Core enum imports (`use core.compute.[ComputeError]`,
-        // etc.) keep the imported item alongside its module alias. Resolve
-        // dotted variants through the generated leaf-kind/variant tables
-        // rather than treating the variant as a module member.
-        if let Some(item) = self.core_item_imports.get(alias).cloned() {
-            let is_core_enum = matches!(
-                jet_foundation::CoreModuleExports::core_leaf_kind(module, &item),
-                Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
-            );
-            let identity = self.import_qualified_nominal(alias)
-                .unwrap_or_else(|| item.clone());
-            if is_core_enum
-                && self
-                    .resolve_enum_variants_cloned(&identity)
-                    .is_some_and(|variants| variants.contains_key(name))
-            {
-                self.record_import_alias_reference(alias, alias_span);
-                return Some(Type::Named(identity));
+        // Native enums retain their catalog leaf identity, not a source-module
+        // nominal synthesized for an imported alias. Borrow the actual case
+        // names instead of cloning a registry under that synthetic identity.
+        if let Some(item) = self.core_item_imports.get(alias) {
+            if self.core_source_enum_owner_module(module, item).is_none() {
+                let variants = super::core_types::core_native_enum_variant_names(module, item);
+                if variants.is_some_and(|variants| variants.contains(&name)) {
+                    let identity = item.clone();
+                    self.record_import_alias_reference(alias, alias_span);
+                    return Some(Type::Named(identity));
+                }
             }
         }
 

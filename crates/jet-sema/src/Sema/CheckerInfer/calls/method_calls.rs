@@ -2354,39 +2354,39 @@ impl<'a> Checker<'a> {
                         return Some(ret);
                     }
                 }
-                if let Some(owner) = self.core_source_enum_owner_module(&module, &item) {
-                    let has_variant = self.modules.is_some_and(|states|
+                let enum_identity = if let Some(owner) =
+                    self.core_source_enum_owner_module(&module, &item)
+                {
+                    self.modules.is_some_and(|states|
                         states[owner].registry.enum_variants(&item)
-                            .is_some_and(|variants| variants.contains_key(method)));
-                    if has_variant {
-                        let identity = self.canonical_nominal_name(owner, &item);
-                        let saved: Vec<Expr> = args
-                            .iter_mut()
-                            .map(|arg| {
-                                std::mem::replace(
-                                    &mut arg.expr,
-                                    Expr::Int(0, arg.span, None, None),
-                                )
-                            })
-                            .collect();
-                        let mut enum_args: Vec<EnumLitArg> =
-                            saved.into_iter().map(EnumLitArg::Positional).collect();
-                        let ty = self.check_enum_lit(
-                            &identity,
-                            method,
-                            &mut enum_args,
-                            span,
-                            Some(span),
-                        );
-                        for (arg, enum_arg) in args.iter_mut().zip(enum_args) {
-                            if let EnumLitArg::Positional(expr) = enum_arg {
-                                arg.expr = expr;
-                            }
+                            .is_some_and(|variants| variants.contains_key(method)))
+                        .then(|| self.canonical_nominal_name(owner, &item))
+                } else {
+                    crate::Sema::CheckerCoreLib::core_native_enum_variant_names(
+                        &module, &item,
+                    ).filter(|variants| variants.contains(&method)).map(|_| item.clone())
+                };
+                if let Some(identity) = enum_identity {
+                    self.record_import_alias_reference(alias, *alias_span);
+                    let mut enum_args: Vec<EnumLitArg> = args.iter_mut()
+                        .map(|arg| EnumLitArg::Positional(std::mem::replace(
+                            &mut arg.expr, Expr::Int(0, arg.span, None, None),
+                        ))).collect();
+                    let ty = self.check_enum_lit(
+                        &identity,
+                        method,
+                        &mut enum_args,
+                        span,
+                        Some(span),
+                    );
+                    for (arg, enum_arg) in args.iter_mut().zip(enum_args) {
+                        if let EnumLitArg::Positional(expr) = enum_arg {
+                            arg.expr = expr;
                         }
-                        **receiver = Expr::Ident(identity, span);
-                        *resolved_ret_out = Some(ty.clone());
-                        return Some(ty);
                     }
+                    **receiver = Expr::Ident(identity, span);
+                    *resolved_ret_out = Some(ty.clone());
+                    return Some(ty);
                 }
                 if module == "core.encoding" && item == "EncodingLimits" && method == "safe" {
                     let ret = self.check_static_method(&item,

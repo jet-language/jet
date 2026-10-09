@@ -189,6 +189,9 @@ Source-owned Core enum unit and payload cases resolve the enum's declaring
 registry before module-item lookup. Native Core enums use their canonical
 variant tables as well: grouped `EnvError.InvalidValue` and qualified
 `sys.EnvError.InvalidValue` name the case, not a `core.sys` module item.
+Catalog-backed native cases such as `EventConfigError.InvalidCapacity`
+retain the catalog's native type leaf, including under a local import
+alias; unit fields and constructor calls share that case lookup.
 Within compiler-owned Core source, an import of a sealed part's catalog
 alias also joins the transitive source closure, even if that part's public
 owner was not imported. This does not expose private aliases to user code.
@@ -2226,6 +2229,9 @@ user-facing — a single explicit method `fn display(self) -> String`, no
 default (E0915, L0520). Bare `self` gives read access (D-MEM1), not ownership:
 printing and interpolation `{}` borrow the value and leave it available;
 `display(^self)` and `display(&self)` do not match this contract.
+`#Error` marks an error type; it does not synthesize `Display`. Source-owned
+Core errors register their explicit formatting implementations through the
+same trait registry as user types, without a duplicate builtin implementation.
 `Debug` is dev-facing and auto-derived; `{value:Debug}` selects it;
 `#Redact` on a field renders `"[redacted]"` (D-DEBUG-REDACT).
 

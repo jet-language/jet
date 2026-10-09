@@ -2837,6 +2837,16 @@ pub(crate) fn core_terminal_mode_variants(
 pub(crate) const CORE_ENV_ERROR_VARIANT_NAMES: &[&str] =
     &["InvalidName", "InvalidValue", "NonUnicode"];
 
+pub(crate) fn core_native_enum_variant_names(module: &str, item: &str) -> Option<&'static [&'static str]> {
+    match jet_foundation::CoreModuleExports::core_leaf_kind(module, item) {
+        Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(variants)) => Some(variants),
+        // This native enum predates enum leaf classification in the catalog.
+        Some(jet_foundation::CoreModuleExports::CoreLeafKind::Plain)
+            if module == "core.sys" && item == "EnvError" => Some(CORE_ENV_ERROR_VARIANT_NAMES),
+        _ => None,
+    }
+}
+
 pub(crate) fn core_env_error_variants(
 ) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
     use crate::Diagnostics::Span;
