@@ -13,12 +13,12 @@ use core.math as math
 
 // C: the observations are private. All Float arithmetic below keeps the
 // existing measured-value constructor, operator and observation surface.
-struct Measurement<T> {
+struct Measurement<T: Debug> {
     value: T
     uncertainty: T
 
     impl Display {
-        fn display(self) -> String Never! { "{self.value:Debug} ± {self.uncertainty:Debug}" }
+        fn display(self) -> String { "{self.value:Debug} ± {self.uncertainty:Debug}" }
     }
 }
 
@@ -56,7 +56,7 @@ fn __measurement_div(left: Measurement<Float>, right: Measurement<Float>) -> Mea
 
 fn __measurement_sqrt(value: Measurement<Float>) -> Measurement<Float> Never! {
     root :: math.sqrt(value.value)
-    uncertainty :: if root == 0.0 && value.uncertainty == 0.0 -> 0.0 else -> value.uncertainty / (2.0 * root)
+    uncertainty :: if root == 0.0 && value.uncertainty == 0.0 -> Float{0.0} else -> value.uncertainty / (Float{2.0} * root)
     __measurement_new(root, uncertainty)
 }
 
@@ -70,7 +70,7 @@ fn __measurement_optional(value: Float?, relative: Float) -> Measurement<Float>?
     Val(__measurement_from_relative(scalar, relative))
 }
 
-fn __measurement_result(value: Float String!, relative: Float) -> Measurement<Float> String! {
+fn __measurement_result<E>(value: Float E!, relative: Float) -> Measurement<Float> E! {
     if value == {
         .Ok(scalar) -> Ok(__measurement_from_relative(scalar, relative))
         .Err(error) -> Err(error)
@@ -251,11 +251,11 @@ fn is_zero(m: Measurement<Float>) -> Bool Never! {
     optional :: __measurement_optional(Val(-12.0), -0.025) ?? panic("conversion")
     assert_eq(optional.value(), -12.0)
     assert_eq(math.to_bits(optional.uncertainty()), 4599075939470750516)
-    if __measurement_result(Err("unit conversion is not exactly representable"), 0.025) == {
+    if __measurement_result(Err(Err("unit conversion is not exactly representable")), 0.025) == {
         .Ok(_) -> panic("lost scalar conversion error")
-        .Err(error) -> assert_eq(error, "unit conversion is not exactly representable")
+        .Err(error) -> assert_eq(error.message, "unit conversion is not exactly representable")
     }
-    if __measurement_result(Ok(-12.0), -0.025) == {
+    if __measurement_result<Err>(Ok(-12.0), -0.025) == {
         .Ok(value) -> assert_eq(math.to_bits(value.uncertainty()), 4599075939470750516)
         .Err(_) -> panic("successful conversion failed")
     }

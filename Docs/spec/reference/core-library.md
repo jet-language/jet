@@ -2346,14 +2346,17 @@ uncertainty, and multiplication, division, and square root use the
 corresponding first-order derivatives. Exact inputs have zero uncertainty.
 **Correlated errors are out of scope** (D-TYPE2-UNCERT1).
 
-`Measurement<T>` is a source-owned generic record with private observations.
+`Measurement<T: Debug>` is a source-owned generic record; its `Display`
+implementation requires the observations to support Debug formatting.
 Construct Float measurements with `measurement(value, uncertainty: sigma)`;
 read them through `value()` and `uncertainty()`, not record fields or literals.
 Arithmetic uses `+`, `-`, `*`, `/`, and `math.sqrt`; named arithmetic and
 `sqrt()` methods are not alternate spellings. Exact scalar operands enter
 these operations with zero uncertainty. Measured unit conversion first keeps
-the scalar exact/rounded conversion's failure, then constructs uncertainty
-from the converted value and the relative scale uncertainty. Ordinary
+the scalar exact/rounded conversion's failure domain `E`, then constructs
+uncertainty from the converted value and the relative scale uncertainty.
+The source propagation helper is generic over `E`; it does not turn failures
+into an invalid `String!` error contract. Ordinary
 measurement Display uses Float Debug text (`1e-8`), while `units.show` retains
 Float Display text.
 

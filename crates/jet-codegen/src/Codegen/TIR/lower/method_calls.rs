@@ -2026,12 +2026,20 @@ pub(super) fn lower_measurement_source_call(
             }
         })
         .collect();
+    let type_args = if function == "__measurement_result" {
+        match &result {
+            Type::Result { err, .. } => vec![(**err).clone()],
+            _ => return invariant_method_expr(span, "checked Measurement result call has no failure domain"),
+        }
+    } else {
+        Vec::new()
+    };
     TExpr {
         ty: result,
         kind: TExprKind::ModuleCall {
             form: core_source_module_target(signature, function),
             target_return,
-            type_args: Vec::new(),
+            type_args,
             args,
         },
     }

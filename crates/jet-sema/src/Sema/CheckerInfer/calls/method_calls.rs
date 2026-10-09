@@ -6419,7 +6419,9 @@ impl<'a> Checker<'a> {
         // Arithmetic is the ordinary operator surface; the old named
         // add/sub/mul/div methods are not a second spelling.
         if let Type::Apply { name, .. } = &recv_ty {
-            if name == crate::Syntax::TYPE_MEASUREMENT
+            if (name == crate::Syntax::TYPE_MEASUREMENT
+                || (jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                    && name.ends_with("::Core/units/units.jet::Measurement")))
                 && matches!((method, args.len()), ("value" | "uncertainty", 0))
             {
                 *recv_type_out = Some(crate::Syntax::TYPE_MEASUREMENT.to_string());
