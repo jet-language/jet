@@ -234,8 +234,13 @@ fn sema_ownership_last_use_pattern(pattern: Pattern, name: String) -> Bool Never
     if pattern == {
         .Struct(fields, _, _, _) -> loop field in fields {
             if field == {
-                .Value(_, _, value) -> if sema_ownership_last_use_expr(value, name) -> return true
-                .Nested(_, _, nested) -> if sema_ownership_last_use_pattern(nested, name) -> return true
+                // Braces keep the table's fallback outside the nested `if`.
+                .Value(_, _, value) -> {
+                    if sema_ownership_last_use_expr(value, name) -> return true
+                }
+                .Nested(_, _, nested) -> {
+                    if sema_ownership_last_use_pattern(nested, name) -> return true
+                }
                 else -> {}
             }
         }
