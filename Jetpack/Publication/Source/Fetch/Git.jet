@@ -33,7 +33,7 @@ fn pkg_fetch_git_transport(root: String, url: String) -[FS, Env, Net, Time.Wait]
         if !(canonical == project || canonical.starts_with("{project}/")) -> return Err(pkg_fetch_git_bad("the local Git path resolves outside the project root"))
         source :: foundation_open_directory_authority(canonical) ?? return Err(pkg_fetch_git_bad("could not retain the local Git path authority: {err}"))
         source.tree_hash(true) ?? return Err(pkg_fetch_git_bad("local Git source contains unsafe files: {err}"))
-        remote :: if sys.is_macos() || sys.name() == "ios" -> "/dev/fd/199" else if sys.name() == "linux" || sys.name() == "android" -> "/proc/self/fd/199" else -> return Err(pkg_fetch_git_bad("descriptor-relative Git source access is unavailable on this platform"))
+        remote :: if sys.is_macos() || sys.name() == "ios" -> "/dev/fd/199" else if sys.name() == "linux" || sys.name() == "android" -> "/proc/self/fd/199" else -> { return Err(pkg_fetch_git_bad("descriptor-relative Git source access is unavailable on this platform")) }
         return Ok(PackageFetchGitTransport{network: None, local: Val(source), remote: remote})
     }
     scheme := ""
@@ -41,7 +41,7 @@ fn pkg_fetch_git_transport(root: String, url: String) -[FS, Env, Net, Time.Wait]
     if url.split_once("://") == .Val(pair) {
         scheme = pair.before.to_ascii_lower()
         authority = pair.after
-        loop marker in [String]{"/", "?", "#"} { if authority.split_once(marker) == .Val(parts) -> authority = parts.before }
+        loop marker in ([String]{"/", "?", "#"}) { if authority.split_once(marker) == .Val(parts) -> authority = parts.before }
     } else {
         parts :: url.split_once(":") ?? return Err(pkg_fetch_git_bad("local git paths must use file:// inside the project root"))
         if parts.before == "" || parts.after == "" || parts.before.contains("/") || parts.before.contains("?") || parts.before.contains("#") || parts.before.ends_with("\\") -> return Err(pkg_fetch_git_bad("local git paths must use file:// inside the project root"))
@@ -62,7 +62,7 @@ fn pkg_fetch_git_transport(root: String, url: String) -[FS, Env, Net, Time.Wait]
     if parsed.host == "" || parsed.host.starts_with("-") || parsed.host.contains("@") || parsed.host.contains("\\") -> return Err(pkg_fetch_git_bad("the URL has no valid host"))
     loop character in parsed.host.chars() { if character.is_whitespace() -> return Err(pkg_fetch_git_bad("the URL has an invalid host")) }
     port :: parsed.port ?? if scheme == "https" -> 443 else if scheme == "http" -> 80 else if scheme == "git" -> 9418 else -> 22
-    answers :: publication_dns.__build_resolve(parsed.host, port) ?? return Err(pkg_fetch_git_bad("could not resolve the destination: {err}"))
+    answers :: publication_dns.jet_http_build_resolve(parsed.host, port) ?? return Err(pkg_fetch_git_bad("could not resolve the destination: {err}"))
     if !publication_addresses_public(answers) -> return Err(pkg_fetch_git_bad("the destination resolves to a non-public address"))
     transport :: PublicationRegistryTransport.Network(scheme, parsed.host, port, parsed.port != None, answers[0])
     Ok(PackageFetchGitTransport{network: Val(transport), local: None, remote: transport.remote(url)})
