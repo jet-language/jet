@@ -535,10 +535,12 @@ fn mir_pass_validate_stop_cleanup_scopes(function: MIRFunction, dominance: MIRPa
                 else -> {}
             }
         }
-        if scopes.len() > 0 && block.terminator == {
-            .Poll(_, _, _) -> return Val("MIR StopCleanup recursively polls")
-            .Stopped | .Return(_) | .Yield(_, _) -> return Val("MIR exit leaves a StopCleanup token open")
-            else -> {}
+        if scopes.len() > 0 {
+            if block.terminator == {
+                .Poll(_, _, _) -> return Val("MIR StopCleanup recursively polls")
+                .Stopped | .Return(_) | .Yield(_, _) -> return Val("MIR exit leaves a StopCleanup token open")
+                else -> {}
+            }
         }
         loop target in mir_terminator_targets(block.terminator) {
             unwinding := state.unwinding
@@ -2128,7 +2130,7 @@ fn mir_pass_remainder_drops(function: MIRFunction, definitions: MIRPassDefinitio
 // place, so only an earlier move of the owner itself conflicts with it.
 fn mir_pass_move_is_live(moved: [MIRPassPlaceEvent], reinitialized: [MIRPassPlaceEvent], path: [String], remainder_drop: Bool, block: MIRBlockID, index: Int, dominance: MIRPassDominance) -> Bool Never! {
     loop earlier in moved {
-        overlaps :: mir_pass_place_path_is_prefix(earlier.projections, path) || !remainder_drop && mir_pass_place_path_is_prefix(path, earlier.projections)
+        overlaps :: mir_pass_place_path_is_prefix(earlier.projections, path) || (!remainder_drop && mir_pass_place_path_is_prefix(path, earlier.projections))
         if !overlaps || !mir_pass_precedes(earlier.block, earlier.index, block, index, dominance) -> next
         restored := false
         loop write in reinitialized {
