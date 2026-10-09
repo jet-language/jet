@@ -743,7 +743,8 @@ fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, walk: &mut NominalWalk<'
         Type::Apply { name, .. }
             if matches!(
                 name.as_str(),
-                "DataArrowBatch"
+                "Atomic"
+                    | "DataArrowBatch"
                     | "MutationPlan"
                     | "VaultWrite"
                     | "ExpiringSecret"

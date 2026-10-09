@@ -169,6 +169,7 @@ fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         }
     }
     if offset < 0 -> offset = 0
+    if !lower_atomic_check_offset(p, &m, &f, ty, offset) -> return None
     Val(LowerPlaceAddress{address: LowerFieldAddress{base: base, offset: offset}, ty: ty, borrowed: borrowed})
 }
 
