@@ -2325,7 +2325,8 @@ operations resolve their reserved helpers by the loaded math module identity;
 they do not resolve a user function with the same helper spelling.
 The bare and `core.math`-qualified `Fraction`, `Decimal`, and `Complex`
 spellings name the same declarations; local user types retain their own
-declaration identity.
+declaration identity. These are reserved source-owned declarations, not duplicate
+compiler builtin records: only the canonical loaded Core module may declare them.
 Their `Display` implementations use the canonical `fn display(self) -> String`
 contract: rendering borrows the value and keeps the exact text policy above.
 

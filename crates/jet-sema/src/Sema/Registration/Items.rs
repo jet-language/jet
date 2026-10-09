@@ -1709,7 +1709,7 @@ pub(crate) fn register_struct(
     consts: &HashMap<String, Type>,
     target: &jet_foundation::Layout::TargetLayout,
 ) {
-    if is_reserved_type(&s.name) && !s.compiler_builtin_error {
+    if registry.reserves_type_name(&s.name) && !s.compiler_builtin_error {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", s.name),
