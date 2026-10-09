@@ -14,12 +14,15 @@ writers to shared artifacts.
 During consolidation repair, remove exact duplicate declarations while retaining
 the canonical regression scenarios; compilation fixes must not narrow coverage.
 
-Admit the shared host/release build as soon as the workspace/all-target bootstrap
-check is green; do not delay the fresh verifier behind an older verifier's grammar
-or memory failures. Pin it to an immutable export of that checked commit. Publish
+Admit the shared host/release build at Main's committed bootstrap-build pin;
+retired Rust integration tests are not the compiler-source gate. Do not delay the
+fresh verifier behind an older verifier's grammar or memory failures. Pin the build
+to an immutable export of that commit. Publish
 the bootstrap host and release `jet` entries in `jet-regression-artifacts/v1`
 as they become available, and derive runtime freshness checks from that release's
 own all-parts emission.
+Keep the all-parts seed's public Core imports current, including `core.db.sql`;
+otherwise a newly exposed source-owned boundary is absent from the error census.
 
 The separate candidate build requires read-only generator checks and a frontend
 check of the complete compiler assembled by `Compiler/Bootstrap/assemble.mjs`,
