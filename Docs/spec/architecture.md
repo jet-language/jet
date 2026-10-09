@@ -77,6 +77,13 @@ path. Library feeds require fresh object, export and ABI files; command
 completion alone is not a native pass. Checked-MIR observers are explicit Jet
 drivers compiled from the canonical compiler aggregate, cached per pinned
 toolchain, rather than a bootstrap factory or a retired Rust observer.
+The [S5 drivers](../../Tools/agent/s5/make-jobs.sh) execute from the immutable
+source export. Queue completion is not a pass: consumers require the real
+`driver.rc`, a completed same-pin phase receipt and its decisive PASS rows.
+Receipts are published atomically; interruption preserves partial evidence
+and records a driver failure. A pack publication binds its runtime key and
+digest to `native.key` and the selected object. Prepared golden corpora are
+hash-checked and consumed without rerunning preparation.
 
 The compiler frontend receipt must retain the full foreign Cargo diagnostics,
 including cached bridge fingerprint output when an inline-FFI error hides

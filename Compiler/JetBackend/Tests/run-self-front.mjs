@@ -32,7 +32,7 @@ function main(){
  if(options.front!=='jet'||!options.unit||!options.map)throw new Error('self-host feed requires --front jet, --unit and --map');
  const out=resolve(output),unit=resolve(options.unit),map=JSON.parse(readFileSync(options.map,'utf8'));mkdirSync(out,{recursive:true});
  const mir=join(out,'self.mird'),candidate=options.decode?null:resolve(options.candidate??candidateJetc0());
- if(!options.decode){const problem=runJetMir({candidate,file:unit,root:dirname(unit),cwd:dirname(unit),prefix:join(out,'self'),receipt:join(out,'self.receipt'),store:join(out,'store'),mir});if(problem){writeFileSync(join(out,'self.failure.json'),JSON.stringify(problem,null,2)+'\n');console.error(problem.detail);process.exitCode=1;return;}}
+ if(!options.decode){const problem=runJetMir({candidate,file:unit,root:dirname(unit),cwd:dirname(unit),prefix:join(out,'self'),store:join(out,'store'),mir});if(problem){writeFileSync(join(out,'self.failure.json'),JSON.stringify(problem,null,2)+'\n');console.error(problem.detail);process.exitCode=1;return;}}
  const observed=options.decode?resolve(options.decode):mir;
  const decoded=decodeStream(readFileSync(observed,'utf8'),loadMirSchema(repo));
  const inventory=selfInventory(decoded.program,map,unit);

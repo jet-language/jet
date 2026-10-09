@@ -156,7 +156,7 @@ if (from <= 0 && until >= 0) {
       const root = project ? join(cwd, relative(checkout, project)) : dirname(file);
       const problem = runJetFront({
         candidate, file, root, cwd, prefix: join(dirs.lower, c.slug),
-        receipt: join(dirs.mir, `${c.slug}.receipt`), pack: runtimePack,
+        pack: runtimePack,
         store: join(outDir, "store", c.slug),
       });
       if (problem) Object.assign(c, problem);

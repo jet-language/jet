@@ -73,7 +73,7 @@ if (mode !== "--plan") {
             const program = join(executableRoot, "unit.jet");
             writeFileSync(program, readFileSync(join(raw, "unit.jet"), "utf8") + "\nfn run() { collections_tests() }\n");
             const prefix = join(executableRoot, "collections-test");
-            const problem = runJetFront({ candidate: candidateJetc0(), file: program, root: executableRoot, cwd: root, prefix, receipt: join(raw, "front.receipt"), pack, store: join(raw, "store") });
+            const problem = runJetFront({ candidate: candidateJetc0(), file: program, root: executableRoot, cwd: root, prefix, pack, store: join(raw, "store") });
             if (problem) failures.push(`raw front: ${problem.detail}`);
             else {
                 const run = spawnSync(`${prefix}.exe`, [], { encoding: "utf8", timeout: 30000 });
@@ -98,7 +98,7 @@ if (mode !== "--plan") {
                 const stopFile = join(directory, "unit.jet");
                 const stopPrefix = join(directory, "stop");
                 writeFileSync(stopFile, readFileSync(join(raw, "unit.jet"), "utf8") + `\nfn run() { ${entry} }\n`);
-                const problem = runJetFront({ candidate: candidateJetc0(), file: stopFile, root: directory, cwd: root, prefix: stopPrefix, receipt: join(directory, "front.receipt"), pack, store: join(raw, "store") });
+                const problem = runJetFront({ candidate: candidateJetc0(), file: stopFile, root: directory, cwd: root, prefix: stopPrefix, pack, store: join(raw, "store") });
                 if (problem) failures.push(`${name} compile: ${problem.detail}`);
                 else {
                     const stopped = spawnSync(`${stopPrefix}.exe`, [], { encoding: "utf8", timeout: 30000 });

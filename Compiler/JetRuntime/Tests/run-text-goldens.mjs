@@ -88,7 +88,7 @@ if (mode !== "--plan") {
       const prefix = join(executableRoot, "text-test");
       const problem = runJetFront({
         candidate, file: program, root: executableRoot,
-        cwd: root, prefix, receipt: join(raw, "front.receipt"), pack, store: join(raw, "store"),
+        cwd: root, prefix, pack, store: join(raw, "store"),
       });
       if (problem) failures.push(`raw witness compile: ${problem.detail}`);
       else {
@@ -113,7 +113,7 @@ if (mode !== "--plan") {
         writeFileSync(file, `${library}\nfn run() { ${entry}() }\n`);
         const problem = runJetFront({
           candidate, file, root: directory, cwd: root, prefix,
-          receipt: join(directory, "front.receipt"), pack, store: join(raw, "store"),
+          pack, store: join(raw, "store"),
         });
         if (problem) failures.push(`${name} compile: ${problem.detail}`);
         else {

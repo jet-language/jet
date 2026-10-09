@@ -94,7 +94,7 @@ else {
     const program = join(executableRoot, "unit.jet");
     writeFileSync(program, `${readFileSync(join(raw, "unit.jet"), "utf8")}\n${tests}`);
     const prefix = join(executableRoot, "scan-test");
-    const problem = runJetFront({ candidate: candidateJetc0(), file: program, root: executableRoot, cwd: root, prefix, receipt: join(raw, "front.receipt"), pack, store: join(raw, "store") });
+    const problem = runJetFront({ candidate: candidateJetc0(), file: program, root: executableRoot, cwd: root, prefix, pack, store: join(raw, "store") });
     if (problem) failures.push(`raw compile: ${problem.detail}`);
     else {
       const run = spawnSync(`${prefix}.exe`, [], { encoding: "utf8", timeout: 30000 });

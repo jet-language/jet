@@ -91,7 +91,7 @@ if (mode !== "--plan") {
       const prefix = join(native, "unicode-test");
       const problem = runJetFront({
         candidate: candidateJetc0(), file: executable, root: native,
-        cwd: root, prefix, receipt: join(native, "front.receipt"),
+        cwd: root, prefix,
         pack, store: join(native, "store"),
       });
       if (problem) failures.push(`raw witness compile: ${problem.detail}`);
