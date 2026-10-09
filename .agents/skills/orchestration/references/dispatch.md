@@ -12,7 +12,7 @@ the fields that the worker and artifact need:
 
 | Worker or artifact | Add to the brief |
 |---|---|
-| Source implementation | In-repository worktree and branch, last integrated commit, applicable authority and invariants, complete consumer/caller cutover, and the exact criterion proof command with its expected observable result. |
+| Source implementation | The dev worktree, the last dev commit, the paths the worker owns and commits on `dev`, applicable authority and invariants, complete consumer/caller cutover, and the exact criterion proof command with its expected observable result. |
 | `.jet` source writer | The source file's scoped checks: `Tools/agent/jet-env jet check path/to/file.jet` and `Tools/agent/jet-env jet fmt --check path/to/file.jet`. These are source checks, not runtime, tier, snapshot, golden, or generated-artifact proof. |
 | Prose or static-data writer | The user-visible audience, source-of-truth paths, link/path consumers, and the expected `DOCS ONLY` receipt. Do not require compiler commands for prose-only work. |
 | Review worker | The exact bounded artifact, acceptance criteria, authority, invariants, and evidence to inspect. A review worker reports findings and does not repair the artifact. |
@@ -32,8 +32,8 @@ Dispatch through the host's task and steering tools, which handle harvest,
 cancellation, and liveness. Select the most specific role available; prompts do
 not choose or name a model. If the host cannot run the required role, record
 the exact harness failure in the handoff before a bounded fallback. A fallback
-still uses the assigned in-repository worktree, explicit timeout, complete
-brief, no Tower writes, and no sibling worktree access.
+still uses the dev worktree and its owned paths, explicit timeout, complete
+brief, no Tower writes, and no other worker's paths.
 
 Workers do not write Tower, close cards, or start `tower serve`. The completion
 owner uses the non-serve CLI against the main board; no agent hand-edits Tower

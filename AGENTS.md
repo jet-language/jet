@@ -189,15 +189,18 @@ composed sweep and one fresh-context review; individual cards do not wait for
 that gate.
 
 One implementer owns each coherent patch. Concurrent writers need disjoint
-paths and one named close owner. Default to a single delivery stream, and add
-streams only when paths, integration, tests, and resources stay clean. Use only
-in-repository worktrees under `.claude/worktrees/<name>` or
-`.agent-worktrees/<name>`, use checkout-owned external Cargo targets configured
-through `jet-env` (see the orchestration resource reference), integrate promptly,
-and remove finished worktrees and temporary branches. Never overwrite
-another task's paths. Never run `git add -A`, a broad `git commit -a`,
-`git restore .`, or any equivalent broad operation. Never hand-edit
-`Tools/tower/.tower/`.
+paths and one named close owner. The repository has exactly two branches,
+`master` and `dev`, and one dev worktree. Every agent commits directly on `dev`
+in that worktree, in small commits that stage only its own paths. Never create a
+branch, a worktree, or any other ref (`refs/keep`, `refs/salvage`,
+`refs/archive`, private lineages), for any purpose: experiments, candidates,
+measurements, and proofs included. To build or measure an uncommitted change,
+apply a scratch patch to a temporary `git archive` export outside the
+repository. Use checkout-owned external Cargo targets configured through
+`jet-env` (see the orchestration resource reference). Never overwrite another
+task's paths. Never run `git add -A`, a broad `git commit -a`, `git stash`,
+`git restore .`, `git reset --hard`, or any equivalent broad operation. Never
+hand-edit `Tools/tower/.tower/`.
 
 Only the owner starts `tower serve` unless the owner directs otherwise. Agents
 use the non-serve Tower CLI (`node Tools/tower/tower.mjs`) against the main

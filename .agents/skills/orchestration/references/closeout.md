@@ -14,9 +14,10 @@ it. Keep the findings in Tower; this does not authorize unrelated broad proof.
 
 ## One integration line
 
-Branch parallel work from one integration line and return it promptly after
-focused proof. One named integrator lands branches or patches; do not keep
-long-lived side branches.
+All work lands directly on `dev`, the one integration line, in small commits
+that stage only the writer's own paths. The repository has exactly two
+branches, `master` and `dev`, and one dev worktree; never create another
+branch, worktree, or ref (see `AGENTS.md`).
 
 `master` advances only when a goal or milestone is accomplished and its proof
 gate passes. Use the commit-bound sweep and fresh review below; individual
