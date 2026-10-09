@@ -1195,7 +1195,7 @@ impl<'a> Interp<'a> {
         }
         let mut frame = HashMap::new();
         frame.insert(function.params[0].name.clone(), value.clone());
-        match self.call_func(&format!("{name}.{hook}"), function, frame)? {
+        match self.call_func(function, frame)? {
             CtValue::Str(text) => Ok(Some(text)),
             _ => Err(unsupported("source value renderer did not return String", span)),
         }

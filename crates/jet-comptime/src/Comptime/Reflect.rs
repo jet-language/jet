@@ -3363,7 +3363,6 @@ mod tests {
             compiler_builtin_error: false,
             is_pub: true,
             is_package_pub: false,
-            compiler_builtin_error: false,
             name: "Point".to_string(),
             name_span: span(),
             type_params: vec![TypeParam {

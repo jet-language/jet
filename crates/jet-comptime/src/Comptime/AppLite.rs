@@ -277,8 +277,8 @@ mod web_kernel {
     pub fn jet_enc_json_to_string<T: __jet_Encode>(
         value: &T,
     ) -> Result<String, jet_std::EncodingError> {
-        let tree = value.jet_encode();
-        jet_foundation::EncodingJson::validate_json(&tree).map_err(|error| {
+        let tree = super::super::JSONInterp::from_json(value.jet_encode());
+        super::super::JSONInterp::render_ordered_dyn(&tree, false, 0).map_err(|error| {
             jet_std::EncodingError::new(
                 jet_std::EncodingFormat::JSON,
                 jet_std::EncodingErrorKind::Unsupported,
@@ -288,8 +288,7 @@ mod web_kernel {
                 error.path,
                 error.reason,
             )
-        })?;
-        Ok(jet_foundation::EncodingJson::render_json(&tree, false, 0))
+        })
     }
 
     include!("../../../jet-codegen/src/Prelude/Core/EncodingError.rs");
@@ -2628,8 +2627,8 @@ pub fn apply_suite(
             let fields = web_strings(one(2)?, "store fields", span)?;
             let callback = one(3)?.clone();
             Ok(web_store_transaction(web_kernel::jet_web_store_transaction(store, action, fields,
-                move |state| {
-                    super::Methods::invoke_standalone_closure_mut(&callback, state, span)
+                move || {
+                    super::Methods::invoke_standalone_closure(&callback, Vec::new(), span)
                         .unwrap_or_else(|error| std::panic::panic_any(error));
                 })))
         }
