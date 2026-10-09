@@ -167,6 +167,49 @@ fn fx_display_list() -> MIRProgram Never! {
     fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
 }
 
+// Compiler source use sites:
+// JetParser/Source/Parser/ExpressionForms/DecisionTables.jet:138 interpolates
+// BinOp; JetSema/Source/Sema/Comptime/BodyRequests.jet:205-213 debugs a list
+// of SemaComptimeBodyValue records containing Type enum payloads.
+// No explicit impl is present: these exercise the existing derived renderer
+// through the same owned-String helper call used by interpolation.
+// expect-stdout display-compiler-values: "Eq\nSemaComptimeBodyValue { key: \"entry\", ty: Named(\"Widget\") }\n[SemaComptimeBodyValue { key: \"entry\", ty: Named(\"Widget\") }]\n"
+fn fx_display_compiler_values() -> MIRProgram Never! {
+    op_ty :: fx_named("BinOp")
+    type_ty :: fx_named("Type")
+    row_ty :: fx_named("SemaComptimeBodyValue")
+    types :: [MIRTypeDef]{
+        fx_display_type("BinOp", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+            MIRVariant{name: "Eq", wire_name: "Eq", span: fx_span(), payload: MIRVariantPayload.Unit, discriminant: None},
+            MIRVariant{name: "Ne", wire_name: "Ne", span: fx_span(), payload: MIRVariantPayload.Unit, discriminant: None},
+        }, methods: [MIRFunctionID]{}}),
+        fx_display_type("Type", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+            MIRVariant{name: "String", wire_name: "String", span: fx_span(), payload: MIRVariantPayload.Unit, discriminant: None},
+            MIRVariant{name: "Named", wire_name: "Named", span: fx_span(), payload: MIRVariantPayload.Single{value: fx_string()}, discriminant: None},
+        }, methods: [MIRFunctionID]{}}),
+        fx_display_type("SemaComptimeBodyValue", MIRTypeDefKind.Struct{fields: [MIRField]{
+            fx_field("SemaComptimeBodyValue", "key", fx_string()),
+            fx_field("SemaComptimeBodyValue", "ty", type_ty),
+        }, methods: [MIRFunctionID]{}}),
+    }
+    b := fx_builder()
+    op :: fx_copy(&b, op_ty, MIROperation.Enum{type_id: mir_type_id("BinOp"), variant: "Eq", args: [MIREnumArg]{}})
+    fx_render_interpolation(&b, op, MIRStringFormat.Display)
+    name :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "Widget"}})
+    ty :: fx_owned(&b, type_ty, MIROperation.Enum{type_id: mir_type_id("Type"), variant: "Named", args: [MIREnumArg]{MIREnumArg{field: None, value: name, boxed: false}}})
+    key :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "entry"}})
+    row :: fx_owned(&b, row_ty, MIROperation.Struct{type_id: mir_type_id("SemaComptimeBodyValue"), fields: [MIRFieldValue]{
+        MIRFieldValue{field: mir_field_id("SemaComptimeBodyValue.key"), value: key},
+        MIRFieldValue{field: mir_field_id("SemaComptimeBodyValue.ty"), value: ty},
+    }})
+    fx_render_interpolation(&b, row, MIRStringFormat.Debug)
+    rows :: fx_owned(&b, mir_type_from_kind(MIRTypeKind.List{inner: row_ty}), MIROperation.BuildList{values: [MIRValueID]{row}, trait_coercion: None})
+    fx_render_interpolation(&b, rows, MIRStringFormat.Debug)
+    fx_do(&b, MIROperation.Drop{value: rows, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, types)
+}
+
 // The ordinary reference bodies return constants. Only the runtime driver
 // table may substitute them, and both System V Float boundaries are exercised.
 // expect-stdout runtime-bitcast: "true\n"
@@ -263,7 +306,6 @@ fn fx_runtime_bitcast_refusals() -> Bool Never! {
     if inst == .Bitcast(dst, src) {
         layouts :: [LIRLayout]{
             LIRLayout{size: 4, align: 4, class: .Integer},
-            LIRLayout{size: 4, align: 4, class: .Float},
             LIRLayout{size: 4, align: 4, class: .Pointer},
             LIRLayout{size: 8, align: 8, class: .Memory},
         }
@@ -275,6 +317,18 @@ fn fx_runtime_bitcast_refusals() -> Bool Never! {
             bad.values[dst.value].layout = layout
             if lir_lint_inst(program, bad, inst).len() == 0 -> return false
         }
+        // Binary32 <-> Word is admitted; a bitcast is still not a
+        // Float32/Float64 conversion or a pointer reinterpretation.
+        binary32 :: LIRLayout{size: 4, align: 4, class: .Float}
+        cross_float := ~function
+        cross_float.values[dst.value].layout = binary32
+        if lir_lint_inst(program, cross_float, inst).len() == 0 -> return false
+        cross_float = ~function
+        cross_float.values[src.value].layout = binary32
+        cross_float.values[dst.value].layout = lir_layout_float()
+        if lir_lint_inst(program, cross_float, inst).len() == 0 -> return false
+        cross_float.values[dst.value].layout = lir_layout_pointer()
+        if lir_lint_inst(program, cross_float, inst).len() == 0 -> return false
         bad := ~function
         bad.values[src.value].drop = LIRDrop.Runtime{symbol: "jet_rt_string_drop"}
         if lir_lint_inst(program, bad, inst).len() == 0 -> return false

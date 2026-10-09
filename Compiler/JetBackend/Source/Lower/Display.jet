@@ -171,6 +171,14 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
         lower_call_runtime(&m, &f, symbol, [LIRValueID]{operand}, Val(text))
         return Val(LowerText{value: text, owned: true})
     }
+    // Compiler/JetCli/Source/Cli/AdaptiveTable.jet formats I128/U128 cells.
+    // Their inline two-word carrier must render as one decimal value, not as
+    // a structural tuple or a truncated machine word.
+    if lower_wide_signed(p, ty) != None {
+        text :: lower_render_string(&f)
+        lower_wide_show(p, &m, &f, text, operand, ty)
+        return Val(LowerText{value: text, owned: true})
+    }
     symbol :: if repr == {
         .ExactInt -> "jet_rt_int_to_string"
         .Word -> if {
