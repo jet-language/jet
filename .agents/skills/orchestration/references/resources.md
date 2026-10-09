@@ -11,16 +11,21 @@ a stale binary is not proof. Avoid per-worker copies or private builds unless
 the worker's unintegrated change is itself what must be measured. Serialize
 writers to shared artifacts.
 
-Before admitting a shared compiler build, collect the workspace/all-target
-bootstrap check, read-only generator checks, and a frontend check of the complete
-compiler assembled by `Compiler/Bootstrap/assemble.mjs` with the frozen bootstrap
-verifier. A file-local parse receipt does not establish that the assembled
-compiler resolves its current APIs. Migrate callers to the retained one-walk
-Core collector, in-place effect graph publisher, payload-place shared writer,
-multi-root backend lowering, source-owned expiry carriers, and current owner-gated
-recipe refusal; do not restore retired providers or compatibility aliases.
-Pin the admitted build to an immutable export of the checked commit and derive
-runtime freshness checks from that build's own all-parts emission.
+Admit the shared host/release build as soon as the workspace/all-target bootstrap
+check is green; do not delay the fresh verifier behind an older verifier's grammar
+or memory failures. Pin it to an immutable export of that checked commit. Publish
+the bootstrap host and release `jet` entries in `jet-regression-artifacts/v1`
+as they become available, and derive runtime freshness checks from that release's
+own all-parts emission.
+
+The separate candidate build requires read-only generator checks and a frontend
+check of the complete compiler assembled by `Compiler/Bootstrap/assemble.mjs`,
+using the fresh release verifier. A file-local parse receipt does not establish
+that the assembled compiler resolves its current APIs; inspect nested diagnostics,
+not just the transport's top-level `ok` flag. Migrate callers to retained current
+APIs without restoring retired providers or aliases. Append the candidate entry
+only after its real CLI hello succeeds and its collect-all report contains no
+failure rows; typed traps are failure evidence, not a green compiler.
 
 ## Keep build output separate and bounded
 
