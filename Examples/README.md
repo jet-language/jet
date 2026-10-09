@@ -23,6 +23,12 @@ node Tools/agent/run-feature-examples.mjs
 For the contributor workflow around the executable and its environment, see
 [`AGENTS.md`](../AGENTS.md) and [`Tools/agent/jet-env`](../Tools/agent/jet-env).
 
+Examples that depend on environment or process identity should print checked
+relationships instead of raw paths or process IDs. For example,
+[`system_projection.jet`](features/io/system_projection.jet) compares the home
+directory with its environment source and checks child exit statuses, preserving
+the system calls while keeping the stdout contract independent of the host.
+
 ## Find an example
 
 Start with the smallest source in [`features/basics/`](features/basics/), then
