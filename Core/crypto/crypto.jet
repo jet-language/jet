@@ -970,6 +970,317 @@ fn jetc_verify_output(input: JetcFd, writer: jetc.Writer, length: Int) FileCrypt
     Ok()
 }
 
+// Internal source-owned migration coordinator, shared with expert.migrate_v1.
+// The legacy grammar intentionally retains its bounded whole-buffer contract.
+fn __migrate_v1(key: [U8], source: Path, recipients: [X25519PublicKey], destination: Path) -[FS, Rand]> Bool FileCryptoError! {
+    if source == destination -> return Err(.DestinationExists)
+    input :: jetc_source(source.to_string(), .SourceIO)
+    total :: jetc_stat(input, .SourceIO).len
+    if total > 1073741858 -> return Err(.OpenFailed)
+    data := Secret{bytes: [U8]{}}
+    loop {
+        jetc_cancel_checkpoint()
+        part :: jetc_read(input, jetc.CHUNK, "migrate-v1-read-io", .SourceIO)
+        if part.bytes.len() == 0 -> break
+        if data.bytes.len() + part.bytes.len() > 1073741858 -> return Err(.OpenFailed)
+        loop byte in part.bytes -> &data.bytes.push(byte)
+    }
+    if data.bytes.len() != total -> return Err(.SourceIO)
+    plain := Secret{bytes: [U8]{}}
+    #Unsafe("the expert API explicitly authorizes authenticated legacy-v1 migration") {
+        plain.bytes = core.crypto.expert.open_v1(key, data.bytes) ?? return Err(.OpenFailed)
+    }
+    canonical :: jetc.canonical(recipients)
+    parent :: jetc_parent(destination.to_string())
+    stage :: jetc_stage(parent)
+    jetc_cancel_checkpoint()
+    jetc_write(stage.file, plain.bytes, "migrate-stage-write")
+    jetc_sync(stage.file, "migrate-stage-fsync")
+    metadata :: jetc_stat(stage.file, .DestinationIO)
+    jetc_seek(stage.file, .DestinationIO)
+    hash := jetc_hash()
+    jetc_hash_update(&hash, plain.bytes)
+    expected :: jetc_hash_finish(&hash)
+    jetc_seal_stage(canonical, parent, stage, plain.bytes.len(), expected, metadata, true)
+    Ok(true)
+}
+
+struct JetcParent {
+    directory: JetcFd, path: String, destination: String,
+    name: String, metadata: __JetcStat, linux: Bool,
+}
+fn jetc_min(left: Int, right: Int) -> Int Never! {
+    if left < right -> left else -> right
+}
+fn jetc_fd(raw: __JetcRaw, error: FileCryptoError) -> JetcFd FileCryptoError! {
+    if raw.value < 0 -> return Err(error)
+    Ok(JetcFd{fd: raw.value})
+}
+fn jetc_stat(file: JetcFd, error: FileCryptoError) -> __JetcStat FileCryptoError! {
+    result :: core.crypto.__jetc_stat(file.fd)
+    if result.status < 0 -> return Err(error)
+    Ok(result)
+}
+fn jetc_walk_directory(path: String) -> JetcFd FileCryptoError! {
+    current := jetc_fd(core.crypto.__jetc_open_directory(if path.starts_with("/") -> "/" else -> "."), .DestinationIO)
+    loop name in path.split("/") {
+        if name == "" || name == "." -> next
+        if name == ".." -> return Err(.DestinationIO)
+        next :: jetc_fd(core.crypto.__jetc_open_child_directory(current.fd, name), .DestinationIO)
+        close(^current)
+        current = ^next
+    }
+    Ok(^current)
+}
+fn jetc_parent(destination: String) -> JetcParent FileCryptoError! {
+    loop byte in destination.bytes() {
+        if byte == (U8{0}) -> return Err(.DestinationIO)
+    }
+    name :: core.files.basename(destination)
+    if name == "" || name == "." || name == ".." -> return Err(.DestinationIO)
+    parent_text :: core.files.dirname(destination)
+    path :: if parent_text == "" -> "." else -> parent_text
+    opened :: core.crypto.__jetc_open_directory(path)
+    linux :: opened.linux
+    directory := jetc_fd(opened, .DestinationIO)
+    if linux {
+        checked :: jetc_walk_directory(path)
+        close(^directory)
+        directory = ^checked
+    }
+    metadata :: jetc_stat(directory, .DestinationIO)
+    if !metadata.is_dir -> return Err(.DestinationIO)
+    Ok(JetcParent{directory: ^directory, path: path, destination: destination,
+        name: name, metadata: metadata, linux: linux})
+}
+fn jetc_source(path: String, error: FileCryptoError) -> JetcFd FileCryptoError! {
+    file :: jetc_fd(core.crypto.__jetc_open_source(path), error)
+    if !jetc_stat(file, error).is_file -> return Err(error)
+    Ok(^file)
+}
+fn jetc_same_source(left: __JetcStat, right: __JetcStat) -> Bool Never! {
+    identity :: if core.files.__os_family() == "unix" -> left.dev == right.dev && left.ino == right.ino else -> true
+    identity && left.len == right.len && left.mtime == right.mtime && left.mtime_ns == right.mtime_ns
+}
+fn jetc_temp(parent: JetcParent, prefix: String) -> JetcTemp FileCryptoError! {
+    if parent.linux {
+        file :: jetc_fd(core.crypto.__jetc_tmpfile(parent.directory.fd), .DestinationIO)
+        if jetc_stat(file, .DestinationIO).nlink != 0 -> return Err(.DestinationIO)
+        return Ok(JetcTemp{file: ^file, path: None})
+    }
+    pid :: core.files.__atomic_pid()
+    loop attempt in 0..<128 {
+        sequence :: parent.directory.fd * 128 + attempt
+        name :: ".{prefix}-{pid}-{sequence}"
+        path :: core.files.join(parent.path, name)
+        result :: core.crypto.__jetc_create_named(path)
+        if result.value >= 0 -> return Ok(JetcTemp{file: JetcFd{fd: result.value}, path: Val(path)})
+        if !jetc_exists_errno(result.errno) -> return Err(.DestinationIO)
+    }
+    Err(.DestinationIO)
+}
+fn jetc_stage(parent: JetcParent) -> JetcTemp FileCryptoError! {
+    stage := jetc_temp(parent, "jetc-stage")
+    if stage.path == .Val(path) {
+        core.files.__remove_raw(path) ?? return Err(.DestinationIO)
+        stage.path = None
+    }
+    Ok(^stage)
+}
+fn jetc_io_fault(name: String, error: FileCryptoError) FileCryptoError! {
+    if core.files.__fault_should_fail(name) -> return Err(error)
+    Ok()
+}
+fn jetc_read(file: JetcFd, count: Int, name: String, error: FileCryptoError) -> Secret FileCryptoError! {
+    loop {
+        if core.files.__fault_should_fail("{name}.interrupted") -> next
+        jetc_io_fault(name, error)
+        if core.files.__fault_should_fail("{name}.eof") -> return Ok(Secret{bytes: [U8]{}})
+        requested :: if core.files.__fault_should_fail("{name}.short") -> jetc_min(count, 17) else -> count
+        result :: core.crypto.__jetc_read(file.fd, requested)
+        if result.value < 0 {
+            if result.errno == 4 && core.files.__os_family() == "unix" -> next
+            return Err(error)
+        }
+        return Ok(Secret{bytes: ^result.bytes})
+    }
+}
+fn jetc_read_exact(file: JetcFd, count: Int, name: String, error: FileCryptoError) -> Secret FileCryptoError! {
+    if count == 0 -> return Ok(Secret{bytes: [U8]{}})
+    out := jetc_read(file, jetc_min(count, jetc.CHUNK), name, error)
+    if out.bytes.len() == 0 -> return Err(error)
+    loop out.bytes.len() < count {
+        part :: jetc_read(file, jetc_min(count - out.bytes.len(), jetc.CHUNK), name, error)
+        if part.bytes.len() == 0 -> return Err(error)
+        loop byte in part.bytes -> &out.bytes.push(byte)
+    }
+    Ok(^out)
+}
+fn jetc_write(file: JetcFd, bytes: [U8], name: String) FileCryptoError! {
+    jetc_write_span(file, bytes, 0, bytes.len(), name)
+}
+fn jetc_write_span(file: JetcFd, bytes: [U8], start: Int, end: Int, name: String) FileCryptoError! {
+    offset := start
+    loop offset < end {
+        if core.files.__fault_should_fail("{name}.interrupted") -> next
+        jetc_io_fault(name, .DestinationIO)
+        if core.files.__fault_should_fail("{name}.zero") -> return Err(.DestinationIO)
+        count :: if core.files.__fault_should_fail("{name}.short") -> jetc_min(end - offset, 17) else -> end - offset
+        result :: core.crypto.__jetc_write(file.fd, bytes, offset, count)
+        if result.value < 0 {
+            if result.errno == 4 && core.files.__os_family() == "unix" -> next
+            return Err(.DestinationIO)
+        }
+        if result.value == 0 -> return Err(.DestinationIO)
+        offset += result.value
+    }
+    Ok()
+}
+fn jetc_seek(file: JetcFd, error: FileCryptoError) FileCryptoError! {
+    if core.crypto.__jetc_seek(file.fd, 0).value < 0 -> return Err(error)
+    Ok()
+}
+fn jetc_sync(file: JetcFd, name: String) FileCryptoError! {
+    jetc_io_fault(name, .DestinationIO)
+    if core.crypto.__jetc_fsync(file.fd).value < 0 -> return Err(.DestinationIO)
+    Ok()
+}
+fn jetc_digest(file: JetcFd, expected_length: Int, name: String) -> [U8] FileCryptoError! {
+    hash := jetc_hash()
+    length := 0
+    loop {
+        jetc_cancel_checkpoint()
+        part :: jetc_read(file, jetc.CHUNK, name, .SourceIO)
+        if part.bytes.len() == 0 -> break
+        length += part.bytes.len()
+        if length > expected_length || length > jetc.MAX_PLAIN -> return Err(.SourceIO)
+        jetc_hash_update(&hash, part.bytes)
+    }
+    if length != expected_length -> return Err(.SourceIO)
+    Ok(jetc_hash_finish(&hash))
+}
+fn jetc_revalidate(parent: JetcParent) FileCryptoError! {
+    current :: if parent.linux -> jetc_walk_directory(parent.path) else -> jetc_fd(core.crypto.__jetc_open_directory(parent.path), .DestinationIO)
+    before :: if parent.linux -> jetc_stat(parent.directory, .DestinationIO) else -> parent.metadata
+    after :: jetc_stat(current, .DestinationIO)
+    if before.dev != after.dev || before.ino != after.ino -> return Err(.DestinationIO)
+    Ok()
+}
+fn jetc_publish(output: ^JetcTemp, parent: JetcParent, operation: String) FileCryptoError! {
+    jetc_cancel_checkpoint()
+    if parent.linux {
+        jetc_sync(output.file, "{operation}-output-fsync")
+        jetc_revalidate(parent)
+        result :: core.crypto.__jetc_link(output.file.fd, parent.directory.fd, parent.name)
+        if result.value < 0 {
+            if jetc_exists_errno(result.errno) -> return Err(.DestinationExists)
+            return Err(.DestinationIO)
+        }
+        jetc_sync(parent.directory, "{operation}-directory-fsync")
+    } else {
+        if core.crypto.__jetc_fsync(output.file.fd).value < 0 -> return Err(.DestinationIO)
+        close(^output.file)
+        output.file = JetcFd{fd: -1}
+        jetc_revalidate(parent)
+        path :: output.path ?? return Err(.DestinationIO)
+        if core.files.__hard_link_raw(path, parent.destination) == {
+            .Err(error) -> {
+                if error == .AlreadyExists(_) -> return Err(.DestinationExists)
+                return Err(.DestinationIO)
+            }
+            .Ok(_) -> {}
+        }
+        core.files.__remove_raw(path) ?? return Err(.DestinationIO)
+        directory :: jetc_fd(core.crypto.__jetc_open_directory(parent.path), .DestinationIO)
+        if core.crypto.__jetc_fsync(directory.fd).value < 0 -> return Err(.DestinationIO)
+        output.path = None
+    }
+    Ok()
+}
+fn jetc_seal_stage(recipients: [jetc.Recipient], parent: JetcParent, stage: JetcTemp,
+    length: Int, expected: [U8], metadata: __JetcStat, verify: Bool) FileCryptoError! -[FS, Rand]> {
+    // Ratified snapshot/cancellation ordering: no RNG1 on observed cancel.
+    jetc_cancel_checkpoint()
+    file_id :: jetc_random(16)
+    file_key :: jetc_random(32)
+    ephemeral :: jetc_random(32)
+    nonce_prefix :: jetc_random(16)
+    writer := jetc.writer(recipients, length, file_id.bytes, ^file_key, ^ephemeral, nonce_prefix.bytes)
+    jetc_cancel_checkpoint()
+    output :: jetc_temp(parent, "jetc-output")
+    operation :: if verify -> "migrate" else -> "seal"
+    jetc_write_span(output.file, writer.prefix, 0, 20, "{operation}-output-write")
+    jetc_write_span(output.file, writer.prefix, 20, writer.prefix.len(), "{operation}-output-write")
+    jetc_seek(stage.file, .SourceIO)
+    hash := jetc_hash()
+    loop !writer.final {
+        jetc_cancel_checkpoint()
+        count :: jetc_min(writer.remaining, jetc.CHUNK)
+        plain :: jetc_read_exact(stage.file, count, "{operation}-stage-read", .SourceIO)
+        jetc_hash_update(&hash, plain.bytes)
+        if count < jetc.CHUNK {
+            trailing :: jetc_read(stage.file, 1, "{operation}-stage-read", .SourceIO)
+            if trailing.bytes.len() != 0 || !jetc_same_source(metadata, jetc_stat(stage.file, .SourceIO)) -> return Err(.SourceIO)
+            if !constant_time_equal_bytes(jetc_hash_finish(&hash), expected) -> return Err(.SourceIO)
+        }
+        record :: jetc.seal_chunk(&writer, plain.bytes)
+        jetc_write_span(output.file, record.framing, 0, 4, "{operation}-output-write")
+        jetc_write_span(output.file, record.framing, 4, 5, "{operation}-output-write")
+        jetc_write(output.file, record.cipher, "{operation}-output-write")
+    }
+    if verify {
+        jetc_sync(output.file, "migrate-verify-fsync")
+        jetc_io_fault("migrate-reopen-verify", .DestinationIO)
+        if jetc_verify_output(output.file, writer, length) == {
+            .Ok(_) -> {}
+            .Err(error) -> {
+                if error == .SourceIO -> return Err(.SourceIO)
+                return Err(.DestinationIO)
+            }
+        }
+    }
+    jetc_publish(^output, parent, operation)
+    Ok()
+}
+
+fn jetc_random(length: Int) -> Secret FileCryptoError! {
+    if random_bytes(length) == {
+        .Ok(bytes) -> Ok(Secret{bytes: bytes})
+        .Err(error) -> Err(.SealFailed(error))
+    }
+}
+fn jetc_exists_errno(errno: Int) -> Bool Never! {
+    errno == 17 || (core.files.__path_windows() && (errno == 80 || errno == 183))
+}
+
+fn jetc_cancel_checkpoint() FileCryptoError! {
+    if core.tasks.__task_cancelled() ?? false -> return Err(.SourceIO)
+    Ok()
+}
+fn jetc_verify_output(input: JetcFd, writer: jetc.Writer, length: Int) FileCryptoError! {
+    jetc_seek(input, .OpenFailed)
+    metadata :: jetc_stat(input, .OpenFailed)
+    if metadata.len != writer.prefix.len() + (jetc.body_length(length) ?? return Err(.OpenFailed)) -> return Err(.OpenFailed)
+    prefix :: jetc_read_exact(input, writer.prefix.len(), "migrate-verify-read", .OpenFailed)
+    // Exact equality also verifies every original recipient stanza, ephemeral
+    // key and header tag, without retaining writer ephemeral private material.
+    if !constant_time_equal_bytes(prefix.bytes, writer.prefix) -> return Err(.OpenFailed)
+    reader := jetc.Reader{header_hash: writer.header_hash, key: Secret{bytes: ~writer.key.bytes},
+        nonce_prefix: writer.nonce_prefix, remaining: metadata.len - writer.prefix.len(), index: 1, final: false}
+    loop reader.remaining > 0 {
+        jetc_cancel_checkpoint()
+        framing :: jetc_read_exact(input, 5, "migrate-verify-read", .OpenFailed)
+        size :: jetc.integer(framing.bytes, 0, 4)
+        if !jetc.record_shape(size, framing.bytes[4]) -> return Err(.OpenFailed)
+        encrypted :: jetc_read_exact(input, size + jetc.TAG, "migrate-verify-read", .OpenFailed)
+        _clear :: jetc.open_chunk(&reader, framing.bytes, encrypted.bytes)
+    }
+    trailing :: jetc_read(input, 1, "migrate-verify-read", .OpenFailed)
+    jetc.finish(reader, trailing.bytes)
+    jetc_cancel_checkpoint()
+    Ok()
+}
+
 pub fn sign(signing_key: SigningKey, bytes: [U8]) -> Signature CryptoError! {
     if signing_key.bytes.len() != 32 -> return Err(CryptoError.KeyRejected)
     Ok(Signature{bytes: ed25519_sign_raw(signing_key.bytes, bytes)})
