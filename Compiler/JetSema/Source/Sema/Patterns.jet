@@ -146,15 +146,8 @@ fn sema_pattern_core_payload(owner: String, variant: String) -> [Type]? {
             "Number" -> Val([Type.String])
             else -> None
         }
-        "DataEvent" -> if variant == {
-            "Bool" -> Val([Type.Bool])
-            "Int" -> Val([Type.Int])
-            "Float" -> Val([Type.Float])
-            "Text" | "Key" -> Val([Type.String])
-            "Bytes" -> Val([Type.List{element: Type.IntN{signed: false, bits: 8}}])
-            "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd" -> Val([Type]{})
-            else -> None
-        }
+        // D-ENCSTREAM-SURFACE1=A: the canonical twelve generated payload rows.
+        "DataEvent" -> core_enum_variant_payload(owner, variant)
         "Key" -> if variant == {
             "Char" | "Ctrl" -> Val([Type.Char])
             "F" -> Val([Type.Int])
