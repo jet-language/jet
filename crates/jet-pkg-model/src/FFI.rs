@@ -6708,6 +6708,92 @@ mod tests {
     use crate::AST::{AccessConvention, Type};
     use std::collections::HashSet;
 
+    fn bridge_test_completion(
+        name: &str,
+        status: Option<i32>,
+        stdout: &str,
+        stderr: &str,
+    ) -> Result<bool, String> {
+        let expected_pass = format!("test {name} ... ok");
+        let expected_failure = format!("test {name} ... FAILED");
+        let completed_pass = stdout.lines().filter(|line| *line == expected_pass).count() == 1
+            && stdout.contains("test result: ok. 1 passed; 0 failed; 0 ignored;");
+        let completed_failure = stdout
+            .lines()
+            .filter(|line| *line == expected_failure)
+            .count()
+            == 1
+            && stdout.contains("test result: FAILED. 0 passed; 1 failed; 0 ignored;");
+        // Cargo also returns 101 for a crashed test child. Require its named
+        // completion packet and reject an unsafe child-status diagnostic.
+        let unsafe_child = stderr.lines().find(|line| {
+            line.trim_start()
+                .starts_with("process didn't exit successfully:")
+                && !line.trim_end().ends_with("(exit status: 101)")
+        });
+        if unsafe_child.is_none() {
+            if status == Some(0) && completed_pass {
+                return Ok(true);
+            }
+            if status == Some(101) && completed_failure {
+                return Ok(false);
+            }
+        }
+        Err(format!(
+            "unsafe child or missing named harness completion: test={name} status={status:?} child={unsafe_child:?}"
+        ))
+    }
+
+    #[test]
+    fn bridge_test_completion_classifies_completed_and_unsafe_packets() {
+        const PASS: &str =
+            "test fixture ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored;\n";
+        const FAIL: &str =
+            "test fixture ... FAILED\ntest result: FAILED. 0 passed; 1 failed; 0 ignored;\n";
+        const SIGNAL: &str =
+            "process didn't exit successfully: fixture (signal: 11, SIGSEGV: invalid memory reference)";
+        let cases = [
+            ("completed-pass", Some(0), PASS, "", Some(true)),
+            ("completed-fail-101", Some(101), FAIL, "", Some(false)),
+            (
+                "completed-fail-child-exit-101",
+                Some(101),
+                FAIL,
+                "process didn't exit successfully: fixture (exit status: 101)",
+                Some(false),
+            ),
+            ("fatal-child-101", Some(101), FAIL, SIGNAL, None),
+            ("direct-signal", None, FAIL, "", None),
+            (
+                "zero-tests",
+                Some(0),
+                "test result: ok. 0 passed; 0 failed; 0 ignored;\n",
+                "",
+                None,
+            ),
+            (
+                "wrong-name",
+                Some(0),
+                "test other ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored;\n",
+                "",
+                None,
+            ),
+        ];
+        let mut all_passed = true;
+        for (case, status, stdout, stderr, expected) in cases {
+            let actual = bridge_test_completion("fixture", status, stdout, stderr);
+            let passed = actual.as_ref().ok().copied() == expected
+                && (stderr != SIGNAL
+                    || actual.as_ref().err().is_some_and(|reason| reason.contains(SIGNAL)));
+            println!(
+                "bridge completion case={case} result={} actual={actual:?}",
+                if passed { "PASS" } else { "FAIL" },
+            );
+            all_passed &= passed;
+        }
+        assert!(all_passed, "bridge completion classification regression");
+    }
+
     // This executes real generated cfg-tests, not a zero-match pkg-model filter.
     // It is heavy and must be explicitly selected with --ignored --exact.
     #[test]
@@ -6926,32 +7012,13 @@ mod tests {
                 ran.mechanism, ran.policy,
             );
             println!("canonical bridge test={name} stderr:\n{stderr}");
-            let expected_pass = format!("test {name} ... ok");
-            let expected_failure = format!("test {name} ... FAILED");
-            let completed_pass =
-                stdout.lines().filter(|line| *line == expected_pass).count() == 1
-                    && stdout.contains("test result: ok. 1 passed; 0 failed; 0 ignored;");
-            let completed_failure =
-                stdout.lines().filter(|line| *line == expected_failure).count() == 1
-                    && stdout.contains("test result: FAILED. 0 passed; 1 failed; 0 ignored;");
-            // Cargo also returns 101 for a crashed test child. Its child-status
-            // diagnostic plus the named completion packet separates that case
-            // from an ordinary, completed assertion failure.
-            let unsafe_child = stderr.lines().find(|line| {
-                line.trim_start()
-                    .starts_with("process didn't exit successfully:")
-                    && !line.trim_end().ends_with("(exit status: 101)")
-            });
-            let ordinary_completion = unsafe_child.is_none()
-                && ((ran.output.status.success() && completed_pass)
-                    || (ran.output.status.code() == Some(101) && completed_failure));
+            let completion =
+                bridge_test_completion(name, ran.output.status.code(), &stdout, &stderr);
             let stdout_valid = std::str::from_utf8(&ran.output.stdout).is_ok();
             let stderr_valid = std::str::from_utf8(&ran.output.stderr).is_ok();
-            let passed = ran.output.status.success()
-                && ordinary_completion
+            let passed = matches!(&completion, Ok(true))
                 && stdout_valid
-                && stderr_valid
-                && completed_pass;
+                && stderr_valid;
             println!(
                 "canonical bridge test={name} result={} status={}",
                 if passed { "PASS" } else { "FAIL" },
@@ -6964,11 +7031,8 @@ mod tests {
                 );
             }
             all_passed &= passed;
-            if !ordinary_completion {
-                block_reason = Some(format!(
-                    "unsafe child or missing named harness completion: test={name} status={} child={unsafe_child:?}",
-                    ran.output.status,
-                ));
+            if let Err(reason) = completion {
+                block_reason = Some(reason);
             }
         }
         for (path, expected) in identities {
