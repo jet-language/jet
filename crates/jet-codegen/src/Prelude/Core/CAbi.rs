@@ -1000,17 +1000,6 @@ mod jet_c_abi {
         guard(|| handle(value.to_string()))
     }
 
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_u64_to_string(value: u64) -> JetCString {
-        guard(|| handle(value.to_string()))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_u64_to_string(value: u64) -> JetCString {
-        guard(|| handle(value.to_string()))
-    }
-
     #[no_mangle]
     pub extern "C" fn jet_rt_char_to_string(value: i64) -> JetCString {
         guard(|| {
@@ -1039,14 +1028,6 @@ mod jet_c_abi {
         guard(|| handle(super::JetDebug::jet_debug(&value)))
     }
 
-
-    /// A Prelude `jet_panic("<core.prelude>", 0, message)` stop that generated
-    /// code checks inline (e.g. an iterator loop stride, Collections.rs:1518).
-    #[no_mangle]
-    pub extern "C" fn jet_rt_panic_message(ptr: *const u8, len: usize) {
-        let message = text(ptr, len).into_owned();
-        guard(move || -> () { super::jet_panic("<core.prelude>", 0, &message) })
-    }
 
     /// A Prelude `jet_panic("<core.prelude>", 0, message)` stop that generated
     /// code checks inline (e.g. an iterator loop stride, Collections.rs:1518).
@@ -1160,36 +1141,6 @@ mod jet_c_abi {
     }
 
     #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_int_owned_to_f64(value: i64) -> f64 {
-        guard(|| crate::jet_std::jet_int_to_f64(value))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_int_owned_from_i64(value: i64) -> i64 {
-        guard(|| crate::jet_std::jet_int_owned_from_i64(value).into_raw())
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_int_owned_to_i64(value: i64) -> i64 {
-        guard(|| native(value))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_int_owned_to_f64(value: i64) -> f64 {
-        guard(|| crate::jet_std::jet_int_to_f64(value))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_int_owned_from_i64(value: i64) -> i64 {
-        guard(|| crate::jet_std::jet_int_owned_from_i64(value).into_raw())
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_int_owned_to_i64(value: i64) -> i64 {
-        guard(|| native(value))
-    }
-
     #[no_mangle]
     pub extern "C" fn jet_int_owned_to_f64(value: i64) -> f64 {
         guard(|| crate::jet_std::jet_int_to_f64(value))
