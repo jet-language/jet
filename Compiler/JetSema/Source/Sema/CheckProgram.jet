@@ -189,17 +189,21 @@ pub struct SemaComptimeItemValue {
     pub ty: Type
 }
 
+fn sema_comptime_body_value_from_item(value: SemaComptimeItemValue) -> SemaComptimeBodyValue Never! {
+    SemaComptimeBodyValue{
+        module_identity: value.module_identity,
+        key: value.key,
+        destination_key: value.destination_key,
+        value: value.value,
+        ty: value.ty,
+    }
+}
+
 pub fn sema_comptime_body_values_from_items(values: [SemaComptimeItemValue]) -> [SemaComptimeBodyValue] Never! {
     result := [SemaComptimeBodyValue]{}
     loop value in values {
         if value.kind != SemaComptimeItemKind.BodyExpression -> next
-        &result.push(SemaComptimeBodyValue{
-            module_identity: value.module_identity,
-            key: value.key,
-            destination_key: value.destination_key,
-            value: value.value,
-            ty: value.ty,
-        })
+        &result.push(sema_comptime_body_value_from_item(value))
     }
     result
 }
@@ -4897,15 +4901,16 @@ pub fn sema_comptime_environment(graph: ^SemaRegistrationGraph, values: [SemaCom
     work := sema_comptime_body_work_new(trace_sink)
     count_key_bytes :: if work == .Val(_) -> true else -> false
     environment.comptime_body_publication = sema_comptime_body_values_freeze(sema_comptime_body_values_from_items(values), work, count_key_bytes)
+    environment.comptime_body_publication.item_frontier = values.len()
     ^environment
 }
 
-// Called only when the staging producer lands a body value. Retargeting a
-// module/function is not a publication and cannot copy or rebuild this table.
-pub fn sema_comptime_environment_publish_body_values(environment: &SemaScopeEnvironment, values: [SemaComptimeItemValue]) Never! {
-    work := ~environment.comptime_body_publication.work
-    count_key_bytes :: if work == .Val(_) -> true else -> false
-    environment.comptime_body_publication = sema_comptime_body_values_freeze(sema_comptime_body_values_from_items(values), work, count_key_bytes)
+// Only the staging producer lands rows from its authenticated item frontier.
+// Retargets and nonbody batches do not rebuild the visible body prefix.
+pub fn sema_comptime_environment_publish_body_values(environment: &SemaScopeEnvironment, values: [SemaComptimeItemValue], from: Int, body_values_changed: Bool) Never! {
+    if from < 0 || from > values.len() || from != environment.comptime_body_publication.item_frontier -> panic("body publication lost its authenticated item frontier")
+    if body_values_changed -> sema_comptime_body_values_append_items(&environment.comptime_body_publication, values, from)
+    environment.comptime_body_publication.item_frontier = values.len()
 }
 
 // `environment` is the run's sema_comptime_environment, whose graph already

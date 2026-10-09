@@ -54,10 +54,15 @@ fn sema_comptime_body_sources_truncate(context: &SemaCheckContext, length: Int) 
     }
 }
 
-// First and second positions are sufficient for every ordered prefix. A
-// second match at or beyond the visible length is not yet ambiguous; a third
-// match can never change that answer. The row payloads themselves stay owned
-// by the published immutable facts, including equal-key/different-value rows.
+fn sema_comptime_body_value_index_row(modules: &[String:Int], first_rows: &[[String:Int]], second_rows: &[[String:Int]], module_identity: String, key: String, row: Int) Never! {
+    slot :: sema_comptime_body_module_slot(&modules, &first_rows, module_identity)
+    if second_rows.len() < first_rows.len() -> &second_rows.push([String:Int]{})
+    if first_rows[slot].get(key) == None -> first_rows[slot][key] = row
+    else if second_rows[slot].get(key) == None -> second_rows[slot][key] = row
+}
+
+// First and second positions settle every ordered prefix. Appending future
+// rows never rewrites either existing position or an earlier row payload.
 fn sema_comptime_body_values_freeze(values: ^[SemaComptimeBodyValue], work: Shared<SemaComptimeBodyWork>?, count_key_bytes: Bool) -> SemaComptimeBodyValues Never! {
     length :: values.len()
     modules := [String:Int]{}
@@ -66,10 +71,7 @@ fn sema_comptime_body_values_freeze(values: ^[SemaComptimeBodyValue], work: Shar
     indexed_rows := 0
     index_key_utf8_bytes := 0
     loop row in 0..<length {
-        slot :: sema_comptime_body_module_slot(&modules, &first_rows, values[row].module_identity)
-        if second_rows.len() < first_rows.len() -> &second_rows.push([String:Int]{})
-        if first_rows[slot].get(values[row].key) == None -> first_rows[slot][values[row].key] = row
-        else if second_rows[slot].get(values[row].key) == None -> second_rows[slot][values[row].key] = row
+        sema_comptime_body_value_index_row(&modules, &first_rows, &second_rows, values[row].module_identity, values[row].key, row)
         indexed_rows += 1
         if count_key_bytes -> index_key_utf8_bytes += values[row].module_identity.count_bytes() + values[row].key.count_bytes()
     }
@@ -86,6 +88,46 @@ fn sema_comptime_body_values_freeze(values: ^[SemaComptimeBodyValue], work: Shar
         facts: Val(shared SemaComptimeBodyFacts{values: ^values, modules: ^modules, first_rows: ^first_rows, second_rows: ^second_rows, indexed_rows: indexed_rows}),
         length: length,
         work: ~work,
+    }
+}
+
+// The staging owner's one payload guard closes before diagnostic counters or
+// any caller/evaluator/sink executes. Work is proportional to new item rows.
+fn sema_comptime_body_facts_append_items(facts: Shared<SemaComptimeBodyFacts>, values: [SemaComptimeItemValue], from: Int, expected_length: Int, count_key_bytes: Bool) -> (length: Int, rows: Int, key_utf8_bytes: Int) {
+    permit := facts.guard_edit()
+    if permit.value.values.len() != expected_length -> panic("body publication attempted to append through an old prefix generation")
+    appended := 0
+    key_utf8_bytes := 0
+    loop index in from..<values.len() {
+        if values[index].kind != SemaComptimeItemKind.BodyExpression -> next
+        row :: permit.value.values.len()
+        sema_comptime_body_value_index_row(&permit.value.modules, &permit.value.first_rows, &permit.value.second_rows, values[index].module_identity, values[index].key, row)
+        if count_key_bytes -> key_utf8_bytes += values[index].module_identity.count_bytes() + values[index].key.count_bytes()
+        &permit.value.values.push(sema_comptime_body_value_from_item(values[index]))
+        permit.value.indexed_rows += 1
+        appended += 1
+    }
+    (length: permit.value.values.len(), rows: appended, key_utf8_bytes: key_utf8_bytes)
+}
+
+fn sema_comptime_body_values_append_items(publication: &SemaComptimeBodyValues, values: [SemaComptimeItemValue], from: Int) {
+    new_generation :: if publication.facts == .Val(_) -> false else -> true
+    if new_generation {
+        if publication.length != 0 -> panic("a body prefix lost its facts owner")
+        publication.facts = Val(shared SemaComptimeBodyFacts{values: [SemaComptimeBodyValue]{}, modules: [String:Int]{}, first_rows: [[String:Int]]{}, second_rows: [[String:Int]]{}, indexed_rows: 0})
+    }
+    facts :: ~publication.facts ?? panic("body publication has no facts owner")
+    count_key_bytes :: if publication.work == .Val(_) -> true else -> false
+    added :: sema_comptime_body_facts_append_items(facts, values, from, publication.length, count_key_bytes)
+    if added.rows == 0 -> panic("the authenticated body frontier contained no new body row")
+    publication.length = added.length
+    if publication.work == .Val(cell) {
+        permit := cell.guard_edit()
+        permit.value.publications += 1
+        permit.value.publication_rows += added.rows
+        if new_generation -> permit.value.index_builds += 1
+        permit.value.indexed_rows += added.rows
+        permit.value.index_key_utf8_bytes += added.key_utf8_bytes
     }
 }
 
@@ -158,14 +200,18 @@ pub fn sema_comptime_body_work_flush(values: SemaComptimeBodyValues, trace_sink:
     }
 }
 
-// The two module-memo boundaries restore the full publication before reading
-// this fingerprint (sema_check_registration_module / sema_check_prepare_module).
-// Item probes can select length zero, but never freeze a module memo; preserve
-// that empty ordered-row view without reading or copying the fact payload.
+// Prefix Debug uses the same canonical list renderer as the original memo.
+// Only an explicitly requested old-prefix memo materializes its visible rows;
+// the ordinary cold session-None route never requests a fingerprint.
 fn sema_comptime_body_values_debug(values: SemaComptimeBodyValues) -> String {
     if values.length == 0 -> return "{[SemaComptimeBodyValue]{}:Debug}"
     facts :: values.facts ?? return "{[SemaComptimeBodyValue]{}:Debug}"
     permit :: facts.guard_read()
+    if values.length < permit.value.values.len() {
+        prefix := [SemaComptimeBodyValue]{}
+        loop row in 0..<values.length -> &prefix.push(~permit.value.values[row])
+        return "{prefix:Debug}"
+    }
     "{permit.value.values:Debug}"
 }
 

@@ -304,13 +304,90 @@ fn body_index_publication_lifecycle() {
     next_site :: Span{start: 30, end: 31}
     second :: body_index_value("mod::one", "function::one", span, next_site, 9)
     landed :: SemaComptimeItemValue{module_identity: second.module_identity, key: second.key, destination_key: second.destination_key, kind: SemaComptimeItemKind.BodyExpression, value: second.value, ty: second.ty}
-    sema_comptime_environment_publish_body_values(&environment, [SemaComptimeItemValue]{initial, landed})
-    body_index_require(environment.comptime_body_values.length == 1 && environment.comptime_body_publication.length == 2 && prior.length == 1, "publication replacement leaves the old selected view and old owner intact")
+    sema_comptime_environment_publish_body_values(&environment, [SemaComptimeItemValue]{initial, landed}, 1, true)
+    body_index_require(environment.comptime_body_values.length == 1 && environment.comptime_body_publication.length == 2 && prior.length == 1, "append preserves the old selected view and old captured prefix")
+    body_index_require(sema_comptime_body_values_debug(prior) == "{[SemaComptimeBodyValue]{first}:Debug}", "an older prefix memo cannot fingerprint later appended rows")
+    if prior.facts == .Val(old_facts) {
+        if environment.comptime_body_publication.facts == .Val(new_facts) -> body_index_require(old_facts.same(new_facts), "append retains the single authenticated facts owner")
+        else -> panic("append lost its facts owner")
+    } else {
+        panic("the old prefix lost its facts owner")
+    }
     next_full := ~environment.comptime_body_publication
     body_index_require(sema_scope_environment_enter_probe_module(&environment, "mod::one", ^next_full), "the next function selects the new publication")
     context.comptime_body_values = ~environment.comptime_body_values
     body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", span, site) == Val(first) && sema_comptime_body_value_find(context, "mod::one", "function::one", span, next_site) == Val(second), "the new function sees the entire ordered updated publication")
     body_index_require(sema_comptime_body_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{first, second}:Debug}", "the next full view fingerprints the newly published row order")
+    nonbody :: body_index_item(second, SemaComptimeItemKind.Constant)
+    sema_comptime_environment_publish_body_values(&environment, [SemaComptimeItemValue]{initial, landed, nonbody}, 2, false)
+    body_index_require(environment.comptime_body_publication.item_frontier == 3 && environment.comptime_body_publication.length == 2, "a nonbody batch advances the authenticated item frontier without projecting or indexing body rows")
+    third :: body_index_value("mod::one", "function::one", span, Span{start: 40, end: 41}, 11)
+    next_item :: body_index_item(third, SemaComptimeItemKind.BodyExpression)
+    sema_comptime_environment_publish_body_values(&environment, [SemaComptimeItemValue]{initial, landed, nonbody, next_item}, 3, true)
+    body_index_require(environment.comptime_body_publication.item_frontier == 4 && environment.comptime_body_publication.length == 3 && environment.comptime_body_values.length == 2, "the next body batch projects only its new row after a mixed-kind frontier")
+}
+
+fn body_index_item(value: SemaComptimeBodyValue, kind: SemaComptimeItemKind) -> SemaComptimeItemValue {
+    SemaComptimeItemValue{module_identity: value.module_identity, key: value.key, destination_key: value.destination_key, kind: kind, value: value.value, ty: value.ty}
+}
+
+fn body_index_append_prefixes() {
+    source :: Span{start: 10, end: 20}
+    site :: Span{start: 3, end: 7}
+    first :: body_index_value("append::module", "append::function", source, site, 7)
+    different :: body_index_value("append::module", "append::function", source, site, 9)
+    late :: body_index_value("late::module", "late::function", source, site, 11)
+    publication := SemaComptimeBodyValues{}
+    empty :: ~publication
+    items := [SemaComptimeItemValue]{body_index_item(first, SemaComptimeItemKind.Constant), body_index_item(first, SemaComptimeItemKind.BodyExpression)}
+    sema_comptime_body_values_append_items(&publication, items, 0)
+    one :: ~publication
+    &items.push(body_index_item(different, SemaComptimeItemKind.BodyExpression))
+    sema_comptime_body_values_append_items(&publication, items, 2)
+    two :: ~publication
+    &items.push(body_index_item(first, SemaComptimeItemKind.BodyExpression))
+    &items.push(body_index_item(late, SemaComptimeItemKind.Constant))
+    &items.push(body_index_item(late, SemaComptimeItemKind.BodyExpression))
+    sema_comptime_body_values_append_items(&publication, items, 3)
+    views :: [SemaComptimeBodyValues]{~empty, ~one, ~two, ~publication}
+    loop index in 0..<views.len() {
+        context := sema_check_context_init()
+        context.comptime_body_values = ~views[index]
+        actual :: sema_comptime_body_value_find(context, "append::module", "append::function", source, site)
+        expected :: if index == 1 -> Val(first) else -> None
+        body_index_require(actual == expected, "append keeps old 0/1/2-row duplicate visibility after a third duplicate")
+        body_index_query(context, "append::module", "append::function", source, site)
+        body_index_require(sema_comptime_body_value_find(context, "late::module", "late::function", source, site) == (if index == 3 -> Val(late) else -> None), "a late module and key are invisible to earlier prefixes")
+    }
+    body_index_require(sema_comptime_body_values_debug(one) == "{[SemaComptimeBodyValue]{first}:Debug}" && sema_comptime_body_values_debug(two) == "{[SemaComptimeBodyValue]{first, different}:Debug}", "prefix memo bytes match canonical ordered list Debug")
+    restored := sema_check_context_init()
+    restored.comptime_body_values = ~publication
+    mark :: sema_check_context_mark(&restored)
+    sema_comptime_body_values_replace(&restored, [SemaComptimeBodyValue]{late})
+    body_index_require(sema_comptime_body_value_find(restored, "late::module", "late::function", source, site) == Val(late), "replacement publishes an isolated new generation")
+    replacement := ~restored.comptime_body_values
+    replacement_items :: [SemaComptimeItemValue]{body_index_item(late, SemaComptimeItemKind.BodyExpression), body_index_item(first, SemaComptimeItemKind.BodyExpression)}
+    sema_comptime_body_values_append_items(&replacement, replacement_items, 1)
+    body_index_require(replacement.length == 2 && publication.length == 4 && restored.comptime_body_values.length == 1, "append to a replacement generation cannot retarget an older owner or its selected prefix")
+    body_index_require(sema_comptime_body_values_debug(restored.comptime_body_values) == "{[SemaComptimeBodyValue]{late}:Debug}" && sema_comptime_body_values_debug(two) == "{[SemaComptimeBodyValue]{first, different}:Debug}", "replacement append preserves both generations' old canonical memo bytes")
+    sema_check_context_rollback(&restored, mark)
+    body_index_require(restored.comptime_body_values.length == 4 && sema_comptime_body_value_find(restored, "append::module", "append::function", source, site) == None, "rollback restores the old generation and duplicate ambiguity")
+}
+
+fn body_index_append_size(size: Int) {
+    work :: shared SemaComptimeBodyWork{}
+    publication := SemaComptimeBodyValues{work: Val(~work)}
+    items := [SemaComptimeItemValue]{}
+    loop index in 0..<size {
+        from :: items.len()
+        row :: body_index_value("append::scale", "append::function", Span{start: index * 4, end: index * 4 + 2}, Span{start: index * 4 + 2, end: index * 4 + 3}, index)
+        &items.push(body_index_item(row, SemaComptimeItemKind.Constant))
+        &items.push(body_index_item(row, SemaComptimeItemKind.BodyExpression))
+        sema_comptime_body_values_append_items(&publication, items, from)
+    }
+    body_index_require(publication.length == size, "mixed item rows project only authentic body values")
+    permit :: work.guard_read()
+    body_index_require(permit.value.publications == size && permit.value.publication_rows == size && permit.value.index_builds == 1 && permit.value.indexed_rows == size, "N/2N/4N growing publications project and index N rows, never the sum of earlier prefixes")
 }
 
 fn run() {
@@ -318,6 +395,10 @@ fn run() {
     body_index_identity_and_lifecycle()
     body_index_duplicate_prefixes()
     body_index_publication_lifecycle()
+    body_index_append_prefixes()
+    body_index_append_size(64)
+    body_index_append_size(128)
+    body_index_append_size(256)
     body_index_size(64)
     body_index_size(128)
     body_index_size(256)

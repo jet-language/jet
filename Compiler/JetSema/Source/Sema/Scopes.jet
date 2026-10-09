@@ -338,9 +338,9 @@ pub struct SemaComptimeBodyValue {
     pub ty: Type
 }
 
-// Published body values and their derived lookup indexes are immutable. A
-// context keeps only a shared owner and a visible ordered prefix: forks retain
-// the facts instead of copying every value and rebuilding every key index.
+// Published ordered prefixes are immutable. The staging owner may append
+// future rows under its guard; contexts retain only the owner and captured
+// visible length, never a copied table or a rebuilt index.
 pub struct SemaComptimeBodyFacts {
     pub values: [SemaComptimeBodyValue]
     pub modules: [String:Int]
@@ -352,6 +352,9 @@ pub struct SemaComptimeBodyFacts {
 pub struct SemaComptimeBodyValues {
     pub facts: Shared<SemaComptimeBodyFacts>?{None}
     pub length: Int{0}
+    // Only the staging producer advances this authenticated item frontier.
+    // Context views retain it as metadata, never use it to publish.
+    pub item_frontier: Int{0}
     // Numeric diagnosis is a separate phase-owned slot, never a fact mutation
     // or a retained CompilerTraceSink. None on every ordinary/cold trace path.
     pub work: Shared<SemaComptimeBodyWork>?{None}
