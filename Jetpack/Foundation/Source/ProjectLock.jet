@@ -5,13 +5,14 @@
 // into this one file: the provider opens close-on-exec, never follows a final
 // link, and re-checks that the path still names the locked inode.
 //
-// Authority lives on the canonical managed-root directory inode. Every scope
-// of one root shares that one kernel lock domain, so replacing every name
-// under `.locks` cannot create a second domain; the per-scope marker file is
-// the visible, never-unlinked name a probe inspects. File contents, PID
-// reuse, timestamps and path existence are never liveness evidence.
+// Every scope of one canonical managed root shares `.jetpack.lock`, a regular
+// file outside the replaceable `.locks` marker directory. FILELOCK1 creates it
+// owner-only, refuses a final link and never unlinks it when releasing a claim.
+// Per-scope markers remain the visible names probes inspect. File contents,
+// PID reuse, timestamps and path existence are never liveness evidence.
 
 RUNTIME_LOCK_DIR :: prep { ".locks" }
+RUNTIME_LOCK_OWNER_FILE :: prep { ".jetpack.lock" }
 // Rust LOCK_WAIT: a contended acquire gives up after 30 seconds.
 RUNTIME_LOCK_WAIT_SECONDS :: prep { 30 }
 RUNTIME_LOCK_MARKER_MODE :: prep { 0o600 }
@@ -24,9 +25,9 @@ pub enum RuntimeLockState {
 }
 
 // A held process lock. `owner` is the kernel lock on the canonical managed
-// root; `marker` pins the scope marker inode that `path` must keep naming.
-// Scope exit (or handing `owner` to a child through `keep_open_for`)
-// releases the kernel lock; the marker file always stays on disk.
+// root's dedicated regular file; `marker` pins the scope marker inode that
+// `path` must keep naming. Scope exit (or handing `owner` to a child through
+// `keep_open_for`) releases the kernel lock; both files always stay on disk.
 pub struct RuntimeLock {
     pub path: String
     pub owner_path: String
@@ -43,7 +44,7 @@ pub struct RuntimeLock {
 }
 
 // Rust `drop(lock)`: release the kernel lock now instead of at scope exit.
-// The marker file stays on disk so every later opener locks the same inode.
+// Both files stay on disk so every later opener locks the same owner inode.
 impl RuntimeLock.Close {
     fn close(^self) {}
 }
@@ -89,7 +90,8 @@ pub fn env_acquire_lock(root: String, scope: String) -[FS, Env]> RuntimeLock IOE
 pub fn env_try_acquire_lock(root: String, scope: String) -[FS, Env]> RuntimeLock? IOError! {
     path :: env_lock_open_scope(root, scope)
     owner_path :: env_lock_canonical_owner(path)
-    owner :: files.try_lock(owner_path) ?? return Ok(None)
+    attempted :: files.try_lock(owner_path)
+    owner :: attempted ?? return Ok(None)
     Ok(Val(env_lock_hold(path, owner_path, owner)))
 }
 
@@ -132,13 +134,14 @@ fn env_lock_open_scope(root: String, scope: String) -[FS, Env]> String IOError! 
     Ok(path)
 }
 
-// `<lock dir>/..` canonicalized: the managed root whose inode is the domain.
+// `<lock dir>/..` canonicalized, then its dedicated shared regular lock file.
 fn env_lock_canonical_owner(path: String) -[FS, Env]> String IOError! {
     lock_dir :: files.dirname(path)
     if lock_dir == "" -> return Err(env_lock_invalid_input(path, "jetpack lock path has no directory"))
     root :: files.dirname(lock_dir)
     if root == "" -> return Err(env_lock_invalid_input(path, "jetpack lock path has no managed root"))
-    files.canonicalize(root)
+    canonical :: files.canonicalize(root)
+    Ok(files.join(canonical, RUNTIME_LOCK_OWNER_FILE))
 }
 
 // Pin the marker inode after the kernel lock is held; a marker that is no

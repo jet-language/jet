@@ -683,14 +683,14 @@ fn store_explain_receipt_projection(roots: HangarRoots, entry: StoreEntry, graph
 // between the facts, the producer, and the entry reported.
 fn store_explain_provider_projection(entry: StoreEntry, reports: &[ExplainReport]) -> ExplainProvider? Never! {
     producer :: if ProducerRecord.decode(entry.producer_record) == {
-fn store_explain_liveness_projection(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, reports: &[ExplainReport]) -> ExplainLiveness Never! {
+        .Ok(decoded) -> decoded
         .Err(error) -> {
             &reports.push(ExplainReport.loss("producer provenance is unavailable: {error.message()}"))
             return None
         }
     }
     facts := ProviderFacts?{None}
-    if store_lifecycle_snapshot(&verification, roots) == {
+    if producer.facts.get("provider-facts") == {
         .Val(raw) -> {
             if ProviderFacts.from_json(raw) == {
                 .Ok(decoded) -> {
@@ -807,7 +807,7 @@ fn store_explain_locked_provider_facts(entry: StoreEntry, reports: &[ExplainRepo
             store_explain_report_provider_validation(facts, "locked", &reports)
         }
         identity_ok := true
-fn store_explain_rebuild_projection(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, provider: ExplainProvider?, receipt_ok: Bool, reports: &[ExplainReport]) -> ExplainRebuild Never! {
+        if record.future_fields.get("provider-facts-digest") == {
             .Val(expected) -> {
                 actual :: facts.digest()
                 if matches_entry && expected != actual {
@@ -830,7 +830,7 @@ fn store_explain_rebuild_projection(verification: &StoreVerification, roots: Han
                 identity_ok = false
                 &reports.push(ExplainReport.conflict("locked provider identity hash disagrees for {record.identity.exact}: {record.identity.hash} vs {facts.digest()}"))
             }
-        if store_try_entry_output_hash(&verification, roots, entry) == {
+        }
         valid :: if facts.validate() == {
             .Ok(_) -> true
             else -> false
