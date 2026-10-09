@@ -1800,9 +1800,9 @@ fn sema_expression_nominal_identity(left: Type, right: Type, environment: SemaSc
 // Rust `nominal_type_identity`: two spellings of one declared type (the
 // written `Kind` and the canonical `module::Kind` a resolved type carries)
 // are the same type at a merge.
-fn sema_expression_nominal_identity(left: Type, right: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_expression_nominal_identity(left: Type, right: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if type_identity_equal(left, right) -> return true
-    type_identity_equal(sema_expr_expected_type(left, environment), sema_expr_expected_type(right, environment))
+    type_identity_equal(sema_expr_expected_type(left, environment, program), sema_expr_expected_type(right, environment, program))
 }
 
 // Rust `nominal_type_identity`: two spellings of one declared type (the

@@ -994,36 +994,36 @@ fn sema_expression_displayable(ty: Type, environment: SemaScopeEnvironment) -> B
     if sema_call_reflection_secret_bearing(ty) || sema_call_reflection_one_pass(ty) -> return false
     if ty == {
         .Named(name) -> {
-            if environment.registration_graph == None -> return true
-            if sema_call_reflection_leaf_name(name) == "Unit" || sema_call_reflection_named_displayable(name, ty, environment) -> return true
-            return sema_expr_unit_fact(ty, environment) != None || sema_expression_interpolation_derived(ty, environment)
+            if program.registration_graph == None -> return true
+            if sema_call_reflection_leaf_name(name) == "Unit" || sema_call_reflection_named_displayable(name, ty, environment, program) -> return true
+            return sema_expr_unit_fact(ty, environment, program) != None || sema_expression_interpolation_derived(ty, environment, program)
         }
-        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> return sema_expression_displayable(inner, environment)
-        .Result(ok, err) -> return sema_expression_displayable(ok, environment) && sema_expression_displayable(err, environment)
-        .Map(key, _, value) -> return sema_expression_displayable(key, environment) && sema_expression_displayable(value, environment)
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> return sema_expression_displayable(inner, environment, program)
+        .Result(ok, err) -> return sema_expression_displayable(ok, environment, program) && sema_expression_displayable(err, environment, program)
+        .Map(key, _, value) -> return sema_expression_displayable(key, environment, program) && sema_expression_displayable(value, environment, program)
         .Tuple(fields) -> {
             loop field in fields {
-                if !sema_expression_displayable(field.ty, environment) -> return false
+                if !sema_expression_displayable(field.ty, environment, program) -> return false
             }
             return true
         }
         .Union(members) -> {
             loop member in members {
-                if !sema_expression_displayable(member, environment) -> return false
+                if !sema_expression_displayable(member, environment, program) -> return false
             }
             return true
         }
         .Apply(name, args) -> {
             // The owner's own rule is the reflection gate's, applied to the
             // bare owner; every argument is then shown in turn.
-            if !sema_call_reflection_is_displayable(Type.Apply{name: name, args: [Type]{}}, environment) && !sema_expression_interpolation_derived(ty, environment) -> return false
+            if !sema_call_reflection_is_displayable(Type.Apply{name: name, args: [Type]{}}, environment, program) && !sema_expression_interpolation_derived(ty, environment, program) -> return false
             if sema_call_reflection_leaf_name(name) == "KeyRef" -> return true
             loop argument in args {
-                if !sema_expression_displayable(argument, environment) -> return false
+                if !sema_expression_displayable(argument, environment, program) -> return false
             }
             return true
         }
-        else -> return sema_call_reflection_is_displayable(ty, environment)
+        else -> return sema_call_reflection_is_displayable(ty, environment, program)
     }
 }
 
@@ -1063,9 +1063,9 @@ fn sema_expression_one_pass_fix(ty: Type) -> String Never! {
 // `Display`, which has no default. A value without it is refused here
 // (E0915); a nominal `distinct` type without `#Printable` names the bundles
 // it was granted instead (E0138). Returns whether the value can be shown.
-fn sema_expression_interpolation_display(value: TExpr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_expression_interpolation_display(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     ty :: value.ty
-    if sema_expression_displayable(ty, environment) -> return true
+    if sema_expression_displayable(ty, environment, program) -> return true
     if sema_call_reflection_secret_bearing(ty) {
         &diagnostics.push(sema_error("E0915", value.span, "secret-bearing `{type_name(ty)}` has no `Display` implementation", "cryptographic secrets cannot enter logs or strings through interpolation", "remove the interpolation; log a public operation label or key identifier instead"))
         return false
@@ -1075,7 +1075,7 @@ fn sema_expression_interpolation_display(value: TExpr, environment: SemaScopeEnv
         return false
     }
     if ty == .Named(name) {
-        if sema_expression_distinct_bundles(name, environment, &scopes) == .Val(granted) {
+        if sema_expression_distinct_bundles(name, environment, program, &scopes) == .Val(granted) {
             has :: if granted.len() == 0 -> "no operation bundles" else -> "only {granted.join(", ")}"
             &diagnostics.push(sema_error("E0138", value.span, "`{name}` doesn't support string interpolation", "a nominal type only gets the operations its operation bundles grant; `{name}` has {has}", "add `#Printable` before the declaration, or convert to the base type first"))
             return false
