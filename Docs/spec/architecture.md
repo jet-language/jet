@@ -446,6 +446,14 @@ module-item snapshots concurrently. Checker rows initially contain metadata
 only; their item snapshots are materialized for every module after the
 comptime rows are released, before registration can inspect sibling nominals.
 
+The MIR interpreter indexes nominal declarations once per immutable program
+and memoizes source-value-hook reachability by operation and instantiated type.
+Shared nominal subgraphs are visited once within a query. Complete negative
+queries can publish their visited rows; a successful cyclic query publishes
+only its root, because an intermediate negative may depend on an ancestor
+cycle cut. Generic cycles with changing arguments retain the nominal recursion
+guard without publishing context-dependent intermediate negatives.
+
 CLI default-target discovery scans raw tokens and parses only top-level target
 markers and target-bearing marker groups with the registered marker parser.
 It does not construct an AST for function, module or type bodies; the actual

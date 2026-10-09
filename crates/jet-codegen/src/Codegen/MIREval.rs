@@ -4052,6 +4052,8 @@ fn mir_stream_pull_handle(
     stream.pull(machine, span)
 }
 
+type SourceValueHookMemo = HashMap<jet_foundation::MIR::MirTypeId, Vec<(MirType, bool)>>;
+
 struct Machine<'a, 'state> {
     program: &'a jet_foundation::MIR::MirProgram,
     config: &'a MirEvalConfig,
@@ -4079,6 +4081,8 @@ struct Machine<'a, 'state> {
     deadline_guards: Vec<(usize, MirScopeId, crate::scheduler::JetDeadlineGuard)>,
     drop_only_values: HashMap<MirFunctionId, HashSet<MirValueId>>,
     close_facts: super::MIRRust::CloseFacts,
+    source_value_hook_types: HashMap<jet_foundation::MIR::MirTypeId, usize>,
+    source_value_hook_memos: RefCell<HashMap<&'static str, SourceValueHookMemo>>,
     /// Held for the machine's lifetime so the scoped Web runtime policy is
     /// restored on drop; never read directly.
     _web_runtime_policy: crate::Comptime::AppLite::WebRuntimePolicyGuard,
@@ -4184,6 +4188,14 @@ impl<'a, 'state> Machine<'a, 'state> {
             deadline_guards: Vec::new(),
             drop_only_values: HashMap::new(),
             close_facts: super::MIRRust::CloseFacts::default(),
+            source_value_hook_types: {
+                let mut rows = HashMap::with_capacity(program.types.len());
+                for (index, definition) in program.types.iter().enumerate() {
+                    rows.entry(definition.id).or_insert(index);
+                }
+                rows
+            },
+            source_value_hook_memos: RefCell::new(HashMap::new()),
             _web_runtime_policy: web_runtime_policy,
             forwarded_output: Arc::new(MirForwardedOutput::default()),
             forwards_output: false,
@@ -6602,7 +6614,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                         MirStringPart::Value(value) => {
                             let ty = self.value_type(frame_index, *value, span)?.clone();
                             let value = self.value(frame_index, *value, span)?;
-                            if self.contains_source_value_hook(&ty, "show", &mut Vec::new()) {
+                            if self.contains_source_value_hook(&ty, "show") {
                                 output.push_str(&self.render_source_value(value, &ty, false, span)?);
                             } else {
                                 output.push_str(&mir_show(&runtime_to_data(value, span)?));
@@ -13737,11 +13749,61 @@ impl<'a, 'state> Machine<'a, 'state> {
         self.eval_prelude_runtime(call, args, result_ty, span)
     }
 
-    fn contains_source_value_hook(
+    fn contains_source_value_hook(&self, ty: &MirType, operation: &'static str) -> bool {
+        // Container queries reuse their element's nominal memo rather than
+        // constructing a new graph walk for every list/map value copy.
+        match ty.kind() {
+            MirTypeKind::Shared(_) if operation == "clone" => return false,
+            MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. }
+            | MirTypeKind::Shared(inner) | MirTypeKind::Option(inner)
+            | MirTypeKind::Tagged { inner, .. } =>
+                return self.contains_source_value_hook(inner, operation),
+            MirTypeKind::Map { key, value } =>
+                return self.contains_source_value_hook(key, operation)
+                    || self.contains_source_value_hook(value, operation),
+            MirTypeKind::Result { ok, err } =>
+                return self.contains_source_value_hook(ok, operation)
+                    || self.contains_source_value_hook(err, operation),
+            MirTypeKind::Tuple(fields) => return fields.iter().any(|(_, field)|
+                self.contains_source_value_hook(field, operation)),
+            _ => {}
+        }
+        let Some(id) = ty.nominal_id() else { return false };
+        if let Some(found) = self.source_value_hook_memos.borrow().get(operation)
+            .and_then(|memo| memo.get(&id))
+            .and_then(|rows| rows.iter().find(|(cached, _)| cached.kind.same_identity(&ty.kind)))
+            .map(|(_, found)| *found)
+        {
+            return found;
+        }
+        let mut memo = SourceValueHookMemo::new();
+        let mut changed_cycle = false;
+        let found = self.contains_source_value_hook_inner(
+            ty, operation, &mut Vec::new(), &mut memo, &mut changed_cycle,
+        );
+        let mut operations = self.source_value_hook_memos.borrow_mut();
+        let cached = operations.entry(operation).or_default();
+        // A negative whole-query result proves every visited row negative,
+        // except when the nominal cycle guard cut a different instantiation.
+        // Nested negatives from a successful cyclic walk are context-dependent:
+        // A -> B -> A can cut B before A's other field supplies the hook.
+        if !found && !changed_cycle {
+            for (id, rows) in memo {
+                cached.entry(id).or_default().extend(rows);
+            }
+        } else if let Some(id) = ty.nominal_id() {
+            cached.entry(id).or_default().push((ty.clone(), found));
+        }
+        found
+    }
+
+    fn contains_source_value_hook_inner(
         &self,
         ty: &MirType,
-        operation: &str,
-        visiting: &mut Vec<jet_foundation::MIR::MirTypeId>,
+        operation: &'static str,
+        visiting: &mut Vec<(jet_foundation::MIR::MirTypeId, MirType)>,
+        memo: &mut SourceValueHookMemo,
+        changed_cycle: &mut bool,
     ) -> bool {
         if jet_foundation::MIR::mir_source_value_hook(self.program, ty, operation).is_some() {
             return true;
@@ -13750,38 +13812,67 @@ impl<'a, 'state> Machine<'a, 'state> {
             MirTypeKind::Shared(_) if operation == "clone" => false,
             MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. }
             | MirTypeKind::Shared(inner) | MirTypeKind::Option(inner)
-            | MirTypeKind::Tagged { inner, .. } => self.contains_source_value_hook(inner, operation, visiting),
-            MirTypeKind::Map { key, value } => self.contains_source_value_hook(key, operation, visiting)
-                || self.contains_source_value_hook(value, operation, visiting),
-            MirTypeKind::Result { ok, err } => self.contains_source_value_hook(ok, operation, visiting)
-                || self.contains_source_value_hook(err, operation, visiting),
-            MirTypeKind::Tuple(fields) => fields.iter().any(|(_, ty)| self.contains_source_value_hook(ty, operation, visiting)),
+            | MirTypeKind::Tagged { inner, .. } => self.contains_source_value_hook_inner(inner, operation, visiting, memo, changed_cycle),
+            MirTypeKind::Map { key, value } => self.contains_source_value_hook_inner(key, operation, visiting, memo, changed_cycle)
+                || self.contains_source_value_hook_inner(value, operation, visiting, memo, changed_cycle),
+            MirTypeKind::Result { ok, err } => self.contains_source_value_hook_inner(ok, operation, visiting, memo, changed_cycle)
+                || self.contains_source_value_hook_inner(err, operation, visiting, memo, changed_cycle),
+            MirTypeKind::Tuple(fields) => fields.iter().any(|(_, ty)| self.contains_source_value_hook_inner(ty, operation, visiting, memo, changed_cycle)),
             _ => {
-                let Some(def) = ty.nominal_id().and_then(|id| self.program.types.iter().find(|def| def.id == id)) else { return false };
-                if visiting.contains(&def.id) { return false; }
-                visiting.push(def.id);
+                let Some(def) = ty.nominal_id().and_then(|id|
+                    self.source_value_hook_types.get(&id).map(|index| &self.program.types[*index]))
+                else { return false };
+                // A complete negative query remains negative with additional
+                // ancestors. Positive rows cannot be reused inside a walk:
+                // their path may pass through one of the current ancestors.
+                if self.source_value_hook_memos.borrow().get(operation)
+                    .and_then(|memo| memo.get(&def.id))
+                    .is_some_and(|rows| rows.iter().any(|(cached, found)|
+                        !found && cached.kind.same_identity(&ty.kind)))
+                {
+                    return false;
+                }
+                if let Some((_, active)) = visiting.iter().find(|(id, _)| *id == def.id) {
+                    if !active.kind.same_identity(&ty.kind) {
+                        // Preserve the existing nominal-ID recursion guard for
+                        // expanding generic cycles; their negatives cannot be
+                        // reused under a different ancestor instantiation.
+                        *changed_cycle = true;
+                        memo.clear();
+                    }
+                    return false;
+                }
+                if !*changed_cycle && memo.get(&def.id).is_some_and(|rows|
+                    rows.iter().any(|(cached, _)| cached.kind.same_identity(&ty.kind)))
+                {
+                    return false;
+                }
+                visiting.push((def.id, ty.clone()));
                 let substitutions = self.native_print_substitutions(def, ty);
                 let found = match &def.kind {
                     MirTypeDefKind::Struct { fields, .. } => fields.iter().any(|field| {
-                        !field.computed && self.contains_source_value_hook(
-                            &substitute_print_type(&field.ty, &substitutions), operation, visiting,
+                        !field.computed && self.contains_source_value_hook_inner(
+                            &substitute_print_type(&field.ty, &substitutions), operation, visiting, memo, changed_cycle,
                         )
                     }),
                     MirTypeDefKind::Enum { variants, .. } => variants.iter().any(|variant| match &variant.payload {
                         MirVariantPayload::Unit => false,
-                        MirVariantPayload::Single(inner) => self.contains_source_value_hook(
-                            &substitute_print_type(inner, &substitutions), operation, visiting,
+                        MirVariantPayload::Single(inner) => self.contains_source_value_hook_inner(
+                            &substitute_print_type(inner, &substitutions), operation, visiting, memo, changed_cycle,
                         ),
                         MirVariantPayload::Named(fields) => fields.iter().any(|field| {
-                            self.contains_source_value_hook(&substitute_print_type(&field.ty, &substitutions), operation, visiting)
+                            self.contains_source_value_hook_inner(&substitute_print_type(&field.ty, &substitutions), operation, visiting, memo, changed_cycle)
                         }),
                     }),
-                    MirTypeDefKind::Alias { target: inner } => self.contains_source_value_hook(
-                        &substitute_print_type(inner, &substitutions), operation, visiting,
+                    MirTypeDefKind::Alias { target: inner } => self.contains_source_value_hook_inner(
+                        &substitute_print_type(inner, &substitutions), operation, visiting, memo, changed_cycle,
                     ),
                     _ => false,
                 };
-                visiting.pop();
+                let (_, visited) = visiting.pop().expect("nominal hook traversal frame");
+                if !found && !*changed_cycle {
+                    memo.entry(def.id).or_default().push((visited, false));
+                }
                 found
             }
         }
@@ -13810,7 +13901,7 @@ impl<'a, 'state> Machine<'a, 'state> {
         if let Some(inner) = self.source_copy_alias(ty) {
             return self.semantic_copy_runtime(value, &inner, span);
         }
-        if !self.contains_source_value_hook(ty, "clone", &mut Vec::new()) {
+        if !self.contains_source_value_hook(ty, "clone") {
             fork_runtime_value_owners(&mut value);
             return Ok(value);
         }
@@ -13891,7 +13982,7 @@ impl<'a, 'state> Machine<'a, 'state> {
         if let Some(inner) = self.source_copy_alias(ty) {
             return self.semantic_copy_data(value, &inner, span);
         }
-        if !self.contains_source_value_hook(ty, "clone", &mut Vec::new()) {
+        if !self.contains_source_value_hook(ty, "clone") {
             return Ok(());
         }
         match value {
@@ -13951,7 +14042,7 @@ impl<'a, 'state> Machine<'a, 'state> {
         if let Some(inner) = self.source_copy_alias(ty) {
             return self.semantic_copy_ct(value, &inner, span);
         }
-        if !self.contains_source_value_hook(ty, "clone", &mut Vec::new()) {
+        if !self.contains_source_value_hook(ty, "clone") {
             fork_ct_value_owners(value);
             return Ok(());
         }
@@ -14142,7 +14233,7 @@ impl<'a, 'state> Machine<'a, 'state> {
         }
         let debug = row.member == "debug";
         let ty = self.value_type(frame_index, arg.value, span)?.clone();
-        if !self.contains_source_value_hook(&ty, if debug { "debug" } else { "show" }, &mut Vec::new()) {
+        if !self.contains_source_value_hook(&ty, if debug { "debug" } else { "show" }) {
             if debug || !self.displays_through_plain_enum(&ty) {
                 return Ok(None);
             }
@@ -14181,7 +14272,7 @@ impl<'a, 'state> Machine<'a, 'state> {
         ty: &MirType,
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
-        if self.contains_source_value_hook(ty, "show", &mut Vec::new()) {
+        if self.contains_source_value_hook(ty, "show") {
             let text = self.render_source_value(value, ty, false, span)?;
             return Ok(RuntimeValue::Data(MirEvalValue::String(text)));
         }
@@ -33662,5 +33753,92 @@ fn run() {
             assert_eq!(bytes.as_ptr(), original, "zeroize replaced rather than wiped the allocation");
             assert_eq!(bytes, &[0; 6], "the original allocation retained secret bytes");
         });
+    }
+}
+
+#[cfg(test)]
+mod source_value_hook_tests {
+    use super::*;
+    use jet_foundation::MIR::*;
+
+    fn nominal(name: &str, args: Vec<MirType>) -> MirType {
+        MirType::from_kind(MirTypeKind::Apply {
+            name: MirNominalRef::from_name(name), args,
+        })
+    }
+
+    fn alias(name: &str, target: MirType) -> MirTypeDef {
+        MirTypeDef {
+            id: MirNominalRef::from_name(name).id,
+            module: MirModuleId(1), key: name.into(), name: name.into(),
+            span: Span::new(0, 0), public: false, package_public: false,
+            generic_params: Vec::new(), derives: Vec::new(),
+            auto_derive_default: false, auto_printable: false,
+            published_schema: false, single_use: false, must_use: false,
+            layout: None, c_layout_tag: None, enum_layout: None,
+            layout_alignment: None, serde: Vec::new(), cli_bindings: Vec::new(),
+            cli: None, ownership: MirOwnershipMode::Owned,
+            boxed_edges: Vec::new(), compiler_builtin: None,
+            kind: MirTypeDefKind::Alias { target },
+        }
+    }
+
+    fn program(types: Vec<MirTypeDef>) -> MirProgram {
+        MirProgram {
+            cffi: MirCffiFacts::default(), native_pack: false,
+            schema_version: MIR_SCHEMA_VERSION, package_identity: "hook-graph".into(),
+            facts: MirPackageFacts::default(), names: MirNameFacts::default(),
+            modules: Vec::new(), imports: Vec::new(), types,
+            traits: Vec::new(), core_owners: Vec::new(), impls: Vec::new(),
+            constants: Vec::new(), fields: Vec::new(), source_files: Vec::new(),
+            functions: Vec::new(), foreign: Vec::new(), links: Vec::new(),
+            callbacks: Vec::new(), handles: Vec::new(), jobs: Vec::new(),
+            tests: Vec::new(), harnesses: Vec::new(), artifacts: Vec::new(),
+            core_calls: Vec::new(), prelude_calls: Vec::new(),
+            type_instances: Vec::new(), codec_migrations: HashMap::new(),
+            unreachable: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn shared_nominal_dag_is_visited_once_and_reused_for_container_queries() {
+        let mut types = vec![alias("N0", MirType::from_kind(MirTypeKind::Tuple(Vec::new())))];
+        for index in 1..24 {
+            let child = nominal(&format!("N{}", index - 1), Vec::new());
+            types.push(alias(&format!("N{index}"), MirType::from_kind(MirTypeKind::Tuple(
+                vec![("left".into(), child.clone()), ("right".into(), child)],
+            ))));
+        }
+        let program = program(types);
+        let config = MirEvalConfig::default();
+        let machine = Machine::new(&program, &config, Vec::new(), None, None);
+        let root = nominal("N23", Vec::new());
+        assert!(!machine.contains_source_value_hook(&root, "clone"));
+        assert_eq!(machine.source_value_hook_memos.borrow()["clone"].len(), 24);
+        let list = MirType::from_kind(MirTypeKind::List(Box::new(root)));
+        assert!(!machine.contains_source_value_hook(&list, "clone"));
+        assert_eq!(machine.source_value_hook_memos.borrow()["clone"].values()
+            .map(Vec::len).sum::<usize>(), 24);
+        assert!(!machine.contains_source_value_hook(&list, "show"));
+        assert_eq!(machine.source_value_hook_memos.borrow()["show"].len(), 24);
+    }
+
+    #[test]
+    fn expanding_generic_cycles_keep_instantiations_separate() {
+        let parameter = nominal("T", Vec::new());
+        let mut growing = alias("Grow", nominal("Grow", vec![
+            MirType::from_kind(MirTypeKind::List(Box::new(parameter))),
+        ]));
+        growing.generic_params.push(MirGenericParam { name: "T".into(), bounds: Vec::new() });
+        let program = program(vec![growing]);
+        let config = MirEvalConfig::default();
+        let machine = Machine::new(&program, &config, Vec::new(), None, None);
+        for argument in [MirTypeKind::Int, MirTypeKind::Bool] {
+            assert!(!machine.contains_source_value_hook(
+                &nominal("Grow", vec![MirType::from_kind(argument)]), "clone",
+            ));
+        }
+        let memos = machine.source_value_hook_memos.borrow();
+        assert_eq!(memos["clone"][&MirNominalRef::from_name("Grow").id].len(), 2);
     }
 }
