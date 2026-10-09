@@ -834,7 +834,7 @@ fn jet_rust_emit_units(program: MIRProgram) -> JetRustEmitUnits Never! {
             marker :: line.trim_end()
             if !marker.ends_with("]") -> next
             bytes :: marker.bytes()
-            path :: String.from_bytes(~(bytes[marker_length..<bytes.len() - 1])) ?? ""
+            path :: String.from_bytes(bytes[marker_length..<bytes.len() - 1].copy()) ?? ""
             parts :: path.split("/").to_list()
             unit :: if parts.len() > 1 -> parts[1] else -> JET_RUST_EMIT_BASE_UNIT
             names[unit] = true
