@@ -999,6 +999,14 @@ fn lower_prepare_roots(program: MIRProgram, roots: [MIRFunctionID], shared_sites
             lower_reach_render_type(program, &q, ty, row.op == "handle.show", -1)
         }
     }
+    if native_pack {
+        loop symbol in imports {
+            row :: lower_native_export(symbol) ?? next
+            if row.op != "handle.display" && row.op != "handle.show" -> next
+            ty :: lower_native_source_type(program, row.jet_name) ?? next
+            lower_reach_render_type(program, &q, ty, row.op == "handle.show", -1)
+        }
+    }
     lower_mono_run(program, &q)
     q
 }
