@@ -186,6 +186,8 @@ build directories. It recognizes block and whole-function
 `#Unsafe("reason")` gates and grouped
 `#[Unsafe("reason"), …]` function gates. It skips comments, strings, malformed
 or incorrectly placed markers, and generated FFI files below `.jet/bindings/`.
+A lone declaration gate is bare `#Unsafe("reason")`; the bracket form is for
+two or more markers, such as `#[Unsafe("reason"), FFI(asm)]`.
 
 Run the checker without `--update` to compare source with this baseline. A
 larger count fails and reports each unmatched semantic region. When a new
