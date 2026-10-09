@@ -960,6 +960,32 @@ fn __fraction_denominator(value: Fraction) -> Int Never! { value.den_value.copy(
 impl Fraction {
     fn numerator(self) -> Int Never! { __fraction_numerator(self) }
     fn denominator(self) -> Int Never! { __fraction_denominator(self) }
+    fn to_string(self) -> String Never! { __fraction_to_string(self) }
+    fn is_zero(self) -> Bool Never! { __fraction_is_zero(self) }
+}
+impl Fraction.Add {
+    fn add(self, rhs: Fraction) -> Fraction Never! { __fraction_add(self, rhs) }
+}
+impl Fraction.Sub {
+    fn sub(self, rhs: Fraction) -> Fraction Never! { __fraction_sub(self, rhs) }
+}
+impl Fraction.Mul {
+    fn mul(self, rhs: Fraction) -> Fraction Never! { __fraction_mul(self, rhs) }
+}
+impl Fraction.Div {
+    fn div(self, rhs: Fraction) -> Fraction Never! { __fraction_div(self, rhs) }
+}
+impl Fraction.Equatable {
+    fn equal(self, rhs: Fraction) -> Bool Never! { __fraction_equal(self, rhs) }
+}
+impl Fraction.Comparable {
+    fn compare(self, rhs: Fraction) -> Ordering Never! {
+        left :: self.num_value * rhs.den_value
+        right :: rhs.num_value * self.den_value
+        if left < right -> return Ordering.Less
+        if left > right -> return Ordering.Greater
+        Ordering.Equal
+    }
 }
 
 #Test("Fraction source construction reduces and fixes denominator sign") {
@@ -983,6 +1009,30 @@ struct Decimal {
     negative: Bool
     magnitude: Int
     scale: Int
+}
+impl Decimal {
+    fn round(self) -> Decimal Never! { __decimal_round(self) }
+    fn floor(self) -> Decimal Never! { __decimal_floor(self) }
+    fn ceil(self) -> Decimal Never! { __decimal_ceil(self) }
+    fn to_string(self) -> String Never! { __decimal_to_string(self) }
+}
+impl Decimal.Add {
+    fn add(self, rhs: Decimal) -> Decimal Never! { __decimal_add(self, rhs) }
+}
+impl Decimal.Sub {
+    fn sub(self, rhs: Decimal) -> Decimal Never! { __decimal_sub(self, rhs) }
+}
+impl Decimal.Mul {
+    fn mul(self, rhs: Decimal) -> Decimal Never! { __decimal_mul(self, rhs) }
+}
+impl Decimal.Div {
+    fn div(self, rhs: Decimal) -> Fraction Never! { __decimal_div(self, rhs) }
+}
+impl Decimal.Equatable {
+    fn equal(self, rhs: Decimal) -> Bool Never! { __decimal_equal(self, rhs) }
+}
+impl Decimal.Comparable {
+    fn compare(self, rhs: Decimal) -> Ordering Never! { __decimal_compare(self, rhs) }
 }
 fn exact_power(base: Int, exponent: Int) -> Int Never! {
     result := 1
