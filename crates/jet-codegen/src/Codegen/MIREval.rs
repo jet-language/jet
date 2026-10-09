@@ -5481,28 +5481,10 @@ impl<'a, 'state> Machine<'a, 'state> {
                 span,
             ));
         }
-        let (expected_member, expected_symbol, flatten_result) = match kind {
-            MirTaskGroupKind::All => {
-                if member == "all_result" {
-                    ("all_result", "jet_std::jet_task_all_result", true)
-                } else {
-                    ("all", "jet_std::jet_task_all", false)
-                }
-            }
-            MirTaskGroupKind::Race => {
-                if member == "race_result" {
-                    ("race_result", "jet_std::jet_task_race_result", true)
-                } else {
-                    ("race", "jet_std::jet_task_race", false)
-                }
-            }
-            MirTaskGroupKind::Any => {
-                if member == "any_result" {
-                    ("any_result", "jet_std::jet_task_any_result", true)
-                } else {
-                    ("any", "jet_std::jet_task_any", false)
-                }
-            }
+        let (expected_member, expected_symbol) = match kind {
+            MirTaskGroupKind::All => ("all", "jet_std::jet_task_all"),
+            MirTaskGroupKind::Race => ("race", "jet_std::jet_task_race"),
+            MirTaskGroupKind::Any => ("any", "jet_std::jet_task_any"),
         };
         if member != expected_member || symbol != expected_symbol || values.len() != 1 {
             return Err(mir_error_at(
@@ -5585,40 +5567,10 @@ impl<'a, 'state> Machine<'a, 'state> {
                     Ok(completions) => completions,
                     Err(failure) => return Ok(task_failure_result(failure)),
                 };
-                if !flatten_result {
-                    let payload = runtime_from_ct(assemble_payload(completions)?, span)?;
-                    RuntimeValue::Result {
-                        ok: true,
-                        value: Box::new(payload),
-                    }
-                } else {
-                    let mut payloads = Vec::with_capacity(completions.len());
-                    for completion in completions {
-                        let joined = Self::eval_task_payload(
-                            runtime_from_ct(completion, span)?,
-                            true,
-                            span,
-                        )?;
-                        match joined {
-                            RuntimeValue::Result { ok: true, value } => {
-                                payloads.push(self.runtime_to_ct(*value, span)?);
-                            }
-                            RuntimeValue::Result { ok: false, value } => {
-                                return Ok(RuntimeValue::Result { ok: false, value });
-                            }
-                            _ => {
-                                return Err(mir_error_at(
-                                    "MIR task-group result adapter returned a non-result",
-                                    span,
-                                ));
-                            }
-                        }
-                    }
-                    let payload = runtime_from_ct(assemble_payload(payloads)?, span)?;
-                    RuntimeValue::Result {
-                        ok: true,
-                        value: Box::new(payload),
-                    }
+                let payload = runtime_from_ct(assemble_payload(completions)?, span)?;
+                RuntimeValue::Result {
+                    ok: true,
+                    value: Box::new(payload),
                 }
             }
             MirTaskGroupKind::Race => {
@@ -5626,14 +5578,14 @@ impl<'a, 'state> Machine<'a, 'state> {
                     Ok(completion) => completion,
                     Err(failure) => return Ok(task_failure_result(failure)),
                 };
-                Self::eval_task_payload(runtime_from_ct(completion, span)?, flatten_result, span)?
+                Self::eval_task_payload(runtime_from_ct(completion, span)?, false, span)?
             }
             MirTaskGroupKind::Any => {
                 let completion = match crate::scheduler::jet_scheduler_any(entries) {
                     Ok(completion) => completion,
                     Err(failure) => return Ok(task_failure_result(failure)),
                 };
-                Self::eval_task_payload(runtime_from_ct(completion, span)?, flatten_result, span)?
+                Self::eval_task_payload(runtime_from_ct(completion, span)?, false, span)?
             }
         };
         let _ = result_ty;

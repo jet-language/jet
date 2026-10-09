@@ -177,5 +177,6 @@ fn run() (HTTPError | NetError | TaskFailure)! {
     print("protected:{protected_response.status()}")
     asset :: client.get("http://{addr}/assets/index.html")
     print("asset:{asset.status()}:{asset.body().text(8192) ?? "bad"}")
-    task_handle.join()
+    completed :: task_handle.join() ?? return Err(err)
+    completed ?? return Err(err)
 }

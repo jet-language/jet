@@ -1198,19 +1198,20 @@ fn task_route(receiver: &Type, carrier: &TFailureCarrier) -> Result<TRoutePlan, 
     let task_value = args
         .first()
         .ok_or_else(|| route_error("checked task join is missing its value type"))?;
-    // `Task<Result<T, E>>` is the private carrier used by fallible task
-    // bodies. The shared Prelude helper removes that carrier before exposing
-    // the public `Result<T, TaskFailure>` join surface.
-    let symbol = if matches!(task_value, Type::Result { .. }) {
-        "jet_std::jet_task_join_result"
-    } else {
-        "jet_std::JetTask::join"
+    let TFailureCarrier::Result { success, .. } = carrier else {
+        return Err(route_error("checked task join has no result carrier"));
     };
+    // A join retains the checked Task element, including any worker outcome.
+    if success != task_value {
+        return Err(route_error(
+            "checked task join result disagrees with its task element",
+        ));
+    }
     Ok(prelude(
         MirPreludeFamily::HandleMethod,
         "core.tasks",
         "join",
-        symbol,
+        "jet_std::JetTask::join",
         1,
         1,
         &[false],

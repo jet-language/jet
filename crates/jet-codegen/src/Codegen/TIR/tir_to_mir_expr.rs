@@ -3954,7 +3954,6 @@ pub(super) fn lower_expr(
         TExprKind::TaskGroupAll { tasks } => {
             let call = ctx.intern_prelude_route(task_group_route(
                 MirTaskGroupKind::All,
-                &tasks.ty,
                 &carrier,
             ))?;
             let tasks = vec![lower_consuming_value(ctx, tasks)?];
@@ -3971,7 +3970,6 @@ pub(super) fn lower_expr(
         TExprKind::TaskGroupRace { tasks } => {
             let call = ctx.intern_prelude_route(task_group_route(
                 MirTaskGroupKind::Race,
-                &tasks.ty,
                 &carrier,
             ))?;
             let tasks = vec![lower_consuming_value(ctx, tasks)?];
@@ -3988,7 +3986,6 @@ pub(super) fn lower_expr(
         TExprKind::TaskGroupAny { tasks } => {
             let call = ctx.intern_prelude_route(task_group_route(
                 MirTaskGroupKind::Any,
-                &tasks.ty,
                 &carrier,
             ))?;
             let tasks = vec![lower_consuming_value(ctx, tasks)?];
@@ -7184,36 +7181,14 @@ fn direct_prelude_route(
     }
 }
 
-fn task_group_result_tasks(ty: &Type) -> bool {
-    fn task_result(ty: &Type) -> bool {
-        matches!(
-            ty.without_user_tags(),
-            Type::Apply { name, args }
-                if name == "Task"
-                    && args.len() == 1
-                    && matches!(args[0].without_user_tags(), Type::Result { .. })
-        )
-    }
-    match ty.without_user_tags() {
-        Type::List(inner) | Type::FixedList { elem: inner, .. } => task_result(inner),
-        Type::Tuple(fields) => fields.iter().all(|(_, field)| task_result(field)),
-        _ => false,
-    }
-}
-
 fn task_group_route(
     kind: MirTaskGroupKind,
-    tasks_ty: &Type,
     carrier: &super::TFailureCarrier,
 ) -> TPreludeRoute {
-    let result = task_group_result_tasks(tasks_ty);
-    let (name, symbol) = match (kind, result) {
-        (MirTaskGroupKind::All, false) => ("all", "jet_std::jet_task_all"),
-        (MirTaskGroupKind::Race, false) => ("race", "jet_std::jet_task_race"),
-        (MirTaskGroupKind::Any, false) => ("any", "jet_std::jet_task_any"),
-        (MirTaskGroupKind::All, true) => ("all_result", "jet_std::jet_task_all_result"),
-        (MirTaskGroupKind::Race, true) => ("race_result", "jet_std::jet_task_race_result"),
-        (MirTaskGroupKind::Any, true) => ("any_result", "jet_std::jet_task_any_result"),
+    let (name, symbol) = match kind {
+        MirTaskGroupKind::All => ("all", "jet_std::jet_task_all"),
+        MirTaskGroupKind::Race => ("race", "jet_std::jet_task_race"),
+        MirTaskGroupKind::Any => ("any", "jet_std::jet_task_any"),
     };
     direct_prelude_route("core.tasks", name, symbol, 1, &[false], carrier)
 }

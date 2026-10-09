@@ -8913,55 +8913,19 @@ fn jet_eval_task_group_exchange(machine: &JetEvalMachine, call: MIRPreludeCallID
     expected_symbol := ""
     if kind == {
         .All -> {
-            if {
-                row.member == "all" -> {
-                    expected_member = "all"
-                    expected_symbol = "jet_std::jet_task_all"
-                }
-                row.member == "all_result" -> {
-                    expected_member = "all_result"
-                    expected_symbol = "jet_std::jet_task_all_result"
-                }
-                else -> {
-                    jet_eval_compiler_fail(&machine, span, "MIR task-group all route has a non-canonical member")
-                    return None
-                }
-            }
+            expected_member = "all"
+            expected_symbol = "jet_std::jet_task_all"
         }
         .Race -> {
-            if {
-                row.member == "race" -> {
-                    expected_member = "race"
-                    expected_symbol = "jet_std::jet_task_race"
-                }
-                row.member == "race_result" -> {
-                    expected_member = "race_result"
-                    expected_symbol = "jet_std::jet_task_race_result"
-                }
-                else -> {
-                    jet_eval_compiler_fail(&machine, span, "MIR task-group race route has a non-canonical member")
-                    return None
-                }
-            }
+            expected_member = "race"
+            expected_symbol = "jet_std::jet_task_race"
         }
         .Any -> {
-            if {
-                row.member == "any" -> {
-                    expected_member = "any"
-                    expected_symbol = "jet_std::jet_task_any"
-                }
-                row.member == "any_result" -> {
-                    expected_member = "any_result"
-                    expected_symbol = "jet_std::jet_task_any_result"
-                }
-                else -> {
-                    jet_eval_compiler_fail(&machine, span, "MIR task-group any route has a non-canonical member")
-                    return None
-                }
-            }
+            expected_member = "any"
+            expected_symbol = "jet_std::jet_task_any"
         }
     }
-    if mir_symbol_name(row.symbol) != expected_symbol || tasks.len() != 1 {
+    if row.member != expected_member || mir_symbol_name(row.symbol) != expected_symbol || tasks.len() != 1 {
         jet_eval_compiler_fail(&machine, span, "MIR task-group route has an invalid symbol or operand arity")
         return None
     }

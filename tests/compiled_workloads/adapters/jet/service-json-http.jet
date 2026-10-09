@@ -103,12 +103,17 @@ fn run_concurrent(url: String, body: String, count: Int, workers: Int) {
         if {
             count == 2 -> {
                 values :: task.all {post_sum(url, body), post_sum(url, body)} ?? panic("concurrent requests failed")
-                if values[0] != 6 || values[1] != 6 -> panic("concurrent sum mismatch")
+                first :: values[0] ?? panic("concurrent request failed")
+                second :: values[1] ?? panic("concurrent request failed")
+                if first != 6 || second != 6 -> panic("concurrent sum mismatch")
                 print("concurrent=2")
             }
             count == 3 -> {
                 values :: task.all {post_sum(url, body), post_sum(url, body), post_sum(url, body)} ?? panic("concurrent requests failed")
-                if values[0] != 12 || values[1] != 12 || values[2] != 12 {
+                first :: values[0] ?? panic("concurrent request failed")
+                second :: values[1] ?? panic("concurrent request failed")
+                third :: values[2] ?? panic("concurrent request failed")
+                if first != 12 || second != 12 || third != 12 {
                     panic("concurrent sum mismatch")
                 }
                 print("concurrent=3")

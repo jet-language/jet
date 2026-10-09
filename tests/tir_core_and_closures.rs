@@ -13,6 +13,109 @@ use tir_support::{
     assert_tiers_agree, build_and_run, build_and_run_full_with_cfg, build_and_run_multi, have_rustc,
 };
 
+
+/// #4790 / I2: the task lambda's checked Never carrier must survive a typed
+/// list boundary. Joining unwraps the task failure and then the worker result.
+#[test]
+fn task_lambda_never_carrier_typed_list_builds_and_runs() {
+    if !have_rustc() {
+        return;
+    }
+    let source = r#"
+fn report() -> String Never! { "done" }
+fn run() {
+    workers := [Task<String Never!>]{}
+    task.group group {
+        &workers.push(task { report() })
+        loop pending in workers {
+            joined :: ^pending.join() ?? panic("join failed")
+            print(joined ?? panic("infallible worker"))
+        }
+    }
+}
+"#;
+    let (code, stdout) = build_and_run("task_lambda_never_carrier_typed_list", source);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "done\n");
+}
+
+#[test]
+fn recursive_task_explicit_joins_build_and_run() {
+    if !have_rustc() {
+        return;
+    }
+    let source = r#"
+fn report() Never! {}
+fn start(group: Group, remaining: Int) Never! {
+    if remaining == 0 -> return
+    worker :: task report()
+    start(group, remaining - 1)
+    joined :: ^worker.join() ?? panic("join failed")
+    joined ?? panic("infallible worker")
+}
+fn run() {
+    task.group group {
+        start(group, 2)
+    }
+    print("joined")
+}
+"#;
+    let (code, stdout) = build_and_run("recursive_task_explicit_joins", source);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "joined\n");
+}
+
+/// A worker's ordinary error remains an inner Result, not TaskFailure.Panicked.
+/// Successful workers likewise retain their Never carrier through every group.
+#[test]
+fn task_groups_preserve_worker_results_builds_and_runs() {
+    if !have_rustc() {
+        return;
+    }
+    let source = r#"
+#Error
+enum WorkerError { Bad }
+fn report() -> String Never! { "done" }
+fn fail() -> String WorkerError! { Err(WorkerError.Bad) }
+fn run() {
+    values :: task.all {{ report() }, { report() }} ?? panic("all failed")
+    print(values[0] ?? panic("infallible worker"))
+    print(values[1] ?? panic("infallible worker"))
+    named :: task.all {z: { report() }, a: { report() }} ?? panic("named all failed")
+    print(named.z ?? panic("infallible worker"))
+    print(named.a ?? panic("infallible worker"))
+    raced :: task.race {{ report() }, { report() }} ?? panic("race failed")
+    print(raced ?? panic("infallible worker"))
+    first :: task.any {{ report() }, { report() }} ?? panic("any failed")
+    print(first ?? panic("infallible worker"))
+    failures :: task.all {{ fail() }, { fail() }} ?? panic("worker error became a waiting failure")
+    loop result in failures {
+        if result == {
+            .Err(error) -> {
+                if error == {
+                    .Bad -> print("worker error")
+                }
+            }
+            .Ok(_) -> panic("worker error was lost")
+        }
+    }
+    worker :: task fail()
+    joined :: ^worker.join() ?? panic("worker error became a waiting failure")
+    if joined == {
+        .Err(error) -> {
+            if error == {
+                .Bad -> print("joined worker error")
+            }
+        }
+        .Ok(_) -> panic("joined worker error was lost")
+    }
+}
+"#;
+    let (code, stdout) = build_and_run("task_groups_preserve_worker_results", source);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "done\ndone\ndone\ndone\ndone\ndone\nworker error\nworker error\njoined worker error\n");
+}
+
 /// c109 Phase 10: core/stdlib module calls route through the TIR. `math.*`,
 /// `Path.join`, and `crypto.sha256` are type-monomorphic (in `core_fixed_sig`),
 /// so `calc`/`make_path`/`hash`/`main` are all covered. The call forms

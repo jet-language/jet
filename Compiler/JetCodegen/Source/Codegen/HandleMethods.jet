@@ -61,16 +61,17 @@ fn jet_codegen_handle_type_without_tags(ty: Type) -> Type Never! {
     }
 }
 
-fn jet_codegen_handle_task_route(receiver: Type) -> JetCodegenHandleRoute Never! {
+fn jet_codegen_handle_task_route(receiver: Type, carrier: TFailureCarrier) -> JetCodegenHandleRoute Never! {
     task_type := jet_codegen_handle_type_without_tags(receiver)
     if task_type == {
         .Apply(name, args) -> {
             if name != "Task" || args.len() != 1 -> panic("checked task join has an unsupported receiver type")
-            symbol := if args[0] == {
-                .Result(_, _) -> "jet_std::jet_task_join_result"
-                else -> "jet_std::JetTask::join"
+            success := if carrier == {
+                .Result(value, _) -> value
+                else -> panic("checked task join has no result carrier")
             }
-            return jet_codegen_handle_core("core.tasks", "join", symbol, [Bool]{false}, None)
+            if success != args[0] -> panic("checked task join result disagrees with its task element")
+            return jet_codegen_handle_core("core.tasks", "join", "jet_std::JetTask::join", [Bool]{false}, None)
         }
         else -> panic("checked task join has an unsupported receiver type")
     }
@@ -851,7 +852,7 @@ fn jet_codegen_handle_dynamic_route(operation: THandleOp, receiver: Type, argume
         }
         .ReactiveGet -> return jet_codegen_handle_reactive_route(receiver, "get")
         .ReactiveSet -> return jet_codegen_handle_reactive_route(receiver, "set")
-        .TaskJoin -> return Val(jet_codegen_handle_task_route(receiver))
+        .TaskJoin -> return Val(jet_codegen_handle_task_route(receiver, carrier))
         .PreciseMethod(type_name, method) -> return jet_codegen_handle_precise_route(type_name, method)
         .MathMethod(type_name, method, reduce_op) -> return jet_codegen_handle_math_route(type_name, method, reduce_op)
         .EventMethod(method) -> return jet_codegen_handle_event_route(receiver, method, carrier)
