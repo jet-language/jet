@@ -4106,7 +4106,9 @@ fn run() {
 parameter and result contracts before code generation. There is no dynamic
 export lookup or missing-export fallback. Each parameter and the result of an
 export is `Int`, `Float`, `Bool`, or `Text`, mixed freely across positions, or
-a recursively closed Component Model shape (E1260).
+a recursively closed `#Codable` record, list, `Option`, or `Result` of those
+(E1260). A sandbox export must return a value; fixed widths, maps, tuples,
+unions, handles, and generic applications do not cross the Component boundary.
 The `packages/sandbox_mathkit` golden exercises `Bool` results and UTF-8 text
 round trips, including a non-ASCII name; its checked-in interface snapshot
 lists every named export used by the host.
@@ -4132,7 +4134,8 @@ The manifest `export:` target names the interface and defaults to the package
 name. The frozen public interface is keyed as `plugin__<export>` in
 `.jet/cache/api/`; unchanged interfaces freeze silently, while removing or
 changing an export is E1257. E1258 reports authority denial, E1259 a component
-build/toolchain failure, and E1260 an unsupported export shape
+build/toolchain failure, and E1260 an unsupported export shape on either the
+sandbox Component boundary or the native `#Export(c)` C boundary
 (D-PLUGIN1, D-PLUGIN-EXPORT1, D-PLUGIN-VERSION1, D-DEP-WASM1, D-EMBED2).
 
 ### Embedding artifacts
@@ -4142,7 +4145,8 @@ artifact exports its top-level `pub fn` items. Each parameter and the result of
 a native `#Export(c)` function is, independently, one C primitive: `Int`
 (`int64_t`), `Float` (`double`), `Bool`, `Text` (the JetText pointer/length
 pair), `I8`–`I64` and `U8`–`U64` (`int8_t`–`uint64_t`), or `F32` (`float`); a
-unit result is `void`. A sandbox export uses the Component scalars above.
+unit result is `void`. A sandbox export uses the Component shapes above. Both
+boundaries publish the success value of a function's failure contract.
 
 `jet build --lib` emits a linkable native static or shared library and a C
 header. It needs no Component runtime, but the native artifact is trusted code:

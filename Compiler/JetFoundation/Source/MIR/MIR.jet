@@ -3275,6 +3275,75 @@ pub fn mir_c_export_signature(function: MIRFunction) -> Bool Never! {
     mir_c_void(result) || mir_c_primitive(result) != None
 }
 
+// The sandbox Component export law (D-PLUGIN-EXPORT1=A): every parameter and
+// the published result of a sandbox `pub fn` is one recursively closed
+// Component Model shape, independently per position: `Int`, `Float`, `Bool`,
+// `String`, or a `List`, `Option`, `Result` or `#Codable` record of them. The
+// published result is the same `mir_c_export_result` the C law uses, so a
+// unit, Optional or diverging result has no Component value. `codable_keys`
+// names the checked record types that derive both Encode and Decode: the
+// boundary never invents a record layout from a spelling. Fixed widths,
+// maps, tuples, unions, handles and generic applications have no Component
+// shape here.
+pub fn mir_component_type_descriptor(types: [MIRTypeDef], codable_keys: [String], ty: MIRType, seen: [MIRTypeID]) -> MIRComponentTypeDescriptor? {
+    if ty.kind == {
+        .Int -> return Val(MIRComponentTypeDescriptor.Int)
+        .Float -> return Val(MIRComponentTypeDescriptor.Float)
+        .Bool -> return Val(MIRComponentTypeDescriptor.Bool)
+        .String -> return Val(MIRComponentTypeDescriptor.String)
+        .List(inner) | .FixedList(inner, _) -> return mir_component_type_descriptor(types, codable_keys, inner, seen).map(value -> MIRComponentTypeDescriptor.List{inner: value})
+        .Option(inner) -> return mir_component_type_descriptor(types, codable_keys, inner, seen).map(value -> MIRComponentTypeDescriptor.Option{inner: value})
+        .InlineRange(inner, _, _) | .Tagged(_, inner) -> return mir_component_type_descriptor(types, codable_keys, inner, seen)
+        .Result(ok, err) -> {
+            ok_descriptor :: mir_component_type_descriptor(types, codable_keys, ok, seen) ?? return None
+            err_descriptor :: mir_component_type_descriptor(types, codable_keys, err, seen) ?? return None
+            return Val(MIRComponentTypeDescriptor.Result{ok: ok_descriptor, err: err_descriptor})
+        }
+        .Apply(name, args) -> {
+            if args.len() != 0 -> return None
+            loop prior in seen {
+                if prior == name.id -> return None
+            }
+            next_seen := seen
+            &next_seen.push(name.id)
+            loop definition in types {
+                if definition.id != name.id -> next
+                if definition.kind == {
+                    .Alias(target) -> return mir_component_type_descriptor(types, codable_keys, target, next_seen)
+                    .Struct(fields, _) -> {
+                        if !codable_keys.contains(definition.key) -> return None
+                        component_fields := [MIRComponentTypeField]{}
+                        loop index in 0..<fields.len() {
+                            field :: fields[index]
+                            if field.skip || field.computed -> next
+                            descriptor :: mir_component_type_descriptor(types, codable_keys, field.ty, next_seen) ?? return None
+                            &component_fields.push(MIRComponentTypeField{index: index, name: field.shape_names.json ?? field.name, ty: descriptor})
+                        }
+                        return Val(MIRComponentTypeDescriptor.Record{name: definition.name, fields: component_fields})
+                    }
+                    else -> return None
+                }
+            }
+            return None
+        }
+        else -> return None
+    }
+}
+
+// Whether a checked top-level function satisfies the sandbox Component export
+// law, and its canonical Component signature when it does.
+pub fn mir_component_export_signature(types: [MIRTypeDef], codable_keys: [String], function: MIRFunction) -> MIRComponentSignatureDescriptor? {
+    if function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 -> return None
+    params := [MIRComponentTypeDescriptor]{}
+    loop param in function.params {
+        descriptor :: mir_component_type_descriptor(types, codable_keys, param.ty, [MIRTypeID]{}) ?? return None
+        &params.push(descriptor)
+    }
+    result :: mir_c_export_result(function) ?? return None
+    result_descriptor :: mir_component_type_descriptor(types, codable_keys, result, [MIRTypeID]{}) ?? return None
+    Val(MIRComponentSignatureDescriptor{params: params, result: result_descriptor})
+}
+
 pub struct MIREntrySpec {
     pub kind: MIREntryKind
     pub function: MIRFunctionID?
