@@ -110,6 +110,29 @@ runtime's ABI, error behavior, or observable output. Report an unsupported
 construct before producing an executable; do not marshal an unproved carrier
 or run a backend-local approximation. A focused same-program regression must
 exercise either the shared meaning or that explicit refusal.
+Module scalar storage has one local data cell per checked declaration. Global
+reads and writes through static-rooted places address that same cell, including
+when the shared object writer packages a runtime library. Atomic values still
+require their typed allocation, ordering and ownership contract; a raw machine
+compare-and-swap primitive does not establish that contract.
+
+The runtime allocator distinguishes an invalid layout from exhausted storage.
+Invalid layouts retain the canonical Jet panic diagnostic. Failure to allocate
+a valid nonzero layout writes exactly `memory allocation of N bytes failed\n`
+to stderr, with `N` rendered as unsigned decimal, then aborts the process
+(SIGABRT on the hosted native target). This fatal path uses stack storage and
+the shared raw-byte terminal writer: it neither allocates a diagnostic carrier
+nor invokes a Rust panic hook, task-stop publication, or backtrace rendering.
+The Rust-tier seed adapter preserves the same bytes and termination as the
+Jet-owned allocator; it does not inherit host-toolchain allocation-error policy.
+
+Runtime C routes use canonical `Float` for a direct 64-bit floating argument or
+result, matching the Rust `f64` register carrier. The validator does not admit
+convenience spellings or a 32-bit floating carrier. Pointer and indirect output
+slots remain `I64` or `U64` words even when their payload is a float; byte and
+boolean carriers retain their separate checks. This is carrier validation, not
+a numeric conversion.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

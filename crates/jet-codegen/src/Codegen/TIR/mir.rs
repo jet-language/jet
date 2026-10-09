@@ -58,6 +58,7 @@ use jet_foundation::MIR::{
     MirVectorFact, MirVectorLayout, MirVectorRule, MirVisibility, MirWebParamField,
     MirWebParamReconstruction, stable_id,
 };
+use jet_foundation::MIR::{MirPollKind, mir_operation_can_stop};
 /// Keep only derive requests whose implementation is part of this target's
 /// checked program. Type-site markers are broader than Rust trait conformance:
 /// a user derive provider (for example `#Summarize`) contributes inherent
@@ -188,6 +189,8 @@ pub(super) struct FunctionRegistry {
     /// cleanup closes a still-live local of that type through this function.
     close_impl_rows: Vec<(String, Type, Span, MirFunctionId)>,
     close_impls: HashMap<MirTypeId, MirFunctionId>,
+    /// Native runtime lowering owns explicit stop paths; AOT/web stay unwind-based.
+    stop_points: bool,
 }
 
 impl FunctionRegistry {
@@ -210,6 +213,7 @@ impl FunctionRegistry {
             receiver_access: HashMap::new(),
             close_impl_rows: Vec::new(),
             close_impls: HashMap::new(),
+            stop_points: false,
         };
         // Resolve stable-ID hash collisions from a canonical identity order.
         // Normal rows retain their historical IDs; only a real collision gets
@@ -1137,9 +1141,20 @@ fn report_lower_sweep_failure(
 /// Lower a TIR program to MIR. The program is consumed: each function's body
 /// is released as soon as it is lowered, so a large program never holds its
 /// whole TIR and whole MIR at once.
-pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerError> {
+pub fn lower_tir_to_mir(program: TirProgram) -> Result<MirProgram, LowerError> {
+    lower_tir_to_mir_with_stop_points(program, false)
+}
+
+/// Checked native runtime MIR uses the same ownership builder as AOT, but
+/// transfers cancellation and task failure through explicit cleanup edges.
+pub fn lower_native_tir_to_mir(program: TirProgram) -> Result<MirProgram, LowerError> {
+    lower_tir_to_mir_with_stop_points(program, true)
+}
+
+fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool) -> Result<MirProgram, LowerError> {
     let mut function_registry =
         FunctionRegistry::build(&program.funcs, program.entry_sibling_calls.as_ref())?;
+    function_registry.stop_points = stop_points;
     let mut types = lower_type_defs(&program.declarations.type_defs, &function_registry)?;
     lower_anonymous_union_type_defs(&program, &mut types)?;
     // Trait names are checked nominal identities too.  Unlike user types,
@@ -3819,6 +3834,24 @@ pub fn lower_checked_mir_program_for(
     lower_checked_mir_program_for_with_debug(bundle, checked_nominals, request, false)
 }
 
+/// Native runtime entry: the request is still the checked artifact selection,
+/// but ownership exits are explicit instead of crossing native frames.
+pub fn lower_checked_native_mir_program_for(
+    bundle: &crate::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
+    request: MirArtifactRequest,
+) -> Result<(MirProgram, MirArtifactId), LowerError> {
+    let target = request.target;
+    let kind = request.kind;
+    let tir = super::lower_checked_tir_program_for_with_debug(bundle, checked_nominals, request, false)?;
+    let mir = lower_native_tir_to_mir(tir)?;
+    mir.validate().map_err(|error| LowerError::new(Span::new(0, 0), format!("native MIR validation failed: {error}")))?;
+    let artifact = mir.artifacts.iter().find(|artifact| artifact.target == target && artifact.kind == kind)
+        .map(|artifact| artifact.id)
+        .ok_or_else(|| LowerError::new(Span::new(0, 0), "native MIR request has no artifact row"))?;
+    Ok((mir, artifact))
+}
+
 /// Lower checked MIR with the native debug source-map markers enabled.
 pub fn lower_checked_mir_program_for_with_debug(
     bundle: &crate::AST::ProgramBundle,
@@ -3828,6 +3861,7 @@ pub fn lower_checked_mir_program_for_with_debug(
 ) -> Result<(MirProgram, MirArtifactId), LowerError> {
     let target = request.target;
     let kind = request.kind;
+    let native_dump = std::env::var_os("JET_DUMP_NATIVE_MIR").map(|path| (path, request.clone()));
     let tir = super::lower_checked_tir_program_for_with_debug(bundle, checked_nominals, request, debug_linemap)?;
     let mut mir = lower_tir_to_mir(tir)?;
     // Compile time is explicit in the checker, so ordinary immutable bindings
@@ -3849,6 +3883,11 @@ pub fn lower_checked_mir_program_for_with_debug(
     // when unset.
     if let Some(path) = std::env::var_os("JET_DUMP_MIR") {
         let _ = std::fs::write(path, format!("{mir:#?}"));
+    }
+    if let Some((path, request)) = native_dump {
+        let (native, _) = lower_checked_native_mir_program_for(bundle, checked_nominals, request)?;
+        std::fs::write(path, format!("{native:#?}"))
+            .map_err(|error| LowerError::new(Span::new(0, 0), format!("cannot write native MIR: {error}")))?;
     }
     let artifact = mir
         .artifacts
@@ -4371,6 +4410,7 @@ fn lower_function(
     for (offset, (name, ty, access)) in f.params.iter().enumerate() {
         ctx.bind_parameter(param_index + offset, name, ty, *access)?;
     }
+    ctx.emit_poll(MirPollKind::Check)?;
     match body {
         Some(TLambdaBody::Expr(expr)) => {
             let value = ctx.lower_child(expr)?;
@@ -5065,6 +5105,7 @@ enum ExitTarget {
     Return(Option<MirPlaceId>),
     Break(MirBlockId),
     Continue(MirBlockId),
+    Stopped,
 }
 
 /// One drop-chain entry of a frame: exits toward `target` taken after the
@@ -5184,6 +5225,7 @@ pub(super) struct LowerCtx<'a> {
     pub(super) loops: Vec<(Option<String>, MirBlockId, MirBlockId)>,
     loop_defer_depths: Vec<usize>,
     defer_stack: Vec<DeferFrame>,
+    stop_cleanup_active: bool,
     /// The final block of each shared drop chain (see `ExitTarget`).
     exit_tails: HashMap<ExitTarget, MirBlockId>,
     /// Locals that carry a returned value through a shared drop chain, one
@@ -5394,6 +5436,7 @@ impl<'a> LowerCtx<'a> {
             loops: Vec::new(),
             loop_defer_depths: Vec::new(),
             defer_stack: vec![DeferFrame::default()],
+            stop_cleanup_active: false,
             exit_tails: HashMap::new(),
             exit_value_slots: Vec::new(),
             deferred_closes: Vec::new(),
@@ -6672,6 +6715,27 @@ impl<'a> LowerCtx<'a> {
         }
     }
 
+    /// Never read a can-stop result on the stop edge. Only the resume edge
+    /// binds it into a lexical frame; Stopped exits through that frame's
+    /// ordinary drop chain. Cleanup, Shield and transaction bodies are masked.
+    pub(super) fn emit_poll(&mut self, kind: MirPollKind) -> Result<(), LowerError> {
+        if !self.function_registry.stop_points || self.stop_cleanup_active
+            || !self.transaction_restores.is_empty() || self.is_terminated()
+            || self.defer_stack.iter().filter_map(|frame| frame.owner).any(|owner| {
+                self.scopes.iter().any(|scope| scope.id == owner && scope.kind == MirScopeKind::Shield)
+            })
+        {
+            return Ok(());
+        }
+        let resume = self.new_block(self.span(), "poll.resume")?;
+        let stop = self.new_block(self.span(), "poll.stop")?;
+        self.terminate(MirTerminator::Poll { kind, resume, stop });
+        self.current = stop;
+        self.terminate_with_cleanup(MirTerminator::Stopped, 0)?;
+        self.current = resume;
+        Ok(())
+    }
+
     /// End the current path with `terminator`, running the cleanups of every
     /// frame from `from_depth` up first. Each frame's cleanups are lowered
     /// once, as a drop chain its exits share (`seal_exit_chains`), so cleanup
@@ -6798,6 +6862,7 @@ impl<'a> LowerCtx<'a> {
             }
             MirTerminator::Break { target, value: None } => Some(ExitTarget::Break(*target)),
             MirTerminator::Continue { target } => Some(ExitTarget::Continue(*target)),
+            MirTerminator::Stopped => Some(ExitTarget::Stopped),
             _ => None,
         })
     }
@@ -6916,6 +6981,7 @@ impl<'a> LowerCtx<'a> {
                 value: None,
             },
             ExitTarget::Continue(target) => MirTerminator::Continue { target },
+            ExitTarget::Stopped => MirTerminator::Stopped,
         };
         self.terminate(terminator);
         self.exit_tails.insert(target, block);
@@ -7106,6 +7172,9 @@ impl<'a> LowerCtx<'a> {
         action: DeferredCleanup,
         stop_path: bool,
     ) -> Result<(), LowerError> {
+        let masked = self.stop_cleanup_active;
+        self.stop_cleanup_active = true;
+        let result = (|| {
         match action {
             DeferredCleanup::Close(index) => self.emit_deferred_close(index)?,
             DeferredCleanup::Guard(place) => {
@@ -7143,7 +7212,10 @@ impl<'a> LowerCtx<'a> {
                 }
             }
         }
-        Ok(())
+            Ok(())
+        })();
+        self.stop_cleanup_active = masked;
+        result
     }
 
     pub(super) fn emit_scope_cleanups(&mut self, scope: MirScopeId) -> Result<(), LowerError> {
@@ -7844,6 +7916,7 @@ impl<'a> LowerCtx<'a> {
         let identity = self.reserve_identity("operation", span, role, &detail)?;
         let value = MirValueId(stable_id("mir-value", &identity));
         let op_id = jet_foundation::MIR::MirOpId(stable_id("mir-op", &identity));
+        let can_stop = mir_operation_can_stop(&operation);
         if let Some(value_type) = &value_type {
             let ownership = match forced_ownership {
                 Some(ownership) => ownership,
@@ -7891,6 +7964,9 @@ impl<'a> LowerCtx<'a> {
                 None,
                 MirOperation::WritePlace { place: flag, value: next },
             )?;
+        }
+        if can_stop {
+            self.emit_poll(MirPollKind::Propagate)?;
         }
         Ok(value)
     }

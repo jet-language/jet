@@ -710,6 +710,8 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, pla
             &items.push(jet_rust_emit_cfg_edge(block_id, target, indent))
         }
         .Unreachable(reason) -> &items.push(jet_rust_emit_cfg_line("{indent}unreachable!({jet_rust_emit_quote(reason)});"))
+        // Stop points are produced only for the native execution host (MIR Stops.jet), after the optimizer.
+        .Poll(_, _, _) | .Stopped -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR stop point reached the Rust emitter", "stop points are produced only for native host compilations", None)
     }
 }
 

@@ -438,10 +438,10 @@ fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
     bytes
 }
 
-// Link the runtime archive set `bufs` (names[i] names bufs[i] in reports;
-// the first archive is the runtime itself) into a runtime pack. The roots
-// are the C ABI the first archive defines plus `extra_roots` (names a
-// program object may reference directly, such as `memcpy`).
+// Link runtime objects and archives (names[i] names bufs[i] in reports).
+// Audited Jet exports are defined public globals in standalone objects;
+// private functions and imported symbols are not exports. The roots are
+// those object exports, the first archive's C ABI, and `extra_roots`.
 pub fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) -> X64ExecutableResult Never! {
     c := link_context(^bufs)
     link_load_inputs(&c, names)
@@ -453,6 +453,25 @@ pub fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [Strin
         if link_pack_c_abi(name) && seen.get(name) == None {
             &seen.add(name, true).drop("checked absent above")
             &root_names.push(name)
+        }
+    }
+    // link_load_inputs has loaded only standalone objects at this point.
+    // Archive dependencies pulled during resolution must stay private.
+    loop obj in 0..<c.obj_name.len() {
+        b :: c.obj_buffer[obj]
+        loop k in c.obj_first_global[obj]..<c.obj_sym_count[obj] {
+            at :: link_sym_at(c, obj, k)
+            bind :: link_u8(c.bufs, b, at + 4) >> 4
+            visibility :: link_u8(c.bufs, b, at + 5) & 3
+            if (bind != 1 && bind != 2) || (visibility != 0 && visibility != 3) -> next
+            if link_sym_shndx(c, obj, k) == LINK_UNDEF -> next
+            g :: link_global_of(c, obj, k)
+            if g < 0 -> next
+            name :: c.g_name[g]
+            if link_pack_c_abi(name) && seen.get(name) == None {
+                &seen.add(name, true).drop("checked absent above")
+                &root_names.push(name)
+            }
         }
     }
     loop name in extra_roots {

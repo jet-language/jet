@@ -314,6 +314,7 @@ const FIELD_RENAMES = {
   MIRConstantDef: { module: "module_id" },
   MIRNameDeclaration: { module: "module_index" },
   MIRNameAlias: { module: "module_index" },
+  MIRNameDisplayPath: { module: "module_index" },
   MIRLocal: { comptime: "is_comptime" },
 };
 

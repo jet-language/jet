@@ -93,6 +93,8 @@ pub(crate) mod text_rt {
                 return IOError::Unsupported(context);
             }
             match e.kind() {
+                std::io::ErrorKind::AlreadyExists => IOError::AlreadyExists(context),
+                std::io::ErrorKind::Unsupported => IOError::Unsupported(context),
                 std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
                     IOError::InvalidInput(context)
                 }

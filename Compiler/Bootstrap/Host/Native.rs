@@ -2383,6 +2383,8 @@ fn emit_bootstrap_host_factory(
     let request_trace_sink = symbols.field_symbol("JetDriverCompileRequest", "trace_sink")?;
     let request_mir_lint_every_pass =
         symbols.field_symbol("JetDriverCompileRequest", "mir_lint_every_pass")?;
+    let request_comptime_stop_points =
+        symbols.field_symbol("JetDriverCompileRequest", "comptime_stop_points")?;
     let request_compiler_threads =
         symbols.field_symbol("JetDriverCompileRequest", "compiler_threads")?;
     // #4643: the request's compile mode; the bootstrap host always compiles a program.
@@ -2547,6 +2549,7 @@ fn emit_bootstrap_host_factory(
             "        {request_gate_policies}: Vec::new(),\n",
             "        {request_external_gate_entries}: Vec::new(),\n",
             "        {request_evaluation_entry}: Err(Default::default()),\n",
+            "        {request_comptime_stop_points}: false,\n",
             "        // D-JOBS1=A: the bootstrap host takes no `--threads` cap, so the\n",
             "        // compiler admits threads automatically up to the reported cores\n",
             "        // and within the memory Linux reports available, lowered to the\n",
@@ -2610,6 +2613,7 @@ fn emit_bootstrap_host_factory(
         gate_session_flag = gate_session_flag,
         request_trace_sink = request_trace_sink,
         request_mir_lint_every_pass = request_mir_lint_every_pass,
+        request_comptime_stop_points = request_comptime_stop_points,
         request_compiler_threads = request_compiler_threads,
         request_mode = request_mode,
         mode_program = mode_program,

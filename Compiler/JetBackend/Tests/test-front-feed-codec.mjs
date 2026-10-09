@@ -5,8 +5,16 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Converter, encode, jetDecoder, loadMirSchema, parseJetSchema, parseRustDebug } from './mir-debug.mjs';
 import { decodeStream, jetWriter } from './front-feed-codec.mjs';
+import { frontReceipt } from './jet-front.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const schema = loadMirSchema(repo);
+// Receipt parsing is strict: lints do not fail compilation, but errors,
+// interrupted candidates and absent completion never count as native passes.
+assert.equal(frontReceipt('complete=true\n', { status: 0 }), null);
+assert.equal(frontReceipt('complete=true\nreport_json={"severity":"warning","code":"W0001"}\n', { status: 0 }), null);
+assert.equal(frontReceipt('complete=true\nreport_json={"severity":"error","code":"E0101","what":"missing entry"}\n', { status: 0 }).verdict, 'no-mir');
+assert.equal(frontReceipt('complete=false\n', { status: 0 }).verdict, 'no-mir');
+assert.equal(frontReceipt('complete=true\n', { status: null, signal: 'SIGKILL' }).verdict, 'no-mir');
 const named = name => ({ k: 'named', name });
 // MIR NameLedger rows have declaration defaults. The codec must consume their
 // types, never manufacture decoder names from the default initializer text.
@@ -51,6 +59,20 @@ const set = (value, field, item) => { const row = value.fields.find(([key]) => k
 const field = (value, owner, name) => value.fields[schema.get(owner).fields.findIndex(f => f.name === name)];
 const variant = (value, owner) => schema.get(owner).variants[value.tag].name;
 const convert = (text, name, converter = new Converter(schema)) => converter.convert(parseRustDebug(text), named(name), 'test');
+
+// This checked display row is retained from modules/generic_modules' MIR dump.
+// Its module field follows the same bootstrap mapping as declarations/aliases.
+const displayPath = convert(`NameDisplayPath {
+    module: 0,
+    internal_path: "generic_modules.M3Int4LawsReveal",
+    display_path: "int_laws.Reveal",
+}`, 'MIRNameDisplayPath');
+assert.equal(field(displayPath, 'MIRNameDisplayPath', 'module_index').int, '0');
+assert.equal(field(displayPath, 'MIRNameDisplayPath', 'internal_path'), 'generic_modules.M3Int4LawsReveal');
+assert.equal(field(displayPath, 'MIRNameDisplayPath', 'display_path'), 'int_laws.Reveal');
+const displayTokens = [];
+encode(displayPath, named('MIRNameDisplayPath'), schema, displayTokens);
+assert.deepEqual(displayTokens, ['0', 'sgeneric_modules.M3Int4LawsReveal', 'sint_laws.Reveal']);
 
 for (const [raw, bound, unbounded] of [['None', null, false], ['Some(None)', null, true], ['Some(Some(37))', '37', false]]) {
   const fn = node(named('MIRFunction')); set(fn, 'memo_bound', parseRustDebug(raw));

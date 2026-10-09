@@ -29,6 +29,71 @@ every program, `jet build`, `jet run` and `jet dev` compile through the Rust
 path and execute its result; the evaluator serves comptime only until native
 O0 comptime lands. Both are removed with the rest of Rust (owner directive 19).
 
+The native runtime object's `jet_rt_alloc` and `jet_rt_free` own C-carrier
+allocation. Generated Rust adapters allocate List result buffers through that
+same allocator because native List paths release them with `jet_rt_free`.
+Native adapters import the Jet definitions and consumers retain the object's
+allocator `.init_array` entry. Rust-tier allocator bodies remain only as
+ledgered seed/verification paths that die at Rust cutover; native packs never
+link those bodies.
+
+Native runtime cutover packaging checks the pinned compiler with the stage0
+front end before declaring the cutover READY, in addition to the narrow trusted
+syntax parse and manifest checks. Record the frontend command's own exit and
+diagnostic summary; syntax-only receipts do not establish borrow correctness.
+A held stage0-only job being READY means it is prepared for scheduling, not
+that its semantic check passed. In Codegen poll and comptime-budget emission,
+`span := builder.current_span` snapshots the source span before write-access to
+`&builder`; `span ::` would retain a builder view across those mutations.
+
+The compiler frontend receipt must retain the full foreign Cargo diagnostics,
+including cached bridge fingerprint output when an inline-FFI error hides
+Cargo's stderr. `os_syscall_stack4_i64` saves and restores the six argument
+registers just like the loader's `os_syscall` and runtime's `os_syscall_i64`;
+its seven generic inputs then need only the return register and two syscall
+clobbers, rather than sixteen simultaneous general-purpose register slots.
+Before scheduling a cutover job, syntax-check its shell script and check every
+referenced input script/path exists. Outputs created by earlier steps are
+identified separately; the runtime assembly driver is
+`Compiler/JetBackend/Tests/run-runtime.mjs`, not a JetRuntime test script.
+
+The bootstrap completion owner may initiate Source resource retirement after
+its caller consumes the factory result and grants retirement permission; a
+prior request is not required. Callback jobs and retained roots still block
+retirement. The runtime library-object feed requires an observed retirement
+request, retired resources and zero retained roots in its frontend receipt
+before accepting the object.
+
+The Rust-debug MIR conversion feed preserves the bootstrap codec's field-name
+mapping for all NameLedger rows, including display paths: the checked Rust
+`MIRNameDisplayPath.module` becomes Jet `module_index`. Internal and display
+paths remain distinct checked strings; conversion must not infer or discard
+either path.
+
+The seed/native C-ABI fixture declares each allocator export once in its shared
+extern block. Its ABI metadata checks must pass in both configurations before a
+runtime pack is admitted. The transitional Rust producer build retains debug
+information and receives a scoped `RUST_MIN_STACK=67108864` environment setting
+for the large generated compiler units; tool crashes remain failed evidence,
+not a native-runtime semantic verdict.
+
+Runtime-pack roots include the public defined C-ABI globals of standalone
+runtime objects as well as the first runtime archive's indexed C ABI and
+explicit extra roots. The Jet object writer publishes audited exports as
+global symbols and private functions as locals. Packing preserves that
+boundary: undefined symbols, hidden/internal definitions, private functions
+and mangled implementation names do not become object export roots. Archive
+members pulled to satisfy these exports remain implementation dependencies.
+`Compiler/JetBackend/Tests/run-runtime-pack-roots.mjs` exercises this boundary
+with real objects, an archive and a consumer, including an unreferenced export.
+
+The all-parts runtime includes `CAbiTest.rs` once through Codegen's canonical
+prelude; the compiler-call preparation step must not append a second copy.
+Test callbacks transfer owned E4 text errors through the shared carrier `take`
+operation, outcome wire output uses `handle`, and finish-wire parsing borrows
+the caller-owned carrier through `view`. No Rust `Box<String>` layout crosses
+these C doors.
+
 The front end owns language checks and user-facing compiler diagnostics.
 Backends consume checked facts; a back end that rejects checked MIR has hit an
 internal compiler error, not another language checker.
@@ -165,6 +230,14 @@ It must not introduce a third front end, a second query verdict, or a new
 execution lens. The Rust host is a bootstrap seed: it is frozen once the Jet
 compiler ships with parity and removed once the native back end is complete
 (D-EXEC2, owner directive 19).
+
+The bootstrap host initializes every `JetDriverCompileRequest` field, including
+declared defaults, through checked field-symbol metadata. Ordinary bootstrap
+compilation keeps `comptime_stop_points` false; only native comptime selection
+enables it. The focused
+[`bootstrap host field guard`](../../Tools/agent/bootstrap-host-fields.test.mjs)
+checks that new request fields have both an emitted initializer row and its
+metadata binding before the generated producer is built.
 
 The table describes crossing responsibilities, not a list of completed ports.
 Its source links own the executable contracts. The proof-home references are

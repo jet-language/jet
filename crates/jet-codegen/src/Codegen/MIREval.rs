@@ -6521,6 +6521,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 &format!("MIR reached an unreachable terminator: {reason}"),
                 span,
             )),
+            MirTerminator::Poll { .. } | MirTerminator::Stopped => Err(mir_error_at(
+                "MIR stop point (native execution host only)",
+                span,
+            )),
         }
     }
     fn eval_plain_list_cursor(

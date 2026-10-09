@@ -1775,6 +1775,44 @@ fn mir_lowers_default_err_return() {
             .unwrap_or_else(|err| panic!("default Err return failed to lower to MIR: {err:?}"));
     });
 }
+
+#[test]
+fn native_stop_producer_checks_entry_calls_loops_and_panic_cleanup() {
+    use jet_foundation::MIR::{MirPollKind, MirTerminator};
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(
+            "fn child(x: Int) -> Int { if x == 0 -> panic(\"boom\")\n x }\n\
+             fn run() { name :: \"owned\"\n n := 0\n loop n < 2 { print(child(n))\n n += 1 }\n print(name) }\n",
+        );
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (native, _) = super::lower_checked_native_mir_program_for(&bundle, &nominals, request.clone()).unwrap();
+        native.validate().unwrap();
+        let mut checks = 0;
+        let mut propagates = 0;
+        let mut stopped = 0;
+        for function in &native.functions {
+            for block in &function.blocks {
+                match block.terminator {
+                    MirTerminator::Poll { kind: MirPollKind::Check, .. } => checks += 1,
+                    MirTerminator::Poll { kind: MirPollKind::Propagate, .. } => propagates += 1,
+                    MirTerminator::Stopped => stopped += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert!(checks >= 3, "two entries and one loop header");
+        assert!(propagates >= 3, "child, print and checked panic");
+        assert!(stopped > 0);
+        let (aot, _) = super::lower_checked_mir_program_for(&bundle, &nominals, request).unwrap();
+        assert!(aot.functions.iter().flat_map(|function| &function.blocks).all(|block| {
+            !matches!(block.terminator, MirTerminator::Poll { .. } | MirTerminator::Stopped)
+        }));
+    });
+}
 /// #4318 §4: lower `src`, returning per-function loop-cursor counts and the
 /// `.clone()` count of the emitted Rust (runtime and types left out).
 fn stable_loop_probe(src: &str) -> (HashMap<String, usize>, usize) {
@@ -1798,6 +1836,113 @@ fn stable_loop_probe(src: &str) -> (HashMap<String, usize>, usize) {
         })
         .collect();
     (cursors, non_scalar_clone_count(&rust))
+}
+
+/// #4882: reflection's typed kind must own a checked declaration even though
+/// it has no native runtime carrier. Keep the reflected record and its enum
+/// constant intact, then exercise the ordinary artifact enum emitter.
+#[test]
+fn unit_scale_provenance_reflection_emits_checked_enum_declaration() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = r#"
+#UnitFamily(Length, dimension) { meter }
+UNIT_SCALE :: prep { Meter.$unit_scale_provenance }
+fn scale_kind() -> UnitScaleProvenanceKind { UNIT_SCALE.kind }
+fn run() { print(scale_kind() == .Rational) }
+"#;
+        let (bundle, nominals) = checked_bundle(source);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("reflection kind must lower with its canonical nominal row");
+        mir.validate().expect("reflection MIR must be valid");
+        let definitions = mir
+            .types
+            .iter()
+            .filter(|row| row.key == "UnitScaleProvenanceKind")
+            .collect::<Vec<_>>();
+        assert_eq!(definitions.len(), 1, "one canonical reflection enum owner");
+        let jet_foundation::MIR::MirTypeDefKind::Enum { variants, .. } =
+            &definitions[0].kind
+        else {
+            panic!("reflection kind must be a checked enum");
+        };
+        let expected = ["Rational", "SymbolicPi", "Conventional", "Measured"];
+        assert_eq!(
+            variants.iter().map(|variant| variant.name.as_str()).collect::<Vec<_>>(),
+            expected
+        );
+        assert!(
+            mir.functions.iter().flat_map(|function| &function.blocks)
+                .flat_map(|block| &block.instructions)
+                .any(|instruction| matches!(
+                    &instruction.operation,
+                    jet_foundation::MIR::MirOperation::EnumIs { owner, variant, .. }
+                        if *owner == definitions[0].id && variant == "Rational"
+                )),
+            "the typed comparison must retain the reflection enum's canonical owner"
+        );
+        let sema_variants = crate::Sema::core_fact_kind_variants("UnitScaleProvenanceKind")
+            .expect("canonical reflection sema menu");
+        assert_eq!(sema_variants.len(), expected.len());
+        for variant in variants {
+            assert!(matches!(variant.payload, jet_foundation::MIR::MirVariantPayload::Unit));
+            assert!(matches!(
+                sema_variants.get(&variant.name),
+                Some((_, crate::AST::VariantPayload::Unit))
+            ));
+        }
+        let reflected = mir
+            .constants
+            .iter()
+            .find(|constant| constant.name == "UNIT_SCALE")
+            .expect("the reflected constant must not be stripped");
+        let jet_foundation::MIR::MirConstant::Struct { type_name, fields } = &reflected.value
+        else {
+            panic!("the reflected provenance must remain a typed record");
+        };
+        assert_eq!(type_name, "UnitScaleProvenanceInfo");
+        assert_eq!(
+            fields.iter().map(|(name, _)| name.as_str()).collect::<HashSet<_>>(),
+            HashSet::from(["kind", "value", "source", "uncertainty"])
+        );
+        let kind = fields.iter().find(|(name, _)| name == "kind").unwrap();
+        assert!(matches!(
+            &kind.1,
+            jet_foundation::MIR::MirConstant::Enum { type_name, variant, args }
+                if type_name == "UnitScaleProvenanceKind" && variant == "Rational" && args.is_empty()
+        ));
+        assert!(!super::tir_to_mir_types::is_compiler_owned_type("UnitScaleProvenanceKind"));
+        let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
+        execution.emit_types = true;
+        execution.emit_runtime = false;
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution,
+            },
+        );
+        // Declarations use canonical path mangling; flat tags use name mangling.
+        assert!(
+            rust.contains(&format!(
+                "pub enum {} {{",
+                crate::Codegen::mangle_path("UnitScaleProvenanceKind")
+            )),
+            "{rust}"
+        );
+        for variant in expected {
+            assert!(
+                rust.contains(&format!("    {},", crate::Codegen::mangle(variant))),
+                "{rust}"
+            );
+        }
+    });
 }
 
 /// Lower `src` to validated MIR and emit its Rust (runtime and types left out).

@@ -149,6 +149,8 @@ pub(crate) mod os_rt {
                 return IOError::Unsupported(context);
             }
             match error.kind() {
+                std::io::ErrorKind::AlreadyExists => IOError::AlreadyExists(context),
+                std::io::ErrorKind::Unsupported => IOError::Unsupported(context),
                 std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
                     IOError::InvalidInput(context)
                 }

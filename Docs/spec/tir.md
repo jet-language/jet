@@ -65,6 +65,14 @@ carrier's builtin identity, and checked constructors publish that identity
 as their lowering receiver. A user module cannot acquire Core ownership merely
 by using a Core-like name.
 
+Compiler-created reflection values retain ordinary checked nominal declarations,
+including their enum tags and payloads. A compiler-owned name does not imply a
+native runtime carrier: reflection enums without one are declared by the artifact
+through the same enum emission path as source declarations.
+Typed variant comparisons resolve their owner from the checked subject's enum
+declaration and require membership in that declaration's canonical variant menu.
+This includes compiler-created reflection enums, not only source and runtime enums.
+
 Checked function parameters and explicit nominal construction type arguments
 publish their resolved identities on the AST consumed by lowering. Body locals,
 patterns, and specialization keys must not reinterpret the same declaration
