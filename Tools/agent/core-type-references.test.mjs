@@ -30,3 +30,14 @@ test('cyclic catalog type-reference targets fail loudly', () => {
     const cyclic = source.replace('JetDataPlotAggregate:plain(None|Count|Sum|Mean|Min|Max)', 'JetDataPlotAggregate:from(core.data)');
     assert.throws(() => parseCoreSource(cyclic), /cyclic Core type reference/);
 });
+test('private ExpiringValue ownership does not expand the public time types', () => {
+    const facts = parseCoreSource(source);
+    const owner = facts.sourceModules.find(row => row.module === 'core.time');
+    assert.ok(owner.ownedTypes.includes('ExpiringValue'));
+    assert.ok(!facts.modules.find(row => row.module === 'core.time').types.some(row => row.name === 'ExpiringValue'));
+});
+test('source ownership still requires the exact source declaration', () => {
+    const changed = source.replace('TimeError, ExpiringValue }', 'TimeError, MissingPrivateType }');
+    assert.notEqual(changed, source);
+    assert.throws(() => parseCoreSource(changed), /does not declare owned type `core\.time\.MissingPrivateType`/);
+});

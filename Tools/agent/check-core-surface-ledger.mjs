@@ -2219,15 +2219,8 @@ function parseCoreSource(source, root = ROOT) {
           sourceModule.module + "." + member + "`");
       }
     }
-    const typeNames = new Set(modules.find(function (entry) {
-      return entry.module === sourceModule.module;
-    }).types.map(function (type) { return type.name; }));
-    for (const type of sourceModule.ownedTypes) {
-      if (!typeNames.has(type)) {
-        throw new Error("Core source module owns undeclared type `" +
-          sourceModule.module + "." + type + "`");
-      }
-    }
+    // Source ownership includes private nominals, not only the public export
+    // metadata. The exact declaring source is validated below.
   }
   const sourceTargets = new Map();
   for (const row of dispatcherRows) {

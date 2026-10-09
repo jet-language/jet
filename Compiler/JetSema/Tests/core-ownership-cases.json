@@ -102,6 +102,24 @@
     "errors": []
   },
   {
+    "name": "source-expiring-value-declaration-and-impl-owner",
+    "root": 10,
+    "source": "use core.time as time\nfn millis() -> Int Never! { time.duration_ms(Duration{ns: 1000000}) }\n",
+    "errors": []
+  },
+  {
+    "name": "user-reserved-expiring-value",
+    "root": 10,
+    "source": "struct ExpiringValue<T> { value: T }\n",
+    "errors": ["E0106"]
+  },
+  {
+    "name": "user-expiring-value-impl-still-rejected",
+    "root": 10,
+    "source": "impl ExpiringValue { fn extra(self) Never! {} }\n",
+    "errors": ["E0301"]
+  },
+  {
     "name": "source-native-carrier-impls",
     "root": 18,
     "sourcePath": "tests/ui/core_opaque_source_impl_ok.jet",

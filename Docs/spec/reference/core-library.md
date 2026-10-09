@@ -2782,6 +2782,13 @@ access: this is Main's owner-approved, veto-able private-field correction,
 following the Measurement/LogSpan rule. The retired module constructor and
 `force` diagnostics are unchanged.
 
+`ExpiringValue` is a reserved source-owned nominal declared in
+`Core/time/time.jet`. The canonical Core ownership inventory admits that
+declaration and its impl even though the spelling remains reserved for user
+code (E0106 for redeclarations, E0301 for user impls on the builtin spelling).
+Source ownership is distinct from public export metadata and also applies
+to private Core declarations; it never grants ownership to a user file.
+
 #### Named zones and local-time resolution
 
 `parse_zoned(text)` accepts RFC9557-style text with a bracketed zone name,

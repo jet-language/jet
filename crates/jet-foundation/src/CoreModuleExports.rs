@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: a49114d2ba4c52a050ee09647544b5384bc2318e1090f5e3b332d01182090d98
+// Source SHA-256: 460f71aaaccec38a441bbc308c67330916d9f66f73b0634cfe1b30312dec192c
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -1004,6 +1004,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/time/time.jet", name: "Instant" },
     CoreSourceOwnedType { path: "Core/time/time.jet", name: "Stopwatch" },
     CoreSourceOwnedType { path: "Core/time/time.jet", name: "TimeError" },
+    CoreSourceOwnedType { path: "Core/time/time.jet", name: "ExpiringValue" },
     CoreSourceOwnedType { path: "Core/tui/tui.jet", name: "TUIColor" },
     CoreSourceOwnedType { path: "Core/tui/tui.jet", name: "TUIConstraint" },
     CoreSourceOwnedType { path: "Core/tui/tui.jet", name: "TUIDirection" },
