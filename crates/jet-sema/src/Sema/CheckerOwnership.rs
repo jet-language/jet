@@ -4812,7 +4812,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0222",
                     format!("A part of `{name}` cannot be moved independently"),
-                    format!("`{}` has its own Close implementation, which needs the complete owner; this move would leave it with an empty field", owner_ty.show()),
+                    format!("{} has its own Close implementation, which needs the complete owner; this move would leave it with an empty field", owner_ty.show()),
                     "Move the Close owner as a whole, or copy the field if its type supports copying".to_string(),
                     Some(span),
                 ));
