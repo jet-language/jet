@@ -151,7 +151,17 @@ if (options.bootstrap) {
   const seenImports = new Set();
   const clean = text => text.replace(imports, block => block.replace(/[^\n]/g, ' ')).replace(/^use core\.[^\[\n]*$/gm, line => { if (seenImports.has(line)) return line.replace(/[^\n]/g, ' '); seenImports.add(line); return line; });
   const sourcePaths = readFileSync(join(repo, 'Compiler/Bootstrap/sources.list'), 'utf8').split('\n').map(s => s.trim()).filter(s => s && !s.startsWith('#'));
-  const sources = sourcePaths.map(path => clean(readFileSync(join(repo, path), 'utf8')));
+  const sources = sourcePaths.map(path => {
+    const text = readFileSync(join(repo, path), 'utf8');
+    if (!options.cleanupStop || path !== 'Compiler/JetCodegen/Source/Codegen/Functions.jet') return clean(text);
+    // Test-only host lowering, matching the source assembly transformations
+    // below. Match the unique lower_functions sequence, never another session.
+    const anchor = '    program := jet_codegen_new_program(^function_index, ^program_modules, ^field_symbols, source_files, ^source_index)\n    lowered_rows := [JetCodegenLoweredFunction]{}';
+    const matches = text.split(anchor).length - 1;
+    if (matches !== 1) throw new Error(`cleanup stop host assembly expected one lower_functions anchor, found ${matches}`);
+    writeFileSync(join(out, 'cleanup-host-assembly.json'), JSON.stringify({ source: path, sha256: createHash('sha256').update(text).digest('hex'), matches }, null, 2) + '\n');
+    return clean(text.replace(anchor, anchor.replace('\n', '\n    program.stop_points = true\n')));
+  });
   const golden = readFileSync(join(repo, 'Compiler/JetBackend/Tests/GoldenLower.jet'), 'utf8')
     .replace(/\nfn run\(\) \{[\s\S]*$/, '\n')
     .replace('use core.files as files', 'use core.files as gl_files')
