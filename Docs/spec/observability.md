@@ -23,6 +23,17 @@ question it answers.
 | Wall-clock session | Which symbols consume wall time, CPU, task, lock, or I/O time? | `jet perf run app.jet`, then `jet perf view <trace.jettrace>` | `jet perf run`, `jet perf test`, and `jet perf attach <pid> --source app.jet` record sessions. The ratified user-verb recorder is `--record=<name>` on `run`, `dev`, and `test`. | The default artifact is `.jet/perf/<stamp>-<short-id>.jettrace`, with schema `jet.trace` v1. |
 | Browser rows | Which browser, WebAssembly, or DOM rows consume time? | `jet dev --target=web`, then `jet perf attach <pid>` | The dev server sends bounded, payload-free relay rows; `jet perf attach` requests collection. | The request transport uses `jet.browser.request.v1`; `jet perf attach` merges rows into the canonical `.jettrace` rather than creating a second trace format. |
 
+The scheduler's internal I/O-quiescence predicate is not a census of every
+host operation. It tests `active == 0 && allocated == retired` for the IOCP
+owners (`Prelude/Observe.rs`, with writes confined to Windows `run_iocp` in
+`Prelude/Scheduler.rs`). On Linux these three facts remain zero: the Jet
+`HostIO.jet` provider therefore returns true both at idle and while a pipe
+read is blocked. Linux descriptor operations must not update those facts.
+`Compiler/JetRuntime/Tests/HostIOQuiescentTests.c` witnesses that distinction
+using a real blocked kernel read; the host fixture runner compares exact
+output and audits unique provider ownership.
+
+
 ## Exporting a wall-clock trace
 
 `jet perf export <trace.jettrace> --chrome` writes Chrome Trace Event JSON.

@@ -1,3 +1,15 @@
+// Seed parity: Observe.rs:1049-1052 tests active==0 && allocated==retired.
+// The only counter writes are run_iocp (Scheduler.rs:2653 Windows-only cfg,
+// :2732-2889). Linux never changes them, including during blocked pipe reads.
+// Do not instrument Linux host operations: these facts describe IOCP owners,
+// not all host I/O. Preserve the predicate without a store or allocation.
+#Export(c) fn jet_rt_observe_io_quiescent() -> Bool {
+    active :: I64{0}
+    allocated :: I64{0}
+    retired :: I64{0}
+    active == I64{0} && allocated == retired
+}
+
 // Reviewed L7b C carriers. All offsets are defined here, not Rust struct
 // layout. IOError tags are the CoreEnumPayloadRows declaration-order ordinals.
 // IOError: [kind, operation, resource-text?, has-os-code, os-code, cause-text?,
