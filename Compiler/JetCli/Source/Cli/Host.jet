@@ -339,7 +339,9 @@ fn jet_cli_build_native(file: String, command: String, result: JetDriverCompileR
         }
     }
     entry :: lowered.entry ?? return jet_cli_ice("the MIR program of `{file}` lost its entry function")
-    object :: x64_relocatable_object(lowered.lir, entry)
+    lir := lowered.lir
+    lir.debug.directory = root
+    object :: x64_relocatable_object(lir, entry)
     if object.errors.len() > 0 {
         return JetDriverVerbOutput{
             stdout: "",

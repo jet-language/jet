@@ -328,11 +328,13 @@ fn lir_builder_block_id(builder: &LIRFunctionBuilder) -> LIRBlockID Never! {
 
 fn lir_builder_push(builder: &LIRFunctionBuilder, inst: LIRInst) Never! {
     &builder.open.push(inst)
+    &builder.open_lines.push(builder.line)
 }
 
 fn lir_builder_seal(builder: &LIRFunctionBuilder, id: LIRBlockID, params: [LIRValueID], terminator: LIRTerminator) Never! {
     &builder.blocks.push(LIRBlock{id: id, params: params, insts: builder.open, terminator: terminator})
     builder.open = [LIRInst]{}
+    builder.open_lines = [Int]{}
 }
 
 fn lir_builder_finish(builder: LIRFunctionBuilder) -> LIRFunction Never! {

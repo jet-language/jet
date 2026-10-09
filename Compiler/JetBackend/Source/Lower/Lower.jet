@@ -1033,6 +1033,7 @@ fn lower_value_owned(c: LowerContext, value: MIRValueID) -> Bool Never! {
 
 fn lower_set_slot(f: &LowerFunction, slot: Int, value: LIRValueID?) Never! {
     f.current[slot] = value
+    if value == .Val(carried) -> lower_debug_bind(&f, slot, carried)
 }
 
 fn lower_define(c: LowerContext, f: &LowerFunction, value: MIRValueID, lowered: LIRValueID) Never! {
@@ -1254,6 +1255,7 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
         storage: [LIRValueID?]{},
         phi_storage: [U64:Int]{},
         env: None,
+        debug_slots: [Int]{},
         cells: [LIRValueID?]{},
         sentry_scopes: [U64:Int]{},
         sentry_function: None,
@@ -1334,6 +1336,7 @@ fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIR
         return lir_builder_finish(f.builder)
     }
     c :: lower_context(p, &m, &f, function) ?? return lir_builder_finish(f.builder)
+    lower_debug_function(p, c, &m, &f)
     lower_function_body(p, c, &m, &f)
     lir_builder_finish(f.builder)
 }
@@ -1663,6 +1666,12 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
             &f.params.push(None)
         }
     }
+    // A parameter's debug variable is its MIR position (lower_debug_function);
+    // a Write parameter's entry value is the caller's place, not the value.
+    loop (index, param) in c.mir.params {
+        if param.access == .Write -> next
+        if f.params[index] == .Val(value) -> lower_debug_bind_variable(&f, index, value)
+    }
     current := [LIRValueID?]{}
     loop _ in c.slots -> &current.push(None)
     f.current = current
@@ -1749,6 +1758,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
     current := [LIRValueID?]{}
     loop _ in c.slots -> &current.push(None)
     f.current = current
+    lower_debug_block_line(p, c, &m, &f, block)
     loop instruction in block.instructions {
         if instruction.operation == .Phi(_) {
             if lower_result(p, c, &m, &f, instruction) == .Val(param) -> &params.push(param)
@@ -1779,6 +1789,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
         if f.failed -> return
         lower_comptime_site(&m, &f, "jet_rt_comptime_step", instruction.span.start, instruction.span.end)
         if instruction.operation == .Phi(_) -> next
+        lower_debug_line(p, c, &m, &f, instruction)
         lower_instruction(p, c, &m, &f, instruction)
         if lower_is_noreturn(instruction.operation) && !poll_block -> return
     }

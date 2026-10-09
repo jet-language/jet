@@ -86,6 +86,9 @@ fn lir_lint_function(program: LIRModule, function: LIRFunction) -> [LIRLintIssue
             .Trivial -> {}
         }
     }
+    loop binding in function.debug.bindings {
+        if binding.variable < 0 || binding.variable >= function.debug.variables.len() || !lir_lint_value_valid(function, binding.value) -> &issues.push(lir_lint_issue(function, -1, "debug binding of variable {binding.variable} names a missing variable or value v{binding.value.value}"))
+    }
     if issues.len() > 0 -> return issues
 
     // Block identity and edges.
@@ -93,6 +96,7 @@ fn lir_lint_function(program: LIRModule, function: LIRFunction) -> [LIRLintIssue
         loop (other, earlier) in function.blocks {
             if other < index && earlier.id == block.id -> &issues.push(lir_lint_issue(function, block.id.value, "block ID b{block.id.value} is duplicated"))
         }
+        if block.lines.len() != block.insts.len() + 1 -> &issues.push(lir_lint_issue(function, block.id.value, "block has {block.lines.len()} source lines for {block.insts.len()} instructions and its terminator"))
         loop target in lir_terminator_targets(block.terminator) {
             target_index :: lir_block_index(function, target.block)
             if target_index < 0 {
