@@ -432,6 +432,119 @@ fn jet_cli_path_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], color:
     None
 }
 
+// Read dependency declarations from the bytes already in the snapshot, never
+// by reopening the manifest. Inline Package carriers use the same model.
+fn jet_cli_root_dependencies(root: JetDriverAuthorizedSourceRoot) -> [String: DepSpec] Never! {
+    loop file in root.files {
+        if file.relative_path != "package.jet" -> next
+        manifest :: pkg_manifest_parse(file.path, file.source) ?? return [String: DepSpec]{}
+        return manifest.dependencies
+    }
+    loop relative in [String]{"run.jet", "src/run.jet"} {
+        loop file in root.files {
+            if file.relative_path != relative -> next
+            inline :: PackageFacts.parse_inline(file.source, file.path) ?? return [String: DepSpec]{}
+            if inline == .Val(carrier) {
+                manifest :: pkg_to_manifest(carrier.facts, file.source) ?? return [String: DepSpec]{}
+                return manifest.dependencies
+            }
+        }
+    }
+    [String: DepSpec]{}
+}
+
+fn jet_cli_dependency_within(path: String, root: String) -> Bool Never! {
+    path == root || path.starts_with(if root.ends_with("/") -> root else -> "{root}/")
+}
+
+// Loader.rs `RootPathReach`: the entry's relative declarations, canonicalized
+// once, and the canonical sibling directories they open outside its tree.
+struct JetCLIRootPathReach {
+    declared: [String]
+    sibling_dirs: [String]
+}
+
+fn jet_cli_root_path_reach(entry: String, dependencies: [String: DepSpec]) -[FS]> JetCLIRootPathReach Never! {
+    declared := [String]{}
+    sibling_dirs := [String]{}
+    loop spec in dependencies.values() {
+        if spec == .Path(relative) {
+            if relative.starts_with("/") -> next
+            canonical :: cli_files.realpath(jet_cli_report_path(Val(entry), relative)) ?? next
+            &declared.push(canonical)
+            if !jet_cli_dependency_within(canonical, entry) {
+                sibling_parent :: jet_cli_parent(canonical) ?? "/"
+                if !sibling_dirs.contains(sibling_parent) -> &sibling_dirs.push(sibling_parent)
+            }
+        }
+    }
+    JetCLIRootPathReach{declared: declared, sibling_dirs: sibling_dirs}
+}
+
+// D-MOD-CYCLE1=A: test the canonical target, never a textual symlink alias.
+// Check before reading the target tree.
+fn jet_cli_path_dependency_reachable(canonical: String, reach: JetCLIRootPathReach) -> Bool Never! {
+    if reach.declared.contains(canonical) -> return true
+    loop sibling_parent in reach.sibling_dirs {
+        if jet_cli_dependency_within(canonical, sibling_parent) -> return true
+    }
+    false
+}
+
+fn jet_cli_path_dependency_escape(name: String, relative: String, parent: String, color: Bool) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E1206", "path dependency `{name}` escapes its parent package", "the path `{relative}` resolves outside the declaring package directory `{parent}`", "use a relative path below the declaring package directory", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+
+// Authorize each path root once, in dependency-name order. The driver's
+// catalog still owns dependency binding and semantic diagnostics; this host
+// only reads trees the declared graph permits. No provider or network is run.
+fn jet_cli_path_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], color: Bool) -[FS, Env]> JetDriverVerbOutput? Never! {
+    entry :: roots[0].canonical_path
+    root_reach :: jet_cli_root_path_reach(entry, jet_cli_root_dependencies(roots[0]))
+    index := 0
+    loop index < roots.len() {
+        parent :: roots[index].canonical_path
+        dependencies :: jet_cli_root_dependencies(roots[index])
+        names := dependencies.keys().to_list()
+        &names.sort()
+        loop name in names {
+            if dependencies[name] == .Path(relative) {
+                path :: jet_cli_report_path(Val(parent), relative)
+                canonical :: cli_files.realpath(path) ?? ""
+                declared_by_root :: !relative.starts_with("/") && canonical != "" && jet_cli_path_dependency_reachable(canonical, root_reach)
+                if index != 0 && !declared_by_root && (relative.starts_with("/") || !jet_cli_dependency_within(path, parent)) {
+                    return Val(jet_cli_path_dependency_escape(name, relative, parent, color))
+                }
+                // A missing target stays unbound: the driver emits E0603 at
+                // the declaration rather than a host filesystem diagnostic.
+                if canonical == "" -> next
+                if index != 0 && !declared_by_root && !jet_cli_dependency_within(canonical, parent) {
+                    return Val(jet_cli_path_dependency_escape(name, relative, parent, color))
+                }
+                found := false
+                loop existing in roots {
+                    if existing.canonical_path == canonical -> found = true
+                }
+                if found -> next
+                stat :: cli_files.stat(canonical) ?? next
+                if !stat.is_dir -> next
+                files := [JetDriverAuthorizedSourceFile]{}
+                directories := [AppAuthorizedDirectory]{}
+                caches := [JetDriverAuthorizedSourceFile]{}
+                if jet_cli_walk_sources(canonical, "", 0, &files, &directories, true) == .Val(problem) {
+                    return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't securely read the sources under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or check a file outside this tree", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+                }
+                if jet_cli_foreign_cache_files(canonical, &caches) == .Val(problem) {
+                    return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't securely read the foreign bindings under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+                }
+                &roots.push(JetDriverAuthorizedSourceRoot{canonical_path: canonical, identity: jet_cli_identity_key("directory", stat), allow_hardlinks: false, files: files, foreign_cache_files: caches, directories: directories})
+            }
+        }
+        index += 1
+    }
+    None
+}
+
 // The nearest directory at or above `entry_path` that holds `package.jet`, or
 // the entry's own directory for a loose file.
 fn jet_cli_source_root(entry_path: String) -[FS]> String Never! {
