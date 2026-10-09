@@ -114,6 +114,8 @@ fn pc_formatter_edit_boundaries() {
     pc_require((jfmt_apply_source_edits("", [TextEdit]{TextEdit{span: Span{start: 0, end: 0}, new_text: "a"}}) ?? panic("empty insertion rejected")) == "a", "insertion in empty source")
     pc_require(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 0, end: 4}, new_text: "a"}}) == None, "out-of-bounds edit")
     pc_require(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 2, end: 0}, new_text: "a"}}) == None, "reversed edit")
+    pc_require(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 1, end: 2}, new_text: "a"}}) == None, "edit start cannot split a UTF-8 scalar")
+    pc_require(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 0, end: 1}, new_text: "a"}}) == None, "edit end cannot split a UTF-8 scalar")
 }
 
 fn pc_qualified_generic_literal() {
