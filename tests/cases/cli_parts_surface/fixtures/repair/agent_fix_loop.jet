@@ -11,26 +11,26 @@ struct S1RepairEdit { code: String, file: String, start: Int, end: Int, new_text
 struct S1RepairReport { code: String, edits: [S1RepairEdit] }
 struct S1RepairDone { state: [S1RepairFile], rounds: Int }
 
-fn s1_repair_field(tree: encoding.DataTree, key: String) -> encoding.DataTree {
+fn s1_repair_field(tree: encoding.Dyn, key: String) -> encoding.Dyn {
     &tree.field(key) ?? panic("machine report missing {key}")
 }
-fn s1_repair_string(tree: encoding.DataTree, key: String) -> String {
+fn s1_repair_string(tree: encoding.Dyn, key: String) -> String {
     value :: s1_repair_field(tree, key)
     value.text() ?? panic("machine report {key} is not a string")
 }
-fn s1_repair_usize(tree: encoding.DataTree, key: String) -> Int {
+fn s1_repair_usize(tree: encoding.Dyn, key: String) -> Int {
     value :: s1_repair_field(tree, key)
     number :: value.int() ?? panic("machine report {key} is not an integer")
     assert(number >= 0, "machine report {key} is negative")
     number
 }
-fn s1_repair_array(value: encoding.DataTree) -> [encoding.DataTree] {
+fn s1_repair_array(value: encoding.Dyn) -> [encoding.Dyn] {
     if value == {
         .Array(items) -> return items
         else -> panic("machine status reports/fix_edits is not an array")
     }
 }
-fn s1_repair_parse_report(value: encoding.DataTree) -> S1RepairReport {
+fn s1_repair_parse_report(value: encoding.Dyn) -> S1RepairReport {
     // surface.rs1327: exact original schema, even if the live head differs.
     assert_eq(s1_repair_string(value, "schema"), "jet.report/v2")
     code :: s1_repair_string(value, "code")
@@ -45,7 +45,7 @@ fn s1_repair_parse_report(value: encoding.DataTree) -> S1RepairReport {
     }
     S1RepairReport{code: code, edits: edits}
 }
-fn s1_repair_parse_reports(status: encoding.DataTree) -> [S1RepairReport] {
+fn s1_repair_parse_reports(status: encoding.Dyn) -> [S1RepairReport] {
     assert_eq(s1_repair_string(status, "schema"), "jet.status/v1")
     assert_eq(s1_repair_string(status, "action"), "check")
     loop value in s1_repair_array(s1_repair_field(status, "reports")) -> s1_repair_parse_report(value)
@@ -62,7 +62,7 @@ fn s1_repair_check(dir: String, jet: String, state: [S1RepairFile]) -> [S1Repair
         assert_eq(s1_repair_string(status, "action"), "check")
         rows :: s1_repair_parse_reports(status)
         if output.success {
-            assert_eq(s1_repair_field(status, "ok"), encoding.DataTree.Bool(true))
+            assert_eq(s1_repair_field(status, "ok"), encoding.Dyn.Bool(true))
             assert_eq(rows.len(), 0, "clean check must have no reports")
         } else {
             assert_eq(output.code, 1, "check failed")

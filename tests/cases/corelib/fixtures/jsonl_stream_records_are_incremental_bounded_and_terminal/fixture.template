@@ -6,12 +6,12 @@ use core.files as files
 fn run() {
     output :: files.create("{work}/out.jsonl") ?? panic("create")
     writer :: jsonl.writer(^output) ?? panic("writer")
-    writer.write(DataTree.Text("alpha")) ?? panic("write")
-    writer.write(DataTree.Array([DataTree.Int(1), DataTree.Text("beta")])) ?? panic("write")
+    writer.write(Dyn.Text("alpha")) ?? panic("write")
+    writer.write(Dyn.Array([Dyn.Int(1), Dyn.Text("beta")])) ?? panic("write")
     &writer.flush() ?? panic("flush")
     writer.finish() ?? panic("finish")
     writer.finish() ?? panic("finish twice")
-    after_finish :: writer.write(DataTree.Null)
+    after_finish :: writer.write(Dyn.Null)
     if after_finish == {
         .Ok(_) -> { print("write-after-finish-missed") }
         .Err(first) -> {
@@ -33,8 +33,8 @@ fn run() {
     second_result :: reader.next() ?? panic("second")
     if second_result == {
         Val(value) -> {
-            first :: value.at(0) ?? DataTree.Int(-1)
-            second :: value.at(1) ?? DataTree.Text("bad")
+            first :: value.at(0) ?? Dyn.Int(-1)
+            second :: value.at(1) ?? Dyn.Text("bad")
             print(first.int() ?? -1)
             print(second.text() ?? "bad")
         }
@@ -68,7 +68,7 @@ fn run() {
     limits.max_item_bytes = 2
     limited_output :: files.create("{work}/limited.jsonl") ?? panic("limited create")
     limited_writer :: jsonl.writer(^limited_output, limits) ?? panic("limited writer")
-    limited_result :: limited_writer.write(DataTree.Text("three"))
+    limited_result :: limited_writer.write(Dyn.Text("three"))
     if limited_result == {
         .Ok(_) -> { print("limit-missed") }
         .Err(first) -> {

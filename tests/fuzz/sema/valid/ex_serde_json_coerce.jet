@@ -10,9 +10,9 @@ fn run() {
     raw :: "{{\"port\":\"8080\",\"enabled\":\"true\",\"name\":\"api\"}}"
     data :: json.decode(raw) ?? panic("bad json")
     if data == .Object(_) {
-        port :: &data.field("port") ?? DataTree.Null
-        name :: &data.field("name") ?? DataTree.Null
-        enabled :: &data.field("enabled") ?? DataTree.Null
+        port :: &data.field("port") ?? Dyn.Null
+        name :: &data.field("name") ?? Dyn.Null
+        enabled :: &data.field("enabled") ?? Dyn.Null
         if port == .Int(n) {
             // n is a plain Int; add 1 to prove it came back numeric
             print(n + 1)

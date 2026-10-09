@@ -22,7 +22,7 @@ fn visit(root: String, path: String) {
     // Hex is injective over bytes; JSON quoting is injective over relative paths.
     relative := ""
     if path != root -> relative = files.relative(~path, ~root)
-    shown :: json.to_string(DataTree.Text(relative))
+    shown :: json.to_string(Dyn.Text(relative))
     modified :: info.modified.to_unix_ns() ?? panic("mtime outside Unix nanosecond range")
     print("{shown}\t{kind}\t{info.size}\t{mode}\tsome:{modified}\t{bytes}")
     if !info.is_dir -> return

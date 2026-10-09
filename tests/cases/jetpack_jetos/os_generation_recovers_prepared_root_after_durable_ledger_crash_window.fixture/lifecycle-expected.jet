@@ -2,7 +2,7 @@
 use core.files as files
 use core.process as process
 use core.encoding.json as json
-use core.encoding.DataTree
+use core.encoding.Dyn
 fn run() {
     args :: process.args()
     assert(args.len() == 2)
@@ -15,6 +15,6 @@ fn run() {
         else -> panic("digests must be array")
     }
     loop value in values -> _ :: value.text() ?? panic("target must be string")
-    result :: DataTree.Array([DataTree]{DataTree.Object([String:DataTree]{"kind": DataTree.Text("external-consumer"), "id": DataTree.Text(args[1]), "producer": DataTree.Text("jetos-generation"), "witness": witness, "targets": targets, "phase": DataTree.Text("committed")})})
+    result :: Dyn.Array([Dyn]{Dyn.Object([String:Dyn]{"kind": Dyn.Text("external-consumer"), "id": Dyn.Text(args[1]), "producer": Dyn.Text("jetos-generation"), "witness": witness, "targets": targets, "phase": Dyn.Text("committed")})})
     print(json.to_string(result))
 }

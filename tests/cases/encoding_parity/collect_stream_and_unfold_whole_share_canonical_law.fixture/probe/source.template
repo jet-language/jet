@@ -29,7 +29,7 @@ fn run() {
     cbor_writer.write(encoding.DataEvent.Int(1)) ?? panic("ci")
     cbor_writer.write(encoding.DataEvent.ObjectEnd) ?? panic("ce")
     cbor_writer.finish() ?? panic("cf")
-    whole_tree := DataTree.Object(["a": DataTree.Int(1)])
+    whole_tree := Dyn.Object(["a": Dyn.Int(1)])
     stream_bytes := files.read_bytes(cbor_path) ?? panic("cbor bytes")
     print((cbor.to_bytes_canonical(whole_tree) ?? panic("canonical")) == stream_bytes)
 }

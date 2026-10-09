@@ -9,7 +9,7 @@ use core.files as files
 use core.text as text
 use core.text.parse as parse
 use core.encoding.json as json
-use core.encoding.DataTree
+use core.encoding.Dyn
 use core.time as time
 
 fn registry_slice(bytes: [U8], start: Int, end: Int) -> [U8] {
@@ -102,8 +102,8 @@ fn run() {
         body :: registry_slice(request, header_end, body_end)
         // The sole body predicate in the original is this exact byte window.
         has_schema :: registry_find(body, "schemaVersion".bytes()) >= 0
-        method_json :: json.to_string(DataTree.Text(method))
-        path_json :: json.to_string(DataTree.Text(path))
+        method_json :: json.to_string(Dyn.Text(method))
+        path_json :: json.to_string(Dyn.Text(path))
         &requests.push("{{\"method\":{method_json},\"path\":{path_json},\"body_has_schema_version\":{has_schema}}}")
         status := 404
         extra := ""

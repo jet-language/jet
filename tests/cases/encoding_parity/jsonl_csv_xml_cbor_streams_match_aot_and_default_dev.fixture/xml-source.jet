@@ -4,12 +4,12 @@ use core.encoding.[xml as fmt]
 use core.files as files
 
 
-fn xml_name(local: String) -[]> DataTree {
-    return DataTree.Object([
-        "raw": DataTree.Text(~local),
-        "prefix": DataTree.Null,
-        "local": DataTree.Text(~local),
-        "namespace_uri": DataTree.Null,
+fn xml_name(local: String) -[]> Dyn {
+    return Dyn.Object([
+        "raw": Dyn.Text(~local),
+        "prefix": Dyn.Null,
+        "local": Dyn.Text(~local),
+        "namespace_uri": Dyn.Null,
     ])
 }
 
@@ -17,29 +17,29 @@ fn run() {
     path := "{work}/doc.xml"
     output :: files.create(path) ?? panic("create")
     writer :: fmt.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
-    writer.write(DataTree.Object([
-        "$xml_event": DataTree.Text("document_start"),
-        "encoding": DataTree.Null,
-        "bom": DataTree.Array([]),
+    writer.write(Dyn.Object([
+        "$xml_event": Dyn.Text("document_start"),
+        "encoding": Dyn.Null,
+        "bom": Dyn.Array([]),
     ])) ?? panic("document_start")
-    writer.write(DataTree.Object([
-        "$xml_event": DataTree.Text("element_start"),
+    writer.write(Dyn.Object([
+        "$xml_event": Dyn.Text("element_start"),
         "name": xml_name("r"),
-        "namespaces": DataTree.Array([]),
-        "attributes": DataTree.Array([]),
-        "empty_style": DataTree.Text("empty"),
-        "open_lexical": DataTree.Object([
-            "raw_text": DataTree.Null,
-            "raw_bytes": DataTree.Null,
-            "semantic": DataTree.Object([
+        "namespaces": Dyn.Array([]),
+        "attributes": Dyn.Array([]),
+        "empty_style": Dyn.Text("empty"),
+        "open_lexical": Dyn.Object([
+            "raw_text": Dyn.Null,
+            "raw_bytes": Dyn.Null,
+            "semantic": Dyn.Object([
                 "name": xml_name("r"),
-                "namespaces": DataTree.Array([]),
-                "attributes": DataTree.Array([]),
-                "empty_style": DataTree.Text("empty"),
+                "namespaces": Dyn.Array([]),
+                "attributes": Dyn.Array([]),
+                "empty_style": Dyn.Text("empty"),
             ]),
         ]),
     ])) ?? panic("root")
-    writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_end")])) ?? panic("end")
+    writer.write(Dyn.Object(["$xml_event": Dyn.Text("document_end")])) ?? panic("end")
     writer.finish() ?? panic("finish")
     input :: files.open(path) ?? panic("open")
     reader :: fmt.reader(^input) ?? panic("reader")

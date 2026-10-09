@@ -3,7 +3,7 @@ use core.files as files
 use core.process as process
 use core.text.parse as text
 use core.encoding.json as json
-use core.encoding.DataTree
+use core.encoding.Dyn
 struct RootProof { kind: String, id: String, producer: String, witness: String, targets: [String], phase: String }
 fn digit(byte: U8) -> Int {
     n :: Int.from_u8(byte)
@@ -61,12 +61,12 @@ fn run() {
     ids := [String]{}
     loop root in roots -> &ids.push(root.id)
     &ids.sort()
-    observed := [DataTree]{}
+    observed := [Dyn]{}
     loop id in ids {
         root :: roots[root_index(roots, id)]
-        targets := [DataTree]{}
-        loop target in root.targets -> &targets.push(DataTree.Text(target))
-        &observed.push(DataTree.Object([String: DataTree]{"kind": DataTree.Text(root.kind), "id": DataTree.Text(root.id), "producer": DataTree.Text(root.producer), "witness": DataTree.Text(root.witness), "targets": DataTree.Array(targets), "phase": DataTree.Text(root.phase)}))
+        targets := [Dyn]{}
+        loop target in root.targets -> &targets.push(Dyn.Text(target))
+        &observed.push(Dyn.Object([String: Dyn]{"kind": Dyn.Text(root.kind), "id": Dyn.Text(root.id), "producer": Dyn.Text(root.producer), "witness": Dyn.Text(root.witness), "targets": Dyn.Array(targets), "phase": Dyn.Text(root.phase)}))
     }
-    print(json.to_string(DataTree.Array(observed)))
+    print(json.to_string(Dyn.Array(observed)))
 }

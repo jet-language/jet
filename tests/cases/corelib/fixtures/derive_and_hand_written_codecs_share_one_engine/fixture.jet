@@ -6,11 +6,11 @@ struct DerivedEmail { address: String }
 
 struct HandEmail { address: String }
 impl HandEmail.Encode {
-    fn encode(self) -> DataTree { DataTree.Object(["address": DataTree.Text(~self.address)]) }
+    fn encode(self) -> Dyn { Dyn.Object(["address": Dyn.Text(~self.address)]) }
 }
 impl HandEmail.Decode {
-    fn decode(tree: DataTree) -> HandEmail [FieldError]! {
-        field :: &tree.field("address") ?? DataTree.Text("")
+    fn decode(tree: Dyn) -> HandEmail [FieldError]! {
+        field :: &tree.field("address") ?? Dyn.Text("")
         address :: field.text() ?? ""
         return Ok(HandEmail{ address: address })
     }

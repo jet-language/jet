@@ -6,11 +6,11 @@ use core.text as text
 struct Token { raw: String }
 
 impl Token.Encode {
-    fn encode(self) -> DataTree { DataTree.Text("wire") }
+    fn encode(self) -> Dyn { Dyn.Text("wire") }
 }
 
 impl Token.Decode {
-    fn decode(tree: DataTree) -[]> Token ![FieldError] {
+    fn decode(tree: Dyn) -[]> Token ![FieldError] {
         value :: tree.text()
         if value != "wire" {
             return Err([FieldError{ path: "$xml_event", reason: "bad token" }])

@@ -25,7 +25,7 @@ fn run() {
     float_writer.write(encoding.DataEvent.Float(-0.0)) ?? panic("negative zero write")
     float_writer.write(encoding.DataEvent.ArrayEnd) ?? panic("float array end")
     float_writer.finish() ?? panic("float finish")
-    whole_tree :: DataTree.Object(["b": DataTree.Text("xy"), "a": DataTree.Int(1)])
+    whole_tree :: Dyn.Object(["b": Dyn.Text("xy"), "a": Dyn.Int(1)])
     expected_whole :: [U8]{ 162, 97, 97, 1, 97, 98, 98, 120, 121 }
     print((cbor.to_bytes_canonical(whole_tree) ?? panic("whole encode")) == expected_whole)
     after :: writer.write(encoding.DataEvent.Null)

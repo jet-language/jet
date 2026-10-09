@@ -42,7 +42,7 @@ fn run() {
     record_limits.max_total_bytes = Val(5)
     record_output :: files.create("{work}/record.jsonl") ?? panic("create record")
     record_writer :: jsonl.writer(^record_output, record_limits) ?? panic("record writer")
-    record_result :: record_writer.write(DataTree.Array([DataTree.Int(1), DataTree.Text("abcd")]))
+    record_result :: record_writer.write(Dyn.Array([Dyn.Int(1), Dyn.Text("abcd")]))
     if record_result == {
         .Ok(_) -> { print("record-limit-missed") }
         .Err(first) -> {
@@ -53,6 +53,6 @@ fn run() {
 
     nonfinite_output :: files.create("{work}/nonfinite.jsonl") ?? panic("create nonfinite")
     nonfinite_writer :: jsonl.writer(^nonfinite_output) ?? panic("nonfinite writer")
-    nonfinite_result :: nonfinite_writer.write(DataTree.Array([DataTree.Int(1), DataTree.Float(0.0 / 0.0)]))
+    nonfinite_result :: nonfinite_writer.write(Dyn.Array([Dyn.Int(1), Dyn.Float(0.0 / 0.0)]))
     if nonfinite_result == { .Ok(_) -> { print("nonfinite-missed") } .Err(_) -> { print(true) } }
 }

@@ -749,8 +749,8 @@ fn policy_is_task_statement(statement: Stmt, only_all: Bool) -> Bool {
     }
 }
 fn policy_data_tree_type(ty: Type) -> Bool {
-    if policy_named_type(ty, "DataTree") -> return true
-    if ty == .List(inner) -> return policy_named_type(inner, "DataTree")
+    if policy_named_type(ty, "Dyn") -> return true
+    if ty == .List(inner) -> return policy_named_type(inner, "Dyn")
     false
 }
 fn policy_constant_bool_body(body: [Stmt]) -> Bool {
@@ -796,8 +796,8 @@ fn policy_data_tree_violations(path: String, program: Program) -> [PolicyOccurre
             pair :: function.params.len() == 2 && policy_data_tree_type(function.params[0].ty) && policy_data_tree_type(function.params[1].ty)
             constant :: policy_constant_bool_body(function.body)
             if (pair && (constant || policy_compares_parameter_pair(function))) ||
-                (function.params.len() == 1 && policy_named_type(function.params[0].ty, "DataTree") && constant) {
-                &violations.push(PolicyOccurrence{file: path, rule: "datatree-domain-policy", site: policy_site("fn:{function.name}", function.span)})
+                (function.params.len() == 1 && policy_named_type(function.params[0].ty, "Dyn") && constant) {
+                &violations.push(PolicyOccurrence{file: path, rule: "dyn-domain-policy", site: policy_site("fn:{function.name}", function.span)})
             }
         }
     }
@@ -815,7 +815,7 @@ fn policy_response_decoder(function: Func) -> Bool {
     if function.name != "decode_response" || function.params.len() != 2 ||
         !policy_named_type(function.params[0].ty, "String") || !policy_named_type(function.params[1].ty, "Int") -> return false
     result :: function.return_type ?? return false
-    if result == .Result(ok, _) -> return policy_named_type(ok, "DataTree")
+    if result == .Result(ok, _) -> return policy_named_type(ok, "Dyn")
     false
 }
 fn policy_ordinary_envelope_decoder(function: Func) -> Bool {
@@ -1597,7 +1597,7 @@ fn policy_ast_test_binding_renderers() PolicyError! {
     loop producer in manifest.producers {
         if !producer.selector.contains("Bind.rs#render_jet") || producer.protocol == "no-response-protocol" -> next
         count += 1
-        violations :: policy_evaluate_generated(manifest, producer.selector, "fn decode_response(raw: String, code: Int) -> DataTree Err! {{ return Ok(DataTree.Null) }}")
+        violations :: policy_evaluate_generated(manifest, producer.selector, "fn decode_response(raw: String, code: Int) -> Dyn Err! {{ return Ok(Dyn.Null) }}")
         assert(violations.is_empty(), "{producer.selector} did not accept one shared response decoder: {policy_occurrence_messages(violations)}")
     }
     assert_eq(count, 7)
@@ -1605,7 +1605,7 @@ fn policy_ast_test_binding_renderers() PolicyError! {
 }
 #Test("every_response_binding_renderer_uses_the_shared_decoder_policy") { policy_ast_test_binding_renderers() }
 fn policy_ast_test_canonical_decoder_symbol() PolicyError! {
-    violations :: policy_evaluate_generated(policy_manifest(), "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet", "fn decode_other(raw: String, code: Int) -> DataTree Err! {{ return Ok(DataTree.Null) }}")
+    violations :: policy_evaluate_generated(policy_manifest(), "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet", "fn decode_other(raw: String, code: Int) -> Dyn Err! {{ return Ok(Dyn.Null) }}")
     assert_eq(violations.len(), 1)
     assert_eq(violations[0].rule, "bindgen-one-decoder")
     Ok(Unit{})
@@ -1614,9 +1614,9 @@ fn policy_ast_test_canonical_decoder_symbol() PolicyError! {
 fn policy_ast_test_protocol_override() PolicyError! {
     manifest :: policy_manifest()
     producer :: "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet"
-    raw :: policy_evaluate_generated(manifest, producer, "fn decode_response(raw: String, code: Int) -> DataTree Err! {{ return Ok(json.parse(raw)) }}")
+    raw :: policy_evaluate_generated(manifest, producer, "fn decode_response(raw: String, code: Int) -> Dyn Err! {{ return Ok(json.parse(raw)) }}")
     assert(raw.is_empty(), "raw JSON override is distinct: {policy_occurrence_messages(raw)}")
-    ordinary :: policy_evaluate_generated(manifest, producer, "fn decode_response(raw: String, code: Int) -> DataTree Err! {{\n    response :: json.parse(raw)\n    ok :: response.field(\"ok\")\n    return Ok(response)\n}}")
+    ordinary :: policy_evaluate_generated(manifest, producer, "fn decode_response(raw: String, code: Int) -> Dyn Err! {{\n    response :: json.parse(raw)\n    ok :: response.field(\"ok\")\n    return Ok(response)\n}}")
     assert(policy_has_rule(ordinary, "generated-protocol-override"))
     Ok(Unit{})
 }
@@ -1694,8 +1694,8 @@ fn policy_ast_test_migration_shapes() PolicyError! {
         PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "fn run() {{ print(\"{{value:Grouped(2)}}\".replace(\",\", \"\")) }}", rule: "plain-format-fact", present: false},
         PolicyShapeCase{path: "Docs/site/generate.jet", source: "fn run() {{ files.create_dir(\"dist\") }}", rule: "dogfood-directory-setup", present: true},
         PolicyShapeCase{path: "Docs/site/generate.jet", source: "fn run() {{ files.create_dir_all(\"dist\") }}", rule: "dogfood-directory-setup", present: false},
-        PolicyShapeCase{path: "Tools/tower/run.jet", source: "fn duplicate_equal(left: DataTree, right: DataTree) -> Bool {{ return true }}", rule: "datatree-domain-policy", present: true},
-        PolicyShapeCase{path: "Tools/tower/run.jet", source: "fn javascript_truthy(value: DataTree) -> Bool {{ return true }}", rule: "datatree-domain-policy", present: false},
+        PolicyShapeCase{path: "Tools/tower/run.jet", source: "fn duplicate_equal(left: Dyn, right: Dyn) -> Bool {{ return true }}", rule: "dyn-domain-policy", present: true},
+        PolicyShapeCase{path: "Tools/tower/run.jet", source: "fn javascript_truthy(value: Dyn) -> Bool {{ return true }}", rule: "dyn-domain-policy", present: false},
         PolicyShapeCase{path: "Jetpack/PackageModel/Source/Envelope/PathLaw.jet", source: "fn run() {{ value :: \"text\".replace(\"A\", \"a\").replace(\"B\", \"b\") }}", rule: "dogfood-ascii", present: false},
         PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "fn pattern() {{ value :: Regex{{\"^x$\"}} }}\nfn run(value: String) {{\n    matched :: re.match(Regex{{\"x\"}}, value)\n    print(matched.group(1) ?? \"\")\n}}", rule: "regex-capture-recipe", present: true},
         PolicyShapeCase{path: "Docs/spec/guides/first-hour.md", source: "```jet\n#CLI\nstruct Args {{ name: String }}\n```\n```bash\njet build\n```", rule: "first-hour-doc-recipe", present: true},
@@ -1835,7 +1835,7 @@ fn policy_ast_test_planted_rule_pairs() PolicyError! {
         PolicyPlantedPair{rule: "effect-row-inference", kind: "fn:run", rejected: "fn run() -[IO]> {{ print(\"hello\") }}", clean: "fn run() {{ print(\"hello\") }}"},
         PolicyPlantedPair{rule: "task-one-child", kind: "stmt:task.group", rejected: "fn run() {{ task.group g {{ task.race {{1, 2}} }} }}", clean: "fn run() {{ task.race {{1, 2}} }}"},
         PolicyPlantedPair{rule: "indexed-sequence", kind: "loop:manual-counter", rejected: "fn run() {{\n    count := 0\n    loop item in items {{\n        count += 1\n        print(count)\n    }}\n}}", clean: "fn run() {{ loop (index, item) in items -> print(index) }}"},
-        PolicyPlantedPair{rule: "datatree-domain-policy", kind: "fn:duplicate", rejected: "fn duplicate(left: DataTree, right: DataTree) -> Bool {{ true }}", clean: "fn duplicate(left: DataTree, right: DataTree) -> Bool {{ left.equal_unordered(right) }}"},
+        PolicyPlantedPair{rule: "dyn-domain-policy", kind: "fn:duplicate", rejected: "fn duplicate(left: Dyn, right: Dyn) -> Bool {{ true }}", clean: "fn duplicate(left: Dyn, right: Dyn) -> Bool {{ left.equal_unordered(right) }}"},
         PolicyPlantedPair{rule: "walk-files-filter", kind: "call:fs.walk", rejected: "use core.files as fs\nfn run() {{ loop entry in fs.walk(root) {{ if !entry.is_dir -> print(entry.path) }} }}", clean: "use core.files as fs\nfn run() {{ loop entry in fs.walk_files(root) -> print(entry.path) }}"},
         PolicyPlantedPair{rule: "regex-capture-recipe", kind: "recipe:regex-capture", rejected: "fn run() {{ Regex{{\"x\"}} }}", clean: "fn run() {{\n    pattern :: Regex{{\"^x$\"}}\n    matched :: re.match(pattern, value)\n    print(matched.group(1) ?? \"\")\n}}"},
         PolicyPlantedPair{rule: "dogfood-ascii", kind: "call:String.replace", rejected: "fn run() {{ {ladder} }}", clean: "fn run() {{ \"text\".to_ascii_lower() }}"},

@@ -6,7 +6,7 @@ use core.files as files
 fn write_unfinished(path: String) {
     output :: files.create(path) ?? panic("create partial")
     writer :: jsonl.writer(^output) ?? panic("writer")
-    writer.write(DataTree.Text("alpha")) ?? panic("record")
+    writer.write(Dyn.Text("alpha")) ?? panic("record")
     &writer.flush() ?? panic("flush")
     // no finish — Drop must leave the record LF unwritten (incomplete wire)
 }
@@ -19,7 +19,7 @@ fn run() {
     // Same-path recreate: Drop must have released the unfinished writer handle.
     reopen_out :: files.create("{work}/partial.jsonl") ?? panic("same-path recreate after Drop")
     reopen_writer :: jsonl.writer(^reopen_out) ?? panic("reopen writer")
-    reopen_writer.write(DataTree.Null) ?? panic("reopen write")
+    reopen_writer.write(Dyn.Null) ?? panic("reopen write")
     reopen_writer.finish() ?? panic("reopen finish")
     finished :: files.read("{work}/partial.jsonl") ?? panic("same-path read after finish")
     print(finished == "null\n")
