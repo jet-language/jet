@@ -62,7 +62,7 @@ fn from_values(shape: [Int], data: [Float], profile: String) -> compute.Tensor {
     body :: "{fields[0]};{fields[1]};profile={profile}"
     hash := U64{0xcbf29ce484222325}
     prime :: U64{0x100000001b3}
-    loop byte in body.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    loop byte in body.bytes() -> hash = (hash.bit_xor(U64.from_u8(byte))).wrapping_mul(prime)
     checksum :: fmt.hex(Int.from_u64(hash), 16)
     compute.deserialize("{body};checksum={checksum}") ?? panic("deserialize profile")
 }
