@@ -195,6 +195,10 @@ checked bundle and carries sema-approved types, access conventions and effects.
 canonical type, function, place and artifact identities. The resulting MIR is
 validated and optimized before execution or emission. Neither lowering infers
 new language permissions or falls back to an unchecked AST emitter.
+Close lowering distinguishes boxed/handle pointer identity from scalar presence
+with an ordered representation arm table. Non-inline scalar receivers use a
+presence sentinel; pointer receivers retain their actual identity. The
+representation is evaluated once, only after ruling out inline receivers.
 
 The [driver's source compilation path](../../crates/jet-driver/src/Driver/mod.rs)
 lowers the checked bundle once and passes its selected artifact to the back
