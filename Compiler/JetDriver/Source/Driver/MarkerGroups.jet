@@ -153,7 +153,8 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
         source :: jet_driver_marker_group_source(source_files, unit.path) ?? return false
         groups := [JetDriverMarkerGroup]{}
         used_names := modules[module_index].program.used_import_names
-        loop tokens in named_marker_groups(lex_generated(source.bytes()).tokens) {
+        group_source :: lex_generated(source.bytes())
+        loop tokens in named_marker_groups(group_source.tokens, group_source.tables) {
             declaration :: sema_marker_module_declaration_by_span(modules[module_index].program.items, tokens.name_span) ?? next
             members :: declaration.group ?? next
             parts :: tokens.name.split(".").to_list()
@@ -210,7 +211,7 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
         source :: if jet_driver_unit_is_core(unit) -> jet_driver_mask_inline_package(original, jet_driver_inline_package(original)) else -> original
         source_bytes :: source.bytes()
         lexed := if jet_driver_unit_is_core(unit) -> lex_generated(source_bytes) else -> lex(source_bytes)
-        expanded :: expand_named_marker_groups_with_uses(lexed.tokens, groups)
+        expanded :: expand_named_marker_groups_with_uses(lexed.tokens, &lexed.tables, groups)
         if expanded.uses.len() == 0 -> next
         bindings := [SemaMarkerModuleBinding]{}
         used_names := modules[module_index].program.used_import_names
