@@ -1,0 +1,20 @@
+// One generic struct used at several instances: each instance of its impl
+// keeps its own identity, so the methods of `Slot<Int>`, `Slot<String>` and
+// `Slot<Slot<Int>>` never share a body.
+struct Slot<T> { value: T }
+
+impl Slot {
+    fn get(self) -> T { self.value }
+    fn put(self, value: T) -> Slot<T> { Slot<T>{value: value} }
+}
+
+fn run() {
+    number :: Slot<Int>{value: 41}
+    word :: Slot<String>{value: "jet"}
+    nested :: Slot<Slot<Int>>{value: Slot<Int>{value: 7}}
+    print(number.get() + 1)
+    print(word.get().len())
+    print(nested.get().get())
+    print(word.put("lang").get())
+    print(nested.put(number).get().get())
+}

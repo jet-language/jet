@@ -1,0 +1,18 @@
+// `top_n` ranks a map's entries by their typed values, highest first, and
+// breaks equal values by key in ascending order; the compile-time fold and the
+// run-time call give the same rows.
+fn scores() -> [String:Int] {
+    table := [String:Int]{}
+    table["z"] = 10
+    table["a"] = 10
+    table["b"] = 2
+    table
+}
+
+FIRST :: prep { scores().top_n(2)[0].key }
+SECOND :: prep { scores().top_n(2)[1].key }
+
+fn run() {
+    print("prep {FIRST} {SECOND}")
+    loop item in scores().top_n(2) -> print("run {item.key}:{item.value}")
+}

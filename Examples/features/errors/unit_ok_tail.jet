@@ -1,0 +1,37 @@
+// A unit-fallible body that ends with `Ok()` returns that `Ok()`: the tail
+// is the body's result, on a plain body, after an early `return Ok()`, and
+// after a fallible call that propagates.
+#Error
+enum StepError {
+    Refused
+}
+
+fn step(name: String) StepError! {
+    print("step {name}")
+    Ok()
+}
+
+fn guarded(value: Int) StepError! {
+    if value < 0 -> return Err(StepError.Refused)
+    if value == 0 {
+        print("early")
+        return Ok()
+    }
+    print("late")
+    Ok()
+}
+
+fn chain(value: Int) StepError! {
+    step("chain")
+    guarded(value)
+    Ok()
+}
+
+fn run() {
+    loop value in [0, 1, -1] {
+        if chain(value) == {
+            .Ok(_) -> print("ok {value}")
+            .Err(error) -> print(error)
+        }
+    }
+}

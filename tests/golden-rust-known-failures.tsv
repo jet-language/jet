@@ -1,0 +1,14 @@
+# Transition list, removed together with the Rust compiler: goldens that hold
+# the Jet-built compiler to behaviour the frozen Rust reference compiler gets
+# wrong. tests/golden.rs (always the Rust reference) reports each listed stem as
+# SKIP-RUST-DEFECT, never PASS. It never applies to jetc0: the Jet-built
+# compiler's runners (Tools/agent/stage1/goldens.sh, run-feature-examples.mjs)
+# do not read this file. Format: stem<TAB>Rust defect.
+modules/generic_alias_chain	generic alias chain declared in a sibling file overflows the compiler stack at `jet run`
+modules/cross_file_trait_bound	E0905 when the trait impl is in a different file from the bounded caller
+basics/default_binder_carriers	ICE `unbound TIR local __jet___argN_0` for String and list defaults that read an earlier parameter
+types/generic_trait_impl_instances	ICE `missing checked function target Slot<Int>::size` for a trait impl on a generic struct
+types/nested_generic_list_bounds	E0904 cannot infer `T` from `[T]` when a bounded generic passes its list to another
+lowlevel/vector_mul_dispatch	ICE `missing checked function target Vec3::mul` (vector * vector) and rustc E0308 on Vec2 * Float
+collections/bits_native_range	E3010 from Bits reports `--> <core.collections>:0` instead of the Jet file and line
+serde/union_codec	JSON decode of a union rejects its String member (`no matching union member`) although encode wrote it
