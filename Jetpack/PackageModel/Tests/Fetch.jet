@@ -1,0 +1,48 @@
+#Test("fetch capability digest is package then signature ordered and excludes release headers") {
+    first :: pkg_capability_snapshot_parse("api_version = 3\npackage = b\npublished_version = 1.0.0\nfn z(v: &Value)\nfn a() Int\n") ?? panic("snapshot")
+    second :: pkg_capability_snapshot_parse("api_version = 3\npackage = a\npublished_version = 2.0.0\nfn read(v: Value)\n") ?? panic("snapshot")
+    assert_eq(pkg_capability_snapshot_text([PackageCapabilitySnapshot]{first, second}), "a\nfn read(v: Value)\n--\nb\nfn a() Int\nfn z(v: &Value)")
+    assert(pkg_capability_snapshot_parse("api_version = nope\npackage = a\npublished_version = 1\n") == None)
+    assert(pkg_capability_snapshot_parse("api_version = 3\npackage = a\npublished_version = 1\nunknown\n") == None)
+    changed :: pkg_capability_snapshot_parse("api_version = 3\npackage = b\npublished_version = 99\nfn z(v: Value)\nfn a() Int\n") ?? panic("changed")
+    assert(pkg_lock_compute_fingerprint("tree", [String]{}, pkg_capability_snapshot_text([PackageCapabilitySnapshot]{first})) != pkg_lock_compute_fingerprint("tree", [String]{}, pkg_capability_snapshot_text([PackageCapabilitySnapshot]{changed})))
+}
+#Test("fetch selected update closure excludes unrelated packages and terminates on repeated graph edges") {
+    lock := LockFile.empty()
+    lock.packages = [LockedPackage]{LockedPackage{name: "root", version: "1", source: .Root, dependencies: [String]{"a", "unrelated"}}, LockedPackage{name: "a", version: "1", source: .Path("a"), dependencies: [String]{"b"}}, LockedPackage{name: "b", version: "1", source: .Path("b"), dependencies: [String]{"a"}}, LockedPackage{name: "unrelated", version: "1", source: .Path("unrelated")}}
+    assert_eq(pkg_fetch_closure(lock, "a"), [String]{"a", "b"})
+    assert_eq(pkg_fetch_update_scope(Val(lock), PackageFetchOptions{update: true, update_dep: Val("a")}), [String]{"a", "b"})
+    assert_eq(pkg_fetch_update_scope(Val(lock), PackageFetchOptions{}), [String]{})
+    assert_eq(pkg_fetch_normalize_path("/a/b/../c"), "/a/c")
+    assert_eq(pkg_fetch_normalize_path("../../a"), "../../a")
+}
+#Test("fetch all-answer public destination policy rejects mixed and malformed DNS results") {
+    assert(publication_addresses_public([[U8]]{[U8]{8, 8, 8, 8}}))
+    assert(!publication_addresses_public([[U8]]{}))
+    assert(!publication_addresses_public([[U8]]{[U8]{8, 8, 8, 8}, [U8]{127, 0, 0, 1}}))
+    assert(!publication_addresses_public([[U8]]{[U8]{192, 0, 0, 9}}))
+    assert(!publication_addresses_public([[U8]]{[U8]{8, 8, 8}}))
+    assert_eq(publication_address_text([U8]{8, 8, 8, 8}), "8.8.8.8")
+    assert_eq(publication_registry_ip([U8]{32, 1, 72, 96, 72, 96, 0, 0, 0, 0, 0, 0, 0, 0, 136, 136}), "[2001:4860:4860:0000:0000:0000:0000:8888]")
+}
+#Test("fetch git revisions refuse options controls and unsafe cache components") {
+    assert(pkg_fetch_git_revision("main", false) == .Ok(_))
+    assert(pkg_fetch_git_revision("--upload-pack=touch pwned", false) == .Err(_))
+    assert(pkg_fetch_git_revision("main\nforged", false) == .Err(_))
+    assert(pkg_fetch_git_revision("refs/tags/v1", false) == .Ok(_))
+    assert(pkg_fetch_git_revision("refs/tags/v1", true) == .Err(_))
+}
+#Test("fetch registry identity includes every visible auxiliary file and excludes managed state") {
+    root :: files.tmpdir("jet-fetch-registry-hash-") ?? panic("fixture")
+    files.write(files.join(root, "package.jet"), "package {{ name: \"hash\", version: \"1.0.0\" }}\n") ?? panic("manifest")
+    files.write(files.join(root, "asset.bin"), "before") ?? panic("asset")
+    files.write(files.join(root, "registry.json"), "{{\"name\":\"hash\",\"version\":\"1.0.0\",\"dependencies\":[]}}\n") ?? panic("metadata")
+    before :: publication_registry_artifact_hash(root) ?? panic("hash")
+    files.write(files.join(root, "asset.bin"), "after") ?? panic("asset update")
+    after :: publication_registry_artifact_hash(root) ?? panic("hash after")
+    assert(before != after)
+    files.create_dir_all(files.join(root, ".jet")) ?? panic("managed")
+    files.write(files.join(root, ".jet/lock"), "version = 1\n") ?? panic("lock")
+    assert_eq(publication_registry_artifact_hash(root) ?? panic("managed hash"), after)
+    files.remove_all(root) ?? panic("cleanup")
+}

@@ -1,0 +1,193 @@
+// Pure DB console helpers, Rust Source/CmdDb.rs:2688-2694,2973-3137.
+#Error
+pub struct JetCLIDBSessionError { pub message: String }
+// Rust csv_escape (2688-2694).
+pub fn jet_cli_db_csv_escape(value: String) -> String Never! {
+    raw :: value.bytes()
+    if !raw.contains(U8{44}) && !raw.contains(U8{34}) && !raw.contains(U8{10}) && !raw.contains(U8{13}) -> return ~value
+    out := [U8]{U8{34}}
+    loop byte in raw {
+        &out.push(byte)
+        if byte == (U8{34}) -> &out.push(byte)
+    }
+    &out.push(U8{34})
+    String.from_bytes(out) ?? panic("escaped CSV is UTF-8")
+}
+// Rust has_complete_sql_statement (2994-3027); ASCII delimiters, no scalar-list allocation.
+pub fn jet_cli_db_has_complete_sql_statement(text: String) -> Bool Never! {
+    jet_cli_db_complete_sql_bytes(text.bytes())
+}
+// Rust has_complete_sql_statement scanner; console borrows its pending byte buffer.
+fn jet_cli_db_complete_sql_bytes(raw: [U8]) -> Bool Never! {
+    quote := 0
+    escaped := false
+    depth := 0
+    index := 0
+    loop index < raw.len() {
+        character :: Int.from_u8(raw[index])
+        index += 1
+        if escaped {
+            escaped = false
+            next
+        }
+        if quote != 0 && character == 92 {
+            escaped = true
+            next
+        }
+        if quote != 0 {
+            if character == quote {
+                if index < raw.len() && Int.from_u8(raw[index]) == quote -> index += 1 else -> quote = 0
+            }
+            next
+        }
+        if character == {
+            39 | 34 -> quote = character
+            40 -> depth += 1
+            41 -> depth -= 1
+            59 -> { if depth == 0 -> return true }
+            else -> {}
+        }
+    }
+    false
+}
+// Rust split_sql_statements (3029-3093); output slices preserve all quoted bytes.
+pub fn jet_cli_db_split_sql_statements(text: String) -> [String] JetCLIDBSessionError! {
+    jet_cli_db_split_sql_bytes(text.bytes())
+}
+// Rust split_sql_statements scanner; allocate only each completed output statement.
+fn jet_cli_db_split_sql_bytes(raw: [U8]) -> [String] JetCLIDBSessionError! {
+    statements := [String]{}
+    start := 0
+    quote := 0
+    escaped := false
+    depth := 0
+    index := 0
+    loop index < raw.len() {
+        character :: Int.from_u8(raw[index])
+        index += 1
+        if escaped {
+            escaped = false
+            next
+        }
+        if quote != 0 && character == 92 {
+            escaped = true
+            next
+        }
+        if quote != 0 {
+            if character == quote {
+                if index < raw.len() && Int.from_u8(raw[index]) == quote -> index += 1 else -> quote = 0
+            }
+            next
+        }
+        if character == {
+            39 | 34 -> quote = character
+            40 -> depth += 1
+            41 -> {
+                depth -= 1
+                if depth < 0 -> return Err(JetCLIDBSessionError{message: "SQL statement closes a parenthesis that it did not open"})
+            }
+            59 -> {
+                if depth == 0 {
+                    trimmed :: (String.from_bytes(raw[start..<index - 1]) ?? panic("SQL slice is UTF-8")).trim()
+                    if trimmed != "" -> &statements.push(trimmed)
+                    start = index
+                }
+            }
+            else -> {}
+        }
+    }
+    if quote != 0 -> return Err(JetCLIDBSessionError{message: "SQL string literal is missing its closing quote"})
+    if depth != 0 -> return Err(JetCLIDBSessionError{message: "SQL statement has unbalanced parentheses"})
+    trimmed :: (String.from_bytes(raw[start..<raw.len()]) ?? panic("SQL slice is UTF-8")).trim()
+    if trimmed != "" -> &statements.push(trimmed)
+    Ok(statements)
+}
+// Rust split_console_inputs (2973-2992): str::lines omits terminal LF and strips CRLF.
+pub fn jet_cli_db_split_console_inputs(text: String) -> [String] JetCLIDBSessionError! {
+    inputs := [String]{}
+    pending := [U8]{}
+    pending_blank := true
+    raw :: text.bytes()
+    start := 0
+    loop end in 0..<raw.len() + 1 {
+        if end < raw.len() && raw[end] != (U8{10}) -> next
+        if end == raw.len() && start == end -> break
+        stop := end
+        if end < raw.len() && stop > start && raw[stop - 1] == (U8{13}) -> stop -= 1
+        line :: String.from_bytes(raw[start..<stop]) ?? panic("console input is UTF-8")
+        start = end + 1
+        if pending_blank && line.trim_start().starts_with(".") {
+            &inputs.push(line.trim())
+            next
+        }
+        if line.trim() != "" -> pending_blank = false
+        loop byte in line.bytes() -> &pending.push(byte)
+        &pending.push(U8{10})
+        if jet_cli_db_complete_sql_bytes(pending) {
+            statements :: jet_cli_db_split_sql_bytes(pending)
+            loop statement in statements -> &inputs.push(statement)
+            pending = [U8]{}
+            pending_blank = true
+        }
+    }
+    if !pending_blank {
+        statements :: jet_cli_db_split_sql_bytes(pending)
+        loop statement in statements -> &inputs.push(statement)
+    }
+    Ok(inputs)
+}
+// Rust is_remote (3095-3097); case-sensitive, not a URL parser.
+pub fn jet_cli_db_is_remote(value: String) -> Bool Never! {
+    value.contains("://") || value.starts_with("postgres:") || value.starts_with("mysql:")
+}
+fn jet_cli_db_ascii_alphabetic(code: Int) -> Bool Never! {
+    (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+}
+fn jet_cli_db_ascii_digit(code: Int) -> Bool Never! { code >= 48 && code <= 57 }
+// Rust source_name_from_path (3099-3115), POSIX Path::file_stem on the CLI host.
+pub fn jet_cli_db_source_name_from_path(path: String) -> String Never! {
+    filename := ""
+    loop component in path.split("/") {
+        if component == "" || component == "." -> next
+        filename = component
+    }
+    if filename == "" || filename == ".." -> filename = "source"
+    raw :: filename.bytes()
+    end := raw.len()
+    loop index in 1..<raw.len() { if raw[index] == (U8{46}) -> end = index }
+    name_bytes := [U8]{}
+    loop index in 0..<end {
+        code :: Int.from_u8(raw[index])
+        if code >= 128 && code < 192 -> next
+        keep :: jet_cli_db_ascii_alphabetic(code) || jet_cli_db_ascii_digit(code) || code == 95
+        &name_bytes.push(if keep -> raw[index] else -> U8{95})
+    }
+    if name_bytes.len() == 0 -> return "source"
+    name :: String.from_bytes(name_bytes) ?? panic("source name is ASCII")
+    if jet_cli_db_ascii_digit(Int.from_u8(name_bytes[0])) -> return "table_{name}"
+    name
+}
+// Rust valid_table_name (3117-3126).
+pub fn jet_cli_db_valid_table_name(value: String) -> Bool Never! {
+    raw :: value.bytes()
+    if raw.len() == 0 -> return false
+    first :: Int.from_u8(raw[0])
+    if !jet_cli_db_ascii_alphabetic(first) && first != 95 -> return false
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        if !jet_cli_db_ascii_alphabetic(code) && !jet_cli_db_ascii_digit(code) && code != 95 && code != 46 && code != 36 -> return false
+    }
+    true
+}
+// Rust valid_column_name (3128-3137).
+pub fn jet_cli_db_valid_column_name(value: String) -> Bool Never! {
+    raw :: value.bytes()
+    if raw.len() == 0 -> return false
+    first :: Int.from_u8(raw[0])
+    if !jet_cli_db_ascii_alphabetic(first) && first != 95 -> return false
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        if !jet_cli_db_ascii_alphabetic(code) && !jet_cli_db_ascii_digit(code) && code != 95 -> return false
+    }
+    true
+}

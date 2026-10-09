@@ -1,0 +1,384 @@
+// Pure bounded DB command policy, Rust Source/CmdDb.rs:39-113,687-1220.
+// OutputMode is the shared Adapter projection; color overrides are resolved Bool.
+use jet_foundation.[foundation_embedded_core]
+
+pub enum JetCLIDBOutput {
+    Human
+    JSON
+    JSONL
+    CSV
+}
+pub struct JetCLIDBOptions {
+    pub source_path: String?
+    pub source_name: String?
+    pub query: String?
+    pub script: String?
+    pub output: JetCLIDBOutput
+    pub machine_override: Bool?
+    pub color_override: Bool?
+    pub max_input_bytes: Int
+    pub max_rows: Int
+    pub max_output_bytes: Int
+    pub allow_rights: [String]
+    pub deny_rights: [String]
+    pub allow_fs: Bool
+    pub deny_fs: Bool
+    pub allow_write: Bool
+    pub deny_write: Bool
+    pub allow_db: Bool
+    pub deny_db: Bool
+    pub browser: Bool
+    pub help: Bool
+}
+#Error
+pub struct JetCLIDBError {
+    pub code: String
+    pub operation: String
+    pub source: String
+    pub message: String
+    pub hint: String
+}
+// Rust DbError::new (78-93).
+pub fn jet_cli_db_error_new(code: String, operation: String, source: String, message: String, hint: String) -> JetCLIDBError Never! {
+    JetCLIDBError{code: code, operation: operation, source: source, message: message, hint: hint}
+}
+// Rust DbError::diagnostics (95-112).
+pub fn jet_cli_db_error_diagnostics(operation: String, source: String, diagnostics: [Diagnostic]) -> JetCLIDBError Never! {
+    if diagnostics.len() == 0 -> return jet_cli_db_error_new("E2600", operation, source, "the SQL evaluator returned no diagnostic details", "retry the statement after correcting its source or SQL")
+    first :: diagnostics[0]
+    jet_cli_db_error_new(first.code, operation, source, first.what, first.fix)
+}
+fn jet_cli_db_argument_error(message: String, hint: String) -> JetCLIDBError Never! {
+    jet_cli_db_error_new("E2104", "arguments", "", message, hint)
+}
+// Rust parse_options initializer (756-777).
+pub fn jet_cli_db_options_default() -> JetCLIDBOptions Never! {
+    JetCLIDBOptions{source_path: None, source_name: None, query: None, script: None,
+        output: JetCLIDBOutput.Human, machine_override: None, color_override: None,
+        max_input_bytes: 33554432, max_rows: 100000, max_output_bytes: 4194304,
+        allow_rights: [String]{}, deny_rights: [String]{}, allow_fs: false, deny_fs: false,
+        allow_write: false, deny_write: false, allow_db: false, deny_db: false,
+        browser: false, help: false}
+}
+// Rust parse_output_format (687-701).
+pub fn jet_cli_db_parse_output_format(value: String) -> JetCLIDBOutput JetCLIDBError! {
+    if value == {
+        "human" | "text" -> Ok(JetCLIDBOutput.Human)
+        "json" -> Ok(JetCLIDBOutput.JSON)
+        "jsonl" -> Ok(JetCLIDBOutput.JSONL)
+        "csv" -> Ok(JetCLIDBOutput.CSV)
+        else -> Err(jet_cli_db_argument_error("unknown db output format `{value}`", "choose human, json, jsonl, or csv"))
+    }
+}
+fn jet_cli_db_equal_folded(left: String, right: String) -> Bool Never! {
+    left_bytes :: left.bytes()
+    right_bytes :: right.bytes()
+    if left_bytes.len() != right_bytes.len() -> return false
+    loop index in 0..<left_bytes.len() {
+        a :: Int.from_u8(left_bytes[index])
+        b :: Int.from_u8(right_bytes[index])
+        folded_a :: if a >= 65 && a <= 90 -> a + 32 else -> a
+        folded_b :: if b >= 65 && b <= 90 -> b + 32 else -> b
+        if folded_a != folded_b -> return false
+    }
+    true
+}
+// Rust effect_declarations() generated projection (Effects.rs:19-47).
+// The canonical embedded Core accessor owns declaration discovery.
+pub fn jet_cli_db_declared_effect_names() -> [String] Never! {
+    names := [String]{}
+    core :: foundation_embedded_core()
+    loop declaration in core.effect_declarations() {
+        &names.push(^declaration.name)
+    }
+    names
+}
+// Rust effect_declarations() is a generated LazyLock: project once, not per right.
+JET_CLI_DB_DECLARED_EFFECT_NAMES :: prep { jet_cli_db_declared_effect_names() }
+// Rust canonical_cli_right (703-717).
+pub fn jet_cli_db_canonical_cli_right(right: String) -> String? Never! {
+    canonical :: authority_parse_right(right) ?? return None
+    operation :: canonical.split(":").to_list()[0]
+    if !operation.contains(".") -> return Val(canonical)
+    loop leaf in BUILTIN_EFFECT_LEAVES {
+        if jet_cli_db_equal_folded(leaf, operation) -> return Val(canonical)
+    }
+    loop declared in JET_CLI_DB_DECLARED_EFFECT_NAMES {
+        if declared.contains(".") && jet_cli_db_equal_folded(declared, operation) -> return Val(canonical)
+    }
+    None
+}
+// Rust has_exact_right (751-753); deliberately no ancestor or resource matching.
+pub fn jet_cli_db_has_exact_right(rights: [String], expected: String) -> Bool Never! {
+    loop right in rights { if jet_cli_db_equal_folded(right, expected) -> return true }
+    false
+}
+// Rust parse_rights_value (719-749); append only after the entire value succeeds.
+pub fn jet_cli_db_parse_rights_value(value: String, option: String, rights: &[String]) JetCLIDBError! {
+    parsed := [String]{}
+    loop raw in value.split(",") {
+        right :: raw.trim()
+        if right == "" -> return Err(jet_cli_db_argument_error("{option} contains an empty right", "pass `{option}=FS.Read,DB.Read`"))
+        canonical :: jet_cli_db_canonical_cli_right(right) ?? return Err(jet_cli_db_argument_error("unknown authority right `{right}`", "use a canonical effect root or leaf such as FS.Read, FS.Write, or DB.Read"))
+        if !jet_cli_db_has_exact_right(rights, canonical) && !jet_cli_db_has_exact_right(parsed, canonical) -> &parsed.push(canonical)
+    }
+    loop right in parsed -> &rights.push(right)
+}
+// Rust parse_positive_limit (1065-1085): usize bounds on the CLI's 64-bit host.
+// Int arithmetic stays exact and checks before multiplication, never Float.
+pub fn jet_cli_db_parse_positive_limit(value: String, option: String) -> Int JetCLIDBError! {
+    raw :: value.bytes()
+    start :: if raw.len() > 0 && raw[0] == (U8{43}) -> 1 else -> 0
+    valid := start < raw.len()
+    parsed := 0
+    loop index in start..<raw.len() {
+        digit :: Int.from_u8(raw[index]) - 48
+        if digit < 0 || digit > 9 {
+            valid = false
+            break
+        }
+        if parsed > (18446744073709551615 - digit) /% 10 {
+            valid = false
+            break
+        }
+        parsed = parsed * 10 + digit
+    }
+    if !valid -> return Err(jet_cli_db_argument_error("{option} needs a non-negative integer, got `{value}`", "pass `{option}=10000` or another bounded integer"))
+    if parsed == 0 -> return Err(jet_cli_db_argument_error("{option} must be greater than zero", "choose a positive bound so output cannot become an accidental unbounded operation"))
+    Ok(parsed)
+}
+fn jet_cli_db_missing_value(option: String) -> JetCLIDBError Never! {
+    if option == {
+        "--format" -> jet_cli_db_argument_error("`--format` needs an output format", "pass `--format json` or `--format=json`")
+        "--allow" | "--deny" -> jet_cli_db_argument_error("`{option}` needs a comma-separated rights value", "pass `{option}=FS.Read,DB.Read`")
+        "--query" -> jet_cli_db_argument_error("`--query` needs SQL text", "pass `--query 'SELECT * FROM source'")
+        "--script" -> jet_cli_db_argument_error("`--script` needs a path", "pass `--script report.sql`")
+        "--table" -> jet_cli_db_argument_error("`--table` needs NAME=PATH", "pass `--table orders=orders.json`")
+        "--max-rows" -> jet_cli_db_argument_error("`--max-rows` needs an integer", "pass `--max-rows 10000`")
+        "--max-bytes" -> jet_cli_db_argument_error("`--max-bytes` needs an integer", "pass `--max-bytes 1048576`")
+        else -> jet_cli_db_argument_error("`--max-output-bytes` needs an integer", "pass `--max-output-bytes 1048576`")
+    }
+}
+fn jet_cli_db_assignment(value: String) -> [String]? Never! {
+    raw :: value.bytes()
+    loop index in 0..<raw.len() {
+        if raw[index] == (U8{61}) -> return Val([String]{String.from_bytes(raw[0..<index]) ?? "", String.from_bytes(raw[index + 1..<raw.len()]) ?? ""})
+    }
+    None
+}
+// Rust parse_options (755-1063); sequential flags, including last-wins output overrides.
+pub fn jet_cli_db_parse_options(args: [String]) -> JetCLIDBOptions JetCLIDBError! {
+    options := jet_cli_db_options_default()
+    index := if args.len() > 0 && args[0] == "db" -> 1 else -> 0
+    valued :: [String]{"--format", "--allow", "--deny", "--query", "--script", "--table", "--max-rows", "--max-bytes", "--max-output-bytes"}
+    loop index < args.len() {
+        argument :: args[index]
+        index += 1
+        if {
+            argument == "--help" || argument == "-h" -> {
+                options.help = true
+                next
+            }
+            argument == "--json" -> {
+                options.output = JetCLIDBOutput.JSON
+                options.machine_override = Val(true)
+                next
+            }
+            argument == "--jsonl" -> {
+                options.output = JetCLIDBOutput.JSONL
+                options.machine_override = Val(true)
+                next
+            }
+            argument == "--csv" -> {
+                options.output = JetCLIDBOutput.CSV
+                options.machine_override = Val(false)
+                next
+            }
+            argument == "--browser" -> {
+                options.browser = true
+                next
+            }
+            argument == "--machine" -> {
+                options.machine_override = Val(true)
+                next
+            }
+            argument == "--human" -> {
+                options.machine_override = Val(false)
+                next
+            }
+            argument == "--no-color" -> {
+                options.color_override = Val(false)
+                next
+            }
+            argument == "--force-color" || argument == "--color" -> {
+                options.color_override = Val(true)
+                next
+            }
+            argument.starts_with("--color=") -> {
+                color :: argument.slice(8..<argument.len())
+                if color == {
+                    "always" | "on" -> options.color_override = Val(true)
+                    "never" | "off" -> options.color_override = Val(false)
+                    "auto" -> options.color_override = None
+                    else -> return Err(jet_cli_db_argument_error("unknown color mode `{color}`", "choose `--color=always`, `--color=never`, or `--color=auto`"))
+                }
+                next
+            }
+            argument == "--quiet" -> next
+            else -> {}
+        }
+        pair :: jet_cli_db_assignment(argument)
+        option := argument
+        value := ""
+        inline := false
+        if pair == .Val(parts) {
+            option = parts[0]
+            value = parts[1]
+            inline = true
+        }
+        if valued.contains(option) {
+            if !inline {
+                if index >= args.len() -> return Err(jet_cli_db_missing_value(option))
+                value = args[index]
+                index += 1
+            }
+            if option == {
+                "--format" -> {
+                    options.output = jet_cli_db_parse_output_format(value)
+                    options.machine_override = Val(options.output == JetCLIDBOutput.JSON || options.output == JetCLIDBOutput.JSONL)
+                }
+                "--allow" -> jet_cli_db_parse_rights_value(value, option, &options.allow_rights)
+                "--deny" -> jet_cli_db_parse_rights_value(value, option, &options.deny_rights)
+                "--query" -> options.query = Val(value)
+                "--script" -> options.script = Val(value)
+                "--table" -> {
+                    table :: jet_cli_db_assignment(value) ?? return Err(jet_cli_db_missing_value(option))
+                    options.source_name = Val(table[0])
+                    options.source_path = Val(table[1])
+                }
+                "--max-rows" -> options.max_rows = jet_cli_db_parse_positive_limit(value, option)
+                "--max-bytes" -> options.max_input_bytes = jet_cli_db_parse_positive_limit(value, option)
+                "--max-output-bytes" -> options.max_output_bytes = jet_cli_db_parse_positive_limit(value, option)
+                else -> panic("DB valued option dispatch is complete")
+            }
+            next
+        }
+        if argument.starts_with("--allow-") || argument.starts_with("--deny-") {
+            replacement :: if argument == {
+                "--allow-fs" -> "`--allow=FS`"
+                "--allow-read" -> "`--allow=FS.Read`"
+                "--deny-fs" -> "`--deny=FS`"
+                "--deny-read" -> "`--deny=FS.Read`"
+                "--allow-write" -> "`--allow=FS.Write`"
+                "--allow-db" -> "`--allow=DB`"
+                "--deny-db" -> "`--deny=DB`"
+                else -> "`--allow=RIGHTS` or `--deny=RIGHTS`"
+            }
+            return Err(jet_cli_db_argument_error("retired db authority option `{argument}`", "replace it with {replacement}"))
+        }
+        if argument.starts_with("-") -> return Err(jet_cli_db_argument_error("unknown db option `{argument}`", "run `jet db --help` for the bounded console options"))
+        if options.source_path != None -> return Err(jet_cli_db_argument_error("the db console accepts one source path", "use `--table NAME=PATH` for an explicit table identity"))
+        options.source_path = Val(argument)
+    }
+    loop allow in options.allow_rights {
+        if jet_cli_db_has_exact_right(options.deny_rights, allow) -> return Err(jet_cli_db_error_new("E2102", "authority", "", "authority right `{allow}` was both granted and denied", "remove the duplicate right from either `--allow` or `--deny`"))
+    }
+    options.allow_fs = jet_cli_db_has_exact_right(options.allow_rights, "FS") || jet_cli_db_has_exact_right(options.allow_rights, "FS.Read")
+    options.allow_write = jet_cli_db_has_exact_right(options.allow_rights, "FS") || jet_cli_db_has_exact_right(options.allow_rights, "FS.Write")
+    options.allow_db = jet_cli_db_has_exact_right(options.allow_rights, "DB") || jet_cli_db_has_exact_right(options.allow_rights, "DB.Read")
+    options.deny_fs = jet_cli_db_has_exact_right(options.deny_rights, "FS") || jet_cli_db_has_exact_right(options.deny_rights, "FS.Read")
+    options.deny_write = jet_cli_db_has_exact_right(options.deny_rights, "FS") || jet_cli_db_has_exact_right(options.deny_rights, "FS.Write")
+    options.deny_db = jet_cli_db_has_exact_right(options.deny_rights, "DB") || jet_cli_db_has_exact_right(options.deny_rights, "DB.Read")
+    Ok(options)
+}
+// Rust effective_mode (1087-1097).
+pub fn jet_cli_db_effective_mode(mode: JetCLIOutputMode, output: JetCLIDBOutput) -> JetCLIOutputMode Never! {
+    JetCLIOutputMode{json: mode.json || output == JetCLIDBOutput.JSON || output == JetCLIDBOutput.JSONL, color: mode.color, quiet: mode.quiet}
+}
+// Rust resolved_mode (1098-1107).
+pub fn jet_cli_db_resolved_mode(mode: JetCLIOutputMode, options: JetCLIDBOptions) -> JetCLIOutputMode Never! {
+    resolved := jet_cli_db_effective_mode(mode, options.output)
+    if options.machine_override == .Val(machine) -> resolved.json = machine
+    if options.color_override == .Val(color) -> resolved.color = color
+    resolved
+}
+// Rust usage (1140-1142).
+pub fn jet_cli_db_usage() -> String Never! {
+    "jet db [PATH] [--query SQL | --script PATH]\n\n  --table NAME=PATH       preserve an explicit typed source identity\n  --allow=RIGHTS          authorize comma-separated canonical rights\n  --deny=RIGHTS           deny comma-separated canonical rights\n  --machine | --human     override the output channel\n  --color=MODE            choose auto, always, or never color\n  --browser               serve a loopback-only inspector for this session\n  --max-rows N            bound decoded input rows\n  --max-bytes N           bound source/script bytes\n  --max-output-bytes N    bound one rendered result\n  --json | --jsonl | --csv deterministic output modes\n  .tables .schema .plan .stats .export PATH [json|csv] .help .quit\n"
+}
+// Rust char::is_whitespace, decoded at one UTF-8 scalar boundary without allocation.
+fn jet_cli_db_space_at(raw: [U8], at: Int, width: Int) -> Bool Never! {
+    lead :: Int.from_u8(raw[at])
+    point := if width == 1 -> lead else -> lead % (2 ^ (7 - width))
+    loop index in 1..<width -> point = point * 64 + Int.from_u8(raw[at + index]) % 64
+    point == 32 || (point >= 9 && point <= 13) || point == 133 || point == 160 || point == 5760 || (point >= 8192 && point <= 8202) || point == 8232 || point == 8233 || point == 8239 || point == 8287 || point == 12288
+}
+// Rust enforce_json_row_bound (1144-1219); bound scanner, not JSON validation.
+pub fn jet_cli_db_enforce_json_row_bound(text: String, max_rows: Int, path: String) JetCLIDBError! {
+    started := false
+    quote := false
+    escaped := false
+    nested := 0
+    item := false
+    items := 0
+    raw :: text.bytes()
+    index := 0
+    loop index < raw.len() {
+        character :: Int.from_u8(raw[index])
+        width :: if {
+            character < 128 -> 1
+            character < 224 -> 2
+            character < 240 -> 3
+            else -> 4
+        }
+        at :: index
+        index += width
+        if escaped {
+            escaped = false
+            next
+        }
+        if quote {
+            if {
+                character == 92 -> escaped = true
+                character == 34 -> quote = false
+                else -> {}
+            }
+            next
+        }
+        if character == 34 {
+            quote = true
+            if started && nested == 0 -> item = true
+            next
+        }
+        if !started {
+            if jet_cli_db_space_at(raw, at, width) -> next
+            if character != 91 -> return Ok()
+            started = true
+            next
+        }
+        if nested == 0 {
+            if character == {
+                93 -> break
+                44 -> {
+                    if item {
+                        items += 1
+                        item = false
+                    }
+                }
+                123 | 91 -> {
+                    nested = 1
+                    item = true
+                }
+                else -> { if !jet_cli_db_space_at(raw, at, width) -> item = true }
+            }
+        } else {
+            if character == {
+                123 | 91 -> nested += 1
+                125 | 93 -> { if nested > 0 -> nested -= 1 }
+                else -> {}
+            }
+        }
+    }
+    if item -> items += 1
+    if items > max_rows -> return Err(jet_cli_db_error_new("E2603", "source", path, "JSON source has {items} rows, over the {max_rows}-row limit", "raise `--max-rows` explicitly or split the source"))
+}

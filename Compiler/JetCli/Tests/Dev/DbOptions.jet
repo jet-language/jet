@@ -1,0 +1,221 @@
+// #4303: runtime blocked (Authority.jet authority_parse_right borrowed trim).
+// Independent limit/row-bound/output/constructor tests run from their real source slices.
+// Behavioral port tests for Source/CmdDb.rs (no Rust inline tests).
+fn db_options_test_parse(args: [String]) -> JetCLIDBOptions {
+    jet_cli_db_parse_options(args) ?? panic("DB options refused: {err.message}")
+}
+fn db_options_test_error(args: [String], code: String, operation: String, message: String, hint: String) {
+    if jet_cli_db_parse_options(args) == {
+        .Ok(_) -> panic("DB arguments unexpectedly accepted")
+        .Err(error) -> {
+            assert_eq(error.code, code)
+            assert_eq(error.operation, operation)
+            assert_eq(error.source, "")
+            assert_eq(error.message, message)
+            assert_eq(error.hint, hint)
+        }
+    }
+}
+#Test("DB defaults and optional command word") {
+    defaults :: db_options_test_parse([String]{})
+    assert(defaults == db_options_test_parse(["db"]))
+    assert(defaults == jet_cli_db_options_default())
+    assert_eq(defaults.max_input_bytes, 33554432)
+    assert_eq(defaults.max_rows, 100000)
+    assert_eq(defaults.max_output_bytes, 4194304)
+    assert(defaults.output == JetCLIDBOutput.Human)
+    assert(defaults.machine_override == None && defaults.color_override == None)
+    assert(!defaults.allow_fs && !defaults.allow_write && !defaults.allow_db)
+    assert(!defaults.deny_fs && !defaults.deny_write && !defaults.deny_db)
+}
+#Test("DB values retain unicode and first assignment delimiter") {
+    options :: db_options_test_parse(["db", "--table", "é=dir/a=b.json", "--query=SELECT 'é=α'", "--script", "β.sql", "--max-rows", "12", "--max-bytes=2048", "--max-output-bytes", "4096", "--browser", "--quiet", "-h"])
+    assert_eq(options.source_name, Val("é"))
+    assert_eq(options.source_path, Val("dir/a=b.json"))
+    assert_eq(options.query, Val("SELECT 'é=α'"))
+    assert_eq(options.script, Val("β.sql"))
+    assert_eq(options.max_rows, 12)
+    assert_eq(options.max_input_bytes, 2048)
+    assert_eq(options.max_output_bytes, 4096)
+    assert(options.browser && options.help)
+    assert_eq(db_options_test_parse(["--table=="]).source_path, Val(""))
+    assert_eq(db_options_test_parse(["a.json", "--table=b=c.json"]).source_path, Val("c.json"))
+    assert_eq(db_options_test_parse(["--query", "--help"]).query, Val("--help"))
+    assert(!db_options_test_parse(["--query", "--help"]).help)
+}
+#Test("DB formats and output precedence") {
+    formats :: [String]{"human", "text", "json", "jsonl", "csv"}
+    outputs :: [JetCLIDBOutput]{JetCLIDBOutput.Human, JetCLIDBOutput.Human, JetCLIDBOutput.JSON, JetCLIDBOutput.JSONL, JetCLIDBOutput.CSV}
+    loop (index, format) in formats {
+        spaced :: db_options_test_parse(["--format", format])
+        inline :: db_options_test_parse(["--format={format}"])
+        assert(spaced == inline)
+        assert(spaced.output == outputs[index])
+        assert_eq(spaced.machine_override, Val(index == 2 || index == 3))
+    }
+    mode :: JetCLIOutputMode{json: false, color: true, quiet: true}
+    assert(jet_cli_db_resolved_mode(mode, db_options_test_parse(["--json", "--human"])).json == false)
+    assert(jet_cli_db_resolved_mode(mode, db_options_test_parse(["--human", "--json"])).json)
+    assert(jet_cli_db_resolved_mode(mode, db_options_test_parse(["--csv", "--machine"])).json)
+    assert(!jet_cli_db_resolved_mode(mode, db_options_test_parse(["--machine", "--csv"])).json)
+    assert(db_options_test_parse(["--jsonl", "--json", "--csv"]).output == JetCLIDBOutput.CSV)
+    assert(jet_cli_db_effective_mode(mode, JetCLIDBOutput.JSONL).json)
+    assert(jet_cli_db_effective_mode(mode, JetCLIDBOutput.Human) == mode)
+    assert(jet_cli_db_resolved_mode(mode, db_options_test_parse(["--no-color", "--color=auto"])) == mode)
+    assert(!jet_cli_db_resolved_mode(mode, db_options_test_parse(["--force-color", "--no-color"])).color)
+    assert(jet_cli_db_resolved_mode(mode, db_options_test_parse(["--no-color", "--color"])).color)
+    colors :: [String]{"always", "on", "never", "off", "auto"}
+    loop (index, color) in colors {
+        options :: db_options_test_parse(["--color={color}"])
+        if index == 4 -> assert(options.color_override == None) else -> assert_eq(options.color_override, Val(index < 2))
+    }
+    resolved :: jet_cli_db_resolved_mode(mode, db_options_test_parse(["--json"]))
+    assert(resolved.quiet && resolved.color && resolved.json)
+}
+#Test("DB declared effects project the canonical Prelude source") {
+    dotted := [String]{}
+    loop name in jet_cli_db_declared_effect_names() { if name.contains(".") -> &dotted.push(name) }
+    assert(dotted == [String]{"FS.Read", "FS.Write"})
+    assert_eq(BUILTIN_EFFECT_LEAVES.len(), 29)
+    assert_eq(jet_cli_db_canonical_cli_right("fs.read"), Val("FS.read"))
+    assert_eq(jet_cli_db_canonical_cli_right("db.read"), Val("DB.read"))
+    assert_eq(jet_cli_db_canonical_cli_right("FFI.py"), Val("FFI.py"))
+    assert(jet_cli_db_canonical_cli_right("DB.Drop") == None)
+    assert_eq(jet_cli_db_canonical_cli_right("FS.Read:/tmp"), Val("FS.Read:/tmp"))
+}
+#Test("DB exact rights not substrings ancestors or scoped aliases") {
+    options :: db_options_test_parse(["--allow", " fs.read,FS.READ, DB.Read ,FS.Read:/tmp,DB.Write", "--deny=FS.Write"])
+    assert(options.allow_rights == [String]{"FS.read", "DB.Read", "FS.Read:/tmp", "DB.Write"})
+    assert(options.allow_fs && options.allow_db && !options.allow_write)
+    assert(options.deny_write && !options.deny_fs && !options.deny_db)
+    root :: db_options_test_parse(["--allow=FS,DB"])
+    assert(root.allow_fs && root.allow_write && root.allow_db)
+    deny :: db_options_test_parse(["--deny=FS,DB"])
+    assert(deny.deny_fs && deny.deny_write && deny.deny_db)
+    scoped :: db_options_test_parse(["--allow=FS.Read:/tmp,DB.Write"])
+    assert(!scoped.allow_fs && !scoped.allow_write && !scoped.allow_db)
+    assert(!jet_cli_db_has_exact_right(["FS.Read:/tmp", "FS.Reader"], "FS.Read"))
+    // Root/leaf allow-deny is not an exact duplicate; both flags remain visible.
+    mixed :: db_options_test_parse(["--allow=FS", "--deny=FS.Read"])
+    assert(mixed.allow_fs && mixed.deny_fs)
+    db_options_test_error(["--allow=fs.read", "--deny=FS.READ"], "E2102", "authority", "authority right `FS.read` was both granted and denied", "remove the duplicate right from either `--allow` or `--deny`")
+}
+#Test("DB rights values are transactional and reject empty and unknown rights") {
+    rights := [String]{"IO"}
+    if jet_cli_db_parse_rights_value("FS.Read,DB.Drop", "--allow", &rights) == {
+        .Ok(_) -> panic("unknown right accepted")
+        .Err(_) -> assert(rights == [String]{"IO"})
+    }
+    values :: [String]{"", ",FS", "FS,", "FS,,DB"}
+    loop value in values -> db_options_test_error(["--allow={value}"], "E2104", "arguments", "--allow contains an empty right", "pass `--allow=FS.Read,DB.Read`")
+    db_options_test_error(["--deny=,"], "E2104", "arguments", "--deny contains an empty right", "pass `--deny=FS.Read,DB.Read`")
+    db_options_test_error(["--allow= DB.Drop "], "E2104", "arguments", "unknown authority right `DB.Drop`", "use a canonical effect root or leaf such as FS.Read, FS.Write, or DB.Read")
+    db_options_test_error(["--deny=Unknown"], "E2104", "arguments", "unknown authority right `Unknown`", "use a canonical effect root or leaf such as FS.Read, FS.Write, or DB.Read")
+}
+#Test("DB every missing value error has exact code operation what and fix") {
+    flags :: [String]{"--format", "--allow", "--deny", "--query", "--script", "--table", "--max-rows", "--max-bytes", "--max-output-bytes"}
+    messages :: [String]{"`--format` needs an output format", "`--allow` needs a comma-separated rights value", "`--deny` needs a comma-separated rights value", "`--query` needs SQL text", "`--script` needs a path", "`--table` needs NAME=PATH", "`--max-rows` needs an integer", "`--max-bytes` needs an integer", "`--max-output-bytes` needs an integer"}
+    hints :: [String]{"pass `--format json` or `--format=json`", "pass `--allow=FS.Read,DB.Read`", "pass `--deny=FS.Read,DB.Read`", "pass `--query 'SELECT * FROM source'", "pass `--script report.sql`", "pass `--table orders=orders.json`", "pass `--max-rows 10000`", "pass `--max-bytes 1048576`", "pass `--max-output-bytes 1048576`"}
+    loop (index, flag) in flags -> db_options_test_error([flag], "E2104", "arguments", messages[index], hints[index])
+    db_options_test_error(["--table=orders"], "E2104", "arguments", messages[5], hints[5])
+    db_options_test_error(["--table", "orders"], "E2104", "arguments", messages[5], hints[5])
+    db_options_test_error(["--format=JSON"], "E2104", "arguments", "unknown db output format `JSON`", "choose human, json, jsonl, or csv")
+    db_options_test_error(["--color=rainbow"], "E2104", "arguments", "unknown color mode `rainbow`", "choose `--color=always`, `--color=never`, or `--color=auto`")
+}
+#Test("DB retired authority flags and unexpected positional errors") {
+    flags :: [String]{"--allow-fs", "--allow-read", "--deny-fs", "--deny-read", "--allow-write", "--allow-db", "--deny-db", "--deny-write", "--allow-xyz"}
+    replacements :: [String]{"`--allow=FS`", "`--allow=FS.Read`", "`--deny=FS`", "`--deny=FS.Read`", "`--allow=FS.Write`", "`--allow=DB`", "`--deny=DB`", "`--allow=RIGHTS` or `--deny=RIGHTS`", "`--allow=RIGHTS` or `--deny=RIGHTS`"}
+    loop (index, flag) in flags -> db_options_test_error([flag], "E2104", "arguments", "retired db authority option `{flag}`", "replace it with {replacements[index]}")
+    unknown :: [String]{"--oops", "--", "-", "--help=true"}
+    loop flag in unknown -> db_options_test_error([flag], "E2104", "arguments", "unknown db option `{flag}`", "run `jet db --help` for the bounded console options")
+    db_options_test_error(["a", "b"], "E2104", "arguments", "the db console accepts one source path", "use `--table NAME=PATH` for an explicit table identity")
+    db_options_test_error(["--help", "--oops"], "E2104", "arguments", "unknown db option `--oops`", "run `jet db --help` for the bounded console options")
+}
+fn db_options_test_limit_error(value: String, flag: String, message: String, hint: String) {
+    if jet_cli_db_parse_positive_limit(value, flag) == {
+        .Ok(_) -> panic("invalid limit accepted")
+        .Err(error) -> {
+            assert_eq(error.code, "E2104")
+            assert_eq(error.operation, "arguments")
+            assert_eq(error.source, "")
+            assert_eq(error.message, message)
+            assert_eq(error.hint, hint)
+        }
+    }
+}
+#Test("DB positive limit usize endpoints and invalid syntax") {
+    assert_eq(jet_cli_db_parse_positive_limit("1", "--max-rows") ?? panic(err.message), 1)
+    assert_eq(jet_cli_db_parse_positive_limit("+00012", "--max-rows") ?? panic(err.message), 12)
+    assert_eq(jet_cli_db_parse_positive_limit("18446744073709551615", "--max-rows") ?? panic(err.message), 18446744073709551615)
+    flags :: [String]{"--max-rows", "--max-bytes", "--max-output-bytes"}
+    invalid :: [String]{"", "+", "-1", " 1", "1 ", "1.0", "1e2", "a", "１２", "18446744073709551616", "9999999999999999999999999999999999999999999999999999999"}
+    loop flag in flags {
+        loop value in invalid -> db_options_test_limit_error(value, flag, "{flag} needs a non-negative integer, got `{value}`", "pass `{flag}=10000` or another bounded integer")
+        zero :: [String]{"0", "+0", "000"}
+        loop value in zero -> db_options_test_limit_error(value, flag, "{flag} must be greater than zero", "choose a positive bound so output cannot become an accidental unbounded operation")
+    }
+}
+#Test("DB JSON bound counts only outer rows preserving nested and escaped commas") {
+    text :: " [{{\"x\":[1,2,{{\"y\":\"a,]\\\"b\"}}]}},[1,2],\"é,\\\\\",null,true,4] trailing"
+    assert(jet_cli_db_enforce_json_row_bound(text, 6, "input.json") == .Ok(_))
+    if jet_cli_db_enforce_json_row_bound(text, 5, "input.json") == {
+        .Ok(_) -> panic("row bound not enforced")
+        .Err(error) -> {
+            assert_eq(error.code, "E2603")
+            assert_eq(error.operation, "source")
+            assert_eq(error.source, "input.json")
+            assert_eq(error.message, "JSON source has 6 rows, over the 5-row limit")
+            assert_eq(error.hint, "raise `--max-rows` explicitly or split the source")
+        }
+    }
+    assert(jet_cli_db_enforce_json_row_bound("[]", 0, "") == .Ok(_))
+    assert(jet_cli_db_enforce_json_row_bound("[,,,]", 0, "") == .Ok(_))
+    assert(jet_cli_db_enforce_json_row_bound("[1,,,]", 1, "") == .Ok(_))
+    assert(jet_cli_db_enforce_json_row_bound("{{\"not\": [1,2]}}", 0, "") == .Ok(_))
+    assert(jet_cli_db_enforce_json_row_bound("[\"unterminated", 1, "") == .Ok(_))
+    assert(jet_cli_db_enforce_json_row_bound("[{{}}", 1, "") == .Ok(_))
+}
+#Test("DB error constructors retain all diagnostic fields and first diagnostic") {
+    empty :: jet_cli_db_error_diagnostics("query", "orders", [Diagnostic]{})
+    assert_eq(empty.code, "E2600")
+    assert_eq(empty.operation, "query")
+    assert_eq(empty.source, "orders")
+    assert_eq(empty.message, "the SQL evaluator returned no diagnostic details")
+    assert_eq(empty.hint, "retry the statement after correcting its source or SQL")
+    diagnostics :: [Diagnostic]{Diagnostic{severity: 1, code: "E2601", what: "bad SQL", why: "reason", fix: "correct SQL"}, Diagnostic{severity: 1, code: "E2602", what: "second", why: "reason", fix: "second fix"}}
+    first :: jet_cli_db_error_diagnostics("query", "orders", diagnostics)
+    assert(first == jet_cli_db_error_new("E2601", "query", "orders", "bad SQL", "correct SQL"))
+}
+// tests/db_policy.rs's cases are runtime SQL-policy tests, not CLI options tests:
+// typed_sql_hostile_operations_keep_policy_and_provenance_across_tiers;
+// typed_sql_canonical_scope_example_has_aot_default_and_interpreter_parity;
+// db_scope_enforces_policy_on_query_insert_and_live_{aot,default};
+// invalid_row_policy_is_denied_the_same_way_{aot,default};
+// sqlite_blob_round_trip_preserves_bytes_across_tiers.
+// No option-level assertions exist there; no SQL kernel behavior is replaced here.
+#Test("DB output leaves resolve defaults and explicit overrides without ambient facts") {
+    defaults :: jet_cli_db_options_default()
+    assert_eq(defaults.max_rows, 100000)
+    assert_eq(defaults.max_input_bytes, 33554432)
+    assert_eq(defaults.max_output_bytes, 4194304)
+    formats :: [String]{"human", "text", "json", "jsonl", "csv"}
+    outputs :: [JetCLIDBOutput]{JetCLIDBOutput.Human, JetCLIDBOutput.Human, JetCLIDBOutput.JSON, JetCLIDBOutput.JSONL, JetCLIDBOutput.CSV}
+    mode :: JetCLIOutputMode{json: false, color: true, quiet: true}
+    loop (index, format) in formats {
+        parsed :: jet_cli_db_parse_output_format(format) ?? panic(err.message)
+        assert(parsed == outputs[index])
+        effective :: jet_cli_db_effective_mode(mode, parsed)
+        assert(effective.json == (index == 2 || index == 3))
+        assert(effective.color && effective.quiet)
+    }
+    if jet_cli_db_parse_output_format("bad") == {
+        .Ok(_) -> panic("bad output accepted")
+        .Err(error) -> assert(error == jet_cli_db_error_new("E2104", "arguments", "", "unknown db output format `bad`", "choose human, json, jsonl, or csv"))
+    }
+    override := defaults
+    override.output = JetCLIDBOutput.JSON
+    override.machine_override = Val(false)
+    override.color_override = Val(false)
+    resolved :: jet_cli_db_resolved_mode(mode, override)
+    assert(!resolved.json && !resolved.color && resolved.quiet)
+}

@@ -1,0 +1,25 @@
+// Real pure canonical SQL composition; no native session or authority mocked.
+use core.db.runtime.kernel_sql_query as db_query_fixture_sql
+#Test("DB canonical projection retains requested field order") {
+    source :: jet_cli_db_load_jsonl_source("source", "rows.jsonl", "{\"a\":1,\"b\":\"first\"}\n{\"a\":2,\"b\":\"second\"}", 4) ?? panic("source")
+    query :: db_query_fixture_sql.parse_sql_query("SELECT b AS label, a FROM source WHERE a >= 2") ?? panic("query")
+    result :: jet_cli_db_run_dynamic_query(source, query) ?? panic("execute")
+    assert_eq(result.rendered, "[{\"label\":\"second\",\"a\":2}]")
+    assert_eq(result.rows.len(), 1)
+    assert_eq(result.columns[0].name, "label")
+    assert_eq(result.columns[0].kind, JetCLIDBColumnKind.String)
+    assert_eq(result.columns[1].kind, JetCLIDBColumnKind.Int)
+}
+#Test("DB canonical aggregate feeds output column facts") {
+    source :: jet_cli_db_load_jsonl_source("source", "rows.jsonl", "{\"group\":\"x\",\"n\":2}\n{\"group\":\"x\",\"n\":3}\n{\"group\":\"y\",\"n\":7}", 4) ?? panic("source")
+    query :: db_query_fixture_sql.parse_sql_query("SELECT group, SUM(n) AS total, COUNT(*) AS count FROM source GROUP BY group ORDER BY total DESC LIMIT 1") ?? panic("query")
+    result :: jet_cli_db_run_dynamic_query(source, query) ?? panic("execute")
+    assert_eq(result.rendered, "[{\"group\":\"y\",\"total\":7,\"count\":1}]")
+    assert(result.columns[1].nullable)
+    assert_eq(result.columns[1].kind, JetCLIDBColumnKind.Int)
+    assert(!result.columns[2].nullable)
+}
+#Test("DB generated row schema preserves nullable typed fields") {
+    columns :: [JetCLIDBColumn]{JetCLIDBColumn{name:"number",kind:.Int,nullable:false},JetCLIDBColumn{name:"label",kind:.String,nullable:true}}
+    assert_eq(jet_cli_db_generated_row_item(columns), "#Codable\nstruct DbConsoleRow {\n    number: Int\n    label: String?\n}\n")
+}
