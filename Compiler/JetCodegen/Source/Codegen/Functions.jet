@@ -2421,7 +2421,7 @@ pub fn lower_comptime_closure(session: &JetCodegenComptimeSession, functions: [T
     }
     constants := session.constants
     types := jet_codegen_comptime_types(session)
-    jet_codegen_functions_from_rows(rows, functions, session.program.function_index, session.program.modules, session.trait_names, ^types, ^constants)
+    jet_codegen_functions_from_rows(^rows, functions, session.program.function_index, session.program.modules, session.trait_names, ^types, ^constants)
 }
 
 // Makes `functions` the session's closure (its function index and closure
@@ -3360,7 +3360,8 @@ pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], s
         constants := jet_codegen_lower_constant_rows(modules)
         empty_index := jet_codegen_function_index([TFunc]{})
         types := jet_codegen_declared_type_rows(empty_index, modules)
-        return jet_codegen_functions_from_rows([JetCodegenLoweredFunction]{}, functions, empty_index, modules, jet_codegen_trait_names(modules), ^types, ^constants)
+        no_rows := [JetCodegenLoweredFunction]{}
+        return jet_codegen_functions_from_rows(^no_rows, functions, empty_index, modules, jet_codegen_trait_names(modules), ^types, ^constants)
     }
     rows := [TFunc]{}
     jet_codegen_move_function_rows(&rows, &functions)
@@ -3385,7 +3386,7 @@ pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], s
     }
     constants := jet_codegen_lower_constant_rows(program.modules)
     types := jet_codegen_declared_type_rows(program.function_index, program.modules)
-    lowered := jet_codegen_functions_from_rows(lowered_rows, program.function_index.rows, program.function_index, program.modules, jet_codegen_trait_names(program.modules), ^types, ^constants)
+    lowered := jet_codegen_functions_from_rows(^lowered_rows, program.function_index.rows, program.function_index, program.modules, jet_codegen_trait_names(program.modules), ^types, ^constants)
     jet_codegen_move_function_rows(&functions, &program.function_index.rows)
     jet_codegen_move_module_rows(&modules, &program.modules)
     lowered
@@ -3690,7 +3691,9 @@ fn jet_codegen_declared_type_rows(function_index: JetCodegenFunctionIndex, modul
 // with `declared_types` (jet_codegen_declared_type_rows of `modules`, or a
 // comptime closure's jet_codegen_comptime_types) and `constants`
 // (jet_codegen_lower_constant_rows of `modules`).
-fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], functions: [TFunc], function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], trait_names: JetCodegenTraitNames, declared_types: ^[MIRTypeDef], constants: ^[MIRConstantDef]) -> JetCodegenFunctions {
+// The lowered rows are owned: each row's function, nested functions and
+// metadata rows move out of it in program order, so no MIR row is copied.
+fn jet_codegen_functions_from_rows(lowered_rows: ^[JetCodegenLoweredFunction], functions: [TFunc], function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], trait_names: JetCodegenTraitNames, declared_types: ^[MIRTypeDef], constants: ^[MIRConstantDef]) -> JetCodegenFunctions {
     lowered_functions := [MIRFunction]{}
     prelude_calls := [MIRPreludeCall]{}
     core_calls := [MIRCoreCall]{}
@@ -3698,30 +3701,42 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
     nested_functions := [MIRFunction]{}
     callbacks := [MIRCallbackAdapter]{}
     // Identity sets so each merge step is O(1) rather than a rescan of every
-    // row lowered so far: `"id"` and `"module:key"` per top-level and nested
+    // row lowered so far: the id and `"module:key"` per top-level and nested
     // function, and row positions of callbacks, routes and Core calls by id.
-    top_ids := [String:Bool]{}
+    top_ids := [U64:Bool]{}
     top_keys := [String:Bool]{}
-    nested_ids := [String:Bool]{}
+    nested_ids := [U64:Bool]{}
     nested_keys := [String:Bool]{}
     callback_rows := [String:Int]{}
     prelude_seen := [String:Bool]{}
     core_rows := [String:Int]{}
     used_core_seen := [String:Bool]{}
-    loop lowered in lowered_rows {
-        id_key :: "{lowered.function.id.value}"
+    // Popping the reversed rows yields them in program order.
+    pending := ^lowered_rows
+    &pending.reverse()
+    loop {
+        lowered := &pending.pop() ?? break
+        id_key :: lowered.function.id.value
         module_key :: "{lowered.function.module_id.value}:{lowered.function.key}"
         if top_ids.get(id_key) != None || top_keys.get(module_key) != None -> panic("duplicate top-level MIR function identity")
         if nested_ids.get(id_key) != None || nested_keys.get(module_key) != None -> panic("top-level MIR function collides with a nested function")
-        &lowered_functions.push(lowered.function)
+        // A field moves only when a write in the same block refills it
+        // (LastUse.jet); the bodiless signature row is that refill.
+        shell := jet_rust_emit_signature_row(lowered.function)
+        function := ^lowered.function
+        lowered.function = ^shell
+        &lowered_functions.push(^function)
         top_ids[id_key] = true
         top_keys[module_key] = true
-        loop nested in lowered.nested_functions {
-            nested_id_key :: "{nested.id.value}"
+        // Popping the reversed list in place moves each nested row out.
+        &lowered.nested_functions.reverse()
+        loop {
+            nested := &lowered.nested_functions.pop() ?? break
+            nested_id_key :: nested.id.value
             nested_module_key :: "{nested.module_id.value}:{nested.key}"
             if top_ids.get(nested_id_key) != None || top_keys.get(nested_module_key) != None -> panic("nested MIR function collides with a top-level function")
             if nested_ids.get(nested_id_key) != None || nested_keys.get(nested_module_key) != None -> panic("duplicate nested MIR function identity")
-            &nested_functions.push(nested)
+            &nested_functions.push(^nested)
             nested_ids[nested_id_key] = true
             nested_keys[nested_module_key] = true
         }

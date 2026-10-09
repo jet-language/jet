@@ -108,7 +108,10 @@ fn mir_lint_program_scan(program: MIRProgram, all: Bool) -> [MIRLintError] Never
     if program.functions.len() == 0 -> return failures
     ctx := mir_lint_context(mir_lint_index(program), ~program.functions[0])
     loop position in 0..<program.functions.len() {
-        if position > 0 -> _ := mir_lint_enter(&ctx, ~program.functions[position])
+        if position > 0 {
+            ctx.function = ~program.functions[position]
+            mir_lint_enter(&ctx)
+        }
         failure :: mir_lint_function(ctx) ?? next
         &failures.push(failure)
         if !all -> return failures
@@ -118,10 +121,10 @@ fn mir_lint_program_scan(program: MIRProgram, all: Bool) -> [MIRLintError] Never
 
 // Lint one part of a program whose functions are owned by the caller,
 // last-first (the optimizer wave law, Pipeline mir_pass_wave): each function
-// is moved into the context, checked, and moved back, so none is copied, and
-// the part again holds its functions last-first. Failures are in program
-// order; without `all` the part stops at its first failure, leaving the
-// unchecked functions in place.
+// moves into the context, is checked, and moves back (a field move refilled
+// in the same block, LastUse.jet), so the part again holds its functions
+// last-first. Failures are in program order; without `all` the part stops at
+// its first failure, leaving the unchecked functions in place.
 fn mir_lint_owned_part(index: ^MIRLintIndex, functions: &[MIRFunction], all: Bool) -> [MIRLintError] Never! {
     failures := [MIRLintError]{}
     first := &functions.pop() ?? return failures
@@ -133,8 +136,10 @@ fn mir_lint_owned_part(index: ^MIRLintIndex, functions: &[MIRFunction], all: Boo
             if !all -> break
         }
         next_function := &functions.pop() ?? break
-        previous := mir_lint_enter(&ctx, ^next_function)
+        previous := ^ctx.function
+        ctx.function = ^next_function
         &checked.push(^previous)
+        mir_lint_enter(&ctx)
     }
     current := ^ctx.function
     &functions.push(^current)
@@ -491,8 +496,8 @@ fn mir_lint_is_bool(ty: MIRType) -> Bool Never! {
 }
 
 // The program index and the lookup rows of the function being checked. The
-// context owns that function: mir_lint_enter moves the next one in and hands
-// the previous one back. Every table is keyed by the raw U64 ID.
+// context owns that function; mir_lint_enter builds its lookup rows. Every
+// table is keyed by the raw U64 ID.
 struct MIRLintContext {
     pub index: MIRLintIndex
     pub function: MIRFunction
@@ -506,49 +511,34 @@ struct MIRLintContext {
     pub predecessors: [[MIRBlockID]]
 }
 
-// The lookup rows of one function, built before it moves into a context.
-struct MIRLintRows {
-    pub values: [U64:Int]
-    pub places: [U64:Int]
-    pub blocks: [U64:Int]
-    pub predecessors: [[MIRBlockID]]
+fn mir_lint_context(index: ^MIRLintIndex, function: ^MIRFunction) -> MIRLintContext Never! {
+    ctx := MIRLintContext{index: ^index, function: ^function, values: [U64:Int]{}, places: [U64:Int]{}, blocks: [U64:Int]{}, predecessors: [[MIRBlockID]]{}}
+    mir_lint_enter(&ctx)
+    ctx
 }
 
-fn mir_lint_rows(function: MIRFunction) -> MIRLintRows Never! {
+// Build the lookup rows of the function the context now holds.
+fn mir_lint_enter(ctx: &MIRLintContext) Never! {
     values := [U64:Int]{}
-    loop (row, fact) in function.values -> _ := &values.add(fact.id.value, row)
+    loop (row, fact) in ctx.function.values -> _ := &values.add(fact.id.value, row)
     places := [U64:Int]{}
-    loop (row, place) in function.places -> _ := &places.add(place.id.value, row)
+    loop (row, place) in ctx.function.places -> _ := &places.add(place.id.value, row)
     blocks := [U64:Int]{}
     predecessors := [[MIRBlockID]]{}
-    loop (position, block) in function.blocks {
+    loop (position, block) in ctx.function.blocks {
         _ := &blocks.add(block.id.value, position)
         &predecessors.push([MIRBlockID]{})
     }
-    loop block in function.blocks {
+    loop block in ctx.function.blocks {
         loop target in mir_terminator_targets(block.terminator) {
             position :: blocks.get(target.value) ?? next
             &predecessors[position].push(block.id)
         }
     }
-    MIRLintRows{values: values, places: places, blocks: blocks, predecessors: predecessors}
-}
-
-fn mir_lint_context(index: ^MIRLintIndex, function: ^MIRFunction) -> MIRLintContext Never! {
-    rows := mir_lint_rows(function)
-    MIRLintContext{index: ^index, function: ^function, values: ^rows.values, places: ^rows.places, blocks: ^rows.blocks, predecessors: ^rows.predecessors}
-}
-
-// Point the context at `function`, moved in; returns the function it held.
-fn mir_lint_enter(ctx: &MIRLintContext, function: ^MIRFunction) -> MIRFunction Never! {
-    rows := mir_lint_rows(function)
-    previous := ^ctx.function
-    ctx.function = ^function
-    ctx.values = ^rows.values
-    ctx.places = ^rows.places
-    ctx.blocks = ^rows.blocks
-    ctx.predecessors = ^rows.predecessors
-    previous
+    ctx.values = values
+    ctx.places = places
+    ctx.blocks = blocks
+    ctx.predecessors = predecessors
 }
 
 fn mir_lint_fail(ctx: MIRLintContext, rule: MIRLintRule, span: Span, detail: String) -> MIRLintError? Never! {
