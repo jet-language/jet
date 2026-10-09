@@ -14169,11 +14169,11 @@ mod jet_c_abi_routes {
 
     /// core.auth.session_cookie
     #[no_mangle]
-    pub extern "C" fn jet_auth_session_cookie(a0: *mut crate::JetAuthSession) -> JetCString {
-        guard(|| handle(crate::jet_auth_session_cookie(unsafe { &*a0 })))
+    pub extern "C" fn jet_auth_store_load(data: *mut *mut u64) -> i64 {
+        guard(|| list_out(crate::jet_auth_store_load().into_iter().map(|e| e as u64).collect(), data))
     }
 
-    /// core.auth.session_id
+    /// core.auth.__store_replace
     #[no_mangle]
     pub extern "C" fn jet_auth_session_id(a0: *mut crate::JetAuthSession) -> JetCString {
         guard(|| handle(crate::jet_auth_session_id(unsafe { &*a0 })))
