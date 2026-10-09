@@ -38,6 +38,16 @@ fn core_effect_leaf_for_call(module: &str, name: &str) -> Option<&'static str> {
     }
 }
 
+// Testing's source-owned diff policy shares only the audited String storage
+// leaves, not the encoding stream or Dyn carrier machinery.
+pub(super) fn checked_testing_text_source(source_alias: Option<&str>, module: &str, name: &str) -> bool {
+    module == "core.encoding"
+        && matches!(name, "__string_byte" | "__bytes_into_text")
+        && source_alias
+            .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
+            .is_some_and(|source| source.module == "core.testing")
+}
+
 fn core_call_is_known(module: &str, name: &str) -> bool {
     jet_foundation::CoreModuleExports::core_modules()
         .iter()
@@ -2557,6 +2567,7 @@ impl<'a> Checker<'a> {
             == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_STREAM_ALIAS)
             || checked_csv
             || checked_xml
+            || checked_testing_text_source(source_alias, module, name)
             || source_alias == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_CBOR_STREAM_ALIAS)
             || source_alias == Some("__core_encoding_xml_engine")
             || ((module == "core.mem" || (module == "core.encoding" && name == "__utf8_validate"))

@@ -88,3 +88,52 @@ fn run() {
         "true\nfalse\ntrue\ntrue\n",
     );
 }
+
+#[test]
+fn source_testing_diff_accepts_audited_utf8_storage_helpers() {
+    let scratch = common::Scratch::new("testing_audited_utf8_diff");
+    let golden = scratch.path.join("utf8.golden");
+    std::fs::write(&golden, "expected é界\n").expect("write UTF-8 golden");
+    let source = format!(
+        r#"use core.testing as testing
+fn run() {{
+    print(testing.golden("{}", "actual é界\n"))
+}}
+"#,
+        jet_string(&golden),
+    );
+    // Mismatched golden text executes byte scanning and owned diff text
+    // transfer in the real Core module, not a generated user-origin helper.
+    assert_tiers_agree("testing_audited_utf8_diff", &source, "false\n");
+}
+
+#[test]
+fn user_unsafe_does_not_admit_private_testing_text_helpers() {
+    let scratch = common::Scratch::new("user_private_testing_text");
+    let entry = scratch.path.join("main.jet");
+    std::fs::write(&entry, "use core.encoding as encoding\nfn run() {}\n")
+        .expect("write user source closure");
+    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).expect("load encoding source");
+    let source = r#"use core.encoding as encoding
+fn run() {
+    #Unsafe("user audit is not a checked Core source identity") {
+        _ :: encoding.__string_byte("x", U64{0})
+        _ :: encoding.__bytes_into_text(^[U8]{120})
+    }
+}
+"#;
+    // Bypass the reserved-name lexical gate only, retaining user source origin.
+    let (tokens, lexical) = jet::Lexer::lex_generated(source);
+    assert!(lexical.is_empty(), "{lexical:?}");
+    let (program, _) = jet::Parser::parse_for_check_with_source(&tokens, source)
+        .expect("parse generated private helper calls");
+    bundle.modules[bundle.entry].items = program.items;
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    for member in ["__string_byte", "__bytes_into_text"] {
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0510"
+                && diagnostic.what.contains(member)),
+            "{member} escaped source-origin checking: {diagnostics:?}",
+        );
+    }
+}

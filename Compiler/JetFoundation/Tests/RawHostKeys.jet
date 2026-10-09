@@ -44,9 +44,21 @@ fn run() {
         TypeTupleField{name: "value", ty: Type.Int},
         TypeTupleField{name: "errno", ty: Type.Int}
     }}
-    raw_host_key_fixture("core.files", "jet_files_link_reader_at_raw", "__link_reader_at", [Type]{Type.Named{name: "FileReader"}, Type.Int, Type.String}, link_facts, [Bool]{true, false, true}, Effect.FS, None)
+    raw_host_key_fixture("core.files", "jet_files_link_reader_at_raw", "__link_reader_at", [Type]{Type.Named{name: "FileReader"}, Type.Int, Type.String}, link_facts, [Bool]{true, false, true}, Effect.FS, Val("FS.Write"))
     files :: core_module_export("core.files") ?? panic("files exports are registered")
     assert(files.members.contains("compiler_link_held"))
     assert(!files.members.contains("__link_held"))
     assert(core_call("core.files", "compiler_link_held") == None)
+    loop member in [String]{"__read_bytes_os", "__read_at_os", "__read_link_os", "__scope_read_at", "__reader_line_bytes"} {
+        row :: core_call("core.files", member) ?? panic("file read leaf is registered")
+        assert(row.effect_kind == Val(Effect.FS) && row.effect_leaf == Val("FS.Read"))
+    }
+    loop member in [String]{"__write_bytes_os", "__append_bytes_os", "__create_dirs_os", "__write_at_os", "__writer_refusal", "__atomic_reserve", "__atomic_finish", "__atomic_remove", "__atomic_rename", "__atomic_sync_parent", "__atomic_close"} {
+        row :: core_call("core.files", member) ?? panic("file write leaf is registered")
+        assert(row.effect_kind == Val(Effect.FS) && row.effect_leaf == Val("FS.Write"))
+    }
+    loop member in [String]{"__path_windows", "__atomic_pid", "__scope_roots", "__reader_path"} {
+        row :: core_call("core.files", member) ?? panic("file inspection leaf is registered")
+        assert(row.effect_kind == None && row.effect_leaf == None)
+    }
 }

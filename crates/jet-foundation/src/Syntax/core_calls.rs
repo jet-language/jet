@@ -69,7 +69,8 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
         if same_text(method, "__temp_directory") {
             return Some(Effect::Env);
         }
-        if one_of(method, &["__host_path_is_absolute", "__host_path_join", "__fault_should_fail", "__os_family"]) {
+        if one_of(method, &["__host_path_is_absolute", "__host_path_join", "__fault_should_fail", "__os_family",
+            "__path_windows", "__atomic_pid", "__scope_roots", "__reader_path"]) {
             return None;
         }
     }
@@ -532,6 +533,11 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "read_bytes",
                 "read_at",
                 "read_link",
+                "__read_bytes_os",
+                "__read_at_os",
+                "__read_link_os",
+                "__scope_read_at",
+                "__reader_line_bytes",
                 "map",
                 "open",
                 "exists",
@@ -580,6 +586,18 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "write_bytes",
                 "write_at",
                 "write_atomic",
+                "__write_bytes_os",
+                "__append_bytes_os",
+                "__create_dirs_os",
+                "__write_at_os",
+                "__writer_refusal",
+                "__atomic_reserve",
+                "__atomic_finish",
+                "__atomic_remove",
+                "__atomic_rename",
+                "__atomic_sync_parent",
+                "__atomic_close",
+                "jet_files_link_reader_at_raw",
                 "append_all",
                 "create",
                 "append",

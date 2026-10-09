@@ -49,6 +49,10 @@ are not additional public constructors. Vetted Core internals may borrow
 these payloads inside audited `#Unsafe` regions (#4737). The private Object
 entry view borrows the input's ordered backing storage; it neither converts
 the Object to a sorted map nor clones its children.
+The source-owned testing diff policy shares only the private String byte read
+and owned byte-to-text transfer leaves. Its checked Core source identity and
+an audited `#Unsafe` region are both required; this does not grant testing
+access to stream I/O or raw `Dyn` carrier leaves.
 
 
 Use one adapter identity per format for whole-value operations and bounded

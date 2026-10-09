@@ -5,6 +5,51 @@ mod tests {
     use crate::AST::Type;
 
     #[test]
+    fn testing_only_shares_its_audited_text_storage_leaves() {
+        use super::super::core_call::checked_testing_text_source;
+        let alias = jet_foundation::CoreModuleExports::core_source_module("core.testing")
+            .expect("testing source is registered").alias;
+        for name in ["__string_byte", "__bytes_into_text"] {
+            assert!(checked_testing_text_source(Some(alias), "core.encoding", name));
+            for source in [None, Some("core.testing"), Some("user_testing"), Some("core_core_files")] {
+                assert!(!checked_testing_text_source(source, "core.encoding", name));
+            }
+        }
+        for name in ["__read_byte", "__utf8_validate", "__text_into_bytes", "__object_from_entries", "__bytes_view"] {
+            assert!(!checked_testing_text_source(Some(alias), "core.encoding", name));
+        }
+        assert!(!checked_testing_text_source(Some(alias), "core.mem", "__list_capacity"));
+    }
+
+    #[test]
+    fn files_runtime_leaves_preserve_the_source_effect_budget() {
+        use crate::Syntax::core_call;
+        use crate::Sema::Effects::Effect;
+        for (leaf, members) in [
+            ("FS.Read", &["read", "read_bytes", "read_at", "read_link", "__read_bytes_os",
+                "__read_at_os", "__read_link_os", "__scope_read_at", "__reader_line_bytes"][..]),
+            ("FS.Write", &["write", "write_bytes", "write_at", "write_atomic", "__write_bytes_os",
+                "__append_bytes_os", "__create_dirs_os", "__write_at_os", "__writer_refusal",
+                "__atomic_reserve", "__atomic_finish", "__atomic_remove", "__atomic_rename",
+                "__atomic_sync_parent", "__atomic_close", "jet_files_link_reader_at_raw"][..]),
+        ] {
+            for member in members {
+                let row = core_call("core.files", member).expect("file route is registered");
+                assert_eq!(row.effect(), Some(Effect::FS), "{member}");
+                assert_eq!(row.effect_leaf(), Some(leaf), "{member}");
+            }
+        }
+        for member in ["__path_windows", "__atomic_pid", "__scope_roots", "__reader_path"] {
+            let row = core_call("core.files", member).expect("file inspection route is registered");
+            assert_eq!(row.effect(), None, "{member}");
+            assert_eq!(row.effect_leaf(), None, "{member}");
+        }
+        // Combined operations must not accidentally become read-only.
+        assert_eq!(core_call("core.files", "copy").unwrap().effect_leaf(), None);
+        assert_eq!(core_call("core.files", "copy_dir").unwrap().effect_leaf(), None);
+    }
+
+    #[test]
     fn dyn_cutover_has_closed_payloads_and_members() {
         use super::super::{core_json_pattern_types, dyn_member, dyn_method_return};
         let dyn_ty = Type::Named("Dyn".to_string());

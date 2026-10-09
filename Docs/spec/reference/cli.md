@@ -133,6 +133,10 @@ extracts the private held-directory handle inside Core and calls the existing
 `jet_files_link_reader_at_raw` leaf. Compiler callers cannot substitute a path
 or bypass the directory authority, and the bridge does not change link/copy
 fallback policy.
+The held-link leaf carries `FS.Write`, not the broad `FS` root. Raw file
+routes preserve their source wrappers' narrow read or write contract;
+inspection of already-held path, scope, platform, and process-ID facts
+does not acquire filesystem authority.
 
 Remote builder records accept LF or CRLF line endings, removing only the single
 carriage return immediately before a newline. Extra or interior control bytes

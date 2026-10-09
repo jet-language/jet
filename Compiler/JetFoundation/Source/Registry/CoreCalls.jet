@@ -117,7 +117,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
     if {
         module_name == "core.files" && member == "__temp_path_sample" -> Val(Effect.Time)
         module_name == "core.files" && member == "__temp_directory" -> Val(Effect.Env)
-        module_name == "core.files" && core_call_one_of(member, [String]{"__host_path_is_absolute", "__host_path_join", "__fault_should_fail", "__os_family"}) -> None
+        module_name == "core.files" && core_call_one_of(member, [String]{"__host_path_is_absolute", "__host_path_join", "__fault_should_fail", "__os_family", "__path_windows", "__atomic_pid", "__scope_roots", "__reader_path"}) -> None
         module_name == "core.log" && member == "__metric_publish" -> None
         module_name == "core.devtools" && member == "__publish_payload" -> None
         module_name == "core.web" && core_call_one_of(member, [String]{"__openapi_inputs", "__openapi_render", "__contract_stop", "__live_stats_snapshot"}) -> None
@@ -233,6 +233,7 @@ fn core_call_effect_leaf_for(module_name: String, member: String) -> String? {
         module_name == "core.files" && core_call_one_of(member, [String]{
             "read", "read_bytes", "read_at", "read_link", "map", "open", "exists", "is_dir", "is_fifo", "is_socket",
             "stat", "lstat", "list_dir", "walk", "walk_parallel", "walk_files", "glob", "canonicalize", "absolute",
+            "__read_bytes_os", "__read_at_os", "__read_link_os", "__scope_read_at", "__reader_line_bytes",
             // #3593 provider leaves behind Core/files/files.jet.
             "__open_reader", "__open_directory", "__close_directory", "__list_directory", "__stat_at", "__path_kind", "__read_link_at",
             "__xattr_names", "__xattr_get", "__reader_stat", "__writer_stat", "__metadata_directory", "__directory_fd",
@@ -243,6 +244,9 @@ fn core_call_effect_leaf_for(module_name: String, member: String) -> String? {
         module_name == "core.files" && core_call_one_of(member, [String]{
             "write", "write_bytes", "write_at", "write_atomic", "append_all", "create", "append", "fsync", "remove",
             "remove_dir", "remove_all", "create_dir", "create_dir_all", "rename", "symlink", "hard_link", "chown",
+            "__write_bytes_os", "__append_bytes_os", "__create_dirs_os", "__write_at_os", "__writer_refusal",
+            "__atomic_reserve", "__atomic_finish", "__atomic_remove", "__atomic_rename", "__atomic_sync_parent", "__atomic_close",
+            "jet_files_link_reader_at_raw",
             "set_mode", "mkdtemp", "mktemp", "temp_dir", "temp_file", "lock", "__open_writer", "__create_directory",
             "__fsync_directory", "__rename_at", "__remove_at", "__xattr_set", "__writer_set_mode", "__flock",
             "__remove_raw", "__remove_dir_raw", "__remove_all_raw", "__hard_link_raw", "__fsync_raw", "__chown_raw",
