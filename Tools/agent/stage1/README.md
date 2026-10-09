@@ -96,8 +96,15 @@ receipt preserve every failure while the runner continues through the census.
 Rust bootstrap tests are separately inventoried in `retired-with-Rust.json`;
 they are not Jet registry entries or cutover blockers.
 The owner-approved `Tools/testkit/retired-with-rust.tsv` is the single explicit
-retirement list for Rust-dependent cases. Both normal testkit discovery and
-the manifest's `retiredWithRust.testkitCases` read those exact IDs and reasons.
+retirement list for Rust-dependent case and compiler-registry sources. Normal
+testkit discovery and the manifest's `retiredWithRust` section read those exact
+IDs and reasons.
 Retirement changes the active corpus; the runner uses no CLI filter or shard,
 and accepts no skipped outcome among the remaining cases.
+Backend/runtime transports reuse the existing Node assemblers and verdict
+checkers, with production native Jet CLI compilation and permitted system C
+drivers. `run --runtime DIR` explicitly names the admitted runtime directory;
+otherwise transports use `jet-runtime` beside the supplied compiler. Its
+`native.key`, Jet-only object, full pack and matching zero-Rust/LLVM provenance
+are required. Transport command evidence is retained in the same receipt.
 

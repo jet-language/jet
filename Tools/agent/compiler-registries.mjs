@@ -12,18 +12,19 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFi
 import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
+import { prepareTransport, runTransport } from './compiler-registry-transports.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n');
 const currentHead = () => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
-const usage = 'compiler-registries.mjs manifest HEAD [--out DIR]; run --jet JET --manifest JSON [--receipt JSON]';
+const usage = 'compiler-registries.mjs manifest HEAD [--out DIR]; run --jet JET --manifest JSON [--runtime DIR] [--receipt JSON]';
 const [command, ...args] = process.argv.slice(2);
 const options = {};
 if (command === 'manifest') options.head = args.shift();
 for (let i = 0; i < args.length; i += 2) {
     const name = args[i];
-    if (!['--jet', '--manifest', '--receipt', '--out'].includes(name) || !args[i + 1]) throw Error(usage);
+    if (!['--jet', '--manifest', '--receipt', '--out', '--runtime'].includes(name) || !args[i + 1]) throw Error(usage);
     options[name.slice(2)] = resolve(args[i + 1]);
 }
 function filesUnder(directory, extension = '.jet') {
@@ -90,17 +91,28 @@ function inventory() {
         }) : [];
     });
 }
+function retirements() {
+    return readFileSync(join(repo, 'Tools/testkit/retired-with-rust.tsv'), 'utf8').split('\n').flatMap(line => {
+        if (!line.trim() || line.startsWith('#')) return [];
+        const [path, reason, extra] = line.split('\t');
+        if (!path || !reason || extra !== undefined) throw Error('retired rows need an exact source ID and reason');
+        return [{ path, reason, ...(existsSync(join(repo, path)) ? { sha256: hash(readFileSync(join(repo, path))) } : {}) }];
+    });
+}
+function registryRows(census) {
+    const retired = new Set(retirements().map(row => row.path));
+    return census.filter(row => row.role === 'registry' && !retired.has(row.source)).flatMap(row => {
+        const id = row.source.replace(/^Compiler\//, '').replace(/\.jet$/, '');
+        const mode = row.names.length ? 'test' : 'run';
+        return [{ ...row, id, mode }, ...(row.names.length && row.entry ? [{ ...row, id: `${id}.run`, mode: 'run' }] : [])];
+    });
+}
 function testkitInventory() {
     const sources = readdirSync(join(repo, 'Tools/testkit')).filter(name => name.endsWith('.jet')).sort()
         .map(name => `Tools/testkit/${name}`);
     const retirementPath = 'Tools/testkit/retired-with-rust.tsv';
     sources.push('Tools/testkit/package.jet', retirementPath);
-    const retiredCases = readFileSync(join(repo, retirementPath), 'utf8').split('\n').flatMap(line => {
-        if (!line.trim() || line.startsWith('#')) return [];
-        const [path, reason, extra] = line.split('\t');
-        if (!path || !reason || extra !== undefined) throw Error('retired case rows need an exact ID and reason');
-        return [{ path, reason, ...(existsSync(join(repo, path)) ? { sha256: hash(readFileSync(join(repo, path))) } : {}) }];
-    });
+    const retiredCases = retirements().filter(row => row.path.startsWith('tests/cases/'));
     const retiredIds = new Set(retiredCases.map(row => row.path));
     const cases = filesUnder(join(repo, 'tests/cases'), '.case').map(path => relative(repo, path)).filter(path => !retiredIds.has(path));
     const rustToolRequirements = cases.flatMap(path => readFileSync(join(repo, path), 'utf8').split('\n')
@@ -125,6 +137,19 @@ function environment() {
     }
     return env;
 }
+function nativeRuntime(jet) {
+    const runtimeDir = realpathSync(options.runtime ?? join(dirname(jet), 'jet-runtime'));
+    const key = readFileSync(join(runtimeDir, 'native.key'), 'utf8').trim();
+    if (!key || key === '.' || key === '..' || /[\\/\s]/.test(key)) throw Error('native.key must name one runtime directory');
+    const runtimePack = join(runtimeDir, key, 'jet_runtime.pack.o');
+    const runtimeObject = join(runtimeDir, key, 'jet_runtime_jet.o');
+    const provenance = JSON.parse(readFileSync(join(runtimeDir, 'provenance.json'), 'utf8'));
+    if (provenance.backend !== 'jet-native' || provenance.rustObjects !== 0 || provenance.llvmObjects !== 0
+        || provenance.packSha256 !== hash(readFileSync(runtimePack)) || provenance.objectSha256 !== hash(readFileSync(runtimeObject))) {
+        throw Error('registry transports require matching Jet-native, zero-Rust/LLVM runtime pack/object provenance');
+    }
+    return { runtimeDir, runtimePack, runtimeObject, packSha256: provenance.packSha256, objectSha256: provenance.objectSha256 };
+}
 function generate() {
     if (!/^[a-f0-9]{40}$/.test(options.head ?? '') || options.head !== currentHead()) throw Error('manifest requires the current full committed head');
     const out = options.out ?? join(homedir(), '.cache/jet-dev/scratch/RegistryRunnerLead', options.head);
@@ -141,15 +166,19 @@ function generate() {
     const baseNames = testsIn(base);
     const manifests = ['Compiler/Bootstrap/sources.list', 'Compiler/JetRuntime/sources.list'].map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) }));
     const sourceMap = assemblyError ? null : JSON.parse(readFileSync(join(home, '.cache/jet-luna/compiler-bootstrap/compiler.map.json'), 'utf8'));
-    for (const row of census.filter(row => row.role === 'registry')) {
-        const mode = row.names.length ? 'test' : 'run';
+    for (const row of registryRows(census)) {
+        if (row.package === 'JetRuntime' || (row.package === 'JetBackend' && row.entry)) {
+            const transport = prepareTransport(row, { repo, out });
+            if (transport) { entries.push(transport); continue; }
+        }
+        const mode = row.mode;
         let reason = assemblyError;
         if (row.package === 'JetRuntime') reason = 'runtime hand-ABI registries require their native C fixture driver/runtime source assembly; not a compiler Test harness';
         if (row.package === 'JetBackend' && row.entry) reason = 'backend artifact/FFI registry needs its existing run-*.mjs source assembly plus native artifact execution/checker; a returned fn run is not its success verdict';
         const sources = [row.source];
         if (row.package === 'JetParser' && row.names.length) sources.unshift('Compiler/JetParser/Tests/Support.jet');
         if (row.source === 'Compiler/JetParser/Tests/SelfHost.jet') sources.push('Compiler/JetParser/Tests/SelfHostProbe.jet');
-        const id = row.source.replace(/^Compiler\//, '').replace(/\.jet$/, '');
+        const id = row.id;
         const stdout = mode === 'test' ? 'jet.test.v1' : `JET_COMPILER_REGISTRY PASS ${id} tests=1\n`;
         const entry = { id, package: row.package, mode, path: join(out, id, 'registry.jet'), cwd: join(out, id),
             sha256: row.sha256, stdout, testCount: mode === 'test' ? baseNames.length + row.names.length : 1,
@@ -162,7 +191,7 @@ function generate() {
             if (path === row.source && mode === 'run') text = text.replace(/^fn run(?=\s*\()/m, 'fn compiler_registry_body');
             body += `\n// [compiler registry source: ${path}]\n` + stripImports(text, seen) + '\n';
         }
-        if (mode === 'run') body += `\nfn run() { compiler_registry_body(); print(${JSON.stringify(stdout.trimEnd())}) }\n`;
+        if (mode === 'run') body += `\nfn run() {\n    compiler_registry_body()\n    print(${JSON.stringify(stdout.trimEnd())})\n}\n`;
         entry.sha256 = hash(Buffer.from(body));
         entry.testNames = mode === 'test' ? [...baseNames, ...row.names] : [];
         mkdirSync(entry.cwd, { recursive: true });
@@ -183,18 +212,19 @@ function generate() {
     if (options.head !== currentHead()) throw Error('head advanced during assembly; regenerate on the newest committed head');
     const manifest = { head: options.head, completeCompilerRegistries: true, repo, sourceManifests: manifests,
         compilerSources: (sourceMap?.files ?? []).map(({ path, sha256 }) => ({ path, sha256 })), inventory: census, testkit: kit, entries,
-        retiredWithRust: { testkitCases: kit.retiredCases, bootstrapTests: retiredBootstrapTests() } };
+        retiredWithRust: { testkitCases: kit.retiredCases,
+            compilerRegistries: retirements().filter(row => row.path.startsWith('Compiler/')), bootstrapTests: retiredBootstrapTests() } };
     json(join(out, 'manifest.json'), manifest);
     json(join(out, 'retired-with-Rust.json'), retiredBootstrapTests());
     console.log(JSON.stringify(manifest, null, 2));
 }
-function run() {
+async function run() {
     if (!options.jet || !options.manifest) throw Error(usage);
     options.jet = realpathSync(options.jet);
     const bytes = readFileSync(options.manifest), manifest = JSON.parse(bytes);
     if (manifest.head !== currentHead() || manifest.completeCompilerRegistries !== true || !manifest.entries?.length) throw Error('complete current-head manifest required');
     // Re-census: a forged/truncated entries array cannot turn omissions into PASS.
-    const current = inventory(), required = [...current.filter(row => row.role === 'registry').map(row => row.source.replace(/^Compiler\//, '').replace(/\.jet$/, '')), 'testkit/cases'];
+    const current = inventory(), required = [...registryRows(current).map(row => row.id), 'testkit/cases'];
     const ids = manifest.entries.map(entry => entry.id);
     if (new Set(ids).size !== ids.length || JSON.stringify(ids.slice().sort()) !== JSON.stringify(required.slice().sort())) throw Error('manifest does not account for every current registry');
     if (JSON.stringify(current) !== JSON.stringify(manifest.inventory)) throw Error('registry source inventory changed since manifest');
@@ -206,6 +236,11 @@ function run() {
     const logDir = `${receiptPath}.logs`; mkdirSync(logDir, { recursive: true });
     const receipt = { status: 'FAIL', head: manifest.head, jet: options.jet, jetSha256: hash(readFileSync(options.jet)),
         manifestSha256: hash(bytes), total: ids.length, passed: 0, blocked: 0, failed: 0, entries: [] };
+    let runtime, runtimeError;
+    if (manifest.entries.some(entry => entry.kind === 'transport' && entry.status !== 'BLOCKED')) {
+        try { runtime = nativeRuntime(options.jet); receipt.runtime = runtime; }
+        catch (error) { runtimeError = error; }
+    }
     for (const entry of manifest.entries) {
         const result = { id: entry.id, mode: entry.mode, testCount: entry.testCount };
         if (entry.status === 'BLOCKED') { result.status = 'BLOCKED'; result.reason = entry.reason; receipt.blocked++; }
@@ -237,6 +272,13 @@ function run() {
                         }
                         result.report = report;
                     }
+                } else if (entry.kind === 'transport') {
+                    if (runtimeError) throw runtimeError;
+                    const ran = await runTransport(entry, { jet: options.jet, repo, logDir, ...runtime });
+                    if (ran.testCount !== entry.testCount) throw Error('transport verdict count differs from complete registry');
+                    command = ['native-registry-transport', entry.path, entry.id];
+                    child = { ...ran, status: ran.code };
+                    result.transportEvidence = ran.evidence;
                 } else {
                     command = [options.jet, entry.mode, ...(entry.mode === 'test' ? ['--capture=all', '--color=never'] : []), entry.path];
                     child = spawnSync(command[0], command.slice(1), { cwd: entry.cwd, env: environment(), encoding: 'utf8',
@@ -269,5 +311,5 @@ function run() {
     process.exitCode = receipt.status === 'PASS' ? 0 : 1;
 }
 if (command === 'manifest') generate();
-else if (command === 'run') run();
+else if (command === 'run') await run();
 else throw Error(usage);

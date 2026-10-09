@@ -28,7 +28,7 @@ fn kit_cases_retired(root: String) -> [String] {
         if line == "" || line.starts_with("#") -> next
         fields :: line.split("\t").to_list()
         assert(fields.len() == 2 && fields[1] != "", "retired case rows need an exact ID and reason")
-        &retired.push(fields[0])
+        if fields[0].starts_with("tests/cases/") -> &retired.push(fields[0])
     }
     retired
 }
