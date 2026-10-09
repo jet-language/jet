@@ -1186,7 +1186,7 @@ fn package_namespace_uses_owner_indices_without_sibling_imports() {
     for (name, source) in files {
         fs::write(scratch.join(name), source).unwrap();
     }
-    let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts_for_run_and_entry(
+    let (diagnostics, bundle, _, _checked_nominals) = jet::Driver::check_file_with_effect_facts_for_run_and_entry(
         scratch.join("main.jet").to_str().unwrap(), "dev", &Default::default(), None,
     );
     assert!(diagnostics.iter().all(|diagnostic|
@@ -1225,7 +1225,7 @@ fn comptime_qualified_module_function_call_reaches_its_body() {
     ] {
         fs::write(scratch.join(name), source).unwrap();
     }
-    let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts_for_run_and_entry(
+    let (diagnostics, bundle, _, _checked_nominals) = jet::Driver::check_file_with_effect_facts_for_run_and_entry(
         scratch.join("main.jet").to_str().unwrap(), "dev", &Default::default(), None,
     );
     assert!(diagnostics.iter().all(|diagnostic|

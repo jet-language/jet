@@ -766,7 +766,7 @@ fn ownership_for_definition(single_use: bool) -> TirOwnership {
 }
 
 fn qualified_key(module: &str, name: &str) -> String {
-    if module.is_empty() {
+    if module.is_empty() || name.contains("::") {
         name.to_string()
     } else {
         format!("{module}::{name}")
@@ -1349,6 +1349,7 @@ pub(super) fn lower_erasure(
 
 pub(super) fn lower_tir_declarations(
     bundle: &ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     boxed_edges_by_module: &BTreeMap<String, HashSet<(String, String)>>,
     auto_printable_by_module: &BTreeMap<String, HashSet<String>>,
     auto_debug_by_module: &BTreeMap<String, HashSet<String>>,
@@ -1388,7 +1389,7 @@ pub(super) fn lower_tir_declarations(
                 )
             },
             seed_parse_error,
-            None,
+            Some(checked_nominals[index].as_ref()),
         );
     }
     discard_duplicate_core_enum_fallbacks(&mut out);
@@ -1419,7 +1420,7 @@ pub(super) fn lower_declarations_from_items_with_boxed_edges(
     boxed_edges: &HashSet<(String, String)>,
     auto_printable: &HashSet<String>,
     auto_debug: &HashSet<String>,
-    checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<&crate::AST::MirFragmentNominalFacts>,
 ) -> TirDeclarations {
     let mut out = TirDeclarations::default();
     let layout_engine = TargetLayoutEngine::new(items, target_layout.clone());
@@ -1505,7 +1506,7 @@ fn collect_items(
     qualify_type: &impl Fn(&Type, &[String]) -> Type,
     impl_owner: &impl Fn(&str) -> String,
     seed_parse_error: bool,
-    checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<&crate::AST::MirFragmentNominalFacts>,
 ) {
     // A bare trait name in a declared field, payload, or trait signature is
     // the trait value, the same canonical type every checked body and impl
@@ -1531,7 +1532,7 @@ fn collect_items(
     for item in items {
         match item {
             Item::Struct(definition) => {
-                out.type_defs.push(lower_struct(
+                let mut row = lower_struct(
                     definition,
                     module,
                     &canonical,
@@ -1539,7 +1540,15 @@ fn collect_items(
                     boxed_edges,
                     is_auto_printable(auto_printable, module, &definition.name),
                     is_auto_debug(auto_debug, module, &definition.name),
-                ));
+                );
+                if definition.compiler_builtin_error && checked_nominals.is_some_and(|facts| {
+                    let identity = facts.name_ledger.declared_identity(facts.module_idx, &definition.name)
+                        .or_else(|| facts.nominal_identities.get(&definition.name).map(String::as_str));
+                    identity.is_some() && identity == facts.compiler_owned_default_err_identity.as_deref()
+                }) {
+                    row.compiler_builtin = Some(MirCompilerBuiltin::DefaultErr);
+                }
+                out.type_defs.push(row);
                 push_nested_trait_impls(out, &definition.name, &definition.trait_impls, module);
             }
             Item::Enum(definition) => {
@@ -2340,7 +2349,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
     ("TLSTrust", &["System", "SystemPlusCa"]),
     ("TLSVersion", &["TLS12", "TLS13"]),
     ("TLSClientTrust", &["System", "SystemPlus", "CustomOnly"]),
-    ("NetDnsError", &["NotFound", "Failure"]),
+    ("NetDNSError", &["NotFound", "Failure"]),
     (
         "NetError",
         &[
@@ -3063,7 +3072,7 @@ pub(crate) fn compiler_owned_enum_variants(name: &str) -> Option<&'static [&'sta
 /// retained from sema's checked source enum facts when that source is loaded.
 fn compiler_owned_core_enums(
     module: &str,
-    checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<&crate::AST::MirFragmentNominalFacts>,
 ) -> Vec<TirTypeDef> {
     let span = Span::new(0, 0);
     let mut seen = HashSet::new();
@@ -3148,7 +3157,7 @@ fn compiler_owned_core_enums(
 }
 
 fn checked_core_enum_payloads<'a>(
-    checked_nominals: Option<&'a crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<&'a crate::AST::MirFragmentNominalFacts>,
 ) -> HashMap<(&'a str, &'a str), &'a EnumDef> {
     let mut payloads = HashMap::new();
     let Some(checked_nominals) = checked_nominals else {
@@ -3177,58 +3186,6 @@ fn checked_core_enum_payloads<'a>(
         payloads.insert((source.module, name), definition);
     }
     payloads
-}
-
-fn compiler_owned_default_err(module: &str) -> TirTypeDef {
-    let span = Span::new(0, 0);
-    let field = |name: &str, ty: Type| TirField {
-        name: name.to_string(),
-        shape_names: ShapeFieldNames::from_source(name),
-        skip: false,
-        ty,
-        span,
-        public: true,
-        package_public: false,
-        computed: false,
-        has_default: false,
-        redact: false,
-    };
-    TirTypeDef {
-        module: module.to_string(),
-        key: crate::Syntax::TYPE_ERR.to_string(),
-        name: crate::Syntax::TYPE_ERR.to_string(),
-        span,
-        public: true,
-        package_public: false,
-        generic_params: Vec::new(),
-        derives: Vec::new(),
-        auto_derive_default: false,
-        auto_printable: false,
-        published_schema: false,
-        single_use: false,
-        must_use: false,
-        layout: None,
-        layout_alignment: None,
-        c_layout_tag: None,
-        enum_layout: None,
-        serde: Vec::new(),
-        cli_bindings: Vec::new(),
-        cli: None,
-        ownership: TirOwnership::Owned,
-        boxed_edges: Vec::new(),
-        compiler_builtin: Some(MirCompilerBuiltin::DefaultErr),
-        kind: TirTypeDefKind::Struct {
-            fields: vec![
-                field("message", Type::String),
-                field("code", Type::Option(Box::new(Type::String))),
-                field(
-                    "cause",
-                    Type::Option(Box::new(Type::Named(crate::Syntax::TYPE_ERR.to_string()))),
-                ),
-            ],
-            methods: Vec::new(),
-        },
-    }
 }
 
 fn compiler_owned_record(
@@ -3413,10 +3370,10 @@ fn compiler_owned_parse_error(module: &str) -> TirTypeDef {
 fn compiler_owned_type_defs<'a>(
     module: &'a str,
     seed_parse_error: bool,
-    checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<&crate::AST::MirFragmentNominalFacts>,
 ) -> impl Iterator<Item = TirTypeDef> + 'a {
     let span = Span::new(0, 0);
-    let net_error_variants = ["NetDnsError", "NetError"]
+    let net_error_variants = ["NetDNSError", "NetError"]
         .into_iter()
         .map(|enum_name| {
             (
@@ -3426,7 +3383,7 @@ fn compiler_owned_type_defs<'a>(
             )
         })
         .collect::<HashMap<_, _>>();
-    for enum_name in ["NetDnsError", "NetError"] {
+    for enum_name in ["NetDNSError", "NetError"] {
         let canonical_names = compiler_owned_enum_variants(enum_name)
             .unwrap_or_else(|| panic!("missing canonical MIR enum {enum_name}"));
         let variants = net_error_variants
@@ -3717,7 +3674,7 @@ fn compiler_owned_type_defs<'a>(
                                 ))),
                                 _ => TirVariantPayload::Unit,
                             }
-                        } else if matches!(*name, "NetError" | "NetDnsError") {
+                        } else if matches!(*name, "NetError" | "NetDNSError") {
                             let (_, payload) = net_error_variants
                                 .get(*name)
                                 .and_then(|variants| variants.get(*variant))
@@ -3735,7 +3692,6 @@ fn compiler_owned_type_defs<'a>(
             },
         })
         .chain(compiler_owned_core_enums(module, checked_nominals))
-        .chain(std::iter::once(compiler_owned_default_err(module)))
         .chain(std::iter::once(compiler_owned_record(
             module,
             "FieldError",

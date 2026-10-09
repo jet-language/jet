@@ -5204,7 +5204,7 @@ fn job_registry_for_entry(
 ) -> jet_foundation::CLISchema::JobRegistry {
     let display = entry.to_string_lossy().into_owned();
     let source = fs::read_to_string(entry).unwrap_or_default();
-    let (diagnostics, bundle, _facts) =
+    let (diagnostics, bundle, _facts, _checked_nominals) =
         jet::Driver::check_file_with_effect_facts_for_run(&display, "dev", &BTreeMap::new());
     let errors = diagnostics
         .into_iter()

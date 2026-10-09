@@ -39,7 +39,7 @@ fn callbacks_entry_effects_are_only_io() {
 fn selected_output_effects_follow_the_selected_callable() {
     let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("Examples/features/tooling/output_callable.jet");
-    let (diagnostics, bundle, facts) = jet::Driver::check_file_with_effect_facts_for_output(
+    let (diagnostics, bundle, facts, _checked_nominals) = jet::Driver::check_file_with_effect_facts_for_output(
         entry.to_str().unwrap(),
         "app",
         "dev",

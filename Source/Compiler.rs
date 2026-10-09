@@ -1957,7 +1957,7 @@ fn compiler_semantic_index_value(
 }
 
 fn checked_value(source: &str) -> CtValue {
-    let (checked_diagnostics, bundle, effect_facts) =
+    let (checked_diagnostics, bundle, effect_facts, _nominals) =
         crate::Driver::check_eval_with_effect_facts(source, "core.compiler.jet");
     checked_value_from_parts(source, &checked_diagnostics, bundle.as_ref(), &effect_facts)
 }
@@ -2265,7 +2265,7 @@ pub fn parse_source(src: &str) -> SyntaxTree {
 
 pub fn check_file(path: &std::path::Path) -> CheckedFile {
     let file = path.to_string_lossy();
-    let (diagnostics, bundle, facts) =
+    let (diagnostics, bundle, facts, _nominals) =
         crate::Driver::check_file_with_effect_facts(&file, None, true);
     let has_errors = diagnostics.iter().any(|d| d.severity == Severity::Error);
     let source = std::fs::read_to_string(path).unwrap_or_default();

@@ -30,13 +30,14 @@ struct Pass {
 }
 
 fn lower_bundle(bundle: &mut jet::AST::ProgramBundle, context: &str) -> MirProgram {
-    let diagnostics = jet::Sema::check_bundle(bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, nominals) =
+        jet::Sema::check_bundle_with_effect_facts(bundle, jet::Sema::CompileMode::Run);
     let errors = diagnostics.iter().filter(|row| row.severity == Severity::Error).collect::<Vec<_>>();
     assert!(errors.is_empty(), "{context}: checked terminator fixture: {errors:#?}");
     let request = MirArtifactRequest::new(
         MirArtifactTarget::Interpreter, MirArtifactKind::NativeExecutable, MirArtifactBuildMode::Dev,
     );
-    jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+    jet::Codegen::TIR::lower_checked_mir_program_for(bundle, &nominals, request)
         .unwrap_or_else(|error| panic!("{context}: canonical optimized terminator MIR: {error}"))
         .0
 }

@@ -1619,7 +1619,7 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
 /// Outside the family on purpose: `TaskFailure` (D-FAIL-CARRIER1 owns
 /// cancellation and deadline reporting), `[FieldError]` (a list, not one named
 /// type), and component types no Core call fails with (`DataErrorKind`,
-/// `EncodingCause`, `IOContext`, `NetErrorDetail`, `NetDnsError`).
+/// `EncodingCause`, `IOContext`, `NetErrorDetail`, `NetDNSError`).
 ///
 /// A source-owned Core error arrives under its canonical owner identity
 /// (`<corelib>/Core/crypto::Core/crypto/uuid.jet::UUIDError`); membership is

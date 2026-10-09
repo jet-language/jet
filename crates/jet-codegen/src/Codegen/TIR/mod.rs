@@ -2781,7 +2781,7 @@ pub struct MirFragmentContext<'a> {
     pub core_imports: &'a std::collections::HashMap<String, String>,
     pub structs: &'a std::collections::HashMap<String, &'a crate::AST::StructDef>,
     pub computed_fields: &'a std::collections::HashMap<(String, String), &'a crate::AST::Expr>,
-    pub checked_nominals: Option<&'a crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    pub checked_nominals: Option<&'a crate::AST::MirFragmentNominalFacts>,
     pub distinct_ranges: &'a std::collections::HashMap<String, Option<(i64, i64)>>,
     pub distinct_bases: &'a std::collections::HashMap<String, crate::AST::Type>,
     pub unit_families: &'a [crate::AST::UnitFamilyDef],
@@ -3003,7 +3003,7 @@ fn collect_fragment_core_callable(
 /// take the ordinary loaded-module route of `collect_fragment_core_callable`.
 fn collect_fragment_module_callable(
     expr: &crate::AST::Expr,
-    facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
+    facts: &crate::AST::MirFragmentNominalFacts,
     module_imports: &std::collections::HashMap<String, String>,
     imported_functions: &std::collections::HashMap<String, (String, String)>,
     locals: Option<&std::collections::HashMap<String, crate::AST::Type>>,
@@ -3065,14 +3065,14 @@ fn annotate_fragment_module_calls(
     function: &mut crate::AST::Func,
     signatures: &std::collections::HashMap<
         (String, String),
-        crate::Comptime::MirBridge::MirFragmentCoreSourceSignature,
+        crate::AST::MirFragmentCoreSourceSignature,
     >,
     imported_functions: &std::collections::HashMap<String, (String, String)>,
 ) {
     if signatures.is_empty() {
         return;
     }
-    let checked_return = |signature: &crate::Comptime::MirBridge::MirFragmentCoreSourceSignature| {
+    let checked_return = |signature: &crate::AST::MirFragmentCoreSourceSignature| {
         signature.return_type.clone().unwrap_or_else(|| {
             jet_foundation::AST::FailureContract::from_return_type(None).effective_type()
         })
@@ -3108,7 +3108,7 @@ fn annotate_fragment_module_calls(
 fn collect_fragment_function_dependencies(
     function: &crate::AST::Func,
     current_owner: Option<&str>,
-    core_scope: Option<(&str, &crate::Comptime::MirBridge::MirFragmentCoreSourceModule)>,
+    core_scope: Option<(&str, &crate::AST::MirFragmentCoreSourceModule)>,
     context: &MirFragmentContext<'_>,
     out: &mut std::collections::BTreeSet<FragmentCallable>,
 ) {
@@ -3790,6 +3790,7 @@ fn lower_mir_fragment(
                 span: empty_span,
                 is_pub: false,
                 is_package_pub: false,
+                compiler_builtin_error: false,
                 name: name.clone(),
                 name_span: empty_span,
                 type_params: Vec::new(),
@@ -4268,8 +4269,8 @@ fn lower_mir_fragment(
 /// file module also sees every checked nominal row by its canonical identity
 /// and spells its own and imported types through its identity table.
 fn fragment_core_source_cx(
-    facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
-    source: &crate::Comptime::MirBridge::MirFragmentCoreSourceModule,
+    facts: &crate::AST::MirFragmentNominalFacts,
+    source: &crate::AST::MirFragmentCoreSourceModule,
     fragment_cx: &Cx,
 ) -> (Vec<Item>, Cx) {
     let user_module =
@@ -4363,12 +4364,12 @@ fn fragment_core_source_cx(
 /// declared signature supplies the call's conventions and return.
 fn install_fragment_module_imports(
     cx: &mut Cx,
-    facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
+    facts: &crate::AST::MirFragmentNominalFacts,
     module_imports: &std::collections::HashMap<String, String>,
     imported_functions: &std::collections::HashMap<String, (String, String)>,
     signatures: &std::collections::HashMap<
         (String, String),
-        crate::Comptime::MirBridge::MirFragmentCoreSourceSignature,
+        crate::AST::MirFragmentCoreSourceSignature,
     >,
 ) {
     for (alias, module) in module_imports {
@@ -4402,7 +4403,7 @@ fn install_fragment_module_imports(
 /// name runtime lowering gives them, so `prep` code calls the same Core
 /// function a runtime call reaches.
 fn lower_fragment_core_source_bodies(
-    facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
+    facts: &crate::AST::MirFragmentNominalFacts,
     reachable: &std::collections::BTreeSet<FragmentCallable>,
     fragment_cx: &Cx,
     funcs: &mut Vec<TFunc>,
@@ -4447,7 +4448,7 @@ fn lower_fragment_core_source_bodies(
 /// Lower every checked instantiation of a source-owned Core generic function
 /// the fragment demanded, as runtime lowering does for imported Core modules.
 fn specialize_fragment_core_source_generics(
-    facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
+    facts: &crate::AST::MirFragmentNominalFacts,
     fragment_cx: &Cx,
     funcs: &mut Vec<TFunc>,
 ) -> Result<(), LowerError> {
@@ -4759,22 +4760,24 @@ fn lower_mir_fragment_program(
 /// Lower one explicitly requested checked artifact into analytical TIR.
 pub fn lower_checked_tir_program_for(
     bundle: &ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     request: MirArtifactRequest,
 ) -> Result<TirProgram, LowerError> {
-    lower_checked_tir_program_for_with_debug(bundle, request, false)
+    lower_checked_tir_program_for_with_debug(bundle, checked_nominals, request, false)
 }
 
 /// Lower checked TIR with the native debug source-map markers enabled.
 pub fn lower_checked_tir_program_for_with_debug(
     bundle: &ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     request: MirArtifactRequest,
     debug_linemap: bool,
 ) -> Result<TirProgram, LowerError> {
     if jet_foundation::CompilerStack::on_compiler_worker() {
-        return lower_checked_tir_program_on_stack(bundle, request, debug_linemap);
+        return lower_checked_tir_program_on_stack(bundle, checked_nominals, request, debug_linemap);
     }
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        lower_checked_tir_program_on_stack(bundle, request, debug_linemap)
+        lower_checked_tir_program_on_stack(bundle, checked_nominals, request, debug_linemap)
     })
 }
 
@@ -4795,6 +4798,7 @@ pub fn lower_checked_tir_program_for_with_debug(
 ///   MIR asks for the projection in the function's declaring module first.
 fn nominal_identity_projection(
     bundle: &ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
 ) -> std::collections::HashMap<String, String> {
     let mut claims: std::collections::HashMap<String, std::collections::HashSet<String>> =
         std::collections::HashMap::new();
@@ -4843,6 +4847,12 @@ fn nominal_identity_projection(
                 identity.clone(),
             );
             claims.entry(spelling).or_default().insert(identity);
+        }
+    }
+    for facts in checked_nominals {
+        for (spelling, identity) in &facts.nominal_identities {
+            scoped.insert((facts.module_identity.clone(), spelling.clone()), identity.clone());
+            claims.entry(spelling.clone()).or_default().insert(identity.clone());
         }
     }
     let mut unique: std::collections::HashMap<_, _> = claims
@@ -5353,9 +5363,20 @@ fn collect_http_route_handlers(items: &[Item], out: &mut std::collections::HashS
 }
 fn lower_checked_tir_program_on_stack(
     bundle: &ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     request: MirArtifactRequest,
     debug_linemap: bool,
 ) -> Result<TirProgram, LowerError> {
+    if checked_nominals.len() != bundle.modules.len() {
+        return Err(LowerError::new(Span::new(0, 0), "missing checked nominal module facts"));
+    }
+    for (module_idx, facts) in checked_nominals.iter().enumerate() {
+        if facts.module_idx != module_idx
+            || bundle.name_ledger.module_identity(module_idx) != Some(facts.module_identity.as_str())
+        {
+            return Err(LowerError::new(Span::new(0, 0), "checked nominal module context disagrees with its bundle"));
+        }
+    }
     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
         let module = bundle.modules.get(bundle.entry).ok_or_else(|| {
             LowerError::new(crate::Diagnostics::Span::new(0, 0), "missing entry module")
@@ -6643,6 +6664,7 @@ fn lower_checked_tir_program_on_stack(
         let canonical_calls = cx.jit_canonical_calls.borrow().clone();
         let declarations = lower_tir_declarations(
             bundle,
+            checked_nominals,
             &boxed_edges_by_module,
             &auto_printable_by_module,
             &auto_debug_by_module,
@@ -6724,7 +6746,7 @@ fn lower_checked_tir_program_on_stack(
             memo_dependencies,
             reflection_fields,
             reflect_paths,
-            nominal_identities: nominal_identity_projection(bundle),
+            nominal_identities: nominal_identity_projection(bundle, checked_nominals),
             struct_type_params,
             enum_variants,
             enum_variant_payload_types,

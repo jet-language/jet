@@ -12,6 +12,7 @@ pub struct CheckedQuery {
     pub diagnostics: Arc<Vec<crate::Diagnostics::Diagnostic>>,
     pub bundle: Option<Arc<crate::AST::ProgramBundle>>,
     pub effect_facts: Arc<crate::Sema::SemIndexEffectFacts>,
+    pub checked_nominals: Arc<[Arc<crate::AST::MirFragmentNominalFacts>]>,
     dependencies: Arc<Vec<PathBuf>>,
 }
 
@@ -352,7 +353,7 @@ impl CompilerQueries {
                     .iter()
                     .map(|(path, text)| (path.as_path(), text.as_str()))
                     .collect::<Vec<_>>();
-                let (diagnostics, bundle, facts, dependencies) =
+                let (diagnostics, bundle, facts, checked_nominals, dependencies) =
                     crate::Driver::check_file_with_effect_facts_incremental_overlays_prepared(
                         &path,
                         &overlay_refs,
@@ -364,6 +365,7 @@ impl CompilerQueries {
                     diagnostics: Arc::new(diagnostics),
                     bundle: bundle.map(Arc::new),
                     effect_facts: Arc::new(facts),
+                    checked_nominals,
                     dependencies: Arc::new(dependencies),
                 }
             })
@@ -431,12 +433,13 @@ impl CompilerQueries {
             Err(_) => {
                 let file = FileKey::new(root.to_string_lossy());
                 self.invalidate_file(&file);
-                let (diagnostics, bundle, facts) =
+                let (diagnostics, bundle, facts, checked_nominals) =
                     crate::Driver::check_file_with_effect_facts(path, None, is_lsp);
                 CheckedQuery {
                     diagnostics: Arc::new(diagnostics),
                     bundle: bundle.map(Arc::new),
                     effect_facts: Arc::new(facts),
+                    checked_nominals,
                     dependencies: Arc::new(Vec::new()),
                 }
             }

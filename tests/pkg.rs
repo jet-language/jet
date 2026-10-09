@@ -5978,7 +5978,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     );
     let mut bundle =
         jet::Loader::load_entry_with_overlay(current_path.to_str().unwrap(), None, true).unwrap();
-    let (_, facts) =
+    let (_, facts, _checked_nominals) =
         jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Check);
     let entry = &bundle.modules[bundle.entry];
     let frozen = jet::Publish::ApiFreeze::snapshot_from_items_with_effects(
@@ -6244,7 +6244,7 @@ fn physical_unit_trait_methods_use_canonical_dimensions() {
 
     let mut bundle = jet::Loader::load_entry_with_overlay(path.to_str().unwrap(), None, true)
         .expect("trait source bundle");
-    let (_, facts) =
+    let (_, facts, _checked_nominals) =
         jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Check);
     let entry = &bundle.modules[bundle.entry];
     let frozen = jet::Publish::ApiFreeze::snapshot_from_items_with_effects(

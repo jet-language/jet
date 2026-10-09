@@ -10,13 +10,26 @@ pub(super) fn check_bundle_opts_for_output_inner(
     explicit_output: Option<&str>,
     incremental: Option<&mut IncrementalSemaCache>,
     allow_compiler_api: bool,
-) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
+) -> (
+    Vec<Diagnostic>,
+    super::super::Effects::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
+) {
     guard_fact_registry_law();
+    let error_owner = match super::super::Prelude::retain_error_prelude_module(bundle) {
+        Ok(owner) => owner,
+        Err(diagnostics) => return (
+            diagnostics,
+            super::super::Effects::SemIndexEffectFacts::default(),
+            std::sync::Arc::from([]),
+        ),
+    };
     let foreign_diags = validate_foreign_imports(bundle);
     if !foreign_diags.is_empty() {
         return (
             foreign_diags,
             super::super::Effects::SemIndexEffectFacts::default(),
+            std::sync::Arc::from([]),
         );
     }
     let mut diags = Vec::new();
@@ -195,12 +208,15 @@ pub(super) fn check_bundle_opts_for_output_inner(
             ModuleState {
                 module_path: m.display.clone(),
                 source: m.source.clone(),
-                package_scope: jet_foundation::Names::package_scope_for(
-                    &m.path,
-                    &bundle.project_root,
-                ),
+                package_scope: if module_idx == error_owner {
+                    super::super::Prelude::ERROR_PRELUDE_PACKAGE.to_owned()
+                } else {
+                    jet_foundation::Names::package_scope_for(&m.path, &bundle.project_root)
+                },
                 module_alias: m.alias.clone(),
                 items: m.items.clone(),
+                is_core_source: m.is_core_source(),
+                compiler_builtin_error_owner: Some(error_owner),
                 build_facts: bundle.build_facts.clone(),
                 allow_compiler_api: allow_compiler_api && module_idx == bundle.entry,
                 exact_int_reachable: Default::default(),
@@ -239,6 +255,17 @@ pub(super) fn check_bundle_opts_for_output_inner(
         .collect();
     let mut name_ledger = std::mem::take(&mut bundle.name_ledger);
     name_ledger.clear_sema_facts();
+
+    for state in &mut states {
+        let target_layout = jet_foundation::Layout::TargetLayout::from_build_facts(&state.build_facts);
+        for item in &bundle.modules[error_owner].items {
+            if let Item::Struct(definition) = item {
+                super::super::Registration::register_builtin_error_struct(
+                    definition, &mut state.registry, &mut diags, &target_layout,
+                );
+            }
+        }
+    }
     let namespace_trait_scopes = {
         let mut scopes: HashMap<&str, HashMap<String, jet_foundation::Traits::TraitInfo>> =
             HashMap::new();
@@ -692,6 +719,9 @@ pub(super) fn check_bundle_opts_for_output_inner(
             match item {
                 Item::Func(f) => register_func_item(f, st, &mut diags, !module.no_prelude),
                 Item::Struct(s) => {
+                    if s.compiler_builtin_error {
+                        continue;
+                    }
                     register_struct(
                         s,
                         &mut st.registry,

@@ -167,8 +167,9 @@ fn run() {
     let mir = jet::run_compiler_work(|| {
         let mut bundle = jet::Loader::load_entry(entry.to_str().expect("UTF-8 fixture path"))
             .expect("load file owner fixture");
-        let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-            .into_iter()
+        let (diagnostics, _facts, nominals) =
+            jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diagnostics.into_iter()
             .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
             .collect();
         assert!(errors.is_empty(), "checked file owner fixture: {errors:#?}");
@@ -177,7 +178,7 @@ fn run() {
             MirArtifactKind::NativeExecutable,
             MirArtifactBuildMode::Dev,
         );
-        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request)
+        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, &nominals, request)
             .expect("checked file owner TIR");
         jet::Codegen::TIR::lower_tir_to_mir(tir).expect("file owner MIR")
     });
@@ -579,8 +580,9 @@ fn run() {
     let mir = jet::run_compiler_work(|| {
         let mut bundle = jet::Loader::load_entry(entry.to_str().expect("UTF-8 fixture path"))
             .expect("load borrowed temporary fixture");
-        let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-            .into_iter()
+        let (diagnostics, _facts, nominals) =
+            jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diagnostics.into_iter()
             .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
             .collect();
         assert!(errors.is_empty(), "checked borrowed temporary fixture: {errors:#?}");
@@ -589,7 +591,7 @@ fn run() {
             MirArtifactKind::NativeExecutable,
             MirArtifactBuildMode::Dev,
         );
-        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request)
+        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, &nominals, request)
             .expect("checked borrowed temporary TIR");
         let mir = jet::Codegen::TIR::lower_tir_to_mir(tir).expect("borrowed temporary MIR");
         jet_foundation::MIR::optimize_mir_program(

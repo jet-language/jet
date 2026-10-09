@@ -1724,7 +1724,14 @@ impl<'a> Checker<'a> {
                         }
                     }
                     if crate::Sema::CheckerCoreLib::core_module_type_item(&ns, leaf) {
-                        let type_name = if matches!(
+                        let type_name = if ns == "core.encoding"
+                            && matches!(jet_foundation::CoreModuleExports::core_leaf_kind(&ns, leaf),
+                                Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_)))
+                        {
+                            self.core_source_enum_owner_module(&ns, leaf)
+                                .map(|owner| self.canonical_nominal_name(owner, leaf))
+                                .unwrap_or_else(|| leaf.clone())
+                        } else if matches!(
                             ns.as_str(),
                             "core.http" | "core.http.client" | "core.http.server"
                         ) {
@@ -2134,8 +2141,10 @@ impl<'a> Checker<'a> {
                 if module == "core.encoding"
                     && matches!(item.as_str(), "DataEvent" | "EncodingErrorKind" | "EncodingFormat")
                 {
+                    let identity = self.import_qualified_nominal(alias)
+                        .unwrap_or_else(|| item.clone());
                     let has_variant = self
-                        .resolve_enum_variants_cloned(&item)
+                        .resolve_enum_variants_cloned(&identity)
                         .is_some_and(|variants| variants.contains_key(method));
                     if has_variant {
                         let saved: Vec<Expr> = args
@@ -2150,7 +2159,7 @@ impl<'a> Checker<'a> {
                         let mut enum_args: Vec<EnumLitArg> =
                             saved.into_iter().map(EnumLitArg::Positional).collect();
                         let ty = self.check_enum_lit(
-                            &item,
+                            &identity,
                             method,
                             &mut enum_args,
                             span,
@@ -2161,7 +2170,7 @@ impl<'a> Checker<'a> {
                                 arg.expr = expr;
                             }
                         }
-                        **receiver = Expr::Ident(item, span);
+                        **receiver = Expr::Ident(identity, span);
                         *resolved_ret_out = Some(ty.clone());
                         return Some(ty);
                     }

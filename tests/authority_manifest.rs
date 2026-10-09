@@ -390,7 +390,8 @@ fn i9_interpreter_runs_the_authority_project() {
     let entry = root.join("run.jet");
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap())
         .expect("interpreter front end accepts authority project");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(
         diagnostics.is_empty(),
         "interpreter sema changed authority meaning: {diagnostics:#?}"
@@ -398,6 +399,7 @@ fn i9_interpreter_runs_the_authority_project() {
 
     match common::run_interpreter_checked_bundle(
         &bundle,
+        &checked_nominals,
         true,
         jet::Interpreter::InterpreterInvocation::RunInterpret,
         &common::development_policy(),

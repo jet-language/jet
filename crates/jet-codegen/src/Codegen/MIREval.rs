@@ -1676,14 +1676,16 @@ pub fn install_mir_bridge() {
 
 fn run_bundle_bridge(
     bundle: &crate::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     sink: &mut crate::Comptime::DevSink,
     gates: jet_foundation::Policy::GateSet,
 ) -> Result<CtValue, Diagnostic> {
-    run_bundle_at_stage_bridge(bundle, sink, gates, crate::Comptime::PurityStage::BuildTime)
+    run_bundle_at_stage_bridge(bundle, checked_nominals, sink, gates, crate::Comptime::PurityStage::BuildTime)
 }
 
 fn run_bundle_at_stage_bridge(
     bundle: &crate::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     sink: &mut crate::Comptime::DevSink,
     _gates: jet_foundation::Policy::GateSet,
     _stage: crate::Comptime::PurityStage,
@@ -1693,7 +1695,7 @@ fn run_bundle_at_stage_bridge(
         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
         jet_foundation::MIR::MirArtifactBuildMode::Dev,
     );
-    let (program, artifact) = crate::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+    let (program, artifact) = crate::Codegen::TIR::lower_checked_mir_program_for(bundle, checked_nominals, request)
         .map_err(|error| mir_error_at(&error.message, error.span))?;
     let config = MirEvalConfig {
         base_dir: PathBuf::from(program.facts.project_root.clone()),
@@ -1717,7 +1719,7 @@ fn fragment_context<'a>(
     globals: &'a HashMap<String, CtValue>,
     core_imports: &'a HashMap<String, String>,
     structs: &'a HashMap<String, &'a crate::AST::StructDef>,
-    checked_nominals: Option<&'a crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<&'a crate::AST::MirFragmentNominalFacts>,
     computed_fields: &'a HashMap<(String, String), &'a crate::AST::Expr>,
     distinct_ranges: &'a HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &'a HashMap<String, crate::AST::Type>,
@@ -1859,7 +1861,7 @@ fn eval_expr_bridge(
         request.globals,
         request.core_imports,
         request.structs,
-        request.checked_nominals.as_ref(),
+        request.checked_nominals.as_deref(),
         request.computed_fields,
         request.distinct_ranges,
         request.distinct_bases,
@@ -1913,7 +1915,7 @@ fn eval_block_bridge<'a, 'debug>(
         request.globals,
         request.core_imports,
         request.structs,
-        request.checked_nominals.as_ref(),
+        request.checked_nominals.as_deref(),
         request.computed_fields,
         request.distinct_ranges,
         request.distinct_bases,
@@ -32646,7 +32648,10 @@ fn run() {
 }
 ";
 
-    fn checked_run_bundle(src: &str) -> crate::AST::ProgramBundle {
+    fn checked_run_bundle(src: &str) -> (
+        crate::AST::ProgramBundle,
+        std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
+    ) {
         let (toks, lex_diags) = crate::Lexer::lex(src);
         assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
         let mut prog = crate::Parser::parse(&toks).expect("parse failed");
@@ -32691,14 +32696,14 @@ fn run() {
             edition: "2027".to_string(),
         };
         install_mir_bridge();
-        let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
+        let (diags, _facts, nominals) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Run);
         assert!(
             !diags
                 .iter()
                 .any(|d| d.severity == crate::Diagnostics::Severity::Error),
             "sema errors: {diags:?}"
         );
-        bundle
+        (bundle, nominals)
     }
 
     /// Run `src` through the MIR interpreter on its own thread so a wait that
@@ -32710,14 +32715,14 @@ fn run() {
             .stack_size(32 * 1024 * 1024)
             .spawn(move || {
                 let outcome = jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-                    let bundle = checked_run_bundle(src);
+                    let (bundle, nominals) = checked_run_bundle(src);
                     let request = jet_foundation::MIR::MirArtifactRequest::new(
                         MirArtifactTarget::Interpreter,
                         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
                         jet_foundation::MIR::MirArtifactBuildMode::Dev,
                     );
                     let (program, artifact) =
-                        crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
+                        crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, &nominals, request)
                             .map_err(|error| format!("MIR lowering failed: {error:?}"))?;
                     evaluate_mir_program_with_config(&program, artifact, &MirEvalConfig::default())
                         .map(|result| result.stdout)

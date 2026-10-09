@@ -233,7 +233,10 @@ fn compiler_fact_pattern_fold_does_not_claim_user_enums() {
 /// (S57/M9.5) — are present before gating. Builds a single-module bundle the
 /// same way `lib.rs::check_for_eval` does, asserts sema accepted the program,
 /// then runs `tir_covers` on the sema-enriched function.
-fn checked_bundle(src: &str) -> crate::AST::ProgramBundle {
+fn checked_bundle(src: &str) -> (
+    crate::AST::ProgramBundle,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
+) {
     let (toks, lex_diags) = crate::Lexer::lex(src);
     assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
     let mut prog = crate::Parser::parse(&toks).expect("parse failed");
@@ -286,20 +289,20 @@ fn checked_bundle(src: &str) -> crate::AST::ProgramBundle {
     // Coverage and lowering helpers check named functions, not a runnable
     // program. `CompileMode::Run` demands `fn run` (E0101) and is the
     // wrong door for a fragment whose entry is `opt`/`build`/`ch`.
-    let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check);
+    let (diags, _facts, nominals) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Check);
     assert!(
         !diags
             .iter()
             .any(|d| d.severity == crate::Diagnostics::Severity::Error),
         "sema errors: {diags:?}"
     );
-    bundle
+    (bundle, nominals)
 }
 
 /// Compiler worker required; see `covers`.
 fn covers_after_sema(src: &str, fn_name: &str) -> bool {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
         let mut cx = build_cx_items(&module.items, src, "test.jet", None, &std::sync::Arc::default(), &bundle.edition);
         crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry,
@@ -318,7 +321,7 @@ fn covers_after_sema(src: &str, fn_name: &str) -> bool {
 
 fn refusal_after_sema(src: &str, fn_name: &str) -> String {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
         let mut cx = build_cx_items(&module.items, src, "test.jet", None, &std::sync::Arc::default(), &bundle.edition);
         crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry,
@@ -343,7 +346,7 @@ fn refusal_after_sema(src: &str, fn_name: &str) -> String {
 /// Compiler worker required; see `covers`.
 fn lower_after_sema(src: &str, fn_name: &str) -> TFunc {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
         let mut cx = build_cx_items(&module.items, src, "test.jet", None, &std::sync::Arc::default(), &bundle.edition);
         crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry,
@@ -454,7 +457,7 @@ fn default_parameter_call_sites_are_tir_covered() {
             env!("CARGO_MANIFEST_DIR"),
             "/../../Examples/features/basics/default_refs.jet"
         ));
-        let bundle = checked_bundle(source);
+        let (bundle, _nominals) = checked_bundle(source);
         let module = &bundle.modules[bundle.entry];
         let cx = build_cx_items(&module.items, source, "default_refs.jet", None, &std::sync::Arc::default(), &bundle.edition);
         let function = module
@@ -473,7 +476,7 @@ fn default_parameter_call_sites_are_tir_covered() {
 #[test]
 fn explicit_run_is_lowered_as_the_canonical_run_function() {
     let source = "fn run() { print(\"script\") }\nfn helper() {}\n";
-    let bundle = checked_bundle(source);
+    let (bundle, _nominals) = checked_bundle(source);
     let module = &bundle.modules[bundle.entry];
     assert!(module.script_body.is_empty());
     let runs = module
@@ -1604,7 +1607,7 @@ fn compiler_owned_core_enum_rows_reuse_checked_source_payloads() {
             .expect("Core source path suffix")
     );
     method.name = identity.clone();
-    let mut checked_nominals = crate::Comptime::MirBridge::MirFragmentNominalFacts::default();
+    let mut checked_nominals = crate::AST::MirFragmentNominalFacts::default();
     checked_nominals
         .foreign_modules
         .insert(identity.clone(), source.alias.to_string());
@@ -1654,28 +1657,68 @@ fn compiler_owned_core_enum_rows_reuse_checked_source_payloads() {
 }
 
 #[test]
-fn compiler_owned_default_err_is_a_struct_row() {
+fn unchecked_declarations_do_not_synthesize_default_err() {
     let declarations = super::tir_to_mir_types::lower_declarations_from_items(
-        &[],
-        "",
-        &jet_foundation::Layout::TargetLayout::host(),
+        &[], "", &jet_foundation::Layout::TargetLayout::host(),
     );
-    let err = declarations
-        .type_defs
-        .iter()
-        .find(|ty| ty.key == crate::Syntax::TYPE_ERR)
-        .expect("default Err must be a compiler-owned type row");
-    let kind = format!("{:?}", err.kind);
-    assert!(
-        kind.starts_with("Struct"),
-        "default Err must be a struct, got {kind}"
-    );
-    for field in ["message", "code", "cause"] {
-        assert!(
-            kind.contains(field),
-            "default Err missing field {field} in {kind}"
+    assert!(!declarations.type_defs.iter().any(|row|
+        matches!(row.compiler_builtin, Some(jet_foundation::MIR::MirCompilerBuiltin::DefaultErr))));
+}
+
+#[test]
+fn checked_default_err_retains_original_identity_and_private_metadata() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle("fn run() {}\n");
+        let identity = nominals[bundle.entry].compiler_owned_default_err_identity.as_deref()
+            .expect("original Prelude Err declaration identity");
+        let owner = bundle.name_ledger.nominal_module(identity)
+            .expect("the original declaration has a checked source owner");
+        assert_ne!(owner, bundle.entry, "the Prelude is not injected into the entry owner");
+        assert_eq!(bundle.modules[owner].path,
+            std::path::Path::new("jet:canonical-prelude/Prelude/Errors.jet"));
+        assert_eq!(bundle.name_ledger.module(owner).unwrap().package, "jet:canonical-prelude");
+        assert_eq!(bundle.name_ledger.module(owner).unwrap().path, "Prelude/Errors.jet");
+        assert_eq!(nominals.len(), bundle.modules.len());
+        let original = bundle.modules[owner].items.iter().find_map(|item| match item {
+            Item::Struct(definition) if definition.compiler_builtin_error
+                && definition.name == crate::Syntax::TYPE_ERR => Some(definition),
+            _ => None,
+        }).expect("original Prelude Err in its checked source context");
+        assert_eq!(original.fields.len(), 4);
+        let original_metadata = &original.fields[3];
+        assert!(!original_metadata.is_pub && !original_metadata.is_package_pub);
+        let Some(Expr::StructLit { type_name, import_ns, fields, .. }) =
+            original_metadata.default.as_deref()
+        else {
+            panic!("the original metadata default must be inferred in place");
+        };
+        assert_eq!(type_name, "__jet_ErrorMetadata");
+        assert!(import_ns.is_none());
+        assert_eq!(fields.iter().map(|(name, _, _)| name.as_str()).collect::<Vec<_>>(),
+            ["typed_identity", "context_frames", "conversion_history", "details"]);
+        let metadata_identity = bundle.name_ledger.declared_identity(owner, type_name)
+            .expect("the default references the original supplier declaration");
+        assert!(nominals[owner].structs.contains_key(metadata_identity));
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-    }
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("original checked Err lowers");
+        let row = mir.types.iter().find(|row| row.key == identity)
+            .expect("original Err identity in MIR");
+        assert!(matches!(row.compiler_builtin,
+            Some(jet_foundation::MIR::MirCompilerBuiltin::DefaultErr)));
+        let jet_foundation::MIR::MirTypeDefKind::Struct { fields, .. } = &row.kind else {
+            panic!("original Err must remain a struct");
+        };
+        assert_eq!(fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(),
+            ["message", "code", "cause", "__jet___memo_error_metadata"]);
+        let metadata = &fields[3];
+        assert!(!metadata.public && !metadata.package_public);
+        assert!(metadata.has_default);
+    });
 }
 #[test]
 fn compiler_owned_core_ui_registry_has_nominal_rows() {
@@ -1722,13 +1765,13 @@ fn mir_lowers_default_err_return() {
     // "missing checked MIR owner type".
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let src = "fn f(x: Int) -> Int Err! {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn run() {}\n";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        super::lower_checked_mir_program_for(&bundle, request)
+        super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("default Err return failed to lower to MIR: {err:?}"));
     });
 }
@@ -1759,13 +1802,13 @@ fn stable_loop_probe(src: &str) -> (HashMap<String, usize>, usize) {
 
 /// Lower `src` to validated MIR and emit its Rust (runtime and types left out).
 fn emitted_rust(src: &str) -> (jet_foundation::MIR::MirProgram, String) {
-    let bundle = checked_bundle(src);
+    let (bundle, _nominals) = checked_bundle(src);
     let request = jet_foundation::MIR::MirArtifactRequest::new(
         jet_foundation::MIR::MirArtifactTarget::RustAot,
         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
         jet_foundation::MIR::MirArtifactBuildMode::Dev,
     );
-    let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, request)
+    let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
         .unwrap_or_else(|err| panic!("probe failed to lower: {err:?}"));
     mir.validate()
         .unwrap_or_else(|err| panic!("probe failed validation: {err}"));
@@ -1934,13 +1977,13 @@ struct Box<T> {
 fn boxed(item: Box<Int>) -> Int Err! { return item.get() }
 fn run() {}
 ";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("full-carrier ownership fixture failed to lower: {err:?}"));
         mir.validate()
             .unwrap_or_else(|err| panic!("full-carrier ownership fixture failed validation: {err}"));
@@ -2129,13 +2172,13 @@ fn canonical_device(device: String) -> String? {
 }
 fn run() {}
 ";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("canonical_device failed to lower to MIR: {err:?}"));
         mir.validate()
             .unwrap_or_else(|err| panic!("canonical_device MIR failed validation: {err}"));
@@ -2180,17 +2223,17 @@ fn net_err(op: String, addr: String, message: String) -> NetError {
     })
 }
 fn dns_err(name: String) -> NetError {
-    return NetError.DNS(NetDnsError.NotFound(name))
+    return NetError.DNS(NetDNSError.NotFound(name))
 }
 fn run() {}
 ";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("NetError construction failed to lower to MIR: {err:?}"));
         mir.validate()
             .unwrap_or_else(|err| panic!("NetError MIR failed validation: {err}"));
@@ -2241,8 +2284,8 @@ fn run() {}
         let net_dns_error = mir
             .types
             .iter()
-            .find(|ty| ty.key == "NetDnsError")
-            .expect("compiler-owned NetDnsError type row");
+            .find(|ty| ty.key == "NetDNSError")
+            .expect("compiler-owned NetDNSError type row");
         let detail = mir
             .types
             .iter()
@@ -2293,7 +2336,7 @@ fn run() {}
             ..
         } = &net_dns_error.kind
         else {
-            panic!("NetDnsError must be an enum row");
+            panic!("NetDNSError must be an enum row");
         };
         assert_eq!(
             net_dns_variants
@@ -2337,13 +2380,13 @@ fn mir_is_finite_selects_math_runtime_part() {
     // `MirRuntimePartId` spellings, so AOT never emitted MathLibPure.
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let src = "fn checked(x: Float) -> Bool {\n return x.is_finite()\n}\nfn run() { print(checked(1.0)) }\n";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("is_finite failed to lower to MIR: {err:?}"));
         assert!(
             mir.artifacts.iter().any(|artifact| artifact
@@ -2368,13 +2411,13 @@ fn mir_debug_trace_selects_eprint_runtime_part() {
     // function it never emitted (rustc E0425).
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let src = "fn run() {\n x :: debug(1)\n print(x)\n}\n";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("debug trace failed to lower to MIR: {err:?}"));
         assert!(
             mir.artifacts.iter().any(|artifact| artifact
@@ -2390,13 +2433,13 @@ fn mir_map_slice_routes_to_the_prelude_kernel() {
     // `Map.slice(keys)` must name a function the Rust Prelude defines.
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let src = "fn run() {\n m :: [String:Int]{\"a\": 1, \"b\": 2}\n s :: m.slice([\"a\"])\n print(s.len())\n}\n";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("Map.slice failed to lower to MIR: {err:?}"));
         let symbol = "jet_map_slice_keys_kernel";
         assert!(
@@ -2415,13 +2458,13 @@ fn mir_map_slice_routes_to_the_prelude_kernel() {
 fn mir_math_arithmetic_results_use_typed_kernels() {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let src = include_str!("../../../../../Examples/features/lowlevel/vector_result_values.jet");
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("math arithmetic failed to lower: {err:?}"));
         for symbol in [
             "jet_math_Vec3_add",
@@ -2442,13 +2485,13 @@ fn mir_math_arithmetic_results_use_typed_kernels() {
 fn mir_read_union_injection_does_not_move_member_places() {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let src = include_str!("../../../../../Examples/features/types/union_parameter_values.jet");
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("union read injection failed to lower: {err:?}"));
         let mut injections = 0;
         for function in &mir.functions {
@@ -2476,13 +2519,13 @@ fn mir_partial_f32_swizzle_widens_lanes_and_writes_have_setters() {
     // for every swizzleable type.
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let src = "fn run() {\n lanes :: F32x4(1.0, 2.0, 3.0, 4.0)\n pair :: Vec2{lanes.xy}\n print(pair.to_array())\n pos := Vec3(10.0, 20.0, 30.0)\n pos.xy = Vec2(0.0, 0.0)\n print(pos.to_array())\n}\n";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("swizzle failed to lower to MIR: {err:?}"));
         let run = mir
             .functions
@@ -2536,13 +2579,13 @@ fn mir_lowers_user_struct_and_instance_method() {
     // user struct construct, print a field, and call an instance method.
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let src = "pub struct Gauge {\n n: Int\n}\nfn Gauge.value(self) -> Int { self.n }\nfn run() {\n v :: Gauge{ n: 1 }\n print(\"{v.value()}\")\n}\n";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("user struct method failed to lower to MIR: {err:?}"));
         mir.validate()
             .unwrap_or_else(|err| panic!("user struct MIR failed validate: {err}"));
@@ -2597,13 +2640,13 @@ fn run() {
     print(\"{first_value}:{second_value}\")
 }
 ";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("indexed same-name methods failed: {err:?}"));
         mir.validate()
             .unwrap_or_else(|err| panic!("indexed same-name MIR failed validate: {err}"));
@@ -2649,13 +2692,13 @@ fn mir_lowers_computed_field_getter_onto_inherent_impl() {
     // and AOT panics unless an impl row names them.
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let src = "struct Stats {\n n: Int\n doubled: Int -> n * 2\n}\nfn run() {\n s :: Stats{ n: 1 }\n print(\"{s.doubled}\")\n}\n";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("computed field failed to lower to MIR: {err:?}"));
         mir.validate()
             .unwrap_or_else(|err| panic!("computed field MIR failed validate: {err}"));
@@ -3883,7 +3926,7 @@ fn run() {
 
 fn auto_facts_after_sema(src: &str, fn_name: &str) -> Option<crate::AST::AutoVectorizationFacts> {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
         let function = module
             .items
