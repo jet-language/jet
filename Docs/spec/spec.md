@@ -458,7 +458,9 @@ docs and fixtures use canonical syntax only.
 
 Structs and enums carry data; methods attach behavior. A struct literal is
 `Type{field: value}` or an expected-type-inferred `{field: value}`. Enum values
-use `Type.Variant`, and pattern tests use `==`. Optional values use `T?`,
+use `Type.Variant`; labeled payloads use `Type.Variant{label: value}` rather
+than call parentheses. Every labeled field appears exactly once, in any order.
+Pattern tests use `==`. Optional values use `T?`,
 `Val(value)`, and `None`. `None` needs an expected optional type, such as a
 return, field, or argument type; `Val(value)` uses that type to check its
 payload, or infers the optional type from its payload when no type is expected.
@@ -1923,6 +1925,11 @@ declares. The UI fixtures are `tests/ui/package_file_import/`,
 Library helpers consumed as `package.helper(...)` are declared at package
 scope. Wrapping those helpers in an inline module adds another namespace; a
 library output name does not flatten that module's members.
+
+An explicit local import alias selects its bound module, even when a public
+Core module has the same short name. Struct and enum identity comes from the
+declaring module, not the leaf spelling: two modules' `Limits` records retain
+their own fields and are different types, even if their field shapes agree.
 
 Cross-file access is qualified:
 

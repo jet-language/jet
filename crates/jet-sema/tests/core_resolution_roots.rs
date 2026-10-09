@@ -275,3 +275,57 @@ fn retained_core_arguments_accept_fresh_values_but_not_unmarked_places() {
     ]);
     assert!(errors.iter().any(|error| error.starts_with("E0201:")), "{errors:?}");
 }
+
+#[test]
+fn private_xml_alias_keeps_the_engine_enum_owner() {
+    let errors = check_sources(&[
+        ("<corelib>/Core/encoding/xml_engine.jet", "__core_encoding_xml_engine", "enum EntityPolicy { Preserve, Expand }\nenum RenderEncoding { UTF8, UTF16 }\n", &[]),
+        ("<corelib>/Core/encoding/xml.jet", "core_xml", "struct XMLReader {}\n", &[]),
+        ("<corelib>/Core/encoding/xml_kernel.jet", "__core_encoding_xml_kernel", "use __core_encoding_xml_engine as xml\nfn policy() -> xml.EntityPolicy Never! { xml.EntityPolicy.Preserve }\nfn encoding() -> xml.RenderEncoding Never! { xml.RenderEncoding.UTF8 }\n", &[]),
+        ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+    ]);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn same_named_source_records_keep_their_declared_fields_and_nominal_owner() {
+    let engine = "struct Limits { max_depth: Int }\nfn safe() -> Limits Never! { Limits{max_depth: 8} }\n";
+    let kernel = "use __core_encoding_xml_engine as xml\nfn safe() -> xml.Limits Never! { xml.Limits{max_depth: 8} }\n";
+    let errors = check_sources(&[
+        ("<corelib>/Core/email/email.jet", "core_core_email", "struct Limits { max_reply_line_bytes: Int }\n", &[]),
+        ("<corelib>/Core/encoding/xml_engine.jet", "__core_encoding_xml_engine", engine, &[]),
+        ("<corelib>/Core/encoding/xml_kernel.jet", "__core_encoding_xml_kernel", kernel, &[]),
+        ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+    ]);
+    assert!(errors.is_empty(), "{errors:?}");
+    let errors = check_sources(&[
+        ("pkg/first.jet", "first", "struct Limits { value: Int }\n", &[]),
+        ("pkg/second.jet", "second", "struct Limits { value: Int }\n", &[]),
+        ("pkg/main.jet", "main", "use first as first\nuse second as second\nfn mismatch(value: first.Limits) -> second.Limits Never! { value.copy() }\nfn run() {}\n", &[("first", 0), ("second", 1)]),
+    ]);
+    assert!(errors.iter().any(|error| error.starts_with("E0201:")), "{errors:?}");
+}
+
+#[test]
+fn labeled_enum_brace_constructors_accept_reordered_fields_and_reject_missing_fields() {
+    let source = "enum Part { Text(value: String, raw: String) }\nfn make() -> Part Never! { Part.Text{raw: \"raw\", value: \"text\"} }\nfn run() {}\n";
+    let errors = check_sources(&[("pkg/main.jet", "main", source, &[])]);
+    assert!(errors.is_empty(), "{errors:?}");
+    for body in ["Part.Text{value: \"text\"}", "Part.Text(value: \"text\", raw: \"raw\")"] {
+        let source = source.replace("Part.Text{raw: \"raw\", value: \"text\"}", body);
+        let errors = check_sources(&[("pkg/main.jet", "main", &source, &[])]);
+        assert!(errors.iter().any(|error| error.starts_with("E0303:")), "{errors:?}");
+    }
+}
+
+#[test]
+fn temporary_list_and_call_ranges_are_owned_not_place_views() {
+    let source = "fn bytes() -> [U8] Never! { [U8]{1, 2} }\nfn literal() -> [U8] Never! { [U8]{1, 2}[0..<1] }\nfn call() -> [U8] Never! { bytes()[0..<1] }\nfn need(value: View<U8>) Never! {}\nfn bound() Never! { data :: [U8]{1, 2}\n need(data[0..<1]) }\nfn run() {}\n";
+    let errors = check_sources(&[("pkg/main.jet", "main", source, &[])]);
+    assert!(errors.is_empty(), "{errors:?}");
+    for value in ["[U8]{1, 2}[0..<1]", "bytes()[0..<1]"] {
+        let source = format!("{source}\nfn temporary() Never! {{ need({value}) }}\n");
+        let errors = check_sources(&[("pkg/main.jet", "main", &source, &[])]);
+        assert!(errors.iter().any(|error| error.starts_with("E0201:")), "{errors:?}");
+    }
+}

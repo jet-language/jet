@@ -3018,12 +3018,7 @@ impl<'a> Checker<'a> {
         {
             return None;
         }
-        // D-MOD2: a member-imported enum (`use types.[Kind]`) keeps its
-        // owner's canonical identity; every other spelling keeps its own.
-        if let Some(identity) = self.import_qualified_nominal(root) {
-            return Some((identity, segs.join(".")));
-        }
-        Some((root.to_string(), segs.join(".")))
+        Some((identity, path))
     }
 
     /// D-MOD2: `name` is bound here by a member import of another module's
@@ -3298,8 +3293,16 @@ impl<'a> Checker<'a> {
         // E2-M10: compiler-known constructable struct types (HTTPRequest, HTTPResponse).
         // These have no user-module owner but are valid in struct literals. Generic
         // history records use the same path with their concrete command argument.
-        if let Some(core_fields) = core_constructable_fields(type_name)
-            .or_else(|| core_generic_constructable_fields(type_name, type_args))
+        // A loaded declaration owns its shape, even when its leaf also
+        // names a compiler-provided Core record in another module.
+        let owner_mod = self.struct_owner_module(type_name, import_ns);
+        let core_fields = if owner_mod.is_none() {
+            core_constructable_fields(type_name)
+                .or_else(|| core_generic_constructable_fields(type_name, type_args))
+        } else {
+            None
+        };
+        if let Some(core_fields) = core_fields
             .filter(|_| !crate::Sema::CheckerCoreLib::core_record_literal_is_core_only(type_name)
                 || self.module_is_core_source(self.module_idx))
         {
@@ -3360,7 +3363,7 @@ impl<'a> Checker<'a> {
             }
             return Type::Named(type_name.to_string());
         }
-        let Some(owner_mod) = self.struct_owner_module(type_name, import_ns) else {
+        let Some(owner_mod) = owner_mod else {
             self.diags.push(Diagnostic::error(
                 "E0119",
                 format!("there's no type called `{}`", display_type_name),
