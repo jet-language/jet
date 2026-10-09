@@ -286,9 +286,9 @@ fn direct_test_completion(
         if status == Some(0) && completed_pass {
             return Ok(true);
         }
-        // This caller executes the produced libtest binary directly. Ordinary
-        // libtest assertions exit 1; Cargo's wrapper 101 is NOT interchangeable.
-        if status == Some(1) && completed_failure {
+        // The qualified direct libtest returns 101 for an ordinary assertion.
+        // Require its completed named packet; a Cargo child diagnostic is unsafe.
+        if status == Some(101) && completed_failure {
             return Ok(false);
         }
     }
@@ -307,9 +307,9 @@ fn direct_completion_classifies_all_seven_packets() {
         "process didn't exit successfully: fixture (signal: 11, SIGSEGV: invalid memory reference)";
     let cases = [
         ("completed-pass", Some(0), PASS, "", Some(true)),
-        ("completed-direct-fail-1", Some(1), FAIL, "", Some(false)),
+        ("completed-direct-fail-101", Some(101), FAIL, "", Some(false)),
         (
-            "cargo-101-is-not-direct-1",
+            "cargo-child-diagnostic-not-direct-completion",
             Some(101),
             FAIL,
             "process didn't exit successfully: fixture (exit status: 101)",
