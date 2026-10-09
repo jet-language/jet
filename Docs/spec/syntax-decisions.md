@@ -687,6 +687,14 @@ One-line effect and value forms stay quiet. Fmt does not change branch shape.
   `else` is required (E0003), and branch types must match (E0124). A returned
   multiline arm uses `-> { ... }`. The same arm-table spelling works in
   expression position and yields `()` or one unified value type (D-IFDIST1).
+  Without an expected type, an unshadowed positional `Err(payload)` arm can
+  take its Result carrier from a fallible sibling, in either order. The
+  sibling's root retains the carrier for this join; nested calls still use
+  ordinary propagation. Each arm is checked once in its own scope, including
+  payload reads, moves, and scope-end obligations. Explicit expected types
+  and user functions named `Err` retain their ordinary checking paths.
+  The paired checker corpus is
+  `Compiler/JetSema/Tests/checker-gap-operator-cases.json` (root 26).
 - **Dispatch form** — a comparison between subject and `{` is required (bare
   `if subject { arm -> … }` is E0992, auto-fixed). Any of `== != < > <= >=`
   distributes over bare arm atoms (D-IFDIST1=A):
