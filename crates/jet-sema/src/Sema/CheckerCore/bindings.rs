@@ -896,7 +896,19 @@ fn project_comptime_nominals(
         });
         facts.core_source_sigs.extend(rows.core_source_sigs.iter().cloned());
         bodies.insert(rows.row_key.clone(), std::sync::Arc::clone(&rows.body));
-        if target == module_idx { continue }
+        if target == module_idx {
+            // The original Prelude supplier publishes its own checked struct
+            // rows (private fields and declared defaults included) with its
+            // facts; every other module's own rows stay in its item set.
+            if current.compiler_builtin_error_owner == Some(module_idx) {
+                for (identity, row) in &rows.nominals {
+                    if let FragmentNominalRow::Struct(def) = row {
+                        facts.structs.entry(identity.clone()).or_insert_with(|| def.clone());
+                    }
+                }
+            }
+            continue;
+        }
         for (identity, row) in &rows.nominals {
             facts.foreign_modules.insert(identity.clone(), state.module_alias.clone());
             match row {
