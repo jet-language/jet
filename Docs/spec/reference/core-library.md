@@ -2777,6 +2777,10 @@ different: they retain the caller's original clock, so later ticks on that
 clock affect its attached secret's lifetime. Clock Show and Debug retain the
 `Clock { now: N }` rendering. Manual tick/wait arithmetic saturates at `Int`'s
 millisecond bounds.
+
+The source system-clock state uses labeled `started_ns` and `offset_ms`
+fields. Its reserved monotonic sample remains the pure Clock seam; it does
+not change `clock.now()` into an effectful host-clock API.
 `time.clock(seed)` stays retired (E1004); use the type-owned `Clock.new(seed)` constructor.
 
 `ExpiringValue.new(value, ttl, clock)` computes a saturating absolute
@@ -4451,6 +4455,11 @@ stores. Its two temporary host leaves only allocate the existing task runtime
 and materialize those supplied fields. Seven private type-name bindings expose
 the existing field types without introducing a new carrier; both compiler
 mappers bind the same names and retire at the Jet-runtime cutover.
+
+Retaining service transports receive copies of borrowed caller values
+(names, policies, messages, and endpoint identities). A `.copy()` result is
+fresh and passes without a `^` receiver mark; `^` moves locally owned
+mailboxes and queues instead, preserving their channel identity.
 
 Worker registration, failure/restart selection, restart-window counting and
 mailbox-depth selection are Jet policy. Registration retains the checked
