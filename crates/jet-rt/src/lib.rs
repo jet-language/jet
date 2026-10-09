@@ -119,12 +119,6 @@ fn exact_int_map_key(raw: i64) -> JetMapKey {
     }
 }
 
-fn canonical_int_map_key(key: i64) -> i64 {
-    unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(key) }
-        .to_i64()
-        .unwrap_or(key)
-}
-
 #[allow(dead_code)]
 mod uninit_semantics {
     include!("../../jet-codegen/src/Prelude/Uninit.rs");
