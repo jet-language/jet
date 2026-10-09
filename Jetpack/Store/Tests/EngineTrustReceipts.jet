@@ -8,7 +8,7 @@ fn engine_receipt_field(bytes: [U8], name: String) -> String {
     text :: String.from_bytes(bytes) ?? panic("receipt UTF-8")
     prefix :: "{name}="
     loop line in text.lines() {
-        if line.starts_with(prefix) -> return ~line.removeprefix(prefix)
+        if line.starts_with(prefix) -> return line.removeprefix(prefix).copy()
     }
     panic("receipt field {name}")
 }

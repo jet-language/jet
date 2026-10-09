@@ -45,7 +45,7 @@ fn trust_pkg_integration_lock(owner: String, key: String, exact: String) -> Sema
 // Ported from pkg.rs:522-534.
 #Test("pkg integration lock_rationale_preserves_exact_identity") {
     a :: trust_pkg_integration_lock("app", "core.log", "1.2.3")
-    b := ~a
+    b := a.copy()
     b.records[0].rationales[0].reason = "human text changed"
     assert_eq(a.records[0].identity.machine_identity(), b.records[0].identity.machine_identity())
 }
@@ -83,7 +83,7 @@ fn trust_pkg_integration_lock(owner: String, key: String, exact: String) -> Sema
 // Ported from pkg.rs:610-624.
 #Test("pkg integration lock_merge_accepts_one_sided_identity_change_from_base") {
     base :: trust_pkg_integration_lock("app", "core.log", "1.2.3")
-    out :: trust_merge_semantic_locks(base, ~base, trust_pkg_integration_lock("app", "core.log", "1.3.0"))
+    out :: trust_merge_semantic_locks(base, base.copy(), trust_pkg_integration_lock("app", "core.log", "1.3.0"))
     assert_eq(out.conflicts.len(), 0)
     assert_eq(out.merged.records[0].identity.exact, "1.3.0")
 }

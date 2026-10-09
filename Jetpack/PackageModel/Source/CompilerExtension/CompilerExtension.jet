@@ -193,7 +193,7 @@ struct SpanFact {
     end: Int
 
     fn to_json_tree(self) -> Dyn Never! {
-        Dyn.Object(["end": Dyn.Int(self.end), "file": Dyn.Text(~self.file), "id": Dyn.Text(~self.id), "start": Dyn.Int(self.start)])
+        Dyn.Object(["end": Dyn.Int(self.end), "file": Dyn.Text(self.file.copy()), "id": Dyn.Text(self.id.copy()), "start": Dyn.Int(self.start)])
     }
 }
 
@@ -277,7 +277,7 @@ struct TypeFact {
     shape: TypeFactShape
 
     fn to_json_tree(self) -> Dyn Never! {
-        Dyn.Object(["id": Dyn.Text(~self.id), "repr": Dyn.Text(~self.repr), "shape": self.shape.to_json_tree()])
+        Dyn.Object(["id": Dyn.Text(self.id.copy()), "repr": Dyn.Text(self.repr.copy()), "shape": self.shape.to_json_tree()])
     }
 }
 
@@ -294,12 +294,12 @@ struct SymbolFact {
     fn to_json_tree(self) -> Dyn Never! {
         Dyn.Object([
             "effects": pkg_json_texts(self.effects),
-            "id": Dyn.Text(~self.id),
-            "kind": Dyn.Text(~self.kind),
-            "name": Dyn.Text(~self.name),
-            "provenance": Dyn.Text(~self.provenance),
-            "span_id": Dyn.Text(~self.span_id),
-            "type_id": Dyn.Text(~self.type_id)
+            "id": Dyn.Text(self.id.copy()),
+            "kind": Dyn.Text(self.kind.copy()),
+            "name": Dyn.Text(self.name.copy()),
+            "provenance": Dyn.Text(self.provenance.copy()),
+            "span_id": Dyn.Text(self.span_id.copy()),
+            "type_id": Dyn.Text(self.type_id.copy())
         ])
     }
 }
@@ -370,7 +370,7 @@ struct TypedSnapshot {
             "host_imports": Dyn.Array(imports),
             "protocol": Dyn.Int(self.protocol),
             "spans": Dyn.Array(spans),
-            "stage": Dyn.Text(~self.stage),
+            "stage": Dyn.Text(self.stage.copy()),
             "symbols": Dyn.Array(symbols),
             "trust": Dyn.Text(self.trust.as_str()),
             "types": Dyn.Array(types)
@@ -423,7 +423,7 @@ struct ExtensionFinding {
     severity: String
 
     fn to_json_tree(self) -> Dyn Never! {
-        Dyn.Object(["message": Dyn.Text(~self.message), "rule": Dyn.Text(~self.rule), "severity": Dyn.Text(~self.severity), "span_id": Dyn.Text(~self.span_id)])
+        Dyn.Object(["message": Dyn.Text(self.message.copy()), "rule": Dyn.Text(self.rule.copy()), "severity": Dyn.Text(self.severity.copy()), "span_id": Dyn.Text(self.span_id.copy())])
     }
 }
 
@@ -434,7 +434,7 @@ struct ExtensionProposedEdit {
     rationale: String
 
     fn to_json_tree(self) -> Dyn Never! {
-        Dyn.Object(["rationale": Dyn.Text(~self.rationale), "replacement": Dyn.Text(~self.replacement), "span_id": Dyn.Text(~self.span_id)])
+        Dyn.Object(["rationale": Dyn.Text(self.rationale.copy()), "replacement": Dyn.Text(self.replacement.copy()), "span_id": Dyn.Text(self.span_id.copy())])
     }
 }
 
@@ -843,10 +843,10 @@ fn pkg_extension_host_import_json(import: MIRHostImportFact) -> Dyn Never! {
         .None -> Dyn.Null
     }
     Dyn.Object([
-        "id": Dyn.Text(~import.id),
-        "operation": Dyn.Text(~import.operation),
+        "id": Dyn.Text(import.id.copy()),
+        "operation": Dyn.Text(import.operation.copy()),
         "parameter_type_ids": pkg_json_texts(import.parameter_type_ids),
-        "required_right": Dyn.Text(~import.required_right),
+        "required_right": Dyn.Text(import.required_right.copy()),
         "result_type_id": result_type
     ])
 }

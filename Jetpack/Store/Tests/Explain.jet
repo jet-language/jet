@@ -46,7 +46,7 @@
     verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     ingested :: store_test_ingest_fixture(&verification, roots, "explain-truncated-producer", [String: String]{"out": "explain"}, [String]{})
-    damaged := ~ingested.entry
+    damaged := ingested.entry.copy()
     damaged.producer_record = "truncated"
     reports := [ExplainReport]{}
     assert_eq(store_explain_provider_projection(damaged, &reports), None)

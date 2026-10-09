@@ -83,7 +83,7 @@ fn s1_authority_manifest_error(text: String) -> Diagnostic {
 #Test("package_guarantees_are_tighten_only") {
     weak := PackagePolicy.default()
     &weak.contain.push("libxml")
-    strong := ~weak
+    strong := weak.copy()
     &strong.contain.push("libz")
     strong.harden = true
     if weak.guarantees_tighten(strong) == {

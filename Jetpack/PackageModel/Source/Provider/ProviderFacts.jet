@@ -75,9 +75,9 @@ struct ProviderLoss {
 
     fn to_json_tree(self) -> Dyn Never! {
         object := [String: Dyn]{}
-        object["key"] = Dyn.Text(~self.key)
-        object["reason"] = Dyn.Text(~self.reason)
-        object["source"] = Dyn.Text(~self.source)
+        object["key"] = Dyn.Text(self.key.copy())
+        object["reason"] = Dyn.Text(self.reason.copy())
+        object["source"] = Dyn.Text(self.source.copy())
         Dyn.Object(object)
     }
 
@@ -99,10 +99,10 @@ struct ProviderConflict {
 
     fn to_json_tree(self) -> Dyn Never! {
         object := [String: Dyn]{}
-        object["key"] = Dyn.Text(~self.key)
-        object["left"] = Dyn.Text(~self.left)
-        object["right"] = Dyn.Text(~self.right)
-        object["source"] = Dyn.Text(~self.source)
+        object["key"] = Dyn.Text(self.key.copy())
+        object["left"] = Dyn.Text(self.left.copy())
+        object["right"] = Dyn.Text(self.right.copy())
+        object["source"] = Dyn.Text(self.source.copy())
         Dyn.Object(object)
     }
 
@@ -428,24 +428,24 @@ struct ProviderFacts {
         facts := [String: Dyn]{}
         loop key in pkg_provider_sorted_keys(self.facts.keys().to_list()) -> facts[key] = self.facts[key].to_json_tree()
         provenance := [String: Dyn]{}
-        loop key in pkg_provider_sorted_keys(self.provenance.keys().to_list()) -> provenance[key] = Dyn.Text(~self.provenance[key])
+        loop key in pkg_provider_sorted_keys(self.provenance.keys().to_list()) -> provenance[key] = Dyn.Text(self.provenance[key].copy())
         losses := [Dyn]{}
         loop loss in self.losses -> &losses.push(loss.to_json_tree())
         conflicts := [Dyn]{}
         loop conflict in self.conflicts -> &conflicts.push(conflict.to_json_tree())
         object := [String: Dyn]{}
         object["schema"] = Dyn.Text(PROVIDER_FACTS_SCHEMA)
-        object["provider"] = Dyn.Text(~self.provider)
-        object["reference"] = Dyn.Text(~self.reference)
-        object["target"] = Dyn.Text(~self.target)
+        object["provider"] = Dyn.Text(self.provider.copy())
+        object["reference"] = Dyn.Text(self.reference.copy())
+        object["target"] = Dyn.Text(self.target.copy())
         object["selector"] = self.selector.to_json_tree()
-        object["resolved_source"] = Dyn.Text(~self.resolved_source)
-        object["profile"] = Dyn.Text(~self.profile)
-        object["profile_provenance"] = Dyn.Text(~self.profile_provenance)
+        object["resolved_source"] = Dyn.Text(self.resolved_source.copy())
+        object["profile"] = Dyn.Text(self.profile.copy())
+        object["profile_provenance"] = Dyn.Text(self.profile_provenance.copy())
         object["facts"] = Dyn.Object(facts)
         object["provenance"] = Dyn.Object(provenance)
-        object["native_format"] = Dyn.Text(~self.native_format)
-        object["native_document"] = Dyn.Text(~self.native_document)
+        object["native_format"] = Dyn.Text(self.native_format.copy())
+        object["native_document"] = Dyn.Text(self.native_document.copy())
         object["losses"] = Dyn.Array(losses)
         object["conflicts"] = Dyn.Array(conflicts)
         Dyn.Object(object)
@@ -544,7 +544,7 @@ fn pkg_provider_number_tree(text: String) -> Dyn Never! {
     }
     if pkg_provider_json_core.parse(text) == {
         .Ok(tree) -> tree
-        .Err(_) -> Dyn.Text(~text)
+        .Err(_) -> Dyn.Text(text.copy())
     }
 }
 

@@ -178,7 +178,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
     derivation :: pkg_boundary_test_derivation(contract)
     evidence :: pkg_boundary_test_evidence(derivation)
     record :: pkg_boundary_test_comparison("42", true)
-    before :: ~contract
+    before :: contract.copy()
     loop component in 0..<6 {
         identity := contract.identity
         if component == {
@@ -220,7 +220,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
     derivation :: pkg_boundary_test_derivation(contract)
     evidence := pkg_boundary_test_evidence(derivation)
     record :: pkg_boundary_test_comparison("42", true)
-    before :: ~contract
+    before :: contract.copy()
     error :: if &contract.accept_reasoned_replacement(before.identity, before.artifact_coverage, derivation, evidence, record, " \t") == {
         .Ok(_) -> panic("blank replacement")
         .Err(error) -> error.message
@@ -284,7 +284,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
     languages :: [ForeignLanguage]{ForeignLanguage.C, ForeignLanguage.Cpp, ForeignLanguage.Com, ForeignLanguage.Ada, ForeignLanguage.Pascal}
     loop language in languages {
         contract := pkg_boundary_test_contract(language)
-        before :: ~contract
+        before :: contract.copy()
         assert_eq(pkg_boundary_test_accept_error(&contract, pkg_boundary_test_comparison("42", true)), "foreign source replacement is unavailable for {language.root()}")
         assert_eq(contract, before)
     }
@@ -390,7 +390,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
     assert_eq(row.evidence, None)
     assert_eq(row.assumptions, [String]{"relation=typed_equality", "source=source", "target=target", "tool=toolchain"})
     assert(!contract.replacement_accepted())
-    before :: ~contract
+    before :: contract.copy()
     assert_eq(pkg_boundary_test_accept_error(&contract, pkg_boundary_test_comparison("42", true)), "cannot accept a foreign replacement without all matched cases carrying evidence")
     assert_eq(contract, before)
 }

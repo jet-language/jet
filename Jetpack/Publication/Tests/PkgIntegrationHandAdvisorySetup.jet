@@ -22,27 +22,27 @@ fn s6_hand_advisory_setup() {
     s6_hand_advisory_save(root, "clean", feed)
     s6_hand_advisory_files.write("{root}/public-key.txt", public) ?? panic("public key")
     s6_hand_advisory_files.write("{root}/accepted-digest.txt", publication_advisory_feed_digest(feed)) ?? panic("accepted digest")
-    weakened := ~feed
+    weakened := feed.copy()
     weakened.maturity_seconds = 1
     weakened.signature = publication_sign_advisory_feed(weakened, generated.seed_path) ?? panic("sign weakened feed")
     s6_hand_advisory_save(root, "weakened", weakened)
-    fork := ~feed
+    fork := feed.copy()
     fork.maturity_seconds = 86401
     fork.signature = publication_sign_advisory_feed(fork, generated.seed_path) ?? panic("sign fork feed")
     s6_hand_advisory_save(root, "fork", fork)
-    stale := ~feed
+    stale := feed.copy()
     stale.expires_at = 150
     stale.signature = publication_sign_advisory_feed(stale, generated.seed_path) ?? panic("sign stale feed")
     s6_hand_advisory_save(root, "stale", stale)
-    immature := ~feed
+    immature := feed.copy()
     &immature.releases.push(PublicationAdvisoryRelease{package: "mylib", version: publication_parse_semver("1.0.0") ?? panic("version"), first_seen: 100, source_class: PublicationSourceClass.ThirdParty})
     immature.signature = publication_sign_advisory_feed(immature, generated.seed_path) ?? panic("sign immature feed")
     s6_hand_advisory_save(root, "immature", immature)
-    excepted := ~immature
+    excepted := immature.copy()
     &excepted.exceptions.push(PublicationAdvisoryException{package: "mylib", version: publication_parse_semver("1.0.0") ?? panic("version"), reason: "urgent security fix", reviewer: "security-team", expires_at: 1000})
     excepted.signature = publication_sign_advisory_feed(excepted, generated.seed_path) ?? panic("sign exception feed")
     s6_hand_advisory_save(root, "excepted", excepted)
-    tampered := ~feed
+    tampered := feed.copy()
     tampered.maturity_seconds = 86401
     // Deliberately retain the clean signature, exactly the original tamper.
     s6_hand_advisory_save(root, "tampered", tampered)

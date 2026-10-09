@@ -75,11 +75,11 @@ fn store_cache_test_root(label: String) -> String Never! {
     written :: store_write_nar(ingested.entry.out) ?? panic("real NAR producer")
     info :: NarInfo{store_path: "/jet/hangar/{ingested.entry.envelope.output_hash}", url: "nar/object.nar", compression: "none", file_size: written.stats.bytes, nar_size: written.stats.bytes, nar_hash: written.stats.digest, references: [String]{}, deriver: None, ca: None, signatures: [NarSignature]{}}
     store_cache_verify_artifact_bytes(info, written.bytes) ?? panic("valid produced NAR")
-    file_bad := ~info
+    file_bad := info.copy()
     file_bad.file_size += 1
-    nar_bad := ~info
+    nar_bad := info.copy()
     nar_bad.nar_size += 1
-    hash_bad := ~info
+    hash_bad := info.copy()
     hash_bad.nar_hash = "sha256:" + "0".repeat(64)
     rejected :: [NarInfo]{file_bad, nar_bad, hash_bad}
     loop candidate in rejected {

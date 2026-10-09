@@ -106,7 +106,7 @@ fn trust_pin_top_block_body(text: String, key: String) -> String? Never! {
             index += 1
             next
         }
-        start :: ~index
+        start :: index.copy()
         index = trust_pin_ident_end(raw, start)
         colon :: trust_text_skip_ascii_space(raw, index)
         if pkg_bytes_text(raw, start, index) != key || pkg_bytes_code(raw, colon) != TRUST_COLON -> next
@@ -174,7 +174,7 @@ fn trust_pin_simple_field(body: String, key: String) -> String? Never! {
             index += 1
             next
         }
-        start :: ~index
+        start :: index.copy()
         index = trust_pin_ident_end(raw, start)
         colon :: trust_text_skip_ascii_space(raw, index)
         if pkg_bytes_text(raw, start, index) != key || pkg_bytes_code(raw, colon) != TRUST_COLON -> next
@@ -232,7 +232,7 @@ fn trust_pin_top_level_simple_field(text: String, key: String) -> String? Never!
             index += 1
             next
         }
-        start :: ~index
+        start :: index.copy()
         index = trust_pin_ident_end(raw, start)
         if pkg_bytes_text(raw, start, index) != key -> next
         colon :: trust_text_skip_ascii_space(raw, index)

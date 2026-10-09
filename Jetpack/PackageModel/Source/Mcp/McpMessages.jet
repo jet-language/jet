@@ -105,7 +105,7 @@ struct MCPRPCError {
             .Val(data) -> object["data"] = data
             .None -> {}
         }
-        object["message"] = Dyn.Text(~self.message)
+        object["message"] = Dyn.Text(self.message.copy())
         Dyn.Object(object)
     }
 
@@ -373,8 +373,8 @@ impl MCPImplementation {
     fn to_json_tree(self) -> Dyn MCPCodecError! {
         self.validate()
         object := [String: Dyn]{}
-        object["name"] = Dyn.Text(~self.name)
-        object["version"] = Dyn.Text(~self.version)
+        object["name"] = Dyn.Text(self.name.copy())
+        object["version"] = Dyn.Text(self.version.copy())
         Ok(Dyn.Object(object))
     }
 

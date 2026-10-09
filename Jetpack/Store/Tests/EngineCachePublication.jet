@@ -87,7 +87,7 @@ fn engine_cache_clear_negative(mirror: String) {
     info_text :: String.from_bytes(info_bytes) ?? panic("UTF-8 info")
     unsigned := [String]{}
     loop line in info_text.lines() {
-        if !line.starts_with("Sig: ") -> &unsigned.push(~line)
+        if !line.starts_with("Sig: ") -> &unsigned.push(line.copy())
     }
     files.write(info, "{unsigned.join("\n")}\n") ?? panic("unsigned")
     assert(store_verify_cache_transfer(&verification, roots, entry.id, "public") == .Err(_))
