@@ -37,6 +37,13 @@ allocator `.init_array` entry. Rust-tier allocator bodies remain only as
 ledgered seed/verification paths that die at Rust cutover; native packs never
 link those bodies.
 
+The native [Duration constructor](../../Compiler/JetRuntime/Source/Duration.jet)
+borrows the exact-Int input, checks narrowing and nanosecond scaling without a
+panic, and writes only the selected owned Duration or RangeError result. It uses
+the shared time/text carriers. The compiler's stopwatch timing follows this
+same route; its range and six-unit ABI [fixture](../../Compiler/JetRuntime/Tests/duration-fixture.c)
+links only the admitted Jet runtime pack.
+
 Native runtime cutover packaging checks the pinned compiler with the stage0
 front end before declaring the cutover READY, in addition to the narrow trusted
 syntax parse and manifest checks. Record the frontend command's own exit and

@@ -1,0 +1,49 @@
+// Restore the constructor policy from 7c42badbb^ Core/time/runtime/
+// top_math_random_time.jet and kernel_duration.jet at the native C ABI.
+// D-TIMERES1 / D-SHAPE-DURATIONCONVERT1: narrow exact Int without a trap,
+// checked positive-unit multiplication, and an owned RangeError on failure.
+// Duration8 and RangeError8 remain owned by TimeGlue/TextGlue, not this route.
+fn runtime_duration_error(error: I64) -> I64 {
+    reason :: rt_static_text("duration is outside the supported range")
+    time_glue_store(error, jet_rt_record_new_RangeError(reason))
+    I64{0}
+}
+fn runtime_duration_scale(unit: I64) -> I64 {
+    if {
+        unit == I64{0} -> I64{1}
+        unit == I64{1} -> I64{1000}
+        unit == I64{2} -> I64{1000000}
+        unit == I64{3} -> I64{1000000000}
+        unit == I64{4} -> I64{60000000000}
+        unit == I64{5} -> I64{3600000000000}
+        else -> {
+            // CAbiRoutes range_stop: malformed compiler-owned unit tags are
+            // a native argument stop, not a user RangeError or a new unit.
+            trap_native_index_range_stop()
+            I64{0}
+        }
+    }
+}
+#Export(c) fn jet_duration_from_int(value: I64, unit: I64, output: I64, error: I64) -> I64 {
+    scale :: runtime_duration_scale(unit)
+    if scale == I64{0} -> return I64{0}
+    // The C adapter borrows its exact-Int input; no retain/drop is needed.
+    // jet_int_owned_to_i64 is a trapping conversion, so use the same existing
+    // magnitude check and projection directly for this fallible boundary.
+    raw := value
+    if !int_inline(value) {
+        bound :: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}
+        if !int_fits(value, bound) -> return runtime_duration_error(error)
+        raw = int_word(value)
+    }
+    // All declared scales are positive. Truncation towards zero gives exact
+    // admissible endpoints, including I64.MIN; multiplication cannot overflow
+    // after these comparisons. This is kernel_duration.scale's checked_mul.
+    if raw < I64{-9223372036854775808} /% scale || raw > I64{9223372036854775807} /% scale {
+        return runtime_duration_error(error)
+    }
+    duration :: jet_rt_alloc(TIME_DURATION_BYTES, I64{8})
+    time_glue_store(duration + TIME_DURATION_NS, raw * scale)
+    time_glue_store(output, duration)
+    I64{1}
+}

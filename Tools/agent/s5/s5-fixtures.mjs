@@ -80,7 +80,7 @@ modes('run-world-sentry-fixtures', ['assemble','lower','audit','link','run','ren
 modes('run-object-fixtures', ['--assemble','--lower','--global','--initializer','--allocator'], front);
 modes('run-collections-stop', ['--assemble','--lower','--run'], front);
 add('run-closure-refs-shared', ['assemble','lower','link','run'].map(mode => r('run-closure-refs-shared', out('closure-refs-shared'), mode, object)), [...front,...runtime]);
-for (const runner of ['run-cabi-driver','run-alloc-parity','run-compiler-needed-math','run-int-cabi','run-int-widen','run-http-body']) add(runner, [r(runner, out(runner), object)], runtime);
+for (const runner of ['run-cabi-driver','run-alloc-parity','run-compiler-needed-math','run-int-cabi','run-int-widen','run-duration','run-http-body']) add(runner, [r(runner, out(runner), object)], runtime);
 add('run-main-fixtures', ['link','run'].map(mode => r('run-main-fixtures', out('main-fixtures'), mode, object)), runtime);
 add('check-object', [r('check-object', object, out('object-audit'))], runtime);
 add('check-runtime', [r('check-runtime', out('check-runtime'), '--assemble-only'), r('check-runtime', out('check-runtime-full'))], front);
