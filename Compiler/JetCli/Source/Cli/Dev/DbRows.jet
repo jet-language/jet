@@ -455,7 +455,9 @@ fn jet_cli_db_query_result_columns(source: JetCLIDBLoadedSource, query: db_rows_
 }
 fn jet_cli_db_run_dynamic_query(source: JetCLIDBLoadedSource, query: db_rows_sql.JetSQLQuery) -> JetCLIDBQueryResult JetCLIDBError! {
     parsed :: db_rows_json.parse_allow_duplicates_with_limits(source.json, jet_cli_db_rows_limits(source.json.bytes().len())) ?? return Err(jet_cli_db_error_new("E2600", "query", source.path, "normalized source could not be decoded: {err.reason}", "reload the local source before querying it"))
-    values :: if parsed == .Array(rows) -> rows else -> return Err(jet_cli_db_error_new("E2600", "query", source.path, "normalized source is not a row array", "reload a local JSON, JSONL, or CSV source"))
+    values :: if parsed == .Array(rows) -> rows else -> {
+        return Err(jet_cli_db_error_new("E2600", "query", source.path, "normalized source is not a row array", "reload a local JSON, JSONL, or CSV source"))
+    }
     fields := [String]{}
     loop column in source.columns -> &fields.push(~column.name)
     count :: U64.from_int(values.len()) ?? panic("normalized row count fits U64")
@@ -476,10 +478,10 @@ fn jet_cli_db_run_dynamic_query(source: JetCLIDBLoadedSource, query: db_rows_sql
         &out.push(U8{123})
         loop position in 0..<rows[index].fields.len() {
             if position > 0 -> &out.push(U8{44})
-            pair :: rows[index].fields[position]
-            jet_cli_db_rows_append(&out, jet_cli_db_rows_quote(pair.0))
+            (name, cell) :: rows[index].fields[position]
+            jet_cli_db_rows_append(&out, jet_cli_db_rows_quote(name))
             &out.push(U8{58})
-            jet_cli_db_rows_append(&out, jet_cli_db_sql_json(pair.1))
+            jet_cli_db_rows_append(&out, jet_cli_db_sql_json(cell))
         }
         &out.push(U8{125})
     }
