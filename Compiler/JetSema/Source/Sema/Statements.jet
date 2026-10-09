@@ -4060,6 +4060,15 @@ fn sema_stmt_check_shared_field_assignment(target: LValue, op: BinOp?, op_span: 
         }
         else -> return None
     }
+    rewritten_expr :: sema_shared_access_desugar_place_write(handle, target, op, op_span, value, span)
+    if needs_transaction {
+        &body.push(Stmt.Expr{expr: rewritten_expr})
+        transaction_span := Span{start: span.start, end: expr_span(expr).end}
+        transaction := Stmt.Transact{name: None, name_span: None, body: body, implicit: true, span: transaction_span}
+        return sema_stmt_check_shared_transaction(transaction, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
+    checked :: sema_check_expression(rewritten_expr, Val(Type.Named{name: "Unit"}), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    Val(TStmt.ExprStmt{value: checked, span: expr_span(rewritten_expr)})
 }
 
 fn sema_stmt_check_assignment_place(target: LValue, compound: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
