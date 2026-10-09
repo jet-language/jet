@@ -3,6 +3,8 @@ use jet_foundation.[
     AccessConvention,
     CallArg,
     Diagnostic,
+    DiagnosticFixApplicability,
+    DiagnosticFixSafety,
     EnumLitArg,
     Expr,
     IndexKind,
@@ -21,9 +23,12 @@ use jet_foundation.[
     TagMarker,
     TextEdit,
     Type,
+    Token,
     builtin_numeric_kind,
+    ast_program,
     core_record_field,
     diagnostic_with_edit,
+    diagnostic_with_edit_grade,
     expr_optional_method_call_as_call,
     expr_span,
     is_compute_tensor_family,
@@ -32,6 +37,7 @@ use jet_foundation.[
     tir_symbol_local,
     type_name,
 ]
+use jet_parser.[jfmt_fmt_expr, jfmt_new, jfmt_out_text]
 
 fn sema_expression_index_kind(kind: IndexKind, base: Type) -> TIndexKind Never! {
     if kind == {
@@ -117,10 +123,20 @@ fn sema_expression_exact_move(value: Expr, span: Span, expected: Type?, environm
         return None
     }
     // The same law for any place below an element (`^items[i].tags`): the
-    // element keeps owning its fields, so the value can only be a copy, and
-    // the copy is spelled with its own marker.
+    // element keeps owning its fields, so the value can only be a copy,
+    // spelled with `.copy()`.
     if sema_expression_place_below_element(value) {
-        &diagnostics.push(diagnostic_with_edit(sema_error("E0225", mark_span, "the move marker `^` cannot take a field out of a collection element", "an element stays owned by its collection together with every field inside it, so this value can only be a copy", "write the copy marker `~` instead of `^` to copy the field"), TextEdit{span: mark_span, new_text: "~"}))
+        diagnostic := sema_error("E0225", mark_span, "the move marker `^` cannot take a field out of a collection element", "an element stays owned by its collection together with every field inside it, so this value can only be a copy", "remove `^` and call `.copy()` on the field instead")
+        facts :: sema_copy_classify(checked.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+        if environment.source_origin == SemaSourceOrigin.Snapshot && facts.complete && facts.cloneable && !facts.resource {
+            // One edit must remove the move mark as well as append the copy
+            // call; inserting only the suffix would leave `^` on a fresh value.
+            formatter := jfmt_new(ast_program(), "", [Token]{}, false)
+            jfmt_fmt_expr(&formatter, value, 0)
+            replacement :: "{jfmt_out_text(formatter)}.copy()"
+            diagnostic = diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: mark_span.start, end: expr_span(value).end}, new_text: replacement}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
+        }
+        &diagnostics.push(diagnostic)
         return None
     }
     binding :: sema_ownership_binding_for_expr(&state, value, scopes)

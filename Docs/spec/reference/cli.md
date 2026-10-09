@@ -610,9 +610,9 @@ Ordinary-source formatting preserves declaration meaning: a raw
 (also when the result type is omitted or other attributes are present), and
 module bindings retain `:=` for mutable values and `::` for immutable ones.
 These are not `--simplify` rewrites.
-`--explicit-copies` checks each file, then writes `~` at every implicit copy
-site: the Safe `~` edits sema gives the same source under
-`#Policy(copies: .Explicit)`; marks that would not parse report E0122.
+`--explicit-copies` checks each file, then writes `.copy()` at every implicit copy
+site: the Safe `.copy()` edits sema gives the same source under
+`#Policy(copies: .Explicit)`; calls that would not parse report E0122.
 With `--json`, a clean `--check` emits the `fmt` status envelope; dirty
 checks emit `status: "dirty"` with paths, or path/diff objects with `--diff`.
 Read and parse failures stay on stderr in machine form, and no file is

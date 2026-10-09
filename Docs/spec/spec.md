@@ -1069,7 +1069,7 @@ an independent copy, and `ys := ^xs` moves `xs` exactly: `^place` is accepted
 in every value position (binding, assignment, field initializer, collection
 element, result), and any later use of `xs` is E0121 naming the move. `^`
 before a literal or call result, or before a collection element or any place
-below one (`^items[i].tags`, whose copy is spelled `~items[i].tags`), is E0225;
+below one (`^items[i].tags`, whose copy is spelled `items[i].tags.copy()`), is E0225;
 on a read or write parameter it is E0201. An unmarked use that is not the last one
 shares the value instead of moving it: the source stays usable and each holder
 has its own value, so a write through one never shows in the other. A use in

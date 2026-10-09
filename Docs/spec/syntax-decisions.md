@@ -942,7 +942,8 @@ Word forms are not operators.
 on Int and Float. These methods lower through the existing numeric operations
 and shared Prelude, with the same integer-width, exactness, overflow-policy
 and D-EXPNEG1 negative-exponent rules. Shifts remain `<<` and `>>`. Prefix
-`&`, `^` and `~` retain their ownership meanings; `!` negates Bool only.
+`&` and `^` retain their ownership meanings; copying is `.copy()` (D-COPY-WORD1),
+and `!` negates Bool only.
 Retired infix arithmetic and compounds produce E0398 naming the method, with
 a precedence-preserving structured repair. Updates explicitly assign the
 method result back. `core.math.xor` and `core.math.pow` are removed.
@@ -2627,12 +2628,12 @@ keeps its write-lend or take meaning, so the lambda captures that binding by
 write lend or by take, never as a hidden consuming move (card #2758).
 Passing an unmarked parameter is allocation-free and
 never elevates; a body write requires `&`, while consuming ownership requires
-`^`. `~` has only the copy meaning assigned by D-SHAPE-COPY1. Raw `&T`
+`^`. Copying is the method `.copy()` (D-COPY-WORD1). Raw `&T`
 reference returns and fields remain deleted (D-REF-SHORTHAND1/2 and
 E0207/E0427); safe stored and returned views use D-MEM-VIEWRET1's named
 `View<T>`/`ViewMut<T>` boundary instead. L0201
 deleted — moves of named bindings are always written `^`; temporaries pass
-freely; `~x` (D-SHAPE-COPY1) is the one copy spelling. Named escape hatches
+freely; `x.copy()` (D-COPY-WORD1) is the one copy spelling. Named escape hatches
 `Shared<T>`, `Pool<T>`/`Id<T>`; scoped memory facts now use `Mem.*` effect
 denials (the old `no_alloc` spelling is tombstoned).
 **S1 shipped (2026-07-04)**: `&` is the write sigil, `~` is gone from the
@@ -2756,7 +2757,7 @@ E0121 naming the move. A field move leaves disjoint fields usable and drops
 the owner's remaining fields without copying the moved field. `^` before a fresh
 value (a literal or call result) is E0225, before a collection element is
 E0225 (the element stays in its collection), and on borrowed storage is E0201.
-`ys :: xs` of a place stays a read view and `~xs` stays an independent copy.
+`ys :: xs` of a place stays a read view and `xs.copy()` stays an independent copy.
 A taking receiver call on a whole local at its last use needs no `^`
 (`ticket.redeem()`); a take on a field or on a local read again later still
 needs `^`, and a writing call always needs `&` (E0224). An unmarked use that
@@ -7434,7 +7435,7 @@ are defined below. D-HARDENED1 supplies the named hardened profile and its
 foreign-edge checks; runtime sentry behavior remains in the shared Prelude
 seam.
 
-**D-MEM-COPYSEM1=A — a read-only view flowing into a non-view slot means a copy** *(ratified 2026-08-12, card #1889)*: wherever today's checker refuses a read-only view entering a non-view destination — a `String` binding or field, a collection element, a stored capture (string views: E2307; generic views: E2305) — the store now means an owned copy, with the same lowering as an explicit `~` store, on every tier. Declared `View<T>`/`ViewMut<T>` fields and returns are untouched: they keep D-MEM-VIEWRET1=B provenance semantics exactly as ratified; this decision governs only the flows those boundaries already refuse. `ViewMut` flowing into a non-view slot stays an error under its existing codes (E2305/E0212 for generic views) — copying a write-through window would break write-back; nothing about legal ViewMut boundaries changes. `~x` remains the one copy spelling (D-SHAPE-COPY1 untouched); nothing is ever injected into user source. Visibility ladder: `jet audit copies` (site + size per copy), editor ghost hints, `jet fmt --explicit-copies` (invited materializer), and per D-PACKAGE-POLICY-SCOPE1's mirror law the refusal exists at both scopes — `#Policy(copies: .Explicit)` in source and `policy: .{ copies: .Explicit }` in `package.jet` — restoring today's errors with their exact fix text. Amends D-MEM-VIEWRET1's non-view-flow behavior only.
+**D-MEM-COPYSEM1=A — a read-only view flowing into a non-view slot means a copy** *(ratified 2026-08-12, card #1889)*: wherever today's checker refuses a read-only view entering a non-view destination — a `String` binding or field, a collection element, a stored capture (string views: E2307; generic views: E2305) — the store now means an owned copy, with the same lowering as an explicit `.copy()` store, on every tier. Declared `View<T>`/`ViewMut<T>` fields and returns are untouched: they keep D-MEM-VIEWRET1=B provenance semantics exactly as ratified; this decision governs only the flows those boundaries already refuse. `ViewMut` flowing into a non-view slot stays an error under its existing codes (E2305/E0212 for generic views) — copying a write-through window would break write-back; nothing about legal ViewMut boundaries changes. `x.copy()` is the one copy spelling (D-COPY-WORD1); nothing is ever injected into user source. Visibility ladder: `jet audit copies` (site + size per copy), editor ghost hints, `jet fmt --explicit-copies` (invited materializer), and per D-PACKAGE-POLICY-SCOPE1's mirror law the refusal exists at both scopes — `#Policy(copies: .Explicit)` in source and `policy: .{ copies: .Explicit }` in `package.jet` — restoring today's errors with their exact fix text. Amends D-MEM-VIEWRET1's non-view-flow behavior only.
 
 **D-CONC-FREEZE1=A — `freeze` and `^`-captures** *(ratified 2026-08-12, card #1889)*: `freeze(x)` is a prefix verb returning a deeply immutable value; bare task captures of frozen values are legal because no race can exist; writing to a frozen value is a compile error naming the freeze site; freezing twice is the identity. `^x` in a group-child capture consumes the value into the task (existing use-after-move E0121 applies afterward). Baseline corrected per review: D-TASKBORROW1=A already lets lexical `task.group` children borrow readable places where non-overlap is provable, and D-CONC-SHARE1=A already replaces `Shared.read/.edit` closures with `shared expr` plus ordinary field access — `freeze` covers what neither does: sharing past provable non-overlap and past the lexical group, without a lock. E1101's fix menu becomes: give it (`^`), freeze it (`freeze`), or share it (`shared`). Extends D-TASKBORROW1; composes with D-CONC-SHARE1; `Shared`/`Cell` semantics unchanged.
 
