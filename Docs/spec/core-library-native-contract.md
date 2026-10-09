@@ -261,25 +261,85 @@ on an already-delivered stop rail. Generation exhaustion also releases both
 permit and owner before delivering its stop.
 
 Native `Shared<T>` construction supplies `(payload slot, NativeMeta descriptor,
-monomorphized payload-drop function)` to `jet_rt_native_shared_new`. Its 88-byte
+monomorphized payload-drop function)` to `jet_rt_native_shared_new`. Its 96-byte
 cell stores the function pointer at byte 80; the thunk borrows the owned slot
-address and returns `Unit`. Only the atomic `1 -> 0` strong-release transition
-invokes it, exactly once, outside all Shared locks. The glue performs the complete
+address and returns `Unit`. The packed reference word at byte 0 holds logical
+owners in its low 32 bits and physical pins in its high 32 bits; each half is
+bounded by `2^31 - 1`, a deliberately tighter native limit than Rust Arc's
+`isize::MAX` refcount-abort bound. Exhausting either packed half stops through
+the existing overflow door rather than spilling into the other half. Payload
+retirement requires zero logical owners and zero lifetime physical borrows at
+byte 72, including suspended physical guards.
+Retirement clears the payload and descriptor under the cell mutex, then invokes
+the thunk exactly once outside all Shared locks. The glue performs complete
 typed destruction, including `T.Close` and owned fields. The provider must not
 also invoke the descriptor's drop callback. A null function is reserved for
 trivial payloads and means plain free, not a descriptor-drop fallback.
+
+Weak references use the appended count at byte 88; the drop-code pointer stays
+at byte 80 and every other existing field offset is unchanged. All logical
+owners and physical pins collectively hold one implicit weak reservation.
+Downgrade reserves a weak without retaining the payload; upgrade atomically
+reserves a logical owner only while the low reference half is nonzero, writing
+its out slot only on success. Physical pins alone cannot resurrect an expired
+logical owner. The implicit weak retires when the entire packed reference word
+reaches zero; final weak release alone frees the cell. Payload destruction may
+precede that transition when only passive pins remain. Temporary weak ownership
+keeps the cell live across out-of-lock drop-glue reentry and concurrent final
+pin release. The existing Linux locked `sync_cas`/`sync_add` operations supply
+acquire/release fences.
+
+The Source physical-owner API reuses native weak identity without retaining a
+factory context. Passive pins keep the cell allocation alive, while physical
+Guard40 leases retain a pin and a lifetime borrow across suspension. The
+thread-confined header records cell, editability, held permit, dirty state and
+shared projection references. Clean physical release does not bump revision;
+dirty publication bumps once under the original edit permit. Abort releases
+without committing. Reacquisition checks cancellation/deadlines and refreshes
+the borrowed canonical slot only after obtaining that same permit. Final guard
+drop releases the protocol before payload cleanup. Ordinary native guards
+remain logical owners and eager-dirty, preserving their existing ABI.
+Alias24 receipts reserve one logical owner and a monotonic token from the
+existing publication header; consuming their owned slot clears it before the
+one release. The publication header is 16 bytes (node head at 0, alias counter
+at 8), with no new global or sidecar cell registry.
+
+The existing publication fixture assembly also supports `link-weak`/`run-weak`.
+Its C client checks failed upgrade leaves the out slot unchanged, exactly-once
+payload destruction, the counting allocator's remaining 96-byte cell until the
+last weak drops, and a two-thread upgrade/final-strong-drop race.
+The same client distinguishes logical owners from physical pins, verifies
+clean/dirty/abort revision behavior and alias-slot exact-once release, and
+checks failed upgrade while a physical guard still retains the live payload.
+The existing sync fixture exercises physical wait cancellation: registration
+occurs under the original edit permit, dirty publication releases it, cleanup
+removes the same condition node before reacquisition, and interrupted waiting
+returns an unheld guard with no lingering registration.
 
 Like Rust's `Arc<T>` releasing its final strong owner, the callback runs in the
 releasing caller's context. The provider adds neither a cleanup mask nor a
 session shield; releases inside a MIR cleanup frame inherit that frame's
 bracket. A callback that returns with pending stop still permits the provider
-to free the payload allocation, descriptor and cell before the caller propagates
-it. Reclamation on a pending stop is explicit, not unwind-dependent.
+to free the payload allocation and descriptor and release the strong owners'
+implicit weak reservation before the caller propagates it. Reclamation on a
+pending stop is explicit, not unwind-dependent.
 The seed-only C fixture retains its separate
 two-argument Rust-provider declaration for comparison; it is not a native alias
 and retires at cutover. Native runtime fixtures pass explicit drop functions,
 including two threads each racing 100,000 clone/drop pairs and a null-glue
 case that must not fall back to the descriptor callback.
+
+The Shared site publication witness uses the actual native providers, not a
+Rust seed implementation. `run-channel-fixtures.mjs OUT assemble-publication`
+enrolls the registry observer after the production runtime; the existing
+`lower` mode emits the fixture object, and `link-publication`/`run-publication`
+link and exercise it with the freshly composed native library. Two initializers
+race to publish one winner; the losing payload drop runs once. World reset
+clears the cell and releases only its owner while a retained clone survives;
+republishing the same site must retain exactly one registry node. Process
+sites must never enter the World registry or be released by its reset.
+The observer only counts actual registry nodes after publishers have joined;
+the C client supplies callbacks and barriers, never publication or reset logic.
 
 ### Exact integer carrier
 
