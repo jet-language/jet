@@ -146,14 +146,35 @@ fn canonical(recipients: [crypto.X25519PublicKey]) -> [Recipient] crypto.FileCry
     Ok(sorted)
 }
 
+// Length-only expert copies are wiped before releasing their allocations.
+// The original Secret remains whole and retains its normal Close duty.
+fn secret_length(secret: crypto.Secret) -> Int Never! {
+    #Unsafe("Core JETC2 checks secret draw widths through the audited exposure and wipes the temporary copy") {
+        material := expert.secret_bytes(secret)
+        length :: material.len()
+        crypto.__zeroize(&material)
+        return length
+    }
+}
+
+#Test("JETC2 secret width checks preserve the original zeroizing owner") {
+    secret :: crypto.Secret.from_text("JETC2")
+    assert(secret_length(secret) == 5)
+    assert(crypto.constant_time_equal(secret, crypto.Secret.from_text("JETC2")))
+    assert(secret_length(crypto.Secret.from_bytes([U8]{})) == 0)
+}
+
 // Exactly four independent draws, supplied after source snapshot/revalidation:
 // file id 16, key 32, ephemeral secret 32, nonce prefix 16.
 fn writer(sorted: [Recipient], plain_length: Int,
     file_id: [U8], file_key: ^crypto.Secret, ephemeral_secret: ^crypto.Secret,
     nonce_prefix: [U8]) -> Writer crypto.FileCryptoError! {
     body :: body_length(plain_length) ?? return Err(.SourceIO)
-    if file_id.len() != 16 || file_key.bytes.len() != 32 || ephemeral_secret.bytes.len() != 32 || nonce_prefix.len() != 16 -> return Err(.SealFailed(.Length))
-    ephemeral_key :: crypto.X25519SecretKey{bytes: ^ephemeral_secret.bytes}
+    if file_id.len() != 16 || secret_length(file_key) != 32 || secret_length(ephemeral_secret) != 32 || nonce_prefix.len() != 16 -> return Err(.SealFailed(.Length))
+    ephemeral_key := crypto.X25519SecretKey{bytes: [U8]{}}
+    #Unsafe("Core JETC2 copies a validated ephemeral Secret into a zeroizing X25519SecretKey; both owners retain their Close duty") {
+        ephemeral_key = crypto.X25519SecretKey.from_bytes(expert.secret_bytes(ephemeral_secret)) ?? return Err(.SealFailed(err))
+    }
     ephemeral :: if crypto.x25519_public(ephemeral_key) == {
         .Ok(value) -> ^value
         .Err(error) -> { return Err(.SealFailed(error)) }
