@@ -8,7 +8,7 @@ struct BundleNativeFacts {
 }
 struct BundleSigningRun { requested: Bool, verified: Bool, programs: [String], identities: [String] }
 
-fn pkg_bundle_native_free(path: String) -[FS]> String! {
+fn pkg_bundle_native_free(path: String) String! -[FS]> {
     if files.stat(path) == {
         .Ok(_) -> Err("package output `{path}` already exists")
         .Err(error) -> if error == .NotFound(_) -> Ok() else -> Err("could not inspect package output `{path}`: {error}")
@@ -56,7 +56,7 @@ fn pkg_bundle_native_detail(run: NativeSandboxOutput) -> String Never! {
     "stdout: {stdout}; stderr: {stderr}"
 }
 fn pkg_bundle_native_version(run: NativeSandboxOutput) -> String String! {
-    loop text in [String]{pkg_bundle_native_text(run.receipt.stdout), pkg_bundle_native_text(run.receipt.stderr)} {
+    loop text in ([String]{pkg_bundle_native_text(run.receipt.stdout), pkg_bundle_native_text(run.receipt.stderr)}) {
         loop line in text.split("\n") {
             value :: line.trim()
             if value == "" -> next
@@ -66,13 +66,17 @@ fn pkg_bundle_native_version(run: NativeSandboxOutput) -> String String! {
     }
     Err("package materializer tool returned no version text")
 }
-fn pkg_bundle_native_hooks(plan: &BundlePlan, phase: SigningPhase, source: String, output: String, run: &BundleSigningRun) -[FS, Env, Exec, Time, Time.Wait]> String! {
+fn pkg_bundle_native_hooks(plan: &BundlePlan, phase: SigningPhase, source: String, output: String, run: &BundleSigningRun) String! -[FS, Env, Exec, Time, Time.Wait]> {
     loop hook in plan.signing_hooks {
         if hook.phase != phase -> next
         loop expected in hook.inputs {
             found := false
-            loop input in plan.inputs -> if input.path == expected.path && input.digest == expected.digest -> found = true
-            loop file in plan.files -> if file.path == expected.path && file.digest() == expected.digest -> found = true
+            loop input in plan.inputs {
+                if input.path == expected.path && input.digest == expected.digest -> found = true
+            }
+            loop file in plan.files {
+                if file.path == expected.path && file.digest() == expected.digest -> found = true
+            }
             if !found -> return Err("signing hook `{hook.name}` names an input with an unverified digest: `{expected.path}`")
         }
         tool :: pkg_bundle_native_tool(hook.program, true)
@@ -113,7 +117,7 @@ fn pkg_bundle_native_relative(plan: &BundlePlan, file: &BundleFile, strip: Bool)
     if parts.len() == 0 -> return Err("package path `{file.path}` is empty")
     Ok(parts.join("/"))
 }
-fn pkg_bundle_native_tree(plan: &BundlePlan, stage: String, strip: Bool) -[FS, Env]> String! {
+fn pkg_bundle_native_tree(plan: &BundlePlan, stage: String, strip: Bool) String! -[FS, Env]> {
     seen := [String]{}
     loop file in plan.files {
         relative :: pkg_bundle_native_relative(plan, &file, strip)
@@ -158,7 +162,11 @@ fn pkg_bundle_materialize(plan: &BundlePlan, output: String, compiler_version: S
     pkg_bundle_native_free(output)
     name :: files.basename(output)
     if name == "" -> return Err("package output `{output}` has no UTF-8 file name")
-    suffix :: if plan.target == { .LinuxAppImage -> "appdir" .MacOSApp -> "app" .WindowsMsix -> "msix" }
+    suffix :: if plan.target == {
+        .LinuxAppImage -> "appdir"
+        .MacOSApp -> "app"
+        .WindowsMsix -> "msix"
+    }
     stage :: files.join(parent, ".{name}.jet-package-{suffix}-{sys.pid()}")
     output_stage :: files.join(parent, ".{name}.jet-package-appimage-output-{sys.pid()}")
     staged_msix :: files.join(parent, ".{name}.jet-package-msix-output-{sys.pid()}")
@@ -201,8 +209,11 @@ fn pkg_bundle_native_materialize(plan: &BundlePlan, output: String, parent: Stri
     if !version.receipt.success -> return Err("declared package tool `{tool}` failed its version probe: {pkg_bundle_native_detail(version)}")
     tool_version :: pkg_bundle_native_version(version)
     artifact :: if linux -> files.join(output_stage, name) else -> staged_msix
-    args :: if linux -> [String]{if sys.is_linux() -> "/work/source" else -> stage, if sys.is_linux() -> "/work/output/{name}" else -> artifact}
-        else -> [String]{"pack", "/d", stage, "/p", artifact, "/o"}
+    args :: if linux -> {
+        [String]{if sys.is_linux() -> "/work/source" else -> stage, if sys.is_linux() -> "/work/output/{name}" else -> artifact}
+    } else -> {
+        [String]{"pack", "/d", stage, "/p", artifact, "/o"}
+    }
     packaged :: pkg_bundle_native_run(tool, args, stage, writable)
     if !packaged.receipt.success -> return Err("declared package tool `{tool}` failed to materialize `{name}`: {pkg_bundle_native_detail(packaged)}")
     _ :: pkg_bundle_native_regular(artifact)

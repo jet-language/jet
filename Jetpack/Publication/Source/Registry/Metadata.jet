@@ -53,12 +53,12 @@ fn publication_read_registry_package_metadata(artifact: String, expected_name: S
     held :: if foundation_open_file_authority(artifact, PUBLICATION_REGISTRY_PACKAGE_METADATA_FILE) == {
         .Ok(source) -> source
         .Err(error) -> if error == {
-            .NotFound(_) -> return Ok(None)
+            .NotFound(_) -> { return Ok(None) }
             .PermissionDenied(context) -> {
                 if context.cause == Val("file authority input is not a regular file") -> return Err(publication_invalid_registry_metadata("registry.json is not a regular file"))
                 return Err(error)
             }
-            else -> return Err(error)
+            else -> { return Err(error) }
         }
     }
     bytes :: if held.read_bounded(PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES) == {
@@ -68,7 +68,7 @@ fn publication_read_registry_package_metadata(artifact: String, expected_name: S
                 if context.cause == Val("file exceeds its read bound") -> return Err(publication_invalid_registry_metadata("registry.json exceeds its size limit"))
                 return Err(error)
             }
-            else -> return Err(error)
+            else -> { return Err(error) }
         }
     }
     text :: String.from_bytes(bytes) ?? return Err(publication_invalid_registry_metadata("stream did not contain valid UTF-8"))
@@ -177,7 +177,7 @@ fn publication_parse_registry_dependency_descriptor(descriptor: Dyn) -> Publicat
     strict := false
     enabled_by_default := false
     if descriptor == {
-        .Text(requirement) -> &requirements.push(~requirement)
+        .Text(requirement) -> &requirements.push(requirement.copy())
         .Object(pairs) -> {
             fields := [String: DataTree]{}
             loop pair in pairs -> fields[pair.key] = pair.value

@@ -37,7 +37,10 @@
     stripped.signatures = [TrustSignature]{}
     assert(if TrustEngine.bootstrap(stripped, eng.keyring, TrustRootPolicy.default(), Val(pin), TrustedClock.Fixed(now), None) == {
         .Ok(_) -> false
-        .Err(error) -> if error == { .SignatureStripped(_) -> true; else -> false }
+        .Err(error) -> if error == {
+            .SignatureStripped(_) -> true
+            else -> false
+        }
     })
     rotated := root
     rotated.version = 2

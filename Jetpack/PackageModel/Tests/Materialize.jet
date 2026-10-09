@@ -3,7 +3,7 @@
     plan :: pkg_bundle_wire_test_plan()
     good :: BundleFile.new("a/./b", BundleFileKind.Executable, 493, "payload".bytes())
     assert_eq(pkg_bundle_native_relative(&plan, &good, false) ?? panic("relative"), "a/b")
-    loop path in [String]{"../a", "a/../b", "/a", "C:\\a", "", "."} {
+    loop path in ([String]{"../a", "a/../b", "/a", "C:\\a", "", "."}) {
         file :: BundleFile.new(path, BundleFileKind.Executable, 493, [U8]{})
         assert(pkg_bundle_native_relative(&plan, &file, false) == .Err(_))
     }
@@ -14,7 +14,7 @@
 }
 #Test("native bundle signing requires successful verify and canonical tool identity") {
     absent :: BundleSigningRun{requested: false, verified: false, programs: [String]{}, identities: [String]{}}
-    assert(pkg_bundle_native_signing(absent) == .Ok(None))
+    assert(pkg_bundle_native_signing(absent) == .Ok(.None))
     pending :: BundleSigningRun{requested: true, verified: false, programs: [String]{"sign"}, identities: [String]{"id"}}
     assert(pkg_bundle_native_signing(pending) == .Err(_))
     one :: BundleSigningRun{requested: true, verified: true, programs: [String]{"verify"}, identities: [String]{"id"}}

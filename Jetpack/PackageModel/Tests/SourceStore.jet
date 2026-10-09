@@ -8,10 +8,11 @@ fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
 }
 
 #Test("source-store components reject path syntax and all C0/C1 controls") {
-    loop value in [String]{"", ".", "..", "../pkg", "pkg/name", "pkg\\name", "pkg:version", "pkg\nname", "pkg\u{0085}name"} {
+    next_line :: String.from_bytes([U8]{194, 133}) ?? panic("valid C1 scalar")
+    loop value in ([String]{"", ".", "..", "../pkg", "pkg/name", "pkg\\name", "pkg:version", "pkg\nname", "pkg{next_line}name"}) {
         assert(pkg_source_store_component(value) == .Err(_))
     }
-    loop value in [String]{"jet", "1.2.3-dev+build", "abcdef0123456789", "工具"} {
+    loop value in ([String]{"jet", "1.2.3-dev+build", "abcdef0123456789", "工具"}) {
         assert(pkg_source_store_component(value) == .Ok(_))
     }
 }
