@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 /// own semantic part instead of inheriting an unrelated hosted service.
 // BEGIN GENERATED CORE DEPENDENCIES
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 460f71aaaccec38a441bbc308c67330916d9f66f73b0634cfe1b30312dec192c
+// Source SHA-256: f72eb633192672af122bbee18cf914e3125d8f1d3302539d8a53082bc1bed60d
 const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("app", &["core.web"]),
     ("core.devtools", &["core"]),
