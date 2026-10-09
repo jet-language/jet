@@ -47,45 +47,58 @@ fn jet_cli_complexity_items(items: [Item], reports: &[JetCLIComplexityReport]) N
                     loop method in implementation.methods -> jet_cli_complexity_function(method, &reports)
                 }
             }
-            .CodeModule(module) -> if module.body == .Val(body) -> jet_cli_complexity_items(body, &reports)
-            .GenericModule(module) -> jet_cli_complexity_items(module.body, &reports)
+            .CodeModule(code_module) -> {
+                if code_module.body == .Val(body) -> jet_cli_complexity_items(body, &reports)
+            }
+            .GenericModule(generic_module) -> jet_cli_complexity_items(generic_module.body, &reports)
+            else -> {}
+        }
+    }
+}
+
+// The expression half of one function's complexity walk: `ast_visit_statement`
+// reports every expression here, which records its controls, nesting, mixed
+// boolean chains and direct recursion.
+struct JetCLIComplexityVisitor {
+    function_name: String
+    controls: [Span]
+    nesting: [Span]
+    mixed: Int
+    recursive: Bool
+    fn visit(&self, expression: Expr) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
+        if expression == {
+            .If(_, _, _, _, _, span) -> {
+                &self.controls.push(span)
+                &self.nesting.push(span)
+            }
+            .Lambda(lambda) -> {
+                &self.nesting.push(lambda.span)
+                if lambda.body == .Block(body) {
+                    loop nested in body -> jet_cli_complexity_statement(nested, &self.controls, &self.nesting)
+                }
+            }
+            .Call(call) -> {
+                if call.name == self.function_name -> self.recursive = true
+            }
+            .Binary(.And, _, _, _) | .Binary(.Or, _, _, _) -> {
+                operators :: jet_cli_complexity_boolean_operators(expression)
+                if operators == 3 -> self.mixed += 1
+            }
             else -> {}
         }
     }
 }
 
 fn jet_cli_complexity_function(function: Func, reports: &[JetCLIComplexityReport]) Never! {
-    controls := [Span]{}
-    nesting := [Span]{}
-    mixed := 0
-    recursive := false
+    visitor := JetCLIComplexityVisitor{function_name: function.name, controls: [Span]{}, nesting: [Span]{}, mixed: 0, recursive: false}
     loop statement in function.body {
-        jet_cli_complexity_statement(statement, &controls, &nesting)
-        ast_visit_statement(statement, fn(expression: Expr) Never! {
-            if expression == {
-                .If(_, _, _, _, _, span) -> {
-                    &controls.push(span)
-                    &nesting.push(span)
-                }
-                .Lambda(lambda) -> {
-                    &nesting.push(lambda.span)
-                    if lambda.body == .Block(body) {
-                        loop nested in body -> jet_cli_complexity_statement(nested, &controls, &nesting)
-                    }
-                }
-                .Call(call) -> if call.name == function.name -> recursive = true
-                .Binary(.And, _, _, _) | .Binary(.Or, _, _, _) -> {
-                    operators :: jet_cli_complexity_boolean_operators(expression)
-                    if operators == 3 -> mixed += 1
-                }
-                else -> {}
-            }
-        }, false)
+        jet_cli_complexity_statement(statement, &visitor.controls, &visitor.nesting)
+        ast_visit_statement(statement, (expression: Expr) -> &visitor.visit(expression), false)
     }
-    score := mixed + if recursive -> 1 else -> 0
-    loop inner in controls {
+    score := visitor.mixed + if visitor.recursive -> 1 else -> 0
+    loop inner in visitor.controls {
         score += 1
-        loop outer in nesting {
+        loop outer in visitor.nesting {
             if outer.start < inner.start && inner.end < outer.end -> score += 1
         }
     }

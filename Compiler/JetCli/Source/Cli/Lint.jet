@@ -77,8 +77,9 @@ fn jet_cli_lint_architecture(file: String, color: Bool) -> JetCLIArchitectureIns
 }
 
 pub fn jet_cli_lint_complexity(file: String, source: String, raw: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
-    budget :: if jet_cli_lint_max(raw, color) == {
-        .Value(value) -> value
+    budget := Int?{None}
+    if jet_cli_lint_max(raw, color) == {
+        .Value(value) -> budget = value
         .Refused(output) -> return ~output
     }
     compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Program)
@@ -124,7 +125,11 @@ pub fn jet_cli_lint_complexity(file: String, source: String, raw: [String], colo
             }
             if inspection.check == .Val(check) -> &fields.push(jet_cli_status_field("check", check))
             stdout = "{jet_cli_status_render("lint.complexity", true, fields)}\n"
-        } else { stdout = "{stdout}{jet_cli_architecture_text(inspection)}" }
-    } else if json { stdout = "{jet_cli_status_json(jet_cli_status_array(rows))}\n" }
+        } else {
+            stdout = "{stdout}{jet_cli_architecture_text(inspection)}"
+        }
+    } else {
+        if json -> stdout = "{jet_cli_status_json(jet_cli_status_array(rows))}\n"
+    }
     JetDriverVerbOutput{stdout: stdout, stderr: if !json && exceeded.len() > 0 -> diagnostic_render_all(file, source, exceeded, color) else -> "", exit_code: if exceeded.len() == 0 -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR}
 }
