@@ -56,15 +56,7 @@ pub(crate) fn variant_binding_types_for_enum(
         };
     }
     if enum_name == "DataEvent" {
-        return match variant {
-            "Bool" => Some(vec![Type::Bool]),
-            "Int" => Some(vec![Type::Int]),
-            "Float" => Some(vec![Type::Float]),
-            "Text" | "Key" => Some(vec![Type::String]),
-            "Bytes" => Some(vec![Type::List(Box::new(Type::Int))]),
-            "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd" => Some(Vec::new()),
-            _ => None,
-        };
+        return crate::Sema::data_event_payload(variant).map(|payload| payload.into_iter().collect());
     }
     let resolved = crate::Codegen::TIR::canonical_enum_owner(cx, enum_name);
     let variants = cx.fact_enum_variants(&resolved)?;

@@ -7588,10 +7588,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     }
                     if env.ty_of(enum_name).is_none()
                         && enum_name == "DataEvent"
-                        && matches!(
-                            member.as_str(),
-                            "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd"
-                        )
+                        && matches!(crate::Sema::data_event_payload(member), Some(None))
                     {
                         return in_own_frame(|| {
                             return TExpr {

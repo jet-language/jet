@@ -40,6 +40,7 @@ use jet_foundation.[
     Type,
     TypeTupleField,
     ViewProvenanceMap,
+    core_enum_variant_payload,
     core_enum_variants,
     core_record_field,
     mir_boundary_head_carrier_module,
@@ -1054,7 +1055,7 @@ JET_CODEGEN_COMPILER_OWNED_ENUMS :: prep { [JetCodegenCompilerOwnedEnum]{
     JetCodegenCompilerOwnedEnum{name: "DataFreshness", variants: [String]{"Pending", "Fresh", "Stale", "Error", "Offline", "Cancelled"}},
     JetCodegenCompilerOwnedEnum{name: "DataInvalidationCause", variants: [String]{"NoCause", "Loader", "Input", "ArchiveMember", "Parameters", "Credential", "Capability", "Manual"}},
     JetCodegenCompilerOwnedEnum{name: "DataTree", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "TypedText", "Text", "Bytes", "Array", "Object"}},
-    JetCodegenCompilerOwnedEnum{name: "DataEvent", variants: [String]{"Null", "ArrayStart", "ArrayEnd", "ObjectStart", "ObjectEnd", "Bool", "Int", "Float", "Text", "Bytes", "Key"}},
+    JetCodegenCompilerOwnedEnum{name: "DataEvent", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "ArrayStart", "ArrayEnd", "ObjectStart", "Key", "ObjectEnd"}},
     JetCodegenCompilerOwnedEnum{name: "XMLCanonicalMode", variants: [String]{"Inclusive11", "Exclusive10"}},
     JetCodegenCompilerOwnedEnum{name: "PluginLimit", variants: [String]{"Fuel", "Memory", "Table", "Time", "Wire"}},
     JetCodegenCompilerOwnedEnum{name: "PluginError", variants: [String]{"Guest", "Denied", "Budget", "Defect"}},
@@ -1137,15 +1138,18 @@ fn jet_codegen_compiler_owned_enum_payload(name: String, variant: String) -> Jet
         if variant == "SystemPlus" || variant == "CustomOnly" -> return jet_codegen_compiler_owned_single(Type.Named{name: "TLSRootCertificates"})
         return JetCodegenCompilerOwnedPayload.Unit
     }
-    if name == "DataEvent" || name == "DataTree" {
+    // D-ENCSTREAM-SURFACE1=A: the canonical twelve DataEvent payloads are the
+    // generated Core payload rows (Rust core_types.rs data_event_payload).
+    if name == "DataEvent" {
+        payload :: core_enum_variant_payload(name, variant) ?? return JetCodegenCompilerOwnedPayload.Unit
+        if payload.len() == 1 -> return jet_codegen_compiler_owned_single(payload[0])
+        return JetCodegenCompilerOwnedPayload.Unit
+    }
+    if name == "DataTree" {
         if variant == "Bool" -> return jet_codegen_compiler_owned_single(Type.Bool)
         if variant == "Int" -> return jet_codegen_compiler_owned_single(Type.Int)
         if variant == "Float" -> return jet_codegen_compiler_owned_single(Type.Float)
         if variant == "Bytes" -> return jet_codegen_compiler_owned_single(bytes)
-        if name == "DataEvent" {
-            if variant == "Text" || variant == "Key" -> return jet_codegen_compiler_owned_single(Type.String)
-            return JetCodegenCompilerOwnedPayload.Unit
-        }
         tree :: Type.Named{name: "DataTree"}
         if variant == "Number" || variant == "TypedText" || variant == "Text" -> return jet_codegen_compiler_owned_single(Type.String)
         if variant == "Array" -> return jet_codegen_compiler_owned_single(Type.List{element: tree})

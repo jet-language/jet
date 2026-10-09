@@ -616,10 +616,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                     return true;
                 }
                 if enum_name == "DataEvent"
-                    && matches!(
-                        member.as_str(),
-                        "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd"
-                    )
+                    && matches!(crate::Sema::data_event_payload(member), Some(None))
                 {
                     return true;
                 }
