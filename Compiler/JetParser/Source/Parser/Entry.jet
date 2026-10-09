@@ -414,6 +414,50 @@ fn parser_collect_debug_trace_sites(tokens: [Token], source: [U8], sites: &[Debu
     }
 }
 
+// D-DBG1=A: record each `debug(…)` call's argument text as written, so sema
+// can name the traced expression and build the E3405 unwrap edit. The text
+// runs from the first token after `(` to the last one before its matching
+// `)`, leaving out a trailing comma. Interpolations are scanned as well.
+fn parser_debug_trace_sites(tokens: [Token], source: [U8]) -> [DebugTraceSite] Never! {
+    sites := [DebugTraceSite]{}
+    if source.len() > 0 -> parser_collect_debug_trace_sites(tokens, source, &sites)
+    sites
+}
+
+fn parser_collect_debug_trace_sites(tokens: [Token], source: [U8], sites: &[DebugTraceSite]) Never! {
+    loop index in 0..<tokens.len() {
+        token :: tokens[index]
+        loop part in token.payload.string_parts {
+            if part.kind == STRING_PART_INTERPOLATION -> parser_collect_debug_trace_sites(part.tokens, source, &sites)
+        }
+        if token.kind != TOKEN_IDENT || token.payload.decoded != "debug" || index + 1 >= tokens.len() || tokens[index + 1].kind != TOKEN_LPAREN -> next
+        open :: index + 1
+        depth := 0
+        close := -1
+        loop cursor in open..<tokens.len() {
+            kind :: tokens[cursor].kind
+            if kind == TOKEN_LPAREN -> depth += 1
+            if kind == TOKEN_RPAREN {
+                depth -= 1
+                if depth == 0 {
+                    close = cursor
+                    break
+                }
+            }
+        }
+        if close < 0 -> next
+        last := close - 1
+        if last > open && tokens[last].kind == TOKEN_COMMA -> last -= 1
+        if last <= open -> next
+        start :: tokens[open + 1].span.start
+        end :: tokens[last].span.end
+        close_end :: tokens[close].span.end
+        if start < 0 || end <= start || close_end > source.len() -> next
+        text :: String.from_bytes(source.slice(start, end)) ?? next
+        &sites.push(DebugTraceSite{name_start: token.span.start, text: text, close_end: close_end})
+    }
+}
+
 fn parser_parse_program(state: &JetParserState) -> Program {
     program := ast_program()
     loop parser_current_kind(&state) != TOKEN_EOF {

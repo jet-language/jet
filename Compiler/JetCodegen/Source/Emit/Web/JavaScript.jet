@@ -143,6 +143,34 @@ fn jet_web_js_persist_live_value_update(ctx: &JetWebEmitContext, function: MIRFu
     }
 }
 
+// MIRWeb js_persist_live_value_update: under the local devtools rail, a write
+// to a persistent place publishes its new value (scalar text forms only).
+fn jet_web_js_persist_type_renderable(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> return true
+        .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> return jet_web_js_persist_type_renderable(base)
+        else -> return false
+    }
+}
+
+fn jet_web_js_persist_live_value_update(ctx: &JetWebEmitContext, function: MIRFunction, operation: MIROperation) -> String? {
+    if !ctx.config.release_devtools_policy.local_rail -> return None
+    if operation == {
+        .WritePlace(place_id, _) -> {
+            loop place in function.places {
+                if place.id == place_id {
+                    key :: place.persist_key ?? return None
+                    rendered :: if jet_web_js_persist_type_renderable(place.ty) -> "String({jet_web_js_read_place(&ctx, function, place_id)})" else -> "null"
+                    return Val("jetDom.publishLiveValueUpdate({jet_web_js_quote(key)}, {jet_web_js_quote(mir_type_canonical_key(place.ty))}, {rendered});")
+                }
+            }
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "Web MIR place is missing", "persistent place writes must resolve one checked place row", Val(function.span))
+            return None
+        }
+        else -> return None
+    }
+}
+
 fn jet_web_emit_js_function(ctx: &JetWebEmitContext, function: MIRFunction, out: &[String]) {
     if !jet_web_function_in_bucket(function, MIRWebBucket.JS) -> return
     keyword :: if function.generator != None -> "async function*" else -> "async function"
