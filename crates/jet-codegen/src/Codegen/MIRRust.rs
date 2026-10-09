@@ -6665,8 +6665,12 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
-    fn read_trait_referent(&self, reference: String, borrowed: bool) -> String {
-        if borrowed { reference } else { format!("({reference}).as_ref()") }
+    fn read_trait_referent(&self, ty: &MirType, reference: String, borrowed: bool) -> String {
+        if !borrowed && matches!(ty.kind(), MirTypeKind::TraitObject(_)) {
+            format!("({reference}).as_ref()")
+        } else {
+            reference
+        }
     }
 
     fn read_trait_call_reference(&self, function: &MirFunction, arg: &MirCallArg) -> String {
@@ -6685,7 +6689,7 @@ impl<'a> RustEmitter<'a> {
             let borrowed = arg.place
                 .map(|place| self.read_trait_place_is_loan(function, place))
                 .unwrap_or_else(|| self.read_trait_value_is_loan(function, value));
-            self.read_trait_referent(reference, borrowed)
+            self.read_trait_referent(self.value_type(function, value), reference, borrowed)
         } else {
             reference
         }
@@ -19327,7 +19331,7 @@ impl<'a> RustEmitter<'a> {
                 value_slot(*cursor)
             );
             return if matches!(self.value_type(function, value).kind(), MirTypeKind::TraitObject(_)) {
-                self.read_trait_referent(reference, false)
+                self.read_trait_referent(self.value_type(function, value), reference, false)
             } else {
                 reference
             };
@@ -19365,7 +19369,7 @@ impl<'a> RustEmitter<'a> {
         if matches!(self.value_type(function, value).kind(), MirTypeKind::TraitObject(_)) {
             let borrowed = matches!(operation, MirOperation::ReadPlace(place)
                 if self.read_trait_place_is_loan(function, *place));
-            self.read_trait_referent(reference, borrowed)
+            self.read_trait_referent(self.value_type(function, value), reference, borrowed)
         } else {
             reference
         }
