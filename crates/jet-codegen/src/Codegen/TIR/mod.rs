@@ -5372,7 +5372,7 @@ fn lower_checked_tir_program_on_stack(
     }
     for (module_idx, facts) in checked_nominals.iter().enumerate() {
         if facts.module_idx != module_idx
-            || bundle.name_ledger.module_identity_ref(module_idx) != Some(facts.module_identity.as_str())
+            || bundle.name_ledger.module_identity(module_idx).as_deref() != Some(facts.module_identity.as_str())
         {
             return Err(LowerError::new(crate::Diagnostics::Span::new(0, 0), "checked nominal module context disagrees with its bundle"));
         }

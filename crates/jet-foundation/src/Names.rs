@@ -373,11 +373,6 @@ impl NameLedger {
         self.tables.module_identities.get(&module).cloned()
     }
 
-    /// Borrow the same registered identity for a non-owning custody check.
-    pub fn module_identity_ref(&self, module: usize) -> Option<&str> {
-        self.tables.module_identities.get(&module).map(String::as_str)
-    }
-
     pub fn declare(
         &mut self,
         module: usize,
