@@ -958,10 +958,20 @@ fn jet_rust_emit_units(program: MIRProgram) -> JetRustEmitUnits Never! {
     loop file in program.source_files {
         rows := [JetRustEmitUnitStart]{}
         offset := 0
-        loop line in file.source.split("\n").to_list() {
-            bytes :: line.bytes()
-            offset += bytes.len() + 1
-            if !line.starts_with(JET_RUST_EMIT_UNIT_PROVENANCE_MARKER) || !line.ends_with("]") -> next
+        // MIRRust EmissionUnits::new: offsets count each line with its real
+        // newline (split_inclusive), and a marker line matches with its
+        // trailing whitespace (`\r`, spaces) trimmed.
+        segments :: file.source.split("\n").to_list()
+        loop (index, line) in segments {
+            last :: index == segments.len() - 1
+            width :: line.bytes().len()
+            if last && width == 0 -> break
+            newline :: if last -> 0 else -> 1
+            offset += width + newline
+            if !line.starts_with(JET_RUST_EMIT_UNIT_PROVENANCE_MARKER) -> next
+            marker :: line.trim_end()
+            if !marker.ends_with("]") -> next
+            bytes :: marker.bytes()
             path :: String.from_bytes(~(bytes[marker_length..<bytes.len() - 1])) ?? ""
             parts :: path.split("/").to_list()
             unit :: if parts.len() > 1 -> parts[1] else -> JET_RUST_EMIT_BASE_UNIT

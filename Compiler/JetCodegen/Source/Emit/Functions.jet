@@ -1666,6 +1666,52 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
     compacted
 }
 
+// A direct view return carries one checked provenance slot. Its owner gets an
+// explicit Rust lifetime; unrelated borrowed parameters retain elision.
+fn jet_rust_emit_is_view_type(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Apply(name, _) -> name.name == "View" || name.name == "ViewMut"
+        .Tagged(_, inner) -> jet_rust_emit_is_view_type(inner)
+        else -> false
+    }
+}
+
+fn jet_rust_emit_return_view_lifetime(function: MIRFunction) -> String Never! {
+    if !jet_rust_emit_is_view_type(function.return_type) -> return ""
+    found := false
+    entries :: function.return_view_provenance ?? [MIRViewProvenanceEntry]{}
+    loop entry in entries {
+        if entry.slot.len() != 0 -> next
+        loop path in entry.provenance.sources {
+            found = true
+            if path.source == { .Static(_, _) -> {} else -> { return "'__jet_view" } }
+        }
+    }
+    if found -> "'static" else -> ""
+}
+
+fn jet_rust_emit_parameter_owns_view(function: MIRFunction, parameter: MIRParam) -> Bool Never! {
+    if !jet_rust_emit_is_view_type(function.return_type) -> return false
+    entries :: function.return_view_provenance ?? [MIRViewProvenanceEntry]{}
+    loop entry in entries {
+        if entry.slot.len() != 0 -> next
+        loop path in entry.provenance.sources {
+            if path.source == {
+                .Parameter(index) -> { if index == parameter.index -> return true }
+                .Receiver -> { if jet_rust_emit_is_receiver(function, parameter.index) -> return true }
+                else -> {}
+            }
+        }
+    }
+    false
+}
+
+fn jet_rust_emit_reference_lifetime(rendered: String, lifetime: String) -> String Never! {
+    assert(rendered.starts_with("&"))
+    bytes :: rendered.bytes()
+    "&{lifetime} {String.from_bytes(~(bytes[1..<bytes.len()])) ?? ""}"
+}
+
 fn jet_rust_emit_function_signature(ctx: &JetRustEmitContext, function: MIRFunction) -> String Never! {
     params := [String]{}
     types := [String]{}

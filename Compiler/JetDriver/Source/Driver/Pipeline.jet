@@ -2010,6 +2010,71 @@ fn jet_driver_restore_checked_functions(graph: &SemaGraphResult, counts: [Int], 
     }
 }
 
+// Moves every function of `from` onto the end of `to` in order, leaving
+// `from` empty. Each pop moves one function, so the list is never resident
+// twice.
+fn jet_driver_move_mir_functions(to: &[MIRFunction], from: &[MIRFunction]) Never! {
+    reversed := [MIRFunction]{}
+    loop from.len() > 0 {
+        function := &from.pop() ?? { break }
+        &reversed.push(^function)
+    }
+    loop reversed.len() > 0 {
+        function := &reversed.pop() ?? { break }
+        &to.push(^function)
+    }
+}
+
+// Moves the rows of `functions` flagged in `mask` onto `kept` and the others
+// onto `rest`, both in order, leaving `functions` empty. Each pop moves one
+// row, so no row is ever copied.
+fn jet_driver_partition_checked_functions(functions: &[TFunc], mask: [Bool], kept: &[TFunc], rest: &[TFunc]) Never! {
+    reversed := [TFunc]{}
+    loop functions.len() > 0 {
+        function := &functions.pop() ?? { break }
+        &reversed.push(^function)
+    }
+    position := 0
+    loop reversed.len() > 0 {
+        function := &reversed.pop() ?? { break }
+        if mask[position] {
+            &kept.push(^function)
+        } else {
+            &rest.push(^function)
+        }
+        position += 1
+    }
+}
+
+// Moves the rows split by jet_driver_partition_checked_functions back into
+// their graph modules in their original order: module `index` takes the next
+// `counts[index]` rows. `kept` and `rest` are left empty.
+fn jet_driver_restore_checked_functions(graph: &SemaGraphResult, counts: [Int], mask: [Bool], kept: &[TFunc], rest: &[TFunc]) Never! {
+    kept_reversed := [TFunc]{}
+    loop kept.len() > 0 {
+        function := &kept.pop() ?? { break }
+        &kept_reversed.push(^function)
+    }
+    rest_reversed := [TFunc]{}
+    loop rest.len() > 0 {
+        function := &rest.pop() ?? { break }
+        &rest_reversed.push(^function)
+    }
+    position := 0
+    loop module_index in 0..<counts.len() {
+        loop _ in 0..<counts[module_index] {
+            if mask[position] {
+                function := &kept_reversed.pop() ?? { break }
+                &graph.modules[module_index].functions.push(^function)
+            } else {
+                function := &rest_reversed.pop() ?? { break }
+                &graph.modules[module_index].functions.push(^function)
+            }
+            position += 1
+        }
+    }
+}
+
 
 fn jet_driver_assemble_mir(
     load: JetDriverLoadResult,
@@ -3718,6 +3783,38 @@ fn jet_driver_comptime_unstage_bare(staging: &JetDriverComptimeStaging) Never! {
     staging.growth_constants = [MIRConstantDef]{}
     staging.restore = false
     staging.bare = false
+}
+
+// Rust `plain_literal_value` (Registration/Items.rs): a constant whose checked
+// initializer is a plain literal (an unsuffixed Int in the evaluator's Int
+// range, optionally negated, a Bool, a Char, or a string without
+// interpolation) is its own value. Evaluating it lowered, assembled and ran a
+// MIR fragment holding every module's declarations once per constant, which
+// made staging quadratic in program size (#3661).
+fn jet_driver_comptime_plain_literal(expression: TExpr) -> TComptimeValue? Never! {
+    if expression.kind == {
+        .IntLit(value, width) -> {
+            if width == None && expression.ty == Type.Int && jet_driver_comptime_small_int(value) -> return Val(TComptimeValue.Int{value: value})
+        }
+        .Unary(op, operand) -> {
+            if op == TUnaryOp.Neg && expression.ty == Type.Int && operand.kind == .IntLit(value, width) {
+                if width == None && jet_driver_comptime_small_int(0 - value) -> return Val(TComptimeValue.Int{value: 0 - value})
+            }
+        }
+        .BoolLit(value) -> return Val(TComptimeValue.Bool{value: value})
+        .CharLit(value) -> return Val(TComptimeValue.Char{value: value})
+        .StrLit(parts) -> {
+            if expression.ty != Type.String -> return None
+            if parts.len() == 0 -> return Val(TComptimeValue.String{value: ""})
+            if parts.len() == 1 && parts[0] == .Literal(text) -> return Val(TComptimeValue.String{value: text})
+        }
+        else -> {}
+    }
+    None
+}
+
+fn jet_driver_comptime_small_int(value: Int) -> Bool Never! {
+    value >= -9223372036854775807 - 1 && value <= 9223372036854775807
 }
 
 // Rust `plain_literal_value` (Registration/Items.rs): a constant whose checked

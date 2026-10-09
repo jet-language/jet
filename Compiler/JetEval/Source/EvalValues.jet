@@ -894,6 +894,10 @@ fn jet_eval_program_shape_rows(program: MIRProgram) -> JetEvalProgramRows Never!
         &id_rows.push(index)
         core_owners_by_id[id] = id_rows
     }
+    function_rows := [JetEvalFunctionRows]{}
+    loop _ in 0..<program.functions.len() {
+        &function_rows.push(JetEvalFunctionRows{built: false, blocks: [U64:Int]{}, places: [U64:Int]{}, values: [U64:Int]{}, values_next: [Int]{}, locals: [U64:Int]{}, locals_next: [Int]{}})
+    }
     JetEvalProgramRows{
         functions: [U64:Int]{},
         fields: [U64:Int]{},

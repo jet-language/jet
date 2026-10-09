@@ -5084,7 +5084,7 @@ fn sema_comptime_add_marker_source(sources: &SemaComptimeSourceList, graph: Sema
         .Expr(expression) -> {
             destination_key := "{owner_key}::marker::{marker.name}::{marker.name_span.start}"
             key := "{module_identity}::{destination_key}"
-            sema_comptime_add_source(&sources, graph, module_identity, key, destination_key, marker.name, SemaComptimeItemKind.MarkerArgument, expression, expected_type)
+            sema_comptime_add_source(&sources, graph, &environment, module_identity, key, destination_key, marker.name, SemaComptimeItemKind.MarkerArgument, expression, expected_type)
         }
         else -> {}
     }
@@ -5097,16 +5097,16 @@ fn sema_comptime_add_meta_sources(sources: &SemaComptimeSourceList, graph: SemaR
         if field == {
             .Category(expression, span) -> {
                 destination_key := "{owner_key}::meta::category::{span.start}"
-                sema_comptime_add_source(&sources, graph, module_identity, "{module_identity}::{destination_key}", destination_key, "category", SemaComptimeItemKind.MarkerArgument, expression, Val(Type.String))
+                sema_comptime_add_source(&sources, graph, &environment, module_identity, "{module_identity}::{destination_key}", destination_key, "category", SemaComptimeItemKind.MarkerArgument, expression, Val(Type.String))
             }
             .Maturity(expression, span) -> {
                 destination_key := "{owner_key}::meta::maturity::{span.start}"
-                sema_comptime_add_source(&sources, graph, module_identity, "{module_identity}::{destination_key}", destination_key, "maturity", SemaComptimeItemKind.MarkerArgument, expression, Val(Type.String))
+                sema_comptime_add_source(&sources, graph, &environment, module_identity, "{module_identity}::{destination_key}", destination_key, "maturity", SemaComptimeItemKind.MarkerArgument, expression, Val(Type.String))
             }
             .Unknown(name, expression, span) -> {
                 if expression == .Val(source_expression) {
                     destination_key := "{owner_key}::meta::{name}::{span.start}"
-                    sema_comptime_add_source(&sources, graph, module_identity, "{module_identity}::{destination_key}", destination_key, name, SemaComptimeItemKind.MarkerArgument, source_expression, None)
+                    sema_comptime_add_source(&sources, graph, &environment, module_identity, "{module_identity}::{destination_key}", destination_key, name, SemaComptimeItemKind.MarkerArgument, source_expression, None)
                 }
             }
             else -> {}
@@ -5120,7 +5120,7 @@ fn sema_comptime_add_function_sources(sources: &SemaComptimeSourceList, graph: S
     // stages no value for it and discards its evaluation errors, because its
     // arguments may be menu words (`#Inline(Always)`, `#Job(.Dev)`) or name
     // locals; ordinary marker validation reads those arguments instead.
-    sema_comptime_add_meta_sources(&sources, graph, source_module.module_identity, owner_key, function.meta)
+    sema_comptime_add_meta_sources(&sources, graph, &environment, source_module.module_identity, owner_key, function.meta)
 }
 
 fn sema_comptime_nominal_position(source_module: SemaRegistrationModule, name: String) -> Int? {
@@ -5134,7 +5134,7 @@ fn sema_comptime_add_module_item_sources(sources: &SemaComptimeSourceList, graph
     if item == {
         .Func(function) -> {
             owner_key := symbol_id(SymbolKind.Function, source_module.module_identity, "", function.name).key
-            sema_comptime_add_function_sources(&sources, graph, source_module, function, owner_key)
+            sema_comptime_add_function_sources(&sources, graph, &environment, source_module, function, owner_key)
         }
         .Struct(definition) -> {
             position :: sema_comptime_nominal_position(source_module, definition.name) ?? return
@@ -5152,16 +5152,16 @@ fn sema_comptime_add_module_item_sources(sources: &SemaComptimeSourceList, graph
                         expression :: field.default ?? Expr.Unit{span: field.name_span}
                         destination_key := symbol.id.key
                         key := "{destination_key}::default"
-                        sema_comptime_add_source(&sources, graph, source_module.module_identity, key, destination_key, "{definition.name}.{field.name}", SemaComptimeItemKind.FieldDefault, expression, Val(field.ty))
+                        sema_comptime_add_source(&sources, graph, &environment, source_module.module_identity, key, destination_key, "{definition.name}.{field.name}", SemaComptimeItemKind.FieldDefault, expression, Val(field.ty))
                     }
                     // A field marker's argument has its rule's own parameter type
                     // (Rust CheckerMarkers `constant_for_source(0)`), never the field's.
-                    loop marker in field.serde_markers -> sema_comptime_add_marker_source(&sources, graph, source_module.module_identity, symbol.id.key, marker, None)
+                    loop marker in field.serde_markers -> sema_comptime_add_marker_source(&sources, graph, &environment, source_module.module_identity, symbol.id.key, marker, None)
                 }
             }
-            loop function in definition.methods -> sema_comptime_add_function_sources(&sources, graph, source_module, function, "{nominal.symbol.id.key}::{function.name}")
+            loop function in definition.methods -> sema_comptime_add_function_sources(&sources, graph, &environment, source_module, function, "{nominal.symbol.id.key}::{function.name}")
             loop block in definition.trait_impls {
-                loop function in block.methods -> sema_comptime_add_function_sources(&sources, graph, source_module, function, "{nominal.symbol.id.key}::{function.name}")
+                loop function in block.methods -> sema_comptime_add_function_sources(&sources, graph, &environment, source_module, function, "{nominal.symbol.id.key}::{function.name}")
             }
         }
         .Enum(definition) -> {
@@ -5180,29 +5180,29 @@ fn sema_comptime_add_module_item_sources(sources: &SemaComptimeSourceList, graph
                         expression :: variant.discriminant_expr ?? Expr.Unit{span: variant.name_span}
                         destination_key := symbol.id.key
                         key := "{destination_key}::discriminant"
-                        sema_comptime_add_source(&sources, graph, source_module.module_identity, key, destination_key, "{definition.name}.{variant.name}", SemaComptimeItemKind.TypeLevel, expression, Val(Type.Int))
+                        sema_comptime_add_source(&sources, graph, &environment, source_module.module_identity, key, destination_key, "{definition.name}.{variant.name}", SemaComptimeItemKind.TypeLevel, expression, Val(Type.Int))
                     }
                 }
-                loop marker in variant.serde_markers -> sema_comptime_add_marker_source(&sources, graph, source_module.module_identity, "{nominal.symbol.id.key}::{variant.name}", marker, None)
+                loop marker in variant.serde_markers -> sema_comptime_add_marker_source(&sources, graph, &environment, source_module.module_identity, "{nominal.symbol.id.key}::{variant.name}", marker, None)
             }
-            loop function in definition.methods -> sema_comptime_add_function_sources(&sources, graph, source_module, function, "{nominal.symbol.id.key}::{function.name}")
+            loop function in definition.methods -> sema_comptime_add_function_sources(&sources, graph, &environment, source_module, function, "{nominal.symbol.id.key}::{function.name}")
             loop block in definition.trait_impls {
-                loop function in block.methods -> sema_comptime_add_function_sources(&sources, graph, source_module, function, "{nominal.symbol.id.key}::{function.name}")
+                loop function in block.methods -> sema_comptime_add_function_sources(&sources, graph, &environment, source_module, function, "{nominal.symbol.id.key}::{function.name}")
             }
         }
         .Impl(definition) -> {
             loop implementation in source_module.impls {
                 if implementation.declaration.type_name != definition.type_name -> next
-                loop method in implementation.methods -> sema_comptime_add_function_sources(&sources, graph, source_module, method.declaration, method.symbol.id.key)
+                loop method in implementation.methods -> sema_comptime_add_function_sources(&sources, graph, &environment, source_module, method.declaration, method.symbol.id.key)
             }
         }
         .Const(definition) -> {
             owner_key := symbol_id(SymbolKind.Constant, source_module.module_identity, "", definition.name).key
-            sema_comptime_add_meta_sources(&sources, graph, source_module.module_identity, owner_key, definition.meta)
+            sema_comptime_add_meta_sources(&sources, graph, &environment, source_module.module_identity, owner_key, definition.meta)
         }
         .Distinct(definition) -> {
             owner_key := symbol_id(SymbolKind.Type, source_module.module_identity, "", definition.name).key
-            loop marker in definition.type_markers -> sema_comptime_add_marker_source(&sources, graph, source_module.module_identity, owner_key, marker, None)
+            loop marker in definition.type_markers -> sema_comptime_add_marker_source(&sources, graph, &environment, source_module.module_identity, owner_key, marker, None)
         }
         else -> {}
     }
@@ -5221,7 +5221,7 @@ fn sema_comptime_collect_module_sources(graph: SemaRegistrationGraph, source_mod
         expression := constant.declaration.value
         expected := constant.declaration.ty
         if expected == None -> expected = constant.ty
-        sema_comptime_add_source(&sources, graph, source_module.module_identity, constant.symbol.id.key, constant.symbol.id.key, constant.declaration.name, SemaComptimeItemKind.Constant, expression, expected)
+        sema_comptime_add_source(&sources, graph, &environment, source_module.module_identity, constant.symbol.id.key, constant.symbol.id.key, constant.declaration.name, SemaComptimeItemKind.Constant, expression, expected)
     }
     loop item in source_module.program.items -> sema_comptime_add_module_item_sources(&sources, graph, source_module, item)
     items := ^sources.items

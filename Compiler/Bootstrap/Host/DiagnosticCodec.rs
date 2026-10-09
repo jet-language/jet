@@ -105,7 +105,8 @@ fn __jet_bootstrap_source_revision(path: &str, source: &str) -> String {
     })
 }
 fn __jet_bootstrap_validate_origin(
-    value: &::jet_foundation::Diagnostics::DiagnosticOrigin,
+    value: &::std::sync::Arc<::jet_foundation::Diagnostics::DiagnosticOrigin>,
+    origins: &mut __JetBootstrapDiagnosticOrigins,
     source_path: Option<&String>,
     generated_source_files: &[@t.MIRSourceFile@],
     snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
@@ -154,12 +155,14 @@ fn __jet_bootstrap_validate_origin(
     if value.source != expected_source {
         return Err(format!("diagnostic origin `{}` does not carry the authorized source snapshot", value.path));
     }
+    origins.insert(value.path.clone(), ::std::sync::Arc::clone(value));
     Ok(generated_origin)
 }
 fn __jet_bootstrap_cause_to_host(
     value: &@t.DiagnosticCause@,
     generated_source_files: &[@t.MIRSourceFile@],
     snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
+    origins: &mut __JetBootstrapDiagnosticOrigins,
 ) -> Result<::jet_foundation::Diagnostics::DiagnosticCause, String> {
     Ok(::jet_foundation::Diagnostics::DiagnosticCause {
         code: value.@f.DiagnosticCause.code@.clone(),
@@ -169,9 +172,9 @@ fn __jet_bootstrap_cause_to_host(
         },
         origin: match value.@f.DiagnosticCause.origin@.as_ref().ok() {
             Some(origin) => {
-                let origin = __jet_bootstrap_origin_to_host(origin);
-                __jet_bootstrap_validate_origin(&origin, None, generated_source_files, snapshot)?;
-                Some(::std::sync::Arc::new(origin))
+                let origin = ::std::sync::Arc::new(__jet_bootstrap_origin_to_host(origin));
+                __jet_bootstrap_validate_origin(&origin, origins, None, generated_source_files, snapshot)?;
+                Some(origin)
             }
             None => None,
         },
@@ -750,7 +753,7 @@ fn __jet_bootstrap_diagnostic_to_host_with_sources(
     let mut raw_source_start = 0usize;
     let mut generated_origin = false;
     if let Some(explicit) = origin.as_ref() {
-        generated_origin = __jet_bootstrap_validate_origin(explicit, source_path, generated_source_files, snapshot)?;
+        generated_origin = __jet_bootstrap_validate_origin(explicit, origins, source_path, generated_source_files, snapshot)?;
         report_source = explicit.source.as_str();
         if source_path.is_some() {
             let source_offset = source_offset.ok_or_else(|| "Jet diagnostic source path has no aggregate source offset".to_string())?;
@@ -863,7 +866,7 @@ fn __jet_bootstrap_diagnostic_to_host_with_sources(
         span,
         origin,
         labels,
-        cause: diagnostic.@f.Diagnostic.cause@.iter().map(|cause| __jet_bootstrap_cause_to_host(cause, generated_source_files, snapshot)).collect::<Result<Vec<_>, String>>()?,
+        cause: diagnostic.@f.Diagnostic.cause@.iter().map(|cause| __jet_bootstrap_cause_to_host(cause, generated_source_files, snapshot, origins)).collect::<Result<Vec<_>, String>>()?,
         edit,
         applicability: diagnostic.@f.Diagnostic.applicability@.as_ref().ok().map(__jet_bootstrap_applicability_to_host),
         safety: diagnostic.@f.Diagnostic.safety@.as_ref().ok().map(__jet_bootstrap_safety_to_host),
