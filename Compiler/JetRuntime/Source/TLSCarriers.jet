@@ -36,7 +36,10 @@ fn tls_trust_take(kind: I64, roots: I64) -> I64 {
 #Export(c) fn jet_rt_record_new_JetTLSTrust_SystemPlus(roots: I64) -> I64 { tls_trust_take(I64{1}, roots) }
 #Export(c) fn jet_rt_record_new_JetTLSTrust_CustomOnly(roots: I64) -> I64 { tls_trust_take(I64{2}, roots) }
 fn tls_trust_get(value: I64, kind: I64) -> I64 {
-    if (rt_text_word(value) != kind) -> rt_record_variant_panic()
+    if (rt_text_word(value) != kind) {
+        rt_record_variant_panic()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     jet_rt_handle_clone_JetTLSRootCertificates(value + I64{8})
 }
 #Export(c) fn jet_rt_record_get_JetTLSTrust_SystemPlus(value: I64) -> I64 { tls_trust_get(value, I64{1}) }

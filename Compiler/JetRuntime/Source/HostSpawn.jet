@@ -628,6 +628,7 @@ fn spawn_exec_child(plan: I64, count: I64, child: I64, scratch: I64, err_read: I
 
 #Export(c) fn jet_process_kill_raw(child: I64, signal: I64, group: Bool, error: I64) {
     native_signal :: host_i32(signal)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
     sync_mutex_lock(child)
     pid :: fd_word(child, I64{8})
     // std::process::Child::kill succeeds after its cached reap. Explicit
@@ -654,7 +655,9 @@ fn spawn_stream_dup(child: I64, stream: I64) -> I64 {
 
 fn spawn_stream_io(child: I64, stream: I64, bytes: I64, length: I64, number: I64, error: I64) -> I64 {
     index :: host_native_int(stream)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     requested :: host_native_int(length)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     packed :: spawn_stream_dup(child, index)
     if (packed < I64{0}) { return fd_error(packed, error) }
     native :: packed & I64{4294967295}
@@ -682,6 +685,7 @@ fn spawn_stream_io(child: I64, stream: I64, bytes: I64, length: I64, number: I64
 
 #Export(c) fn jet_process_close_stream_raw(child: I64, stream: I64, error: I64) {
     index :: host_native_int(stream)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
     sync_mutex_lock(child)
     offset :: spawn_stream_offset(child, index)
     native :: fd_word(child, offset)
@@ -692,7 +696,11 @@ fn spawn_stream_io(child: I64, stream: I64, bytes: I64, length: I64, number: I64
 }
 
 #Export(c) fn jet_process_resize_raw(child: I64, cols: I64, rows: I64, error: I64) {
-    size :: (host_native_int(rows) & I64{65535}) | ((host_native_int(cols) & I64{65535}) << I64{16})
+    native_rows :: host_native_int(rows)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    native_cols :: host_native_int(cols)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    size :: (native_rows & I64{65535}) | ((native_cols & I64{65535}) << I64{16})
     sync_mutex_lock(child)
     master :: fd_word(child, I64{56})
     result := I64{-9}
@@ -759,6 +767,7 @@ fn spawn_stream_io(child: I64, stream: I64, bytes: I64, length: I64, number: I64
 // terminal view; it is never passed to a syscall.
 #Export(c) fn jet_process_take_stream_raw(child: I64, stream: I64, error: I64) -> I64 {
     index :: host_native_int(stream)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     sync_mutex_lock(child)
     offset :: wrapping(I64{32} + index * I64{8})
     master :: fd_word(child, I64{56})

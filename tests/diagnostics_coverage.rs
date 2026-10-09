@@ -446,6 +446,42 @@ fn runtime_stop_renderer_accepts_only_active_runtime_rows() {
 }
 
 #[test]
+fn sentry_metadata_uses_the_returned_fault_exit_code() {
+    use jet_foundation::Outcome::{
+        jet_render_runtime_sentry, jet_render_runtime_sentry_with_context,
+    };
+
+    for code in ["R0801", "R0802", "R0803"] {
+        for report in [
+            jet_render_runtime_sentry(
+                code, "probe.jet", 7, "probe gate", "read", "valid_ptr", "runtime probe",
+            ),
+            jet_render_runtime_sentry_with_context(
+                code, "probe.jet", 7, "probe gate", "read", "valid_ptr", "runtime probe",
+                "false", Some("tokenizer"), Some(true),
+            ),
+        ] {
+            assert_eq!(report.code, code);
+            assert_eq!(report.source, "runtime");
+            assert_eq!(report.exit_code, 70);
+            let metadata = report.rendered.lines()
+                .filter_map(|line| line.strip_prefix("exit: "))
+                .collect::<Vec<_>>();
+            assert_eq!(metadata, [report.exit_code.to_string()], "{code}: {}", report.rendered);
+            assert!(report.obligation.is_some());
+        }
+    }
+
+    let unknown = jet_render_runtime_sentry(
+        "__unknown_runtime_sentry__", "probe.jet", 7, "probe gate",
+        "read", "valid_ptr", "runtime probe",
+    );
+    assert_eq!(unknown.exit_code, 101);
+    assert_eq!(unknown.source, "host");
+    assert!(!unknown.rendered.lines().any(|line| line.starts_with("exit: ")));
+}
+
+#[test]
 fn ffi_runtime_stop_keeps_one_jet_source_frame() {
     let report = jet_foundation::Outcome::jet_render_runtime_stop(
         "E3014",

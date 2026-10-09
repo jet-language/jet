@@ -69,6 +69,8 @@ if (mode === 'assemble') {
   writeFileSync(join(out, 'ledger-stop.receipt.json'), JSON.stringify({ status: stopped.status, signal: stopped.signal,
     error: stopped.error?.message ?? null, stdout: stopped.stdout, stderr: stopped.stderr }, null, 2) + '\n');
   if (stopped.error || stopped.signal || stopped.status !== 70 || stopped.stdout !== '' || !stopped.stderr?.includes('R0802')) failures.push('fault+stop did not produce the canonical R0802 exit70');
+  const exitMetadata = stopped.stderr?.split('\n').filter(line => line.startsWith('exit: ')) ?? [];
+  if (exitMetadata.length !== 1 || exitMetadata[0] !== `exit: ${stopped.status}`) failures.push('sentry report exit metadata differs from the actual fault status');
   try {
     const reference = readFileSync(referencePath), native = readFileSync(nativePath);
     if (!reference.equals(native)) throw Error('ledger JSONL differs byte-for-byte from canonical Rust writer');

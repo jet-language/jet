@@ -583,6 +583,13 @@ fn run() {
         }
         for (tier, (exit_code, stdout, stderr)) in tiers {
             assert_eq!(exit_code, 70, "{tier} changed {code} exit status: {stderr}");
+            let metadata = stderr.lines()
+                .filter_map(|line| line.strip_prefix("exit: "))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                metadata, [exit_code.to_string()],
+                "{tier} changed {code} report exit metadata: {stderr}"
+            );
             assert!(
                 stdout.is_empty(),
                 "{tier} leaked stdout for {code}: {stdout}"

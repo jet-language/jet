@@ -2652,6 +2652,7 @@ pub fn jet_render_runtime_sentry_from_row(
     foreign_component: Option<&str>,
     foreign_fenced: Option<bool>,
 ) -> JetRuntimeDiagnostic {
+    let exit_code = jet_runtime_stop_status(row);
     let obligation_report = Some(JetRuntimeObligation {
         name: obligation.to_string(),
         status: JetRuntimeObligationStatus::Failed,
@@ -2686,7 +2687,7 @@ pub fn jet_render_runtime_sentry_from_row(
             why: why.to_string(),
             fix: fix.to_string(),
             rendered,
-            exit_code: 101,
+            exit_code,
             obligation: obligation_report,
             foreign: foreign_report,
         };
@@ -2727,7 +2728,8 @@ pub fn jet_render_runtime_sentry_from_row(
             if foreign.fenced { "fenced" } else { "unfenced" }
         ));
     }
-    rendered.push_str("exit: 1\n");
+    std::fmt::Write::write_fmt(&mut rendered, format_args!("exit: {exit_code}\n"))
+        .expect("String formatting cannot fail");
     rendered.push_str(&jet_diagnostic_more_line(code));
     rendered.push('\n');
     JetRuntimeDiagnostic {
@@ -2737,7 +2739,7 @@ pub fn jet_render_runtime_sentry_from_row(
         why,
         fix,
         rendered,
-        exit_code: 70,
+        exit_code,
         obligation: obligation_report,
         foreign: foreign_report,
     }

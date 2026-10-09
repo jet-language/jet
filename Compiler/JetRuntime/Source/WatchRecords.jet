@@ -1,8 +1,13 @@
 // CommonTypes.rs:640-665 derive Clone/PartialEq; CAbiRoutes.rs:12158-12195.
 #Export(c) fn jet_rt_record_new_WatchEvent(domain: I64, kind: I64, path: I64, detail: I64, pid: I64, port: I64) -> I64 {
-    if (domain < I64{0} || domain > I64{2} || kind < I64{0} || kind > I64{5}) -> trap_native_index_range_stop()
+    if (domain < I64{0} || domain > I64{2} || kind < I64{0} || kind > I64{5}) {
+        trap_native_index_range_stop()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     p :: jet_int_owned_to_i64(pid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     n :: jet_int_owned_to_i64(port)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     value :: jet_rt_alloc(WATCH_EVENT_BYTES, I64{8})
     data_tree_store(value + WATCH_EVENT_DOMAIN, domain)
     data_tree_store(value + WATCH_EVENT_KIND, kind)

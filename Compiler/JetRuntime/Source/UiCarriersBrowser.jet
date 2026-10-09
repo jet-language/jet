@@ -22,7 +22,11 @@
 #Export(c) fn jet_rt_record_get_JetBrowserProfile_name(value: I64) -> I64 { jet_rt_string_clone(ui_carrier_word(value + UI_CARRIER_BROWSER_PROFILE_NAME)) }
 #Export(c) fn jet_rt_record_get_JetBrowserProfile_version(value: I64) -> I64 { jet_rt_string_clone(ui_carrier_word(value + UI_CARRIER_BROWSER_PROFILE_VERSION)) }
 
-#Export(c) fn jet_rt_record_new_JetBrowserTimeout(m0: I64) -> I64 { ui_carrier_scalar_new(jet_int_owned_to_i64(m0)) }
+#Export(c) fn jet_rt_record_new_JetBrowserTimeout(m0: I64) -> I64 {
+    raw :: jet_int_owned_to_i64(m0)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    ui_carrier_scalar_new(raw)
+}
 #Export(c) fn jet_rt_handle_clone_JetBrowserTimeout(value: I64) -> I64 { ui_carrier_scalar_new(ui_carrier_word(value + UI_CARRIER_BROWSER_TIMEOUT_MS)) }
 #Export(c) fn jet_rt_handle_drop_JetBrowserTimeout(value: I64) { ui_carrier_scalar_drop(value) }
 #Export(c) fn jet_rt_handle_eq_JetBrowserTimeout(a: I64, b: I64) -> Bool { ui_carrier_word(a + UI_CARRIER_BROWSER_TIMEOUT_MS) == ui_carrier_word(b + UI_CARRIER_BROWSER_TIMEOUT_MS) }
@@ -40,6 +44,7 @@ fn ui_carrier_browser_locked_new(engine: I64, version: I64, binary: I64, protoco
 }
 #Export(c) fn jet_rt_record_new_JetBrowserLocked(m0: I64, m1: I64, m2: I64, m3: I64, m4: I64, m5: I64) -> I64 {
     size :: jet_int_owned_to_i64(m4)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     ui_carrier_browser_locked_new(m0, m1, m2, m3, size, m5)
 }
 #Export(c) fn jet_rt_handle_clone_JetBrowserLocked(value: I64) -> I64 {

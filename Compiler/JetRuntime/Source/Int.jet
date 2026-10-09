@@ -339,6 +339,41 @@ fn int_stop(file: I64, file_len: I64, line: I64, reason: I64) {
         trap_native_index_range_stop()
         return
     }
+    // ExactNumeric.rs:88-93 and NumericConversion.rs:115-116 own these
+    // raw reasons. Root rendering below remains byte-for-byte unchanged.
+    message :: jet_rt_alloc(I64{40}, I64{8})
+    length := I64{15}
+    if {
+        (reason == I64{0}) -> {
+            trap_store(message, I64{2334101988825262436})
+            trap_store(message + I64{8}, I64{31369502581094754})
+        }
+        (reason == I64{1}) -> {
+            length = I64{29}
+            trap_store(message, I64{7311146993653867854})
+            trap_store(message + I64{8}, I64{8389209267074589728})
+            trap_store(message + I64{16}, I64{8104338719519951136})
+            trap_store(message + I64{24}, I64{500068347503})
+        }
+        (reason == I64{2}) -> {
+            length = I64{19}
+            trap_store(message, I64{2334106421097295433})
+            trap_store(message + I64{8}, I64{8026294645210835059})
+            trap_store(message + I64{16}, I64{7630453})
+        }
+        (reason == I64{3}) -> {
+            length = I64{37}
+            trap_store(message, I64{8026576056014889302})
+            trap_store(message + I64{8}, I64{7594793504856765285})
+            trap_store(message + I64{16}, I64{8315162377463603316})
+            trap_store(message + I64{24}, I64{7957695015158704500})
+            trap_store(message + I64{32}, I64{435678704672})
+        }
+        else -> jet_rt_unreachable(I64{0}, I64{0})
+    }
+    published :: rt_task_panic_publish(message, length, I64{0})
+    jet_rt_free(message, I64{40}, I64{8})
+    if published -> return
     trap_header(I64{1})
     if {
         (reason == I64{0}) -> trap_msg_divide_zero()
@@ -370,14 +405,23 @@ fn int_stop(file: I64, file_len: I64, line: I64, reason: I64) {
 #Export(c) fn jet_int_owned_to_i64(value: I64) -> I64 {
     if int_inline(value) -> return value
     bound :: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}
-    if !int_fits(value, bound) -> int_stop(I64{0}, I64{0}, I64{0}, I64{4})
+    if !int_fits(value, bound) {
+        int_stop(I64{0}, I64{0}, I64{0}, I64{4})
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     int_word(value)
 }
 
 #Export(c) fn jet_int_checked_fixed(value: I64, kind: I64, file: I64, file_len: I64, line: I64) -> I64 {
-    if (kind < I64{0} || kind > I64{7}) { int_stop(file, file_len, line, I64{3}) }
+    if (kind < I64{0} || kind > I64{7}) {
+        int_stop(file, file_len, line, I64{3})
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     negative :: int_negative(value)
-    if (kind >= I64{4} && negative) { int_stop(file, file_len, line, I64{3}) }
+    if (kind >= I64{4} && negative) {
+        int_stop(file, file_len, line, I64{3})
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     bound := U64{18446744073709551615}
     if {
         (kind == I64{0}) -> bound = if negative -> U64{128} else -> U64{127}
@@ -391,7 +435,10 @@ fn int_stop(file: I64, file_len: I64, line: I64, reason: I64) {
         (kind == I64{6}) -> bound = U64{4294967295}
         else -> {}
     }
-    if !int_fits(value, bound) -> int_stop(file, file_len, line, I64{3})
+    if !int_fits(value, bound) {
+        int_stop(file, file_len, line, I64{3})
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     int_word(value)
 }
 
@@ -429,7 +476,10 @@ fn int_sub_assign(node: I64, value: I64) {
 
 // kind: trunc quotient/remainder, floor quotient/modulo, Euclid quotient/rest.
 fn int_division(left: I64, right: I64, file: I64, file_len: I64, line: I64, kind: I64) -> I64 {
-    if (right == I64{0}) { int_stop(file, file_len, line, I64{0}) }
+    if (right == I64{0}) {
+        int_stop(file, file_len, line, I64{0})
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     if int_inline(left) && int_inline(right) {
         initial_r :: left %% right
         initial_q :: (left - initial_r) /% right
@@ -558,12 +608,14 @@ fn int_scale(node: I64, factor: I64, add: I64) {
 fn int_shift_count(count: I64, file: I64, len: I64, line: I64) -> I64 {
     if int_negative(count) || !int_fits(count, U64{9223372036854775807}) {
         int_stop(file, len, line, I64{2})
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     }
     int_word(count)
 }
 
 #Export(c) fn jet_int_shl(value: I64, count: I64, file: I64, len: I64, line: I64) -> I64 {
     bits :: int_shift_count(count, file, len, line)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if (value == I64{0}) { return I64{0} }
     if (int_inline(value) && bits < I64{63}) {
         shifted :: value << bits
@@ -581,6 +633,7 @@ fn int_shift_count(count: I64, file: I64, len: I64, line: I64) -> I64 {
 
 #Export(c) fn jet_int_shr(value: I64, count: I64, file: I64, len: I64, line: I64) -> I64 {
     bits :: int_shift_count(count, file, len, line)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if int_inline(value) {
         step :: if (bits > I64{63}) -> I64{63} else -> bits
         return value >> step
@@ -602,7 +655,10 @@ fn int_shift_count(count: I64, file: I64, len: I64, line: I64) -> I64 {
 }
 
 #Export(c) fn jet_int_pow(value: I64, exponent: I64, file: I64, len: I64, line: I64) -> I64 {
-    if int_negative(exponent) -> int_stop(file, len, line, I64{1})
+    if int_negative(exponent) {
+        int_stop(file, len, line, I64{1})
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     if (exponent == I64{0}) { return I64{1} }
     if (value == I64{0} || value == I64{1}) { return value }
     if (value == I64{-1}) {

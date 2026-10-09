@@ -76,9 +76,13 @@ fn fd_new(number: I64, path: I64, writer: Bool) -> I64 {
 }
 
 #Export(c) fn jet_fd_open_raw(path: I64, flags: I64, mode: I64, errno: I64) -> I64 {
+    native_flags :: host_native_int(flags)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    native_mode :: host_native_int(mode)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     name :: fd_c_path(path)
-    bits :: fd_open_flags(host_native_int(flags))
-    result :: host_call(I64{2}, name, bits | I64{524288}, host_native_int(mode) & I64{4294967295})
+    bits :: fd_open_flags(native_flags)
+    result :: host_call(I64{2}, name, bits | I64{524288}, native_mode & I64{4294967295})
     fd_c_path_drop(name, path)
     _ := fd_error(result, errno)
     if (result < I64{0}) -> I64{0} else -> fd_new(result, path, (bits & I64{3}) != I64{0})
@@ -86,7 +90,9 @@ fn fd_new(number: I64, path: I64, writer: Bool) -> I64 {
 
 // Takes ownership of a native descriptor supplied by another runtime leaf.
 #Export(c) fn jet_fd_adopt_raw(number: I64, path: I64, writer: Bool) -> I64 {
-    fd_new(host_i32(number), path, writer)
+    native :: host_i32(number)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    fd_new(native, path, writer)
 }
 
 #Export(c) fn jet_fd_number_raw(state: I64) -> I64 {
@@ -151,6 +157,7 @@ fn fd_read_error(result: I64, error: I64) -> I64 {
 // owns buffering/retry; EINTR is a real POSIX ErrorOut32 code4, not swallowed.
 #Export(c) fn jet_fd_read_raw(state: I64, bytes: I64, length: I64, error: I64) -> I64 {
     requested :: host_native_int(length)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     fd_lock(state)
     result := fd_flush_locked(state)
     if (result == I64{0}) {
@@ -163,6 +170,7 @@ fn fd_read_error(result: I64, error: I64) -> I64 {
 
 #Export(c) fn jet_fd_write_raw(state: I64, bytes: I64, length: I64, errno: I64, zero: I64) -> I64 {
     requested :: host_native_int(length)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
@@ -216,11 +224,13 @@ fn fd_read_error(result: I64, error: I64) -> I64 {
 }
 
 #Export(c) fn jet_fd_seek_raw(state: I64, offset: I64, whence: I64, errno: I64, zero: I64) -> I64 {
+    delta :: host_native_int(offset)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    origin :: host_i32(whence)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     fd_lock(state)
     result := fd_flush_locked(state)
     if (result == I64{0}) {
-        delta := host_native_int(offset)
-        origin :: host_i32(whence)
         result = host_call(I64{8}, fd_word(state, I64{8}), delta, origin)
         if (result >= I64{0}) {
             fd_put(state, I64{48}, I64{0})
@@ -260,11 +270,15 @@ fn fd_operation(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
 }
 
 #Export(c) fn jet_fd_chmod_raw(state: I64, mode: I64, errno: I64) {
-    fd_operation(state, I64{91}, host_native_int(mode) & I64{4294967295}, I64{0}, errno)
+    native :: host_native_int(mode)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    fd_operation(state, I64{91}, native & I64{4294967295}, I64{0}, errno)
 }
 
 #Export(c) fn jet_fd_lock_raw(state: I64, operation: I64, errno: I64) {
-    fd_operation(state, I64{73}, host_i32(operation), I64{0}, errno)
+    native :: host_i32(operation)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    fd_operation(state, I64{73}, native, I64{0}, errno)
 }
 
 #Export(c) fn jet_fd_close_raw(state: I64, errno: I64, zero: I64) {
@@ -343,8 +357,10 @@ fn fd_operation(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
 }
 
 #Export(c) fn jet_fs_mkdir_raw(path: I64, mode: I64, errno: I64) {
+    native :: host_native_int(mode)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
     name :: fd_c_path(path)
-    result :: host_call(I64{83}, name, host_native_int(mode) & I64{4294967295}, I64{0})
+    result :: host_call(I64{83}, name, native & I64{4294967295}, I64{0})
     fd_c_path_drop(name, path)
     _ := fd_error(result, errno)
 }
@@ -375,8 +391,10 @@ fn fd_operation(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
 }
 
 #Export(c) fn jet_fd_directory_raw(state: I64, bytes: I64, length: I64, errno: I64) -> I64 {
+    requested :: host_native_int(length)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     fd_lock(state)
-    result :: if (fd_word(state, I64{16}) != I64{0}) -> I64{-9} else -> host_call(I64{217}, fd_word(state, I64{8}), bytes, host_native_int(length))
+    result :: if (fd_word(state, I64{16}) != I64{0}) -> I64{-9} else -> host_call(I64{217}, fd_word(state, I64{8}), bytes, requested)
     fd_unlock(state)
     fd_error(result, errno)
 }
@@ -388,13 +406,17 @@ fn fd_zero(result: I64, zero: I64) {
 }
 
 #Export(c) fn jet_fd_open_at_raw(directory: I64, path: I64, flags: I64, mode: I64, errno: I64) -> I64 {
+    native_flags :: host_native_int(flags)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    native_mode :: host_native_int(mode)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     name :: fd_c_path(path)
-    bits :: fd_open_flags(host_native_int(flags))
+    bits :: fd_open_flags(native_flags)
     fd_lock(directory)
     result := I64{-9}
     if (fd_word(directory, I64{16}) == I64{0}) {
         #Unsafe("the held directory and terminated source-approved single name stay live through openat") {
-            result = os_syscall_i64(I64{257}, fd_word(directory, I64{8}), name, bits | I64{524288}, host_native_int(mode) & I64{4294967295}, I64{0}, I64{0})
+            result = os_syscall_i64(I64{257}, fd_word(directory, I64{8}), name, bits | I64{524288}, native_mode & I64{4294967295}, I64{0}, I64{0})
         }
     }
     fd_unlock(directory)
@@ -498,13 +520,16 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
 }
 
 #Export(c) fn jet_fd_adopt_unbuffered_raw(number: I64, path: I64) -> I64 {
-    state :: fd_new(host_i32(number), path, false)
+    native :: host_i32(number)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    state :: fd_new(native, path, false)
     fd_put(state, I64{40}, I64{0})
     state
 }
 
 #Export(c) fn jet_fd_write_unbuffered_raw(state: I64, bytes: I64, length: I64, error: I64) -> I64 {
     requested :: host_native_int(length)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
@@ -518,12 +543,16 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
 }
 
 #Export(c) fn jet_fd_truncate_raw(state: I64, length: I64, errno: I64) {
-    fd_operation(state, I64{77}, host_native_int(length), I64{0}, errno)
+    native :: host_native_int(length)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    fd_operation(state, I64{77}, native, I64{0}, errno)
 }
 
 #Export(c) fn jet_fs_readlink_raw(path: I64, bytes: I64, length: I64, errno: I64) -> I64 {
+    requested :: host_native_int(length)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     name :: fd_c_path(path)
-    result :: host_call(I64{89}, name, bytes, host_native_int(length))
+    result :: host_call(I64{89}, name, bytes, requested)
     fd_c_path_drop(name, path)
     fd_error(result, errno)
 }
@@ -532,11 +561,13 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
 // bytes=0,length=0. Source owns absence/Unsupported mapping, allocation and
 // ERANGE retry; this leaf reports exactly one syscall's count or POSIX error.
 #Export(c) fn jet_fs_xattr_get_raw(path: I64, attribute: I64, bytes: I64, length: I64, error: I64) -> I64 {
+    requested :: host_native_int(length)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     name :: fd_c_path(path)
     key :: fd_c_path(attribute)
     result := I64{0}
     #Unsafe("both terminated borrowed names and the caller's optional compact byte output remain live only through lgetxattr") {
-        result = os_syscall_i64(I64{192}, name, key, bytes, host_native_int(length), I64{0}, I64{0})
+        result = os_syscall_i64(I64{192}, name, key, bytes, requested, I64{0}, I64{0})
     }
     fd_c_path_drop(key, attribute)
     fd_c_path_drop(name, path)
@@ -544,8 +575,10 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
 }
 
 #Export(c) fn jet_fd_mkdir_at_raw(directory: I64, path: I64, mode: I64, errno: I64) {
+    native :: host_native_int(mode)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
     name :: fd_c_path(path)
-    fd_operation(directory, I64{258}, name, host_native_int(mode) & I64{4294967295}, errno)
+    fd_operation(directory, I64{258}, name, native & I64{4294967295}, errno)
     fd_c_path_drop(name, path)
 }
 
@@ -556,12 +589,14 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
 }
 
 #Export(c) fn jet_fd_readlink_at_raw(directory: I64, path: I64, bytes: I64, length: I64, errno: I64) -> I64 {
+    requested :: host_native_int(length)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     name :: fd_c_path(path)
     fd_lock(directory)
     result := I64{-9}
     if (fd_word(directory, I64{16}) == I64{0}) {
         #Unsafe("the held directory, terminated plain name and writable byte range are borrowed only through readlinkat") {
-            result = os_syscall_i64(I64{267}, fd_word(directory, I64{8}), name, bytes, host_native_int(length), I64{0}, I64{0})
+            result = os_syscall_i64(I64{267}, fd_word(directory, I64{8}), name, bytes, requested, I64{0}, I64{0})
         }
     }
     fd_unlock(directory)
@@ -570,6 +605,8 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
 }
 
 #Export(c) fn jet_fd_rename_at_raw(source: I64, old: I64, destination: I64, new: I64, flags: I64, errno: I64) {
+    native_flags :: host_native_int(flags)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
     a :: fd_dup_number(source)
     if (a < I64{0}) {
         _ := fd_error(a, errno)
@@ -585,7 +622,7 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
     new_name :: fd_c_path(new)
     result := I64{0}
     #Unsafe("held directory duplicates and terminated names prevent any descriptor-close/reuse race during renameat2") {
-        result = os_syscall_i64(I64{316}, a, old_name, b, new_name, host_native_int(flags) & I64{4294967295}, I64{0})
+        result = os_syscall_i64(I64{316}, a, old_name, b, new_name, native_flags & I64{4294967295}, I64{0})
     }
     fd_c_path_drop(old_name, old)
     fd_c_path_drop(new_name, new)
@@ -596,7 +633,11 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
 
 // Independent terminal-control FD72 can outlive the ProcessChild carrier.
 #Export(c) fn jet_fd_resize_raw(state: I64, cols: I64, rows: I64, error: I64) {
-    size :: (host_native_int(rows) & I64{65535}) | ((host_native_int(cols) & I64{65535}) << I64{16})
+    native_rows :: host_native_int(rows)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    native_cols :: host_native_int(cols)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    size :: (native_rows & I64{65535}) | ((native_cols & I64{65535}) << I64{16})
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {

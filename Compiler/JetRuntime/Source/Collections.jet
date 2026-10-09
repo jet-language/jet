@@ -233,12 +233,16 @@ fn coll_bits_bound(bits: I64, value: I64) -> I64 {
     count :: trap_word(bits)
     if (count == I64{0}) { return I64{0} }
     last :: trap_word(trap_word(bits + I64{16}) + (count - I64{1}) * I64{8})
-    if (last == I64{9223372036854775807}) { jet_rt_panic_overflow() }
+    if (last == I64{9223372036854775807}) {
+        jet_rt_panic_overflow()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     jet_int_owned_from_i64(last + I64{1})
 }
 
 #Export(c) fn jet_bit_set_has(bits: I64, carrier: I64) -> Bool {
     value :: jet_int_owned_to_i64(carrier)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return false
     at :: coll_bits_bound(bits, value)
     if at == trap_word(bits) -> return false
     trap_word(trap_word(bits + I64{16}) + at * I64{8}) == value
@@ -246,6 +250,7 @@ fn coll_bits_bound(bits: I64, value: I64) -> I64 {
 
 #Export(c) fn jet_bitset_add(bits: I64, carrier: I64) -> Bool {
     value :: jet_int_owned_to_i64(carrier)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return false
     if (value < I64{0}) { return false }
     at :: coll_bits_bound(bits, value)
     length :: trap_word(bits)
@@ -273,6 +278,7 @@ fn coll_bits_bound(bits: I64, value: I64) -> I64 {
 
 #Export(c) fn jet_bitset_remove(bits: I64, carrier: I64) {
     value :: jet_int_owned_to_i64(carrier)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
     at := coll_bits_bound(bits, value)
     length :: trap_word(bits)
     data :: trap_word(bits + I64{16})
@@ -714,13 +720,19 @@ fn coll_ordered_map_render(map: I64) -> I64 {
 
 fn coll_i64_add(left: I64, right: I64) -> I64 {
     result :: wrapping(left + right)
-    if (((left ^ result) & (right ^ result)) < I64{0}) { jet_rt_panic_overflow() }
+    if (((left ^ result) & (right ^ result)) < I64{0}) {
+        jet_rt_panic_overflow()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     result
 }
 
 fn coll_i64_sub(left: I64, right: I64) -> I64 {
     result :: wrapping(left - right)
-    if (((left ^ right) & (left ^ result)) < I64{0}) { jet_rt_panic_overflow() }
+    if (((left ^ right) & (left ^ result)) < I64{0}) {
+        jet_rt_panic_overflow()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     result
 }
 
@@ -763,6 +775,7 @@ fn coll_counter_delta(counter: I64, key: I64, amount: I64) {
         if jet_rt_string_eq(trap_word(keys + at * I64{8}), key) {
             found = true
             next :: coll_i64_add(trap_word(counts + at * I64{8}), amount)
+            if (jet_scheduler_native_propagate() != I64{0}) -> return
             if (next == I64{0}) { coll_counter_remove(counter, at) } else {
                 trap_store(counts + at * I64{8}, next)
                 at += I64{1}
@@ -785,6 +798,10 @@ fn coll_counter_delta(counter: I64, key: I64, amount: I64) {
     at := I64{0}
     loop at < length {
         coll_counter_delta(result, trap_word(keys + at * I64{8}), I64{1})
+        if (jet_scheduler_native_propagate() != I64{0}) {
+            jet_rt_handle_drop_JetCounter(result)
+            return I64{0}
+        }
         at += I64{1}
     }
     result
@@ -794,6 +811,10 @@ fn coll_counter_delta(counter: I64, key: I64, amount: I64) {
     capacity :: trap_word(counter) + (if (amount == I64{0}) -> I64{0} else -> I64{1})
     result :: coll_counter_copy_capacity(counter, capacity)
     coll_counter_delta(result, key, amount)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_JetCounter(result)
+        return I64{0}
+    }
     result
 }
 
@@ -815,7 +836,9 @@ fn coll_counter_get(counter: I64, key: I64) -> I64 {
 }
 
 #Export(c) fn jet_coll_counter_set_count(counter: I64, key: I64, count: I64) -> I64 {
-    jet_coll_counter_add(counter, key, coll_i64_sub(count, coll_counter_get(counter, key)))
+    amount :: coll_i64_sub(count, coll_counter_get(counter, key))
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_coll_counter_add(counter, key, amount)
 }
 
 #Export(c) fn jet_coll_counter_total(counter: I64) -> I64 {
@@ -825,6 +848,7 @@ fn coll_counter_get(counter: I64, key: I64) -> I64 {
     at := I64{0}
     loop at < length {
         total = coll_i64_add(total, trap_word(counts + at * I64{8}))
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
         at += I64{1}
     }
     jet_int_owned_from_i64(total)
@@ -842,7 +866,10 @@ fn coll_counter_get(counter: I64, key: I64) -> I64 {
     at := I64{0}
     loop at < length {
         count :: trap_word(counts + at * I64{8})
-        if (count > I64{0}) { total = coll_i64_add(total, count) }
+        if (count > I64{0}) {
+            total = coll_i64_add(total, count)
+            if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        }
         at += I64{1}
     }
     result :: coll_i64_output(total, out_data)
@@ -900,7 +927,16 @@ fn coll_counter_merge(left: I64, right: I64, subtract: Bool) -> I64 {
     at := I64{0}
     loop at < trap_word(right) {
         count :: trap_word(counts + at * I64{8})
-        coll_counter_delta(result, trap_word(keys + at * I64{8}), if subtract -> coll_i64_sub(I64{0}, count) else -> count)
+        amount :: if subtract -> coll_i64_sub(I64{0}, count) else -> count
+        if (jet_scheduler_native_propagate() != I64{0}) {
+            jet_rt_handle_drop_JetCounter(result)
+            return I64{0}
+        }
+        coll_counter_delta(result, trap_word(keys + at * I64{8}), amount)
+        if (jet_scheduler_native_propagate() != I64{0}) {
+            jet_rt_handle_drop_JetCounter(result)
+            return I64{0}
+        }
         at += I64{1}
     }
     result
@@ -1069,13 +1105,16 @@ fn coll_chain_value(chain: I64, key: I64) -> I64 {
 
 #Export(c) fn jet_coll_chain_get(chain: I64, key: I64, some: I64) -> I64 {
     value :: coll_chain_value(chain, key)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if (value == I64{0}) { return I64{0} }
     trap_store(some, jet_rt_string_clone(value))
     I64{1}
 }
 
 #Export(c) fn jet_coll_chain_contains(chain: I64, key: I64) -> Bool {
-    coll_chain_value(chain, key) != I64{0}
+    value :: coll_chain_value(chain, key)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return false
+    value != I64{0}
 }
 
 fn coll_layer_render_into(layer: I64, text: I64, scratch: I64) {
@@ -1149,8 +1188,11 @@ fn coll_loop_range_stop(exhausted: Bool) {
 
 #Export(c) fn jet_loop_range_init(start: I64, end: I64, step: I64, has_step: U8, exclusive: U8) -> I64 {
     stride :: if (has_step == U8{0}) -> I64{1} else -> jet_int_owned_to_i64(step)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     first :: jet_int_owned_to_i64(start)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     last :: jet_int_owned_to_i64(end)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if (stride == I64{0}) { coll_loop_range_stop(false) }
     cursor :: jet_rt_alloc(I64{40}, I64{8})
     trap_store(cursor, first)

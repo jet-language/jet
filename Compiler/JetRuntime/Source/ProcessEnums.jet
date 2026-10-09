@@ -38,6 +38,10 @@ fn process_resource_label(target: I64, ordinal: I64, debug: Bool) {
 fn process_resource_render(value: I64, debug: Bool) -> I64 {
     target :: jet_rt_string_builder_new()
     process_resource_label(target, encoding_word(value + ENCODING_ENUM_TAG), debug)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_string_drop(target)
+        return I64{0}
+    }
     jet_rt_string_builder_finish(target)
 }
 #Export(c) fn jet_rt_handle_show_ProcessResourceLimit(value: I64) -> I64 { process_resource_render(value, false) }

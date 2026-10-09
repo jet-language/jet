@@ -116,5 +116,7 @@ fn host_stdio_facts(failure: I64, errno: I64, write_zero: I64) {
 #Export(c) fn jet_stdio_stderr_tty_raw() -> Bool { host_is_tty(I64{2}) }
 
 #Export(c) fn jet_sys_errno_text_raw(errno: I64) -> I64 {
-    host_errno_cause(host_i32(errno))
+    native :: host_i32(errno)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    host_errno_cause(native)
 }

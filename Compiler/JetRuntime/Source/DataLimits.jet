@@ -29,11 +29,17 @@ fn data_limits_store(address: I64, value: I64) {
 #Export(c) fn jet_rt_record_new_EncodingLimits(buffer: I64, depth: I64, item: I64, total: I64, expansion_depth: I64, expansion_bytes: I64) -> I64 {
     // Native conversion is borrowed and uses the shared exact CAbi stop site.
     raw_buffer :: jet_int_owned_to_i64(buffer)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     raw_depth :: jet_int_owned_to_i64(depth)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     raw_item :: jet_int_owned_to_i64(item)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     raw_total :: if (total == I64{0}) -> I64{0} else -> jet_int_owned_to_i64(data_limits_word(total))
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     raw_expansion_depth :: jet_int_owned_to_i64(expansion_depth)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     raw_expansion_bytes :: jet_int_owned_to_i64(expansion_bytes)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     result :: jet_rt_alloc(ENCODING_LIMITS_BYTES, I64{8})
     data_limits_store(result + ENCODING_LIMITS_BUFFER_BYTES, raw_buffer)
     data_limits_store(result + ENCODING_LIMITS_MAX_DEPTH, raw_depth)
@@ -75,9 +81,25 @@ fn data_limits_store(address: I64, value: I64) {
 }
 #Export(c) fn jet_rt_record_new_DataLimits(encoding: I64, groups: I64, sort_rows: I64, join_rows: I64, output_rows: I64) -> I64 {
     raw_groups :: jet_int_owned_to_i64(groups)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_EncodingLimits(encoding)
+        return I64{0}
+    }
     raw_sort :: jet_int_owned_to_i64(sort_rows)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_EncodingLimits(encoding)
+        return I64{0}
+    }
     raw_join :: jet_int_owned_to_i64(join_rows)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_EncodingLimits(encoding)
+        return I64{0}
+    }
     raw_output :: jet_int_owned_to_i64(output_rows)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_EncodingLimits(encoding)
+        return I64{0}
+    }
     result :: jet_rt_alloc(DATA_LIMITS_BYTES, I64{8})
     data_limits_store(result + DATA_LIMITS_ENCODING, encoding)
     data_limits_store(result + DATA_LIMITS_MAX_GROUPS, raw_groups)

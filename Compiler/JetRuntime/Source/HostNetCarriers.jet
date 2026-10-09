@@ -50,6 +50,7 @@ fn net_stream_drop(value: I64) {
 #Export(c) fn jet_socket_stream_timeout_set_raw(value: I64, directions: I64, milliseconds: I64) {
     // milliseconds is the route's borrowed exact-Int word, source validated.
     duration :: host_native_int(milliseconds)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
     mutex :: wrapping(value + I64{48})
     sync_mutex_lock(mutex)
     if ((directions & I64{1}) != I64{0}) -> net_put(value, I64{32}, duration)
@@ -126,6 +127,7 @@ fn net_listener_drop(value: I64) {
 }
 #Export(c) fn jet_udp_socket_timeout_set_raw(value: I64, milliseconds: I64) {
     duration :: host_native_int(milliseconds)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
     state :: net_word(value, I64{0})
     mutex :: wrapping(state + I64{8})
     sync_mutex_lock(mutex)

@@ -17,7 +17,10 @@ fn data_tree_new(kind: I64, payload: I64) -> I64 {
     tree
 }
 fn data_tree_payload(tree: I64, kind: I64) -> I64 {
-    if data_tree_word(tree + DATA_TREE_TAG) != kind -> rt_record_variant_panic()
+    if data_tree_word(tree + DATA_TREE_TAG) != kind {
+        rt_record_variant_panic()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     data_tree_word(tree + DATA_TREE_PAYLOAD)
 }
 fn data_sequence_push(sequence: I64, key: I64, child: I64, entries: Bool) {
@@ -183,7 +186,11 @@ fn data_tree_render(target: I64, tree: I64) {
 #Export(c) fn jet_rt_record_tag_DataTree(tree: I64) -> I64 { data_tree_word(tree + DATA_TREE_TAG) }
 #Export(c) fn jet_rt_record_new_DataTree_Null() -> I64 { data_tree_new(DATA_TREE_NULL, I64{0}) }
 #Export(c) fn jet_rt_record_new_DataTree_Bool(value: U8) -> I64 { data_tree_new(DATA_TREE_BOOL, if (value == U8{0}) -> I64{0} else -> I64{1}) }
-#Export(c) fn jet_rt_record_new_DataTree_Int(value: I64) -> I64 { data_tree_new(DATA_TREE_INT, jet_int_owned_to_i64(value)) }
+#Export(c) fn jet_rt_record_new_DataTree_Int(value: I64) -> I64 {
+    raw :: jet_int_owned_to_i64(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    data_tree_new(DATA_TREE_INT, raw)
+}
 #Export(c) fn jet_rt_record_new_DataTree_Float(value: Float) -> I64 { data_tree_new(DATA_TREE_FLOAT, rt_f64_bits(value)) }
 #Export(c) fn jet_rt_record_new_DataTree_Number(value: I64) -> I64 { data_tree_new(DATA_TREE_NUMBER, jet_rt_string_clone(value)) }
 #Export(c) fn jet_rt_record_new_DataTree_TypedText(value: I64) -> I64 { data_tree_new(DATA_TREE_TYPED_TEXT, jet_rt_string_clone(value)) }
@@ -192,11 +199,31 @@ fn data_tree_render(target: I64, tree: I64) {
 #Export(c) fn jet_rt_record_new_DataTree_Array(value: I64) -> I64 { data_tree_new(DATA_TREE_ARRAY, value) }
 #Export(c) fn jet_rt_record_new_DataTree_Object(value: I64) -> I64 { data_tree_new(DATA_TREE_OBJECT, value) }
 #Export(c) fn jet_rt_record_get_DataTree_Bool(tree: I64) -> Bool { data_tree_payload(tree, DATA_TREE_BOOL) != I64{0} }
-#Export(c) fn jet_rt_record_get_DataTree_Int(tree: I64) -> I64 { jet_int_owned_from_i64(data_tree_payload(tree, DATA_TREE_INT)) }
-#Export(c) fn jet_rt_record_get_DataTree_Float(tree: I64) -> Float { rt_f64_from_bits(data_tree_payload(tree, DATA_TREE_FLOAT)) }
-#Export(c) fn jet_rt_record_get_DataTree_Number(tree: I64) -> I64 { jet_rt_string_clone(data_tree_payload(tree, DATA_TREE_NUMBER)) }
-#Export(c) fn jet_rt_record_get_DataTree_TypedText(tree: I64) -> I64 { jet_rt_string_clone(data_tree_payload(tree, DATA_TREE_TYPED_TEXT)) }
-#Export(c) fn jet_rt_record_get_DataTree_Text(tree: I64) -> I64 { jet_rt_string_clone(data_tree_payload(tree, DATA_TREE_TEXT)) }
+#Export(c) fn jet_rt_record_get_DataTree_Int(tree: I64) -> I64 {
+    payload :: data_tree_payload(tree, DATA_TREE_INT)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_int_owned_from_i64(payload)
+}
+#Export(c) fn jet_rt_record_get_DataTree_Float(tree: I64) -> Float {
+    payload :: data_tree_payload(tree, DATA_TREE_FLOAT)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return Float{0.0}
+    rt_f64_from_bits(payload)
+}
+#Export(c) fn jet_rt_record_get_DataTree_Number(tree: I64) -> I64 {
+    payload :: data_tree_payload(tree, DATA_TREE_NUMBER)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_rt_string_clone(payload)
+}
+#Export(c) fn jet_rt_record_get_DataTree_TypedText(tree: I64) -> I64 {
+    payload :: data_tree_payload(tree, DATA_TREE_TYPED_TEXT)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_rt_string_clone(payload)
+}
+#Export(c) fn jet_rt_record_get_DataTree_Text(tree: I64) -> I64 {
+    payload :: data_tree_payload(tree, DATA_TREE_TEXT)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_rt_string_clone(payload)
+}
 #Export(c) fn jet_rt_record_get_DataTree_Bytes(tree: I64) -> I64 { data_tree_payload(tree, DATA_TREE_BYTE_LIST) }
 #Export(c) fn jet_rt_record_get_DataTree_Array(tree: I64) -> I64 { data_tree_payload(tree, DATA_TREE_ARRAY) }
 #Export(c) fn jet_rt_record_get_DataTree_Object(tree: I64) -> I64 { data_tree_payload(tree, DATA_TREE_OBJECT) }

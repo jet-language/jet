@@ -13,7 +13,10 @@ fn ui_carrier_store(address: I64, word: I64) {
 }
 fn ui_carrier_checked_tag(value: I64, count: I64) -> I64 {
     // Existing CAbiRoutes.rs range_stop: E3010, <core.prelude>:0, exit 70.
-    if (value < I64{0} || value >= count) -> trap_native_index_range_stop()
+    if (value < I64{0} || value >= count) {
+        trap_native_index_range_stop()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
     value
 }
 fn ui_carrier_scalar_new(word: I64) -> I64 {

@@ -70,6 +70,13 @@ Build authority repairs use `--allow=Effect` (for example `--allow=Exec`);
 action stderr is decoded from the structured report before terminal rendering,
 so its line breaks remain actual lines rather than JSON escapes.
 
+Memory sentries (`R0801`–`R0803`) are program-side faults, not unhandled entry
+errors. Their `exit:` metadata is rendered from the same exit-code fact that
+the returned runtime report carries: 70 under S36 / D-FAIL-EXIT1. Execution
+boundaries deliver that report and preserve its status; they do not classify
+the fault from its prose. An unresolved diagnostic row remains a host defect
+with status 101.
+
 ## Machine reports and causes
 
 The canonical machine envelope is `jet.report/v3`. Its `cause` array is
