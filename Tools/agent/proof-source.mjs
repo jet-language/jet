@@ -4,7 +4,6 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pipeline } from 'node:stream/promises';
 
 const candidates = '/mnt/jetscratch/candidates';
 
@@ -64,17 +63,13 @@ async function exportSource(repository, expected) {
             if (type !== 'blob' || !['100644', '100755', '120000'].includes(mode)) throw Error(`unsupported proof source entry ${path}: ${mode} ${type}`);
             return { path, mode, blob };
         });
-        const archive = spawn('git', ['-C', repository, 'archive', commit], { stdio: ['ignore', 'pipe', 'inherit'] });
-        const extract = spawn('tar', ['-x', '-C', join(temporary, 'source')], { stdio: ['pipe', 'inherit', 'inherit'] });
-        const exits = [completed(archive, 'git archive'), completed(extract, 'tar')];
-        try {
-            await Promise.all([...exits, pipeline(archive.stdout, extract.stdin)]);
-        } finally {
-            for (const child of [archive, extract]) {
-                if (child.exitCode === null && child.signalCode === null) child.kill();
-            }
-            await Promise.allSettled(exits);
-        }
+        const archivePath = join(temporary, 'source.tar');
+        const archive = spawn('git', ['-C', repository, 'archive', '--format=tar', `--output=${archivePath}`, commit],
+            { stdio: 'inherit' });
+        await completed(archive, 'git archive');
+        const extract = spawn('tar', ['-xf', archivePath, '-C', join(temporary, 'source')], { stdio: 'inherit' });
+        await completed(extract, 'tar');
+        rmSync(archivePath);
         writeFileSync(join(temporary, 'source.manifest.json'), JSON.stringify({
             schema: 'jet-proof-source/v1', commit, tree: git(repository, ['rev-parse', `${commit}^{tree}`]).trim(), files,
         }) + '\n');

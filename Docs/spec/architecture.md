@@ -279,6 +279,11 @@ export through the live checkout's `jet-env`, unset `CARGO_TARGET_DIR` so that
 checkout does not stamp the proof target as its own. The
 [`proof source guard`](../../Tools/agent/proof-source.test.mjs) checks tracked
 bytes, symlink targets and executable modes without requiring dev to stand still.
+The exporter completes a temporary tar file before extraction, removes that
+file, and publishes the verified source and manifest with one atomic rename.
+Archive or extraction failures publish nothing; consumer EOF cannot race the
+archive producer through a pipe.
+
 
 The private startup-output factory packages supplied environment bytes and
 terminal facts as an ordinary checked Source value, retaining owned typed bytes.
