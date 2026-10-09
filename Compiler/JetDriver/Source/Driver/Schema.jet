@@ -61,6 +61,50 @@ fn load_snapshot(root: String, type_name: String) -[Env, FS]> SchemaSnapshot? {
     None
 }
 
+// Key by the filename, not the embedded type label: that is what load_snapshot
+// does, including when a hand-edited snapshot's label does not match its name.
+fn jet_driver_load_schema_snapshots(root: String) -[Env, FS]> [String:SchemaSnapshot] {
+    cache :: schema_cache_dir(root)
+    names :: schema_files.listdir(cache) ?? return [String:SchemaSnapshot]{}
+    snapshots := [String:SchemaSnapshot]{}
+    loop name in names {
+        if !name.ends_with(".snapshot") -> next
+        raw :: schema_files.read(schema_files.join(cache, name)) ?? next
+        parsed :: SchemaSnapshot.parse(raw) ?? next
+        snapshots[name.slice(0, name.len() - 9)] = parsed
+    }
+    snapshots
+}
+
+fn load_all_snapshots(root: String) -[Env, FS]> [SchemaSnapshot] {
+    snapshots :: jet_driver_load_schema_snapshots(root)
+    result := [SchemaSnapshot]{}
+    // Stable insertion order mirrors Rust's sort_by(type_name). Directory
+    // order is irrelevant unless two snapshots advertise the same type name.
+    keys := [String]{}
+    loop (key, _) in snapshots -> &keys.push(key)
+    &keys.sort()
+    loop key in keys {
+        value :: snapshots[key]
+        &result.push(value)
+        index := result.len() - 1
+        loop index > 0 && result[index - 1].type_name > value.type_name {
+            result[index] = result[index - 1]
+            index -= 1
+        }
+        result[index] = value
+    }
+    result
+}
+
+// Save intentionally ignores the test read override.
+fn save_snapshot(root: String, snapshot: SchemaSnapshot) SchemaSnapshotError! -[FS]> {
+    directory :: schema_files.join(root, ".jet/cache/schema")
+    schema_files.create_dir_all(directory) ?? return Err(SchemaSnapshotError{message: "could not create schema cache dir: {err}"})
+    schema_files.write(schema_files.join(directory, "{snapshot.type_name}.snapshot"), snapshot.write()) ?? return Err(SchemaSnapshotError{message: "could not write schema snapshot: {err}"})
+    Ok(())
+}
+
 // CmdSchema.rs:104-138: advisory load-only bundle items, deliberately NOT a
 // full build's populated registry. The loader's failure is handled by caller.
 fn jet_driver_schema_pending_breaks(modules: [[Item]], snapshots: [String:SchemaSnapshot]) -> [String] Never! {

@@ -94,6 +94,9 @@ program, physical path, source bytes, and optional selected entry Package
 version; they do not substitute a semantic check or reparse a manifest in the
 CLI. Squash uses that declared version (falling back to `0.0.0` only when it
 is absent).
+Snapshot enumeration keys each valid snapshot by its filename, even if its
+embedded type label differs. Status lists valid snapshots in type-name order;
+unreadable or malformed snapshot files are skipped by this advisory listing.
 
 Inspection planes and schema actions resolve explicit and inline Packages through
 the same checked entry resolver as compilation. When a root is genuinely absent,
