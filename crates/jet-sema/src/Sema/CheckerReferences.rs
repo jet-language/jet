@@ -308,6 +308,31 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Exact executable declaration selected by nominal method checking.
+    /// Abstract trait signatures also have kind `method`, but are not bodies.
+    /// No alias, nominal spelling, local-module, or source-span fallback.
+    pub(crate) fn checked_method_callee(
+        &self,
+        owner: usize,
+        owner_name: &str,
+        method_name: &str,
+    ) -> Option<String> {
+        if self
+            .name_ledger
+            .declaration(owner, owner_name)
+            .is_some_and(|declaration| declaration.kind == "trait")
+        {
+            return None;
+        }
+        let declaration = self.name_ledger.declaration(owner, method_name)?;
+        if declaration.kind != "method" {
+            return None;
+        }
+        self.name_ledger
+            .declared_identity(owner, method_name)
+            .map(str::to_owned)
+    }
+
     pub(crate) fn record_method_reference(&mut self, type_name: &str, method: &str, span: Span) {
         let (import_ns, leaf) = Self::split_type_name(type_name);
         let Some(owner) = self.struct_owner_module(leaf, import_ns) else {

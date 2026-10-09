@@ -778,6 +778,10 @@ pub enum Expr {
         /// meaning of "resolved user-defined receiver type"). Lowering
         /// consumes it without reconstructing the language rule.
         checked_widen: bool,
+        /// Exact executable declaration identity retained by checked nominal
+        /// method resolution. Template offsets and receiver leaf spellings
+        /// cannot identify generated bodies; abstract dispatch leaves this unset.
+        checked_callee: Option<String>,
     },
     /// D-DOTCTOR1 (ratified 2026-06-25): `Type.{ field: expr, ... }` (named) or
     /// `.{ field: expr, ... }` (inferred — type from context). Replaces the old

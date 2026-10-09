@@ -228,6 +228,7 @@ pub fn rewrite_core_item_call(expr: &mut Expr, method: &str) {
         resolved_ret: call.resolved_ret,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     };
 }
 

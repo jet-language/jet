@@ -705,6 +705,7 @@ impl<'a> Checker<'a> {
         owner_type_args: &mut Vec<Type>,
         method_type_args: &[Type],
         args: &mut Vec<crate::AST::CallArg>,
+        checked_callee_out: &mut Option<String>,
     ) -> Option<Type> {
         let display_type_name = self.display_type_name(type_name, None);
         // D-TEXTHEAD-TYPE1=A: checked text constructors are ordinary static
@@ -958,6 +959,7 @@ impl<'a> Checker<'a> {
             })
         }
         .unwrap_or_default();
+        let method_diagnostics = self.diags.len();
         let mut call_access = self.call_access_frame();
         let mut pre_inferred = None;
         // Bind before receiver-type inference too: generic constructors use
@@ -1129,6 +1131,14 @@ impl<'a> Checker<'a> {
             pre_inferred_method.as_deref().or(pre_inferred.as_deref()),
             Some(call_access),
         );
+        if checked.is_some()
+            && !self.diags[method_diagnostics..]
+                .iter()
+                .any(|diagnostic| diagnostic.severity == crate::Diagnostics::Severity::Error)
+        {
+            *checked_callee_out =
+                self.checked_method_callee(owner_mod, method_type_name, &method_name);
+        }
         if raw_protocol_return && msig.return_type.is_some() {
             msig.return_type.clone()
         } else {

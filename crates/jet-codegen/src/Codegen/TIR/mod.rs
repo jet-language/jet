@@ -2678,7 +2678,7 @@ fn lower_imported_generated_codecs(
     bundle: &ProgramBundle,
     module_idx: usize,
     core_modules: &std::collections::HashSet<usize>,
-    reachable_bodies: &std::collections::HashSet<(usize, usize, usize)>,
+    reachable_bodies: &ReachableCoreBodies,
     cx: &Cx,
     funcs: &mut Vec<TFunc>,
 ) {
@@ -2731,7 +2731,8 @@ fn lower_imported_generated_codecs(
                     core_modules,
                     reachable_bodies,
                     module_idx,
-                    method,
+                    Some(&implementation.type_name),
+                    &method.name,
                 ) {
                     continue;
                 }
@@ -5528,7 +5529,7 @@ fn lower_checked_tir_program_on_stack(
         };
         let core_source_modules = core_source_module_indices(bundle);
         let reachable_core_bodies = if core_source_modules.is_empty() {
-            std::collections::HashSet::new()
+            Vec::new()
         } else {
             let app_graph = crate::Sema::extract_app_graph(bundle).0;
             let callables = cost_callables(bundle, app_graph.as_ref());
@@ -5926,7 +5927,8 @@ fn lower_checked_tir_program_on_stack(
                                 &core_source_modules,
                                 &reachable_core_bodies,
                                 module_idx,
-                                function,
+                                None,
+                                &function.name,
                             )
                         {
                             continue;
@@ -6006,11 +6008,16 @@ fn lower_checked_tir_program_on_stack(
                             if !function.type_params.is_empty() {
                                 continue;
                             }
+                            let declaration_name = jet_foundation::Names::member_name(
+                                &code_module.name,
+                                &function.name,
+                            );
                             if !should_lower_imported_core_body(
                                 &core_source_modules,
                                 &reachable_core_bodies,
                                 module_idx,
-                                function,
+                                None,
+                                &declaration_name,
                             ) {
                                 continue;
                             }
@@ -6018,10 +6025,7 @@ fn lower_checked_tir_program_on_stack(
                             // emitted `code_module__function` name. The final TIR
                             // symbol remains the imported module's Rust-qualified ABI.
                             let mut mangled_function = function.clone();
-                            mangled_function.name = jet_foundation::Names::member_name(
-                                &code_module.name,
-                                &function.name,
-                            );
+                            mangled_function.name = declaration_name;
                             let mut lowered = lower_func(&mangled_function, &imported_cx);
                             let binders = qualification_binders(&[], Some(function));
                             for (_, ty, _) in &mut lowered.params {
@@ -6078,7 +6082,8 @@ fn lower_checked_tir_program_on_stack(
                                     &core_source_modules,
                                     &reachable_core_bodies,
                                     module_idx,
-                                    method,
+                                    Some(name),
+                                    &method.name,
                                 ) {
                                     continue;
                                 }
@@ -6110,7 +6115,8 @@ fn lower_checked_tir_program_on_stack(
                                         &core_source_modules,
                                         &reachable_core_bodies,
                                         module_idx,
-                                        method,
+                                        Some(name),
+                                        &method.name,
                                     ) {
                                         continue;
                                     }
@@ -6172,7 +6178,8 @@ fn lower_checked_tir_program_on_stack(
                                     &core_source_modules,
                                     &reachable_core_bodies,
                                     module_idx,
-                                    method,
+                                    Some(&implementation.type_name),
+                                    &method.name,
                                 ) {
                                     continue;
                                 }
@@ -6211,7 +6218,8 @@ fn lower_checked_tir_program_on_stack(
                                 &core_source_modules,
                                 &reachable_core_bodies,
                                 module_idx,
-                                method,
+                                Some(&implementation.type_name),
+                                &method.name,
                             ) {
                                 continue;
                             }
@@ -6285,7 +6293,8 @@ fn lower_checked_tir_program_on_stack(
                                     &core_source_modules,
                                     &reachable_core_bodies,
                                     module_idx,
-                                    method,
+                                    Some(&implementation.type_name),
+                                    &method.name,
                                 ) {
                                     continue;
                                 }
@@ -10172,48 +10181,56 @@ struct TCostCallable {
     root: bool,
 }
 
-/// The checked source function of every callable declaration, keyed by its
-/// module and declaration span, with whether its owner type is generic. The
-/// cost passes ask once per callable, so the items are walked once per pass
-/// instead of once per question (which made `jet check` quadratic).
+/// The checked source body of every executable declaration, keyed by its
+/// module and canonical declaration name, with whether its owner is generic.
+/// Generated derives share provider-template spans; those offsets are source
+/// diagnostics, not executable identities. Walk each module once per pass.
 struct CostFunctionIndex<'a> {
-    functions: std::collections::HashMap<(usize, crate::Diagnostics::Span), (&'a Func, bool)>,
+    functions: Vec<std::collections::HashMap<String, (&'a Func, bool)>>,
 }
 
 impl<'a> CostFunctionIndex<'a> {
     fn new(bundle: &'a ProgramBundle) -> Self {
-        let mut functions = std::collections::HashMap::new();
-        for (module, data) in bundle.modules.iter().enumerate() {
-            index_cost_functions(&data.items, module, &mut functions);
+        let mut functions = Vec::with_capacity(bundle.modules.len());
+        for module in &bundle.modules {
+            let mut declarations = std::collections::HashMap::new();
+            index_cost_functions(&module.items, None, &mut declarations);
+            functions.push(declarations);
         }
         Self { functions }
     }
 
-    fn get(&self, module: usize, span: crate::Diagnostics::Span) -> Option<(&'a Func, bool)> {
-        self.functions.get(&(module, span)).copied()
+    fn get(&self, module: usize, name: &str) -> Option<(&'a Func, bool)> {
+        self.functions.get(module)?.get(name).copied()
     }
 }
 
 fn index_cost_functions<'a>(
     items: &'a [Item],
-    module: usize,
-    functions: &mut std::collections::HashMap<(usize, crate::Diagnostics::Span), (&'a Func, bool)>,
+    prefix: Option<&str>,
+    functions: &mut std::collections::HashMap<String, (&'a Func, bool)>,
 ) {
-    // The first declaration at a span wins, as in a front-to-back search.
+    fn scoped_name(prefix: Option<&str>, name: &str) -> String {
+        prefix.map_or_else(
+            || name.to_string(),
+            |prefix| jet_foundation::Names::member_name(prefix, name),
+        )
+    }
     fn add<'a>(
-        functions: &mut std::collections::HashMap<(usize, crate::Diagnostics::Span), (&'a Func, bool)>,
-        module: usize,
+        functions: &mut std::collections::HashMap<String, (&'a Func, bool)>,
+        owner: &str,
         methods: impl IntoIterator<Item = &'a Func>,
         owner_is_generic: bool,
     ) {
         for function in methods {
-            functions
-                .entry((module, function.name_span))
-                .or_insert((function, owner_is_generic));
+            // Match Bundle::declare_method_names and NameLedger's winning
+            // declaration; never join two owners by their template offsets.
+            functions.insert(
+                format!("{owner}.{}", function.name),
+                (function, owner_is_generic),
+            );
         }
     }
-    // An `impl` extends a generic owner when this item list declares that
-    // owner with type parameters.
     let generic_owners = items
         .iter()
         .filter_map(|item| match item {
@@ -10228,42 +10245,105 @@ fn index_cost_functions<'a>(
         .collect::<std::collections::HashSet<_>>();
     for item in items {
         match item {
-            Item::Func(function) => add(functions, module, [function], false),
+            Item::Func(function) => {
+                functions.insert(scoped_name(prefix, &function.name), (function, false));
+            }
             Item::Struct(definition) => add(
                 functions,
-                module,
+                &scoped_name(prefix, &definition.name),
                 definition.methods.iter().chain(
-                    definition
-                        .trait_impls
-                        .iter()
-                        .flat_map(|implementation| implementation.methods.iter()),
+                    definition.trait_impls.iter().flat_map(|implementation| {
+                        implementation.methods.iter()
+                    }),
                 ),
                 !definition.type_params.is_empty(),
             ),
             Item::Enum(definition) => add(
                 functions,
-                module,
+                &scoped_name(prefix, &definition.name),
                 definition.methods.iter().chain(
-                    definition
-                        .trait_impls
-                        .iter()
-                        .flat_map(|implementation| implementation.methods.iter()),
+                    definition.trait_impls.iter().flat_map(|implementation| {
+                        implementation.methods.iter()
+                    }),
                 ),
                 !definition.type_params.is_empty(),
             ),
             Item::Impl(implementation) => add(
                 functions,
-                module,
+                &scoped_name(prefix, &implementation.type_name),
                 &implementation.methods,
                 generic_owners.contains(implementation.type_name.as_str()),
             ),
-            Item::CodeModule(code_module) => {
-                if let Some(body) = &code_module.body {
-                    index_cost_functions(body, module, functions);
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    let nested = scoped_name(prefix, &module.name);
+                    index_cost_functions(body, Some(&nested), functions);
                 }
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod cost_function_identity_tests {
+    use super::*;
+
+    #[test]
+    fn shared_derive_offsets_do_not_join_distinct_owner_bodies() {
+        let source = concat!(
+            "struct First { fn compare(self, other: First) -> Int Never! { 0 } }\n",
+            "struct Second { fn compare(self, other: Second) -> Int Never! { 1 } }\n",
+        );
+        let (tokens, diagnostics) = crate::Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let mut program = crate::Parser::parse(&tokens).expect("method bodies parse");
+        let shared_span = match &program.items[0] {
+            Item::Struct(owner) => owner.methods[0].name_span,
+            _ => panic!("expected First"),
+        };
+        match &mut program.items[1] {
+            Item::Struct(owner) => owner.methods[0].name_span = shared_span,
+            _ => panic!("expected Second"),
+        }
+        let mut indexed = std::collections::HashMap::new();
+        index_cost_functions(&program.items, None, &mut indexed);
+        for (position, name) in ["First.compare", "Second.compare"].into_iter().enumerate() {
+            let Item::Struct(owner) = &program.items[position] else {
+                panic!("expected nominal owner");
+            };
+            let (body, generic) = indexed.get(name).expect("canonical body");
+            assert!(std::ptr::eq(*body, &owner.methods[0]));
+            assert!(!generic);
+        }
+        assert_eq!(indexed.len(), 2);
+    }
+
+    #[test]
+    fn scoped_executable_names_and_declaration_replacement_match_the_ledger() {
+        let source = "fn first() {}\nfn second() {}\n";
+        let (tokens, diagnostics) = crate::Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let mut program = crate::Parser::parse(&tokens).expect("functions parse");
+        let Item::Func(first) = &program.items[0] else {
+            panic!("expected first function");
+        };
+        let shared_span = first.name_span;
+        let Item::Func(second) = &mut program.items[1] else {
+            panic!("expected second function");
+        };
+        second.name = "first".to_string();
+        second.name_span = shared_span;
+        let mut indexed = std::collections::HashMap::new();
+        index_cost_functions(&program.items, Some("nested"), &mut indexed);
+        let Item::Func(second) = &program.items[1] else {
+            panic!("expected winning declaration");
+        };
+        let name = jet_foundation::Names::member_name("nested", "first");
+        let (body, generic) = indexed.get(&name).expect("scoped body");
+        assert!(std::ptr::eq(*body, second));
+        assert!(!generic);
+        assert_eq!(indexed.len(), 1);
     }
 }
 
@@ -10289,11 +10369,26 @@ fn collect_selected_cost_outputs(
     }
 }
 
+fn cost_callable_owner_and_name(callable: &TCostCallable) -> (&str, &str) {
+    if callable.method {
+        callable.declaration_name.rsplit_once('.')
+            .expect("checked method declaration has an owner")
+    } else {
+        ("", callable.declaration_name.as_str())
+    }
+}
+
 /// Lookup tables over one pass's cost callables. Reachability asks them once
 /// per checked name reference, so no question may rescan every callable.
-struct CostCallableIndex {
-    /// Module of each callable, by callable index.
-    modules: Vec<usize>,
+struct CostCallableIndex<'callable> {
+    /// Executable names borrow the immutable callable rows; no copied keys or
+    /// temporary canonical-name strings are needed by declaration queries.
+    by_name: Vec<
+        std::collections::HashMap<
+            &'callable str,
+            std::collections::HashMap<&'callable str, usize>,
+        >,
+    >,
     /// Callables by declaration span, in callable order.
     by_span: std::collections::HashMap<crate::Diagnostics::Span, Vec<usize>>,
     /// Callables by semantic identity (`module::name`), in callable order.
@@ -10349,12 +10444,22 @@ impl CostSpanList {
     }
 }
 
-impl CostCallableIndex {
-    fn new(bundle: &ProgramBundle, callables: &[TCostCallable]) -> Self {
+impl<'callable> CostCallableIndex<'callable> {
+    fn new(bundle: &ProgramBundle, callables: &'callable [TCostCallable]) -> Self {
         let mut by_span = std::collections::HashMap::<_, Vec<usize>>::new();
         let mut by_identity = std::collections::HashMap::<_, Vec<usize>>::new();
         let mut bodies = std::collections::HashMap::<String, CostBodySpans>::new();
+        let mut by_name: Vec<
+            std::collections::HashMap<
+                &'callable str,
+                std::collections::HashMap<&'callable str, usize>,
+            >,
+        > = (0..bundle.modules.len())
+            .map(|_| std::collections::HashMap::new())
+            .collect();
         for (index, callable) in callables.iter().enumerate() {
+            let (owner, name) = cost_callable_owner_and_name(callable);
+            by_name[callable.module].entry(owner).or_default().insert(name, index);
             by_span.entry(callable.declaration_span).or_default().push(index);
             if let Some(identity) = callable_semantic_identity(bundle, callable) {
                 by_identity.entry(identity).or_default().push(index);
@@ -10386,20 +10491,18 @@ impl CostCallableIndex {
             spans.generated.finish();
         }
         Self {
-            modules: callables.iter().map(|callable| callable.module).collect(),
+            by_name,
             by_span,
             by_identity,
             bodies,
         }
     }
 
-    /// The first callable declared at `span` in `module`.
-    fn declared(&self, module: usize, span: crate::Diagnostics::Span) -> Option<usize> {
-        self.by_span
-            .get(&span)?
-            .iter()
+    fn named(&self, module: usize, owner: Option<&str>, name: &str) -> Option<usize> {
+        self.by_name.get(module)?
+            .get(owner.unwrap_or(""))?
+            .get(name)
             .copied()
-            .find(|&index| self.modules[index] == module)
     }
 
     fn declared_at(&self, span: crate::Diagnostics::Span) -> &[usize] {
@@ -10466,7 +10569,7 @@ fn cost_callables(
         let function = if declaration.kind == "extern" {
             None
         } else {
-            functions.get(declaration.module, declaration.span)
+            functions.get(declaration.module, &declaration.name)
         };
         if declaration.kind != "extern" && function.is_none() {
             continue;
@@ -10732,18 +10835,18 @@ fn checked_core_source_signature<'a>(
     signatures.get(&(module.to_string(), method.to_string()))
 }
 
-fn checked_local_function_declaration_span(
+fn checked_local_function_declaration_name<'declaration>(
     module: usize,
     name: &str,
     resolved_return: Option<&Type>,
-    declaration: Option<&jet_foundation::Names::NameDeclaration>,
-) -> Option<crate::Diagnostics::Span> {
+    declaration: Option<&'declaration jet_foundation::Names::NameDeclaration>,
+) -> Option<&'declaration str> {
     let declaration = declaration?;
     (resolved_return.is_some()
         && declaration.module == module
         && declaration.name == name
         && declaration.kind == "function")
-        .then_some(declaration.span)
+        .then_some(declaration.name.as_str())
 }
 
 fn checked_local_function_call_target(
@@ -10752,13 +10855,13 @@ fn checked_local_function_call_target(
     module: usize,
     call: &crate::AST::Call,
 ) -> Option<usize> {
-    let declaration_span = checked_local_function_declaration_span(
+    let declaration_name = checked_local_function_declaration_name(
         module,
         &call.name,
         call.resolved_ret.as_ref(),
         bundle.name_ledger.declaration(module, &call.name),
     )?;
-    index.declared(module, declaration_span)
+    index.named(module, None, declaration_name)
 }
 
 // Direct Core-module syntax is sema-checked as a Core call and may not leave a
@@ -10778,7 +10881,7 @@ fn checked_core_source_call_edges(
     let mut edges = Vec::new();
 
     for (caller_index, callable) in callables.iter().enumerate() {
-        let Some((function, _)) = functions.get(callable.module, callable.declaration_span) else {
+        let Some((function, _)) = functions.get(callable.module, &callable.declaration_name) else {
             continue;
         };
         let Some(imports) = core_imports.get(callable.module) else {
@@ -10846,8 +10949,18 @@ fn checked_core_source_call_edges(
                     receiver,
                     method,
                     resolved_ret,
+                    checked_callee,
                     ..
                 } => {
+                    if let Some(identity) = checked_callee {
+                        if let Some(&target) = index.with_identity(identity).first() {
+                            edges.push((caller_index, target));
+                        }
+                        // A checked executable identity cannot be re-resolved
+                        // through a receiver spelling or a template offset.
+                        // Missing bodies retain the existing lowering refusal.
+                        return;
+                    }
                     let Some(module) = checked_core_module_path_from_receiver(
                         receiver.as_ref(),
                         imports,
@@ -11122,16 +11235,16 @@ mod checked_function_reference_tests {
         let resolved_return = Type::String;
 
         assert_eq!(
-            checked_local_function_declaration_span(
+            checked_local_function_declaration_name(
                 3,
                 "trim_ascii",
                 Some(&resolved_return),
                 Some(&declaration),
             ),
-            Some(declaration_span)
+            Some("trim_ascii")
         );
         assert_eq!(
-            checked_local_function_declaration_span(3, "trim_ascii", None, Some(&declaration)),
+            checked_local_function_declaration_name(3, "trim_ascii", None, Some(&declaration)),
             None
         );
     }
@@ -11209,13 +11322,27 @@ fn test_reference_enabled(
         .map(|(_, _, included)| *included)
 }
 
+fn scoped_cost_owner<'name>(
+    prefix: Option<&str>,
+    name: &'name str,
+) -> std::borrow::Cow<'name, str> {
+    match prefix {
+        Some(prefix) => std::borrow::Cow::Owned(
+            jet_foundation::Names::member_name(prefix, name),
+        ),
+        None => std::borrow::Cow::Borrowed(name),
+    }
+}
+
 fn collect_trait_impl_callable_groups(
     items: &[Item],
     module: usize,
+    prefix: Option<&str>,
     index: &CostCallableIndex,
     groups: &mut Vec<Vec<usize>>,
 ) {
     fn push_group(
+        owner: &str,
         methods: &[crate::AST::Func],
         module: usize,
         index: &CostCallableIndex,
@@ -11223,7 +11350,7 @@ fn collect_trait_impl_callable_groups(
     ) {
         let indices = methods
             .iter()
-            .filter_map(|method| index.declared(module, method.name_span))
+            .filter_map(|method| index.named(module, Some(owner), &method.name))
             .collect::<Vec<_>>();
         if !indices.is_empty() {
             groups.push(indices);
@@ -11233,21 +11360,31 @@ fn collect_trait_impl_callable_groups(
     for item in items {
         match item {
             Item::Struct(definition) => {
+                if definition.trait_impls.is_empty() {
+                    continue;
+                }
+                let owner = scoped_cost_owner(prefix, &definition.name);
                 for implementation in &definition.trait_impls {
-                    push_group(&implementation.methods, module, index, groups);
+                    push_group(&owner, &implementation.methods, module, index, groups);
                 }
             }
             Item::Enum(definition) => {
+                if definition.trait_impls.is_empty() {
+                    continue;
+                }
+                let owner = scoped_cost_owner(prefix, &definition.name);
                 for implementation in &definition.trait_impls {
-                    push_group(&implementation.methods, module, index, groups);
+                    push_group(&owner, &implementation.methods, module, index, groups);
                 }
             }
             Item::Impl(implementation) if implementation.trait_name.is_some() => {
-                push_group(&implementation.methods, module, index, groups);
+                let owner = scoped_cost_owner(prefix, &implementation.type_name);
+                push_group(&owner, &implementation.methods, module, index, groups);
             }
             Item::CodeModule(code_module) => {
                 if let Some(body) = &code_module.body {
-                    collect_trait_impl_callable_groups(body, module, index, groups);
+                    let nested = scoped_cost_owner(prefix, &code_module.name);
+                    collect_trait_impl_callable_groups(body, module, Some(&nested), index, groups);
                 }
             }
             _ => {}
@@ -11262,11 +11399,14 @@ fn collect_trait_impl_callable_groups(
 fn collect_core_close_callables(
     items: &[Item],
     module: usize,
+    prefix: Option<&str>,
     index: &CostCallableIndex,
     out: &mut Vec<usize>,
 ) {
     fn push_close(
         trait_name: &str,
+        owner_name: &str,
+        prefix: Option<&str>,
         methods: &[crate::AST::Func],
         module: usize,
         index: &CostCallableIndex,
@@ -11275,10 +11415,11 @@ fn collect_core_close_callables(
         if trait_name.rsplit('.').next() != Some(crate::Syntax::TRAIT_CLOSE) {
             return;
         }
+        let owner = scoped_cost_owner(prefix, owner_name);
         out.extend(
             methods
                 .iter()
-                .filter_map(|method| index.declared(module, method.name_span)),
+                .filter_map(|method| index.named(module, Some(&owner), &method.name)),
         );
     }
 
@@ -11286,22 +11427,23 @@ fn collect_core_close_callables(
         match item {
             Item::Struct(definition) => {
                 for implementation in &definition.trait_impls {
-                    push_close(&implementation.trait_name, &implementation.methods, module, index, out);
+                    push_close(&implementation.trait_name, &definition.name, prefix, &implementation.methods, module, index, out);
                 }
             }
             Item::Enum(definition) => {
                 for implementation in &definition.trait_impls {
-                    push_close(&implementation.trait_name, &implementation.methods, module, index, out);
+                    push_close(&implementation.trait_name, &definition.name, prefix, &implementation.methods, module, index, out);
                 }
             }
             Item::Impl(implementation) => {
                 if let Some(trait_name) = &implementation.trait_name {
-                    push_close(trait_name, &implementation.methods, module, index, out);
+                    push_close(trait_name, &implementation.type_name, prefix, &implementation.methods, module, index, out);
                 }
             }
             Item::CodeModule(code_module) => {
                 if let Some(body) = &code_module.body {
-                    collect_core_close_callables(body, module, index, out);
+                    let nested = scoped_cost_owner(prefix, &code_module.name);
+                    collect_core_close_callables(body, module, Some(&nested), index, out);
                 }
             }
             _ => {}
@@ -11346,7 +11488,7 @@ fn reachable_core_source_callables(
         let ffi_callback = callable_semantic_identity(bundle, callable)
             .is_some_and(|identity| bundle.ffi_callback_fns.contains(&identity));
         let sampled_contract = functions
-            .get(callable.module, callable.declaration_span)
+            .get(callable.module, &callable.declaration_name)
             .is_some_and(|(function, _)| {
                 !function.pre.is_empty() && !function.params.is_empty()
             });
@@ -11398,10 +11540,11 @@ fn reachable_core_source_callables(
             collect_trait_impl_callable_groups(
                 &data.items,
                 module,
+                None,
                 &lookup,
                 &mut trait_impl_groups,
             );
-            collect_core_close_callables(&data.items, module, &lookup, &mut close_callables);
+            collect_core_close_callables(&data.items, module, None, &lookup, &mut close_callables);
         }
     }
     for index in close_callables {
@@ -11428,32 +11571,50 @@ fn reachable_core_source_callables(
     }
 }
 
+/// Canonical source-body membership, grouped by module and owner. The empty
+/// owner holds free functions. Borrowed owner/name queries need no allocation.
+type ReachableCoreBodies = Vec<
+    std::collections::HashMap<String, std::collections::HashSet<String>>,
+>;
+
 fn reachable_core_source_bodies(
     callables: &[TCostCallable],
     core_modules: &std::collections::HashSet<usize>,
     reachable: &[bool],
-) -> std::collections::HashSet<(usize, usize, usize)> {
-    callables
-        .iter()
-        .zip(reachable)
-        .filter_map(|(callable, reachable)| {
-            (core_modules.contains(&callable.module) && *reachable).then_some((
-                callable.module,
-                callable.declaration_span.start,
-                callable.declaration_span.end,
-            ))
-        })
-        .collect()
+) -> ReachableCoreBodies {
+    let modules = core_modules.iter().max().map_or(0, |module| module + 1);
+    let mut bodies: ReachableCoreBodies = (0..modules)
+        .map(|_| std::collections::HashMap::new())
+        .collect();
+    for (callable, reachable) in callables.iter().zip(reachable) {
+        if !*reachable || !core_modules.contains(&callable.module) {
+            continue;
+        }
+        let (owner, name) = cost_callable_owner_and_name(callable);
+        let owners = &mut bodies[callable.module];
+        if let Some(names) = owners.get_mut(owner) {
+            names.insert(name.to_string());
+        } else {
+            let mut names = std::collections::HashSet::new();
+            names.insert(name.to_string());
+            owners.insert(owner.to_string(), names);
+        }
+    }
+    bodies
 }
 
 fn should_lower_imported_core_body(
     core_modules: &std::collections::HashSet<usize>,
-    reachable_bodies: &std::collections::HashSet<(usize, usize, usize)>,
+    reachable_bodies: &ReachableCoreBodies,
     module: usize,
-    function: &Func,
+    owner: Option<&str>,
+    name: &str,
 ) -> bool {
     !core_modules.contains(&module)
-        || reachable_bodies.contains(&(module, function.name_span.start, function.name_span.end))
+        || reachable_bodies
+            .get(module)
+            .and_then(|owners| owners.get(owner.unwrap_or("")))
+            .is_some_and(|names| names.contains(name))
 }
 
 fn lowered_cost_method_matches(lowered: &str, expected: &str) -> bool {
@@ -11604,7 +11765,7 @@ fn cost_error_conversion_gaps(
         if !is_reachable || callable.foreign {
             continue;
         }
-        let Some((function, _)) = functions.get(callable.module, callable.declaration_span) else {
+        let Some((function, _)) = functions.get(callable.module, &callable.declaration_name) else {
             continue;
         };
         collect_cost_typed_conversions(&function.body, &mut required);

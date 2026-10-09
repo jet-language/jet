@@ -1152,6 +1152,7 @@ impl<'a> Checker<'a> {
         resolved_ret_out: &mut Option<Type>,
         operator_rhs_out: &mut Option<Type>,
     ) -> Option<Type> {
+        *checked_callee_out = None;
         if let Some(path) = checker_hardware_path(receiver, &self.core_imports) {
             let is_board = self
                 .core_imports
@@ -1491,14 +1492,12 @@ impl<'a> Checker<'a> {
                 {
                     let full = format!("{prefix}.{leaf}");
                     if self.registry.method(&full, method).is_some() {
-                        return self.check_static_method(
-                            &full,
-                            method,
-                            span,
-                            owner_type_args,
-                            type_args,
-                            args,
-                        );
+                        return self.check_static_method(&full,
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args, checked_callee_out);
                     }
                 }
             }
@@ -2031,67 +2030,55 @@ impl<'a> Checker<'a> {
                                 return Some(ty);
                             }
                         }
-                        return self.check_static_method(
-                            &type_name,
-                            method,
-                            span,
-                            owner_type_args,
-                            type_args,
-                            args,
-                        );
+                        return self.check_static_method(&type_name,
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args, checked_callee_out);
                     }
                     if ns == "core.encoding" && leaf == "EncodingLimits" && method == "safe" {
-                        return self.check_static_method(
-                            "EncodingLimits",
-                            method,
-                            span,
-                            owner_type_args,
-                            type_args,
-                            args,
-                        );
+                        return self.check_static_method("EncodingLimits",
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args, checked_callee_out);
                     }
                     if ns == "core.encoding.cbor" && leaf == "CBOROptions" && method == "safe" {
-                        return self.check_static_method(
-                            "CBOROptions",
-                            method,
-                            span,
-                            owner_type_args,
-                            type_args,
-                            args,
-                        );
+                        return self.check_static_method("CBOROptions",
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args, checked_callee_out);
                     }
                     if ns == "core.encoding.xml"
                         && (leaf == "XMLLimits" || leaf == "XMLParseOptions")
                         && method == "safe"
                     {
-                        return self.check_static_method(
-                            leaf,
-                            method,
-                            span,
-                            owner_type_args,
-                            type_args,
-                            args,
-                        );
+                        return self.check_static_method(leaf,
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args, checked_callee_out);
                     }
                     if ns == "core.email" && leaf == "Limits" && method == "safe" {
-                        return self.check_static_method(
-                            "Limits",
-                            method,
-                            span,
-                            owner_type_args,
-                            type_args,
-                            args,
-                        );
+                        return self.check_static_method("Limits",
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args, checked_callee_out);
                     }
                     if ns == "core.data" && leaf == "DataLimits" && method == "safe" {
-                        return self.check_static_method(
-                            "DataLimits",
-                            method,
-                            span,
-                            owner_type_args,
-                            type_args,
-                            args,
-                        );
+                        return self.check_static_method("DataLimits",
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args, checked_callee_out);
                     }
                 }
             }
@@ -2174,14 +2161,12 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if module == "core.encoding" && item == "EncodingLimits" && method == "safe" {
-                    let ret = self.check_static_method(
-                        &item,
-                        method,
-                        span,
-                        owner_type_args,
-                        type_args,
-                        args,
-                    );
+                    let ret = self.check_static_method(&item,
+                    method,
+                    span,
+                    owner_type_args,
+                    type_args,
+                    args, checked_callee_out);
                     *resolved_ret_out = ret.clone();
                     return ret;
                 }
@@ -2191,14 +2176,12 @@ impl<'a> Checker<'a> {
                 {
                     self.record_import_alias_reference(alias, *alias_span);
                     **receiver = Expr::Ident(item.clone(), span);
-                    let ret = self.check_static_method(
-                        &item,
-                        method,
-                        span,
-                        owner_type_args,
-                        type_args,
-                        args,
-                    );
+                    let ret = self.check_static_method(&item,
+                    method,
+                    span,
+                    owner_type_args,
+                    type_args,
+                    args, checked_callee_out);
                     *resolved_ret_out = ret.clone();
                     return ret;
                 }
@@ -2680,14 +2663,12 @@ impl<'a> Checker<'a> {
                     && self.is_checked_text_type_name(type_name))
             {
                 self.record_static_time_effect(type_name, method, span);
-                let ret = self.check_static_method(
-                    type_name,
-                    method,
-                    span,
-                    owner_type_args,
-                    type_args,
-                    args,
-                );
+                let ret = self.check_static_method(type_name,
+                method,
+                span,
+                owner_type_args,
+                type_args,
+                args, checked_callee_out);
                 let ret = if type_name == crate::Syntax::CLOCK_TYPE && method == "system" {
                     ret.map(crate::Sema::Diagnostics::system_clock_type)
                 } else {
@@ -3415,14 +3396,12 @@ impl<'a> Checker<'a> {
             // returned above; an unknown one follows the ordinary E0102
             // method diagnostic instead of reinterpreting the type as a value.
             if self.lookup(type_name).is_none() && builtin_type_from_ident(type_name).is_some() {
-                return self.check_static_method(
-                    type_name,
-                    method,
-                    span,
-                    owner_type_args,
-                    type_args,
-                    args,
-                );
+                return self.check_static_method(type_name,
+                method,
+                span,
+                owner_type_args,
+                type_args,
+                args, checked_callee_out);
             }
         }
         // D-VALIDATE1: `Validate.over(s).check(...)` and `.finish()` are
@@ -8208,6 +8187,7 @@ impl<'a> Checker<'a> {
         }
         let raw_protocol_return = self.raw_protocol_return_for_method(&type_name, method);
         // D-APILABEL1=A: bind before inference — see `bind_method_args`.
+        let method_diagnostics = self.diags.len();
         if !self.bind_method_args(method, &msig, args, span) {
             let (resolved_ret, return_type) =
                 self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
@@ -8316,6 +8296,13 @@ impl<'a> Checker<'a> {
                 .or(pre_inferred_method.as_deref()),
             Some(call_access),
         )?;
+        if !self.diags[method_diagnostics..]
+            .iter()
+            .any(|diagnostic| diagnostic.severity == crate::Diagnostics::Severity::Error)
+        {
+            *checked_callee_out =
+                self.checked_method_callee(owner_mod, method_type_name, &method_name);
+        }
         let (resolved_ret, return_type) =
             self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
         let ret = Some(return_type);

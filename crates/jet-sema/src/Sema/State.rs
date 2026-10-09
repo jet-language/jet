@@ -1288,6 +1288,7 @@ mod tests {
             resolved_ret: None,
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         };
         let table = StateTable::with_facts(Default::default());
         let mut ctx = StateCtx::new(&table, &[]);

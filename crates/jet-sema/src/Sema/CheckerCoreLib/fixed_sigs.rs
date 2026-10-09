@@ -7738,6 +7738,7 @@ impl CoreDefault {
                 resolved_ret: None,
                 operator_rhs: None,
                 checked_widen: false,
+                checked_callee: None,
             },
             CoreDefault::StaticEnum { type_name, variant } => crate::AST::Expr::EnumLit {
                 type_name: type_name.to_string(),

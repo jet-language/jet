@@ -36,7 +36,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 /// Schema of one stored constant value (an action record under its key).
-const COMPTIME_VALUE_SCHEMA: &str = "jet.comptime-value/v2";
+const COMPTIME_VALUE_SCHEMA: &str = "jet.comptime-value/v3";
 const SECTION_VALUE: u64 = 1;
 
 /// The environment of one check's constant evaluations, and the store work

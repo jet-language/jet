@@ -290,6 +290,7 @@ impl<'a> Parser<'a> {
                             resolved_ret: None,
                             operator_rhs: None,
                             checked_widen: false,
+                            checked_callee: None,
                         };
                     } else {
                         expr = Expr::Field(Box::new(expr), member, member_span);

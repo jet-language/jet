@@ -680,6 +680,7 @@ fn normalize_bare_method_head(expr: &mut Expr) {
                 resolved_ret: None,
                 operator_rhs: None,
                 checked_widen: false,
+                checked_callee: None,
             };
         }
         Expr::Paren(inner, ..) => normalize_bare_method_head(inner),
@@ -1676,6 +1677,7 @@ impl<'a> Checker<'a> {
                 resolved_ret: Some(Type::String),
                 operator_rhs: None,
                 checked_widen: false,
+                checked_callee: None,
             };
             if self.infer(inner) != Some(Type::String) {
                 holes_valid = false;
@@ -2708,6 +2710,7 @@ impl<'a> Checker<'a> {
             resolved_ret: None,
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         };
     }
 
@@ -3061,6 +3064,7 @@ impl<'a> Checker<'a> {
                     resolved_ret: call.resolved_ret,
                     operator_rhs: None,
                     checked_widen: false,
+                    checked_callee: None,
                 };
             }
             // The existing assertion kernel is shared by AOT, JIT, and the
@@ -3386,6 +3390,7 @@ impl<'a> Checker<'a> {
                     resolved_ret: None,
                     operator_rhs: None,
                     checked_widen: false,
+                    checked_callee: None,
                 };
             }
         }
@@ -3920,6 +3925,7 @@ impl<'a> Checker<'a> {
                     resolved_ret: None,
                     operator_rhs: None,
                     checked_widen: false,
+                    checked_callee: None,
                 };
                 self.infer(e)
             }
@@ -5211,6 +5217,7 @@ impl<'a> Checker<'a> {
                             resolved_ret: None,
                             operator_rhs: None,
                             checked_widen: false,
+                            checked_callee: None,
                         };
                         return self.infer(e);
                     }
@@ -5262,6 +5269,7 @@ impl<'a> Checker<'a> {
                 resolved_ret,
                 operator_rhs,
                 checked_widen: _,
+                checked_callee,
             } => {
                 // D-SHAPE3a=A: the parser's empty identifier is the unspellable
                 // receiver sentinel for `.new(...)`. Resolve it only from the same
@@ -6239,6 +6247,7 @@ impl<'a> Checker<'a> {
                             resolved_ret: Some(head.clone()),
                             operator_rhs: None,
                             checked_widen: true,
+                            checked_callee: None,
                         };
                         return Some(head);
                     }

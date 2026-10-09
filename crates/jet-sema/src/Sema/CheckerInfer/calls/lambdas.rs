@@ -1296,6 +1296,7 @@ fn rewrite_collect_yields(stmts: &mut [Stmt], target: &str) {
                     resolved_ret: Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
                     operator_rhs: None,
                     checked_widen: false,
+                    checked_callee: None,
                 });
             }
             Stmt::Loop { body, .. }

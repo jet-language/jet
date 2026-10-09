@@ -97,6 +97,7 @@ fn shared_access_call(handle: Expr, method: &str, body: LambdaBody, span: Span) 
         resolved_ret: None,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     }
 }
 

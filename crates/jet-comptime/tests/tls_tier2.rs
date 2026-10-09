@@ -20,6 +20,7 @@ fn tls_call_diag(impure_depth: usize, gates: jet_foundation::Policy::GateSet) ->
         resolved_ret: None,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     };
     let funcs = HashMap::new();
     let extern_names = HashSet::new();
@@ -126,6 +127,7 @@ fn core_tls_repl_requests_use_the_net_effect() {
         resolved_ret: None,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     };
     let stmts = vec![Stmt::AuthorityScope {
         caps: vec![("Net".to_string(), span)],

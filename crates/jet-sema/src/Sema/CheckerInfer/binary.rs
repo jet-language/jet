@@ -490,6 +490,7 @@ impl<'a> Checker<'a> {
             resolved_ret: Some(target.clone()),
             operator_rhs: None,
             checked_widen: widening && checked,
+            checked_callee: None,
         };
     }
 
@@ -546,6 +547,7 @@ impl<'a> Checker<'a> {
             resolved_ret: Some(base),
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         }
     }
 
@@ -580,6 +582,7 @@ impl<'a> Checker<'a> {
             resolved_ret: Some(Type::Named(destination_name.to_string())),
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         }
     }
 
@@ -639,6 +642,7 @@ impl<'a> Checker<'a> {
             resolved_ret: Some(Type::Named(destination_name.to_string())),
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         }
     }
 
@@ -678,6 +682,7 @@ impl<'a> Checker<'a> {
             resolved_ret: Some(Type::Named(unit_name.to_string())),
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         }
     }
 
@@ -1121,6 +1126,16 @@ impl<'a> Checker<'a> {
             )
         };
 
+        let checked_callee = match &receiver_ty {
+            Type::Named(name) | Type::Apply { name, .. } => {
+                self.resolve_method_sig(name, method).and_then(|(owner, _)| {
+                    let (_, owner_name) = self.struct_type_name_parts(name);
+                    let declaration_name = format!("{owner_name}.{method}");
+                    self.checked_method_callee(owner, owner_name, &declaration_name)
+                })
+            }
+            _ => None,
+        };
         let left = std::mem::replace(lhs, Box::new(Expr::Absent(span)));
         let right = std::mem::replace(rhs, Box::new(Expr::Absent(span)));
         let (receiver, argument) = if receiver_is_left {
@@ -1146,6 +1161,7 @@ impl<'a> Checker<'a> {
             resolved_ret: Some(result_ty.clone()),
             operator_rhs,
             checked_widen: false,
+            checked_callee,
         };
         *replacement = Some(call);
         let _ = (receiver_ty, argument_ty);
@@ -1687,6 +1703,13 @@ impl<'a> Checker<'a> {
                             crate::Sema::effect_key(Some(Self::split_type_name(type_name).1), method),
                             span,
                         );
+                        let checked_callee = self
+                            .resolve_method_sig(type_name, method)
+                            .and_then(|(owner, _)| {
+                                let (_, owner_name) = self.struct_type_name_parts(type_name);
+                                let declaration_name = format!("{owner_name}.{method}");
+                                self.checked_method_callee(owner, owner_name, &declaration_name)
+                            });
                         let left = std::mem::replace(lhs, Box::new(Expr::Absent(span)));
                         let right = std::mem::replace(rhs, Box::new(Expr::Absent(span)));
                         let call = Expr::MethodCall {
@@ -1717,6 +1740,7 @@ impl<'a> Checker<'a> {
                             resolved_ret: Some(ret.clone()),
                             operator_rhs,
                             checked_widen: false,
+                            checked_callee,
                         };
                         *replacement = Some(match op {
                             BinOp::Eq | BinOp::Ne if comparable_hook => Expr::Binary(
