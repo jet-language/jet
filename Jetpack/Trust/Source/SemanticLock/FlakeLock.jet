@@ -192,12 +192,12 @@ fn trust_json_canonical_field(object: [String: Dyn], key: String) -> String Trus
 
 fn trust_json_quote(text: String) -> String Never! {
     // Text cannot contain a non-finite Float or a non-text map key.
-    json.to_string(Dyn.Text(~text)) ?? panic("Text must be JSON-encodable")
+    json.to_string(Dyn.Text(text.copy())) ?? panic("Text must be JSON-encodable")
 }
 
 fn trust_json_texts(values: [String]) -> Dyn Never! {
     items := [Dyn]{}
-    loop value in values -> &items.push(Dyn.Text(~value))
+    loop value in values -> &items.push(Dyn.Text(value.copy()))
     Dyn.Array(items)
 }
 
@@ -485,7 +485,7 @@ fn trust_flake_registry_json(entry: FlakeRegistryEntry) -> String Never! {
 fn trust_flake_composition_json(composition: FlakeComposition) -> String Never! {
     // This closed schema has only Text, Bool, and arrays of Text.
     trust_json_object_text([TrustJSONField]{
-        TrustJSONField{key: "framework", value: Dyn.Text(~composition.framework)},
+        TrustJSONField{key: "framework", value: Dyn.Text(composition.framework.copy())},
         TrustJSONField{key: "modules", value: trust_json_texts(composition.modules)},
         TrustJSONField{key: "moduleSources", value: trust_json_texts(composition.module_sources)},
         TrustJSONField{key: "perSystem", value: Dyn.Bool(composition.per_system)},

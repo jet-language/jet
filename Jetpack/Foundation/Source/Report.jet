@@ -229,7 +229,7 @@ struct StatusEnvelope {
         self.validate() ?? panic("invalid jet.status/v1 envelope")
         object := [String: Dyn]{}
         object["schema"] = Dyn.Text(STATUS_SCHEMA)
-        object["action"] = Dyn.Text(~self.action)
+        object["action"] = Dyn.Text(self.action.copy())
         object["ok"] = Dyn.Bool(self.ok)
         reports := [Dyn]{}
         loop report in self.reports -> &reports.push(report.to_tree())
@@ -406,7 +406,7 @@ struct ReportCause {
 
     fn to_tree(self) -> Dyn Never! {
         object := [String: Dyn]{}
-        object["code"] = Dyn.Text(~self.code)
+        object["code"] = Dyn.Text(self.code.copy())
         object["file"] = report_optional_path(self.file)
         object["line"] = report_optional_int(self.line)
         object["col"] = report_optional_int(self.col)
@@ -429,7 +429,7 @@ struct ReportEdit {
         object := [String: Dyn]{}
         object["file"] = Dyn.Text(self.file.as_str())
         object["span"] = self.span.to_tree()
-        object["new_text"] = Dyn.Text(~self.new_text)
+        object["new_text"] = Dyn.Text(self.new_text.copy())
         object["safety"] = Dyn.Text(self.safety.as_str())
         Dyn.Object(object)
     }
@@ -543,12 +543,12 @@ struct ReportEnvelope {
         self.validate() ?? panic("invalid jet.report/v3 envelope")
         object := [String: Dyn]{}
         object["schema"] = Dyn.Text("{self.schema_name}/v{self.schema_version}")
-        object["moment"] = Dyn.Text(~self.moment)
-        object["severity"] = Dyn.Text(~self.severity)
-        object["code"] = Dyn.Text(~self.code)
-        object["what"] = Dyn.Text(~self.what)
-        object["why"] = Dyn.Text(~self.why)
-        object["fix"] = Dyn.Text(~self.fix)
+        object["moment"] = Dyn.Text(self.moment.copy())
+        object["severity"] = Dyn.Text(self.severity.copy())
+        object["code"] = Dyn.Text(self.code.copy())
+        object["what"] = Dyn.Text(self.what.copy())
+        object["why"] = Dyn.Text(self.why.copy())
+        object["fix"] = Dyn.Text(self.fix.copy())
         if self.applicability == {
             .Val(applicability) -> object["applicability"] = Dyn.Text(applicability.as_str())
             .None -> {}
