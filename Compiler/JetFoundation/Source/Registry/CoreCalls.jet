@@ -396,17 +396,6 @@ fn core_call_source_member(row: CoreCallRecord) -> String? Never! {
     Val(row.source_target ?? row.member)
 }
 
-fn core_call_with_source_target(row: ^CoreCallRecord, target: String) -> CoreCallRecord Never! {
-    updated := row
-    updated.source_target = Val(target)
-    updated
-}
-
-fn core_call_source_member(row: CoreCallRecord) -> String? Never! {
-    if row.symbol != CoreCallSymbol.SourceOwned -> return None
-    Val(row.source_target ?? row.member)
-}
-
 // The same checked boundary fact used by legacy Core MIR and source forwarding.
 fn core_call_authority_boundary_at(row: CoreCallRecord, index: Int) -> Bool Never! {
     row.module_name == "core.plugin" && row.member == "load" && index == 1
@@ -420,17 +409,6 @@ fn core_call_authority_boundary_at(row: CoreCallRecord, index: Int) -> Bool Neve
     wire :: core_call("core.plugin", "__authority_to_wire") ?? panic("authority wire row")
     assert_eq(core_call_authority_boundary_at(wire, 1), false)
     assert_eq(wire.effect_kind, None)
-}
-
-fn core_call_with_source_target(row: ^CoreCallRecord, target: String) -> CoreCallRecord Never! {
-    updated := row
-    updated.source_target = Val(target)
-    updated
-}
-
-fn core_call_source_member(row: CoreCallRecord) -> String? Never! {
-    if row.symbol != CoreCallSymbol.SourceOwned -> return None
-    Val(row.source_target ?? row.member)
 }
 
 fn core_call_new_with_coverage(module_name: String, member: String, symbol: String, prelude: Bool, borrow_mask: [Bool], coverage: CoreCallCoverage) -> CoreCallRecord Never! {
