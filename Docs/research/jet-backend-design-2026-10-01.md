@@ -15,6 +15,13 @@ runtime, ELF writer, in-process loader) and `Compiler/JetBackend/Source/OS/`
 (the Jet OS layer). The package is listed in `Compiler/Bootstrap/sources.list`
 after the Foundation MIR it reads.
 
+Merge-lost native session helpers have been restored to their canonical
+providers: checked native value reads, slot writes and allocation receipts in
+`OS/Linux.jet` (589ecd28b, with word-range validation from 4612eae5e), and
+parent/child Core startup in `Image/Loader.jet` (82fe5a735). LIR debug facts,
+builder source lines and x64 variable ranges are restored from e0628be87;
+optimizer and sanitizer constructors retain those facts across rewrites.
+
 ### What Cranelift does today (the behaviour to match)
 
 `crates/jet-jit/src/jit/runtime_host.rs` (`new_jit_module`) builds one
@@ -688,6 +695,13 @@ skipping a Jet-owned route whose ABI cannot be derived. Exact `Int`, typed
 `String`, write borrows, failures, and mismatched parameter/result widths are
 not raw route signatures. `--check` validates signatures as well as
 generated-file freshness.
+Native source-identity descriptors (`lower_native_type`, `lower_native_export`)
+and logical-environment descriptors (`lower_environment_route`) use the same
+canonical emitter and declaration-proven inputs. Capture them only from a
+fresh all-parts emission matching the current compiler/Core/provider pin;
+historical descriptor snapshots are not replacement table data. At Rust
+cutover, retain the populated tables as canonical Jet source with generator
+and input-digest provenance, rather than retaining the Rust-driven emitter.
 `node Tools/agent/gen-runtime.mjs <allparts.rs> --check` checks trap literals,
 the lifecycle list, runtime stop exports, and routes in one keep-going invocation. Without `--check`
 it regenerates them in dependency order. Narrow worker and held-job checks
@@ -3308,45 +3322,72 @@ casts. Date/time formatting and Pool construction are Core source-owner rows,
 not String/allocator runtime aliases. The private image-runtime stop/String
 allocator and L1/L3 canonical allocator/split providers are existing Jet bodies.
 
-### Native DataTree ownership boundary
+### Native Dyn ownership boundary
 
-`JetBackend/Source/DataABI.jet` single-sources the native DataTree variant
-words and payload offsets; these are never the layout of a Rust DataTree.
-`JetRuntime/Source/DataTree.jet` provides the recursive ownership boundary
-using the existing native List `[length, capacity, data]` header. Constructors
-clone borrowed text, consume sequence holders, and preserve ordered Object
-entries, including duplicate keys. Int constructors borrow an exact Int,
-range-check through `jet_int_owned_to_i64`, and store raw i64, matching
-`CAbiRoutes.rs:9118-9126`. Int getters rebuild a fresh exact owner through
-`jet_int_owned_from_i64`; clone/drop have no Int owner to retain/release.
-Sequence getters lend children and clone keys; text getters clone their owner.
+`JetBackend/Source/DataABI.jet` single-sources canonical Dyn's raw variant
+words and payload offsets; these are never a Rust allocation layout.
+The retained `JetRuntime/Source/DataTree.jet` filename and private
+`data_tree_*` helpers describe generic storage, not a second public type.
+All exported lifecycle, constructor, getter and sequence symbols use `Dyn`;
+obsolete `DataTree` exports and `TypedText` are removed.
+Constructors clone borrowed text and exact Int owners, consume sequence
+holders, and preserve ordered Object entries, including duplicate keys.
+Int getters clone the retained exact owner rather than narrowing to i64.
+Sequence getters lend children and clone keys; text getters clone owners.
 
-Equality follows `jet-foundation/src/DataTree.rs:8-22`: compare variant first,
-then ordered payloads, with IEEE Float equality (NaN unequal even to itself,
-signed zeros equal). Drop frees children before their storage, exactly once.
-Show/display/debug share the compact JSON behavior of
-`JetStd/JSONDataTree.rs:27-94`, including quoted text/control escapes, lexical
-Number preservation, byte arrays, decimal Float debug spelling and the
-non-finite Float stop. Raw i64 Int uses `jet_rt_i64_to_string`'s signed decimal
-formatter, including both i64 edges (the decimal intent of
-`JSONDataTree.rs:31`). Delimiters stream into one existing text builder.
+Equality is canonical Dyn's ordered, variant-sensitive equality, including
+IEEE Float equality (NaN unequal even to itself, signed zeros equal). Drop
+releases owned Int, text, byte, date-time and recursive sequence payloads.
+Debug renders compact JSON; show/display first use scalar `to_text`
+projection and otherwise JSON. Number preserves its lexeme; Bytes renders
+standard base64; DateTime retains instant, nanos, leap label and frozen offset.
+`CompilerNeededJSON.jet` ports the canonical shared strict JSON parser with
+exact-number mode: every numeric token becomes Number until a typed read.
+Error reasons and the JSON/Syntax, offset-zero, line-present, column-absent
+adapter remain unchanged. This is not Core's separate policy parser.
 
-`JetRuntime/Tests/DataTreeWitness.c` requires the real Jet object and
-`--wrap=jet_rt_free`; it asserts that interception actually ran, child/key/text
-clone independence, ordered equality and exact-once frees. The Int edge cases
-check raw storage and independently owned getters after the borrowed argument
-is dropped. `nonfinite` exercises the JSON stop separately; `native-overflow`
-supplies `i64::MAX + 1` as an exact Int and must stop with the existing native
-conversion's `native Int argument exceeds host range` message at
-`<core.prelude>:0`. These new cases have not been executed. Earlier parse and C
-syntax receipts do not admit native caller layouts or prove execution:
-source-root/MIR ownership and the generator's provider ABI validation remain
-required before pack cutover.
+`DynNative.jet` marshals the compiler's checked enum through the descriptor
+in `Lower/Dyn.jet`, rather than assuming source/runtime tags or element
+offsets coincide. Both directions clone borrowed owners; packed byte lists,
+padded Object entries and recursive payload wrappers follow descriptor facts.
+Compiler JSON does not construct DateTime. Main explicitly scoped that
+bridge variant out of cutover: it raises the registered E3001 panic
+`Dyn DateTime is not yet bridged natively`, never a silent ZonedDateTime
+reinterpretation. The complete ZonedDateTime projection requires a separate
+schema extension after cutover.
+
+`JetRuntime/Tests/DataTreeWitness.c` retains its existing filename but uses
+only canonical Dyn exports. It requires a real Jet object and
+`--wrap=jet_rt_free`, checks owned clones and exact-once frees, and its
+`exact-int-large` case accepts `i64::MAX + 1` without narrowing.
+`CompilerNeededJSONTests.jet` and `DynNativeTests.jet` cover parser/outslot
+contracts and source-layout-independent roundtrips. Execution of these
+fixtures is still required; source inspection is not native execution proof.
+
+### Compiler-needed scalar runtime routes
+
+`CompilerNeededMath.jet` provides all 37 compiler-needed math routes.
+Transcendental, rounding, remainder, power, hypot and fused multiply-add
+operations call the platform's matching C libm entry points, with no Rust
+provider or approximation. Absolute value and predicates preserve IEEE bits;
+comparison retains the Rust NaN ordering; sin/cos keeps tuple order.
+Existing audited FloatBits intrinsics supply bitcasts, with native exact Int
+owners at route boundaries. The C fixture compares result bits against the
+same platform libm, including payloads, subnormals, signed zeros and fusion.
+
+The three text predicates stream the existing E4 UTF-8 decoder over pinned
+Unicode 17 properties; empty input remains false. Alphabetic/Numeric
+balanced tables regenerate from checksum-pinned UCD inputs with frozen range
+hashes, not Rust source or a locale-dependent libc predicate.
+`CompilerNeededURL.jet` ports the kernel's parse/normalize contract, including
+its permissive host/bracket rules, Punycode, percent decoding, query ordering
+and error precedence, and provides the existing JetURL record lifecycle.
+Provider fixtures are Jet-only; no frozen Rust implementation is rebuilt.
 
 
 ### Shared record-variant panic parity
 
-DataTree, DataEvent, TLS, TaskFailure, and ProcessResourceLimit variant checks
+Dyn, DataEvent, TLS, TaskFailure, and ProcessResourceLimit variant checks
 call the single internal `rt_record_variant_panic()` in
 `JetRuntime/Source/Trap.jet`. It materializes the seed's 33-byte reason in one
 owned buffer and calls the existing `jet_rt_panic_message`; after task

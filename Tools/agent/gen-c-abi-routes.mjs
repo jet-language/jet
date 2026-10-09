@@ -48,7 +48,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 
-import { runtimeExportSignatures, validateRuntimeRoute } from "./runtime-route-abi.mjs";
+import { generatedRecordPath, nativeProviderHandles, recordApplication, recordApplicationsIn, recordBindings, recordInstanceName, substituteRecordType, runtimeExportSignatures, validateRuntimeRoute } from "./runtime-route-abi.mjs";
+import { nativeEnvironmentRoutes, emitNativeEnvironmentRoutes } from "./native-route-environment.mjs";
+import { nativeHandleExports } from "./native-route-handles.mjs";
+import { nativeRecordExports } from "./native-route-records.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimePath = process.argv[2];
 const check = process.argv.includes("--check");
@@ -515,14 +518,6 @@ const rustOutcomeAlias = (rustPath) => {
   const disabled = [...noRustPrelude].some((module) => !module || decl.path === module || decl.path.startsWith(`${module}::`));
   return decl.visible && !decl.gated && (target !== "Result" || !shadow && !disabled);
 };
-const nominalOutcome = [...types].some(([key, decls]) => key.split("::").pop() === "JetOutcome" &&
-  decls.some((decl) => decl.visible && !decl.gated && (decl.kind === "struct" || decl.kind === "enum")));
-const rustOutcomeAlias = (rustPath) => {
-  const found = declarationOf(rustPath.replace(/^crate::/, ""));
-  if (!found?.decls.some((decl) => decl.kind === "rust-sum-alias")) return false;
-  if (found.decls.length !== 1 || nominalOutcome) throw new Error("JetOutcome sum alias: visible nominal declaration is ambiguous");
-  return found.decls[0].visible && !found.decls[0].gated;
-};
 
 // Computed route families (TIR routes.rs): precise_builtin_route spells every
 // precise-numeric entry point `jet_<type>_<func>` and geometry_method_route
@@ -566,6 +561,7 @@ for (const m of handTable.matchAll(/exact_int_(?:binary|located)!\s*\{?\(?([^)}]
 // metadata below stays shared; only the Rust adapter bodies disappear.
 const jetRuntimeSignatures = runtimeExportSignatures(repo);
 const jetRuntimeExports = new Set(jetRuntimeSignatures.keys());
+const nativeProviders = nativeProviderHandles(jetRuntimeSignatures);
 const fixedInts = new Set(["u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "isize"]);
 
 // A handle type whose runtime declaration derives `Clone` also gets a clone
@@ -1479,6 +1475,13 @@ const ownsType = (name) => {
   return parts.length >= 3 && ownedTypes.has(`${parts[parts.length - 2]}::${parts[parts.length - 1]}`);
 };
 const isSourceOwned = (name) => ownsType(name) || sourceOwned.some((rule) => name.startsWith(rule.prefix) && (!rule.suffix || name.endsWith(rule.suffix)) && (!rule.leaves || rule.leaves.includes(coreLeaf(name))));
+const sourceNominalReferences = new Set();
+for (const definitions of fns.values()) {
+  for (const definition of definitions) {
+    for (const name of definition.sig.match(/\b__jet_[A-Za-z0-9_]+\b/g) ?? []) sourceNominalReferences.add(name);
+    if (definition.selfType?.startsWith("__jet_")) sourceNominalReferences.add(definition.selfType);
+  }
+}
 // The native Rust type path (from the crate root) of a Jet type name, as
 // MIRRust.rs `rust_type` resolves an argument-free nominal; null if none.
 const nativeType = (name) => {
@@ -2235,6 +2238,7 @@ jet.push("        if row.runtime == runtime && row.field == field -> return Val(
 jet.push("    }");
 jet.push("    None");
 jet.push("}");
+jet.push(...emitNativeEnvironmentRoutes(nativeEnvironmentRoutes(routes, jetRuntimeExports, jetRuntimeSignatures)));
 
 jet.push("");
 jet.push("// Candidate source identities; Lower validates against actual MIR/native layout.");
