@@ -46,13 +46,15 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 
 import { runtimeExportSignatures, validateRuntimeRoute } from "./runtime-route-abi.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimePath = process.argv[2];
 const check = process.argv.includes("--check");
+const nativeListOnly = process.argv.includes("--native-list-only");
 if (!runtimePath) {
-  console.error("usage: gen-c-abi-routes.mjs <runtime.rs> [--check]");
+  console.error("usage: gen-c-abi-routes.mjs <runtime.rs> [--check | --native-list-only]");
   process.exit(64);
 }
 const rsOut = "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs";
@@ -290,6 +292,7 @@ const attributesBefore = (lineStart) => {
   return attributes;
 };
 const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => line.startsWith("#[cfg("));
+const noRustPrelude = new Set();
 {
   // frames: { mod: name | null, impl: type name | null, gated }. An inherent
   // `impl Name {` of a non-generic type holds methods keyed `path::Name::method`.
@@ -304,6 +307,10 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
   const isIdent = (c) => /[A-Za-z0-9_]/.test(c);
   while (i < n) {
     const c = text[i];
+    if (c === "#" && stack.every((frame) => frame.mod)) {
+      const attribute = /^#(!?)\[\s*(no_implicit_prelude|no_std)\s*\]/.exec(text.slice(i, i + 80));
+      if (attribute?.[1]) noRustPrelude.add(stack.map((frame) => frame.mod).join("::"));
+    }
     if (c === "/" && text[i + 1] === "/") { i = text.indexOf("\n", i); if (i < 0) break; continue; }
     if (c === "/" && text[i + 1] === "*") {
       let depth = 1; i += 2;
@@ -352,6 +359,9 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
         if (m) {
           pendingMod = m[1];
           pendingGated = cfgsBefore(text.lastIndexOf("\n", i) + 1).some((cfg) => cfg !== '#[cfg(not(target_arch = "wasm32"))]');
+          if (attributesBefore(text.lastIndexOf("\n", i) + 1).includes("#[no_implicit_prelude]")) {
+            noRustPrelude.add([...stack.filter((frame) => frame.mod).map((frame) => frame.mod), m[1]].join("::"));
+          }
         }
       } else if (word === "impl" && stack.every((frame) => frame.mod)) {
         const m = /^\s+([A-Z][A-Za-z0-9_]*)\s*\{/.exec(text.slice(j, j + 120));
@@ -389,6 +399,7 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
             // `not(target_arch = "wasm32")`), here or on an enclosing module.
             gated: cfgs.some((cfg) => cfg !== '#[cfg(not(target_arch = "wasm32"))]') || stack.some((frame) => frame.gated),
             path,
+            at: i,
             // The inherent impl's type for a method (`Self` and the receiver).
             selfType: impl,
           });
@@ -418,13 +429,27 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
           });
           types.set(key, list);
         }
+      } else if (word === "type" && stack.every((frame) => frame.mod)) {
+        // Actual emitted Result aliases, resolved through the same import
+        // table as records; an alias spelling alone conveys no carrier.
+        const alias = /^\s+([A-Z]\w*)\s*<([^<>]+)>\s*=\s*((?:(?:std|core)::result::)?Result)\s*<([^;]+)>\s*;/.exec(text.slice(j, j + 2000));
+        const lineStart = text.lastIndexOf("\n", i) + 1;
+        if (alias && /\bpub\b/.test(text.slice(lineStart, i))) {
+          const path = stack.map((frame) => frame.mod).join("::");
+          const key = path ? `${path}::${alias[1]}` : alias[1];
+          const list = types.get(key) ?? [];
+          list.push({ visible: true, generic: true, kind: "rust-sum-alias", at: i, path, derives: [],
+            alias: { parameters: alias[2], target: alias[3], arguments: alias[4], definition: `pub type ${alias[1]}<${alias[2]}> = ${alias[3]}<${alias[4]}>` },
+            gated: cfgsBefore(lineStart).some((cfg) => cfg !== '#[cfg(not(target_arch = "wasm32"))]') || stack.some((frame) => frame.gated) });
+          types.set(key, list);
+        }
       } else if (word === "use" && stack.every((frame) => frame.mod)) {
         const here = stack.map((frame) => frame.mod);
-        // A `use` path (relative to this module unless `crate::`), as a
-        // module path from the crate root.
+        // A `use` path from the crate root; Rust standard-library namespaces
+        // are absolute even inside a module.
         const resolve = (prefix) => {
           const target = prefix.split("::").filter(Boolean);
-          const base = target[0] === "crate" ? [] : [...here];
+          const base = /^(?:crate|std|core|alloc)$/.test(target[0] ?? "") ? [] : [...here];
           for (const segment of target[0] === "crate" ? target.slice(1) : target) {
             if (segment === "super") base.pop();
             else if (segment !== "self") base.push(segment);
@@ -456,19 +481,39 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
 // The declaration a runtime type path names: `{ key, decls }` for the item at
 // that module path, one a renamed import names, or one a module's glob import
 // (`use super::*;`, `pub(crate) use jet_sync::*;`) brings in; null if none.
+// External std/core/alloc paths are marked, never inferred to be Jet records.
 const declarationOf = (rustPath, seen = new Set()) => {
+  rustPath = rustPath.replace(/<[\s\S]*>$/, "");
   if (types.has(rustPath)) return { key: rustPath, decls: types.get(rustPath) };
   if (renames.has(rustPath)) return declarationOf(renames.get(rustPath), seen);
+  if (/^(?:std|core|alloc)::/.test(rustPath)) return { key: rustPath, decls: [], external: true };
   const segments = rustPath.split("::");
   const name = segments.pop();
   const module = segments.join("::");
   if (seen.has(module)) return null;
   seen.add(module);
+  let external = null;
   for (const target of globs.get(module) ?? []) {
     const found = declarationOf(target ? `${target}::${name}` : name, seen);
-    if (found) return found;
+    if (found && !found.external) return found;
+    if (found) external ??= found;
   }
-  return null;
+  return external;
+};
+const nominalOutcome = [...types].some(([key, decls]) => key.split("::").pop() === "JetOutcome" &&
+  decls.some((decl) => decl.visible && !decl.gated && (decl.kind === "struct" || decl.kind === "enum")));
+const rustOutcomeAlias = (rustPath) => {
+  const found = declarationOf(rustPath.replace(/^crate::/, ""));
+  if (!found?.decls.some((decl) => decl.kind === "rust-sum-alias")) return false;
+  if (found.decls.length !== 1 || found.key.split("::").pop() === "JetOutcome" && nominalOutcome) {
+    classificationFailure(new Error(`${found.key} sum alias: visible nominal declaration is ambiguous`), rustPath, "");
+    return false;
+  }
+  const decl = found.decls[0];
+  const target = decl.alias.target;
+  const shadow = target === "Result" ? declarationOf(decl.path ? `${decl.path}::Result` : "Result") : null;
+  const disabled = [...noRustPrelude].some((module) => !module || decl.path === module || decl.path.startsWith(`${module}::`));
+  return decl.visible && !decl.gated && (target !== "Result" || !shadow && !disabled);
 };
 
 // Computed route families (TIR routes.rs): precise_builtin_route spells every
@@ -529,7 +574,7 @@ const derivedKnown = new Map();
 const derives = (full, trait) => {
   const key = `${trait} ${full}`;
   if (derivedKnown.has(key)) return derivedKnown.get(key);
-  const name = full.split("::").pop();
+  const name = recordApplication(full)?.base.split("::").pop() ?? full.split("::").pop();
   const manual = new RegExp(`^\\s*impl (?:(?:std|core)::(?:cmp|clone)::)?${trait} for (?:(?:super|crate|[a-z_][a-z0-9_]*)::)*${name}\\s*\\{`, "m").test(text);
   const found = declarationOf(full.replace(/^crate::/, ""));
   let result;
@@ -565,11 +610,259 @@ for (const match of text.matchAll(/^\s*impl (?:(?:super|crate)::)*(JetDisplay|Je
 
 // A Rust type written in module `path` as a type the adapter module names.
 const qualify = (ty, path) => {
-  if (ty.startsWith("crate::") || ty.startsWith("std::")) return ty;
+  if (/^(?:crate|std|core|alloc)::/.test(ty)) return ty;
   if (ty.startsWith("super::")) return `crate::${path.split("::").slice(0, -1).filter(Boolean).concat(ty.slice(7)).join("::")}`;
   return path ? `crate::${path}::${ty}` : `crate::${ty}`;
 };
-const opaqueName = /^(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Z][A-Za-z0-9_]*)$/;
+// Expand only a declaration-proven Rust Result alias on the result edge.
+// Actual arguments resolve in the caller's module; fixed alias payloads
+// resolve in the declaration's module, even through renamed/glob imports.
+const resultAlias = (type, path) => {
+  const application = /^((?:[A-Za-z_]\w*::)*[A-Z]\w*)<([\s\S]*)>$/.exec(type);
+  if (!application) return null;
+  const full = qualify(application[1], path);
+  if (!rustOutcomeAlias(full)) return null;
+  const found = declarationOf(full.replace(/^crate::/, ""));
+  if (found?.decls.length !== 1) return null;
+  const decl = found.decls[0];
+  const parameters = recordBindings(`struct ${application[1].split("::").pop()}<${decl.alias.parameters}>`, splitTop(application[2]), type);
+  const qualified = (ty, module) => {
+    if (ty === "()" || ty === "String" || ty === "bool" || ty === "f64" || unsupportedRawArguments.has(ty)) return ty;
+    const nested = /^([^<]+)<([\s\S]*)>$/.exec(ty);
+    if (nested) {
+      const base = nested[1] === "Option" || nested[1] === "Result" || nested[1] === "Vec" ? nested[1] : qualify(nested[1], module);
+      return `${base}<${splitTop(nested[2]).map((arg) => qualified(arg, module)).join(",")}>`;
+    }
+    return qualify(ty, module);
+  };
+  for (const [name, argument] of parameters) parameters.set(name, qualified(argument, path));
+  const args = splitTop(decl.alias.arguments.replace(/\s+/g, ""));
+  if (args.length !== 2) return null;
+  return `Result<${args.map((arg) => qualified(substituteRecordType(arg, parameters), decl.path)).join(",")}>`;
+};
+const recordDeclUnchecked = (full) => {
+  const found = declarationOf(full.replace(/^crate::/, ""));
+  if (!found || found.decls.length !== 1) return null;
+  const decl = found.decls[0];
+  if (decl.gated || decl.at === undefined) return null;
+  const open = text.indexOf("{", decl.at);
+  const head = text.slice(decl.at, open);
+  if (open < 0 || /[;(]/.test(head) || /\bwhere\b/.test(head)) return null;
+  const application = recordApplication(full);
+  if (application.args.some((arg) => arg.startsWith("'"))) return null;
+  const bindings = recordBindings(head, application.args, full);
+  let depth = 0;
+  let close = open;
+  for (; close < text.length; close++) {
+    if (text[close] === "{") depth++;
+    else if (text[close] === "}" && --depth === 0) break;
+  }
+  const body = text.slice(open + 1, close).replace(/\/\/[^\n]*/g, "");
+  if (/#\[cfg/.test(body)) return null;
+  return { kind: decl.kind, path: decl.path, items: splitTop(body.replace(/#\[[^\]]*\]/g, "")).map((item) => substituteRecordType(item, bindings)) };
+};
+const recordDecl = (full) => {
+  try { return recordDeclUnchecked(full); }
+  catch (error) { classificationFailure(error, full, "", { phase: "record declaration" }); return null; }
+};
+// Canonical C carriers shared with Jet host kernels. Match resolved
+// declarations, never a leaf spelling that could name a user type.
+const handleBridges = new Map();
+for (const [rust, type, stem] of [
+  ["jet_std::IOError", "JetCIOError", "error"],
+  ["jet_std::IOContext", "JetCIOContext", "context"],
+  ...(jetRuntimeExports.has("jet_rt_handle_drop_JetTaskFailure")
+    ? [["JetTaskFailure", "JetCTaskFailure", "failure"]] : []),
+  ...(jetRuntimeExports.has("jet_rt_handle_drop_Jet__ResolveError")
+    ? [["Jet__ResolveError", "JetCResolveError", "resolve_error"]] : []),
+  ...(jetRuntimeExports.has("jet_rt_handle_drop_JetIpAddr")
+    ? [["JetIpAddr", "JetCIpAddr", "ip"]] : []),
+  ...(jetRuntimeExports.has("jet_rt_handle_drop_JetSocketAddr")
+    ? [["JetSocketAddr", "JetCSocketAddr", "socket"]] : []),
+]) {
+  const key = declarationOf(rust)?.key;
+  if (key !== undefined) handleBridges.set(key, { type, stem });
+}
+const handleBridge = (full) => handleBridges.get(declarationOf(full.replace(/^crate::/, ""))?.key);
+const handleType = (full) => handleBridge(full) ? `super::jet_c_abi_host::${handleBridge(full).type}` : full;
+const handleBorrow = (full, value) => handleBridge(full) ? `&super::jet_c_abi_host::${handleBridge(full).stem}_view(${value})` : `unsafe { &*${value} }`;
+const handleCopy = (full, value) => handleBridge(full) ? `super::jet_c_abi_host::${handleBridge(full).stem}_view(${value})` : `unsafe { &*${value} }.clone()`;
+const handleTake = (full, value) => handleBridge(full) ? `super::jet_c_abi_host::${handleBridge(full).stem}_take(${value})` : `*unsafe { Box::from_raw(${value}) }`;
+const handleOut = (full, value) => handleBridge(full) ? `super::jet_c_abi_host::${handleBridge(full).stem}_handle(${value})` : `Box::into_raw(Box::new(${value}))`;
+const opaqueName = /^(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Z][A-Za-z0-9_]*|__jet_[A-Za-z0-9_]+)(?:<[\s\S]*>)?$/;
+// Scalar records keep native storage in Jet; only the exact-Int field crosses
+// this ABI. Resolve the declaration, never a route symbol or leaf-name alias.
+const wordRecords = new Map();
+function wordRecord(ty, path) {
+  if (!opaqueName.test(ty) || ty.includes("<")) return null;
+  const full = qualify(ty, path);
+  const found = declarationOf(full.replace(/^crate::/, ""));
+  if (!found || found.decls.length !== 1) return null;
+  const declaration = found.decls[0];
+  if (!declaration.visible || declaration.gated || declaration.generic || declaration.kind !== "struct") return null;
+  const record = recordDecl(full);
+  if (!record || record.items.length !== 1) return null;
+  const field = /^(pub(?:\([a-z]+\))?\s+)?([a-z_][a-z0-9_]*|__jet_[A-Za-z0-9_]+)\s*:\s*(.+)$/.exec(record.items[0]);
+  if (!field || (record.path && !field[1])) return null;
+  const fieldType = field[3].replace(/\s+/g, "");
+  let resolvedField = qualify(fieldType, record.path).replace(/^crate::/, "");
+  const seen = new Set();
+  while (renames.has(resolvedField) && !seen.has(resolvedField)) {
+    seen.add(resolvedField);
+    resolvedField = renames.get(resolvedField).replace(/^crate::/, "");
+  }
+  const exact = resolvedField === "jet_foundation::Numeric::JetInt";
+  if (fieldType !== "i64" && !exact) return null;
+  const result = { full: `crate::${found.key}`, declaration: found.key, field: field[2],
+    member: field[2].replace(/^__jet_/, ""), exact };
+  wordRecords.set(found.key, result);
+  return result;
+}
+const concreteHandles = new Map(); // specialization name -> resolved declaration application
+const borrowedHandles = new Map(); // seed-only Rust lifetime carriers, not Jet type instances
+const unsupportedSumCarriers = new Map(); // declaration-proved seed alias, no plain C codec
+const unsupportedRustCarriers = new Map(); // std/core/alloc provenance, no C record codec
+const unsupportedGenericCarriers = new Map(); // proved seed TYPEs without a record codec
+const unsupportedRawArguments = new Set([...fixedInts, "i64", "i128", "u128", "f32", "char"]);
+const classificationErrors = [];
+let classificationSite = null;
+function declarationParameters(at) {
+  const opener = /^(?:struct|enum)\s+\w+\s*</.exec(text.slice(at, at + 2000));
+  if (!opener) return null;
+  const start = at + opener[0].length;
+  const stack = [">"];
+  const closing = { "<": ">", "(": ")", "[": "]" };
+  for (let end = start; end < text.length; end++) {
+    const char = text[end];
+    if (closing[char]) stack.push(closing[char]);
+    else if (char === stack[stack.length - 1] && !(char === ">" && text[end - 1] === "-")) {
+      stack.pop();
+      if (!stack.length) return splitTop(text.slice(start, end));
+    } else if (char === "{" || char === ";") break;
+  }
+  throw new Error("generic record: unterminated declaration parameters");
+}
+function unsupportedSeedRecord(type, path, reason) {
+  const found = declarationOf(qualify(type.replace(/<[\s\S]*>$/, ""), path).replace(/^crate::/, ""));
+  if (!found || found.decls.length !== 1 || found.key.split("::").pop().startsWith("__jet_")) return false;
+  const decl = found.decls[0];
+  const key = `${found.key}:${type}`;
+  const previous = unsupportedGenericCarriers.get(key)?.reason;
+  unsupportedGenericCarriers.set(key, { type, qualified: `crate::${found.key}`,
+    declaration: { kind: decl.kind, path: decl.path, at: decl.at },
+    reason: previous && !previous.includes(reason) ? `${previous}; ${reason}` : `${reason}; actual seed declaration proved, no native record codec` });
+  return true;
+}
+function classificationFailure(error, type, path, consumer = classificationSite) {
+  if ((consumer?.phase?.includes("record") || consumer?.phase === "source identity") &&
+      unsupportedSeedRecord(type, path, error.message)) return;
+  if (!nativeListOnly) throw error;
+  const declaration = declarationOf(qualify(type.replace(/<[\s\S]*>$/, ""), path).replace(/^crate::/, ""));
+  classificationErrors.push({ type, reason: error.message, site: {
+    runtime: resolve(runtimePath), module: path, consumer,
+    offsetUnits: "UTF-16 code units in emitted runtime text",
+    declaration: declaration ? { key: declaration.key, offsets: declaration.decls.map((decl) => decl.at) } : null,
+  } });
+}
+function runtimeHandle(ty, path) {
+  if (!nativeListOnly) return runtimeHandleUnchecked(ty, path);
+  try { return runtimeHandleUnchecked(ty, path); }
+  catch (error) { classificationFailure(error, ty, path); return null; }
+}
+const genericArgumentKinds = new Map([["f64", "Float"], ["bool", "Bool"], ["String", "String"], ["crate::jet_foundation::Numeric::JetInt", "Int"]]);
+function runtimeHandleUnchecked(ty, path) {
+  const aliasPath = qualify(ty.replace(/<[\s\S]*>$/, ""), path);
+  // RUST-EXIT S5: resolve imports before nominal TYPE structural validation.
+  let resolved = declarationOf(aliasPath.replace(/^crate::/, ""));
+  // Rust's default prelude supplies Box only after local/import shadowing.
+  // Explicit crate::Box never inherits this fallback; disabled preludes do not.
+  if (!resolved && ty.replace(/<[\s\S]*>$/, "") === "Box" &&
+      ![...noRustPrelude].some((module) => !module || path === module || path.startsWith(`${module}::`))) {
+    resolved = { key: "std::boxed::Box", decls: [], external: true };
+  }
+  if (resolved?.external && !/^crate::(?:std|core|alloc)::/.test(ty) &&
+      !aliasPath.split("::").pop().startsWith("__jet_")) {
+    const qualified = resolved.key + ty.slice(ty.replace(/<[\s\S]*>$/, "").length);
+    unsupportedRustCarriers.set(qualified, { type: ty, qualified,
+      reason: /dynFn(?:Mut|Once)?\b/.test(ty) ? "Rust closure carrier, no C callback codec; seed-only"
+        : "Rust standard-library carrier, no C record codec; seed-only" });
+    return null;
+  }
+  if (rustOutcomeAlias(aliasPath)) {
+    unsupportedSumCarriers.set(`${aliasPath}:${ty}`, { type: ty, qualified: aliasPath,
+      declaration: { key: resolved.key, at: resolved.decls[0].at },
+      reason: `resolved ${resolved.decls[0].alias.definition}; plain/tuple/list-element carrier has no sum C codec; seed-only` });
+    return null;
+  }
+  const structural = /^((?:[A-Za-z_]\w*::)*(?:[A-Z]\w*|__jet_\w+))<([\s\S]*)>$/.exec(ty);
+  if (structural && /[<>()[\]]/.test(structural[2].replace(/\(\)/g, "")) && resolved?.decls.length === 1) {
+    const decl = resolved.decls[0];
+    const params = declarationParameters(decl.at);
+    if (params && decl.visible && !decl.gated) {
+      const supplied = splitTop(structural[2]);
+      const required = params.filter((param) => !param.includes("=")).length;
+      if (supplied.length < required || supplied.length > params.length) throw new Error(`generic record ${ty}: expected ${required}..${params.length} declaration arguments, got ${supplied.length}`);
+      if (unsupportedSeedRecord(ty, path, "nested/structural TYPE specialization unsupported")) return null;
+    }
+  }
+  const application = recordApplication(ty);
+  if (!application) return null;
+  if (application.args.length === 0) return { name: application.base.split("::").pop(), full: qualify(ty, path) };
+  const requested = qualify(application.base, path);
+  const found = declarationOf(requested.replace(/^crate::/, ""));
+  if (!found || found.decls.length !== 1) throw new Error(`generic record ${ty}: unresolved or ambiguous declaration ${requested}`);
+  const decl = found.decls[0];
+  if (!decl.visible || decl.gated) throw new Error(`generic record ${ty}: inaccessible or gated declaration`);
+  // RUST-EXIT S5: retain the existing opaque seed codec's Rust lifetime
+  // spelling. Never turn a lifetime into a Jet TYPE argument or native owner.
+  if (application.args.some((arg) => arg.startsWith("'"))) {
+    const open = text.indexOf("{", decl.at);
+    const head = text.slice(decl.at, open);
+    const parameters = /^(?:struct|enum)\s+\w+\s*<([^<>]*)>/.exec(head)?.[1].split(",").map((arg) => arg.trim());
+    if (!application.args.every((arg) => /^'[A-Za-z_]\w*$/.test(arg)) ||
+        !parameters || parameters.length !== application.args.length ||
+        !parameters.every((arg) => /^'[A-Za-z_]\w*$/.test(arg))) {
+      throw new Error(`generic record ${ty}: mixed lifetime and TYPE arguments are unsupported`);
+    }
+    const handle = { name: application.base.split("::").pop(), full: qualify(ty, path) };
+    borrowedHandles.set(handle.name, { runtime: handle.name, qualified: handle.full,
+      reason: "actual Rust lifetime-only declaration; borrowed seed codec, not native-admissible Jet TYPE specialization" });
+    return handle;
+  }
+  // Arguments name types in the caller's module, not the declaration's.
+  const args = application.args.map((arg) => {
+    if (arg === "()" || unsupportedRawArguments.has(arg)) return arg;
+    if (genericArgumentKinds.has(arg)) return arg;
+    if (/^(?:(?:crate|super|[a-z_][a-z0-9_]*)::)*(?:Numeric::)?JetInt$/.test(arg)) return "crate::jet_foundation::Numeric::JetInt";
+    const argument = declarationOf(qualify(arg, path).replace(/^crate::/, ""));
+    if (!argument || argument.decls.length !== 1 || argument.decls[0].generic || argument.decls[0].gated || !argument.decls[0].visible) {
+      throw new Error(`generic record ${ty}: unresolved or unsupported argument ${arg}`);
+    }
+    return `crate::${argument.key}`;
+  });
+  const open = text.indexOf("{", decl.at);
+  recordBindings(text.slice(decl.at, open), args, ty);
+  const unsupportedArgs = args.filter((arg) => arg === "()" || unsupportedRawArguments.has(arg));
+  if (unsupportedArgs.length) {
+    if (found.key.split("::").pop().startsWith("__jet_")) {
+      throw new Error(`generic record ${ty}: SOURCE ${unsupportedArgs.includes("()") ? "TYPE-Unit" : "raw-machine TYPE"} specialization requires a typed ${unsupportedArgs.includes("()") ? "Unit" : "identity/record"} codec`);
+    }
+    // RUST-EXIT S5: prior seed routes skip these TYPEs. Keep them unadmitted
+    // until a typed identity/record codec exists; never invent a layout.
+    unsupportedGenericCarriers.set(`${requested}:${ty}`, { type: ty, qualified: requested,
+      declaration: { kind: decl.kind, path: decl.path, at: decl.at },
+      reason: `${unsupportedArgs.includes("()") ? "seed TYPE-Unit specialization unsupported" : "seed raw-machine TYPE specialization unsupported"}: actual generic declaration and arity proved, no typed identity/record codec for ${unsupportedArgs.join(",")}; seed-only` });
+    return null;
+  }
+  const name = recordInstanceName(found.key, args);
+  const full = `crate::${found.key}<${args.join(",")}>`;
+  const handle = { name, full, args };
+  const known = concreteHandles.get(name);
+  if (known && known.full !== full) throw new Error(`generic record ${ty}: specialization key collision ${name}`);
+  concreteHandles.set(name, handle);
+  return handle;
+}
+const expressionType = (full) => full.replace("<", "::<");
 
 // A fieldless runtime enum crosses as its variant index in a word; the Jet
 // table names its variants in declaration order so the lowering checks that
@@ -583,7 +876,7 @@ for (const match of text.matchAll(/^\s*pub enum ([A-Z][A-Za-z0-9_]*)\s*\{([^{}]*
   fieldlessEnums.set(match[1], known !== undefined && (known === null || known.join(",") !== variants.join(",")) ? null : variants);
 }
 function tagCarrier(ty, path) {
-  if (!opaqueName.test(ty)) return null;
+  if (!opaqueName.test(ty) || ty.includes("<")) return null;
   const name = opaqueName.exec(ty)[1];
   const variants = fieldlessEnums.get(name);
   if (!variants) return null;
@@ -613,15 +906,16 @@ function elementCarrier(ty) {
 // element: a record element converts through Records.jet for the call).
 function handleElement(ty, path) {
   if (!opaqueName.test(ty) || tagCarrier(ty, path)) return null;
-  const name = opaqueName.exec(ty)[1];
-  const full = qualify(ty, path);
+  const handle = runtimeHandle(ty, path);
+  if (!handle) return null;
+  const { name, full } = handle;
   if (name === "String" || name === "Self" || !derivesClone(full)) return null;
-  return { jet: `Handle{name: "${name}"}`, read: `unsafe { &*(w as *const ${full}) }.clone()`, handle: { name, full } };
+  return { jet: `Handle{name: "${name}"}`, read: handleCopy(full, `(w as *mut ${handleType(full)})`), handle: { name, full } };
 }
 
 // Parameter carrier: { jet, ctys: [C types], expr(names) } or null. A List
 // parameter is two words: its slot data pointer and its length.
-function paramCarrier(ty, path) {
+function paramCarrier(ty, path, symbol) {
   ty = ty.replace(/\s+/g, "");
   const one = (jet, cty, expr) => ({ jet, ctys: [cty], expr: ([a]) => expr(a) });
   if (ty === "&str") return one("Text", "JetCString", (a) => `view(${a})`);
@@ -640,6 +934,12 @@ function paramCarrier(ty, path) {
   // A fieldless enum by value: its variant index (results keep their carrier).
   const tag = tagCarrier(ty, path);
   if (tag) return one(tag.jet, "i64", tag.read);
+  const scalarRecord = wordRecord(ty.startsWith("&") && !ty.startsWith("&mut") ? ty.slice(1) : ty, path);
+  if (scalarRecord) {
+    const read = (a) => scalarRecord.exact
+      ? `unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${a}) }` : `native(${a})`;
+    return one("Word", "i64", (a) => `${ty.startsWith("&") ? "&" : ""}${scalarRecord.full} { ${scalarRecord.field}: ${read(a)} }`);
+  }
   // An exact Int by value: the borrowed carrier word, cloned into an owner.
   // The exact Int is spelled from the crate root wherever its kernel names it.
   if (/^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return one("Word", "i64", (a) => `unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${a}) }`);
@@ -657,9 +957,11 @@ function paramCarrier(ty, path) {
   // caller's own box (the lowering lends the handle of its Write place).
   const borrowedMut = /^&mut(.+)$/.exec(ty);
   if (borrowedMut && opaqueName.test(borrowedMut[1]) && !tagCarrier(borrowedMut[1], path)) {
-    const name = opaqueName.exec(borrowedMut[1])[1];
+    const handle = runtimeHandle(borrowedMut[1], path);
+    if (!handle) return null;
+    const { name, full } = handle;
     if (name === "String" || name === "Self") return null;
-    const full = qualify(borrowedMut[1], path);
+    if (handleBridge(full)) throw new Error(`${name} route ${symbol}: mutable Rust borrowing is not a C carrier`);
     return { ...one(`HandleMut{name: "${name}"}`, `*mut ${full}`, (a) => `unsafe { &mut *${a} }`), handle: { name, full } };
   }
   const borrowed = /^&([^&].*)$/.exec(ty);
@@ -667,27 +969,36 @@ function paramCarrier(ty, path) {
   const borrowedTag = borrowed ? tagCarrier(borrowed[1], path) : null;
   if (borrowedTag) return one(borrowedTag.jet, "i64", (a) => `&${borrowedTag.read(a)}`);
   if (borrowed && !borrowed[1].startsWith("mut") && opaqueName.test(borrowed[1])) {
-    const name = opaqueName.exec(borrowed[1])[1];
+    const handle = runtimeHandle(borrowed[1], path);
+    if (!handle) return null;
+    const { name, full } = handle;
     if (name === "String" || name === "Self") return null;
-    const full = qualify(borrowed[1], path);
-    return { ...one(`Handle{name: "${name}"}`, `*mut ${full}`, (a) => `unsafe { &*${a} }`), handle: { name, full } };
+    return { ...one(`Handle{name: "${name}"}`, `*mut ${handleType(full)}`, (a) => handleBorrow(full, a)), handle: { name, full } };
   }
   // A cloneable handle by value: the adapter copies the borrowed handle.
   if (!borrowed && opaqueName.test(ty)) {
-    const name = opaqueName.exec(ty)[1];
-    const full = qualify(ty, path);
+    const handle = runtimeHandle(ty, path);
+    if (!handle) return null;
+    const { name, full } = handle;
     if (name === "String" || name === "Self" || !derivesClone(full)) return null;
-    return { ...one(`Handle{name: "${name}"}`, `*mut ${full}`, (a) => `unsafe { &*${a} }.clone()`), handle: { name, full } };
+    return { ...one(`Handle{name: "${name}"}`, `*mut ${handleType(full)}`, (a) => handleCopy(full, a)), handle: { name, full } };
   }
   return null;
 }
 
 // A value carrier for a result side: { jet, cty, wrap(v) } or null; "()" is Unit.
-function valueCarrier(ty, path, nativeInt) {
+function valueCarrier(ty, path, nativeInt, rawFixed = false) {
   ty = ty.replace(/\s+/g, "");
   if (ty === "()") return { jet: "Unit", cty: null, wrap: () => "()" };
   if (ty === "String") return { jet: "Text", cty: "JetCString", wrap: (v) => `handle(${v})` };
+  if (ty === "&'staticstr") return { jet: "Text", cty: "JetCString", wrap: (v) => `text_handle(${v})` };
   if (ty === "i64") return { jet: "Word", cty: "i64", wrap: (v) => (nativeInt ? `crate::jet_std::jet_int_from_i64(${v})` : v) };
+  // Fixed Reader results are raw machine bits, not exact-Int owners. Casts
+  // sign-extend signed widths and preserve all 64 bits of unsigned u64.
+  if (rawFixed && fixedInts.has(ty)) return { jet: "Word", cty: "i64", wrap: (v) => `(${v}) as i64` };
+  // Lower's MIR F32 uses its low32 raw word with four-byte storage. Never
+  // widen through f64: preserve every binary32 NaN/signaling payload bit.
+  if (rawFixed && ty === "f32") return { jet: "Word", cty: "i64", wrap: (v) => `(${v}).to_bits() as i64` };
   if (fixedInts.has(ty)) return { jet: "Word", cty: "i64", wrap: (v) => nativeInt ? `crate::jet_std::jet_int_from_i64(i64::try_from(${v}).unwrap_or_else(|_| range_stop()))` : `(${v}) as i64` };
   if (ty === "bool") return { jet: "Flag", cty: "bool", wrap: (v) => v };
   if (ty === "f64") return { jet: "Float", cty: "f64", wrap: (v) => v };
@@ -696,11 +1007,15 @@ function valueCarrier(ty, path, nativeInt) {
   if (ty === "__jet_Ordering") return { jet: `Tag{name: "Ordering", variants: "Less,Equal,Greater"}`, cty: "i64", wrap: (v) => `match ${v} { crate::__jet_Ordering::__jet_Less => 0, crate::__jet_Ordering::__jet_Equal => 1, crate::__jet_Ordering::__jet_Greater => 2 }` };
   // An owned exact Int: its carrier word, ownership passing to the caller.
   if (/^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return { jet: "Word", cty: "i64", wrap: (v) => `(${v}).into_raw()` };
+  const scalarRecord = wordRecord(ty, path);
+  if (scalarRecord) return { jet: "Word", cty: "i64", wrap: (v) => scalarRecord.exact
+    ? `(${v}).${scalarRecord.field}.into_raw()` : `crate::jet_std::jet_int_from_i64((${v}).${scalarRecord.field})` };
   if (opaqueName.test(ty)) {
-    const name = opaqueName.exec(ty)[1];
+    const handle = runtimeHandle(ty, path);
+    if (!handle) return null;
+    const { name, full } = handle;
     if (name === "Self" || name === "String") return null;
-    const full = qualify(ty, path);
-    return { jet: `Handle{name: "${name}"}`, cty: `*mut ${full}`, wrap: (v) => `Box::into_raw(Box::new(${v}))`, handle: { name, full } };
+    return { jet: `Handle{name: "${name}"}`, cty: `*mut ${handleType(full)}`, wrap: (v) => handleOut(full, v), handle: { name, full } };
   }
   return null;
 }
@@ -757,12 +1072,24 @@ function parseSignature(sig) {
 // passes the second at the payload slot's next word. A tuple returns nothing
 // and writes item `i` through out pointer `item<i>`, each to its own zeroed
 // eight-byte slot.
-function resultShape(ty, path, nativeInt) {
+function resultShape(ty, path, nativeInt, rawFixed = false) {
   ty = (ty ?? "()").replace(/\s+/g, "");
   if (ty === "!") ty = "()";
   // `JetOutcome<T, JetAbsent>` (= `Result<T, JetAbsent>`) is generated Rust's
   // `T?`: it crosses as an Option.
-  const outcome = /^(?:(?:[a-z_][a-z0-9_]*::)*JetOutcome|Result)<(.*),JetAbsent>$/.exec(ty);
+  const outcomeCandidate = /^(?:(?:[a-z_][a-z0-9_]*::)*JetOutcome|Result)<(.*),JetAbsent>$/.exec(ty);
+  const outcome = outcomeCandidate && (ty.startsWith("Result<") || rustOutcomeAlias(qualify(ty.slice(0, ty.indexOf("<")), path)))
+    ? outcomeCandidate : null;
+  if (!outcome) {
+    const expanded = resultAlias(ty, path);
+    if (expanded) {
+      const shape = resultShape(expanded, "", nativeInt, rawFixed);
+      // Unsupported nested payloads retain the declaration-proven sum
+      // inventory reason; expansion is not admission of a new codec.
+      if (!shape) runtimeHandle(ty, path);
+      return shape;
+    }
+  }
   const generic = outcome ? [ty, "Option", outcome[1]] : /^(Option|Result)<(.*)>$/.exec(ty);
   const [somePattern, nonePattern] = outcome ? ["Ok", "Err(_)"] : ["Some", "None"];
   // A List result element: a plain slot word, or a new owned handle of a
@@ -771,10 +1098,11 @@ function resultShape(ty, path, nativeInt) {
     const plain = elementCarrier(t);
     if (plain) return plain;
     if (!opaqueName.test(t) || tagCarrier(t, path)) return null;
-    const name = opaqueName.exec(t)[1];
+    const handle = runtimeHandle(t, path);
+    if (!handle) return null;
+    const { name, full } = handle;
     if (name === "String" || name === "Self") return null;
-    const full = qualify(t, path);
-    return { jet: `Handle{name: "${name}"}`, write: "Box::into_raw(Box::new(e)) as u64", handle: { name, full } };
+    return { jet: `Handle{name: "${name}"}`, write: `${handleOut(full, "e")} as u64`, handle: { name, full } };
   };
   const listOf = (t) => {
     const list = /^Vec<(.+)>$/.exec(t);
@@ -792,7 +1120,7 @@ function resultShape(ty, path, nativeInt) {
   }
   const tuple = /^\((.*)\)$/.exec(ty);
   if (tuple && ty !== "()") {
-    const items = splitTop(tuple[1]).map((item) => valueCarrier(item, path, nativeInt));
+    const items = splitTop(tuple[1]).map((item) => valueCarrier(item, path, nativeInt, rawFixed));
     if (items.length < 2 || items.some((item) => !item || !item.cty)) return null;
     const names = items.map((_, i) => `e${i}`);
     const writes = items.map((item, i) => `            unsafe { item${i}.write(${item.wrap(names[i])}) };`);
@@ -803,7 +1131,7 @@ function resultShape(ty, path, nativeInt) {
     };
   }
   if (!generic) {
-    const v = valueCarrier(ty, path, nativeInt);
+    const v = valueCarrier(ty, path, nativeInt, rawFixed);
     if (!v) return null;
     return { jet: `Plain{carrier: LowerRouteCarrier.${v.jet}}`, ret: v.cty, outs: [], handles: v.handle ? [v.handle] : [], body: (call) => (v.cty ? v.wrap(call) : `${call}`) };
   }
@@ -819,7 +1147,7 @@ function resultShape(ty, path, nativeInt) {
         body: (call) => `match ${call} {\n            ${listArm("some", element, somePattern, 1)}\n            ${nonePattern} => 0,\n        }`,
       };
     }
-    const v = valueCarrier(args[0], path, nativeInt);
+    const v = valueCarrier(args[0], path, nativeInt, rawFixed);
     if (!v || !v.cty) return null;
     return {
       jet: `Option{some: LowerRouteCarrier.${v.jet}}`, ret: "i64", outs: [{ name: "some", cty: v.cty }], handles: v.handle ? [v.handle] : [],
@@ -828,7 +1156,7 @@ function resultShape(ty, path, nativeInt) {
   }
   if (args.length !== 2) return null;
   const okList = listOf(args[0]);
-  const ok = okList ? null : valueCarrier(args[0], path, nativeInt);
+  const ok = okList ? null : valueCarrier(args[0], path, nativeInt, rawFixed);
   const errList = listOf(args[1]);
   const err = errList ? null : valueCarrier(args[1], path, false);
   if ((!ok && !okList) || (!errList && (!err || !err.cty))) return null;
@@ -868,6 +1196,7 @@ for (const match of handTable.matchAll(/exact_int_(binary|located)!\s*\{?\(?([^)
   for (const name of match[2].split(",").map((part) => part.trim()).filter(Boolean)) handAbi.set(name, parseSignature(`fn ${name}${macro[1]}`));
 }
 for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]))) {
+  classificationSite = { phase: "route", symbol };
   // An exact-Int adapted symbol calls its owned kernel (MIRRust.rs
   // call_symbol_for_function); the route keeps the symbol.
   const target = exactAdapters.get(symbol) ?? symbol;
@@ -886,7 +1215,9 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
     continue;
   }
   const skip = (reason) => {
-    if (jetRuntimeExports.has(name)) throw new Error(`Jet runtime route ${symbol}: cannot validate canonical C ABI: ${reason}`);
+    if (jetRuntimeExports.has(name)) {
+      classificationFailure(new Error(`Jet runtime route ${symbol}: cannot validate canonical C ABI: ${reason}`), classificationSite?.signature ?? symbol, classificationSite?.module ?? "");
+    }
     skipped.push(`${symbol} (${label}): ${reason}`);
   };
   if (exported.has(name)) { skip("export name taken"); continue; }
@@ -897,6 +1228,7 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
   if (new Set(defs.map((def) => def.sig)).size !== 1) { skip("cfg-dependent signature"); continue; }
   const def = defs[0];
   const path = def.path;
+  classificationSite = { phase: "route", symbol, target, signature: def.sig, module: path, offset: def.at };
   if (path && !def.pub) { skip(`not public in ${path}`); continue; }
   // A method's receiver is its first parameter; `Self` is the impl's type.
   const selfSig = def.selfType
@@ -914,11 +1246,21 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
   }
   const params = splitTop(sig.params).map((param) => {
     const colon = param.indexOf(":");
-    return colon < 0 ? null : paramCarrier(param.slice(colon + 1), path);
+    return colon < 0 ? null : paramCarrier(param.slice(colon + 1), path, symbol);
   });
   if (params.some((param) => param === null)) { skip(`parameter types ${sig.params}`); continue; }
-  const result = resultShape(sig.result, path, route.nativeInt);
+  const rawFixed = /^jet_reader_(?:read_[ui](?:8|16|32|64)(?:_le|_be)?|read_f32_(?:le|be)|peek)$/.test(name);
+  const result = resultShape(sig.result, path, rawFixed ? false : route.nativeInt, rawFixed);
   if (!result) { skip(`result type ${sig.result}`); continue; }
+  if (jetRuntimeExports.has(name) && (name === "jet_reader_over" || name === "jet_reader_over_owned")) {
+    if (params.length !== 1 || params[0].ctys.length !== 2) throw new Error(`${name}: Reader.over must have one checked byte List parameter`);
+    // Logical metadata stays one List; Lower appends the checked 1|8 stride.
+    params[0].ctys.push("i64");
+  } else if (jetRuntimeExports.has(name) && name === "jet_reader_take") {
+    if (params.length !== 2 || params[1].ctys.length !== 1) throw new Error(`${name}: Reader.take must have handle and length parameters`);
+    // The target element stride precedes ok-data/ok-length/error out slots.
+    params[1].ctys.push("i64");
+  }
   // A direct #Export(c) is the Jet adapter. Check the entire flattened ABI,
   // including Option/Result/Tuple/List out slots, before dropping its Rust body.
   if (jetRuntimeExports.has(name)) validateRuntimeRoute({ symbol, name, params, result }, jetRuntimeSignatures.get(name));
@@ -931,6 +1273,7 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
   if (!exported.has(name)) continue;
   adapters.push({ symbol, target, name, label, params, result, rows: route.rows });
 }
+classificationSite = null;
 
 // Finite scalar specializations of the existing canonical codec intrinsics.
 // These adapters marshal native storage only; Encode/Decode implementations
@@ -1004,6 +1347,54 @@ adapters.push({
   if (index < 0) adapters.push(row); else adapters[index] = row;
 }
 
+// The raw tagged-Int destructor is callable only after its Jet layer owns the
+// export. Earlier E1/E4 runtime epochs must not acquire a dangling route.
+if (jetRuntimeExports.has("jet_rt_int_drop") && !adapters.some((adapter) => adapter.name === "jet_rt_int_drop")) {
+  const adapter = {
+    symbol: "jet_rt_int_drop", name: "jet_rt_int_drop", external: true,
+    params: [{ jet: "Word", ctys: ["i64"] }],
+    result: { jet: "Plain{carrier: LowerRouteCarrier.Unit}", ret: null, outs: [] },
+    rows: ["JetRuntime.Int.drop"],
+  };
+  validateRuntimeRoute(adapter, jetRuntimeSignatures.get(adapter.name));
+  adapters.push(adapter);
+}
+
+// Native-only operations have no seed kernel to wrap. Their dispatch is typed
+// in Routes.jet; their real Jet providers still validate against this ABI table.
+// Weak signatures: Shared.jet@4f9428a3a, Word -> Word, Word/Word -> Flag,
+// Word -> Unit. Enrollment does not admit a Rust Box carrier or seed body.
+for (const [name, params, result, row] of [
+  ["jet_rt_native_bits_new", [], { jet: 'Plain{carrier: LowerRouteCarrier.Handle{name: "JetBitSet"}}', ret: "i64", outs: [] }, "JetRuntime.BitSet.new"],
+  ["jet_rt_native_bits_clear", [{ jet: 'HandleMut{name: "JetBitSet"}', ctys: ["i64"] }], { jet: "Plain{carrier: LowerRouteCarrier.Unit}", ret: null, outs: [] }, "JetRuntime.BitSet.clear"],
+  ["jet_rt_native_shared_downgrade", [{ jet: "Word", ctys: ["i64"] }], { jet: "Plain{carrier: LowerRouteCarrier.Word}", ret: "i64", outs: [] }, "JetRuntime.Shared.downgrade"],
+  ["jet_rt_native_shared_weak_upgrade", [{ jet: "Word", ctys: ["i64"] }, { jet: "Word", ctys: ["i64"] }], { jet: "Plain{carrier: LowerRouteCarrier.Flag}", ret: "bool", outs: [] }, "JetRuntime.Shared.weak_upgrade"],
+  ["jet_rt_native_shared_weak_drop", [{ jet: "Word", ctys: ["i64"] }], { jet: "Plain{carrier: LowerRouteCarrier.Unit}", ret: null, outs: [] }, "JetRuntime.Shared.weak_drop"],
+  // Physical Shared owner/alias/guard exports: accepted f4da51359+20314fd26.
+  // Words are provider-owned addresses/status, not exact-Int conversions.
+  ...[
+    ["owner_strong_count", 1, "Word"], ["owner_pin", 2, "Flag"],
+    ["pin_drop", 1, "Unit"], ["owner_alias", 2, "Flag"],
+    ["alias_token", 1, "Word"], ["alias_drop", 1, "Unit"],
+    ["guard_acquire", 2, "Word"], ["guard_clone", 1, "Word"],
+    ["guard_held", 1, "Flag"], ["guard_root_ptr", 1, "Word"],
+    ["guard_revision", 1, "Word"], ["guard_mark_dirty", 1, "Unit"],
+    ["guard_publish_and_release", 1, "Unit"], ["guard_abort_release", 1, "Unit"],
+    ["guard_reacquire_and_refresh", 2, "Flag"], ["guard_drop", 1, "Unit"],
+    ["guard_wait_once", 2, "Word"],
+  ].map(([operation, arity, carrier]) => [
+    `jet_rt_shared_${operation}`,
+    Array.from({ length: arity }, () => ({ jet: "Word", ctys: ["i64"] })),
+    { jet: `Plain{carrier: LowerRouteCarrier.${carrier}}`,
+      ret: carrier === "Unit" ? null : carrier === "Flag" ? "bool" : "i64", outs: [] },
+    `JetRuntime.Shared.${operation}`,
+  ]),
+]) {
+  if (!jetRuntimeExports.has(name)) continue;
+  const adapter = { symbol: name, name, external: true, params, result, rows: [row] };
+  validateRuntimeRoute(adapter, jetRuntimeSignatures.get(name));
+  adapters.push(adapter);
+}
 // Core types the runtime holds natively: the Jet name -> native Rust type
 // tables generated Rust spells its types with (Codegen/Context.rs and
 // Syntax/predicates.rs, applied in MIRRust.rs `rust_type` order, with its
@@ -1084,6 +1475,12 @@ const isSourceOwned = (name) => ownsType(name) || sourceOwned.some((rule) => nam
 // MIRRust.rs `rust_type` resolves an argument-free nominal; null if none.
 const nativeType = (name) => {
   const canonical = name.startsWith("<corelib>/");
+  // Actual source nominal declarations, not marker structs or retired Rust
+  // carriers. Nongeneric ownership also needs the source rule or a typed
+  // source use; generic concrete uses are discovered from signatures below.
+  const generated = canonical ? generatedRecordPath(name) : null;
+  const declaration = generated ? declarationOf(generated) : null;
+  if (declaration?.decls.length === 1 && (declaration.decls[0].generic || isSourceOwned(name) || sourceNominalReferences.has(generated))) return declaration.key;
   const native = canonical && !isSourceOwned(name) ? coreLeaf(name) : name;
   if (explicitTable.has(name)) return explicitTable.get(name);
   const fileName = /^<corelib>\/Core\/(files|term)::Core\/\1\/\1\.jet::/.test(name) ? coreLeaf(name) : name;
@@ -1100,18 +1497,20 @@ const nativeType = (name) => {
   return rootPrelude.get(core) ?? `jet_std::${core}`;
 };
 // A native type path the adapters can hold by handle: a handle a route
-// already holds at that path, or one visible, ungated, non-generic runtime
-// struct or enum, spelled at its declaration (a private glob import does not
-// re-export it).
+// already holds at that path, or one visible, ungated runtime declaration
+// with concrete arguments substituted at the boundary.
 const handleOf = (rustPath) => {
-  if (!rustPath || !/^(?:[A-Za-z_][A-Za-z0-9_]*::)*[A-Z][A-Za-z0-9_]*$/.test(rustPath)) return null;
-  const name = rustPath.split("::").pop();
+  if (!rustPath || !opaqueName.test(rustPath)) return null;
+  const application = recordApplication(rustPath);
+  if (!application) return null;
+  if (application.args.length > 0) return runtimeHandle(rustPath, "");
+  const name = application.base.split("::").pop();
   if (handles.get(name) === `crate::${rustPath}`) return { name, full: `crate::${rustPath}` };
   const found = declarationOf(rustPath);
   if (!found || found.decls.length !== 1) return null;
   const [decl] = found.decls;
+  // A bare name-table entry for a generic is not a concrete ABI request.
   if (!decl.visible || decl.generic || decl.gated) return null;
-  // A renamed import names the declaration's own type.
   return { name: found.key.split("::").pop(), full: `crate::${found.key}` };
 };
 // Every Jet name of a native handle type: the table names, plus the canonical
@@ -1126,11 +1525,33 @@ const jetNames = new Map(); // Jet name -> runtime handle name
       candidates.add(`<corelib>/${dirname(rel)}::${rel}::${m[1]}`);
     }
   }
+  // Pure Core source functions can mention concrete generic records without
+  // a C route. Discover those applications from their emitted signatures too.
+  for (const jetName of [...candidates].sort()) {
+    const target = nativeType(jetName);
+    const declaration = target ? declarationOf(target) : null;
+    if (!declaration || declaration.decls.length !== 1 || !declaration.decls[0].generic) continue;
+    const base = target.split("::").pop();
+    for (const defs of fns.values()) {
+      for (const def of defs) {
+        const signature = parseSignature(def.sig);
+        if (!signature || signature.generics || def.gated || def.wasmOnly) continue;
+        classificationSite = { phase: "source generic", signature: def.sig, module: def.path, offset: def.at };
+        for (const application of recordApplicationsIn(def.sig, base)) {
+          const handle = runtimeHandle(application, def.path);
+          if (!handle) continue; // Classified unadmitted carriers remain in the inventory.
+          const known = handles.get(handle.name);
+          if (known && known !== handle.full) throw new Error(`generic record ${application}: handle key names two declarations`);
+          handles.set(handle.name, handle.full);
+        }
+      }
+    }
+  }
   // Two spellings of one declaration (`crate::X` and, through a glob import,
   // `crate::jet_std::X`) are one handle type: the first spelling stays.
   const sameType = (a, b) => {
     const left = declarationOf(a.slice("crate::".length));
-    return a === b || (left !== null && left.key === declarationOf(b.slice("crate::".length))?.key);
+    return a === b || (!a.includes("<") && !b.includes("<") && left !== null && left.key === declarationOf(b.slice("crate::".length))?.key);
   };
   for (const jetName of [...candidates].sort()) {
     const handle = handleOf(nativeType(jetName));
@@ -1140,10 +1561,45 @@ const jetNames = new Map(); // Jet name -> runtime handle name
     if (!known) handles.set(handle.name, handle.full);
     jetNames.set(jetName, handle.name);
   }
+  for (const jetName of [...candidates].sort()) {
+    for (const instance of concreteHandles.values()) {
+      if (!handles.has(instance.name)) continue;
+      const target = nativeType(jetName);
+      if (!target || declarationOf(target)?.key !== declarationOf(instance.full.slice(7))?.key) continue;
+      const labels = instance.args.map((arg) => {
+        if (genericArgumentKinds.has(arg)) return genericArgumentKinds.get(arg);
+        const key = declarationOf(arg.slice("crate::".length))?.key;
+        const names = [...jetNames].filter(([, runtime]) => {
+          const full = handles.get(runtime);
+          return full === arg || key !== undefined && full !== undefined && declarationOf(full.slice("crate::".length))?.key === key;
+        }).map(([name]) => name).sort((a, b) => a.localeCompare(b));
+        return names.find((name) => name.startsWith("<corelib>/")) ?? names[0];
+      });
+      if (labels.some((label) => !label)) {
+        classificationFailure(new Error(`generic record ${instance.full}: argument has no Jet runtime identity`), instance.full, "", { phase: "source identity", jetName });
+        continue;
+      }
+      jetNames.set(`${jetName}<${labels.join(",")}>`, instance.name);
+    }
+  }
 }
 
 // Handle drops: Core types that cross the boundary by handle.
 const handleRows = [...handles].sort((a, b) => a[0].localeCompare(b[0]));
+for (const [name, full] of handleRows) {
+  if (handleBridge(full) && (!jetRuntimeExports.has(`jet_rt_handle_drop_${name}`) || !jetRuntimeExports.has(`jet_rt_handle_clone_${name}`))) {
+    throw new Error(`${name} carrier requires Jet clone/drop exports in sources.list and exports.list before adapter cutover`);
+  }
+}
+// One ownership gate for every generated handle helper. Carrier metadata
+// remains unchanged; a Jet provider must implement this exact physical ABI.
+const jetOwnsHandleGlue = (symbol, parameters, result) => {
+  if (!jetRuntimeExports.has(symbol)) return false;
+  validateRuntimeRoute({ symbol, name: symbol,
+    params: parameters.map((type) => ({ ctys: [type] })),
+    result: { ret: result, outs: [] } }, jetRuntimeSignatures.get(symbol));
+  return true;
+};
 
 const rs = [];
 rs.push("// BEGIN GENERATED C-ABI ROUTES (Tools/agent/gen-c-abi-routes.mjs; do not hand-edit)");
@@ -1202,20 +1658,24 @@ rs.push("        len as i64");
 rs.push("    }");
 const cloneable = new Set(handleRows.filter(([, full]) => derivesClone(full)).map(([name]) => name));
 for (const [name, full] of handleRows) {
+  const pointer = `*mut ${handleType(full)}`;
+  if (!jetOwnsHandleGlue(`jet_rt_handle_drop_${name}`, [pointer], null)) {
+    rs.push("");
+    rs.push("    #[no_mangle]");
+    rs.push(`    pub extern "C" fn jet_rt_handle_drop_${name}(value: ${pointer}) {`);
+    rs.push("        if !value.is_null() {");
+    rs.push("            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.");
+    rs.push(handleBridge(full) ? `            super::jet_c_abi_host::${handleBridge(full).stem}_drop(value);` : "            drop(unsafe { Box::from_raw(value) });");
+    rs.push("        }");
+    rs.push("    }");
+  }
+  const ownedClone = jetOwnsHandleGlue(`jet_rt_handle_clone_${name}`, [pointer], pointer);
+  if (!cloneable.has(name) || ownedClone) continue;
   rs.push("");
   rs.push("    #[no_mangle]");
-  rs.push(`    pub extern "C" fn jet_rt_handle_drop_${name}(value: *mut ${full}) {`);
-  rs.push("        if !value.is_null() {");
-  rs.push("            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.");
-  rs.push("            drop(unsafe { Box::from_raw(value) });");
-  rs.push("        }");
-  rs.push("    }");
-  if (!cloneable.has(name)) continue;
-  rs.push("");
-  rs.push("    #[no_mangle]");
-  rs.push(`    pub extern "C" fn jet_rt_handle_clone_${name}(value: *mut ${full}) -> *mut ${full} {`);
+  rs.push(`    pub extern "C" fn jet_rt_handle_clone_${name}(value: *mut ${handleType(full)}) -> *mut ${handleType(full)} {`);
   rs.push("        // SAFETY: `value` is a live handle the caller owns for this call.");
-  rs.push("        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))");
+  rs.push(`        guard(|| ${handleOut(full, handleCopy(full, "value"))})`);
   rs.push("    }");
 }
 // Display, show and debug text of a handle: the runtime type's own
@@ -1226,23 +1686,26 @@ const rendered = (name, full) => {
 };
 for (const [name, full] of handleRows) {
   for (const [kind, trait, method] of [["display", "JetDisplay", "jet_display"], ["show", "JetShow", "jet_show"], ["debug", "JetDebug", "jet_debug"]]) {
-    if (!rendered(name, full)[kind]) continue;
+    const owned = jetOwnsHandleGlue(`jet_rt_handle_${kind}_${name}`, [`*mut ${handleType(full)}`], "JetCString");
+    if (!rendered(name, full)[kind] || owned) continue;
     rs.push("");
     rs.push("    #[no_mangle]");
-    rs.push(`    pub extern "C" fn jet_rt_handle_${kind}_${name}(value: *mut ${full}) -> JetCString {`);
+    rs.push(`    pub extern "C" fn jet_rt_handle_${kind}_${name}(value: *mut ${handleType(full)}) -> JetCString {`);
     rs.push("        // SAFETY: `value` is a live handle the caller lends for this call.");
-    rs.push(`        guard(|| handle(<${full} as crate::${trait}>::${method}(unsafe { &*value })))`);
+    rs.push(`        guard(|| handle(<${full} as crate::${trait}>::${method}(${handleBorrow(full, "value")})))`);
     rs.push("    }");
   }
 }
 const comparable = new Set(handleRows.filter(([, full]) => derives(full, "PartialEq")).map(([name]) => name));
 for (const [name, full] of handleRows) {
-  if (!comparable.has(name)) continue;
+  const pointer = `*mut ${handleType(full)}`;
+  const owned = jetOwnsHandleGlue(`jet_rt_handle_eq_${name}`, [pointer, pointer], "bool");
+  if (!comparable.has(name) || owned) continue;
   rs.push("");
   rs.push("    #[no_mangle]");
-  rs.push(`    pub extern "C" fn jet_rt_handle_eq_${name}(left: *mut ${full}, right: *mut ${full}) -> bool {`);
+  rs.push(`    pub extern "C" fn jet_rt_handle_eq_${name}(left: *mut ${handleType(full)}, right: *mut ${handleType(full)}) -> bool {`);
   rs.push("        // SAFETY: both are live handles the caller lends for this call.");
-  rs.push("        guard(|| unsafe { &*left } == unsafe { &*right })");
+  rs.push(`        guard(|| ${handleBorrow(full, "left")} == ${handleBorrow(full, "right")})`);
   rs.push("    }");
 }
 
@@ -1257,29 +1720,16 @@ for (const [name, full] of handleRows) {
 // String, an Int or a record. Each schema row names its members' kinds, so the
 // lowering crosses a Jet type only when every member means the same carrier.
 // Records CAbi.rs writes by hand (their exports there) are not generated.
-const recordDecl = (full) => {
-  const found = declarationOf(full.replace(/^crate::/, ""));
-  if (!found || found.decls.length !== 1) return null;
-  const decl = found.decls[0];
-  if (decl.generic || decl.gated || decl.at === undefined) return null;
-  const open = text.indexOf("{", decl.at);
-  const head = text.slice(decl.at, open);
-  if (open < 0 || /[;(]/.test(head) || /\bwhere\b/.test(head)) return null;
-  let depth = 0;
-  let close = open;
-  for (; close < text.length; close++) {
-    if (text[close] === "{") depth++;
-    else if (text[close] === "}" && --depth === 0) break;
-  }
-  const body = text.slice(open + 1, close).replace(/\/\/[^\n]*/g, "");
-  if (/#\[cfg/.test(body)) return null;
-  return { kind: decl.kind, path: decl.path, items: splitTop(body.replace(/#\[[^\]]*\]/g, "")) };
-};
 const recordable = new Map(); // runtime name -> { full, kind, path, members }
 for (const [name, full] of handleRows) {
-  if (handExports.has(`jet_rt_record_tag_${name}`) || handExports.has(`jet_rt_record_new_${name}`)) continue;
   const decl = recordDecl(full);
-  if (!decl) continue;
+  if (!decl) {
+    if (concreteHandles.has(name)) classificationFailure(new Error(`generic record ${full}: unsupported record declaration`), full, "", { phase: "record declaration" });
+    continue;
+  }
+  // Source nominal members use the emitters' plain __jet_ prefix; the schema
+  // uses Jet declaration names, while Rust projections keep emitted names.
+  const memberName = (rust) => full.startsWith("crate::__jet_") ? rust.replace(/^__jet_/, "") : rust;
   const members = [];
   let ok = true;
   for (const item of decl.items) {
@@ -1287,21 +1737,22 @@ for (const [name, full] of handleRows) {
       const field = /^(pub(?:\([a-z]+\))?\s+)?([a-z_][a-z0-9_]*)\s*:\s*([\s\S]+)$/.exec(item);
       // A struct in a module exposes only its `pub` fields to the adapters.
       if (!field || (decl.path && !field[1])) { ok = false; break; }
-      members.push({ name: field[2], ty: field[3].replace(/\s+/g, "") });
+      members.push({ name: memberName(field[2]), rustName: field[2], ty: field[3].replace(/\s+/g, "") });
     } else {
-      const variant = /^([A-Z][A-Za-z0-9_]*)\s*(?:\(([\s\S]*)\)|=\s*[-0-9]+)?$/.exec(item);
+      const variant = /^([A-Z][A-Za-z0-9_]*|__jet_[A-Za-z0-9_]+)\s*(?:\(([\s\S]*)\)|=\s*[-0-9]+)?$/.exec(item);
       if (!variant || (variant[2] !== undefined && splitTop(variant[2]).length !== 1)) { ok = false; break; }
-      members.push({ name: variant[1], ty: variant[2] === undefined ? null : variant[2].replace(/\s+/g, "") });
+      members.push({ name: memberName(variant[1]), rustName: variant[1], ty: variant[2] === undefined ? null : variant[2].replace(/\s+/g, "") });
     }
   }
   if (ok) recordable.set(name, { full, kind: decl.kind, path: decl.path, members });
+  else if (concreteHandles.has(name)) classificationFailure(new Error(`generic record ${full}: inaccessible or unsupported stored members`), full, decl.path, { phase: "record stored members" });
 }
 // A member's carrier: { kind, ret, outCty, get(place), cty, make(param) }, or
 // null when no export carries it. `place` is a Rust place of the member.
 // Recursive DataTree collections cross as temporary owned Vec holders. These
 // exports only marshal storage; ordering/duplicate policy remains in Jet.
 const recordSequences = new Map();
-const recordMember = (ty, path) => {
+const recordMember = (ty, path, site) => {
   const exact = /^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty);
   if (ty === "String") return { kind: "Text", ret: "JetCString", get: (v) => `handle(${v}.clone())`, cty: "JetCString", make: (p) => `view(${p}).to_owned()` };
   if (ty === "i64") return { kind: "Int", ret: "i64", get: (v) => `crate::jet_std::jet_int_from_i64(${v})`, cty: "i64", make: (p) => `native(${p})` };
@@ -1312,8 +1763,9 @@ const recordMember = (ty, path) => {
   if (list) {
     const entries = /^\(String,([A-Z][A-Za-z0-9_:]*)\)$/.exec(list[1]);
     const elementTy = entries ? entries[1] : list[1];
-    const element = elementTy === "u8" ? null : recordMember(elementTy, path);
+    const element = elementTy === "u8" ? null : recordMember(elementTy, path, site);
     if (elementTy !== "u8" && !element?.kind.startsWith("Rec.")) return null;
+    if (element?.bridge) throw new Error(`record ${site}: borrowed C-carrier sequence projections are unsupported`);
     const kind = `${entries ? "Entries" : "List"}.${element ? element.kind : "Byte"}`;
     const elementFull = element ? element.cty.replace(/^\*mut /, "") : "u8";
     const full = `Vec<${entries ? `(String, ${elementFull})` : elementFull}>`;
@@ -1327,7 +1779,7 @@ const recordMember = (ty, path) => {
   const option = /^(Option|JetOutcome)<(.+?)(?:,JetAbsent|,(?:crate::|super::)*JetAbsent)?>$/.exec(ty);
   if (option) {
     if (option[1] === "JetOutcome" && !/,(?:(?:crate|super)::)*JetAbsent>$/.test(ty)) return null;
-    const inner = recordMember(option[2], path);
+    const inner = recordMember(option[2], path, site);
     if (!inner || !(inner.kind === "Text" || inner.kind === "Int" || inner.kind.startsWith("Rec."))) return null;
     const [some, none] = option[1] === "Option" ? ["Some", "None"] : ["Ok", "Err(crate::JetAbsent)"];
     const boxed = inner.kind.startsWith("Rec.") ? inner.cty : `*const ${inner.cty}`;
@@ -1339,25 +1791,30 @@ const recordMember = (ty, path) => {
     };
   }
   if (opaqueName.test(ty)) {
-    const name = opaqueName.exec(ty)[1];
+    const handle = runtimeHandle(ty, path);
+    if (!handle) return null;
+    const { name } = handle;
     const nested = handles.get(name);
-    if (!nested || nested !== qualify(ty, path) && declarationOf(nested.replace(/^crate::/, ""))?.key !== declarationOf(qualify(ty, path).replace(/^crate::/, ""))?.key) return null;
+    if (!nested || nested !== qualify(ty, path) && (!ty.includes("<") && declarationOf(nested.replace(/^crate::/, ""))?.key !== declarationOf(qualify(ty, path).replace(/^crate::/, ""))?.key)) return null;
     if (!cloneable.has(name)) return null;
-    return { kind: `Rec.${name}`, ret: `*mut ${nested}`, get: (v) => `Box::into_raw(Box::new(${v}.clone()))`, cty: `*mut ${nested}`, make: (p) => `*unsafe { Box::from_raw(${p}) }` };
+    return { kind: `Rec.${name}`, ret: `*mut ${handleType(nested)}`, get: (v) => handleOut(nested, `${v}.clone()`), cty: `*mut ${handleType(nested)}`, make: (p) => handleTake(nested, p), bridge: handleBridge(nested) !== undefined };
   }
   return null;
 };
 // A record whose members all cross; a nested record must itself cross.
 const recordMembers = new Map(); // runtime name -> [{ name, carrier | null }]
 for (const [name, record] of recordable) {
-  const carried = record.members.map((member) => ({ name: member.name, carrier: member.ty === null ? null : recordMember(member.ty, record.path) }));
+  classificationSite = { phase: "record members", record: record.full };
+  const carried = record.members.map((member) => ({ name: member.name, rustName: member.rustName, carrier: member.ty === null ? null : recordMember(member.ty, record.path, `${name}.${member.name}`) }));
   if (carried.every((member, k) => record.members[k].ty === null || member.carrier)) recordMembers.set(name, carried);
+  else if (concreteHandles.has(name)) classificationFailure(new Error(`generic record ${record.full}: a substituted member has an unsupported carrier`), record.full, record.path);
 }
 for (let changed = true; changed;) {
   changed = false;
   for (const [name, members] of recordMembers) {
     const nestedKinds = members.map((member) => member.carrier?.kind.replace(/^(?:Opt|List\.|Entries\.)/, "") ?? "").filter((kind) => kind.startsWith("Rec."));
     if (nestedKinds.every((kind) => recordMembers.has(kind.slice(4)) || handExports.has(`jet_rt_record_new_${kind.slice(4)}`))) continue;
+    if (concreteHandles.has(name)) classificationFailure(new Error(`generic record ${recordable.get(name).full}: nested record schema is unsupported`), recordable.get(name).full, "", { phase: "nested record schema" });
     recordMembers.delete(name);
     changed = true;
   }
@@ -1382,11 +1839,33 @@ for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompa
   const { full, kind } = recordable.get(name);
   const described = members.map((member) => (member.carrier ? `${member.name}=${member.carrier.kind}` : member.name)).join(",");
   recordSchemas.push(kind === "struct" ? { name, variants: "", fields: described } : { name, variants: described, fields: "" });
+  // Hand-written carrier helpers still need the real field schema. Their
+  // ownership changes where the definition lives, not the record's shape.
+  if (handExports.has(`jet_rt_record_tag_${name}`) || handExports.has(`jet_rt_record_new_${name}`)) {
+    const validate = (export_, ctys, ret) => {
+      if (!jetRuntimeExports.has(export_)) return;
+      validateRuntimeRoute({ symbol: export_, name: export_, params: ctys.map((cty) => ({ ctys: [cty] })), result: { ret, outs: [] } }, jetRuntimeSignatures.get(export_));
+    };
+    const pointer = `*mut ${handleType(full)}`;
+    if (kind === "struct") {
+      validate(`jet_rt_record_new_${name}`, members.map((member) => member.carrier.cty), pointer);
+      for (const { name: field, carrier } of members) {
+        validate(`jet_rt_record_get_${name}_${field}`, [pointer, ...(carrier.outCty ? [`*mut ${carrier.outCty}`] : [])], carrier.ret);
+      }
+    } else {
+      validate(`jet_rt_record_tag_${name}`, [pointer], "i64");
+      for (const { name: variant, carrier } of members) {
+        validate(`jet_rt_record_new_${name}_${variant}`, carrier ? [carrier.cty] : [], pointer);
+        if (carrier) validate(`jet_rt_record_get_${name}_${variant}`, [pointer, ...(carrier.outCty ? [`*mut ${carrier.outCty}`] : [])], carrier.ret);
+      }
+    }
+    continue;
+  }
   const getter = (export_, param, carrier, place) => {
     const out = carrier.outCty ? `, some: *mut ${carrier.outCty}` : "";
     rs.push("");
     rs.push("    #[no_mangle]");
-    rs.push(`    pub extern "C" fn ${export_}(value: *mut ${full}${out}) -> ${carrier.ret} {`);
+    rs.push(`    pub extern "C" fn ${export_}(value: *mut ${handleType(full)}${out}) -> ${carrier.ret} {`);
     rs.push(`        // SAFETY: \`value\` is a live handle the caller lends${carrier.outCty ? "; `some` is its zeroed out slot" : " for this call"}.`);
     rs.push(`        guard(|| ${param} ${place})`);
     rs.push("    }");
@@ -1394,11 +1873,11 @@ for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompa
   if (kind === "struct") {
     // A fieldless struct carries nothing a schema row can check.
     if (members.length === 0) { recordSchemas.pop(); continue; }
-    for (const member of members) getter(`jet_rt_record_get_${name}_${member.name}`, `{ let value = unsafe { &*value };`, member.carrier, `${member.carrier.get(`value.${member.name}`)} }`);
+    for (const member of members) getter(`jet_rt_record_get_${name}_${member.name}`, `{ let value = ${handleBorrow(full, "value")};`, member.carrier, `${member.carrier.get(`value.${member.rustName}`)} }`);
     rs.push("");
     rs.push("    #[no_mangle]");
-    rs.push(`    pub extern "C" fn jet_rt_record_new_${name}(${members.map((member, k) => `m${k}: ${member.carrier.cty}`).join(", ")}) -> *mut ${full} {`);
-    rs.push(`        guard(|| Box::into_raw(Box::new(${full} { ${members.map((member, k) => `${member.name}: ${member.carrier.make(`m${k}`)}`).join(", ")} })))`);
+    rs.push(`    pub extern "C" fn jet_rt_record_new_${name}(${members.map((member, k) => `m${k}: ${member.carrier.cty}`).join(", ")}) -> *mut ${handleType(full)} {`);
+    rs.push(`        guard(|| ${handleOut(full, `${expressionType(full)} { ${members.map((member, k) => `${member.rustName}: ${member.carrier.make(`m${k}`)}`).join(", ")} }`)})`);
     rs.push("    }");
     continue;
   }
@@ -1406,18 +1885,18 @@ for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompa
   if (members.every((member) => !member.carrier)) continue;
   rs.push("");
   rs.push("    #[no_mangle]");
-  rs.push(`    pub extern "C" fn jet_rt_record_tag_${name}(value: *mut ${full}) -> i64 {`);
+  rs.push(`    pub extern "C" fn jet_rt_record_tag_${name}(value: *mut ${handleType(full)}) -> i64 {`);
   rs.push("        // SAFETY: `value` is a live handle the caller lends for this call.");
-  rs.push(`        guard(|| match unsafe { &*value } { ${members.map((member, k) => `${full}::${member.name}${member.carrier ? "(_)" : ""} => ${k}`).join(", ")} })`);
+  rs.push(`        guard(|| match ${handleBorrow(full, "value")} { ${members.map((member, k) => `${expressionType(full)}::${member.rustName}${member.carrier ? "(_)" : ""} => ${k}`).join(", ")} })`);
   rs.push("    }");
   for (const member of members) {
     if (member.carrier) {
-      getter(`jet_rt_record_get_${name}_${member.name}`, `match unsafe { &*value } { ${full}::${member.name}(item) =>`, member.carrier, `${member.carrier.get("(*item)")}, _ => crate::jet_panic("<core.prelude>", 0, "record variant index out of range") }`);
+      getter(`jet_rt_record_get_${name}_${member.name}`, `match ${handleBorrow(full, "value")} { ${expressionType(full)}::${member.rustName}(item) =>`, member.carrier, `${member.carrier.get("(*item)")}, _ => crate::jet_panic("<core.prelude>", 0, "record variant index out of range") }`);
     }
     rs.push("");
     rs.push("    #[no_mangle]");
-    rs.push(`    pub extern "C" fn jet_rt_record_new_${name}_${member.name}(${member.carrier ? `payload: ${member.carrier.cty}` : ""}) -> *mut ${full} {`);
-    rs.push(`        guard(|| Box::into_raw(Box::new(${full}::${member.name}${member.carrier ? `(${member.carrier.make("payload")})` : ""})))`);
+    rs.push(`    pub extern "C" fn jet_rt_record_new_${name}_${member.name}(${member.carrier ? `payload: ${member.carrier.cty}` : ""}) -> *mut ${handleType(full)} {`);
+    rs.push(`        guard(|| ${handleOut(full, `${expressionType(full)}::${member.rustName}${member.carrier ? `(${member.carrier.make("payload")})` : ""}`)})`);
     rs.push("    }");
   }
 }
@@ -1442,7 +1921,10 @@ for (const [name, full] of handleRows) {
     else if (opaqueName.test(ty) && !tagCarrier(ty, decl.path)) {
       const nested = opaqueName.exec(ty)[1];
       const held = handles.get(nested);
-      if (held && declarationOf(held.replace(/^crate::/, ""))?.key === declarationOf(qualify(ty, decl.path).replace(/^crate::/, ""))?.key) { kind = `Handle.${nested}`; pointee = held; }
+      if (held && declarationOf(held.replace(/^crate::/, ""))?.key === declarationOf(qualify(ty, decl.path).replace(/^crate::/, ""))?.key) {
+        if (handleBridge(held)) throw new Error(`field ${name}.${field[2]}: borrowed C-carrier address projections are unsupported`);
+        kind = `Handle.${nested}`; pointee = held;
+      }
     }
     if (!kind) continue;
     handleFields.push({ name, field: field[2], kind });
@@ -1535,8 +2017,95 @@ rs.push(`
         })
     }
 `);
+
+// Source declarations are candidates, not a layout claim. Lower resolves the
+// exact declaration + arguments in the actual MIR and refuses opaque runtime
+// handles; this table merely supplies stable C names for that typed lookup.
+const nativeTypes = [];
+for (const [runtime] of handleRows) {
+  if (!handles.get(runtime).startsWith("crate::__jet_")) continue;
+  const names = [...jetNames].filter(([, target]) => target === runtime).map(([name]) => name).sort();
+  for (const key of names) {
+    const match = /^<corelib>\/[^:]+::(Core\/[^:]+\.jet)::([A-Za-z_]\w*)(?:<(.*)>)?$/.exec(key);
+    if (!match) continue;
+    const [, path, name, argumentsText] = match;
+    const source = readFileSync(`${repo}/${path}`, "utf8");
+    if (!new RegExp(`\\b(?:struct|enum)\\s+${name}\\b`).test(source)) continue;
+    const base = argumentsText === undefined ? key : key.slice(0, key.length - argumentsText.length - 2);
+    const render = rendered(runtime, handles.get(runtime));
+    const members = recordMembers.get(runtime);
+    const record = members && recordSchemas.some((schema) => schema.name === runtime)
+      ? { kind: recordable.get(runtime).kind, members: members.map((member) => ({ name: member.name, kind: member.carrier?.kind ?? null })) } : undefined;
+    const fields = handleFields.filter((field) => field.name === runtime).map((field) => ({ name: field.field, kind: field.kind }));
+    nativeTypes.push({ runtime, jetNames: names, jetName: key, source: { path, key: base },
+      arguments: argumentsText ?? "", clone: cloneable.has(runtime), eq: comparable.has(runtime), ...render, record, fields });
+    break;
+  }
+}
+const seedHelperNames = new Set([...rs.join("\n").matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\(/g)].map((match) => match[1]));
+const nativeExports = [
+  ...nativeHandleExports(nativeTypes).map((row) => ({ ...row, op: `handle.${row.op}`, member: "" })),
+  ...nativeRecordExports(nativeTypes),
+].filter((descriptor) => seedHelperNames.has(descriptor.name) && !jetRuntimeExports.has(descriptor.name));
+const nativeSourceExports = new Set(nativeExports.map((row) => row.name));
+// Explicit providers replace a type's representation, not individual Box
+// operations. Inspect the existing emission pass before either output mode:
+// no retained native-pack helper or adapter may touch that Rust layout.
+const ownedBoxTypes = handleRows.filter(([name, full]) => !handleBridge(full) &&
+  [...jetRuntimeExports].some((symbol) =>
+    ["drop", "clone", "eq", "display", "show", "debug"].some((op) => symbol === `jet_rt_handle_${op}_${name}`) ||
+    symbol.startsWith(`jet_rt_handle_field_${name}_`) ||
+    symbol === `jet_rt_record_new_${name}` || symbol === `jet_rt_record_tag_${name}` ||
+    symbol.startsWith(`jet_rt_record_new_${name}_`) || symbol.startsWith(`jet_rt_record_get_${name}_`)));
+const requireUnownedBox = (name, symbol) => {
+  throw new Error(`all-or-none ownership for ${name}: retained Rust Box-layout emission ${symbol} requires a complete Jet-owned type family`);
+};
+for (const [name, full] of ownedBoxTypes) {
+  const escaped = full.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pointer = new RegExp(`\\*(?:mut|const)\\s+[^;{}\\n]*?${escaped}(?![A-Za-z0-9_:<])`);
+  for (const match of rs.join("\n").matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\(([^{}]*?)\{/g)) {
+    if (!jetRuntimeExports.has(match[1]) && !nativeSourceExports.has(match[1]) && pointer.test(match[2])) requireUnownedBox(name, match[1]);
+  }
+  for (const adapter of adapters) {
+    if (adapter.external || jetRuntimeExports.has(adapter.name)) continue;
+    const carried = [...adapter.params.map((param) => param.handle).filter(Boolean), ...adapter.result.handles];
+    if (carried.some((handle) => handle.full === full)) requireUnownedBox(name, adapter.name);
+  }
+}
+// Inventory uses the SAME descriptor pass as native-pack emission. It never
+// writes generated tables or treats this list as actual MIR layout admission.
+if (nativeListOnly) {
+  const digest = (body) => createHash("sha256").update(body).digest("hex");
+  const declarations = [...new Set(nativeTypes.map((type) => type.source.path))].sort();
+  const inventory = {
+    mode: "native-pack-descriptors",
+    provenance: {
+      runtime: resolve(runtimePath), runtimeSha256: digest(text),
+      generatorSha256: digest(readFileSync(fileURLToPath(import.meta.url))),
+      providerManifestSha256: digest(readFileSync(`${repo}/Compiler/JetRuntime/exports.list`)),
+      sourceDeclarations: declarations.map((path) => ({ path, sha256: digest(readFileSync(`${repo}/${path}`)) })),
+      borrowedCarriers: [...borrowedHandles.values()].sort((a, b) => a.runtime.localeCompare(b.runtime)),
+    },
+    nativeTypes, nativeExports, handleRows,
+    wordRecords: [...wordRecords.values()],
+    seedHelperNames: [...seedHelperNames].sort(),
+    jetRuntimeExports: [...jetRuntimeExports].sort(),
+    unsupportedSumCarriers: [...unsupportedSumCarriers.values()],
+    unsupportedRustCarriers: [...unsupportedRustCarriers.values()],
+    unsupportedGenericCarriers: [...unsupportedGenericCarriers.values()],
+    skipped,
+  };
+  const packet = classificationErrors.length ? { mode: "native-pack-classification-errors",
+    provenance: inventory.provenance, classificationErrors,
+    unsupportedGenericCarriers: inventory.unsupportedGenericCarriers,
+    unsupportedRustCarriers: inventory.unsupportedRustCarriers,
+    unsupportedSumCarriers: inventory.unsupportedSumCarriers } : inventory;
+  // Wait for the pipe to drain; a direct process.exit can truncate large JSON.
+  await new Promise((done) => process.stdout.write(JSON.stringify(packet) + "\n", done));
+  process.exit(classificationErrors.length ? 1 : 0);
+}
 for (const adapter of adapters) {
-  if (adapter.external || jetRuntimeExports.has(adapter.name)) continue;
+  if (adapter.external) continue;
   const params = [];
   const names = adapter.params.map((param, index) => param.ctys.map((cty, k) => {
     const name = param.ctys.length === 1 ? `a${index}` : `a${index}_${k}`;
@@ -1576,12 +2145,12 @@ jet.push("    Result(ok: LowerRouteCarrier, err: LowerRouteCarrier)");
 jet.push("    Tuple(items: [LowerRouteCarrier])");
 jet.push("}");
 jet.push("");
-jet.push("pub struct LowerRoute { pub symbol: String, pub export: String, pub params: [LowerRouteCarrier], pub result: LowerRouteResult }");
+jet.push("pub struct LowerRoute { pub symbol: String, pub export: String, pub native_lists: Bool, pub params: [LowerRouteCarrier], pub result: LowerRouteResult }");
 jet.push("");
 jet.push("LOWER_RUNTIME_ROUTES :: prep { [LowerRoute]{");
 for (const adapter of adapters) {
   const params = adapter.params.map((param) => `LowerRouteCarrier.${param.jet}`).join(", ");
-  jet.push(`    LowerRoute{symbol: "${adapter.symbol}", export: "${adapter.name}", params: [LowerRouteCarrier]{${params}}, result: LowerRouteResult.${adapter.result.jet}},`);
+  jet.push(`    LowerRoute{symbol: "${adapter.symbol}", export: "${adapter.name}", native_lists: ${jetRuntimeExports.has(adapter.name)}, params: [LowerRouteCarrier]{${params}}, result: LowerRouteResult.${adapter.result.jet}},`);
 }
 jet.push("} }");
 jet.push("");
@@ -1611,8 +2180,17 @@ for (const [jetName, name] of [...jetNames].sort((a, b) => a[0].localeCompare(b[
 }
 jet.push("} }");
 jet.push("");
+jet.push("// Opaque native providers: physical ownership ABI only, no Rust schema.");
+jet.push("LOWER_NATIVE_PROVIDER_HANDLES :: prep { [LowerRuntimeHandle]{");
+for (const row of nativeProviders) jet.push(`    LowerRuntimeHandle{jet_name: "${row.jetName}", runtime: "${row.runtime}", clone: true, display: false, show: false, debug: false, eq: false},`);
+jet.push("} }");
+jet.push("");
 jet.push("pub fn lower_runtime_handle(name: String) -> LowerRuntimeHandle? {");
 jet.push("    loop handle in LOWER_RUNTIME_HANDLES {");
+jet.push("        if handle.jet_name == name -> return Val(~handle)");
+jet.push("    }");
+jet.push("    // Existing Rust rows win in seed mode; absent nominals may use a provider.");
+jet.push("    loop handle in LOWER_NATIVE_PROVIDER_HANDLES {");
 jet.push("        if handle.jet_name == name -> return Val(~handle)");
 jet.push("    }");
 jet.push("    None");
@@ -1624,6 +2202,14 @@ jet.push("// variants in index order, each `name=kind` when it carries a member 
 jet.push("// Int, Flag, Float, Tag.<enum>, Rec.<record>, Opt<kind>).");
 jet.push("LOWER_GENERATED_RECORDS :: prep { [LowerRecordSchema]{");
 for (const schema of recordSchemas) jet.push(`    LowerRecordSchema{jet_name: "${schema.name}", variants: "${schema.variants}", fields: "${schema.fields}"},`);
+jet.push("} }");
+jet.push("// Declaration-proven scalar records; Lower still proves the actual native field.");
+jet.push("pub struct LowerWordRecord { pub runtime: String, pub field: String }");
+jet.push("LOWER_WORD_RECORDS :: prep { [LowerWordRecord]{");
+for (const [runtime, full] of handleRows) {
+  const record = wordRecord(full, "");
+  if (record) jet.push(`    LowerWordRecord{runtime: "${runtime}", field: "${record.member}"},`);
+}
 jet.push("} }");
 jet.push("");
 jet.push("// Fields of runtime handle structs readable in place (Places.jet):");
@@ -1641,9 +2227,58 @@ jet.push("        if row.runtime == runtime && row.field == field -> return Val(
 jet.push("    }");
 jet.push("    None");
 jet.push("}");
+
+jet.push("");
+jet.push("// Candidate source identities; Lower validates against actual MIR/native layout.");
+jet.push("pub struct LowerNativeType { pub jet_name: String, pub declaration: String, pub arguments: String }");
+jet.push("LOWER_NATIVE_TYPES :: prep { [LowerNativeType]{");
+for (const type of nativeTypes) jet.push(`    LowerNativeType{jet_name: "${type.jetName}", declaration: "${type.source.key}", arguments: "${type.arguments}"},`);
+jet.push("} }");
+jet.push("pub fn lower_native_type(name: String) -> LowerNativeType? {");
+jet.push("    loop row in LOWER_NATIVE_TYPES { if row.jet_name == name -> return Val(~row) }");
+jet.push("    None");
+jet.push("}");
+jet.push("pub struct LowerNativeExport { pub symbol: String, pub jet_name: String, pub op: String, pub member: String }");
+jet.push("LOWER_NATIVE_EXPORTS :: prep { [LowerNativeExport]{");
+for (const row of nativeExports) jet.push(`    LowerNativeExport{symbol: "${row.name}", jet_name: "${row.jetName}", op: "${row.op}", member: "${row.member}"},`);
+jet.push("} }");
+jet.push("pub fn lower_native_export(symbol: String) -> LowerNativeExport? {");
+jet.push("    loop row in LOWER_NATIVE_EXPORTS { if row.symbol == symbol -> return Val(~row) }");
+jet.push("    None");
+jet.push("}");
+jet.push("// All possible external C imports, mechanically derived from the ABI tables.");
+jet.push("LOWER_NATIVE_IMPORTS :: prep { [String]{");
+const nativeImportNames = new Set([
+  ...adapters.map((row) => row.name),
+  ...jetRuntimeExports,
+  ...[...rs.join("\n").matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\(/g)].map((match) => match[1]),
+  ...nativeExports.map((row) => row.name),
+]);
+for (const name of [...nativeImportNames].sort()) jet.push(`    "${name}",`);
+jet.push("} }");
 jet.push("// END GENERATED C-ABI ROUTES");
 
-const outputs = [[rsOut, rs.join("\n") + "\n"], [jetOut, jet.join("\n") + "\n"]];
+// Lifecycle and record/field helpers obey the same ownership partition as
+// routes. Validate every replaced C signature before excluding its seed body
+// from the native pack. exports.list is the single provider ownership input.
+const rustBody = rs.join("\n") + "\n";
+const rustParts = [];
+let copied = 0;
+for (const match of rustBody.matchAll(/^    #\[no_mangle\]\n    pub extern "C" fn ([A-Za-z_]\w*)([^{}]*?)\{/gm)) {
+  const [, name, raw] = match;
+  if (!jetRuntimeExports.has(name) && !nativeSourceExports.has(name)) continue;
+  if (jetRuntimeExports.has(name)) {
+    const signature = parseSignature(`fn ${name}${raw}`);
+    if (!signature || signature.generics) throw new Error(`Jet-owned generated export ${name}: unparsed C ABI`);
+    const params = splitTop(signature.params).map((param) => ({ ctys: [param.slice(param.indexOf(":") + 1).trim()] }));
+    validateRuntimeRoute({ symbol: name, name, params, result: { outs: [], ret: signature.result === "()" ? null : signature.result } }, jetRuntimeSignatures.get(name));
+  }
+  rustParts.push(rustBody.slice(copied, match.index));
+  rustParts.push("    #[cfg(not(jet_native_pack))]\n");
+  copied = match.index;
+}
+rustParts.push(rustBody.slice(copied));
+const outputs = [[rsOut, rustParts.join("")], [jetOut, jet.join("\n") + "\n"]];
 let stale = false;
 for (const [path, body] of outputs) {
   let current = "";

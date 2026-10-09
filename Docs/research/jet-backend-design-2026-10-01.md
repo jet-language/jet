@@ -619,6 +619,14 @@ are never freed or grown, and owning reads clone it. Native compiler text
 marshaling continues to use `jet_rt_string_data`/`jet_rt_string_byte_len`,
 never Rust layout. This contract applies to the linked runtime pack; the
 standalone freestanding image runtime is separate and retires with L3.
+An owned result from a Rust `&'static str` kernel copies directly into the
+same E4 header and byte buffer via `text_handle`, without an intermediate
+Rust `String`, including when that text is an Option/Result payload.
+List result slot buffers use the same `jet_rt_alloc`/`jet_rt_free` domain,
+including lists returned inside an Option or Result. Rust `Vec` storage is
+only temporary marshaling storage: adapters copy its words into the shared
+runtime allocation before returning a buffer to native lowering. Empty lists
+keep the null-buffer/zero-length convention.
 
 The Jet runtime-only source manifest is assembled by the runtime-object path,
 never the compiler bootstrap unit. Adjacent `// runtime-init: N` and
@@ -763,6 +771,60 @@ must not. Canonical Core identities override a source layout only when the gener
 name rules replace that exact identity; source-owned enums and records retain their
 native constructors and matches. Tuple adapters write zeroed word slots, and lowering
 copies each item into the tuple's naturally aligned native field offset.
+`IOError` is a C-carrier boundary, not a `Box` of the Rust enum. Its 56-byte,
+eight-aligned `JetCIOError` stores kind, operation, optional E4 resource text,
+OS-code presence and value, optional E4 cause text, and resource-limit tag.
+The generator matches the resolved Core error declaration and uses
+`error_handle`/`error_view`/`error_take` when crossing the remaining Rust
+seed kernels, including nested records and Option/Result/List payloads.
+`IOContext` uses a 40-byte, eight-aligned `JetCIOContext` with operation,
+resource E4 pointer, OS-code presence/value, and cause E4 pointer; it matches
+bytes 8–48 of `JetCIOError`. Its remaining seed-kernel boundaries use
+`context_handle`/`context_view`/`context_take` rather than Rust record addresses.
+The private resolver error uses the same resolved-record mechanism once L7
+owns its canonical helpers: `JetCResolveError` is 32 bytes (owned exact-Int
+kind, OS-code flag word, owned exact-Int OS code, owned E4 message). Both Int
+words retain/release through the canonical numeric carrier; neither is
+reinterpreted as a fixed integer. Its schema is read from the actual named
+runtime declaration, including Int/Bool/Int/String field kinds.
+Once the L8 task layer owns canonical clone/drop, `JetTaskFailure` uses a
+16-byte, eight-aligned `JetCTaskFailure` (canonical enum tag, nullable owned
+E4 reason) and `failure_handle`/`failure_view`/`failure_take`. Until that
+coordinated cutover the task record retains its seed representation.
+Every bridged carrier requires Jet-owned canonical clone/drop before
+route generation. Hand context/error record exports are seed-only under
+`cfg(not(jet_native_pack))` and use these same C headers. Context constructors
+transfer child owners and free only the 40-byte header; projections deep-clone
+E4 text directly, without an intermediate Rust String. Native packs contain
+only the Jet definitions. These seed/verification bodies die at cutover.
+Jet owns clone/drop and the E4 text children. Generated lifecycle, record,
+and field exports use the same ownership filter and ABI checks as routes.
+Mutable Rust-enum borrows and address-lending error fields/sequences are
+refused with their route or record name; a Rust enum address is never treated
+as the C header. Lifecycle source markers retain their init/fini priority in
+the shared export list.
+The unified generator runs host-error and host-carrier generators before
+export and route generation, so their outputs participate in `--check`.
+CString helpers called directly by `Lower/CForeign.jet` have a checked
+lowering-only ABI table in `runtime-route-abi.mjs`; they are not invented Rust
+routes. Packing borrows an E4 header and returns an owned NUL buffer; unpacking
+returns an owned E4 header; freeing takes pointer and size including NUL.
+For Jet-owned routes, generated `LowerRoute.native_lists` is true. Lists of
+records cross directly as native inline element buffers, with the checked
+record's native stride (for example SocketAddr56), not arrays of record
+handles. Seed routes retain the handle-buffer conversions. Both use the
+same data-pointer/length C call shape, and record schemas remain checked.
+StreamCursor's native cutover is one complete export family: all Cursor/Reader
+routes, clone/drop, and the borrowed Cursor buffer projection are Jet-owned.
+G1 rejects a partial family before generating routes; it retains logical
+List/handle metadata while checking Reader constructors' explicit source stride
+and Reader.take's target stride before its three result out slots. These
+physical strides come from checked native element layouts (one or eight
+bytes). Fixed-width Reader results are raw sign/zero-extended words, including
+all unsigned 64-bit patterns; only Int-typed results use exact-Int ownership.
+F32 reads preserve the low 32 IEEE bits in a zero-extended word, not a widened
+F64 value. The Rust Core implementation remains a verification path, but no
+stream Rust C adapter or Box lifecycle remains in the native pack.
 A MIR-defined Core record (the general `Err`, `IOError`, `IOContext`; schemas in
 `Lower/Records.jet`) keeps its native layout and crosses a route as its runtime
 type's handle: a generated `record.out` helper builds it through
@@ -781,6 +843,43 @@ schema. No suffix-only match authorizes a user type. Thus `core.files.list_dir`
 rebuilds native, qualified `DirEntry` list elements rather than refusing the
 runtime's `DirEntry` handle carrier; the qualified-record fixtures also retain
 user-nominal and changed-schema refusals.
+Generic record schemas bind the declaration's ordered type parameters to the
+concrete arguments at a route boundary, then substitute every stored member
+type before choosing its carrier. A concrete application's handle/schema key
+includes the resolved arguments (UTF-8 hex suffixes on the runtime name), so
+different applications cannot reuse one schema. Argument-free records keep
+their existing keys and exports. Native lookup uses the corresponding concrete
+Jet application name and the existing MIR declaration instantiation, not a
+type-specific codec. Unresolved, inaccessible, gated or unsupported arguments
+are generator errors naming the application. Nested declaration arguments are
+explicitly refused; generic function monomorphization is not an ABI schema.
+Source-owned generic records resolve through the emitters' existing
+`Syntax::generated_path` identity only when the emitted runtime actually
+declares that type. Concrete uses in non-generic emitted Core function
+signatures supply arguments even when no C route mentions the record.
+Schemas keep source member names; Rust projections retain the emitted
+`__jet_` member names. Root-private fields remain private in Jet and in
+emitted Rust: the internal adapter child module already reaches its parent
+record without adding an accessor or widening user-field visibility.
+If a runtime declaration already has concrete generic rows, an unsupported or
+unregistered application is a named `LowerRepr.Unsupported`, never a silent
+native-struct fallback. Generic Core enums use the same concrete handle key.
+Ordinary Jet generics with no runtime declaration rows remain native.
+Native glue metadata records the actual Core declaration and its ordered type
+arguments, not a Rust layout. `lower_native_source_type` is the shared ownership
+gate: the current MIR must contain that declaration and Lower must already
+represent it as inline storage, a native payload box, or a native enum tag.
+Opaque/special runtime handles are not admitted by declaration presence alone;
+existing handwritten Jet C providers are excluded from generated descriptors.
+Only surviving boundary callers need synthesized native glue. Direct native
+reads/writes require no replacement C symbol.
+Candidate admission also requires the actual emitted source nominal identity,
+not a legacy Rust carrier with a similarly named Core marker. Nongeneric
+nominals require a source-owned rule or an actual typed source reference;
+unused marker declarations do not qualify. Inventory classification reports
+source record/opaque candidates separately and labels native layout as
+unexercised until the MIR predicate runs. Collection-holder symbols have no
+invented declaration owner.
 Recursive record collection members use generated `jet_rt_record_seq_*`
 holders while crossing the boundary. Byte lists, record lists and `(key:
 String, value: Record)` entry lists retain their native List layouts; the

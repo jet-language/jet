@@ -2,6 +2,78 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+// A concrete record application retains its declaration and ordered arguments.
+// Generic function monomorphization is separate; these helpers only instantiate
+// a declaration's stored field / variant types at a concrete ABI boundary.
+export function recordApplication(type) {
+  const match = /^((?:[A-Za-z_]\w*::)*(?:[A-Z]\w*|__jet_\w+))(?:<([\s\S]*)>)?$/.exec(type.replace(/\s+/g, ""));
+  if (!match) return null;
+  // RUST-EXIT S5: seed-only Rust prelude/container codecs, removed at cutover,
+  // are not emitted crate declarations.
+  // Keep explicit crate::Option (and source-qualified names) nominal: only
+  // the actual builtin spelling/provenance bypasses record specialization.
+  if (match[2] !== undefined && /^(?:Option|Result|Vec|(?:std|core)::(?:option::Option|result::Result|vec::Vec))$/.test(match[1])) return null;
+  if (match[2] === undefined) return { base: match[1], args: [] };
+  // Nested declaration arguments are not yet representable in the route key.
+  // Reject them explicitly rather than confusing their commas with parameters.
+  // () is a real TYPE, not a nested tuple. Parsing it claims no Unit codec.
+  if (/[<>()[\]]/.test(match[2].replace(/\(\)/g, ""))) throw new Error(`generic record ${type}: nested or structural arguments are unsupported`);
+  const args = match[2].split(",");
+  if (args.some((arg) => !arg)) throw new Error(`generic record ${type}: empty argument`);
+  return { base: match[1], args };
+}
+
+export function recordBindings(header, args, type) {
+  const match = /^(?:struct|enum)\s+[A-Za-z_]\w*\s*(?:<([^<>]*)>)?/.exec(header);
+  if (!match) throw new Error(`generic record ${type}: unparsed declaration`);
+  const params = match[1] === undefined ? [] : match[1].split(",").map((param) => {
+    const parsed = /^\s*([A-Za-z_]\w*)(?:\s*:\s*[^=]+)?\s*$/.exec(param);
+    if (!parsed) throw new Error(`generic record ${type}: unsupported declaration parameter ${param.trim()}`);
+    return parsed[1];
+  });
+  if (params.length !== args.length) throw new Error(`generic record ${type}: expected ${params.length} declaration arguments, got ${args.length}`);
+  if (new Set(params).size !== params.length) throw new Error(`generic record ${type}: duplicate declaration parameter`);
+  return new Map(params.map((param, index) => [param, args[index]]));
+}
+
+export function substituteRecordType(type, bindings) {
+  // Replace complete type identifiers, never substrings of a field/type name.
+  return type.replace(/\b[A-Za-z_]\w*\b/g, (name) => bindings.get(name) ?? name);
+}
+
+export function recordInstanceName(base, args) {
+  // Injective argument encoding: qualified names and underscores cannot alias
+  // another argument list. Argument-free names are unchanged.
+  return base.split("::").pop() + args.map((arg) => `__${Buffer.from(arg).toString("hex")}`).join("");
+}
+// Syntax::generated_path (and Jet Emit/Hardware.jet) gives a source nominal
+// one injective Rust identity. A caller still requires its actual declaration.
+export function generatedRecordPath(name) {
+  const escapes = new Map([[95, "u"], [46, "d"], [58, "c"], [47, "s"], [92, "b"], [45, "h"]]);
+  let out = "__jet_";
+  for (const byte of Buffer.from(name)) {
+    out += byte >= 48 && byte <= 57 || byte >= 65 && byte <= 90 || byte >= 97 && byte <= 122
+      ? String.fromCharCode(byte) : `_${escapes.get(byte) ?? `x${byte.toString(16).padStart(2, "0")}`}`;
+  }
+  return out;
+}
+
+export function recordApplicationsIn(signature, base) {
+  const applications = [];
+  const pattern = new RegExp(`\\b(?:[A-Za-z_]\\w*::)*${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*<`, "g");
+  for (const match of signature.matchAll(pattern)) {
+    let end = match.index + match[0].length, depth = 1;
+    for (; end < signature.length && depth > 0; end++) {
+      if (signature[end] === "<") depth++;
+      else if (signature[end] === ">") depth--;
+    }
+    if (depth !== 0) throw new Error(`generic record ${base}: unterminated application in ${signature}`);
+    applications.push(signature.slice(match.index, end).replace(/\s+/g, ""));
+  }
+  return applications;
+}
+
+
 export function runtimeExportSignatures(root) {
   const sources = readFileSync(join(root, "Compiler/JetRuntime/sources.list"), "utf8")
     .split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
@@ -59,6 +131,17 @@ function accepts(rust, jet) {
   return false;
 }
 
+// Reviewed PARAMETER-only widening. HostNet's resolver constructor masks the
+// low byte before testing the flag (e5157d499); 0x100 is false, 0x101 is true.
+// Return/out carriers and every unlisted symbol remain strict.
+// HostNetAddress/Resolver18eb2f82f discard high port/flow/scope bits at the
+// boundary with the same explicit unsigned masks.
+const maskedWordParameters = new Map([
+  ["jet_rt_record_new_Jet__ResolveError", new Map([[1, "u8"]])],
+  ["jet_net_raw_socket_from_parts", new Map([[1, "u16"], [2, "u32"], [3, "u32"]])],
+  ["jet_net_raw_resolve_ordered", new Map([[1, "u16"]])],
+]);
+
 export function validateRuntimeRoute(adapter, definition) {
   const expected = [...adapter.params.flatMap((param) => param.ctys), ...adapter.result.outs.map((out) => `*mut ${out.cty}`)];
   const actual = definition.params.map((param) => /^[A-Za-z_]\w*\s*:\s*(I64|U64|Float|Bool|U8)$/.exec(param)?.[1]);
@@ -70,4 +153,50 @@ export function validateRuntimeRoute(adapter, definition) {
     const found = `(${definition.params.join(", ")})${suffix ? ` ${suffix}` : ""}`;
     throw new Error(`Jet runtime route ${adapter.symbol}: ${definition.path} export ${adapter.name}${found} does not match C ABI ${wanted}`);
   }
+}
+
+// Lower/CForeign.jet: lower_c_import_call calls these raw helpers directly,
+// not through a Core route or a fabricated Rust kernel. This table checks the
+// actual C ABI of the existing calls (pack/len 126/128, unpack 156, free 173).
+export const loweringRuntimeAbi = [
+  { name: "jet_rt_c_string_pack", params: ["i64"], ret: "i64", site: "Compiler/JetBackend/Source/Lower/CForeign.jet:126" },
+  { name: "jet_rt_string_byte_len", params: ["i64"], ret: "i64", site: "Compiler/JetBackend/Source/Lower/CForeign.jet:128" },
+  { name: "jet_rt_c_string_unpack", params: ["i64"], ret: "i64", site: "Compiler/JetBackend/Source/Lower/CForeign.jet:156" },
+  { name: "jet_rt_c_string_free", params: ["i64", "i64"], ret: null, site: "Compiler/JetBackend/Source/Lower/CForeign.jet:173" },
+];
+
+export function validateLoweringRuntimeAbi(definitions) {
+  // Earlier runtime compositions without CString do not acquire new symbols.
+  if (!definitions.has("jet_rt_c_string_pack") && !definitions.has("jet_rt_c_string_unpack") && !definitions.has("jet_rt_c_string_free")) return;
+  for (const { name, params, ret, site } of loweringRuntimeAbi) {
+    const definition = definitions.get(name);
+    if (!definition) throw new Error(`${site}: missing Jet lowering helper ${name}`);
+    validateRuntimeRoute({ symbol: `${name} (${site})`, name, params: params.map((cty) => ({ ctys: [cty] })), result: { ret, outs: [] } }, definition);
+  }
+}
+
+// Native opaque providers have no Rust record declaration. Admit their
+// ownership metadata only from the canonical physical ABI, never a marker
+// struct or a guessed Rust type. Pipe24 is shared by these two nominals.
+export function nativeProviderHandles(definitions) {
+  const types = ["ProcessStdoutStream", "ProcessStderrStream"];
+  const lifecycle = types.flatMap((type) => [`jet_rt_handle_clone_${type}`, `jet_rt_handle_drop_${type}`]);
+  if (!lifecycle.some((name) => definitions.has(name))) return [];
+  const required = [
+    ...types.flatMap((type) => [
+      { name: `jet_rt_handle_clone_${type}`, params: ["i64"], ret: "i64" },
+      { name: `jet_rt_handle_drop_${type}`, params: ["i64"], ret: null },
+    ]),
+    { name: "jet_process_pipe_take_raw", params: ["i64"], ret: "i64" },
+    { name: "jet_process_stream_line_bytes_raw", params: ["i64", "i64", "i64", "i64"], ret: "i64" },
+  ];
+  for (const { name, params, ret } of required) {
+    const definition = definitions.get(name);
+    if (!definition) throw new Error(`native Pipe24 provider requires ${name}`);
+    validateRuntimeRoute({ symbol: name, name, params: params.map((cty) => ({ ctys: [cty] })), result: { ret, outs: [] } }, definition);
+  }
+  return types.flatMap((runtime) => [
+    { jetName: `<corelib>/Core/process::Core/process/process.jet::${runtime}`, runtime },
+    { jetName: runtime, runtime },
+  ]);
 }

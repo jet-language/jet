@@ -67,6 +67,7 @@ enum LowerMonoPending { Function(row: Int) Type(row: Int) Render(row: Int, show:
 struct LowerMonoEdge { pub function: MIRFunctionID?, pub branch: Int, pub next: Int }
 
 pub struct LowerPrepared {
+    pub native_pack: Bool
     // Final order: reached originals in declaration order, then instances in
     // first-request order.
     pub functions: [LowerPreparedFunction]
@@ -812,6 +813,7 @@ fn lower_mono_edge(q: &LowerPrepared, function: MIRFunctionID?, branch: Int, nex
 
 fn lower_mono_empty() -> LowerPrepared Never! {
     LowerPrepared{
+        native_pack: false,
         functions: [LowerPreparedFunction]{}, instances: [MIRFunction]{},
         source_rows: [U64:Int]{}, mir_rows: [U64:Int]{}, entry: None, issues: [LIRLoweringIssue]{},
         roots: [U64:MIRFunctionID]{},
@@ -979,6 +981,14 @@ fn lower_prepare_roots(program: MIRProgram, roots: [MIRFunctionID], shared_sites
         if requested == .Val(concrete) {
             &q.roots.add(root.value, concrete).drop("checked absent above")
             if q.entry == None && shared_sites_dynamic -> q.entry = Val(concrete)
+        }
+    }
+    if native_pack {
+        loop symbol in imports {
+            row :: lower_native_export(symbol) ?? next
+            if row.op != "handle.display" && row.op != "handle.show" -> next
+            ty :: lower_native_source_type(program, row.jet_name) ?? next
+            lower_reach_render_type(program, &q, ty, row.op == "handle.show", -1)
         }
     }
     lower_mono_run(program, &q)

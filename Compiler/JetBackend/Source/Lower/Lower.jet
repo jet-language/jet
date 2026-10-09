@@ -184,6 +184,8 @@ struct LowerModule {
     pub test_checks: [MIROutputCheck]
     // Empty for ordinary program and callback lowering.
     pub runtime_intrinsics: [U64:LowerRuntimeIntrinsic]{[U64:LowerRuntimeIntrinsic]{}}
+    pub native_pack: Bool
+    pub native_exports: [String:LIRFunctionID]
     // Signature shape key -> its id (lower_signature_key).
     pub signature_rows: [String:Int]
     pub data: [LIRData]
@@ -371,6 +373,8 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         test_serial: test_serial ?? false,
         test_checks: checks,
         runtime_intrinsics: ^prepared.runtime_intrinsics,
+        native_pack: native_pack,
+        native_exports: [String:LIRFunctionID]{},
         signature_rows: [String:Int]{},
         data: [LIRData]{},
         data_rows: [String:Int]{},
@@ -472,6 +476,11 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     // Concrete trait keys are registered while lowering MIR bodies. Helpers
     // only refer to those keys. Drain ordinary glue before emitting each
     // deferred dispatcher once, including newly registered nested helpers.
+    if native_pack {
+        loop symbol in imports -> lower_native_glue_import(program, &m, "external C consumer", symbol)
+        loop function in functions -> lower_native_glue_rewrite(program, &m, function)
+    }
+    // Glue and helpers may register more, so the list grows while it is walked.
     cursor := 0
     dispatchers := [Int]{}
     glue_functions := [LIRFunction?]{}
@@ -490,11 +499,15 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
             } else {
                 &glue_functions.push(Val(lower_glue_function(program, &m, glue)))
             }
+            if native_pack {
+                if glue_functions[cursor] == .Val(function) -> lower_native_glue_rewrite(program, &m, function)
+            }
             cursor += 1
         }
         if emitted == dispatchers.len() -> break
         glue :: ~m.glue[dispatchers[emitted]]
         function :: if glue.helper != "" -> lower_helper_function(program, &m, glue) else if glue.clone -> lower_clone_glue_function(program, &m, glue) else -> lower_glue_function(program, &m, glue)
+        if native_pack -> lower_native_glue_rewrite(program, &m, function)
         glue_functions[dispatchers[emitted]] = Val(function)
         emitted += 1
     }
@@ -644,25 +657,25 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if lower_tally_element(ty) == .Val(elem) -> return lower_map_repr(p, ty, elem, lower_tally_count_type())
             if lower_queue_element(ty) == .Val(elem) -> return lower_queue_repr(p, ty, elem)
             if lower_priority_queue_element(ty) == .Val(elem) -> return lower_priority_queue_repr(p, ty, elem)
+            runtime :: lower_runtime_handle_type(p, ty)
+            if runtime == None && lower_runtime_missing_application(ty, &LOWER_RUNTIME_HANDLES) == .Val(failure) -> return failure
+            schema :: lower_record_schema_with_handle(p, ty, runtime)
             // The canonical runtime name table excludes source-owned Core
             // shapes. Only exact Core paths may override their MIR definition,
             // and a record schema keeps its MIR layout (Records.jet): its
             // fields read natively and it converts only at a route boundary.
-            if args.len() == 0 && name.name.starts_with("<corelib>/") && lower_record_schema(p, ty) == None {
-                if lower_runtime_handle(name.name) == .Val(runtime) {
-                    clone :: if runtime.clone -> "jet_rt_handle_clone_{runtime.runtime}" else -> ""
-                    return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime.runtime}", clone: clone}
+            if name.name.starts_with("<corelib>/") && schema == None {
+                if runtime == .Val(handle) {
+                    clone :: if handle.clone -> "jet_rt_handle_clone_{handle.runtime}" else -> ""
+                    return LowerRepr.Handle{drop: "jet_rt_handle_drop_{handle.runtime}", clone: clone}
                 }
             }
             definition :: lower_type_def(p, ty) ?? {
                 // A Core type with no Jet definition is the runtime's own
                 // value behind an owned handle (RuntimeRoutes.jet).
-                if args.len() == 0 {
-                    runtime :: lower_runtime_handle(name.name) ?? return LowerRepr.Unsupported{reason: "type {name.name} without a definition"}
-                    clone :: if runtime.clone -> "jet_rt_handle_clone_{runtime.runtime}" else -> ""
-                    return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime.runtime}", clone: clone}
-                }
-                return LowerRepr.Unsupported{reason: "type {name.name} without a definition"}
+                handle :: runtime ?? return LowerRepr.Unsupported{reason: "type {name.name} without a definition"}
+                clone :: if handle.clone -> "jet_rt_handle_clone_{handle.runtime}" else -> ""
+                return LowerRepr.Handle{drop: "jet_rt_handle_drop_{handle.runtime}", clone: clone}
             }
             if definition.kind == {
                 .Struct(_, _) -> LowerRepr.Inline{ty: ty}
@@ -671,10 +684,10 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
                     // even when its Jet declaration supplies the variants.
                     // Only record schemas with explicit ABI adapters retain
                     // their native layout at runtime boundaries.
-                    if definition.key.starts_with("<corelib>/") && lower_record_schema(p, ty) == None {
-                        if lower_runtime_handle(definition.name) == .Val(runtime) {
-                            clone :: if runtime.clone -> "jet_rt_handle_clone_{runtime.runtime}" else -> ""
-                            return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime.runtime}", clone: clone}
+                    if definition.key.starts_with("<corelib>/") && schema == None {
+                        if runtime == .Val(handle) {
+                            clone :: if handle.clone -> "jet_rt_handle_clone_{handle.runtime}" else -> ""
+                            return LowerRepr.Handle{drop: "jet_rt_handle_drop_{handle.runtime}", clone: clone}
                         }
                     }
                     if lower_enum_is_tag(variants) -> LowerRepr.Discriminant else -> LowerRepr.Boxed{ty: ty}
@@ -3160,6 +3173,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_tally_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_queue_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_priority_queue_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
+        if lower_bits_clear(p, c, &m, &f, instruction, row, receiver, args) -> return
         if lower_list_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_map_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_ordering_method(p, c, &m, &f, instruction, row, receiver, args) -> return
@@ -3204,6 +3218,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_queue_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_priority_queue_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
+        if lower_bits_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_shared_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_task_group_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_list_concat(p, c, &m, &f, instruction, call, args) -> return
