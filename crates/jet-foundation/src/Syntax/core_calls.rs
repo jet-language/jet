@@ -59,6 +59,9 @@ const fn one_of(method: &str, names: &[&str]) -> bool {
 /// `Effects::core_effect`'s legacy resolver; a row never consults that second
 /// key table.
 const fn effect_for(module: &str, method: &str) -> Option<Effect> {
+    if same_text(module, "core.plugin") && same_text(method, "__authority_to_wire") {
+        return None;
+    }
     if same_text(module, "core.files") {
         if same_text(method, "__temp_path_sample") {
             return Some(Effect::Time);
@@ -1342,6 +1345,21 @@ impl CoreCallRecord {
             Some(target) => Some(target),
             None => Some(self.member),
         }
+    }
+
+    /// The existing checked plugin Authority-to-wire boundary, before forwarding.
+    pub const fn authority_boundary_at(self, index: usize) -> bool {
+        same_text(self.module, "core.plugin") && same_text(self.member, "load") && index == 1
+    }
+
+    /// Admit an implementation's checked signature without publishing another
+    /// public Core member or changing ordinary import visibility.
+    pub fn targets_source_function(self, module: &str, member: &str) -> bool {
+        let Some(target) = self.source_member() else { return false };
+        if target.starts_with("core.") {
+            return target.rsplit_once('.').is_some_and(|(owner, name)| owner == module && name == member);
+        }
+        self.module == module && target == member
     }
 
     /// Construct a row with an explicit consumer projection set. Use this for

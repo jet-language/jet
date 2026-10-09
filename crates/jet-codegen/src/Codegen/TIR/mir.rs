@@ -12208,9 +12208,7 @@ impl<'a> LowerCtx<'a> {
             implicit_clone: false,
             shared_auto_clone: false,
             owned_last_use: matches!(access, MirAccess::Move),
-            authority_boundary: record.module == "core.plugin"
-                && record.member == "load"
-                && index == 1,
+            authority_boundary: record.authority_boundary_at(index),
             fn_coercion: None,
             widen_fixed_to_list: widen_to_vec,
             widen_to_union: None,

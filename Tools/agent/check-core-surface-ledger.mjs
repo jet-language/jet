@@ -1710,6 +1710,10 @@ function translateCoreCallMethod(record, name, args, context) {
     return "core_call_with_ui_capabilities(" + record + ", " +
       translateStringSlice(argument, context) + ")";
   }
+  if (name === "with_source_owned") {
+    if (argument.trim()) throw new Error(context + ": with_source_owned takes no argument");
+    return "core_call_with_source_owned(" + record + ")";
+  }
   if (name === "with_source_target") {
     return "core_call_with_source_target(" + record + ", " +
       rustStringExpression(argument, context) + ")";

@@ -13140,6 +13140,33 @@ mod checked_core_source_target_tests {
     use super::*;
 
     #[test]
+    fn checked_authority_operand_is_materialized_once_before_source_forwarding() {
+        let record = *crate::Syntax::core_call("core.plugin", "load").expect("plugin load row");
+        assert!(!record.authority_boundary_at(0));
+        assert!(record.authority_boundary_at(1));
+        assert!(!record.authority_boundary_at(2));
+        let span = Span::new(0, 0);
+        let authority = || TExpr {
+            ty: Type::Named("Authority".to_string()),
+            kind: TExprKind::ConstRef("authority".to_string()),
+        };
+        let unchanged = materialize_core_authority_boundary(record, 0, authority(), span);
+        assert!(matches!(unchanged.kind, TExprKind::ConstRef(ref name) if name == "authority"));
+        let wired = materialize_core_authority_boundary(record, 1, authority(), span);
+        assert_eq!(wired.ty, Type::String);
+        let TExprKind::CoreCall { record: wire, args, fallibility, .. } = wired.kind else {
+            panic!("expected checked wire operand before ordinary source forwarding");
+        };
+        assert_eq!(wire.member, "__authority_to_wire");
+        assert_eq!(wire.prelude_symbol(), "jet_authority_to_wire");
+        assert_eq!(wire.effect, None);
+        assert!(!wire.authority_boundary_at(1));
+        assert!(matches!(fallibility, TFailureCarrier::Infallible));
+        assert_eq!(args.len(), 1, "the normalized authority is evaluated once");
+        assert!(matches!(args[0].kind, TExprKind::ConstRef(ref name) if name == "authority"));
+    }
+
+    #[test]
     fn imported_core_source_call_uses_checked_module_member_identity() {
         jet_foundation::CompilerStack::run_on_compiler_stack(|| {
             let source_text = "fn run() {}";

@@ -406,6 +406,21 @@ pub fn core_call_source_member(row: CoreCallRecord) -> String? Never! {
     Val(row.source_target ?? row.member)
 }
 
+// The same checked boundary fact used by legacy Core MIR and source forwarding.
+pub fn core_call_authority_boundary_at(row: CoreCallRecord, index: Int) -> Bool Never! {
+    row.module_name == "core.plugin" && row.member == "load" && index == 1
+}
+
+#Test("authority boundary stays on plugin load argument one") {
+    row :: core_call("core.plugin", "load") ?? panic("plugin load row")
+    assert_eq(core_call_authority_boundary_at(row, 0), false)
+    assert_eq(core_call_authority_boundary_at(row, 1), true)
+    assert_eq(core_call_authority_boundary_at(row, 2), false)
+    wire :: core_call("core.plugin", "__authority_to_wire") ?? panic("authority wire row")
+    assert_eq(core_call_authority_boundary_at(wire, 1), false)
+    assert_eq(wire.effect_kind, None)
+}
+
 pub fn core_call_new_with_coverage(module_name: String, member: String, symbol: String, prelude: Bool, borrow_mask: [Bool], coverage: CoreCallCoverage) -> CoreCallRecord Never! {
     row := core_call_new(module_name, member, symbol, prelude, borrow_mask)
     row.coverage = coverage

@@ -44,6 +44,8 @@ use jet_foundation.[
     CoreCallSymbol,
     TCallArg,
     core_call,
+    tir_generated_local,
+    core_call_authority_boundary_at,
     core_call_accepts_arity,
     core_call_coverage_contains,
     core_call_source_member,
@@ -481,10 +483,10 @@ fn sema_call_core_normalized_source_record(record: CoreCallRecord, args: [TExpr]
     normalized
 }
 
-fn sema_call_core_source_arguments(args: [TExpr], params: [SemaCallParam], environment: SemaScopeEnvironment) -> [TCallArg] Never! {
+fn sema_call_core_source_arguments(record: CoreCallRecord, args: [TExpr], params: [SemaCallParam], span: Span, environment: SemaScopeEnvironment) -> [TCallArg] Never! {
     result := [TCallArg]{}
     loop index in 0..<args.len() {
-        value :: args[index]
+        value :: sema_call_core_materialize_authority_boundary(record, index, args[index], span)
         param :: params[index]
         &result.push(TCallArg{value: value, template_items: [SymbolID]{},
             borrow: param.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
@@ -516,7 +518,7 @@ pub fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, typ
             value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
             return sema_expr_expected(value, expected, environment, &diagnostics)
         }
-        target :: sema_call_core_source_target(environment, identity, member, type_args, span, &diagnostics) ?? {
+        target :: sema_call_core_source_target(environment, identity, source_member, type_args, span, true, &diagnostics) ?? {
             &diagnostics.push(sema_error("E0902", span, "source-owned Core call `{record.module_name}.{member}` has no checked source target", "this declaration must execute its owning Jet function", "load the matching Core source export"))
             return None
         }
@@ -525,7 +527,7 @@ pub fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, typ
             &diagnostics.push(sema_error("E0902", span, "source-owned Core target `{member}` has the wrong normalized arity", "the checked source signature must accept every normalized argument", "use the matching Core source export"))
             return None
         }
-        source_args :: sema_call_core_source_arguments(args, params, environment)
+        source_args :: sema_call_core_source_arguments(record, args, params, span, environment)
         value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: type_args, args: source_args}, span)
         return sema_expr_expected(value, expected, environment, &diagnostics)
     }
@@ -783,6 +785,14 @@ fn sema_call_core_result_type(signature: CoreTypedCallSignature, type_args: [Typ
 // polymorphic bodies remain ahead of this entry point when no fixed row exists.
 fn sema_call_core_posix_control(member: String) -> Bool Never! {
     member == "fork" || member == "setuid" || member == "setgid" || member == "setpgid" || member == "setpgrp" || member == "setsid" || member == "initgroups" || member == "kill" || member == "wait" || member == "waitpid" || member == "pipe" || member == "close_fd" || member == "mkfifo" || member == "umask" || member == "getpriority" || member == "setpriority" || member == "utime" || member == "atexit" || member == "stop"
+}
+
+fn sema_call_core_materialize_authority_boundary(record: CoreCallRecord, index: Int, value: TExpr, span: Span) -> TExpr Never! {
+    if !core_call_authority_boundary_at(record, index) -> return value
+    wire :: core_call("core.plugin", "__authority_to_wire") ?? panic("checked Authority wire row is missing")
+    sema_tir_expr(Type.String, TExprKind.CoreCall{record: wire, args: [TExpr]{value},
+        source_span: span, type_args: [Type]{}, widen_to_vec: [Bool]{false},
+        data_plan: None, fallibility: TFailureCarrier.Infallible}, span)
 }
 
 fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
