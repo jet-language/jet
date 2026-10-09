@@ -7,6 +7,7 @@ use jet_foundation.[
     FunctionObligations,
     InternalTag,
     ParamZone,
+    Span,
     Symbol,
     SymbolKind,
     TGenericParam,
@@ -20,6 +21,7 @@ use jet_foundation.[
     ViewSourcePath,
     ViewSourceProjection,
     core_module_export,
+    symbol_id,
     type_identity_equal,
     type_is_unit_callable_return,
     type_with_effective_fn_returns,
@@ -673,6 +675,26 @@ fn sema_type_graph_trait_symbol(graph: SemaRegistrationGraph, module_identity: S
     Val(resolved.symbol)
 }
 
+// Rust Generics::BUILTIN_TRAITS / is_builtin_trait: a generic bound may name
+// a compiler-owned trait that no source module declares. Its identity is the
+// bare trait name with no owning module.
+pub fn sema_type_builtin_trait_symbol(name: String) -> Symbol? {
+    if name == {
+        "Printable" | "Equatable" | "Comparable" | "Serialize" | "Encode" | "Decode" | "Renderable" | "Close" | "Add" | "Sub" | "Mul" | "Div" | "Numeric" | "CheckedText" -> {}
+        else -> return None
+    }
+    Val(Symbol{id: symbol_id(SymbolKind.Trait, "", "", name), kind: SymbolKind.Trait, name: name, module_name: "", owner: None, span: Span{start: 0, end: 0}, ty: None, visibility: 2})
+}
+
+// A generic bound's trait: the visible declaration of that name, else the
+// builtin trait (Rust `Traits::is_trait_name`).
+pub fn sema_type_graph_bound_symbol(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
+    resolved :: sema_type_graph_lookup_symbol(graph, module_identity, name)
+    if resolved != None -> return resolved
+    symbol :: sema_type_builtin_trait_symbol(name) ?? return None
+    Val(SemaRegistrationResolvedSymbol{symbol: symbol, source_module_identity: "", target_module_identity: "", visibility: symbol.visibility})
+}
+
 fn sema_type_graph_is_checked_text_impl(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl) -> Bool Never! {
     resolved := implementation.trait_symbol
     if resolved == None {
@@ -825,7 +847,7 @@ fn sema_type_generic_bound_satisfied(graph: SemaRegistrationGraph, actual_resolv
         }
     }
     current :: parameter ?? return None
-    trait_symbol :: sema_type_graph_trait_symbol(graph, caller_module_identity, bound_name) ?? return None
+    trait_symbol :: sema_type_graph_trait_symbol(graph, caller_module_identity, bound_name) ?? sema_type_builtin_trait_symbol(bound_name) ?? return None
     loop bound in current.bounds {
         if bound.key == trait_symbol.id.key -> return Val(true)
     }

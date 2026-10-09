@@ -1386,6 +1386,12 @@ fn jet_codegen_mir_trait_ref_for_symbol(modules: [SemaGraphModuleResult], symbol
             }
         }
     }
+    // A builtin bound (Sema `sema_type_builtin_trait_symbol`) has no owning
+    // module: its identity is the bare compiler-owned trait name.
+    parts :: symbol.key.split(":").to_list()
+    name :: parts[parts.len() - 1]
+    if symbol.key != symbol_id(SymbolKind.Trait, "", "", name).key -> panic("checked trait symbol has no registered nominal declaration")
+    if jet_codegen_is_native_rust_derive_name(name) || jet_codegen_is_compiler_owned_trait_name(name) || name == "CheckedText" -> return mir_trait_ref(name)
     panic("checked trait symbol has no registered nominal declaration")
 }
 

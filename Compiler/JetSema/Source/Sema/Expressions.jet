@@ -57,10 +57,11 @@ use jet_foundation.[
     core_call_typed_signature,
     core_module_export,
     dimension_display_name,
+    dimension_divide,
     dimension_identity,
+    dimension_multiply,
     expr_span,
     integer_bounds_exact,
-    measure_signed_value,
     symbol_id,
     tir_symbol_local,
     type_identity_equal,
@@ -1538,29 +1539,6 @@ fn sema_expr_unit_conversion_is_finite(source: SemaRegistrationUnitFact, destina
     sema_expr_unit_ratio_is_finite(scale) && sema_expr_unit_ratio_is_finite(offset)
 }
 
-
-fn sema_expr_dimension_add_axis(axes: &[DimensionAxis], name: String, exponent: Int) -> Bool Never! {
-    index := 0
-    loop index < axes.len() {
-        if axes[index].name == name {
-
-            current :: measure_signed_value(axes[index].exponent) ?? return false
-            next := current + exponent
-            if {
-                next == 0 -> {
-                    _ := &axes.remove(index, .Slot)
-                }
-                else -> {
-                    axes[index].exponent = Measure.SignedLiteral{kind: "dimension", value: next}
-                }
-            }
-            return true
-        }
-        index += 1
-    }
-    if exponent != 0 -> &axes.push(DimensionAxis{name: name, exponent: Measure.SignedLiteral{kind: "dimension", value: exponent}})
-    true
-}
 fn sema_expr_unit_quantity_base_is_float(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
     if ty == {
         .Quantity(base, _) -> return base == Type.Float
@@ -1571,17 +1549,7 @@ fn sema_expr_unit_quantity_base_is_float(ty: Type, environment: SemaScopeEnviron
 }
 
 fn sema_expr_dimension_combine(left: Dimension, right: Dimension, multiply: Bool) -> Dimension? {
-    axes := [DimensionAxis]{}
-    loop axis in left.axes {
-        exponent :: measure_signed_value(axis.exponent) ?? return None
-        if !sema_expr_dimension_add_axis(&axes, axis.name, exponent) -> return None
-    }
-    loop axis in right.axes {
-        exponent := measure_signed_value(axis.exponent) ?? return None
-        if !multiply -> exponent = -exponent
-        if !sema_expr_dimension_add_axis(&axes, axis.name, exponent) -> return None
-    }
-    Val(Dimension{axes: axes})
+    if multiply -> dimension_multiply(left, right) else -> dimension_divide(left, right)
 }
 
 fn sema_expr_unit_dimension(ty: Type, environment: SemaScopeEnvironment) -> Dimension? {
