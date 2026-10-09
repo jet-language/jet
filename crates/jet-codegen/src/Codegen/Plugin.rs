@@ -1999,3 +1999,25 @@ mod io_error_bridge_generation_tests {
         assert_eq!(bridge.matches(&format!("{free}(")).count(), 2);
     }
 }
+
+#[cfg(test)]
+mod export_call_generation_tests {
+    use super::plugin_export_call;
+    use jet_foundation::MIR::{MirFailureCarrier, MirType, MirTypeKind};
+
+    #[test]
+    fn only_a_failure_rail_callee_is_unwrapped() {
+        let args = ["&p0".to_string(), "p1".to_string()];
+        let text = MirType::from_kind(MirTypeKind::String);
+        let result = MirFailureCarrier::Result { success: text.clone(), error: text };
+        assert_eq!(
+            plugin_export_call("echo", &args, &result),
+            "match echo(&p0, p1) { Ok(value) => value, Err(error) => jet_entry_error_exit_jet(error) }"
+        );
+        // An infallible callee returns its value directly (TIR lower/functions.rs).
+        assert_eq!(
+            plugin_export_call("echo", &args, &MirFailureCarrier::Infallible),
+            "echo(&p0, p1)"
+        );
+    }
+}
