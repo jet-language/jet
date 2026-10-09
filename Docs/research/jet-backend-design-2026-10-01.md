@@ -481,7 +481,7 @@ function parameters and jumps to it (LIR forbids jumps to the entry).
 | `ResultOk` / `ResultErr` | box, word at 0 = 1 / 0, payload at 8 |
 | `ResultIsOk` / `ResultValue` | `Load` offset 0 and `Compare Ne 0` / read at offset 8 |
 | `BuildString(parts)` | `jet_rt_string_builder_new`, `..._push_static(b, ptr, len)` per literal, `..._push(b, text)` per Display or Debug interpolation, `..._finish(b) -> String` |
-| `Semantic(Print(call, v))` | Display text of v (the String itself, or `jet_rt_int_to_string` / `jet_rt_i64_to_string` / `jet_rt_char_to_string` / `jet_rt_bool_to_string`, dropped after the call), then the route's symbol (`jet_term_write_stdout_line`) with `(text, flush = 0)`; the shared runtime owns terminal-line versus file/pipe buffering |
+| `Semantic(Print(call, v))` | Display text of v (the String itself, or `jet_rt_int_to_string` / `jet_rt_i64_to_string` / `jet_rt_char_to_string` / `jet_rt_bool_to_string`, dropped after the call), then the route's symbol (`jet_term_write_stdout_line`) with `(text, flush = 1)` |
 | `Call` of a user function, method or associated function | `Call Function(id)` with the callee's signature; Unit arguments are omitted |
 | `Call` of a Prelude route | `Call Runtime(symbol)` |
 | `LoopRangeInit/HasNext/Value/Advance` | the route's symbols; init takes `(start, end, step, has_step, exclusive)` |
@@ -2437,6 +2437,31 @@ ambiguous pairing is reported, never treated as equality. `--bootstrap JETC0`
 provides a front-end diagnostic census before the probe can be built.
 Preparation and a receipt-only census never establish differential parity;
 only `summary.json` with `differential_verified: true` does.
+
+### Native arena resource counters
+
+`MemRegistry.jet` is the single native owner of the seven memory observation
+words from `Prelude/Observe.rs`: outstanding arenas, allocations and bytes,
+retained block capacity, high-water bytes, and the two allocation-probe totals.
+Its priority-1 runtime initializer allocates its own state after the heap is
+ready; it does not share allocator policy cells or count ordinary heap blocks
+as arenas. The provider uses the existing `Sync.jet` atomic leaves.
+
+Core's Arena/Bump/Fixed/Pool implementations call the open/alloc/reset/close
+hooks, and their RawBlock owners call retain/release. Zero-sized values count
+as allocations with zero bytes. Counters carry unsigned machine-word bits,
+wrap on fetch-add/subtract, and snapshot independently with relaxed loads,
+matching the reference rather than promising a transactional metric snapshot.
+The high-water candidate alone saturates on unsigned overflow. Probe reset
+and take use sequentially consistent exchanges and never clear live facts.
+
+`jet_rt_mem_resources(out)` writes three words (arenas, allocations, bytes)
+into caller-owned 24-byte aligned storage for the Observe live writer.
+`MemRegistryWitness.c` links the real native provider and covers lifecycle,
+zero-size, unsigned wrapping, probe isolation and concurrent allocation totals.
+Compile it with `cc -pthread` against the composed runtime object; its success
+line is `MemRegistry: lifecycle, zero-size, probe isolation, unsigned wrap,
+concurrent totals ok`. Source/syntax checks do not establish native parity.
 
 ### Native collection runtime
 

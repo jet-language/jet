@@ -77,11 +77,6 @@ fn x64_object_main(entry: LIRFunctionID) -> X64CompiledFunction Never! {
     start_at :: x64_call_rel32(&code)
     entry_at :: x64_lea_rip(&code, X64_RDI)
     call_at :: x64_call_rel32(&code)
-    // Native linker startup need not provide libc's fini-array traversal.
-    // Drain here as well, retaining the runtime boundary's i32 exit status.
-    x64_mov_rr(&code, X64_RBX, X64_RAX)
-    flush_at :: x64_call_rel32(&code)
-    x64_mov_rr(&code, X64_RAX, X64_RBX)
     x64_pop(&code, X64_RBX)
     x64_ret(&code)
     relocs :: [X64Reloc]{X64Reloc{at: arguments_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_arguments"}}, X64Reloc{at: start_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_program_start"}}, X64Reloc{at: entry_at, target: X64RelocTarget.Function{id: entry}}, X64Reloc{at: call_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_main"}}, X64Reloc{at: flush_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_stdout_flush"}}}
@@ -101,7 +96,7 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
     functions := [X64CompiledFunction]{x64_object_main(entry)}
     loop function in compiled.functions -> &functions.push(function)
 
-    x64_object_functions(program, functions, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main", init_priority: -1, fini_priority: -1}})
+    x64_object_functions(program, functions, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
 }
 
 // Shared section/relocation writer for hosted program and runtime objects.
@@ -257,9 +252,9 @@ fn x64_object_functions(program: LIRModule, functions: [X64CompiledFunction], ex
     }
     shstrtab := [U8]{U8{0}}
     names := [String]{".text", ".data", ".rela.text", ".symtab", ".strtab", ".shstrtab", ".note.GNU-stack", ".rela.data"}
-    loop name in lifecycle_names {
-        &names.push(name)
-        &names.push(".rela{name}")
+    if initializer >= 0 {
+        &names.push(".init_array.00000")
+        &names.push(".rela.init_array.00000")
     }
     name_offsets := [Int]{0}
     loop name in names -> &name_offsets.push(elf64_string(&shstrtab, name))
@@ -280,13 +275,15 @@ fn x64_object_functions(program: LIRModule, functions: [X64CompiledFunction], ex
     elf64_u16(&bytes, 0)
     elf64_u16(&bytes, 0)
     elf64_u16(&bytes, ELF64_SECTION_HEADER_SIZE)
-    section_count :: ELF64_OBJECT_SECTIONS + lifecycle_names.len() * 2
+    section_count :: if initializer >= 0 -> ELF64_OBJECT_SECTIONS + 2 else -> ELF64_OBJECT_SECTIONS
     elf64_u16(&bytes, section_count)
     elf64_u16(&bytes, ELF64_OBJECT_SHSTRTAB)
     contents := [[U8]]{text, rodata, rela, symtab, strtab, shstrtab, data_rela}
     aligns := [Int]{X64_FUNCTION_ALIGN, rodata_align, 8, 8, 1, 1, 8}
-    loop content in lifecycle_contents {
-        &contents.push(content)
+    if initializer >= 0 {
+        &contents.push(init)
+        &contents.push(init_rela)
+        &aligns.push(8)
         &aligns.push(8)
     }
     section_offsets := [Int]{}
@@ -313,11 +310,10 @@ fn x64_object_functions(program: LIRModule, functions: [X64CompiledFunction], ex
     elf64_section_header(&bytes, name_offsets[7], 1, 0, shoff, 0, 0, 0, 1, 0)
     // .rela.data: absolute pointer words against the .data section symbol.
     elf64_section_header(&bytes, name_offsets[8], 4, 0x40, section_offsets[6], data_rela.len(), ELF64_OBJECT_SYMTAB, ELF64_OBJECT_RODATA, 8, ELF64_RELA_SIZE)
-    loop (index, kind) in lifecycle_kinds {
-        section :: 9 + index * 2
-        content :: 7 + index * 2
-        elf64_section_header(&bytes, name_offsets[section], kind, 3, section_offsets[content], 8, 0, 0, 8, 8)
-        elf64_section_header(&bytes, name_offsets[section + 1], 4, 0x40, section_offsets[content + 1], 24, ELF64_OBJECT_SYMTAB, section, 8, ELF64_RELA_SIZE)
+    if initializer >= 0 {
+        // SHT_INIT_ARRAY; absolute pointer relocated to the global init FUNC.
+        elf64_section_header(&bytes, name_offsets[9], 14, 3, section_offsets[7], init.len(), 0, 0, 8, 8)
+        elf64_section_header(&bytes, name_offsets[10], 4, 0x40, section_offsets[8], init_rela.len(), ELF64_OBJECT_SYMTAB, 9, 8, ELF64_RELA_SIZE)
     }
     X64ExecutableResult{bytes: bytes, errors: [String]{}}
 }
