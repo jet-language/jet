@@ -9855,48 +9855,6 @@ fn validate_consumed_stop_uses(
     Ok(())
 }
 
-/// A consuming call has already taken its arguments when it delivers a stop.
-/// Replaying that cleanup on the stop edge would close the same owner twice.
-fn validate_consumed_stop_uses(
-    function: &MirFunction,
-    blocks: &HashMap<MirBlockId, usize>,
-    operation: &MirOperation,
-    stop: MirBlockId,
-) -> Result<(), MirValidationError> {
-    let args = match operation {
-        MirOperation::Call { args, .. } | MirOperation::IndirectCall { args, .. }
-        | MirOperation::CoreCall { args, .. } => args.as_slice(),
-        _ => &[],
-    };
-    let thunk = match operation {
-        MirOperation::IndirectCall { callee, .. } => Some(*callee),
-        _ => None,
-    };
-    if thunk.is_none() && !args.iter().any(|arg| arg.access == MirAccess::Move) {
-        return Ok(());
-    }
-    let mut pending = vec![stop];
-    let mut seen = HashSet::new();
-    while let Some(id) = pending.pop() {
-        if !seen.insert(id) { continue; }
-        let Some(&index) = blocks.get(&id) else { continue };
-        let block = &function.blocks[index];
-        for instruction in &block.instructions {
-            let reused_thunk = matches!(&instruction.operation,
-                MirOperation::IndirectCall { callee, .. } if Some(*callee) == thunk);
-            if reused_thunk || args.iter().filter(|arg| arg.access == MirAccess::Move)
-                .any(|arg| instruction.operation.value_uses().contains(&arg.value)) {
-                return Err(MirValidationError::InvalidOperation {
-                    function: function.id,
-                    message: "MIR stop edge reuses an already-consumed cleanup input".to_string(),
-                });
-            }
-        }
-        pending.extend(block.terminator.targets());
-    }
-    Ok(())
-}
-
 fn validate_resume_uses(
     function: &MirFunction,
     place_rows: &HashMap<MirPlaceId, &MirPlace>,

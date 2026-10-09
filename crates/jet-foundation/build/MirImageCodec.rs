@@ -1636,8 +1636,9 @@ fn mir_image_unknown_static_string_restores_past_source_owned_rows() {
     let mut writer = MirProgramImageWriter { bytes: Vec::new(), interner: &mut interner };
     writer.write_string(value).unwrap();
     let body = writer.finish();
-    let bytes = mir_image_assemble(interner, body).unwrap();
-    let (tables, cursor) = mir_image_read_tables(&bytes).unwrap();
+    // The fixture uses the same sealed schema prefix as a complete MIR image.
+    let bytes = mir_image_assemble(interner, body, MIR_SCHEMA_VERSION).unwrap();
+    let (tables, cursor) = mir_image_read_tables(&bytes, MIR_SCHEMA_VERSION).unwrap();
     let mut reader = MirProgramImageReader { bytes: &bytes, cursor, tables: &tables, bodies: true };
     let restored = mir_image_static_str(reader.read_string().unwrap()).unwrap();
     reader.finish().unwrap();

@@ -4338,13 +4338,9 @@ fn verify_moves_and_borrows(
     place_map: &HashMap<crate::MIR::MirPlaceId, &MirPlace>,
     prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>,
 ) -> Result<(), MirLegalityError> {
-    let mut consumed: HashMap<MirValueId, (MirBlockId, usize, Span)> = HashMap::new();
     let booleans = BooleanLocals::new(function);
     let feasible = booleans.feasible_blocks(function);
-    let mut scope_deadlines = HashMap::with_capacity(function.scopes.len());
-    for scope in &function.scopes {
-        scope_deadlines.entry(scope.id).or_insert(scope.deadline);
-    }
+    verify_physical_consumption(function, defs, &feasible, prelude_calls)?;
     let remainder_drops = partial_move_remainder_drops(function, place_map);
     // Only paths under one root can overlap, so events are grouped by root:
     // each use scans its own root's moves, not every move in the function.
@@ -4524,21 +4520,15 @@ fn consumption_block(
             if let Some(defined) = instruction.result {
                 moved.remove(&defined);
             }
-            for value in moved {
-                let Some((_, _, _, ownership)) = defs.get(&value) else {
-                    return Err(MirLegalityError::InvalidReference {
-                        function: function.id,
-                        subject: format!("move {value:?}"),
-                        span: instruction.span,
-                    });
-                };
-                if !ownership.is_runtime_owned() || consumed.contains_key(&value)
-                {
-                    return Err(MirLegalityError::InvalidMove {
-                        function: function.id,
-                        value,
-                        span: instruction.span,
-                    });
+            continue;
+        }
+        let uses = instruction.operation.value_uses();
+        if check {
+            if let MirOperation::ScopeEnter { scope, .. } = instruction.operation {
+                if let Some(deadline) = function.scopes.iter().find(|row| row.id == scope).and_then(|row| row.deadline) {
+                    if moved.contains(&deadline) {
+                        return Err(MirLegalityError::InvalidMove { function: function.id, value: deadline, span: instruction.span });
+                    }
                 }
             }
             for &value in &uses {
