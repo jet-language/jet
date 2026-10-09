@@ -783,7 +783,7 @@ impl<'a> Parser<'a> {
                 && self.peek().span.start == op_span.end
             {
                 return Err(Diagnostic::from_row(
-                    "E0394",
+                    "E0396",
                     &[],
                     Some(Span::new(op_span.start, self.peek().span.end)),
                 ));

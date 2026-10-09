@@ -683,7 +683,7 @@ fn run() {
         let diagnostics = Parser::parse(&tokens).expect_err("`**` is not a Jet operator");
         assert!(
             diagnostics.iter().any(|diagnostic| {
-                diagnostic.code == "E0394"
+                diagnostic.code == "E0396"
                     && diagnostic.what.contains("`^`")
                     && diagnostic.span.is_some_and(|span| &source[span.start..span.end] == "**")
             }),
@@ -692,7 +692,7 @@ fn run() {
         // `a * *p` (spaced) keeps its raw-pointer meaning for sema to gate.
         let (tokens, _) = Lexer::lex("fn run() { x :: a * *p }\n");
         if let Err(diagnostics) = Parser::parse(&tokens) {
-            assert!(diagnostics.iter().all(|diagnostic| diagnostic.code != "E0394"), "{diagnostics:?}");
+            assert!(diagnostics.iter().all(|diagnostic| diagnostic.code != "E0396"), "{diagnostics:?}");
         }
     }
 
