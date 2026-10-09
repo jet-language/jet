@@ -40,9 +40,10 @@ fn unsupported_error(format: EncodingFormat, offset: Int, reason: String) -> Enc
 // lift those rows into `Dyn` arrays so CSV participates in the shared
 // tree without a second table type.
 //
-// Typed `decode<T>` owns native header-to-record and row-error policy here.
-// The streaming reader and writer use bounded source state machines over
-// existing registered file leaves (D-ENCSTREAM-SURFACE1).
+// Typed `decode<T>` owns native header-to-record and row-error policy here;
+// its parser has a typed failure carrier and maps diagnostic text to FieldError.
+// Streaming reads distinguish optional EOF from typed IO failures, and writes
+// borrow bounded byte windows over existing registered file leaves.
 // `query<T>` reads a bounded UTF-8 table, validates its header, decodes all
 // typed rows and reuses the same SQL query door as an in-memory list.
 struct CSVRow {
@@ -70,7 +71,7 @@ fn rows(text: String, delimiter: String{","}, header: Bool{false}, skip_blank: B
 /// Header-named typed rows. Missing cells become empty text; extra cells are
 /// ignored, and failures from every data record are accumulated in row order.
 fn decode<T: Decode>(text: String) -> [T] [FieldError]! {
-    rows :: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err}})
+    rows :: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err.reason}})
     if rows.len() == 0 -> return Ok([T]{})
     header :: rows[0]
     values := [T]{}
@@ -99,6 +100,9 @@ fn decode<T: Decode>(text: String) -> [T] [FieldError]! {
 
 // Whole-value typed CSV uses the same native CsvKernel state transitions but
 // no streaming EncodingLimits: the shipped whole-value decoder is unbounded.
+#Error
+struct TypedCSVError { reason: String }
+
 struct TypedCSV {
     field: [U8]
     fields: [String]
@@ -114,8 +118,8 @@ struct TypedCSV {
     ended_record: Bool
     saw_input: Bool
 
-    fn error(self, line: Int, column: Int, reason: String) -> String Never! {
-        "E2701: CSV row {self.record}, line {line}, column {column} — {reason}"
+    fn error(self, line: Int, column: Int, reason: String) -> TypedCSVError Never! {
+        TypedCSVError{reason: "E2701: CSV row {self.record}, line {line}, column {column} — {reason}"}
     }
 
     fn close_field(&self) Never! {
@@ -135,7 +139,7 @@ struct TypedCSV {
         self.ended_record = true
     }
 
-    fn push(&self, bytes: [U8]) String! {
+    fn push(&self, bytes: [U8]) TypedCSVError! {
         self.saw_input = true
         byte :: Int.from_u8(bytes[0])
         if self.pending_cr {
@@ -200,7 +204,7 @@ struct TypedCSV {
         }
     }
 
-    fn finish(&self) String! {
+    fn finish(&self) TypedCSVError! {
         if self.pending_cr -> return Err(self.error(self.pending_line, self.pending_column, "bare CR is not a record ending"))
         if self.quoted && !self.after_quote -> return Err(self.error(self.line, self.column + 1, "quoted field ended before its closing quote"))
         if self.ended_record || !self.saw_input -> return
@@ -210,7 +214,7 @@ struct TypedCSV {
     }
 }
 
-fn typed_records(text: String) -> [[String]] String! {
+fn typed_records(text: String) -> [[String]] TypedCSVError! {
     parser := TypedCSV{field: [U8]{}, fields: [String]{}, rows: [[String]]{}, quoted: false, after_quote: false, pending_cr: false, pending_line: 1, pending_column: 1, record: 1, line: 1, column: 0, ended_record: false, saw_input: false}
     index := 0
     loop index < text.count_bytes() {
@@ -246,7 +250,7 @@ fn to_string<T: Encode>(rows: [T]) -> String Never! {
         out = encode_row(header)
         loop i in 0..<rows.len() {
             tree :: if i == 0 -> first else -> rows[i].encode()
-            if tree != .Object(_) -> panic("csv.to_string needs rows or records")
+            if tree != Dyn.Object(_) -> panic("csv.to_string needs rows or records")
             fields := [String]{}
             loop key in header {
                 cell := ""
@@ -284,7 +288,7 @@ fn csv_cell(value: Dyn) -> String Never! {
         .Float(n) -> "{n:Debug}"
         .Bool(b) -> "{b}"
         .Null -> ""
-        else -> value.show()
+        else -> json.to_string(value) ?? panic("CSV cell cannot be represented as JSON")
     }
 }
 
@@ -292,7 +296,7 @@ fn csv_cell(value: Dyn) -> String Never! {
 /// Typed CSV query with the same SQL grammar and result carrier as rows.query.
 fn query<T: [Decode, Encode]>(path: String, sql: SQL) -[FS]> Query<T> [FieldError]! {
     text :: query_text(path) ?? return Err(err)
-    physical :: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err}})
+    physical :: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err.reason}})
     header :: if physical.len() == 0 -> [String]{} else -> physical[0]
     encoding.__query_validate_fields(header, sql) ?? return Err([FieldError]{FieldError{path: "", reason: err}})
     values :: decode<T>(text) ?? return Err(err)
@@ -555,7 +559,8 @@ struct CSVWriter {
     fn byte(&self, value: U8, count: Int) EncodingError! -[IO]> {
         self.buffer[0] = value
         self.buffer[1] = value
-        encoding.__write_bytes(&self.output, self.buffer[0..<count]) ?? return Err(self.io_error(err))
+        window :: self.buffer[0..<count]
+        encoding.__write_bytes(&self.output, window) ?? return Err(self.io_error(err))
     }
 
     fn close_record(&self) EncodingError! -[IO]> {
@@ -565,7 +570,8 @@ struct CSVWriter {
         }
         self.buffer[0] = U8{13}
         self.buffer[1] = U8{10}
-        encoding.__write_bytes(&self.output, self.buffer[0..<2]) ?? return Err(self.io_error(err))
+        window :: self.buffer[0..<2]
+        encoding.__write_bytes(&self.output, window) ?? return Err(self.io_error(err))
         self.total += 2
         self.pending_crlf = false
     }
@@ -696,10 +702,13 @@ struct CSVReader {
     }
 
     fn byte(&self) -[IO]> U8? EncodingError! {
-        byte :: encoding.__read_byte(&self.input) ?? {
-            error := codec_error(.IO, self.offset, self.line, self.column, self.path(), "file IO failed")
-            error.cause = Val(err)
-            return Err(error)
+        byte :: if encoding.__read_byte(&self.input) == {
+            .Ok(value) -> value
+            .Err(cause) -> {
+                error := codec_error(.IO, self.offset, self.line, self.column, self.path(), "file IO failed")
+                error.cause = Val(cause)
+                return Err(error)
+            }
         }
         if byte == None -> return Ok(None)
         if self.limits.max_total_bytes == .Val(limit) {
@@ -719,19 +728,24 @@ struct CSVReader {
     }
 
     fn character(&self) -[IO]> Int? EncodingError! {
-        first :: &self.byte() ?? return Err(err)
-        if first == None -> return Ok(None)
-        self.char0 = first
+        first :: if &self.byte() == {
+            .Ok(value) -> value
+            .Err(error) -> { return Err(error) }
+        }
+        self.char0 = first ?? return Ok(None)
         n :: Int.from_u8(self.char0)
         width :: if n <= 127 -> 1 else if n >= 194 && n <= 223 -> 2 else if n >= 224 && n <= 239 -> 3 else if n >= 240 && n <= 244 -> 4 else -> 0
         if width == 0 -> return Err(self.utf8_error(self.offset - 1))
         self.char_width = width
         loop i in 1..<width {
-            byte :: &self.byte() ?? return Err(err)
-            if byte == None -> return Err(self.utf8_error(self.offset))
-            if i == 1 -> self.char1 = byte
-            else if i == 2 -> self.char2 = byte
-            else -> self.char3 = byte
+            byte :: if &self.byte() == {
+                .Ok(value) -> value
+                .Err(error) -> { return Err(error) }
+            }
+            continuation :: byte ?? return Err(self.utf8_error(self.offset))
+            if i == 1 -> self.char1 = continuation
+            else if i == 2 -> self.char2 = continuation
+            else -> self.char3 = continuation
         }
         loop i in 1..<width {
             b :: Int.from_u8(self.character_byte(i))
@@ -752,7 +766,8 @@ struct CSVReader {
         capacity :: mem.__list_capacity<U8>(self.field)
         if self.field.len() == capacity {
             grown :: if capacity < 8 -> 8 else -> capacity * 2
-            if !stream.reserve<U8>(self.allocation, &self.field, grown - self.field.len()) -> return Err(self.capacity_error())
+            additional :: grown - self.field.len()
+            if !stream.reserve<U8>(self.allocation, &self.field, additional) -> return Err(self.capacity_error())
         }
         &self.field.push(byte)
     }
@@ -761,7 +776,8 @@ struct CSVReader {
         capacity :: mem.__list_capacity<String>(self.fields)
         if self.fields.len() == capacity {
             grown :: if capacity < 4 -> 4 else -> capacity * 2
-            if !stream.reserve<String>(self.allocation, &self.fields, grown - self.fields.len()) -> return Err(self.capacity_error())
+            additional :: grown - self.fields.len()
+            if !stream.reserve<String>(self.allocation, &self.fields, additional) -> return Err(self.capacity_error())
         }
         self.fields_heap += mem.__list_capacity<U8>(self.field)
         text := ""
@@ -788,7 +804,7 @@ struct CSVReader {
             return Ok(None)
         }
         heap :: mem.__list_capacity<String>(self.fields) * mem.__type_size<String>() + self.fields_heap
-        fields :: ^self.fields
+        fields :: self.fields.copy()
         self.fields = [String]{}
         self.fields_heap = 0
         self.allocation.release(heap)
@@ -877,9 +893,15 @@ struct CSVReader {
     fn next_inner(&self) -[IO]> CSVRow? EncodingError! {
         if self.eof -> return Ok(None)
         loop {
-            character :: &self.character() ?? return Err(err)
+            character :: if &self.character() == {
+                .Ok(value) -> value
+                .Err(error) -> { return Err(error) }
+            }
             if character == .Val(value) {
-                row :: &self.push(value) ?? return Err(err)
+                row :: if &self.push(value) == {
+                    .Ok(record) -> record
+                    .Err(error) -> { return Err(error) }
+                }
                 if row != None -> return Ok(row)
             } else {
                 self.eof = true
@@ -895,9 +917,12 @@ struct CSVReader {
 
     fn next(&self) -[IO]> CSVRow? EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
-        result :: &self.next_inner() ?? {
-            self.terminal = Val(err)
-            return Err(err)
+        result :: if &self.next_inner() == {
+            .Ok(row) -> row
+            .Err(error) -> {
+                self.terminal = Val(error)
+                return Err(error)
+            }
         }
         Ok(result)
     }
@@ -923,11 +948,15 @@ fn reader(source: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}, de
     assert_eq(records[1][0], "x\"y")
     assert_eq(records[2], [String]{""})
     if typed_records("é\"") == {
-        .Err(reason) -> assert_eq(reason, "E2701: CSV row 1, line 1, column 2 — quote inside an unquoted field")
+        .Err(error) -> assert_eq(error.reason, "E2701: CSV row 1, line 1, column 2 — quote inside an unquoted field")
         else -> panic("unquoted quote must fail")
     }
     if typed_records("\"x") == {
-        .Err(reason) -> assert_eq(reason, "E2701: CSV row 1, line 1, column 3 — quoted field ended before its closing quote")
+        .Err(error) -> assert_eq(error.reason, "E2701: CSV row 1, line 1, column 3 — quoted field ended before its closing quote")
         else -> panic("unfinished quoted field must fail")
     }
+}
+
+#Test("CSV structured cells retain compact JSON text") {
+    assert_eq(csv_cell(Dyn.Array([Dyn]{Dyn.Int(1), Dyn.Bool(true)})), "[1,true]")
 }
