@@ -243,6 +243,15 @@ It must not introduce a third front end, a second query verdict, or a new
 execution lens. The Rust host is a bootstrap seed: it is frozen once the Jet
 compiler ships with parity and removed once the native back end is complete
 (D-EXEC2, owner directive 19).
+The private startup-output factory packages supplied environment bytes and
+terminal facts as an ordinary checked Source value, retaining owned typed bytes.
+Native suppliers must match that value's checked layout and ownership.
+Compiler-internal byte READ helpers operate on already supplied arrays, retain
+the shared diagnostics scalar decoder and existing bounds behavior, and leave
+source lifetime and output ownership with the caller. They do not change public
+Core or String APIs or eliminate the copy made by String.bytes(). Declaring these
+values and including their source files does not activate the host startup path
+or qualify a native supplier.
 
 The bootstrap host initializes every `JetDriverCompileRequest` field, including
 declared defaults, through checked field-symbol metadata. Ordinary bootstrap
