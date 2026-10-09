@@ -41,6 +41,9 @@ shared writable build targets. Configure external targets through `jet-env`.
 Bound disk and memory use before starting work, account for peak allocations,
 and reclaim idle output promptly after integration. Never remove source,
 protected evidence, or artifacts still in use to make room for another job.
+Forward a collected child's complete diagnostic buffer synchronously before
+throwing on failure. An asynchronous pipe write followed by an uncaught exception
+can truncate the last diagnostics; a partial log is not a collect-all census.
 
 `jet-env` preserves caller-selected Cargo wrappers; it does not select sccache
 based on whether a debug output directory exists. Set `JET_NO_SCCACHE=1` to

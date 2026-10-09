@@ -19,7 +19,7 @@ mkdirSync(work, { recursive: true });
 copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'allparts-seed.jet'), join(work, 'seed.jet'));
 const run = spawnSync(resolve(jet), ['emit', '--rust', 'seed.jet'], { cwd: work, encoding: 'utf8', maxBuffer: 1 << 30 });
 if (run.status !== 0 || !run.stdout.includes('mod jet_c_abi {')) {
-  process.stderr.write(run.stderr ?? '');
+  writeFileSync(2, run.stderr ?? '');
   throw new Error(`jet emit --rust allparts-seed.jet failed (status ${run.status}${run.signal ? `, ${run.signal}` : ''})`);
 }
 writeFileSync(out, run.stdout);
