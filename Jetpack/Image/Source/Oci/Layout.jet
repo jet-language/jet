@@ -138,11 +138,11 @@ pub fn image_build_with_base(spec: OCIBuildSpec, out_dir: String, ref_name: Stri
     }
     &diff_ids.push("sha256:{layer_digest}")
 
-    config_json :: image_config_json(spec, diff_ids, architecture)
+    config_json :: image_config_json(spec, diff_ids, architecture) ?? return Err(err)
     config_digest :: pkg_sha256_hex(config_json.bytes())
 
     &layers.push(OCILayerDescriptor{media_type: IMAGE_MEDIA_TYPE_LAYER, digest: "sha256:{layer_digest}", size: layer_tar.len()})
-    manifest_json :: image_manifest_json(config_digest, config_json.bytes().len(), layers)
+    manifest_json :: image_manifest_json(config_digest, config_json.bytes().len(), layers) ?? return Err(err)
     manifest_digest :: pkg_sha256_hex(manifest_json.bytes())
 
     files.create_dir_all(image_blob_dir(out_dir))
@@ -319,12 +319,13 @@ fn image_write_index(out_dir: String, manifest_digest: String, manifest_size: In
     index := [String: DataTree]{}
     index["schemaVersion"] = DataTree.Int(2)
     index["manifests"] = DataTree.Array([DataTree]{DataTree.Object(descriptor)})
-    image_write_layout_file(files.join(out_dir, "index.json"), image_json_text(DataTree.Object(index)).bytes())
+    text :: image_json_text(DataTree.Object(index)) ?? return Err(err)
+    image_write_layout_file(files.join(out_dir, "index.json"), text.bytes())
 }
 
 // The OCI image config: `architecture`/`os`/`config`/`rootfs` only. No
 // `created` or `history`, because an embedded timestamp breaks determinism.
-fn image_config_json(spec: OCIBuildSpec, diff_ids: [String], architecture: String) -> String Never! {
+fn image_config_json(spec: OCIBuildSpec, diff_ids: [String], architecture: String) -> String ImageError! {
     env := [DataTree]{}
     loop entry in image_sorted_env(spec.env) -> &env.push(DataTree.Text("{entry.key}={entry.value}"))
     entrypoint := [DataTree]{}
@@ -354,7 +355,7 @@ fn image_config_json(spec: OCIBuildSpec, diff_ids: [String], architecture: Strin
     image_json_text(DataTree.Object(document))
 }
 
-fn image_manifest_json(config_digest: String, config_size: Int, layers: [OCILayerDescriptor]) -> String Never! {
+fn image_manifest_json(config_digest: String, config_size: Int, layers: [OCILayerDescriptor]) -> String ImageError! {
     config := [String: DataTree]{}
     config["mediaType"] = DataTree.Text(IMAGE_MEDIA_TYPE_CONFIG)
     config["digest"] = DataTree.Text("sha256:{config_digest}")
@@ -574,8 +575,9 @@ fn image_digest_for(bytes: [U8]) -> String Never! {
     "sha256:{pkg_sha256_hex(bytes)}"
 }
 
-fn image_json_text(value: DataTree) -> String Never! {
-    json.to_string(value) ?? panic("compact JSON rendering of a DataTree is total")
+fn image_json_text(value: DataTree) -> String ImageError! {
+    text :: json.to_string(value) ?? return Err(ImageError.InvalidData(err.reason))
+    Ok(text)
 }
 
 // Read a regular file (never through a final link) of at most `limit` bytes.

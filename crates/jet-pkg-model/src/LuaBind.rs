@@ -186,15 +186,15 @@ pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! 
     for name in functions {
         out.push_str(&format!(
             r#"pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree LuaError! {{
-    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.{name}(session.value, json.to_string(input) ?? return Err(LuaError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }}
 
 pub fn {name}_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {{
-    tree := json.parse(json.to_string(input)) ?? return Err(LuaError.Protocol)
+    tree := json.parse(json.to_string(input) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     value := {name}(session, tree, deadline_ms)
-    decoded := json.decode<T>(json.to_string(value)) ?? return Err(LuaError.Protocol)
+    decoded := json.decode<T>(json.to_string(value) ?? return Err(LuaError.Protocol)) ?? return Err(LuaError.Protocol)
     return Ok(decoded)
 }}
 

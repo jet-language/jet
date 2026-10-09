@@ -725,7 +725,7 @@ fn toml_leaf(value: DataTree) -> String Never! {
             .Int(n) -> "{n}"
             .Float(n) -> "{n:Debug}"
             .Number(_) | .TypedText(_) -> panic("internal JSON carrier escaped typed decode")
-            .Text(s) -> json.to_string(DataTree.Text(s))
+            .Text(s) -> json.to_string(DataTree.Text(s)) ?? panic("Text always has a JSON string representation")
             .Bytes(bytes) -> {
                 out := "["
                 loop i in 0..<bytes.len() {

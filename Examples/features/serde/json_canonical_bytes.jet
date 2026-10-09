@@ -28,7 +28,7 @@ fn show(label: String, text: String) {
     reparsed :: json.parse(canon) ?? panic("canonical text must reparse")
     again :: json.canonical(reparsed) ?? panic("canonical text must canonicalize")
     print("{label}: {canon}")
-    print("{label}: stable={canon == again} pretty-differs={canon != json.to_string_pretty(tree)}")
+    print("{label}: stable={canon == again} pretty-differs={canon != (json.to_string_pretty(tree) ?? panic("JSON encode"))}")
 }
 
 fn run() {

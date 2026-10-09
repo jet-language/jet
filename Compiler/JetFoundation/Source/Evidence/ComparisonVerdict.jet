@@ -32,13 +32,13 @@ pub fn testing_compare_samples_with_discarded(relation: ObservationRelation, sam
             }
         }
         equal :: if relation == {
-            .TypedEquality -> Val(sample.reference.raw == sample.candidate.raw)
+            .TypedEquality -> sample.declared_equal
             .OrderedEffects -> Val(sample.reference.raw == sample.candidate.raw && sample.reference.ordered_effects == sample.candidate.ordered_effects && sample.reference.cleanup == sample.candidate.cleanup && sample.reference.mutation == sample.candidate.mutation)
             .TypedFailure -> Val(sample.reference.typed_failure == sample.candidate.typed_failure && sample.reference.raw == sample.candidate.raw)
             .Custom(_) -> sample.declared_equal
         } ?? {
             record.status = ComparisonStatus.InvalidOracle
-            record.reason = Val("custom comparison relation did not declare an observation result")
+            record.reason = Val("comparison relation did not declare a checked equality result")
             return record
         }
         if !equal {

@@ -345,8 +345,8 @@ fn jet_testing_history_execute<Command>(
     (
         jet_std::DataTree,
         jet_std::DataTree,
-        crate::jet_testing_comparison_foundation::ComparisonObservation,
-        crate::jet_testing_comparison_foundation::ComparisonObservation,
+        crate::jet_std::DataTree,
+        crate::jet_std::DataTree,
     ),
     String,
 >
@@ -358,11 +358,9 @@ where
     let candidate_value =
         jet_testing_history_apply(actual, commands.to_vec(), "actual")?;
     let reference_observed =
-        jet_testing_history_apply(observe, reference_value.clone(), "observe")
-            .map(|value| jet_testing_history_observation(&value))?;
+        jet_testing_history_apply(observe, reference_value.clone(), "observe")?;
     let candidate_observed =
-        jet_testing_history_apply(observe, candidate_value.clone(), "observe")
-            .map(|value| jet_testing_history_observation(&value))?;
+        jet_testing_history_apply(observe, candidate_value.clone(), "observe")?;
     Ok((
         reference_value,
         candidate_value,
@@ -628,12 +626,24 @@ where
                 provenance.target.clone(),
             );
             identity.seed = Some(case.seed);
-            let sample = crate::jet_testing_comparison_foundation::ComparisonSample::new(
+            let mut sample = crate::jet_testing_comparison_foundation::ComparisonSample::new(
                 identity,
-                reference_observed,
-                candidate_observed,
-            )
-            .with_replays(reference_replay, candidate_replay);
+                jet_testing_history_observation(&reference_observed),
+                jet_testing_history_observation(&candidate_observed),
+            );
+            if matches!(
+                &relation,
+                crate::jet_testing_comparison_foundation::ObservationRelation::TypedEquality
+            ) {
+                sample = sample.with_declared_equal(jet_std::JetDataTreeAccess::equal_unordered(
+                    &reference_observed,
+                    &candidate_observed,
+                ));
+            }
+            let sample = sample.with_replays(
+                jet_testing_history_observation(&reference_replay),
+                jet_testing_history_observation(&candidate_replay),
+            );
             inputs.push(input);
             reference_values.push(reference_value);
             candidate_values.push(candidate_value);
@@ -1550,8 +1560,8 @@ mod jet_testing_history_web {
         (
             Tree,
             Tree,
-            crate::jet_testing_comparison_foundation::ComparisonObservation,
-            crate::jet_testing_comparison_foundation::ComparisonObservation,
+            jet_std::DataTree,
+            jet_std::DataTree,
         ),
         String,
     >
@@ -1564,10 +1574,8 @@ mod jet_testing_history_web {
             .ok_or_else(|| "history command codec is unavailable on Web".to_string())?;
         let reference_value = callback(model, &input, "model")?;
         let candidate_value = callback(actual, &input, "actual")?;
-        let reference_observed = callback(observe, &reference_value, "observe")
-            .map(|value| jet_testing_history_observation(&value))?;
-        let candidate_observed = callback(observe, &candidate_value, "observe")
-            .map(|value| jet_testing_history_observation(&value))?;
+        let reference_observed = callback(observe, &reference_value, "observe")?;
+        let candidate_observed = callback(observe, &candidate_value, "observe")?;
         Ok((
             reference_value,
             candidate_value,
@@ -1737,12 +1745,25 @@ mod jet_testing_history_web {
                     provenance.target.clone(),
                 );
                 identity.seed = Some(case.seed);
-                let sample = ComparisonSample::new(
+                let mut sample = ComparisonSample::new(
                     identity,
-                    reference_observed,
-                    candidate_observed,
-                )
-                .with_replays(reference_replay, candidate_replay);
+                    jet_testing_history_observation(&reference_observed),
+                    jet_testing_history_observation(&candidate_observed),
+                );
+                if matches!(
+                    &relation,
+                    crate::jet_testing_comparison_foundation::ObservationRelation::TypedEquality
+                ) {
+                    sample =
+                        sample.with_declared_equal(jet_std::JetDataTreeAccess::equal_unordered(
+                            &reference_observed,
+                            &candidate_observed,
+                        ));
+                }
+                let sample = sample.with_replays(
+                    jet_testing_history_observation(&reference_replay),
+                    jet_testing_history_observation(&candidate_replay),
+                );
                 inputs.push(input);
                 reference_values.push(reference_value);
                 candidate_values.push(candidate_value);

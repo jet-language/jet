@@ -290,10 +290,10 @@ pub fn services_logs(project_dir: String, name: String) -[FS]> String Never! {
 
 // Structured lifecycle facts for `services health --json`; the state file
 // stays the source of truth.
-pub fn services_lifecycle_json(project_dir: String, name: String) -[FS]> String? Never! {
-    found :: services_read_lifecycle(services_service_dir(project_dir, name)) ?? return None
-    facts :: found ?? return None
-    authority :: services_authority_from_lifecycle(facts) ?? return None
+pub fn services_lifecycle_json(project_dir: String, name: String) -[FS]> String? ServicesError! {
+    found :: services_read_lifecycle(services_service_dir(project_dir, name)) ?? return Ok(None)
+    facts :: found ?? return Ok(None)
+    authority :: services_authority_from_lifecycle(facts) ?? return Ok(None)
     after := [DataTree]{}
     loop dependency in facts.dependencies -> &after.push(DataTree.Text(dependency))
     document := [String: DataTree]{}
@@ -306,5 +306,6 @@ pub fn services_lifecycle_json(project_dir: String, name: String) -[FS]> String?
     document["unit"] = if authority.unit() == .Val(unit) -> DataTree.Text(unit) else -> DataTree.Null
     document["guardian"] = if authority.guardian() == .Val(guardian) -> DataTree.Text(guardian) else -> DataTree.Null
     document["after"] = DataTree.Array(after)
-    Val(json.to_string(DataTree.Object(document)))
+    text :: json.to_string(DataTree.Object(document)) ?? return Err(ServicesError.new(err.reason))
+    Ok(Val(text))
 }

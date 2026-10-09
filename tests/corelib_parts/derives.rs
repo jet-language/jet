@@ -79,11 +79,11 @@ struct Tagged<K> {
 
 fn run() {
     wi :: Wrap<Int>{ value: 7 }
-    print(json.to_string(wi))
+    print(json.to_string(wi) ?? panic("JSON encode"))
     back :: json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad")
     print(back.value)
     id :: Tagged<Wrap<Int>>{ raw: 9, marker: None }
-    print(json.to_string(id))
+    print(json.to_string(id) ?? panic("JSON encode"))
     rid :: json.decode<Tagged<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
     print(rid.raw)
 }
@@ -201,7 +201,7 @@ impl Email.Decode {
 
 fn run() {
     e := Email{addr: "a@b.com"}
-    s := json.to_string(e)
+    s := json.to_string(e) ?? panic("JSON encode")
     print(s)
     back := json.decode<Email>(s) ?? panic("decode failed")
     print(back.addr)
@@ -253,8 +253,8 @@ impl HandEmail.Decode {
 fn run() {
     derived :: DerivedEmail{ address: "ada@jet" }
     hand :: HandEmail{ address: "ada@jet" }
-    derived_wire :: json.to_string(derived)
-    hand_wire :: json.to_string(hand)
+    derived_wire :: json.to_string(derived) ?? panic("JSON encode")
+    hand_wire :: json.to_string(hand) ?? panic("JSON encode")
     derived_bytes :: derived_wire.bytes()
     hand_bytes :: hand_wire.bytes()
     assert(derived_bytes == hand_bytes)
@@ -294,13 +294,13 @@ use core.encoding.json as json
 #Codable
 struct Boxed<T> { value: T }
 
-fn generic_encode<T: Encode>(value: T) -> String { json.to_string(value) }
+fn generic_encode<T: Encode>(value: T) -> String EncodingError! { json.to_string(value) }
 fn generic_decode<T: Decode>(wire: String) -> T [FieldError]! { json.decode<T>(wire) }
 
 fn run() {
     value :: Boxed<Int>{ value: 7 }
-    derived_wire :: json.to_string(value)
-    generic_wire :: generic_encode(value)
+    derived_wire :: json.to_string(value) ?? panic("JSON encode")
+    generic_wire :: generic_encode(value) ?? panic("generic JSON encode")
     derived_bytes :: derived_wire.bytes()
     generic_bytes :: generic_wire.bytes()
     assert(derived_bytes == generic_bytes)
@@ -381,9 +381,9 @@ fn run() {
     a := Event.Idle
     b := Event.Count(3)
     c := Event.Named{ name: "x", enabled: true }
-    print(json.to_string(a))
-    print(json.to_string(b))
-    print(json.to_string(c))
+    print(json.to_string(a) ?? panic("JSON encode"))
+    print(json.to_string(b) ?? panic("JSON encode"))
+    print(json.to_string(c) ?? panic("JSON encode"))
     back := json.decode<Event>("{{\"Count\":7}}") ?? panic("decode")
     if back == .Count(n) { print(n) }
 }
@@ -415,15 +415,15 @@ fn run() {
     unit := Event.Idle
     tuple := Event.Count(3)
     named := Event.Named{ name: "x", enabled: true }
-    print(json.to_string(unit))
-    print(json.to_string(tuple))
-    print(json.to_string(named))
+    print(json.to_string(unit) ?? panic("JSON encode"))
+    print(json.to_string(tuple) ?? panic("JSON encode"))
+    print(json.to_string(named) ?? panic("JSON encode"))
     a := json.decode<Event>("{{\"type\":\"Idle\"}}") ?? panic("unit")
     b := json.decode<Event>("{{\"type\":\"Count\",\"value\":7}}") ?? panic("tuple")
     c := json.decode<Event>("{{\"type\":\"Named\",\"name\":\"y\",\"enabled\":false}}") ?? panic("named")
-    print(json.to_string(a))
-    print(json.to_string(b))
-    print(json.to_string(c))
+    print(json.to_string(a) ?? panic("JSON encode"))
+    print(json.to_string(b) ?? panic("JSON encode"))
+    print(json.to_string(c) ?? panic("JSON encode"))
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "tagged_enum", src, &[], None);
@@ -473,7 +473,7 @@ struct Record {
 
 fn run() {
     value := Record{ base: 4, note: None }
-    print(json.to_string(value))
+    print(json.to_string(value) ?? panic("JSON encode"))
     back := json.decode<Record>("{{\"base\":5,\"doubled\":999}}") ?? panic("decode")
     print(back.base)
     print(back.doubled)
@@ -567,9 +567,9 @@ fn run() {
     absent := Wire{ first: "a", second: "b", maybe: None, last: 4 }
     present := Wire{ first: "a", second: "b", maybe: Val("c"), last: 4 }
     arbitrary := [String:Int]{ "z": 1, "a": 2 }
-    print(json.to_string(absent))
-    print(json.to_string(present))
-    print(json.to_string(arbitrary))
+    print(json.to_string(absent) ?? panic("JSON encode"))
+    print(json.to_string(present) ?? panic("JSON encode"))
+    print(json.to_string(arbitrary) ?? panic("JSON encode"))
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "struct_serde_order", src, &[], None);

@@ -36,17 +36,24 @@
         }
     }
 
-    // Render a DataTree as JSON, preserving Object field order. Int uses the
-    // exact carrier renderer; Float keeps its decimal (`5.0`); Bytes render as
-    // a number array.
+    /// JSON wire validation, shared by typed encoders and carrier-only hosts.
+    /// Object keys are text in the canonical DataTree representation.
+    pub fn validate_datatree_json(tree: &DataTree) -> Result<(), EncodingError> {
+        crate::jet_encoding_json::validate_json(tree).map_err(|error| EncodingError::new(
+            EncodingFormat::JSON, EncodingErrorKind::Unsupported, error.byte_offset,
+            error.line, error.column, error.path, error.reason,
+        ))
+    }
+
+    // Diagnostic DataTree display preserves ordered JSON text for finite leaves.
+    // It is not a wire serializer: non-finite leaves use print(Float)'s formatter.
     pub fn render_datatree_json(t: &DataTree, pretty: bool, depth: usize) -> String {
         match t {
             DataTree::Null => "null".to_string(),
             DataTree::Bool(b) => b.to_string(),
             DataTree::Int(n) => jet_int_to_string(*n),
             DataTree::Float(f) => {
-                assert!(f.is_finite(), "JSON cannot encode a non-finite Float");
-                format!("{:?}", f)
+                crate::JetShow::jet_show(f)
             }
             DataTree::Number(text) => text.clone(),
             DataTree::TypedText(text) => quote_json(text),

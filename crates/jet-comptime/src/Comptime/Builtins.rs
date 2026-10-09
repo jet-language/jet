@@ -101,7 +101,7 @@ fn datatree_payload<'a>(value: &'a CtValue, variant: &str) -> Option<&'a CtValue
 }
 
 fn datatree_render(value: &CtValue) -> String {
-    super::JSONInterp::render_ordered_datatree(value, false, 0)
+    super::JSONInterp::display_datatree(value)
 }
 
 fn datatree_failure(path: impl Into<String>, reason: impl Into<String>) -> CtValue {

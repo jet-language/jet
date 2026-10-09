@@ -13,7 +13,7 @@ struct Order {
 
 fn run() [FieldError]! {
     o :: Order{id: 7, who: "Ada", items: ["pen", "ink"], note: None}
-    print(json.to_string(o))
+    print(json.to_string(o) ?? panic("JSON encode"))
     raw :: "{{\"id\":9,\"customer\":\"Bo\",\"items\":[\"ink\"],\"note\":\"rush\"}}"
     back :: json.decode<Order>(raw)
     print(back.who)

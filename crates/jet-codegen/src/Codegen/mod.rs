@@ -445,6 +445,44 @@ const HOST_DEVTOOLS_NATIVE_END: &str = "// JET_HOST_DEVTOOLS_NATIVE_END";
 enum EmbeddedPreludePartSource {
     Static(&'static str),
     Outcome,
+    EncodingJson,
+}
+
+fn push_embedded_encoding_json(out: &mut String) {
+    let mut source = include_str!("../../../jet-foundation/src/EncodingJson.rs");
+    out.push_str("\nmod jet_encoding_json {\n");
+    for (marker, body) in [
+        (
+            "include!(\"../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs\");",
+            include_str!("../Prelude/CoreLib/JetStd/EncodingTypes.rs"),
+        ),
+        (
+            "include!(\"../../jet-codegen/src/Prelude/Core/EncodingError.rs\");",
+            include_str!("../Prelude/Core/EncodingError.rs"),
+        ),
+    ] {
+        let (before, after) = source.split_once(marker)
+            .expect("EncodingJson host include marker must exist");
+        out.push_str(before);
+        out.push_str(body);
+        source = after;
+    }
+    out.push_str(source);
+    out.push_str("\n}\n\n#[allow(non_snake_case)]\nmod EncodingJson { pub use crate::jet_encoding_json::*; }\n");
+}
+
+#[cfg(test)]
+mod encoding_json_embedding_tests {
+    #[test]
+    fn embedded_json_uses_the_canonical_inline_error_abi() {
+        let mut source = String::new();
+        super::push_embedded_encoding_json(&mut source);
+        assert!(!source.contains("include!("));
+        assert_eq!(source.matches("pub enum EncodingFormat {").count(), 1);
+        assert_eq!(source.matches("pub struct EncodingError {").count(), 1);
+        assert_eq!(source.matches("fn jet_encoding_error_kernel_show(").count(), 1);
+        assert!(source.contains("pub fn validate_json(tree: &DataTree)"));
+    }
 }
 
 struct EmbeddedPreludePart {
@@ -493,11 +531,7 @@ const EMBEDDED_PRELUDE_PARTS: &[EmbeddedPreludePart] = &[
     EmbeddedPreludePart {
         name: "encoding_json",
         dependencies: &["encoding_errors", "json_number"],
-        source: EmbeddedPreludePartSource::Static(concat!(
-            "\nmod jet_encoding_json {\n",
-            include_str!("../../../jet-foundation/src/EncodingJson.rs"),
-            "\n}\n\n#[allow(non_snake_case)]\nmod EncodingJson { pub use crate::jet_encoding_json::*; }\n"
-        )),
+        source: EmbeddedPreludePartSource::EncodingJson,
     },
     EmbeddedPreludePart {
         name: "outcome",
@@ -832,6 +866,7 @@ fn push_prelude_part(out: &mut String, name: &str, emitted: &mut HashSet<&'stati
     match &part.source {
         EmbeddedPreludePartSource::Static(source) => out.push_str(source),
         EmbeddedPreludePartSource::Outcome => push_embedded_outcome(out),
+        EmbeddedPreludePartSource::EncodingJson => push_embedded_encoding_json(out),
     }
 }
 

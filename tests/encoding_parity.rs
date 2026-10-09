@@ -273,11 +273,11 @@ use core.encoding.base64 as base64
 use core.encoding.base32 as base32
 
 fn run() {
-    print(json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")))
+    print(json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")) ?? panic("JSON render"))
     print((jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len())
     print((csv.parse("name,score\nada,9\n") ?? panic("csv")).len())
     print(xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml")) ?? panic("xml render"))
-    print(json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p")))
+    print(json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p")) ?? panic("JSON render"))
     print((base64.decode("Zg==") ?? panic("b64")).len())
     print((base64.decode_url("aGk") ?? panic("b64url")).len())
     print((base32.decode("MZXQ====") ?? panic("b32")).len())
@@ -318,21 +318,21 @@ use core.encoding.cbor as cbor
 use core.encoding.base64 as base64
 use core.encoding.base32 as base32
 
-JSON_CANON :: prep { json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")) }
+JSON_CANON :: prep { json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")) ?? panic("JSON render") }
 JSONL_N :: prep { (jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len() }
 CSV_N :: prep { (csv.parse("name,score\nada,9\n") ?? panic("csv")).len() }
 XML_TEXT :: prep { xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml")) ?? panic("xml render") }
-CBOR_ROUND :: prep { json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p")) }
+CBOR_ROUND :: prep { json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p")) ?? panic("JSON render") }
 B64_N :: prep { (base64.decode("Zg==") ?? panic("b64")).len() }
 B64URL_N :: prep { (base64.decode_url("aGk") ?? panic("b64url")).len() }
 B32_N :: prep { (base32.decode("MZXQ====") ?? panic("b32")).len() }
 
 fn run() {
-    print("{JSON_CANON}|{json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json"))}")
+    print("{JSON_CANON}|{json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")) ?? panic("JSON render")}")
     print("{JSONL_N}|{(jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len()}")
     print("{CSV_N}|{(csv.parse("name,score\nada,9\n") ?? panic("csv")).len()}")
     print("{XML_TEXT}|{xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml")) ?? panic("xml render")}")
-    print("{CBOR_ROUND}|{json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p"))}")
+    print("{CBOR_ROUND}|{json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p")) ?? panic("JSON render")}")
     print("{B64_N}|{(base64.decode("Zg==") ?? panic("b64")).len()}")
     print("{B64URL_N}|{(base64.decode_url("aGk") ?? panic("b64url")).len()}")
     print("{B32_N}|{(base32.decode("MZXQ====") ?? panic("b32")).len()}")
@@ -611,7 +611,7 @@ use core.encoding.json as json
 
 fn run() {
     value :: json.parse("{{\"text\":\"quote: \\\" and music: \\uD834\\uDD1E\"}}") ?? panic("valid JSON")
-    print(json.to_string(value))
+    print(json.to_string(value) ?? panic("JSON render"))
     json.parse("{{\"a\":1,\"a\":}}") ? _value -> {
         print("duplicate accepted")
     } ! error -> {
@@ -631,6 +631,28 @@ true|/a|duplicate object key `a`
     assert_eq!(dev, aot, "default `jet run` diverged");
     let interpreter = run_forced_interpreter(path.to_str().unwrap());
     assert_eq!(interpreter, aot, "forced interpreter diverged");
+}
+
+#[test]
+fn json_unsupported_and_wire_escapes_match_comptime_aot_dev_and_interpreter() {
+    on_encoding_stack(|| {
+        let scratch = Scratch::new("json_unsupported");
+        let path = scratch.write_project(
+            "2026",
+            include_str!("../Examples/features/serde/json_unsupported.jet"),
+        );
+        let expected = include_str!("../Examples/features/expected/serde/json_unsupported.out");
+        let aot = run_aot(&path, scratch.path());
+        assert_eq!(aot.exit, 0, "JSON Unsupported AOT failed: {}", aot.stderr);
+        assert_eq!(aot.stdout, expected);
+        let dev = run_default_dev(path.to_str().unwrap());
+        assert_eq!(dev, aot, "JSON Unsupported default `jet run` diverged");
+        let interpreter = run_forced_interpreter(path.to_str().unwrap());
+        assert_eq!(
+            interpreter, aot,
+            "JSON Unsupported forced interpreter diverged"
+        );
+    });
 }
 
 #[test]
@@ -955,12 +977,12 @@ struct Strict {
 
 fn published() -[]> String {
     value :: json.decode<Published>("{{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}}") ?? panic("published decode")
-    return json.to_string(value)
+    return json.to_string(value) ?? panic("JSON render")
 }
 
 fn plain() -[]> String {
     value :: json.decode<Plain>("{{\"future\":1,\"known\":7,\"middle\":2}}") ?? panic("plain decode")
-    return json.to_string(value)
+    return json.to_string(value) ?? panic("JSON render")
 }
 
 fn strict() -[]> String {
@@ -1295,12 +1317,12 @@ impl Token.Encode {
 fn token() -> Token? { Val(Token{raw: "raw"}) }
 fn empty() -> Token? { None }
 fn run() {
-    print(json.to_string([Token{raw: "raw"}]))
-    print(json.to_string(token()))
-    print(json.to_string(empty()))
+    print(json.to_string([Token{raw: "raw"}]) ?? panic("JSON render"))
+    print(json.to_string(token()) ?? panic("JSON render"))
+    print(json.to_string(empty()) ?? panic("JSON render"))
     tokens := [String:Token]{}
     tokens["a"] = Token{raw: "raw"}
-    print(json.to_string(tokens))
+    print(json.to_string(tokens) ?? panic("JSON render"))
 }
 "#;
         let scratch = Scratch::new("custom_container_encode");
@@ -1587,7 +1609,7 @@ use core.files as files
 
 fn run() {
     whole := json.parse("{{\"a\":1,\"b\":2}}") ?? panic("json")
-    canon := json.to_string(whole)
+    canon := json.to_string(whole) ?? panic("JSON render")
     path := "@DIR@/round.json"
     output :: files.create(path) ?? panic("create")
     writer :: json.writer(^output, encoding.EncodingLimits.safe(), false) ?? panic("writer")
@@ -1599,8 +1621,8 @@ fn run() {
     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("oe")
     writer.finish() ?? panic("finish")
     collected := json.parse(files.read(path) ?? panic("read")) ?? panic("collect")
-    print(json.to_string(collected) == canon)
-    print(json.to_string(collected))
+    print((json.to_string(collected) ?? panic("JSON render")) == canon)
+    print(json.to_string(collected) ?? panic("JSON render"))
 
     cbor_path := "@DIR@/round.cbor"
     cbor_out :: files.create(cbor_path) ?? panic("cbor create")

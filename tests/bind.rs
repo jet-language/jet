@@ -441,7 +441,7 @@ fn run() {
     wire := json.parse(canonical) ?? panic("parse")
     user := wire.decode<User>() ?? panic("decode")
     encoded := user.encode()
-    reencoded := json.to_string(encoded)
+    reencoded := json.to_string(encoded) ?? panic("JSON encode")
     roundtrip_wire := json.parse(reencoded) ?? panic("reparse")
     roundtrip := roundtrip_wire.decode<User>() ?? panic("decode roundtrip")
     if roundtrip.id != user.id { panic("id roundtrip") }
@@ -699,7 +699,7 @@ fn run() {
     wire := json.parse(canonical) ?? panic("parse")
     repo := wire.decode<Repo>() ?? panic("decode")
     encoded := repo.encode()
-    reencoded := json.to_string(encoded)
+    reencoded := json.to_string(encoded) ?? panic("JSON encode")
     roundtrip_wire := json.parse(reencoded) ?? panic("reparse")
     roundtrip := roundtrip_wire.decode<Repo>() ?? panic("decode roundtrip")
     if roundtrip.name != repo.name { panic("name roundtrip") }

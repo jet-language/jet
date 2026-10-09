@@ -184,7 +184,7 @@ PKG_OCTAVE_JET_FUNCTION :: prep { ```pub fn @@function@@(session: Session, input
     request :: json.to_string(DataTree.Object([
         "shape": DataTree.Array(shape_wire),
         "data": DataTree.Array(data_wire)
-    ]))
+    ])) ?? return Err(OctaveError.Protocol)
     raw :: abi.@@function@@(session.value, request, deadline_ms)
     code :: abi.take_error()
     value :: decode_response(raw, code)

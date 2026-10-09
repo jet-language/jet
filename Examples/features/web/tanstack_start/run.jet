@@ -113,15 +113,15 @@ fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) -> Strin
     // App.route is the sole registration graph and the App router is the
     // single navigation state; `loaded` is that router's decoded route data.
     loaded_markup :: render_order_rows(loaded)
-    search_wire :: url.percent_encode(json.to_string(route_search))
+    search_wire :: url.percent_encode(json.to_string(route_search) ?? panic("JSON encode"))
     route_text :: "route=/orders/{id} search={search_wire} loaded={loaded.len()}"
     search :: route_search
     next_search :: OrderSearch{q: search.q, page: search.page + 1, cart: search.cart, refresh: search.refresh}
     refresh_search :: OrderSearch{q: search.q, page: search.page, cart: search.cart, refresh: search.refresh + 1}
     cart_search :: OrderSearch{q: search.q, page: search.page, cart: search.cart + 1, refresh: search.refresh}
-    next_link :: url.percent_encode(json.to_string(next_search))
-    refresh_link :: url.percent_encode(json.to_string(refresh_search))
-    cart_link :: url.percent_encode(json.to_string(cart_search))
+    next_link :: url.percent_encode(json.to_string(next_search) ?? panic("JSON encode"))
+    refresh_link :: url.percent_encode(json.to_string(refresh_search) ?? panic("JSON encode"))
+    cart_link :: url.percent_encode(json.to_string(cart_search) ?? panic("JSON encode"))
     ship_data :: ShipForm{id: id, carrier: "Parcel", tracking: "PX-41"}
     typed_form :: web.form(ShipForm, action: submit_ship_order)
     &typed_form.set("id", "{ship_data.id}") ?? panic("typed id value")
@@ -133,9 +133,9 @@ fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) -> Strin
 
     // Query.live seeds the cache with route data and reuses its loader for
     // refreshes. Invalidation exposes stale → fetching → fresh to the panel.
-    orders_query :: query.live("orders.list", "orders", json.to_string(loaded), () -> {
+    orders_query :: query.live("orders.list", "orders", json.to_string(loaded) ?? panic("JSON encode"), () -> {
         refreshed :: load_orders(route_search)
-        return Ok(json.to_string(refreshed))
+        return Ok(json.to_string(refreshed) ?? return Err(err))
     })
     stale_generation :: orders_query.invalidate()
     query_state :: orders_query.state()
@@ -192,7 +192,7 @@ fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) -> Strin
     transaction :: store.transaction(cart, "add-order", ["ids"], add_order_to_cart)
     store_text :: cart.facts_json()
 
-    search_link :: url.percent_encode(json.to_string(route_search))
+    search_link :: url.percent_encode(json.to_string(route_search) ?? panic("JSON encode"))
     nav :: "<nav data-panel=\"routes\" data-jet-routes=\"/,/orders,/orders/:id,/settings\"><a data-jet-route=\"/\" href=\"/\">Home</a><a data-jet-route=\"/orders\" href=\"/orders?search={search_link}\">Orders</a><a data-jet-route=\"/orders/:id\" href=\"/orders/41?search={search_link}\">Order 41</a><a data-jet-route=\"/settings\" href=\"/settings\">Settings</a></nav>"
     interactions :: "<section data-panel=\"interactions\"><a data-action=\"refresh-orders\" href=\"/orders?search={refresh_link}\">Refresh orders</a><a data-action=\"next-page\" href=\"/orders?search={next_link}\">Next page</a><a data-action=\"add-to-cart\" href=\"/orders?search={cart_link}\">Add order 41 to cart</a></section>"
     loader_html :: "<section data-panel=\"loader\"><table><tbody>{loaded_markup}</tbody></table></section>"

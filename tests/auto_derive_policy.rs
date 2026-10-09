@@ -384,7 +384,7 @@ use core.encoding.json as json
 struct Record { id: Int name: String }
 
 fn run() {
-    print(json.to_string(Record{ id: 7, name: "plain" }))
+    print(json.to_string(Record{ id: 7, name: "plain" }) ?? panic("JSON encode"))
 }
 "#,
     );
@@ -397,7 +397,7 @@ use core.encoding.json as json
 struct Record { id: Int name: String }
 
 fn run() {
-    print(json.to_string(Record{ id: 7, name: "plain" }))
+    print(json.to_string(Record{ id: 7, name: "plain" }) ?? panic("JSON encode"))
 }
 "#,
     );
@@ -933,7 +933,7 @@ fn run() {
     print("{envelope:Debug}")
     print(envelope == ImportedEnvelope{ badge: library.Badge{ value: 9 } })
     print(envelope < ImportedEnvelope{ badge: library.Badge{ value: 10 } })
-    wire :: json.to_string(envelope)
+    wire :: json.to_string(envelope) ?? panic("JSON encode")
     print(wire)
     decoded :: json.decode<ImportedEnvelope>(wire) ?? panic("decode")
     print(decoded == envelope)

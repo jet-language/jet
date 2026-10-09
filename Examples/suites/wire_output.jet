@@ -28,7 +28,7 @@ fn run() (EncodingError | IOError)! {
     root :: testing.temp_dir("suite-wire-output")
     path :: Path.from(root).join("record.json")
     record :: WireRecord{count: 2, name: "Ada"}
-    files.write(path, json.to_string(record))
+    files.write(path, json.to_string(record) ?? panic("JSON encode"))
     wire :: files.read(path)
     print(wire)
 

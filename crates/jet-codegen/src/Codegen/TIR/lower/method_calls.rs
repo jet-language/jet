@@ -291,10 +291,13 @@ fn checked_core_type_args(
     args: &[TExpr],
 ) -> Vec<Type> {
     if module == "core.encoding.json" && matches!(method, "to_string" | "to_string_pretty") {
-        // JSON rendering lowers every value to the dynamic Data carrier before
-        // the direct renderer call; source type arguments must not describe
-        // the pre-lowering value.
-        Vec::new()
+        // The source-owned generic Encode wrapper receives the original value;
+        // its type argument must describe that value, not a raw DataTree route.
+        if type_args.is_empty() {
+            args.first().map(|arg| vec![arg.ty.clone()]).unwrap_or_default()
+        } else {
+            type_args.to_vec()
+        }
     } else if module == "core.encoding.csv" && method == "to_string" && type_args.is_empty() {
         match args.first().map(|arg| arg.ty.without_user_tags()) {
             Some(Type::List(inner) | Type::FixedList { elem: inner, .. }) if !matches!(inner.without_user_tags(), Type::List(cell) if **cell == Type::String) =>

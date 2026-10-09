@@ -364,6 +364,7 @@ pub struct FlakeGraph {
 
     // The whole graph as one stable JSON document.
     fn stable_json(self) -> String Never! {
+        // These projected objects contain only Text leaves and text keys.
         inputs := [String]{}
         loop input in self.inputs {
             &inputs.push(trust_json_object_text([TrustJSONField]{
@@ -372,7 +373,7 @@ pub struct FlakeGraph {
                 TrustJSONField{key: "revision", value: DataTree.Text(~input.revision)},
                 TrustJSONField{key: "follows", value: DataTree.Text(~input.follows)},
                 TrustJSONField{key: "provenance", value: DataTree.Text(~input.provenance)}
-            }))
+            }) ?? panic("typed flake input must be JSON-encodable"))
         }
         outputs := [String]{}
         loop output in self.outputs {
@@ -382,7 +383,7 @@ pub struct FlakeGraph {
                 TrustJSONField{key: "system", value: DataTree.Text(~output.system)},
                 TrustJSONField{key: "attribute", value: DataTree.Text(~output.attribute)},
                 TrustJSONField{key: "provenance", value: DataTree.Text(~output.provenance)}
-            }))
+            }) ?? panic("typed flake output must be JSON-encodable"))
         }
         lock_nodes := [String]{}
         loop node in self.lock_nodes -> &lock_nodes.push(trust_flake_lock_node_json(node))
@@ -392,7 +393,7 @@ pub struct FlakeGraph {
             .Val(declared) -> trust_flake_composition_json(declared)
             .None -> "null"
         }
-        unsupported :: trust_json_canonical(trust_json_texts(self.unsupported))
+        unsupported :: trust_json_canonical(trust_json_texts(self.unsupported)) ?? panic("text arrays must be JSON-encodable")
         "{{\"source\":{trust_json_quote(self.source)},\"inputs\":[{inputs.join(",")}],\"lockNodes\":[{lock_nodes.join(",")}],\"registries\":[{registries.join(",")}],\"outputs\":[{outputs.join(",")}],\"composition\":{composition},\"unsupported\":{unsupported}}}"
     }
 

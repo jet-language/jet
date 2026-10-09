@@ -2143,7 +2143,15 @@ fn run_query(
                 "keep the query as a SELECT expression",
             )
         })?;
-        let rendered = jet::Comptime::render_datatree_for_tir(value);
+        let rendered = jet::Comptime::render_datatree_for_tir(value).map_err(|error| {
+            DbError::new(
+                "E2600",
+                "query",
+                &source.path,
+                error.reason,
+                "use finite Floats and text map keys for JSON query output",
+            )
+        })?;
         let rows = result_row_count(value).ok_or_else(|| {
             DbError::new(
                 "E2600",

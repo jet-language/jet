@@ -38,8 +38,10 @@ pub struct ProjectionPlan {
 // Write the classification ledger and the plan and dossier inspection views.
 pub fn image_write_projection_artifacts(layout: String, manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) ImageError! -[FS, Env]> {
     image_write_projection_report(layout, manifest_digest, report)
-    image_write_atomic_json(layout, "plan.json", image_render_projection_plan(manifest_digest, plan))
-    image_write_atomic_json(layout, "dossier.json", image_render_projection_dossier(manifest_digest, plan, report))
+    plan_json :: image_render_projection_plan(manifest_digest, plan) ?? return Err(err)
+    image_write_atomic_json(layout, "plan.json", plan_json)
+    dossier_json :: image_render_projection_dossier(manifest_digest, plan, report) ?? return Err(err)
+    image_write_atomic_json(layout, "dossier.json", dossier_json)
 }
 
 // Write `projection.json`: the sorted, deduplicated classification ledger.
@@ -53,7 +55,7 @@ pub fn image_write_projection_report(layout: String, manifest_digest: String, re
     document["changed"] = image_report_values(report.changed)
     document["omitted"] = image_report_values(report.omitted)
     document["rejected"] = image_report_values(report.rejected)
-    json_text :: image_json_text(DataTree.Object(document))
+    json_text :: image_json_text(DataTree.Object(document)) ?? return Err(err)
     temporary :: image_with_extension(path, "json.tmp-{sys.pid()}")
     node :: image_node(path) ?? OCINode.Missing
     if node != OCINode.Missing && !node.is_file() {
@@ -62,7 +64,7 @@ pub fn image_write_projection_report(layout: String, manifest_digest: String, re
     image_publish_json(temporary, path, json_text)
 }
 
-fn image_render_projection_plan(manifest_digest: String, plan: ProjectionPlan) -> String Never! {
+fn image_render_projection_plan(manifest_digest: String, plan: ProjectionPlan) -> String ImageError! {
     expose := [DataTree]{}
     loop port in plan.expose -> &expose.push(DataTree.Int(port))
     document := [String: DataTree]{}
@@ -84,7 +86,7 @@ fn image_render_projection_plan(manifest_digest: String, plan: ProjectionPlan) -
     image_json_text(DataTree.Object(document))
 }
 
-fn image_render_projection_dossier(manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) -> String Never! {
+fn image_render_projection_dossier(manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) -> String ImageError! {
     classification := [String: DataTree]{}
     classification["included"] = image_report_values(report.included)
     classification["changed"] = image_report_values(report.changed)

@@ -1,4 +1,5 @@
 use super::{AccessConvention, BinOp, Expr, Lambda, ParamZone, Type};
+use crate::EncodingJson::{json_unsupported, EncodingError};
 use crate::Names::{mangle, mangle_path};
 use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
@@ -2285,6 +2286,54 @@ mod tests {
         assert_eq!(value.to_json().unwrap(), "{\"v\\\"\":{\"x\\u0001\":2}}");
         let value = CtValue::Map([(CtKey::Str("x\u{0001}".into()), CtValue::Int(2))].into());
         assert_eq!(value.to_json().unwrap(), "{\"x\\u0001\":2}");
+    }
+
+    #[test]
+    fn ct_json_rejects_non_finite_floats_and_non_text_map_keys() {
+        use crate::EncodingJson::{EncodingErrorKind, EncodingFormat};
+        for float in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for value in [
+                CtValue::Float(CtFloat::f64(float)),
+                CtValue::List(vec![CtValue::Float(CtFloat::f64(float))]),
+            ] {
+                let error = value.to_json().unwrap_err();
+                assert_eq!(error.format, EncodingFormat::JSON);
+                assert_eq!(error.kind, EncodingErrorKind::Unsupported);
+                assert_eq!(error.reason, "JSON cannot encode a non-finite Float");
+                assert_eq!(error.path, "$");
+                assert_eq!(error.byte_offset, 0);
+                assert!(error.line.is_err() && error.column.is_err() && error.cause.is_err());
+            }
+        }
+        let map = CtValue::Map([(CtKey::Int(1), CtValue::Int(2))].into_iter().collect());
+        let error = map.to_json().unwrap_err();
+        assert_eq!(error.kind, EncodingErrorKind::Unsupported);
+        assert_eq!(error.reason, "JSON cannot encode non-text map keys");
+    }
+
+    #[test]
+    fn ct_json_quotes_char_c0_and_field_names() {
+        for character in ['"', '\\', '\0', '\u{001f}', '\n', '\r', '\t'] {
+            let text = character.to_string();
+            let encoded = CtValue::Char(character).to_json().unwrap();
+            assert_eq!(encoded, crate::EncodingJson::quote_json(&text));
+            assert_eq!(
+                crate::JSON::parse(&encoded).unwrap(),
+                crate::DataTree::DataTree::Text(text)
+            );
+        }
+        let controls: String = (0..32).map(|byte| char::from(byte)).collect();
+        let encoded = CtValue::Str(controls.clone()).to_json().unwrap();
+        assert!(encoded.contains("\\u001f"));
+        assert_eq!(
+            crate::JSON::parse(&encoded).unwrap(),
+            crate::DataTree::DataTree::Text(controls)
+        );
+        let value = CtValue::Struct {
+            type_name: "Quoted".into(),
+            fields: vec![("a\"\\\0".into(), CtValue::Int(1))],
+        };
+        assert_eq!(value.to_json().unwrap(), "{\"a\\\"\\\\\\u0000\":1}");
     }
 
     #[test]

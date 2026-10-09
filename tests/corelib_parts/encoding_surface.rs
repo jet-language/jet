@@ -441,7 +441,7 @@ fn run() {
     print(json.events(data).contains("object_start $"))
     rows := jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")
     print(rows.len())
-    print(jsonl.to_string(rows).contains("\"a\":1"))
+    print((jsonl.to_string(rows) ?? panic("JSONL encode")).contains("\"a\":1"))
     source := "<r xmlns=\"urn:r\" xmlns:h=\"urn:h\" h:a=\"x&amp;y\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><h:c/></r>"
     doc := xml.parse(source) ?? panic("xml")
     print(xml.to_string(doc) ?? panic("xml render"))

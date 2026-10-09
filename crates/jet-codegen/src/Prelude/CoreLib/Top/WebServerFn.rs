@@ -1239,7 +1239,8 @@ impl JetWebServerFunction {
         U: __jet_Decode,
         F: Fn(JetWebServerFnRequest) -> Result<JetWebServerFnResponse, JetWebServerFnError>,
     {
-        let body = jet_enc_json_to_string(input);
+        let body = jet_enc_json_to_string(input)
+            .map_err(|error| JetWebServerFnError::InvalidInput(jet_enc_json_error_text(&error)))?;
         let result = self.call_encoded(body, idempotency_key, transport)?;
         jet_enc_json_decode(&result).map_err(|_| JetWebServerFnError::InvalidOutput)
     }

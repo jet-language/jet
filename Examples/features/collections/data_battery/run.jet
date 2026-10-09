@@ -139,7 +139,7 @@ fn run() {
         png_written: files.exists(png_path),
         bridge_statuses: bridge_statuses.len(),
     }
-    files.write(receipt_path, json.to_string(receipt)) ?? panic("write receipt")
+    files.write(receipt_path, json.to_string(receipt) ?? panic("JSON encode")) ?? panic("write receipt")
     if !files.exists(receipt_path) -> panic("receipt missing")
 
     // Unavailable paths stay explicit in source: core.data has no parquet

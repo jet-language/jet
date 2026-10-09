@@ -268,8 +268,44 @@ mod web_kernel {
         }
     }
 
-    pub fn jet_enc_json_to_string<T: __jet_Encode>(value: &T) -> String {
-        jet_foundation::EncodingJson::render_json(&value.jet_encode(), false, 0)
+    pub fn jet_enc_json_to_string<T: __jet_Encode>(
+        value: &T,
+    ) -> Result<String, jet_std::EncodingError> {
+        let tree = value.jet_encode();
+        jet_foundation::EncodingJson::validate_json(&tree).map_err(|error| {
+            jet_std::EncodingError::new(
+                jet_std::EncodingFormat::JSON,
+                jet_std::EncodingErrorKind::Unsupported,
+                error.byte_offset,
+                error.line,
+                error.column,
+                error.path,
+                error.reason,
+            )
+        })?;
+        Ok(jet_foundation::EncodingJson::render_json(&tree, false, 0))
+    }
+
+    include!("../../../jet-codegen/src/Prelude/Core/EncodingError.rs");
+
+    pub fn jet_enc_json_error_text(error: &jet_std::EncodingError) -> String {
+        let kind = match error.kind {
+            jet_std::EncodingErrorKind::Syntax => "Syntax",
+            jet_std::EncodingErrorKind::Truncated => "Truncated",
+            jet_std::EncodingErrorKind::Unsupported => "Unsupported",
+            jet_std::EncodingErrorKind::Limit => "Limit",
+            jet_std::EncodingErrorKind::IO => "IO",
+            jet_std::EncodingErrorKind::State => "State",
+        };
+        jet_encoding_error_kernel_show(
+            error.format.as_str(),
+            kind,
+            error.byte_offset,
+            error.line.as_ref().ok().copied(),
+            error.column.as_ref().ok().copied(),
+            &error.path,
+            &error.reason,
+        )
     }
 
     pub fn jet_enc_json_decode<T: __jet_Decode>(
@@ -434,7 +470,7 @@ mod http_kernel {
     use super::web_kernel::native_scheduler::jet_std;
     use super::web_kernel::{
         __jet_Decode, __jet_Encode, jet_app_ws_register, jet_app_ws_unregister,
-        jet_enc_json_decode, jet_enc_json_to_string, jet_runtime_stop,
+        jet_enc_json_decode, jet_enc_json_to_string, jet_enc_json_error_text, jet_runtime_stop,
     };
     use super::CtValue;
     use crate::AST::Type;

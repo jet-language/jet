@@ -576,7 +576,7 @@ use core.encoding.json as json
 fn run() {
     raw :: "{{\"big\":1.5e3,\"acc\":\"caf\\u00e9\",\"grin\":\"\\uD83D\\uDE00\",\"tab\":\"a\\tb\"}}"
     data :: json.parse(raw) ?? panic("bad json")
-    print(json.to_string(data))
+    print(json.to_string(data) ?? panic("JSON encode"))
 }
 "#,
         &[],

@@ -2338,13 +2338,18 @@ pub fn check_file_json(path: &std::path::Path) -> String {
             )
         }
     };
+    let value = match status_ct_value(&checked_value(&source)) {
+        Ok(value) => value,
+        Err(reason) => return StatusEnvelope::new("inspect.compiler.check", false)
+            .with_field("error", StatusValue::from(reason)).json(),
+    };
     let compiler = StatusValue::object(
         StatusFields::new()
             .with("schema_version", JSON_SCHEMA_VERSION)
             .with("api_version", API_VERSION)
             .with("operation", "check")
             .with("file", file.as_ref())
-            .with("value", status_ct_value(&checked_value(&source))),
+            .with("value", value),
     );
     compiler_json("check", compiler)
 }
