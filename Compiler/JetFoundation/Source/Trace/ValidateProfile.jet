@@ -1,0 +1,71 @@
+// JetTrace.rs:1620-1830. Explicit source sampling/measurement state.
+fn jettrace_optional_unsigned(value: CanonicalJSON, label: String) -> U64? JetTraceError! {
+    if value == CanonicalJSON.Null -> return Ok(None)
+    Ok(Val(jettrace_unsigned(value, label)))
+}
+fn jettrace_validate_profile(value: CanonicalJSON, source_identity: CanonicalJSON) JetTraceError! {
+    fields :: jettrace_object_keys(value, "content.profile", [String]{"coverage", "method", "overhead_ns", "overhead_reason", "overhead_status", "reason", "row_limit", "rows", "rows_truncated", "status", "window_cpu_ns", "window_reason", "window_status", "window_wall_ns"})
+    method :: jettrace_text(fields[jettrace_get(fields, "method")].value, "content.profile.method")
+    if method != "sampling" -> return Err(jettrace_error("content.profile.method must be sampling"))
+    status :: jettrace_text(fields[jettrace_get(fields, "status")].value, "content.profile.status")
+    if status != "captured" && status != "no_samples" && status != "unsupported" && status != "truncated" -> return Err(jettrace_error("content.profile.status is not a supported state"))
+    coverage :: jettrace_text(fields[jettrace_get(fields, "coverage")].value, "content.profile.coverage")
+    if coverage != "complete" && coverage != "partial" && coverage != "none" && coverage != "unsupported" -> return Err(jettrace_error("content.profile.coverage is not a supported state"))
+    if jettrace_unsigned(fields[jettrace_get(fields, "row_limit")].value, "content.profile.row_limit") != (U64{4096}) -> return Err(jettrace_error("content.profile.row_limit does not match the bounded profile policy"))
+    truncated :: jettrace_bool(fields[jettrace_get(fields, "rows_truncated")].value, "content.profile.rows_truncated")
+    if truncated != (status == "truncated") -> return Err(jettrace_error("content.profile truncation state is inconsistent"))
+    overhead_status :: jettrace_text(fields[jettrace_get(fields, "overhead_status")].value, "content.profile.overhead_status")
+    if overhead_status != "measured" && overhead_status != "not_measured" && overhead_status != "not_applicable" -> return Err(jettrace_error("content.profile.overhead_status is not supported"))
+    overhead :: jettrace_optional_unsigned(fields[jettrace_get(fields, "overhead_ns")].value, "content.profile.overhead_ns")
+    if overhead_status == "measured" && overhead == None -> return Err(jettrace_error("measured profile overhead must include overhead_ns"))
+    if overhead_status != "measured" && overhead != None -> return Err(jettrace_error("unmeasured profile overhead cannot include overhead_ns"))
+    _ :: jettrace_text(fields[jettrace_get(fields, "overhead_reason")].value, "content.profile.overhead_reason")
+    _ :: jettrace_text(fields[jettrace_get(fields, "reason")].value, "content.profile.reason")
+    window_status :: jettrace_text(fields[jettrace_get(fields, "window_status")].value, "content.profile.window_status")
+    if window_status != "exit" && window_status != "live" && window_status != "unavailable" -> return Err(jettrace_error("content.profile.window_status is not supported"))
+    wall :: jettrace_optional_unsigned(fields[jettrace_get(fields, "window_wall_ns")].value, "content.profile.window_wall_ns")
+    cpu :: jettrace_optional_unsigned(fields[jettrace_get(fields, "window_cpu_ns")].value, "content.profile.window_cpu_ns")
+    if (window_status == "unavailable") != (wall == None) -> return Err(jettrace_error("content.profile run window wall time is inconsistent with its status"))
+    if window_status == "unavailable" && cpu != None -> return Err(jettrace_error("an unavailable profile run window cannot include window_cpu_ns"))
+    _ :: jettrace_text(fields[jettrace_get(fields, "window_reason")].value, "content.profile.window_reason")
+    rows :: jettrace_array(fields[jettrace_get(fields, "rows")].value, "content.profile.rows")
+    if rows.len() > TRACE_PROFILE_ROW_LIMIT -> return Err(jettrace_error("content.profile.rows exceeds row_limit"))
+    if (status == "no_samples" || status == "unsupported") && rows.len() != 0 -> return Err(jettrace_error("content.profile.{status} state cannot contain rows"))
+    if status == "captured" && rows.len() == 0 -> return Err(jettrace_error("captured profile must contain at least one row"))
+    if status == "truncated" && rows.len() == 0 -> return Err(jettrace_error("truncated profile must retain bounded rows"))
+    identities :: jettrace_array(source_identity, "content.source_identity")
+    // Source identities have been validated already. Index path+digest once;
+    // unlike Rust's any() scan this stays linear in rows plus source identities.
+    identity_index := [String:[String:Bool]]{}
+    loop identity in identities {
+        identity_fields :: jettrace_object_keys(identity, "content.source_identity", [String]{"path", "sha256", "symbols"})
+        path :: jettrace_text(identity_fields[jettrace_get(identity_fields, "path")].value, "content.source_identity.path")
+        digest :: jettrace_text(identity_fields[jettrace_get(identity_fields, "sha256")].value, "content.source_identity.sha256")
+        if !identity_index.has_key(path) -> identity_index[~path] = [String:Bool]{}
+        identity_index[path][~digest] = true
+    }
+    loop index in 0..<rows.len() {
+        label :: "content.profile.rows[{index}]"
+        row :: jettrace_object_keys(rows[index], label, [String]{"clock", "execution_count", "sample_count", "sample_weight", "source", "symbol"})
+        clock :: jettrace_text(row[jettrace_get(row, "clock")].value, "{label}.clock")
+        if clock != "wall" && clock != "cpu" -> return Err(jettrace_error("{label}.clock must be wall or cpu"))
+        execution :: row[jettrace_get(row, "execution_count")].value
+        if execution != CanonicalJSON.Null { _ :: jettrace_unsigned(execution, "{label}.execution_count") }
+        _ :: jettrace_unsigned(row[jettrace_get(row, "sample_count")].value, "{label}.sample_count")
+        _ :: jettrace_unsigned(row[jettrace_get(row, "sample_weight")].value, "{label}.sample_weight")
+        source :: jettrace_object_keys(row[jettrace_get(row, "source")].value, "{label}.source", [String]{"end_column", "end_line", "path", "sha256", "start_column", "start_line"})
+        path :: jettrace_text(source[jettrace_get(source, "path")].value, "{label}.source.path")
+        digest :: jettrace_text(source[jettrace_get(source, "sha256")].value, "{label}.source.sha256")
+        if !jettrace_hex64(digest) -> return Err(jettrace_error("{label}.source.sha256 is not lowercase Hex64"))
+        positions :: [String]{"start_line", "start_column", "end_line", "end_column"}
+        loop key in positions {
+            if jettrace_unsigned(source[jettrace_get(source, key)].value, "{label}.source.{key}") == (U64{0}) -> return Err(jettrace_error("{label}.source.{key} must be nonzero"))
+        }
+        symbol :: jettrace_object_keys(row[jettrace_get(row, "symbol")].value, "{label}.symbol", [String]{"name", "path"})
+        if jettrace_text(symbol[jettrace_get(symbol, "path")].value, "{label}.symbol.path") != path -> return Err(jettrace_error("{label}.symbol.path does not match source.path"))
+        _ :: jettrace_text(symbol[jettrace_get(symbol, "name")].value, "{label}.symbol.name")
+        if !identity_index.has_key(path) -> return Err(jettrace_error("{label}.source does not match content.source_identity"))
+        if !identity_index[path].has_key(digest) -> return Err(jettrace_error("{label}.source does not match content.source_identity"))
+    }
+    return
+}

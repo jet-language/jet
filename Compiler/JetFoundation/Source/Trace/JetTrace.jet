@@ -1,0 +1,64 @@
+// JetTrace.rs:13-44,1258-1314,2579-2592. Artifact wire; not CompilerTraceSink.
+pub TRACE_SCHEMA :: prep { "jet.trace" }
+pub TRACE_VERSION :: prep { U32{1} }
+pub CAPTURE_POLICY_SCHEMA :: prep { "5" }
+pub TRACE_GAME_FRAME_ROW_LIMIT :: prep { 4096 }
+pub TRACE_GAME_DRAW_EVENT_ROW_LIMIT :: prep { 4096 }
+pub TRACE_BROWSER_ROW_LIMIT :: prep { U64{4096} }
+pub TRACE_TASK_ROW_LIMIT :: prep { U64{4096} }
+pub TRACE_IO_ROW_LIMIT :: prep { U64{4096} }
+pub TRACE_NATIVE_ROW_LIMIT :: prep { U64{4096} }
+pub TRACE_SPAN_ROW_LIMIT :: prep { U64{4096} }
+pub TRACE_PROFILE_ROW_LIMIT :: prep { 4096 }
+pub TRACE_PROFILE_SAMPLE_LIMIT :: prep { U64{4096} }
+TRACE_RECEIPT_SECTION_NAME_BYTES :: prep { 128 }
+TRACE_RECEIPT_SECTION_TYPE_BYTES :: prep { 256 }
+pub DEFAULT_EXCLUSIONS :: prep { [String]{"arguments", "credentials", "environment", "request_bodies", "response_bodies", "secret_types", "sql", "urls", "values"} }
+
+#Error
+pub struct JetTraceError { pub message: String }
+fn jettrace_error(message: String) -> JetTraceError Never! { JetTraceError{message: message} }
+fn jettrace_field(key: String, ^value: CanonicalJSON) -> CanonicalJSONField Never! { CanonicalJSONField{key: key, value: ^value} }
+fn jettrace_object(fields: [CanonicalJSONField]) -> CanonicalJSON JetTraceError! {
+    if canonical_json_object(fields) == {
+        .Ok(value) -> return Ok(^value)
+        .Err(error) -> return Err(jettrace_error(error.message))
+    }
+}
+
+// Fixed wrapper keys are unique; content's canonical LF participates in SHA256.
+pub fn jettrace_artifact(^content: CanonicalJSON) -> CanonicalJSON JetTraceError! {
+    id :: canonical_json_sha256(content)
+    jettrace_object([CanonicalJSONField]{
+        jettrace_field("content", ^content),
+        jettrace_field("schema", CanonicalJSON.String(TRACE_SCHEMA)),
+        jettrace_field("trace_id", CanonicalJSON.String(id)),
+        jettrace_field("version", CanonicalJSON.Integer("{TRACE_VERSION}"))
+    })
+}
+pub fn build_skeleton_bytes(skeleton: TraceSkeleton) -> [U8] JetTraceError! {
+    Ok(canonical_json_bytes(jettrace_artifact(trace_skeleton_content_json(skeleton))))
+}
+pub fn verify_jettrace(bytes: [U8]) -> CanonicalJSON JetTraceError! {
+    report :: canonical_json_parse(bytes) ?? return Err(jettrace_error(err.message))
+    fields :: jettrace_wrapper_fields(report)
+    expected :: [String]{"content", "schema", "trace_id", "version"}
+    if !jettrace_keys_match(fields, expected) -> return Err(jettrace_error("jettrace wrapper has missing or unknown keys"))
+    schema :: fields[jettrace_get(fields, "schema")].value
+    if schema != CanonicalJSON.String(TRACE_SCHEMA) -> return Err(jettrace_error("unsupported jettrace schema (need {TRACE_SCHEMA})"))
+    version :: fields[jettrace_get(fields, "version")].value
+    if version == {
+        .Integer(number) -> {
+            supported :: "{TRACE_VERSION}"
+            if number != supported -> return Err(jettrace_error("jettrace version {number} needs a newer jet toolchain (this reader supports {TRACE_VERSION})"))
+        }
+        else -> return Err(jettrace_error("jettrace version is not an integer"))
+    }
+    content :: fields[jettrace_get(fields, "content")].value
+    jettrace_validate_content(content)
+    claimed :: jettrace_text(fields[jettrace_get(fields, "trace_id")].value, "jettrace trace_id")
+    if !jettrace_hex64(claimed) -> return Err(jettrace_error("jettrace trace_id is not lowercase Hex64"))
+    actual :: canonical_json_sha256(content)
+    if actual != claimed -> return Err(jettrace_error("content hash mismatch: claimed {claimed}, recomputed {actual}"))
+    Ok(^report)
+}

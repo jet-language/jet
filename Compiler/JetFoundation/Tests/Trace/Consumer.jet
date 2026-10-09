@@ -1,0 +1,22 @@
+// A real importing consumer; no local version constant, builder, or verifier.
+use jet_foundation.[TRACE_VERSION, TRACE_SCHEMA, TraceSkeleton, TraceToolchain, TraceHardware, TraceSample, TraceAllocation, TraceBrowser, TraceGameFrame, TraceGameDrawEvent, TraceTask, TraceLock, TraceIO, TraceNative, TraceSpan, TraceReceiptSection, SourceIdentity, TraceSourceMap, capture_policy_default_exclusions, trace_profile_unsupported, build_skeleton_bytes, verify_jettrace, trace_id, CanonicalJSON, canonical_json_bytes]
+
+#Test("JetTrace consuming module imports typed schema version and full wire") {
+    version :: TRACE_VERSION
+    assert_eq(version, U32{1})
+    assert_eq(TRACE_SCHEMA, "jet.trace")
+    skeleton :: TraceSkeleton{command: "run", argv: [String]{"app.jet"},
+        toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test-build", stdlib_id: "test-core", runner_id: "test-runner"},
+        hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"},
+        capture_policy: capture_policy_default_exclusions(), samples: [TraceSample]{}, profile: trace_profile_unsupported("consumer has no capture"),
+        allocations: [TraceAllocation]{}, browser: [TraceBrowser]{}, game_frames: [TraceGameFrame]{}, game_draw_events: [TraceGameDrawEvent]{},
+        tasks: [TraceTask]{}, locks: [TraceLock]{}, io: [TraceIO]{}, native: [TraceNative]{}, spans: [TraceSpan]{},
+        receipt_sections: [TraceReceiptSection]{}, source_identity: [SourceIdentity]{}, source_maps: [TraceSourceMap]{}}
+    bytes :: build_skeleton_bytes(skeleton) ?? panic(err.message)
+    verified :: verify_jettrace(bytes) ?? panic(err.message)
+    assert_eq(canonical_json_bytes(verified), bytes)
+    assert_eq((trace_id(verified) ?? panic(err.message)).len(), 64)
+    text :: String.from_bytes(bytes) ?? panic("UTF8")
+    assert(text.contains("\"schema\":\"jet.trace\""))
+    assert(text.contains("\"version\":1"))
+}
