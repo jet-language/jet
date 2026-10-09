@@ -306,7 +306,12 @@ fn jet_cli_table_strip_ansi(source: [U8]) -> [U8] Never! {
 fn jet_cli_table_bound_text(input: ^[U8]) -> [U8] Never! {
     text := ^input
     ansi := false
-    loop byte in text { if byte == U8{27} { ansi = true; break } }
+    loop byte in text {
+        if byte == (U8{27}) {
+            ansi = true
+            break
+        }
+    }
     if ansi -> text = jet_cli_table_strip_ansi(text)
     if text.len() <= JET_CLI_TABLE_MAX_CELL_BYTES -> return ^text
     out := [U8]{}
@@ -326,7 +331,7 @@ fn jet_cli_table_text_width(text: [U8]) -> Int Never! {
     start := 0
     loop start <= text.len() {
         end := start
-        loop end < text.len() && text[end] != U8{10} -> end += 1
+        loop end < text.len() && text[end] != (U8{10}) -> end += 1
         width := 0
         index := start
         loop index < end {
@@ -343,8 +348,11 @@ fn jet_cli_table_text_width(text: [U8]) -> Int Never! {
 
 fn jet_cli_table_wrap_span(lines: &[[U8]], text: [U8], start: Int, stop: Int, width: Int) Never! {
     end := stop
-    if end > start && text[end - 1] == U8{13} -> end -= 1
-    if start == end { &lines.push([U8]{}); return }
+    if end > start && text[end - 1] == (U8{13}) -> end -= 1
+    if start == end {
+        &lines.push([U8]{})
+        return
+    }
     line := [U8]{}
     line_width := 0
     emitted := false
@@ -356,7 +364,11 @@ fn jet_cli_table_wrap_span(lines: &[[U8]], text: [U8], start: Int, stop: Int, wi
                 if line_width < width -> foundation_append_read_bytes(&line, text, index, cluster.end)
             }
             cluster.width > width -> {
-                if line.len() > 0 { &lines.push(^line); line = [U8]{}; line_width = 0 }
+                if line.len() > 0 {
+                    &lines.push(^line)
+                    line = [U8]{}
+                    line_width = 0
+                }
                 &lines.push([U8]{63})
                 emitted = true
             }
@@ -381,7 +393,7 @@ fn jet_cli_table_wrap(text: [U8], budget: Int) -> [[U8]] Never! {
     start := 0
     loop start <= text.len() {
         end := start
-        loop end < text.len() && text[end] != U8{10} -> end += 1
+        loop end < text.len() && text[end] != (U8{10}) -> end += 1
         jet_cli_table_wrap_span(&lines, text, start, end, width)
         if end == text.len() -> break
         start = end + 1
