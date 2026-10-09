@@ -2226,6 +2226,147 @@ fn emitted_fn_body<'a>(rust: &'a str, name: &str) -> &'a str {
 }
 
 #[test]
+fn copy_borrow_primitive_place_reads_are_bitwise() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust("fn select(flag: Bool, n: I32) -> I32 {\n yes := flag\n value := n\n if yes -> return value\n return 0\n}\nfn run() {}\n");
+        let body = emitted_fn_body(&rust, "select");
+        assert_eq!(body.matches(".clone()").count(), 0, "primitive place reads must be bitwise:\n{body}");
+        println!("copy_borrow primitive clones={}", body.matches(".clone()").count());
+    });
+}
+
+#[test]
+fn copy_borrow_read_text_abi_and_owned_sink() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust("fn length(text: String) -> Int { text.len() }\nfn forward(text: String) -> Int { length(text) }\nfn owned(text: String) -> String { text.copy() }\nfn run() {}\n");
+        let forward = emitted_fn_body(&rust, "forward");
+        assert!(forward.contains("__jet_text: &str"), "Read text must lend its contents:\n{forward}");
+        assert_eq!(non_scalar_clone_count(forward) + forward.matches(".to_owned()").count(), 0, "forwarding must not materialize text:\n{forward}");
+        let owned = emitted_fn_body(&rust, "owned");
+        let owned_copies = owned.matches(".to_owned()").count() + owned.matches(".clone()").count() + owned.matches("jet_string_copy(").count();
+        assert_eq!(owned_copies, 1, "an explicit owned return materializes once:\n{owned}");
+        println!("copy_borrow forward copies=0 owned_return copies=1");
+    });
+}
+#[test]
+fn copy_borrow_trim_view_to_string_read_never_copies() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust(
+            "fn lend(right: String) -> Int { right.len() }\n\
+             fn authority(raw: String) -> Int {\n\
+                 right :: raw.trim()\n\
+                 lend(right)\n\
+             }\n\
+             fn run() {}\n",
+        );
+        let body = emitted_fn_body(&rust, "authority");
+        assert_eq!(body.matches("jet_string_view_copy").count(), 0,
+            "a trim view lent to a String Read formal is already &str:\n{body}");
+        assert_eq!(non_scalar_clone_count(body) + body.matches(".to_owned()").count(), 0,
+            "the borrowed call must not materialize the view by another spelling:\n{body}");
+        println!("copy_borrow trim_view_read copies=0 view_copies=0");
+    });
+}
+
+
+#[test]
+fn copy_borrow_all_runtime_kernel_signatures_compile() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        use jet_foundation::MIR::MirRuntimePartId as Part;
+        let (mut mir, _) = emitted_rust(r#"
+use core.auth
+fn length(text: String) -> Int { text.len() }
+fn owned(text: String) -> String { text.copy() }
+fn inspect<T>(_value: T) -> Int { 7 }
+fn generic(text: String) -> Int { inspect(text) }
+fn apply(callback: fn(String) -> Int, text: String) -> Int { callback(text) }
+fn verify(issuer: String) {
+    token :: #Credential "invalid"
+    key :: [U8]{0, 1, 2}
+    _claims :: auth.verify_jwt(token, key: key, audience: "gateway", issuer: issuer, clock_skew: 0ms) ?? {
+        print(false)
+        return
+    }
+    print(true)
+}
+fn run() {
+    raw := " a "
+    right :: raw.trim()
+    print(length(right))
+    print(owned(right))
+    print(generic(right))
+    print(inspect(right))
+    print(apply(length, right))
+    reader :: (value: String) -> (length(value) + raw.len())
+    print(apply(reader, right))
+    values :: ["a", "b", "a"]
+    mapping :: [String:Int]{"a": 3}
+    print(values.contains(right))
+    print(values.index_of(right) ?? -1)
+    print(values.count(right))
+    print(mapping.has_key(right))
+    print(mapping.get(right) ?? -1)
+    verify("partner")
+}
+"#);
+        let artifact = mir.artifacts.first_mut().expect("probe has an artifact");
+        artifact.runtime_parts.extend([
+            Part::Gc, Part::Event, Part::Realtime, Part::EmbeddedHardware,
+            Part::Ui, Part::Devtools, Part::Gtk, Part::Apps, Part::Email,
+            Part::Game, Part::Files, Part::Interrupt, Part::FsRuntime,
+            Part::Process, Part::Crypto, Part::Math, Part::Encoding,
+            Part::Data, Part::Fmt, Part::DataFmt, Part::Compute, Part::Http,
+            Part::WebSocket, Part::Browser, Part::Args, Part::Reflect,
+            Part::AuthTokens, Part::AuthSession, Part::Sync, Part::Services,
+            Part::Mod,
+        ]);
+        let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact.id);
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution,
+            },
+        );
+        let directory = std::env::temp_dir().join(format!("jet_copy_borrow_kernels_{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("runtime.rs");
+        std::fs::write(&source, &rust).unwrap();
+        if let Some(output) = std::env::var_os("COPY_BORROW_KERNEL_SOURCE") {
+            std::fs::write(output, &rust).unwrap();
+        }
+        let output = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-type=lib", "--emit=metadata", "-Awarnings"])
+            .arg(&source).arg("-o").arg(directory.join("runtime.rmeta"))
+            .output().expect("kernel signature proof requires rustc");
+        assert!(output.status.success(), "all runtime kernels must agree on the Read ABI:\n{}", String::from_utf8_lossy(&output.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
+fn copy_borrow_text_interpolation_appends_a_borrow() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust("fn wrap(text: String) -> String {\n \"<{text}>\"\n}\nfn run() {}\n");
+        let body = emitted_fn_body(&rust, "wrap");
+        assert!(!body.contains("jet_show"), "a text hole must not allocate its display:\n{body}");
+        assert!(!body.contains("jet_fmt_display"), "a text hole must not materialize its display:\n{body}");
+        assert!(!body.contains(".clone()"), "a text hole must borrow its text:\n{body}");
+        assert!(body.contains("__jet_string.push_str(&(*__jet_text))"), "text must append directly:\n{body}");
+        println!("copy_borrow text clones={} displays={} shows={}", body.matches(".clone()").count(), body.matches("jet_fmt_display").count(), body.matches("jet_show").count());
+        let (_, local_rust) = emitted_rust("fn local_wrap(text: String) -> String {\n local := text\n result :: \"<{local}>\"\n result\n}\nfn run() {}\n");
+        let local = emitted_fn_body(&local_rust, "local_uwrap");
+        assert_eq!(local.matches(".clone()").count() + local.matches(".to_owned()").count(), 1, "only the explicit local snapshot may copy:\n{local}");
+        let (_, debug_rust) = emitted_rust("fn debug_wrap(text: String) -> String {\n \"{text:Debug}\"\n}\nfn run() {}\n");
+        let debug = emitted_fn_body(&debug_rust, "debug_uwrap");
+        assert!(debug.contains("jet_fmt_debug"), "Debug text must keep its checked formatting:\n{debug}");
+    });
+}
+
+
+#[test]
 fn borrowed_builtin_arguments_are_never_copied() {
     // #4318: `contains` and `get` only read their argument (the Rust kernels
     // borrow it), so the argument place is borrowed at the call; `push`
@@ -2242,7 +2383,7 @@ fn borrowed_builtin_arguments_are_never_copied() {
         }
         let keep = emitted_fn_body(&rust, "keep_uvalue");
         assert_eq!(
-            keep.matches(".clone()").count(),
+            keep.matches(".clone()").count() + keep.matches(".to_owned()").count(),
             1,
             "a stored builtin argument is copied exactly once:\n{keep}"
         );
@@ -2336,7 +2477,7 @@ fn mir_walks_stable_loop_sources_in_place() {
     // copy counts compare the loop lowering alone. The source is a `:=`
     // binding, which `fold_pure_calls` leaves alone, so its length is not a
     // folded constant. A field source (`bag.names`, which sema wraps in a
-    // share copy) walks the same way as a local.
+    // share copy) walks the same way as a local or fixed list.
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let program = |setup: &str, source: &str, inside: &str, after: &str| {
             format!(
@@ -2483,6 +2624,71 @@ fn run() {{
     });
 }
 
+#[test]
+fn split_feeding_only_join_fuses_in_place() {
+    // #4566 slice 6: `text.split(sep).join(joiner)` splits and joins the
+    // source in place; a split iterator with another consumer keeps the
+    // iterator.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn fused(text: String) -> String {\n    return text.split(\",\").join(\";\")\n}\n\nfn kept(seed: String) -> Int {\n    text := seed\n    n := 0\n    loop piece in text.split(\",\") {\n        n += piece.len()\n        text = \"x\"\n    }\n    return n\n}\n\nfn run() {\n    print(fused(\"a,b\"))\n    print(kept(\"a,b\"))\n}\n";
+        let (_, rust) = emitted_rust(src);
+        let fused = emitted_fn_body(&rust, "fused");
+        assert!(
+            fused.contains("jet_string_split_join(") && !fused.contains("jet_iter_string_split("),
+            "a split feeding only a join must fuse:\n{fused}"
+        );
+        let kept = emitted_fn_body(&rust, "kept");
+        assert!(
+            kept.contains("jet_iter_string_split(") && !kept.contains("jet_loop_split_init("),
+            "a loop over a split of a source its body changes keeps the iterator:\n{kept}"
+        );
+    });
+}
+#[test]
+fn split_feeding_a_loop_iterates_views() {
+    // #4566 slice 6: a loop over the split of a source nothing can change
+    // while it runs (a read parameter, an immutable local) walks the pieces
+    // as views of the borrowed source; the source is never copied.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn views_count(text: String) -> Int {\n    n := 0\n    loop piece in text.split(\",\") -> n += piece.len()\n    return n\n}\n\nfn views_words(seed: String) -> Int {\n    text :: \"{seed}, tail\"\n    out := [String]{}\n    loop piece in text.split(\", \") -> &out.push(piece)\n    return out.len()\n}\n\nfn run() {\n    print(views_count(\"a,bb,ccc\"))\n    print(views_words(\"x, y\"))\n}\n";
+        let (_, rust) = emitted_rust(src);
+        for name in ["views_ucount", "views_uwords"] {
+            let body = emitted_fn_body(&rust, name);
+            assert!(
+                body.contains("jet_loop_split_init(")
+                    && !body.contains("jet_iter_string_split(")
+                    && !body.contains("jet_loop_iter_init("),
+                "a loop over a stable source's split must walk views:\n{body}"
+            );
+        }
+    });
+}
+#[test]
+fn eager_adapters_inline_callbacks_and_fuse_pure_stages() {
+    // #4566 slice 5: eager list adapters borrow their source and take plain
+    // closures; a map chain whose later callbacks are pure and total runs as
+    // one pass, while a later callback that can stop (a division by a
+    // non-literal) keeps the passes apart.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn adapters_fused(xs: [Int], r: Int) -> [Int] {\n    return xs.map(x -> x * 3 + r).filter(x -> x % 2 == 0).map(x -> x + 1)\n}\n\nfn adapters_kept(xs: [Int], r: Int) -> [Int] {\n    return xs.map(x -> x + 1).filter(x -> x / r > 1)\n}\n\nfn run() {\n    print(adapters_fused([1, 2, 3], 1))\n    print(adapters_kept([1, 2, 3], 1))\n}\n";
+        let (_, rust) = emitted_rust(src);
+        let chain = emitted_fn_body(&rust, "adapters_ufused");
+        assert!(
+            chain.contains("jet_list_map_chain(")
+                && !chain.contains("jet_list_filter(")
+                && !chain.contains("RefCell"),
+            "a pure map/filter/map chain must fuse over plain closures:\n{chain}"
+        );
+        let split = emitted_fn_body(&rust, "adapters_ukept");
+        assert!(
+            split.contains("jet_list_map(")
+                && split.contains("jet_list_filter(")
+                && !split.contains("jet_list_map_chain(")
+                && !split.contains("RefCell"),
+            "a filter that can stop keeps its own pass, still over plain closures:\n{split}"
+        );
+    });
+}
 #[test]
 fn split_feeding_only_join_fuses_in_place() {
     // #4566 slice 6: `text.split(sep).join(joiner)` splits and joins the

@@ -52,7 +52,7 @@ mod file_stream {
             io_error_at, jet_fs_link_fd_at_raw, jet_fs_open_at, jet_fs_stat_file, IOContext, IOError, IOOperation
         };
 
-        pub(super) fn jet_std_files_writer_refusal(path: &String) -> Option<IOError> {
+        pub(super) fn jet_std_files_writer_refusal(path: &str) -> Option<IOError> {
             crate::CoreHost::os_rt::jet_mapped_writer_refusal(path).map(|refusal| {
                 IOError::other(
                     IOOperation::Write,
@@ -63,7 +63,7 @@ mod file_stream {
         }
     }
 
-    fn jet_fs_open(path: &String) -> std::io::Result<std::fs::File> {
+    fn jet_fs_open(path: &str) -> std::io::Result<std::fs::File> {
         super::fs_ops_kernel::jet_fs_open(path)
     }
 

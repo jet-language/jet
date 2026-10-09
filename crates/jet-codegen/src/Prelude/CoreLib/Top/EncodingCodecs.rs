@@ -113,7 +113,7 @@ fn jet_std_xml_parse(text: &String) -> Result<jet_std::Dyn, jet_std::XMLError> {
 }
 
 fn jet_std_xml_parse_with(
-    text: &String,
+    text: &str,
     options: &jet_std::XMLParseOptions,
 ) -> Result<jet_std::Dyn, jet_std::XMLError> {
     crate::jet_xml_kernel::parse_document_with(text, &jet_xml_options(options))
@@ -268,7 +268,7 @@ fn jet_xml_decode_shape_error(reason: String) -> Vec<jet_std::FieldError> {
 }
 
 fn jet_enc_xml_decode<T: __jet_Decode>(
-    text: &String,
+    text: &str,
     options: jet_std::XMLParseOptions,
 ) -> Result<T, Vec<jet_std::FieldError>> {
     let document = jet_std_xml_parse_with(text, &options).map_err(jet_xml_decode_value_error)?;
@@ -453,7 +453,7 @@ fn jet_uuid_bytes(s: &str) -> Result<[u8; 16], String> {
 
 // #1481 core.crypto.uuid: validate and normalize (lowercase) a UUID string — the
 // String representation stays canonical (D-CORE-TREE1 area; no new UUID type).
-fn jet_std_uuid_parse(s: &String) -> Result<String, String> {
+fn jet_std_uuid_parse(s: &str) -> Result<String, String> {
     jet_uuid_bytes(s).map(|bytes| jet_uuid_format(&bytes))
 }
 
@@ -518,7 +518,7 @@ fn jet_uuid_sha1(data: &[u8]) -> [u8; 20] {
 
 // #1481 core.crypto.uuid: v5 (namespace + name, SHA-1) — deterministic sibling of
 // the already-shipped v4 (random) and v7 (time-ordered).
-fn jet_std_uuid_v5(namespace: &String, name: &String) -> Result<String, String> {
+fn jet_std_uuid_v5(namespace: &str, name: &str) -> Result<String, String> {
     let ns = jet_uuid_bytes(namespace)?;
     let mut input = ns.to_vec();
     input.extend_from_slice(name.as_bytes());

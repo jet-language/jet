@@ -1546,7 +1546,7 @@ impl JetZonedDateTime {
         let (datetime_text, zone_name) = head
             .rsplit_once('[')
             .ok_or_else(|| format!("RFC9557 datetime needs a [zone]: {}", value))?;
-        let zone = JetZone::named(&zone_name.to_string())?;
+        let zone = JetZone::named(zone_name)?;
         let (date_text, rest) = datetime_text
             .split_once('T')
             .ok_or_else(|| format!("invalid RFC9557 datetime: {}", value))?;

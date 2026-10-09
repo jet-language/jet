@@ -17,13 +17,13 @@ impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
         true
     }
 
-    fn remove(&mut self, key: &K) -> Option<V> {
-        let index = self.entries.iter().position(|(stored, _)| stored == key)?;
+    fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V> where K: std::borrow::Borrow<Q>, Q: PartialEq {
+        let index = self.entries.iter().position(|(stored, _)| stored.borrow() == key)?;
         Some(self.entries.remove(index).1)
     }
 
-    fn contains_key(&self, key: &K) -> bool {
-        self.entries.iter().any(|(stored, _)| stored == key)
+    fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool where K: std::borrow::Borrow<Q>, Q: PartialEq {
+        self.entries.iter().any(|(stored, _)| stored.borrow() == key)
     }
 
     fn keys(&self) -> Vec<K> {
@@ -61,13 +61,13 @@ impl<K: Eq + Clone, V: Clone> JetCache<K, V> {
     fn add_new(&mut self, key: K, value: V) -> bool {
         self.lru.add_new(key, value)
     }
-    fn get(&mut self, key: &K) -> Option<V> {
-        self.lru.get(key)
+    fn get<Q: ?Sized>(&mut self, key: &Q) -> Option<V> where K: std::borrow::Borrow<Q>, Q: PartialEq {
+        self.lru.get_matching(|stored| stored.borrow() == key)
     }
-    fn remove(&mut self, key: &K) -> Option<V> {
+    fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V> where K: std::borrow::Borrow<Q>, Q: PartialEq {
         self.lru.remove(key)
     }
-    fn contains_key(&self, key: &K) -> bool {
+    fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool where K: std::borrow::Borrow<Q>, Q: PartialEq {
         self.lru.contains_key(key)
     }
     fn keys(&self) -> Vec<K> {
@@ -507,11 +507,11 @@ fn jet_list_is_empty<C: JetListSurface + ?Sized>(xs: &C) -> bool {
 }
 
 #[inline(always)]
-pub(crate) fn jet_list_contains<T: PartialEq>(xs: &[T], needle: &T) -> bool {
-    xs.contains(needle)
+pub(crate) fn jet_list_contains<T: PartialEq<U>, U: ?Sized>(xs: &[T], needle: &U) -> bool {
+    xs.iter().any(|item| item == needle)
 }
 #[inline(always)]
-fn jet_list_index_of<T: PartialEq>(xs: &[T], needle: &T) -> JetOutcome<i64, JetAbsent> {
+fn jet_list_index_of<T: PartialEq<U>, U: ?Sized>(xs: &[T], needle: &U) -> JetOutcome<i64, JetAbsent> {
     jet_outcome_of(xs.iter().position(|item| item == needle).map(|index| index as i64))
 }
 
@@ -553,21 +553,21 @@ fn jet_map_get_opt<K: Ord + std::borrow::Borrow<Q>, V: Clone, Q: Ord + ?Sized>(
     jet_outcome_of(map.get(key).cloned())
 }
 #[inline(always)]
-fn jet_map_has_key<K: Ord, V>(map: &JetMap<K, V>, key: &K) -> bool {
+fn jet_map_has_key<K: Ord + std::borrow::Borrow<Q>, V, Q: Ord + ?Sized>(map: &JetMap<K, V>, key: &Q) -> bool {
     map.contains_key(key)
 }
 
 #[inline(always)]
-fn jet_bag_has<T: Eq + std::hash::Hash>(
+fn jet_bag_has<T: Eq + std::hash::Hash + std::borrow::Borrow<Q>, Q: Eq + std::hash::Hash + ?Sized>(
     bag: &std::collections::HashMap<T, usize>,
-    value: &T,
+    value: &Q,
 ) -> bool {
     bag.get(value).copied().unwrap_or(0) > 0
 }
 
-fn jet_bag_count<T: Eq + std::hash::Hash>(
+fn jet_bag_count<T: Eq + std::hash::Hash + std::borrow::Borrow<Q>, Q: Eq + std::hash::Hash + ?Sized>(
     bag: &std::collections::HashMap<T, usize>,
-    value: &T,
+    value: &Q,
 ) -> i64 {
     bag.get(value).copied().unwrap_or(0) as i64
 }
@@ -587,9 +587,9 @@ fn jet_set_is_empty<T>(set: &std::collections::HashSet<T>) -> bool {
     set.is_empty()
 }
 #[inline(always)]
-fn jet_set_has<T: Eq + std::hash::Hash>(
+fn jet_set_has<T: Eq + std::hash::Hash + std::borrow::Borrow<Q>, Q: Eq + std::hash::Hash + ?Sized>(
     set: &std::collections::HashSet<T>,
-    value: &T,
+    value: &Q,
 ) -> bool {
     set.contains(value)
 }
@@ -700,7 +700,7 @@ fn jet_lru_is_empty<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> bool {
     cache.is_empty()
 }
 #[inline(always)]
-fn jet_lru_has<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>, key: &K) -> bool {
+fn jet_lru_has<K: Eq + Clone + std::borrow::Borrow<Q>, V: Clone, Q: PartialEq + ?Sized>(cache: &JetCache<K, V>, key: &Q) -> bool {
     cache.contains_key(key)
 }
 #[inline(always)]
@@ -802,11 +802,11 @@ fn jet_deque_peek_back<T: Clone>(
 }
 
 #[inline(always)]
-fn jet_deque_contains<T: PartialEq>(
+fn jet_deque_contains<T: PartialEq<U>, U: ?Sized>(
     queue: &std::collections::VecDeque<T>,
-    value: &T,
+    value: &U,
 ) -> bool {
-    queue.contains(value)
+    queue.iter().any(|item| item == value)
 }
 
 #[inline(always)]
@@ -1229,11 +1229,11 @@ fn jet_map_from_keys_kernel<K: Ord + Clone, V: Clone>(keys: Vec<K>, default: V) 
     keys.into_iter().map(|key| (key, default.clone())).collect()
 }
 
-fn jet_map_contains_value_kernel<K: Ord, V: PartialEq>(m: &JetMap<K, V>, needle: &V) -> bool {
+fn jet_map_contains_value_kernel<K: Ord, V: PartialEq<U>, U: ?Sized>(m: &JetMap<K, V>, needle: &U) -> bool {
     m.values().any(|value| value == needle)
 }
 
-fn jet_map_pop_kernel<M, K: Ord + Clone, V: Clone>(m: &mut M, key: &K) -> JetOutcome<V, JetAbsent>
+fn jet_map_pop_kernel<M, K: Ord + Clone + std::borrow::Borrow<Q>, V: Clone, Q: Ord + ?Sized>(m: &mut M, key: &Q) -> JetOutcome<V, JetAbsent>
 where
     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
 {
@@ -1293,7 +1293,7 @@ fn jet_list_insert_kernel<T>(
     Ok(())
 }
 
-fn jet_list_count_kernel<T: PartialEq>(xs: &[T], value: &T) -> i64 {
+fn jet_list_count_kernel<T: PartialEq<U>, U: ?Sized>(xs: &[T], value: &U) -> i64 {
     jet_count_to_int(xs.iter().filter(|item| *item == value).count())
 }
 
@@ -3303,8 +3303,8 @@ fn jet_list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> {
 }
 /// Sorted membership search. Returns the matching position as `?Int`; with
 /// duplicates, the matching position is unspecified and is not a lower bound.
-fn jet_list_binary_search<T: Ord>(xs: &[T], needle: &T) -> JetOutcome<i64, JetAbsent> {
-    jet_outcome_of(xs.binary_search(needle).ok().map(|i| i as i64))
+fn jet_list_binary_search<T: Ord + std::borrow::Borrow<Q>, Q: Ord + ?Sized>(xs: &[T], needle: &Q) -> JetOutcome<i64, JetAbsent> {
+    jet_outcome_of(xs.binary_search_by(|item| item.borrow().cmp(needle)).ok().map(|i| i as i64))
 }
 /// Comparator form of sorted membership search. Returns `?Int`, not an
 /// insertion point or a promise to select the first duplicate.

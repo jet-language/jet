@@ -1055,7 +1055,10 @@ fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, program: JetCod
     if collection.kind == .Clone(inner, _) -> list = inner
     loop_scope_depth := builder.scope_depth
     jet_codegen_enter_lexical(&builder, program)
-    length := jet_codegen_lower_expr(&builder, program, length_expr)
+    length := if fixed_length == {
+        .Val(count) -> jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: count, width: None, spelling: None}})
+        .None -> jet_codegen_lower_expr(&builder, program, TExpr{ty: Type.Int, kind: TExprKind.BuiltinMethod{receiver: list, operation: TBuiltinOp.LenList, args: [TExpr]{}}, span: span, integer_bounds: None, cost: None})
+    }
     index_local := if variable_two == None -> tir_user_local("read_walk_index_{span.start}", span) else -> variable
     item_local := variable_two ?? variable
     index_place := jet_codegen_bind_local(&builder, program, index_local, Type.Int, true, None, None, false)

@@ -1,0 +1,60 @@
+// A function that starts its result from an empty list or String and returns
+// it hands back a fresh value on every call, even when the caller rebinds the
+// result on every loop pass: an earlier call's contents never show through, a
+// shorter result stays short, and a result the caller keeps is never changed
+// by a later call.
+fn evens(count: Int) -> [Int] {
+    out := [Int]{}
+    loop i in 0..<count -> &out.push(i * 2)
+    out
+}
+
+fn label(seed: Int) -> String {
+    out := ""
+    loop i in 0..<seed % 4 {
+        if i % 2 == 0 -> out += "a" else -> out += "bc"
+    }
+    out
+}
+
+fn pick(fresh: Bool, count: Int) -> [String] {
+    out := [String]{"seed"}
+    if fresh {
+        out = [String]{}
+        loop i in 0..<count -> &out.push("n{i}")
+    }
+    out
+}
+
+fn run() {
+    total := 0
+    loop round in 0..<5 {
+        xs :: evens(5 - round)
+        print(xs)
+        loop x in xs -> total += x
+    }
+    print(total)
+    kept := [[Int]]{}
+    loop round in 0..<3 {
+        ys :: evens(round + 1)
+        &kept.push(ys)
+    }
+    print(kept)
+    loop seed in 0..<6 {
+        text :: label(seed)
+        print("[{text}] {text.len()}")
+    }
+    loop round in 0..<4 {
+        names :: pick(round % 2 == 0, round + 1)
+        print(names.join(","))
+    }
+    last := [Int]{}
+    loop round in 0..<3 {
+        zs :: evens(round + 2)
+        if round == 1 {
+            last = zs
+            break
+        }
+    }
+    print(last)
+}

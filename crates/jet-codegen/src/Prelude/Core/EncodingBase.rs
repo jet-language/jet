@@ -146,7 +146,7 @@ fn jet_std_binary_format(
     Ok((endian, ops))
 }
 
-pub(crate) fn jet_std_binary_calcsize(format: &String) -> Result<i64, String> {
+pub(crate) fn jet_std_binary_calcsize(format: &str) -> Result<i64, String> {
     let (_, ops) = jet_std_binary_format(format)?;
     Ok(ops.iter().map(|(_, _, width)| *width as i64).sum())
 }
@@ -209,7 +209,7 @@ fn jet_std_binary_unpack_one(
 }
 
 pub(crate) fn jet_std_binary_pack(
-    format: &String,
+    format: &str,
     values: &Vec<i64>,
 ) -> Result<Vec<u8>, String> {
     let (endian, ops) = jet_std_binary_format(format)?;
@@ -241,7 +241,7 @@ pub(crate) fn jet_std_binary_pack(
 }
 
 pub(crate) fn jet_std_binary_unpack(
-    format: &String,
+    format: &str,
     data: &Vec<u8>,
 ) -> Result<Vec<i64>, String> {
     let (endian, ops) = jet_std_binary_format(format)?;
@@ -268,7 +268,7 @@ pub(crate) fn jet_std_binary_unpack(
     Ok(out)
 }
 pub(crate) fn jet_std_binary_iter_unpack(
-    format: &String,
+    format: &str,
     data: &Vec<u8>,
 ) -> Result<Vec<Vec<i64>>, String> {
     let size = usize::try_from(jet_std_binary_calcsize(format)?)

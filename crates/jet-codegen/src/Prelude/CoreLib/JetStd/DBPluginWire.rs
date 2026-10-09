@@ -2401,7 +2401,7 @@ pub trait JetDBBackend {
 
 pub fn jet_db_transaction<B: JetDBBackend>(
     backend: &mut B,
-    label: &String,
+    label: &str,
     steps: &Vec<SQL>,
 ) -> Result<i64, DBError> {
     if !backend.begin() {
@@ -2431,10 +2431,10 @@ pub fn jet_db_transaction<B: JetDBBackend>(
 
 pub fn jet_db_migrate<B: JetDBBackend>(
     backend: &mut B,
-    name: &String,
+    name: &str,
     steps: &Vec<SQL>,
 ) -> Result<i64, DBError> {
-    let request = JetMigrationRequest::direct(name.clone(), steps.clone());
+    let request = JetMigrationRequest::direct(name.to_owned(), steps.clone());
     jet_db_migration_request(backend, &request).map(|outcome| outcome.step_count as i64)
 }
 

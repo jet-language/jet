@@ -823,7 +823,7 @@ fn granted_path(path: &std::path::Path, grant: &JetModGrant) -> Result<std::path
 /// Every refusal is tagged (D-MOD-ERR1=A): the grant and metadata checks tag
 /// their own; a file that cannot be read, parsed, staged or mapped is
 /// `Invalid`; a target without a native loader is `Unsupported`.
-pub fn jet_mod_load(path: &String, grant: &JetModGrant) -> Result<JetMod, String> {
+pub fn jet_mod_load(path: &str, grant: &JetModGrant) -> Result<JetMod, String> {
     if !jet_mod_native::SUPPORTED {
         return Err(JetModFailure::Unsupported.tag(format!(
             "Mod.load is not supported on target `{}`",

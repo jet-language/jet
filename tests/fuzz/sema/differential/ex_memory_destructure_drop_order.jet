@@ -1,0 +1,66 @@
+//! Partially moving an owned result keeps the omitted fields at their
+//! aggregate owner's cleanup position, in the original field order.
+use core.mem.scope as scope
+
+struct Bundle<T> {
+    retained: T
+    omitted_first: T
+    omitted_second: T
+}
+
+fn pass<T>(value: ^T) -> T { ^value }
+
+fn ordered(early: Bool) {
+    _before :: pass(
+    (
+        first: scope.guard(() -> print("before first")),
+        second: scope.guard(() -> print("before second")),
+    ),
+    )
+    Bundle{retained: _retained, ..} :: pass(
+    Bundle<ScopeGuard>{
+        retained: scope.guard(() -> print("retained")),
+        omitted_first: scope.guard(() -> print("omitted first")),
+        omitted_second: scope.guard(() -> print("omitted second")),
+    },
+    )
+    _after :: pass(
+    (
+        first: scope.guard(() -> print("after first")),
+        second: scope.guard(() -> print("after second")),
+    ),
+    )
+    print("body")
+    if early {
+        return
+    }
+    print("normal")
+}
+
+struct Closing {
+    name: String
+    payload: String
+}
+
+impl Closing.Close {
+    fn close(^self) { print("close {self.name} {self.payload}") }
+}
+
+fn closing_result() -> Closing { Closing{name: "call", payload: "intact"} }
+
+fn closing(early: Bool) {
+    Closing{name: call_name, ..} :: closing_result()
+    Closing{name: literal_name, ..} :: Closing{name: "literal", payload: "intact"}
+    print("names {call_name} {literal_name}")
+    if early {
+        return
+    }
+    print("close normal")
+}
+
+fn run() {
+    ordered(false)
+    ordered(true)
+    closing(false)
+    closing(true)
+}

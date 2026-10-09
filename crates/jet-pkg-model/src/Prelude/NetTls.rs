@@ -230,7 +230,7 @@ fn jet_net_tls_pem_base64(text: &str) -> Result<Vec<u8>, String> {
 
 fn jet_net_tls_begin_inner(
     stream: TcpStream,
-    server_name: &String,
+    server_name: &str,
     trust_mode: i64,
     custom_ca_pem: Option<&[u8]>,
     identity: Option<(&[u8], &[u8])>,
@@ -242,7 +242,7 @@ fn jet_net_tls_begin_inner(
     RUSTLS_PROVIDER.call_once(|| {
         let _ = rustls::crypto::ring::default_provider().install_default();
     });
-    let name = rustls::pki_types::ServerName::try_from(server_name.clone())
+    let name = rustls::pki_types::ServerName::try_from(server_name.to_owned())
         .map_err(|_| format!("invalid TLS server name `{}`", server_name))?;
     stream
         .set_nonblocking(true)
@@ -257,7 +257,7 @@ fn jet_net_tls_begin_inner(
         id,
         JetTLSState {
             stream: tls,
-            server_name: server_name.clone(),
+            server_name: server_name.to_owned(),
             pending_read: Vec::new(),
             read_eof: false,
             pending_write: None,
@@ -270,13 +270,13 @@ fn jet_net_tls_begin_inner(
 
 /// Email runtime handshake seam: caller polls this between ambient cancellation
 /// and deadline checks. No bridge worker or hidden retry exists.
-pub fn jet_net_tls_begin_impl(stream: TcpStream, server_name: &String) -> Result<i64, String> {
+pub fn jet_net_tls_begin_impl(stream: TcpStream, server_name: &str) -> Result<i64, String> {
     jet_net_tls_begin_inner(stream, server_name, 0, None, None, 12, 13, &[])
 }
 
 pub fn jet_net_tls_begin_config_impl(
     stream: TcpStream,
-    server_name: &String,
+    server_name: &str,
     trust_mode: i64,
     roots: &Vec<u8>,
     cert_chain: &Vec<u8>,
@@ -292,7 +292,7 @@ pub fn jet_net_tls_begin_config_impl(
 
 pub fn jet_net_tls_begin_with_ca_impl(
     stream: TcpStream,
-    server_name: &String,
+    server_name: &str,
     custom_ca_pem: &Vec<u8>,
 ) -> Result<i64, String> {
     jet_net_tls_begin_inner(stream, server_name, 1, Some(custom_ca_pem), None, 12, 13, &[])
@@ -656,7 +656,7 @@ pub fn jet_net_tls_read_step_impl(id: i64, limit: i64) -> Result<Option<Vec<u8>>
     }
 }
 
-pub fn jet_net_tls_write_impl(id: i64, data: &String) -> Result<(), String> {
+pub fn jet_net_tls_write_impl(id: i64, data: &str) -> Result<(), String> {
     jet_net_tls_write_all_bytes_impl(id, &data.as_bytes().to_vec())
 }
 

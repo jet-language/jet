@@ -1400,7 +1400,7 @@ macro_rules! jet_net_tls_client_bridge {
     ($bridge:ident) => {
         fn jet_net_tls_client(
             stream: JetTCPStream,
-            server_name: &String,
+            server_name: &str,
         ) -> Result<JetTLSStream, jet_std::IOError> {
             jet_net_tls_client_scheduler(
                 stream,
@@ -1477,8 +1477,8 @@ macro_rules! jet_net_tls_client_bridge {
 
 fn jet_net_tls_client_scheduler(
     stream: JetTCPStream,
-    server_name: &String,
-    begin: fn(std::net::TcpStream, &String) -> Result<i64, String>,
+    server_name: &str,
+    begin: fn(std::net::TcpStream, &str) -> Result<i64, String>,
     handshake_step: fn(i64) -> Result<bool, String>,
     abort: fn(i64),
     wants: fn(i64) -> Result<(bool, bool), String>,
@@ -1567,9 +1567,9 @@ where
 
 fn jet_net_tls_client_scheduler_deadline(
     stream: JetTCPStream,
-    server_name: &String,
+    server_name: &str,
     deadline: &jet_std::Duration,
-    begin: fn(std::net::TcpStream, &String) -> Result<i64, String>,
+    begin: fn(std::net::TcpStream, &str) -> Result<i64, String>,
     handshake_step: fn(i64) -> Result<bool, String>,
     abort: fn(i64),
     wants: fn(i64) -> Result<(bool, bool), String>,
@@ -1599,12 +1599,12 @@ fn jet_net_tls_client_scheduler_deadline(
 
 fn jet_net_tls_client_scheduler_config_deadline(
     stream: JetTCPStream,
-    server_name: &String,
+    server_name: &str,
     config: &JetTLSClientConfig,
     deadline: &jet_std::Duration,
     begin: fn(
         std::net::TcpStream,
-        &String,
+        &str,
         i64,
         &Vec<u8>,
         &Vec<u8>,

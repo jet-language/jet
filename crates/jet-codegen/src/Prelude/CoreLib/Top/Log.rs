@@ -95,52 +95,52 @@ fn jet_ring_log_flush() {
 }
 
 
-fn jet_ring_log_field(key: &String, value: &String) -> jet_std::LogField {
+fn jet_ring_log_field(key: &str, value: &str) -> jet_std::LogField {
     jet_std::LogField {
-        key: key.clone(),
-        value: value.clone(),
+        key: key.to_owned(),
+        value: value.to_owned(),
         kind: "string".to_string(),
         redacted: false,
     }
 }
 
-fn jet_ring_log_int(key: &String, value: i64) -> jet_std::LogField {
+fn jet_ring_log_int(key: &str, value: i64) -> jet_std::LogField {
     jet_std::LogField {
-        key: key.clone(),
+        key: key.to_owned(),
         value: value.to_string(),
         kind: "int".to_string(),
         redacted: false,
     }
 }
 
-fn jet_ring_log_float(key: &String, value: f64) -> jet_std::LogField {
+fn jet_ring_log_float(key: &str, value: f64) -> jet_std::LogField {
     jet_std::LogField {
-        key: key.clone(),
+        key: key.to_owned(),
         value: value.to_string(),
         kind: "float".to_string(),
         redacted: false,
     }
 }
 
-fn jet_ring_log_bool(key: &String, value: bool) -> jet_std::LogField {
+fn jet_ring_log_bool(key: &str, value: bool) -> jet_std::LogField {
     jet_std::LogField {
-        key: key.clone(),
+        key: key.to_owned(),
         value: value.to_string(),
         kind: "bool".to_string(),
         redacted: false,
     }
 }
 
-fn jet_ring_log_redact(key: &String) -> jet_std::LogField {
+fn jet_ring_log_redact(key: &str) -> jet_std::LogField {
     jet_std::LogField {
-        key: key.clone(),
+        key: key.to_owned(),
         value: "[redacted]".to_string(),
         kind: "redacted".to_string(),
         redacted: true,
     }
 }
 
-fn jet_ring_log_counter(name: &String, value: i64) -> jet_std::LogField {
+fn jet_ring_log_counter(name: &str, value: i64) -> jet_std::LogField {
     jet_log_publish_metric(name, value);
     jet_std::LogField {
         key: format!("metric.counter.{}", name),
@@ -150,7 +150,7 @@ fn jet_ring_log_counter(name: &String, value: i64) -> jet_std::LogField {
     }
 }
 
-fn jet_ring_log_span(name: &String) -> jet_std::LogSpan {
+fn jet_ring_log_span(name: &str) -> jet_std::LogSpan {
     let id = JET_LOG_NEXT_SPAN.with(|n| {
         let id = n.get();
         n.set(id + 1);
@@ -158,7 +158,7 @@ fn jet_ring_log_span(name: &String) -> jet_std::LogSpan {
     });
     jet_std::LogSpan {
         id,
-        name: name.clone(),
+        name: name.to_owned(),
     }
 }
 
@@ -313,7 +313,7 @@ fn jet_log_metric_slot(name: &str) -> Option<(bool, u64)> {
     Some((true, 1))
 }
 
-fn jet_log_publish_metric(name: &String, value: i64) {
+fn jet_log_publish_metric(name: &str, value: i64) {
     let name = jet_log_telemetry_text(name);
     if name.is_empty() {
         return;

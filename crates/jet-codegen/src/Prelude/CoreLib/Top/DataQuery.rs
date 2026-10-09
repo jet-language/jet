@@ -45,7 +45,7 @@ pub fn jet_data_query_read(path: &String) -> Result<String, Vec<jet_std::FieldEr
 /// Validate a CSV header against the canonical SQL row-field traversal.
 pub fn jet_data_query_validate_fields(
     fields: &[String],
-    sql: &String,
+    sql: &str,
 ) -> Result<(), Vec<jet_std::FieldError>> {
     jet_data_query_validate_fields_raw(fields, sql).map_err(jet_analytics_query_error)
 }

@@ -519,6 +519,12 @@ where the C peer does not use a capability Jet lacks.
   - A call, method call, value call, tuple or struct literal, `^take`, `~copy`,
     or a `?` / `??` over one of these now moves every field. A name, field,
     index or view still copies, which keeps the place intact.
+  - Moving fields also transfers cleanup away from the temporary as a whole.
+    The MIR lowering retires its whole-owner drop flag after extraction and
+    registers field cleanup for omitted fields. Otherwise the temporary's
+    scope-exit `MovePlace` reads a partially moved aggregate and MIR legality
+    correctly rejects it. This belongs in both `tir_to_mir_stmt.rs`/`mir.rs`
+    and JetCodegen `Bindings.jet`, not in a legality-check exception.
 - Repro: `Tools/perf/function-boundary/destructure-move/main.jet`. Before the
   patch, its emitted Rust contains `(_v5…).0.clone()` and `(_v5…).1.clone()`.
 - Pending: release rebuild of `jet` from the worktree (after stage 2 frees

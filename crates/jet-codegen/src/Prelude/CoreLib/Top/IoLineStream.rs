@@ -3,7 +3,7 @@
 // `include!` this exact source instead of re-encoding the logic in Rust a
 // second time (I9 — semantics live only in Prelude/**; JIT hosts marshal
 // args/results and call the same Prelude function).
-fn jet_std_io_input(prompt: Option<&String>) -> Result<String, jet_std::IOError> {
+fn jet_std_io_input(prompt: Option<&str>) -> Result<String, jet_std::IOError> {
     if let Some(p) = prompt {
         if jet_fault_should_fail("IO.Write") {
             return Err(jet_std::IOError::other(

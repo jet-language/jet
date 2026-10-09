@@ -324,10 +324,10 @@ fn jet_std_io_stderr_is_tty(_s: &JetStderr) -> bool {
 }
 
 fn jet_std_io_terminal_width() -> i64 {
-    jet_term_width(|name| jet_std_env_get(&name.to_string()))
+    jet_term_width(jet_std_env_get)
 }
 fn jet_std_io_terminal_height() -> i64 {
-    jet_term_height(|name| jet_std_env_get(&name.to_string()))
+    jet_term_height(jet_std_env_get)
 }
 /// `core.term.jet_term_is_terminal_raw`: compiler-private raw leaf (one host fact, no
 /// policy): whether the process's stdin (0), stdout (1) or stderr (2) is a

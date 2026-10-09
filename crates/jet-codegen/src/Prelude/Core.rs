@@ -4,7 +4,7 @@
 /// execution tier calls these same pure methods.
 pub trait CheckedText {
     type Error;
-    fn check(text: &String) -> Result<(), Self::Error>;
+    fn check(text: &str) -> Result<(), Self::Error>;
     fn encode_hole<T: JetShow>(value: &T) -> String;
 }
 
@@ -3092,9 +3092,9 @@ enum JetRemoveBy {
     Slot,
 }
 
-fn jet_index_map<M, K: Ord + Clone + JetShow, V: Clone>(
+fn jet_index_map<M, K: Ord + Clone + std::borrow::Borrow<Q>, V: Clone, Q: Ord + JetShow + ?Sized>(
     m: &M,
-    k: &K,
+    k: &Q,
     file: &str,
     line: u32,
     fn_name: &str,
@@ -3123,9 +3123,9 @@ where
 /// Borrow one map value without materializing a clone. This is the read-side
 /// counterpart to `jet_index_map_mut`, used when a view receiver is a nested
 /// map/list place whose storage must outlive the borrowed view.
-fn jet_index_map_ref<'a, M, K: Ord + Clone + JetShow + 'a, V>(
+fn jet_index_map_ref<'a, M, K: Ord + Clone + std::borrow::Borrow<Q> + 'a, V, Q: Ord + JetShow + ?Sized>(
     m: &'a M,
-    k: &K,
+    k: &Q,
     file: &str,
     line: u32,
     fn_name: &str,
@@ -3151,9 +3151,9 @@ where
     }
 }
 
-fn jet_index_map_mut<'a, M, K: Ord + Clone + JetShow + 'a, V>(
+fn jet_index_map_mut<'a, M, K: Ord + Clone + std::borrow::Borrow<Q> + 'a, V, Q: Ord + JetShow + ?Sized>(
     m: &'a mut M,
-    k: K,
+    k: &Q,
     file: &str,
     line: u32,
     fn_name: &str,
@@ -3164,7 +3164,7 @@ fn jet_index_map_mut<'a, M, K: Ord + Clone + JetShow + 'a, V>(
 where
     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
 {
-    match m.get_mut(&k) {
+    match m.get_mut(k) {
         Some(value) => value,
         None => jet_panic_rich(
             file,
@@ -3630,7 +3630,7 @@ fn jet_priority_queue_remove_slot_canonical<T: Ord>(
     }
 }
 
-fn jet_list_count<T: PartialEq>(xs: &[T], value: &T) -> i64 {
+fn jet_list_count<T: PartialEq<U>, U: ?Sized>(xs: &[T], value: &U) -> i64 {
     jet_list_count_kernel(xs, value)
 }
 fn jet_list_count_where<T, F>(xs: &[T], predicate: F) -> i64
@@ -3681,8 +3681,23 @@ fn jet_fixed_list_concat<
     })
 }
 
+/// The scalar count of `s`: its bytes that start a scalar (every byte but a
+/// `0b10xx_xxxx` continuation byte). Each 64-byte block sums into one byte
+/// lane, a branch-free pass the host CPU's vector unit runs.
 fn jet_char_len(s: &str) -> i64 {
-    s.chars().count() as i64
+    let mut chunks = s.as_bytes().chunks_exact(64);
+    let mut count = 0_usize;
+    for chunk in &mut chunks {
+        let mut starts = 0_u8;
+        for &byte in chunk {
+            starts += u8::from((byte as i8) >= -0x40);
+        }
+        count += usize::from(starts);
+    }
+    for &byte in chunks.remainder() {
+        count += usize::from((byte as i8) >= -0x40);
+    }
+    count as i64
 }
 // Eager materialize of the same pieces as `jet_iter_string_split` (AOT `String.split`
 // emits the lazy helper; this Vec form remains for hosts that need a list handle).
@@ -3861,7 +3876,7 @@ fn jet_map_from_keys_composite<K: Ord + Clone, V: Clone>(
 ) -> JetMap<K, V> {
     jet_map_from_keys_kernel(keys, default)
 }
-fn jet_map_contains_value<K: Ord, V: PartialEq>(m: &JetMap<K, V>, needle: &V) -> bool {
+fn jet_map_contains_value<K: Ord, V: PartialEq<U>, U: ?Sized>(m: &JetMap<K, V>, needle: &U) -> bool {
     jet_map_contains_value_kernel(m, needle)
 }
 fn jet_map_pop_first<K: Ord + Clone, V: Clone>(m: &mut JetMap<K, V>) -> JetOutcome<V, JetAbsent> {

@@ -687,7 +687,7 @@ fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std:
     T::jet_decode(&tree)
 }
 fn jet_data_json_decode<T: __jet_Decode>(
-    text: &String,
+    text: &str,
 ) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
     jet_enc_json_decode::<Vec<T>>(text)
 }
@@ -703,8 +703,8 @@ fn jet_db_decode<T: __jet_Decode>(
 // CSV typed decode: header row maps columns to fields by name; each data row
 // becomes a Dyn::Object of Text cells, then decodes to `T`. A short row or a
 // per-row decode failures are typed `[FieldError]` values naming the 1-based row.
-fn jet_enc_csv_decode<T: __jet_Decode>(text: &String) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
-    let rows = jet_ring_csv_parse(text, &",".to_string(), false, false)
+fn jet_enc_csv_decode<T: __jet_Decode>(text: &str) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
+    let rows = jet_ring_csv_parse(text, ",", false, false)
         .map_err(jet_std::FieldError::one)?;
     jet_std::jet_enc_csv_decode_rows(
         rows,

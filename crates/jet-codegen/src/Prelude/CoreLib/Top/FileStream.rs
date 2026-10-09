@@ -58,14 +58,14 @@ pub(crate) fn jet_std_files_open_reader_nonblocking(
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Read",
         ));
     }
     let file = jet_std::jet_fs_open_nonblocking(path)?;
     Ok(JetFileReader {
         inner: std::io::BufReader::new(file),
-        path: path.clone(),
+        path: path.to_owned(),
     })
 }
 

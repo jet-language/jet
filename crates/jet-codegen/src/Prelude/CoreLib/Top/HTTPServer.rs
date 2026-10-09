@@ -1856,7 +1856,7 @@ fn jet_http_accept_quality(value: &str) -> u16 {
 
 /// Select one representation from the request's Accept list. Explicit media
 /// types outrank wildcards; equal-quality explicit types keep client order.
-fn jet_http_error_page_accepts_json(accept: Option<&String>) -> bool {
+fn jet_http_error_page_accepts_json(accept: Option<&str>) -> bool {
     let Some(accept) = accept else {
         return false;
     };
@@ -1924,7 +1924,7 @@ fn jet_http_error_page_response(
         correlation_links,
         local,
     );
-    let wants_json = jet_http_error_page_accepts_json(request.headers.get("accept"));
+    let wants_json = jet_http_error_page_accepts_json(request.headers.get("accept").map(String::as_str));
     let (body, content_type) = if wants_json {
         (projection.json(), "application/json; charset=utf-8")
     } else {
@@ -5148,10 +5148,10 @@ fn jet_http_mux_serve_tls<V, S>(
     session: S,
 ) -> Result<(), String>
 where
-    V: Fn(&String, &String) -> Result<(), String>,
+    V: Fn(&str, &str) -> Result<(), String>,
     S: Fn(
-            &String,
-            &String,
+            &str,
+            &str,
             std::net::TcpStream,
             Box<dyn FnMut(&[u8], bool) -> Result<(Vec<u8>, bool), String> + Send>,
             JetHTTPTlsH2,
@@ -5187,10 +5187,10 @@ fn jet_http_server_bind_tls<V, S>(
     session: S,
 ) -> Result<JetHTTPServer, JetHTTPError>
 where
-    V: Fn(&String, &String) -> Result<(), String>,
+    V: Fn(&str, &str) -> Result<(), String>,
     S: Fn(
-            &String,
-            &String,
+            &str,
+            &str,
             std::net::TcpStream,
             Box<dyn FnMut(&[u8], bool) -> Result<(Vec<u8>, bool), String> + Send>,
             JetHTTPTlsH2,
@@ -5209,8 +5209,8 @@ where
 fn jet_http_tls_conn_handler<S>(mux: JetHTTPMux, tls: JetHTTPServerTls, session: S) -> JetHTTPTlsConn
 where
     S: Fn(
-            &String,
-            &String,
+            &str,
+            &str,
             std::net::TcpStream,
             Box<dyn FnMut(&[u8], bool) -> Result<(Vec<u8>, bool), String> + Send>,
             JetHTTPTlsH2,
@@ -6074,9 +6074,9 @@ fn jet_http_srv_static_file(path: &str, mime: &str) -> Result<JetHTTPResponse, J
     let length = usize::try_from(metadata.len()).map_err(|_| JetHTTPError::IO {
         operation: format!("static file `{path}` is too large"),
     })?;
-    let mut response = jet_http_srv_response(200, &String::new());
+    let mut response = jet_http_srv_response(200, "");
     response.body = JetHTTPBody::file(file, length);
-    Ok(jet_http_srv_response_header(response, &"content-type".to_string(), mime))
+    Ok(jet_http_srv_response_header(response, "content-type", mime))
 }
 
 fn jet_http_srv_static_file_range(req: &JetHTTPRequest, path: &str, mime: &str, ) -> Result<JetHTTPResponse, String> {
@@ -6088,10 +6088,10 @@ fn jet_http_srv_static_file_range(req: &JetHTTPRequest, path: &str, mime: &str, 
         return Err(format!("static file `{path}` could not be opened with held identity"));
     };
     let file_len = usize::try_from(metadata.len()).map_err(|_| format!("static file `{path}` is too large"))?;
-    let Ok(range) = jet_http_srv_req_header(req, &"range".to_string()) else {
-        let mut response = jet_http_srv_response(200, &String::new());
+    let Ok(range) = jet_http_srv_req_header(req, "range") else {
+        let mut response = jet_http_srv_response(200, "");
         response.body = JetHTTPBody::file(file, file_len);
-        return Ok(jet_http_srv_response_header(response, &"content-type".to_string(), mime));
+        return Ok(jet_http_srv_response_header(response, "content-type", mime));
     };
     let Some((start, end)) = jet_http_static_range(&range, file_len) else {
         return Ok(jet_http_srv_response_owned(416, "range not satisfiable".to_string()));
@@ -6100,16 +6100,16 @@ fn jet_http_srv_static_file_range(req: &JetHTTPRequest, path: &str, mime: &str, 
     file.seek(std::io::SeekFrom::Start(start as u64))
         .map_err(|error| format!("static file `{path}` seek failed: {error}"))?;
     let length = end - start + 1;
-    let mut response = jet_http_srv_response(206, &String::new());
+    let mut response = jet_http_srv_response(206, "");
     response.body = JetHTTPBody::file(file, length);
     let resp = jet_http_srv_response_header(
         response,
-        &"content-type".to_string(),
+        "content-type",
         mime,
     );
     Ok(jet_http_srv_response_header(
         resp,
-        &"content-range".to_string(),
+        "content-range",
         &format!("bytes {start}-{end}/{file_len}"),
     ))
 }
@@ -6837,7 +6837,7 @@ pub(crate) fn jet_app_http_request_url(request: &JetHTTPRequest) -> String {
 
 pub(crate) fn jet_app_http_mount<F>(mux: &JetHTTPMux, path: &str, handler: F)
 where
-    F: Fn(&String) + Send + Sync + 'static,
+    F: Fn(&str) + Send + Sync + 'static,
 {
     jet_http_mux_add(mux, "POST", path, move |request| {
         handler(&request.path);
@@ -6845,10 +6845,10 @@ where
     });
 }
 
-pub(crate) fn jet_app_http_assets(mux: &JetHTTPMux, root: &String) {
+pub(crate) fn jet_app_http_assets(mux: &JetHTTPMux, root: &str) {
     jet_http_srv_static_files_mount(
         mux,
-        &"/assets".to_string(),
+        "/assets",
         root,
         JetHTTPStaticOptions::safe(),
     );
@@ -6883,7 +6883,7 @@ pub(crate) fn jet_app_http_reload(mux: &JetHTTPMux) {
         };
         let status = if changed { 200 } else { 204 };
         let body = if changed { "data: reload\n\n" } else { "" };
-        let mut response = jet_http_srv_response(status, &body.to_string());
+        let mut response = jet_http_srv_response(status, body);
         response
             .headers
             .append("content-type", "text/event-stream")
@@ -6964,12 +6964,12 @@ impl JetShow for JetHTTPRouter {
 //       services and tools at hundreds of concurrent connections. For very high
 //       connection counts, Jet is not the right tool yet — see docs/services.md.
 
-fn jet_http_serve<F>(addr: &String, handler: F)
+fn jet_http_serve<F>(addr: &str, handler: F)
 where
     F: Fn(JetHTTPRequest) -> JetHTTPResponse + Send + Sync + 'static,
 {
     use std::io::Write;
-    let listener = std::net::TcpListener::bind(addr.as_str()).unwrap_or_else(|e| {
+    let listener = std::net::TcpListener::bind(addr).unwrap_or_else(|e| {
         eprintln!("E2801: Bind on `{}` failed: {}", addr, e);
         std::process::exit(1);
     });
@@ -7129,7 +7129,7 @@ fn jet_http_router_dispatch(
     (route.handler)(req2)
 }
 
-fn jet_http_serve_router(addr: &String, router: JetHTTPRouter) {
+fn jet_http_serve_router(addr: &str, router: JetHTTPRouter) {
     let router = std::sync::Arc::new(router);
     jet_http_serve(addr, move |request| {
         jet_http_router_dispatch(&router, request)

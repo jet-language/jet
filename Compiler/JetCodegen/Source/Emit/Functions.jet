@@ -3,12 +3,17 @@ use jet_foundation.[
     name_mangle,
     MIRAccess,
     MIRCallee,
+    MIRBasicBlock,
+    MIRBinaryDispatch,
+    MIRBinaryOp,
+    MIRCallArg,
     MIRCaptureParam,
     MIRCopyFact,
     MIRDropKind,
     MIRFieldID,
     MIRFunction,
     MIRFunctionID,
+    MIRFunctionKind,
     MIRGenericParam,
     MIRImplDef,
     MIRIndexKind,
@@ -29,6 +34,10 @@ use jet_foundation.[
     MIRTypeKind,
     MIRValueFact,
     mir_type_id,
+    MIRValueID,
+    mir_operation_place_uses,
+    mir_operation_value_uses,
+    mir_terminator_targets,
     mir_type_same_checked_type,
 ]
 
@@ -3565,6 +3574,7 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     previous_ref_bindings := ctx.ref_bindings
     previous_body_index := ctx.body_index
     previous_expected_exits := ctx.expected_test_exits
+    previous_native_ints := ctx.native_ints
     ctx.current_function = Val(function.id)
     ctx.body_index = jet_rust_emit_body_index(function)
     ctx.expected_test_exits = jet_rust_emit_expected_scope_exits(&ctx, function)
@@ -3584,15 +3594,80 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     // binding rows above.
     read_bindings :: jet_rust_emit_read_bindings(&ctx, function)
     ctx.body_index.bindings = read_bindings
-    lines := [String]{jet_rust_emit_function_signature(&ctx, function)}
+    // MIRRust RustEmitter::new plan_native_ints (#4566 slice 1b); it reads
+    // the index, shared locals and reference bindings above.
+    native_ints :: jet_rust_emit_plan_native_ints(&ctx, function, [Int:JetRustEmitIntRange]{})
+    // MIRRust plan_native_version / emit_callable (#4566 loop versioning): a
+    // versioned function prints its native version under its own symbol, then
+    // its exact body as the cold `{name}__jet_exact` fallback.
+    version :: jet_rust_emit_plan_native_version(&ctx, function, native_ints)
+    // MIRRust emit_callable_named: a direct call fills its caller's slot; the
+    // function's own name stays a by-value wrapper (jet_rust_emit_plan_return_slot).
+    return_slot :: ctx.return_slots.get(function.id.value)
+    wrapper :: if return_slot != None -> jet_rust_emit_return_slot_wrapper(&ctx, function) else -> [String]{}
+    head :: if return_slot != None -> jet_rust_emit_return_slot_signature(&ctx, function) else -> jet_rust_emit_function_signature(&ctx, function)
+    lines := [String]{}
+    exact := [String]{}
+    if version == .Val(native) {
+        ctx.native_ints = native
+        lines = jet_rust_emit_function_text(&ctx, function, head)
+        ctx.native_ints = native_ints
+        exact_signature :: jet_rust_emit_exact_version_signature(&ctx, function)
+        exact = jet_rust_emit_function_text(&ctx, function, exact_signature)
+    } else {
+        ctx.native_ints = native_ints
+        lines = jet_rust_emit_function_text(&ctx, function, head)
+    }
+    memo_header := [String]{}
+    if jet_rust_emit_function_memoized(function) {
+        root :: ~ctx.config.root_prefix
+        key :: jet_rust_emit_memo_key_type(&ctx, function)
+        value :: jet_rust_emit_callable_return(&ctx, function)
+        bound :: jet_rust_emit_memo_bound(function)
+        id :: function.id.value
+        &memo_header.push("static __jet_memo_store_{id}: std::sync::OnceLock<std::sync::Mutex<{root}JetMemo<{key}, {value}>>> = std::sync::OnceLock::new();")
+        &memo_header.push("fn __jet_memo_stats_{id}() -> {root}JetMemoStats {{ {root}jet_memo_stats(__jet_memo_store_{id}.get_or_init(|| std::sync::Mutex::new({root}JetMemo::with_bound({bound})))) }}")
+    }
+    ctx.current_function = previous_function
+    ctx.current_generic_params = previous_generic_params
+    ctx.move_facts = previous_move_facts
+    ctx.ref_bindings = previous_ref_bindings
+    ctx.body_index = previous_body_index
+    ctx.native_ints = previous_native_ints
+    ctx.expected_test_exits = previous_expected_exits
+    // MIRRust emit_callable_named: the inline attributes precede the item,
+    // and a return-slot function's wrapper precedes its body symbol.
+    if !function.is_inline_always && !function.is_inline && wrapper.len() == 0 && exact.len() == 0 && memo_header.len() == 0 -> return lines
+    out := ^memo_header
+    attribute :: if function.is_inline_always -> "#[inline(always)]" else -> "#[inline]"
+    attributed :: function.is_inline_always || function.is_inline
+    if wrapper.len() > 0 {
+        if attributed -> &out.push(attribute)
+        loop line in wrapper -> &out.push(line)
+    }
+    if attributed -> &out.push(attribute)
+    loop line in lines -> &out.push(line)
+    if exact.len() > 0 {
+        &out.push("")
+        if attributed -> &out.push(attribute)
+        loop line in exact -> &out.push(line)
+    }
+    out
+}
+
+// MIRRust emit_callable_named: one body of `function` under the signature
+// `head`, with ctx.native_ints as its native plan. A native version's plan
+// (ctx.native_ints.params non-empty) checks its versioned parameters first.
+fn jet_rust_emit_function_text(ctx: &JetRustEmitContext, function: MIRFunction, head: String) -> [String] Never! {
+    return_slot :: ctx.return_slots.get(function.id.value)
+    destinations :: ctx.call_destinations.get(function.id.value)
+    lines := [String]{head}
     if jet_rust_emit_function_memoized(function) {
         &lines.push("    let __jet_memo_key: {jet_rust_emit_memo_key_type(&ctx, function)} = {jet_rust_emit_memo_key_value(&ctx, function)};")
         &lines.push("    {ctx.config.root_prefix}jet_memo_call(__jet_memo_store_{function.id.value}.get_or_init(|| std::sync::Mutex::new({ctx.config.root_prefix}JetMemo::with_bound({jet_rust_emit_memo_bound(function)}))), __jet_memo_key, || {{")
     }
     generator :: function.generator != None
-    // MIRRust emit_callable_named: the producer runs on its own task thread
-    // (`Send + 'static`), so a read-borrowed parameter is snapshotted into the
-    // closure; a read parameter cannot change during the call.
+    // Producer storage belongs inside its task closure, not in task captures.
     borrowed := [String]{}
     if generator {
         loop parameter in function.params {
@@ -3603,8 +3678,44 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
         &lines.push("    {ctx.config.root_prefix}jet_std::jet_stream_task(move |__jet_yield_tx| {{")
         loop name in borrowed -> &lines.push("        let {name} = &{name};")
     }
-    // Even empty cursor slots inherit their payload's Send requirement.
-    // Body storage belongs inside the producer, not in its task captures.
+    // MIRRust emit_callable_named (#4566 slice 1b): native Int shadows sit
+    // before the slots, outside the slot text passes, in row order;
+    // compaction renames them with the body.
+    loop local in function.locals {
+        if ctx.native_ints.locals.get(local.id.value) != None -> &lines.push("    let mut {jet_rust_emit_native_local_slot(local.id)}: i64 = 0;")
+    }
+    loop value in function.values {
+        if ctx.native_ints.values.get(value.id.value) != None -> &lines.push("    let mut {jet_rust_emit_native_value_slot(value.id)}: i64 = 0;")
+    }
+    // MIRRust emit_callable_named (#4566 loop versioning): the native version
+    // checks each versioned parameter once; a call outside the ranges runs the
+    // exact body.
+    if ctx.native_ints.params.len() > 0 {
+        checks := [String]{}
+        args := [String]{}
+        loop capture in function.capture_params {
+            name :: jet_rust_emit_capture_name(capture.slot)
+            &args.push(name)
+            index :: function.params.len() + capture.slot
+            admitted :: ctx.native_ints.params.get(index) ?? next
+            shadow :: jet_rust_emit_native_param_slot(index)
+            &lines.push("    let {shadow}: i64 = {name}.to_raw();")
+            &checks.push("({admitted.low}i64..={admitted.high}i64).contains(&{shadow})")
+        }
+        loop parameter in function.params {
+            name :: jet_rust_emit_parameter_name(function, parameter.index)
+            &args.push(name)
+            admitted :: ctx.native_ints.params.get(parameter.index) ?? next
+            shadow :: jet_rust_emit_native_param_slot(parameter.index)
+            &lines.push("    let {shadow}: i64 = {name}.to_raw();")
+            &checks.push("({admitted.low}i64..={admitted.high}i64).contains(&{shadow})")
+        }
+        if return_slot != None -> &args.push(JET_RUST_EMIT_RETURN_SLOT_PARAMETER)
+        &lines.push("    if !({checks.join(" && ")}) {{")
+        &lines.push("        return {jet_rust_emit_exact_version_symbol(&ctx, function)}({args.join(", ")});")
+        &lines.push("    }}")
+    }
+    slots_start :: lines.len()
     partial_lines :: jet_rust_emit_partial_declarations(&ctx, function)
     loop line in partial_lines -> &lines.push("    {line}")
     locals_start :: lines.len()
@@ -3711,17 +3822,5 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
         &memo_header.push("static __jet_memo_store_{id}: std::sync::OnceLock<std::sync::Mutex<{root}JetMemo<{key}, {value}>>> = std::sync::OnceLock::new();")
         &memo_header.push("fn __jet_memo_stats_{id}() -> {root}JetMemoStats {{ {root}jet_memo_stats(__jet_memo_store_{id}.get_or_init(|| std::sync::Mutex::new({root}JetMemo::with_bound({bound})))) }}")
     }
-    ctx.current_function = previous_function
-    ctx.current_generic_params = previous_generic_params
-    ctx.move_facts = previous_move_facts
-    ctx.ref_bindings = previous_ref_bindings
-    ctx.body_index = previous_body_index
-    ctx.expected_test_exits = previous_expected_exits
-    // MIRRust emit_callable_named: the inline attributes precede the item.
-    out := ^memo_header
-    if function.is_inline_always -> &out.push("#[inline(always)]") else {
-        if function.is_inline -> &out.push("#[inline]")
-    }
-    loop line in lines -> &out.push(line)
-    out
+    "#[cold]\nfn {symbol}{generics}({params.join(", ")}) -> {jet_rust_emit_callable_return(&ctx, function)} {{"
 }

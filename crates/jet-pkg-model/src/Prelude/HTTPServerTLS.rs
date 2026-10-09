@@ -35,8 +35,8 @@ impl Write for JetHTTPTlsSharedWriter {
 }
 
 fn jet_http_server_tls_config(
-    cert_pem: &String,
-    key_pem: &String,
+    cert_pem: &str,
+    key_pem: &str,
 ) -> Result<Arc<rustls::ServerConfig>, String> {
     static RUSTLS_PROVIDER: std::sync::Once = std::sync::Once::new();
     RUSTLS_PROVIDER.call_once(|| {
@@ -65,8 +65,8 @@ fn jet_http_server_tls_config(
 }
 
 pub fn jet_http_server_tls_validate_impl(
-    cert_pem: &String,
-    key_pem: &String,
+    cert_pem: &str,
+    key_pem: &str,
 ) -> Result<(), String> {
     jet_http_server_tls_config(cert_pem, key_pem).map(|_| ())
 }
@@ -79,8 +79,8 @@ pub fn jet_http_server_tls_validate_impl(
 /// final request of the 1000-request cap so the response carries `Connection: close`
 /// like the plain HTTP path.
 pub fn jet_http_server_tls_session_impl(
-    cert_pem: &String,
-    key_pem: &String,
+    cert_pem: &str,
+    key_pem: &str,
     stream: TcpStream,
     on_request: Box<dyn FnMut(&[u8], bool) -> Result<(Vec<u8>, bool), String> + Send>,
     on_h2: Box<
@@ -106,8 +106,8 @@ pub fn jet_http_server_tls_session_impl(
 }
 
 fn jet_http_server_tls_session_limited(
-    cert_pem: &String,
-    key_pem: &String,
+    cert_pem: &str,
+    key_pem: &str,
     stream: TcpStream,
     mut on_request: Box<dyn FnMut(&[u8], bool) -> Result<(Vec<u8>, bool), String> + Send>,
     on_h2: Box<
@@ -275,8 +275,8 @@ fn jet_http_server_tls_session_limited(
 
 /// Backward-compatible one-shot entry used by older emit shapes.
 pub fn jet_http_server_tls_handle_impl(
-    cert_pem: &String,
-    key_pem: &String,
+    cert_pem: &str,
+    key_pem: &str,
     stream: TcpStream,
     handler: Box<dyn FnOnce(String) -> String + Send>,
 ) -> Result<(), String> {

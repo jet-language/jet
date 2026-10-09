@@ -6207,7 +6207,7 @@ fn jet_services_directory_register(
 
 fn jet_services_directory_resolve(
     tree: &JetServiceTree,
-    name: &String,
+    name: &str,
 ) -> Result<JetServiceEndpoint, JetServiceError> {
     let Some((entry, endpoint, signature)) = tree
         .directory

@@ -1067,7 +1067,7 @@ fn jet_rust_emit_block(ctx: &JetRustEmitContext, function: MIRFunction, plan: Je
     active := plan.debug[position]
     expects_fail :: ctx.expected_test_exits.len() > 0
     if expects_fail -> &items.push(jet_rust_emit_cfg_line("{indent}let __jet_scope_step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{"))
-    loop instruction in block.instructions {
+    loop (index, instruction) in block.instructions {
         skip := false
         if instruction.operation == {
             .ScopeEnter(scope, _) -> {

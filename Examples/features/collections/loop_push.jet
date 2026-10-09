@@ -1,0 +1,32 @@
+// Pushing once per loop pass builds the list in order. The loop may count to
+// a fixed end, to a runtime end, include its end, use a stride, start from a
+// list that already holds values, or stop early with `break`; the list holds
+// exactly the values pushed.
+fn squares(count: Int) -> [Int] {
+    out := [Int]{}
+    loop i in 0..<count -> &out.push(i * i)
+    out
+}
+
+fn run() {
+    print(squares(6))
+    print(squares(0).len())
+    fixed := [Int]{}
+    loop i in 0..<5 -> &fixed.push(i + 10)
+    print(fixed)
+    seeded := [Int]{1, 2}
+    loop i in 3..5 -> &seeded.push(i)
+    print(seeded)
+    strided := [Int]{}
+    loop i in 0..10, 3 -> &strided.push(i)
+    print(strided)
+    early := [Int]{}
+    loop i in 0..<1000000000 {
+        &early.push(i)
+        if early.len() == 3 -> break
+    }
+    print(early)
+    words := [String]{}
+    loop i in 0..<3 -> &words.push("w{i}")
+    print(words.join(","))
+}

@@ -22,8 +22,8 @@ use kernel::jet_email;
 
 #[derive(Clone, Copy)]
 pub struct RuntimeFns {
-    pub tls_begin: fn(std::net::TcpStream, &String) -> Result<i64, String>,
-    pub tls_begin_ca: fn(std::net::TcpStream, &String, &Vec<u8>) -> Result<i64, String>,
+    pub tls_begin: fn(std::net::TcpStream, &str) -> Result<i64, String>,
+    pub tls_begin_ca: fn(std::net::TcpStream, &str, &Vec<u8>) -> Result<i64, String>,
     pub tls_handshake_step: fn(i64) -> Result<bool, String>,
     pub tls_set_poll_timeout: fn(i64, i64) -> Result<(), String>,
     pub tls_read: fn(i64, i64) -> Result<Vec<u8>, String>,

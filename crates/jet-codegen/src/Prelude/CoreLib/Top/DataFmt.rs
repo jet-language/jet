@@ -49,7 +49,7 @@ fn jet_std_toml_parse(text: &String) -> Result<jet_std::Dyn, jet_std::EncodingEr
     })
 }
 
-fn jet_enc_toml_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
+fn jet_enc_toml_decode<T: __jet_Decode>(text: &str) -> Result<T, Vec<jet_std::FieldError>> {
     let tree = jet_std::toml::parse_to_tree(text).map_err(|e| {
         jet_std::FieldError::one(format!("invalid TOML (line {}): {}", e.line, e.message))
     })?;
@@ -75,7 +75,7 @@ fn jet_std_yaml_parse(text: &String) -> Result<jet_std::Dyn, jet_std::EncodingEr
     })
 }
 
-fn jet_enc_yaml_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
+fn jet_enc_yaml_decode<T: __jet_Decode>(text: &str) -> Result<T, Vec<jet_std::FieldError>> {
     let tree = jet_std::yaml::parse_to_tree(text).map_err(|e| {
         jet_std::FieldError::one(format!("invalid YAML (line {}): {}", e.line, e.message))
     })?;

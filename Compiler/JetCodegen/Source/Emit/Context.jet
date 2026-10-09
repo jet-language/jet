@@ -1169,6 +1169,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         ref_bindings: jet_rust_emit_empty_ref_bindings(),
         body_index: jet_rust_emit_empty_body_index(),
         expected_test_exits: [U64:U64]{},
+        native_ints: jet_rust_emit_empty_native_ints(),
         unit_ratio_function: None,
         unit_ratio_parameters: [U64:Bool]{},
         selected_modules: [U64:Bool]{},
@@ -1291,6 +1292,20 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
     ctx.view_carriers = jet_rust_emit_collect_view_carriers(&ctx)
     ctx.plain_drop_types = jet_rust_emit_collect_plain_drop_types(&ctx)
     ctx.clone_bounds = jet_rust_emit_collect_clone_bounds(&ctx)
+    // MIRRust RustEmitter::new: destinations read every callee's return slot,
+    // so all are planned first.
+    loop function_index in 0..<ctx.program.functions.len() {
+        function := ctx.program.functions[function_index]
+        slot :: jet_rust_emit_plan_return_slot(&ctx, function) ?? next
+        ctx.return_slots[function.id.value] = slot
+    }
+    if ctx.return_slots.len() > 0 {
+        loop function_index in 0..<ctx.program.functions.len() {
+            function := ctx.program.functions[function_index]
+            destinations :: jet_rust_emit_plan_call_destinations(&ctx, function)
+            if destinations.targets.len() > 0 -> ctx.call_destinations[function.id.value] = destinations
+        }
+    }
     ctx
 }
 

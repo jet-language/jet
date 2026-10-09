@@ -3,8 +3,8 @@
 
 // ── jet.csv ───────────────────────────────────────────────────────────────────
 fn jet_ring_csv_records(
-    text: &String,
-    delimiter: &String,
+    text: &str,
+    delimiter: &str,
     header: bool,
     skip_blank: bool,
 ) -> Result<Vec<jet_csv_kernel::CsvRecord>, String> {
@@ -12,8 +12,8 @@ fn jet_ring_csv_records(
 }
 
 fn jet_ring_csv_parse(
-    text: &String,
-    delimiter: &String,
+    text: &str,
+    delimiter: &str,
     header: bool,
     skip_blank: bool,
 ) -> Result<Vec<Vec<String>>, String> {
@@ -22,8 +22,8 @@ fn jet_ring_csv_parse(
 }
 
 fn jet_ring_csv_rows(
-    text: &String,
-    delimiter: &String,
+    text: &str,
+    delimiter: &str,
     header: bool,
     skip_blank: bool,
 ) -> Result<Vec<jet_std::CSVRow>, String> {
