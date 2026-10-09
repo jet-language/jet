@@ -1,7 +1,7 @@
 // JetTrace.rs:1138-1256. Sort borrowed row indices, not cloned payload tables.
 fn trace_skeleton_content_json(value: TraceSkeleton) -> CanonicalJSON JetTraceError! {
     argv := [CanonicalJSON]{}
-    loop item in value.argv -> &argv.push(.String(~item))
+    loop item in value.argv -> &argv.push(.String(item.copy()))
     samples := [CanonicalJSON]{}
     loop item in value.samples -> &samples.push(trace_sample_to_json(item))
     profile :: trace_profile_to_json(value.profile)
@@ -62,7 +62,7 @@ fn trace_skeleton_content_json(value: TraceSkeleton) -> CanonicalJSON JetTraceEr
     jettrace_object([CanonicalJSONField]{
         jettrace_field("allocations", .Array(^allocations)), jettrace_field("game_draw_events", .Array(^draws)), jettrace_field("game_frames", .Array(^frames)),
         jettrace_field("argv", .Array(^argv)), jettrace_field("browser", .Array(^browser)), jettrace_field("capture_policy", capture_policy_to_json(value.capture_policy)),
-        jettrace_field("command", .String(~value.command)), jettrace_field("hardware", trace_hardware_to_json(value.hardware)), jettrace_field("io", .Array(^io)),
+        jettrace_field("command", .String(value.command.copy())), jettrace_field("hardware", trace_hardware_to_json(value.hardware)), jettrace_field("io", .Array(^io)),
         jettrace_field("locks", .Array(^locks)), jettrace_field("native", .Array(^native)), jettrace_field("samples", .Array(^samples)), jettrace_field("profile", ^profile),
         jettrace_field("source_identity", .Array(^identity)), jettrace_field("source_maps", .Array(^maps)), jettrace_field("receipt_sections", .Array(^receipts)),
         jettrace_field("spans", .Array(^spans)), jettrace_field("tasks", .Array(^tasks)), jettrace_field("toolchain", trace_toolchain_to_json(value.toolchain))

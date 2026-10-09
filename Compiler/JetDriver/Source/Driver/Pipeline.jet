@@ -376,7 +376,7 @@ fn jet_driver_attach_registration_source_location(diagnostic: Diagnostic, graph:
 // jet_driver_attach_registration_source_location on the graph `program` owns
 // (a comptime run's tables).
 fn jet_driver_attach_program_source_location(diagnostic: Diagnostic, program: SemaProgramTables, module_identity: String) -> Diagnostic Never! {
-    graph :: program.registration_graph ?? return ~diagnostic
+    graph :: program.registration_graph ?? return diagnostic.copy()
     jet_driver_attach_registration_source_location(diagnostic, graph, module_identity)
 }
 fn jet_driver_module_display(relative_path: String) -> String Never! {
@@ -3303,7 +3303,7 @@ fn jet_driver_comptime_run(
     // never change, so every on-demand function check shares one, built at
     // the run's first function check (jet_driver_comptime_function_closure).
     memory_plan := [SemaFunctionMemoryPlan]{}
-    checked_functions := ~initial_functions
+    checked_functions := initial_functions.copy()
     trace := jet_driver_empty_compile_trace()
     pending := sources
     // The `module\nkey` of every source pending or staged in this run.
@@ -3315,7 +3315,7 @@ fn jet_driver_comptime_run(
     // place rather than rebuilding it per item, and counted into the run's
     // available constant keys.
     owned := ^staged
-    environment := sema_comptime_environment(^owned ?? ~graph, values, request.trace_sink)
+    environment := sema_comptime_environment(^owned ?? graph.copy(), values, request.trace_sink)
     // The module scope every item and function check of the run checks in.
     probe := sema_comptime_probe_init(sema_host_hook_access(request.eval_config.host_hooks))
     resolved_count := values.len()
@@ -4002,7 +4002,7 @@ fn jet_driver_test_artifacts(package_identity: String, entry_module_identity: St
                 reference := TFunctionRef?{None}
                 loop function in owner.functions {
                     if function.key == function_key {
-                        reference = Val(TFunctionRef{key: ~function.key, module_identity: ~function.module_identity, name: ~function.name, span: function.source_span, visibility: function.visibility})
+                        reference = Val(TFunctionRef{key: function.key.copy(), module_identity: function.module_identity.copy(), name: function.name.copy(), span: function.source_span, visibility: function.visibility})
                         break
                     }
                 }
@@ -4013,7 +4013,7 @@ fn jet_driver_test_artifacts(package_identity: String, entry_module_identity: St
                 function_ref :: ^reference ?? next
                 &output_checks.push(TOutputCheckFact{
                     key: "{graph_module.module_identity}::output-check::{output.output_name}@{output.definition.start}..{output.definition.end}",
-                    name: ~output.output_name,
+                    name: output.output_name.copy(),
                     function: ^function_ref,
                 })
                 wanted[function_key] = true

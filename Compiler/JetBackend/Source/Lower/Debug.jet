@@ -132,7 +132,7 @@ fn lower_debug_variable(p: MIRProgram, m: &LowerModule, file: MIRSourceFileID, n
 // `value` now carries the variable of `slot`, if it has one.
 fn lower_debug_bind(f: &LowerFunction, slot: Int, value: LIRValueID) Never! {
     if slot >= f.debug_slots.len() -> return
-    variable :: ~f.debug_slots[slot]
+    variable :: f.debug_slots[slot].copy()
     if variable >= 0 -> lower_debug_bind_variable(&f, variable, value)
 }
 

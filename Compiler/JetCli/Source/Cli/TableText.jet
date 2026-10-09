@@ -404,10 +404,10 @@ fn jet_cli_table_wrap(text: [U8], budget: Int) -> [[U8]] Never! {
 fn jet_cli_table_clip(text: [U8], width: Int, unicode: Bool) -> [U8] Never! {
     if width == 0 -> return [U8]{}
     if text.len() > JET_CLI_TABLE_MAX_CELL_BYTES {
-        bounded :: jet_cli_table_bound_text(~text)
+        bounded :: jet_cli_table_bound_text(text.copy())
         return jet_cli_table_clip(bounded, width, unicode)
     }
-    if jet_cli_table_text_width(text) <= width -> return ~text
+    if jet_cli_table_text_width(text) <= width -> return text.copy()
     out := [U8]{}
     suffix_width :: if unicode -> 1 else -> 3
     if width <= suffix_width {
@@ -441,7 +441,7 @@ fn jet_cli_table_repeat(out: &[U8], byte: U8, count: Int) Never! {
 
 fn jet_cli_table_append_pad(out: &[U8], value: [U8], width: Int, alignment: JetCLITableAlignment) Never! {
     if value.len() > JET_CLI_TABLE_MAX_CELL_BYTES {
-        bounded :: jet_cli_table_bound_text(~value)
+        bounded :: jet_cli_table_bound_text(value.copy())
         jet_cli_table_append_pad(&out, bounded, width, alignment)
         return
     }

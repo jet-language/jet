@@ -136,5 +136,5 @@ fn name_ledger_display_path_at(ledger: NameLedger, module_index: Int, span: Span
 fn name_mangle(name: String) -> String Never! {
     bytes :: name.bytes()
     plain :: if name.starts_with("$") -> "ct_{String.from_bytes(~(bytes[1..<bytes.len()])) ?? ""}" else -> name
-    if plain.starts_with("__jet_") -> ~plain else -> "__jet_{plain}"
+    if plain.starts_with("__jet_") -> plain.copy() else -> "__jet_{plain}"
 }

@@ -6,7 +6,7 @@ fn opt_licm_dominates(dom: OptDominators, ancestor: Int, row: Int) -> Bool Never
     cursor := row
     loop cursor >= 0 {
         if cursor == ancestor -> return true
-        parent :: ~dom.parent[cursor]
+        parent :: dom.parent[cursor].copy()
         if parent == cursor -> return false
         cursor = parent
     }
@@ -28,7 +28,7 @@ fn opt_licm_body(function: LIRFunction, dom: OptDominators, header: Int) -> [Boo
     }
     cursor := 0
     loop cursor < pending.len() {
-        row :: ~pending[cursor]
+        row :: pending[cursor].copy()
         cursor += 1
         if !opt_licm_dominates(dom, header, row) -> return None
         loop predecessor in dom.predecessors[row] {
@@ -162,7 +162,7 @@ fn opt_licm_loop(function: &LIRFunction, header: Int) Never! {
     if hoisted.len() == 0 -> return
     header_id :: function.blocks[header].id
     if outside.len() == 1 {
-        predecessor :: ~outside[0]
+        predecessor :: outside[0].copy()
         if function.blocks[predecessor].terminator == .Jump(target) {
             if target.block == header_id {
                 block :: function.blocks[predecessor]

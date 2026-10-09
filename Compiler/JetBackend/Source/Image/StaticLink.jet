@@ -1776,8 +1776,8 @@ fn link_debug_sections(c: &LinkContext) -> LinkDebug Never! {
     groups := [String:Int]{}
     loop obj in 0..<c.obj_name.len() {
         if c.obj_base[obj] != 0 -> next
-        b :: ~c.obj_buffer[obj]
-        first :: ~c.obj_first_section[obj]
+        b :: c.obj_buffer[obj].copy()
+        first :: c.obj_first_section[obj].copy()
         loop k in 1..<c.obj_count[obj] {
             s :: first + k
             if link_sec_type(c, obj, s) != LINK_SHT_PROGBITS || (link_sec_flags(c, obj, s) & 0x802) != 0 -> next
@@ -1877,7 +1877,7 @@ fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDe
     symtab := [U8]{}
     loop _ in 0..<24 -> &symtab.push(U8{0})
     loop obj in 0..<c.obj_name.len() {
-        b :: ~c.obj_buffer[obj]
+        b :: c.obj_buffer[obj].copy()
         loop k in 1..<c.obj_first_global[obj] {
             at :: link_sym_at(c, obj, k)
             info :: link_u8(c.bufs, b, at + 4)

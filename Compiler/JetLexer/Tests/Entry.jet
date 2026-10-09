@@ -12,7 +12,7 @@ fn lexer_test_cr() -> String Never! { String.from_bytes([U8]{13}) ?? panic("ASCI
 fn lexer_test_strings(tokens: [Token]) -> [[StringPart]] Never! {
     strings := [[StringPart]]{}
     loop token in tokens {
-        if token.kind == TOKEN_STRING -> &strings.push(~token.payload.string_parts)
+        if token.kind == TOKEN_STRING -> &strings.push(token.payload.string_parts.copy())
     }
     strings
 }
@@ -35,7 +35,7 @@ fn lexer_test_first_string(source: String) -> String Never! {
     assert(strings.len() > 0)
     parts :: strings[0]
     assert(parts.len() == 1 && parts[0].kind == STRING_PART_TEXT)
-    ~parts[0].text
+    parts[0].text.copy()
 }
 
 // Rust: crates/jet-lexer/src/lib.rs:15
@@ -293,7 +293,7 @@ byte_fixed :: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* bloc
     loop diagnostic in lexed.diagnostics {
         assert_eq(diagnostic.code, "E-FENCE-SPELLING")
         edit :: diagnostic.edit ?? panic("fence respelling edit")
-        &edits.push(~edit.new_text)
+        &edits.push(edit.new_text.copy())
     }
     assert_eq(edits, [String]{"<:", ":>", " :>"})
     assert_eq(lexed.tokens[2].kind, TOKEN_FENCE_OPEN)

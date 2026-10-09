@@ -41,7 +41,7 @@ fn lower_native_handle_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue, op:
     if op == "eq" -> &params.push(lir_layout_pointer())
     result :: if op == "drop" -> None else if op == "eq" -> Val(lir_layout_bool()) else -> Val(lir_layout_pointer())
     f := lower_helper_start(&m, glue, params, result)
-    shell :: ~f.open_params[0]
+    shell :: f.open_params[0].copy()
     ty :: glue.ty
     repr :: lower_repr(p, ty)
     if repr == .Handle(_, _) || repr == .Unsupported(_) {
@@ -84,7 +84,7 @@ fn lower_native_handle_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue, op:
         lower_seal(&f, LIRTerminator.Return{value: Val(target)})
     } else if op == "eq" {
         left :: lower_native_handle_operand(p, &f, ty, shell)
-        right :: lower_native_handle_operand(p, &f, ty, ~f.open_params[1])
+        right :: lower_native_handle_operand(p, &f, ty, f.open_params[1].copy())
         equal :: lower_equal_values(p, &m, &f, ty, left, right)
         if equal == .Val(value) -> lower_seal(&f, LIRTerminator.Return{value: Val(value)}) else {
             lower_seal(&f, LIRTerminator.Unreachable)

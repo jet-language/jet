@@ -41,8 +41,8 @@ fn jettrace_validate_profile(value: CanonicalJSON, source_identity: CanonicalJSO
         identity_fields :: jettrace_object_keys(identity, "content.source_identity", [String]{"path", "sha256", "symbols"})
         path :: jettrace_text(identity_fields[jettrace_get(identity_fields, "path")].value, "content.source_identity.path")
         digest :: jettrace_text(identity_fields[jettrace_get(identity_fields, "sha256")].value, "content.source_identity.sha256")
-        if !identity_index.has_key(path) -> identity_index[~path] = [String:Bool]{}
-        identity_index[path][~digest] = true
+        if !identity_index.has_key(path) -> identity_index[path.copy()] = [String:Bool]{}
+        identity_index[path][digest.copy()] = true
     }
     loop index in 0..<rows.len() {
         label :: "content.profile.rows[{index}]"

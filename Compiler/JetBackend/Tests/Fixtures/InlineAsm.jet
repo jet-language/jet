@@ -458,7 +458,7 @@ fn fx_inline_asm_import() -> MIRProgram Never! {
     fx_do(&b, MIROperation.Call{callee: MIRCallee.Foreign{id: MIRForeignID{value: 77}}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
     fx_block(&b, U64{0}, MIRTerminator.Return{value: None})
     p := fx_asm_program([MIRFunction]{fx_function("run", b, fx_unit()), fx_asm_leaf("os_load_word", [String]{"address"}, true)})
-    import := ~p.foreign[0]
+    import := p.foreign[0].copy()
     import.key = "runtime-overflow-import"
     import.name = "runtime-overflow-import"
     import.symbol = "jet_rt_panic_overflow"

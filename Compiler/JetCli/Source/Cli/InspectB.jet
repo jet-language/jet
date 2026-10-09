@@ -812,12 +812,12 @@ fn jet_cli_semindex(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIP
 // the first non-flag word is the entry, the second an optional Output
 // address; the host selects the Output through the canonical query.
 fn jet_cli_inspect_output(args: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
-    positionals :: loop argument in args if !argument.starts_with("-") -> ~argument
+    positionals :: loop argument in args if !argument.starts_with("-") -> argument.copy()
     if positionals.len() == 0 {
         return jet_cli_inspect_b_fail("E2104", "`jet inspect output` needs an entry file", "run `jet inspect output Examples/features/tooling/output_callable.jet`", color, json, JET_DRIVER_EXIT_USAGE)
     }
-    address :: if positionals.len() > 1 -> Val(~positionals[1]) else -> None
-    JetCLIPlan.Output{file: ~positionals[0], address: address, color: color, json: json}
+    address :: if positionals.len() > 1 -> Val(positionals[1].copy()) else -> None
+    JetCLIPlan.Output{file: positionals[0].copy(), address: address, color: color, json: json}
 }
 
 // `jet inspect expand [--facts <lens>] <file.jet>` (CmdExpand.rs

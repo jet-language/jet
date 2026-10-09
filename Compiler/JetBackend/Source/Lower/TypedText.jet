@@ -150,8 +150,8 @@ fn lower_text_byte_is(f: &LowerFunction, value: LIRValueID, byte: Int, yes: LIRB
 fn lower_helper_typed_text_escape(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     html :: glue.helper == "text.html_escape"
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
-    builder :: ~f.open_params[0]
-    text :: ~f.open_params[1]
+    builder :: f.open_params[0].copy()
+    text :: f.open_params[1].copy()
     data :: lower_pointer(&f)
     lower_call_runtime(&m, &f, "jet_rt_string_data", [LIRValueID]{text}, Val(data))
     length :: lower_word(&f)

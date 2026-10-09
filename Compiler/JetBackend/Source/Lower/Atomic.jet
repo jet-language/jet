@@ -188,7 +188,7 @@ fn lower_atomic_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
 
 fn lower_atomic_drop_glue(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    address :: ~f.open_params[0]
+    address :: f.open_params[0].copy()
     nil :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Const{dst: nil, value: 0})
     absent :: lower_flag(&f)
@@ -208,8 +208,8 @@ fn lower_helper_atomic_try_add(p: MIRProgram, m: &LowerModule, glue: LowerGlue) 
     ok_ty :: if glue.ty.kind == .Result(ok, _) -> ok else -> panic("Atomic try_add checked Result")
     err_ty :: if glue.ty.kind == .Result(_, err) -> err else -> panic("Atomic try_add checked Result")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, Val(lir_layout_pointer()))
-    address :: ~f.open_params[0]
-    delta :: ~f.open_params[1]
+    address :: f.open_params[0].copy()
+    delta :: f.open_params[1].copy()
     result :: lower_pointer(&f)
     lower_alloc(&m, &f, result, lower_result_box_size(p, ok_ty, err_ty))
     scratch :: lower_pointer(&f)

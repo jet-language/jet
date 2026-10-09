@@ -23,7 +23,7 @@ fn jettrace_test_text(value: TraceSkeleton) -> String Never! { String.from_bytes
 fn jettrace_test_set(value: &CanonicalJSON, key: String, ^replacement: CanonicalJSON) Never! {
     if value == {
         .Object(original) -> {
-            fields := ~original
+            fields := original.copy()
             loop index in 0..<fields.len() {
                 if fields[index].key == key {
                     fields[index].value = ^replacement
@@ -259,7 +259,7 @@ fn jettrace_test_window(status: String, wall: U64?, cpu: U64?) -> Bool Never! {
         skeleton :: jettrace_sample_skeleton()
         content := trace_skeleton_content_json(skeleton) ?? panic(err.message)
         policy := capture_policy_to_json(skeleton.capture_policy) ?? panic(err.message)
-        jettrace_test_set(&policy, "schema", .Integer(~schema))
+        jettrace_test_set(&policy, "schema", .Integer(schema.copy()))
         jettrace_test_set(&content, "capture_policy", ^policy)
         assert_eq(jettrace_test_error_bytes(jettrace_test_wrap(^content)), "unsupported capture_policy schema")
     }

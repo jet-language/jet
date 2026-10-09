@@ -113,7 +113,7 @@ fn jet_codegen_collection_materialize_view(builder: &JetCodegenBuilder, program:
 fn jet_codegen_collection_slot_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: MIRValueID, source: TExpr, target: Type) -> MIRValueID Never! {
     qualified_source :: jet_codegen_qualify_type(source.ty, program.modules, builder.function.module_identity, builder.generic_type_names)
     qualified_target :: jet_codegen_qualify_type(target, program.modules, builder.function.module_identity, builder.generic_type_names)
-    if type_identity_key(qualified_source) == type_identity_key(qualified_target) -> return ~value
+    if type_identity_key(qualified_source) == type_identity_key(qualified_target) -> return value.copy()
     if jet_codegen_unwrap_pattern_tags(qualified_target) == .Union(members) {
         member_found := false
         loop member in members {
@@ -138,7 +138,7 @@ fn jet_codegen_collection_slot_value(builder: &JetCodegenBuilder, program: JetCo
         if source_trait == .Val(source_type) && target_trait == .Val(target_type) {
             canonical_source :: jet_codegen_qualify_type(source_type, program.modules, builder.function.module_identity, builder.generic_type_names)
             canonical_target :: jet_codegen_qualify_type(target_type, program.modules, builder.function.module_identity, builder.generic_type_names)
-            if type_identity_key(canonical_source) == type_identity_key(canonical_target) -> return ~boxed
+            if type_identity_key(canonical_source) == type_identity_key(canonical_target) -> return boxed.copy()
         }
         panic("checked collection slot has incompatible source and target carriers")
     }

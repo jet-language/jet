@@ -233,7 +233,7 @@ fn run() {
     flushed := 0
     lower_watch :: sh_time.start()
     loop (index, descriptor) in prepared.functions {
-        signature :: ~m.mir_signatures[index]
+        signature :: m.mir_signatures[index].copy()
         id :: LIRFunctionID{value: index}
         if skips.get(descriptor.name) != None {
             &m.issues.push(LIRLoweringIssue{function: descriptor.name, message: "probe: lowering crashed in an earlier run"})
@@ -257,7 +257,7 @@ fn run() {
     glue_watch :: sh_time.start()
     cursor := 0
     loop cursor < m.glue.len() {
-        glue :: ~m.glue[cursor]
+        glue :: m.glue[cursor].copy()
         name :: sh_glue_name(glue)
         if skips.get(name) != None {
             &m.issues.push(LIRLoweringIssue{function: name, message: "probe: glue lowering crashed in an earlier run"})
@@ -277,7 +277,7 @@ fn run() {
     }
     sh_note(out, "stats", "glue_ms\t{glue_watch.elapsed_millis()}")
     sh_note(out, "stats", "glue_functions\t{m.glue.len()}")
-    lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data, debug: LIRModuleDebug{directory: "", files: ~m.debug_files, types: ~m.debug_types}}
+    lowered :: LIRModule{signatures: m.signatures.copy(), functions: functions, data: m.data.copy(), debug: LIRModuleDebug{directory: "", files: m.debug_files.copy(), types: m.debug_types.copy()}}
     loop issue in m.issues -> &issues.push("{issue.function}\t{issue.message}")
     if issues.len() == 0 {
         loop issue in lir_lint_module(lowered) -> &issues.push("{issue.function}\tLIR lint b{issue.block}: {issue.message}")

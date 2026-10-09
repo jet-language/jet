@@ -426,7 +426,7 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
         // tail. Its private pin cannot shadow a declaration-slot default.
         pin_slot := slot
         if params[slot].variadic -> pin_slot = -index - 1
-        original :: ~lowered[index].value
+        original :: lowered[index].value.copy()
         ty :: original.ty
         init := original
         if lowered[index].clone || lowered[index].arc_clone {
@@ -514,7 +514,7 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
     loop index in 0..<lowered.len() {
         slot :: typed.slots[index]
         if !params[slot].variadic -> next
-        value := ~lowered[index].value
+        value := lowered[index].value.copy()
         if lowered[index].widen_to_vec {
             // The boundary copy itself clones the fixed list's elements.
             // Do not first clone the array and then clone that copy again.

@@ -114,7 +114,7 @@ fn lower_scan_binary_parts(p: MIRProgram, m: &LowerModule, f: &LowerFunction, pa
         zero :: lower_const(&f, 0)
         if part == .Literal(bytes) {
             id :: LIRDataID{value: m.data.len()}
-            &m.data.push(LIRData{id: id, bytes: ~bytes, align: 1, relocs: [LIRDataReloc]{}})
+            &m.data.push(LIRData{id: id, bytes: bytes.copy(), align: 1, relocs: [LIRDataReloc]{}})
             address :: lower_pointer(&f)
             lower_emit(&f, LIRInst.DataAddress{dst: address, data: id})
             &parts.push(LowerScanPart{descriptor: 16, a: address, b: lower_const(&f, bytes.len()), width: 0, storage: 0, destination: zero})

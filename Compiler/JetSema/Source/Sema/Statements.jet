@@ -2613,7 +2613,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         .Block(body, value, block_span) -> {
             block_mark :: sema_scope_mark(&scopes)
             sema_scope_enter(&scopes, &state, "refutable.block@{block_span.start}")
-            block_return_type :: ~scopes.return_type
+            block_return_type :: scopes.return_type.copy()
             block_loop_depth :: scopes.loop_depth
             checked_block := sema_check_statements(body, block_return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, block_loop_depth)
             if value == .Val(tail) -> _ := sema_check_expression(tail, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2648,7 +2648,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
                             &diagnostics.push(sema_error("E0405", expr_span(expression), "`?? return value` cannot return a value here", "this function returns nothing", "drop the value from the return route"))
                         }
                         else -> {
-                            fallback_return_type :: ~scopes.return_type
+                            fallback_return_type :: scopes.return_type.copy()
                             checked :: sema_stmt_check_return_value(expression, fallback_return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics)
                             if checked != None {
                                 checked_value :: checked
@@ -3335,7 +3335,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
         &diagnostics.push(sema_unknown_name(name, name_span))
         return None
     }
-    binding :: ~scopes.bindings[index]
+    binding :: scopes.bindings[index].copy()
     if sema_ownership_reject_frozen_write(state, Expr.Ident{name: name, span: name_span}, "be assigned", name_span, scopes, &diagnostics) -> return None
     // Rust `is_global_mutable_binding`: a module-level `name := …` is the one
     // module-level write target; it writes the binding's runtime storage cell.
@@ -5729,7 +5729,7 @@ fn sema_stmt_check_loop_statement(statement: Stmt, return_type: Type?, environme
             }
         }
         .CountedLoop(init, cond, step, body, span, arrow_body, label) -> {
-            init_lambda_escapes :: ~context.lambda_escapes
+            init_lambda_escapes :: context.lambda_escapes.copy()
             sema_scope_enter(&scopes, &state, "counted@{span.start}")
             loop_scope_valid := true
             label_name := String?{None}

@@ -261,7 +261,7 @@ fn fx_close_pair_remainder_checks(generic: Bool) -> Bool Never! {
     loop function in program.functions {
         if function.id == mir_function_id("run") {
             loop local in function.locals {
-                if local.name == "pair" -> owner_type = ~local.ty.identity
+                if local.name == "pair" -> owner_type = local.ty.identity.copy()
             }
         }
     }
@@ -316,21 +316,21 @@ fn fx_close_pair_remainder_checks(generic: Bool) -> Bool Never! {
             if inst == {
                 .Const(dst, value) -> &constants.add(dst.value, value).drop("records an SSA constant")
                 .Copy(dst, src) | .Move(dst, src) -> {
-                    if (~constants.get(src.value)) == .Val(value) -> &constants.add(dst.value, value).drop("copies a constant")
-                    if (~origins.get(src.value)) == .Val(origin) -> &origins.add(dst.value, origin).drop("copies live-bit provenance")
-                    if (~offsets.get(src.value)) == .Val(offset) -> &offsets.add(dst.value, offset).drop("copies owner-relative address")
+                    if (constants.get(src.value).copy()) == .Val(value) -> &constants.add(dst.value, value).drop("copies a constant")
+                    if (origins.get(src.value).copy()) == .Val(origin) -> &origins.add(dst.value, origin).drop("copies live-bit provenance")
+                    if (offsets.get(src.value).copy()) == .Val(offset) -> &offsets.add(dst.value, offset).drop("copies owner-relative address")
                 }
                 .Binary(dst, op, left, right) -> {
                     if op == .And {
-                        a :: (~constants.get(left.value)) ?? next
-                        b :: (~constants.get(right.value)) ?? next
+                        a :: (constants.get(left.value).copy()) ?? next
+                        b :: (constants.get(right.value).copy()) ?? next
                         &constants.add(dst.value, a & b).drop("tracks live-bit conjunction")
-                        if (~origins.get(right.value)) == .Val(origin) -> &origins.add(dst.value, origin).drop("tracks transferred live-bit provenance")
+                        if (origins.get(right.value).copy()) == .Val(origin) -> &origins.add(dst.value, origin).drop("tracks transferred live-bit provenance")
                     }
                 }
                 .PointerAdd(dst, base, offset) -> {
-                    start :: (~offsets.get(base.value)) ?? next
-                    amount :: (~constants.get(offset.value)) ?? next
+                    start :: (offsets.get(base.value).copy()) ?? next
+                    amount :: (constants.get(offset.value).copy()) ?? next
                     &offsets.add(dst.value, start + amount).drop("records owner-relative field address")
                 }
                 .Compare(dst, condition, left, right) -> {
@@ -342,27 +342,27 @@ fn fx_close_pair_remainder_checks(generic: Bool) -> Bool Never! {
                 }
                 .Store(base, offset, value) -> {
                     if offset != 0 -> next
-                    number :: ~constants.get(value.value)
+                    number :: constants.get(value.value).copy()
                     &memory.add(base.value, number).drop("records the last private flag store")
                     if number == .Val(bit) {
                         if bit == 1 -> &reset.add(base.value, true).drop("records the flag becoming live")
                         if bit == 0 && reset.get(base.value) != None -> &cleared.add(base.value, true).drop("records the move clearing a live flag")
                     }
-                    origin :: (~origins.get(value.value)) ?? base.value
+                    origin :: (origins.get(value.value).copy()) ?? base.value
                     &memory_origins.add(base.value, origin).drop("records flag transfer provenance")
                 }
                 .Load(dst, base, offset) -> {
                     if offset != 0 -> next
-                    stored :: (~memory.get(base.value)) ?? next
+                    stored :: (memory.get(base.value).copy()) ?? next
                     number :: stored ?? next
                     &constants.add(dst.value, number).drop("reads the private live bit")
-                    origin :: (~memory_origins.get(base.value)) ?? base.value
+                    origin :: (memory_origins.get(base.value).copy()) ?? base.value
                     &origins.add(dst.value, origin).drop("records live-bit source")
                 }
                 .Call(_, _, callee, args) -> {
                     if callee == .Function(target) {
                         if glue.get(target.value) == None || args.len() != 1 -> next
-                        offset :: ~offsets.get(args[0].value)
+                        offset :: offsets.get(args[0].value).copy()
                         &calls.push(FxCloseDropCall{block: block.id.value, offset: offset})
                     }
                 }
@@ -371,7 +371,7 @@ fn fx_close_pair_remainder_checks(generic: Bool) -> Bool Never! {
         }
         if block.terminator == .Branch(condition, _, _) {
             if (constants.get(condition.value) ?? -1) == 0 && origins.get(condition.value) != None {
-                origin :: (~origins.get(condition.value)) ?? return false
+                origin :: (origins.get(condition.value).copy()) ?? return false
                 if cleared.get(origin) != None -> has_cleared_guard = true
             }
         }
@@ -387,12 +387,12 @@ fn fx_close_pair_remainder_checks(generic: Bool) -> Bool Never! {
         cursor += 1
         if reachable.get(id) != None -> next
         &reachable.add(id, true).drop("visits a CFG block once")
-        index :: (~indices.get(id)) ?? return false
+        index :: (indices.get(id).copy()) ?? return false
         terminator :: root.blocks[index].terminator
         if terminator == {
             .Jump(target) -> &queue.push(target.block.value)
             .Branch(condition, yes, no) -> {
-                bit :: (~constants.get(condition.value)) ?? -1
+                bit :: (constants.get(condition.value).copy()) ?? -1
                 if bit != 0 -> &queue.push(yes.block.value)
                 if bit != 1 -> &queue.push(no.block.value)
             }

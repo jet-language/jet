@@ -68,11 +68,11 @@ fn lower_has_narrow_params(source: MIRFunction) -> Bool Never! {
 // arguments once, then calls the checked callable (through its static
 // initializer when the callable has one).
 fn lower_export_entry(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
-    signature_id :: ~m.mir_signatures[glue.function]
-    signature :: ~m.signatures[signature_id.value]
+    signature_id :: m.mir_signatures[glue.function].copy()
+    signature :: m.signatures[signature_id.value].copy()
     source :: lower_row_source(p, m, glue.function)
     f := lower_helper_start(&m, glue, signature.params, signature.result)
-    params :: ~f.open_params
+    params :: f.open_params.copy()
     args := [LIRValueID]{}
     loop (position, value) in params {
         ty :: source.params[position].ty

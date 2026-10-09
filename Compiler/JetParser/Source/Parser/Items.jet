@@ -2013,7 +2013,7 @@ fn parser_parse_trait_impl_block(state: &JetParserState) -> TraitImplBlock {
     parser_bump(&state)
     trait_name :: parser_expect_name(&state, "after `impl`")
     trait_text :: parser_value(state, trait_name)
-    operator_rhs :: parser_parse_operator_rhs(&state, Val(~trait_text))
+    operator_rhs :: parser_parse_operator_rhs(&state, Val(trait_text.copy()))
     operator_marker := OperatorMarker?{None}
     loop parser_current_kind(&state) == TOKEN_HASH {
         marker :: parser_parse_marker(&state)

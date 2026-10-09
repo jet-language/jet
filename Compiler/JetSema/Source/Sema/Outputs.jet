@@ -77,7 +77,7 @@ fn sema_output_fields(args: [EnumLitArg], span: Span, diagnostics: &[Diagnostic]
                 &diagnostics.push(sema_output_error(expr_span(value), "Output field `{label}` is written twice", "one Output field has one checked value", "remove one `{label}:` field"))
                 return None
             }
-            fields[~label] = index
+            fields[label.copy()] = index
         } else {
             &diagnostics.push(sema_output_error(span, "an Output payload uses named fields", "Output facts need stable field names for checking and inspection", "write `.Executable.{{ name: \"app\", entry: run }}`"))
             return None
@@ -88,14 +88,14 @@ fn sema_output_fields(args: [EnumLitArg], span: Span, diagnostics: &[Diagnostic]
 
 fn sema_output_field(args: [EnumLitArg], index: Int) -> Expr? Never! {
     arg :: args[index]
-    if arg == .Named(_, value) -> Val(~value) else -> None
+    if arg == .Named(_, value) -> Val(value.copy()) else -> None
 }
 
 fn sema_output_string(value: Expr) -> String? Never! {
     if value == .Str(parts, _) {
         if parts.len() == 1 {
             part :: parts[0]
-            if part == .Lit(text) -> return Val(~text)
+            if part == .Lit(text) -> return Val(text.copy())
         }
     }
     None
@@ -103,10 +103,10 @@ fn sema_output_string(value: Expr) -> String? Never! {
 
 fn sema_output_path(value: Expr) -> (root: String, root_span: Span, members: [ExprMember])? Never! {
     if value == {
-        .Ident(name, span) -> Val((root: ~name, root_span: span, members: [ExprMember]{}))
+        .Ident(name, span) -> Val((root: name.copy(), root_span: span, members: [ExprMember]{}))
         .Field(base, member, span) -> {
             path := sema_output_path(base) ?? return None
-            &path.members.push(ExprMember{name: ~member, span: span})
+            &path.members.push(ExprMember{name: member.copy(), span: span})
             Val(^path)
         }
         else -> None
@@ -115,7 +115,7 @@ fn sema_output_path(value: Expr) -> (root: String, root_span: Span, members: [Ex
 
 fn sema_output_import_reference(owner: SemaRegistrationModule, target_identity: String, name: String, span: Span, visibility: Int) -> SemaNameReferenceFact Never! {
     // An alias use names the declaring module's alias, not the target function.
-    symbol :: Symbol{id: symbol_id(SymbolKind.Import, owner.module_identity, target_identity, name), kind: SymbolKind.Import, name: ~name, module_name: ~owner.module_identity, owner: None, span: span, ty: None, visibility: visibility}
+    symbol :: Symbol{id: symbol_id(SymbolKind.Import, owner.module_identity, target_identity, name), kind: SymbolKind.Import, name: name.copy(), module_name: owner.module_identity.copy(), owner: None, span: span, ty: None, visibility: visibility}
     SemaNameReferenceFact{span: span, symbol: ^symbol, kind: "import_alias"}
 }
 
@@ -127,7 +127,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
     if entry == .Ident(name, span) {
         if owner.inline_bindings.imports.get(name) == .Val(binding) {
             resolved = sema_registration_lookup_name(graph, owner.module_identity, binding.semantic_name)
-            source_name = Val(~name)
+            source_name = Val(name.copy())
             &references.push(sema_output_import_reference(owner, owner.module_identity, name, binding.span, binding.visibility))
         } else {
             resolved = sema_registration_lookup_name(graph, owner.module_identity, name)
@@ -138,7 +138,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
             }
             if resolved == None {
                 exported :: sema_registration_resolve_export(graph, declaring_index, name, owner.module_identity, owner.package_identity, [String]{})
-                if exported == .Val(found) -> resolved = Val(SemaRegistrationResolvedSymbol{symbol: ~found.symbol, source_module_identity: ~found.source_module_identity, target_module_identity: ~found.source_module_identity, visibility: found.visibility})
+                if exported == .Val(found) -> resolved = Val(SemaRegistrationResolvedSymbol{symbol: found.symbol.copy(), source_module_identity: found.source_module_identity.copy(), target_module_identity: found.source_module_identity.copy(), visibility: found.visibility})
             }
         }
         if resolved == None {
@@ -168,7 +168,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
                         if imported.declaration.alias != target.module_alias || sema_registration_import_is_unqualified(imported.declaration) -> next
                         target_index :: sema_registration_module_index(graph, imported.target_module_identity) ?? break
                         exported :: sema_registration_resolve_export(graph, target_index, target.member, owner.module_identity, owner.package_identity, [String]{}) ?? break
-                        registered = Val(SemaRegistrationResolvedSymbol{symbol: ~exported.symbol, source_module_identity: ~exported.source_module_identity, target_module_identity: ~exported.source_module_identity, visibility: exported.visibility})
+                        registered = Val(SemaRegistrationResolvedSymbol{symbol: exported.symbol.copy(), source_module_identity: exported.source_module_identity.copy(), target_module_identity: exported.source_module_identity.copy(), visibility: exported.visibility})
                         break
                     }
                 } else {
@@ -183,7 +183,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
             }
             callable :: if registered == .Val(found) -> graph.callable_rows.get(found.symbol.id.key) else -> None
             if callable == .Val(row) {
-                if row == .Function(module_index, function_index) -> return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: ~member.name, references: ^references})
+                if row == .Function(module_index, function_index) -> return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: member.name.copy(), references: ^references})
             }
             &diagnostics.push(sema_output_error(member.span, "module `{path.root}` has no function `{member.name}`", "Output entries use ordinary module member resolution", "update `entry:` to a function that exists"))
             return None
@@ -199,13 +199,13 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
         root_target := String?{None}
         if imported_root == .Val(index) {
             imported :: owner.imports[index]
-            root_target = Val(~imported.target_module_identity)
+            root_target = Val(imported.target_module_identity.copy())
             &references.push(sema_output_import_reference(owner, imported.target_module_identity, path.root, imported.declaration.alias_span, imported.visibility))
         } else if owner.import_binding_rows.get(path.root) == .Val(binding_row) {
             imported :: owner.imports[binding_row.import_index]
             binding :: imported.bindings[binding_row.binding]
             if binding.symbol.kind == SymbolKind.Import || binding.symbol.kind == SymbolKind.Module {
-                root_target = Val(~binding.target_module_identity)
+                root_target = Val(binding.target_module_identity.copy())
                 &references.push(sema_output_import_reference(owner, binding.target_module_identity, path.root, binding.symbol.span, imported.visibility))
             }
         }
@@ -239,7 +239,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
                 &references.push(sema_output_import_reference(graph.modules[current], exported.source_module_identity, member.name, exported.symbol.span, exported.visibility))
                 current = sema_registration_module_index(graph, exported.source_module_identity) ?? return None
             } else {
-                resolved = Val(SemaRegistrationResolvedSymbol{symbol: ~exported.symbol, source_module_identity: ~exported.source_module_identity, target_module_identity: ~exported.source_module_identity, visibility: exported.visibility})
+                resolved = Val(SemaRegistrationResolvedSymbol{symbol: exported.symbol.copy(), source_module_identity: exported.source_module_identity.copy(), target_module_identity: exported.source_module_identity.copy(), visibility: exported.visibility})
             }
         }
     } else {
@@ -251,7 +251,7 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
         &diagnostics.push(sema_output_error(expr_span(entry), "Output entry is not a function reference", "text names, calls, and runtime reflection are not Output links", "write a bare or qualified function reference, such as `entry: run`"))
         return None
     }
-    if callable == .Function(module_index, function_index) -> return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: source_name ?? ~graph.modules[module_index].functions[function_index].declaration.name, references: ^references})
+    if callable == .Function(module_index, function_index) -> return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: source_name ?? graph.modules[module_index].functions[function_index].declaration.name.copy(), references: ^references})
     &diagnostics.push(sema_output_error(expr_span(entry), "Output entry `{symbol.symbol.name}` is not an ordinary safe Jet function", "package tools invoke checked Jet functions without granting an FFI or unsafe authority boundary", "wrap the boundary in an ordinary safe Jet function and reference that function"))
     None
 }
@@ -313,10 +313,10 @@ fn sema_output_fact(graph: SemaRegistrationGraph, declaring_index: Int, address:
     kind_name :: sema_output_kind_name(kind)
     if !sema_output_entry_contract(graph, target.module_index, function, target.source_name, kind, expr_span(entry), "change `fn {target.source_name}` to match the {kind_name} contract", &diagnostics) -> return None
     params := [OutputParam]{}
-    loop parameter in function.parameters -> &params.push(OutputParam{access: parameter.convention, ty: ~parameter.ty})
+    loop parameter in function.parameters -> &params.push(OutputParam{access: parameter.convention, ty: parameter.ty.copy()})
     lowered_name :: if module_row.module_identity == graph.entry_module_identity -> name_mangle(function.declaration.name) else -> "{name_mangle(module_row.module_name)}::{name_mangle(function.declaration.name)}"
-    fact :: ResolvedOutput{address: ~address, kind: kind, output_name: ~output_name, module_id: target.module_index, source_path: ~module_row.module_path, source_name: ~target.source_name, semantic_name: ~function.declaration.name, lowered_name: ^lowered_name, params: ^params, return_type: ~function.declaration.return_type, failure_contract: failure_contract_of_function(function.declaration.return_type, function.declaration.return_type_span), reference: expr_span(entry), definition: function.symbol.span, authority: OutputCallableAuthority.SafeJet, effects: [String]{}, selected: false, selection_reason: "not selected"}
-    &target.references.push(SemaNameReferenceFact{span: expr_span(entry), symbol: ~function.symbol, kind: "function"})
+    fact :: ResolvedOutput{address: address.copy(), kind: kind, output_name: output_name.copy(), module_id: target.module_index, source_path: module_row.module_path.copy(), source_name: target.source_name.copy(), semantic_name: function.declaration.name.copy(), lowered_name: ^lowered_name, params: ^params, return_type: function.declaration.return_type.copy(), failure_contract: failure_contract_of_function(function.declaration.return_type, function.declaration.return_type_span), reference: expr_span(entry), definition: function.symbol.span, authority: OutputCallableAuthority.SafeJet, effects: [String]{}, selected: false, selection_reason: "not selected"}
+    &target.references.push(SemaNameReferenceFact{span: expr_span(entry), symbol: function.symbol.copy(), kind: "function"})
     Val((fact: ^fact, references: ^target.references))
 }
 
@@ -327,7 +327,7 @@ fn sema_output_default(graph: SemaRegistrationGraph, entry_index: Int, diagnosti
             if definition.value == .StructLit(_, _, _, _, fields, _, _) {
                 loop field in fields {
                     if field.name != "run" -> next
-                    if field.value == .Ident(address, _) -> return Val(~address)
+                    if field.value == .Ident(address, _) -> return Val(address.copy())
                     &diagnostics.push(sema_output_error(expr_span(field.value), "default `run` is not an Output address", "defaults use checked Output references, not text or calls", "write `run: output_name`"))
                 }
                 return None
@@ -434,7 +434,7 @@ fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, 
             } else {
                 choices := [String]{}
                 loop row in rows {
-                    if row.module_index == entry_index && (row.fact.kind == OutputKind.Executable || row.fact.kind == OutputKind.Service) -> &choices.push(~row.fact.address)
+                    if row.module_index == entry_index && (row.fact.kind == OutputKind.Executable || row.fact.kind == OutputKind.Service) -> &choices.push(row.fact.address.copy())
                 }
                 &choices.sort()
                 &diagnostics.push(sema_output_error(sema_output_entry_span(graph, entry_index), "no compatible Output named `{address}`", "available compatible Outputs: {choices.join(", ")}", "choose one listed Output address"))
@@ -460,7 +460,7 @@ fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, 
                 }
                 if !selected {
                     choices := [String]{}
-                    loop index in compatible -> &choices.push(~rows[index].fact.address)
+                    loop index in compatible -> &choices.push(rows[index].fact.address.copy())
                     &choices.sort()
                     &diagnostics.push(sema_output_error(sema_output_entry_span(graph, entry_index), "`jet run` has more than one compatible Output", "available compatible Outputs: {choices.join(", ")}", "write `defaults: {{ run: output_name }}` or select an Output address"))
                 }
@@ -496,12 +496,12 @@ fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, 
         declaration_span := Span{start: 0, end: 0}
         if graph.modules[row.module_index].program.items[row.item_index] == .Const(definition) {
             declaration_span = definition.name_span
-            updated := ~definition
-            updated.resolved_output = Val(~row.fact)
+            updated := definition.copy()
+            updated.resolved_output = Val(row.fact.copy())
             graph.modules[row.module_index].program.items[row.item_index] = Item.Const{value: ^updated}
         }
         loop constant_index in 0..<graph.modules[row.module_index].constants.len() {
-            if graph.modules[row.module_index].constants[constant_index].declaration.name_span == declaration_span -> graph.modules[row.module_index].constants[constant_index].declaration.resolved_output = Val(~row.fact)
+            if graph.modules[row.module_index].constants[constant_index].declaration.name_span == declaration_span -> graph.modules[row.module_index].constants[constant_index].declaration.resolved_output = Val(row.fact.copy())
         }
     }
     &references.reverse()
@@ -532,7 +532,7 @@ fn sema_output_fact_with_solved_effects(output: ^ResolvedOutput, modules: [SemaG
     }
     key :: symbol_id(SymbolKind.Function, modules[target].module_identity, "", fact.semantic_name).key
     function_index :: rows[target].get(key) ?? return fact
-    fact.effects = ~modules[target].functions[function_index].effects.solved
+    fact.effects = modules[target].functions[function_index].effects.solved.copy()
     fact
 }
 
@@ -545,7 +545,7 @@ fn sema_output_publish_solved_effects(graph: &SemaRegistrationGraph, modules: &[
     loop module_index in 0..<modules.len() {
         loop constant_index in 0..<modules[module_index].constants.len() {
             if modules[module_index].constants[constant_index].declaration.resolved_output == .Val(output) {
-                updated := sema_output_fact_with_solved_effects(~output, modules, &rows, &indexed)
+                updated := sema_output_fact_with_solved_effects(output.copy(), modules, &rows, &indexed)
                 modules[module_index].constants[constant_index].declaration.resolved_output = Val(^updated)
             }
         }
@@ -553,7 +553,7 @@ fn sema_output_publish_solved_effects(graph: &SemaRegistrationGraph, modules: &[
     loop module_index in 0..<graph.modules.len() {
         loop constant_index in 0..<graph.modules[module_index].constants.len() {
             if graph.modules[module_index].constants[constant_index].declaration.resolved_output == .Val(output) {
-                updated := sema_output_fact_with_solved_effects(~output, modules, &rows, &indexed)
+                updated := sema_output_fact_with_solved_effects(output.copy(), modules, &rows, &indexed)
                 graph.modules[module_index].constants[constant_index].declaration.resolved_output = Val(^updated)
             }
         }
@@ -561,8 +561,8 @@ fn sema_output_publish_solved_effects(graph: &SemaRegistrationGraph, modules: &[
         loop item_index in 0..<graph.modules[module_index].program.items.len() {
             if graph.modules[module_index].program.items[item_index] == .Const(definition) {
                 if definition.resolved_output == .Val(output) {
-                    updated_output := sema_output_fact_with_solved_effects(~output, modules, &rows, &indexed)
-                    updated_definition := ~definition
+                    updated_output := sema_output_fact_with_solved_effects(output.copy(), modules, &rows, &indexed)
+                    updated_definition := definition.copy()
                     updated_definition.resolved_output = Val(^updated_output)
                     graph.modules[module_index].program.items[item_index] = Item.Const{value: ^updated_definition}
                 }

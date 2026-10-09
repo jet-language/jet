@@ -277,7 +277,7 @@ fn lower_stm_scope_exit(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     // Commit consumes the state. Clear without a second rollback Drop.
     // Early exits instead use MIR's existing MovePlace + rollback Drop.
     if c.slots[slot].cell {
-        cell :: (~f.cells[slot]) ?? return lower_fail(&m, &f, "transaction Stm cell has no storage")
+        cell :: (f.cells[slot].copy()) ?? return lower_fail(&m, &f, "transaction Stm cell has no storage")
         lower_clear_at(p, &f, cell, 0, local.ty)
     } else {
         lower_clear_slot(p, c, &f, slot)

@@ -591,7 +591,7 @@ fn jet_eval_compiler_services_parse(input: JetCompilerServicesSourceInput) -> Je
         lex_facts.lexed.diagnostics.len() > 0 -> {
             ParseResult{program: ast_program(), diagnostics: lex_facts.lexed.diagnostics}
         }
-        else -> parse_lexed(~lex_facts.lexed)
+        else -> parse_lexed(lex_facts.lexed.copy())
     }
     value := jet_eval_compiler_services_syntax_value(input.source, parsed)
     Val(JetCompilerServicesParseFacts{source: input.source, compiler_source: lex_facts.compiler_source, lexed: lex_facts.lexed, parsed: parsed, value: value})

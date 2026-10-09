@@ -38,7 +38,7 @@ fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModul
     loop module_row in modules {
         loop definition in module_row.declarations.type_defs -> &checked_types.push(definition)
     }
-    environment := sema_check_pass_environment(~graph, checked_types, SemaComptimeBodyValues{})
+    environment := sema_check_pass_environment(graph.copy(), checked_types, SemaComptimeBodyValues{})
     if !sema_scope_environment_enter_probe_module(&environment, root.module_identity, SemaComptimeBodyValues{}) {
         return Err(ReplSetupError{message: "REPL root is not in the canonical registration graph"})
     }
@@ -48,7 +48,7 @@ fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModul
         return Err(ReplSetupError{message: "REPL declaration environment is not a successfully registered module"})
     }
     // The session keeps the graph for every later turn, so it owns a copy.
-    program := sema_program_tables_init(Val(~graph), checked_types)
+    program := sema_program_tables_init(Val(graph.copy()), checked_types)
     if !sema_scope_environment_enter_probe_module(&environment, program, root.module_identity, [SemaComptimeBodyValue]{}) {
         return Err(ReplSetupError{message: "REPL root is not in the canonical registration graph"})
     }
@@ -62,7 +62,7 @@ fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModul
     scopes.failure_carrier = Val(sema_failure_carrier(Val(return_type)))
     context := sema_check_context_init()
     context.function_name = root.name
-    context.comptime_body_values = ~environment.comptime_body_values
+    context.comptime_body_values = environment.comptime_body_values.copy()
     environment.function_name = root.name
     Ok(SemaReplSession{environment: ^environment, program: ^program, scopes: ^scopes, ownership: ^ownership, tails: sema_statement_tail_store_init(), context: ^context, modules: ^modules, source: source, root: root})
 }
@@ -83,7 +83,7 @@ fn sema_repl_type_check_stmts(session: &SemaReplSession, statements: [Stmt], sou
         }
     }
     diagnostics := [Diagnostic]{}
-    return_type :: ~session.scopes.return_type
+    return_type :: session.scopes.return_type.copy()
     checked :: sema_check_statements(body, return_type, session.environment, session.program, &session.scopes, &session.ownership, &session.tails, &session.context, &diagnostics, 0)
     complete := checked.complete
     echo := TExpr?{None}

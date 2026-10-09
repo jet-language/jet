@@ -520,7 +520,7 @@ fn mir_pass_validate_stop_cleanup_scopes(function: MIRFunction, dominance: MIRPa
         position :: dominance.positions.get(id.value) ?? next
         block :: function.blocks[position]
         state :: state_at.get(id.value) ?? MIRPassStopCleanupState{unwinding: false, scopes: [U64]{}}
-        scopes := ~state.scopes
+        scopes := state.scopes.copy()
         loop instruction in block.instructions {
             if instruction.operation == {
                 .ScopeEnter(scope, _) -> {
@@ -548,7 +548,7 @@ fn mir_pass_validate_stop_cleanup_scopes(function: MIRFunction, dominance: MIRPa
             if state_at.get(target.value) == .Val(seen) {
                 if seen.unwinding != unwinding || seen.scopes != scopes -> return Val("MIR StopCleanup state differs between paths into a block")
             } else {
-                &state_at.add(target.value, MIRPassStopCleanupState{unwinding: unwinding, scopes: ~scopes}).drop("checked absent above")
+                &state_at.add(target.value, MIRPassStopCleanupState{unwinding: unwinding, scopes: scopes.copy()}).drop("checked absent above")
                 &pending.push(target)
             }
         }
@@ -2501,11 +2501,11 @@ fn mir_pass_validate_consumption(function: MIRFunction, definitions: MIRPassDefi
         position :: work[head]
         head += 1
         queued[position] = false
-        current := ~states[position]
+        current := states[position].copy()
         _ := mir_pass_consumption_step(function, definitions, tables, function.blocks[position], &current, false)
         loop target in mir_terminator_targets(function.blocks[position].terminator) {
             destination :: positions.get(target.value) ?? return Val("consumption target is missing")
-            edge := ~current
+            edge := current.copy()
             _ := mir_pass_consumption_edge(function, definitions, function.blocks[position].id, function.blocks[destination], &edge, false)
             changed := !reached[destination]
             reached[destination] = true
@@ -2523,12 +2523,12 @@ fn mir_pass_validate_consumption(function: MIRFunction, definitions: MIRPassDefi
     }
     loop (position, block) in function.blocks {
         if !reached[position] -> next
-        current := ~states[position]
+        current := states[position].copy()
         failure :: mir_pass_consumption_step(function, definitions, tables, block, &current, true)
         if failure != None -> return failure
         loop target in mir_terminator_targets(block.terminator) {
             destination :: positions.get(target.value) ?? return Val("consumption target is missing")
-            edge := ~current
+            edge := current.copy()
             edge_failure :: mir_pass_consumption_edge(function, definitions, block.id, function.blocks[destination], &edge, true)
             if edge_failure != None -> return edge_failure
         }

@@ -45,8 +45,8 @@ fn lower_test_present(f: &LowerFunction, value: LIRValueID) -> LIRValueID Never!
 
 fn lower_test_invoke(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
-    signature :: ~m.mir_signatures[glue.function]
-    return_layout :: ~m.signatures[signature.value].result
+    signature :: m.mir_signatures[glue.function].copy()
+    return_layout :: m.signatures[signature.value].result.copy()
     parameter_count :: m.signatures[signature.value].params.len()
     ty :: glue.ty
     null :: lower_pointer(&f)
@@ -122,7 +122,7 @@ fn lower_test_unit(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFuncti
     callback :: lower_closure_helper_id(&m, "test.invoke", glue.function, source)
     lower_emit(&f, LIRInst.FunctionAddress{dst: code, function: callback})
     outcome :: lower_pointer(&f)
-    env :: ~f.open_params[0]
+    env :: f.open_params[0].copy()
     lower_call_runtime(&m, &f, "jet_rt_test_unit", [LIRValueID]{name, expected, env, code}, Val(outcome))
     lower_emit(&f, LIRInst.Drop{value: name})
     lower_seal(&f, LIRTerminator.Return{value: Val(outcome)})
@@ -186,8 +186,8 @@ fn lower_test_checks(p: MIRProgram, m: &LowerModule, f: &LowerFunction) Never! {
             return lower_seal(&f, LIRTerminator.Unreachable)
         }
         source :: lower_row_source(p, m, row)
-        signature :: ~m.mir_signatures[row]
-        return_layout :: ~m.signatures[signature.value].result
+        signature :: m.mir_signatures[row].copy()
+        return_layout :: m.signatures[signature.value].result.copy()
         if source.form != .TopLevel || source.capture_params.len() > 0 || source.params.len() > 0 {
             lower_fail(&m, &f, "native output check {check.name} requires a checked zero-argument top-level function")
             return lower_seal(&f, LIRTerminator.Unreachable)

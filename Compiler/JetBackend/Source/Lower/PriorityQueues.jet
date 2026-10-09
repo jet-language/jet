@@ -259,8 +259,8 @@ fn lower_helper_priority_queue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) 
     layouts := [LIRLayout]{lir_layout_pointer()}
     if glue.helper == "priority_queue.push" -> &layouts.push(lower_repr_layout(lower_repr(p, elem)) ?? lir_layout_pointer())
     f := lower_helper_start(&m, glue, layouts, if glue.helper == "priority_queue.pop" -> Val(lir_layout_pointer()) else -> None)
-    heap :: ~f.open_params[0]
-    incoming :: if layouts.len() == 2 -> Val(~f.open_params[1]) else -> None
+    heap :: f.open_params[0].copy()
+    incoming :: if layouts.len() == 2 -> Val(f.open_params[1].copy()) else -> None
     if glue.helper == "priority_queue.push" {
         length :: lower_list_reserve(p, &m, &f, heap, elem)
         data :: lower_list_data(&f, heap)
@@ -322,7 +322,7 @@ fn lower_helper_priority_queue_render(p: MIRProgram, m: &LowerModule, glue: Lowe
     elem :: lower_priority_queue_element(glue.ty) ?? panic("PriorityQueue rendering has no checked element")
     list_ty :: lower_priority_queue_list(elem)
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
-    heap :: ~f.open_params[0]
+    heap :: f.open_params[0].copy()
     snapshot :: lower_new_storage(p, &f, list_ty)
     lower_inline_clone(p, &m, &f, heap, snapshot, list_ty)
     lower_call_helper(&m, &f, "list.sort_desc", list_ty, [LIRValueID]{snapshot}, None)

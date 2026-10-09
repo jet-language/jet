@@ -141,7 +141,7 @@ fn fx_runtime_o1_effects_check() -> Bool Never! {
     args := [LIRValueID]{}
     loop _ in 0..<7 -> &args.push(lir_builder_word(&b))
     floating :: lir_builder_value(&b, lir_layout_float(), LIRDrop.Trivial, None)
-    params := ~args
+    params := args.copy()
     &params.push(floating)
     zero :: lir_builder_word(&b)
     lir_builder_push(&b, LIRInst.Const{dst: zero, value: 0})
@@ -163,7 +163,7 @@ fn fx_runtime_o1_effects_check() -> Bool Never! {
     if !fx_runtime_o1_asm(&target, "os_spin_pause", [String]{}, [LIRValueID]{}, false) -> return false
     lir_builder_seal(&target, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: None})
     layouts :: loop _ in args -> lir_layout_word()
-    parameter_layouts := ~layouts
+    parameter_layouts := layouts.copy()
     &parameter_layouts.push(lir_layout_float())
     unit :: LIRModule{
         signatures: [LIRSignature]{

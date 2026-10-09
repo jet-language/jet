@@ -1648,7 +1648,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     if !then_result.complete {
         sema_scope_leave(&scopes, &state)
         sema_scope_rollback(&scopes, then_mark)
-        found_sites :: ~state.share_found
+        found_sites :: state.share_found.copy()
         sema_ownership_fork_drop(&state, fork, found_sites, [SemaOwnershipShareSite]{})
         return None
     }
@@ -1676,7 +1676,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
         first :: sema_check_expression(then_value, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
             sema_scope_leave(&scopes, &state)
             sema_scope_rollback(&scopes, then_mark)
-            found_sites :: ~state.share_found
+            found_sites :: state.share_found.copy()
             sema_ownership_fork_drop(&state, fork, found_sites, [SemaOwnershipShareSite]{})
             return None
         }
@@ -1695,7 +1695,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     if !else_result.complete {
         sema_scope_leave(&scopes, &state)
         sema_scope_rollback(&scopes, else_mark)
-        else_found :: ~state.share_found
+        else_found :: state.share_found.copy()
         sema_ownership_fork_drop(&state, fork, then_found, else_found)
         return None
     }
@@ -1703,7 +1703,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     else_checked :: sema_check_expression(else_value, else_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
         sema_scope_leave(&scopes, &state)
         sema_scope_rollback(&scopes, else_mark)
-        else_found :: ~state.share_found
+        else_found :: state.share_found.copy()
         sema_ownership_fork_drop(&state, fork, then_found, else_found)
         return None
     }

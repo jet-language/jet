@@ -310,29 +310,29 @@ fn fx_runtime_bitcast_refusals() -> Bool Never! {
             LIRLayout{size: 8, align: 8, class: .Memory},
         }
         loop layout in layouts {
-            bad := ~function
+            bad := function.copy()
             bad.values[src.value].layout = layout
             if lir_lint_inst(program, bad, inst).len() == 0 -> return false
-            bad = ~function
+            bad = function.copy()
             bad.values[dst.value].layout = layout
             if lir_lint_inst(program, bad, inst).len() == 0 -> return false
         }
         // Binary32 <-> Word is admitted; a bitcast is still not a
         // Float32/Float64 conversion or a pointer reinterpretation.
         binary32 :: LIRLayout{size: 4, align: 4, class: .Float}
-        cross_float := ~function
+        cross_float := function.copy()
         cross_float.values[dst.value].layout = binary32
         if lir_lint_inst(program, cross_float, inst).len() == 0 -> return false
-        cross_float = ~function
+        cross_float = function.copy()
         cross_float.values[src.value].layout = binary32
         cross_float.values[dst.value].layout = lir_layout_float()
         if lir_lint_inst(program, cross_float, inst).len() == 0 -> return false
         cross_float.values[dst.value].layout = lir_layout_pointer()
         if lir_lint_inst(program, cross_float, inst).len() == 0 -> return false
-        bad := ~function
+        bad := function.copy()
         bad.values[src.value].drop = LIRDrop.Runtime{symbol: "jet_rt_string_drop"}
         if lir_lint_inst(program, bad, inst).len() == 0 -> return false
-        bad = ~function
+        bad = function.copy()
         bad.values[dst.value].drop = LIRDrop.Runtime{symbol: "jet_rt_string_drop"}
         if lir_lint_inst(program, bad, inst).len() == 0 -> return false
         return true
@@ -362,7 +362,7 @@ fn fx_journey_address_program(arity: Int, include_target: Bool) -> MIRProgram Ne
     } else {
         // A valid unrelated export gets past library validation before the
         // Journey intrinsic's required target lookup refuses the program.
-        other := ~target
+        other := target.copy()
         other.id = mir_function_id("unrelated")
         other.name = "unrelated"
         other.key = "unrelated"

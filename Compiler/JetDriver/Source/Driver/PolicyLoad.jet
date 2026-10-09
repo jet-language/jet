@@ -28,7 +28,7 @@ fn jet_driver_load_policy(program: &Program, package_policy: [PolicyDeclaration]
     // Rewrite only source-authored declarations, then prepend the package
     // chain. Package declarations retain their absolute manifest/carrier path.
     loop index in 0..<program.policy_declarations.len() -> program.policy_declarations[index].source = path
-    effective := ~package_policy
+    effective := package_policy.copy()
     &effective.extend(^program.policy_declarations)
     program.policy_declarations = ^effective
     outer := [PolicyDeclaration]{}
@@ -45,7 +45,7 @@ fn jet_driver_load_policy(program: &Program, package_policy: [PolicyDeclaration]
         loop declaration in program.policy_declarations {
             if jet_driver_policy_outer(declaration.scope) || declaration.key != rule.key -> next
             target :: declaration.target ?? next
-            chain := ~outer
+            chain := outer.copy()
             loop candidate in program.policy_declarations {
                 if !jet_driver_policy_outer(candidate.scope) && candidate.target == (Val(target)) -> &chain.push(candidate)
             }

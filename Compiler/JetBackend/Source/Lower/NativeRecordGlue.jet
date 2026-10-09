@@ -149,7 +149,7 @@ fn lower_native_record_get_member(p: MIRProgram, m: &LowerModule, f: &LowerFunct
         lower_seal(&f, LIRTerminator.Return{value: Val(lower_const(&f, 0))})
         lower_start(&f, present, [LIRValueID]{})
         value :: lower_native_record_get_value(p, &m, &f, inner, box, 0)
-        lower_emit(&f, LIRInst.Store{base: ~f.open_params[1], offset: 0, value: value})
+        lower_emit(&f, LIRInst.Store{base: f.open_params[1].copy(), offset: 0, value: value})
         lower_seal(&f, LIRTerminator.Return{value: Val(lower_const(&f, 1))})
         return
     }
@@ -204,26 +204,26 @@ fn lower_native_record_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
             schema :: lower_record_schema(p, ty) ?? panic("native constructor schema must exist")
             loop (index, entry) in schema.fields.split(",").to_list() {
                 info :: lower_native_record_field(p, ty, lower_record_entry_name(entry)) ?? panic("schema field must exist")
-                lower_native_record_store_member(p, &m, &f, info, ~f.open_params[index], shell)
+                lower_native_record_store_member(p, &m, &f, info, f.open_params[index].copy(), shell)
             }
         } else if definition.kind == .Enum(variants, _) {
             loop (index, variant) in variants {
                 if variant.name != member -> next
                 lower_emit(&f, LIRInst.Store{base: shell, offset: 0, value: lower_const(&f, lower_discriminant(index))})
-                if lower_native_record_field(p, ty, member) == .Val(info) -> lower_native_record_store_member(p, &m, &f, info, ~f.open_params[0], shell)
+                if lower_native_record_field(p, ty, member) == .Val(info) -> lower_native_record_store_member(p, &m, &f, info, f.open_params[0].copy(), shell)
             }
         }
         lower_seal(&f, LIRTerminator.Return{value: Val(shell)})
     } else if op == "record.tag" {
         index :: lower_word(&f)
-        lower_emit(&f, LIRInst.Load{dst: index, base: ~f.open_params[0], offset: 0})
+        lower_emit(&f, LIRInst.Load{dst: index, base: f.open_params[0].copy(), offset: 0})
         lower_seal(&f, LIRTerminator.Return{value: Val(index)})
     } else if op == "record.get" {
         if definition.kind == .Enum(variants, _) {
             loop (index, variant) in variants {
                 if variant.name != member -> next
                 actual :: lower_word(&f)
-                lower_emit(&f, LIRInst.Load{dst: actual, base: ~f.open_params[0], offset: 0})
+                lower_emit(&f, LIRInst.Load{dst: actual, base: f.open_params[0].copy(), offset: 0})
                 correct :: lower_flag(&f)
                 lower_emit(&f, LIRInst.Compare{dst: correct, condition: LIRCondition.Eq, left: actual, right: lower_const(&f, lower_discriminant(index))})
                 good :: lower_new_block(&f)
@@ -235,15 +235,15 @@ fn lower_native_record_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
             }
         }
         info :: lower_native_record_field(p, ty, member) ?? panic("native getter field must exist")
-        lower_native_record_get_member(p, &m, &f, info, ~f.open_params[0])
+        lower_native_record_get_member(p, &m, &f, info, f.open_params[0].copy())
     } else if op == "record.field" {
         info :: lower_native_record_field(p, ty, member) ?? panic("native borrowed field must exist")
-        address :: lower_address(&f, ~f.open_params[0], info.offset)
+        address :: lower_address(&f, f.open_params[0].copy(), info.offset)
         if info.ty.kind == .String {
             text :: lower_read_at(p, &f, address, 0, info.ty) ?? panic("String has storage")
             // The native E4 header and borrowed CText are both [data,len,cap]
             // (JetRuntime/Source/Text.jet). The copy lends, never owns, bytes.
-            lower_copy_bytes(&f, ~f.open_params[1], 0, text, 0, 24)
+            lower_copy_bytes(&f, f.open_params[1].copy(), 0, text, 0, 24)
             lower_seal(&f, LIRTerminator.Return{value: None})
         } else {
             lower_seal(&f, LIRTerminator.Return{value: Val(address)})
@@ -273,7 +273,7 @@ fn lower_native_record_sequence_glue(p: MIRProgram, m: &LowerModule, glue: Lower
         &params.push(if kind == "List.Byte" -> lir_layout_word() else -> lir_layout_pointer())
     }
     f := lower_helper_start(&m, glue, params, result)
-    source :: ~f.open_params[0]
+    source :: f.open_params[0].copy()
     if op == "new" {
         negative :: lower_flag(&f)
         lower_emit(&f, LIRInst.Compare{dst: negative, condition: LIRCondition.Lt, left: source, right: lower_const(&f, 0)})
@@ -308,23 +308,23 @@ fn lower_native_record_sequence_glue(p: MIRProgram, m: &LowerModule, glue: Lower
         address :: lower_list_address(&f, data, length, lower_list_stride(p, elem))
         if entries {
             members :: lower_inline_members(p, elem)
-            lower_native_record_take(p, &m, &f, members[0].ty, ~f.open_params[1], address, members[0].offset)
-            lower_native_record_take(p, &m, &f, members[1].ty, ~f.open_params[2], address, members[1].offset)
+            lower_native_record_take(p, &m, &f, members[0].ty, f.open_params[1].copy(), address, members[0].offset)
+            lower_native_record_take(p, &m, &f, members[1].ty, f.open_params[2].copy(), address, members[1].offset)
         } else if kind == "List.Byte" {
-            byte :: ~f.open_params[1]
+            byte :: f.open_params[1].copy()
             invalid :: lower_flag(&f)
             lower_emit(&f, LIRInst.Compare{dst: invalid, condition: LIRCondition.UGt, left: byte, right: lower_const(&f, 255)})
             lower_check(&m, &f, invalid, "jet_rt_panic_int_range")
             lower_write_at(p, &f, address, 0, byte, elem)
         } else {
-            lower_native_record_take(p, &m, &f, elem, ~f.open_params[1], address, 0)
+            lower_native_record_take(p, &m, &f, elem, f.open_params[1].copy(), address, 0)
         }
         next_length :: lower_word(&f)
         lower_emit(&f, LIRInst.Binary{dst: next_length, op: LIRBinaryOp.Add, left: length, right: lower_const(&f, 1)})
         lower_emit(&f, LIRInst.Store{base: source, offset: 0, value: next_length})
         lower_seal(&f, LIRTerminator.Return{value: None})
     } else {
-        index :: ~f.open_params[1]
+        index :: f.open_params[1].copy()
         length :: lower_list_word(&f, source, 0)
         valid :: lower_flag(&f)
         lower_emit(&f, LIRInst.Compare{dst: valid, condition: LIRCondition.ULt, left: index, right: length})
@@ -343,7 +343,7 @@ fn lower_native_record_sequence_glue(p: MIRProgram, m: &LowerModule, glue: Lower
             key :: lower_native_record_get_value(p, &m, &f, members[0].ty, address, members[0].offset)
             if op == "key" -> lower_seal(&f, LIRTerminator.Return{value: Val(key)})
             else {
-                lower_emit(&f, LIRInst.Store{base: ~f.open_params[2], offset: 0, value: key})
+                lower_emit(&f, LIRInst.Store{base: f.open_params[2].copy(), offset: 0, value: key})
                 payload :: lower_read_at(p, &f, address, members[1].offset, members[1].ty) ?? panic("an entry has storage")
                 lower_seal(&f, LIRTerminator.Return{value: Val(payload)})
             }

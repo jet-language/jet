@@ -250,8 +250,8 @@ fn sema_expression_shared_guard_value(ty: Type) -> SemaCallMemoryGuard? {
 // stay parameters) before the owner's type arguments are substituted.
 fn sema_expression_field_owner_type(environment: SemaScopeEnvironment, program: SemaProgramTables, owner_module: String, declared: Type, generic_names: [String]) -> Type Never! {
     graph_option :: program.registration_graph
-    graph :: graph_option ?? return ~declared
-    if owner_module == "" -> return ~declared
+    graph :: graph_option ?? return declared.copy()
+    if owner_module == "" -> return declared.copy()
     generics :: loop name in generic_names -> TGenericParam{name: name, bounds: [SymbolID]{}}
     sema_type_resolve_declared_with_generics(graph, declared, owner_module, generics)
 }

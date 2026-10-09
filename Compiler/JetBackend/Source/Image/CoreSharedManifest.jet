@@ -64,7 +64,7 @@ struct CoreSharedLayoutBuilder {
 // Sort a local receipt copy; neither installed source order nor the caller's
 // owned-member lists are changed. Length-framed JSON prevents delimiter aliases.
 fn core_shared_source_seal(sources: [CoreSharedSource]) -> String Never! {
-    ordered := ~sources
+    ordered := sources.copy()
     &ordered.sort_by((a: CoreSharedSource, b: CoreSharedSource) -> (a.module_owner_key <=> b.module_owner_key).then(a.path <=> b.path))
     rows := [String]{}
     loop source in ordered {
@@ -409,10 +409,10 @@ fn core_shared_binding(program: MIRProgram, lowered: LIRLowering, manifest: Core
 #Test("Core callable digest refuses a changed linked offset or signature") {
     row :: CoreSharedCallableBinding{semantic_identity: "lazy.drop:checked", role: "lazy.drop", type_key: "checked", symbol: "jet_core_callable_7", function: LIRFunctionID{value: 7}, signature: LIRSignature{id: LIRSignatureID{value: 3}, convention: .SystemV, params: [LIRLayout]{lir_layout_pointer()}, result: None}, linked_offset: 40}
     digest :: core_shared_callable_rows_digest([CoreSharedCallableBinding]{row})
-    changed := ~row
+    changed := row.copy()
     changed.linked_offset = 48
     assert_eq(core_shared_callable_digest_error([CoreSharedCallableBinding]{changed}, digest), "CoreSharedCallableBindingIdentityMismatch")
-    changed = ~row
+    changed = row.copy()
     changed.signature.params = [LIRLayout]{lir_layout_word()}
     assert_eq(core_shared_callable_digest_error([CoreSharedCallableBinding]{changed}, digest), "CoreSharedCallableBindingIdentityMismatch")
 }
@@ -427,7 +427,7 @@ fn core_shared_binding(program: MIRProgram, lowered: LIRLowering, manifest: Core
     member :: CoreSharedLayoutMember{name: "byte", offset: 8, boxed: true, type_key: "integer:false:8", storage_type_key: "option:15:integer:false:8"}
     encoded :: core_shared_member_json(member)
     assert_eq(encoded, "[\"byte\",8,true,\"integer:false:8\",\"option:15:integer:false:8\"]")
-    changed := ~member
+    changed := member.copy()
     changed.storage_type_key = member.type_key
     assert(core_shared_member_json(changed) != encoded)
 }
@@ -436,7 +436,7 @@ fn core_shared_binding(program: MIRProgram, lowered: LIRLowering, manifest: Core
     ty :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})
     row :: CoreSharedNativeLayout{type_key: lower_mono_fingerprint(ty), nominal_key: "", display_name: mir_type_display_name(ty), representation: "Word", kind: 3 | (8 << 32), stride: 1, payload_size: 1, align: 1, box_size: 0, clone_identity: "", drop_identity: "", child_keys: [String]{}, members: [CoreSharedLayoutMember]{}, variants: [CoreSharedLayoutVariant]{}}
     encoded :: core_shared_layout_json(row)
-    changed := ~row
+    changed := row.copy()
     changed.display_name = "another display name"
     assert(core_shared_layout_json(changed) != encoded)
 }

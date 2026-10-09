@@ -139,8 +139,8 @@ fn jet_cli_native_test_selection(program: MIRProgram, harness: MIRHarnessPlan, f
             index -= 1
             bound :: U64.from_int(index + 1) ?? panic("test count fits U64")
             chosen :: Int.from_u64(jet_native_test_shuffle_next(&state) %% bound)
-            saved := ~tests[index]
-            tests[index] = ~tests[chosen]
+            saved := tests[index].copy()
+            tests[index] = tests[chosen].copy()
             tests[chosen] = ^saved
         }
     }

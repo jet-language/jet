@@ -278,7 +278,7 @@ fn core_shared_parent_getter(parent: &CoreSharedParent, attachment: CoreSharedPa
 #Test("a schema-perturbed factory is refused before production or getter publication") {
     original := CoreSharedManifest{namespace_owner_key: "<corelib>", seal: "retained-recipe", sorted_sites: [CoreSharedSiteSchema]{}, keyed_native_layout_inventory: [CoreSharedNativeLayout]{}, digest: "", errors: [String]{}}
     original.digest = core_parent_crypto.sha256(core_shared_manifest_body(original).bytes()).hex()
-    perturbed := ~original
+    perturbed := original.copy()
     perturbed.seal = "perturbed-factory-schema"
     perturbed.digest = core_parent_crypto.sha256(core_shared_manifest_body(perturbed).bytes()).hex()
     assert(core_shared_parent_manifest_valid(original))

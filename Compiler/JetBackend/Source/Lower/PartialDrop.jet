@@ -185,7 +185,7 @@ fn lower_partial_frame(p: MIRProgram, c: LowerContext, m: LowerModule, f: &Lower
     }
     // A whole-owner move can rebind any same-typed local. Reserve its paths
     // before lowering blocks, so the move copies bits rather than losing them.
-    seeds :: ~f.partial_drops
+    seeds :: f.partial_drops.copy()
     loop (slot, definition) in c.slots {
         loop seed in seeds {
             if mir_type_identity_key(seed.root_ty) != mir_type_identity_key(definition.ty) -> next

@@ -17,7 +17,7 @@ fn jet_cli_flash_non_utf8_error(byte_offset: Int) -> JetCLIFlashError Never! {
     JetCLIFlashError{message: "flash path is not UTF-8 at byte {byte_offset}", byte_offset: Val(byte_offset)}
 }
 fn jet_cli_flash_context_error(message: String, cause: JetCLIFlashError) -> JetCLIFlashError Never! {
-    if cause.byte_offset != None -> return ~cause
+    if cause.byte_offset != None -> return cause.copy()
     jet_cli_flash_error(message)
 }
 // One C-FS seam, using Core's canonical Path address. The host preserves
@@ -65,9 +65,9 @@ fn jet_cli_flash_tool_from_facts(facts: MIRTargetProgrammerFacts) -> JetCLIFlash
     if facts.adapter == {
         .Emulator -> {
             &arguments.push(JetCLIFlashArgument.Literal("-machine"))
-            if facts.machine == .Val(value) -> &arguments.push(JetCLIFlashArgument.Dynamic(~value))
+            if facts.machine == .Val(value) -> &arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
             &arguments.push(JetCLIFlashArgument.Literal("-cpu"))
-            if facts.cpu == .Val(value) -> &arguments.push(JetCLIFlashArgument.Dynamic(~value))
+            if facts.cpu == .Val(value) -> &arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
             &arguments.push(JetCLIFlashArgument.Literal("-nographic"))
             &arguments.push(JetCLIFlashArgument.Literal("-kernel"))
             &arguments.push(JetCLIFlashArgument.ImageName)
@@ -76,11 +76,11 @@ fn jet_cli_flash_tool_from_facts(facts: MIRTargetProgrammerFacts) -> JetCLIFlash
             &arguments.push(JetCLIFlashArgument.Literal("download"))
             if facts.chip == .Val(value) {
                 &arguments.push(JetCLIFlashArgument.Literal("--chip"))
-                &arguments.push(JetCLIFlashArgument.Dynamic(~value))
+                &arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
             }
             if facts.interface == .Val(value) {
                 &arguments.push(JetCLIFlashArgument.Literal("--probe"))
-                &arguments.push(JetCLIFlashArgument.Dynamic(~value))
+                &arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
             }
             if facts.speed_khz == .Val(value) {
                 &arguments.push(JetCLIFlashArgument.Literal("--speed"))
@@ -92,11 +92,11 @@ fn jet_cli_flash_tool_from_facts(facts: MIRTargetProgrammerFacts) -> JetCLIFlash
         .OpenOcd -> {
             if facts.interface == .Val(value) {
                 &arguments.push(JetCLIFlashArgument.Literal("-f"))
-                &arguments.push(JetCLIFlashArgument.Dynamic(~value))
+                &arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
             }
             loop config in facts.config {
                 &arguments.push(JetCLIFlashArgument.Literal("-f"))
-                &arguments.push(JetCLIFlashArgument.Dynamic(~config))
+                &arguments.push(JetCLIFlashArgument.Dynamic(config.copy()))
             }
             if facts.speed_khz == .Val(value) {
                 &arguments.push(JetCLIFlashArgument.Literal("-c"))
@@ -106,7 +106,7 @@ fn jet_cli_flash_tool_from_facts(facts: MIRTargetProgrammerFacts) -> JetCLIFlash
             &arguments.push(JetCLIFlashArgument.OpenOcdProgram(facts.reset))
         }
     }
-    JetCLIFlashToolDeclaration{adapter: adapter, executable: ~facts.executable, arguments: arguments, programmer: ~facts}
+    JetCLIFlashToolDeclaration{adapter: adapter, executable: facts.executable.copy(), arguments: arguments, programmer: facts.copy()}
 }
 // Rust FlashToolDeclaration::argv (CmdFlash.rs:146-172).
 fn jet_cli_flash_tool_argv(tool: JetCLIFlashToolDeclaration, image_name: String) -> [String] JetCLIFlashError! {
@@ -116,9 +116,9 @@ fn jet_cli_flash_tool_argv(tool: JetCLIFlashToolDeclaration, image_name: String)
     result := [String]{}
     loop argument in tool.arguments {
         value :: if argument == {
-            .Literal(text) -> ~text
-            .Dynamic(text) -> ~text
-            .ImageName -> ~image_name
+            .Literal(text) -> text.copy()
+            .Dynamic(text) -> text.copy()
+            .ImageName -> image_name.copy()
             .OpenOcdProgram(reset) -> if reset -> "program {image_name} verify reset exit" else -> "program {image_name} verify exit"
         }
         &result.push(value)
@@ -132,7 +132,7 @@ fn jet_cli_flash_profile_from_machine(machine: MIRTargetMachine) -> JetCLIFlashP
     tools := [JetCLIFlashToolDeclaration]{}
     loop facts in machine.programmers -> &tools.push(jet_cli_flash_tool_from_facts(facts))
     if tools.is_empty() -> return Err(jet_cli_flash_error("target `{machine.name}` has no owner-approved programmer facts; declare an adapter plus chip for probe-rs, interface/config for OpenOCD, or machine/cpu for an emulator"))
-    Ok(JetCLIFlashProfile{target: ~machine.name, target_triple: ~machine.triple, target_identity: jet_target_provider_identity(machine), hardware_identity: mir_sha256_hex(jet_target_hardware_json(machine.hardware)), tools: tools})
+    Ok(JetCLIFlashProfile{target: machine.name.copy(), target_triple: machine.triple.copy(), target_identity: jet_target_provider_identity(machine), hardware_identity: mir_sha256_hex(jet_target_hardware_json(machine.hardware)), tools: tools})
 }
 // Rust FlashProfile::select (CmdFlash.rs:208-246). Return an index, not a copied tool.
 fn jet_cli_flash_profile_select(profile: JetCLIFlashProfile, requested: JetCLIFlashAdapter?) -> Int JetCLIFlashError! {
@@ -182,7 +182,7 @@ fn jet_cli_flash_plan_from_machine<H: JetCLIFlashHost>(host: &H, machine: MIRTar
     // #4376: consume fallible optional payload with a result match, never an implicit optional owner.
     image_name :: if &host.utf8_filename(canonical_image) == {
         .Ok(name) -> jet_cli_flash_required_filename(name, canonical_image)
-        .Err(cause) -> { return Err(~cause) }
+        .Err(cause) -> { return Err(cause.copy()) }
     }
     canonical_audit :: jet_cli_flash_resolve_audit<H>(&host, canonical_image, machine.name, audit)
     text :: jet_cli_flash_read_audit<H>(&host, canonical_audit)
@@ -195,26 +195,26 @@ fn jet_cli_flash_plan_from_machine<H: JetCLIFlashHost>(host: &H, machine: MIRTar
     declared_argv :: jet_cli_flash_tool_argv(declaration, image_name)
     executable :: jet_cli_flash_resolve_tool<H>(&host, declaration.executable)
     tool_digest :: &host.sha256_file(executable) ?? return Err(jet_cli_flash_context_error("cannot hash declared flash tool `{flash_paths.show(executable)}`: {err.message}", err))
-    argv := [String]{~declaration.executable}
-    loop word in declared_argv -> &argv.push(~word)
-    Ok(JetCLIFlashPlan{schema: JET_CLI_FLASH_PLAN_SCHEMA, target: ~machine.name, target_triple: ~machine.triple, target_identity: ~profile.target_identity, hardware_identity: ~profile.hardware_identity, adapter: declaration.adapter, programmer: ~declaration.programmer, tool: ~declaration.executable, tool_identity: tool_digest, executable: executable, image: canonical_image, audit: canonical_audit, audit_sha256: audit_digest, image_bytes: metadata.bytes, image_sha256: image_digest, argv: argv, authority: JET_CLI_FLASH_AUTHORITY})
+    argv := [String]{declaration.executable.copy()}
+    loop word in declared_argv -> &argv.push(word.copy())
+    Ok(JetCLIFlashPlan{schema: JET_CLI_FLASH_PLAN_SCHEMA, target: machine.name.copy(), target_triple: machine.triple.copy(), target_identity: profile.target_identity.copy(), hardware_identity: profile.hardware_identity.copy(), adapter: declaration.adapter, programmer: declaration.programmer.copy(), tool: declaration.executable.copy(), tool_identity: tool_digest, executable: executable, image: canonical_image, audit: canonical_audit, audit_sha256: audit_digest, image_bytes: metadata.bytes, image_sha256: image_digest, argv: argv, authority: JET_CLI_FLASH_AUTHORITY})
 }
 // Rust default_flash_image (CmdFlash.rs:935-943).
 fn jet_cli_flash_default_image(target: String, package_version: String) -> Path Never! {
     machine :: jet_driver_target_machine_by_name(target, package_version)
-    canonical :: if machine == .Val(value) -> ~value.name else -> ~target
+    canonical :: if machine == .Val(value) -> value.name.copy() else -> target.copy()
     flash_paths.join(flash_paths.join(flash_paths.of(".jet/target"), canonical), "firmware.elf")
 }
 // Rust FlashPlan::from_machine filename checks (CmdFlash.rs:323-326).
 fn jet_cli_flash_required_filename(name: String?, image: Path) -> String JetCLIFlashError! {
     if name == .Val(value) {
-        if !value.is_empty() -> return Ok(~value)
+        if !value.is_empty() -> return Ok(value.copy())
     }
     Err(jet_cli_flash_error("flash image `{flash_paths.show(image)}` has no UTF-8 filename"))
 }
 fn jet_cli_flash_strings_json(values: [String]) -> CanonicalJSON Never! {
     rows := [CanonicalJSON]{}
-    loop value in values -> &rows.push(CanonicalJSON.String(~value))
+    loop value in values -> &rows.push(CanonicalJSON.String(value.copy()))
     CanonicalJSON.Array(rows)
 }
 // Rust FlashPlan::identity object (CmdFlash.rs:378-436); keys in canonical order.
@@ -224,25 +224,25 @@ fn jet_cli_flash_plan_json(plan: JetCLIFlashPlan) -> CanonicalJSON Never! {
         CanonicalJSONField{key: "adapter", value: CanonicalJSON.String(jet_cli_flash_adapter_name(plan.adapter))},
         CanonicalJSONField{key: "argv", value: jet_cli_flash_strings_json(plan.argv)},
         CanonicalJSONField{key: "audit", value: CanonicalJSON.String(flash_paths.show(plan.audit))},
-        CanonicalJSONField{key: "audit_sha256", value: CanonicalJSON.String(~plan.audit_sha256)},
-        CanonicalJSONField{key: "authority", value: CanonicalJSON.String(~plan.authority)},
-        CanonicalJSONField{key: "hardware_identity", value: CanonicalJSON.String(~plan.hardware_identity)},
+        CanonicalJSONField{key: "audit_sha256", value: CanonicalJSON.String(plan.audit_sha256.copy())},
+        CanonicalJSONField{key: "authority", value: CanonicalJSON.String(plan.authority.copy())},
+        CanonicalJSONField{key: "hardware_identity", value: CanonicalJSON.String(plan.hardware_identity.copy())},
         CanonicalJSONField{key: "image", value: CanonicalJSON.String(flash_paths.show(plan.image))},
         CanonicalJSONField{key: "image_bytes", value: CanonicalJSON.Integer("{plan.image_bytes}")},
-        CanonicalJSONField{key: "image_sha256", value: CanonicalJSON.String(~plan.image_sha256)},
-        CanonicalJSONField{key: "plan_schema", value: CanonicalJSON.String(~plan.schema)},
+        CanonicalJSONField{key: "image_sha256", value: CanonicalJSON.String(plan.image_sha256.copy())},
+        CanonicalJSONField{key: "plan_schema", value: CanonicalJSON.String(plan.schema.copy())},
         CanonicalJSONField{key: "programmer", value: jet_cli_flash_programmer_json(plan.programmer)},
-        CanonicalJSONField{key: "target", value: CanonicalJSON.String(~plan.target)},
-        CanonicalJSONField{key: "target_identity", value: CanonicalJSON.String(~plan.target_identity)},
-        CanonicalJSONField{key: "target_triple", value: CanonicalJSON.String(~plan.target_triple)},
-        CanonicalJSONField{key: "tool", value: CanonicalJSON.String(~plan.tool)},
-        CanonicalJSONField{key: "tool_identity", value: CanonicalJSON.String(~plan.tool_identity)},
+        CanonicalJSONField{key: "target", value: CanonicalJSON.String(plan.target.copy())},
+        CanonicalJSONField{key: "target_identity", value: CanonicalJSON.String(plan.target_identity.copy())},
+        CanonicalJSONField{key: "target_triple", value: CanonicalJSON.String(plan.target_triple.copy())},
+        CanonicalJSONField{key: "tool", value: CanonicalJSON.String(plan.tool.copy())},
+        CanonicalJSONField{key: "tool_identity", value: CanonicalJSON.String(plan.tool_identity.copy())},
     })
 }
 // Rust FlashPlan::identity (CmdFlash.rs:378-436): JSON text, NOT its digest.
 fn jet_cli_flash_plan_identity(plan: JetCLIFlashPlan) -> String Never! {
     bytes :: canonical_json_bytes(jet_cli_flash_plan_json(plan))
-    String.from_bytes(~bytes[0..<bytes.len() - 1]) ?? panic("flash plan identity JSON is UTF-8")
+    String.from_bytes(bytes[0..<bytes.len() - 1].copy()) ?? panic("flash plan identity JSON is UTF-8")
 }
 // Rust FlashFailure, FlashExecution records (CmdFlash.rs:472-475,626-633).
 struct JetCLIFlashFailure { kind: String, detail: String }
@@ -263,13 +263,13 @@ fn jet_cli_flash_receipt_from_execution(plan: JetCLIFlashPlan, execution: ^JetCL
     stdout := jet_cli_flash_bound_capture(execution.stdout)
     stderr := jet_cli_flash_bound_capture(execution.stderr)
     success :: execution.failure == None
-    receipt := JetCLIFlashReceipt{schema: JET_CLI_FLASH_RECEIPT_SCHEMA, plan: ~plan, plan_identity: jet_cli_flash_plan_identity(plan), mechanism: ^execution.mechanism, policy: ^execution.policy, status: execution.status, success: success, stdout: ^stdout.bytes, stderr: ^stderr.bytes, stdout_truncated: stdout.truncated, stderr_truncated: stderr.truncated, failure: ^execution.failure, result_identity: ""}
+    receipt := JetCLIFlashReceipt{schema: JET_CLI_FLASH_RECEIPT_SCHEMA, plan: plan.copy(), plan_identity: jet_cli_flash_plan_identity(plan), mechanism: ^execution.mechanism, policy: ^execution.policy, status: execution.status, success: success, stdout: ^stdout.bytes, stderr: ^stderr.bytes, stdout_truncated: stdout.truncated, stderr_truncated: stderr.truncated, failure: ^execution.failure, result_identity: ""}
     receipt.result_identity = "flash-result-v1:{canonical_json_sha256(jet_cli_flash_receipt_result_json(receipt))}"
     receipt
 }
 // Rust FlashReceipt::failure_json (CmdFlash.rs:556-564).
 fn jet_cli_flash_receipt_failure_json(receipt: JetCLIFlashReceipt) -> CanonicalJSON Never! {
-    if receipt.failure == .Val(failure) -> return CanonicalJSON.Object([CanonicalJSONField]{CanonicalJSONField{key: "detail", value: CanonicalJSON.String(~failure.detail)}, CanonicalJSONField{key: "kind", value: CanonicalJSON.String(~failure.kind)}})
+    if receipt.failure == .Val(failure) -> return CanonicalJSON.Object([CanonicalJSONField]{CanonicalJSONField{key: "detail", value: CanonicalJSON.String(failure.detail.copy())}, CanonicalJSONField{key: "kind", value: CanonicalJSON.String(failure.kind.copy())}})
     CanonicalJSON.Null
 }
 fn jet_cli_flash_status_json(status: Int?) -> CanonicalJSON Never! { if status == .Val(value) -> CanonicalJSON.Integer("{value}") else -> CanonicalJSON.Null }
@@ -326,20 +326,20 @@ fn jet_cli_flash_receipt_result_json(receipt: JetCLIFlashReceipt) -> CanonicalJS
         CanonicalJSONField{key: "adapter", value: CanonicalJSON.String(jet_cli_flash_adapter_name(plan.adapter))},
         CanonicalJSONField{key: "argv", value: jet_cli_flash_strings_json(plan.argv)},
         CanonicalJSONField{key: "audit", value: CanonicalJSON.String(flash_paths.show(plan.audit))},
-        CanonicalJSONField{key: "audit_sha256", value: CanonicalJSON.String(~plan.audit_sha256)},
+        CanonicalJSONField{key: "audit_sha256", value: CanonicalJSON.String(plan.audit_sha256.copy())},
         CanonicalJSONField{key: "failure", value: jet_cli_flash_receipt_failure_json(receipt)},
-        CanonicalJSONField{key: "hardware_identity", value: CanonicalJSON.String(~plan.hardware_identity)},
-        CanonicalJSONField{key: "image_sha256", value: CanonicalJSON.String(~plan.image_sha256)},
-        CanonicalJSONField{key: "mechanism", value: CanonicalJSON.String(~receipt.mechanism)},
-        CanonicalJSONField{key: "plan_identity", value: CanonicalJSON.String(~receipt.plan_identity)},
-        CanonicalJSONField{key: "policy", value: CanonicalJSON.String(~receipt.policy)},
+        CanonicalJSONField{key: "hardware_identity", value: CanonicalJSON.String(plan.hardware_identity.copy())},
+        CanonicalJSONField{key: "image_sha256", value: CanonicalJSON.String(plan.image_sha256.copy())},
+        CanonicalJSONField{key: "mechanism", value: CanonicalJSON.String(receipt.mechanism.copy())},
+        CanonicalJSONField{key: "plan_identity", value: CanonicalJSON.String(receipt.plan_identity.copy())},
+        CanonicalJSONField{key: "policy", value: CanonicalJSON.String(receipt.policy.copy())},
         CanonicalJSONField{key: "programmer", value: jet_cli_flash_programmer_json(plan.programmer)},
         CanonicalJSONField{key: "status", value: jet_cli_flash_status_json(receipt.status)},
         CanonicalJSONField{key: "stderr", value: CanonicalJSON.String(jet_cli_flash_utf8_lossy(receipt.stderr))},
         CanonicalJSONField{key: "stdout", value: CanonicalJSON.String(jet_cli_flash_utf8_lossy(receipt.stdout))},
         CanonicalJSONField{key: "success", value: CanonicalJSON.Bool(receipt.success)},
-        CanonicalJSONField{key: "target_identity", value: CanonicalJSON.String(~plan.target_identity)},
-        CanonicalJSONField{key: "tool_identity", value: CanonicalJSON.String(~plan.tool_identity)},
+        CanonicalJSONField{key: "target_identity", value: CanonicalJSON.String(plan.target_identity.copy())},
+        CanonicalJSONField{key: "tool_identity", value: CanonicalJSON.String(plan.tool_identity.copy())},
     })
 }
 // Rust FlashReceipt::to_json (CmdFlash.rs:566-619).
@@ -348,24 +348,24 @@ fn jet_cli_flash_receipt_to_json(receipt: JetCLIFlashReceipt) -> CanonicalJSON N
     fields := [CanonicalJSONField]{}
     if jet_cli_flash_plan_json(plan) == .Object(plan_fields) {
         loop field in plan_fields {
-            if field.key != "plan_schema" -> &fields.push(~field)
+            if field.key != "plan_schema" -> &fields.push(field.copy())
         }
     }
     additions :: [CanonicalJSONField]{
         CanonicalJSONField{key: "failure", value: jet_cli_flash_receipt_failure_json(receipt)},
-        CanonicalJSONField{key: "mechanism", value: CanonicalJSON.String(~receipt.mechanism)},
-        CanonicalJSONField{key: "plan_identity", value: CanonicalJSON.String(~receipt.plan_identity)},
-        CanonicalJSONField{key: "policy", value: CanonicalJSON.String(~receipt.policy)},
-        CanonicalJSONField{key: "receipt_schema", value: CanonicalJSON.String(~receipt.schema)},
+        CanonicalJSONField{key: "mechanism", value: CanonicalJSON.String(receipt.mechanism.copy())},
+        CanonicalJSONField{key: "plan_identity", value: CanonicalJSON.String(receipt.plan_identity.copy())},
+        CanonicalJSONField{key: "policy", value: CanonicalJSON.String(receipt.policy.copy())},
+        CanonicalJSONField{key: "receipt_schema", value: CanonicalJSON.String(receipt.schema.copy())},
         CanonicalJSONField{key: "result", value: CanonicalJSON.String(if receipt.success -> "ok" else -> "failed")},
-        CanonicalJSONField{key: "result_identity", value: CanonicalJSON.String(~receipt.result_identity)},
+        CanonicalJSONField{key: "result_identity", value: CanonicalJSON.String(receipt.result_identity.copy())},
         CanonicalJSONField{key: "status", value: jet_cli_flash_status_json(receipt.status)},
         CanonicalJSONField{key: "stderr", value: CanonicalJSON.String(jet_cli_flash_utf8_lossy(receipt.stderr))},
         CanonicalJSONField{key: "stderr_truncated", value: CanonicalJSON.Bool(receipt.stderr_truncated)},
         CanonicalJSONField{key: "stdout", value: CanonicalJSON.String(jet_cli_flash_utf8_lossy(receipt.stdout))},
         CanonicalJSONField{key: "stdout_truncated", value: CanonicalJSON.Bool(receipt.stdout_truncated)},
     }
-    loop field in additions -> &fields.push(~field)
+    loop field in additions -> &fields.push(field.copy())
     canonical_json_object(fields) ?? panic("flash receipt JSON keys are unique")
 }
 // Rust FlashReceipt::section (CmdFlash.rs:621-624).

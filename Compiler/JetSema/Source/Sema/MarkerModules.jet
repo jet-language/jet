@@ -144,7 +144,7 @@ fn sema_marker_module_scope(items: [Item], span: Span, prefix: String) -> String
             return sema_marker_module_scope(body, span, name)
         }
     }
-    ~prefix
+    prefix.copy()
 }
 
 fn sema_marker_module_import_declared(items: [Item], scope: String, span: Span, prefix: String) -> Bool Never! {
@@ -311,7 +311,7 @@ fn sema_marker_module_bind_items(items: [Item], bindings: [SemaMarkerModuleBindi
 
 // Both direct uses and replayed group members feed this single AST projection.
 fn sema_marker_module_bind_program(program: Program, bindings: [SemaMarkerModuleBinding]) -> Program Never! {
-    if bindings.len() == 0 -> return ~program
+    if bindings.len() == 0 -> return program.copy()
     bound := program
     bound.items = sema_marker_module_bind_items(program.items, bindings)
     loop index in 0..<bound.rule_facts.len() -> bound.rule_facts[index].marker = sema_marker_module_bind_marker(bound.rule_facts[index].marker, bindings)

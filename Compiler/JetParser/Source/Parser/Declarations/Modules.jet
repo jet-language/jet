@@ -350,12 +350,12 @@ fn parser_module_body_visibility(body: ^[Item], is_pub: Bool, is_package_pub: Bo
             .CodeModule(definition) -> {
                 updated := definition
                 package :: parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
-                if definition.body == .Val(inner) -> updated.body = Val(parser_module_body_visibility(~inner, false, package))
+                if definition.body == .Val(inner) -> updated.body = Val(parser_module_body_visibility(inner.copy(), false, package))
                 &narrowed.push(Item.CodeModule{value: updated})
             }
             .GenericModule(definition) -> {
                 updated := definition
-                updated.body = parser_module_body_visibility(~definition.body, false, parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub))
+                updated.body = parser_module_body_visibility(definition.body.copy(), false, parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub))
                 &narrowed.push(Item.GenericModule{value: updated})
             }
             .ModuleAlias(definition) -> {

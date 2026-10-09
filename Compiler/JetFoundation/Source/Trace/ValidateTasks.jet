@@ -19,7 +19,7 @@ fn jettrace_validate_tasks(value: CanonicalJSON, limit: Int) -> [U64:JetTraceTas
         symbol :: fields[jettrace_get(fields, "symbol")].value
         jettrace_validate_symbol(symbol, "{label}.symbol")
         if tasks.has_key(id) -> return Err(jettrace_error("{label}.id duplicates task {id}"))
-        tasks[id] = JetTraceTaskFact{parent: parent, state: ^state, wait: ^wait, symbol: ~symbol}
+        tasks[id] = JetTraceTaskFact{parent: parent, state: ^state, wait: ^wait, symbol: symbol.copy()}
         &ids.push(id)
     }
     &ids.sort()

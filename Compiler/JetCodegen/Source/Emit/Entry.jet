@@ -65,7 +65,7 @@ fn jet_rust_emit_program_allocator(ctx: &JetRustEmitContext, lines: &[String]) N
     if jet_rust_emit_is_no_os(&ctx) -> return
     if ctx.program.facts.program_allocator == .Counting(cap) {
         bytes :: if cap == .Val(size) -> "{size.bytes}" else -> "18446744073709551615"
-        root :: ~ctx.config.root_prefix
+        root :: ctx.config.root_prefix.copy()
         &lines.push("#[global_allocator]")
         &lines.push("static __JET_PROGRAM_ALLOCATOR: {root}jet_program_allocator::JetProgramAllocator = {root}jet_program_allocator::JetProgramAllocator::counting({bytes});")
     }

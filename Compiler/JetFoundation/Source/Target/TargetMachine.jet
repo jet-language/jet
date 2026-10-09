@@ -753,7 +753,7 @@ fn jet_target_capabilities_for_core_usage(api: String) -> [MIRTargetCapability] 
 // Rust TargetMachineUse::from_core_apis (TargetMachine.rs).
 fn jet_target_machine_use_from_core_apis(apis: [String]) -> MIRTargetMachineUse Never! {
     usage := jet_target_machine_use_default()
-    sorted := ~apis
+    sorted := apis.copy()
     &sorted.sort()
     loop api in sorted {
         if usage.core_apis.is_empty() || usage.core_apis[usage.core_apis.len() - 1] != api -> &usage.core_apis.push(api)

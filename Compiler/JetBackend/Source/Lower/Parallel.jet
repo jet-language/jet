@@ -41,9 +41,9 @@ fn lower_parallel_walk(p: MIRProgram, m: &LowerModule, f: &LowerFunction, closur
 fn lower_helper_parallel_map(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     shape :: lower_parallel_shape(glue.ty) ?? panic("parallel callback has a checked single-input type")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_word(), lir_layout_word()}, None)
-    env :: ~f.open_params[0]
-    begin :: ~f.open_params[1]
-    end :: ~f.open_params[2]
+    env :: f.open_params[0].copy()
+    begin :: f.open_params[1].copy()
+    end :: f.open_params[2].copy()
     closure :: lower_pointer(&f)
     input :: lower_pointer(&f)
     output :: lower_pointer(&f)
@@ -336,14 +336,14 @@ fn lower_helper_parallel_fold(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -
     merging :: glue.helper == "para.fold.merge"
     params :: if merging -> [LIRLayout]{lir_layout_pointer(), lir_layout_pointer(), lir_layout_pointer()} else -> [LIRLayout]{lir_layout_pointer(), lir_layout_word(), lir_layout_word()}
     f := lower_helper_start(&m, glue, params, Val(lir_layout_pointer()))
-    env :: ~f.open_params[0]
+    env :: f.open_params[0].copy()
     callback :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: callback, base: env, offset: if merging -> 16 else -> 0})
     output :: lower_pointer(&f)
     lower_alloc(&m, &f, output, lower_size(p, result_ty).size)
     if merging {
-        left :: ~f.open_params[1]
-        right :: ~f.open_params[2]
+        left :: f.open_params[1].copy()
+        right :: f.open_params[2].copy()
         a :: lower_read_at(p, &f, left, 0, result_ty) ?? panic("stored accumulator")
         b :: lower_read_at(p, &f, right, 0, result_ty) ?? panic("stored accumulator")
         value :: lower_call_closure_box(p, &m, &f, callback, [LIRValueID]{a, b}, result_ty) ?? panic("stored accumulator")
@@ -359,8 +359,8 @@ fn lower_helper_parallel_fold(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -
         data :: lower_pointer(&f)
         lower_emit(&f, LIRInst.Load{dst: step, base: env, offset: 8})
         lower_emit(&f, LIRInst.Load{dst: data, base: env, offset: 24})
-        begin :: ~f.open_params[1]
-        end :: ~f.open_params[2]
+        begin :: f.open_params[1].copy()
+        end :: f.open_params[2].copy()
         each :: lower_sort_loop(&f, begin, end)
         source :: lower_list_address(&f, data, each.at, lower_list_stride(p, elem))
         item :: lower_read_at(p, &f, source, 0, elem) ?? panic("stored parallel input")

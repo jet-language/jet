@@ -46,8 +46,8 @@ fn lower_helper_contains(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     layouts := [LIRLayout]{lir_layout_pointer()}
     if lower_repr_layout(lower_repr(p, elem)) == .Val(layout) -> &layouts.push(layout)
     f := lower_helper_start(&m, glue, layouts, Val(lir_layout_bool()))
-    list :: ~f.open_params[0]
-    needle :: if layouts.len() == 2 -> Val(~f.open_params[1]) else -> None
+    list :: f.open_params[0].copy()
+    needle :: if layouts.len() == 2 -> Val(f.open_params[1].copy()) else -> None
     hit :: lower_new_block(&f)
     each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
     item :: lower_read_at(p, &f, each.address, 0, elem)
@@ -72,8 +72,8 @@ fn lower_helper_binary_search(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -
     elem :: lower_list_element(glue.ty) ?? panic("binary_search has no element")
     needle_layout :: lower_repr_layout(lower_repr(p, elem)) ?? lir_layout_pointer()
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), needle_layout}, Val(lir_layout_pointer()))
-    list :: ~f.open_params[0]
-    needle :: ~f.open_params[1]
+    list :: f.open_params[0].copy()
+    needle :: f.open_params[1].copy()
     length :: lower_list_word(&f, list, 0)
     data :: lower_list_data(&f, list)
     zero :: lower_const(&f, 0)
@@ -133,7 +133,7 @@ fn lower_float_zero(f: &LowerFunction) -> LIRValueID Never! {
 fn lower_helper_sum_fixed(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     elem :: lower_list_element(glue.ty) ?? panic("fixed sum has no element")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_float()))
-    list :: ~f.open_params[0]
+    list :: f.open_params[0].copy()
     lanes :: lower_pointer(&f)
     lower_emit(&f, LIRInst.StackSlot{dst: lanes, size: 64, align: 8})
     zero :: lower_float_zero(&f)
@@ -175,7 +175,7 @@ fn lower_helper_float_extremum(p: MIRProgram, m: &LowerModule, glue: LowerGlue) 
     elem :: lower_list_element(glue.ty) ?? panic("Float extremum has no element")
     maximum :: glue.helper == "builtin.max_float"
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
-    list :: ~f.open_params[0]
+    list :: f.open_params[0].copy()
     data :: lower_list_data(&f, list)
     length :: lower_list_word(&f, list, 0)
     zero :: lower_const(&f, 0)
@@ -270,7 +270,7 @@ fn lower_helper_try_capacity(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
     err_ty :: if glue.ty.kind == .Result(_, err) -> err else -> panic("capacity helper has a checked Result")
     elem :: lower_list_element(ok_ty) ?? panic("capacity helper has a checked List")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_word()}, Val(lir_layout_pointer()))
-    capacity :: ~f.open_params[0]
+    capacity :: f.open_params[0].copy()
     result :: lower_pointer(&f)
     // Fatal metadata allocation does not consult or consume the fault rail.
     lower_alloc(&m, &f, result, lower_result_box_size(p, ok_ty, err_ty))

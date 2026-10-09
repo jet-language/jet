@@ -217,7 +217,7 @@ fn dimension_divide(left: Dimension, right: Dimension) -> Dimension? {
 }
 
 fn dimension_combine(left: Dimension, right: Dimension, subtract: Bool) -> Dimension? {
-    axes := ~left.axes
+    axes := left.axes.copy()
     loop axis in right.axes {
         exponent :: measure_signed_value(axis.exponent) ?? return None
         delta :: if subtract -> -exponent else -> exponent

@@ -55,7 +55,7 @@ fn run() {
     assert(read.bytes == "fn run() {{ 1 }}\n".bytes())
     assert(files[0].identity == jet_cli_identity_key("file", read.stat))
     assert(files[0].identity.contains("device={read.stat.id.device};inode={read.stat.id.inode}"))
-    precise := ~read.stat
+    precise := read.stat.copy()
     precise.modified = core.time.datetime(2026, 1, 1, 0, 0, 0).add_nanoseconds(123456789)
     ns :: precise.modified.to_unix_ns() ?? panic("fixture timestamp")
     assert(ns % 1000000 != 0)

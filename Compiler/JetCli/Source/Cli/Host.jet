@@ -995,7 +995,7 @@ fn jet_cli_fmt_explicit_copies(source: String, origin: String, color: Bool) -> J
         loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
             owner :: diagnostic.origin ?? next
             edit :: diagnostic.edit ?? next
-            if owner.path != snapshot.entry_path || edit.new_text != "~" || edit.span.start != edit.span.end -> next
+            if owner.path != snapshot.entry_path || edit.new_text != ".copy()" || edit.span.start != edit.span.end -> next
             site :: edit.span.start - shift
             if site >= 0 && site <= source.len() && !sites.contains(site) -> &sites.push(site)
         }
@@ -1004,7 +1004,7 @@ fn jet_cli_fmt_explicit_copies(source: String, origin: String, color: Bool) -> J
     marked := ""
     cursor := 0
     loop site in sites {
-        marked = "{marked}{source.slice(cursor..<site)}~"
+        marked = "{marked}{source.slice(cursor..<site)}.copy()"
         cursor = site
     }
     jet_cli_fmt_formatted("{marked}{source.slice(cursor..<source.len())}")
@@ -1460,14 +1460,14 @@ fn jet_cli_policy_explain_host(key: PolicyKey, file: String, site: String?, line
 // choices in `args`), queried without checking bodies.
 fn jet_cli_gates_run(file: String, args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
     if jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc) == {
-        .Refused(output) -> return ~output
+        .Refused(output) -> return output.copy()
         .Prepared(request, _) -> {
             ledger := GateLedger{}
-            loop entry in request.external_gate_entries -> gate_ledger_push(&ledger, ~entry)
+            loop entry in request.external_gate_entries -> gate_ledger_push(&ledger, entry.copy())
             store :: trust_store_path()
-            loop entry in jet_cli_gate_trust_entries(store, trust_list_records(store)) -> gate_ledger_push(&ledger, ~entry)
+            loop entry in jet_cli_gate_trust_entries(store, trust_list_records(store)) -> gate_ledger_push(&ledger, entry.copy())
             jet_cli_gate_append_invocation(&ledger, args)
-            gated := ~request
+            gated := request.copy()
             gated.external_gate_entries = ledger.rows
             return jet_cli_gates_host(gated, args, file, color, json)
         }
@@ -1478,8 +1478,8 @@ fn jet_cli_gates_run(file: String, args: [String], color: Bool, json: Bool) -> J
 // profile) over the authorized request of `file`.
 fn jet_cli_output_run(file: String, address: String?, color: Bool, json: Bool) -> JetDriverVerbOutput {
     if jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc) == {
-        .Refused(output) -> return ~output
-        .Prepared(request, _) -> return jet_cli_output_host(~request, address, file, json)
+        .Refused(output) -> return output.copy()
+        .Prepared(request, _) -> return jet_cli_output_host(request.copy(), address, file, json)
     }
 }
 

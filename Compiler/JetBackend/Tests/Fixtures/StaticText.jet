@@ -45,7 +45,7 @@ fn fx_static_text_module() -> LIRModule Never! {
     lowered :: lir_lower_runtime_callables(p, roots, ^intrinsics)
     loop issue in lowered.issues -> print("static-text: {issue.function}: {issue.message}")
     if lowered.issues.len() != 0 -> panic("literal StaticText lowering refused")
-    lir := ~lowered.lir
+    lir := lowered.lir.copy()
     root :: lowered.callables.get(roots[0].value) ?? panic("missing static-text root")
     loop function in lir.functions {
         loop value in function.values { if value.drop != .Trivial -> panic("StaticText has a drop action") }

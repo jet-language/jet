@@ -398,7 +398,7 @@ fn sema_failure_project_returns(graph: &SemaRegistrationGraph, projections: [Sem
         local_names["{module_index}|{updated.name}"] = projection.key
         items[projection.key] = Item.Func{value: updated}
         &trail.entries.push(SemaGraphUndo.FunctionRow{module_index: module_index, row: projection.row, old: graph.modules[module_index].functions[projection.row]})
-        graph.modules[module_index].functions[projection.row] = ~row
+        graph.modules[module_index].functions[projection.row] = row.copy()
         if !seen[module_index] {
             seen[module_index] = true
             &declaring.push(module_index)
@@ -472,7 +472,7 @@ fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGraphMo
         loop facts in module_result.failure_facts {
             function_row :: sema_failure_function_row(graph, module_index, facts.function_key)
             if function_row < 0 || !sema_failure_inference_candidate(graph.modules[module_index].functions[function_row].declaration) -> next
-            &rows.push(SemaFailureUnionRow{key: ~facts.function_key, name: ~graph.modules[module_index].functions[function_row].declaration.name, module_index: module_index, members: ~facts.union_members, general: facts.union_general, edges: ~facts.union_edges, cases: ~facts.union_cases, function_row: function_row})
+            &rows.push(SemaFailureUnionRow{key: facts.function_key.copy(), name: graph.modules[module_index].functions[function_row].declaration.name.copy(), module_index: module_index, members: facts.union_members.copy(), general: facts.union_general, edges: facts.union_edges.copy(), cases: facts.union_cases.copy(), function_row: function_row})
         }
     }
     if rows.len() == 0 -> return projected

@@ -81,11 +81,11 @@ fn sema_comptime_body_values_freeze(values: ^[SemaComptimeBodyValue], work: Shar
         permit.value.indexed_rows += indexed_rows
         permit.value.index_key_utf8_bytes += index_key_utf8_bytes
     }
-    if length == 0 -> return SemaComptimeBodyValues{work: ~work}
+    if length == 0 -> return SemaComptimeBodyValues{work: work.copy()}
     SemaComptimeBodyValues{
         facts: Val(shared SemaComptimeBodyFacts{values: ^values, modules: ^modules, first_rows: ^first_rows, second_rows: ^second_rows, indexed_rows: indexed_rows}),
         length: length,
-        work: ~work,
+        work: work.copy(),
     }
 }
 
@@ -114,7 +114,7 @@ fn sema_comptime_body_values_append_items(publication: &SemaComptimeBodyValues, 
         if publication.length != 0 -> panic("a body prefix lost its facts owner")
         publication.facts = Val(shared SemaComptimeBodyFacts{values: [SemaComptimeBodyValue]{}, modules: [String:Int]{}, first_rows: [[String:Int]]{}, second_rows: [[String:Int]]{}, indexed_rows: 0})
     }
-    facts :: ~publication.facts ?? panic("body publication has no facts owner")
+    facts :: publication.facts.copy() ?? panic("body publication has no facts owner")
     count_key_bytes :: if publication.work == .Val(_) -> true else -> false
     added :: sema_comptime_body_facts_append_items(facts, values, from, publication.length, count_key_bytes)
     if added.rows == 0 -> panic("the authenticated body frontier contained no new body row")
@@ -138,7 +138,7 @@ fn sema_comptime_body_values_truncate(context: &SemaCheckContext, length: Int) N
 }
 
 fn sema_comptime_body_values_prefix(values: SemaComptimeBodyValues, length: Int) -> SemaComptimeBodyValues Never! {
-    prefix := ~values
+    prefix := values.copy()
     if prefix.length > length -> prefix.length = length
     ^prefix
 }
@@ -172,7 +172,7 @@ fn sema_comptime_body_work_count(values: SemaComptimeBodyValues, operation: Sema
 // callback can perform host I/O or re-enter an observer.
 fn sema_comptime_body_work_snapshot(cell: Shared<SemaComptimeBodyWork>) -> SemaComptimeBodyWork {
     permit :: cell.guard_read()
-    ~permit.value
+    permit.value.copy()
 }
 
 // Called after tasks join, by the existing phase owner holding the real sink.
@@ -207,7 +207,7 @@ fn sema_comptime_body_values_debug(values: SemaComptimeBodyValues) -> String {
     permit :: facts.guard_read()
     if values.length < permit.value.values.len() {
         prefix := [SemaComptimeBodyValue]{}
-        loop row in 0..<values.length -> &prefix.push(~permit.value.values[row])
+        loop row in 0..<values.length -> &prefix.push(permit.value.values[row].copy())
         return "{prefix:Debug}"
     }
     "{permit.value.values:Debug}"
@@ -270,7 +270,7 @@ fn sema_comptime_body_value_find(
         if second < context.comptime_body_values.length -> return None
     }
     sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.OwnedRowReturned)
-    Val(~permit.value.values[row])
+    Val(permit.value.values[row].copy())
 }
 
 fn sema_comptime_body_item_source(source: SemaComptimeBodySource) -> SemaComptimeItemSource Never! {

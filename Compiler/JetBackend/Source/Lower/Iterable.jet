@@ -112,12 +112,12 @@ fn lower_iterable_next_problem(p: MIRProgram, m: LowerModule, next: MIRFunction,
 // for None), owned by the caller.
 fn lower_iterable_pull(p: MIRProgram, m: &LowerModule, f: &LowerFunction, next: MIRFunction, cell: LIRValueID) -> LIRValueID Never! {
     index :: lower_function_index(m, next.id)
-    signature :: ~m.mir_signatures[index]
+    signature :: m.mir_signatures[index].copy()
     receiver := cell
     if lower_pipe_next_name(next.params[0].ty) != "" {
         receiver = lower_read_at(p, &f, cell, 0, next.params[0].ty) ?? {
             lower_fail(&m, &f, "process line source has no native stream carrier")
-            return ~cell
+            return cell.copy()
         }
     }
     item :: lower_pointer(&f)
@@ -203,7 +203,7 @@ fn lower_iterable_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f
     state :: lower_pointer(&f)
     lower_alloc(&m, &f, state, lower_iterable_state_size(p, iter_ty))
     cell :: lower_address(&f, state, lower_iterable_state_head())
-    iter_signature :: ~m.mir_signatures[iter_index]
+    iter_signature :: m.mir_signatures[iter_index].copy()
     iter_target :: LIRCallee.Function{id: LIRFunctionID{value: iter_index}}
     if m.mir_results[iter_index] > 0 {
         // An inline iterator is built straight into the state box.
@@ -347,7 +347,7 @@ fn lower_iterable_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, curso
 // and frees the state box.
 fn lower_iterable_cursor_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue, next: MIRFunction, advance: Bool) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    cursor :: ~f.open_params[0]
+    cursor :: f.open_params[0].copy()
     if lower_iterable_next_problem(p, m, next, glue.ty) == .Val(problem) {
         lower_fail(&m, &f, "Iterable loop source: {problem} is not lowered at O0 yet")
         lower_seal(&f, LIRTerminator.Unreachable)

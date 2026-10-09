@@ -251,7 +251,7 @@ fn pc_current_kind_equivalence() {
             pc_require(state.pending_type_gt, "real type-close consumer leaves the pending second GT")
         }
         before :: state.position
-        oracle := ~state
+        oracle := state.copy()
         expected :: parser_current(&oracle).kind
         actual :: parser_current_kind(&state)
         pc_require(actual == expected && "{state:Debug}" == "{oracle:Debug}", "kind-only query preserves full parser state and the token-accessor verdict")
@@ -263,7 +263,7 @@ fn pc_current_kind_equivalence() {
             cursors :: [Int]{-1, state.tokens.len(), state.tokens.len() + 1}
             loop cursor in cursors {
                 state.position = cursor
-                oracle = ~state
+                oracle = state.copy()
                 expected_pending :: parser_current(&oracle).kind
                 pc_require(parser_current_kind(&state) == expected_pending && expected_pending == TOKEN_GT, "pending split token precedes negative and out-of-range bounds")
                 pc_require(state.position == cursor && "{state:Debug}" == "{oracle:Debug}", "pending GT preserves even an out-of-range cursor and all state")
@@ -274,7 +274,7 @@ fn pc_current_kind_equivalence() {
         cursors :: [Int]{-1, 0, state.tokens.len() - 1, state.tokens.len(), state.tokens.len() + 1}
         loop cursor in cursors {
             state.position = cursor
-            oracle = ~state
+            oracle = state.copy()
             expected_at :: parser_current(&oracle).kind
             actual_at :: parser_current_kind(&state)
             pc_require(actual_at == expected_at && "{state:Debug}" == "{oracle:Debug}", "valid, comment, actual EOF, and invalid cursors match the canonical token accessor")

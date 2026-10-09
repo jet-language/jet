@@ -494,7 +494,7 @@ fn lower_shared_site_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
     f := lower_helper_start(&m, glue, [LIRLayout]{}, Val(lir_layout_pointer()))
     if m.shared_sites_dynamic -> panic("dynamic image attempted to emit a Core publication getter")
     f.builder.name = mir_shared_site_getter_symbol(site.initializer)
-    f.name = ~f.builder.name
+    f.name = f.builder.name.copy()
     loop exported in m.shared_sites {
         if exported.initializer == site.initializer || exported.symbol == f.builder.name {
             message :: "duplicate or colliding Core publication getter {f.builder.name}"
@@ -502,7 +502,7 @@ fn lower_shared_site_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
             return lir_builder_finish(f.builder)
         }
     }
-    &m.shared_sites.push(LIRSharedSiteExport{initializer: site.initializer, site_key: definition.key, function: glue.id, symbol: ~f.builder.name, lifetime: site.lifetime, ty: definition.ty})
+    &m.shared_sites.push(LIRSharedSiteExport{initializer: site.initializer, site_key: definition.key, function: glue.id, symbol: f.builder.name.copy(), lifetime: site.lifetime, ty: definition.ty})
     cell :: lower_static_storage(p, &m, &f, definition) ?? return lir_builder_finish(f.builder)
     tls :: site.lifetime == MIRSharedLifetime.Thread || site.lifetime == MIRSharedLifetime.Attempt
     key := LIRValueID{value: -1}

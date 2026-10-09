@@ -67,7 +67,7 @@ fn lower_trait_arg(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
         lower_fail(&m, &f, "trait argument target {target.value} has no checked type")
         return None
     }
-    target_ty :: ~m.checked_types.types[row]
+    target_ty :: m.checked_types.types[row].copy()
     ty :: lower_value_type(c, arg.value) ?? return None
     source := if lower_repr(p, ty) == .Absent -> None else -> lower_use(&m, &f, arg.value)
     if source == .Val(value) && (arg.implicit_clone || arg.shared_auto_clone || arg.access == .Read) {
@@ -84,7 +84,7 @@ fn lower_trait_arg(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
 fn lower_trait_payload_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     clone :: glue.helper == "trait.clone"
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, if clone -> Val(lir_layout_pointer()) else -> None)
-    source :: ~f.open_params[0]
+    source :: f.open_params[0].copy()
     if clone {
         dst :: lower_pointer(&f)
         lower_alloc(&m, &f, dst, lower_trait_size(p, glue.ty))
@@ -104,7 +104,7 @@ fn lower_trait_payload_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
 
 fn lower_trait_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, if glue.clone -> Val(lir_layout_pointer()) else -> None)
-    boxed :: ~f.open_params[0]
+    boxed :: f.open_params[0].copy()
     null :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Const{dst: null, value: 0})
     empty :: lower_flag(&f)
@@ -118,7 +118,7 @@ fn lower_trait_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunct
     key :: lower_list_word(&f, boxed, 0)
     count :: m.glue.len()
     loop index in 0..count {
-        payload :: ~m.glue[index]
+        payload :: m.glue[index].copy()
         if payload.helper != "trait.drop" -> next
         expected :: lower_const(&f, payload.id.value)
         selected :: lower_flag(&f)
@@ -211,7 +211,7 @@ fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                 } else if lower_read_at(p, &f, boxed, 8, concrete) == .Val(value) -> &call_args.push(value)
             }
             loop value in lowered -> &call_args.push(value)
-            signature :: ~m.mir_signatures[row]
+            signature :: m.mir_signatures[row].copy()
             branch_result := LIRValueID?{None}
             if !inline_result && m.signatures[signature.value].result == .Val(layout) -> branch_result = Val(lower_new_value(&f, layout, LIRDrop.Trivial, None))
             lower_emit(&f, LIRInst.Call{dst: branch_result, signature: signature, callee: .Function{id: LIRFunctionID{value: row}}, args: call_args})
@@ -236,7 +236,7 @@ fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 
 fn lower_reach_trait_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, target: MIRTypeID, parent: Int) Never! {
     row :: q.checked_types.rows.get(target.value) ?? return
-    target_ty :: ~q.checked_types.types[row]
+    target_ty :: q.checked_types.types[row].copy()
     bound :: lower_trait_ref(p, target_ty) ?? return
     if lower_trait_ref(p, ty) != None -> return
     if bound.name == "Renderable" {
@@ -256,12 +256,12 @@ fn lower_reach_trait_value(p: MIRProgram, q: &LowerPrepared, function: MIRFuncti
 // Renderable delegates to the concrete payload's selected renderer.
 fn lower_helper_trait_render(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
-    boxed :: ~f.open_params[0]
+    boxed :: f.open_params[0].copy()
     key :: lower_list_word(&f, boxed, 0)
     mode :: if glue.helper == "show" -> LowerRenderMode.Show else if glue.helper == "debug" -> LowerRenderMode.Debug else -> LowerRenderMode.Display
     count :: m.glue.len()
     loop index in 0..count {
-        payload :: ~m.glue[index]
+        payload :: m.glue[index].copy()
         if payload.helper != "trait.drop" -> next
         expected :: lower_const(&f, payload.id.value)
         selected :: lower_flag(&f)

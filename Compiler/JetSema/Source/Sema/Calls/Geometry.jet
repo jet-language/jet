@@ -28,30 +28,30 @@ struct SemaCallGeometryTransformParts {
 
 // Same declaration-identity predicate as Rust's geometry_nominal_leaf.
 fn sema_geometry_nominal_leaf(name: String) -> String Never! {
-    if !core_source_owns_type(name) -> return ~name
+    if !core_source_owns_type(name) -> return name.copy()
     parts :: name.split("::").to_list()
-    if parts.len() >= 2 && parts[parts.len() - 2] == "Core/math/math.jet" -> return ~parts[parts.len() - 1]
-    ~name
+    if parts.len() >= 2 && parts[parts.len() - 2] == "Core/math/math.jet" -> return parts[parts.len() - 1].copy()
+    name.copy()
 }
 
 fn sema_geometry_restore_owner(ty: Type, source: Type) -> Type Never! {
-    name :: if source == { .Named(owner) | .Apply(owner, _) -> owner else -> { return ~ty } }
+    name :: if source == { .Named(owner) | .Apply(owner, _) -> owner else -> { return ty.copy() } }
     leaf :: sema_geometry_nominal_leaf(name)
-    if leaf == name -> return ~ty
+    if leaf == name -> return ty.copy()
     parts := name.split("::").to_list()
     if ty == {
         .Result(ok, error) -> return Type.Result{ok: sema_geometry_restore_owner(ok, source), err: sema_geometry_restore_owner(error, source)}
         .Named(result) -> {
-            if result.contains("::") -> return ~ty
-            parts[parts.len() - 1] = ~result
+            if result.contains("::") -> return ty.copy()
+            parts[parts.len() - 1] = result.copy()
             return Type.Named{name: parts.join("::")}
         }
         .Apply(result, args) -> {
-            if result.contains("::") -> return ~ty
-            parts[parts.len() - 1] = ~result
-            return Type.Apply{name: parts.join("::"), args: ~args}
+            if result.contains("::") -> return ty.copy()
+            parts[parts.len() - 1] = result.copy()
+            return Type.Apply{name: parts.join("::"), args: args.copy()}
         }
-        else -> return ~ty
+        else -> return ty.copy()
     }
 }
 
@@ -176,8 +176,8 @@ fn sema_call_geometry_transform_method_return_inner(receiver_type: Type, method:
 fn sema_geometry_diagnostic_type(ty: Type) -> Type Never! {
     if ty == {
         .Named(name) -> Type.Named{name: sema_geometry_nominal_leaf(name)}
-        .Apply(name, args) -> Type.Apply{name: sema_geometry_nominal_leaf(name), args: ~args}
-        else -> ~ty
+        .Apply(name, args) -> Type.Apply{name: sema_geometry_nominal_leaf(name), args: args.copy()}
+        else -> ty.copy()
     }
 }
 

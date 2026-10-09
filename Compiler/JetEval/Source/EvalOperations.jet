@@ -173,7 +173,7 @@ fn jet_eval_static(machine: &JetEvalMachine, name: String, span: Span) -> JetEva
         jet_eval_compiler_fail(&machine, span, "MIR global `{name}` is not provided by the evaluation")
         return None
     }
-    constant :: ~machine.program.constants[row].value
+    constant :: machine.program.constants[row].value.copy()
     if constant == .SharedSite(site) -> return jet_eval_global_shared(&machine, site, machine.program.constants[row].ty, span)
     jet_eval_constant_runtime(constant, &machine, span)
 }

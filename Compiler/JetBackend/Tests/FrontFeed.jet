@@ -235,7 +235,7 @@ fn ff_cleanup_program(program: MIRProgram) {
                 definitions :: mir_pass_definitions(function)
                 dominance :: mir_pass_legality_dominators(function)
                 if mir_pass_validate_stop_points(function, definitions, dominance, tables) != None -> panic("clean cleanup witness failed native Legality")
-                missing_leave := ~function
+                missing_leave := function.copy()
                 exit_id :: cleanup_exit ?? panic("cleanup witness has no typed leave")
                 loop index in 0..<missing_leave.blocks.len() {
                     kept := [MIRInstruction]{}

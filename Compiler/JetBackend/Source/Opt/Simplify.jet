@@ -386,7 +386,7 @@ fn opt_drop_unreachable(function: &LIRFunction) -> Bool Never! {
     pending := [Int]{0}
     cursor := 0
     loop cursor < pending.len() {
-        current :: ~pending[cursor]
+        current :: pending[cursor].copy()
         cursor += 1
         loop target in lir_terminator_targets(function.blocks[current].terminator) {
             row :: rows.get(target.block.value) ?? -1
@@ -424,13 +424,13 @@ fn opt_predecessor_counts(function: LIRFunction, rows: [Int:Int]) -> [Int] Never
 // block reads directly (the empty block dominates the reader) refuses the
 // bypass: that read would lose its definition (`outside`, opt_outside_uses).
 fn opt_thread_target(function: LIRFunction, rows: [Int:Int], outside: [Bool], target: LIRJumpTarget) -> LIRJumpTarget Never! {
-    row :: rows.get(target.block.value) ?? return ~target
-    if row == 0 -> return ~target
+    row :: rows.get(target.block.value) ?? return target.copy()
+    if row == 0 -> return target.copy()
     hop :: function.blocks[row]
-    if hop.insts.len() != 0 -> return ~target
-    loop param in hop.params { if outside[param.value] -> return ~target }
+    if hop.insts.len() != 0 -> return target.copy()
+    loop param in hop.params { if outside[param.value] -> return target.copy() }
     if hop.terminator == .Jump(onward) {
-        if onward.block == hop.id -> return ~target
+        if onward.block == hop.id -> return target.copy()
         args := [LIRValueID]{}
         loop arg in onward.args {
             mapped := arg
@@ -441,7 +441,7 @@ fn opt_thread_target(function: LIRFunction, rows: [Int:Int], outside: [Bool], ta
         }
         return LIRJumpTarget{block: onward.block, args: args}
     }
-    ~target
+    target.copy()
 }
 
 // Values read by an instruction or terminator of a block other than the one
@@ -595,7 +595,7 @@ fn opt_dead_code(function: &LIRFunction) -> Bool Never! {
     }
     cursor := 0
     loop cursor < pending.len() {
-        value :: ~pending[cursor]
+        value :: pending[cursor].copy()
         cursor += 1
         if defs.insts[value] == .Val(definition) {
             loop used in lir_inst_uses(definition) {
@@ -660,8 +660,8 @@ fn opt_dead_code(function: &LIRFunction) -> Bool Never! {
 // `target` without the arguments of its block's dead parameters; `function`
 // still holds the parameter lists from before the removal.
 fn opt_live_args(function: LIRFunction, rows: [Int:Int], live: [Bool], target: LIRJumpTarget) -> LIRJumpTarget Never! {
-    row :: rows.get(target.block.value) ?? return ~target
-    if row == 0 -> return ~target
+    row :: rows.get(target.block.value) ?? return target.copy()
+    if row == 0 -> return target.copy()
     args := [LIRValueID]{}
     loop (position, param) in function.blocks[row].params {
         if live[param.value] -> &args.push(target.args[position])

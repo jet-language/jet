@@ -102,7 +102,7 @@ fn jettrace_validate_hardware(value: CanonicalJSON) JetTraceError! {
     _ :: jettrace_unsigned(fields[jettrace_get(fields, "logical_cpus")].value, "content.hardware.logical_cpus")
     claimed :: jettrace_text(fields[jettrace_get(fields, "fingerprint")].value, "content.hardware.fingerprint")
     if !jettrace_hex64(claimed) -> return Err(jettrace_error("content.hardware.fingerprint is not lowercase Hex64"))
-    body :: jettrace_object([CanonicalJSONField]{jettrace_field("cpu_arch", ~fields[jettrace_get(fields, "cpu_arch")].value), jettrace_field("logical_cpus", ~fields[jettrace_get(fields, "logical_cpus")].value), jettrace_field("os", ~fields[jettrace_get(fields, "os")].value), jettrace_field("target", ~fields[jettrace_get(fields, "target")].value)})
+    body :: jettrace_object([CanonicalJSONField]{jettrace_field("cpu_arch", fields[jettrace_get(fields, "cpu_arch")].value.copy()), jettrace_field("logical_cpus", fields[jettrace_get(fields, "logical_cpus")].value.copy()), jettrace_field("os", fields[jettrace_get(fields, "os")].value.copy()), jettrace_field("target", fields[jettrace_get(fields, "target")].value.copy())})
     jettrace_verify_digest(body, claimed)
 }
 struct JetTraceCaptureLimits { browser_rows: Int, io_rows: Int, native_rows: Int, span_rows: Int, task_rows: Int }
@@ -110,7 +110,7 @@ struct JetTraceCaptureLimits { browser_rows: Int, io_rows: Int, native_rows: Int
 fn jettrace_validate_capture_policy(value: CanonicalJSON) -> JetTraceCaptureLimits JetTraceError! {
     items :: jettrace_object_view(value, "capture_policy")
     schema := CanonicalJSON.Null
-    loop field in items { if field.key == "schema" -> schema = ~field.value }
+    loop field in items { if field.key == "schema" -> schema = field.value.copy() }
     if schema == {
         .Integer(number) -> {
             if number != CAPTURE_POLICY_SCHEMA -> return Err(jettrace_error("unsupported capture_policy schema"))
@@ -120,7 +120,7 @@ fn jettrace_validate_capture_policy(value: CanonicalJSON) -> JetTraceCaptureLimi
     fields :: jettrace_object_keys(value, "capture_policy", [String]{"allowlist", "browser_row_limit", "browser_rows_truncated", "default_exclusions", "io_row_limit", "io_rows_truncated", "native_row_limit", "native_rows_truncated", "schema", "span_row_limit", "span_rows_truncated", "task_row_limit", "task_rows_truncated"})
     exclusions :: jettrace_array(fields[jettrace_get(fields, "default_exclusions")].value, "capture_policy.default_exclusions")
     expected := [CanonicalJSON]{}
-    loop item in DEFAULT_EXCLUSIONS -> &expected.push(.String(~item))
+    loop item in DEFAULT_EXCLUSIONS -> &expected.push(.String(item.copy()))
     if exclusions.len() != expected.len() -> return Err(jettrace_error("capture_policy.default_exclusions does not match D-PERFSESSION1 defaults"))
     loop index in 0..<exclusions.len() {
         if exclusions[index] != expected[index] -> return Err(jettrace_error("capture_policy.default_exclusions does not match D-PERFSESSION1 defaults"))
@@ -144,7 +144,7 @@ fn jettrace_validate_capture_policy(value: CanonicalJSON) -> JetTraceCaptureLimi
             }
             else -> {}
         }
-        prior = Val(~text)
+        prior = Val(text.copy())
     }
     Ok(JetTraceCaptureLimits{browser_rows: 4096, io_rows: 4096, native_rows: 4096, span_rows: 4096, task_rows: 4096})
 }
@@ -271,7 +271,7 @@ fn trace_receipt_section_from_json_at(value: CanonicalJSON, label: String) -> Tr
     fields :: jettrace_object_keys(value, label, [String]{"digest", "name", "type_name", "value"})
     type_name :: jettrace_text(fields[jettrace_get(fields, "type_name")].value, "{label}.type_name")
     digest :: jettrace_text(fields[jettrace_get(fields, "digest")].value, "{label}.digest")
-    Ok(TraceReceiptSection{name: ~name, type_name: ~type_name, value: ~fields[jettrace_get(fields, "value")].value, digest: ~digest})
+    Ok(TraceReceiptSection{name: name.copy(), type_name: type_name.copy(), value: fields[jettrace_get(fields, "value")].value.copy(), digest: digest.copy()})
 }
 fn jettrace_validate_receipt_sections(value: CanonicalJSON) JetTraceError! {
     items :: jettrace_array(value, "content.receipt_sections")
@@ -286,7 +286,7 @@ fn jettrace_validate_receipt_sections(value: CanonicalJSON) JetTraceError! {
             }
             else -> {}
         }
-        prior = Val(~name)
+        prior = Val(name.copy())
     }
     return
 }
@@ -307,8 +307,8 @@ fn jettrace_validate_source_identity(value: CanonicalJSON) JetTraceError! {
             kind :: jettrace_text(sfields[jettrace_get(sfields, "kind")].value, "{slabel}.kind")
             name :: jettrace_text(sfields[jettrace_get(sfields, "name")].value, "{slabel}.name")
             if j > 0 && (prior_name > name || (prior_name == name && prior_kind > kind)) -> return Err(jettrace_error("{label}.symbols is not sorted"))
-            prior_name = ~name
-            prior_kind = ~kind
+            prior_name = name.copy()
+            prior_kind = kind.copy()
         }
     }
     return
@@ -328,7 +328,7 @@ fn jettrace_validate_source_maps(value: CanonicalJSON) JetTraceError! {
             }
             else -> {}
         }
-        prior = Val(~path)
+        prior = Val(path.copy())
         // Match the retained node directly: returning the potentially large map
         // string from jettrace_text would make an unnecessary owned copy.
         if fields[jettrace_get(fields, "map")].value == {
@@ -350,7 +350,7 @@ fn jettrace_validate_toolchain(value: CanonicalJSON) JetTraceError! {
     body_fields := [CanonicalJSONField]{}
     loop key in keys {
         text :: jettrace_text(fields[jettrace_get(fields, key)].value, "toolchain.{key}")
-        &body_fields.push(jettrace_field(~key, .String(~text)))
+        &body_fields.push(jettrace_field(key.copy(), .String(text.copy())))
     }
     digest :: jettrace_text(fields[jettrace_get(fields, "digest")].value, "toolchain.digest")
     if !jettrace_hex64(digest) -> return Err(jettrace_error("toolchain.digest is not lowercase Hex64"))

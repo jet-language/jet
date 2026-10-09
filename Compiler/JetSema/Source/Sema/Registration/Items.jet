@@ -1268,8 +1268,8 @@ fn sema_registration_trait_method(method: TraitMethodSig, module_identity: Strin
 
 // Hook callable identity is the operand pair, not the ordinary owner/name key.
 fn sema_registration_operator_owner(owner: SymbolID, module_identity: String, left: Type, trait_name: String?, rhs: Type?) -> SymbolID Never! {
-    trait_value :: trait_name ?? return ~owner
-    if !sema_checked_operator_trait(trait_value) -> return ~owner
+    trait_value :: trait_name ?? return owner.copy()
+    if !sema_checked_operator_trait(trait_value) -> return owner.copy()
     right :: rhs ?? left
     symbol_id(SymbolKind.Impl, module_identity, owner.key, "{type_name(left)}::{trait_value}<{type_name(right)}>")
 }
@@ -1942,7 +1942,7 @@ fn sema_registration_prepare_module(input: SemaRegistrationModuleInput) -> SemaR
 
 fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, templates: [SemaGenericModuleSource]) -> SemaRegistrationModuleResult {
     diagnostics := [Diagnostic]{}
-    module_row := sema_registration_prepare_module_row(~input, templates, &diagnostics)
+    module_row := sema_registration_prepare_module_row(input.copy(), templates, &diagnostics)
     SemaRegistrationModuleResult{module_row: module_row, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
 }
 
@@ -2034,9 +2034,9 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // derive templates into compiler-generated trait blocks before any
     // declaration, impl, or known-time value is registered.
     sema_derive_expand_builtin_items(&module_row.program.items, &diagnostics)
-    row_source_file :: ~module_row.source_file
-    row_source_origin :: ~module_row.source_origin
-    row_source_segments :: ~module_row.source_segments
+    row_source_file :: module_row.source_file.copy()
+    row_source_origin :: module_row.source_origin.copy()
+    row_source_segments :: module_row.source_segments.copy()
     // Registering a root reads no program item, so the items move out for the
     // walk and back after it: each one is read in place instead of copied.
     items := ^module_row.program.items
@@ -2061,7 +2061,7 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // Only impls register here; every other item is skipped without a copy.
     loop index in 0..<module_row.program.items.len() {
         if module_row.program.items[index] == .Impl(_) {
-            item :: ~module_row.program.items[index]
+            item :: module_row.program.items[index].copy()
             sema_registration_add_impl(&module_row, item, &diagnostics)
         }
     }
@@ -2171,8 +2171,8 @@ fn sema_registration_resolve_export(graph: SemaRegistrationGraph, module_index: 
                 if import.declaration.alias != name -> next
                 visibility :: if import.declaration.is_pub -> 2 else -> 1
                 if !sema_registration_visible(visibility, requester_module, requester_package, module_row.module_identity, module_row.package_identity) -> return None
-                symbol :: Symbol{id: symbol_id(SymbolKind.Import, module_row.module_identity, import.target_module_identity, name), kind: SymbolKind.Import, name: ~name, module_name: ~module_row.module_identity, owner: None, span: import.declaration.alias_span, ty: None, visibility: visibility}
-                return Val(SemaRegistrationExport{name: ~name, symbol: ^symbol, declaration: None, source_module_identity: ~import.target_module_identity, visibility: visibility})
+                symbol :: Symbol{id: symbol_id(SymbolKind.Import, module_row.module_identity, import.target_module_identity, name), kind: SymbolKind.Import, name: name.copy(), module_name: module_row.module_identity.copy(), owner: None, span: import.declaration.alias_span, ty: None, visibility: visibility}
+                return Val(SemaRegistrationExport{name: name.copy(), symbol: ^symbol, declaration: None, source_module_identity: import.target_module_identity.copy(), visibility: visibility})
             }
         }
     }
@@ -2260,7 +2260,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
         }
         // Only the target's name is kept: a whole-module copy per import made
         // registration imports × module size (the AST rides in the row).
-        target_name :: ~graph.modules[target_index].module_name
+        target_name :: graph.modules[target_index].module_name.copy()
         if declaration.kind == {
             .Unqualified(_, _, items, _, _) -> loop item in items {
                 local :: sema_registration_import_local(item)

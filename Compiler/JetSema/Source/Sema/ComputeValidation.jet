@@ -52,13 +52,13 @@ fn sema_compute_index(modules: [SemaGraphModuleResult], work: &SemaComputeValida
         loop (row, function) in module_row.functions {
             if work.counting -> work.indexed_functions += 1
             if index.functions.get(function.key) == .Val(_) {} else {
-                index.functions[~function.key] = SemaComputePosition{module_index: module_position, row_index: row}
+                index.functions[function.key.copy()] = SemaComputePosition{module_index: module_position, row_index: row}
             }
         }
         loop (row, fact) in module_row.compute_facts {
             if work.counting -> work.indexed_facts += 1
             if index.facts.get(fact.function_key) == .Val(_) {} else {
-                index.facts[~fact.function_key] = SemaComputePosition{module_index: module_position, row_index: row}
+                index.facts[fact.function_key.copy()] = SemaComputePosition{module_index: module_position, row_index: row}
             }
         }
     }

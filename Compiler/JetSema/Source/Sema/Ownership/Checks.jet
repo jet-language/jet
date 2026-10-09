@@ -364,10 +364,10 @@ fn sema_ownership_state_snapshot(source: SemaOwnershipState) -> SemaOwnershipSta
 // discarded.
 fn sema_ownership_state_restore(state: &SemaOwnershipState, saved: SemaOwnershipState) Never! {
     sema_ownership_state_restore_path(&state, saved)
-    state.receiver_frames = ~saved.receiver_frames
-    state.share_known = ~saved.share_known
-    state.fixed_length_write_params = ~saved.fixed_length_write_params
-    state.static_roots = ~saved.static_roots
+    state.receiver_frames = saved.receiver_frames.copy()
+    state.share_known = saved.share_known.copy()
+    state.fixed_length_write_params = saved.fixed_length_write_params.copy()
+    state.static_roots = saved.static_roots.copy()
 }
 
 // The per-path part of sema_ownership_state_restore: everything except the
@@ -375,22 +375,22 @@ fn sema_ownership_state_restore(state: &SemaOwnershipState, saved: SemaOwnership
 fn sema_ownership_state_restore_path(state: &SemaOwnershipState, saved: SemaOwnershipState) Never! {
     state.scope_depth = saved.scope_depth
     state.next_seq = saved.next_seq
-    state.declarations = ~saved.declarations
-    state.moved = ~saved.moved
-    state.loans = ~saved.loans
-    state.views = ~saved.views
-    state.references = ~saved.references
-    state.share_found = ~saved.share_found
-    state.uninit = ~saved.uninit
-    state.key_slots = ~saved.key_slots
-    state.key_facts = ~saved.key_facts
-    state.declaration_previous = ~saved.declaration_previous
-    state.active_rows = ~saved.active_rows
-    state.single_use_rows = ~saved.single_use_rows
-    state.dirty_rows = ~saved.dirty_rows
+    state.declarations = saved.declarations.copy()
+    state.moved = saved.moved.copy()
+    state.loans = saved.loans.copy()
+    state.views = saved.views.copy()
+    state.references = saved.references.copy()
+    state.share_found = saved.share_found.copy()
+    state.uninit = saved.uninit.copy()
+    state.key_slots = saved.key_slots.copy()
+    state.key_facts = saved.key_facts.copy()
+    state.declaration_previous = saved.declaration_previous.copy()
+    state.active_rows = saved.active_rows.copy()
+    state.single_use_rows = saved.single_use_rows.copy()
+    state.dirty_rows = saved.dirty_rows.copy()
     state.dirty_clean = saved.dirty_clean
-    state.anchors = ~saved.anchors
-    state.trail = ~saved.trail
+    state.anchors = saved.anchors.copy()
+    state.trail = saved.trail.copy()
 }
 
 fn sema_ownership_next_sequence(state: &SemaOwnershipState) -> Int Never! {
@@ -3581,7 +3581,7 @@ fn sema_ownership_loop_path_to_depth(path: SemaOwnershipState, target_depth: Int
 // to the base depth.
 fn sema_ownership_join_loop_value_paths(state: &SemaOwnershipState, context: SemaCheckContext, frame_index: Int, fork: SemaOwnershipFork, outer: Bool, body_falls_through: Bool, may_skip: Bool) -> Bool Never! {
     target_depth :: if outer -> fork.scope_depth - 1 else -> fork.scope_depth
-    found :: ~state.share_found
+    found :: state.share_found.copy()
     after_body := SemaOwnershipPath?{None}
     if may_skip && body_falls_through {
         normalize :: sema_ownership_mark(&state)

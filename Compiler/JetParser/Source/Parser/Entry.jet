@@ -89,13 +89,13 @@ fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerG
 }
 
 fn parse_lexed(lexed: Lexed) -> ParseResult {
-    parser_parse_lexed_lines(~lexed, [U8]{}, [Int]{}, false)
+    parser_parse_lexed_lines(lexed.copy(), [U8]{}, [Int]{}, false)
 }
 
 // Parse just the supplied token slice with its aggregate source available for
 // canonical source-dependent diagnostics. REPL turns never reparse old tokens.
 fn parse_lexed_with_source(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
-    parser_parse_lexed_lines(~lexed, source, line_starts, false)
+    parser_parse_lexed_lines(lexed.copy(), source, line_starts, false)
 }
 
 // Parse a Jetpack config surface (Rust `parse_config_with_source`): the
@@ -103,7 +103,7 @@ fn parse_lexed_with_source(lexed: Lexed, source: [U8], line_starts: [Int]) -> Pa
 // as the typed environment read (D-ONCE-DOLLAR1=B); `source` stays available
 // for config values whose spelling is not a general Jet expression.
 fn parse_config_with_source(lexed: Lexed, source: [U8]) -> ParseResult {
-    parser_parse_lexed_lines(~lexed, source, parser_line_starts(source), true)
+    parser_parse_lexed_lines(lexed.copy(), source, parser_line_starts(source), true)
 }
 
 // The lexed tokens move into the parser state (field moves reset the field,

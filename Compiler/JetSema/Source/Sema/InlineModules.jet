@@ -1141,7 +1141,7 @@ fn sema_inline_bind_imports(program: Program, surfaces: [SemaInlineModuleSurface
                     else -> {
                         seen[local] = true
                         span :: if item_index < declaration.local_spans.len() -> declaration.local_spans[item_index] else -> declaration.span
-                        rewrite.imported[local] = SemaInlineFunctionBinding{semantic_name: sema_inline_member_name(target, item.original), module_alias: ~target, source_name: ~item.original, span: span, visibility: if declaration.is_pub -> 2 else -> if declaration.is_package_pub -> 1 else -> 0}
+                        rewrite.imported[local] = SemaInlineFunctionBinding{semantic_name: sema_inline_member_name(target, item.original), module_alias: target.copy(), source_name: item.original.copy(), span: span, visibility: if declaration.is_pub -> 2 else -> if declaration.is_package_pub -> 1 else -> 0}
                     }
                 }
             }
@@ -1197,7 +1197,7 @@ fn sema_inline_bind_module_imports(definition: CodeModule, surfaces: [SemaInline
                     rewrite.qualified[local] = target
                 } else {
                     span :: if index < declaration.local_spans.len() -> declaration.local_spans[index] else -> declaration.span
-                    rewrite.imported[local] = SemaInlineFunctionBinding{semantic_name: sema_inline_member_name(target.module_alias, target.member), module_alias: ~target.module_alias, source_name: ~target.member, span: span, visibility: if declaration.is_pub -> 2 else -> if declaration.is_package_pub -> 1 else -> 0}
+                    rewrite.imported[local] = SemaInlineFunctionBinding{semantic_name: sema_inline_member_name(target.module_alias, target.member), module_alias: target.module_alias.copy(), source_name: target.member.copy(), span: span, visibility: if declaration.is_pub -> 2 else -> if declaration.is_package_pub -> 1 else -> 0}
                 }
                 if declaration.is_pub -> reexports[local] = target
             }

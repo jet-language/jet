@@ -4,7 +4,7 @@ struct JetCLIDBSessionError { message: String }
 // Rust csv_escape (2688-2694).
 fn jet_cli_db_csv_escape(value: String) -> String Never! {
     raw :: value.bytes()
-    if !raw.contains(U8{44}) && !raw.contains(U8{34}) && !raw.contains(U8{10}) && !raw.contains(U8{13}) -> return ~value
+    if !raw.contains(U8{44}) && !raw.contains(U8{34}) && !raw.contains(U8{10}) && !raw.contains(U8{13}) -> return value.copy()
     out := [U8]{U8{34}}
     loop byte in raw {
         &out.push(byte)

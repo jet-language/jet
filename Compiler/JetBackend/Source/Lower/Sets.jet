@@ -319,8 +319,8 @@ fn lower_helper_set_take(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     shape :: lower_map_shape(p, lower_set_map(glue.ty)) ?? panic("Set take has no entry layout")
     discard :: glue.helper == "set.remove"
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lower_map_key_layout(p, shape)}, if discard -> None else -> Val(lir_layout_pointer()))
-    set :: ~f.open_params[0]
-    key :: ~f.open_params[1]
+    set :: f.open_params[0].copy()
+    key :: f.open_params[1].copy()
     found :: lower_word(&f)
     lower_call_helper(&m, &f, "map.find", lower_set_map(glue.ty), [LIRValueID]{set, key}, Val(found))
     zero :: lower_const(&f, 0)
@@ -377,7 +377,7 @@ fn lower_helper_set_take(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
 fn lower_helper_set_edge(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     shape :: lower_map_shape(p, lower_set_map(glue.ty)) ?? panic("Rank edge has no entry layout")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
-    set :: ~f.open_params[0]
+    set :: f.open_params[0].copy()
     length :: lower_list_word(&f, set, 0)
     zero :: lower_const(&f, 0)
     empty :: lower_flag(&f)
@@ -410,7 +410,7 @@ fn lower_helper_set_edge(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
 fn lower_helper_rank_render(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     shape :: lower_map_shape(p, lower_set_map(glue.ty)) ?? panic("Rank render has no entry layout")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
-    set :: ~f.open_params[0]
+    set :: f.open_params[0].copy()
     mode :: if glue.helper == "show" -> LowerRenderMode.Show else if glue.helper == "debug" -> LowerRenderMode.Debug else -> LowerRenderMode.Display
     builder :: lower_pointer(&f)
     lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
@@ -439,8 +439,8 @@ fn lower_helper_rank_render(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
 fn lower_helper_set_equal(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     shape :: lower_map_shape(p, lower_set_map(glue.ty)) ?? panic("Set equality has no entry layout")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_bool()))
-    left :: ~f.open_params[0]
-    right :: ~f.open_params[1]
+    left :: f.open_params[0].copy()
+    right :: f.open_params[1].copy()
     left_len :: lower_list_word(&f, left, 0)
     right_len :: lower_list_word(&f, right, 0)
     equal_len :: lower_flag(&f)
@@ -476,7 +476,7 @@ fn lower_helper_set_render(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> L
     if lower_rank_type(glue.ty) -> return lower_helper_rank_render(p, &m, glue)
     shape :: lower_map_shape(p, lower_set_map(glue.ty)) ?? panic("Set render has no entry layout")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
-    set :: ~f.open_params[0]
+    set :: f.open_params[0].copy()
     mode :: if glue.helper == "show" -> LowerRenderMode.Show else if glue.helper == "debug" -> LowerRenderMode.Debug else -> LowerRenderMode.Display
     string_ty :: mir_type_from_kind(MIRTypeKind.String)
     list_ty :: mir_type_from_kind(MIRTypeKind.List{inner: string_ty})

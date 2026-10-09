@@ -158,8 +158,8 @@ fn x64_value_boundary(program: MIRProgram, ty: MIRType) -> X64ValueBoundary Neve
 // remains internal to the checked call; scalar carriers are stored only after
 // the delivered-stop guard used by ordinary native callback adapters.
 fn lower_value_callable(program: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
-    signature_id :: ~m.mir_signatures[glue.function]
-    signature :: ~m.signatures[signature_id.value]
+    signature_id :: m.mir_signatures[glue.function].copy()
+    signature :: m.signatures[signature_id.value].copy()
     source :: program.functions[m.mir_sources[glue.function]]
     hidden :: if source.capture_params.len() > 0 -> 1 else -> 0
     inline :: lower_is_inline(program, glue.ty)
@@ -169,7 +169,7 @@ fn lower_value_callable(program: MIRProgram, m: &LowerModule, glue: LowerGlue) -
         &params.push(layout)
     }
     f := lower_helper_start(&m, glue, params, None)
-    out :: ~f.open_params[0]
+    out :: f.open_params[0].copy()
     args := [LIRValueID]{}
     input := 1
     loop (index, _) in signature.params {
@@ -191,7 +191,7 @@ fn lower_value_callable(program: MIRProgram, m: &LowerModule, glue: LowerGlue) -
 
 fn lower_value_release(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    out :: ~f.open_params[0]
+    out :: f.open_params[0].copy()
     lower_drop_stored(p, &m, &f, out, 0, glue.ty)
     lower_seal(&f, LIRTerminator.Return{value: None})
     lir_builder_finish(f.builder)

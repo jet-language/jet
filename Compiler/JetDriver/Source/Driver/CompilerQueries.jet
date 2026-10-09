@@ -396,7 +396,7 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     if registration.internal_problem == .Val(problem) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(problem))
     // The declaration pass takes its own graph; `registration` stays for the
     // provisional finalizations and the packet.
-    stage := sema_collect_comptime_declarations(~registration, jet_driver_compiler_check_package_policies(load), input.request.eval_config.host_hooks, input.request.compiler_threads, input.request.trace_sink)
+    stage := sema_collect_comptime_declarations(registration.copy(), jet_driver_compiler_check_package_policies(load), input.request.eval_config.host_hooks, input.request.compiler_threads, input.request.trace_sink)
     if !stage.complete || stage.modules.len() != registration_count || jet_driver_has_errors(stage.diagnostics) {
         jet_driver_comptime_diagnostics_add(&load.diagnostics, stage.diagnostics)
         if stage.modules.len() == registration_inputs.len() {

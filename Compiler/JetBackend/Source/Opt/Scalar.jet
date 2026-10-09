@@ -152,7 +152,7 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
         loop row in dom.order { if stores[row] -> &pending.push(row) }
         cursor := 0
         loop cursor < pending.len() {
-            definition :: ~pending[cursor]
+            definition :: pending[cursor].copy()
             cursor += 1
             loop join in frontiers[definition] {
                 if live[join] && phis[join][field_index] < 0 {
@@ -202,7 +202,7 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
                         // Memory held a snapshot even if its source was later
                         // moved/dropped. Retain that separate trivial lifetime.
                         if consumed[value.value] {
-                            sample :: ~function.values[value.value]
+                            sample :: function.values[value.value].copy()
                             snapshot :: opt_scalar_value(&function, sample)
                             &aliases.alias.push(-1)
                             &aliases.known.push(false)
@@ -254,7 +254,7 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
 fn lir_scalar_replace_function(original: LIRFunction) -> LIRFunction Never! {
     slots := [LIRInst]{}
     loop block in original.blocks { loop inst in block.insts { if inst == .StackSlot(_, _, _) -> &slots.push(inst) } }
-    if slots.len() == 0 -> return ~original
+    if slots.len() == 0 -> return original.copy()
     dom :: opt_dominators(original)
     frontiers :: opt_scalar_frontiers(dom)
     function := original
@@ -269,5 +269,5 @@ fn lir_scalar_replace_function(original: LIRFunction) -> LIRFunction Never! {
             }
         }
     }
-    if changed -> opt_compact(function) else -> ~original
+    if changed -> opt_compact(function) else -> original.copy()
 }

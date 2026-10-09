@@ -223,8 +223,8 @@ fn lower_helper_queue_push(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem
     layouts := [LIRLayout]{lir_layout_pointer()}
     if lower_repr_layout(lower_repr(p, elem)) == .Val(layout) -> &layouts.push(layout)
     f := lower_helper_start(&m, glue, layouts, None)
-    queue :: ~f.open_params[0]
-    value :: if f.open_params.len() == 2 -> Val(~f.open_params[1]) else -> None
+    queue :: f.open_params[0].copy()
+    value :: if f.open_params.len() == 2 -> Val(f.open_params[1].copy()) else -> None
     lower_queue_reserve(p, &m, &f, queue, elem)
     length :: lower_list_word(&f, queue, 0)
     cap :: lower_list_word(&f, queue, 8)
@@ -256,13 +256,13 @@ fn lower_helper_queue_get(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem:
     layouts := [LIRLayout]{lir_layout_pointer()}
     if glue.helper == "queue.get" -> &layouts.push(lir_layout_word())
     f := lower_helper_start(&m, glue, layouts, Val(lir_layout_pointer()))
-    queue :: ~f.open_params[0]
+    queue :: f.open_params[0].copy()
     length :: lower_list_word(&f, queue, 0)
     zero :: lower_const(&f, 0)
     one :: lower_const(&f, 1)
     index := zero
     if glue.helper == "queue.get" {
-        index = ~f.open_params[1]
+        index = f.open_params[1].copy()
     } else if glue.helper.ends_with(".back") {
         index = lower_word(&f)
         lower_emit(&f, LIRInst.Binary{dst: index, op: LIRBinaryOp.Sub, left: length, right: one})
@@ -331,8 +331,8 @@ fn lower_queue_retire(p: MIRProgram, m: &LowerModule, f: &LowerFunction, queue: 
 
 fn lower_helper_queue_copy(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem: MIRType, ring: Bool) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
-    source :: ~f.open_params[0]
-    dst :: ~f.open_params[1]
+    source :: f.open_params[0].copy()
+    dst :: f.open_params[1].copy()
     length :: lower_list_word(&f, source, 0)
     cap :: lower_list_word(&f, source, 8)
     head :: lower_list_word(&f, source, 24)
@@ -359,8 +359,8 @@ fn lower_helper_queue_search(p: MIRProgram, m: &LowerModule, glue: LowerGlue, el
     layout :: lower_repr_layout(lower_repr(p, elem)) ?? lir_layout_word()
     deletes :: glue.helper == "queue.delete"
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), layout}, if deletes -> None else -> Val(lir_layout_bool()))
-    queue :: ~f.open_params[0]
-    key :: ~f.open_params[1]
+    queue :: f.open_params[0].copy()
+    key :: f.open_params[1].copy()
     length :: lower_list_word(&f, queue, 0)
     cap :: lower_list_word(&f, queue, 8)
     head :: lower_list_word(&f, queue, 24)
@@ -442,9 +442,9 @@ fn lower_helper_queue_search(p: MIRProgram, m: &LowerModule, glue: LowerGlue, el
 
 fn lower_helper_queue_split(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem: MIRType) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_word(), lir_layout_pointer()}, None)
-    queue :: ~f.open_params[0]
-    index :: ~f.open_params[1]
-    dst :: ~f.open_params[2]
+    queue :: f.open_params[0].copy()
+    index :: f.open_params[1].copy()
+    dst :: f.open_params[2].copy()
     length :: lower_list_word(&f, queue, 0)
     zero :: lower_const(&f, 0)
     at :: lower_list_clamp(&f, index, zero, length)
@@ -473,7 +473,7 @@ fn lower_helper_queue_split(p: MIRProgram, m: &LowerModule, glue: LowerGlue, ele
 
 fn lower_helper_queue_reverse(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem: MIRType) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    queue :: ~f.open_params[0]
+    queue :: f.open_params[0].copy()
     length :: lower_list_word(&f, queue, 0)
     data :: lower_list_data(&f, queue)
     head :: lower_list_word(&f, queue, 24)
@@ -504,8 +504,8 @@ fn lower_helper_queue_render(p: MIRProgram, m: &LowerModule, glue: LowerGlue, el
     layouts := [LIRLayout]{lir_layout_pointer()}
     if joining -> &layouts.push(lir_layout_pointer())
     f := lower_helper_start(&m, glue, layouts, Val(lir_layout_pointer()))
-    queue :: ~f.open_params[0]
-    separator :: if joining -> Val(~f.open_params[1]) else -> None
+    queue :: f.open_params[0].copy()
+    separator :: if joining -> Val(f.open_params[1].copy()) else -> None
     mode :: if glue.helper == "debug" -> LowerRenderMode.Debug else if glue.helper == "display" -> LowerRenderMode.Display else -> LowerRenderMode.Show
     builder :: lower_pointer(&f)
     lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
@@ -551,7 +551,7 @@ fn lower_helper_queue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFun
     if glue.helper == "queue.reverse" -> return lower_helper_queue_reverse(p, &m, glue, elem)
     if glue.helper == "queue.join" || glue.helper == "show" || glue.helper == "display" || glue.helper == "debug" -> return lower_helper_queue_render(p, &m, glue, elem)
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    queue :: ~f.open_params[0]
+    queue :: f.open_params[0].copy()
     if glue.helper == "queue.clear" || glue.helper == "" {
         lower_queue_retire(p, &m, &f, queue, elem, glue.helper == "")
     } else {

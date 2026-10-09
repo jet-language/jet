@@ -50,9 +50,9 @@ fn opt_dominators(function: LIRFunction) -> OptDominators Never! {
     visited[0] = true
     postorder := [Int]{}
     loop depth > 0 {
-        current :: ~stack[depth - 1]
+        current :: stack[depth - 1].copy()
         if edge_cursor[current] < successors[current].len() {
-            child :: ~successors[current][edge_cursor[current]]
+            child :: successors[current][edge_cursor[current]].copy()
             edge_cursor[current] = edge_cursor[current] + 1
             if !visited[child] {
                 visited[child] = true
@@ -68,7 +68,7 @@ fn opt_dominators(function: LIRFunction) -> OptDominators Never! {
     cursor := postorder.len()
     loop cursor > 0 {
         cursor -= 1
-        block :: ~postorder[cursor]
+        block :: postorder[cursor].copy()
         rank[block] = order.len()
         &order.push(block)
     }
@@ -110,9 +110,9 @@ fn opt_dom_events(dom: OptDominators) -> [Int] Never! {
     stack := [Int]{0}
     depth := 1
     loop depth > 0 {
-        row :: ~stack[depth - 1]
+        row :: stack[depth - 1].copy()
         if next_child[row] < children[row].len() {
-            child :: ~children[row][next_child[row]]
+            child :: children[row][next_child[row]].copy()
             next_child[row] = next_child[row] + 1
             if depth < stack.len() -> stack[depth] = child else -> &stack.push(child)
             depth += 1
@@ -155,7 +155,7 @@ fn opt_inline_test_values(function: LIRFunction, defs: OptDefs, inst: LIRInst) -
         values := [Int]{}
         cursor := 0
         loop cursor < pending.len() {
-            value :: ~pending[cursor]
+            value :: pending[cursor].copy()
             cursor += 1
             if !opt_is_word(function, value) -> return None
             definition :: defs.insts[value.value] ?? return None
@@ -221,7 +221,7 @@ fn lir_inline_facts_function(original: LIRFunction) -> LIRFunction Never! {
         // Count edges, not distinct predecessor blocks: Branch(t, t) must
         // not claim its condition held on arrival. Entry has no incoming fact.
         if row != 0 && dom.predecessors[row].len() == 1 {
-            predecessor :: ~dom.predecessors[row][0]
+            predecessor :: dom.predecessors[row][0].copy()
             if function.blocks[predecessor].terminator == .Branch(condition, then_target, _) {
                 if then_target.block == function.blocks[row].id {
                     if tests[condition.value] == .Val(values) {
