@@ -40,6 +40,7 @@ pub(crate) fn dyn_call(receiver: crate::AST::Expr, method: &str, values: Vec<cra
         resolved_ret: Some(ret),
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     }
 }
 

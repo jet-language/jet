@@ -1,7 +1,6 @@
 mod a11y;
 mod arg_expect;
 mod core_call;
-pub(crate) use core_call::literal_int;
 mod core_literals;
 mod db_methods;
 mod fields_ptrs;

@@ -54,7 +54,6 @@ pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diag
             compiler_builtin_error: false,
             is_pub: s.is_pub,
             is_package_pub: s.is_package_pub,
-            compiler_builtin_error: false,
             name: patch_name.clone(),
             name_span: s.name_span,
             type_params: Vec::new(),

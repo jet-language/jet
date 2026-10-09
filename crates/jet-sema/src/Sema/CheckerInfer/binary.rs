@@ -1334,6 +1334,37 @@ impl<'a> Checker<'a> {
         let rt = self.infer(rhs);
         self.expected_type = saved_expected;
         let (mut lt, mut rt) = (lt?, rt?);
+        if crate::Sema::CheckerCoreLib::is_dyn_type(&rt)
+            && matches!(&lt, Type::Named(name) if name == "Decimal")
+        {
+            if let Some(original) = dyn_float_lhs {
+                *lhs = original;
+                let saved = self.expected_type.replace(Type::Float);
+                let inferred = self.infer(lhs);
+                self.expected_type = saved;
+                lt = inferred?;
+            }
+        }
+        if crate::Sema::CheckerCoreLib::is_dyn_type(&lt)
+            || crate::Sema::CheckerCoreLib::is_dyn_type(&rt)
+        {
+            if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div
+                | BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge)
+            {
+                self.wrap_dyn_value(lhs, &lt)?;
+                self.wrap_dyn_value(rhs, &rt)?;
+                if matches!(op, BinOp::Eq | BinOp::Ne) { return Some(Type::Bool); }
+                let comparison = matches!(op, BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge);
+                let ret = if comparison { Type::Bool } else { json_ty() };
+                *replacement = Some(crate::Sema::CheckerCoreLib::dyn_call(
+                    std::mem::replace(lhs.as_mut(), Expr::Absent(span)),
+                    if comparison { "__dyn_compare" } else { "__dyn_binary" },
+                    vec![std::mem::replace(rhs.as_mut(), Expr::Absent(span)),
+                        Expr::Str(vec![crate::AST::StrPart::Lit(op.spell().to_string())], span),
+                        self.dyn_site(span)], ret.clone(), span));
+                return Some(ret);
+            }
+        }
         let source_instant = |ty: &Type| matches!(ty, Type::Named(name)
             if name.ends_with("::Instant")
                 && jet_foundation::CoreModuleExports::core_source_owns_type(name));
@@ -1364,6 +1395,7 @@ impl<'a> Checker<'a> {
                 ],
                 recv_type: None, resolved_ret: None,
                 operator_rhs: None, checked_widen: false,
+                checked_callee: None,
             };
             let result = self.infer(&mut call);
             *replacement = Some(call);
@@ -1679,7 +1711,7 @@ impl<'a> Checker<'a> {
                     _ => None,
                 };
                 if let Some((trait_name, method, mut ret)) = hook {
-                    let (owner_type, registry, owner_traits) = self.capability_type_context(&lt);
+                    let (owner_type, _, owner_traits) = self.capability_type_context(&lt);
                     let operator_rhs = owner_traits
                         .operator_impl_for(&owner_type, trait_name, &owner_type)
                         .map(|implementation| {

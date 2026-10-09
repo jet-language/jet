@@ -502,7 +502,6 @@ fn build_validate_builder_struct(span: Span) -> StructDef {
         compiler_builtin_error: false,
         is_pub: false,
         is_package_pub: false,
-        compiler_builtin_error: false,
         name: Syntax::TYPE_VALIDATE_BUILDER.to_string(),
         name_span: span,
         type_params: vec![TypeParam {

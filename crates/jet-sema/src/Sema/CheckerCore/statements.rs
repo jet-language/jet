@@ -1099,7 +1099,7 @@ impl<'a> Checker<'a> {
                                 "this function has read access only and does not own the value"
                                     .to_string(),
                                 format!(
-                                    "return a copy: `return {}{}` — or take ownership with the move marker `^`: `{}: {}{}`. \
+                                    "return a copy: `return {}` — or take ownership with the move marker `^`: `{}: {}{}`. \
                                      To return borrowed data, declare `-> View<T> from {}` and \
                                      return a view derived from `{}`",
                                     Syntax::copy_call(n),

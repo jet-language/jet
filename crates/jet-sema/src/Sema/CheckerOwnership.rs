@@ -5467,7 +5467,7 @@ impl<'a> Checker<'a> {
         }
         // The same law for any place below an element (`^items[i].tags`):
         // the element keeps owning its fields, so the value can only be a
-        // copy, and the copy is spelled with its own marker.
+        // copy, spelled with `.copy()`.
         let mut base = place;
         let mut below_element = false;
         loop {
@@ -5481,23 +5481,32 @@ impl<'a> Checker<'a> {
             }
         }
         if below_element {
-            self.diags.push(
-                Diagnostic::error(
-                    "E0225",
-                    "the move marker `^` cannot take a field out of a collection element".to_string(),
-                    "an element stays owned by its collection together with every field inside it, so this value can only be a copy".to_string(),
-                    format!(
-                        "write the copy marker `{}` instead of `{}` to copy the field",
-                        Syntax::SIGIL_COPY,
-                        Syntax::SIGIL_MOVE
-                    ),
-                    Some(sigil_span),
-                )
-                .with_edit(TextEdit {
-                    span: sigil_span,
-                    new_text: Syntax::SIGIL_COPY.to_string(),
-                }),
+            let mut diagnostic = Diagnostic::error(
+                "E0225",
+                "the move marker `^` cannot take a field out of a collection element".to_string(),
+                "an element stays owned by its collection together with every field inside it, so this value can only be a copy".to_string(),
+                format!(
+                    "remove `{}` and call `.copy()` on the field instead",
+                    Syntax::SIGIL_MOVE
+                ),
+                Some(sigil_span),
             );
+            if !self.compiler_generated
+                && ty.is_some_and(|ty| !self.is_resource_type(ty) && self.is_cloneable_type(ty))
+            {
+                let anchor = copy_edit_anchor(place);
+                if let Some(text) = self.source.get(anchor.start..anchor.end) {
+                    diagnostic = diagnostic.with_edit_grade(
+                        TextEdit {
+                            span: Span::new(mark_span.start, anchor.end),
+                            new_text: Syntax::copy_call_source(text),
+                        },
+                        FixApplicability::Safe,
+                        FixSafety::BehaviorPreserving,
+                    );
+                }
+            }
+            self.diags.push(diagnostic);
             return;
         }
         let Some(info) = self.lookup(&root) else {

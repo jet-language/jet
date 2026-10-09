@@ -234,6 +234,7 @@ pub(crate) fn canonical_time_literal(
         resolved_ret: None,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     };
     Expr::OrFallback {
         value: Box::new(constructor),

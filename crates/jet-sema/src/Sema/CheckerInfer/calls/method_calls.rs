@@ -1718,8 +1718,10 @@ impl<'a> Checker<'a> {
         // method-call receiver is `Field(Ident(alias), leaf)`; resolve to the submodule
         // `<ns>.<leaf>` as a core call. Guarded by `is_known_core_module`, so it fires only
         // for real submodules (e.g. `core.encoding.json`), never plain field access.
-        if let Expr::Field(base, leaf, _) = &**receiver {
-            if let Expr::Ident(alias, alias_span) = &**base {
+        if let Expr::Field(base, leaf_storage, _) = &mut **receiver {
+            if let Expr::Ident(alias_storage, alias_span) = &mut **base {
+                let alias = &*alias_storage;
+                let leaf = &*leaf_storage;
                 if let Some(ns) = self.core_imports.get(alias).cloned() {
                     self.record_import_alias_reference(alias, *alias_span);
                     if ns == "core.net.tls" && leaf == "ClientConfig" && method == "default" {
@@ -1936,6 +1938,10 @@ impl<'a> Checker<'a> {
                         } else {
                             leaf.clone()
                         };
+                        // Preserve the source spellings for enum constructors before
+                        // replacing the receiver, without cloning either AST string.
+                        let alias = std::mem::take(alias_storage);
+                        let leaf = std::mem::take(leaf_storage);
                         **receiver = Expr::Ident(type_name.clone(), span);
                         if type_name == "Fixed" && matches!(method, "new" | "over") {
                             *recv_type_out = Some(type_name.clone());
