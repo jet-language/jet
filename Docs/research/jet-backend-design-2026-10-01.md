@@ -986,6 +986,16 @@ retains an emitted seed's paired route set. Generated Rust programs carry only
 uses them, so `CAbiIter.rs`, `CAbiTask.rs` and `CAbiRoutes.rs` exist only in the
 all-parts native runtime crate.
 
+`Shared<T>` construction passes three native words: initialized value-slot
+address, native descriptor, and the descriptor's monomorphic address-based
+`lazy.drop` callback (zero for trivial `T`). The native cell stores this callback
+separately at offset 80 and invokes it once, outside its lock, on the last
+release before freeing the slot. The wrapper loads the initialized typed value
+and invokes ordinary instantiated drop glue, including `Close` through Option
+and generic members. Neither receiver-structural cleanup nor a Meta16 fallback
+or cleanup mask is used at this ownership boundary. Copies share the cell, not
+the contained `T`; only the final reference owns releasing its value.
+
 Task and channel adapters share the iterator's typed slot descriptors rather
 than introducing another erased value ABI. A native SendFn body writes its
 result directly into an uninitialized slot; Sema's sendability facts authorize moving
