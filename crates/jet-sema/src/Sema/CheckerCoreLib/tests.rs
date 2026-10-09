@@ -27,6 +27,37 @@ mod tests {
     }
 
     #[test]
+    fn encoding_backing_signatures_use_dyn() {
+        use crate::AST::AccessConvention::{Move, Read};
+        let dyn_ty = Type::Named("Dyn".to_string());
+        let entry = Type::Tuple(vec![
+            ("key".to_string(), Box::new(Type::String)),
+            ("value".to_string(), Box::new(dyn_ty.clone())),
+        ]);
+        assert_eq!(
+            core_fixed_sig("core.encoding", "__object_from_entries"),
+            Some((vec![(Move, Type::List(Box::new(entry.clone())))], Some(dyn_ty.clone()))),
+        );
+        assert_eq!(
+            core_fixed_sig("core.encoding", "__typed_text"),
+            Some((vec![(Move, Type::String)], Some(dyn_ty.clone()))),
+        );
+        assert_eq!(
+            core_fixed_sig("core.encoding", "__object_entries_view"),
+            Some((vec![(Read, dyn_ty.clone())], Some(Type::Apply {
+                name: "View".to_string(), args: vec![entry],
+            }))),
+        );
+        assert_eq!(
+            core_fixed_sig("core.encoding", "__bytes_view"),
+            Some((vec![(Read, dyn_ty)], Some(Type::Apply {
+                name: "View".to_string(),
+                args: vec![Type::IntN { signed: false, bits: 8 }],
+            }))),
+        );
+    }
+
+    #[test]
     fn dyn_automatic_wrap_is_recursive_and_not_encode_in_general() {
         use super::super::dyn_wrappable;
         for ty in [Type::Int, Type::Float, Type::String, Type::Bool,

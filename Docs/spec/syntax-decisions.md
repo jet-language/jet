@@ -1551,6 +1551,10 @@ the single dynamic value, closed to
 are aliases over it. **Declined**: `[..]T` spelling — zero-copy comes as
 `View<T>` library type (D-DYNARRAY1).
 
+The private encoding backing signatures also carry `Dyn`, including
+ordered object-entry values and borrowed object/byte views; the bootstrap
+checker and native Jet signature registry must agree on that nominal type.
+
 ### Strings & literals
 
 **S8 — Interpolation**: `"hi {name}"`; no `+` concatenation.

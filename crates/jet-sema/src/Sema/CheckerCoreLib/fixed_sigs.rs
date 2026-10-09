@@ -1646,9 +1646,9 @@ fn core_fixed_sig_raw(
         ("core.encoding", "__object_from_entries") => Some((
             vec![(AccessConvention::Move, Type::List(Box::new(Type::Tuple(vec![
                 ("key".to_string(), Box::new(Type::String)),
-                ("value".to_string(), Box::new(Type::Named("DataTree".to_string()))),
+                ("value".to_string(), Box::new(Type::Named("Dyn".to_string()))),
             ]))))],
-            Some(Type::Named("DataTree".to_string())),
+            Some(Type::Named("Dyn".to_string())),
         )),
         ("core.encoding", "__write_text") => Some((
             vec![(AccessConvention::Write, Type::Named("FileWriter".to_string())), (read, Type::String)],
@@ -1660,17 +1660,17 @@ fn core_fixed_sig_raw(
         )),
         ("core.encoding", "__typed_text") => Some((
             vec![(AccessConvention::Move, Type::String)],
-            Some(Type::Named("DataTree".to_string())),
+            Some(Type::Named("Dyn".to_string())),
         )),
         ("core.encoding", "__object_entries_view") => Some((
-            vec![(read, Type::Named("DataTree".to_string()))],
+            vec![(read, Type::Named("Dyn".to_string()))],
             Some(Type::Apply { name: "View".to_string(), args: vec![Type::Tuple(vec![
                 ("key".to_string(), Box::new(Type::String)),
-                ("value".to_string(), Box::new(Type::Named("DataTree".to_string()))),
+                ("value".to_string(), Box::new(Type::Named("Dyn".to_string()))),
             ])] }),
         )),
         ("core.encoding", "__bytes_view") => Some((
-            vec![(read, Type::Named("DataTree".to_string()))],
+            vec![(read, Type::Named("Dyn".to_string()))],
             Some(Type::Apply { name: "View".to_string(), args: vec![u8_ty()] }),
         )),
         ("core.net", "__unix_connect_host") => Some((vec![(read, Type::String)], Some(result_ty(Type::Named("UnixStream".to_string()), Type::Named("NetError".to_string()))))),
