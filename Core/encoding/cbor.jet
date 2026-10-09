@@ -95,7 +95,6 @@ fn validate(value: Dyn, path: String) CBORError! {
     #Unsafe("inspect private typed carriers without changing public Dyn variants") {
         if value == {
             .Number(text) -> return Err(unsupported(path, "JSON number carrier {text:Debug} is not a CBOR value"))
-            .TypedText(text) -> return Err(unsupported(path, "typed text carrier {text:Debug} is not a CBOR value"))
             .Array(items) -> {
                 loop i in 0..<items.len() -> validate(items[i], "{path}[{i}]") ?? return Err(err)
             }

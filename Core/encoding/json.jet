@@ -709,7 +709,6 @@ fn __parse_typed(text: String) -> Dyn EncodingError! {
 fn append_events(value: Dyn) -> [DataEvent] Never! {
     #Unsafe("preserve the native compiler-private Dyn carriers in Core JSON event projection") {
         if value == .Number(text) -> return [DataEvent]{DataEvent.Number(text)}
-        if value == .TypedText(text) -> return [DataEvent]{DataEvent.Text(text)}
         if value == .Bytes(bytes) -> return [DataEvent]{DataEvent.Bytes(bytes)}
     }
     out := [DataEvent]{}
@@ -874,10 +873,6 @@ fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) EncodingError! 
     #Unsafe("Core JSON rendering borrows native private payloads without exposing their constructors") {
         if value == .Number(text) {
             write_ascii(&out, text)
-            return Ok(())
-        }
-        if value == .TypedText(text) {
-            write_json_string(&out, text)
             return Ok(())
         }
         if value == .Bytes(bytes) {

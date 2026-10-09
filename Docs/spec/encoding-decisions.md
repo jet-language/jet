@@ -43,10 +43,10 @@ helpers, not `Dyn` adapters. This keeps one tree walker and one set of
 format adapters while preserving the distinction between text serialization
 and byte alphabets.
 
-The native carrier also retains compiler-private `Number`, `TypedText`,
-and `Bytes` payloads for target-directed decoding and byte encoders. They
-are not additional public constructors. Vetted Core internals may borrow
-these payloads inside audited `#Unsafe` regions (#4737). The private Object
+The native carrier retains exact `Number` lexemes for target-directed decoding.
+Text-cell decoding is scoped to the typed read; strings use the ordinary `Text`
+payload, not a separate `TypedText` variant. Vetted Core internals may borrow
+private payloads inside audited `#Unsafe` regions (#4737). The private Object
 entry view borrows the input's ordered backing storage; it neither converts
 the Object to a sorted map nor clones its children.
 The source-owned testing diff policy shares only the private String byte read

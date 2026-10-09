@@ -1076,7 +1076,7 @@ JET_CODEGEN_COMPILER_OWNED_ENUMS :: prep { [JetCodegenCompilerOwnedEnum]{
     JetCodegenCompilerOwnedEnum{name: "DataFormat", variants: [String]{"CSV", "JSON", "JSONL", "Parquet", "Arrow"}},
     JetCodegenCompilerOwnedEnum{name: "DataFreshness", variants: [String]{"Pending", "Fresh", "Stale", "Error", "Offline", "Cancelled"}},
     JetCodegenCompilerOwnedEnum{name: "DataInvalidationCause", variants: [String]{"NoCause", "Loader", "Input", "ArchiveMember", "Parameters", "Credential", "Capability", "Manual"}},
-    JetCodegenCompilerOwnedEnum{name: "Dyn", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "TypedText", "Text", "Bytes", "Array", "Object"}},
+    JetCodegenCompilerOwnedEnum{name: "Dyn", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "Array", "Object"}},
     JetCodegenCompilerOwnedEnum{name: "DataEvent", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "ArrayStart", "ArrayEnd", "ObjectStart", "Key", "ObjectEnd"}},
     JetCodegenCompilerOwnedEnum{name: "XMLCanonicalMode", variants: [String]{"Inclusive11", "Exclusive10"}},
     JetCodegenCompilerOwnedEnum{name: "PluginLimit", variants: [String]{"Fuel", "Memory", "Table", "Time", "Wire"}},
@@ -1180,8 +1180,9 @@ fn jet_codegen_compiler_owned_enum_payload(name: String, variant: String) -> Jet
         if variant == "Int" -> return jet_codegen_compiler_owned_single(Type.Int)
         if variant == "Float" -> return jet_codegen_compiler_owned_single(Type.Float)
         if variant == "Bytes" -> return jet_codegen_compiler_owned_single(bytes)
+        if variant == "DateTime" -> return jet_codegen_compiler_owned_single(Type.Named{name: "ZonedDateTime"})
         tree :: Type.Named{name: "Dyn"}
-        if variant == "Number" || variant == "TypedText" || variant == "Text" -> return jet_codegen_compiler_owned_single(Type.String)
+        if variant == "Number" || variant == "Text" -> return jet_codegen_compiler_owned_single(Type.String)
         if variant == "Array" -> return jet_codegen_compiler_owned_single(Type.List{element: tree})
         if variant == "Object" -> return jet_codegen_compiler_owned_single(Type.List{element: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: tree}}}})
         return JetCodegenCompilerOwnedPayload.Unit

@@ -2179,7 +2179,7 @@ pub(super) fn xml_shape_error_value(reason: String) -> CtValue {
 pub(super) fn xml_render(value: &CtValue) -> Result<String, CtValue> {
     let converted = if json_payload(value, "Float").is_some() || json_payload(value, "Bytes").is_some() {
         Err("XML tree cannot contain Float or Bytes values".to_string())
-    } else if json_payload(value, "Number").is_some() || json_payload(value, "TypedText").is_some() {
+    } else if json_payload(value, "Number").is_some() {
         Err("internal JSON carrier escaped typed decode".to_string())
     } else {
         xml_from_ct(value)

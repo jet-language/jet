@@ -2758,7 +2758,7 @@ pub fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
         // `Number` is the compiler-only lexical carrier used by typed JSON
         // parsing. It is accepted in generated union decoder patterns, but
         // has no public `Dyn.Number(...)` constructor.
-        "Number" | "TypedText" => Some(vec![Type::String]),
+        "Number" => Some(vec![Type::String]),
         _ => None,
     }
 }

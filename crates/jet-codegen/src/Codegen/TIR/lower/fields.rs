@@ -147,13 +147,36 @@ fn canonical_nominal_name(
             })
             .map(|_| leaf.to_string());
     }
-    let alias = bundle.name_ledger.effective_alias(module_idx, name)?;
-    let target = alias.target_module?;
-    let leaf = alias
-        .target
-        .rsplit_once('.')
-        .map_or(alias.target.as_str(), |(_, leaf)| leaf);
-    canonical_nominal_name(bundle, target, leaf, &HashSet::new(), qualify_aliases, seen)
+    if let Some(alias) = bundle.name_ledger.effective_alias(module_idx, name) {
+        if let Some(target) = alias.target_module {
+            let leaf = alias
+                .target
+                .rsplit_once('.')
+                .map_or(alias.target.as_str(), |(_, leaf)| leaf);
+            return canonical_nominal_name(bundle, target, leaf, &HashSet::new(), qualify_aliases, seen);
+        }
+    }
+    // Implicit Core types (for example Stat.modified: DateTime) keep their
+    // source declaration owner even without a written selective import.
+    // Resolve the registry's unique owner, never another module's same leaf.
+    let core_module = if let Some(kind) = crate::Syntax::typed_head_kind(name) {
+        kind.carrier_record_module()?
+    } else {
+        let mut owners = jet_foundation::CoreModuleExports::core_modules()
+            .iter()
+            .filter(|module| module.type_exports.iter().any(|(leaf, _)| *leaf == name));
+        let owner = owners.next()?;
+        if owners.next().is_some() {
+            return None;
+        }
+        owner.module
+    };
+    let (_, target) = crate::Codegen::core_source_target(bundle, core_module)?;
+    if declares(target) {
+        bundle.name_ledger.nominal_identity(target, name)
+    } else {
+        None
+    }
 }
 
 /// Resolve a nominal spelling as written *inside* `module_idx` to the canonical
@@ -1096,6 +1119,31 @@ mod parsed_core_record_tests {
 
     fn qualified(bundle: &ProgramBundle, module: usize, name: &str) -> String {
         imported_type_name(&bundle.name_ledger.module_identity(module).expect("module owner"), name)
+    }
+
+    #[test]
+    fn implicit_datetime_fields_keep_the_core_source_declaration() {
+        let bundle = parsed_bundle("core.time", "struct Stat { modified: DateTime, created: DateTime? }\nfn run() {}\n");
+        let owner = bundle.name_ledger.module_identity(0).expect("caller owner");
+        let datetime = qualified(&bundle, 1, "DateTime");
+        for ty in [
+            Type::Named("DateTime".to_string()),
+            Type::Option(Box::new(Type::Named("DateTime".to_string()))),
+        ] {
+            assert_eq!(
+                qualify_imported_type(&bundle, 0, &owner, &[], &ty),
+                ty.map_named_types(&|name| (name == "DateTime").then(|| datetime.clone())),
+            );
+        }
+        assert_eq!(
+            qualify_imported_type(&bundle, 0, &owner, &["DateTime".to_string()], &Type::Named("DateTime".to_string())),
+            Type::Named("DateTime".to_string()),
+        );
+        let shadowed = parsed_bundle("core.time", "struct DateTime { value: Int }\nfn run() {}\n");
+        assert_eq!(
+            canonical_nominal_from(&shadowed, 0, "DateTime"),
+            Some(qualified(&shadowed, 0, "DateTime")),
+        );
     }
 
     #[test]
