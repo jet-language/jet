@@ -11,6 +11,7 @@
 // Integer wire packing uses truncating division; String windows use slice.
 // Collection compaction swaps owned slots and pops tails; projections preserve
 // their insertion order without moving fields out of indexed borrowed storage.
+// Named XML event payloads use the language's labeled brace construction.
 use core.encoding.[Dyn]
 use core.encoding as encoding
 use core.text as unicode
@@ -2650,7 +2651,7 @@ fn declaration_matches_input(name: String, encoding: WireEncoding?) -> Bool Neve
     input :: encoding ?? WireEncoding.UTF8
     if input == {
         .UTF8 -> ascii_equal(name, "UTF-8")
-        .Utf16Le | .Utf16Be -> ascii_equal(name, "UTF-16") || ascii_equal(name, "UTF-16LE") || ascii_equal(name, "UTF-16BE")
+        .UTF16Le | .UTF16Be -> ascii_equal(name, "UTF-16") || ascii_equal(name, "UTF-16LE") || ascii_equal(name, "UTF-16BE")
     }
 }
 impl Scanner {
@@ -2814,7 +2815,7 @@ impl Scanner {
                     literal :: byte_text(bytes[0..<bytes.len()], at, at + rel)
                     value :: normalize_attribute_text(literal)
                     normalized += value
-                    &parts.push(Part.Text(value: ^value, raw: literal.copy()))
+                    &parts.push(Part.Text{value: ^value, raw: literal.copy()})
                 }
                 start :: at + rel
                 end :: byte_find(bytes[0..<bytes.len()], start, [U8]{59}[0..<1]) ?? return Err(XMLFault.at(source_base + start, "unterminated entity reference"))
@@ -2836,13 +2837,13 @@ impl Scanner {
                     normalized = ""
                     all = false
                 }
-                &parts.push(Part.Entity(name: name.copy(), resolved: ^resolved, raw: byte_text(bytes[0..<bytes.len()], start, start + end + 1)))
+                &parts.push(Part.Entity{name: name.copy(), resolved: ^resolved, raw: byte_text(bytes[0..<bytes.len()], start, start + end + 1)})
                 at = start + end + 1
             } else {
                 literal :: byte_text(bytes[0..<bytes.len()], at, bytes.len())
                 value :: normalize_attribute_text(literal)
                 normalized += value
-                &parts.push(Part.Text(value: ^value, raw: literal.copy()))
+                &parts.push(Part.Text{value: ^value, raw: literal.copy()})
                 break
             }
         }
@@ -2944,7 +2945,7 @@ impl Scanner {
         if !empty {
             &self.stack.push(Frame{name: name.copy(), namespaces: ^local})
         } else if self.stack.is_empty() { self.root_closed = true }
-        Event.ElementStart(name: ^name, namespaces: ^namespaces, attributes: ^attributes, empty: empty, raw: ^raw)
+        Event.ElementStart{name: ^name, namespaces: ^namespaces, attributes: ^attributes, empty: empty, raw: ^raw}
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:6369
     fn charge_nodes(self: &Scanner, amount: Int) XMLFault! {
@@ -3027,12 +3028,12 @@ impl Scanner {
             raw :: ^taken.raw
             value :: taken.body.slice(4, taken.body.len())
             if value.contains("--") { return Err(self.fail("XML comment contains --")) }
-            return Val(Event.Comment(value: ^value, raw: ^raw))
+            return Val(Event.Comment{value: ^value, raw: ^raw})
         }
         if self.starts("<![CDATA[") {
             if self.stack.is_empty() { return Err(self.fail("CDATA outside root element")) }
             taken :: &self.take_until("]]>", "unterminated CDATA") ?? return Err(err)
-            return Val(Event.Cdata(value: taken.body.slice(9, taken.body.len()), raw: ^taken.raw))
+            return Val(Event.Cdata{value: taken.body.slice(9, taken.body.len()), raw: ^taken.raw})
         }
         if self.starts("<?xml") {
             if self.declaration_seen || self.root_seen || self.offset != 0 { return Err(self.fail("XML declaration is out of order")) }
@@ -3049,7 +3050,7 @@ impl Scanner {
                 }
             }
             self.declaration_seen = true
-            return Val(Event.Declaration(version: ^version, encoding: ^encoding, standalone: standalone, raw: ^raw))
+            return Val(Event.Declaration{version: ^version, encoding: ^encoding, standalone: standalone, raw: ^raw})
         }
         if self.starts("<?") {
             taken :: &self.take_until("?>", "unterminated processing instruction") ?? return Err(err)
@@ -3060,7 +3061,7 @@ impl Scanner {
             target :: byte_text(bytes[0..<bytes.len()], 0, split)
             if !valid_name(target) || ascii_equal(target, "xml") -> return Err(self.fail("invalid processing instruction target"))
             value :: byte_text(bytes[0..<bytes.len()], split, bytes.len()).trim_start()
-            return Val(Event.ProcessingInstruction(target: ^target, value: ^value, raw: ^raw))
+            return Val(Event.ProcessingInstruction{target: ^target, value: ^value, raw: ^raw})
         }
         if self.starts("<!DOCTYPE") {
             if self.doctype_seen || self.root_seen { return Err(self.fail("DOCTYPE is out of order")) }
@@ -3108,7 +3109,7 @@ impl Scanner {
             loop entity_name in ordered -> self.check_name(entity_name, "entity name") ?? return Err(err)
             self.declared_entities = ^declared_entities
             self.doctype_seen = true
-            return Val(Event.Doctype(name: ^name, public_id: ^public_id, system_id: ^system_id, internal_subset: ^internal_subset, raw: ^raw))
+            return Val(Event.Doctype{name: ^name, public_id: ^public_id, system_id: ^system_id, internal_subset: ^internal_subset, raw: ^raw})
         }
         if self.starts("</") {
             start :: self.offset
@@ -3124,7 +3125,7 @@ impl Scanner {
             self.offset = start + rel + 1
             _ :: &self.stack.pop()
             if self.stack.is_empty() { self.root_closed = true }
-            return Val(Event.ElementEnd(name: ^name, raw: byte_text(self.source[0..<self.source.len()], start, self.offset)))
+            return Val(Event.ElementEnd{name: ^name, raw: byte_text(self.source[0..<self.source.len()], start, self.offset)})
         }
         if self.starts("<") {
             if self.root_closed { return Err(self.fail("multiple XML root elements")) }
@@ -3134,7 +3135,7 @@ impl Scanner {
         if self.starts("&") {
             if self.stack.is_empty() { return Err(self.fail("entity reference outside root element")) }
             reference :: &self.reference() ?? return Err(err)
-            return Val(Event.EntityRef(name: ^reference.name, resolved: ^reference.resolved, raw: ^reference.raw))
+            return Val(Event.EntityRef{name: ^reference.name, resolved: ^reference.resolved, raw: ^reference.raw})
         }
         start :: self.offset
         rel := 0
@@ -3146,10 +3147,10 @@ impl Scanner {
             if !raw.bytes().all(character -> character == (U8{32}) || character == (U8{9}) || character == (U8{13}) || character == (U8{10})) {
                 return Err(self.fail("character data outside root element"))
             }
-            Val(Event.DocumentWhitespace(value: raw.copy(), raw: ^raw))
+            Val(Event.DocumentWhitespace{value: raw.copy(), raw: ^raw})
         } else -> {
             if raw.contains("]]>") { return Err(self.fail("character data contains forbidden ]]>")) }
-            Val(Event.Text(value: raw.copy(), raw: ^raw))
+            Val(Event.Text{value: raw.copy(), raw: ^raw})
         }
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:6686
