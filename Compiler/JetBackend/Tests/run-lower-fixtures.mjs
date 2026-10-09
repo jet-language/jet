@@ -122,6 +122,7 @@ const parts = [
       "pub struct FieldLayoutFacts {",
       "pub struct LayoutFacts {",
     ].map((head) => item("Compiler/JetFoundation/Source/Target/Layout.jet", head)),
+    body("Compiler/JetFoundation/Source/DerivationTypes.jet"),
     body("Compiler/JetFoundation/Source/MIR/MIR.jet"),
     body("Compiler/JetFoundation/Source/Text/RustDebug.jet"),
     body("Compiler/JetFoundation/Source/Encoding/Json.jet"),

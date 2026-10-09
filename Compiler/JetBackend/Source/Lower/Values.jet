@@ -527,6 +527,7 @@ fn lower_needs_drop_index(p: MIRProgram, close_methods: [U64:[LowerCloseImpl]], 
             if lower_tally_element(aggregate) != None -> return true
             if lower_queue_element(aggregate) != None -> return true
             if lower_priority_queue_element(aggregate) != None -> return true
+            if lower_close_method(p, m.close_methods, aggregate) != None -> return true
             loop member in lower_inline_members(p, aggregate) {
                 if member.boxed || lower_needs_drop_index(p, close_methods, member.ty) -> return true
             }

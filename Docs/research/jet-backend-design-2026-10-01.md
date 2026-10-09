@@ -232,7 +232,7 @@ IR with these choices, which the Jet lowering keeps or replaces as noted:
 | `Int`, ranges/tags/quantities over Int | exact-Int word | `i64` (Integer 8) | none (big integers are runtime-managed) |
 | `Char`, `IntN(_, 64)` | word | `i64` | none |
 | `Bool` | flag | `i8` (Integer 1, 0 or 1) | none |
-| `F32` (reader materialization/text only) | `Float32Bits`: zero-extended raw binary32 word in registers | four stored bytes, align 4 | none |
+| `F32` (constants/reader materialization/text only) | `Float32Bits`: zero-extended raw binary32 word in registers | four stored bytes, align 4 | none |
 | `Unit`, `Never` | no LIR value | — | — |
 | `String` | runtime handle to a C-layout `{ptr, len, cap}` UTF-8 header (byte counts, words at offsets 0/8/16 on x64) | `ptr` | `jet_rt_string_drop` |
 | `RangeCursor`, `IterCursor` | runtime handle | `ptr` | `jet_loop_cursor_drop` |
@@ -258,9 +258,13 @@ register layout. Reader routes return binary32 in the low 32 of their
 zero-extended out word. Native storage writes four bytes; reads load U32 and
 zero-extend, with no FP conversion. Display and Debug borrow that raw word
 for `jet_rt_float32_to_string` and `jet_rt_float32_debug` respectively, using
-binary32 shortest text rather than widening to binary64 text. Numeric,
-comparison and cast operations remain explicit refusals in this minimal
-reader/text scope. Future FP-register operations must use the canonical LIR
+binary32 shortest text rather than widening to binary64 text.
+Local, aggregate-tree and static constants pack the MIR binary64 literal into
+binary32 once with integer ties-to-even rounding, preserving signed zero,
+subnormals, infinity and the high quiet-NaN payload. The constants fixture
+covers local, record, List and global storage plus rounding boundary bits.
+Numeric, comparison and cast operations remain explicit refusals in this
+constant/reader/text scope. Future FP-register operations must use the canonical LIR
 `Bitcast`, not introduce another reinterpretation mechanism.
 F32 runtime result admission is a named allow-list: only
 `jet_reader_read_f32_le` and `jet_reader_read_f32_be`, producing
@@ -1950,6 +1954,12 @@ bodies that rustc accepts; the same bodies in dispatch form fail with E0502.
 
 ## Testing
 
+The golden-lowering driver's generated package grants `FS.Read`, `FS.Write`,
+`IO`, `Mem.Alloc`, `Panic`, and `Time`: these are the checked Lower unit's
+required effects. The harness must grant `Panic` for its checked-invariant
+failures as well as its file, allocation, and timing operations; otherwise
+driver compilation refuses before any golden can be lowered.
+
 `Compiler/JetBackend/Tests/LowerFixtures.jet` builds small checked-MIR programs
 by hand (hello, exact-Int arithmetic, locals with a loop and a phi, a switch,
 a range loop, string interpolation, structs, payload and tag enums, Options),
@@ -2144,6 +2154,8 @@ E3015 what/why/fix snapshot is exercised by
 `Tests/test-native-output-diagnostic.mjs`. These consumers require the real
 composed candidate, host and matching runtime pack; metadata-only checks do
 not admit execution parity.
+Its registered What line starts `Output check not run:` in sentence case,
+matching the canonical snapshot and the shared user-facing case-law gate.
 
 
 `Tests/run-front-feed.mjs` selects **every** `pass` row in an explicit native

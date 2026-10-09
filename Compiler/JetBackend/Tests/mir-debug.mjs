@@ -1,7 +1,7 @@
 // Real MIR for the Jet backend harness: the Rust compiler's checked MIR
 // (written in Rust Debug form when JET_DUMP_MIR=<path> is set, see
 // crates/jet-codegen/src/Codegen/TIR/mir.rs) converted into the Jet MIR
-// schema (Compiler/JetFoundation/Source/MIR/MIR.jet).
+// schema (MIR/MIR.jet with shared DerivationTypes.jet).
 //
 // The conversion follows the field and variant correspondence of the
 // bootstrap codec (Compiler/Bootstrap/Host/RuntimeMirCodec.rs): types are
@@ -275,8 +275,9 @@ export function parseJetSchema(source, only = null) {
 }
 
 // The Jet MIR schema exactly as the harness unit assembles it: MIR.jet plus
-// the support declarations the bootstrap codec names (SUPPORT_ITEMS).
+// canonical DerivationTypes and support declarations the bootstrap codec names.
 export const SUPPORT_ITEMS = [
+  ["Compiler/JetFoundation/Source/DerivationTypes.jet", ["MIRResourceAccessMode", "MIRResourceIdentity", "MIRResourceRegion", "MIRResourceLayout", "MIRResourceAccess", "MIRFrameCompletion", "MIRFrameOperation", "MIRFrameDependency", "MIRFrameTransfer", "MIRFrameReuse", "MIRFrameRetention", "MIRFrameSchedule", "MIRDerivationMethod", "MIRDerivationDisposition", "MIRDerivationRef"]],
   ["Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet", ["Span"]],
   ["Compiler/JetFoundation/Source/Registry/CoreCalls.jet", ["Effect", "SinkClass", "CoreCallFallibility", "CoreCallPureRoute", "CoreCallInterpreterRoute", "CoreCallSymbol", "CoreMarkerApplication"]],
   ["Compiler/JetFoundation/Source/Types/Types.jet", ["ParamZone"]],

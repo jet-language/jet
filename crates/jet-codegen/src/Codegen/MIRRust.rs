@@ -3494,6 +3494,7 @@ struct RustEmitter<'a> {
     /// Memoized `type_derive_capability` answers for closed (non-generic,
     /// unbound) type rows, per trait name.
     derive_capability_cache: std::cell::RefCell<BTreeMap<String, BTreeMap<MirTypeId, bool>>>,
+    close_facts: CloseFacts,
     /// Lowest `visiting` index a cycle assumption reached in the current
     /// `type_derive_capability` frame (`usize::MAX` when none).
     derive_capability_cycle_floor: std::cell::Cell<usize>,
@@ -3688,6 +3689,7 @@ impl<'a> RustEmitter<'a> {
             cfg_state: std::cell::RefCell::new(None),
             history_runtime_metadata: std::cell::OnceCell::new(),
             derive_capability_cache: std::cell::RefCell::new(BTreeMap::new()),
+            close_facts: CloseFacts::default(),
             derive_capability_cycle_floor: std::cell::Cell::new(usize::MAX),
             derive_capability_pending: std::cell::RefCell::new(Vec::new()),
             history_callback_lifetime: std::cell::Cell::new("'static"),
@@ -28713,6 +28715,81 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
+    /// Render a typed cleanup graph. Local functions make recursive owned
+    /// records finite without allocating a runtime visitor or cloning values.
+    fn typed_drop_expression(&self, function: &MirFunction, ty: &MirType, value: &str, structural: bool) -> String {
+        if !self.close_facts.contains_owned(self.program, ty) {
+            return format!("{{ drop({value}); () }}");
+        }
+        let mut pending = vec![(ty.clone(), structural)];
+        let mut names = BTreeMap::new();
+        names.insert((ty.canonical_key(), structural), 0usize);
+        let mut definitions = String::new();
+        let mut cursor = 0;
+        while cursor < pending.len() {
+            let (ty, structural) = pending[cursor].clone();
+            let needed = self.history_type_parameters(&ty);
+            let mut parameters = function.generic_params.iter()
+                .chain(self.generic_scopes.borrow().iter().flat_map(|scope| scope.iter()))
+                .filter(|param| needed.contains(&param.name)).cloned().collect::<Vec<_>>();
+            parameters.sort_by(|left, right| left.name.cmp(&right.name));
+            parameters.dedup_by(|left, right| left.name == right.name);
+            let generics = self.generic_params_from(&parameters);
+            let mut child = |ty: &MirType, value: String| {
+                let key = (ty.canonical_key(), false);
+                let next = names.len();
+                let index = *names.entry(key).or_insert_with(|| {
+                    pending.push((ty.clone(), false));
+                    next
+                });
+                format!("__jet_drop_{index}({value}); ")
+            };
+            let body = if !structural {
+                self.close_facts.nominal(self.program, &ty).map(|id| {
+                    let row = self.function_row(id);
+                    let MirFunctionForm::TraitMethod { trait_ref, .. } = &row.form else {
+                        panic!("checked Close implementation is not a trait method");
+                    };
+                    format!("<{} as {}>::{}(value);", self.rust_type(&ty),
+                        self.trait_nominal_name(trait_ref), self.rust_method_symbol(row))
+                })
+            } else { None };
+            let body = body.unwrap_or_else(|| match ty.kind() {
+                MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } =>
+                    format!("for item in value {{ {} }}", child(inner, "item".into())),
+                MirTypeKind::Option(inner) =>
+                    format!("if let Ok(item) = value {{ {} }}", child(inner, "item".into())),
+                MirTypeKind::Result { ok, err } =>
+                    format!("match value {{ Ok(item) => {{ {} }}, Err(item) => {{ {} }} }}",
+                        child(ok, "item".into()), child(err, "item".into())),
+                MirTypeKind::Tuple(fields) => fields.iter().enumerate()
+                    .map(|(index, (_, ty))| child(ty, format!("value.{index}"))).collect(),
+                MirTypeKind::Apply { .. } =>
+                    close_owned_fields(self.program, &ty).iter().map(|(id, _, field_ty)| {
+                        let value = format!("value.{}", self.field_name(*id));
+                        child(field_ty, if self.boxed_field(*id) { format!("*{value}") } else { value })
+                    }).collect(),
+                _ => "drop(value);".into(),
+            });
+            let _ = write!(definitions, "fn __jet_drop_{cursor}{generics}(value: {}) {{ {body} }} ", self.rust_type(&ty));
+            cursor += 1;
+        }
+        format!("{{ {definitions} __jet_drop_0({value}); () }}")
+    }
+
+    fn drop_partial_fields(&self, function: &MirFunction, node: &PartialMoveNode) -> String {
+        let mut out = String::new();
+        for field in &node.fields {
+            let value = if field.boxed { "*item" } else { "item" };
+            let body = self.typed_drop_expression(function, &field.ty, value, false);
+            let _ = write!(out, "if let Some(item) = {}.take() {{ {body}; }} ", field.slot);
+            if let Some(nested) = &field.nested {
+                out.push_str(&self.drop_partial_fields(function, nested));
+            }
+        }
+        out
+    }
+
     fn drop_expression(
         &self,
         function: &MirFunction,
@@ -28739,7 +28816,12 @@ impl<'a> RustEmitter<'a> {
             );
         }
         if let Some(node) = self.partial_drop_node(function, value) {
-            return format!("{{ drop({}.take()); {} () }}", node.slot, Self::clear_partial_fields(node));
+            let ty = self.value_type(function, value);
+            let structural = self.close_facts.nominal(self.program, ty) == Some(function.id)
+                && close_receiver_drop(function, value);
+            let whole = self.typed_drop_expression(function, ty, "item", structural);
+            return format!("{{ if let Some(item) = {}.take() {{ {whole}; }} {} () }}",
+                node.slot, self.drop_partial_fields(function, node));
         }
         if self
             .history_binding(value)
@@ -28769,7 +28851,12 @@ impl<'a> RustEmitter<'a> {
         }
         match kind {
             MirDropKind::None => format!("{{ let _ = {}; () }}", self.value_move(value)),
-            MirDropKind::Value => format!("{{ drop({}); () }}", self.value_move(value)),
+            MirDropKind::Value => {
+                let ty = self.value_type(function, value);
+                let structural = self.close_facts.nominal(self.program, ty) == Some(function.id)
+                    && close_receiver_drop(function, value);
+                self.typed_drop_expression(function, ty, &self.value_move(value), structural)
+            }
             MirDropKind::Shared => format!("{{ drop({}); () }}", self.value_move(value)),
             MirDropKind::View => format!("{{ drop({}); () }}", self.value_move(value)),
             MirDropKind::ForeignHandle => unreachable!(),

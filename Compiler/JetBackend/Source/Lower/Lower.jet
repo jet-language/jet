@@ -1806,6 +1806,11 @@ fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             lower_seal(&f, LIRTerminator.Jump{target: edge})
         }
         .Return(value) -> {
+            if value == .Val(returned) {
+                lower_partial_escape(p, c, &m, &f, returned, None)
+                if f.failed -> return lower_seal(&f, LIRTerminator.Unreachable)
+                lower_close_transfer(c, &f, returned)
+            }
             lower_sentry_function_leave(&m, &f)
             if f.result_storage == .Val(storage) {
                 // An inline aggregate result moves into the caller's storage.
@@ -2124,10 +2129,7 @@ fn lower_constant(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         }
         .Bool(value) -> lower_emit(&f, LIRInst.Const{dst: dst, value: if value -> 1 else -> 0})
         .Char(value) -> lower_emit(&f, LIRInst.Const{dst: dst, value: value})
-        .Float(value, f32, _) -> {
-            if f32 -> return lower_fail(&m, &f, "Float32 values are not lowered at O0 yet")
-            lower_emit(&f, LIRInst.Const{dst: dst, value: math.to_bits(value)})
-        }
+        .Float(value, f32, _) -> lower_emit(&f, LIRInst.Const{dst: dst, value: lower_float_constant_bits(value, f32)})
         .String(value) -> {
             args :: lower_static_text(&m, &f, value)
             lower_call_runtime(&m, &f, "jet_rt_string_from_static", args, Val(dst))

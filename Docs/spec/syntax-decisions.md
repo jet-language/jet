@@ -2614,6 +2614,15 @@ There is no general deferred statement or block: `defer action()` and
 `defer { ... }` are E0003. The resource expression is one directly moved local;
 ordinary close-call resolution proves that `close(^resource)` is valid, and the
 normal move checker rejects any later use, immediate close, or second defer.
+Checked instantiated owned fields and List/Option payloads retain their
+ordinary `Close` cleanup (#4792). A partial field move leaves cleanup only
+for the remaining initialized fields; moving the payload transfers its duty.
+Only the consuming receiver's storage in its own `Close` body is structural
+cleanup: another local of the same nominal type still closes normally.
+The Rust printer and MIREval implement this as seed/verification seams that
+die at cutover; native execution uses Jet-owned Lower cleanup glue.
+Their immutable cleanup facts are cached per program/type, and partial-move
+parity witnesses use owned payloads rather than Copy-only records.
 
 **S53 — Concurrency** *(historical record, superseded by D-CONC-SPAWN1=D)*:
 tasks/channels were once planned around `tasks.spawn` and handle-list

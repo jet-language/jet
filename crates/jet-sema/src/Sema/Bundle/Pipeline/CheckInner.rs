@@ -228,6 +228,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
             }
             ModuleState {
                 module_path: m.display.clone(),
+                is_core_source: m.is_core_source(),
                 source: m.source.clone(),
                 package_scope: if module_idx == error_owner {
                     super::super::Prelude::ERROR_PRELUDE_PACKAGE.to_owned()

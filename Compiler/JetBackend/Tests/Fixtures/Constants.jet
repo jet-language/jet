@@ -27,7 +27,7 @@ use jet_foundation.[
     MIRVisibility,
     mir_field_id,
     mir_type_from_kind,
-    mir_type_id,
+    mir_type_id, mir_copy_ownership,
 ]
 
 fn fx_constant_int(value: Int) -> MIRConstant Never! {
@@ -235,4 +235,47 @@ fn fx_constant_print_chain(b: &FxBuilder, owner: MIRValueID) Never! {
     is_end :: fx_copy(&b, fx_bool(), MIROperation.EnumIs{subject: tail, owner: mir_type_id("ConstChain"), variant: "End"})
     fx_print(&b, head)
     fx_print(&b, is_end)
+}
+
+fn fx_f32_constant_bits_checks() -> Bool Never! {
+    samples :: [Float]{0.0, -0.0, 1.0, -1.5, 1.000000059604644775390625, 1.000000178813934326171875, 7.006492321624085e-46, 1.401298464324817e-45, 3.4028234663852886e38, 3.4028235677973366e38}
+    expected :: [Int]{0, 2147483648, 1065353216, 3217031168, 1065353216, 1065353218, 0, 1, 2139095039, 2139095040}
+    loop (index, sample) in samples {
+        if lower_float_constant_bits(sample, true) != expected[index] -> return false
+    }
+    positive_infinity :: math.from_bits(9218868437227405312)
+    if lower_float_constant_bits(positive_infinity, true) != 2139095040 -> return false
+    quiet_nan :: math.from_bits(9221120237041090560)
+    if lower_float_constant_bits(quiet_nan, true) != 2143289344 -> return false
+    lower_float_constant_bits(1.5, false) == math.to_bits(1.5)
+}
+
+// expect-stdout f32-constants: "1.5\n1.5\n1.5\n1.5\n"
+// expect-runtime-only f32-constants: raw binary32 display plus local, tree, List and static storage
+fn fx_f32_constants() -> MIRProgram Never! {
+    scalar :: mir_type_from_kind(MIRTypeKind.Float32)
+    record :: fx_named("F32ConstantRecord")
+    list_ty :: fx_list_type(scalar)
+    constant :: MIRConstant.Float{value: 1.5, f32: true, spelling: None}
+    b := fx_builder()
+    place :: fx_local(&b, "saved", scalar, mir_copy_ownership())
+    literal :: fx_copy(&b, scalar, MIROperation.Constant{value: constant})
+    fx_do(&b, MIROperation.WritePlace{place: place, value: literal})
+    local :: fx_copy(&b, scalar, MIROperation.ReadPlace{place: place})
+    fx_print(&b, local)
+    tree :: fx_owned(&b, record, MIROperation.Constant{value: MIRConstant.Struct{type_name: "F32ConstantRecord", fields: [MIRConstField]{MIRConstField{name: "number", value: constant}}}})
+    member :: fx_copy(&b, scalar, MIROperation.Field{base: tree, field: mir_field_id("F32ConstantRecord.number")})
+    fx_print(&b, member)
+    list :: fx_owned(&b, list_ty, MIROperation.Constant{value: MIRConstant.List{values: [MIRConstant]{constant}}})
+    zero :: fx_int_const(&b, 0)
+    item :: fx_list_index(&b, list, zero, scalar, false)
+    fx_print(&b, item)
+    global :: fx_copy(&b, scalar, MIROperation.Global{name: "fixture.f32"})
+    fx_print(&b, global)
+    fx_do(&b, MIROperation.Drop{value: tree, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: list, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    program := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{fx_type_def("F32ConstantRecord", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("F32ConstantRecord", "number", scalar)}, methods: [MIRFunctionID]{}})})
+    program.constants = [MIRConstantDef]{MIRConstantDef{id: MIRConstantID{value: 901}, module_id: MIRModuleID{value: 0}, key: "fixture.f32", name: "f32", span: fx_span(), visibility: MIRVisibility.Private, ty: scalar, is_storage: false, value: constant}}
+    program
 }

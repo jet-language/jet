@@ -93,12 +93,10 @@ fn run_compiled(rust: String, tag: &str) -> Output {
 #[test]
 fn defer_close_has_explicit_tir_codegen_and_stable_formatting() {
     let out = compile(SIMPLE);
-    assert!(out.rust.contains("JetDeferredClose"), "{}", out.rust);
     assert!(
-        out.rust
-            .contains("__jet_Close::close(__jet___resource_resource_")
-            && out.rust.contains(".take())"),
-        "{}",
+        out.rust.contains("as __jet_Close>::close(")
+            && out.rust.contains(".take().expect(\"MIR local\")"),
+        "deferred close must consume its MIR local through the nominal protocol:\n{}",
         out.rust
     );
 
@@ -272,17 +270,9 @@ fn run() {
 "#;
     let compiled = compile(src);
     assert!(
-        compiled
-            .rust
-            .contains(": JetResource<__jet_Resource> = JetResource::new(__jet_resource);"),
-        "{}",
-        compiled.rust
-    );
-    assert!(
-        compiled
-            .rust
-            .contains("return __jet___resource_param_resource.take();"),
-        "{}",
+        compiled.rust.contains(".take().expect(\"MIR parameter\")")
+            && compiled.rust.contains("as __jet_Close>::close("),
+        "consuming parameters must transfer their MIR slot and close the final owner:\n{}",
         compiled.rust
     );
     let out = compile_and_run(src, "jet_resource_close_transfer");
@@ -326,7 +316,7 @@ impl Resource.Close {
     }
 }
 
-fn fail() -> Int String! {
+fn fail() -> Int Err! {
     return Err("stop")
 }
 
@@ -337,7 +327,7 @@ fn returned() {
     return
 }
 
-fn questioned() -> Int String! {
+fn questioned() -> Int Err! {
     resource := Resource{ name: "question" }
     defer close(^resource)
     value := fail()
@@ -404,7 +394,7 @@ fn run() {
 fn ordinary_scope_drop_and_reasoned_drop_remain_separate() {
     let src = r#"
 struct Value { number: Int }
-fn maybe() -> Int String! { return Err("unused") }
+fn maybe() -> Int Err! { return Err("unused") }
 fn run() {
     value := Value{ number: 1 }
     print(value.number)
@@ -412,7 +402,6 @@ fn run() {
 }
 "#;
     let out = compile(src);
-    assert!(out.rust.contains("__jet_maybe();"), "{}", out.rust);
     assert_eq!(
         out.rust.matches("JetDeferredClose::new").count(),
         0,
@@ -435,6 +424,8 @@ fn run() {
     defer close(^bump)
     pool := mem.Pool.new(slots: 2)
     close(^pool)
+    fixed :: mem.Fixed.new(size: 64)
+    close(^fixed)
     print("closed")
 }
 "#;
@@ -445,6 +436,20 @@ fn run() {
         String::from_utf8_lossy(&ran.stderr)
     );
     assert_eq!(ran.stdout, b"closed\n");
+}
+
+#[test]
+fn source_pool_does_not_inherit_compiler_owned_close() {
+    let src = r#"
+use core.mem as mem
+struct Pool { value: Int }
+fn run() {
+    pool :: Pool{value: 1}
+    close(^pool)
+}
+"#;
+    let diagnostics = codes(src);
+    assert!(diagnostics.contains(&"E0905".to_string()), "{diagnostics:?}");
 }
 
 #[test]

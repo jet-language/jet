@@ -49,8 +49,10 @@ function comptimeSchema(paths) {
     }
   }
   const provided = new Set(['Span', 'Effect', 'ParamZone']);
-  // MIR supplies its own real types, including layout/type identities.
-  for (const match of read('Compiler/JetFoundation/Source/MIR/MIR.jet').matchAll(/^(?:pub )?(?:struct|enum) (\w+)\b/gm)) provided.add(match[1]);
+  // MIR and shared derivation declarations supply their real type identities.
+  for (const path of ['Compiler/JetFoundation/Source/MIR/MIR.jet', 'Compiler/JetFoundation/Source/DerivationTypes.jet']) {
+    for (const match of read(path).matchAll(/^(?:pub )?(?:struct|enum) (\w+)\b/gm)) provided.add(match[1]);
+  }
   const selected = new Map();
   function visit(name) {
     if (provided.has(name) || selected.has(name) || !declarations.has(name)) return;
@@ -71,6 +73,7 @@ let parts = [
   item('Compiler/JetBackend/Source/Image/ELF.jet', 'ELF64_PROGRAM_HEADER_SIZE ::'),
   item('Compiler/JetBackend/Source/Image/ELF.jet', 'fn elf64_text_offset('),
   ...[
+    'Compiler/JetFoundation/Source/DerivationTypes.jet',
     'Compiler/JetFoundation/Source/MIR/MIR.jet',
     'Compiler/JetBackend/Source/LIR/LIR.jet',
     'Compiler/JetBackend/Source/LIR/Lint.jet',

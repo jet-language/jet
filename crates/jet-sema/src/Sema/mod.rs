@@ -1919,6 +1919,8 @@ impl Clone for SharedFlag {
 #[derive(Clone)]
 pub(crate) struct ModuleState {
     module_path: String,
+    /// Canonical loader provenance, independent of the human display path.
+    is_core_source: bool,
     source: String,
     package_scope: String,
     module_alias: String,

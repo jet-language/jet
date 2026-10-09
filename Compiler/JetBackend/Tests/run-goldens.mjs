@@ -392,6 +392,7 @@ const BACKEND = [
 
 function assembleUnit() {
   const support = [];
+  // SUPPORT_ITEMS also owns the canonical shared DerivationTypes declarations.
   for (const [path, names] of SUPPORT_ITEMS) for (const name of names) support.push(item(path, name));
   const zone = read("Compiler/JetFoundation/Source/Types/Types.jet").split("\n");
   const zoneStart = zone.findIndex((line) => line.startsWith("pub fn param_zone_name("));
@@ -407,7 +408,7 @@ function assembleUnit() {
     jetDecoder(schema),
   ];
   writeFileSync(join(dirs.lower, "unit.jet"), [...coreUses, "", ...parts].join("\n"));
-  writeFileSync(join(dirs.lower, "package.jet"), 'name: "jet_backend_goldens"\nversion: "0.1.0"\nauthority: { holds: { allow: [FS.Read, FS.Write, IO, Mem.Alloc, Time] } }\n');
+  writeFileSync(join(dirs.lower, "package.jet"), 'name: "jet_backend_goldens"\nversion: "0.1.0"\nauthority: { holds: { allow: [FS.Read, FS.Write, IO, Mem.Alloc, Panic, Time] } }\n');
 }
 
 // The unit is built once (`jet build`, or `jet build --release` with
