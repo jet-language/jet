@@ -4468,6 +4468,21 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
             }
         }
     }
+    // `Ok(place)` fills the same view success slot (Rust `check_return`):
+    // return the window itself, lifted into the success rail like any plain
+    // success value, so the payload never materializes the view.
+    if sema_stmt_return_is_view_boundary(return_type) && sema_stmt_return_type_is_result(return_type) {
+        payload := Expr?{None}
+        if value == .Ok(ok_value, _) -> payload = Val(ok_value)
+        if value == .Call(ok_call) {
+            if ok_call.name == "Ok" && ok_call.args.len() == 1 -> payload = Val(ok_call.args[0].expr)
+        }
+        if payload == .Val(ok_value) {
+            if sema_stmt_is_bare_range_place(ok_value, scopes, &state) {
+                return sema_stmt_check_returned_value(Expr.Place{value: ok_value, access: PlaceAccess.Read, span: expr_span(ok_value)}, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            }
+        }
+    }
     checked :: sema_stmt_check_return_value(value, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if !sema_stmt_return_is_view_boundary(return_type) && !sema_copy_site_check_guard_owned(checked, environment, scopes, context, &diagnostics, false) -> return None
     value_is_ident := if value == {

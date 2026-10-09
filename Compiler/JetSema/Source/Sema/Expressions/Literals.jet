@@ -956,6 +956,19 @@ fn sema_expression_interpolation_display(value: TExpr, environment: SemaScopeEnv
     false
 }
 
+// D-MEMPROVENANCE2 (Rust `view_subrange_type`): a subrange of a declared
+// `View<T>`/`ViewMut<T>` is a `View<T>` read reborrow of the same owner;
+// `&view[a..b]` on a `ViewMut<T>` reopens the write window in the place.
+fn sema_expression_view_subrange_type(ty: Type) -> Type? Never! {
+    if sema_expr_unwrap_tag(ty) == .Apply(name, args) {
+        if (name == "View" || name == "ViewMut") && args.len() == 1 {
+            if args[0] == (Type.Named{name: "str"}) -> return None
+            return Val(Type.Apply{name: "View", args: [Type]{args[0]}})
+        }
+    }
+    None
+}
+
 // D-DISPLAY-SHAPE: a nominal type whose `Display` comes from a derive: a
 // `#Printable` or `#Display` marker, or the auto-derived `Printable` the
 // declaration-marker rule selects for it.
