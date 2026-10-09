@@ -189,12 +189,16 @@ composed sweep and one fresh-context review; individual cards do not wait for
 that gate.
 
 One implementer owns each coherent patch. Concurrent writers need disjoint
-paths and one named close owner. The repository has exactly two branches,
-`master` and `dev`, and one dev worktree. Every agent commits directly on `dev`
-in that worktree, in small commits that stage only its own paths. Never create a
-branch, a worktree, or any other ref (`refs/keep`, `refs/salvage`,
-`refs/archive`, private lineages), for any purpose: experiments, candidates,
-measurements, and proofs included. To build or measure an uncommitted change,
+paths and one named close owner. The repository's working branches are
+`master` and `dev`, with one dev worktree. At the Rust cutover, the last
+commit that still contains the Rust implementation becomes the `rust` branch: a
+frozen dead-end leaf kept as a reference and a re-bootstrap safety net. Nobody
+commits to it or merges it into `dev` or `master`. Every agent commits directly
+on `dev` in the dev worktree, in small commits that stage only its own paths.
+Never create any other branch, a worktree, or any other ref (`refs/keep`,
+`refs/salvage`, `refs/archive`, private lineages), for any purpose: experiments,
+candidates, measurements, and proofs included. To build or measure an
+uncommitted change,
 apply a scratch patch to a temporary `git archive` export outside the
 repository. Use checkout-owned external Cargo targets configured through
 `jet-env` (see the orchestration resource reference). Never overwrite another
