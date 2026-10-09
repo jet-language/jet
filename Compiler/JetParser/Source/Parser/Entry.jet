@@ -380,17 +380,21 @@ fn parser_collect_debug_trace_sites(tokens: [Token], tables: TokenTables, debug:
 // `)`, leaving out a trailing comma. Interpolations are scanned as well.
 fn parser_debug_trace_sites(tokens: [Token], source: [U8]) -> [DebugTraceSite] Never! {
     sites := [DebugTraceSite]{}
-    if source.len() > 0 -> parser_collect_debug_trace_sites(tokens, source, &sites)
+    if source.len() == 0 -> return sites
+    debug :: name_find(tables.names, "debug") ?? return sites
+    parser_collect_debug_trace_sites(tokens, tables, debug, source, &sites)
     sites
 }
 
 fn parser_collect_debug_trace_sites(tokens: [Token], source: [U8], sites: &[DebugTraceSite]) Never! {
     loop index in 0..<tokens.len() {
         token :: tokens[index]
-        loop part in token.payload.string_parts {
-            if part.kind == STRING_PART_INTERPOLATION -> parser_collect_debug_trace_sites(part.tokens, source, &sites)
+        if token.literal >= 0 {
+            loop part in tables.literals[token.literal].string_parts {
+                if part.kind == STRING_PART_INTERPOLATION -> parser_collect_debug_trace_sites(part.tokens, tables, debug, source, &sites)
+            }
         }
-        if token.kind != TOKEN_IDENT || token.payload.decoded != "debug" || index + 1 >= tokens.len() || tokens[index + 1].kind != TOKEN_LPAREN -> next
+        if token.kind != TOKEN_IDENT || token.decoded != debug || index + 1 >= tokens.len() || tokens[index + 1].kind != TOKEN_LPAREN -> next
         open :: index + 1
         depth := 0
         close := -1

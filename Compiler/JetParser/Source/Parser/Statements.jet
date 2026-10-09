@@ -1387,7 +1387,7 @@ fn parser_named_loop_is_value(state: &JetParserState) -> Bool Never! {
 // leaves this loop (labelled, or bare and not under a nested loop); otherwise
 // `name ::` labels a statement loop.
 fn parser_named_loop_is_value(state: &JetParserState) -> Bool Never! {
-    label :: parser_current(&state).payload.decoded
+    label :: parser_current(&state).decoded
     braces := 0
     parens := 0
     brackets := 0
@@ -1438,7 +1438,7 @@ fn parser_named_loop_is_value(state: &JetParserState) -> Bool Never! {
                     next_kind :: if next_index >= 0 -> state.tokens[next_index].kind else -> TOKEN_EOF
                     name_index :: if next_index >= 0 -> parser_next_code_index(state, next_index + 1) else -> -1
                     comma_index :: if name_index >= 0 -> parser_next_code_index(state, name_index + 1) else -> -1
-                    targets_label :: next_kind == TOKEN_LPAREN && name_index >= 0 && state.tokens[name_index].kind == TOKEN_IDENT && state.tokens[name_index].payload.decoded == label && comma_index >= 0 && state.tokens[comma_index].kind == TOKEN_COMMA
+                    targets_label :: next_kind == TOKEN_LPAREN && name_index >= 0 && state.tokens[name_index].kind == TOKEN_IDENT && state.tokens[name_index].decoded == label && comma_index >= 0 && state.tokens[comma_index].kind == TOKEN_COMMA
                     // D-CHOOSE-FIND1=A: a search payload may sit under an
                     // `if`, but not under an explicitly nested loop.
                     bare_payload :: braces >= 1 && nested_loop_braces.len() == 0 && next_kind != TOKEN_SEMI && next_kind != TOKEN_RBRACE && next_kind != TOKEN_LPAREN
