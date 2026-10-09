@@ -25,9 +25,9 @@ net_poller_root := I64{0}
 }
 fn rt_net_poller_worker_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
 fn net_state_bucket(root: I64, state: I64) -> I64 {
-    wrapping(net_word(root, I64{24}) + (((state >> I64{4}) ^ (state >> I64{14})) & I64{1023}) * I64{8})
+    wrapping(net_word(root, I64{24}) + (((state >> I64{4}).bit_xor((state >> I64{14}))).bit_and(I64{1023})) * I64{8})
 }
-fn net_id_bucket(root: I64, id: I64) -> I64 { wrapping(net_word(root, I64{32}) + (id & I64{1023}) * I64{8}) }
+fn net_id_bucket(root: I64, id: I64) -> I64 { wrapping(net_word(root, I64{32}) + (id.bit_and(I64{1023})) * I64{8}) }
 fn net_node_for_state(root: I64, state: I64) -> I64 {
     node := net_word(net_state_bucket(root, state), I64{0})
     loop node != (I64{0}) {
@@ -48,14 +48,14 @@ fn net_node_interest(node: I64) -> I64 {
     interest := I64{0}
     waiter := net_word(node, I64{32})
     loop waiter != (I64{0}) {
-        if (net_word(waiter, I64{32}) == I64{0} && net_word(waiter, I64{40}) == I64{0}) -> interest = interest | net_word(waiter, I64{24})
+        if (net_word(waiter, I64{32}) == I64{0} && net_word(waiter, I64{40}) == I64{0}) -> interest = interest.bit_or(net_word(waiter, I64{24}))
         waiter = net_word(waiter, I64{0})
     }
     interest
 }
 fn net_epoll_ctl(root: I64, node: I64, operation: I64, interest: I64) -> I64 {
     event :: wrapping(root + I64{56})
-    net_store_uint(event, I64{4}, interest | I64{1073741824} | I64{8192})
+    net_store_uint(event, I64{4}, interest.bit_or(I64{1073741824}).bit_or(I64{8192}))
     net_store_uint(wrapping(event + I64{4}), I64{8}, net_word(node, I64{16}))
     #Unsafe("the root lock owns a packed 12B epoll_event; state retains the native fd through this synchronous call") {
         return os_syscall_i64(I64{233}, net_word(root, I64{8}), operation, net_word(net_word(node, I64{24}), I64{8}), event, I64{0}, I64{0})
@@ -113,7 +113,7 @@ fn net_node_rearm(root: I64, node: I64) {
                 loop waiter != (I64{0}) {
                     // HUP/ERR satisfy every interest; the subsequent socket
                     // syscall supplies EOF or the real SO_ERROR/errno fact.
-                    ready :: (bits & net_word(waiter, I64{24})) | (if ((bits & I64{8216}) != I64{0}) -> net_word(waiter, I64{24}) else -> I64{0})
+                    ready :: (bits.bit_and(net_word(waiter, I64{24}))).bit_or((if ((bits.bit_and(I64{8216})) != I64{0}) -> net_word(waiter, I64{24}) else -> I64{0}))
                     if (ready != I64{0}) {
                         net_put(waiter, I64{32}, ready)
                         sync_park_wake(net_word(waiter, I64{16}))
@@ -220,11 +220,11 @@ fn net_waiter_remove(root: I64, waiter: I64) {
     net_put(waiter, I64{0}, net_word(node, I64{32}))
     net_put(waiter, I64{8}, node)
     net_put(waiter, I64{16}, sync_park_new())
-    net_put(waiter, I64{24}, interest & I64{5})
+    net_put(waiter, I64{24}, interest.bit_and(I64{5}))
     net_put(node, I64{32}, waiter)
     fd_put(state, I64{64}, fd_word(state, I64{64}) + I64{1})
     if fresh {
-        added :: net_epoll_ctl(root, node, I64{1}, interest & I64{5})
+        added :: net_epoll_ctl(root, node, I64{1}, interest.bit_and(I64{5}))
         if (added < I64{0}) -> net_node_fail(node, added)
     } else { net_node_rearm(root, node) }
     sync_mutex_unlock(root)

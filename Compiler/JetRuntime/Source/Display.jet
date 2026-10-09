@@ -43,7 +43,7 @@ fn display_literal(word: I64, length: I64) -> I64 {
     value := word
     i := I64{0}
     loop i < length {
-        display_put(data + i, value & I64{255})
+        display_put(data + i, value.bit_and(I64{255}))
         value >>= I64{8}
         i += I64{1}
     }
@@ -85,9 +85,9 @@ fn display_integer_digits(data: I64, end: I64, value: I64, width: I64) {
 // division: half is always nonnegative and quotient fits signed i64. This
 // needs neither exact Int nor a checked U64->I64 conversion helper.
 #Export(c) fn jet_rt_u64_to_string(value: I64) -> I64 {
-    half :: (value >> I64{1}) & I64{9223372036854775807}
+    half :: (value >> I64{1}).bit_and(I64{9223372036854775807})
     quotient :: half /% I64{5}
-    remainder :: (half % I64{5}) * I64{2} + (value & I64{1})
+    remainder :: (half % I64{5}) * I64{2} + (value.bit_and(I64{1}))
     if (quotient == I64{0}) { return display_literal(I64{48} + remainder, I64{1}) }
     length :: display_integer_length(quotient) + I64{1}
     text :: display_new(length)
@@ -121,11 +121,11 @@ fn display_integer_digits(data: I64, end: I64, value: I64, width: I64) {
         i := length
         loop i > (I64{1}) {
             i -= I64{1}
-            display_put(data + i, I64{128} | (rest & I64{63}))
+            display_put(data + i, I64{128}.bit_or((rest.bit_and(I64{63}))))
             rest >>= I64{6}
         }
         prefix :: if (length == I64{2}) -> I64{192} else if (length == I64{3}) -> I64{224} else -> I64{240}
-        display_put(data, prefix | rest)
+        display_put(data, prefix.bit_or(rest))
     }
     text
 }
@@ -135,14 +135,14 @@ fn display_integer_digits(data: I64, end: I64, value: I64, width: I64) {
 // limb pointer@24, len@32. Formatting only borrows that node and its limbs.
 fn display_int_limb(data: I64, index: I64) -> I64 {
     at :: data + index * I64{4}
-    display_byte(at) | (display_byte(at + I64{1}) << I64{8}) | (display_byte(at + I64{2}) << I64{16}) | (display_byte(at + I64{3}) << I64{24})
+    display_byte(at).bit_or((display_byte(at + I64{1}) << I64{8})).bit_or((display_byte(at + I64{2}) << I64{16})).bit_or((display_byte(at + I64{3}) << I64{24}))
 }
 
 #Export(c) fn jet_rt_int_to_string(value: I64) -> I64 {
     if ((value >> I64{62}) == I64{0} || (value >> I64{62}) == I64{-1}) {
         return jet_rt_i64_to_string(value)
     }
-    node :: value & I64{4611686018427387903}
+    node :: value.bit_and(I64{4611686018427387903})
     negative :: display_word(node + I64{16}) != I64{0}
     limbs :: display_word(node + I64{24})
     count :: display_word(node + I64{32})
@@ -233,9 +233,9 @@ fn display_float_exponential(raw: I64, digits: I64, count: I64, exponent: I64) -
 
 fn display_float(value: Float, debug: Bool) -> I64 {
     raw :: rt_f64_bits(value)
-    magnitude :: raw & I64{9223372036854775807}
+    magnitude :: raw.bit_and(I64{9223372036854775807})
     if ((magnitude >> I64{52}) == I64{2047}) {
-        if ((magnitude & I64{4503599627370495}) != I64{0}) {
+        if ((magnitude.bit_and(I64{4503599627370495})) != I64{0}) {
             return display_literal(I64{5136718}, I64{3})
         }
         if (raw < I64{0}) { return display_literal(I64{1718511917}, I64{4}) }
@@ -272,10 +272,10 @@ fn display_float(value: Float, debug: Bool) -> I64 {
 // Rust f32 Display is fixed decimal without a mandatory .0; Debug preserves
 // .0 and uses scientific notation outside [f32(1e-4), f32(1e16)).
 fn display_float32(bits: I64, debug: Bool) -> I64 {
-    magnitude :: bits & I64{2147483647}
-    raw :: (bits & I64{4294967295}) << I64{32}
+    magnitude :: bits.bit_and(I64{2147483647})
+    raw :: (bits.bit_and(I64{4294967295})) << I64{32}
     if ((magnitude >> I64{23}) == I64{255}) {
-        if ((magnitude & I64{8388607}) != I64{0}) { return display_literal(I64{5136718}, I64{3}) }
+        if ((magnitude.bit_and(I64{8388607})) != I64{0}) { return display_literal(I64{5136718}, I64{3}) }
         if (raw < I64{0}) { return display_literal(I64{1718511917}, I64{4}) }
         return display_literal(I64{6712937}, I64{3})
     }

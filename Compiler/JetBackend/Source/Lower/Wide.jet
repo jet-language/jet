@@ -24,7 +24,7 @@ fn lower_wide_signed(p: MIRProgram, ty: MIRType) -> Bool? Never! {
 // before emitting Const, avoiding any truncating host conversion or parser.
 fn lower_wide_word(value: Int) -> Int Never! {
     modulus :: 18446744073709551616
-    bits :: value & (modulus - 1)
+    bits :: value.bit_and((modulus - 1))
     if bits >= 9223372036854775808 -> bits - modulus else -> bits
 }
 

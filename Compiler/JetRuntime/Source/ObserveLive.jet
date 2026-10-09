@@ -182,7 +182,7 @@ fn observe_parse_unsigned(data: I64, length: I64, out: I64) -> Bool {
 }
 fn observe_unsigned_div(value: I64, divisor: I64) -> I64 {
     if value >= (I64{0}) -> return value /% divisor
-    low :: value & I64{9223372036854775807}
+    low :: value.bit_and(I64{9223372036854775807})
     q :: I64{9223372036854775807} /% divisor
     r :: I64{9223372036854775807} % divisor
     // Divisors here come from positive AT_CLKTCK (normally100). Avoid adding
@@ -294,7 +294,7 @@ fn observe_contains_word(text: I64, word: I64, length: I64, prefix: Bool) -> Boo
     at := I64{0}
     loop at <= limit {
         byte := I64{0}
-        loop byte < length && trap_byte(rt_text_data(text) + at + byte) == ((word >> (byte * I64{8})) & I64{255}) -> byte += I64{1}
+        loop byte < length && trap_byte(rt_text_data(text) + at + byte) == ((word >> (byte * I64{8})).bit_and(I64{255})) -> byte += I64{1}
         if byte == length -> return true
         if prefix -> return false
         at += I64{1}

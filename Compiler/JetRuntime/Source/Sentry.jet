@@ -31,7 +31,7 @@ fn sentry_save(save: I64) { coll_copy(thread_base() + I64{128}, save, I64{56}) }
     sync_store(base + I64{128}, if (enabled != I64{0} && sentry_available()) -> I64{1} else -> I64{0})
     sync_store(base + I64{136}, file)
     sync_store(base + I64{144}, file_len)
-    sync_store(base + I64{152}, line & I64{4294967295})
+    sync_store(base + I64{152}, line.bit_and(I64{4294967295}))
     sync_store(base + I64{160}, reason)
     sync_store(base + I64{168}, reason_len)
 }
@@ -338,14 +338,14 @@ fn sentry_checked_fault(fault: I64, start: I64, alignment: I64) -> I64 {
 }
 
 fn sentry_remainder(value: I64, divisor: I64) -> I64 {
-    if ((divisor & wrapping(divisor - I64{1})) == I64{0}) -> return value & wrapping(divisor - I64{1})
+    if ((divisor.bit_and(wrapping(divisor - I64{1}))) == I64{0}) -> return value.bit_and(wrapping(divisor - I64{1}))
     remainder := I64{0}
     shift := I64{63}
     loop {
         // Modular doubling without overflowing an unsigned machine word.
         gap :: wrapping(divisor - remainder)
         remainder = if !world_unsigned_before(remainder, gap) -> wrapping(remainder - gap) else -> wrapping(remainder + remainder)
-        bit :: (value >> shift) & I64{1}
+        bit :: (value >> shift).bit_and(I64{1})
         remainder = if (remainder == wrapping(divisor - I64{1}) && bit != I64{0}) -> I64{0} else -> wrapping(remainder + bit)
         if (shift == I64{0}) -> break
         shift -= I64{1}
@@ -367,7 +367,7 @@ fn sentry_hex(text: I64, value: I64) {
     shift := I64{60}
     started := false
     loop {
-        digit :: (value >> shift) & I64{15}
+        digit :: (value >> shift).bit_and(I64{15})
         if (digit != I64{0} || started || shift == I64{0}) {
             rt_text_push_scalar(text, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
             started = true
@@ -404,7 +404,7 @@ fn sentry_quote(text: I64, value: I64, json: Bool) {
                 if json {
                     shift := I64{12}
                     loop {
-                        digit :: (scalar >> shift) & I64{15}
+                        digit :: (scalar >> shift).bit_and(I64{15})
                         rt_text_push_scalar(text, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
                         if (shift == I64{0}) -> break
                         shift -= I64{4}

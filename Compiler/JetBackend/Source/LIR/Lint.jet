@@ -29,7 +29,7 @@ fn lir_lint_module(program: LIRModule) -> [LIRLintIssue] Never! {
     }
     loop (index, data) in program.data {
         if data.id.value != index -> &issues.push(LIRLintIssue{function: "", block: -1, message: "data {index} carries ID {data.id.value}"})
-        if data.align <= 0 || (data.align & (data.align - 1)) != 0 -> &issues.push(LIRLintIssue{function: "", block: -1, message: "data {index} has an invalid alignment"})
+        if data.align <= 0 || (data.align.bit_and((data.align - 1))) != 0 -> &issues.push(LIRLintIssue{function: "", block: -1, message: "data {index} has an invalid alignment"})
         loop reloc in data.relocs {
             if reloc.offset < 0 || reloc.offset % 8 != 0 || reloc.offset > data.bytes.len() - 8 -> &issues.push(LIRLintIssue{function: "", block: -1, message: "data {index} relocation {reloc.offset} is not an aligned word in bounds"})
             if reloc.target.value < 0 || reloc.target.value >= program.data.len() -> &issues.push(LIRLintIssue{function: "", block: -1, message: "data {index} relocation names missing data {reloc.target.value}"})

@@ -277,7 +277,7 @@ fn jet_cli_try_receipt(name: String, changes: [JetCLISourceChange], verdict: Jet
     bytes := name.bytes()
     counts :: [Int]{verdict.claims_rechecked, verdict.claims_reused}
     loop count in counts {
-        loop offset in 0..<8 -> &bytes.push(U8{(count >> (offset * 8)) & 255})
+        loop offset in 0..<8 -> &bytes.push(U8{(count >> (offset * 8)).bit_and(255)})
     }
     loop change in changes {
         &bytes.extend(change.path.bytes())

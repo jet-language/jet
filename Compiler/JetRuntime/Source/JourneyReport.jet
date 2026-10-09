@@ -123,7 +123,7 @@ fn journey_hop_line(out: I64, hop: I64, index: I64, width: I64, budget: I64, col
         hop :: rt_text_word(data + row * I64{8})
         fixed :: journey_fixed_columns(hop, row + I64{1}, true)
         if fixed > widest -> widest = fixed
-        total = wrapping(total + rt_text_word(hop + HOP_COUNT)) & I64{4294967295}
+        total = wrapping(total + rt_text_word(hop + HOP_COUNT)).bit_and(I64{4294967295})
         row += I64{1}
     }
     budget :: if width > widest -> width - widest else -> I64{0}

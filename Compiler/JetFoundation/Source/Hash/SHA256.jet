@@ -23,7 +23,7 @@ MIR_SHA256_H0 :: prep { [Int]{
 } }
 
 fn mir_sha256_word(bytes: View<U8>, offset: Int) -> U32 Never! {
-    (U32.from_u8(bytes[offset]) << 24) | (U32.from_u8(bytes[offset + 1]) << 16) | (U32.from_u8(bytes[offset + 2]) << 8) | U32.from_u8(bytes[offset + 3])
+    (U32.from_u8(bytes[offset]) << 24).bit_or((U32.from_u8(bytes[offset + 1]) << 16)).bit_or((U32.from_u8(bytes[offset + 2]) << 8)).bit_or(U32.from_u8(bytes[offset + 3]))
 }
 
 fn mir_sha256_compress(state: &[U32], words: &[U32], k: [U32], block: View<U8>, offset: Int) Never! {

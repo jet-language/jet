@@ -26,7 +26,7 @@ fn net_stream_drop(value: I64) {
     sync_mutex_lock(mutex)
     state :: net_word(value, I64{0})
     fd_lock(state)
-    flags :: (if (fd_word(state, I64{16}) != I64{0}) -> I64{1} else -> I64{0}) | (net_word(value, I64{16}) << I64{1}) | (net_word(value, I64{24}) << I64{2})
+    flags :: (if (fd_word(state, I64{16}) != I64{0}) -> I64{1} else -> I64{0}).bit_or((net_word(value, I64{16}) << I64{1})).bit_or((net_word(value, I64{24}) << I64{2}))
     fd_unlock(state)
     sync_mutex_unlock(mutex)
     flags
@@ -53,8 +53,8 @@ fn net_stream_drop(value: I64) {
     if (jet_scheduler_native_propagate() != I64{0}) -> return
     mutex :: wrapping(value + I64{48})
     sync_mutex_lock(mutex)
-    if ((directions & I64{1}) != I64{0}) -> net_put(value, I64{32}, duration)
-    if ((directions & I64{2}) != I64{0}) -> net_put(value, I64{40}, duration)
+    if ((directions.bit_and(I64{1})) != I64{0}) -> net_put(value, I64{32}, duration)
+    if ((directions.bit_and(I64{2})) != I64{0}) -> net_put(value, I64{40}, duration)
     sync_mutex_unlock(mutex)
 }
 #Export(c) fn jet_socket_stream_timeout_get_raw(value: I64, reading: Bool, output: I64) -> I64 {

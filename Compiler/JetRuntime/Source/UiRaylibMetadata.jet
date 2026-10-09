@@ -64,7 +64,7 @@ fn ui_raylib_regions_drop(value: I64) {
     ui_carrier_store(result + UI_RAYLIB_ATLAS_TEXTURE_PRESENT, present)
     ui_carrier_store(result + UI_RAYLIB_ATLAS_TEXTURE, if (present != I64{0}) -> ui_carrier_word(value + UI_RAYLIB_ATLAS_TEXTURE) else -> I64{0})
     ui_carrier_store(result + UI_RAYLIB_ATLAS_TEXTURE_SECOND, if (present != I64{0}) -> ui_carrier_word(value + UI_RAYLIB_ATLAS_TEXTURE_SECOND) else -> I64{0})
-    ui_carrier_store(result + UI_RAYLIB_ATLAS_TEXTURE_LAST, if (present != I64{0}) -> ui_carrier_word(value + UI_RAYLIB_ATLAS_TEXTURE_LAST) & I64{4294967295} else -> I64{0})
+    ui_carrier_store(result + UI_RAYLIB_ATLAS_TEXTURE_LAST, if (present != I64{0}) -> ui_carrier_word(value + UI_RAYLIB_ATLAS_TEXTURE_LAST).bit_and(I64{4294967295}) else -> I64{0})
     result
 }
 #Export(c) fn jet_rt_handle_drop_RaylibTextureAtlas(value: I64) {

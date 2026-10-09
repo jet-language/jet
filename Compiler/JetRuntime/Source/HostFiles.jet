@@ -21,7 +21,7 @@ fn fd_lock(state: I64) { sync_mutex_lock(state) }
 fn fd_unlock(state: I64) { sync_mutex_unlock(state) }
 
 fn host_error_out(result: I64, stage: I64, error: I64) {
-    fd_put(error, I64{0}, if (result < I64{0}) -> (stage << I64{32}) | I64{1} else -> I64{0})
+    fd_put(error, I64{0}, if (result < I64{0}) -> (stage << I64{32}).bit_or(I64{1}) else -> I64{0})
     fd_put(error, I64{8}, if (result < I64{0}) -> wrapping(-result) else -> I64{0})
     fd_put(error, I64{16}, I64{0})
     fd_put(error, I64{24}, I64{0})
@@ -35,13 +35,13 @@ fn fd_error(result: I64, error: I64) -> I64 {
 // Portable OpenOptions bits shared with non-Linux mechanical seeds. Source
 // owns option validation (including truncate-without-write), never the leaf.
 fn fd_open_flags(portable: I64) -> I64 {
-    flags := if ((portable & I64{3}) == I64{3}) -> I64{2} else if ((portable & I64{2}) != I64{0}) -> I64{1} else -> I64{0}
-    if ((portable & I64{4}) != I64{0}) { flags = flags | I64{64} }
-    if ((portable & I64{8}) != I64{0}) { flags = flags | I64{512} }
-    if ((portable & I64{16}) != I64{0}) { flags = flags | I64{1024} }
-    if ((portable & I64{32}) != I64{0}) { flags = flags | I64{128} }
-    if ((portable & I64{64}) != I64{0}) { flags = flags | I64{65536} }
-    if ((portable & I64{128}) != I64{0}) { flags = flags | I64{131072} }
+    flags := if ((portable.bit_and(I64{3})) == I64{3}) -> I64{2} else if ((portable.bit_and(I64{2})) != I64{0}) -> I64{1} else -> I64{0}
+    if ((portable.bit_and(I64{4})) != I64{0}) { flags = flags.bit_or(I64{64}) }
+    if ((portable.bit_and(I64{8})) != I64{0}) { flags = flags.bit_or(I64{512}) }
+    if ((portable.bit_and(I64{16})) != I64{0}) { flags = flags.bit_or(I64{1024}) }
+    if ((portable.bit_and(I64{32})) != I64{0}) { flags = flags.bit_or(I64{128}) }
+    if ((portable.bit_and(I64{64})) != I64{0}) { flags = flags.bit_or(I64{65536}) }
+    if ((portable.bit_and(I64{128})) != I64{0}) { flags = flags.bit_or(I64{131072}) }
     flags
 }
 
@@ -82,10 +82,10 @@ fn fd_new(number: I64, path: I64, writer: Bool) -> I64 {
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     name :: fd_c_path(path)
     bits :: fd_open_flags(native_flags)
-    result :: host_call(I64{2}, name, bits | I64{524288}, native_mode & I64{4294967295})
+    result :: host_call(I64{2}, name, bits.bit_or(I64{524288}), native_mode.bit_and(I64{4294967295}))
     fd_c_path_drop(name, path)
     _ := fd_error(result, errno)
-    if (result < I64{0}) -> I64{0} else -> fd_new(result, path, (bits & I64{3}) != I64{0})
+    if (result < I64{0}) -> I64{0} else -> fd_new(result, path, (bits.bit_and(I64{3})) != I64{0})
 }
 
 // Takes ownership of a native descriptor supplied by another runtime leaf.
@@ -272,7 +272,7 @@ fn fd_operation(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
 #Export(c) fn jet_fd_chmod_raw(state: I64, mode: I64, errno: I64) {
     native :: host_native_int(mode)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
-    fd_operation(state, I64{91}, native & I64{4294967295}, I64{0}, errno)
+    fd_operation(state, I64{91}, native.bit_and(I64{4294967295}), I64{0}, errno)
 }
 
 #Export(c) fn jet_fd_lock_raw(state: I64, operation: I64, errno: I64) {
@@ -360,7 +360,7 @@ fn fd_operation(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
     native :: host_native_int(mode)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
     name :: fd_c_path(path)
-    result :: host_call(I64{83}, name, native & I64{4294967295}, I64{0})
+    result :: host_call(I64{83}, name, native.bit_and(I64{4294967295}), I64{0})
     fd_c_path_drop(name, path)
     _ := fd_error(result, errno)
 }
@@ -416,13 +416,13 @@ fn fd_zero(result: I64, zero: I64) {
     result := I64{-9}
     if (fd_word(directory, I64{16}) == I64{0}) {
         #Unsafe("the held directory and terminated source-approved single name stay live through openat") {
-            result = os_syscall_i64(I64{257}, fd_word(directory, I64{8}), name, bits | I64{524288}, native_mode & I64{4294967295}, I64{0}, I64{0})
+            result = os_syscall_i64(I64{257}, fd_word(directory, I64{8}), name, bits.bit_or(I64{524288}), native_mode.bit_and(I64{4294967295}), I64{0}, I64{0})
         }
     }
     fd_unlock(directory)
     fd_c_path_drop(name, path)
     _ := fd_error(result, errno)
-    if (result < I64{0}) -> I64{0} else -> fd_new(result, path, (bits & I64{3}) != I64{0})
+    if (result < I64{0}) -> I64{0} else -> fd_new(result, path, (bits.bit_and(I64{3})) != I64{0})
 }
 
 // FileHandles.rs:711-758: a held-directory entry is statted without following
@@ -491,8 +491,8 @@ fn fd_dup_number(state: I64) -> I64 {
 // BirthTime24: available word, signed seconds, nanoseconds. Linux statx's
 // BTIME support mask is a fact, not a source-level Unsupported error.
 fn fd_created_finish(result: I64, output: I64, errno: I64) {
-    fd_put(output, I64{0}, if (result == I64{0} && (fd_word(output, I64{0}) & I64{2048}) != I64{0}) -> I64{1} else -> I64{0})
-    fd_put(output, I64{16}, fd_word(output, I64{16}) & I64{4294967295})
+    fd_put(output, I64{0}, if (result == I64{0} && (fd_word(output, I64{0}).bit_and(I64{2048})) != I64{0}) -> I64{1} else -> I64{0})
+    fd_put(output, I64{16}, fd_word(output, I64{16}).bit_and(I64{4294967295}))
     _ := fd_error(result, errno)
 }
 
@@ -578,7 +578,7 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
     native :: host_native_int(mode)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
     name :: fd_c_path(path)
-    fd_operation(directory, I64{258}, name, native & I64{4294967295}, errno)
+    fd_operation(directory, I64{258}, name, native.bit_and(I64{4294967295}), errno)
     fd_c_path_drop(name, path)
 }
 
@@ -622,7 +622,7 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
     new_name :: fd_c_path(new)
     result := I64{0}
     #Unsafe("held directory duplicates and terminated names prevent any descriptor-close/reuse race during renameat2") {
-        result = os_syscall_i64(I64{316}, a, old_name, b, new_name, native_flags & I64{4294967295}, I64{0})
+        result = os_syscall_i64(I64{316}, a, old_name, b, new_name, native_flags.bit_and(I64{4294967295}), I64{0})
     }
     fd_c_path_drop(old_name, old)
     fd_c_path_drop(new_name, new)
@@ -637,7 +637,7 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
     if (jet_scheduler_native_propagate() != I64{0}) -> return
     native_cols :: host_native_int(cols)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
-    size :: (native_rows & I64{65535}) | ((native_cols & I64{65535}) << I64{16})
+    size :: (native_rows.bit_and(I64{65535})).bit_or(((native_cols.bit_and(I64{65535})) << I64{16}))
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {

@@ -21,7 +21,7 @@
     ring
 }
 fn realtime_ring_slot(ring: I64, sequence: I64) -> I64 {
-    sync_load(ring + (if ((sequence & I64{1}) == I64{0}) -> RT_RING_FIRST else -> RT_RING_SECOND))
+    sync_load(ring + (if ((sequence.bit_and(I64{1})) == I64{0}) -> RT_RING_FIRST else -> RT_RING_SECOND))
 }
 fn realtime_ring_publish(ring: I64, data: I64, length: I64, zeroed: Bool) -> Bool {
     sequence :: sync_load(ring + RT_RING_WRITE)

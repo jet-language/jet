@@ -37,7 +37,7 @@ fn cli_schema_read_num(bytes: View<U8>, at: Int, width: Int, little: Bool, maxim
     number := U64{0}
     loop index in 0..<width {
         shift :: if little -> index * 8 else -> (width - index - 1) * 8
-        number = number | (U64.from_u8(value[index]) << shift)
+        number = number.bit_or((U64.from_u8(value[index]) << shift))
     }
     Ok(number)
 }
@@ -237,8 +237,8 @@ fn cli_schema_wasm_leb(bytes: View<U8>, at: &Int, maximum: U64) -> Int MetadataE
         at += 1
         if shift >= bits -> return Err(MetadataError.Malformed{why: "Wasm LEB overflow"})
         // Rust's usize shift truncates high bits on a 32-bit reader.
-        value = (value | (U64.from_u8(byte & U8{127}) << shift)) & maximum
-        if byte & (U8{128}) == (U8{0}) -> return Ok(Int.from_u64(value))
+        value = (value.bit_or((U64.from_u8(byte.bit_and(U8{127})) << shift))).bit_and(maximum)
+        if byte.bit_and((U8{128})) == (U8{0}) -> return Ok(Int.from_u64(value))
         shift += 7
     }
     Err(MetadataError.Malformed{why: "Wasm LEB too long"})

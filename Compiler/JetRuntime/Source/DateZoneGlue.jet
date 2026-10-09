@@ -1,6 +1,6 @@
 // DateZoneABI only; Time.rs723-726/1159-1169/1475-1477 owns field order.
-fn datetime_leap(value: I64) -> Bool { (time_glue_word(value + DATETIME_LEAP) & I64{255}) != I64{0} }
-fn datetime_nanos(value: I64) -> I64 { time_glue_word(value + DATETIME_NANOS) & I64{4294967295} }
+fn datetime_leap(value: I64) -> Bool { (time_glue_word(value + DATETIME_LEAP).bit_and(I64{255})) != I64{0} }
+fn datetime_nanos(value: I64) -> I64 { time_glue_word(value + DATETIME_NANOS).bit_and(I64{4294967295}) }
 #Export(c) fn jet_rt_handle_clone_JetDateTime(value: I64) -> I64 {
     result :: time_glue_clone(value, DATETIME_BYTES)
     time_glue_store(result + DATETIME_NANOS, datetime_nanos(value))
@@ -82,7 +82,7 @@ fn zone_rows_clone(value: I64, infos: Bool) -> I64 {
         at := I64{0}
         loop at < length {
             slot :: target + at * ZONE_ROW_BYTES + ZONE_ROW_INDEX_OR_DST
-            time_glue_store(slot, if ((time_glue_word(slot) & I64{255}) != I64{0}) -> I64{1} else -> I64{0})
+            time_glue_store(slot, if ((time_glue_word(slot).bit_and(I64{255})) != I64{0}) -> I64{1} else -> I64{0})
             at += I64{1}
         }
     }
@@ -107,7 +107,7 @@ fn zone_rows_equal(left: I64, right: I64, infos: Bool) -> Bool {
         x :: time_glue_word(first + ZONE_ROW_INDEX_OR_DST)
         y :: time_glue_word(second + ZONE_ROW_INDEX_OR_DST)
         if infos {
-            if ((x & I64{255}) != I64{0}) != ((y & I64{255}) != I64{0}) -> return false
+            if ((x.bit_and(I64{255})) != I64{0}) != ((y.bit_and(I64{255})) != I64{0}) -> return false
         } else { if (x != y) -> return false }
         at += I64{1}
     }

@@ -19,7 +19,7 @@ fn host_u8_put(data: I64, index: I64, byte: I64) {
 }
 
 fn coll_payload(meta: I64) -> I64 {
-    kind :: trap_word(meta + I64{48}) & I64{4294967295}
+    kind :: trap_word(meta + I64{48}).bit_and(I64{4294967295})
     if (kind == I64{11}) { return I64{0} }
     if (kind == I64{9}) { return I64{1} }
     trap_word(meta)
@@ -210,7 +210,7 @@ fn coll_result_size(ok: I64, error: I64) -> I64 {
     b :: coll_payload(error)
     size := if a > b -> a else -> b
     if (size < I64{8}) { size = I64{8} }
-    I64{8} + ((size + I64{7}) & I64{-8})
+    I64{8} + ((size + I64{7}).bit_and(I64{-8}))
 }
 
 // Bits owns a sorted, unique sequence of nonnegative native I64 indices.
@@ -738,7 +738,7 @@ fn coll_ordered_map_render(map: I64) -> I64 {
 
 fn coll_i64_add(left: I64, right: I64) -> I64 {
     result :: wrapping(left + right)
-    if (((left ^ result) & (right ^ result)) < I64{0}) {
+    if (((left.bit_xor(result)).bit_and((right.bit_xor(result)))) < I64{0}) {
         jet_rt_panic_overflow()
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     }
@@ -747,7 +747,7 @@ fn coll_i64_add(left: I64, right: I64) -> I64 {
 
 fn coll_i64_sub(left: I64, right: I64) -> I64 {
     result :: wrapping(left - right)
-    if (((left ^ right) & (left ^ result)) < I64{0}) {
+    if (((left.bit_xor(right)).bit_and((left.bit_xor(result)))) < I64{0}) {
         jet_rt_panic_overflow()
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     }
@@ -922,7 +922,7 @@ fn coll_counter_get(counter: I64, key: I64) -> I64 {
         at := I64{0}
         loop at < length {
             mask :: I64{1} << (at % I64{8})
-            if ((trap_byte(used + at / I64{8}) & mask) == I64{0}) {
+            if ((trap_byte(used + at / I64{8}).bit_and(mask)) == I64{0}) {
                 if (best == I64{-1} || trap_word(counts + at * I64{8}) > trap_word(counts + best * I64{8})) {
                     best = at
                 }
@@ -930,7 +930,7 @@ fn coll_counter_get(counter: I64, key: I64) -> I64 {
             at += I64{1}
         }
         address :: used + best / I64{8}
-        trap_put(address, trap_byte(address) | (I64{1} << (best % I64{8})))
+        trap_put(address, trap_byte(address).bit_or((I64{1} << (best % I64{8}))))
         coll_pair_append(result, jet_rt_string_clone(trap_word(keys + best * I64{8})), trap_word(counts + best * I64{8}))
         pick += I64{1}
     }
@@ -1251,7 +1251,7 @@ fn coll_loop_range_stop(exhausted: Bool) {
     current :: trap_word(cursor)
     step :: trap_word(cursor + I64{16})
     advanced :: wrapping(current + step)
-    if (((current ^ advanced) & (step ^ advanced)) < I64{0}) {
+    if (((current.bit_xor(advanced)).bit_and((step.bit_xor(advanced)))) < I64{0}) {
         trap_store(cursor + I64{32}, I64{1})
         return
     }

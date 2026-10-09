@@ -16,7 +16,7 @@
     // Select sign from the original imaginary bits, including -0 and -NaN.
     imaginary :: geometry_word(value + MATH_COMPLEX_IMAGINARY)
     real_text :: display_float(rt_f64_from_bits(geometry_word(value + MATH_COMPLEX_REAL)), false)
-    imaginary_text :: display_float(rt_f64_from_bits(imaginary & I64{9223372036854775807}), false)
+    imaginary_text :: display_float(rt_f64_from_bits(imaginary.bit_and(I64{9223372036854775807})), false)
     target :: jet_rt_string_builder_new()
     rt_text_append(target, display_word(real_text), display_word(real_text + I64{8}))
     rt_text_push_word(target, if (imaginary < I64{0}) -> I64{2108704} else -> I64{2108192}, I64{3}) // " - " / " + "

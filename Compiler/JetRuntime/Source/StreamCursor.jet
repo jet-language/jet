@@ -128,7 +128,7 @@ fn stream_read(handle: I64, width: I64, little: Bool, signed: Bool, floating: Bo
     at := I64{0}
     loop at < need {
         byte :: rt_text_byte(data + at)
-        if little { value |= byte << (at * I64{8}) } else { value = (value << I64{8}) | byte }
+        if little { value = value.bit_or(byte << (at * I64{8})) } else { value = (value << I64{8}).bit_or(byte) }
         at += I64{1}
     }
     if (signed && width < I64{64}) { value = (value << (I64{64} - width)) >> (I64{64} - width) }

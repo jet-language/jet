@@ -47,7 +47,7 @@ fn vault_crypto_trim_end(data: I64, start: I64, length: I64) -> I64 {
     loop end > start {
         at := end - I64{1}
         loop {
-            if (at <= start || (rt_text_byte(data + at) & I64{192}) != I64{128}) -> break
+            if (at <= start || (rt_text_byte(data + at).bit_and(I64{192})) != I64{128}) -> break
             at -= I64{1}
         }
         if !unicode_is_white_space(rt_text_decode(data + at)) -> break

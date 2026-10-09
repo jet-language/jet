@@ -177,7 +177,7 @@ fn vault_fixture_check(condition: Bool) {
     vault_error_drop(wrong)
     data :: rt_text_word(ciphertext + DATA_SEQUENCE_DATA)
     last :: rt_text_word(ciphertext + DATA_SEQUENCE_LENGTH) - I64{1}
-    rt_text_put(data + last, rt_text_byte(data + last) ~| I64{1})
+    rt_text_put(data + last, rt_text_byte(data + last).bit_xor(I64{1}))
     corrupt :: vault_crypto_decrypt(identity, ciphertext, slots + I64{24})
     vault_fixture_check(corrupt != I64{0} && vault_error_tag(corrupt) == I64{4})
     vault_fixture_check(rt_text_word(slots + I64{24}) == I64{-471})
@@ -271,7 +271,7 @@ fn vault_fixture_check(condition: Bool) {
     clone_secret :: vault_secret_bytes(rt_text_word(clone + VAULT_RECORD_SECRET))
     clone_data :: rt_text_word(clone_secret + DATA_SEQUENCE_DATA)
     first :: host_u8_get(clone_data, I64{0})
-    host_u8_put(clone_data, I64{0}, first ~| I64{1})
+    host_u8_put(clone_data, I64{0}, first.bit_xor(I64{1}))
     vault_fixture_check(!vault_record_equal(record, clone))
     host_u8_put(clone_data, I64{0}, first)
     vault_fixture_check(vault_record_equal(record, clone))
@@ -311,7 +311,7 @@ fn vault_fixture_check(condition: Bool) {
     vault_fixture_check(rt_text_equal_bytes(record + VAULT_RECORD_HASH, expected, I64{32}))
     vault_fixture_check(vault_record_validate(record, false, scratch) == I64{0})
     first :: rt_text_byte(record + VAULT_RECORD_HASH)
-    rt_text_put(record + VAULT_RECORD_HASH, first ~| I64{1})
+    rt_text_put(record + VAULT_RECORD_HASH, first.bit_xor(I64{1}))
     vault_fixture_check(vault_record_validate(record, false, scratch) == I64{8})
     // Both failures retain their seed priority and preserve the scratch fence.
     at = I64{8256}
@@ -908,7 +908,7 @@ fn jet_rt_vault_reference_fixture(original: I64, display: I64, debug: I64) {
     vault_fixture_check(wrong_type != I64{0} && vault_error_tag(wrong_type) == I64{2})
     vault_fixture_check(rt_text_word(slot) == I64{91})
     vault_error_drop(wrong_type)
-    rt_text_put(clone + VAULT_REF_HASH, rt_text_byte(clone + VAULT_REF_HASH) ~| I64{1})
+    rt_text_put(clone + VAULT_REF_HASH, rt_text_byte(clone + VAULT_REF_HASH).bit_xor(I64{1}))
     vault_fixture_check(!vault_ref_equal(reference, clone))
     missing :: vault_find(store, clone, I64{1}, slot)
     vault_fixture_check(missing != I64{0} && vault_error_tag(missing) == I64{1})

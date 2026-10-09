@@ -212,7 +212,7 @@ fn scan_test_f32(input: I64, slots: I64, word: I64) {
         at := I64{0}
         loop at < (I64{4}) {
             shift :: (if (order == I64{0}) -> at else -> I64{3} - at) * I64{8}
-            rt_text_put(input + at, (word >> shift) & I64{255})
+            rt_text_put(input + at, (word >> shift).bit_and(I64{255}))
             at += I64{1}
         }
         reader :: jet_reader_over(input, I64{4}, I64{1})

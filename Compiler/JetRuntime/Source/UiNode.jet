@@ -42,8 +42,8 @@ fn ui_node_children_eq(left: I64, right: I64) -> Bool {
 fn ui_node_color_payload(kind: I64, word: I64) -> I64 {
     if {
         (kind == I64{0}) -> I64{0}
-        (kind == I64{3}) -> word & I64{16777215}
-        else -> word & I64{255}
+        (kind == I64{3}) -> word.bit_and(I64{16777215})
+        else -> word.bit_and(I64{255})
     }
 }
 fn ui_node_color_clone(source: I64, target: I64) {
@@ -58,11 +58,11 @@ fn ui_node_color_eq(left: I64, right: I64) -> Bool {
     ui_node_color_payload(kind, ui_carrier_word(left + I64{8})) == ui_node_color_payload(kind, ui_carrier_word(right + I64{8}))
 }
 fn ui_node_option_clone(source: I64, target: I64, mask: I64, slot: I64, offset: I64) {
-    ui_carrier_store(target + offset, if ((mask & slot) != I64{0}) -> I64{0} else -> ui_carrier_word(source + offset))
+    ui_carrier_store(target + offset, if ((mask.bit_and(slot)) != I64{0}) -> I64{0} else -> ui_carrier_word(source + offset))
 }
 fn ui_node_option_eq(left: I64, right: I64, a: I64, b: I64, slot: I64, offset: I64) -> Bool {
-    if ((a & slot) != (b & slot)) -> return false
-    if ((a & slot) != I64{0}) -> return true
+    if ((a.bit_and(slot)) != (b.bit_and(slot))) -> return false
+    if ((a.bit_and(slot)) != I64{0}) -> return true
     ui_carrier_word(left + offset) == ui_carrier_word(right + offset)
 }
 #Export(c) fn jet_rt_handle_clone_JetUiNode(value: I64) -> I64 {
@@ -73,7 +73,7 @@ fn ui_node_option_eq(left: I64, right: I64, a: I64, b: I64, slot: I64, offset: I
     ui_carrier_store(result + UI_NODE_ROLE, ui_carrier_word(value + UI_NODE_ROLE))
     accessibility :: ui_carrier_word(value + UI_NODE_ACCESSIBILITY)
     ui_carrier_store(result + UI_NODE_ACCESSIBILITY, if (accessibility == I64{0}) -> I64{0} else -> jet_rt_handle_clone_JetUiAccessibility(accessibility))
-    mask :: ui_carrier_word(value + UI_NODE_ABSENT_MASK) & UI_NODE_OPTION_MASK
+    mask :: ui_carrier_word(value + UI_NODE_ABSENT_MASK).bit_and(UI_NODE_OPTION_MASK)
     ui_carrier_store(result + UI_NODE_ABSENT_MASK, mask)
     ui_node_option_clone(value, result, mask, UI_NODE_SLOT_IME, UI_NODE_IME)
     ui_carrier_store(result + UI_NODE_COLOR, ui_optional_text_clone(ui_carrier_word(value + UI_NODE_COLOR)))
@@ -83,7 +83,7 @@ fn ui_node_option_eq(left: I64, right: I64, a: I64, b: I64, slot: I64, offset: I
         (style != I64{0}) -> {
             ui_node_color_clone(value + UI_NODE_FOREGROUND_KIND, result + UI_NODE_FOREGROUND_KIND)
             ui_node_color_clone(value + UI_NODE_BACKGROUND_KIND, result + UI_NODE_BACKGROUND_KIND)
-            ui_carrier_store(result + UI_NODE_STYLE_FLAGS, ui_carrier_word(value + UI_NODE_STYLE_FLAGS) & I64{7})
+            ui_carrier_store(result + UI_NODE_STYLE_FLAGS, ui_carrier_word(value + UI_NODE_STYLE_FLAGS).bit_and(I64{7}))
         }
         else -> {
             offset := UI_NODE_FOREGROUND_KIND
@@ -139,7 +139,7 @@ fn ui_node_option_eq(left: I64, right: I64, a: I64, b: I64, slot: I64, offset: I
     if (style != I64{0}) {
         if !ui_node_color_eq(left + UI_NODE_FOREGROUND_KIND, right + UI_NODE_FOREGROUND_KIND) -> return false
         if !ui_node_color_eq(left + UI_NODE_BACKGROUND_KIND, right + UI_NODE_BACKGROUND_KIND) -> return false
-        if ((ui_carrier_word(left + UI_NODE_STYLE_FLAGS) & I64{7}) != (ui_carrier_word(right + UI_NODE_STYLE_FLAGS) & I64{7})) -> return false
+        if ((ui_carrier_word(left + UI_NODE_STYLE_FLAGS).bit_and(I64{7})) != (ui_carrier_word(right + UI_NODE_STYLE_FLAGS).bit_and(I64{7}))) -> return false
     }
     if (ui_carrier_word(left + UI_NODE_KIND) != ui_carrier_word(right + UI_NODE_KIND)) -> return false
     if !ui_node_children_eq(ui_carrier_word(left + UI_NODE_CHILDREN), ui_carrier_word(right + UI_NODE_CHILDREN)) -> return false

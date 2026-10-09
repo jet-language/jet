@@ -7,7 +7,7 @@ fn cli_metadata_copy(out: &[U8], at: Int, bytes: [U8]) Never! {
 fn cli_metadata_number(out: &[U8], at: Int, width: Int, value: U64, little: Bool) Never! {
     loop index in 0..<width {
         shift :: if little -> index * 8 else -> (width - index - 1) * 8
-        out[at + index] = U8{(value >> shift) & U64{255}}
+        out[at + index] = U8{(value >> shift).bit_and(U64{255})}
     }
 }
 fn cli_metadata_elf(record: [U8], wide: Bool, little: Bool) -> [U8] Never! {
@@ -96,9 +96,9 @@ fn cli_metadata_fat(first: [U8], second: [U8], wide: Bool, little: Bool) -> [U8]
 fn cli_metadata_leb(out: &[U8], value: Int) Never! {
     rest := value
     loop {
-        byte := U8{rest & 127}
+        byte := U8{rest.bit_and(127)}
         rest >>= 7
-        if rest != 0 -> byte |= U8{128}
+        if rest != 0 -> byte = byte.bit_or(U8{128})
         &out.push(byte)
         if rest == 0 -> break
     }
@@ -160,7 +160,7 @@ fn run() {
     unsupported[8] = U8{6}
     cli_metadata_refuse(cli_metadata_wasm(unsupported, 1), MetadataError.UnsupportedVersion{version: U16{6}}, max)
     corrupt := record.copy()
-    corrupt[corrupt.len() - 1] = corrupt[corrupt.len() - 1] ~| U8{1}
+    corrupt[corrupt.len() - 1] = corrupt[corrupt.len() - 1].bit_xor(U8{1})
     cli_metadata_refuse(cli_metadata_wasm(corrupt, 1), MetadataError.Malformed{why: "digest mismatch"}, max)
     disagreement :: cli_metadata_fat(cli_metadata_mach(record, true), cli_metadata_mach(corrupt, true), false, false)
     cli_metadata_refuse(disagreement, MetadataError.Malformed{why: "universal Mach-O slices disagree"}, max)

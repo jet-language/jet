@@ -31,7 +31,7 @@ fn evidence_get_number(cursor: &EvidenceCursor, width: Int) -> U64 EvidenceCodec
     if end > cursor.bytes.len() -> return Err(evidence_codec_error("truncated evidence report"))
     value := U64{0}
     loop _ in 0..<width {
-        value = (value << 8) | U64.from_u8(cursor.bytes[cursor.at])
+        value = (value << 8).bit_or(U64.from_u8(cursor.bytes[cursor.at]))
         cursor.at += 1
     }
     Ok(value)
@@ -153,9 +153,9 @@ fn evidence_decode_record(cursor: &EvidenceCursor) -> EvidenceDecodedRecord Evid
     kind :: evidence_kind_from_code(kind_code) ?? return Err(evidence_codec_error("unknown evidence kind {kind_code}"))
     producer :: evidence_producer_from_code(producer_code) ?? return Err(evidence_codec_error("unknown evidence producer {producer_code}"))
     facet :: evidence_facet_from_code(facet_code) ?? return Err(evidence_codec_error("unknown evidence facet {facet_code}"))
-    outcome_code :: encoded_outcome & 127
+    outcome_code :: encoded_outcome.bit_and(127)
     outcome :: evidence_outcome_from_code(outcome_code) ?? return Err(evidence_codec_error("unknown evidence outcome {outcome_code}"))
-    expectation :: if (encoded_outcome & 128) != 0 -> EvidenceExpectation.ExpectedFailure else -> EvidenceExpectation.Ordinary
+    expectation :: if (encoded_outcome.bit_and(128)) != 0 -> EvidenceExpectation.ExpectedFailure else -> EvidenceExpectation.Ordinary
     if evidence_expectation_validate(expectation, outcome) == {
         .Err(error) -> return Err(evidence_codec_error(evidence_expectation_error_text(error)))
         .Ok(_) -> {}

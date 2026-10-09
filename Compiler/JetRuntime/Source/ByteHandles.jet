@@ -25,9 +25,9 @@ fn byte_buffer_render(buffer: I64) -> I64 {
         if (byte < I64{10}) {
             rt_text_push_word(result, I64{48} + byte, I64{1})
         } else if (byte < I64{100}) {
-            rt_text_push_word(result, (I64{48} + byte / I64{10}) | ((I64{48} + byte % I64{10}) << I64{8}), I64{2})
+            rt_text_push_word(result, (I64{48} + byte / I64{10}).bit_or(((I64{48} + byte % I64{10}) << I64{8})), I64{2})
         } else {
-            rt_text_push_word(result, (I64{48} + byte / I64{100}) | ((I64{48} + byte / I64{10} % I64{10}) << I64{8}) | ((I64{48} + byte % I64{10}) << I64{16}), I64{3})
+            rt_text_push_word(result, (I64{48} + byte / I64{100}).bit_or(((I64{48} + byte / I64{10} % I64{10}) << I64{8})).bit_or(((I64{48} + byte % I64{10}) << I64{16})), I64{3})
         }
         at += I64{1}
     }

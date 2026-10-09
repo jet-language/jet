@@ -20,16 +20,16 @@ fn int_store(address: I64, value: I64) {
 
 fn int_u32(address: I64) -> I64 {
     #Unsafe("borrow four initialized bytes in a live limb buffer; no adjacent limb is read") {
-        return os_load_u8(address) | (os_load_u8(address + I64{1}) << I64{8}) | (os_load_u8(address + I64{2}) << I64{16}) | (os_load_u8(address + I64{3}) << I64{24})
+        return os_load_u8(address).bit_or((os_load_u8(address + I64{1}) << I64{8})).bit_or((os_load_u8(address + I64{2}) << I64{16})).bit_or((os_load_u8(address + I64{3}) << I64{24}))
     }
 }
 
 fn int_put_u32(address: I64, value: I64) {
     #Unsafe("write four bytes in a uniquely owned limb buffer; value is an unsigned 32-bit limb") {
-        os_store_u8(address, value & I64{255})
-        os_store_u8(address + I64{1}, (value >> I64{8}) & I64{255})
-        os_store_u8(address + I64{2}, (value >> I64{16}) & I64{255})
-        os_store_u8(address + I64{3}, (value >> I64{24}) & I64{255})
+        os_store_u8(address, value.bit_and(I64{255}))
+        os_store_u8(address + I64{1}, (value >> I64{8}).bit_and(I64{255}))
+        os_store_u8(address + I64{2}, (value >> I64{16}).bit_and(I64{255}))
+        os_store_u8(address + I64{3}, (value >> I64{24}).bit_and(I64{255}))
     }
 }
 
@@ -37,9 +37,9 @@ fn int_inline(value: I64) -> Bool Never! {
     value >= I64{-4611686018427387904} && value <= I64{4611686018427387903}
 }
 
-fn int_node(value: I64) -> I64 Never! { value & I64{4611686018427387903} }
+fn int_node(value: I64) -> I64 Never! { value.bit_and(I64{4611686018427387903}) }
 
-fn int_tag(node: I64) -> I64 Never! { node | I64{4611686018427387904} }
+fn int_tag(node: I64) -> I64 Never! { node.bit_or(I64{4611686018427387904}) }
 
 fn int_negative(value: I64) -> Bool {
     if int_inline(value) -> return value < I64{0}
@@ -484,7 +484,7 @@ fn int_division(left: I64, right: I64, file: I64, file_len: I64, line: I64, kind
         ln :: left < I64{0}
         rn :: right < I64{0}
         adjust :: initial_r != I64{0} && (((kind == I64{2} || kind == I64{3}) && ln != rn) || ((kind == I64{4} || kind == I64{5}) && ln))
-        if ((kind & I64{1}) == I64{0}) {
+        if ((kind.bit_and(I64{1})) == I64{0}) {
             delta :: if (!adjust) -> I64{0} else if (kind == I64{4} && rn) -> I64{1} else -> I64{-1}
             return jet_int_owned_from_i64(initial_q + delta)
         }
@@ -493,7 +493,7 @@ fn int_division(left: I64, right: I64, file: I64, file_len: I64, line: I64, kind
     }
     ll :: int_len(left)
     rl :: int_len(right)
-    want_quotient :: (kind & I64{1}) == I64{0}
+    want_quotient :: (kind.bit_and(I64{1})) == I64{0}
     quotient :: if want_quotient -> int_new(ll) else -> I64{0}
     rest :: int_new(rl + I64{1})
     product :: int_new(rl + I64{1})
@@ -660,7 +660,7 @@ fn int_shift_count(count: I64, file: I64, len: I64, line: I64) -> I64 {
     if (exponent == I64{0}) { return I64{1} }
     if (value == I64{0} || value == I64{1}) { return value }
     if (value == I64{-1}) {
-        return if ((int_limb(exponent, I64{0}) & I64{1}) == I64{0}) -> I64{1} else -> I64{-1}
+        return if ((int_limb(exponent, I64{0}).bit_and(I64{1})) == I64{0}) -> I64{1} else -> I64{-1}
     }
     // Exponents are arbitrary precision too; dividing their private copy by
     // two avoids imposing an I64/u32 restriction absent in the Rust kernel.
@@ -672,7 +672,7 @@ fn int_shift_count(count: I64, file: I64, len: I64, line: I64) -> I64 {
     loop {
         active :: if small -> (remaining != I64{0}) else -> !(int_load(power + I64{32}) == I64{1} && int_get(power, I64{0}) == I64{0})
         if !active -> break
-        bit :: if small -> remaining & I64{1} else -> int_div_small(power, I64{2})
+        bit :: if small -> remaining.bit_and(I64{1}) else -> int_div_small(power, I64{2})
         if small -> remaining >>= I64{1}
         if (bit != I64{0}) {
             next_result :: jet_int_mul(result, base)
@@ -702,9 +702,9 @@ fn int_binary(value: I64, width: I64) -> I64 {
     loop at < width {
         word := int_div_small(workspace, I64{4294967296})
         if negative {
-            word = (I64{4294967295} ~| word) + carry
+            word = (I64{4294967295}.bit_xor(word)) + carry
             carry = word >> I64{32}
-            word &= I64{4294967295}
+            word = word.bit_and(I64{4294967295})
         }
         int_put_u32(buffer + at * I64{4}, word)
         at += I64{1}
@@ -715,9 +715,9 @@ fn int_binary(value: I64, width: I64) -> I64 {
 
 fn int_bitwise(left: I64, right: I64, kind: I64) -> I64 {
     if int_inline(left) && int_inline(right) {
-        if (kind == I64{0}) { return left & right }
-        if (kind == I64{1}) { return left | right }
-        return left ~| right
+        if (kind == I64{0}) { return left.bit_and(right) }
+        if (kind == I64{1}) { return left.bit_or(right) }
+        return left.bit_xor(right)
     }
     ll :: int_len(left)
     rl :: int_len(right)
@@ -729,19 +729,19 @@ fn int_bitwise(left: I64, right: I64, kind: I64) -> I64 {
     loop at < width {
         av :: int_u32(a + at * I64{4})
         bv :: int_u32(b + at * I64{4})
-        word :: if (kind == I64{0}) -> av & bv else if (kind == I64{1}) -> av | bv else -> av ~| bv
+        word :: if (kind == I64{0}) -> av.bit_and(bv) else if (kind == I64{1}) -> av.bit_or(bv) else -> av.bit_xor(bv)
         int_put_u32(a + at * I64{4}, word)
         at += I64{1}
     }
     jet_rt_free(b, width * I64{4}, I64{4})
-    negative :: (int_u32(a + (width - I64{1}) * I64{4}) & I64{2147483648}) != I64{0}
+    negative :: (int_u32(a + (width - I64{1}) * I64{4}).bit_and(I64{2147483648})) != I64{0}
     if negative {
         carry := I64{1}
         at = I64{0}
         loop at < width {
-            word :: (I64{4294967295} ~| int_u32(a + at * I64{4})) + carry
+            word :: (I64{4294967295}.bit_xor(int_u32(a + at * I64{4}))) + carry
             carry = word >> I64{32}
-            int_put_u32(a + at * I64{4}, word & I64{4294967295})
+            int_put_u32(a + at * I64{4}, word.bit_and(I64{4294967295}))
             at += I64{1}
         }
     }
@@ -811,16 +811,16 @@ fn int_bitwise(left: I64, right: I64, kind: I64) -> I64 {
     sticky := false
     loop !(int_load(node + I64{32}) == I64{1} && int_get(node, I64{0}) == I64{0}) {
         bit :: int_div_small(node, I64{2})
-        if (bits < I64{53}) { top |= bit << bits } else {
+        if (bits < I64{53}) { top = top.bit_or(bit << bits) } else {
             sticky = sticky || guard
-            guard = (top & I64{1}) != I64{0}
-            top = (top >> I64{1}) | (bit << I64{52})
+            guard = (top.bit_and(I64{1})) != I64{0}
+            top = (top >> I64{1}).bit_or((bit << I64{52}))
         }
         bits += I64{1}
     }
     int_free_node(node)
     exponent := bits - I64{1}
-    if (bits > I64{53} && guard && (sticky || (top & I64{1}) != I64{0})) {
+    if (bits > I64{53} && guard && (sticky || (top.bit_and(I64{1})) != I64{0})) {
         top += I64{1}
         if (top == I64{9007199254740992}) {
             top >>= I64{1}
@@ -835,7 +835,7 @@ fn int_bitwise(left: I64, right: I64, kind: I64) -> I64 {
         shift := exponent - I64{52}
         scale := Float{2.0}
         loop shift > (I64{0}) {
-            if ((shift & I64{1}) != I64{0}) { result *= scale }
+            if ((shift.bit_and(I64{1})) != I64{0}) { result *= scale }
             shift >>= I64{1}
             if (shift != I64{0}) { scale *= scale }
         }

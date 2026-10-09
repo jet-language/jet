@@ -59,7 +59,7 @@ fn rt_keccak_rc(round: I64) -> I64 {
 }
 fn rt_keccak_rotl(value: I64, count: I64) -> I64 {
     if (count == I64{0}) -> return value
-    return (value << count) | rt_crypto_shr64(value, I64{64} - count)
+    return (value << count).bit_or(rt_crypto_shr64(value, I64{64} - count))
 }
 fn rt_keccak_f(state: I64) {
     column :: state + I64{200}
@@ -68,16 +68,16 @@ fn rt_keccak_f(state: I64) {
     loop round < (I64{24}) {
         x := I64{0}
         loop x < (I64{5}) {
-            rt_text_store(column + x * I64{8}, rt_text_word(state + x * I64{8}) ~| rt_text_word(state + (x + I64{5}) * I64{8}) ~| rt_text_word(state + (x + I64{10}) * I64{8}) ~| rt_text_word(state + (x + I64{15}) * I64{8}) ~| rt_text_word(state + (x + I64{20}) * I64{8}))
+            rt_text_store(column + x * I64{8}, rt_text_word(state + x * I64{8}).bit_xor(rt_text_word(state + (x + I64{5}) * I64{8})).bit_xor(rt_text_word(state + (x + I64{10}) * I64{8})).bit_xor(rt_text_word(state + (x + I64{15}) * I64{8})).bit_xor(rt_text_word(state + (x + I64{20}) * I64{8})))
             x += I64{1}
         }
         x = I64{0}
         loop x < (I64{5}) {
-            delta :: rt_text_word(column + ((x + I64{4}) % I64{5}) * I64{8}) ~| rt_keccak_rotl(rt_text_word(column + ((x + I64{1}) % I64{5}) * I64{8}), I64{1})
+            delta :: rt_text_word(column + ((x + I64{4}) % I64{5}) * I64{8}).bit_xor(rt_keccak_rotl(rt_text_word(column + ((x + I64{1}) % I64{5}) * I64{8}), I64{1}))
             y := I64{0}
             loop y < (I64{5}) {
                 p :: state + (x + I64{5} * y) * I64{8}
-                rt_text_store(p, rt_text_word(p) ~| delta)
+                rt_text_store(p, rt_text_word(p).bit_xor(delta))
                 y += I64{1}
             }
             x += I64{1}
@@ -100,12 +100,12 @@ fn rt_keccak_f(state: I64) {
                 lane :: rt_text_word(permuted + (x + I64{5} * y) * I64{8})
                 left :: rt_text_word(permuted + ((x + I64{1}) % I64{5} + I64{5} * y) * I64{8})
                 right :: rt_text_word(permuted + ((x + I64{2}) % I64{5} + I64{5} * y) * I64{8})
-                rt_text_store(state + (x + I64{5} * y) * I64{8}, lane ~| ((left ~| I64{-1}) & right))
+                rt_text_store(state + (x + I64{5} * y) * I64{8}, lane.bit_xor(((left.bit_xor(I64{-1})).bit_and(right))))
                 x += I64{1}
             }
             y += I64{1}
         }
-        rt_text_store(state, rt_text_word(state) ~| rt_keccak_rc(round))
+        rt_text_store(state, rt_text_word(state).bit_xor(rt_keccak_rc(round)))
         round += I64{1}
     }
 }
@@ -127,14 +127,14 @@ fn rt_crypto_sha3(input: I64, length: I64, rate: I64, output: I64, count: I64, s
                 index :: lane * I64{8} + b
                 byte := if (index < remaining) -> rt_text_byte(input + at + index) else -> I64{0}
                 if !full {
-                    if (index == remaining) -> byte = byte | I64{6}
-                    if (index == rate - I64{1}) -> byte = byte | I64{128}
+                    if (index == remaining) -> byte = byte.bit_or(I64{6})
+                    if (index == rate - I64{1}) -> byte = byte.bit_or(I64{128})
                 }
-                word = word | (byte << (b * I64{8}))
+                word = word.bit_or((byte << (b * I64{8})))
                 b += I64{1}
             }
             p :: scratch + lane * I64{8}
-            rt_text_store(p, rt_text_word(p) ~| word)
+            rt_text_store(p, rt_text_word(p).bit_xor(word))
             lane += I64{1}
         }
         rt_keccak_f(scratch)

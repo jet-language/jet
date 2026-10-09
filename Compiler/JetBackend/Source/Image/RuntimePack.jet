@@ -70,8 +70,8 @@ fn link_pack_c_abi(name: String) -> Bool Never! {
 // ELF symbol type for a definition in section `s`: TLS, function or object.
 fn link_pack_sym_type(c: LinkContext, s: Int) -> Int Never! {
     flags :: link_sec_flags(c, link_obj_of(c, s), s)
-    if (flags & 0x400) != 0 -> return 6
-    if (flags & 4) != 0 -> return 2
+    if (flags.bit_and(0x400)) != 0 -> return 6
+    if (flags.bit_and(4)) != 0 -> return 2
     1
 }
 
@@ -130,7 +130,7 @@ fn link_pack_symbol(c: &LinkContext, p: &LinkPack, obj: Int, k: Int) -> Int Neve
     value :: link_u64(c.bufs, b, at + 8)
     size :: link_u64(c.bufs, b, at + 16)
     file_symbol :: c.obj_first_symbol[obj] + k
-    if s == LINK_ABS -> return link_pack_local(&p, file_symbol, link_cstr(c.bufs, b, c.obj_strtab[obj] + link_u32(c.bufs, b, at)), info & 15, LINK_ABS, value, size)
+    if s == LINK_ABS -> return link_pack_local(&p, file_symbol, link_cstr(c.bufs, b, c.obj_strtab[obj] + link_u32(c.bufs, b, at)), info.bit_and(15), LINK_ABS, value, size)
     if s < 0 {
         object :: c.obj_name[obj].copy()
         link_error(&c, "runtime pack: {object} refers to local symbol {k}, whose section was discarded")
@@ -143,8 +143,8 @@ fn link_pack_symbol(c: &LinkContext, p: &LinkPack, obj: Int, k: Int) -> Int Neve
         link_error(&c, "runtime pack: {object} refers to {site}, which was collected")
         return 0
     }
-    if (info & 15) == 3 && value == 0 -> return 1 + p.row_ord[link_live_row(c, s)]
-    link_pack_local(&p, file_symbol, link_cstr(c.bufs, b, c.obj_strtab[obj] + link_u32(c.bufs, b, at)), info & 15, out, value, size)
+    if (info.bit_and(15)) == 3 && value == 0 -> return 1 + p.row_ord[link_live_row(c, s)]
+    link_pack_local(&p, file_symbol, link_cstr(c.bufs, b, c.obj_strtab[obj] + link_u32(c.bufs, b, at)), info.bit_and(15), out, value, size)
 }
 
 // Append the rewritten relocation rows `first..<end` of the RELA table at
@@ -201,7 +201,7 @@ fn link_pack_rela(bytes: &[U8], p: LinkPack, first: Int, end: Int, first_global:
         ref :: p.r_sym[k]
         symbol :: if ref >= 0 -> ref else -> first_global + (-1 - ref)
         elf64_u64(&bytes, p.r_off[k])
-        elf64_u64(&bytes, (symbol << 32) | p.r_type[k])
+        elf64_u64(&bytes, (symbol << 32).bit_or(p.r_type[k]))
         elf64_u64(&bytes, p.r_add[k])
     }
 }
@@ -340,7 +340,7 @@ fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
             if s == LINK_ABS {
                 link_pack_sym(&symtab, &xindex, name_at, bind << 4, LINK_ABS, c.g_value[f], c.g_size[f])
             } else {
-                link_pack_sym(&symtab, &xindex, name_at, (bind << 4) | link_pack_sym_type(c, s), link_pack_out(c, p, s), c.g_value[f], c.g_size[f])
+                link_pack_sym(&symtab, &xindex, name_at, (bind << 4).bit_or(link_pack_sym_type(c, s)), link_pack_out(c, p, s), c.g_value[f], c.g_size[f])
             }
         } else if kind == LINK_G_COMMON {
             link_pack_sym(&symtab, &xindex, name_at, 0x11, LINK_COMMON, c.g_common_align[f], c.g_common_size[f])
@@ -387,7 +387,7 @@ fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
         name_at :: link_pack_shstr(&shstrtab, &shstr_seen, link_pack_section_name(c, c.live_class[row], s))
         flags :: link_sec_flags(c, obj, s)
         // SHF_GROUP: the groups are settled.
-        link_pack_header(&h, name_at, kind, flags - (flags & 0x200), offset, size, 0, 0, align, 0)
+        link_pack_header(&h, name_at, kind, flags - (flags.bit_and(0x200)), offset, size, 0, 0, align, 0)
         if rela_out[ord] >= 0 {
             elf64_pad(&bytes, 8)
             rela_at :: bytes.len()
@@ -428,7 +428,7 @@ fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
     link_pack_header(&h, shstrtab_name, 3, 0, shstrtab_at, shstrtab.len(), 0, 0, 1, 0)
     elf64_pad(&bytes, 8)
     shoff :: bytes.len()
-    loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{(shoff >> (8 * shift)) & 255}
+    loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{(shoff >> (8 * shift)).bit_and(255)}
     loop k in 0..<h.name.len() {
         elf64_section_header(&bytes, h.name[k], h.kind[k], h.flags[k], h.offset[k], h.size[k], h.link[k], h.info[k], h.align[k], h.entry_size[k])
     }
@@ -450,7 +450,7 @@ fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) 
         loop k in c.obj_first_global[obj]..<c.obj_sym_count[obj] {
             at :: link_sym_at(c, obj, k)
             bind :: link_u8(c.bufs, b, at + 4) >> 4
-            visibility :: link_u8(c.bufs, b, at + 5) & 3
+            visibility :: link_u8(c.bufs, b, at + 5).bit_and(3)
             if (bind != 1 && bind != 2) || (visibility != 0 && visibility != 3) -> next
             if link_sym_shndx(c, obj, k) == LINK_UNDEF -> next
             g :: link_global_of(c, obj, k)

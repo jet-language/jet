@@ -2,7 +2,7 @@
 // CAbiRoutes:10198-10277 / 10351-10412: every numeric field is Rust i64;
 // native() borrows exact Int, Text constructors clone, getters own fresh results.
 // Existing aligned-word/enum/Text helpers are shared, never a Rust carrier alias.
-fn receipt_bool(word: I64) -> Bool { (word & I64{255}) != I64{0} }
+fn receipt_bool(word: I64) -> Bool { (word.bit_and(I64{255})) != I64{0} }
 fn receipt_bool_word(word: I64) -> I64 { if receipt_bool(word) -> I64{1} else -> I64{0} }
 fn receipt_push_bool(target: I64, word: I64) {
     if receipt_bool(word) -> rt_text_push_word(target, I64{1702195828}, I64{4})

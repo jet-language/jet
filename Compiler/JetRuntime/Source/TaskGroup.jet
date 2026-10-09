@@ -157,8 +157,8 @@ fn task_group_close(group: I64) {
 fn task_order_before(left: I64, right: I64) -> Bool {
     lh :: sync_load(left + I64{120})
     rh :: sync_load(right + I64{120})
-    if lh != rh -> return (lh ^ I64{-9223372036854775808}) < (rh ^ I64{-9223372036854775808})
-    (sync_load(left + I64{112}) ^ I64{-9223372036854775808}) < (sync_load(right + I64{112}) ^ I64{-9223372036854775808})
+    if lh != rh -> return (lh.bit_xor(I64{-9223372036854775808})) < (rh.bit_xor(I64{-9223372036854775808}))
+    (sync_load(left + I64{112}).bit_xor(I64{-9223372036854775808})) < (sync_load(right + I64{112}).bit_xor(I64{-9223372036854775808}))
 }
 fn task_selection_wait_check(kind: I64) -> I64 {
     if (scheduler_deadline_check(kind) != I64{0}) -> return jet_scheduler_native_status()
@@ -272,16 +272,16 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
 }
 
 #Export(c) fn jet_rt_native_task_group(kind: I64, flatten: I64, list: I64, spawn: I64, body_meta: I64, invoke: I64, release: I64, ok_meta: I64, out: I64) -> I64 {
-    handles :: task_group_handles(list, (spawn & I64{255}) != I64{0}, body_meta, invoke, release)
+    handles :: task_group_handles(list, (spawn.bit_and(I64{255})) != I64{0}, body_meta, invoke, release)
     count :: sync_load(handles)
     data :: sync_load(handles + I64{16})
-    winner :: task_selection(data, count, kind, (flatten & I64{255}) != I64{0})
+    winner :: task_selection(data, count, kind, (flatten.bit_and(I64{255})) != I64{0})
     success := I64{0}
     if (winner >= I64{0}) {
         chosen :: sync_load(data + winner * I64{8})
         if {
             (kind != I64{0} || task_result_failed(chosen, (flatten & I64{255}) != I64{0})) -> {
-                success = task_take_outcome(chosen, (flatten & I64{255}) != I64{0}, out)
+                success = task_take_outcome(chosen, (flatten.bit_and(I64{255})) != I64{0}, out)
                 sync_store(data + winner * I64{8}, I64{0})
                 task_selection_drain(data, count, true)
             }
@@ -293,7 +293,7 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
                 success = I64{1}
                 loop at < count {
                     child :: sync_load(data + at * I64{8})
-                    got :: task_take_outcome(child, (flatten & I64{255}) != I64{0}, slot)
+                    got :: task_take_outcome(child, (flatten.bit_and(I64{255})) != I64{0}, slot)
                     sync_store(data + at * I64{8}, I64{0})
                     if (got == I64{0}) {
                         sync_store(out, sync_load(slot))
@@ -318,13 +318,13 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
 #Export(c) fn jet_rt_native_task_all_tuple(handles: I64, count: I64, flatten: I64, offsets: I64, out: I64) -> I64 {
     owned_handles :: jet_rt_alloc(count * I64{8}, I64{8})
     coll_copy(handles, owned_handles, count * I64{8})
-    winner :: task_selection(owned_handles, count, I64{0}, (flatten & I64{255}) != I64{0})
+    winner :: task_selection(owned_handles, count, I64{0}, (flatten.bit_and(I64{255})) != I64{0})
     success := I64{0}
     if (winner >= I64{0}) {
         chosen :: sync_load(owned_handles + winner * I64{8})
         if {
             task_result_failed(chosen, (flatten & I64{255}) != I64{0}) -> {
-                success = task_take_outcome(chosen, (flatten & I64{255}) != I64{0}, out)
+                success = task_take_outcome(chosen, (flatten.bit_and(I64{255})) != I64{0}, out)
                 sync_store(owned_handles + winner * I64{8}, I64{0})
                 task_selection_drain(owned_handles, count, true)
             }
@@ -338,12 +338,12 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
                 loop at < count {
                     child :: sync_load(owned_handles + at * I64{8})
                     meta :: sync_load(child + I64{40})
-                    result_meta :: if task_should_flatten(child, (flatten & I64{255}) != I64{0}) -> sync_load(meta + I64{56}) else -> meta
+                    result_meta :: if task_should_flatten(child, (flatten.bit_and(I64{255})) != I64{0}) -> sync_load(meta + I64{56}) else -> meta
                     owned_meta :: coll_meta_copy(result_meta)
                     slot :: coll_slot_new(owned_meta)
                     sync_store(prepared + at * I64{16}, owned_meta)
                     sync_store(prepared + at * I64{16} + I64{8}, slot)
-                    got :: task_take_outcome(child, (flatten & I64{255}) != I64{0}, slot)
+                    got :: task_take_outcome(child, (flatten.bit_and(I64{255})) != I64{0}, slot)
                     sync_store(owned_handles + at * I64{8}, I64{0})
                     if (got == I64{0}) {
                         sync_store(out, sync_load(slot))

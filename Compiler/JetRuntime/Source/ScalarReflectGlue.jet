@@ -14,7 +14,7 @@ fn scalar_reflect_clone(value: I64, bytes: I64) -> I64 {
 fn scalar_reflect_drop(value: I64, bytes: I64) {
     if (value != I64{0}) -> jet_rt_free(value, bytes, I64{8})
 }
-fn scalar_range_exclusive(value: I64) -> Bool { (scalar_reflect_word(value + SCALAR_RANGE_EXCLUSIVE) & I64{255}) != I64{0} }
+fn scalar_range_exclusive(value: I64) -> Bool { (scalar_reflect_word(value + SCALAR_RANGE_EXCLUSIVE).bit_and(I64{255})) != I64{0} }
 #Export(c) fn jet_rt_record_new_JetRange(start: I64, end: I64, exclusive: U8) -> I64 {
     a :: jet_int_owned_to_i64(start)
     b :: jet_int_owned_to_i64(end)

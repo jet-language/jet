@@ -26,14 +26,14 @@ fn rt_blake_sigma(round: I64, index: I64) -> I64 {
         (round % I64{10} == I64{8}) -> rt_crypto_word64(I64{0x6fe9b308}, I64{0xc2d714a5})
         else -> rt_crypto_word64(I64{0xa2847615}, I64{0xfb9e3cd0})
     }
-    (packed >> ((I64{15} - index) * I64{4})) & I64{15}
+    (packed >> ((I64{15} - index) * I64{4})).bit_and(I64{15})
 }
 fn rt_crypto_le64(input: I64) -> I64 {
-    rt_crypto_le32(input) | (rt_crypto_le32(input + I64{4}) << I64{32})
+    rt_crypto_le32(input).bit_or((rt_crypto_le32(input + I64{4}) << I64{32}))
 }
 fn rt_crypto_put64(output: I64, word: I64) {
     rt_crypto_put32(output, word)
-    rt_crypto_put32(output + I64{4}, (word >> I64{32}) & I64{0xffffffff})
+    rt_crypto_put32(output + I64{4}, (word >> I64{32}).bit_and(I64{0xffffffff}))
 }
 #Arithmetic(.Wrapping)
 fn rt_blake_g(v: I64, ai: I64, bi: I64, ci: I64, di: I64, x: I64, y: I64) {
@@ -42,13 +42,13 @@ fn rt_blake_g(v: I64, ai: I64, bi: I64, ci: I64, di: I64, x: I64, y: I64) {
     c := rt_text_word(v + ci * I64{8})
     d := rt_text_word(v + di * I64{8})
     a = a + b + x
-    d = rt_crypto_rotr64(d ~| a, I64{32})
+    d = rt_crypto_rotr64(d.bit_xor(a), I64{32})
     c += d
-    b = rt_crypto_rotr64(b ~| c, I64{24})
+    b = rt_crypto_rotr64(b.bit_xor(c), I64{24})
     a = a + b + y
-    d = rt_crypto_rotr64(d ~| a, I64{16})
+    d = rt_crypto_rotr64(d.bit_xor(a), I64{16})
     c += d
-    b = rt_crypto_rotr64(b ~| c, I64{63})
+    b = rt_crypto_rotr64(b.bit_xor(c), I64{63})
     rt_text_store(v + ai * I64{8}, a)
     rt_text_store(v + bi * I64{8}, b)
     rt_text_store(v + ci * I64{8}, c)
@@ -65,8 +65,8 @@ fn rt_blake_compress(state: I64, count: I64, last: Bool) {
         if (i < I64{8}) -> rt_text_store(v + i * I64{8}, rt_text_word(state + i * I64{8})) else -> rt_text_store(v + i * I64{8}, rt_blake_iv(i - I64{8}))
         i += I64{1}
     }
-    rt_text_store(v + I64{96}, rt_text_word(v + I64{96}) ~| count)
-    if last -> rt_text_store(v + I64{112}, rt_text_word(v + I64{112}) ~| I64{-1})
+    rt_text_store(v + I64{96}, rt_text_word(v + I64{96}).bit_xor(count))
+    if last -> rt_text_store(v + I64{112}, rt_text_word(v + I64{112}).bit_xor(I64{-1}))
     round := I64{0}
     loop {
         if (round >= I64{12}) -> break
@@ -87,7 +87,7 @@ fn rt_blake_compress(state: I64, count: I64, last: Bool) {
     i = I64{0}
     loop {
         if (i >= I64{8}) -> break
-        rt_text_store(state + i * I64{8}, rt_text_word(state + i * I64{8}) ~| rt_text_word(v + i * I64{8}) ~| rt_text_word(v + I64{64} + i * I64{8}))
+        rt_text_store(state + i * I64{8}, rt_text_word(state + i * I64{8}).bit_xor(rt_text_word(v + i * I64{8})).bit_xor(rt_text_word(v + I64{64} + i * I64{8})))
         i += I64{1}
     }
 }
@@ -99,7 +99,7 @@ fn rt_blake_init(state: I64, output_len: I64) {
         rt_text_store(state + i * I64{8}, rt_blake_iv(i))
         i += I64{1}
     }
-    rt_text_store(state, rt_text_word(state) ~| (I64{0x01010000} | output_len))
+    rt_text_store(state, rt_text_word(state).bit_xor((I64{0x01010000}.bit_or(output_len))))
     rt_text_store(state + I64{464}, output_len)
 }
 fn rt_blake_update(state: I64, input: I64, length: I64) {
@@ -128,7 +128,7 @@ fn rt_blake_finish(state: I64, output: I64) {
     length :: rt_text_word(state + I64{464})
     at := I64{0}
     loop at < length {
-        rt_text_put(output + at, (rt_text_word(state + (at / I64{8}) * I64{8}) >> ((at % I64{8}) * I64{8})) & I64{255})
+        rt_text_put(output + at, (rt_text_word(state + (at / I64{8}) * I64{8}) >> ((at % I64{8}) * I64{8})).bit_and(I64{255}))
         at += I64{1}
     }
     rt_crypto_wipe(state, I64{472})

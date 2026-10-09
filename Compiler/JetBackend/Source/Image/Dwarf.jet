@@ -51,32 +51,32 @@ struct X64DwarfSections {
 // Encoding.
 
 fn dwarf_u8(bytes: &[U8], value: Int) Never! {
-    &bytes.push(U8{value & 255})
+    &bytes.push(U8{value.bit_and(255)})
 }
 
 fn dwarf_uleb(bytes: &[U8], value: Int) Never! {
     rest := value
     loop {
-        low :: rest & 0x7f
+        low :: rest.bit_and(0x7f)
         rest = rest >> 7
         if rest == 0 {
             &bytes.push(U8{low})
             return
         }
-        &bytes.push(U8{low | 0x80})
+        &bytes.push(U8{low.bit_or(0x80)})
     }
 }
 
 fn dwarf_sleb(bytes: &[U8], value: Int) Never! {
     rest := value
     loop {
-        low :: rest & 0x7f
+        low :: rest.bit_and(0x7f)
         rest = rest >> 7
-        if (rest == 0 && (low & 0x40) == 0) || (rest == -1 && (low & 0x40) != 0) {
+        if (rest == 0 && (low.bit_and(0x40)) == 0) || (rest == -1 && (low.bit_and(0x40)) != 0) {
             &bytes.push(U8{low})
             return
         }
-        &bytes.push(U8{low | 0x80})
+        &bytes.push(U8{low.bit_or(0x80)})
     }
 }
 
@@ -86,7 +86,7 @@ fn dwarf_string(bytes: &[U8], text: String) Never! {
 }
 
 fn dwarf_patch_u32(bytes: &[U8], at: Int, value: Int) Never! {
-    loop k in 0..<4 -> bytes[at + k] = U8{(value >> (8 * k)) & 255}
+    loop k in 0..<4 -> bytes[at + k] = U8{(value >> (8 * k)).bit_and(255)}
 }
 
 // The 4-byte length field at `at`: the bytes after it, to the end.
@@ -102,7 +102,7 @@ fn dwarf_cfa_advance(cfi: &[U8], from: Int, to: Int) Never! {
     delta :: to - from
     if delta <= 0 -> return
     if {
-        delta < 64 -> dwarf_u8(&cfi, 0x40 | delta)
+        delta < 64 -> dwarf_u8(&cfi, (0x40).bit_or(delta))
         delta < 256 -> {
             dwarf_u8(&cfi, 0x02)
             dwarf_u8(&cfi, delta)
@@ -137,7 +137,7 @@ fn dwarf_cfa_def_cfa_offset(cfi: &[U8], offset: Int) Never! {
 // `reg` is saved at CFA - 8 * `factored`.
 fn dwarf_cfa_offset(cfi: &[U8], reg: Int, factored: Int) Never! {
     if {
-        reg < 64 -> dwarf_u8(&cfi, 0x80 | reg)
+        reg < 64 -> dwarf_u8(&cfi, (0x80).bit_or(reg))
         else -> {
             dwarf_u8(&cfi, 0x05)
             dwarf_uleb(&cfi, reg)

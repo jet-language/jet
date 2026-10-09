@@ -31,7 +31,7 @@ VAULT_ORIGIN_HASH :: prep { I64{48} }
 #Import(c) fn vault_secret_drop(secret: I64) = "jet_rt_secret_drop"
 #Import(c) fn vault_native_nfc(text: I64) -> I64 = "jet_text_nfc"
 fn vault_unsigned_less(left: I64, right: I64) -> Bool {
-    (left ~| I64{-9223372036854775808}) < (right ~| I64{-9223372036854775808})
+    (left.bit_xor(I64{-9223372036854775808})) < (right.bit_xor(I64{-9223372036854775808}))
 }
 fn vault_bytes_zero(data: I64, length: I64) -> Bool {
     at := I64{0}
@@ -45,7 +45,7 @@ fn vault_put_u64(target: I64, value: I64) {
     at := I64{0}
     loop {
         if (at == I64{8}) -> break
-        rt_text_put(target + at, (value >> (at * I64{8})) & I64{255})
+        rt_text_put(target + at, (value >> (at * I64{8})).bit_and(I64{255}))
         at += I64{1}
     }
 }
@@ -208,9 +208,9 @@ fn vault_store_equal(left: I64, right: I64) -> Bool {
 // Unsigned decimal without an exact Int, temporary string, or digit allocation.
 // q=floor((word unsigned)/10); recursion has at most20 fixed-width frames.
 fn vault_push_u64(target: I64, value: I64) {
-    half :: (value >> I64{1}) & I64{9223372036854775807}
+    half :: (value >> I64{1}).bit_and(I64{9223372036854775807})
     quotient :: half / I64{5}
-    remainder :: (half % I64{5}) * I64{2} + (value & I64{1})
+    remainder :: (half % I64{5}) * I64{2} + (value.bit_and(I64{1}))
     if (quotient != I64{0}) -> vault_push_u64(target, quotient)
     rt_text_push_word(target, I64{48} + remainder, I64{1})
 }
@@ -349,8 +349,8 @@ fn vault_store_debug(store: I64) -> I64 {
 }
 
 fn vault_put_u16(target: I64, value: I64) {
-    rt_text_put(target, value & I64{255})
-    rt_text_put(target + I64{1}, (value >> I64{8}) & I64{255})
+    rt_text_put(target, value.bit_and(I64{255}))
+    rt_text_put(target + I64{1}, (value >> I64{8}).bit_and(I64{255}))
 }
 // Scratch8192 is exclusive; the output32 must not alias it. Crypto primitives
 // consume raw packed key32, never a nominal Rust signing/X25519 carrier.
@@ -437,7 +437,7 @@ fn vault_record_hash(record: I64, digest: I64, scratch: I64) {
     cursor += I64{16}
     origin_name :: rt_text_word(origin + VAULT_ORIGIN_NAME)
     origin_length :: rt_text_len(origin_name)
-    vault_put_u16(buffer + cursor, origin_length & I64{65535})
+    vault_put_u16(buffer + cursor, origin_length.bit_and(I64{65535}))
     cursor += I64{2}
     tail :: scratch + I64{4800}
     vault_put_u64(tail, rt_text_word(origin + VAULT_ORIGIN_GENERATION))
@@ -941,7 +941,7 @@ fn vault_ref_display(reference: I64, debug: Bool) -> I64 {
         at := I64{0}
         loop at < (I64{8}) {
             byte :: rt_text_byte(reference + VAULT_REF_OPAQUE + at /% I64{2})
-            nibble :: if (at % I64{2} == I64{0}) -> byte >> I64{4} else -> byte & I64{15}
+            nibble :: if (at % I64{2} == I64{0}) -> byte >> I64{4} else -> byte.bit_and(I64{15})
             rt_text_push_word(target, if (nibble < I64{10}) -> nibble + I64{48} else -> nibble + I64{87}, I64{1})
             at += I64{1}
         }
@@ -1396,7 +1396,7 @@ fn vault_preview_text(plan: I64, key_type: I64, reason: I64) -> I64 {
     at := I64{0}
     loop at < (I64{32}) {
         byte :: rt_text_byte(plan + VAULT_PLAN_UUID + at /% I64{2})
-        nibble :: if (at % I64{2} == I64{0}) -> byte >> I64{4} else -> byte & I64{15}
+        nibble :: if (at % I64{2} == I64{0}) -> byte >> I64{4} else -> byte.bit_and(I64{15})
         rt_text_push_word(target, if (nibble < I64{10}) -> nibble + I64{48} else -> nibble + I64{87}, I64{1})
         at += I64{1}
     }

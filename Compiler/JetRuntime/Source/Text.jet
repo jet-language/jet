@@ -76,10 +76,10 @@ fn rt_text_decode(ptr: I64) -> I64 {
         (width == I64{3}) -> I64{15}
         else -> I64{7}
     }
-    scalar := rt_text_byte(ptr) & mask
+    scalar := rt_text_byte(ptr).bit_and(mask)
     at := I64{1}
     loop at < width {
-        scalar = (scalar << I64{6}) | (rt_text_byte(ptr + at) & I64{63})
+        scalar = (scalar << I64{6}).bit_or((rt_text_byte(ptr + at).bit_and(I64{63})))
         at += I64{1}
     }
     scalar
@@ -177,7 +177,7 @@ fn rt_text_append_raw_word(target: I64, word: I64, count: I64) {
     if (data == I64{0}) -> return
     at := I64{0}
     loop at < count {
-        rt_text_put(data + used + at, (word >> (at * I64{8})) & I64{255})
+        rt_text_put(data + used + at, (word >> (at * I64{8})).bit_and(I64{255}))
         at += I64{1}
     }
     rt_text_store(target + I64{8}, used + count)
@@ -225,10 +225,10 @@ fn rt_text_push_scalar(target: I64, scalar: I64) {
                 (width == I64{3}) -> I64{224}
                 else -> I64{240}
             }
-            rt_text_put(data, prefix | (value >> ((width - I64{1}) * I64{6})))
+            rt_text_put(data, prefix.bit_or((value >> ((width - I64{1}) * I64{6}))))
             at := I64{1}
             loop at < width {
-                rt_text_put(data + at, I64{128} | ((value >> ((width - at - I64{1}) * I64{6})) & I64{63}))
+                rt_text_put(data + at, I64{128}.bit_or(((value >> ((width - at - I64{1}) * I64{6})).bit_and(I64{63}))))
                 at += I64{1}
             }
         }
@@ -541,7 +541,7 @@ fn rt_text_trim(value: I64) -> I64 {
     }
     loop end > start {
         at := end - I64{1}
-        loop at > start && (rt_text_byte(data + at) & I64{192}) == (I64{128}) -> at -= I64{1}
+        loop at > start && (rt_text_byte(data + at).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
         if !unicode_is_white_space(rt_text_decode(data + at)) -> break
         end = at
     }
@@ -555,7 +555,7 @@ fn rt_text_trim(value: I64) -> I64 {
 fn rt_text_push_word(target: I64, word: I64, len: I64) {
     at := I64{0}
     loop at < len {
-        rt_text_push_scalar(target, (word >> (at * I64{8})) & I64{255})
+        rt_text_push_scalar(target, (word >> (at * I64{8})).bit_and(I64{255}))
         if (jet_rt_session_propagate() != I64{0}) -> return
         at += I64{1}
     }

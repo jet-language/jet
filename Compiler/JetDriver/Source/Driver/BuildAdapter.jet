@@ -314,7 +314,7 @@ fn jet_driver_build_public_address(address: [U8]) -> Bool Never! {
         a :: Int.from_u8(address[0])
         b :: Int.from_u8(address[1])
         c :: Int.from_u8(address[2])
-        return !(a == 0 || a == 10 || (a == 100 && (b & 192) == 64) || a == 127
+        return !(a == 0 || a == 10 || (a == 100 && (b.bit_and(192)) == 64) || a == 127
             || (a == 169 && b == 254) || (a == 172 && b >= 16 && b <= 31)
             || (a == 192 && b == 0 && (c == 0 || c == 2)) || (a == 192 && b == 168)
             || (a == 198 && (b == 18 || b == 19)) || (a == 198 && b == 51 && c == 100)
@@ -328,7 +328,7 @@ fn jet_driver_build_public_address(address: [U8]) -> Bool Never! {
     if mapped && address[10] == (U8{255}) && address[11] == (U8{255}) -> return jet_driver_build_public_address(address[12..<16])
     first :: Int.from_u8(address[0]) * 256 + Int.from_u8(address[1])
     second :: Int.from_u8(address[2]) * 256 + Int.from_u8(address[3])
-    (first & 57344) == 8192 && !(first == 8193 && second == 3512)
+    (first.bit_and(57344)) == 8192 && !(first == 8193 && second == 3512)
 }
 
 fn jet_driver_build_http_length(headers: [[U8]]) String! {

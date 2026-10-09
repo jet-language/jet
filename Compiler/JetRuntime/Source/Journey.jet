@@ -22,8 +22,8 @@ fn journey_hop_new(file: I64, line: I64, column: I64, function: I64, note: I64) 
     hop :: jet_rt_alloc(HOP_BYTES, I64{8})
     rt_text_store(hop + HOP_FUNCTION, jet_rt_string_clone(function))
     rt_text_store(hop + HOP_FILE, jet_rt_string_clone(file))
-    rt_text_store(hop + HOP_LINE, line & I64{4294967295})
-    rt_text_store(hop + HOP_COLUMN, column & I64{4294967295})
+    rt_text_store(hop + HOP_LINE, line.bit_and(I64{4294967295}))
+    rt_text_store(hop + HOP_COLUMN, column.bit_and(I64{4294967295}))
     rt_text_store(hop + HOP_NOTE, if (note == I64{0}) -> jet_rt_string_builder_new() else -> jet_rt_string_clone(note))
     rt_text_store(hop + HOP_COUNT, I64{1})
     hop
@@ -77,7 +77,7 @@ fn journey_hops_clear(value: I64) {
     result
 }
 fn journey_same_site(hop: I64, file: I64, line: I64, function: I64) -> Bool {
-    rt_text_word(hop + HOP_LINE) == (line & I64{4294967295}) && err_text_eq(rt_text_word(hop + HOP_FILE), file) && err_text_eq(rt_text_word(hop + HOP_FUNCTION), function)
+    rt_text_word(hop + HOP_LINE) == (line.bit_and(I64{4294967295})) && err_text_eq(rt_text_word(hop + HOP_FILE), file) && err_text_eq(rt_text_word(hop + HOP_FUNCTION), function)
 }
 #Export(c) fn jet_rt_native_journey_origin(value: I64, file: I64, line: I64, column: I64, function: I64) {
     jet_rt_native_journey_reset(value)
@@ -92,7 +92,7 @@ fn journey_same_site(hop: I64, file: I64, line: I64, function: I64) -> Bool {
     if (count != I64{0}) {
         last :: rt_text_word(rt_text_word(value + JOURNEY_HOPS + I64{16}) + (count - I64{1}) * I64{8})
         if journey_same_site(last, file, line, function) {
-            rt_text_store(last + HOP_COUNT, wrapping(rt_text_word(last + HOP_COUNT) + I64{1}) & I64{4294967295})
+            rt_text_store(last + HOP_COUNT, wrapping(rt_text_word(last + HOP_COUNT) + I64{1}).bit_and(I64{4294967295}))
             return // Repeated site's note and column remain the first ones.
         }
     }
@@ -125,7 +125,7 @@ fn journey_same_site(hop: I64, file: I64, line: I64, function: I64) -> Bool {
         if (length != I64{0}) {
             last :: rt_text_word(rt_text_word(value + JOURNEY_HOPS + I64{16}) + (length - I64{1}) * I64{8})
             if journey_same_site(last, rt_text_word(hop + HOP_FILE), rt_text_word(hop + HOP_LINE), rt_text_word(hop + HOP_FUNCTION)) {
-                rt_text_store(last + HOP_COUNT, wrapping(rt_text_word(last + HOP_COUNT) + rt_text_word(hop + HOP_COUNT)) & I64{4294967295})
+                rt_text_store(last + HOP_COUNT, wrapping(rt_text_word(last + HOP_COUNT) + rt_text_word(hop + HOP_COUNT)).bit_and(I64{4294967295}))
                 journey_hop_drop(hop)
                 collapsed = true
             }
@@ -148,7 +148,7 @@ fn journey_same_site(hop: I64, file: I64, line: I64, function: I64) -> Bool {
     row :: err_rows_append(result + ERR_CONTEXT, ERR_CONTEXT_BYTES)
     rt_text_store(row, jet_rt_string_clone(note))
     rt_text_store(row + I64{8}, jet_rt_string_clone(file))
-    rt_text_store(row + I64{16}, line & I64{4294967295})
+    rt_text_store(row + I64{16}, line.bit_and(I64{4294967295}))
     jet_rt_native_journey_frame(journey, file, line, column, function, note)
     result
 }

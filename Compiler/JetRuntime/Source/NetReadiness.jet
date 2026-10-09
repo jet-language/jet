@@ -1,7 +1,7 @@
 // CAbiRoutes.rs:2677-2715,7509-7523,10966-10979; NetHTTP.rs:184-201.
 // Ready16 owns normalized Bool words; enum8 owns raw declaration-order tags.
 // Shared scalar enum ownership comes from EncodingErrors.jet e1306aee0.
-fn net_ready_bool(word: I64) -> Bool { (word & I64{255}) != I64{0} }
+fn net_ready_bool(word: I64) -> Bool { (word.bit_and(I64{255})) != I64{0} }
 #Export(c) fn jet_rt_record_new_JetNetReady(readable: U8, writable: U8) -> I64 {
     value :: jet_rt_alloc(I64{16}, I64{8})
     rt_text_store(value, if (readable != U8{0}) -> I64{1} else -> I64{0})

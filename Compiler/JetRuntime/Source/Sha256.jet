@@ -74,7 +74,7 @@ fn rt_sha256_k(round: I64) -> I64 {
     }
 }
 fn rt_sha256_rotate(word: I64, shift: I64) -> I64 {
-    ((word >> shift) | (word << (I64{32} - shift))) & I64{0xffffffff}
+    ((word >> shift).bit_or((word << (I64{32} - shift)))).bit_and(I64{0xffffffff})
 }
 fn rt_sha256_byte(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, fourth: I64, length: I64, at: I64, end: I64) -> I64 {
     if (at < left_len) -> return rt_text_byte(left + at)
@@ -84,8 +84,8 @@ fn rt_sha256_byte(left: I64, left_len: I64, right: I64, right_len: I64, third: I
     if (at == length) -> return I64{128}
     if (at >= end - I64{8}) {
         shift :: (end - I64{1} - at) * I64{8}
-        if (shift == I64{0}) -> return (length & I64{31}) << I64{3}
-        return (length >> (shift - I64{3})) & I64{255}
+        if (shift == I64{0}) -> return (length.bit_and(I64{31})) << I64{3}
+        return (length >> (shift - I64{3})).bit_and(I64{255})
     }
     I64{0}
 }
@@ -137,7 +137,7 @@ fn rt_sha2_32_parts4(left: I64, left_len: I64, right: I64, right_len: I64, third
             j := I64{0}
             loop {
                 if (j >= I64{4}) -> break
-                word = (word << I64{8}) | rt_sha256_byte(left, left_len, right, right_len, third, third_len, fourth, length, off + t * I64{4} + j, end)
+                word = (word << I64{8}).bit_or(rt_sha256_byte(left, left_len, right, right_len, third, third_len, fourth, length, off + t * I64{4} + j, end))
                 j += I64{1}
             }
             rt_text_store(schedule + t * I64{8}, word)
@@ -147,9 +147,9 @@ fn rt_sha2_32_parts4(left: I64, left_len: I64, right: I64, right_len: I64, third
             if (t >= I64{64}) -> break
             x :: rt_text_word(schedule + (t - I64{15}) * I64{8})
             y :: rt_text_word(schedule + (t - I64{2}) * I64{8})
-            s0 :: rt_sha256_rotate(x, I64{7}) ~| rt_sha256_rotate(x, I64{18}) ~| (x >> I64{3})
-            s1 :: rt_sha256_rotate(y, I64{17}) ~| rt_sha256_rotate(y, I64{19}) ~| (y >> I64{10})
-            rt_text_store(schedule + t * I64{8}, (rt_text_word(schedule + (t - I64{16}) * I64{8}) + s0 + rt_text_word(schedule + (t - I64{7}) * I64{8}) + s1) & I64{0xffffffff})
+            s0 :: rt_sha256_rotate(x, I64{7}).bit_xor(rt_sha256_rotate(x, I64{18})).bit_xor((x >> I64{3}))
+            s1 :: rt_sha256_rotate(y, I64{17}).bit_xor(rt_sha256_rotate(y, I64{19})).bit_xor((y >> I64{10}))
+            rt_text_store(schedule + t * I64{8}, (rt_text_word(schedule + (t - I64{16}) * I64{8}) + s0 + rt_text_word(schedule + (t - I64{7}) * I64{8}) + s1).bit_and(I64{0xffffffff}))
             t += I64{1}
         }
         a := rt_text_word(scratch)
@@ -163,29 +163,29 @@ fn rt_sha2_32_parts4(left: I64, left_len: I64, right: I64, right_len: I64, third
         t = I64{0}
         loop {
             if (t >= I64{64}) -> break
-            s1 :: rt_sha256_rotate(e, I64{6}) ~| rt_sha256_rotate(e, I64{11}) ~| rt_sha256_rotate(e, I64{25})
-            ch :: (e & f) ~| ((e ~| I64{0xffffffff}) & g)
+            s1 :: rt_sha256_rotate(e, I64{6}).bit_xor(rt_sha256_rotate(e, I64{11})).bit_xor(rt_sha256_rotate(e, I64{25}))
+            ch :: (e.bit_and(f)).bit_xor(((e.bit_xor(I64{0xffffffff})).bit_and(g)))
             temp1 :: h + s1 + ch + rt_sha256_k(t) + rt_text_word(schedule + t * I64{8})
-            s0 :: rt_sha256_rotate(a, I64{2}) ~| rt_sha256_rotate(a, I64{13}) ~| rt_sha256_rotate(a, I64{22})
-            maj :: (a & b) ~| (a & c) ~| (b & c)
+            s0 :: rt_sha256_rotate(a, I64{2}).bit_xor(rt_sha256_rotate(a, I64{13})).bit_xor(rt_sha256_rotate(a, I64{22}))
+            maj :: (a.bit_and(b)).bit_xor((a.bit_and(c))).bit_xor((b.bit_and(c)))
             h = g
             g = f
             f = e
-            e = (d + temp1) & I64{0xffffffff}
+            e = (d + temp1).bit_and(I64{0xffffffff})
             d = c
             c = b
             b = a
-            a = (temp1 + s0 + maj) & I64{0xffffffff}
+            a = (temp1 + s0 + maj).bit_and(I64{0xffffffff})
             t += I64{1}
         }
-        rt_text_store(scratch, (rt_text_word(scratch) + a) & I64{0xffffffff})
-        rt_text_store(scratch + I64{8}, (rt_text_word(scratch + I64{8}) + b) & I64{0xffffffff})
-        rt_text_store(scratch + I64{16}, (rt_text_word(scratch + I64{16}) + c) & I64{0xffffffff})
-        rt_text_store(scratch + I64{24}, (rt_text_word(scratch + I64{24}) + d) & I64{0xffffffff})
-        rt_text_store(scratch + I64{32}, (rt_text_word(scratch + I64{32}) + e) & I64{0xffffffff})
-        rt_text_store(scratch + I64{40}, (rt_text_word(scratch + I64{40}) + f) & I64{0xffffffff})
-        rt_text_store(scratch + I64{48}, (rt_text_word(scratch + I64{48}) + g) & I64{0xffffffff})
-        rt_text_store(scratch + I64{56}, (rt_text_word(scratch + I64{56}) + h) & I64{0xffffffff})
+        rt_text_store(scratch, (rt_text_word(scratch) + a).bit_and(I64{0xffffffff}))
+        rt_text_store(scratch + I64{8}, (rt_text_word(scratch + I64{8}) + b).bit_and(I64{0xffffffff}))
+        rt_text_store(scratch + I64{16}, (rt_text_word(scratch + I64{16}) + c).bit_and(I64{0xffffffff}))
+        rt_text_store(scratch + I64{24}, (rt_text_word(scratch + I64{24}) + d).bit_and(I64{0xffffffff}))
+        rt_text_store(scratch + I64{32}, (rt_text_word(scratch + I64{32}) + e).bit_and(I64{0xffffffff}))
+        rt_text_store(scratch + I64{40}, (rt_text_word(scratch + I64{40}) + f).bit_and(I64{0xffffffff}))
+        rt_text_store(scratch + I64{48}, (rt_text_word(scratch + I64{48}) + g).bit_and(I64{0xffffffff}))
+        rt_text_store(scratch + I64{56}, (rt_text_word(scratch + I64{56}) + h).bit_and(I64{0xffffffff}))
         off += I64{64}
     }
     at := I64{0}
@@ -193,7 +193,7 @@ fn rt_sha2_32_parts4(left: I64, left_len: I64, right: I64, right_len: I64, third
     loop {
         if (at >= output_length) -> break
         word :: rt_text_word(scratch + (at / I64{4}) * I64{8})
-        rt_text_put(digest + at, (word >> (I64{24} - (at % I64{4}) * I64{8})) & I64{255})
+        rt_text_put(digest + at, (word >> (I64{24} - (at % I64{4}) * I64{8})).bit_and(I64{255}))
         at += I64{1}
     }
     // The schedule holds secret-derived words for vault callers. Wipe before

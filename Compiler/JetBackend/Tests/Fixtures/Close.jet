@@ -324,7 +324,7 @@ fn fx_close_pair_remainder_checks(generic: Bool) -> Bool Never! {
                     if op == .And {
                         a :: (constants.get(left.value).copy()) ?? next
                         b :: (constants.get(right.value).copy()) ?? next
-                        &constants.add(dst.value, a & b).drop("tracks live-bit conjunction")
+                        &constants.add(dst.value, a.bit_and(b)).drop("tracks live-bit conjunction")
                         if (origins.get(right.value).copy()) == .Val(origin) -> &origins.add(dst.value, origin).drop("tracks transferred live-bit provenance")
                     }
                 }

@@ -78,7 +78,7 @@ fn text_error_equal(left: I64, right: I64) -> Bool { jet_rt_string_eq(text_glue_
 }
 #Export(c) fn jet_rt_handle_display_FieldError(value: I64) -> I64 { jet_rt_handle_show_FieldError(value) }
 #Export(c) fn jet_rt_handle_debug_FieldError(value: I64) -> I64 { jet_rt_handle_show_FieldError(value) }
-fn text_flag(value: I64, field: I64) -> Bool { (text_glue_word(value + field) & I64{255}) != I64{0} }
+fn text_flag(value: I64, field: I64) -> Bool { (text_glue_word(value + field).bit_and(I64{255})) != I64{0} }
 #Export(c) fn jet_rt_record_new_RegexFlags(insensitive: U8, multiline: U8, dotall: U8) -> I64 {
     // CAbiRoutes11928-11929 treats every nonzero input byte as true.
     result :: jet_rt_alloc(TEXT_FLAGS_BYTES, I64{8})

@@ -62,9 +62,9 @@ fn net_equal(a: I64, b: I64, size: I64) -> Bool {
     value :: jet_rt_alloc(I64{56}, I64{8})
     rt_text_bytes_copy(value, ip, I64{24})
     ipv4 :: net_word(ip, I64{0}) == I64{4}
-    net_put(value, I64{24}, port & I64{65535})
-    net_put(value, I64{32}, if ipv4 -> I64{0} else -> flow & I64{4294967295})
-    net_put(value, I64{40}, if ipv4 -> I64{0} else -> scope & I64{4294967295})
+    net_put(value, I64{24}, port.bit_and(I64{65535}))
+    net_put(value, I64{32}, if ipv4 -> I64{0} else -> flow.bit_and(I64{4294967295}))
+    net_put(value, I64{40}, if ipv4 -> I64{0} else -> scope.bit_and(I64{4294967295}))
     net_put(value, I64{48}, I64{0})
     value
 }
@@ -82,7 +82,7 @@ fn net_load_uint(bytes: I64, width: I64) -> I64 {
     at := I64{0}
     #Unsafe("bytes lends width initialized little-endian bytes (width<=8)") {
         loop at < width {
-            result = result | (os_load_u8(wrapping(bytes + at)) << (at * I64{8}))
+            result = result.bit_or((os_load_u8(wrapping(bytes + at)) << (at * I64{8})))
             at = wrapping(at + I64{1})
         }
     }
@@ -92,12 +92,12 @@ fn net_store_uint(bytes: I64, width: I64, value: I64) {
     at := I64{0}
     #Unsafe("bytes owns width writable little-endian bytes (width<=8)") {
         loop at < width {
-            os_store_u8(wrapping(bytes + at), (value >> (at * I64{8})) & I64{255})
+            os_store_u8(wrapping(bytes + at), (value >> (at * I64{8})).bit_and(I64{255}))
             at = wrapping(at + I64{1})
         }
     }
 }
-fn net_swap16(value: I64) -> I64 { ((value & I64{255}) << I64{8}) | ((value >> I64{8}) & I64{255}) }
+fn net_swap16(value: I64) -> I64 { ((value.bit_and(I64{255})) << I64{8}).bit_or(((value >> I64{8}).bit_and(I64{255}))) }
 // Fills caller-owned 32B scratch; IPv4=16B, IPv6=28B. No heap conversion.
 #Export(c) fn jet_socket_address_encode_raw(value: I64, output: I64) -> I64 {
     net_put(output, I64{0}, I64{0})

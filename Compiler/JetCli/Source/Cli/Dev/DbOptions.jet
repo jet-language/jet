@@ -307,7 +307,7 @@ fn jet_cli_db_usage() -> String Never! {
 // Rust char::is_whitespace, decoded at one UTF-8 scalar boundary without allocation.
 fn jet_cli_db_space_at(raw: [U8], at: Int, width: Int) -> Bool Never! {
     lead :: Int.from_u8(raw[at])
-    point := if width == 1 -> lead else -> lead % (2 ^ (7 - width))
+    point := if width == 1 -> lead else -> lead % ((2).pow((7 - width)))
     loop index in 1..<width -> point = point * 64 + Int.from_u8(raw[at + index]) % 64
     point == 32 || (point >= 9 && point <= 13) || point == 133 || point == 160 || point == 5760 || (point >= 8192 && point <= 8202) || point == 8232 || point == 8233 || point == 8239 || point == 8287 || point == 12288
 }

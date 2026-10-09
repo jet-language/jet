@@ -28,17 +28,17 @@ fn rt_crypto_pbkdf2(password: I64, password_len: I64, salt: I64, salt_len: I64, 
     i := I64{0}
     loop i < (I64{64}) {
         byte :: if (i < key_len) -> rt_text_byte(key + i) else -> I64{0}
-        rt_text_put(inner_pad + i, byte ~| I64{0x36})
-        rt_text_put(outer_pad + i, byte ~| I64{0x5c})
+        rt_text_put(inner_pad + i, byte.bit_xor(I64{0x36}))
+        rt_text_put(outer_pad + i, byte.bit_xor(I64{0x5c}))
         i += I64{1}
     }
     at := I64{0}
     block := I64{1}
     loop at < length {
-        rt_text_put(counter, (block >> I64{24}) & I64{255})
-        rt_text_put(counter + I64{1}, (block >> I64{16}) & I64{255})
-        rt_text_put(counter + I64{2}, (block >> I64{8}) & I64{255})
-        rt_text_put(counter + I64{3}, block & I64{255})
+        rt_text_put(counter, (block >> I64{24}).bit_and(I64{255}))
+        rt_text_put(counter + I64{1}, (block >> I64{16}).bit_and(I64{255}))
+        rt_text_put(counter + I64{2}, (block >> I64{8}).bit_and(I64{255}))
+        rt_text_put(counter + I64{3}, block.bit_and(I64{255}))
         rt_crypto_hmac_pads3(inner_pad, outer_pad, salt, salt_len, counter, I64{4}, I64{1}, I64{0}, u, scratch)
         rt_text_bytes_copy(acc, u, I64{32})
         round := I64{1}
@@ -46,7 +46,7 @@ fn rt_crypto_pbkdf2(password: I64, password_len: I64, salt: I64, salt_len: I64, 
             rt_crypto_hmac_pads3(inner_pad, outer_pad, u, I64{32}, I64{1}, I64{0}, I64{1}, I64{0}, u, scratch)
             i = I64{0}
             loop i < (I64{32}) {
-                rt_text_put(acc + i, rt_text_byte(acc + i) ~| rt_text_byte(u + i))
+                rt_text_put(acc + i, rt_text_byte(acc + i).bit_xor(rt_text_byte(u + i)))
                 i += I64{1}
             }
             round += I64{1}

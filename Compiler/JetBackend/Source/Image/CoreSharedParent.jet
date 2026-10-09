@@ -53,7 +53,7 @@ fn core_shared_runtime_layout_decode(tree: Dyn) -> LIRLayout? Never! {
     size :: x64_execution_int(core_shared_abi_field(tree, "size") ?? return None) ?? return None
     align :: x64_execution_int(core_shared_abi_field(tree, "align") ?? return None) ?? return None
     name :: x64_execution_string(core_shared_abi_field(tree, "class") ?? return None) ?? return None
-    if size <= 0 || align <= 0 || (align & (align - 1)) != 0 -> return None
+    if size <= 0 || align <= 0 || (align.bit_and((align - 1))) != 0 -> return None
     class :: if {
         name == "Integer" -> LIRABIClass.Integer
         name == "Pointer" -> LIRABIClass.Pointer
@@ -98,7 +98,7 @@ struct CoreSharedRuntimeCallResult {
 fn core_shared_runtime_word_layout(layout: LIRLayout) -> Bool Never! {
     (layout.class == LIRABIClass.Integer || layout.class == LIRABIClass.Pointer)
         && (layout.size == 1 || layout.size == 2 || layout.size == 4 || layout.size == 8)
-        && layout.align > 0 && layout.align <= 8 && (layout.align & (layout.align - 1)) == 0
+        && layout.align > 0 && layout.align <= 8 && (layout.align.bit_and((layout.align - 1))) == 0
 }
 fn core_shared_runtime_call_error(runtime: CoreSharedParentRuntime, symbol: String, arity: Int) -> String Never! {
     if runtime.receipt_identity == "" || runtime.library_identity == "" -> return "RuntimeLibraryMissingAdmission: {symbol}"
@@ -130,7 +130,7 @@ fn core_shared_runtime_call(runtime: CoreSharedParentRuntime, symbol: String, ar
     }
     word := x64_native_call(runtime.symbols.get(symbol) ?? panic("validated runtime symbol disappeared"), arity, first, second, third)
     if row.result == .Val(output) {
-        if output.size < 8 -> word &= (1 << (output.size * 8)) - 1
+        if output.size < 8 -> word = word.bit_and((1 << (output.size * 8)) - 1)
     } else { word = 0 }
     CoreSharedRuntimeCallResult{word: word, refusal_key: ""}
 }
@@ -263,13 +263,13 @@ fn core_shared_parent_getter(parent: &CoreSharedParent, attachment: CoreSharedPa
     stopped := 0
     #Unsafe("the admitted canonical control surrounds the producer's checked no-argument System V getter and its owned Shared result; the Core image remains process-pinned") {
         started = os_call_address_three(guard.value.begin, -1, -1, 0)
-        if (started & 255) != 0 {
+        if (started.bit_and(255)) != 0 {
             shared = os_call_address(getter, 0)
             stopped = os_call_address(guard.value.status, 0)
             _ := os_call_address(guard.value.end, 0)
         }
     }
-    if (started & 255) == 0 -> return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedGetterControlRefused"}
+    if (started.bit_and(255)) == 0 -> return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedGetterControlRefused"}
     if stopped != 0 -> return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedGetterStopped: {stopped}"}
     if shared == 0 -> return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedGetterReturnedNull"}
     CoreSharedParentGetterResult{shared: shared, code: "", refusal_key: ""}

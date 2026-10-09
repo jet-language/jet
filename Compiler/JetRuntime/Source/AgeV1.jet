@@ -77,7 +77,7 @@ fn rt_age_stream_nonce(counter: I64, last: Bool, nonce: I64) {
     i := I64{3}
     loop {
         if (i >= I64{11}) -> break
-        rt_text_put(nonce + i, (counter >> ((I64{10} - i) * I64{8})) & I64{255})
+        rt_text_put(nonce + i, (counter >> ((I64{10} - i) * I64{8})).bit_and(I64{255}))
         i += I64{1}
     }
     rt_text_put(nonce + I64{11}, if last -> I64{1} else -> I64{0})
@@ -104,8 +104,8 @@ fn rt_age_body_end(input: I64, length: I64, start: I64) -> I64 {
             i += I64{1}
         }
         rem :: (end - at) % I64{4}
-        if (rem == I64{2} && (rt_age_b64_value(rt_text_byte(input + end - I64{1})) & I64{15}) != I64{0}) -> return I64{-1}
-        if (rem == I64{3} && (rt_age_b64_value(rt_text_byte(input + end - I64{1})) & I64{3}) != I64{0}) -> return I64{-1}
+        if (rem == I64{2} && (rt_age_b64_value(rt_text_byte(input + end - I64{1})).bit_and(I64{15})) != I64{0}) -> return I64{-1}
+        if (rem == I64{3} && (rt_age_b64_value(rt_text_byte(input + end - I64{1})).bit_and(I64{3})) != I64{0}) -> return I64{-1}
         width :: end - at
         at = end + I64{1}
         if (width < I64{64}) -> return at

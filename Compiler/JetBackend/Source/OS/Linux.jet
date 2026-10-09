@@ -852,9 +852,9 @@ fn os_stat_packed_i64(number: I64, object: I64, output: I64) -> I64 {
 fn os_stat_facts_i64(number: I64, object: I64, output: I64) -> I64 {
     #Unsafe("packed Linux 32-bit fields become independent portable machine words without any allocation") {
         result :: os_stat_packed_i64(number, object, output)
-        os_store_i64(wrapping(output + I64{16}), os_load_i64(wrapping(output + I64{16})) & I64{4294967295})
-        os_store_i64(wrapping(output + I64{32}), (os_load_i64(wrapping(output + I64{32})) >> I64{32}) & I64{4294967295})
-        os_store_i64(wrapping(output + I64{40}), os_load_i64(wrapping(output + I64{40})) & I64{4294967295})
+        os_store_i64(wrapping(output + I64{16}), os_load_i64(wrapping(output + I64{16})).bit_and(I64{4294967295}))
+        os_store_i64(wrapping(output + I64{32}), (os_load_i64(wrapping(output + I64{32})) >> I64{32}).bit_and(I64{4294967295}))
+        os_store_i64(wrapping(output + I64{40}), os_load_i64(wrapping(output + I64{40})).bit_and(I64{4294967295}))
         return result
     }
 }
@@ -986,7 +986,7 @@ fn x64_value_unsigned_bytes(address: Int, size: Int) -> Int {
     if error != "" -> panic(error)
     value := 0
     #Unsafe("width and address range are checked; the caller retains the initialized slot's physical permit") {
-        loop index in 0..<size -> value |= os_load_byte(address + index) << (8 * index)
+        loop index in 0..<size -> value = value.bit_or(os_load_byte(address + index) << (8 * index))
     }
     value
 }
@@ -1023,13 +1023,13 @@ fn x64_native_slot_write(address: Int, size: Int, value: Int) -> String {
     bits :: if value >= 9223372036854775808 -> value - 18446744073709551616 else -> value
     #Unsafe("the caller owns exactly size writable bytes under the native payload permit; width and value were checked above") {
         if size == 8 -> os_store_word(address, bits)
-        else -> loop index in 0..<size -> os_store_byte(address + index, (bits >> (8 * index)) & 255)
+        else -> loop index in 0..<size -> os_store_byte(address + index, (bits >> (8 * index)).bit_and(255))
     }
     ""
 }
 fn x64_native_allocation_error(size: Int, align: Int) -> String Never! {
     if size <= 0 || size > 9223372036854775807 -> return "NativeAllocationSizeInvalid: {size}"
-    if align <= 0 || align > 9223372036854775807 || (align & (align - 1)) != 0 -> return "NativeAllocationAlignmentInvalid: {align}"
+    if align <= 0 || align > 9223372036854775807 || (align.bit_and((align - 1))) != 0 -> return "NativeAllocationAlignmentInvalid: {align}"
     ""
 }
 // Allocate and release addresses are resolved by the caller's one admitted

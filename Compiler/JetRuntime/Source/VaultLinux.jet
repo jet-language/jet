@@ -33,7 +33,7 @@ fn vault_linux_close(fd: I64) {
 // name is a borrowed NUL path; how exclusively borrows 24 writable bytes.
 // Seed flags and resolve bits are literal policy: no openat fallback on failure.
 fn vault_linux_openat(dirfd: I64, name: I64, flags: I64, mode: I64, how: I64) -> I64 {
-    rt_text_store(how, flags | VAULT_O_NOFOLLOW | VAULT_O_CLOEXEC)
+    rt_text_store(how, flags.bit_or(VAULT_O_NOFOLLOW).bit_or(VAULT_O_CLOEXEC))
     rt_text_store(how + I64{8}, mode)
     rt_text_store(how + I64{16}, VAULT_RESOLVE)
     trap_syscall(I64{437}, dirfd, name, how, I64{24}, I64{0}, I64{0})
@@ -87,12 +87,12 @@ fn vault_linux_dir_at_root(root: I64, out: I64) -> I64 {
         jet_rt_free(scratch, VAULT_STAT_BYTES + I64{24}, I64{8})
         return error
     }
-    mode :: rt_text_word(scratch + VAULT_STAT_MODE) & I64{4294967295}
-    uid :: rt_text_word(scratch + VAULT_STAT_UID) & I64{4294967295}
+    mode :: rt_text_word(scratch + VAULT_STAT_MODE).bit_and(I64{4294967295})
+    uid :: rt_text_word(scratch + VAULT_STAT_UID).bit_and(I64{4294967295})
     user :: trap_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     // Seed authority_identity also rejects an unavailable session identity.
     session :: trap_syscall(I64{124}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-    if (session < I64{0} || (mode & I64{61440}) != I64{16384} || uid != user || (mode & I64{18}) != I64{0}) {
+    if (session < I64{0} || (mode.bit_and(I64{61440})) != I64{16384} || uid != user || (mode.bit_and(I64{18})) != I64{0}) {
         vault_linux_close(dir_fd)
         jet_rt_free(scratch, VAULT_STAT_BYTES + I64{24}, I64{8})
         return vault_error_new(I64{7}, I64{0}, I64{0})
@@ -477,7 +477,7 @@ fn vault_identity_read_at_root(root: I64, out: I64) -> I64 {
 fn vault_linux_plain_open_at(dir: I64, path: I64, flags: I64, mode: I64) -> I64 {
     file := I64{-4}
     loop file == (I64{-4}) {
-        file = trap_syscall(I64{257}, dir, path, flags | VAULT_O_CLOEXEC, mode, I64{0}, I64{0})
+        file = trap_syscall(I64{257}, dir, path, flags.bit_or(VAULT_O_CLOEXEC), mode, I64{0}, I64{0})
     }
     file
 }
@@ -487,9 +487,9 @@ fn vault_linux_plain_open(path: I64) -> I64 {
 // Reuse Display.jet's unsigned split and final integer-digit writer directly,
 // avoiding a temporary Text owner/copy for decimal path and lock fields.
 fn vault_decimal_put(out: I64, value: I64) -> I64 {
-    half :: (value >> I64{1}) & I64{9223372036854775807}
+    half :: (value >> I64{1}).bit_and(I64{9223372036854775807})
     quotient :: half /% I64{5}
-    remainder :: (half % I64{5}) * I64{2} + (value & I64{1})
+    remainder :: (half % I64{5}) * I64{2} + (value.bit_and(I64{1}))
     if (quotient == I64{0}) {
         rt_text_put(out, I64{48} + remainder)
         return I64{1}
@@ -587,7 +587,7 @@ fn vault_lock_key(bytes: I64, length: I64, first: I64, second: I64, count: I64) 
     at := I64{0}
     loop at < count {
         word :: if (at < I64{8}) -> first else -> second
-        if (rt_text_byte(bytes + at) != ((word >> ((at % I64{8}) * I64{8})) & I64{255})) -> return false
+        if (rt_text_byte(bytes + at) != ((word >> ((at % I64{8}) * I64{8})).bit_and(I64{255}))) -> return false
         at += I64{1}
     }
     true
@@ -597,7 +597,7 @@ fn vault_lock_hex_equal(text: I64, length: I64, raw: I64, count: I64) -> Bool {
     at := I64{0}
     loop at < length {
         byte :: rt_text_byte(raw + at /% I64{2})
-        nibble :: if (at % I64{2} == I64{0}) -> byte >> I64{4} else -> byte & I64{15}
+        nibble :: if (at % I64{2} == I64{0}) -> byte >> I64{4} else -> byte.bit_and(I64{15})
         expected :: if (nibble < I64{10}) -> nibble + I64{48} else -> nibble + I64{87}
         if (rt_text_byte(text + at) != expected) -> return false
         at += I64{1}
@@ -679,7 +679,7 @@ fn vault_hex_put(out: I64, raw: I64, count: I64) {
     at := I64{0}
     loop at < count * (I64{2}) {
         byte :: rt_text_byte(raw + at /% I64{2})
-        nibble :: if (at % I64{2} == I64{0}) -> byte >> I64{4} else -> byte & I64{15}
+        nibble :: if (at % I64{2} == I64{0}) -> byte >> I64{4} else -> byte.bit_and(I64{15})
         rt_text_put(out + at, if (nibble < I64{10}) -> nibble + I64{48} else -> nibble + I64{87})
         at += I64{1}
     }
@@ -843,9 +843,9 @@ fn vault_recover_stale_inner(root: I64, dir: I64, hash: I64, revision: I64, repo
     user :: trap_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     session :: trap_syscall(I64{124}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     if (session < I64{0}) -> return vault_error_new(I64{7}, I64{0}, I64{0})
-    mode :: rt_text_word(scratch + VAULT_STAT_MODE) & I64{4294967295}
-    uid :: rt_text_word(scratch + VAULT_STAT_UID) & I64{4294967295}
-    if ((mode & I64{61440}) != I64{32768} || uid != user) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    mode :: rt_text_word(scratch + VAULT_STAT_MODE).bit_and(I64{4294967295})
+    uid :: rt_text_word(scratch + VAULT_STAT_UID).bit_and(I64{4294967295})
+    if ((mode.bit_and(I64{61440})) != I64{32768} || uid != user) -> return vault_error_new(I64{6}, I64{0}, I64{0})
     if (trap_syscall(I64{228}, I64{0}, scratch + I64{144}, I64{0}, I64{0}, I64{0}, I64{0}) != I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
     now :: rt_text_word(scratch + I64{144})
     nanos :: rt_text_word(scratch + I64{152})
@@ -933,12 +933,12 @@ fn vault_recover_stale_lock(root: I64, dir: I64, hash: I64, revision: I64, repo:
 fn vault_uint_hex_put(out: I64, value: I64) -> I64 {
     shift := I64{60}
     loop {
-        if (shift == I64{0} || ((value >> shift) & I64{15}) != I64{0}) -> break
+        if (shift == I64{0} || ((value >> shift).bit_and(I64{15})) != I64{0}) -> break
         shift -= I64{4}
     }
     at := I64{0}
     loop {
-        nibble :: (value >> shift) & I64{15}
+        nibble :: (value >> shift).bit_and(I64{15})
         rt_text_put(out + at, if (nibble < I64{10}) -> nibble + I64{48} else -> nibble + I64{87})
         at += I64{1}
         if (shift == I64{0}) -> break

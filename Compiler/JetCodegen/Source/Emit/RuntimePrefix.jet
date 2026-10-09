@@ -1050,7 +1050,7 @@ fn jet_rust_prefix_identity_field(value: String) -> String Never! {
     header := [U8]{}
     shift := 56
     loop shift >= 0 {
-        &header.push(U8{(length >> shift) & 255})
+        &header.push(U8{(length >> shift).bit_and(255)})
         shift -= 8
     }
     prefix :: String.from_bytes(header) ?? ""

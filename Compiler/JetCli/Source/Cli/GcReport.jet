@@ -150,7 +150,7 @@ fn jet_cli_gc_read(path: String) -[FS, Env, Time.Wait]> String JetCLIGcError! {
     reader :: held.handle.open(jet_cli_file_name(path)) ?? return Err(jet_cli_gc_error("unsafe", "cannot securely open GC trace: {jet_cli_io_error_text(err)}"))
     metadata :: reader.stat() ?? return Err(jet_cli_gc_error("unsafe", "cannot inspect GC trace: {jet_cli_io_error_text(err)}"))
     if !metadata.is_file -> return Err(jet_cli_gc_error("unsafe", "GC trace is not a regular file"))
-    if cli_sys.is_unix() && (metadata.mode & 0o077) != 0 -> return Err(jet_cli_gc_error("unsafe", "GC trace permissions expose runtime state"))
+    if cli_sys.is_unix() && (metadata.mode.bit_and(0o077)) != 0 -> return Err(jet_cli_gc_error("unsafe", "GC trace permissions expose runtime state"))
     if cli_sys.is_linux() {
         if cli_files.stat("/proc/{cli_sys.pid()}") == .Ok(process) {
             if metadata.owner != process.owner -> return Err(jet_cli_gc_error("unsafe", "GC trace belongs to another user"))

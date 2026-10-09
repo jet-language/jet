@@ -107,8 +107,8 @@ fn jet_cli_complexity_function(function: Func, reports: &[JetCLIComplexityReport
 
 fn jet_cli_complexity_boolean_operators(expression: Expr) -> Int Never! {
     if expression == {
-        .Binary(.And, left, right, _) -> 1 | jet_cli_complexity_boolean_operators(left) | jet_cli_complexity_boolean_operators(right)
-        .Binary(.Or, left, right, _) -> 2 | jet_cli_complexity_boolean_operators(left) | jet_cli_complexity_boolean_operators(right)
+        .Binary(.And, left, right, _) -> (1).bit_or(jet_cli_complexity_boolean_operators(left)).bit_or(jet_cli_complexity_boolean_operators(right))
+        .Binary(.Or, left, right, _) -> (2).bit_or(jet_cli_complexity_boolean_operators(left)).bit_or(jet_cli_complexity_boolean_operators(right))
         .Paren(inner, _) -> jet_cli_complexity_boolean_operators(inner)
         else -> 0
     }

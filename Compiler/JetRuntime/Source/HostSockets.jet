@@ -19,7 +19,7 @@ fn net_socket_call(state: I64, number: I64, a2: I64, a3: I64, a4: I64, a5: I64, 
 }
 #Export(c) fn jet_socket_create_raw(family: I64, kind: I64, protocol: I64, error: I64) -> I64 {
     if scheduler_world_refused() -> return I64{0}
-    result :: host_call(I64{41}, net_socket_domain(family), (kind & I64{15}) | I64{526336}, protocol)
+    result :: host_call(I64{41}, net_socket_domain(family), (kind.bit_and(I64{15})).bit_or(I64{526336}), protocol)
     _ := fd_error(result, error)
     if (result < I64{0}) -> I64{0} else -> jet_fd_adopt_unbuffered_raw(result, I64{0})
 }

@@ -434,7 +434,7 @@ fn core_shared_binding(program: MIRProgram, lowered: LIRLowering, manifest: Core
 
 #Test("canonical absent-payload display name participates in the sealed row") {
     ty :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})
-    row :: CoreSharedNativeLayout{type_key: lower_mono_fingerprint(ty), nominal_key: "", display_name: mir_type_display_name(ty), representation: "Word", kind: 3 | (8 << 32), stride: 1, payload_size: 1, align: 1, box_size: 0, clone_identity: "", drop_identity: "", child_keys: [String]{}, members: [CoreSharedLayoutMember]{}, variants: [CoreSharedLayoutVariant]{}}
+    row :: CoreSharedNativeLayout{type_key: lower_mono_fingerprint(ty), nominal_key: "", display_name: mir_type_display_name(ty), representation: "Word", kind: (3).bit_or((8 << 32)), stride: 1, payload_size: 1, align: 1, box_size: 0, clone_identity: "", drop_identity: "", child_keys: [String]{}, members: [CoreSharedLayoutMember]{}, variants: [CoreSharedLayoutVariant]{}}
     encoded :: core_shared_layout_json(row)
     changed := row.copy()
     changed.display_name = "another display name"

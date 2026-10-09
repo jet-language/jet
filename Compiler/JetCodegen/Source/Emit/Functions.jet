@@ -498,7 +498,7 @@ fn jet_rust_emit_numbered_slot_names(line: String) -> [String] Never! {
             // The digits must end the identifier: a later byte of the part
             // that is no identifier byte, or the end of the line.
             ends :: if end < bytes.len() -> !jet_rust_emit_identifier_byte(bytes[end]) else -> index + 1 == parts.len()
-            if end > width && ends -> &names.push("__jet_{String.from_bytes(~(bytes[0..<end])) ?? ""}")
+            if end > width && ends -> &names.push("__jet_{String.from_bytes((bytes[0..<end]).copy()) ?? ""}")
         }
         joined = if bytes.len() > 0 -> jet_rust_emit_identifier_byte(bytes[bytes.len() - 1]) else -> index > 0
     }
@@ -839,7 +839,7 @@ fn jet_rust_emit_fold_identifiers(text: String) -> JetRustEmitFoldIdentifiers Ne
             bytes :: parts[index].bytes()
             length := 0
             loop length < bytes.len() && ((bytes[length] >= (U8{48}) && bytes[length] <= (U8{57})) || (bytes[length] >= (U8{65}) && bytes[length] <= (U8{90})) || (bytes[length] >= (U8{97}) && bytes[length] <= (U8{122})) || bytes[length] == (U8{95})) -> length += 1
-            if length > 0 -> name = "{name}{String.from_bytes(~(bytes[0..<length])) ?? ""}"
+            if length > 0 -> name = "{name}{String.from_bytes((bytes[0..<length]).copy()) ?? ""}"
             if length < bytes.len() || index + 1 >= parts.len() {
                 last :: if bytes.len() > 0 -> bytes[bytes.len() - 1] else -> U8{95}
                 opens = !(jet_rust_emit_identifier_byte(last) || last == (U8{46}))
@@ -866,7 +866,7 @@ fn jet_rust_emit_fold_index_add(tree: &[Int:Int], row: Int, line: Int, count: In
     at := line + 1
     loop at <= size {
         &tree.add(base + at, (tree.get(base + at) ?? 0) + count).drop("replace prefix count")
-        at += at & (0 - at)
+        at += at.bit_and((0 - at))
     }
 }
 
@@ -886,7 +886,7 @@ fn jet_rust_emit_fold_index_prefix(tree: [Int:Int], row: Int, end: Int, size: In
     at := end
     loop at > 0 {
         count += tree.get(base + at) ?? 0
-        at -= at & (0 - at)
+        at -= at.bit_and((0 - at))
     }
     count
 }
@@ -905,7 +905,7 @@ fn jet_rust_emit_fold_index_next(tree: [Int:Int], row: Int, from: Int, size: Int
         candidate :: at + step
         if candidate <= size {
             stored :: tree.get(base + candidate) ?? 0
-            count :: if inverse -> (candidate & (0 - candidate)) - stored else -> stored
+            count :: if inverse -> (candidate.bit_and((0 - candidate))) - stored else -> stored
             if count < wanted {
                 at = candidate
                 wanted -= count
@@ -1981,7 +1981,7 @@ fn jet_rust_emit_parameter_owns_view(function: MIRFunction, parameter: MIRParam)
 fn jet_rust_emit_reference_lifetime(rendered: String, lifetime: String) -> String Never! {
     assert(rendered.starts_with("&"))
     bytes :: rendered.bytes()
-    "&{lifetime} {String.from_bytes(~(bytes[1..<bytes.len()])) ?? ""}"
+    "&{lifetime} {String.from_bytes((bytes[1..<bytes.len()]).copy()) ?? ""}"
 }
 
 fn jet_rust_emit_function_signature(ctx: &JetRustEmitContext, function: MIRFunction) -> String Never! {

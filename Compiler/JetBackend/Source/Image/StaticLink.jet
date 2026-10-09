@@ -231,12 +231,12 @@ fn link_u8(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
 
 fn link_u16(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
     row :: bufs[b]
-    Int.from_u8(row[at]) | (Int.from_u8(row[at + 1]) << 8)
+    Int.from_u8(row[at]).bit_or((Int.from_u8(row[at + 1]) << 8))
 }
 
 fn link_u32(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
     row :: bufs[b]
-    Int.from_u8(row[at]) | (Int.from_u8(row[at + 1]) << 8) | (Int.from_u8(row[at + 2]) << 16) | (Int.from_u8(row[at + 3]) << 24)
+    Int.from_u8(row[at]).bit_or((Int.from_u8(row[at + 1]) << 8)).bit_or((Int.from_u8(row[at + 2]) << 16)).bit_or((Int.from_u8(row[at + 3]) << 24))
 }
 
 fn link_u64(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
@@ -269,11 +269,11 @@ fn link_name_has(bufs: [[U8]], b: Int, at: Int, prefix: String, whole: Bool) -> 
 }
 
 fn link_put32(out: &[U8], at: Int, value: Int) Never! {
-    loop k in 0..<4 -> out[at + k] = U8{(value >> (8 * k)) & 255}
+    loop k in 0..<4 -> out[at + k] = U8{(value >> (8 * k)).bit_and(255)}
 }
 
 fn link_put64(out: &[U8], at: Int, value: Int) Never! {
-    loop k in 0..<8 -> out[at + k] = U8{(value >> (8 * k)) & 255}
+    loop k in 0..<8 -> out[at + k] = U8{(value >> (8 * k)).bit_and(255)}
 }
 
 fn link_align(value: Int, align: Int) -> Int Never! {
@@ -347,14 +347,14 @@ fn link_class(c: LinkContext, obj: Int, s: Int) -> Int Never! {
     kind :: link_u32(c.bufs, b, h + 4)
     flags :: link_u64(c.bufs, b, h + 8)
     name :: c.obj_names[obj] + link_u32(c.bufs, b, h)
-    if (flags & 2) == 0 || kind == LINK_SHT_NOTE || kind == LINK_SHT_RELA -> return LINK_DROP
+    if (flags.bit_and(2)) == 0 || kind == LINK_SHT_NOTE || kind == LINK_SHT_RELA -> return LINK_DROP
     if kind == LINK_SHT_X86_64_UNWIND || link_name_has(c.bufs, b, name, ".eh_frame", true) -> return LINK_EH
-    if (flags & 0x400) != 0 -> return if kind == LINK_SHT_NOBITS -> LINK_TBSS else -> LINK_TDATA
+    if (flags.bit_and(0x400)) != 0 -> return if kind == LINK_SHT_NOBITS -> LINK_TBSS else -> LINK_TDATA
     if kind == LINK_SHT_PREINIT_ARRAY || link_name_has(c.bufs, b, name, ".preinit_array", false) -> return LINK_PREINIT
     if kind == LINK_SHT_INIT_ARRAY || link_name_has(c.bufs, b, name, ".init_array", false) -> return LINK_INIT
     if kind == LINK_SHT_FINI_ARRAY || link_name_has(c.bufs, b, name, ".fini_array", false) -> return LINK_FINI
-    if (flags & 4) != 0 -> return LINK_TEXT
-    if (flags & 1) != 0 {
+    if (flags.bit_and(4)) != 0 -> return LINK_TEXT
+    if (flags.bit_and(1)) != 0 {
         if kind == LINK_SHT_NOBITS -> return LINK_BSS
         if link_name_has(c.bufs, b, name, ".data.rel.ro", false) -> return LINK_RELRO
         return LINK_DATA
@@ -560,7 +560,7 @@ fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String)
             // `.e...`: an `.eh_frame` an assembler typed PROGBITS.
             &eh.push(k)
         }
-        if kind == LINK_SHT_INIT_ARRAY || kind == LINK_SHT_FINI_ARRAY || kind == LINK_SHT_PREINIT_ARRAY || (link_u32(c.bufs, b, h + 8) & 0x200000) != 0 {
+        if kind == LINK_SHT_INIT_ARRAY || kind == LINK_SHT_FINI_ARRAY || kind == LINK_SHT_PREINIT_ARRAY || (link_u32(c.bufs, b, h + 8).bit_and(0x200000)) != 0 {
             &c.roots.push(first + k)
         }
     }
@@ -588,7 +588,7 @@ fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String)
     loop k in groups {
         h :: shoff + 64 * k
         at :: base + link_u64(c.bufs, b, h + 24)
-        if (link_u32(c.bufs, b, at) & 1) == 0 -> next
+        if (link_u32(c.bufs, b, at).bit_and(1)) == 0 -> next
         signature :: link_cstr(c.bufs, b, strtab + link_u32(c.bufs, b, symtab_at + 24 * link_u32(c.bufs, b, h + 44)))
         if c.comdats.get(signature) == None {
             &c.comdats.add(signature, true).drop("checked absent above")
@@ -828,7 +828,7 @@ fn link_synth() -> LinkSynth Never! {
 }
 
 fn link_synth_code(s: &LinkSynth, bytes: [Int]) Never! {
-    loop byte in bytes -> &s.text.push(U8{byte & 255})
+    loop byte in bytes -> &s.text.push(U8{byte.bit_and(255)})
 }
 
 // A rel32 field naming `name` at the end of the text so far.
@@ -884,7 +884,7 @@ fn link_synth_object(s: LinkSynth) -> [U8] Never! {
     rela := [U8]{}
     loop (k, at) in s.rel_at {
         elf64_u64(&rela, at)
-        elf64_u64(&rela, ((indexes.get(s.rel_names[k]) ?? 0) << 32) | s.rel_types[k])
+        elf64_u64(&rela, ((indexes.get(s.rel_names[k]) ?? 0) << 32).bit_or(s.rel_types[k]))
         elf64_u64(&rela, s.rel_addends[k])
     }
     shstrtab := [U8]{U8{0}}
@@ -917,7 +917,7 @@ fn link_synth_object(s: LinkSynth) -> [U8] Never! {
     }
     elf64_pad(&bytes, 8)
     shoff :: bytes.len()
-    loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{(shoff >> (8 * shift)) & 255}
+    loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{(shoff >> (8 * shift)).bit_and(255)}
     elf64_section_header(&bytes, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     elf64_section_header(&bytes, name_at[1], 1, 6, offsets[0], s.text.len(), 0, 0, 16, 0)
     elf64_section_header(&bytes, name_at[2], 1, 3, offsets[1], s.data.len(), 0, 0, 8, 0)
@@ -1179,18 +1179,18 @@ fn link_got_form(c: LinkContext, kind: Int, obj: Int, s: Int, off: Int, symbol: 
     opcode :: link_u8(c.bufs, b, at - 2)
     modrm :: link_u8(c.bufs, b, at - 1)
     form := 0
-    if opcode == 0x8b && (modrm & 0xc7) == 0x05 {
+    if opcode == 0x8b && (modrm.bit_and(0xc7)) == 0x05 {
         rex :: link_u8(c.bufs, b, at - 3)
-        if (rex & 0xf8) == 0x48 {
+        if (rex.bit_and(0xf8)) == 0x48 {
             form = if kind == LINK_R_REX_GOTPCRELX -> 4 else -> 1
-        } else if kind == LINK_R_GOTPCRELX && (rex & 0xf0) != 0x40 {
+        } else if kind == LINK_R_GOTPCRELX && (rex.bit_and(0xf0)) != 0x40 {
             form = 1
         }
     } else if kind == LINK_R_GOTPCRELX && opcode == 0xff && (modrm == 0x15 || modrm == 0x25) {
         form = if modrm == 0x15 -> 2 else -> 3
     }
     // Only code is rewritten, and never for an absolute symbol.
-    if form == 0 || (link_sec_flags(c, obj, s) & 4) == 0 || link_target_absolute(c, obj, symbol) -> return 0
+    if form == 0 || (link_sec_flags(c, obj, s).bit_and(4)) == 0 || link_target_absolute(c, obj, symbol) -> return 0
     form
 }
 
@@ -1476,10 +1476,10 @@ fn link_apply_got(c: &LinkContext, out: &[U8], obj: Int, s: Int, kind: Int, off:
     } else {
         // REX.W (REX.R becomes REX.B) C7 /0: mov reg, imm32.
         rex :: Int.from_u8(out[pos - 3])
-        reg :: (Int.from_u8(out[pos - 1]) >> 3) & 7
-        out[pos - 3] = U8{0x48 | ((rex >> 2) & 1)}
+        reg :: (Int.from_u8(out[pos - 1]) >> 3).bit_and(7)
+        out[pos - 3] = U8{(0x48).bit_or(((rex >> 2).bit_and(1)))}
         out[pos - 2] = U8{0xc7}
-        out[pos - 1] = U8{0xc0 | reg}
+        out[pos - 1] = U8{(0xc0).bit_or(reg)}
         link_put32(&out, pos, value)
     }
     false
@@ -1576,13 +1576,13 @@ fn link_apply(c: &LinkContext, out: &[U8], obj: Int, s: Int, at: Int, off: Int, 
         rex :: Int.from_u8(out[pos - 3])
         opcode :: Int.from_u8(out[pos - 2])
         modrm :: Int.from_u8(out[pos - 1])
-        if (rex != 0x48 && rex != 0x4c) || (opcode != 0x8b && opcode != 0x03) || (modrm & 0xc7) != 0x05 {
+        if (rex != 0x48 && rex != 0x4c) || (opcode != 0x8b && opcode != 0x03) || (modrm.bit_and(0xc7)) != 0x05 {
             link_reloc_error(&c, s, off, "unrecognized TLS initial-exec instruction")
             return false
         }
         out[pos - 3] = U8{if rex == 0x4c -> 0x49 else -> 0x48}
         out[pos - 2] = U8{if opcode == 0x8b -> 0xc7 else -> 0x81}
-        out[pos - 1] = U8{0xc0 | ((modrm >> 3) & 7)}
+        out[pos - 1] = U8{(0xc0).bit_or(((modrm >> 3).bit_and(7)))}
         link_put32(&out, pos, link_tpoff(c, target) + addend + 4)
         return false
     }
@@ -1780,7 +1780,7 @@ fn link_debug_sections(c: &LinkContext) -> LinkDebug Never! {
         first :: c.obj_first_section[obj].copy()
         loop k in 1..<c.obj_count[obj] {
             s :: first + k
-            if link_sec_type(c, obj, s) != LINK_SHT_PROGBITS || (link_sec_flags(c, obj, s) & 0x802) != 0 -> next
+            if link_sec_type(c, obj, s) != LINK_SHT_PROGBITS || (link_sec_flags(c, obj, s).bit_and(0x802)) != 0 -> next
             name_at :: link_sec_name(c, obj, s)
             if !link_name_has(c.bufs, b, name_at, ".debug_", false) -> next
             name :: link_cstr(c.bufs, b, name_at)
@@ -1881,7 +1881,7 @@ fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDe
         loop k in 1..<c.obj_first_global[obj] {
             at :: link_sym_at(c, obj, k)
             info :: link_u8(c.bufs, b, at + 4)
-            if (info & 15) != 1 && (info & 15) != 2 -> next
+            if (info.bit_and(15)) != 1 && (info.bit_and(15)) != 2 -> next
             name_offset :: link_u32(c.bufs, b, at)
             if name_offset == 0 -> next
             s :: link_sym_shndx(c, obj, k)
@@ -1900,7 +1900,7 @@ fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDe
         if class == LINK_TDATA || class == LINK_TBSS -> next
         bind :: if c.g_weak_def[g] -> 2 else -> 1
         kind :: if class == LINK_TEXT -> 2 else -> 1
-        link_image_symbol(&symtab, &strtab, c.g_name[g], (bind << 4) | kind, header, link_global_addr(c, g), c.g_size[g])
+        link_image_symbol(&symtab, &strtab, c.g_name[g], (bind << 4).bit_or(kind), header, link_global_addr(c, g), c.g_size[g])
     }
     elf64_pad(&out, 8)
     symtab_at :: out.len()
@@ -1937,8 +1937,8 @@ fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDe
     count :: headers.len() + 1
     fields :: [Int]{64, count, count - 1}
     loop (index, value) in fields {
-        out[58 + 2 * index] = U8{value & 255}
-        out[59 + 2 * index] = U8{(value >> 8) & 255}
+        out[58 + 2 * index] = U8{value.bit_and(255)}
+        out[59 + 2 * index] = U8{(value >> 8).bit_and(255)}
     }
 }
 
@@ -2090,7 +2090,7 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], request: ^X64ResidentLi
             object :: c.g_obj[final]
             section :: c.g_section[final]
             if c.obj_buffer[object] != wanted.runtime_input -> return link_resident_failure(^[String]{"resident export `{symbol}` is not defined by the designated runtime input"})
-            if (link_sec_flags(c, object, section) & 4) == 0 -> return link_resident_failure(^[String]{"resident export `{symbol}` is not executable code"})
+            if (link_sec_flags(c, object, section).bit_and(4)) == 0 -> return link_resident_failure(^[String]{"resident export `{symbol}` is not executable code"})
             section_size :: link_sec_size(c, object, section)
             offset :: c.g_value[final]
             size :: c.g_size[final]

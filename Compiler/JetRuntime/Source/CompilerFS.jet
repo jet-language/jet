@@ -154,7 +154,7 @@ fn compiler_fs_bytes_take(bytes: I64, capacity: I64, length: I64, output: I64, l
                 // create_dir_all accepts existing directories, not existing files.
                 #Unsafe("the prefix remains terminated and scratch lends 128 writable portable stat-fact bytes") {
                     stat :: os_stat_facts_i64(I64{4}, name, scratch)
-                    if (stat < I64{0} || (rt_text_word(scratch + I64{16}) & I64{61440}) != I64{16384}) -> failure = result
+                    if (stat < I64{0} || (rt_text_word(scratch + I64{16}).bit_and(I64{61440})) != I64{16384}) -> failure = result
                 }
             }
             rt_text_put(name + at, saved)
@@ -254,7 +254,7 @@ fn compiler_fs_time_ns(seconds: I64, nanos: I64) -> I64 {
     }
     jet_fd_created_raw(reader, birth, errno)
     mode :: rt_text_word(facts + I64{16})
-    bits :: mode & I64{61440}
+    bits :: mode.bit_and(I64{61440})
     kind :: if {
         (bits == I64{32768}) -> I64{0}
         (bits == I64{16384}) -> I64{1}
@@ -268,8 +268,8 @@ fn compiler_fs_time_ns(seconds: I64, nanos: I64) -> I64 {
     row :: jet_rt_alloc(I64{104}, I64{8})
     rt_text_store(row, kind)
     rt_text_store(row + I64{8}, rt_text_word(facts + I64{56}))
-    rt_text_store(row + I64{16}, mode & I64{4095})
-    rt_text_store(row + I64{24}, if ((mode & I64{146}) == I64{0}) -> I64{1} else -> I64{0})
+    rt_text_store(row + I64{16}, mode.bit_and(I64{4095}))
+    rt_text_store(row + I64{24}, if ((mode.bit_and(I64{146})) == I64{0}) -> I64{1} else -> I64{0})
     rt_text_store(row + I64{32}, rt_text_word(facts))
     rt_text_store(row + I64{40}, rt_text_word(facts + I64{8}))
     rt_text_store(row + I64{48}, rt_text_word(facts + I64{24}))

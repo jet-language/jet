@@ -16,7 +16,7 @@ fn float_big_init(value: I64, word: I64) {
         float_big_put(value, i, I64{0})
         i += I64{1}
     }
-    float_big_put(value, I64{0}, word & I64{4294967295})
+    float_big_put(value, I64{0}, word.bit_and(I64{4294967295}))
     float_big_put(value, I64{1}, word >> I64{32})
     display_store(value, if (word >> I64{32} != I64{0}) -> I64{2} else if (word != I64{0}) -> I64{1} else -> I64{0})
 }
@@ -58,7 +58,7 @@ fn float_big_add(a: I64, b: I64) {
     i := I64{0}
     loop i < size {
         sum :: float_big_limb(a, i) + float_big_limb(b, i) + carry
-        float_big_put(a, i, sum & I64{4294967295})
+        float_big_put(a, i, sum.bit_and(I64{4294967295}))
         carry = sum >> I64{32}
         i += I64{1}
     }
@@ -93,7 +93,7 @@ fn float_big_mul(value: I64, factor: I64) {
     i := I64{0}
     loop i < size {
         product :: float_big_limb(value, i) * factor + carry
-        float_big_put(value, i, product & I64{4294967295})
+        float_big_put(value, i, product.bit_and(I64{4294967295}))
         carry = product >> I64{32}
         i += I64{1}
     }
@@ -127,10 +127,10 @@ fn float_big_shift(value: I64, bits: I64) {
         i = original + words
         loop i > words + (I64{1}) {
             i -= I64{1}
-            limb :: (float_big_limb(value, i) << rest) & I64{4294967295}
-            float_big_put(value, i, limb | (float_big_limb(value, i - I64{1}) >> (I64{32} - rest)))
+            limb :: (float_big_limb(value, i) << rest).bit_and(I64{4294967295})
+            float_big_put(value, i, limb.bit_or((float_big_limb(value, i - I64{1}) >> (I64{32} - rest))))
         }
-        float_big_put(value, words, (float_big_limb(value, words) << rest) & I64{4294967295})
+        float_big_put(value, words, (float_big_limb(value, words) << rest).bit_and(I64{4294967295}))
     }
     display_store(value, size)
 }
@@ -228,15 +228,15 @@ fn float_round_up(digits: I64, length: I64) -> Bool {
 // Nonzero finite positive binary64 input. Output count@2656, exponent@2664
 // means the digit sequence represents digits * 10^(exponent-count).
 fn float_shortest(scratch: I64, bits: I64) {
-    fraction :: bits & I64{4503599627370495}
-    exponent :: (bits >> I64{52}) & I64{2047}
+    fraction :: bits.bit_and(I64{4503599627370495})
+    exponent :: (bits >> I64{52}).bit_and(I64{2047})
     mantissa := fraction << I64{1}
     exp := I64{-1075}
     upper := I64{1}
     inclusive := true
     if (exponent != I64{0}) {
-        full :: fraction | I64{4503599627370496}
-        inclusive = (full & I64{1}) == I64{0}
+        full :: fraction.bit_or(I64{4503599627370496})
+        inclusive = (full.bit_and(I64{1})) == I64{0}
         if {
             (fraction == I64{0}) -> {
                 mantissa = full << I64{2}
@@ -255,15 +255,15 @@ fn float_shortest(scratch: I64, bits: I64) {
 // Binary32 decoder: 24-bit significand, bias 127, subnormal unit 2^-149.
 // Raw positive low32 input, never widened to binary64 before rounding.
 fn float32_shortest(scratch: I64, bits: I64) {
-    fraction :: bits & I64{8388607}
-    exponent :: (bits >> I64{23}) & I64{255}
+    fraction :: bits.bit_and(I64{8388607})
+    exponent :: (bits >> I64{23}).bit_and(I64{255})
     mantissa := fraction << I64{1}
     exp := I64{-150}
     upper := I64{1}
     inclusive := true
     if (exponent != I64{0}) {
-        full :: fraction | I64{8388608}
-        inclusive = (full & I64{1}) == I64{0}
+        full :: fraction.bit_or(I64{8388608})
+        inclusive = (full.bit_and(I64{1})) == I64{0}
         if {
             (fraction == I64{0}) -> {
                 mantissa = full << I64{2}

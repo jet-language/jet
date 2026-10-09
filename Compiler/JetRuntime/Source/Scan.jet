@@ -30,7 +30,7 @@ fn scan_ascii(data: I64, len: I64, stride: I64, word: I64, count: I64) -> Bool {
     loop at < count {
         byte := scan_byte(data, stride, at)
         if (byte >= I64{65} && byte <= I64{90}) { byte += I64{32} }
-        if (byte != ((word >> (at * I64{8})) & I64{255})) { return false }
+        if (byte != ((word >> (at * I64{8})).bit_and(I64{255}))) { return false }
         at += I64{1}
     }
     true
@@ -101,7 +101,7 @@ fn scan_bool(data: I64, len: I64, stride: I64) -> I64 {
     if (len != I64{4} && len != I64{5}) { return I64{-1} }
     at := I64{0}
     loop at < len {
-        word |= scan_byte(data, stride, at) << (at * I64{8})
+        word = word.bit_or(scan_byte(data, stride, at) << (at * I64{8}))
         at += I64{1}
     }
     if (word == I64{1702195828} || word == I64{1702195796}) { return I64{1} }
@@ -165,35 +165,35 @@ fn scan_binary_validate(data: I64, len: I64, stride: I64, parts: I64, count: I64
         if (row_tag == I64{16}) {
             n :: rt_text_word(row + I64{16})
             byte_position :: position /% I64{8}
-            if ((position & I64{7}) != I64{0} || n > len - byte_position || !scan_equal(data + byte_position * stride, stride, rt_text_word(row + I64{8}), n)) { return I64{-1} }
+            if ((position.bit_and(I64{7})) != I64{0} || n > len - byte_position || !scan_equal(data + byte_position * stride, stride, rt_text_word(row + I64{8}), n)) { return I64{-1} }
             position += n * I64{8}
         } else if (row_tag == I64{17}) {
             width :: rt_text_word(row + I64{8})
             if (width > total - position) { return I64{-1} }
             value := I64{0}
             little :: rt_text_word(row + I64{16}) != I64{0}
-            if (((position | width) & I64{7}) == I64{0}) {
+            if (((position.bit_or(width)).bit_and(I64{7})) == I64{0}) {
                 bytes :: width /% I64{8}
                 at := I64{0}
                 loop at < bytes {
                     byte :: scan_byte(data, stride, position /% I64{8} + at)
-                    if little { value |= byte << (at * I64{8}) } else { value = (value << I64{8}) | byte }
+                    if little { value = value.bit_or(byte << (at * I64{8})) } else { value = (value << I64{8}).bit_or(byte) }
                     at += I64{1}
                 }
             } else {
                 offset := I64{0}
                 loop offset < width {
                     at :: position + offset
-                    bit :: (scan_byte(data, stride, at /% I64{8}) >> (I64{7} - (at & I64{7}))) & I64{1}
-                    value = (value << I64{1}) | bit
+                    bit :: (scan_byte(data, stride, at /% I64{8}) >> (I64{7} - (at.bit_and(I64{7})))).bit_and(I64{1})
+                    value = (value << I64{1}).bit_or(bit)
                     offset += I64{1}
                 }
-                if (little && (width & I64{7}) == I64{0}) {
+                if (little && (width.bit_and(I64{7})) == I64{0}) {
                     swapped := I64{0}
                     bytes :: width /% I64{8}
                     at := I64{0}
                     loop at < bytes {
-                        swapped |= ((value >> (at * I64{8})) & I64{255}) << ((bytes - I64{1} - at) * I64{8})
+                        swapped = swapped.bit_or(((value >> (at * I64{8})).bit_and(I64{255})) << ((bytes - I64{1} - at) * I64{8}))
                         at += I64{1}
                     }
                     value = swapped
@@ -202,14 +202,14 @@ fn scan_binary_validate(data: I64, len: I64, stride: I64, parts: I64, count: I64
             rt_text_store(row + I64{48}, value)
             position += width
         } else {
-            if ((position & I64{7}) != I64{0}) { return I64{-1} }
+            if ((position.bit_and(I64{7})) != I64{0}) { return I64{-1} }
             rt_text_store(row + I64{48}, position /% I64{8})
             rt_text_store(row + I64{56}, len - position /% I64{8})
             position = total
         }
         index += I64{1}
     }
-    if ((!prefix && position != total) || (prefix && (position & I64{7}) != I64{0})) { return I64{-1} }
+    if ((!prefix && position != total) || (prefix && (position.bit_and(I64{7})) != I64{0})) { return I64{-1} }
     position /% I64{8}
 }
 fn scan_text_copy(data: I64, len: I64, stride: I64) -> I64 {
@@ -268,7 +268,7 @@ fn scan_materialize(data: I64, stride: I64, parts: I64, count: I64) {
                 bytes :: rt_text_word(row + I64{24})
                 at := I64{0}
                 loop at < bytes {
-                    rt_text_put(destination + at, (value >> (at * I64{8})) & I64{255})
+                    rt_text_put(destination + at, (value >> (at * I64{8})).bit_and(I64{255}))
                     at += I64{1}
                 }
             } else { rt_text_store(destination, value) }

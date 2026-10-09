@@ -123,7 +123,7 @@ fn x64_link_text(functions: [X64CompiledFunction], runtime: [X64CompiledFunction
 fn x64_link_absolute(text: &[U8], relocs: [X64ImageDataReloc], base: Int) Never! {
     loop reloc in relocs {
         value :: base + reloc.target
-        loop byte in 0..<8 -> text[reloc.at + byte] = U8{(value >> (8 * byte)) & 255}
+        loop byte in 0..<8 -> text[reloc.at + byte] = U8{(value >> (8 * byte)).bit_and(255)}
     }
 }
 

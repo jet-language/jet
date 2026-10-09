@@ -24,12 +24,12 @@ fn lower_live_empty(words: Int) -> [Int] Never! {
 }
 
 fn lower_live_has(bits: [Int], slot: Int) -> Bool Never! {
-    ((bits[slot /% LOWER_LIVE_BITS] >> (slot % LOWER_LIVE_BITS)) & 1) == 1
+    ((bits[slot /% LOWER_LIVE_BITS] >> (slot % LOWER_LIVE_BITS)).bit_and(1)) == 1
 }
 
 fn lower_live_set(bits: &[Int], slot: Int) Never! {
     word :: slot /% LOWER_LIVE_BITS
-    bits[word] = bits[word] | (1 << (slot % LOWER_LIVE_BITS))
+    bits[word] = bits[word].bit_or((1 << (slot % LOWER_LIVE_BITS)))
 }
 
 fn lower_call_arg_places(args: [MIRCallArg]) -> [MIRPlaceID] Never! {
@@ -140,12 +140,12 @@ fn lower_live_slots(function: MIRFunction, slots: [LowerSlot], place_slots: [U64
             position :: order[index]
             out := lower_live_empty(words)
             loop target in successors[position] {
-                loop word in 0..<words -> out[word] = out[word] | live[target][word]
+                loop word in 0..<words -> out[word] = out[word].bit_or(live[target][word])
             }
             row := [Int]{}
             loop word in 0..<words {
-                kept :: out[word] - (out[word] & defs[position][word])
-                &row.push(uses[position][word] | kept)
+                kept :: out[word] - (out[word].bit_and(defs[position][word]))
+                &row.push(uses[position][word].bit_or(kept))
             }
             if row != live[position] {
                 live[position] = row

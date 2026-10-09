@@ -41,7 +41,7 @@ fn sentry_ledger_parent(path: I64, scratch: I64) -> Bool {
                 at += I64{1}
             }
             if valid {
-                valid = sentry_ledger_stat(parent, scratch) == I64{0} && (sync_load(scratch + I64{24}) & I64{61440}) == I64{16384}
+                valid = sentry_ledger_stat(parent, scratch) == I64{0} && (sync_load(scratch + I64{24}).bit_and(I64{61440})) == I64{16384}
                 if valid -> valid = trap_syscall(I64{90}, parent, I64{448}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0}
             }
         }

@@ -34,7 +34,7 @@ fn host_environment_split(bytes: I64) -> I64 {
 #Export(c) fn jet_rt_host_arguments(argc: I64, argv: I64, envp: I64) {
     // libc main's argc is a nonnegative int32. Explicit hosts use that same
     // range; discard unspecified upper register bits before any other use.
-    count :: argc & I64{4294967295}
+    count :: argc.bit_and(I64{4294967295})
     if (host_argc != I64{-1}) {
         if !(host_argc == count && host_argv == argv && host_envp == envp) {
             host_arguments_refused()

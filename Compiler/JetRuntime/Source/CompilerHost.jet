@@ -58,15 +58,15 @@ fn compiler_process_signal_name(signal: I64) -> I64 {
 }
 fn compiler_process_status_text(status: I64) -> I64 {
     text :: jet_rt_string_builder_new()
-    low :: status & I64{127}
+    low :: status.bit_and(I64{127})
     if (low == I64{0}) {
         jet_rt_string_builder_push(text, rt_static_text("exit status: "))
-        rt_text_push_number(text, (status >> I64{8}) & I64{255})
+        rt_text_push_number(text, (status >> I64{8}).bit_and(I64{255}))
     } else if (status == I64{65535}) {
         jet_rt_string_builder_push(text, rt_static_text("continued (WIFCONTINUED)"))
     } else {
-        stopped :: (status & I64{255}) == I64{127}
-        signal :: if stopped -> (status >> I64{8}) & I64{255} else -> low
+        stopped :: (status.bit_and(I64{255})) == I64{127}
+        signal :: if stopped -> (status >> I64{8}).bit_and(I64{255}) else -> low
         jet_rt_string_builder_push(text, if stopped -> rt_static_text("stopped (not terminated) by signal: ") else -> rt_static_text("signal: "))
         rt_text_push_number(text, signal)
         name :: compiler_process_signal_name(signal)
@@ -75,7 +75,7 @@ fn compiler_process_status_text(status: I64) -> I64 {
             jet_rt_string_builder_push(text, name)
             rt_text_push_word(text, I64{41}, I64{1})
         }
-        if (!stopped && (status & I64{128}) != I64{0}) -> jet_rt_string_builder_push(text, rt_static_text(" (core dumped)"))
+        if (!stopped && (status.bit_and(I64{128})) != I64{0}) -> jet_rt_string_builder_push(text, rt_static_text(" (core dumped)"))
     }
     jet_rt_string_builder_finish(text)
 }

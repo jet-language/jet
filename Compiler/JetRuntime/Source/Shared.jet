@@ -9,8 +9,8 @@
 fn shared_count_retain(cell: I64, pin: Bool) -> Bool {
     refs := sync_load(cell)
     loop {
-        if (refs & I64{4294967295}) == (I64{0}) -> break
-        count :: if pin -> refs >> I64{32} else -> refs & I64{4294967295}
+        if (refs.bit_and(I64{4294967295})) == (I64{0}) -> break
+        count :: if pin -> refs >> I64{32} else -> refs.bit_and(I64{4294967295})
         if count == (I64{2147483647}) {
             jet_rt_panic_overflow()
             return false
@@ -146,9 +146,9 @@ fn shared_revision_begin(shared: I64, revision: I64) -> Bool {
 // caller's token slot when reacquisition fails; its owner remains until drop.
 // SharedProtocol.rs:1572-1591 and MathTaskMem.rs:2770-2775/2995-3005 require
 // an unheld guard's access to stop, while drop must not release another permit.
-fn shared_guard_cell(guard: I64) -> I64 { guard & I64{-2} }
+fn shared_guard_cell(guard: I64) -> I64 { guard.bit_and(I64{-2}) }
 
-fn shared_guard_held(guard: I64) -> Bool { guard != I64{0} && (guard & I64{1}) == I64{0} }
+fn shared_guard_held(guard: I64) -> Bool { guard != I64{0} && (guard.bit_and(I64{1})) == I64{0} }
 
 fn shared_guard_invalid() {
     text :: scheduler_text_new(I64{34})
@@ -233,7 +233,7 @@ fn shared_count_release(shared: I64, pin: Bool) {
     refs := sync_load(shared)
     next := refs
     loop {
-        count :: if pin -> refs >> I64{32} else -> refs & I64{4294967295}
+        count :: if pin -> refs >> I64{32} else -> refs.bit_and(I64{4294967295})
         if count == (I64{0}) {
             sync_mutex_unlock(shared + I64{8})
             shared_guard_invalid()
@@ -359,7 +359,7 @@ fn shared_registry_publish(expected: I64, candidate: I64) -> Bool {
 // Source physical-owner API. Owner identity itself is the existing native weak
 // reference; none of these headers owns a copied payload or a factory context.
 #Export(c) fn jet_rt_shared_owner_strong_count(owner: I64) -> I64 {
-    sync_load(owner) & I64{4294967295}
+    sync_load(owner).bit_and(I64{4294967295})
 }
 #Export(c) fn jet_rt_shared_owner_pin(owner: I64, out: I64) -> Bool {
     if !shared_count_retain(owner, true) -> return false

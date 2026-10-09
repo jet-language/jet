@@ -4,7 +4,7 @@
 
 fn evidence_put_number(out: &[U8], value: U64, width: Int) Never! {
     loop index in 0..<width {
-        &out.push(U8{Int.from_u64((value >> ((width - index - 1) * 8)) & U64{255})})
+        &out.push(U8{Int.from_u64((value >> ((width - index - 1) * 8)).bit_and(U64{255}))})
     }
 }
 
@@ -64,7 +64,7 @@ fn evidence_encode_record_body(record: EvidenceRecord, out: &[U8]) EvidenceCodec
     &out.push(U8{evidence_kind_code(record.kind)})
     &out.push(U8{evidence_producer_code(record.producer)})
     &out.push(U8{evidence_facet_code(record.facet)})
-    &out.push(U8{evidence_outcome_code(record.outcome) | (evidence_expectation_code(record.expectation) * 128)})
+    &out.push(U8{evidence_outcome_code(record.outcome).bit_or((evidence_expectation_code(record.expectation) * 128))})
     &out.push(U8{evidence_completeness_code(record.completeness)})
     evidence_put_number(&out, record.count, 8)
     evidence_put_number(&out, U64{Int.from_u32(record.source.line)}, 4)

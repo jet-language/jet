@@ -198,7 +198,7 @@ struct JetLibStamp {
             loop convention in export.conventions -> &out.bytes.push(U8{convention.tag()})
         }
         effects :: jetlib_effects_canonical(self.declared_effects)
-        &out.push_u32(effects.len() & 4294967295)
+        &out.push_u32(effects.len().bit_and(4294967295))
         loop effect_name in effects -> &out.push_text(effect_name)
         &out.push_text(self.payload_digest)
         out.bytes
@@ -269,7 +269,7 @@ struct JetLibArtifact {
 
     fn encode_bytes(self) -> [U8] Never! {
         out := JetLibWriter{bytes: self.stamp.encode_bytes()}
-        loop i in 0..<8 -> &out.bytes.push(U8{(self.payload.len() >> ((7 - i) * 8)) & 255})
+        loop i in 0..<8 -> &out.bytes.push(U8{(self.payload.len() >> ((7 - i) * 8)).bit_and(255)})
         &out.push_raw(self.payload)
         out.bytes
     }

@@ -304,7 +304,7 @@ fn fx_inline_asm_refusals() -> Bool Never! {
             template :: "or {register_names[d]}, {register_names[r]} ; -> return"
             result :: x64_assemble_template(template, [String]{}, true)
             rex :: 72 + (if source_reg >= 8 -> 4 else -> 0) + (if destination >= 8 -> 1 else -> 0)
-            modrm :: 192 + ((source_reg & 7) << 3) + (destination & 7)
+            modrm :: 192 + ((source_reg.bit_and(7)) << 3) + (destination.bit_and(7))
             expected_or :: [U8]{U8.from_int(rex) ?? return false, 0x09, U8.from_int(modrm) ?? return false}
             if result.error != None || result.result != destination || result.code != expected_or -> return false
         }

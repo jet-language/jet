@@ -1,11 +1,11 @@
 // Numeric terminals retain the reference's collect-before-reduce ordering.
 // Fixed-width integers sum into two machine words, then round only once.
 fn iter_unsigned(word: I64) -> U64 {
-    U64{word & I64{9223372036854775807}} | (if (word < I64{0}) -> U64{9223372036854775808} else -> U64{0})
+    U64{word.bit_and(I64{9223372036854775807})}.bit_or((if (word < I64{0}) -> U64{9223372036854775808} else -> U64{0}))
 }
 
 fn iter_signed(word: U64) -> I64 {
-    I64{word & U64{9223372036854775807}} | (if (word >= U64{9223372036854775808}) -> I64{-9223372036854775808} else -> I64{0})
+    I64{word.bit_and(U64{9223372036854775807})}.bit_or((if (word >= U64{9223372036854775808}) -> I64{-9223372036854775808} else -> I64{0}))
 }
 
 // Signed i128-as-f64 rounding, ties to even. Per-element Float conversion
@@ -24,12 +24,12 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
     sticky := false
     loop hi != (U64{0}) || lo >= (U64{9007199254740992}) {
         sticky = sticky || guard
-        guard = (lo & U64{1}) != U64{0}
-        lo = (lo >> U64{1}) | (hi << U64{63})
+        guard = (lo.bit_and(U64{1})) != U64{0}
+        lo = (lo >> U64{1}).bit_or((hi << U64{63}))
         hi >>= U64{1}
         exponent += I64{1}
     }
-    if (guard && (sticky || (lo & U64{1}) != U64{0})) { lo += U64{1} }
+    if (guard && (sticky || (lo.bit_and(U64{1})) != U64{0})) { lo += U64{1} }
     if (lo == U64{9007199254740992}) {
         lo >>= U64{1}
         exponent += I64{1}
@@ -40,7 +40,7 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
     value := Float{0.0}
     place := Float{1.0}
     loop lo != (U64{0}) {
-        if ((lo & U64{1}) != U64{0}) { value += place }
+        if ((lo.bit_and(U64{1})) != U64{0}) { value += place }
         lo >>= U64{1}
         place *= Float{2.0}
     }
@@ -72,7 +72,7 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
     node :: iter_collect_node(source)
     if (node == I64{0}) { return Float{0.0} }
     meta :: iter_meta(node)
-    kind :: trap_word(meta + I64{48}) & I64{4294967295}
+    kind :: trap_word(meta + I64{48}).bit_and(I64{4294967295})
     width :: trap_word(meta + I64{48}) >> I64{32}
     header :: trap_word(node + I64{112})
     data :: trap_word(header + I64{16})
@@ -100,7 +100,7 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
                 word = (word << (I64{64} - width)) >> (I64{64} - width)
             }
             bits := iter_unsigned(word)
-            if (width < I64{64} && kind == I64{3}) { bits &= (U64{1} << U64{width}) - U64{1} }
+            if (width < I64{64} && kind == I64{3}) { bits = bits.bit_and((U64{1} << U64{width}) - U64{1}) }
             added :: wrapping(lo + bits)
             hi = wrapping(hi + (if (kind == I64{2} && word < I64{0}) -> I64{-1} else -> I64{0}) + (if added < lo -> I64{1} else -> I64{0}))
             lo = added

@@ -134,7 +134,7 @@ fn x64_load_image_bound(image: X64MemoryImage, addresses: [Int]) -> X64LoadedIma
         if reloc.target < 0 || reloc.target >= size -> return x64_loaded_failure([String]{"data relocation target {reloc.target} is outside the image"})
     }
 
-    if image.align < 16 || (image.align & (image.align - 1)) != 0 -> return x64_loaded_failure([String]{"image origin alignment {image.align} is not a power of two at least 16"})
+    if image.align < 16 || (image.align.bit_and((image.align - 1))) != 0 -> return x64_loaded_failure([String]{"image origin alignment {image.align} is not a power of two at least 16"})
     // Over-map by the origin alignment, then trim whole pages on both sides,
     // so the kept mapping starts at an address aligned for the image's data.
     mapping_size :: os_page_round(size)
@@ -190,13 +190,13 @@ fn x64_core_startup_bound(loaded: X64LoadedImage, begin: Int, status: Int, end: 
     stopped := 0
     #Unsafe("the admitted control uses begin(fuel,depth,session), status(), end(); startup is the producer's checked no-argument Unit static-fixup boundary") {
         started = os_call_address_three(begin, -1, -1, 0)
-        if (started & 255) != 0 {
+        if (started.bit_and(255)) != 0 {
             _ := os_call_address(loaded.entry, 0)
             stopped = os_call_address(status, 0)
             _ := os_call_address(end, 0)
         }
     }
-    if (started & 255) == 0 -> return "pinned Core initialization could not begin its execution scope"
+    if (started.bit_and(255)) == 0 -> return "pinned Core initialization could not begin its execution scope"
     if stopped != 0 -> return "pinned Core initialization stopped before publishing its getters (status {stopped})"
     ""
 }

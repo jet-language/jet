@@ -33,7 +33,7 @@
         }
         at :: cipher + length + tag_index
         original :: rt_text_byte(at)
-        rt_text_put(at, original ~| I64{1})
+        rt_text_put(at, original.bit_xor(I64{1}))
         bad :: if extended -> rt_crypto_xaead_open(key, nonce, aad, aad_len, cipher, length + I64{16}, output + I64{1}, scratch) else -> rt_crypto_aead_open(key, nonce, aad, aad_len, cipher, length + I64{16}, output + I64{1}, scratch)
         if bad -> jet_rt_unreachable(I64{0}, I64{0})
         rt_text_put(at, original)

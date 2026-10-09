@@ -263,14 +263,14 @@ fn hll_linear(empty: I64) -> I64 {
 // Exact positive IEEE round (ties away), then Rust's saturating as-i64.
 fn hll_round(value: Float) -> I64 {
     bits :: rt_f64_bits(value)
-    exponent :: ((bits >> I64{52}) & I64{2047}) - I64{1023}
+    exponent :: ((bits >> I64{52}).bit_and(I64{2047})) - I64{1023}
     if (exponent >= I64{63}) -> return I64{9223372036854775807}
     if (exponent < I64{-1}) -> return I64{0}
     if (exponent == I64{-1}) -> return I64{1}
-    significand :: (bits & I64{4503599627370495}) | I64{4503599627370496}
+    significand :: (bits.bit_and(I64{4503599627370495})).bit_or(I64{4503599627370496})
     if (exponent >= I64{52}) -> return significand << (exponent - I64{52})
     shift :: I64{52} - exponent
-    (significand >> shift) + ((significand >> (shift - I64{1})) & I64{1})
+    (significand >> shift) + ((significand >> (shift - I64{1})).bit_and(I64{1}))
 }
 fn hll_count(value: I64) -> I64 {
     sync_mutex_lock(value + HLL_MUTEX)
@@ -313,15 +313,15 @@ fn hll_count(value: I64) -> I64 {
 }
 #Export(c) fn jet_rt_native_hll_add(value: I64, text: I64) {
     hash :: cms_hash(text, I64{-3750763034362895579})
-    index :: hash & I64{255}
-    rest := (hash >> I64{8}) & I64{72057594037927935}
+    index :: hash.bit_and(I64{255})
+    rest := (hash >> I64{8}).bit_and(I64{72057594037927935})
     rank := I64{57}
     if (rest != I64{0}) {
         // Logical shift left eight high zeros in the seed's u64 rest.
         rank = I64{9}
         bit := I64{36028797018963968}
         loop {
-            if ((rest & bit) != I64{0}) -> break
+            if ((rest.bit_and(bit)) != I64{0}) -> break
             rank += I64{1}
             bit >>= I64{1}
         }

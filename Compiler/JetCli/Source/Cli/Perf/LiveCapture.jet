@@ -74,7 +74,7 @@ fn jet_cli_perf_read_private(path: String, limit: Int) -[FS.Read, Env, Time.Wait
     before :: reader.stat() ?? return Err(jet_cli_read_error("cannot inspect observation `{path}`"))
     if before.id != entry.id -> return Err(jet_cli_read_error("observation changed before its secure open"))
     if !before.is_file || before.size > limit -> return Err(jet_cli_read_error("observation is not a bounded regular file"))
-    if (before.mode & 0o077) != 0 -> return Err(jet_cli_read_error("observation permissions expose runtime state"))
+    if (before.mode.bit_and(0o077)) != 0 -> return Err(jet_cli_read_error("observation permissions expose runtime state"))
     if before.owner != Val(perf_sys.getuid()) -> return Err(jet_cli_read_error("observation belongs to another user"))
     bytes := [U8]{}
     loop {

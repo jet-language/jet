@@ -57,16 +57,16 @@ fn progress_unsigned_float(word: I64) -> Float {
     if (word >= I64{0}) -> return Float{word}
     // Round-to-odd before the signed cast preserves the low sticky bit, so
     // a U64 halfway case followed by bit0=1 cannot be double-rounded down.
-    Float{((word >> I64{1}) & I64{9223372036854775807}) | (word & I64{1})} * Float{2}
+    Float{((word >> I64{1}).bit_and(I64{9223372036854775807})).bit_or((word.bit_and(I64{1})))} * Float{2}
 }
 
 fn progress_unsigned_text(word: I64) -> I64 {
     if (word >= I64{0}) -> return jet_rt_i64_to_string(word)
     output :: jet_rt_string_builder_new()
     // unsigned /10 implemented from the signed-safe half, preserving U64.MAX.
-    half :: (word >> I64{1}) & I64{9223372036854775807}
+    half :: (word >> I64{1}).bit_and(I64{9223372036854775807})
     quotient :: half /% I64{5}
-    remainder :: (half % I64{5}) * I64{2} + (word & I64{1})
+    remainder :: (half % I64{5}) * I64{2} + (word.bit_and(I64{1}))
     rt_text_push_number(output, quotient)
     rt_text_push_word(output, I64{48} + remainder, I64{1})
     output
@@ -76,8 +76,8 @@ fn progress_unsigned_text(word: I64) -> I64 {
 // floating point (which would introduce a second rounding at half boundaries).
 fn progress_fixed2(value: Float, suffix: I64) -> I64 {
     bits :: rt_f64_bits(value)
-    binary :: (bits >> I64{52}) & I64{2047}
-    mantissa :: (bits & I64{4503599627370495}) | (if (binary == I64{0}) -> I64{0} else -> I64{4503599627370496})
+    binary :: (bits >> I64{52}).bit_and(I64{2047})
+    mantissa :: (bits.bit_and(I64{4503599627370495})).bit_or((if (binary == I64{0}) -> I64{0} else -> I64{4503599627370496}))
     shift :: if (binary == I64{0}) -> I64{-1074} else -> binary - I64{1075}
     numerator :: jet_int_mul(mantissa, I64{100})
     rounded := I64{0}

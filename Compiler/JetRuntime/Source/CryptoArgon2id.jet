@@ -13,14 +13,14 @@ fn rt_argon_g(block: I64, ai: I64, bi: I64, ci: I64, di: I64) {
     b := rt_text_word(block + bi * I64{8})
     c := rt_text_word(block + ci * I64{8})
     d := rt_text_word(block + di * I64{8})
-    a = a + b + I64{2} * (a & I64{0xffffffff}) * (b & I64{0xffffffff})
-    d = rt_crypto_rotr64(d ~| a, I64{32})
-    c = c + d + I64{2} * (c & I64{0xffffffff}) * (d & I64{0xffffffff})
-    b = rt_crypto_rotr64(b ~| c, I64{24})
-    a = a + b + I64{2} * (a & I64{0xffffffff}) * (b & I64{0xffffffff})
-    d = rt_crypto_rotr64(d ~| a, I64{16})
-    c = c + d + I64{2} * (c & I64{0xffffffff}) * (d & I64{0xffffffff})
-    b = rt_crypto_rotr64(b ~| c, I64{63})
+    a = a + b + I64{2} * (a.bit_and(I64{0xffffffff})) * (b.bit_and(I64{0xffffffff}))
+    d = rt_crypto_rotr64(d.bit_xor(a), I64{32})
+    c = c + d + I64{2} * (c.bit_and(I64{0xffffffff})) * (d.bit_and(I64{0xffffffff}))
+    b = rt_crypto_rotr64(b.bit_xor(c), I64{24})
+    a = a + b + I64{2} * (a.bit_and(I64{0xffffffff})) * (b.bit_and(I64{0xffffffff}))
+    d = rt_crypto_rotr64(d.bit_xor(a), I64{16})
+    c = c + d + I64{2} * (c.bit_and(I64{0xffffffff})) * (d.bit_and(I64{0xffffffff}))
+    b = rt_crypto_rotr64(b.bit_xor(c), I64{63})
     rt_text_store(block + ai * I64{8}, a)
     rt_text_store(block + bi * I64{8}, b)
     rt_text_store(block + ci * I64{8}, c)
@@ -62,7 +62,7 @@ fn rt_argon_addresses(address: I64, input: I64, saved: I64) {
     i := I64{0}
     loop {
         if (i >= I64{1024}) -> break
-        mixed :: rt_text_word(address + i) ~| rt_text_word(saved + i)
+        mixed :: rt_text_word(address + i).bit_xor(rt_text_word(saved + i))
         rt_text_store(address + i, mixed)
         rt_text_store(saved + i, mixed)
         i += I64{8}
@@ -71,7 +71,7 @@ fn rt_argon_addresses(address: I64, input: I64, saved: I64) {
     i = I64{0}
     loop {
         if (i >= I64{1024}) -> break
-        rt_text_store(address + i, rt_text_word(address + i) ~| rt_text_word(saved + i))
+        rt_text_store(address + i, rt_text_word(address + i).bit_xor(rt_text_word(saved + i)))
         i += I64{8}
     }
 }
@@ -79,23 +79,23 @@ fn rt_argon_fill(previous: I64, reference: I64, next: I64, work: I64, saved: I64
     i := I64{0}
     loop {
         if (i >= I64{1024}) -> break
-        mixed :: rt_text_word(previous + i) ~| rt_text_word(reference + i)
+        mixed :: rt_text_word(previous + i).bit_xor(rt_text_word(reference + i))
         rt_text_store(work + i, mixed)
-        rt_text_store(saved + i, if with_xor -> mixed ~| rt_text_word(next + i) else -> mixed)
+        rt_text_store(saved + i, if with_xor -> mixed.bit_xor(rt_text_word(next + i)) else -> mixed)
         i += I64{8}
     }
     rt_argon_permute(work)
     i = I64{0}
     loop {
         if (i >= I64{1024}) -> break
-        rt_text_store(next + i, rt_text_word(work + i) ~| rt_text_word(saved + i))
+        rt_text_store(next + i, rt_text_word(work + i).bit_xor(rt_text_word(saved + i)))
         i += I64{8}
     }
 }
 #Arithmetic(.Wrapping)
 fn rt_argon_mapping(random: I64, area: I64) -> I64 {
-    j1 :: random & I64{0xffffffff}
-    x :: ((j1 * j1) >> I64{32}) & I64{0xffffffff}
+    j1 :: random.bit_and(I64{0xffffffff})
+    x :: ((j1 * j1) >> I64{32}).bit_and(I64{0xffffffff})
     area - I64{1} - ((area * x) >> I64{32})
 }
 fn rt_argon_h0_part(state: I64, field: I64, input: I64, length: I64) {
@@ -171,7 +171,7 @@ fn rt_crypto_argon2id(password: I64, password_len: I64, salt: I64, salt_len: I64
                     previous :: if (index == I64{0} && slice == I64{0}) -> lane * lane_length + lane_length - I64{1} else -> position - I64{1}
                     if (independent && index % I64{128} == I64{0}) -> rt_argon_addresses(address, input, saved)
                     random :: if independent -> rt_text_word(address + (index % I64{128}) * I64{8}) else -> rt_text_word(memory + previous * I64{1024})
-                    reference_lane :: if (pass == I64{0} && slice == I64{0}) -> lane else -> ((random >> I64{32}) & I64{0xffffffff}) % lanes
+                    reference_lane :: if (pass == I64{0} && slice == I64{0}) -> lane else -> ((random >> I64{32}).bit_and(I64{0xffffffff})) % lanes
                     same :: reference_lane == lane
                     area :: if {
                         (pass == I64{0} && slice == I64{0}) -> index - I64{1}
@@ -198,7 +198,7 @@ fn rt_crypto_argon2id(password: I64, password_len: I64, salt: I64, salt_len: I64
         at := I64{0}
         loop {
             if (at >= I64{1024}) -> break
-            rt_text_store(work + at, rt_text_word(work + at) ~| rt_text_word(last + at))
+            rt_text_store(work + at, rt_text_word(work + at).bit_xor(rt_text_word(last + at)))
             at += I64{8}
         }
         lane += I64{1}

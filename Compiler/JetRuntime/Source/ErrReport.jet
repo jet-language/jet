@@ -90,7 +90,7 @@ fn err_json_quote(out: I64, text: I64) {
             rt_text_push_word(out, I64{30044}, I64{2})
             shift := I64{12}
             loop shift >= (I64{0}) {
-                digit :: (scalar >> shift) & I64{15}
+                digit :: (scalar >> shift).bit_and(I64{15})
                 rt_text_push_scalar(out, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
                 shift -= I64{4}
             }

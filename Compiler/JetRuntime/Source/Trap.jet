@@ -261,7 +261,7 @@ fn trap_build_context(report: I64, file: I64, file_len: I64, line: I64, function
 }
 
 fn trap_can_publish() -> Bool {
-    scheduler_control_current() != I64{0} && (sync_load(thread_base() + I64{64}) & I64{2}) != I64{0} && !scheduler_cleanup_panic_fatal()
+    scheduler_control_current() != I64{0} && (sync_load(thread_base() + I64{64}).bit_and(I64{2})) != I64{0} && !scheduler_cleanup_panic_fatal()
 }
 
 fn trap_publish_report(report: I64, raw_message: I64, raw_length: I64) {
@@ -459,9 +459,9 @@ fn rt_seq_index_oob_stop(length: I64, index: I64) {
     } else {
         // Unsigned index = 2 * half + lowBit. Both the decimal quotient and
         // last digit fit signed I64; no MIN negation or unsigned cast is used.
-        half :: (index >> I64{1}) & I64{9223372036854775807}
+        half :: (index >> I64{1}).bit_and(I64{9223372036854775807})
         quotient :: half /% I64{5}
-        last :: (half % I64{5}) * I64{2} + (index & I64{1})
+        last :: (half % I64{5}) * I64{2} + (index.bit_and(I64{1}))
         alloc_write_size(quotient)
         alloc_write_word(I64{48} + last, I64{1})
     }
@@ -652,12 +652,12 @@ struct TrapScalar { code: I64, width: I64 }
 fn trap_scalar(address: I64) -> TrapScalar {
     first :: trap_byte(address)
     if (first < I64{128}) -> return TrapScalar{code: first, width: I64{1}}
-    second :: trap_byte(address + I64{1}) & I64{63}
-    if (first < I64{224}) -> return TrapScalar{code: (first & I64{31}) * I64{64} + second, width: I64{2}}
-    third :: trap_byte(address + I64{2}) & I64{63}
-    if (first < I64{240}) -> return TrapScalar{code: (first & I64{15}) * I64{4096} + second * I64{64} + third, width: I64{3}}
-    fourth :: trap_byte(address + I64{3}) & I64{63}
-    TrapScalar{code: (first & I64{7}) * I64{262144} + second * I64{4096} + third * I64{64} + fourth, width: I64{4}}
+    second :: trap_byte(address + I64{1}).bit_and(I64{63})
+    if (first < I64{224}) -> return TrapScalar{code: (first.bit_and(I64{31})) * I64{64} + second, width: I64{2}}
+    third :: trap_byte(address + I64{2}).bit_and(I64{63})
+    if (first < I64{240}) -> return TrapScalar{code: (first.bit_and(I64{15})) * I64{4096} + second * I64{64} + third, width: I64{3}}
+    fourth :: trap_byte(address + I64{3}).bit_and(I64{63})
+    TrapScalar{code: (first.bit_and(I64{7})) * I64{262144} + second * I64{4096} + third * I64{64} + fourth, width: I64{4}}
 }
 
 // D-STR-ESCAPE1: NUL uses the generic \u{0} escape, CR uses \r, and

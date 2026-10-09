@@ -6,7 +6,7 @@ HTTP_REDIRECT_SAME_ORIGIN :: prep { I64{8} }
 #Export(c) fn jet_rt_handle_clone_JetHTTPRedirectPolicy(value: I64) -> I64 {
     result :: jet_rt_alloc(HTTP_REDIRECT_BYTES, I64{8})
     encoding_store(result + HTTP_REDIRECT_MAX, encoding_word(value + HTTP_REDIRECT_MAX))
-    same_origin :: encoding_word(value + HTTP_REDIRECT_SAME_ORIGIN) & I64{255}
+    same_origin :: encoding_word(value + HTTP_REDIRECT_SAME_ORIGIN).bit_and(I64{255})
     encoding_store(result + HTTP_REDIRECT_SAME_ORIGIN, if (same_origin == I64{0}) -> I64{0} else -> I64{1})
     result
 }

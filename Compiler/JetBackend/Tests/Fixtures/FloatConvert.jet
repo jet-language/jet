@@ -164,7 +164,7 @@ fn fx_float_convert_carriers() -> LIRModule Never! {
     patterns :: [Int]{0x3fc00000, 0x80000000, 1, 0x7fc00042}
     loop (index, bits) in patterns {
         dirty :: lir_builder_word(&entry)
-        lir_builder_push(&entry, LIRInst.Const{dst: dirty, value: bits | (-4294967296)})
+        lir_builder_push(&entry, LIRInst.Const{dst: dirty, value: bits.bit_or((-4294967296))})
         single :: lir_builder_value(&entry, lir_layout_float32(), LIRDrop.Trivial, None)
         lir_builder_push(&entry, LIRInst.Bitcast{dst: single, src: dirty})
         carried :: lir_builder_value(&entry, lir_layout_float32(), LIRDrop.Trivial, None)

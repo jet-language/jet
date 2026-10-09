@@ -42,7 +42,7 @@ fn ui_event_size_eq(a: I64, b: I64) -> Bool {
         else -> {
             if (kind == I64{0} || kind == I64{2} || kind == I64{3}) -> first = jet_rt_string_clone(ui_carrier_word(value + UI_EVENT_FIRST))
             if (kind == I64{4}) -> first = ui_carrier_bool(value + UI_EVENT_FIRST)
-            if (kind == I64{0}) -> second = ui_carrier_word(value + UI_EVENT_SECOND) & I64{255}
+            if (kind == I64{0}) -> second = ui_carrier_word(value + UI_EVENT_SECOND).bit_and(I64{255})
             if (kind == I64{2}) -> second = ui_carrier_word(value + UI_EVENT_SECOND)
             if (kind == I64{3}) -> second = data_sequence_clone(ui_carrier_word(value + UI_EVENT_SECOND), DATA_TREE_BYTE_LIST)
             ui_carrier_store(result + UI_EVENT_FIRST, first)
@@ -77,7 +77,7 @@ fn ui_event_bytes_eq(a: I64, b: I64) -> Bool {
     if (kind == I64{4}) -> return ui_carrier_bool(a + UI_EVENT_FIRST) == ui_carrier_bool(b + UI_EVENT_FIRST)
     if (kind >= I64{5}) -> return true
     if (!jet_rt_string_eq(ui_carrier_word(a + UI_EVENT_FIRST), ui_carrier_word(b + UI_EVENT_FIRST))) -> return false
-    if (kind == I64{0}) -> return (ui_carrier_word(a + UI_EVENT_SECOND) & I64{255}) == (ui_carrier_word(b + UI_EVENT_SECOND) & I64{255})
+    if (kind == I64{0}) -> return (ui_carrier_word(a + UI_EVENT_SECOND).bit_and(I64{255})) == (ui_carrier_word(b + UI_EVENT_SECOND).bit_and(I64{255}))
     if (kind == I64{2}) -> return ui_carrier_word(a + UI_EVENT_SECOND) == ui_carrier_word(b + UI_EVENT_SECOND)
     ui_event_bytes_eq(ui_carrier_word(a + UI_EVENT_SECOND), ui_carrier_word(b + UI_EVENT_SECOND))
 }

@@ -39,10 +39,10 @@ fn jet_driver_native_value_key(value: TComptimeValue) -> TComptimeKey? Never! {
 // normalization preserves the exact value; infinities and NaN payloads retain
 // their sign and fraction bits in the wider carrier.
 fn jet_driver_native_float32_bits(bits: Int) -> Int Never! {
-    sign :: (bits & 2147483648) << 32
-    exponent := (bits >> 23) & 255
-    fraction := bits & 8388607
-    if exponent == 255 -> return sign | (2047 << 52) | (fraction << 29)
+    sign :: (bits.bit_and(2147483648)) << 32
+    exponent := (bits >> 23).bit_and(255)
+    fraction := bits.bit_and(8388607)
+    if exponent == 255 -> return sign.bit_or((2047 << 52)).bit_or((fraction << 29))
     if exponent == 0 {
         if fraction == 0 -> return sign
         exponent = 897
@@ -50,9 +50,9 @@ fn jet_driver_native_float32_bits(bits: Int) -> Int Never! {
             fraction <<= 1
             exponent -= 1
         }
-        fraction &= 8388607
+        fraction = fraction.bit_and(8388607)
     } else { exponent += 896 }
-    sign | (exponent << 52) | (fraction << 29)
+    sign.bit_or((exponent << 52)).bit_or((fraction << 29))
 }
 
 // Decode each counted native node once. Closure identity resolves against the

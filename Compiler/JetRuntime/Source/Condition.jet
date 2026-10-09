@@ -175,7 +175,7 @@ fn condition_reacquire(cell: I64) -> Bool {
         }
         condition_register(condition, node)
         notified :: sync_load(node + I64{40}) != I64{0} || sync_load(node + I64{32}) != sync_load(condition + I64{32})
-        sync_store(guard_slot, cell | I64{1})
+        sync_store(guard_slot, cell.bit_or(I64{1}))
         shared_release(cell, true)
         if !notified -> _ := scheduler_yield(reason, node + I64{8}, I64{-1})
         // Drop registration BEFORE reacquiring, as cleanup.finish1572-1577.

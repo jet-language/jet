@@ -42,7 +42,7 @@ impl CLIRecordCursor {
     fn u32(&self) -> Int MetadataError! {
         if self.at > self.bytes.len() || self.bytes.len() - self.at < 4 -> return Err(MetadataError.Malformed{why: "truncated payload"})
         value := 0
-        loop index in 0..<4 -> value = value | (Int.from_u8(self.bytes[self.at + index]) << (8 * index))
+        loop index in 0..<4 -> value = value.bit_or((Int.from_u8(self.bytes[self.at + index]) << (8 * index)))
         self.at += 4
         Ok(value)
     }
@@ -72,10 +72,10 @@ fn cli_schema_bytes_start(bytes: View<U8>, prefix: [U8]) -> Bool Never! {
 }
 fn decode_record(record: View<U8>) -> CLICommandSchema MetadataError! {
     if record.len() < 46 || !cli_schema_bytes_start(record, CLI_SCHEMA_MAGIC) -> return Err(MetadataError.Malformed{why: "bad record header"})
-    version :: U16{Int.from_u8(record[8]) | (Int.from_u8(record[9]) << 8)}
+    version :: U16{Int.from_u8(record[8]).bit_or((Int.from_u8(record[9]) << 8))}
     if version != RECORD_VERSION -> return Err(MetadataError.UnsupportedVersion{version: version})
     length := 0
-    loop index in 0..<4 -> length = length | (Int.from_u8(record[10 + index]) << (8 * index))
+    loop index in 0..<4 -> length = length.bit_or((Int.from_u8(record[10 + index]) << (8 * index)))
     if length > CLI_SCHEMA_MAX_RECORD_BYTES || record.len() - 46 != length -> return Err(MetadataError.Malformed{why: "invalid record length"})
     payload :: record[46..<record.len()]
     digest :: mir_sha256_bytes(payload)
@@ -233,7 +233,7 @@ fn cli_schema_decode_job(cursor: &CLIRecordCursor) -> JobFact MetadataError! {
     Ok(JobFact{name: name, scope: scope, doc: doc, arguments: ^arguments, after: after, packages: packages, cwd: cwd, inputs: inputs, outputs: outputs, skip: skip, cache: cache, parallel: parallel, limits: limits, schedule: schedule})
 }
 fn cli_schema_put_u32(out: &[U8], value: Int) Never! {
-    loop index in 0..<4 -> &out.push(U8{(value >> (index * 8)) & 255})
+    loop index in 0..<4 -> &out.push(U8{(value >> (index * 8)).bit_and(255)})
 }
 fn cli_schema_put_string(out: &[U8], value: String) Never! {
     bytes :: value.bytes()
@@ -362,7 +362,7 @@ fn encode_record(schema: CLICommandSchema) -> [U8] Never! {
     loop job in schema.jobs -> cli_schema_encode_job(&payload, job)
     record := [U8].with_capacity(46 + payload.len())
     &record.extend(CLI_SCHEMA_MAGIC)
-    &record.push(U8{Int.from_u16(RECORD_VERSION) & 255})
+    &record.push(U8{Int.from_u16(RECORD_VERSION).bit_and(255)})
     &record.push(U8{Int.from_u16(RECORD_VERSION) >> 8})
     cli_schema_put_u32(&record, payload.len())
     &record.extend(mir_sha256_bytes(payload))

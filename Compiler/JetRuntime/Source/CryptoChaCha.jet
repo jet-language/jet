@@ -2,16 +2,16 @@
 // Core/crypto/expert.jet:292-363,428-467@5933a61b2.
 // Internal borrowed spans, caller scratch, no allocations or owning copies.
 fn rt_crypto_le32(input: I64) -> I64 {
-    rt_text_byte(input) | (rt_text_byte(input + I64{1}) << I64{8}) | (rt_text_byte(input + I64{2}) << I64{16}) | (rt_text_byte(input + I64{3}) << I64{24})
+    rt_text_byte(input).bit_or((rt_text_byte(input + I64{1}) << I64{8})).bit_or((rt_text_byte(input + I64{2}) << I64{16})).bit_or((rt_text_byte(input + I64{3}) << I64{24}))
 }
 fn rt_crypto_put32(output: I64, word: I64) {
-    rt_text_put(output, word & I64{255})
-    rt_text_put(output + I64{1}, (word >> I64{8}) & I64{255})
-    rt_text_put(output + I64{2}, (word >> I64{16}) & I64{255})
-    rt_text_put(output + I64{3}, (word >> I64{24}) & I64{255})
+    rt_text_put(output, word.bit_and(I64{255}))
+    rt_text_put(output + I64{1}, (word >> I64{8}).bit_and(I64{255}))
+    rt_text_put(output + I64{2}, (word >> I64{16}).bit_and(I64{255}))
+    rt_text_put(output + I64{3}, (word >> I64{24}).bit_and(I64{255}))
 }
 fn rt_chacha_rot(word: I64, shift: I64) -> I64 {
-    ((word << shift) | (word >> (I64{32} - shift))) & I64{0xffffffff}
+    ((word << shift).bit_or((word >> (I64{32} - shift)))).bit_and(I64{0xffffffff})
 }
 fn rt_chacha_qr(state: I64, ai: I64, bi: I64, ci: I64, di: I64) {
     ap :: state + ai * I64{8}
@@ -22,14 +22,14 @@ fn rt_chacha_qr(state: I64, ai: I64, bi: I64, ci: I64, di: I64) {
     b := rt_text_word(bp)
     c := rt_text_word(cp)
     d := rt_text_word(dp)
-    a = (a + b) & I64{0xffffffff}
-    d = rt_chacha_rot(d ~| a, I64{16})
-    c = (c + d) & I64{0xffffffff}
-    b = rt_chacha_rot(b ~| c, I64{12})
-    a = (a + b) & I64{0xffffffff}
-    d = rt_chacha_rot(d ~| a, I64{8})
-    c = (c + d) & I64{0xffffffff}
-    b = rt_chacha_rot(b ~| c, I64{7})
+    a = (a + b).bit_and(I64{0xffffffff})
+    d = rt_chacha_rot(d.bit_xor(a), I64{16})
+    c = (c + d).bit_and(I64{0xffffffff})
+    b = rt_chacha_rot(b.bit_xor(c), I64{12})
+    a = (a + b).bit_and(I64{0xffffffff})
+    d = rt_chacha_rot(d.bit_xor(a), I64{8})
+    c = (c + d).bit_and(I64{0xffffffff})
+    b = rt_chacha_rot(b.bit_xor(c), I64{7})
     rt_text_store(ap, a)
     rt_text_store(bp, b)
     rt_text_store(cp, c)
@@ -75,7 +75,7 @@ fn rt_crypto_chacha_block(key: I64, nonce: I64, counter: I64, output: I64, scrat
     i := I64{0}
     loop {
         if (i >= I64{16}) -> break
-        rt_crypto_put32(output + i * I64{4}, (rt_text_word(work + i * I64{8}) + rt_text_word(scratch + i * I64{8})) & I64{0xffffffff})
+        rt_crypto_put32(output + i * I64{4}, (rt_text_word(work + i * I64{8}) + rt_text_word(scratch + i * I64{8})).bit_and(I64{0xffffffff}))
         i += I64{1}
     }
     rt_crypto_wipe(scratch, I64{256})
@@ -120,7 +120,7 @@ fn rt_crypto_chacha_xor(key: I64, nonce: I64, counter: I64, input: I64, length: 
         if (length - at < count) -> count = length - at
         i := I64{0}
         loop i < count {
-            rt_text_put(output + at + i, rt_text_byte(input + at + i) ~| rt_text_byte(block + i))
+            rt_text_put(output + at + i, rt_text_byte(input + at + i).bit_xor(rt_text_byte(block + i)))
             i += I64{1}
         }
         at += count

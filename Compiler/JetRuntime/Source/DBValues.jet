@@ -38,7 +38,7 @@ fn db_value_payload(value: I64, kind: I64) -> I64 {
     rt_text_store(result + I64{8}, if (payload != U8{0}) -> I64{1} else -> I64{0})
     result
 }
-#Export(c) fn jet_rt_record_get_DBValue_Bool(value: I64) -> Bool { (db_value_payload(value, I64{4}) & I64{255}) != I64{0} }
+#Export(c) fn jet_rt_record_get_DBValue_Bool(value: I64) -> Bool { (db_value_payload(value, I64{4}).bit_and(I64{255})) != I64{0} }
 #Export(c) fn jet_rt_record_new_DBValue_Blob(payload: I64) -> I64 {
     result :: db_value_new(I64{5})
     coll_copy(payload, result + I64{8}, I64{24})
@@ -57,7 +57,7 @@ fn db_value_payload(value: I64, kind: I64) -> I64 {
     } else {
         word := rt_text_word(value + I64{8})
         if (kind == I64{3}) -> word = jet_rt_string_clone(word)
-        if (kind == I64{4}) -> word = if ((word & I64{255}) != I64{0}) -> I64{1} else -> I64{0}
+        if (kind == I64{4}) -> word = if ((word.bit_and(I64{255})) != I64{0}) -> I64{1} else -> I64{0}
         if (kind != I64{0}) -> rt_text_store(result + I64{8}, word)
     }
     result
@@ -78,7 +78,7 @@ fn db_value_payload(value: I64, kind: I64) -> I64 {
     if (kind == I64{1}) -> return a == b
     if (kind == I64{2}) -> return rt_f64_from_bits(a) == rt_f64_from_bits(b)
     if (kind == I64{3}) -> return jet_rt_string_compare(a, b) == I64{0}
-    if (kind == I64{4}) -> return ((a & I64{255}) != I64{0}) == ((b & I64{255}) != I64{0})
+    if (kind == I64{4}) -> return ((a.bit_and(I64{255})) != I64{0}) == ((b.bit_and(I64{255})) != I64{0})
     if (a != b) -> return false
     left_data :: rt_text_word(left + I64{24})
     right_data :: rt_text_word(right + I64{24})
@@ -96,7 +96,7 @@ fn db_value_payload(value: I64, kind: I64) -> I64 {
     // eb41b09af's existing shared core: Rust f64 Display, not Jet Float Debug.
     if (kind == I64{2}) -> return display_float(rt_f64_from_bits(rt_text_word(value + I64{8})), false)
     if (kind == I64{3}) -> return jet_rt_string_clone(rt_text_word(value + I64{8}))
-    if (kind == I64{4}) -> return if ((rt_text_word(value + I64{8}) & I64{255}) != I64{0}) -> display_literal(I64{1702195828}, I64{4}) else -> display_literal(I64{435728179558}, I64{5})
+    if (kind == I64{4}) -> return if ((rt_text_word(value + I64{8}).bit_and(I64{255})) != I64{0}) -> display_literal(I64{1702195828}, I64{4}) else -> display_literal(I64{435728179558}, I64{5})
     result :: jet_rt_string_builder_new()
     rt_text_push_word(result, I64{91}, I64{1})
     length :: rt_text_word(value + I64{8})

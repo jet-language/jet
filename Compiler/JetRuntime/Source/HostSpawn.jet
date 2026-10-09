@@ -141,8 +141,8 @@ fn spawn_pipe(scratch: I64, minimum: I64, read_out: I64, write_out: I64) -> I64 
     result :: host_call(I64{293}, scratch, I64{524288}, I64{0})
     if (result < I64{0}) { return result }
     packed :: fd_word(scratch, I64{0})
-    a :: packed & I64{4294967295}
-    b :: (packed >> I64{32}) & I64{4294967295}
+    a :: packed.bit_and(I64{4294967295})
+    b :: (packed >> I64{32}).bit_and(I64{4294967295})
     x :: host_call(I64{72}, a, I64{1030}, minimum)
     y :: if (x < I64{0}) -> x else -> host_call(I64{72}, b, I64{1030}, minimum)
     _ := host_call(I64{3}, a, I64{0}, I64{0})
@@ -209,7 +209,7 @@ fn spawn_pty(terminal: I64, scratch: I64, minimum: I64, child: I64) -> I64 {
     }
     if (result == I64{0}) {
         fd_put(scratch, I64{64}, I64{12})
-        fd_put(scratch, I64{0}, (fd_word(terminal, I64{8}) & I64{65535}) | ((fd_word(terminal, I64{0}) & I64{65535}) << I64{16}))
+        fd_put(scratch, I64{0}, (fd_word(terminal, I64{8}).bit_and(I64{65535})).bit_or(((fd_word(terminal, I64{0}).bit_and(I64{65535})) << I64{16})))
         result = host_call(I64{16}, slave, I64{21524}, scratch)
     }
     if (result == I64{0}) {
@@ -219,8 +219,8 @@ fn spawn_pty(terminal: I64, scratch: I64, minimum: I64, child: I64) -> I64 {
             if (fd_word(terminal, I64{16}) == HOST_TERMINAL_MODE_RAW) {
                 input_output :: fd_word(scratch, I64{0})
                 control_local :: fd_word(scratch, I64{8})
-                fd_put(scratch, I64{0}, (input_output & I64{4294965780}) | (((input_output >> I64{32}) & I64{4294967294}) << I64{32}))
-                fd_put(scratch, I64{8}, ((control_local & I64{4294966991}) | I64{48}) | (((control_local >> I64{32}) & I64{4294934452}) << I64{32}))
+                fd_put(scratch, I64{0}, (input_output.bit_and(I64{4294965780})).bit_or((((input_output >> I64{32}).bit_and(I64{4294967294})) << I64{32})))
+                fd_put(scratch, I64{8}, ((control_local.bit_and(I64{4294966991})).bit_or(I64{48})).bit_or((((control_local >> I64{32}).bit_and(I64{4294934452})) << I64{32})))
                 #Unsafe("Linux TCGETS initialized the 36-byte termios buffer; cfmakeraw sets VMIN=1, VTIME=0 in its control-character array") {
                     os_store_u8(wrapping(scratch + I64{23}), I64{1})
                     os_store_u8(wrapping(scratch + I64{22}), I64{0})
@@ -421,7 +421,7 @@ fn spawn_exec_child(plan: I64, count: I64, child: I64, scratch: I64, err_read: I
             if ((index == I64{0} && fd_word(spec, I64{56}) == I64{0}) || mode == I64{3}) {
                 fd_put(scratch, I64{96}, I64{7815273878500238383})
                 fd_put(scratch, I64{104}, I64{108})
-                null_fd :: host_call(I64{2}, wrapping(scratch + I64{96}), I64{524288} | (if (index == I64{0}) -> I64{0} else -> I64{1}), I64{0})
+                null_fd :: host_call(I64{2}, wrapping(scratch + I64{96}), I64{524288}.bit_or((if (index == I64{0}) -> I64{0} else -> I64{1})), I64{0})
                 copied :: if (null_fd < I64{0}) -> null_fd else -> host_call(I64{72}, null_fd, I64{1030}, minimum)
                 spawn_close(null_fd)
                 if (copied < I64{0}) {
@@ -617,7 +617,7 @@ fn spawn_exec_child(plan: I64, count: I64, child: I64, scratch: I64, err_read: I
         }
         sync_mutex_lock(child)
         if (result > I64{0}) {
-            fd_put(child, I64{24}, fd_word(status, I64{0}) & I64{4294967295})
+            fd_put(child, I64{24}, fd_word(status, I64{0}).bit_and(I64{4294967295}))
             compiler_process_record_exit_status(pid, fd_word(child, I64{24}))
             fd_put(child, I64{16}, I64{1})
         } else { fd_put(child, I64{16}, I64{0}) }
@@ -651,7 +651,7 @@ fn spawn_stream_dup(child: I64, stream: I64) -> I64 {
     original :: fd_word(child, offset)
     result :: if (original < I64{0}) -> I64{-9} else -> host_call(I64{72}, original, I64{1030}, I64{3})
     sync_mutex_unlock(child)
-    if (result >= I64{0} && offset == I64{56}) -> result | I64{4294967296} else -> result
+    if (result >= I64{0} && offset == I64{56}) -> result.bit_or(I64{4294967296}) else -> result
 }
 
 fn spawn_stream_io(child: I64, stream: I64, bytes: I64, length: I64, number: I64, error: I64) -> I64 {
@@ -661,7 +661,7 @@ fn spawn_stream_io(child: I64, stream: I64, bytes: I64, length: I64, number: I64
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     packed :: spawn_stream_dup(child, index)
     if (packed < I64{0}) { return fd_error(packed, error) }
-    native :: packed & I64{4294967295}
+    native :: packed.bit_and(I64{4294967295})
     result := I64{0}
     loop {
         result = host_call(number, native, bytes, requested)
@@ -670,7 +670,7 @@ fn spawn_stream_io(child: I64, stream: I64, bytes: I64, length: I64, number: I64
     spawn_close(native)
     // Capture PTY-ness before blocking so an alias's concurrent close does
     // not turn the Linux hung-up PTY EIO fact into a different source error.
-    if (number == I64{0} && result == I64{-5} && (packed & I64{4294967296}) != I64{0}) {
+    if (number == I64{0} && result == I64{-5} && (packed.bit_and(I64{4294967296})) != I64{0}) {
         result = I64{0}
     }
     fd_error(result, error)
@@ -701,7 +701,7 @@ fn spawn_stream_io(child: I64, stream: I64, bytes: I64, length: I64, number: I64
     if (jet_scheduler_native_propagate() != I64{0}) -> return
     native_cols :: host_native_int(cols)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
-    size :: (native_rows & I64{65535}) | ((native_cols & I64{65535}) << I64{16})
+    size :: (native_rows.bit_and(I64{65535})).bit_or(((native_cols.bit_and(I64{65535})) << I64{16}))
     sync_mutex_lock(child)
     master :: fd_word(child, I64{56})
     result := I64{-9}
@@ -740,7 +740,7 @@ fn spawn_stream_io(child: I64, stream: I64, bytes: I64, length: I64, number: I64
         errno := I64{0}
         #Unsafe("libc __errno_location returns this calling thread's live errno int; read only its initialized four bytes") {
             at :: process_errno_location()
-            errno = os_load_u8(at) | (os_load_u8(wrapping(at + I64{1})) << I64{8}) | (os_load_u8(wrapping(at + I64{2})) << I64{16}) | (os_load_u8(wrapping(at + I64{3})) << I64{24})
+            errno = os_load_u8(at).bit_or((os_load_u8(wrapping(at + I64{1})) << I64{8})).bit_or((os_load_u8(wrapping(at + I64{2})) << I64{16})).bit_or((os_load_u8(wrapping(at + I64{3})) << I64{24}))
         }
         jet_rt_free(buffer, I64{4096}, I64{1})
         fd_put(length, I64{0}, I64{0})

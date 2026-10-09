@@ -11,7 +11,7 @@ fn ui_optional_text_eq(left: I64, right: I64) -> Bool {
     jet_rt_string_eq(left, right)
 }
 // Bool occupies a byte, not the uninitialized rest of its carrier word.
-fn ui_carrier_bool(address: I64) -> I64 { if ((ui_carrier_word(address) & I64{255}) == I64{0}) -> I64{0} else -> I64{1} }
+fn ui_carrier_bool(address: I64) -> I64 { if ((ui_carrier_word(address).bit_and(I64{255})) == I64{0}) -> I64{0} else -> I64{1} }
 fn ui_borrow_text(value: I64, out: I64) {
     ui_carrier_store(out, ui_carrier_word(value))
     ui_carrier_store(out + I64{8}, ui_carrier_word(value + I64{8}))
@@ -92,7 +92,7 @@ fn ui_accessibility_fields_drop(value: I64) {
 }
 fn ui_shortcut_copy(value: I64, result: I64) {
     ui_carrier_store(result + UI_SHORTCUT_KEY, jet_rt_string_clone(ui_carrier_word(value + UI_SHORTCUT_KEY)))
-    ui_carrier_store(result + UI_SHORTCUT_MODIFIERS, ui_carrier_word(value + UI_SHORTCUT_MODIFIERS) & I64{255})
+    ui_carrier_store(result + UI_SHORTCUT_MODIFIERS, ui_carrier_word(value + UI_SHORTCUT_MODIFIERS).bit_and(I64{255}))
 }
 fn ui_shortcut_fields_drop(value: I64) {
     jet_rt_string_drop(ui_carrier_word(value + UI_SHORTCUT_KEY))
@@ -108,6 +108,6 @@ fn ui_shortcut_fields_drop(value: I64) {
     jet_rt_free(value, UI_SHORTCUT_BYTES, I64{8})
 }
 #Export(c) fn jet_rt_handle_eq_JetUiShortcut(left: I64, right: I64) -> Bool {
-    jet_rt_string_eq(ui_carrier_word(left + UI_SHORTCUT_KEY), ui_carrier_word(right + UI_SHORTCUT_KEY)) && (ui_carrier_word(left + UI_SHORTCUT_MODIFIERS) & I64{255}) == (ui_carrier_word(right + UI_SHORTCUT_MODIFIERS) & I64{255})
+    jet_rt_string_eq(ui_carrier_word(left + UI_SHORTCUT_KEY), ui_carrier_word(right + UI_SHORTCUT_KEY)) && (ui_carrier_word(left + UI_SHORTCUT_MODIFIERS).bit_and(I64{255})) == (ui_carrier_word(right + UI_SHORTCUT_MODIFIERS).bit_and(I64{255}))
 }
 #Export(c) fn jet_rt_handle_field_JetUiShortcut_key(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_SHORTCUT_KEY), out) }

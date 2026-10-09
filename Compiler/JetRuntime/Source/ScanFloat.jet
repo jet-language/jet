@@ -93,11 +93,11 @@ fn scan_pow10(node: I64, count: I64) {
 fn scan_float_bits(data: I64, len: I64, stride: I64) -> I64 {
     decimal :: scan_decimal(data, len, stride)
     sign :: if decimal.negative -> I64{-9223372036854775808} else -> I64{0}
-    if (decimal.special == I64{1}) { return sign | I64{9218868437227405312} }
-    if (decimal.special == I64{2}) { return sign | I64{9221120237041090560} }
+    if (decimal.special == I64{1}) { return sign.bit_or(I64{9218868437227405312}) }
+    if (decimal.special == I64{2}) { return sign.bit_or(I64{9221120237041090560}) }
     if (decimal.digits == I64{0}) { return sign }
     order :: decimal.digits + decimal.exponent
-    if (order > I64{309}) { return sign | I64{9218868437227405312} }
+    if (order > I64{309}) { return sign.bit_or(I64{9218868437227405312}) }
     if (order < I64{-324}) { return sign }
     // Rust dec2flt's bound: every binary64 rounding boundary terminates within
     // 768 significant decimal digits. A longer suffix can affect rounding only
@@ -137,7 +137,7 @@ fn scan_float_bits(data: I64, len: I64, stride: I64) -> I64 {
     if (exponent > I64{1023} || exponent < I64{-1075}) {
         int_free_node(numerator)
         int_free_node(denominator)
-        return sign | (if (exponent > I64{1023}) -> I64{9218868437227405312} else -> I64{0})
+        return sign.bit_or((if (exponent > I64{1023}) -> I64{9218868437227405312} else -> I64{0}))
     }
     shift := if (exponent >= I64{-1022}) -> I64{52} else -> exponent + I64{1074}
     if (shift < I64{0}) { int_scale(denominator, I64{2}, I64{0}) }
@@ -150,17 +150,17 @@ fn scan_float_bits(data: I64, len: I64, stride: I64) -> I64 {
     twice :: jet_int_add(remainder, remainder)
     comparison :: int_compare_abs(twice, int_tag(denominator))
     mantissa := int_word(quotient)
-    if (comparison > I64{0} || (comparison == I64{0} && (sticky || (mantissa & I64{1}) != I64{0}))) { mantissa += I64{1} }
+    if (comparison > I64{0} || (comparison == I64{0} && (sticky || (mantissa.bit_and(I64{1})) != I64{0}))) { mantissa += I64{1} }
     int_discard(quotient)
     int_discard(remainder)
     int_discard(twice)
     int_free_node(numerator)
     int_free_node(denominator)
-    if (exponent < I64{-1022}) { return sign | mantissa }
+    if (exponent < I64{-1022}) { return sign.bit_or(mantissa) }
     if (mantissa == I64{9007199254740992}) {
         mantissa = I64{4503599627370496}
         exponent += I64{1}
     }
-    if (exponent > I64{1023}) { return sign | I64{9218868437227405312} }
-    sign | ((exponent + I64{1023}) << I64{52}) | (mantissa - I64{4503599627370496})
+    if (exponent > I64{1023}) { return sign.bit_or(I64{9218868437227405312}) }
+    sign.bit_or(((exponent + I64{1023}) << I64{52})).bit_or((mantissa - I64{4503599627370496}))
 }

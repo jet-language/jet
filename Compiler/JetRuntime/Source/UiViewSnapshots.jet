@@ -5,9 +5,9 @@
     result :: jet_rt_alloc(UI_PREVIEW_BYTES, I64{8})
     ui_carrier_store(result + UI_PREVIEW_DEVICE, kind)
     ui_carrier_store(result + UI_PREVIEW_CUSTOM, if (kind == I64{3}) -> jet_rt_string_clone(ui_carrier_word(value + UI_PREVIEW_CUSTOM)) else -> I64{0})
-    ui_carrier_store(result + UI_PREVIEW_WIDTH, ui_carrier_word(value + UI_PREVIEW_WIDTH) & I64{4294967295})
-    ui_carrier_store(result + UI_PREVIEW_HEIGHT, ui_carrier_word(value + UI_PREVIEW_HEIGHT) & I64{4294967295})
-    ui_carrier_store(result + UI_PREVIEW_SCALE, ui_carrier_word(value + UI_PREVIEW_SCALE) & I64{65535})
+    ui_carrier_store(result + UI_PREVIEW_WIDTH, ui_carrier_word(value + UI_PREVIEW_WIDTH).bit_and(I64{4294967295}))
+    ui_carrier_store(result + UI_PREVIEW_HEIGHT, ui_carrier_word(value + UI_PREVIEW_HEIGHT).bit_and(I64{4294967295}))
+    ui_carrier_store(result + UI_PREVIEW_SCALE, ui_carrier_word(value + UI_PREVIEW_SCALE).bit_and(I64{65535}))
     result
 }
 #Export(c) fn jet_rt_handle_drop_JetUiPreviewViewport(value: I64) {
@@ -19,7 +19,7 @@
     kind :: ui_carrier_word(a + UI_PREVIEW_DEVICE)
     if (kind != ui_carrier_word(b + UI_PREVIEW_DEVICE)) -> return false
     if (kind == I64{3} && !jet_rt_string_eq(ui_carrier_word(a + UI_PREVIEW_CUSTOM), ui_carrier_word(b + UI_PREVIEW_CUSTOM))) -> return false
-    (ui_carrier_word(a + UI_PREVIEW_WIDTH) & I64{4294967295}) == (ui_carrier_word(b + UI_PREVIEW_WIDTH) & I64{4294967295}) && (ui_carrier_word(a + UI_PREVIEW_HEIGHT) & I64{4294967295}) == (ui_carrier_word(b + UI_PREVIEW_HEIGHT) & I64{4294967295}) && (ui_carrier_word(a + UI_PREVIEW_SCALE) & I64{65535}) == (ui_carrier_word(b + UI_PREVIEW_SCALE) & I64{65535})
+    (ui_carrier_word(a + UI_PREVIEW_WIDTH).bit_and(I64{4294967295})) == (ui_carrier_word(b + UI_PREVIEW_WIDTH).bit_and(I64{4294967295})) && (ui_carrier_word(a + UI_PREVIEW_HEIGHT).bit_and(I64{4294967295})) == (ui_carrier_word(b + UI_PREVIEW_HEIGHT).bit_and(I64{4294967295})) && (ui_carrier_word(a + UI_PREVIEW_SCALE).bit_and(I64{65535})) == (ui_carrier_word(b + UI_PREVIEW_SCALE).bit_and(I64{65535}))
 }
 fn ui_virtual_measurements_clone(value: I64) -> I64 {
     length :: ui_carrier_word(value + DATA_SEQUENCE_LENGTH)

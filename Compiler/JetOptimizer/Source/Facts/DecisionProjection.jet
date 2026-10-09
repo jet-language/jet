@@ -10,7 +10,7 @@ struct MIRDecisionLedger {
 #Error struct MIRDecisionPayloadError { message: String }
 fn mir_decision_frame(out: &[U8], text: String) Never! {
     length :: U64.from_int(text.bytes().len()) ?? panic("decision frame length")
-    loop index in 0..<8 -> &out.push(U8.from_u64((length >> (8 * index)) & U64{255}) ?? U8{0})
+    loop index in 0..<8 -> &out.push(U8.from_u64((length >> (8 * index)).bit_and(U64{255})) ?? U8{0})
     &out.extend(text.bytes())
 }
 fn mir_decision_runtime_name(part: MIRRuntimePartID) -> String Never! {

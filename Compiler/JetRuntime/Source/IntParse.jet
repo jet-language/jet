@@ -18,7 +18,7 @@ fn numeric_trim_end(text: I64, start: I64) -> I64 {
     end := rt_text_len(text)
     loop end > start {
         at := end - I64{1}
-        loop at > start && (rt_text_byte(data + at) & I64{192}) == (I64{128}) -> at -= I64{1}
+        loop at > start && (rt_text_byte(data + at).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
         if !unicode_is_white_space(rt_text_decode(data + at)) -> break
         end = at
     }

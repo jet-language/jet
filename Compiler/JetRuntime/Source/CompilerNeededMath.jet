@@ -64,16 +64,16 @@
 
 // abs is a sign-bit clear, including -0 and signaling NaN payloads.
 #Export(c) fn jet_std_math_abs_f64(x: Float) -> Float {
-    rt_f64_from_bits(rt_f64_bits(x) & I64{9223372036854775807})
+    rt_f64_from_bits(rt_f64_bits(x).bit_and(I64{9223372036854775807}))
 }
 #Export(c) fn jet_std_math_is_nan(x: Float) -> Bool {
-    (rt_f64_bits(x) & I64{9223372036854775807}) > I64{9218868437227405312}
+    (rt_f64_bits(x).bit_and(I64{9223372036854775807})) > I64{9218868437227405312}
 }
 #Export(c) fn jet_std_math_is_infinite(x: Float) -> Bool {
-    (rt_f64_bits(x) & I64{9223372036854775807}) == I64{9218868437227405312}
+    (rt_f64_bits(x).bit_and(I64{9223372036854775807})) == I64{9218868437227405312}
 }
 #Export(c) fn jet_std_math_is_finite(x: Float) -> Bool {
-    (rt_f64_bits(x) & I64{9223372036854775807}) < I64{9218868437227405312}
+    (rt_f64_bits(x).bit_and(I64{9223372036854775807})) < I64{9218868437227405312}
 }
 // MathLibPure.rs partial_cmp: equal zeros; all NaNs equal and after numbers.
 #Export(c) fn jet_std_math_cmp(a: Float, b: Float) -> I64 {

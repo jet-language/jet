@@ -15,7 +15,7 @@ DELIVERY_HANDLE_BYTES :: prep { I64{40} }
 }
 #Export(c) fn jet_rt_record_get_JetDelivery_id(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value)) }
 #Export(c) fn jet_rt_record_get_JetDelivery_store(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{8})) }
-#Export(c) fn jet_rt_record_get_JetDelivery_duplicate(value: I64) -> Bool { (rt_text_word(value + I64{16}) & I64{255}) != I64{0} }
+#Export(c) fn jet_rt_record_get_JetDelivery_duplicate(value: I64) -> Bool { (rt_text_word(value + I64{16}).bit_and(I64{255})) != I64{0} }
 #Export(c) fn jet_rt_record_get_JetDelivery_authority(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{24})) }
 #Export(c) fn jet_rt_record_get_JetDelivery_generation(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{32})) }
 #Export(c) fn jet_rt_handle_clone_JetDelivery(value: I64) -> I64 {

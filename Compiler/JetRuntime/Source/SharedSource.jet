@@ -24,7 +24,7 @@ fn source_hash_word(initial: I64, value: I64) -> I64 {
     word := value
     at := I64{0}
     loop at < (I64{8}) {
-        hash = wrapping((hash ~| (word & I64{255})) * I64{1099511628211})
+        hash = wrapping((hash.bit_xor((word.bit_and(I64{255})))) * I64{1099511628211})
         word = word >> I64{8}
         at += I64{1}
     }

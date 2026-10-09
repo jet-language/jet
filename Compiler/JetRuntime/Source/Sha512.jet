@@ -3,12 +3,12 @@
 // The 80-word schedule/state are wiped before return; no allocation or padding copy.
 // Signed words carry bit patterns; logical shifts mask off sign extension.
 fn rt_crypto_shr64(value: I64, shift: I64) -> I64 {
-    (value >> shift) & (I64{9223372036854775807} >> (shift - I64{1}))
+    (value >> shift).bit_and((I64{9223372036854775807} >> (shift - I64{1})))
 }
 fn rt_crypto_rotr64(value: I64, shift: I64) -> I64 {
-    rt_crypto_shr64(value, shift) | (value << (I64{64} - shift))
+    rt_crypto_shr64(value, shift).bit_or((value << (I64{64} - shift)))
 }
-fn rt_crypto_word64(high: I64, low: I64) -> I64 { (high << I64{32}) | low }
+fn rt_crypto_word64(high: I64, low: I64) -> I64 { (high << I64{32}).bit_or(low) }
 fn rt_sha512_k(round: I64) -> I64 {
     if {
         (round == I64{0}) -> rt_crypto_word64(I64{0x428a2f98}, I64{0xd728ae22})
@@ -98,8 +98,8 @@ fn rt_sha512_byte(input: I64, length: I64, at: I64, end: I64) -> I64 {
     if (at == length) -> return I64{128}
     if (at >= end - I64{8}) {
         shift :: (end - I64{1} - at) * I64{8}
-        if (shift == I64{0}) -> return (length & I64{31}) << I64{3}
-        return (length >> (shift - I64{3})) & I64{255}
+        if (shift == I64{0}) -> return (length.bit_and(I64{31})) << I64{3}
+        return (length >> (shift - I64{3})).bit_and(I64{255})
     }
     I64{0}
 }
@@ -146,7 +146,7 @@ fn rt_sha2_64_parts3(input: I64, left_len: I64, right: I64, right_len: I64, thir
             j := I64{0}
             loop {
                 if (j >= I64{8}) -> break
-                word = (word << I64{8}) | rt_sha512_parts3_byte(input, left_len, right, right_len, third, length, off + t * I64{8} + j, end)
+                word = (word << I64{8}).bit_or(rt_sha512_parts3_byte(input, left_len, right, right_len, third, length, off + t * I64{8} + j, end))
                 j += I64{1}
             }
             rt_text_store(schedule + t * I64{8}, word)
@@ -156,8 +156,8 @@ fn rt_sha2_64_parts3(input: I64, left_len: I64, right: I64, right_len: I64, thir
             if (t >= I64{80}) -> break
             x :: rt_text_word(schedule + (t - I64{15}) * I64{8})
             y :: rt_text_word(schedule + (t - I64{2}) * I64{8})
-            s0 :: rt_crypto_rotr64(x, I64{1}) ~| rt_crypto_rotr64(x, I64{8}) ~| rt_crypto_shr64(x, I64{7})
-            s1 :: rt_crypto_rotr64(y, I64{19}) ~| rt_crypto_rotr64(y, I64{61}) ~| rt_crypto_shr64(y, I64{6})
+            s0 :: rt_crypto_rotr64(x, I64{1}).bit_xor(rt_crypto_rotr64(x, I64{8})).bit_xor(rt_crypto_shr64(x, I64{7}))
+            s1 :: rt_crypto_rotr64(y, I64{19}).bit_xor(rt_crypto_rotr64(y, I64{61})).bit_xor(rt_crypto_shr64(y, I64{6}))
             rt_text_store(schedule + t * I64{8}, rt_text_word(schedule + (t - I64{16}) * I64{8}) + s0 + rt_text_word(schedule + (t - I64{7}) * I64{8}) + s1)
             t += I64{1}
         }
@@ -172,11 +172,11 @@ fn rt_sha2_64_parts3(input: I64, left_len: I64, right: I64, right_len: I64, thir
         t = I64{0}
         loop {
             if (t >= I64{80}) -> break
-            s1 :: rt_crypto_rotr64(e, I64{14}) ~| rt_crypto_rotr64(e, I64{18}) ~| rt_crypto_rotr64(e, I64{41})
-            ch :: (e & f) ~| ((e ~| I64{-1}) & g)
+            s1 :: rt_crypto_rotr64(e, I64{14}).bit_xor(rt_crypto_rotr64(e, I64{18})).bit_xor(rt_crypto_rotr64(e, I64{41}))
+            ch :: (e.bit_and(f)).bit_xor(((e.bit_xor(I64{-1})).bit_and(g)))
             temp1 :: h + s1 + ch + rt_sha512_k(t) + rt_text_word(schedule + t * I64{8})
-            s0 :: rt_crypto_rotr64(a, I64{28}) ~| rt_crypto_rotr64(a, I64{34}) ~| rt_crypto_rotr64(a, I64{39})
-            maj :: (a & b) ~| (a & c) ~| (b & c)
+            s0 :: rt_crypto_rotr64(a, I64{28}).bit_xor(rt_crypto_rotr64(a, I64{34})).bit_xor(rt_crypto_rotr64(a, I64{39}))
+            maj :: (a.bit_and(b)).bit_xor((a.bit_and(c))).bit_xor((b.bit_and(c)))
             h = g
             g = f
             f = e
@@ -202,7 +202,7 @@ fn rt_sha2_64_parts3(input: I64, left_len: I64, right: I64, right_len: I64, thir
     loop {
         if (at >= output_length) -> break
         word :: rt_text_word(scratch + (at / I64{8}) * I64{8})
-        rt_text_put(output + at, (word >> (I64{56} - (at % I64{8}) * I64{8})) & I64{255})
+        rt_text_put(output + at, (word >> (I64{56} - (at % I64{8}) * I64{8})).bit_and(I64{255}))
         at += I64{1}
     }
     rt_crypto_wipe(scratch, I64{704})

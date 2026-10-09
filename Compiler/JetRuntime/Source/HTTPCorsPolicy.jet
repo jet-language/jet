@@ -12,7 +12,7 @@ HTTP_CORS_POLICY_MAX_AGE :: prep { I64{40} }
     http_cors_origins_copy(value + HTTP_CORS_POLICY_ORIGINS, result + HTTP_CORS_POLICY_ORIGINS)
     encoding_store(result + HTTP_CORS_POLICY_METHODS, jet_rt_string_clone(encoding_word(value + HTTP_CORS_POLICY_METHODS)))
     encoding_store(result + HTTP_CORS_POLICY_HEADERS, jet_rt_string_clone(encoding_word(value + HTTP_CORS_POLICY_HEADERS)))
-    credentials :: encoding_word(value + HTTP_CORS_POLICY_CREDENTIALS) & I64{255}
+    credentials :: encoding_word(value + HTTP_CORS_POLICY_CREDENTIALS).bit_and(I64{255})
     encoding_store(result + HTTP_CORS_POLICY_CREDENTIALS, if (credentials == I64{0}) -> I64{0} else -> I64{1})
     encoding_store(result + HTTP_CORS_POLICY_MAX_AGE, encoding_word(value + HTTP_CORS_POLICY_MAX_AGE))
     result

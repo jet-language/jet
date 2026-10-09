@@ -27,14 +27,14 @@ fn numeric_widen_stop(file: I64, line: I64) {
     remaining := magnitude
     loop remaining != (I64{0}) {
         significant += I64{1}
-        remaining = (remaining >> I64{1}) & I64{9223372036854775807}
+        remaining = (remaining >> I64{1}).bit_and(I64{9223372036854775807})
     }
     remaining = magnitude
-    trailing_more := remaining != I64{0} && (remaining & I64{1}) == I64{0}
+    trailing_more := remaining != I64{0} && (remaining.bit_and(I64{1})) == I64{0}
     loop trailing_more {
         trailing += I64{1}
-        remaining = (remaining >> I64{1}) & I64{9223372036854775807}
-        trailing_more = remaining != I64{0} && (remaining & I64{1}) == I64{0}
+        remaining = (remaining >> I64{1}).bit_and(I64{9223372036854775807})
+        trailing_more = remaining != I64{0} && (remaining.bit_and(I64{1})) == I64{0}
     }
     precision :: if target_f32 -> I64{24} else -> I64{53}
     if (significant > precision && trailing < significant - precision) {
@@ -44,6 +44,6 @@ fn numeric_widen_stop(file: I64, line: I64) {
     if (signed || raw >= I64{0}) -> return Float{raw}
     // Split unsigned conversion at bit63 without a U64->I64 checked cast.
     // Acceptance above guarantees exact conversion, including this split.
-    half :: (raw >> I64{1}) & I64{9223372036854775807}
-    return Float{half} * Float{2} + Float{raw & I64{1}}
+    half :: (raw >> I64{1}).bit_and(I64{9223372036854775807})
+    return Float{half} * Float{2} + Float{raw.bit_and(I64{1})}
 }

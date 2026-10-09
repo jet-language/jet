@@ -44,7 +44,7 @@ fn realtime_big_product(result: I64, left: I64, low: I64, high: I64, temporary: 
     loop bit < (I64{128}) {
         word :: if (bit < I64{64}) -> low else -> high
         at :: if (bit < I64{64}) -> bit else -> bit - I64{64}
-        if (((word >> at) & I64{1}) != I64{0}) {
+        if (((word >> at).bit_and(I64{1})) != I64{0}) {
             float_big_copy(temporary, left)
             float_big_shift(temporary, bit)
             float_big_add(result, temporary)
@@ -77,7 +77,7 @@ fn realtime_big_product(result: I64, left: I64, low: I64, high: I64, temporary: 
         float_big_shift(factor, bit)
         if (float_big_compare(product, factor) >= I64{0}) {
             float_big_sub(product, factor)
-            quotient |= I64{1} << bit
+            quotient = quotient.bit_or(I64{1} << bit)
         }
         bit -= I64{1}
     }

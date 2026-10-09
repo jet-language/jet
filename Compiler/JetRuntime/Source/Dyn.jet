@@ -121,7 +121,7 @@ fn data_tree_quote(target: I64, text: I64) {
         } else if (byte == I64{8}) { rt_text_push_word(target, I64{25180}, I64{2}) } else if (byte == I64{9}) { rt_text_push_word(target, I64{29788}, I64{2}) } else if (byte == I64{10}) { rt_text_push_word(target, I64{28252}, I64{2}) } else if (byte == I64{12}) { rt_text_push_word(target, I64{26204}, I64{2}) } else if (byte == I64{13}) { rt_text_push_word(target, I64{29276}, I64{2}) } else if (byte < I64{32}) {
             rt_text_push_word(target, I64{808482140}, I64{4})
             high :: byte >> I64{4}
-            low :: byte & I64{15}
+            low :: byte.bit_and(I64{15})
             rt_text_push_word(target, if (high < I64{10}) -> high + I64{48} else -> high + I64{87}, I64{1})
             rt_text_push_word(target, if (low < I64{10}) -> low + I64{48} else -> low + I64{87}, I64{1})
         } else { rt_text_append_raw_word(target, byte, I64{1}) }
@@ -141,7 +141,7 @@ fn data_tree_render(target: I64, tree: I64) {
         return
     }
     if kind == DATA_TREE_INT || kind == DATA_TREE_FLOAT {
-        if (kind == DATA_TREE_FLOAT && ((value & I64{9223372036854775807}) >> I64{52}) == I64{2047}) -> panic("JSON cannot encode a non-finite Float")
+        if (kind == DATA_TREE_FLOAT && ((value.bit_and(I64{9223372036854775807})) >> I64{52}) == I64{2047}) -> panic("JSON cannot encode a non-finite Float")
         text :: if kind == DATA_TREE_INT -> jet_rt_int_to_string(value) else -> jet_rt_float_debug(rt_f64_from_bits(value))
         jet_rt_string_builder_push(target, text)
         jet_rt_string_drop(text)
@@ -265,9 +265,9 @@ fn data_dyn_bytes_text(sequence: I64) -> I64 {
         b :: if (at + I64{1} < length) -> host_u8_get(data, at + I64{1}) else -> I64{0}
         c :: if (at + I64{2} < length) -> host_u8_get(data, at + I64{2}) else -> I64{0}
         rt_text_push_scalar(target, rt_text_byte(rt_text_data(alphabet) + (a >> I64{2})))
-        rt_text_push_scalar(target, rt_text_byte(rt_text_data(alphabet) + ((a & I64{3}) << I64{4}) + (b >> I64{4})))
-        rt_text_push_scalar(target, if (at + I64{1} < length) -> rt_text_byte(rt_text_data(alphabet) + ((b & I64{15}) << I64{2}) + (c >> I64{6})) else -> I64{61})
-        rt_text_push_scalar(target, if (at + I64{2} < length) -> rt_text_byte(rt_text_data(alphabet) + (c & I64{63})) else -> I64{61})
+        rt_text_push_scalar(target, rt_text_byte(rt_text_data(alphabet) + ((a.bit_and(I64{3})) << I64{4}) + (b >> I64{4})))
+        rt_text_push_scalar(target, if (at + I64{1} < length) -> rt_text_byte(rt_text_data(alphabet) + ((b.bit_and(I64{15})) << I64{2}) + (c >> I64{6})) else -> I64{61})
+        rt_text_push_scalar(target, if (at + I64{2} < length) -> rt_text_byte(rt_text_data(alphabet) + (c.bit_and(I64{63}))) else -> I64{61})
         at += I64{3}
     }
     jet_rt_string_builder_finish(target)

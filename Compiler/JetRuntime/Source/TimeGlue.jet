@@ -118,13 +118,13 @@ fn time_glue_pad(target: I64, value: I64, width: I64) {
 #Export(c) fn jet_rt_handle_clone_JetLocalTime(value: I64) -> I64 {
     result :: time_glue_clone(value, TIME_LOCAL_BYTES)
     // Nanos is u32; upper half of its native word is padding, not semantics.
-    time_glue_store(result + TIME_LOCAL_NANOS, time_glue_word(value + TIME_LOCAL_NANOS) & I64{4294967295})
+    time_glue_store(result + TIME_LOCAL_NANOS, time_glue_word(value + TIME_LOCAL_NANOS).bit_and(I64{4294967295}))
     result
 }
 #Export(c) fn jet_rt_handle_drop_JetLocalTime(value: I64) { time_glue_drop(value, TIME_LOCAL_BYTES) }
 #Export(c) fn jet_rt_handle_eq_JetLocalTime(left: I64, right: I64) -> Bool {
     time_glue_equal(left, right, TIME_LOCAL_NANOS) &&
-        (time_glue_word(left + TIME_LOCAL_NANOS) & I64{4294967295}) == (time_glue_word(right + TIME_LOCAL_NANOS) & I64{4294967295})
+        (time_glue_word(left + TIME_LOCAL_NANOS).bit_and(I64{4294967295})) == (time_glue_word(right + TIME_LOCAL_NANOS).bit_and(I64{4294967295}))
 }
 #Export(c) fn jet_rt_handle_show_JetLocalTime(value: I64) -> I64 {
     // Time472-480: nanos unsigned, zero omitted, otherwise minimum 9 digits.
@@ -134,7 +134,7 @@ fn time_glue_pad(target: I64, value: I64, width: I64) {
     time_glue_pad(target, time_glue_word(value + TIME_LOCAL_MINUTE), I64{2})
     rt_text_push_word(target, I64{58}, I64{1})
     time_glue_pad(target, time_glue_word(value + TIME_LOCAL_SECOND), I64{2})
-    nanos :: time_glue_word(value + TIME_LOCAL_NANOS) & I64{4294967295}
+    nanos :: time_glue_word(value + TIME_LOCAL_NANOS).bit_and(I64{4294967295})
     if (nanos != I64{0}) {
         rt_text_push_word(target, I64{46}, I64{1})
         time_glue_pad(target, nanos, I64{9})

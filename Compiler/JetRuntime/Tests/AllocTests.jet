@@ -19,8 +19,8 @@ fn alloc_test_payload(size: I64, align: I64) {
     second :: jet_rt_alloc(size, align)
     count :: if (size == I64{0}) -> I64{1} else -> size
     alloc_test_require(first != I64{0} && second != I64{0} && first != second)
-    alloc_test_require((first & wrapping(align - I64{1})) == I64{0})
-    alloc_test_require((second & wrapping(align - I64{1})) == I64{0})
+    alloc_test_require((first.bit_and(wrapping(align - I64{1}))) == I64{0})
+    alloc_test_require((second.bit_and(wrapping(align - I64{1}))) == I64{0})
     alloc_test_require(wrapping(first + count) <= second || wrapping(second + count) <= first)
     #Unsafe("both allocations own count bytes; touching their endpoints must not alias each other or their metadata") {
         os_store_u8(first, I64{17})
@@ -133,7 +133,7 @@ fn alloc_test_nullable() {
     alloc_test_require(small != I64{0})
     jet_rt_free(small, I64{8}, I64{8})
     aligned :: alloc_try(I64{0}, I64{8192})
-    alloc_test_require(aligned != I64{0} && (aligned & I64{8191}) == I64{0})
+    alloc_test_require(aligned != I64{0} && (aligned.bit_and(I64{8191})) == I64{0})
     jet_rt_free(aligned, I64{0}, I64{8192})
 }
 

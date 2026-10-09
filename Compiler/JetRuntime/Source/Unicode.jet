@@ -7,10 +7,10 @@
 // The generator validates <=3 nonzero scalar lanes. Unmapped NUL occupies
 // the first lane and is still emitted; zero only terminates later lanes.
 fn unicode_append_mapping(builder: I64, mapping: I64) {
-    rt_text_push_scalar(builder, mapping & I64{2097151})
-    second :: (mapping >> I64{21}) & I64{2097151}
+    rt_text_push_scalar(builder, mapping.bit_and(I64{2097151}))
+    second :: (mapping >> I64{21}).bit_and(I64{2097151})
     if (second != I64{0}) { rt_text_push_scalar(builder, second) }
-    third :: (mapping >> I64{42}) & I64{2097151}
+    third :: (mapping >> I64{42}).bit_and(I64{2097151})
     if (third != I64{0}) { rt_text_push_scalar(builder, third) }
 }
 

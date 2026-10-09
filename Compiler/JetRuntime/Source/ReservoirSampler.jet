@@ -39,9 +39,9 @@
         return
     }
     state := iter_unsigned(data_tree_word(value + RESERVOIR_RNG))
-    state ^= state << U64{13}
-    state ^= state >> U64{7}
-    state ^= state << U64{17}
+    state = state.bit_xor(state << U64{13})
+    state = state.bit_xor(state >> U64{7})
+    state = state.bit_xor(state << U64{17})
     data_tree_store(value + RESERVOIR_RNG, iter_signed(state))
     index :: state % count
     if (index < U64{limit}) {

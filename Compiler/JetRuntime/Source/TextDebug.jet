@@ -7,7 +7,7 @@ fn rt_text_push_rust_unicode_escape(target: I64, cp: I64) {
     divisor := I64{1}
     loop cp /% divisor >= (I64{16}) -> divisor *= I64{16}
     loop {
-        digit :: cp /% divisor & I64{15}
+        digit :: (cp /% divisor).bit_and(I64{15})
         rt_text_push_word(target, if (digit < I64{10}) -> digit + I64{48} else -> digit + I64{87}, I64{1})
         divisor = divisor /% I64{16}
         if (divisor == I64{0}) -> break
@@ -32,7 +32,7 @@ fn rt_text_push_debug_str(target: I64, text: I64, rust_nul: Bool) {
         if escape {
             rt_text_append(target, data + start, at - start)
             if (short >= I64{0}) {
-                rt_text_push_word(target, I64{92} | (short << I64{8}), I64{2})
+                rt_text_push_word(target, I64{92}.bit_or((short << I64{8})), I64{2})
             } else { rt_text_push_rust_unicode_escape(target, cp) }
             start = at + width
         }

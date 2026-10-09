@@ -91,7 +91,7 @@ fn x64_value_native_stream(runtime: X64Runtime, fd: Int, boundary: X64ValueBound
         if bits < 1 || bits > 64 -> return false
         number := x64_value_unsigned_bytes(address, descriptor.size)
         modulus :: 1 << bits
-        number &= modulus - 1
+        number = number.bit_and(modulus - 1)
         if kind == "Signed" && number >= (modulus >> 1) -> number -= modulus
         return x64_value_node(fd, "Integer", [String]{"{number}"}, 0, 0)
     }

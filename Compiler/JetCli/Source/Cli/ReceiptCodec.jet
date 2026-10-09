@@ -278,7 +278,7 @@ fn jet_cli_receipt_decode(bytes: [U8]) -> JetCLIReceipt String! {
         version :: jet_cli_receipt_take(&cursor)
         if version.len() != 8 -> return Err(jet_cli_read_error("receipt links version is malformed"))
         version_number := U64{0}
-        loop byte in version -> version_number = (version_number << 8) | U64.from_u8(byte)
+        loop byte in version -> version_number = (version_number << 8).bit_or(U64.from_u8(byte))
         if version_number != 1 -> return Err(jet_cli_read_error("unsupported receipt links version {version_number}"))
         consumed = jet_cli_receipt_decode_links(&cursor, "consumed")
         produced = jet_cli_receipt_decode_links(&cursor, "produced")

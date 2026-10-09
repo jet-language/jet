@@ -7,7 +7,7 @@
     value :: jet_rt_alloc(I64{32}, I64{8})
     #Unsafe("value exclusively owns four initialized words; inputs lend exact Int owners and a valid E4 message") {
         os_store_i64(value, jet_rt_int_clone(kind))
-        os_store_i64(wrapping(value + I64{8}), if ((has_os_code & I64{255}) != I64{0}) -> I64{1} else -> I64{0})
+        os_store_i64(wrapping(value + I64{8}), if ((has_os_code.bit_and(I64{255})) != I64{0}) -> I64{1} else -> I64{0})
         os_store_i64(wrapping(value + I64{16}), jet_rt_int_clone(os_code))
         os_store_i64(wrapping(value + I64{24}), jet_rt_string_clone(message))
     }

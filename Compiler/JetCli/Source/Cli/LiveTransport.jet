@@ -36,7 +36,7 @@ fn jet_cli_live_read_at(pid: Int, path: String) -[FS, Env, Time]> JetCLILiveSnap
     before :: reader.stat() ?? return Err(jet_cli_read_error("cannot inspect live runtime snapshot: {jet_cli_io_error_text(err)}"))
     if !before.is_file -> return Err(jet_cli_read_error("live runtime snapshot is not a regular file"))
     if cli_sys.is_unix() {
-        if (before.mode & 0o077) != 0 -> return Err(jet_cli_read_error("live runtime snapshot permissions expose runtime state"))
+        if (before.mode.bit_and(0o077)) != 0 -> return Err(jet_cli_read_error("live runtime snapshot permissions expose runtime state"))
         if before.owner != Val(cli_sys.getuid()) -> return Err(jet_cli_read_error("live runtime snapshot belongs to another user"))
     }
     if before.size > 1048576 -> return Err(jet_cli_read_error("live runtime snapshot exceeds the 1 MiB safety limit"))

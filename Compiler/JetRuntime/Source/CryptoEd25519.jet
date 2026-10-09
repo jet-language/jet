@@ -103,7 +103,7 @@ fn rt_ed25519_mul(p: I64, q: I64, scalar: I64, temporaries: I64, d2: I64, work: 
     i := I64{255}
     loop {
         if (i < I64{0}) -> break
-        bit :: (rt_text_byte(scalar + i / I64{8}) >> (i % I64{8})) & I64{1}
+        bit :: (rt_text_byte(scalar + i / I64{8}) >> (i % I64{8})).bit_and(I64{1})
         rt_ed25519_swap(p, q, bit)
         rt_ed25519_add(q, p, temporaries, d2, work)
         rt_ed25519_add(p, p, temporaries, d2, work)
@@ -125,14 +125,14 @@ fn rt_ed25519_pack(output: I64, p: I64, inverse: I64, work: I64, reduced: I64, p
     rt_x25519_mul(p + I64{128}, p + I64{128}, inverse, work)
     rt_x25519_pack(packed_x, p, reduced)
     rt_x25519_pack(output, p + I64{128}, reduced)
-    rt_text_put(output + I64{31}, rt_text_byte(output + I64{31}) | ((rt_text_byte(packed_x) & I64{1}) << I64{7}))
+    rt_text_put(output + I64{31}, rt_text_byte(output + I64{31}).bit_or(((rt_text_byte(packed_x).bit_and(I64{1})) << I64{7})))
 }
 // Borrowed seed32/output32, disjoint caller scratch4096 aligned8, wiped.
 fn rt_crypto_ed25519_public(seed: I64, output: I64, scratch: I64) {
     hash :: scratch + I64{704}
     rt_crypto_sha512(seed, I64{32}, hash, scratch)
-    rt_text_put(hash, rt_text_byte(hash) & I64{248})
-    rt_text_put(hash + I64{31}, (rt_text_byte(hash + I64{31}) & I64{63}) | I64{64})
+    rt_text_put(hash, rt_text_byte(hash).bit_and(I64{248}))
+    rt_text_put(hash + I64{31}, (rt_text_byte(hash + I64{31}).bit_and(I64{63})).bit_or(I64{64}))
     p :: scratch + I64{768}
     q :: scratch + I64{1280}
     temporaries :: scratch + I64{1792}
@@ -194,7 +194,7 @@ fn rt_ed25519_mod_l(output: I64, x: I64) {
     loop j < (I64{32}) {
         value :: rt_text_word(x + j * I64{8}) + carry - top * rt_ed25519_l(j)
         carry = value >> I64{8}
-        rt_text_store(x + j * I64{8}, value & I64{255})
+        rt_text_store(x + j * I64{8}, value.bit_and(I64{255}))
         j += I64{1}
     }
     j = I64{0}
@@ -207,7 +207,7 @@ fn rt_ed25519_mod_l(output: I64, x: I64) {
         value :: rt_text_word(x + i * I64{8})
         next :: x + (i + I64{1}) * I64{8}
         rt_text_store(next, rt_text_word(next) + (value >> I64{8}))
-        rt_text_put(output + i, value & I64{255})
+        rt_text_put(output + i, value.bit_and(I64{255}))
         i += I64{1}
     }
 }
@@ -236,8 +236,8 @@ fn rt_crypto_ed25519_sign(seed: I64, message: I64, length: I64, signature: I64, 
     reduced :: scratch + I64{3200}
     packed_x :: scratch + I64{3328}
     rt_crypto_sha512(seed, I64{32}, h, scratch)
-    rt_text_put(h, rt_text_byte(h) & I64{248})
-    rt_text_put(h + I64{31}, (rt_text_byte(h + I64{31}) & I64{63}) | I64{64})
+    rt_text_put(h, rt_text_byte(h).bit_and(I64{248}))
+    rt_text_put(h + I64{31}, (rt_text_byte(h + I64{31}).bit_and(I64{63})).bit_or(I64{64}))
     rt_ed25519_d2_init(d2)
     rt_ed25519_base(q, work)
     rt_ed25519_mul(p, q, h, temporaries, d2, work)
@@ -342,10 +342,10 @@ fn rt_ed25519_decode(point: I64, bytes: I64, scratch: I64) -> Bool {
     rt_text_store(point + I64{256}, I64{1})
     i := I64{0}
     loop i < (I64{16}) {
-        rt_text_store(point + I64{128} + i * I64{8}, rt_text_byte(bytes + i * I64{2}) | (rt_text_byte(bytes + i * I64{2} + I64{1}) << I64{8}))
+        rt_text_store(point + I64{128} + i * I64{8}, rt_text_byte(bytes + i * I64{2}).bit_or((rt_text_byte(bytes + i * I64{2} + I64{1}) << I64{8})))
         i += I64{1}
     }
-    rt_text_store(point + I64{248}, rt_text_word(point + I64{248}) & I64{32767})
+    rt_text_store(point + I64{248}, rt_text_word(point + I64{248}).bit_and(I64{32767}))
     t :: scratch + I64{1792}
     num :: scratch + I64{1920}
     den :: scratch + I64{2048}
@@ -375,7 +375,7 @@ fn rt_ed25519_decode(point: I64, bytes: I64, scratch: I64) -> Bool {
     rt_x25519_mul(chk, chk, den, work)
     if !rt_ed25519_field_equal(chk, num, scratch) -> return false
     rt_x25519_pack(scratch + I64{3328}, point, scratch + I64{3200})
-    if ((rt_text_byte(scratch + I64{3328}) & I64{1}) == (rt_text_byte(bytes + I64{31}) >> I64{7})) {
+    if ((rt_text_byte(scratch + I64{3328}).bit_and(I64{1})) == (rt_text_byte(bytes + I64{31}) >> I64{7})) {
         i = I64{0}
         loop i < (I64{16}) {
             rt_text_store(point + i * I64{8}, I64{0} - rt_text_word(point + i * I64{8}))
@@ -396,10 +396,10 @@ fn rt_ed25519_small_order(point: I64, scratch: I64) -> Bool {
     }
     packed :: scratch + I64{4928}
     rt_ed25519_pack(packed, clone, scratch + I64{1792}, scratch + I64{2816}, scratch + I64{3200}, scratch + I64{3328})
-    diff := rt_text_byte(packed) ~| I64{1}
+    diff := rt_text_byte(packed).bit_xor(I64{1})
     i = I64{1}
     loop i < (I64{32}) {
-        diff = diff | rt_text_byte(packed + i)
+        diff = diff.bit_or(rt_text_byte(packed + i))
         i += I64{1}
     }
     return diff == I64{0}

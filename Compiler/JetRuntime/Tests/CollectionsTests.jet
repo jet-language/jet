@@ -121,7 +121,7 @@ fn coll_test_bits_render(bits: I64, low: I64, high: I64, length: I64) {
     loop at < length {
         word :: if (at < I64{8}) -> low else -> high
         shift :: (at % I64{8}) * I64{8}
-        expected :: (word >> shift) & I64{255}
+        expected :: (word >> shift).bit_and(I64{255})
         coll_test_require(trap_byte(rt_text_data(display) + at) == expected)
         coll_test_require(trap_byte(rt_text_data(show) + at) == expected)
         coll_test_require(trap_byte(rt_text_data(debug) + at) == expected)

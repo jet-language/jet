@@ -97,9 +97,9 @@ fn jet_cli_build_host(request: JetDriverCompileRequest, scope: &JetDriverBuildQu
 // A floating multiply/round would double-round and diverge from Rust's {:.3}.
 fn jet_cli_build_duration(value: Float) -> String Never! {
     bits :: build_math.to_bits(value)
-    raw_exponent :: (bits >> 52) & 2047
+    raw_exponent :: (bits >> 52).bit_and(2047)
     if raw_exponent == 2047 -> panic("build record duration must be finite")
-    significand := bits & 4503599627370495
+    significand := bits.bit_and(4503599627370495)
     exponent := -1071
     if raw_exponent != 0 {
         significand += 4503599627370496

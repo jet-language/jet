@@ -74,7 +74,7 @@ fn controlled_monotonic_ns(output: I64) -> Bool {
     provider :: rt_time_monotonic_provider_get()
     if (provider == I64{0}) -> return false
     #Unsafe("registered provider code remains live at this world/lease boundary; output lends one writable word") {
-        return (os_call_address_i64(provider, output) & I64{255}) != I64{0}
+        return (os_call_address_i64(provider, output).bit_and(I64{255})) != I64{0}
     }
 }
 #Export(c) fn jet_rt_time_monotonic_provider_set(provider: I64) -> I64 {
@@ -95,7 +95,7 @@ fn world_decimal(data: I64, value: I64) -> I64 {
     number := value
     count := I64{0}
     loop {
-        half :: (number >> I64{1}) & I64{9223372036854775807}
+        half :: (number >> I64{1}).bit_and(I64{9223372036854775807})
         quotient :: half /% I64{5}
         digit :: wrapping(number - quotient * I64{10})
         trap_put(data + count, I64{48} + digit)
@@ -220,13 +220,13 @@ fn world_timer_find(world: I64, slot: I64) -> I64 {
 }
 fn world_begin_wait(world: I64, slot: I64) {
     base :: thread_base()
-    if ((sync_load(base + I64{112}) & I64{2}) != I64{0}) -> return
+    if ((sync_load(base + I64{112}).bit_and(I64{2})) != I64{0}) -> return
     sync_mutex_lock(world + I64{8})
     world_decrement(world + I64{64})
     world_notify(world)
     sync_mutex_unlock(world + I64{8})
     sync_park_retain(slot)
-    sync_store(base + I64{112}, sync_load(base + I64{112}) | I64{2})
+    sync_store(base + I64{112}, sync_load(base + I64{112}).bit_or(I64{2}))
     sync_store(base + I64{120}, slot)
 }
 fn world_park(world: I64, duration_ns: I64, slot: I64) {
@@ -249,12 +249,12 @@ fn world_park(world: I64, duration_ns: I64, slot: I64) {
     world_notify(world)
     sync_mutex_unlock(world + I64{8})
     sync_park_retain(slot)
-    sync_store(thread_base() + I64{112}, sync_load(thread_base() + I64{112}) | I64{2})
+    sync_store(thread_base() + I64{112}, sync_load(thread_base() + I64{112}).bit_or(I64{2}))
     sync_store(thread_base() + I64{120}, slot)
 }
 fn world_finish_park(world: I64, slot: I64) {
     base :: thread_base()
-    if ((sync_load(base + I64{112}) & I64{2}) == I64{0}) -> return
+    if ((sync_load(base + I64{112}).bit_and(I64{2})) == I64{0}) -> return
     sync_mutex_lock(world + I64{8})
     index :: world_timer_find(world, slot)
     if (index >= I64{0}) {
@@ -263,13 +263,13 @@ fn world_finish_park(world: I64, slot: I64) {
         world_notify(world)
     }
     sync_mutex_unlock(world + I64{8})
-    sync_store(base + I64{112}, sync_load(base + I64{112}) & I64{-3})
+    sync_store(base + I64{112}, sync_load(base + I64{112}).bit_and(I64{-3}))
     sync_store(base + I64{120}, I64{0})
     sync_park_drop(slot)
 }
 fn world_task_finished(world: I64) {
     base :: thread_base()
-    waiting :: (sync_load(base + I64{112}) & I64{2}) != I64{0}
+    waiting :: (sync_load(base + I64{112}).bit_and(I64{2})) != I64{0}
     slot :: sync_load(base + I64{120})
     sync_mutex_lock(world + I64{8})
     index :: if waiting -> world_timer_find(world, slot) else -> I64{-1}
@@ -392,8 +392,8 @@ fn world_wait(world: I64, accept_timer: Bool) {
     if (world == I64{0}) -> return false
     sync_mutex_lock(world + I64{8})
     value := sync_load(world + I64{40})
-    value = value ^ (value << I64{7})
-    value = value ^ ((value >> I64{9}) & I64{36028797018963967})
+    value = value.bit_xor((value << I64{7}))
+    value = value.bit_xor(((value >> I64{9}).bit_and(I64{36028797018963967})))
     value = wrapping(value * I64{-7046029254386353131})
     sync_store(world + I64{40}, value)
     world_event(world, services_msg_rng(), value, I64{0}, I64{1})

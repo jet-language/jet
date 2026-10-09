@@ -751,7 +751,7 @@ fn x64_select_binary_imm(emitter: &X64Emitter, locations: [X64Loc], dst: LIRValu
             .And -> x64_alu_ri(&emitter.code, X64Alu.And, reg, imm)
             .Or -> x64_alu_ri(&emitter.code, X64Alu.Or, reg, imm)
             .Xor -> x64_alu_ri(&emitter.code, X64Alu.Xor, reg, imm)
-            else -> x64_shift_ri(&emitter.code, x64_shift_kind(op), reg, imm & 63)
+            else -> x64_shift_ri(&emitter.code, x64_shift_kind(op), reg, imm.bit_and(63))
         }
     }
     x64_finish_result(&emitter, locations[dst.value], reg)

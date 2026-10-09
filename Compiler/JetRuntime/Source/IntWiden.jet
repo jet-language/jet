@@ -23,8 +23,8 @@
             }
         }
         if {
-            significant < precision -> top |= bit << significant
-            else -> top = (top >> I64{1}) | (bit << (precision - I64{1}))
+            significant < precision -> top = top.bit_or(bit << significant)
+            else -> top = (top >> I64{1}).bit_or((bit << (precision - I64{1})))
         }
         significant += I64{1}
     }
@@ -44,7 +44,7 @@
     shift := significant - precision
     scale := Float{2.0}
     loop shift > (I64{0}) {
-        if ((shift & I64{1}) != I64{0}) { result *= scale }
+        if ((shift.bit_and(I64{1})) != I64{0}) { result *= scale }
         shift >>= I64{1}
         if (shift != I64{0}) { scale *= scale }
     }

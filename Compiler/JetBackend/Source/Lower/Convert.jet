@@ -398,9 +398,9 @@ fn lower_convert_checked_float(p: MIRProgram, c: LowerContext, m: &LowerModule, 
         floating = lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
         lower_emit(&f, LIRInst.Convert{dst: floating, src: single})
     }
-    high_bits :: if narrow -> ((1023 + 127) << 52) | (((1 << 23) - 1) << 29) else -> (1023 + bits - (if signed -> 1 else -> 0)) << 52
+    high_bits :: if narrow -> ((1023 + 127) << 52).bit_or((((1 << 23) - 1) << 29)) else -> (1023 + bits - (if signed -> 1 else -> 0)) << 52
     high :: lower_convert_float_bits(&f, high_bits)
-    low :: lower_convert_float_bits(&f, if narrow || signed -> high_bits | (-9223372036854775807 - 1) else -> 0)
+    low :: lower_convert_float_bits(&f, if narrow || signed -> high_bits.bit_or((-9223372036854775807 - 1)) else -> 0)
     above :: lower_flag(&f)
     below :: lower_flag(&f)
     fits :: lower_flag(&f)

@@ -52,7 +52,7 @@ fn lower_static_store_sized(m: &LowerModule, object: LIRDataID, offset: Int, val
     } else if value.data == .Val(target) {
         &m.data[object.value].relocs.push(LIRDataReloc{offset: offset, target: target, addend: 0})
     } else {
-        loop byte in 0..<size -> m.data[object.value].bytes[offset + byte] = U8{(value.word >> (8 * byte)) & 255}
+        loop byte in 0..<size -> m.data[object.value].bytes[offset + byte] = U8{(value.word >> (8 * byte)).bit_and(255)}
     }
 }
 

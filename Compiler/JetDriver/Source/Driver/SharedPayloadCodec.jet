@@ -217,19 +217,19 @@ fn jet_driver_payload_text(codec: JetDriverNativePayloadCodec, text: String, sym
 // Inverse of DriverNativeComptime's exact IEEE32 widening. Reject values not
 // already represented by the checked 32-bit carrier, rather than rounding.
 fn jet_driver_payload_float32(bits: Int) -> Int? Never! {
-    sign :: (bits >> 32) & 2147483648
-    exponent :: (bits >> 52) & 2047
-    fraction :: bits & 4503599627370495
+    sign :: (bits >> 32).bit_and(2147483648)
+    exponent :: (bits >> 52).bit_and(2047)
+    fraction :: bits.bit_and(4503599627370495)
     result := sign
-    if exponent == 2047 -> result |= (255 << 23) | (fraction >> 29)
-    else if exponent >= 897 && exponent <= 1150 -> result |= ((exponent - 896) << 23) | (fraction >> 29)
-    else if exponent >= 874 && exponent <= 896 -> result |= (fraction | 4503599627370496) >> (926 - exponent)
+    if exponent == 2047 -> result = result.bit_or((255 << 23).bit_or((fraction >> 29)))
+    else if exponent >= 897 && exponent <= 1150 -> result = result.bit_or(((exponent - 896) << 23).bit_or((fraction >> 29)))
+    else if exponent >= 874 && exponent <= 896 -> result = result.bit_or((fraction.bit_or(4503599627370496)) >> (926 - exponent))
     else if exponent != 0 || fraction != 0 -> return None
     if jet_driver_native_float32_bits(result) != bits -> return None
     Val(result)
 }
 fn jet_driver_payload_scalar(codec: JetDriverNativePayloadCodec, row: CoreSharedNativeLayout, value: TComptimeValue, target: Int) -> String {
-    kind :: row.kind & 4294967295
+    kind :: row.kind.bit_and(4294967295)
     word := 0
     if kind == 11 {
         if value != .Unit -> return "CoreSharedPayloadValueMismatch: {row.type_key}"
@@ -360,7 +360,7 @@ fn jet_driver_payload_encode_node(codec: JetDriverNativePayloadCodec, stage: &Je
                 if error == "" -> error = x64_native_slot_write(target + 16, 8, buffer)
             } else if value == .Bytes(bytes) {
                 child_layout :: jet_driver_payload_layout(codec, row.child_keys[0]) ?? return "CoreSharedPayloadLayoutMissing: {row.child_keys[0]}"
-                if child_layout.kind != (3 | (8 << 32)) || child_layout.payload_size != 1 -> return "CoreSharedPayloadValueMismatch: {key}"
+                if child_layout.kind != ((3).bit_or((8 << 32))) || child_layout.payload_size != 1 -> return "CoreSharedPayloadValueMismatch: {key}"
                 buffer := 0
                 if bytes.len() > 0 {
                     buffer = jet_driver_payload_allocate(codec, &stage, bytes.len() * child_layout.stride, 8)
@@ -482,7 +482,7 @@ fn jet_driver_payload_read_text(codec: JetDriverNativePayloadCodec, word: Int) -
     String.from_bytes(bytes)
 }
 fn jet_driver_payload_decode_scalar(codec: JetDriverNativePayloadCodec, row: CoreSharedNativeLayout, source: Int) -> TComptimeValue? {
-    kind :: row.kind & 4294967295
+    kind :: row.kind.bit_and(4294967295)
     if kind == 11 -> return Val(TComptimeValue.Unit)
     if kind == 1 {
         word :: x64_value_word(source)
@@ -505,7 +505,7 @@ fn jet_driver_payload_decode_scalar(codec: JetDriverNativePayloadCodec, row: Cor
         bits :: row.kind >> 32
         if bits < 1 || bits > 64 -> return None
         limit :: 1 << bits
-        word &= limit - 1
+        word = word.bit_and(limit - 1)
         if kind == 2 && word >= (limit >> 1) -> word -= limit
         return Val(TComptimeValue.Int{value: word})
     }

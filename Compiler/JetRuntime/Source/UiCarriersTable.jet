@@ -1,8 +1,8 @@
 // Private UiABI carriers, seed HostServices.rs:74-76,1242-1246 and
 // WebTable.rs:51-120. Ordered E4 lists reuse DataPlot's canonical provider.
-#Export(c) fn jet_rt_handle_clone_JetUiCapabilityFacts(value: I64) -> I64 { ui_carrier_scalar_new(ui_carrier_word(value) & I64{255}) }
+#Export(c) fn jet_rt_handle_clone_JetUiCapabilityFacts(value: I64) -> I64 { ui_carrier_scalar_new(ui_carrier_word(value).bit_and(I64{255})) }
 #Export(c) fn jet_rt_handle_drop_JetUiCapabilityFacts(value: I64) { ui_carrier_scalar_drop(value) }
-#Export(c) fn jet_rt_handle_eq_JetUiCapabilityFacts(a: I64, b: I64) -> Bool { (ui_carrier_word(a) & I64{255}) == (ui_carrier_word(b) & I64{255}) }
+#Export(c) fn jet_rt_handle_eq_JetUiCapabilityFacts(a: I64, b: I64) -> Bool { (ui_carrier_word(a).bit_and(I64{255})) == (ui_carrier_word(b).bit_and(I64{255})) }
 #Export(c) fn jet_rt_handle_clone_JetUiFileFilter(value: I64) -> I64 {
     result :: jet_rt_alloc(UI_FILE_FILTER_BYTES, I64{8})
     ui_carrier_store(result + UI_FILE_FILTER_LABEL, jet_rt_string_clone(ui_carrier_word(value + UI_FILE_FILTER_LABEL)))

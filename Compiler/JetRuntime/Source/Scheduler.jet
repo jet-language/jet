@@ -27,7 +27,7 @@ SCHEDULER_SCOPE_MASK_KIND :: prep { I64{1792} }
 // Exact E4 carrier; rounded byte capacity allows generated literal word stores.
 fn scheduler_text_new(length: I64) -> I64 {
     text :: alloc_required_valid(I64{24}, I64{8})
-    capacity :: (length + I64{7}) & I64{-8}
+    capacity :: (length + I64{7}).bit_and(I64{-8})
     data :: if (capacity == I64{0}) -> I64{1} else -> jet_rt_alloc(capacity, I64{1})
     if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
         alloc_release_valid(text, I64{24}, I64{8})
@@ -162,11 +162,10 @@ fn scheduler_control_leave(save: I64) {
 // shield, wait depth and body provenance untouched in the caller's save slot.
 #Export(c) fn jet_rt_root_begin(save: I64) -> I64 {
     parent_flags :: scheduler_scope_flags(scheduler_control_current())
-    inherited :: (parent_flags & SCHEDULER_SCOPE_INHERITED_STOP) != I64{0} ||
-        ((parent_flags & SCHEDULER_SCOPE_CLEANUP) != I64{0} && scheduler_scope_delivered_kind(parent_flags) != I64{0})
+    inherited :: (parent_flags.bit_and(SCHEDULER_SCOPE_INHERITED_STOP)) != I64{0} ||
+        ((parent_flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && scheduler_scope_delivered_kind(parent_flags) != I64{0})
     control :: scheduler_control_new()
-    sync_store(control + I64{104}, SCHEDULER_SCOPE_ROOT |
-        (if inherited -> SCHEDULER_SCOPE_INHERITED_STOP else -> I64{0}))
+    sync_store(control + I64{104}, SCHEDULER_SCOPE_ROOT.bit_or((if inherited -> SCHEDULER_SCOPE_INHERITED_STOP else -> I64{0})))
     scheduler_control_enter(control, save)
     sync_store(thread_base() + I64{64}, I64{0})
     control
@@ -179,30 +178,30 @@ fn scheduler_control_leave(save: I64) {
 // Only scheduler_text_new's owned, eight-aligned 24B E4 header is tagged.
 // Bit0 records an actual requested code independently of opaque scope flags.
 fn scheduler_root_capture_pointer(control: I64) -> I64 {
-    if (control == I64{0}) -> I64{0} else -> sync_load(control + I64{120}) & I64{-2}
+    if (control == I64{0}) -> I64{0} else -> sync_load(control + I64{120}).bit_and(I64{-2})
 }
 fn scheduler_root_capture_begin() {
     control :: scheduler_control_current()
     if (scheduler_root_capture_pointer(control) != I64{0}) -> scheduler_abort_double_panic()
     text :: scheduler_text_empty()
-    sync_store(control + I64{120}, text | (sync_load(control + I64{120}) & I64{1}))
+    sync_store(control + I64{120}, text.bit_or((sync_load(control + I64{120}).bit_and(I64{1}))))
 }
 fn scheduler_root_capture_take(control: I64) -> I64 {
     word :: sync_load(control + I64{120})
-    sync_store(control + I64{120}, word & I64{1})
-    word & I64{-2}
+    sync_store(control + I64{120}, word.bit_and(I64{1}))
+    word.bit_and(I64{-2})
 }
-fn scheduler_root_code_known(control: I64) -> Bool { (sync_load(control + I64{120}) & I64{1}) != I64{0} }
+fn scheduler_root_code_known(control: I64) -> Bool { (sync_load(control + I64{120}).bit_and(I64{1})) != I64{0} }
 fn scheduler_root_set_code(control: I64, code: I64) {
     sync_store(control + I64{112}, code)
-    sync_store(control + I64{120}, sync_load(control + I64{120}) | I64{1})
+    sync_store(control + I64{120}, sync_load(control + I64{120}).bit_or(I64{1}))
 }
 
 // Takes an already checked Panic record. This one named publication sink is
 // shared by Task, Root, rendered Sentry and transported Parallel failures.
 fn scheduler_panic_publish_record(record: I64) -> Bool {
     control :: scheduler_control_current()
-    if ((scheduler_scope_flags(control) & SCHEDULER_SCOPE_ROOT) != I64{0}) {
+    if ((scheduler_scope_flags(control).bit_and(SCHEDULER_SCOPE_ROOT)) != I64{0}) {
         if (sync_load(record + I64{48}) == I64{0}) {
             old :: scheduler_stop_take_message(record)
             rendered :: trap_root_panic_report(old)
@@ -265,7 +264,7 @@ fn scheduler_root_publish_owned(text: I64, code: I64) -> Bool {
     }
     sync_store(record + I64{48}, I64{1})
     sync_store(code_out, code)
-    sync_store(control + I64{120}, sync_load(control + I64{120}) & I64{-2})
+    sync_store(control + I64{120}, sync_load(control + I64{120}).bit_and(I64{-2}))
     record
 }
 
@@ -322,12 +321,12 @@ fn scheduler_shielded() -> Bool { sync_load(thread_base() + I64{24}) > I64{0} }
 fn scheduler_scope_flags(control: I64) -> I64 {
     if (control == I64{0}) -> I64{0} else -> sync_load(control + I64{104})
 }
-fn scheduler_scope_delivered_kind(flags: I64) -> I64 { (flags & SCHEDULER_SCOPE_MASK_KIND) >> I64{8} }
+fn scheduler_scope_delivered_kind(flags: I64) -> I64 { (flags.bit_and(SCHEDULER_SCOPE_MASK_KIND)) >> I64{8} }
 
 // Root controls are private and never cancel/interrupt targets. Cancellation
 // remains cooperative outside Task; violating this producer law is a defect.
 fn scheduler_assert_not_root_cancel(control: I64) {
-    if ((scheduler_scope_flags(control) & SCHEDULER_SCOPE_ROOT) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if ((scheduler_scope_flags(control).bit_and(SCHEDULER_SCOPE_ROOT)) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
 }
 
 // Origin16 is dynamic: only an actual native Task frame can mint it.
@@ -336,10 +335,10 @@ fn scheduler_assert_not_root_cancel(control: I64) {
     control :: scheduler_control_current()
     if (control == I64{0}) -> return I64{0}
     saved :: scheduler_scope_flags(control)
-    flags := (saved & I64{-1793}) | SCHEDULER_SCOPE_CLEANUP
-    if (sync_load(thread_base() + I64{64}) != I64{0}) -> flags |= SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN
+    flags := (saved.bit_and(I64{-1793})).bit_or(SCHEDULER_SCOPE_CLEANUP)
+    if (sync_load(thread_base() + I64{64}) != I64{0}) -> flags = flags.bit_or(SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN)
     if (delivered_at_entry >= I64{1} && delivered_at_entry <= I64{5} && scheduler_control_status(control) == delivered_at_entry) {
-        flags |= delivered_at_entry << I64{8}
+        flags = flags.bit_or(delivered_at_entry << I64{8})
     }
     sync_store(control + I64{104}, flags)
     saved
@@ -353,17 +352,17 @@ fn scheduler_assert_not_root_cancel(control: I64) {
     if (control == I64{0}) -> return I64{0}
     flags :: scheduler_scope_flags(control)
     body :: sync_load(thread_base() + I64{64}) != I64{0}
-    if ((flags & SCHEDULER_SCOPE_ROOT) != I64{0} && !body) -> return I64{1}
-    if body || ((flags & SCHEDULER_SCOPE_TASK) != I64{0} &&
-        (flags & SCHEDULER_SCOPE_CLEANUP) != I64{0} &&
-        (flags & SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN) != I64{0}) -> return I64{2}
+    if ((flags.bit_and(SCHEDULER_SCOPE_ROOT)) != I64{0} && !body) -> return I64{1}
+    if body || ((flags.bit_and(SCHEDULER_SCOPE_TASK)) != I64{0} &&
+        (flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} &&
+        (flags.bit_and(SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN)) != I64{0}) -> return I64{2}
     I64{0}
 }
 
 fn scheduler_cleanup_mask(status: I64) -> I64 {
     flags :: scheduler_scope_flags(scheduler_control_current())
     delivered :: scheduler_scope_delivered_kind(flags)
-    if ((flags & SCHEDULER_SCOPE_CLEANUP) != I64{0} && delivered >= I64{1} &&
+    if ((flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && delivered >= I64{1} &&
         delivered <= I64{5} && status == delivered) -> I64{0} else -> status
 }
 
@@ -616,7 +615,7 @@ fn scheduler_yield(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
     }
     waiter :: if !shielded -> scheduler_cancel_waiter_register(control, slot) else -> I64{0}
     wait := timeout_ns
-    virtual_wait :: (sync_load(thread_base() + I64{112}) & I64{2}) != I64{0}
+    virtual_wait :: (sync_load(thread_base() + I64{112}).bit_and(I64{2})) != I64{0}
     if virtual_wait {
         if (wait != I64{0}) -> wait = I64{-1}
     }
@@ -731,7 +730,7 @@ fn scheduler_available_parallelism(fallback: I64) -> I64 {
             loop at < result {
                 bits := trap_byte(mask + at)
                 loop bits != (I64{0}) {
-                    bits = bits & (bits - I64{1})
+                    bits = bits.bit_and((bits - I64{1}))
                     count += I64{1}
                 }
                 at += I64{1}
@@ -745,7 +744,7 @@ fn scheduler_available_parallelism(fallback: I64) -> I64 {
 }
 
 fn scheduler_start_worker(root: I64, flags: I64) {
-    handle :: thread_spawn(rt_scheduler_worker_address(), root | flags)
+    handle :: thread_spawn(rt_scheduler_worker_address(), root.bit_or(flags))
     if (handle < I64{0}) {
         message :: scheduler_msg_start_failed()
         scheduler_fatal(message)
@@ -814,9 +813,9 @@ fn scheduler_pop(root: I64, allow_blocking: Bool) -> I64 {
 }
 
 #Export(c) fn jet_rt_scheduler_worker(argument: I64) -> I64 {
-    root :: argument & I64{-8}
-    compensation :: (argument & I64{1}) != I64{0}
-    reserve :: (argument & I64{2}) != I64{0}
+    root :: argument.bit_and(I64{-8})
+    compensation :: (argument.bit_and(I64{1})) != I64{0}
+    reserve :: (argument.bit_and(I64{2})) != I64{0}
     loop {
         sync_mutex_lock(root)
         if compensation && ((reserve && sync_load(root + I64{48}) <= I64{8}) || (!reserve && sync_load(root + I64{48}) == I64{0})) {
@@ -1031,7 +1030,7 @@ fn scheduler_park_duration(wait_kind: I64, duration_ns: I64) -> I64 {
     if (duration_ns <= I64{0}) -> return jet_scheduler_native_propagate()
     world :: world_current()
     if (world != I64{0}) {
-        if ((sync_load(thread_base() + I64{112}) & I64{1}) == I64{0}) {
+        if ((sync_load(thread_base() + I64{112}).bit_and(I64{1})) == I64{0}) {
             scheduler_fatal(services_msg_world_sleep())
             return jet_scheduler_native_status()
         }
@@ -1174,8 +1173,8 @@ fn scheduler_abort_double_panic() {
 fn scheduler_panic_check() -> Bool {
     if (jet_rt_stop_domain() == I64{0}) -> return false
     flags :: scheduler_scope_flags(scheduler_control_current())
-    if ((flags & SCHEDULER_SCOPE_INHERITED_STOP) != I64{0} ||
-        ((flags & SCHEDULER_SCOPE_CLEANUP) != I64{0} && scheduler_scope_delivered_kind(flags) != I64{0}) ||
+    if ((flags.bit_and(SCHEDULER_SCOPE_INHERITED_STOP)) != I64{0} ||
+        ((flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && scheduler_scope_delivered_kind(flags) != I64{0}) ||
         scheduler_delivered_status_unmasked() != I64{0}) -> scheduler_abort_double_panic()
     true
 }

@@ -140,9 +140,9 @@ fn opt_fold_binary(op: LIRBinaryOp, left: Int, right: Int) -> Int? {
             if left < 0 || right <= 0 -> return None
             Val(left - (left /% right) * right)
         }
-        .And -> Val(left & right)
-        .Or -> Val(left | right)
-        .Xor -> Val(left ~| right)
+        .And -> Val(left.bit_and(right))
+        .Or -> Val(left.bit_or(right))
+        .Xor -> Val(left.bit_xor(right))
         .Shl -> {
             if right < 0 || right > 63 -> return None
             shifted :: left << right
