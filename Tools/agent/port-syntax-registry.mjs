@@ -10,10 +10,35 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 export const SYNTAX_DIR = "Compiler/JetFoundation/Data/Syntax";
 const fail = (message) => { throw new Error(`syntax registry port: ${message}`); };
 
+function jetLiteral(literal) {
+  const normalized = literal.replace(/\\(?:u\{([0-9a-fA-F]+)\}|0|.)/g, (escape, scalar) =>
+    scalar ? JSON.stringify(String.fromCodePoint(parseInt(scalar, 16))).slice(1, -1)
+      : escape === "\\0" ? "\\u0000" : escape);
+  const value = JSON.parse(normalized);
+  if (value.includes("\0")) return `String.from_bytes([U8]{${[...Buffer.from(value)].join(", ")}})`;
+  return JSON.stringify(value.replaceAll("{", "{{").replaceAll("}", "}}"));
+}
+
+function tupleMembers(text) {
+  const parts = [];
+  let start = 0, quote = null, escape = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (escape) escape = false;
+      else if (c === "\\") escape = true;
+      else if (c === quote) quote = null;
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === ",") { parts.push(text.slice(start, i).trim()); start = i + 1; }
+  }
+  parts.push(text.slice(start).trim());
+  return parts.filter(Boolean).map((part, index) => `field_${index}: ${part}`).join(", ");
+}
+
 // Keep strings and comments opaque while translating expression punctuation.
 function translate(text, transform) {
-  return text.split(/("(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\/)/g)
-    .map((part, index) => index % 2 ? part : transform(part)).join("");
+  return text.split(/("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\/\/[^\n]*|\/\*[\s\S]*?\*\/)/g)
+    .map((part, index) => index % 2 ? (part.startsWith('"') ? jetLiteral(part) : part) : transform(part)).join("");
 }
 function statementEnd(source, start) {
   let quote = false, escape = false, line = false, block = 0;
@@ -61,15 +86,16 @@ export function rustConstants(source) {
 }
 function jetType(type) {
   return type.replace(/&(?:'static\s+)?str/g, "String").replace(/&(?=\[)/g, "")
-    .replace(/\bu64\b/g, "U64").replace(/\bu8\b/g, "U8").replace(/\busize\b/g, "Int");
+    .replace(/\bu64\b/g, "U64").replace(/\bu8\b/g, "U8").replace(/\busize\b/g, "Int").replace(/\bchar\b/g, "Char")
+    .replace(/\(([^()]*)\)/g, (_, body) => `(${tupleMembers(body)})`);
 }
 function jetValue(row, constants) {
   if (row.type === "&str") {
     const literal = /^"(?:\\.|[^"\\])*"$/;
-    if (literal.test(row.value)) return row.value;
+    if (literal.test(row.value)) return jetLiteral(row.value);
     if (/^concat!\(/.test(row.value)) {
       const parts = [...row.value.matchAll(/"(?:\\.|[^"\\])*"/g)].map(m => JSON.parse(m[0]));
-      return JSON.stringify(parts.join(""));
+      return jetLiteral(JSON.stringify(parts.join("")));
     }
     const name = row.value.replace(/^super::/, "");
     const target = constants.get(name);
@@ -77,7 +103,9 @@ function jetValue(row, constants) {
     return jetValue(target, constants);
   }
   const type = jetType(row.type);
-  let value = translate(row.value, part => part.replace(/\b(?:super|crate)::/g, "").replace(/::/g, ".").replace(/\bSome\(/g, "Val("));
+  const expression = /^&\[\(/.test(row.type) ? row.value.replace(/(^|[,[\n])([\t ]*)\(([^()]*)\)/g,
+    (_, prefix, spaces, body) => `${prefix}${spaces}(${tupleMembers(body)})`) : row.value;
+  let value = translate(expression, part => part.replace(/\b(?:super|crate)::/g, "").replace(/::/g, ".").replace(/\bSome\(/g, "Val(").replace(/\bInterpolationSelectorArguments\.None\b/g, ".None"));
   value = value.replace(/retired_ffi_effect!\(\s*("(?:\\.|[^"\\])*")\s*,\s*("(?:\\.|[^"\\])*")\s*,\s*("(?:\\.|[^"\\])*")\s*\)/g,
     (_, id, retired, canonical) => `Retirement{id: ${id}, retired: ${retired}, canonical: ${canonical}, kind: RetirementKind.Semantic, decision: "D-AUTHORITY-ROOTS1=A", since: "2026-08-06", code: Val("E0119")}`);
   if (/^&\[/.test(row.value)) {
@@ -102,21 +130,27 @@ export function projectRegistry(root = ROOT) {
     const body = rows.map(row => [row.comments, `${row.name} :: ${jetValue(row, constants)}${row.trailing ? ` ${row.trailing}` : ""}`].filter(Boolean).join("\n")).join("\n\n");
     files.set(`${SYNTAX_DIR}/${name}`, `${header.join("\n")}\n\n${body}\n`);
   }
-  const lexer = readFileSync(resolve(root, "crates/jet-lexer/src/Lexer/mod.rs"), "utf8");
-  const keywords = [...lexer.matchAll(/s if s == Syntax::(\w+) => Some\(TokKind::(Kw\w+)\),/g)];
-  if (!keywords.length) fail("missing reference lexer keyword mapping");
-  const keywordRows = keywords.map(([, name, kind]) => {
-    if (!constants.has(name)) fail(`unresolved keyword ${name}`);
-    const tag = `K_${kind.slice(2).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}`;
-    return `    LexerKeyword{constant: "${name}", kind: "${kind}", tag: "${tag}"},`;
-  });
-  files.set("Compiler/JetLexer/Data/Lexer/Keywords.jet", [
-    "// Canonical lexer keyword mapping; spellings live in the Syntax registry.",
-    "// Mechanically ported by Tools/agent/port-syntax-registry.mjs.",
-    "struct LexerKeyword {", "    constant: String", "    kind: String", "    tag: String", "}", "",
-    "LEXER_KEYWORDS :: [LexerKeyword]{", ...keywordRows, "}", "",
-  ].join("\n"));
   return { files, constants };
+}
+
+// The current Jet lexer is canonical. Its 35 arms intentionally differ from
+// the frozen Rust lexer (return/comptime/loop/yield/use are absent there).
+function projectKeywords(constants, root = ROOT) {
+  const scan = readFileSync(resolve(root, "Compiler/JetLexer/Source/Lexer/Scan.jet"), "utf8");
+  const keywords = [...scan.matchAll(/^\s*("(?:\\.|[^"\\])*")\s*->\s*(K_\w+)\s*$/gm)];
+  if (!keywords.length) fail("missing literal Jet lexer keyword mapping; the one-time port is already complete");
+  const rows = keywords.map(([, literal, tag]) => {
+    const candidates = [...constants.values()].filter(row => /^(?:KW_|LIT_)/.test(row.name) && row.type === "&str" && row.value === literal);
+    if (candidates.length !== 1) fail(`unresolved/ambiguous keyword ${literal}/${tag}`);
+    const kind = `Kw${tag.slice(2).split("_").map(word => word[0] + word.slice(1).toLowerCase()).join("")}`;
+    return `    LexerKeyword{constant: "${candidates[0].name}", kind: "${kind}", tag: "${tag}"},`;
+  });
+  return [
+    "// Canonical Jet lexer keyword mapping; spellings live in the Syntax registry.",
+    "// Ported from the current Jet lexer, not the frozen Rust keyword function.",
+    "struct LexerKeyword {", "    constant: String", "    kind: String", "    tag: String", "}", "",
+    "LEXER_KEYWORDS :: [LexerKeyword]{", ...rows, "}", "",
+  ].join("\n");
 }
 function main(args) {
   if (args.length !== 1 || !["--check", "--write"].includes(args[0])) fail("usage: port-syntax-registry.mjs --check|--write");
@@ -126,6 +160,11 @@ function main(args) {
     return;
   }
   const { files, constants } = projectRegistry();
+  if (args[0] === "--write") {
+    const path = resolve(ROOT, "Compiler/JetLexer/Data/Lexer/Keywords.jet");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, projectKeywords(constants));
+  }
   for (const [path, content] of files) {
     if (args[0] === "--write") {
       mkdirSync(dirname(resolve(ROOT, path)), { recursive: true });

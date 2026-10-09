@@ -22,8 +22,8 @@ LEXICAL_LEDGER :: [LexicalEntry]{
     LexicalEntry { spelling: "#Layout(c, align(N)) / #Layout(c, align(target, N))", meaning: "C layout with portable or target-supported explicit alignment", decision: "D-PLACE1=A; D-LAYOUT-ALIGN1=A" },
     LexicalEntry { spelling: "#Align", meaning: "retired standalone alignment marker", decision: "D-PLACE1=A" },
     LexicalEntry { spelling: "Atomic<T>", meaning: "safe lock-free scalar cell", decision: "D-PLACE1=A; D-ATOMIC-WIDTH1=A" },
-    LexicalEntry { spelling: "@", meaning: "live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: prep { value }`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$`", decision: "D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B" },
-    LexicalEntry { spelling: KW_PREP, meaning: "explicit shared-preparation block `prep { … }`; `NAME :: prep { value }` is the only compile-time binding; `@ { … }` is retired", decision: "D-PREP-SURFACE2=A" },
+    LexicalEntry { spelling: "@", meaning: "live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: prep {{ value }}`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$`", decision: "D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B" },
+    LexicalEntry { spelling: KW_PREP, meaning: "explicit shared-preparation block `prep {{ … }}`; `NAME :: prep {{ value }}` is the only compile-time binding; `@ {{ … }}` is retired", decision: "D-PREP-SURFACE2=A" },
     LexicalEntry { spelling: "prep if", meaning: "build-time branch; unchosen arms are name-checked only", decision: "D-PREP-BRANCH1=A" },
     LexicalEntry { spelling: "prep loop", meaning: "build-time loop over statements or declarations", decision: "D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A" },
     LexicalEntry { spelling: "prep fn", meaning: "build-time literal-hook method", decision: "D-PREP-FN1=A; D-FOUND-LITERAL1=A" },
@@ -46,13 +46,13 @@ LEXICAL_LEDGER :: [LexicalEntry]{
     LexicalEntry { spelling: "??", meaning: "fallback", decision: "D-RESULT-DECON2" },
     LexicalEntry { spelling: "&place.method(…) / ^place.method(…)", meaning: "receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement", decision: "D-CAP-RECEIVER1=D" },
     LexicalEntry { spelling: "&self.field / &self.[a, b]", meaning: "stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[`", decision: "D-METHOD-FOOTPRINT1=A; D-SPREAD1=A" },
-    LexicalEntry { spelling: "T{expr}", meaning: "field default", decision: "D-DEFAULT-SHAPE1" },
-    LexicalEntry { spelling: "Name{\"…\"}", meaning: "checked text head", decision: "S8; D-CHECKED-TEXT1" },
-    LexicalEntry { spelling: ".{ … }", meaning: "typed anonymous value", decision: "D-POLICY-WORD1" },
+    LexicalEntry { spelling: "T{{expr}}", meaning: "field default", decision: "D-DEFAULT-SHAPE1" },
+    LexicalEntry { spelling: "Name{{\"…\"}}", meaning: "checked text head", decision: "S8; D-CHECKED-TEXT1" },
+    LexicalEntry { spelling: ".{{ … }}", meaning: "typed anonymous value", decision: "D-POLICY-WORD1" },
     LexicalEntry { spelling: "`", meaning: "raw ordinary String fence", decision: "D-RAWSTR1" },
     LexicalEntry { spelling: "\"\"\"", meaning: "multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted)", decision: "D-SG5; D-TRIPLE-DELIM1=A; D-FFI-RAWBODY1=A" },
     LexicalEntry { spelling: ",", meaning: "separator with optional trailing item in every comma list", decision: "D-TRAILCOMMA1" },
-    LexicalEntry { spelling: "Type{field: pattern, ..}", meaning: "named struct pattern; fields bind or test nested shapes", decision: "D-PAT-RECORD1=A" },
+    LexicalEntry { spelling: "Type{{field: pattern, ..}}", meaning: "named struct pattern; fields bind or test nested shapes", decision: "D-PAT-RECORD1=A" },
     LexicalEntry { spelling: "[first, ..rest]", meaning: "list pattern with a read-only zero-copy rest window; exact without the rest marker", decision: "D-PAT-RECORD1=A" },
     LexicalEntry { spelling: "[key: pattern, key?: optional, ..]", meaning: "map pattern; required and optional keys, exact unless it ends with rest", decision: "D-PAT-MAP1=A" },
     LexicalEntry { spelling: "r\"…\", raw\"…\", $\"…\"", meaning: "unclaimed raw-string prefixes", decision: "" },
@@ -137,9 +137,9 @@ TYPE_TASK :: "Task"
 BUILTIN_CHANNEL :: "channel"
 
 /// Compiler-private runtime rows; the source constructor remains `channel<T>`.
-INTERNAL_CHANNEL_NEW_METHOD :: "\0jet.channel.new"
+INTERNAL_CHANNEL_NEW_METHOD :: String.from_bytes([U8]{0, 106, 101, 116, 46, 99, 104, 97, 110, 110, 101, 108, 46, 110, 101, 119})
 
-INTERNAL_CHANNEL_BOUNDED_METHOD :: "\0jet.channel.bounded"
+INTERNAL_CHANNEL_BOUNDED_METHOD :: String.from_bytes([U8]{0, 106, 101, 116, 46, 99, 104, 97, 110, 110, 101, 108, 46, 98, 111, 117, 110, 100, 101, 100})
 
 /// D-CONC-CHAN1=A: receiver endpoint type is nameable in signatures.
 TYPE_RECEIVER :: "Receiver"
@@ -155,7 +155,7 @@ READINESS_AFTER :: "after"
 
 /// Compiler-private field used while a readiness arm is carried through the
 /// existing one-field tuple AST node. It cannot be written by source code.
-INTERNAL_SELECT_AFTER_FIELD :: "\0jet.select.after"
+INTERNAL_SELECT_AFTER_FIELD :: String.from_bytes([U8]{0, 106, 101, 116, 46, 115, 101, 108, 101, 99, 116, 46, 97, 102, 116, 101, 114})
 
 /// D-CONC-SHARE1=A: prefix for construction of a shared cell.
 KW_SHARED :: "shared"
@@ -222,22 +222,22 @@ METHOD_DIV_EUCLID :: "div_euclid"
 METHOD_REM_EUCLID :: "rem_euclid"
 
 /// Compiler-owned numeric source names for D-SHAPE-CONVERT1=A.
-NUMERIC_CONVERSION_SOURCES :: [(String, String)]{
-    ("from_i8", "I8"),
-    ("from_i64", "I64"),
-    ("from_i16", "I16"),
-    ("from_i32", "I32"),
-    ("from_int", "Int"),
-    ("from_u8", "U8"),
-    ("from_u16", "U16"),
-    ("from_u32", "U32"),
-    ("from_u64", "U64"),
-    ("from_f32", "F32"),
-    ("from_float", "Float"),
+NUMERIC_CONVERSION_SOURCES :: [(field_0: String, field_1: String)]{
+    (field_0: "from_i8", field_1: "I8"),
+    (field_0: "from_i64", field_1: "I64"),
+    (field_0: "from_i16", field_1: "I16"),
+    (field_0: "from_i32", field_1: "I32"),
+    (field_0: "from_int", field_1: "Int"),
+    (field_0: "from_u8", field_1: "U8"),
+    (field_0: "from_u16", field_1: "U16"),
+    (field_0: "from_u32", field_1: "U32"),
+    (field_0: "from_u64", field_1: "U64"),
+    (field_0: "from_f32", field_1: "F32"),
+    (field_0: "from_float", field_1: "Float"),
     // D-TYPE2-EXACT-CONVERT1: the exact-number family uses the same
     // destination-owned source suffix convention as fixed numerics.
-    ("from_decimal", "Decimal"),
-    ("from_fraction", "Fraction"),
+    (field_0: "from_decimal", field_1: "Decimal"),
+    (field_0: "from_fraction", field_1: "Fraction"),
 }
 
 /// D-W4310-BYTES1 / D-W4310-EXACT1 (card #2310/#2312, 2026-08-28): the
@@ -291,43 +291,43 @@ ROUND_NEAREST_EVEN :: "NearestEven"
 
 /// One compiler-owned category table. Parser/sema callers select the grammar
 /// category; spelling policy never gets reimplemented at individual sites.
-NAME_CASE_CATEGORIES :: [(String, NameCase)]{
-    ("associated type", NameCase.Pascal),
-    ("distinct type", NameCase.Pascal),
-    ("enum", NameCase.Pascal),
-    ("enum variant", NameCase.Pascal),
-    ("variant group", NameCase.Pascal),
-    ("marker", NameCase.Pascal),
-    ("protocol", NameCase.Pascal),
-    ("protocol message", NameCase.Pascal),
-    ("state", NameCase.Pascal),
-    ("state type", NameCase.Pascal),
-    ("struct", NameCase.Pascal),
-    ("tag", NameCase.Pascal),
-    ("trait", NameCase.Pascal),
-    ("type", NameCase.Pascal),
-    ("type alias", NameCase.Pascal),
-    ("type parameter", NameCase.Pascal),
-    ("unit family", NameCase.Pascal),
-    ("config name", NameCase.Snake),
-    ("constant", NameCase.Screaming),
-    ("field", NameCase.Snake),
-    ("function", NameCase.Snake),
-    ("generic module", NameCase.Snake),
-    ("lambda parameter", NameCase.Snake),
-    ("local", NameCase.Snake),
-    ("local constant", NameCase.Snake),
-    ("loop label", NameCase.Snake),
-    ("message field", NameCase.Snake),
-    ("method", NameCase.Snake),
-    ("module", NameCase.Snake),
-    ("module variable", NameCase.Snake),
-    ("module alias", NameCase.Snake),
-    ("parameter", NameCase.Snake),
-    ("pattern binding", NameCase.Snake),
-    ("unit member", NameCase.Snake),
-    ("value parameter", NameCase.Snake),
-    ("variant field", NameCase.Snake),
+NAME_CASE_CATEGORIES :: [(field_0: String, field_1: NameCase)]{
+    (field_0: "associated type", field_1: NameCase.Pascal),
+    (field_0: "distinct type", field_1: NameCase.Pascal),
+    (field_0: "enum", field_1: NameCase.Pascal),
+    (field_0: "enum variant", field_1: NameCase.Pascal),
+    (field_0: "variant group", field_1: NameCase.Pascal),
+    (field_0: "marker", field_1: NameCase.Pascal),
+    (field_0: "protocol", field_1: NameCase.Pascal),
+    (field_0: "protocol message", field_1: NameCase.Pascal),
+    (field_0: "state", field_1: NameCase.Pascal),
+    (field_0: "state type", field_1: NameCase.Pascal),
+    (field_0: "struct", field_1: NameCase.Pascal),
+    (field_0: "tag", field_1: NameCase.Pascal),
+    (field_0: "trait", field_1: NameCase.Pascal),
+    (field_0: "type", field_1: NameCase.Pascal),
+    (field_0: "type alias", field_1: NameCase.Pascal),
+    (field_0: "type parameter", field_1: NameCase.Pascal),
+    (field_0: "unit family", field_1: NameCase.Pascal),
+    (field_0: "config name", field_1: NameCase.Snake),
+    (field_0: "constant", field_1: NameCase.Screaming),
+    (field_0: "field", field_1: NameCase.Snake),
+    (field_0: "function", field_1: NameCase.Snake),
+    (field_0: "generic module", field_1: NameCase.Snake),
+    (field_0: "lambda parameter", field_1: NameCase.Snake),
+    (field_0: "local", field_1: NameCase.Snake),
+    (field_0: "local constant", field_1: NameCase.Snake),
+    (field_0: "loop label", field_1: NameCase.Snake),
+    (field_0: "message field", field_1: NameCase.Snake),
+    (field_0: "method", field_1: NameCase.Snake),
+    (field_0: "module", field_1: NameCase.Snake),
+    (field_0: "module variable", field_1: NameCase.Snake),
+    (field_0: "module alias", field_1: NameCase.Snake),
+    (field_0: "parameter", field_1: NameCase.Snake),
+    (field_0: "pattern binding", field_1: NameCase.Snake),
+    (field_0: "unit member", field_1: NameCase.Snake),
+    (field_0: "value parameter", field_1: NameCase.Snake),
+    (field_0: "variant field", field_1: NameCase.Snake),
 }
 
 COMPUTED_FIELD_GETTER_STEM :: "__computed_"

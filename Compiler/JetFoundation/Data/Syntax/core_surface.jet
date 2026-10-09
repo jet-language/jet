@@ -41,13 +41,13 @@ ARTIFACT_EXT_GAME_REPLAY :: ".jetreplay"
 
 ARTIFACT_EXT_PROOF_REPLAY :: ".jetproof-replay"
 
-ARTIFACT_KINDS :: [(ArtifactKind, String)]{
-    (ArtifactKind.SourceMap, ARTIFACT_EXT_SOURCE_MAP),
-    (ArtifactKind.Notebook, ARTIFACT_EXT_NOTEBOOK),
-    (ArtifactKind.Proof, ARTIFACT_EXT_PROOF),
-    (ArtifactKind.Trace, ARTIFACT_EXT_TRACE),
-    (ArtifactKind.GameReplay, ARTIFACT_EXT_GAME_REPLAY),
-    (ArtifactKind.ProofReplay, ARTIFACT_EXT_PROOF_REPLAY),
+ARTIFACT_KINDS :: [(field_0: ArtifactKind, field_1: String)]{
+    (field_0: ArtifactKind.SourceMap, field_1: ARTIFACT_EXT_SOURCE_MAP),
+    (field_0: ArtifactKind.Notebook, field_1: ARTIFACT_EXT_NOTEBOOK),
+    (field_0: ArtifactKind.Proof, field_1: ARTIFACT_EXT_PROOF),
+    (field_0: ArtifactKind.Trace, field_1: ARTIFACT_EXT_TRACE),
+    (field_0: ArtifactKind.GameReplay, field_1: ARTIFACT_EXT_GAME_REPLAY),
+    (field_0: ArtifactKind.ProofReplay, field_1: ARTIFACT_EXT_PROOF_REPLAY),
 }
 
 /// S1 (ratified): keyword that starts a function definition.
@@ -195,9 +195,9 @@ META_FIELD_TUNABLE :: "tunable"
 META_FIELD_MATURITY :: "maturity"
 
 /// S3 (ratified): block delimiters.
-BLOCK_OPEN :: "{"
+BLOCK_OPEN :: "{{"
 
-BLOCK_CLOSE :: "}"
+BLOCK_CLOSE :: "}}"
 
 /// D-FAILURE-FOUNDATION1=A / D-FAIL-CTX1=A: `?` is the contextual journey
 /// marker only when followed by `(text)`; ordinary fallible calls propagate
@@ -221,9 +221,9 @@ BLOCK_COMMENT_CLOSE :: "*/"
 STMT_SEP :: ";"
 
 /// S8 (ratified): string interpolation delimiters inside quoted text.
-INTERP_OPEN :: "{"
+INTERP_OPEN :: "{{"
 
-INTERP_CLOSE :: "}"
+INTERP_CLOSE :: "}}"
 
 /// S9 (ratified): the prelude-declared print function (adds a newline).
 BUILTIN_PRINT :: "print"
@@ -785,25 +785,25 @@ MEM_ALLOC_FREE :: "free"
 
 /// S58: one tier for every current `core.mem` module item. Keep this table
 /// aligned with `core_module_items("core.mem")` in `jet-sema`.
-CORE_MEM_GATE_TIERS :: [(String, CoreMemGate)]{
-    (TYPE_PTR, CoreMemGate.Import),
-    (MEM_FROM_ADDR, CoreMemGate.Audit),
-    (MEM_VOLATILE_READ, CoreMemGate.Audit),
-    (MEM_VOLATILE_WRITE, CoreMemGate.Audit),
-    ("__string_data", CoreMemGate.Audit),
-    ("__string_byte_len", CoreMemGate.Audit),
-    ("__bytes_pack", CoreMemGate.Audit),
-    ("__bytes_free", CoreMemGate.Audit),
-    ("__bytes_unpack", CoreMemGate.Audit),
-    (MEM_ADDRESS_OF, CoreMemGate.Import),
-    (MEM_PIN, CoreMemGate.Import),
-    (TYPE_PIN, CoreMemGate.Import),
-    (MEM_ARENA, CoreMemGate.Import),
-    (MEM_BUMP, CoreMemGate.Import),
-    (MEM_POOL, CoreMemGate.Import),
-    (MEM_FIXED, CoreMemGate.Import),
-    (TYPE_ALLOC_ERROR, CoreMemGate.Import),
-    ("Atomic", CoreMemGate.Import),
+CORE_MEM_GATE_TIERS :: [(field_0: String, field_1: CoreMemGate)]{
+    (field_0: TYPE_PTR, field_1: CoreMemGate.Import),
+    (field_0: MEM_FROM_ADDR, field_1: CoreMemGate.Audit),
+    (field_0: MEM_VOLATILE_READ, field_1: CoreMemGate.Audit),
+    (field_0: MEM_VOLATILE_WRITE, field_1: CoreMemGate.Audit),
+    (field_0: "__string_data", field_1: CoreMemGate.Audit),
+    (field_0: "__string_byte_len", field_1: CoreMemGate.Audit),
+    (field_0: "__bytes_pack", field_1: CoreMemGate.Audit),
+    (field_0: "__bytes_free", field_1: CoreMemGate.Audit),
+    (field_0: "__bytes_unpack", field_1: CoreMemGate.Audit),
+    (field_0: MEM_ADDRESS_OF, field_1: CoreMemGate.Import),
+    (field_0: MEM_PIN, field_1: CoreMemGate.Import),
+    (field_0: TYPE_PIN, field_1: CoreMemGate.Import),
+    (field_0: MEM_ARENA, field_1: CoreMemGate.Import),
+    (field_0: MEM_BUMP, field_1: CoreMemGate.Import),
+    (field_0: MEM_POOL, field_1: CoreMemGate.Import),
+    (field_0: MEM_FIXED, field_1: CoreMemGate.Import),
+    (field_0: TYPE_ALLOC_ERROR, field_1: CoreMemGate.Import),
+    (field_0: "Atomic", field_1: CoreMemGate.Import),
 }
 
 /// D-ARGS1 (ratified 2026-06-22): declarative CLI argument parsing module.
@@ -1030,7 +1030,7 @@ TYPE_MEMO_STATS :: "MemoStats"
 
 METHOD_MEMO_CACHE :: "cache"
 
-MEMO_STATS_CALL_PREFIX :: "\u{0}jet.memo.stats."
+MEMO_STATS_CALL_PREFIX :: String.from_bytes([U8]{0, 106, 101, 116, 46, 109, 101, 109, 111, 46, 115, 116, 97, 116, 115, 46})
 
 TYPE_TYPE_INFO :: "TypeInfo"
 
@@ -1082,10 +1082,10 @@ COMPILER_FACT_MATURITY :: "$maturity"
 COMPILER_BUILD_FACT_PROFILE :: "$profile"
 
 /// Each compiler fact and the `TypeInfo` member it projects.
-COMPILER_FACTS :: [(String, String)]{
-    (COMPILER_FACT_LAYOUT, "layout"),
-    (COMPILER_FACT_NAME, "name"),
-    (COMPILER_FACT_FIELDS, "fields"),
+COMPILER_FACTS :: [(field_0: String, field_1: String)]{
+    (field_0: COMPILER_FACT_LAYOUT, field_1: "layout"),
+    (field_0: COMPILER_FACT_NAME, field_1: "name"),
+    (field_0: COMPILER_FACT_FIELDS, field_1: "fields"),
 }
 
 TYPE_LAYOUT_INFO :: "LayoutInfo"
@@ -1096,4 +1096,4 @@ TYPE_LAYOUT_FIELD :: "LayoutField"
 /// Keeping the selector in an existing `Expr::Ident` avoids a second AST
 /// variant for a compile-time-only projection. It is never formatted as this
 /// sentinel and never appears in generated Jet source.
-LAYOUT_SELECTOR_PREFIX :: "\u{0}jet.layout.selector."
+LAYOUT_SELECTOR_PREFIX :: String.from_bytes([U8]{0, 106, 101, 116, 46, 108, 97, 121, 111, 117, 116, 46, 115, 101, 108, 101, 99, 116, 111, 114, 46})

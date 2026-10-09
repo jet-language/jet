@@ -172,14 +172,14 @@ RETIRED_MARKER_GRANT :: "Grant"
 AUTHORITY_HANDLE_TYPE :: "Authority"
 
 /// D-CONC-SPAWN1=D: parser-only receiver used while lowering `task` sugar.
-INTERNAL_TASK_RECEIVER :: "\0jet.task"
+INTERNAL_TASK_RECEIVER :: String.from_bytes([U8]{0, 106, 101, 116, 46, 116, 97, 115, 107})
 
 /// Compiler-only dispatch type for a `task` combinator that is not attached to
 /// a lexical `Group` handle.
-INTERNAL_TASK_SURFACE_TYPE :: "\0jet.task.surface"
+INTERNAL_TASK_SURFACE_TYPE :: String.from_bytes([U8]{0, 106, 101, 116, 46, 116, 97, 115, 107, 46, 115, 117, 114, 102, 97, 99, 101})
 
 /// Compiler-only dispatch type for a canonical combinator inside `task.group`.
-INTERNAL_TASK_GROUP_SURFACE_TYPE :: "\0jet.task.group.surface"
+INTERNAL_TASK_GROUP_SURFACE_TYPE :: String.from_bytes([U8]{0, 106, 101, 116, 46, 116, 97, 115, 107, 46, 103, 114, 111, 117, 112, 46, 115, 117, 114, 102, 97, 99, 101})
 
 /// D-CONC-SPAWN1=D / D-TASKGROUP-PARAM1=A / D-CONC-GROUP1=A: the
 /// compiler-private handle type bound by `task.group g { … }` and accepted in
@@ -191,22 +191,22 @@ INTERNAL_TASK_GROUP_SURFACE_TYPE :: "\0jet.task.group.surface"
 TYPE_TASKGROUP :: "Group"
 
 /// Compiler-private dispatch method for canonical `task` spawn syntax.
-INTERNAL_TASK_SPAWN_METHOD :: "\0jet.task.spawn"
+INTERNAL_TASK_SPAWN_METHOD :: String.from_bytes([U8]{0, 106, 101, 116, 46, 116, 97, 115, 107, 46, 115, 112, 97, 119, 110})
 
 /// D-TYPE2-TIME1=A: compiler-private dispatch method for `task.timeout(duration)`.
-INTERNAL_TASK_TIMEOUT_METHOD :: "\0jet.task.timeout"
+INTERNAL_TASK_TIMEOUT_METHOD :: String.from_bytes([U8]{0, 106, 101, 116, 46, 116, 97, 115, 107, 46, 116, 105, 109, 101, 111, 117, 116})
 
 /// User-facing selector for the canonical task timeout surface.
 TASK_TIMEOUT_SELECTOR :: "timeout"
 
 /// Compiler-private dispatch method for `task.all { … }`.
-INTERNAL_TASK_ALL_METHOD :: "\0jet.task.all"
+INTERNAL_TASK_ALL_METHOD :: String.from_bytes([U8]{0, 106, 101, 116, 46, 116, 97, 115, 107, 46, 97, 108, 108})
 
 /// Compiler-private dispatch method for `task.race { … }`.
-INTERNAL_TASK_RACE_METHOD :: "\0jet.task.race"
+INTERNAL_TASK_RACE_METHOD :: String.from_bytes([U8]{0, 106, 101, 116, 46, 116, 97, 115, 107, 46, 114, 97, 99, 101})
 
 /// Compiler-private dispatch method for `task.any { … }`.
-INTERNAL_TASK_ANY_METHOD :: "\0jet.task.any"
+INTERNAL_TASK_ANY_METHOD :: String.from_bytes([U8]{0, 106, 101, 116, 46, 116, 97, 115, 107, 46, 97, 110, 121})
 
 /// D-COROUTINE1=A: mark a task paused in the control plane.
 METHOD_TASK_PAUSE :: "pause"
@@ -312,12 +312,12 @@ INTERPOLATION_SELECTORS :: [InterpolationSelector]{
     InterpolationSelector {
         name: "Debug",
         kind: InterpolationSelectorKind.Debug,
-        arguments: InterpolationSelectorArguments.None,
+        arguments: .None,
     },
     InterpolationSelector {
         name: "Pretty",
         kind: InterpolationSelectorKind.Pretty,
-        arguments: InterpolationSelectorArguments.None,
+        arguments: .None,
     },
     InterpolationSelector {
         name: "Fixed",
@@ -357,12 +357,12 @@ INTERPOLATION_SELECTORS :: [InterpolationSelector]{
     InterpolationSelector {
         name: "Bin",
         kind: InterpolationSelectorKind.Bin,
-        arguments: InterpolationSelectorArguments.None,
+        arguments: .None,
     },
     InterpolationSelector {
         name: "Oct",
         kind: InterpolationSelectorKind.Oct,
-        arguments: InterpolationSelectorArguments.None,
+        arguments: .None,
     },
     InterpolationSelector {
         name: "Unit",
@@ -378,9 +378,9 @@ INTERPOLATION_SELECTOR_RAIL :: ":"
 /// rewrite it and print a notice before the zero-adoption ratchet closes.
 RETIRED_INTERPOLATION_SELECTOR_RAIL :: "#"
 
-RETIRED_INTERPOLATION_SELECTOR_EXAMPLE :: "{value#Selector}"
+RETIRED_INTERPOLATION_SELECTOR_EXAMPLE :: "{{value#Selector}}"
 
-INTERPOLATION_SELECTOR_EXAMPLE :: "{value:Selector}"
+INTERPOLATION_SELECTOR_EXAMPLE :: "{{value:Selector}}"
 
 /// D-DEBUG-REDACT / D-VERDICT-732-1 (formerly D-MARKERMOVE1, `#Redact`): hide a field
 /// from auto-derived Debug output.
