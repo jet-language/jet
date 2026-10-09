@@ -1905,6 +1905,18 @@ fn jet_rust_emit_ref_bindings(ctx: &JetRustEmitContext, function: MIRFunction) -
     bindings
 }
 
+// Only eligible vector facts exclude the borrowed-loop plan; merely having
+// a rejected vector candidate must not disable it.
+fn jet_rust_emit_has_eligible_vector_fact(function: MIRFunction) -> Bool Never! {
+    loop fact in function.optimization.vector_facts {
+        if fact.decision == {
+            .Eligible -> return true
+            else -> {}
+        }
+    }
+    false
+}
+
 // MIRRust borrowed_loop_candidates (#4318): read loops that may walk their
 // list in place: a plain, unstepped `LoopIterInit` over a `Vec` collection
 // read once, from a stable place (jet_rust_emit_immutable_read_place) that
@@ -2128,62 +2140,6 @@ fn jet_rust_emit_unused_place_read(ctx: &JetRustEmitContext, function: MIRFuncti
     bindings
 }
 
-// MIRRust borrowed_loop_candidates (#4318): read loops that may walk their
-// list in place: a plain, unstepped `LoopIterInit` over a `Vec` collection
-// read once, from a stable place (jet_rust_emit_immutable_read_place) that
-// nothing may change while the cursor is live
-// (jet_rust_emit_unchanged_until_uses over the cursor's uses, which span the
-// whole loop), whose cursor only feeds its own has-next, value, advance and
-// drop. Each row names the cursor, its collection, the place, and the
-// reference binding the place is rooted at, if any (a rebinding of that
-// local leaves the walked referent as it was).
-// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::borrowed_loop_candidates
-fn jet_rust_emit_borrowed_loop_candidates(ctx: &JetRustEmitContext, function: MIRFunction, use_counts: [U64:Int]) -> [JetRustEmitLoopCandidate] Never! {
-    candidates := [JetRustEmitLoopCandidate]{}
-    if function.optimization.vector_facts.len() > 0 || function.optimization.acceleration_facts.len() > 0 -> return candidates
-    loop block in function.blocks {
-        loop instruction in block.instructions {
-            if instruction.operation == .LoopIterInit(_, collection, step, by_value, source_kind) {
-                cursor :: instruction.result ?? next
-                if step != None || by_value || source_kind != MIRLoopSourceKind.Plain -> next
-                if use_counts.get(collection.value) != (Val(1)) -> next
-                if jet_rust_emit_value_mode(ctx, function, collection) == MIROwnershipMode.WriteBorrow -> next
-                if jet_rust_emit_transparent_read(ctx, function, collection) == .Val(read) {
-                    if jet_rust_emit_value_mode(ctx, function, read) == MIROwnershipMode.WriteBorrow -> next
-                }
-                collection_type :: jet_rust_emit_value_type(ctx, function, collection)
-                if jet_rust_emit_byte_loop_collection(collection_type) || jet_rust_emit_shared_constant_value(&ctx, function, collection) -> next
-                if !jet_rust_emit_type(&ctx, collection_type).starts_with("Vec<") -> next
-                if !jet_rust_emit_loop_cursor_only(ctx, function, cursor) -> next
-                place_id :: jet_rust_emit_immutable_read_place(&ctx, function, collection) ?? next
-                row :: ctx.body_index.place_rows.get(place_id.value) ?? next
-                place :: function.places[row]
-                root := MIRLocalID?{None}
-                if place.base == {
-                    .Parameter(parameter) -> {
-                        access :: jet_rust_emit_parameter_access(ctx, function, parameter) ?? next
-                        if access == MIRAccess.Read {
-                            if jet_rust_emit_place_is_window(&ctx, function, place_id) -> next
-                        } else if access == MIRAccess.Write {
-                            writes :: jet_rust_emit_parameter_place_writes(ctx, function, place) ?? next
-                            if !jet_rust_emit_unchanged_until_uses(ctx, function, cursor, writes) -> next
-                        } else {
-                            next
-                        }
-                    }
-                    .Local(local) -> {
-                        write_slot :: ctx.body_index.write_slots.get(local.value) ?? -1
-                        writes :: if write_slot >= 0 -> ctx.body_index.local_writes[write_slot] else -> [JetRustEmitUse]{}
-                        if ctx.body_index.escaped_locals.get(local.value) != None || !jet_rust_emit_unchanged_until_uses(ctx, function, cursor, writes) -> root = Val(local)
-                    }
-                    else -> next
-                }
-                &candidates.push(JetRustEmitLoopCandidate{cursor: cursor, collection: collection, place: place_id, root: root})
-            }
-        }
-    }
-    candidates
-}
 
 // MIRRust ref_binding_drop: a whole move out of a reference binding whose
 // every user drops it; the binding owns nothing, so neither copies.

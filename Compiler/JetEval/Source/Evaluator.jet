@@ -923,21 +923,6 @@ fn jet_eval_pure_session_value(machine: &JetEvalMachine, function_id: MIRFunctio
     data
 }
 
-// One pure evaluation of `function_id` in `machine`'s current session.
-fn jet_eval_pure_session_value(machine: &JetEvalMachine, function_id: MIRFunctionID, span: Span) -> TComptimeValue? {
-    data := TComptimeValue?{None}
-    if jet_eval_find_function(machine.program, function_id) == .Val(function) {
-        if function.target_applicability.interpreter {
-            if jet_eval_invoke(&machine, function_id, [JetEvalRuntimeValue]{}, [JetEvalRuntimeValue]{}, function.span) == .Val(value) {
-                if !jet_eval_has_failure(machine) && !machine.soft_stop -> data = jet_eval_data(value, &machine, span)
-                if !jet_eval_drop_value(&machine, value, span) -> data = None
-            }
-        }
-    }
-    if !jet_eval_drain_callbacks(&machine, span) || !jet_eval_retire_machine(&machine, span) -> data = None
-    if jet_eval_has_failure(machine) || machine.soft_stop || machine.stdout != "" || machine.stderr != "" -> data = None
-    data
-}
 
 // A pure evaluation's data value and the program its machine ran on.
 struct JetEvalProgramData {
