@@ -676,9 +676,10 @@ fn map(path: String | Path) -[FS.Read]> MappedFile IOError! {
 }
 
 
-fn write(path: String, text: String) IOError! -[FS.Write]> {
-    file_fault("FS.Write", .Write, path)
-    core.files.__write_bytes_os(path, text.bytes())
+fn write(path: String | Path, text: String) IOError! -[FS.Write]> {
+    target :: path_text(path)
+    file_fault("FS.Write", .Write, target)
+    core.files.__write_bytes_os(target, text.bytes())
 }
 
 
@@ -689,9 +690,10 @@ fn write_bytes(path: String, bytes: [U8]) IOError! -[FS.Write]> {
 }
 
 
-fn append_all(path: String, text: String) IOError! -[FS.Write]> {
-    file_fault("FS.Write", .Write, path)
-    core.files.__append_bytes_os(path, text.bytes())
+fn append_all(path: String | Path, text: String) IOError! -[FS.Write]> {
+    target :: path_text(path)
+    file_fault("FS.Write", .Write, target)
+    core.files.__append_bytes_os(target, text.bytes())
 }
 
 
@@ -711,8 +713,7 @@ fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
         candidate := parent.copy()
         host_path.push(&candidate, host_path.from_text(".jet_tmp_{pid}_{sequence}", platform))
         candidate_text :: String.from_bytes(candidate.encoded) ?? panic("UTF-8 temporary path")
-        reservation :: core.files.__atomic_reserve(path, candidate_text)
-        if reservation == {
+        if core.files.__atomic_reserve(path, candidate_text) == {
             .Err(error) -> {
                 if error != .AlreadyExists(_) -> return Err(error)
             }
@@ -769,11 +770,12 @@ fn exists_impl(path: String) -> Bool Never! {
 }
 
 
-fn exists(path: String) -[FS]> Bool Never! { exists_impl(path) }
+fn exists(path: String | Path) -[FS]> Bool Never! { exists_impl(path_text(path)) }
 
 
-fn is_dir(path: String) -[FS.Read]> Bool Never! {
-    core.files.__metadata_directory(path) ?? false
+fn is_dir(path: String | Path) -[FS.Read]> Bool Never! {
+    text :: path_text(path)
+    core.files.__metadata_directory(text) ?? false
 }
 
 
@@ -1022,9 +1024,10 @@ fn list_dir(path: String | Path) -[FS.Read]> [DirEntry] IOError! {
 }
 
 
-fn create_dir(path: String) IOError! -[FS.Write]> {
-    file_fault("FS.Write", .Write, path)
-    core.files.__create_dirs_os(path)
+fn create_dir(path: String | Path) IOError! -[FS.Write]> {
+    target :: path_text(path)
+    file_fault("FS.Write", .Write, target)
+    core.files.__create_dirs_os(target)
 }
 
 
@@ -1403,7 +1406,7 @@ fn walk_validate(context: Int, directory: Int, root: String) IOError! -[FS]> {
 fn walk_batch(context: Int, directory: Int, depth: Int, root: String, ignore: String?, files_only: Bool) -[FS]> (entries: [WalkEntry], children: [Int]) IOError! {
     walk_validate(context, directory, root)
     if ignore != None {
-        rules :: core.files.__walk_rules(context, directory, ignore ?? "")
+        rules :: core.files.__walk_rules(context, directory, ignore)
         if rules.cause != None -> return Err(walk_error(.Read, rules.kind, rules.code, rules.cause, core.files.__walk_shown(context, directory)))
     }
     opened :: core.files.__walk_read_dir(context, directory)

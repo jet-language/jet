@@ -156,7 +156,8 @@ fn socket_addr(host: String, port: Int) -[Net, Time.Wait]> SocketAddr NetError! 
     if contains_byte(host, 58) && !starts_with(host, "[") -> host_text = "[{host}]"
     text :: "{host_text}:{port}"
     if socket_addr_parse(text) == .Ok(address) -> return Ok(address)
-    if core.net.__resolve_ordered(host_text, U16{port}) == {
+    port16 :: U16{port} ?? return Err(net_err("socket_addr", host, "port must be in 0..=65535"))
+    if core.net.__resolve_ordered(host_text, port16) == {
         .Ok(addresses) -> resolve_first(text, addresses)
         .Err(error) -> Err(resolve_error(text, error))
     }
