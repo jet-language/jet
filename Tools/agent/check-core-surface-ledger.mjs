@@ -1909,6 +1909,11 @@ function ownedWrapperRuntimeUnit(source, module, member) {
 }
 
 function parseCoreSource(source, root = ROOT) {
+  const readSource = (path) => {
+    const sourcePath = join(root, path);
+    if (!existsSync(sourcePath)) throw new Error("missing source: " + path);
+    return readFileSync(sourcePath, "utf8");
+  };
   const modules = [];
   const sourceModules = [];
   const bootstraps = [];
@@ -2234,7 +2239,7 @@ function parseCoreSource(source, root = ROOT) {
   }
   for (const sourceModule of sourceModules) {
     const sourceFunctions = new Set(Array.from(
-      read(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+      readSource(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
     ).map(function (match) { return match[1]; }));
     for (const member of sourceModule.ownedMembers) {
       const target = sourceTargets.get(sourceModule.module + "." + member) ?? member;
@@ -2244,7 +2249,7 @@ function parseCoreSource(source, root = ROOT) {
       }
     }
     const sourceTypes = new Set(Array.from(
-      read(sourceModule.path).matchAll(/^(?:struct|enum|alias)\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+      readSource(sourceModule.path).matchAll(/^(?:struct|enum|alias)\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
     ).map(function (match) { return match[1]; }));
     for (const type of sourceModule.ownedTypes) {
       if (!sourceTypes.has(type)) {
@@ -2291,7 +2296,7 @@ function parseCoreSource(source, root = ROOT) {
       return entry.module === row.module && entry.ownedMembers.includes(row.member);
     });
     if (!owner) continue;
-    const unit = ownedWrapperRuntimeUnit(read(owner.path), owner.module, row.member);
+    const unit = ownedWrapperRuntimeUnit(readSource(owner.path), owner.module, row.member);
     if (unit) {
       throw new Error("dispatcher row `" + row.module + "." + row.member + "` (Core.jet line " +
         row.sourceLine + ") is dead: its owned wrapper `fn " + row.member + "` in " + owner.path +
