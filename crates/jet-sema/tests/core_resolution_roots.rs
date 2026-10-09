@@ -101,3 +101,78 @@ fn private_native_email_view_is_nameable_only_by_its_core_owner() {
     ]);
     assert!(errors.iter().any(|error| error.starts_with("E0119:")), "{errors:?}");
 }
+
+#[test]
+fn jobs_optional_projection_preserves_absence_while_forwarding_report() {
+    let source = r#"
+#Error enum ServiceError { Invalid }
+fn optional_text() -> String? ServiceError! { None }
+fn project() -> String? ServiceError! {
+    key :: if optional_text() == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
+    key
+}
+fn run() {}
+"#;
+    let errors = check_sources(&[("pkg/main.jet", "main", source, &[])]);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn xml_marked_optional_dispatch_and_result_fallback_own_the_call_carrier() {
+    let source = r#"
+use core.encoding.[Dyn]
+#Error enum XMLFault { Invalid }
+struct Scanner {
+    fn next(&self) -> Dyn? XMLFault! { None }
+    fn required(&self) -> Dyn XMLFault! { Err(XMLFault.Invalid) }
+}
+fn next(scanner: &Scanner) -> Dyn? XMLFault! {
+    candidate :: if (&scanner.next()) == {
+        .Val(event) -> Val(event)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
+    if candidate == .Val(event) -> return Val(event)
+    None
+}
+fn required(scanner: &Scanner) -> Dyn XMLFault! {
+    &scanner.required() ?? return Err(err)
+}
+fn run() {}
+"#;
+    let errors = check_sources(&[("pkg/main.jet", "main", source, &[])]);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn csv_internal_report_is_handled_without_public_error_domain_validation() {
+    let source = r#"
+use core.encoding as encoding
+use core.files.[FileReader]
+#Error enum StreamError { IO(String) }
+fn byte(input: &FileReader) -> U8? StreamError! {
+    byte :: if encoding.__read_byte(&input) == {
+        .Ok(value) -> value
+        .Err(cause) -> return Err(StreamError.IO(cause.message))
+    }
+    byte
+}
+fn statement_byte(input: &FileReader) -> U8? StreamError! {
+    byte := U8?{None}
+    if encoding.__read_byte(&input) == {
+        .Ok(value) -> { byte = value }
+        .Err(cause) -> return Err(StreamError.IO(cause.message))
+    }
+    byte
+}
+"#;
+    let errors = check_sources(&[
+        ("<corelib>/Core/encoding/csv.jet", "core_csv", source, &[]),
+        ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+    ]);
+    assert!(errors.is_empty(), "{errors:?}");
+}

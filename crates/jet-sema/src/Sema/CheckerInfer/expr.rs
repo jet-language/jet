@@ -2215,11 +2215,11 @@ impl<'a> Checker<'a> {
             }
         }
         let suppress_auto = self.failure_auto_root_suppression > 0;
-        // Grouping is semantically transparent. Keep the one-shot token alive
-        // until it reaches the carrier-owned expression beneath any number of
-        // parentheses; otherwise `(fallible())` would acquire a second `Try`
-        // while the unparenthesized form did not.
-        if suppress_auto && !matches!(e, Expr::Paren(..)) {
+        // Grouping and access marks are transparent to carrier ownership.
+        // Keep the one-shot token until the underlying expression: otherwise
+        // an explicitly handled `&reader.next()` would propagate before its
+        // `??` or pattern could consume the Result.
+        if suppress_auto && !matches!(e, Expr::Paren(..) | Expr::Place(..)) {
             self.failure_auto_root_suppression -= 1;
         }
         if !self.enter_source_nesting(e.span()) {

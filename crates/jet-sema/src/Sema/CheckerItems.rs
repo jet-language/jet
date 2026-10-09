@@ -4356,7 +4356,7 @@ impl<'a> Checker<'a> {
         } else {
             None
         };
-        let mut subj_ty = cached_subject_ty.clone().or_else(|| {
+        let subj_ty = cached_subject_ty.clone().or_else(|| {
             let inferred = if let Some(stable) = stable_optional_subject.clone() {
                 // Preserve ordinary identifier-use/ownership bookkeeping; only
                 // replace the type returned to pattern validation.
@@ -4379,20 +4379,10 @@ impl<'a> Checker<'a> {
         if preserve_result_carrier && cached_subject_ty.is_none() {
             self.failure_auto_depth -= 1;
         }
-        // An invalid explicit `!` domain is diagnosed at its declaration and
-        // does not make a call a usable Result carrier. Let the ordinary call
-        // inference consume that invalid carrier before validating `.Ok`/`.Err`,
-        // preserving the independent pattern mismatch (E0305).
-        if preserve_result_carrier
-            && subj_ty.as_ref().is_some_and(|ty| {
-                matches!(
-                    ty,
-                    Type::Result { err, .. } if !self.is_error_domain(err)
-                )
-            })
-        {
-            subj_ty = self.infer(subject);
-        }
+        // The pattern owns this carrier even when its internal ABI report is
+        // not a public Error domain. Explicit source contracts are validated
+        // at their declarations; re-inferring here would propagate before the
+        // handler and lose its payload/report bindings.
         let Some(st) = subj_ty else {
             return (None, HashMap::new());
         };

@@ -4002,11 +4002,11 @@ fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScopeEnvi
     }
     if !sema_enter_source_nesting(&context, expr_span(expr), &diagnostics) -> return None
     // D-FAILURE-FOUNDATION1=A: a call root auto-propagates its Result carrier
-    // unless a carrier consumer claimed it. Grouping is transparent, so the
-    // consumer's one-shot token passes through parentheses.
+    // unless a carrier consumer claimed it. Grouping and access marks are
+    // transparent, so the consumer's token reaches the underlying call.
     carrier_root :: context.failure_carrier_root
     grouping :: if expr == {
-        .Paren(_, _) -> true
+        .Paren(_, _) | .Place(_, _, _) -> true
         else -> false
     }
     if !grouping -> context.failure_carrier_root = false
