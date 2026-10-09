@@ -5,7 +5,6 @@ use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fmt::Write as _;
-use crate::EncodingJson::{json_unsupported, EncodingError};
 
 #[allow(dead_code)]
 mod map_key_semantics {
@@ -2269,7 +2268,7 @@ mod tests {
             let encoded = CtValue::Char(character).to_json().unwrap();
             assert_eq!(encoded, format!("\"{escaped}\""));
             assert_eq!(encoded, CtValue::Str(character.to_string()).to_json().unwrap());
-            assert_eq!(crate::JSON::parse(&encoded).unwrap(), crate::DataTree::DataTree::Text(character.to_string()));
+            assert_eq!(crate::JSON::parse(&encoded).unwrap(), crate::Dyn::Dyn::Text(character.to_string()));
         }
         for (character, escaped) in [('"', "\\\""), ('\\', "\\\\"), ('λ', "λ"), ('😀', "😀")] {
             assert_eq!(CtValue::Char(character).to_json().unwrap(), format!("\"{escaped}\""));
@@ -2319,7 +2318,7 @@ mod tests {
             assert_eq!(encoded, crate::EncodingJson::quote_json(&text));
             assert_eq!(
                 crate::JSON::parse(&encoded).unwrap(),
-                crate::DataTree::DataTree::Text(text)
+                crate::Dyn::Dyn::Text(text)
             );
         }
         let controls: String = (0..32).map(|byte| char::from(byte)).collect();
@@ -2327,7 +2326,7 @@ mod tests {
         assert!(encoded.contains("\\u001f"));
         assert_eq!(
             crate::JSON::parse(&encoded).unwrap(),
-            crate::DataTree::DataTree::Text(controls)
+            crate::Dyn::Dyn::Text(controls)
         );
         let value = CtValue::Struct {
             type_name: "Quoted".into(),
