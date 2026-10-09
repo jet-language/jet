@@ -2066,7 +2066,10 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         .Drop(value, _) -> lower_drop_value(p, c, &m, &f, value)
         .RawAddressOf(place) -> lower_raw_address_of(p, c, &m, &f, instruction, place)
         .PtrFromAddr(address, _) -> lower_ptr_from_addr(p, c, &m, &f, instruction, address)
-        .Deref(value) -> lower_ptr_deref(p, c, &m, &f, instruction, value)
+        .Deref(value) -> {
+            if lower_shared_guard_deref(p, c, &m, &f, instruction, value) -> return
+            lower_ptr_deref(p, c, &m, &f, instruction, value)
+        }
         else -> lower_fail(&m, &f, "MIR operation {lower_operation_name(instruction.operation)} is not lowered at O0 yet")
     }
 }
@@ -3172,6 +3175,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         return lower_route_call(p, c, &m, &f, instruction, call, values, "HandleMethod")
     }
     if semantic == .HostCall(call, args) {
+        if lower_shared_guard_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_shared_access(p, c, &m, &f, instruction, call, args) -> return
         values :: lower_route_values(p, &m, &f, call, args, "HostCall") ?? return
         return lower_route_call(p, c, &m, &f, instruction, call, values, "HostCall")

@@ -152,6 +152,16 @@ fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                     return None
                 }
             }
+            .Deref(_) -> {
+                elem :: lower_shared_guard_element(ty) ?? {
+                    lower_fail(&m, &f, "Deref projection of {mir_type_display_name(ty)} is not lowered at O0 yet")
+                    return None
+                }
+                base = lower_shared_guard_payload(&m, &f, base, ty) ?? return None
+                borrowed = lower_shared_guard_editable(ty) != Val(true)
+                offset = 0
+                ty = elem
+            }
             else -> {
                 lower_fail(&m, &f, "Deref or Range projection is not lowered at O0 yet")
                 return None
