@@ -69,12 +69,13 @@ fn runner_path() -> Result<PathBuf, String> {
 /// the refusal reason; `out` is left untouched then.
 pub(crate) fn build(
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[Arc<jet::AST::MirFragmentNominalFacts>],
     profile: &str,
     out: &Path,
     store: Option<&Store>,
 ) -> Result<Vec<u8>, String> {
     let runner = runner_path()?;
-    let (mir, artifact) = jet::Interpreter::lower_for_dev_aot(bundle, profile);
+    let (mir, artifact) = jet::Interpreter::lower_for_dev_aot(bundle, checked_nominals, profile);
     let code_store = store.map(|store| {
         Arc::new(StoreCodeCache {
             store: store.clone(),

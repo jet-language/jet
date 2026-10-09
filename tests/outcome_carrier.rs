@@ -34,7 +34,8 @@ fn run_jet(name: &str, src: &str) -> String {
         .spawn(move || {
             let path = file.to_str().unwrap();
             let mut bundle = jet::Loader::load_entry(path).expect("fixture should load");
-            let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+            let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+            let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
             assert!(
                 !diags
                     .iter()
@@ -351,7 +352,8 @@ fn run() Err! {
     fs::write(&file, src).unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap())
         .expect("interpreter Err fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         diagnostics
             .iter()

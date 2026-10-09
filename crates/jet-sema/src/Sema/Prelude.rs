@@ -3,13 +3,41 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
     ErrorConvDef, Expr, Func, ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle, Stmt,
-    TryConvert,
+    Program, TryConvert,
 };
 use jet_foundation::Prelude as CorePrelude;
 use jet_foundation::Prelude::Target;
 use std::collections::{BTreeSet, HashMap};
 
 const INTERNAL_PREFIX: &str = "__jet_prelude_";
+
+/// The original canonical declarations and conversion bodies share one parse.
+/// Registration retains these AST rows; it never fabricates an Err shape.
+pub(crate) fn error_prelude_program() -> Result<&'static Program, &'static [Diagnostic]> {
+    static PARSED: std::sync::OnceLock<Result<Program, Vec<Diagnostic>>> = std::sync::OnceLock::new();
+    match PARSED.get_or_init(|| {
+        const SOURCE: &str = include_str!("../../../jet-codegen/src/Prelude/Errors.jet");
+        let (tokens, mut diagnostics) = crate::Lexer::lex_generated(SOURCE);
+        match crate::Parser::parse_with_source(&tokens, SOURCE) {
+            Ok(mut program) if diagnostics.is_empty() => {
+                for item in &mut program.items {
+                    if let Item::Struct(definition) = item {
+                        definition.compiler_builtin_error = true;
+                    }
+                }
+                Ok(program)
+            }
+            Ok(_) => Err(diagnostics),
+            Err(mut parse_diagnostics) => {
+                diagnostics.append(&mut parse_diagnostics);
+                Err(diagnostics)
+            }
+        }
+    }) {
+        Ok(program) => Ok(program),
+        Err(diagnostics) => Err(diagnostics.as_slice()),
+    }
+}
 
 /// D-FAIL-CONV2=A: open the standard library's own error family onto the default
 /// `Err`. The declarations are ordinary Jet source in `Prelude/Errors.jet`.
@@ -25,10 +53,10 @@ pub(crate) fn inject_exercised_error_conversions(module: &mut LoadedModule) -> V
     if module.no_prelude {
         return Vec::new();
     }
-    let (shipped, diagnostics) = shipped_error_conversions();
-    if shipped.is_empty() {
-        return diagnostics;
-    }
+    let program = match error_prelude_program() {
+        Ok(program) => program,
+        Err(diagnostics) => return diagnostics.to_vec(),
+    };
     // Keyed by the exercised source name. A source-owned Core error arrives
     // under its canonical identity; its conversion is the shipped declaration
     // for its leaf, bound to that identity so sema and codegen name one
@@ -42,7 +70,8 @@ pub(crate) fn inject_exercised_error_conversions(module: &mut LoadedModule) -> V
             let source = source.name();
             let target = target.name();
             let leaf = crate::Sema::Diagnostics::core_error_family_leaf(&source);
-            for conversion in &shipped {
+            for item in &program.items {
+                let Item::ErrorConv(conversion) = item else { continue };
                 if leaf == conversion.from_ty && target == conversion.to_ty {
                     let mut bound = conversion.clone();
                     bound.from_ty = source.clone();
@@ -66,30 +95,9 @@ pub(crate) fn inject_exercised_error_conversions(module: &mut LoadedModule) -> V
         }
         module.items.push(Item::ErrorConv(conversion));
     }
-    diagnostics
+    Vec::new()
 }
 
-fn shipped_error_conversions() -> (Vec<ErrorConvDef>, Vec<Diagnostic>) {
-    const SOURCE: &str = include_str!("../../../jet-codegen/src/Prelude/Errors.jet");
-    let (tokens, mut diagnostics) = crate::Lexer::lex_generated(SOURCE);
-    match crate::Parser::parse(&tokens) {
-        Ok(program) => {
-            let conversions = program
-                .items
-                .into_iter()
-                .filter_map(|item| match item {
-                    Item::ErrorConv(conversion) => Some(conversion),
-                    _ => None,
-                })
-                .collect();
-            (conversions, diagnostics)
-        }
-        Err(mut parse_diagnostics) => {
-            diagnostics.append(&mut parse_diagnostics);
-            (Vec::new(), diagnostics)
-        }
-    }
-}
 
 fn walk_item_exprs(item: &mut Item, visit: &mut impl FnMut(&Expr)) {
     match item {
@@ -221,4 +229,40 @@ fn source_mentions_identifier(source: &str, name: &str) -> bool {
         !before.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
             && !after.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_error_supplier_retains_seven_original_declarations_and_private_default() {
+        let program = error_prelude_program().expect("canonical error source must parse");
+        let declarations: Vec<_> = program.items.iter().filter_map(|item| {
+            if let Item::Struct(definition) = item { Some(definition) } else { None }
+        }).collect();
+        assert_eq!(declarations.len(), 7);
+        assert!(declarations.iter().all(|definition| definition.compiler_builtin_error));
+        assert!(declarations.iter().all(|definition| definition.span.end > definition.span.start));
+        let error = declarations.iter().find(|definition| definition.name == "Err").unwrap();
+        assert_eq!(error.fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(),
+            ["message", "code", "cause", "__jet___memo_error_metadata"]);
+        let metadata = &error.fields[3];
+        assert!(!metadata.is_pub && !metadata.is_package_pub);
+        assert!(metadata.computed.is_none());
+        assert!(matches!(&metadata.ty, crate::AST::Type::Named(name) if name == "__jet_ErrorMetadata"));
+        assert!(metadata.default.is_some());
+        assert!(std::ptr::eq(program, error_prelude_program().unwrap()),
+            "all consumers must retain the same original parsed supplier");
+    }
+
+    #[test]
+    fn ordinary_generated_source_does_not_grant_error_builtin_authority() {
+        let source = "struct Example { value: Int }";
+        let (tokens, diagnostics) = crate::Lexer::lex_generated(source);
+        assert!(diagnostics.is_empty());
+        let program = crate::Parser::parse_with_source(&tokens, source).unwrap();
+        let Item::Struct(definition) = &program.items[0] else { panic!("expected struct") };
+        assert!(!definition.compiler_builtin_error);
+    }
 }

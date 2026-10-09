@@ -169,7 +169,7 @@ pub(super) struct Interp<'a> {
     pub(super) sink: Option<&'a mut DevSink>,
     /// Checked nominal identities and imported struct rows for canonical
     /// comptime fragments. `None` is used outside an active module scope.
-    pub(super) checked_nominals: Option<super::MirBridge::MirFragmentNominalFacts>,
+    pub(super) checked_nominals: Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>>,
     /// D-META-EFFECT1: module alias → Core module path (e.g. `"math"` → `"core.math"`).
     /// Enables the comptime interpreter to evaluate effect-approved Core calls.
     /// Empty for contexts that have no `use` declarations (e.g. module-level consts).

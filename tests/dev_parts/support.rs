@@ -23,13 +23,13 @@ use jet::Interpreter::{dev_iteration, run_jit_once, RunOutcome};
 use jet::JitBackend::JitBackend;
 use jet_jit::CraneliftBackend;
 
-fn emit_native_aot(bundle: &jet::AST::ProgramBundle, ffi: Option<&jet::AST::FfiLink>) -> String {
+fn emit_native_aot(bundle: &jet::Driver::CheckedSourceBundle, ffi: Option<&jet::AST::FfiLink>) -> String {
     let request = jet_foundation::MIR::MirArtifactRequest::new(
         jet_foundation::MIR::MirArtifactTarget::RustAot,
         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
         jet_foundation::MIR::MirArtifactBuildMode::Dev,
     );
-    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(&bundle.bundle, &bundle.checked_nominals, request)
         .expect("checked native artifact lowers through MIR");
     mir.validate()
         .expect("canonical MIR validates in dev support");
@@ -669,14 +669,14 @@ fn build_oracle_binary_from_bundle(
     i: usize,
     stem: &str,
     file: &str,
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
 ) -> Result<std::path::PathBuf, OracleBuildFailure> {
     common::assert_test_environment_is_safe();
     common::assert_test_path_on_disk(dir, "AOT scratch");
-    let ffi = jet::FFI::prepare(bundle).map_err(OracleBuildFailure::FrontEnd)?;
+    let ffi = jet::FFI::prepare(&bundle.bundle).map_err(OracleBuildFailure::FrontEnd)?;
     let rust = emit_native_aot(bundle, ffi.as_ref());
     let clinks =
-        jet::resolve_c_links_for_bundle(bundle, None).map_err(OracleBuildFailure::CLinks)?;
+        jet::resolve_c_links_for_bundle(&bundle.bundle, None).map_err(OracleBuildFailure::CLinks)?;
     build_oracle_binary_from_parts(dir, tag, i, stem, file, rust, ffi, clinks)
 }
 
@@ -793,7 +793,7 @@ fn compiled_binary_output_from_bundle(
     i: usize,
     stem: &str,
     file: &str,
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
 ) -> ProgramOutput {
     let dir = aot_scratch_dir(tag, stem);
     let bin = build_oracle_binary_from_bundle(&dir, tag, i, stem, file, bundle)
@@ -1639,7 +1639,7 @@ fn classify_jit_compile(path: &std::path::Path) -> JitCompileVerdict {
             &file,
             jet::Driver::BuildRunOptions::default(),
         ) {
-            Ok(output) => match output.runtime {
+            Ok(mut output) => match output.take_checked_runtime() {
                 Some(bundle) => classify_jit_bundle(bundle),
                 None => JitCompileVerdict::OutOfUniverse(
                     "build front end returned no runtime bundle".to_string(),
@@ -1683,7 +1683,8 @@ fn classify_jit_compile(path: &std::path::Path) -> JitCompileVerdict {
             first_diagnostic_summary(&diagnostics)
         ));
     }
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
@@ -1694,10 +1695,10 @@ fn classify_jit_compile(path: &std::path::Path) -> JitCompileVerdict {
             first_diagnostic_summary(&errors)
         ));
     }
-    classify_jit_bundle(bundle)
+    classify_jit_bundle(jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals))
 }
 
-fn classify_jit_bundle(bundle: jet::AST::ProgramBundle) -> JitCompileVerdict {
+fn classify_jit_bundle(bundle: jet::Driver::CheckedSourceBundle) -> JitCompileVerdict {
     match common::compile_cranelift_bundle(&bundle, &common::development_policy()) {
         // #2012: one more question about a bundle the lowerer already accepted:
         // will the resident JIT run it? `cranelift_resident_safe_detail` is a
@@ -1814,13 +1815,14 @@ fn print_jit_op_report() {
             Ok(b) => b,
             Err(_) => continue,
         };
-        let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
         if diags
             .iter()
             .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         {
             continue;
         }
+        let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
         let covered =
             common::compile_cranelift_bundle(&bundle, &common::development_policy()).is_ok();
         for tag in common::cranelift_main_ops(&bundle) {
@@ -2428,11 +2430,13 @@ fn run_three_way_battery_parallel(stems: Vec<String>) -> usize {
 
 fn check_job_runner_interpreter(root: &PathBuf, file: &str) {
     let mut bundle = jet::Loader::load_entry(file).expect("job_runner loads");
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "job_runner front end: {errors:?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     for (job, expected_name) in [
         ("greet", "job_runner.greet"),
         ("seed_data", "job_runner.seed_data"),
@@ -2462,16 +2466,16 @@ fn check_job_runner_interpreter(root: &PathBuf, file: &str) {
 /// as this helper does, and as any embedder holding its own bundle would --
 /// skips the driver's own boundary. Without it a 2 MiB libtest worker aborts
 /// the whole binary and reports every other in-flight test as failed.
-fn checked_bundle_from_path(file: &str) -> jet::AST::ProgramBundle {
+fn checked_bundle_from_path(file: &str) -> jet::Driver::CheckedSourceBundle {
     jet::run_compiler_work(|| {
         let mut b = jet::Loader::load_entry(file).expect("bundle should load");
-        let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+        let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut b, jet::Sema::CompileMode::Run);
         let errors: Vec<_> = diags
             .into_iter()
             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
             .collect();
         assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
-        b
+        jet::Driver::CheckedSourceBundle::new(b, facts, nominals)
     })
 }
 
@@ -2741,12 +2745,13 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
                 .join("; ")
         )
     });
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "`{stem}` must type-check: {errors:?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
     assert!(
@@ -2851,12 +2856,13 @@ fn assert_ui_and_web_three_way(file: &str, stem: &str) {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "`{stem}` must type-check");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
     assert!(
@@ -2939,12 +2945,13 @@ fn assert_concurrency_and_game_three_way(file: &str, stem: &str) {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "`{stem}` must type-check");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
     assert!(
@@ -3036,12 +3043,13 @@ fn assert_crypto_auth_vault_three_way(file: &str, stem: &str) {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "`{stem}` must type-check");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
     assert!(
@@ -3119,12 +3127,13 @@ fn assert_network_http_browser_three_way(file: &str, stem: &str) {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "`{stem}` must type-check");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
     assert!(
@@ -3227,12 +3236,13 @@ fn assert_data_pipelines_parsing_three_way(file: &str, stem: &str) {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "`{stem}` must type-check");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
     assert!(
@@ -3401,12 +3411,13 @@ fn assert_io_cli_terminal_time_three_way(file: &str, stem: &str) {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "`{stem}` must type-check");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
     assert!(
@@ -3531,12 +3542,13 @@ fn assert_lowlevel_and_safety_three_way(file: &str, stem: &str) {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "`{stem}` must type-check: {errors:?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
     assert!(
@@ -4227,11 +4239,11 @@ fn classify_corpus_stem(stem: &str, have_rustc: bool) -> CorpusGateRecord {
     let build_entry = fs::read_to_string(&file)
         .ok()
         .is_some_and(|source| jet::Driver::selects_build_entry(&source, None));
-    let mut bundle = if build_entry {
+    let checked_bundle = if build_entry {
         match jet::Driver::compile_bundle_path_build(&file, jet::Driver::BuildRunOptions::default())
         {
-            Ok(output) => match output.runtime {
-                Some(bundle) => bundle,
+            Ok(mut output) => match output.take_checked_runtime() {
+                Some(bundle) => Ok(bundle),
                 None => {
                     return CorpusGateRecord {
                         stem: stem.to_string(),
@@ -4253,7 +4265,7 @@ fn classify_corpus_stem(stem: &str, have_rustc: bool) -> CorpusGateRecord {
             }
         }
     } else {
-        match jet::Loader::load_entry(&file) {
+        let mut bundle = match jet::Loader::load_entry(&file) {
             Ok(b) => b,
             Err(diags) => {
                 let detail = diags
@@ -4266,8 +4278,7 @@ fn classify_corpus_stem(stem: &str, have_rustc: bool) -> CorpusGateRecord {
                     detail,
                 };
             }
-        }
-    };
+        };
     // The run tier's bundle is the one `jet run` builds, not a load+check
     // lookalike. `Interpreter::checked_bundle_with_entry` seeds the single
     // build-fact snapshot before sema, and the AOT oracle below gets it too
@@ -4276,25 +4287,29 @@ fn classify_corpus_stem(stem: &str, have_rustc: bool) -> CorpusGateRecord {
     // only, so `comptime/build_stamp` printed the harness's defaults against the
     // oracle's locked `.jet/lock` stamp and the gate blamed the run tier for a
     // snapshot the gate itself never took (I9: engines marshal one snapshot).
-    let errors: Vec<_> = if build_entry {
-        Vec::new()
-    } else {
-        match jet::Driver::seed_build_facts(
+        jet::Driver::seed_build_facts(
             &mut bundle,
             "dev",
             false,
             &std::collections::BTreeMap::new(),
-        ) {
-            // Seeding answers with errors only, so they are already the run-path
-            // rejection the block below classifies.
-            Err(diags) => diags,
-            Ok(()) => jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-                .into_iter()
+        ).and_then(|()| {
+            let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(
+                &mut bundle,
+                jet::Sema::CompileMode::Run,
+            );
+            let errors: Vec<_> = diagnostics.into_iter()
                 .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-                .collect(),
-        }
+                .collect();
+            if errors.is_empty() {
+                Ok(jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals))
+            } else {
+                Err(errors)
+            }
+        })
     };
-    if !errors.is_empty() {
+    let bundle = match checked_bundle {
+        Ok(bundle) => bundle,
+        Err(errors) => {
         let detail = errors
             .iter()
             .map(|d| format!("{}: {}", d.code, d.what))
@@ -4321,7 +4336,8 @@ fn classify_corpus_stem(stem: &str, have_rustc: bool) -> CorpusGateRecord {
             class: CorpusGateClass::FrontendRejected,
             detail,
         };
-    }
+        }
+    };
 
     // A HOST fact, kept out of every ratcheted section: without rustc there is
     // no oracle for ANY stem, so nothing here can be read as a property of the
@@ -4344,7 +4360,7 @@ fn classify_corpus_stem(stem: &str, have_rustc: bool) -> CorpusGateRecord {
     // "entry returns App" lived as four private copies with no shared
     // predicate, which is why nothing forced the gate to notice when three
     // examples became services.
-    if jet::AST::bundle_serves_until_stopped(&bundle) {
+    if jet::AST::bundle_serves_until_stopped(&bundle.bundle) {
         let aot_dir = aot_scratch_dir("corpus_gate_service", stem);
         assert!(
             try_compiled_binary_build(&aot_dir, "corpus_gate_service", 0, stem, &file).is_some(),
@@ -5146,15 +5162,15 @@ fn cranelift_hot_swap_preserves_live_state_inner() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    fn checked_bundle(src: &str, tag: &str) -> jet::AST::ProgramBundle {
+    fn checked_bundle(src: &str, tag: &str) -> jet::Driver::CheckedSourceBundle {
         let mut b = bundle_of(src, tag);
-        let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+        let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut b, jet::Sema::CompileMode::Run);
         let errors: Vec<_> = diags
             .into_iter()
             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
             .collect();
         assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
-        b
+        jet::Driver::CheckedSourceBundle::new(b, facts, nominals)
     }
 
     let v1 = checked_bundle("fn run() {\n    print(\"v1\")\n}\n", "jit_swap_v1");
@@ -5218,15 +5234,15 @@ fn cranelift_trap_then_hot_swap_continues_inner() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    fn checked_bundle(src: &str, tag: &str) -> jet::AST::ProgramBundle {
+    fn checked_bundle(src: &str, tag: &str) -> jet::Driver::CheckedSourceBundle {
         let mut b = bundle_of(src, tag);
-        let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+        let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut b, jet::Sema::CompileMode::Run);
         let errors: Vec<_> = diags
             .into_iter()
             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
             .collect();
         assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
-        b
+        jet::Driver::CheckedSourceBundle::new(b, facts, nominals)
     }
 
     let panics = checked_bundle(
@@ -5314,15 +5330,15 @@ fn bundle_of(src: &str, tag: &str) -> jet::AST::ProgramBundle {
 const STRUCT_OLD: &str = "struct P {\n    x: Int\n}\nfn f(p: P) -> Int {\n    return p.x\n}\nfn run() {\n    print(f(P{x: 1}))\n}\n";
 
 fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
-    fn load_checked(path: &std::path::Path) -> jet::AST::ProgramBundle {
+    fn load_checked(path: &std::path::Path) -> jet::Driver::CheckedSourceBundle {
         let mut b = jet::Loader::load_entry(path.to_str().unwrap()).expect("bundle should load");
-        let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+        let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut b, jet::Sema::CompileMode::Run);
         let errors: Vec<_> = diags
             .into_iter()
             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
             .collect();
         assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
-        b
+        jet::Driver::CheckedSourceBundle::new(b, facts, nominals)
     }
 
     // Same on-disk path across reloads — matches `jet dev` editing one file

@@ -268,12 +268,13 @@ fn task_program_runs_via_jit() {
     }
     let file = "Examples/features/concurrency/tasks.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("tasks bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "tasks must type-check");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         common::cranelift_resident_safe(&bundle),
         "tasks must be resident-safe: {}",
@@ -734,7 +735,8 @@ fn run() {
 
     let mut bundle =
         jet::Loader::load_entry(file.to_str().unwrap()).expect("loop-value bundle should load");
-    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors = diags
         .into_iter()
         .filter(|diag| matches!(diag.severity, jet::Diagnostics::Severity::Error))
         .collect::<Vec<_>>();
@@ -742,6 +744,7 @@ fn run() {
         errors.is_empty(),
         "loop-value bundle must type-check: {errors:?}"
     );
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         common::cranelift_resident_safe(&bundle),
         "loop values must be resident-safe: {}",
@@ -1865,12 +1868,13 @@ fn scheduler_spawn_runs_via_jit() {
     }
     let file = "Examples/features/concurrency/scheduler_spawn.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "scheduler_spawn must type-check");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         common::cranelift_resident_safe(&bundle),
         "scheduler_spawn must be resident-safe: {}",
@@ -3446,7 +3450,7 @@ fn run() {
     fs::write(&file, src).unwrap();
     let shown = file.to_string_lossy().to_string();
     let bundle = checked_bundle_from_path(&shown);
-    let run_func = bundle.modules[bundle.entry]
+    let run_func = bundle.bundle.modules[bundle.bundle.entry]
         .items
         .iter()
         .find_map(|item| match item {
@@ -5449,7 +5453,8 @@ fn resident_jit_safety_detail_smoke() {
     ] {
         let file = format!("Examples/features/{stem}.jet");
         let mut bundle = jet::Loader::load_entry(&file).expect("load");
-        jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        let (_, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+        let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
         let detail = common::cranelift_resident_safe_detail(&bundle);
         let stmts = common::cranelift_main_stmts(&bundle);
         let funcs = common::cranelift_func_names(&bundle);

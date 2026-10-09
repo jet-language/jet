@@ -10,13 +10,13 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
+fn emit_native_aot(bundle: &jet::Driver::CheckedSourceBundle) -> String {
     let request = jet_foundation::MIR::MirArtifactRequest::new(
         jet_foundation::MIR::MirArtifactTarget::RustAot,
         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
         jet_foundation::MIR::MirArtifactBuildMode::Dev,
     );
-    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(&bundle.bundle, &bundle.checked_nominals, request)
         .expect("checked native artifact lowers through MIR");
     mir.validate()
         .expect("canonical MIR validates in allocator test");
@@ -628,11 +628,13 @@ fn run() {
     let path = root.join("main.jet");
     std::fs::write(&path, src).unwrap();
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
 
     if jet_jit::cranelift_host_supported() {
         let policy = common::development_policy();
@@ -752,11 +754,13 @@ fn program_allocator_fact_selects_counting_wrapper_for_aot() {
             cap: Some(jet::TargetMachine::ByteSize { bytes: 2048 })
         }
     ));
-    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors = diagnostics
         .into_iter()
         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
         .collect::<Vec<_>>();
     assert!(errors.is_empty(), "{errors:?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let rust = emit_native_aot(&bundle);
     assert!(rust.contains(
         "static __JET_PROGRAM_ALLOCATOR: JetProgramAllocator = JetProgramAllocator::counting(2048)"
@@ -771,11 +775,13 @@ fn missing_program_allocator_keeps_hidden_system_heap() {
         bundle.program_allocator,
         jet::TargetMachine::AllocatorPolicy::HostedDefault
     );
-    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors = diagnostics
         .into_iter()
         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
         .collect::<Vec<_>>();
     assert!(errors.is_empty(), "{errors:?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let rust = emit_native_aot(&bundle);
     assert!(!rust.contains("__JET_PROGRAM_ALLOCATOR"));
 }

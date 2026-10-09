@@ -50,7 +50,8 @@ fn run() {
     .unwrap();
 
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics.is_empty(),
         "#Root fixture diagnostics: {diagnostics:#?}"
@@ -101,7 +102,8 @@ fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {
     let shown = file.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("named_args example should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics
             .iter()
@@ -308,7 +310,8 @@ fn bounded_workers_example_has_total_tir() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("Examples/features/concurrency/bounded_workers.jet");
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     assert!(
         common::cranelift_lowers(&bundle),
@@ -350,7 +353,8 @@ fn run() {
     let shown = file.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("event fixture loads");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics.is_empty(),
         "event fixture must type-check: {diagnostics:#?}"
@@ -427,7 +431,8 @@ fn run() {}
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap())
         .expect("HTTP lifetime fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics.is_empty(),
         "HTTP lifetime fixture diagnostics: {diagnostics:#?}"
@@ -1029,7 +1034,8 @@ fn run() {
     .unwrap();
 
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).expect("prompt fixture loads");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         !diags
             .iter()
@@ -1401,7 +1407,8 @@ fn iter_adapter_latches_emit_dominating_clif() {
     let shown = file.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("adapter fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics
             .iter()
@@ -1533,7 +1540,8 @@ fn optional_builtins_agree_on_one_option_carrier_across_tiers() {
     let shown = file.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics
             .iter()
@@ -1638,7 +1646,8 @@ fn map_has_key_runs_resident_for_supported_key_shapes() {
     let shown = file.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("map has_key fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics.is_empty(),
         "fixture must type-check: {diagnostics:#?}"
@@ -1720,7 +1729,8 @@ fn string_is_empty_runs_resident() {
     let shown = file.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("string is_empty fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics.is_empty(),
         "fixture must type-check: {diagnostics:#?}"
@@ -1800,7 +1810,8 @@ fn run() {
     let shown = file.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("float predicate fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics.is_empty(),
         "float predicate fixture must type-check: {diagnostics:#?}"
@@ -1913,7 +1924,8 @@ fn run() {
     let shown = file.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("DataTree extend fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics.is_empty(),
         "DataTree extend fixture must type-check: {diagnostics:#?}"
@@ -1995,7 +2007,8 @@ fn run() {
     let shown = file.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("DataTree fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics.is_empty(),
         "DataTree fixture must type-check: {diagnostics:#?}"
@@ -2071,7 +2084,8 @@ fn run() {
     .unwrap();
     let shown = file.to_string_lossy().into_owned();
     let mut bundle = jet::Loader::load_entry(&shown).expect("flatten fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(diagnostics.is_empty(), "flatten fixture diagnostics: {diagnostics:#?}");
     assert!(
         common::cranelift_resident_safe(&bundle),
@@ -2131,7 +2145,8 @@ fn result_err_try_sort_by_runs_resident_and_matches_interpreter() {
 
     let mut bundle =
         jet::Loader::load_entry(&shown).expect("Result<Int, Err> fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics.is_empty(),
         "Result<Int, Err> fixture must type-check: {diagnostics:#?}"
@@ -2211,7 +2226,8 @@ fn run() {
     let shown = file.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("DataTree sort fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics.is_empty(),
         "DataTree sort fixture must type-check: {diagnostics:#?}"
@@ -2269,7 +2285,8 @@ fn run() {
     let shown = file.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("try payload fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics.is_empty(),
         "try payload fixture must type-check: {diagnostics:#?}"
@@ -2332,7 +2349,8 @@ fn run() {
     let shown = file.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("HTTP response fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics.is_empty(),
         "HTTP response fixture must type-check: {diagnostics:#?}"
@@ -2428,7 +2446,8 @@ fn tower_data_tree_helpers_select_resident_tier() {
     let path = dir.join("run.jet");
     let shown = path.to_string_lossy().into_owned();
     let mut bundle = jet::Loader::load_entry(&shown).expect("Tower run should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics
             .iter()
@@ -2496,7 +2515,8 @@ fn lowering_failure_is_not_resident_covered() {
     let file = dir.join("lib_only.jet");
     fs::write(&file, "fn helper() { print(1) }\n").unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let _ = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+    let (_, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Check);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         !common::cranelift_lowers(&bundle),
         "a file with no run must not lower a JIT program"
@@ -2538,7 +2558,8 @@ fn jit_list_mutations_preserve_dense_arena_values() {
     let shown = file.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("dense list fixture loads");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics
             .iter()
@@ -2585,7 +2606,8 @@ fn nbody_entry_runs_on_resident_jit_without_deopt() {
     let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("Tools/gauntlet/entries/nbody/jet/run.jet");
     let shown = file.to_string_lossy().into_owned();
     let mut bundle = jet::Loader::load_entry(&shown).expect("nbody entry loads");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics
             .iter()
@@ -2706,7 +2728,8 @@ fn run() {
     .unwrap();
     let shown = file.to_string_lossy().into_owned();
     let mut bundle = jet::Loader::load_entry(&shown).expect("CSV group fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics.is_empty(),
         "CSV group fixture must type-check: {diagnostics:#?}"
@@ -2776,7 +2799,8 @@ fn assert_typed_fast_path_fixture_with_manifest(
 
     let mut bundle = jet::Loader::load_entry(&shown)
         .unwrap_or_else(|error| panic!("{name} fixture should load: {error:?}"));
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics
             .iter()
@@ -3030,7 +3054,8 @@ fn run() {
     let shown = file.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("structured list fixture loads");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics
             .iter()
@@ -3128,7 +3153,8 @@ fn run() {}
     .unwrap();
     let shown = file.to_string_lossy().into_owned();
     let mut bundle = jet::Loader::load_entry(&shown).expect("nested helper fixture loads");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, checked_effect_facts, checked_nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, checked_effect_facts, checked_nominals);
     assert!(
         diagnostics
             .iter()

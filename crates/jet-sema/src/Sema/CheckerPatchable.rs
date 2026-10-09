@@ -51,6 +51,7 @@ pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diag
         let (base_methods, patch_methods) = generated_patchable_methods(s);
         to_add.push(Item::Struct(StructDef {
             span: s.span,
+            compiler_builtin_error: false,
             is_pub: s.is_pub,
             is_package_pub: s.is_package_pub,
             name: patch_name.clone(),

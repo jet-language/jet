@@ -78,13 +78,15 @@ fn assert_jit_compiles(name: &str, source: &str) {
         .spawn(move || {
             let (dir, path) = taskgroup_project("jit", &name, &source);
             let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-            let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+            let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+            let errors = diagnostics
                 .into_iter()
                 .filter(|diagnostic| {
                     matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)
                 })
                 .collect::<Vec<_>>();
             assert!(errors.is_empty(), "{errors:?}");
+            let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
             common::compile_cranelift_bundle(&bundle, &common::development_policy())
                 .expect("Group source must compile for resident JIT");
             let _ = fs::remove_dir_all(dir);
@@ -428,7 +430,8 @@ fn assert_group_close_success(name: &str, source: &str, expected_stdout: &str) {
         .spawn(move || {
             let (dir, jit_path) = taskgroup_project("resident", &probe_name, &probe_source);
             let mut bundle = jet::Loader::load_entry(jit_path.to_str().unwrap()).unwrap();
-            let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+            let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+            let errors = diagnostics
                 .into_iter()
                 .filter(|diagnostic| {
                     matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)
@@ -438,6 +441,7 @@ fn assert_group_close_success(name: &str, source: &str, expected_stdout: &str) {
                 errors.is_empty(),
                 "resident probe rejected {probe_name}: {errors:?}"
             );
+            let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
             let detail = common::cranelift_resident_safe_detail(&bundle);
             assert!(
                 common::cranelift_resident_safe(&bundle),

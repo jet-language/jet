@@ -91,7 +91,8 @@ fn fixed_uninit_index_fill_is_resident_jit_safe() {
     let entry = root.join("main.jet");
     fs::write(&entry, SOURCE).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let errors = diagnostics
         .iter()
         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
@@ -118,7 +119,8 @@ fn partial_uninit_fixed_backing_exits_through_resident_jit() {
     fs::write(&entry, PARTIAL_EXIT_SOURCE).unwrap();
     let shown = entry.to_string_lossy().into_owned();
     let mut bundle = jet::Loader::load_entry(&shown).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let errors = diagnostics
         .iter()
         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)

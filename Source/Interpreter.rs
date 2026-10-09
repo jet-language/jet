@@ -311,10 +311,12 @@ fn prelude_schedule(schedule: crate::AST::EverySchedule) -> jet_jit::Job::JetJob
 /// Cranelift MIR artifact `jet run` executes, so both tiers run one program.
 pub fn lower_for_dev_aot(
     bundle: &ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     profile: &str,
 ) -> (jet_foundation::MIR::MirProgram, jet_foundation::MIR::MirArtifactId) {
     crate::lower_checked_semantic_mir_program_for(
         bundle,
+        checked_nominals,
         artifact_request_for(bundle, jet_foundation::MIR::MirArtifactTarget::Cranelift, profile),
     )
 }
@@ -497,7 +499,7 @@ fn checked_snapshot_with_application_authority_and_entry_with_overlays(
                     }
                 }
                 crate::RunCache::note_check();
-                let (diags, effect_facts) = crate::Sema::check_bundle_gates_with_effect_facts(
+                let (diags, effect_facts, checked_nominals) = crate::Sema::check_bundle_gates_with_effect_facts(
                     &mut bundle,
                     crate::Sema::CompileMode::Run,
                     gates,
@@ -542,13 +544,14 @@ fn checked_snapshot_with_application_authority_and_entry_with_overlays(
                 let requested_artifact =
                     artifact_request_for(&bundle, artifact_target, profile);
                 let (mir, artifact) =
-                    crate::lower_checked_semantic_mir_program_for(&bundle, requested_artifact);
+                    crate::lower_checked_semantic_mir_program_for(&bundle, &checked_nominals, requested_artifact);
                 let (mir, artifact) = if artifact_target
                     == jet_foundation::MIR::MirArtifactTarget::Cranelift
                     && !jet_jit::resident_jit_safe_program(&mir)
                 {
                     crate::lower_checked_semantic_mir_program_for(
                         &bundle,
+                        &checked_nominals,
                         artifact_request_for(
                             &bundle,
                             jet_foundation::MIR::MirArtifactTarget::Interpreter,
@@ -562,6 +565,7 @@ fn checked_snapshot_with_application_authority_and_entry_with_overlays(
                     snapshot: crate::CheckedMirSnapshot {
                         bundle,
                         facts: effect_facts,
+                        checked_nominals,
                         mir,
                         artifact,
                     },
@@ -1948,8 +1952,8 @@ mod tests {
                 ] {
                     let mut bundle =
                         crate::Loader::load_entry(file).unwrap_or_else(|_| panic!("load {file}"));
-                    let diags =
-                        crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
+                    let (diags, _, checked_nominals) =
+                        crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Run);
                     assert!(
                         diags
                             .iter()
@@ -1958,6 +1962,7 @@ mod tests {
                     );
                     let (mir, _artifact) = crate::lower_checked_semantic_mir_program_for(
                         &bundle,
+                        &checked_nominals,
                         artifact_request_for(
                             &bundle,
                             jet_foundation::MIR::MirArtifactTarget::Cranelift,
@@ -1997,7 +2002,7 @@ fn run() {
         let shown = file.to_string_lossy().into_owned();
 
         let mut direct = crate::Loader::load_entry(&shown).expect("direct bundle should load");
-        let direct_diags = crate::Sema::check_bundle(&mut direct, crate::Sema::CompileMode::Run);
+        let (direct_diags, _, checked_nominals) = crate::Sema::check_bundle_with_effect_facts(&mut direct, crate::Sema::CompileMode::Run);
         assert!(
             direct_diags
                 .iter()
@@ -2019,6 +2024,7 @@ fn run() {
         .snapshot;
         let (direct_mir, direct_artifact) = crate::lower_checked_semantic_mir_program_for(
             &direct,
+            &checked_nominals,
             artifact_request_for(
                 &direct,
                 jet_foundation::MIR::MirArtifactTarget::Cranelift,

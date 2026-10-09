@@ -38,6 +38,7 @@ use jet_foundation::MIR::{
 pub(crate) struct CheckProjection {
     pub(crate) bundle: jet::AST::ProgramBundle,
     pub(crate) facts: jet::Sema::SemIndexEffectFacts,
+    pub(crate) checked_nominals: std::sync::Arc<[std::sync::Arc<jet::AST::MirFragmentNominalFacts>]>,
     index: std::sync::OnceLock<jet_semindex::SemIndex>,
     package_facts: Option<jet_semindex::PackageFacts>,
     workspace_overlay_policy: Option<jet_pkg_model::Overlay::OverlayPolicy>,
@@ -139,7 +140,7 @@ pub(crate) fn check_diagnostics(path: &Path) -> Result<DiagnosticProjection, Str
     }
 
     let entry = path.display().to_string();
-    let (mut diagnostics, bundle, _facts) =
+    let (mut diagnostics, bundle, _facts, _) =
         jet::Driver::check_file_with_effect_facts_profile(&entry, None, false, "dev");
     let mut complete = bundle.is_some();
     if let Err(error) = jet_semindex::package_facts_for_entry(path) {
@@ -303,12 +304,13 @@ fn check_projection_with_options_and_preflight(
     } else {
         None
     };
-    let (mut diagnostics, bundle, facts, front_end) = if let Some(output) = project_build {
+    let (mut diagnostics, bundle, facts, checked_nominals, front_end) = if let Some(output) = project_build {
         programmable_build = "checked";
         let jet::Driver::BuildCompileOutput {
             compile,
             runtime,
             runtime_effect_facts,
+            runtime_checked_nominals,
             ..
         } = output;
         let bundle = runtime.ok_or_else(|| {
@@ -328,14 +330,18 @@ fn check_projection_with_options_and_preflight(
                 None,
             )]
         })?;
+        let checked_nominals = runtime_checked_nominals.ok_or_else(|| {
+            vec![Diagnostic::from_row("E2391", &[("detail", "project check returned no original checked declarations")], None)]
+        })?;
         (
             compile.lints,
             Some(bundle),
             facts,
+            checked_nominals,
             "Driver::check_project_build_for_tier",
         )
     } else if scope == CheckScope::Project && !package_is_library_only(path) {
-        let (diagnostics, bundle, facts) =
+        let (diagnostics, bundle, facts, checked_nominals) =
             jet::Driver::check_file_with_effect_facts_for_run_and_entry(
                 &entry,
                 profile,
@@ -346,10 +352,11 @@ fn check_projection_with_options_and_preflight(
             diagnostics,
             bundle,
             facts,
+            checked_nominals,
             "Driver::check_file_with_effect_facts_for_run_and_entry",
         )
     } else if let Some(output) = output {
-        let (diagnostics, bundle, facts) = jet::Driver::check_file_with_effect_facts_for_output(
+        let (diagnostics, bundle, facts, checked_nominals) = jet::Driver::check_file_with_effect_facts_for_output(
             &entry,
             output,
             profile,
@@ -359,28 +366,31 @@ fn check_projection_with_options_and_preflight(
             diagnostics,
             bundle,
             facts,
+            checked_nominals,
             "Driver::check_file_with_effect_facts_for_output",
         )
     } else if run_mode {
-        let (diagnostics, bundle, facts) =
+        let (diagnostics, bundle, facts, checked_nominals) =
             jet::Driver::check_file_with_effect_facts_for_run(&entry, profile, setting_overrides);
         (
             diagnostics,
             bundle,
             facts,
+            checked_nominals,
             "Driver::check_file_with_effect_facts_for_run",
         )
     } else if setting_overrides.is_empty() {
-        let (diagnostics, bundle, facts) =
+        let (diagnostics, bundle, facts, checked_nominals) =
             jet::Driver::check_file_with_effect_facts_profile(&entry, None, false, profile);
         (
             diagnostics,
             bundle,
             facts,
+            checked_nominals,
             "Driver::check_file_with_effect_facts_profile",
         )
     } else {
-        let (diagnostics, bundle, facts) =
+        let (diagnostics, bundle, facts, checked_nominals) =
             jet::Driver::check_file_with_effect_facts_profile_and_settings(
                 &entry,
                 None,
@@ -392,6 +402,7 @@ fn check_projection_with_options_and_preflight(
             diagnostics,
             bundle,
             facts,
+            checked_nominals,
             "Driver::check_file_with_effect_facts_profile_and_settings",
         )
     };
@@ -414,6 +425,7 @@ fn check_projection_with_options_and_preflight(
         CheckScope::Project => project_proof_rows(
             &bundle,
             &facts,
+            &checked_nominals,
             package_facts.as_ref(),
             entry_fn,
             target,
@@ -442,6 +454,7 @@ fn check_projection_with_options_and_preflight(
     Ok(CheckProjection {
         bundle,
         facts,
+        checked_nominals,
         index: std::sync::OnceLock::new(),
         package_facts,
         workspace_overlay_policy,
@@ -725,6 +738,7 @@ impl ProjectBundleProof {
     fn from_bundle(
         bundle: &jet::AST::ProgramBundle,
         _facts: &jet::Sema::SemIndexEffectFacts,
+        checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
         target: Option<&str>,
         profile: &str,
         library: bool,
@@ -797,6 +811,7 @@ impl ProjectBundleProof {
         };
         let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
             bundle,
+            checked_nominals,
             jet_foundation::MIR::MirArtifactRequest::new(
                 artifact_target,
                 artifact_kind,
@@ -1060,6 +1075,7 @@ fn failed_output_rows(
 fn project_proof_rows(
     bundle: &jet::AST::ProgramBundle,
     facts: &jet::Sema::SemIndexEffectFacts,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     package_facts: Option<&jet::Package::PackageFacts>,
     entry_fn: Option<&str>,
     target: Option<&str>,
@@ -1086,7 +1102,7 @@ fn project_proof_rows(
         let checked_bundle_storage = declared_output.then(|| {
             spec.path.as_deref().and_then(|path| {
                 let path = path.to_string_lossy().into_owned();
-                let (check_diagnostics, checked_bundle, checked_facts) =
+                let (check_diagnostics, checked_bundle, checked_facts, checked_nominals) =
                     jet::Driver::check_file_with_effect_facts_for_output(
                         &path,
                         &spec.address,
@@ -1094,19 +1110,19 @@ fn project_proof_rows(
                         setting_overrides,
                     );
                 diagnostics.extend(check_diagnostics);
-                checked_bundle.map(|bundle| (bundle, checked_facts))
+                checked_bundle.map(|bundle| (bundle, checked_facts, checked_nominals))
             })
         });
         let checked = if declared_output {
             checked_bundle_storage
                 .as_ref()
                 .and_then(Option::as_ref)
-                .map(|(bundle, facts)| (bundle, facts))
+                .map(|(bundle, facts, nominals)| (bundle, facts, nominals.as_ref()))
         } else {
-            Some((bundle, facts))
+            Some((bundle, facts, checked_nominals))
         };
 
-        let Some((checked_bundle, checked_facts)) = checked else {
+        let Some((checked_bundle, checked_facts, checked_nominals)) = checked else {
             let reason = if spec.path.is_some() {
                 "the output entry check returned no bundle"
             } else {
@@ -1127,6 +1143,7 @@ fn project_proof_rows(
         let shared = ProjectBundleProof::from_bundle(
             checked_bundle,
             checked_facts,
+            checked_nominals,
             target,
             profile,
             library,
@@ -3307,6 +3324,7 @@ fn run_accel(
     };
     let (mir, _) = jet::lower_checked_semantic_mir_program_for(
         &projection.bundle,
+        &projection.checked_nominals,
         jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
@@ -3745,6 +3763,7 @@ fn run_decisions(
     });
     let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
         &projection.bundle,
+        &projection.checked_nominals,
         jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,

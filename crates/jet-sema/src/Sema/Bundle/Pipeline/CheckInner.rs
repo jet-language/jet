@@ -8,13 +8,18 @@ pub(super) fn check_bundle_opts_for_output_inner(
     explicit_output: Option<&str>,
     incremental: Option<&mut IncrementalSemaCache>,
     allow_compiler_api: bool,
-) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
+) -> (
+    Vec<Diagnostic>,
+    super::super::Effects::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
+) {
     guard_fact_registry_law();
     let foreign_diags = validate_foreign_imports(bundle);
     if !foreign_diags.is_empty() {
         return (
             foreign_diags,
             super::super::Effects::SemIndexEffectFacts::default(),
+            Default::default(),
         );
     }
     let mut diags = Vec::new();
@@ -188,6 +193,9 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 ),
                 module_alias: m.alias.clone(),
                 items: m.items.clone(),
+                checked_nominals: None,
+                compiler_builtin_error_owner: None,
+                compiler_builtin_error_program: None,
                 build_facts: bundle.build_facts.clone(),
                 allow_compiler_api: allow_compiler_api && module_idx == bundle.entry,
                 exact_int_reachable: Default::default(),
@@ -222,6 +230,37 @@ pub(super) fn check_bundle_opts_for_output_inner(
             }
         })
         .collect();
+    // Register the same original Prelude declarations into every consumer
+    // registry, but retain one actual declaration/codegen owner.
+    match super::super::Prelude::error_prelude_program() {
+        Ok(program) if !states.is_empty() => {
+            let mut retained_owners = bundle.modules.iter().enumerate().filter_map(|(index, module)| {
+                module.items.iter().any(|item| matches!(item,
+                    Item::Struct(definition) if definition.compiler_builtin_error)).then_some(index)
+            });
+            let retained_owner = retained_owners.next();
+            assert!(retained_owners.next().is_none(), "canonical Prelude errors must have one owner");
+            let owner = retained_owner.unwrap_or(bundle.entry);
+            for state in &mut states {
+                state.compiler_builtin_error_owner = Some(owner);
+                for item in &program.items {
+                    if let Item::Struct(definition) = item {
+                        super::super::Registration::register_builtin_error_struct(
+                            definition,
+                            &mut state.registry,
+                            &mut diags,
+                            &jet_foundation::Layout::TargetLayout::from_build_facts(&state.build_facts),
+                        );
+                    }
+                }
+            }
+            if retained_owner.is_none() {
+                states[owner].compiler_builtin_error_program = Some(program);
+            }
+        }
+        Ok(_) => {}
+        Err(errors) => diags.extend_from_slice(errors),
+    }
     // Early comptime folds and every module checker see the same bundle-wide
     // state rows. Graphs are attached before top-level `Type.reflect()` folds,
     // so no consumer needs a source-side typestate table.
@@ -719,6 +758,9 @@ pub(super) fn check_bundle_opts_for_output_inner(
             match item {
                 Item::Func(f) => register_func_item(f, st, &mut diags, !module.no_prelude),
                 Item::Struct(s) => {
+                    if s.compiler_builtin_error {
+                        continue;
+                    }
                     register_struct(
                         s,
                         &mut st.registry,
@@ -2299,6 +2341,18 @@ pub(super) fn check_bundle_opts_for_output_inner(
     }
 
     resolve_inline_module_imports(bundle, &mut states, &mut name_ledger, &mut diags);
+    // All user registration is complete. Publish the original supplier AST
+    // once to the checked bundle; body/default checking now sees its actual
+    // owner while reserved-name checks remain exclusive to user declarations.
+    for (owner, state) in states.iter_mut().enumerate() {
+        if let Some(program) = state.compiler_builtin_error_program.take() {
+            bundle.modules[owner].items.extend(
+                program.items.iter()
+                    .filter(|item| matches!(item, Item::Struct(_)))
+                    .cloned(),
+            );
+        }
+    }
 
     // D-STATE-TERMINAL1: freeze the checked graph snapshot before body
     // reflection and every downstream semantic consumer read it. The graph is

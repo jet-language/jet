@@ -157,7 +157,7 @@ fn parser_accepts_one_keyword_task_family() {
 fn checked_task_bundle_for(
     name: &str,
     source: &str,
-) -> (jet::AST::ProgramBundle, std::path::PathBuf) {
+) -> (jet::Driver::CheckedSourceBundle, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!(
         "jet_task_control_frontend_{name}_{}",
         std::process::id()
@@ -167,16 +167,16 @@ fn checked_task_bundle_for(
     fs::write(&path, source).unwrap();
     let shown = path.to_string_lossy().into_owned();
     let mut bundle = jet::Loader::load_entry(&shown).expect("task source must load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors = diagnostics
         .iter()
         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect::<Vec<_>>();
     assert!(errors.is_empty(), "sema diagnostics: {errors:?}");
-    (bundle, dir)
+    (jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals), dir)
 }
 
-fn checked_task_bundle(name: &str) -> (jet::AST::ProgramBundle, std::path::PathBuf) {
+fn checked_task_bundle(name: &str) -> (jet::Driver::CheckedSourceBundle, std::path::PathBuf) {
     checked_task_bundle_for(name, SOURCE)
 }
 
@@ -295,11 +295,11 @@ fn run_forced_interpreter(name: &str, source: &str) -> String {
 fn sema_resolves_task_failure_rail_and_core_reachability() {
     let (bundle, dir) = checked_task_bundle("sema");
     assert!(
-        bundle.used_core.contains("core.concurrency::task"),
+        bundle.bundle.used_core.contains("core.concurrency::task"),
         "canonical task syntax must reach the shared Prelude: {:?}",
-        bundle.used_core
+        bundle.bundle.used_core
     );
-    let run = bundle.modules[bundle.entry]
+    let run = bundle.bundle.modules[bundle.bundle.entry]
         .items
         .iter()
         .find_map(|item| match item {
@@ -328,7 +328,7 @@ fn sema_resolves_direct_nested_task_control_bindings() {
         .stack_size(8 * 1024 * 1024)
         .spawn(|| {
             let (bundle, dir) = checked_task_bundle_for("nested", NESTED_SOURCE);
-            assert!(bundle.used_core.contains("core.concurrency::task"));
+            assert!(bundle.bundle.used_core.contains("core.concurrency::task"));
             assert!(
                 common::cranelift_resident_safe(&bundle),
                 "nested task source must stay resident-JIT safe: {}",

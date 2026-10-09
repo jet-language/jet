@@ -30,7 +30,8 @@ fn answers() -> &'static common::ExampleStdin {
 /// reason.
 fn assert_resident_tier_compiles_run() {
     let mut bundle = jet::Loader::load_entry(EXAMPLE).expect("terminal_parity loads");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         !diags
             .iter()

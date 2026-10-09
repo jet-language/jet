@@ -31,7 +31,9 @@ pub fn check_document_with_bundle(
     jet_semindex::SemIndexEffectFacts,
 ) {
     let abs = canonical_path(path);
-    crate::Driver::check_file_with_effect_facts(path, Some((&abs, text)), true)
+    let (diagnostics, bundle, facts, _) =
+        crate::Driver::check_file_with_effect_facts(path, Some((&abs, text)), true);
+    (diagnostics, bundle, facts)
 }
 
 /// Apply a single teaching edit to source text (for scripted LSP tests and the

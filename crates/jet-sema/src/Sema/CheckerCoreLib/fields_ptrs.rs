@@ -24,15 +24,6 @@ impl<'a> Checker<'a> {
             self.record_import_alias_reference(alias, alias_span);
             return Some(json_ty());
         }
-        if module == "core.encoding"
-            && matches!(alias, "DataEvent" | "EncodingErrorKind" | "EncodingFormat")
-            && self
-                .resolve_enum_variants_cloned(alias)
-                .is_some_and(|variants| variants.contains_key(name))
-        {
-            self.record_import_alias_reference(alias, alias_span);
-            return Some(Type::Named(alias.to_string()));
-        }
         // Canonical Core enum imports (`use core.compute.[ComputeError]`,
         // etc.) keep the imported item alongside its module alias. Resolve
         // dotted variants through the generated leaf-kind/variant tables
@@ -44,11 +35,22 @@ impl<'a> Checker<'a> {
             );
             if is_core_enum
                 && self
-                    .resolve_enum_variants_cloned(&item)
+                    .resolve_enum_variants_cloned(alias)
                     .is_some_and(|variants| variants.contains_key(name))
             {
                 self.record_import_alias_reference(alias, alias_span);
-                return Some(Type::Named(item));
+                return Some(self.check_enum_lit(alias, name, &mut [], span, Some(span)));
+            }
+        }
+
+        if matches!(
+            jet_foundation::CoreModuleExports::core_leaf_kind(module, name),
+            Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
+        ) {
+            let requested = format!("{alias}.{name}");
+            if let Some(identity) = self.import_qualified_nominal(&requested) {
+                self.record_import_alias_reference(alias, alias_span);
+                return Some(Type::Named(identity));
             }
         }
 

@@ -389,8 +389,7 @@ fn semindex_projects_arithmetic_policy_and_exact_scope() {
     assert!(json.contains("\"arithmetic\":[{"));
     assert!(json.contains("\"policy\":\"Wrapping\""));
 
-    let (diagnostics, bundle, facts) =
-        jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+    let (diagnostics, bundle, facts, _) = jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let db = build_symbol_db(&bundle.expect("checked bundle"), &facts);
     let hover = db
@@ -464,8 +463,7 @@ impl Door {
 fn run() {}
 "#,
     );
-    let (diagnostics, bundle, facts) =
-        jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+    let (diagnostics, bundle, facts, _) = jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let bundle = bundle.expect("checked bundle");
     let db = build_symbol_db(&bundle, &facts);

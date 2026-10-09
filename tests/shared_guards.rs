@@ -260,11 +260,13 @@ fn assert_native_and_default(source: &str, expected: &str, tag: &str) {
 
     let (_, default_path) = fixture(&format!("{tag}_default"), source);
     let mut bundle = jet::Loader::load_entry(default_path.to_str().unwrap()).unwrap();
-    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors = diagnostics
         .into_iter()
         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect::<Vec<_>>();
     assert!(errors.is_empty(), "{errors:?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
 
     let policy = common::development_policy();
     let mut backend = jet_jit::CraneliftBackend::new();

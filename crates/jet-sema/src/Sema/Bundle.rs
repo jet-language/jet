@@ -1782,6 +1782,13 @@ fn populate_name_ledger(
 
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         let state = &states[module_idx];
+        if let Some(program) = state.compiler_builtin_error_program {
+            for item in &program.items {
+                if matches!(item, Item::Struct(_)) {
+                    declare_item_names(ledger, module_idx, &module.alias, item);
+                }
+            }
+        }
         for item in &module.items {
             declare_item_names(ledger, module_idx, &module.alias, item);
             if let Item::CodeModule(instance) = item {
@@ -2019,7 +2026,11 @@ pub fn check_bundle_for_output_opts_with_effect_facts(
     output: &str,
     no_os: bool,
     gates: crate::Policy::GateSet,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (
+    Vec<Diagnostic>,
+    super::Effects::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
+) {
     pipeline_check_bundle_opts_for_output(bundle, mode, no_os, gates, Some(output), None)
 }
 
@@ -2027,7 +2038,11 @@ pub fn check_bundle_for_output_opts_with_effect_facts(
 pub fn check_bundle_with_effect_facts(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (
+    Vec<Diagnostic>,
+    super::Effects::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
+) {
     pipeline_check_bundle_opts_for_output(
         bundle,
         mode,
@@ -2046,7 +2061,11 @@ pub fn check_bundle_with_effect_facts(
 pub fn check_bundle_with_effect_facts_for_build(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (
+    Vec<Diagnostic>,
+    super::Effects::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
+) {
     pipeline_check_bundle_opts_for_output_with_context(
         bundle,
         mode,
@@ -2138,7 +2157,11 @@ pub fn check_bundle_with_effect_facts_incremental(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
     cache: &mut IncrementalSemaCache,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (
+    Vec<Diagnostic>,
+    super::Effects::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
+) {
     pipeline_check_bundle_opts_for_output(
         bundle,
         mode,
@@ -2166,7 +2189,11 @@ pub fn check_bundle_no_os(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<
 pub fn check_bundle_no_os_with_effect_facts(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (
+    Vec<Diagnostic>,
+    super::Effects::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
+) {
     pipeline_check_bundle_opts_for_output(
         bundle,
         mode,
@@ -2191,7 +2218,11 @@ pub fn check_bundle_gates_with_effect_facts(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
     gates: crate::Policy::GateSet,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (
+    Vec<Diagnostic>,
+    super::Effects::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
+) {
     pipeline_check_bundle_opts_for_output(bundle, mode, false, gates, None, None)
 }
 
@@ -2392,7 +2423,7 @@ mod structure_tests {
 
         let mut cache = IncrementalSemaCache::new();
         let mut first = incremental_bundle(before);
-        let (first_diags, _) = check_bundle_with_effect_facts_incremental(
+        let (first_diags, _, _) = check_bundle_with_effect_facts_incremental(
             &mut first,
             CompileMode::Check,
             &mut cache,
@@ -2407,7 +2438,7 @@ mod structure_tests {
         cache.clear_measurement();
 
         let mut second = incremental_bundle(after);
-        let (second_diags, _) = check_bundle_with_effect_facts_incremental(
+        let (second_diags, _, _) = check_bundle_with_effect_facts_incremental(
             &mut second,
             CompileMode::Check,
             &mut cache,
@@ -2566,7 +2597,7 @@ mod structure_tests {
     fn pending_diagnostics_have_exact_retained_byte_cost() {
         let mut bundle = incremental_bundle("fn run() {}\n");
         let mut cache = IncrementalSemaCache::new();
-        let (diagnostics, _) =
+        let (diagnostics, _, _) =
             check_bundle_with_effect_facts_incremental(&mut bundle, CompileMode::Check, &mut cache);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(cache.functions.len(), 1);

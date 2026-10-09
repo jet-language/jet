@@ -116,7 +116,8 @@ fn assert_fixture_constants_reach_mir_globals() {
         let entry = scratch.path.join("main.jet");
         let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap())
             .expect("constant identity bundle should load");
-        let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        let (diagnostics, _, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+        let errors = diagnostics
             .into_iter()
             .filter(|diagnostic| {
                 matches!(
@@ -132,7 +133,7 @@ fn assert_fixture_constants_reach_mir_globals() {
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request)
+        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, &nominals, request)
             .expect("constant identity fixture should lower through TIR");
         jet::Codegen::TIR::lower_tir_to_mir(tir)
             .expect("constant identity fixture should lower through MIR")

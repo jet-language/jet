@@ -1994,6 +1994,10 @@ impl Marker {
 #[derive(Debug, Clone)]
 pub struct StructDef {
     pub span: Span,
+    /// Authenticated original canonical Prelude error declaration. Only the
+    /// compiler's exact embedded-source supplier sets this; parsing user or
+    /// generated caller source never grants builtin ownership.
+    pub compiler_builtin_error: bool,
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) struct …`.
     pub is_package_pub: bool,

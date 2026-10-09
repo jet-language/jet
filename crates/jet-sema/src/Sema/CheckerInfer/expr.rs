@@ -7261,25 +7261,6 @@ impl<'a> Checker<'a> {
                         Some(span),
                     ));
                 }
-                if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding") {
-                    let enum_name = match leaf.as_str() {
-                        "DataEvent" => Some("DataEvent"),
-                        "EncodingErrorKind" => Some("EncodingErrorKind"),
-                        "EncodingFormat" => Some("EncodingFormat"),
-                        _ => None,
-                    };
-                    if let Some(enum_name) = enum_name {
-                        **inner = Expr::Ident(enum_name.to_string(), span);
-                        let mut empty = Vec::new();
-                        return Some(self.check_enum_lit(
-                            enum_name,
-                            member,
-                            &mut empty,
-                            span,
-                            Some(span),
-                        ));
-                    }
-                }
                 if leaf == "State" {
                     let is_declared_state = self
                         .state_fact_registry(alias)

@@ -80,11 +80,9 @@ fn package_dependency_policy_checks_source_less_dependencies_once_in_order() {
         ]
     );
 
-    let (diagnostics, _, _) = jet::Driver::check_file_with_effect_facts(
-        entry.to_str().unwrap(),
-        None,
-        false,
-    );
+    let (diagnostics, _, _, _) = jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(),
+    None,
+    false,);
     let policy_diagnostics = diagnostics
         .iter()
         .filter(|diagnostic| diagnostic.code == "E2960")

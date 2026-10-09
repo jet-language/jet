@@ -256,14 +256,14 @@ fn the_jit_backend_owns_enough_stack_for_a_two_mib_embedder_thread() {
         .spawn(move || {
             let bundle = jet::run_compiler_work(move || {
                 let mut bundle = jet::Loader::load_entry(&path).expect("the fixture should load");
-                let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+                let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
                 assert!(
                     !diagnostics
                         .iter()
                         .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
                     "{diagnostics:?}"
                 );
-                bundle
+                jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals)
             });
             let mut backend = jet_jit::CraneliftBackend::new();
             let policy = common::development_policy();

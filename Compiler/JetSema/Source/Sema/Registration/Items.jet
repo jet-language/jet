@@ -66,6 +66,9 @@ use jet_foundation.[
     type_identity_key,
     type_with_effective_fn_returns,
 ]
+use jet_parser.[
+    parse_generated_source,
+]
 
 pub JET_CANONICAL_EFFECT_PACKAGE_IDENTITY :: prep { "jet:canonical-prelude" }
 pub JET_CANONICAL_EFFECT_MODULE_PATH :: prep { "Prelude/Effects.jet" }
@@ -1261,79 +1264,27 @@ fn sema_registration_nominal(item: Item, module_identity: String, fallback_sourc
     }
 }
 
-fn sema_registration_compiler_owned_default_err_field(name: String, ty: Type, span: Span) -> Field Never! {
-    Field{
-        is_pub: true,
-        is_package_pub: false,
-        name: name,
-        name_span: span,
-        ty: ty,
-        ty_span: span,
-        serde_markers: [Marker]{},
-        redact: false,
-        computed: None,
-        default: None,
-        default_ct: None,
+fn sema_registration_prelude_error_nominals(module_identity: String, diagnostics: &[Diagnostic]) -> [SemaRegistrationNominal] {
+    // Exact original embedded Prelude source, once per declaration graph.
+    // The generated lexer admits the reserved private names; user source does
+    // not. Ordinary registration owns every field/default/symbol identity.
+    parsed :: parse_generated_source(SEMA_PRELUDE_ERROR_SOURCE.bytes())
+    loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic)
+    nominals := [SemaRegistrationNominal]{}
+    if sema_has_error_since(parsed.diagnostics, 0) -> return nominals
+    loop item in parsed.program.items {
+        if item == .Struct(definition) {
+            nominal := sema_registration_nominal(item, module_identity, SEMA_PRELUDE_ERROR_SOURCE_PATH, SemaSourceOrigin.CompilerGenerated, [SemaSourceSegment]{}, &diagnostics) ?? panic("Prelude error declaration has no nominal row")
+            if definition.name == "Err" {
+                // This role is attached only by this authenticated builtin
+                // source registration, never recovered from a later leaf name.
+                nominal.compiler_owned = true
+                nominal.generated_provenance = Val(sema_registration_compiler_owned_default_err_provenance())
+            }
+            &nominals.push(nominal)
+        }
     }
-}
-
-fn sema_registration_compiler_owned_default_err_definition() -> StructDef Never! {
-    span :: Span{start: 0, end: 0}
-    item_name :: "Err"
-    StructDef{
-        span: span,
-        is_pub: true,
-        is_package_pub: false,
-        name: item_name,
-        name_span: span,
-        type_params: [TypeParam]{},
-        fields: [Field]{
-            sema_registration_compiler_owned_default_err_field("message", Type.String, span),
-            sema_registration_compiler_owned_default_err_field("code", Type.Option{inner: Type.String}, span),
-            sema_registration_compiler_owned_default_err_field("cause", Type.Option{inner: Type.Named{name: item_name}}, span),
-        },
-        state: None,
-        methods: [Func]{},
-        cli_bindings: [CLICommandBinding]{},
-        trait_impls: [TraitImplBlock]{},
-        derives: [NamedSpan]{},
-        auto_derive_default: false,
-        is_published_schema: false,
-        published_schema_span: None,
-        is_single_use: false,
-        single_use_span: None,
-        is_must_use: false,
-        must_use_span: None,
-        layout: None,
-        layout_span: None,
-        serde_markers: [Marker]{},
-        type_markers: [Marker]{},
-        validate_block: [Stmt]{},
-        validate_span: None,
-    }
-}
-
-pub fn sema_registration_compiler_owned_default_err(module_identity: String) -> SemaRegistrationNominal {
-    definition :: sema_registration_compiler_owned_default_err_definition()
-    ty :: Type.Named{name: "Err"}
-    symbol :: sema_registration_named_symbol(module_identity, "Err", definition.name_span, SymbolKind.Type, Val(ty), true, false)
-    diagnostics := [Diagnostic]{}
-    SemaRegistrationNominal{
-        symbol: symbol,
-        kind: SemaRegistrationNominalKind.Struct,
-        source: SemaRegistrationNominalSource.SourceAST{value: Item.Struct{value: definition}},
-        ty: ty,
-        identity: type_identity(ty),
-        identity_key: sema_registration_identity_key(module_identity, ty),
-        generic_params: [SemaRegistrationGenericParam]{},
-        generic_identity_key: symbol.id.key,
-        fields: sema_registration_struct_fields(definition, symbol, &diagnostics),
-        variants: [SemaRegistrationVariant]{},
-        methods: [SemaRegistrationFunction]{},
-        trait_methods: [SemaRegistrationTraitMethod]{},
-        compiler_owned: true,
-        generated_provenance: Val(sema_registration_compiler_owned_default_err_provenance()),
-    }
+    nominals
 }
 
 pub fn sema_registration_is_compiler_owned(nominal: SemaRegistrationNominal) -> Bool Never! {
@@ -2194,11 +2145,16 @@ fn sema_registration_compiler_builtin_module(graph: SemaRegistrationGraph, name:
 fn sema_registration_inject_compiler_builtins(graph: &SemaRegistrationGraph) {
     err_index :: sema_registration_compiler_builtin_module(graph, "Err")
     if err_index == .Val(module_index) {
-        module_identity := graph.modules[module_index].module_identity
+        module_identity :: graph.modules[module_index].module_identity
         first_nominal :: graph.modules[module_index].nominals.len()
-        &graph.modules[module_index].nominals.push(sema_registration_compiler_owned_default_err(module_identity))
+        declarations :: sema_registration_prelude_error_nominals(module_identity, &graph.diagnostics)
+        loop nominal in declarations {
+            row :: graph.modules[module_index].nominals.len()
+            name :: nominal.symbol.name
+            &graph.modules[module_index].nominals.push(nominal)
+            graph.compiler_builtin_rows[name] = SemaRegistrationRowRef{module_index: module_index, row: row}
+        }
         sema_registration_index_nominal_rows(&graph, module_index, first_nominal)
-        graph.compiler_builtin_rows["Err"] = SemaRegistrationRowRef{module_index: module_index, row: first_nominal}
     }
     runtime_enums :: [String]{"Ordering", "RemoveBy", "TaskFailure"}
     loop name in runtime_enums {

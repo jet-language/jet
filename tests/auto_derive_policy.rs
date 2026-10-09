@@ -3,13 +3,13 @@ use std::process::Command;
 
 mod common;
 
-fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
+fn emit_native_aot(bundle: &jet::Driver::CheckedSourceBundle) -> String {
     let request = jet_foundation::MIR::MirArtifactRequest::new(
         jet_foundation::MIR::MirArtifactTarget::RustAot,
         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
         jet_foundation::MIR::MirArtifactBuildMode::Dev,
     );
-    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(&bundle.bundle, &bundle.checked_nominals, request)
         .expect("checked native artifact lowers through MIR");
     mir.validate()
         .expect("canonical MIR validates in auto-derive test");
@@ -61,16 +61,17 @@ fn loaded_project(name: &str, manifest_policy: &str, source: &str) -> jet::AST::
     jet::Loader::load_entry(entry.to_str().unwrap()).unwrap()
 }
 
-fn checked_bundle(mut bundle: jet::AST::ProgramBundle) -> jet::AST::ProgramBundle {
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+fn checked_bundle(mut bundle: jet::AST::ProgramBundle) -> jet::Driver::CheckedSourceBundle {
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics
         .into_iter()
         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "{errors:#?}");
-    bundle
+    jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals)
 }
 
-fn checked_project(name: &str, manifest_policy: &str, source: &str) -> jet::AST::ProgramBundle {
+fn checked_project(name: &str, manifest_policy: &str, source: &str) -> jet::Driver::CheckedSourceBundle {
     checked_bundle(loaded_project(name, manifest_policy, source))
 }
 
@@ -119,7 +120,7 @@ struct AotMeasurement {
     binary_bytes: u64,
 }
 
-fn aot_measurement(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<AotMeasurement> {
+fn aot_measurement(bundle: &jet::Driver::CheckedSourceBundle, name: &str) -> Option<AotMeasurement> {
     if !common::have_rustc() {
         return None;
     }
@@ -151,7 +152,7 @@ fn aot_measurement(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<AotMe
     })
 }
 
-fn aot_output(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<(i32, String)> {
+fn aot_output(bundle: &jet::Driver::CheckedSourceBundle, name: &str) -> Option<(i32, String)> {
     aot_measurement(bundle, name).map(|measurement| (measurement.exit, measurement.stdout))
 }
 
@@ -195,8 +196,8 @@ struct NoCodec { value: Int }
 fn run() {}
 "#,
     );
-    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
-    let facts = &facts[bundle.entry];
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle.bundle, &bundle.bundle.name_ledger);
+    let facts = &facts[bundle.bundle.entry];
     assert!(!facts.auto_encode.contains("NoCodec"));
     assert!(!facts.auto_decode.contains("NoCodec"));
 }
@@ -472,8 +473,8 @@ fn run() {
         assert_eq!(impl_count(&rust, rust_trait, "Enabled"), 1, "{rust_trait} Enabled");
         assert_eq!(impl_count(&rust, rust_trait, "Missing"), 0, "{rust_trait} Missing");
     }
-    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
-    let facts = &facts[bundle.entry];
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle.bundle, &bundle.bundle.name_ledger);
+    let facts = &facts[bundle.bundle.entry];
     assert!(!facts.auto_encode.contains("Missing"));
     assert!(!facts.auto_decode.contains("Missing"));
     assert_eq!(impl_count(&rust, "JetDebug", "Manual"), 1);

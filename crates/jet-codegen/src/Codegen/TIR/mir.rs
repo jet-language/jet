@@ -3713,20 +3713,27 @@ fn type_fields(ty: &MirTypeDef) -> Vec<jet_foundation::MIR::MirFieldRow> {
 /// artifact identity alongside the complete canonical program.
 pub fn lower_checked_mir_program_for(
     bundle: &crate::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     request: MirArtifactRequest,
 ) -> Result<(MirProgram, MirArtifactId), LowerError> {
-    lower_checked_mir_program_for_with_debug(bundle, request, false)
+    lower_checked_mir_program_for_with_debug(bundle, checked_nominals, request, false)
 }
 
 /// Lower checked MIR with the native debug source-map markers enabled.
 pub fn lower_checked_mir_program_for_with_debug(
     bundle: &crate::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     request: MirArtifactRequest,
     debug_linemap: bool,
 ) -> Result<(MirProgram, MirArtifactId), LowerError> {
     let target = request.target;
     let kind = request.kind;
-    let tir = super::lower_checked_tir_program_for_with_debug(bundle, request, debug_linemap)?;
+    let tir = super::lower_checked_tir_program_for_with_debug(
+        bundle,
+        checked_nominals,
+        request,
+        debug_linemap,
+    )?;
     let mut mir = lower_tir_to_mir(tir)?;
     // Compile time is explicit in the checker, so ordinary immutable bindings
     // over pure work are folded here, once, for every execution tier.

@@ -2206,8 +2206,8 @@ fn run_explain_reload(
         );
         (old, new)
     });
-    let (old_diagnostics, old_bundle, _) = checked.0;
-    let (new_diagnostics, new_bundle, _) = checked.1;
+    let (old_diagnostics, old_bundle, _, _) = checked.0;
+    let (new_diagnostics, new_bundle, _, _) = checked.1;
     let (old_bundle, new_bundle) = match (old_bundle, new_bundle) {
         (Some(old_bundle), Some(new_bundle)) => (old_bundle, new_bundle),
         (old_bundle, new_bundle) => {
@@ -5321,7 +5321,7 @@ fn job_registry_for_entry(
 ) -> jet_foundation::CLISchema::JobRegistry {
     let display = entry.to_string_lossy().into_owned();
     let source = fs::read_to_string(entry).unwrap_or_default();
-    let (diagnostics, bundle, _facts) =
+    let (diagnostics, bundle, _facts, _) =
         jet::Driver::check_file_with_effect_facts_for_run(&display, "dev", &BTreeMap::new());
     let errors = diagnostics
         .into_iter()

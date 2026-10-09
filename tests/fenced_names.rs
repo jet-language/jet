@@ -34,7 +34,8 @@ fn run_fenced_source(name: &str, source: &str, expected: &str) {
     let shown = path.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("fenced-name bundle should load");
-    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors = diagnostics
         .into_iter()
         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect::<Vec<_>>();
@@ -42,6 +43,7 @@ fn run_fenced_source(name: &str, source: &str, expected: &str) {
         errors.is_empty(),
         "fenced names must type-check: {errors:?}"
     );
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         common::cranelift_resident_safe(&bundle),
         "expanded statements must stay resident-JIT safe: {}",

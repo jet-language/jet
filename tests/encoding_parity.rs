@@ -143,10 +143,10 @@ fn run_aot(jet_path: &Path, cwd: &Path) -> ProgramOutput {
     )
 }
 
-fn checked_bundle(path: &str) -> jet::AST::ProgramBundle {
+fn checked_bundle(path: &str) -> jet::Driver::CheckedSourceBundle {
     let mut bundle = jet::Loader::load_entry(path).expect("fixture should load");
     let source = fs::read_to_string(path).expect("fixture source should remain readable");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -156,7 +156,7 @@ fn checked_bundle(path: &str) -> jet::AST::ProgramBundle {
         "fixture must type-check:\n{}",
         jet::render_diagnostics(path, &source, &diags)
     );
-    bundle
+    jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals)
 }
 
 fn run_default_dev(path: &str) -> (DevBackend, ProgramOutput) {

@@ -1860,16 +1860,27 @@ impl<'a> Checker<'a> {
                             *resolved_ret_out = ret.clone();
                             return ret;
                         }
-                        // Module-qualified payload constructors such as
-                        // `encoding.DataEvent.Key("name")` rewrite to a type
-                        // ident above, then parse as method calls. Resolve them
-                        // as enum literals before the static-method fallback.
+                        // Keep the original imported declaration identity when
+                        // a registered Core enum reaches this static-call path.
                         {
                             let has_variant = self
                                 .resolve_enum_variants_cloned(&type_name)
                                 .map(|v| v.contains_key(method))
                                 .unwrap_or(false);
                             if has_variant {
+                                let enum_name = if jet_foundation::CoreModuleExports::core_source_modules()
+                                    .iter().any(|source| source.module == ns.as_str())
+                                {
+                                    let requested = format!("{alias}.{leaf}");
+                                    // Keep unresolved source spelling for the
+                                    // ordinary missing-enum diagnostic; never
+                                    // substitute a bare carrier for its owner.
+                                    self.import_qualified_nominal(&requested).unwrap_or(requested)
+                                } else {
+                                    // Genuine native-only enums retain their
+                                    // existing checked intrinsic type identity.
+                                    type_name.clone()
+                                };
                                 let saved: Vec<Expr> = args
                                     .iter_mut()
                                     .map(|a| {
@@ -1882,7 +1893,7 @@ impl<'a> Checker<'a> {
                                 let mut enum_args: Vec<EnumLitArg> =
                                     saved.into_iter().map(EnumLitArg::Positional).collect();
                                 let ty = self.check_enum_lit(
-                                    &type_name,
+                                    &enum_name,
                                     method,
                                     &mut enum_args,
                                     span,
@@ -1893,10 +1904,9 @@ impl<'a> Checker<'a> {
                                         arg.expr = expr;
                                     }
                                 }
-                                // Leave recv_type unset. TIR lowers
-                                // `DataEvent.Key(...)` only when the receiver
-                                // is a type ident and recv_type is None.
-                                **receiver = Expr::Ident(type_name.clone(), span);
+                                // Leave recv_type unset: this is a checked
+                                // enum constructor, not a value receiver.
+                                **receiver = Expr::Ident(enum_name, span);
                                 return Some(ty);
                             }
                         }
@@ -2001,41 +2011,6 @@ impl<'a> Checker<'a> {
                     if let Some(ret) = self.check_core_json_lit(method, args, span) {
                         *resolved_ret_out = Some(ret.clone());
                         return Some(ret);
-                    }
-                }
-                if module == "core.encoding"
-                    && matches!(item.as_str(), "DataEvent" | "EncodingErrorKind" | "EncodingFormat")
-                {
-                    let has_variant = self
-                        .resolve_enum_variants_cloned(&item)
-                        .is_some_and(|variants| variants.contains_key(method));
-                    if has_variant {
-                        let saved: Vec<Expr> = args
-                            .iter_mut()
-                            .map(|arg| {
-                                std::mem::replace(
-                                    &mut arg.expr,
-                                    Expr::Int(0, arg.span, None, None),
-                                )
-                            })
-                            .collect();
-                        let mut enum_args: Vec<EnumLitArg> =
-                            saved.into_iter().map(EnumLitArg::Positional).collect();
-                        let ty = self.check_enum_lit(
-                            &item,
-                            method,
-                            &mut enum_args,
-                            span,
-                            Some(span),
-                        );
-                        for (arg, enum_arg) in args.iter_mut().zip(enum_args) {
-                            if let EnumLitArg::Positional(expr) = enum_arg {
-                                arg.expr = expr;
-                            }
-                        }
-                        **receiver = Expr::Ident(item, span);
-                        *resolved_ret_out = Some(ty.clone());
-                        return Some(ty);
                     }
                 }
                 if module == "core.encoding" && item == "EncodingLimits" && method == "safe" {

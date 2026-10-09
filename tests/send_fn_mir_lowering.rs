@@ -62,20 +62,21 @@ fn run() {
 }
 "#;
 
-fn checked_bundle(name: &str, source: &str) -> jet::AST::ProgramBundle {
+fn checked_bundle(name: &str, source: &str) -> jet::Driver::CheckedSourceBundle {
     let dir = common::unique_tmp(&format!("jet_send_fn_mir_{name}"));
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("package.jet"), APP_PACKAGE).unwrap();
     let entry = dir.join("main.jet");
     fs::write(&entry, source).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics
         .into_iter()
         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "{name}: {errors:#?}");
     let _ = fs::remove_dir_all(dir);
-    bundle
+    jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals)
 }
 
 fn assert_lowers_on_every_tier(name: &str, source: &str) {

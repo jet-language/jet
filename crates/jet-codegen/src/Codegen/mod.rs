@@ -5023,7 +5023,7 @@ mod tests {
             build_facts: Default::default(),
             edition: "2027".to_string(),
         };
-        let (diagnostics, facts) =
+        let (diagnostics, facts, _) =
             crate::Sema::check_bundle_with_effect_facts(&mut bundle, CompileMode::Run);
         assert!(
             !diagnostics

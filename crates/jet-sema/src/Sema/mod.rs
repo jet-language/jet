@@ -1913,6 +1913,12 @@ pub(crate) struct ModuleState {
     /// is the producer for `Type.reflect()` and direct registered fact reads;
     /// no reflection lookup table is kept beside it.
     items: Vec<crate::AST::Item>,
+    /// Final immutable declaration projection shared by normal and fragment lowering.
+    checked_nominals: Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>>,
+    /// Actual bundle module owning the parsed canonical Prelude error rows.
+    compiler_builtin_error_owner: Option<usize>,
+    /// Original parsed supplier, retained only by its actual bundle owner.
+    compiler_builtin_error_program: Option<&'static crate::AST::Program>,
     /// The bundle-wide build fact snapshot, copied into each module state so
     /// the checker can fold facts without an engine or global lookup.
     build_facts: jet_foundation::Facts::BuildFactSnapshot,
@@ -1991,6 +1997,17 @@ pub(crate) struct ModuleState {
     /// D-NAME-WALK1=A: inline-module `pub use` of a Core item. The first
     /// value is the Core module and the second is the original member name.
     inline_reexport_core: HashMap<(String, String), (String, String)>,
+}
+
+impl ModuleState {
+    fn nominal_items(&self) -> impl Iterator<Item = &crate::AST::Item> {
+        self.items.iter().chain(
+            self.compiler_builtin_error_program
+                .into_iter()
+                .flat_map(|program| program.items.iter())
+                .filter(|item| matches!(item, crate::AST::Item::Struct(_))),
+        )
+    }
 }
 
 /// D-INTBIG1: whether a checked type carries Jet's default exact `Int`.

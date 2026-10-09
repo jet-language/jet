@@ -254,7 +254,8 @@ fn run() {
     let entry = dir.join("main.jet");
     std::fs::write(&entry, src).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
 
@@ -323,7 +324,8 @@ fn run() {
     let entry = dir.join("main.jet");
     std::fs::write(&entry, src).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
 
@@ -1384,7 +1386,8 @@ fn run() {
         let path = dir.join("main.jet");
         std::fs::write(&path, defaults).unwrap();
         let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-        let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+        let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let policy = common::development_policy();
         let mut backend = jet_jit::CraneliftBackend::new();
@@ -1422,7 +1425,8 @@ fn run() {
     let path = dir.join("main.jet");
     std::fs::write(&path, explicit).unwrap();
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
     if jet_jit::cranelift_host_supported() {
@@ -1499,7 +1503,8 @@ fn dimensional_quantities_example_stays_in_native_jit() {
 
     let path = "Examples/features/types/dimensional_quantities.jet";
     let mut bundle = jet::Loader::load_entry(path).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert!(
         common::cranelift_resident_safe(&bundle),
@@ -1591,7 +1596,8 @@ fn run() {
     let entry = dir.join("main.jet");
     std::fs::write(&entry, main).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
 

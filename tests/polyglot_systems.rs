@@ -200,7 +200,9 @@ fn run() {
 
     let mut bundle =
         jet::Loader::load_entry_with_overlay(main.to_str().unwrap(), None, false).unwrap();
-    assert!(jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run).is_empty());
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.is_empty());
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let boundary = common::cranelift_resident_safe_detail(&bundle);
     assert!(
         !boundary.is_empty() && boundary.to_ascii_lowercase().contains("foreign"),

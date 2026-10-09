@@ -484,11 +484,13 @@ fn default_dev_runs_deferred_close_with_native_parity() {
     let path = root.join("main.jet");
     fs::write(&path, SIMPLE).unwrap();
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
 
     if jet_jit::cranelift_host_supported() {
         let policy = common::development_policy();

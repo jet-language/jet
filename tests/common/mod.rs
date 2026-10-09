@@ -99,7 +99,7 @@ fn without_package_imports(text: &str, core_imports: &mut std::collections::Hash
 /// callers cannot accidentally invoke a backend with a bundle or mismatched
 /// artifact.
 pub fn lower_cranelift_bundle(
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
 ) -> Result<
     (
         jet_foundation::MIR::MirProgram,
@@ -108,7 +108,8 @@ pub fn lower_cranelift_bundle(
     String,
 > {
     jet::Codegen::TIR::lower_checked_mir_program_for(
-        bundle,
+        &bundle.bundle,
+        &bundle.checked_nominals,
         jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::Cranelift,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
@@ -121,7 +122,7 @@ pub fn lower_cranelift_bundle(
 /// Lower a checked bundle for the interpreter backend while preserving the
 /// same canonical artifact contract as the resident JIT path.
 pub fn lower_interpreter_bundle(
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
 ) -> Result<
     (
         jet_foundation::MIR::MirProgram,
@@ -130,7 +131,8 @@ pub fn lower_interpreter_bundle(
     String,
 > {
     jet::Codegen::TIR::lower_checked_mir_program_for(
-        bundle,
+        &bundle.bundle,
+        &bundle.checked_nominals,
         jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::Interpreter,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
@@ -144,13 +146,13 @@ pub fn development_policy() -> jet_pkg_model::Package::ReleaseDevtoolsPolicy {
     jet_pkg_model::Package::ReleaseDevtoolsPolicy::development()
 }
 
-pub fn cranelift_resident_safe(bundle: &jet::AST::ProgramBundle) -> bool {
+pub fn cranelift_resident_safe(bundle: &jet::Driver::CheckedSourceBundle) -> bool {
     lower_cranelift_bundle(bundle)
         .map(|(program, _)| jet_jit::resident_jit_safe_program(&program))
         .unwrap_or(false)
 }
 
-pub fn cranelift_resident_safe_detail(bundle: &jet::AST::ProgramBundle) -> String {
+pub fn cranelift_resident_safe_detail(bundle: &jet::Driver::CheckedSourceBundle) -> String {
     match lower_cranelift_bundle(bundle) {
         Ok((program, _)) => jet_jit::resident_jit_safe_program_detail(&program),
         Err(error) => error,
@@ -158,7 +160,7 @@ pub fn cranelift_resident_safe_detail(bundle: &jet::AST::ProgramBundle) -> Strin
 }
 
 pub fn compile_cranelift_bundle(
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> Result<(), String> {
     let (program, artifact) = lower_cranelift_bundle(bundle)?;
@@ -174,7 +176,7 @@ pub struct CraneliftTierPlan {
     pub rows: Vec<jet_jit::TierRow>,
 }
 
-pub fn cranelift_tier_plan(bundle: &jet::AST::ProgramBundle) -> CraneliftTierPlan {
+pub fn cranelift_tier_plan(bundle: &jet::Driver::CheckedSourceBundle) -> CraneliftTierPlan {
     let (program, artifact) =
         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
     let plan = jet_jit::plan_mir_tiers(&program, artifact);
@@ -199,7 +201,7 @@ pub fn cranelift_tier_plan(bundle: &jet::AST::ProgramBundle) -> CraneliftTierPla
 }
 
 pub fn cranelift_strict_run(
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> Result<jet::Interpreter::RunOutcome, String> {
     let (program, artifact) = lower_cranelift_bundle(bundle)?;
@@ -207,7 +209,7 @@ pub fn cranelift_strict_run(
 }
 
 pub fn cranelift_func_safety(
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
     name: &str,
 ) -> jet_jit::ResidentJitSafety {
     let (program, _) =
@@ -215,36 +217,36 @@ pub fn cranelift_func_safety(
     jet_jit::resident_jit_func_safety_detail(&program, name)
 }
 
-pub fn cranelift_main_ops(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
+pub fn cranelift_main_ops(bundle: &jet::Driver::CheckedSourceBundle) -> Vec<String> {
     let (program, artifact) =
         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
     jet_jit::jit_dump_main_ops(&program, artifact)
 }
-pub fn cranelift_main_stmts(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
+pub fn cranelift_main_stmts(bundle: &jet::Driver::CheckedSourceBundle) -> Vec<String> {
     let (program, artifact) =
         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
     jet_jit::jit_dump_main_stmts(&program, artifact)
 }
 
-pub fn cranelift_func_names(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
+pub fn cranelift_func_names(bundle: &jet::Driver::CheckedSourceBundle) -> Vec<String> {
     let (program, _) =
         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
     jet_jit::jit_program_func_names(&program)
 }
 
-pub fn cranelift_spawn_stats(bundle: &jet::AST::ProgramBundle) -> (usize, usize) {
+pub fn cranelift_spawn_stats(bundle: &jet::Driver::CheckedSourceBundle) -> (usize, usize) {
     let (program, _) =
         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
     jet_jit::jit_spawn_stats(&program)
 }
 
-pub fn cranelift_uncovered_detail(bundle: &jet::AST::ProgramBundle) -> Option<String> {
+pub fn cranelift_uncovered_detail(bundle: &jet::Driver::CheckedSourceBundle) -> Option<String> {
     let (program, artifact) =
         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
     jet_jit::jit_main_uncovered_detail(&program, artifact)
 }
 
-pub fn cranelift_mixed_switch_conds(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
+pub fn cranelift_mixed_switch_conds(bundle: &jet::Driver::CheckedSourceBundle) -> Vec<String> {
     let (program, artifact) =
         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
     jet_jit::jit_dump_mixed_switch_conds(&program, artifact)
@@ -252,7 +254,7 @@ pub fn cranelift_mixed_switch_conds(bundle: &jet::AST::ProgramBundle) -> Vec<Str
 
 pub fn run_cranelift_bundle(
     backend: &mut jet_jit::CraneliftBackend,
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
     try_anyway: bool,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> jet::Interpreter::RunOutcome {
@@ -264,7 +266,7 @@ pub fn run_cranelift_bundle(
 pub fn hot_swap_cranelift_bundle(
     backend: &mut jet_jit::CraneliftBackend,
     module_name: &str,
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
     try_anyway: bool,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> Result<jet::Interpreter::RunOutcome, Vec<jet::Diagnostics::Diagnostic>> {
@@ -281,7 +283,7 @@ pub fn hot_swap_cranelift_bundle(
 }
 
 pub fn run_interpreter_checked_bundle(
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
     try_anyway: bool,
     invocation: jet::Interpreter::InterpreterInvocation,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
@@ -292,7 +294,7 @@ pub fn run_interpreter_checked_bundle(
 }
 
 pub fn run_interpreter_named_job(
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
     file: &str,
     name: &str,
     try_anyway: bool,
@@ -318,7 +320,7 @@ pub fn run_interpreter_named_job(
 
 pub fn restart_cranelift_bundle(
     backend: &mut jet_jit::CraneliftBackend,
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
     try_anyway: bool,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> jet::Interpreter::RunOutcome {
@@ -329,7 +331,7 @@ pub fn restart_cranelift_bundle(
 
 pub fn run_interpreter_bundle(
     backend: &mut jet::JitBackend::InterpreterBackend,
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
     try_anyway: bool,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> jet::Interpreter::RunOutcome {
@@ -340,7 +342,7 @@ pub fn run_interpreter_bundle(
 pub fn hot_swap_interpreter_bundle(
     backend: &mut jet::JitBackend::InterpreterBackend,
     module_name: &str,
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
     try_anyway: bool,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> Result<jet::Interpreter::RunOutcome, Vec<jet::Diagnostics::Diagnostic>> {
@@ -358,7 +360,7 @@ pub fn hot_swap_interpreter_bundle(
 
 pub fn restart_interpreter_bundle(
     backend: &mut jet::JitBackend::InterpreterBackend,
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
     try_anyway: bool,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> jet::Interpreter::RunOutcome {
@@ -366,11 +368,11 @@ pub fn restart_interpreter_bundle(
         lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
     jet::JitBackend::JitBackend::restart(backend, &program, artifact, try_anyway, policy)
 }
-pub fn cranelift_lowers(bundle: &jet::AST::ProgramBundle) -> bool {
+pub fn cranelift_lowers(bundle: &jet::Driver::CheckedSourceBundle) -> bool {
     lower_cranelift_bundle(bundle).is_ok()
 }
 
-pub fn cranelift_lower_error(bundle: &jet::AST::ProgramBundle) -> String {
+pub fn cranelift_lower_error(bundle: &jet::Driver::CheckedSourceBundle) -> String {
     lower_cranelift_bundle(bundle)
         .err()
         .unwrap_or_else(|| "canonical Cranelift MIR lowering succeeded".to_owned())

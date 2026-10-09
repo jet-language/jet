@@ -2528,8 +2528,7 @@ fn run() {
 }
 "#,
     );
-    let (check_diags, _, facts) =
-        jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+    let (check_diags, _, facts, _) = jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
     assert!(
         !check_diags
             .iter()
@@ -4010,7 +4009,8 @@ fn build_entry_program_runs_the_same_on_every_tier() {
     let expected = ("runtime program\n".to_string(), String::new(), 0);
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("build-entry bundle loads");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         !diagnostics
             .iter()

@@ -57,8 +57,7 @@ fn arithmetic_policy_is_visible_in_function_reflection() {
         "#Arithmetic(.Wrapping)\npub fn wrapped(value: U8) -> U8 { return value + U8{1} }\nfn run() {}\n",
     )
     .unwrap();
-    let (diagnostics, bundle, effect_facts) =
-        jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+    let (diagnostics, bundle, effect_facts, _) = jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let bundle = bundle.expect("checked bundle");
     let facts = jet::Driver::program_semantic_facts(&bundle, &effect_facts);
@@ -113,8 +112,7 @@ fn run() {}
 "#,
     )
     .unwrap();
-    let (diagnostics, bundle, _) =
-        jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+    let (diagnostics, bundle, _, _) = jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let bundle = bundle.expect("checked bundle");
     let info = jet::Comptime::reflect_type_value(
@@ -337,6 +335,7 @@ fn state_info_keeps_no_entry_reachability_unknown() {
 fn type_info_exposes_methods_type_params_and_markers() {
     let s = StructDef {
         span: span(),
+        compiler_builtin_error: false,
         is_pub: true,
         is_package_pub: false,
         name: "Box".to_string(),
@@ -416,6 +415,7 @@ fn type_info_exposes_methods_type_params_and_markers() {
 fn field_info_carries_visibility() {
     let s = StructDef {
         span: span(),
+        compiler_builtin_error: false,
         is_pub: true,
         is_package_pub: false,
         name: "Secret".to_string(),
@@ -472,6 +472,7 @@ fn marker_arguments_are_typed_in_the_written_view() {
     };
     let s = StructDef {
         span: span(),
+        compiler_builtin_error: false,
         is_pub: true,
         is_package_pub: false,
         name: "Hot".to_string(),
@@ -626,6 +627,7 @@ fn registered_type_planes_reflect_as_typed_values() {
     }
     let info = build_struct_type_info(&StructDef {
         span: span(),
+        compiler_builtin_error: false,
         is_pub: true,
         is_package_pub: false,
         name: "Planes".to_string(),

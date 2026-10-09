@@ -770,22 +770,24 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs_and_facts<'a>(
     fact_items: &[crate::AST::Item],
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
     fact_registry: &jet_foundation::Facts::FactRegistry,
-    checked_nominals: Option<&MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<&std::sync::Arc<crate::AST::MirFragmentNominalFacts>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     let closed = fold_build_facts(init, fact_items, build_facts, fact_registry);
-    // The checked projection carries every imported nominal, import alias and
-    // loaded source module; the evaluated module's own enum rows come from
-    // its items.
-    let mut nominal_facts = checked_nominals.cloned().unwrap_or_default();
-    for item in fact_items {
-        if let crate::AST::Item::Enum(definition) = item {
-            let mut row = definition.clone();
-            row.methods.clear();
-            row.trait_impls.clear();
-            row.derives.clear();
-            nominal_facts.enums.insert(row.name.clone(), row);
+    // Checked module projections already retain their own enum declarations.
+    // Share the exact immutable projection rather than cloning its AST maps.
+    let nominal_facts = checked_nominals.cloned().unwrap_or_else(|| {
+        let mut facts = crate::AST::MirFragmentNominalFacts::default();
+        for item in fact_items {
+            if let crate::AST::Item::Enum(definition) = item {
+                let mut row = definition.clone();
+                row.methods.clear();
+                row.trait_impls.clear();
+                row.derives.clear();
+                facts.enums.insert(row.name.clone(), row);
+            }
         }
-    }
+        std::sync::Arc::new(facts)
+    });
     evaluate_with_imports_opts_collecting_structs_and_methods(
         &closed,
         funcs,
@@ -1097,7 +1099,7 @@ fn evaluate_with_imports_opts_collecting_structs_and_methods<'a>(
     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &HashMap<String, crate::AST::Type>,
     unit_families: &[crate::AST::UnitFamilyDef],
-    nominal_facts: Option<MirBridge::MirFragmentNominalFacts>,
+    nominal_facts: Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>>,
     mutated: Option<&mut HashMap<String, CtValue>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     if initial_impure_depth == 0 {
@@ -1812,7 +1814,7 @@ pub fn evaluate_owned_with_imports_opts_collecting_items<'a>(
     gates: jet_foundation::Policy::GateSet,
     initial_impure_depth: usize,
     items: &'a [crate::AST::Item],
-    checked_nominals: Option<MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>>,
     mutated: Option<&mut HashMap<String, CtValue>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     let mut refs: HashMap<String, &Func> = funcs
@@ -1937,7 +1939,7 @@ pub fn expand_derive_body(
     type_info: CtValue,
     funcs: &HashMap<String, &Func>,
     base_dir: &Path,
-    checked_nominals: Option<MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>>,
 ) -> Result<Vec<crate::AST::Item>, Diagnostic> {
     let mut scope = HashMap::new();
     // `@name` is the canonical item-name splice for a derive target. Keep it
@@ -1969,7 +1971,7 @@ fn expand_template_body_with_nominals(
     initial_scope: &HashMap<String, CtValue>,
     funcs: &HashMap<String, &Func>,
     base_dir: &Path,
-    checked_nominals: Option<MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>>,
 ) -> Result<Vec<crate::AST::Item>, Diagnostic> {
     let mut scope = initial_scope.clone();
     let binding_types = scope

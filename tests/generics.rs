@@ -977,7 +977,8 @@ fn run() {
     std::fs::write(&path, source).expect("write generic-free test source");
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap())
         .expect("generic-free test source should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         diagnostics
             .iter()
@@ -1053,7 +1054,8 @@ fn run() {
     std::fs::write(&path, source).expect("write generic-method test source");
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap())
         .expect("generic-method test source should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         diagnostics
             .iter()

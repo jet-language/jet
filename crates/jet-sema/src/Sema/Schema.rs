@@ -581,6 +581,7 @@ mod tests {
         let zero = Span::new(0, 0);
         let s = StructDef {
             span: zero,
+            compiler_builtin_error: false,
             is_pub: false,
             is_package_pub: false,
             name: "Rec".to_string(),

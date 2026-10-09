@@ -17,6 +17,7 @@ pub(super) fn complete_bundle_check(
 ) -> (
     Vec<Diagnostic>,
     super::super::super::Effects::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     let states: &[ModuleState] = &*states_mut;
     populate_name_ledger(bundle, &states, &mut name_ledger);
@@ -283,6 +284,21 @@ pub(super) fn complete_bundle_check(
     } else {
         None
     };
+    let checked_nominals: std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]> =
+        (0..states_mut.len())
+            .map(|idx| {
+                super::super::super::CheckerCore::checked_comptime_nominals_for_context(
+                    states_mut,
+                    idx,
+                    &name_ledger,
+                )
+                .expect("registered module must have a checked nominal context")
+            })
+            .collect::<Vec<_>>()
+            .into();
+    for (state, facts) in states_mut.iter_mut().zip(checked_nominals.iter()) {
+        state.checked_nominals = Some(std::sync::Arc::clone(facts));
+    }
     let states: &[ModuleState] = &*states_mut;
     let mut module_pending_diagnostics = Vec::with_capacity(bundle.modules.len());
     let mut sealed_nodes: Vec<(String, Vec<(String, EffectSummary)>)> = Vec::new();
@@ -876,6 +892,7 @@ pub(super) fn complete_bundle_check(
             web_app: app_graph,
             fact_registry,
         },
+        checked_nominals,
     )
 }
 fn suppress_duplicate_root_panic(

@@ -4,7 +4,7 @@ use crate::Sema::Diagnostics::{owned_type_for_read_view, soft_public_use};
 use crate::Sema::NominalWalk::NominalQuery;
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, BinOp, Call, EnumLitArg, Expr, Pattern, StrMatchPart, StructPatField, Type,
+    AccessConvention, BinOp, Call, EnumLitArg, Expr, Item, Pattern, StrMatchPart, StructPatField, Type,
     VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
@@ -2061,6 +2061,18 @@ impl<'a> Checker<'a> {
             let (namespace, leaf) = type_name.rsplit_once("::")?;
             return self.struct_owner_module(leaf, Some(namespace));
         }
+        if let Some(modules) = self.modules {
+            if let Some(owner) = modules[self.module_idx].compiler_builtin_error_owner {
+                // Authority is the original supplier's actual declaration,
+                // not a user-defined leaf with the same spelling.
+                if crate::Sema::Prelude::error_prelude_program().ok().is_some_and(|program| {
+                    program.items.iter().any(|item| matches!(item,
+                        crate::AST::Item::Struct(definition) if definition.name == type_name))
+                }) {
+                    return Some(owner);
+                }
+            }
+        }
         if self.registry.contains(type_name) {
             return Some(self.module_idx);
         }
@@ -2632,6 +2644,36 @@ impl<'a> Checker<'a> {
         &self,
         enum_name: &str,
     ) -> Option<HashMap<String, (Span, VariantPayload)>> {
+        if self.name_ledger.declaration(self.module_idx, enum_name).is_some()
+            && matches!(
+                jet_foundation::CoreModuleExports::core_leaf_kind("core.encoding", enum_name),
+                Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
+            )
+            && self.core_source_owner_module("core.encoding", enum_name) != Some(self.module_idx)
+        {
+            // A real local declaration shadows the imported Core leaf; its
+            // payloads (or absence of an enum) come from that declaration.
+            return self.registry.enum_variants(enum_name)
+                .map(|variants| self.owner_variants_for_reader(
+                    self.module_idx, enum_name, variants.clone(),
+                ));
+        }
+        // A qualified encoding carrier uses the same checked payload provider
+        // as its declaration, not the export catalog's unit-only shape.
+        // Authenticate the owner before selecting that provider: an unrelated
+        // enum with the same leaf name is not a Core carrier.
+        let imported_identity = self.import_qualified_nominal(enum_name);
+        let identity = imported_identity.as_deref().unwrap_or(enum_name);
+        let (namespace, leaf) = Self::split_type_name(identity);
+        if namespace.is_some() {
+            if let Some(owner) = self.core_source_owner_module("core.encoding", leaf) {
+                if identity == self.canonical_nominal_name(owner, leaf) {
+                    if let Some(variants) = core_encoding_variants(leaf) {
+                        return Some(self.owner_variants_for_reader(owner, leaf, variants));
+                    }
+                }
+            }
+        }
         // Core encoding carriers are declared in Core.jet for export shape,
         // while their payload-bearing variants are owned by the checker table.
         // Resolve that canonical table before the metadata's unit-only view.
@@ -2799,8 +2841,8 @@ impl<'a> Checker<'a> {
         }
         // D-MOD2: a member-imported enum (`use types.[Kind]`) keeps its
         // owner's canonical identity; every other spelling keeps its own.
-        if self.member_imported_type(root) {
-            return Some((self.imported_nominal_head(root), segs.join(".")));
+        if let Some(identity) = self.import_qualified_nominal(root) {
+            return Some((identity, segs.join(".")));
         }
         Some((root.to_string(), segs.join(".")))
     }
@@ -2809,23 +2851,44 @@ impl<'a> Checker<'a> {
     /// type (`use types.[Kind]`), so its identity is the owner's canonical one.
     pub(crate) fn member_imported_type(&self, name: &str) -> bool {
         !name.contains("::")
-            && !self.registry.contains(name)
+            && self.name_ledger.declaration(self.module_idx, name).is_none()
             && self
                 .name_ledger
                 .alias(self.module_idx, name)
                 .is_some_and(|alias| alias.target_module.is_some_and(|owner| owner != self.module_idx))
     }
 
-    /// D-MOD2: the canonical nominal identity (`<owner>::Leaf`) of a name
-    /// qualified by a file-module alias (`types.Kind`). `None` when the
-    /// namespace is not an import alias of this module, so bare and local
-    /// spellings keep their existing identity.
+    /// D-MOD2: an imported nominal keeps the identity of its original
+    /// declaration. Generated Core registry rows are not local declarations
+    /// and must not erase a source-owned enum's module or member-import alias.
     pub(crate) fn import_qualified_nominal(&self, name: &str) -> Option<String> {
-        let (namespace, _) = Self::split_type_name(name);
-        if name.contains("::") || !namespace.is_some_and(|namespace| self.imports.contains_key(namespace)) {
+        if name.contains("::") {
             return None;
         }
-        Some(self.imported_nominal_head(name))
+        let (namespace, leaf) = Self::split_type_name(name);
+        let core_import = match namespace {
+            Some(namespace) => self.core_imports.get(namespace).map(|module| (module, leaf)),
+            None => self.core_imports.get(name).and_then(|module| {
+                self.core_item_imports.get(name).map(|item| (module, item.as_str()))
+            }),
+        };
+        if let Some((module, leaf)) = core_import {
+            if let Some(owner) = self.core_source_owner_module(module, leaf) {
+                let source = self.modules?.get(owner)?;
+                if source.items.iter().any(|item| {
+                    matches!(item, Item::Enum(definition) if definition.name == leaf)
+                }) {
+                    return Some(self.canonical_nominal_name(owner, leaf));
+                }
+            }
+        }
+        if self.member_imported_type(name)
+            || namespace.is_some_and(|namespace| self.imports.contains_key(namespace))
+        {
+            Some(self.imported_nominal_head(name))
+        } else {
+            None
+        }
     }
 
     /// D-TAG1: the enum's variant groups (group path → span + ordered leaf paths),
@@ -3049,8 +3112,11 @@ impl<'a> Checker<'a> {
         // E2-M10: compiler-known constructable struct types (HTTPRequest, HTTPResponse).
         // These have no user-module owner but are valid in struct literals. Generic
         // history records use the same path with their concrete command argument.
-        if let Some(core_fields) = core_constructable_fields(type_name)
-            .or_else(|| core_generic_constructable_fields(type_name, type_args))
+        if let Some(core_fields) = self.struct_owner_module(type_name, import_ns)
+            .is_none()
+            .then(|| core_constructable_fields(type_name)
+                .or_else(|| core_generic_constructable_fields(type_name, type_args)))
+            .flatten()
         {
             let str_map_ty = Type::Map {
                 key: Box::new(Type::String),
@@ -3350,7 +3416,24 @@ impl<'a> Checker<'a> {
                 let inst = self.instantiate_type_for_owner(owner_mod, fty, &subst);
                 self.expected_type = Some(inst);
             }
-            let et = self.infer(&mut filled);
+            let et = if let Some(modules) = self.modules {
+                let owner = &modules[owner_mod];
+                let base = std::path::Path::new(&owner.module_path)
+                    .parent().unwrap_or_else(|| std::path::Path::new("."));
+                let mut checker = crate::Sema::Bundle::checker_for_module(
+                    owner_mod, modules, self.plugin_interfaces, self.devtools_registry,
+                    self.effect_facts, self.ct_funcs, self.ct_checked_funcs,
+                    &owner.items, self.ct_externs, base, self.ct_globals,
+                    self.no_os, self.gates, self.no_prelude, self.name_ledger,
+                    None, false, self.defer_ct_evaluation,
+                );
+                checker.expected_type = self.expected_type.clone();
+                let result = checker.infer(&mut filled);
+                self.diags.extend(checker.diags);
+                result
+            } else {
+                self.infer(&mut filled)
+            };
             self.expected_type = saved_expected;
             if let (Some((_, _, fty)), Some(et)) = (field_def, et) {
                 let inst = self.instantiate_type_for_owner(owner_mod, fty, &subst);
@@ -3612,19 +3695,15 @@ impl<'a> Checker<'a> {
         // An enum literal reads its enum's name, so it uses the import
         // that binds it (`use dep.[Kind]` then `Kind.Beta(3)`).
         self.record_type_import_name_use(type_name);
+        let identity = self.import_qualified_nominal(type_name)
+            .unwrap_or_else(|| type_name.to_string());
         let contextual_ty = self
             .expected_type
             .clone()
-            .filter(|ty| matches!(ty, Type::Apply { name, .. } if name == type_name));
-        // D-MOD2: an enum named through a member import carries its owner's
-        // canonical identity, the one every signature from that owner uses.
-        let ty = contextual_ty.clone().unwrap_or_else(|| {
-            if self.member_imported_type(type_name) {
-                Type::Named(self.imported_nominal_head(type_name))
-            } else {
-                Type::Named(type_name.to_string())
-            }
-        });
+            .filter(|ty| matches!(ty, Type::Apply { name, .. } if name == &identity));
+        // The constructor's result retains its original declaration identity,
+        // including the checked expected generic arguments.
+        let ty = contextual_ty.clone().unwrap_or_else(|| Type::Named(identity));
         let display_type_name = self.display_type_name(type_name, None);
         let Some(variants) = self.resolve_enum_variants_cloned(type_name) else {
             self.diags.push(Diagnostic::error(

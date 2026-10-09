@@ -389,7 +389,8 @@ fn typestate_graph_runs_on_resident_jit_without_runtime_state() {
     fs::write(&path, TIER_SOURCE).unwrap();
     let shown = path.to_string_lossy().into_owned();
     let mut bundle = jet::Loader::load_entry(&shown).expect("typestate fixture loads");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         diagnostics.is_empty(),
         "typestate fixture diagnostics: {diagnostics:#?}"

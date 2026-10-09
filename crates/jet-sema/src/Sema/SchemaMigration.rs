@@ -840,6 +840,7 @@ mod tests {
     fn published_struct(name: &str, fields: Vec<Field>) -> Item {
         Item::Struct(StructDef {
             span: zero(),
+            compiler_builtin_error: false,
             is_pub: false,
             is_package_pub: false,
             name: name.to_string(),

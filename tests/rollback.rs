@@ -114,7 +114,8 @@ fn run() {
 fn rollback_trait_interpreter_restores_projected_fields() {
     let mut bundle = jet::Loader::load_entry("Examples/features/errors/rollback_trait.jet")
         .expect("rollback trait fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let errors = diagnostics
         .iter()
         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)

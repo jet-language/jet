@@ -135,7 +135,8 @@ fn resident_jit_preserves_shared_and_closure_owner_topology() {
 
     let shown = file.to_string_lossy().into_owned();
     let mut bundle = jet::Loader::load_entry(&shown).expect("load Shared ownership fixture");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         diagnostics
             .iter()

@@ -587,7 +587,8 @@ fn run() {
 
     // Tier 2 — resident JIT: compiled natively in this process, no deopt.
     let mut bundle = jet::Loader::load_entry(&shown).expect("tier fixture must load");
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics
         .into_iter()
         .filter(|diag| matches!(diag.severity, jet::Diagnostics::Severity::Error))
         .collect();
@@ -595,6 +596,7 @@ fn run() {
         errors.is_empty(),
         "tier fixture must type-check: {errors:?}"
     );
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         common::cranelift_resident_safe(&bundle),
         "env fixture must be resident-JIT safe: {:?}",

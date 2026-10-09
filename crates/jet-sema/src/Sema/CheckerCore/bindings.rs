@@ -59,6 +59,14 @@ fn canonical_fragment_name(
                 return Some(identity.clone());
             }
         }
+        if let Some(error_owner) = state.compiler_builtin_error_owner {
+            if crate::Sema::Prelude::error_prelude_program().ok().is_some_and(|program| {
+                program.items.iter().any(|item| matches!(item,
+                    crate::AST::Item::Struct(definition) if definition.name == name))
+            }) {
+                return struct_identities.get(&(error_owner, name.to_string())).cloned();
+            }
+        }
     }
     struct_identities.get(&(owner, name.to_string())).cloned()
 }
@@ -291,7 +299,7 @@ fn fragment_signature(
     source_paths: &jet_foundation::Names::NameLedger,
     struct_identities: &HashMap<(usize, String), String>,
     known_identities: &HashSet<String>,
-) -> crate::Comptime::MirBridge::MirFragmentCoreSourceSignature {
+) -> crate::AST::MirFragmentCoreSourceSignature {
     let canonical = |ty: &Type| {
         canonical_fragment_type(
             ty,
@@ -302,7 +310,7 @@ fn fragment_signature(
             known_identities,
         )
     };
-    crate::Comptime::MirBridge::MirFragmentCoreSourceSignature {
+    crate::AST::MirFragmentCoreSourceSignature {
         type_params: function
             .type_params
             .iter()
@@ -327,7 +335,7 @@ fn fragment_signature(
 /// Signatures of every cross-module call module `owner` can spell, keyed by
 /// (source alias or local name, function name).
 type FragmentImportSignatures =
-    HashMap<(String, String), crate::Comptime::MirBridge::MirFragmentCoreSourceSignature>;
+    HashMap<(String, String), crate::AST::MirFragmentCoreSourceSignature>;
 
 /// The user-module call surface of module `owner` for a comptime fragment:
 /// its `use` aliases and member-imported functions keyed to the loaded source
@@ -601,8 +609,11 @@ impl<'a> Checker<'a> {
     /// share that context.
     pub(super) fn checked_comptime_nominals(
         &self,
-    ) -> Option<crate::Comptime::MirBridge::MirFragmentNominalFacts> {
+    ) -> Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>> {
         let modules = self.modules?;
+        if let Some(facts) = modules.get(self.module_idx)?.checked_nominals.as_ref() {
+            return Some(std::sync::Arc::clone(facts));
+        }
         checked_comptime_nominals_for_context(modules, self.module_idx, self.name_ledger)
     }
 }
@@ -614,13 +625,13 @@ pub(crate) fn checked_comptime_nominals_for_context(
     modules: &[crate::Sema::ModuleState],
     module_idx: usize,
     name_ledger: &jet_foundation::Names::NameLedger,
-) -> Option<crate::Comptime::MirBridge::MirFragmentNominalFacts> {
+) -> Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>> {
     let current = modules.get(module_idx)?;
     let reexports = &current.reexports;
     let mut struct_identities = HashMap::new();
     let mut known_identities = HashSet::new();
     for (owner, state) in modules.iter().enumerate() {
-        for item in &state.items {
+        for item in state.nominal_items() {
             let name = match item {
                 crate::AST::Item::Struct(def) => &def.name,
                 crate::AST::Item::Enum(def) => &def.name,
@@ -638,6 +649,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
     // package aliases anew for each isolated comptime context.
     let source_paths = name_ledger;
 
+    let error_owner = current.compiler_builtin_error_owner;
     let mut queue = VecDeque::new();
     let mut queued = HashSet::new();
     for &target in current.imports.values() {
@@ -672,15 +684,45 @@ pub(crate) fn checked_comptime_nominals_for_context(
             queue.push_back(sibling);
         }
     }
+    if let Some(owner) = error_owner {
+        if queued.insert(owner) {
+            queue.push_back(owner);
+        }
+    }
 
-    let mut facts = crate::Comptime::MirBridge::MirFragmentNominalFacts::default();
-    for item in &current.items {
+    let mut facts = crate::AST::MirFragmentNominalFacts::default();
+    facts.module_identity = name_ledger.module_identity(module_idx)?;
+    facts.compiler_owned_default_err_identity = error_owner
+        .and_then(|owner| name_ledger.nominal_identity(owner, crate::Syntax::TYPE_ERR));
+    for item in current.nominal_items() {
         if let crate::AST::Item::Enum(def) = item {
             let mut row = def.clone();
             row.methods.clear();
             row.trait_impls.clear();
             row.derives.clear();
             facts.enums.insert(row.name.clone(), row);
+        }
+        if let crate::AST::Item::Struct(def) = item {
+            let Some(identity) = struct_identities.get(&(module_idx, def.name.clone())) else {
+                continue;
+            };
+            let mut row = def.clone();
+            row.name = identity.clone();
+            row.methods.clear();
+            row.trait_impls.clear();
+            row.derives.clear();
+            for field in &mut row.fields {
+                field.ty = canonical_fragment_type(
+                    &field.ty,
+                    module_idx,
+                    modules,
+                    &source_paths,
+                    &struct_identities,
+                    &known_identities,
+                );
+            }
+            facts.foreign_modules.insert(identity.clone(), current.module_alias.clone());
+            facts.structs.insert(identity.clone(), row);
         }
     }
     for (alias, &target) in &current.imports {
@@ -727,7 +769,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
         }
         let source_module =
             jet_foundation::CoreModuleExports::core_source_module_by_alias(&state.module_alias);
-        let mut body_module = crate::Comptime::MirBridge::MirFragmentCoreSourceModule {
+        let mut body_module = crate::AST::MirFragmentCoreSourceModule {
             alias: state.module_alias.clone(),
             module_identity: name_ledger
                 .module_identity(target)
@@ -810,7 +852,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
                 jet_foundation::CoreModuleExports::core_leaf_kind(source.module, name).is_some()
             })
         };
-        for item in &state.items {
+        for item in state.nominal_items() {
             if let crate::AST::Item::Enum(def) = item {
                 if !source_leaf_visible(&def.name) {
                     continue;
@@ -902,6 +944,16 @@ pub(crate) fn checked_comptime_nominals_for_context(
             facts.nominal_identities.insert(source, path);
         }
     }
+    if let Some(owner) = error_owner {
+        if let Some(program) = crate::Sema::Prelude::error_prelude_program().ok() {
+            for item in &program.items {
+                let crate::AST::Item::Struct(definition) = item else { continue };
+                if let Some(identity) = struct_identities.get(&(owner, definition.name.clone())) {
+                    facts.nominal_identities.insert(definition.name.clone(), identity.clone());
+                }
+            }
+        }
+    }
     for (alias, &target) in &current.imports {
         for ((owner, leaf), identity) in &struct_identities {
             if *owner == target && foreign_identities.contains(identity) {
@@ -954,7 +1006,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
         let Some(state) = modules.get(sibling) else {
             continue;
         };
-        for item in &state.items {
+        for item in state.nominal_items() {
             let name = match item {
                 crate::AST::Item::Struct(def) => &def.name,
                 crate::AST::Item::Enum(def) => &def.name,
@@ -980,7 +1032,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
         }
     }
 
-    Some(facts)
+    Some(std::sync::Arc::new(facts))
 }
 
 fn direct_fixed_constructor(expr: &Expr) -> bool {

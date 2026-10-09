@@ -119,7 +119,7 @@ pub(crate) fn run_generate(args: &[String], json: bool) {
         ))
     });
     let entry_text = entry.to_string_lossy().into_owned();
-    let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts_for_run_and_entry(
+    let (diagnostics, bundle, _, _) = jet::Driver::check_file_with_effect_facts_for_run_and_entry(
         &entry_text,
         "dev",
         &BTreeMap::new(),

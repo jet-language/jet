@@ -118,7 +118,8 @@ fn resident_jit_and_forced_interpreter_agree_without_fallback() {
     let entry = scratch.join("app.jet");
     fs::write(&entry, SOURCE).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics
         .into_iter()
         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
         .collect();
@@ -126,6 +127,7 @@ fn resident_jit_and_forced_interpreter_agree_without_fallback() {
         errors.is_empty(),
         "fact fixture rejected before tier proof: {errors:?}"
     );
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         common::cranelift_resident_safe(&bundle),
         "fact fixture is not resident-JIT safe: {}",

@@ -1732,6 +1732,27 @@ pub(crate) fn register_struct(
         ));
         return;
     }
+    register_struct_fields(s, registry, diags, target);
+}
+
+/// Only the canonical parsed Prelude supplier calls this entry. User source
+/// retains the reserved-name and duplicate checks above; field registration
+/// itself is identical for builtin and user declarations.
+pub(crate) fn register_builtin_error_struct(
+    s: &StructDef,
+    registry: &mut TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+    target: &jet_foundation::Layout::TargetLayout,
+) {
+    register_struct_fields(s, registry, diags, target);
+}
+
+fn register_struct_fields(
+    s: &StructDef,
+    registry: &mut TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+    target: &jet_foundation::Layout::TargetLayout,
+) {
     validate_layout_alignment(s, target, diags);
     let mut field_names = HashSet::new();
     let mut fields = Vec::new();

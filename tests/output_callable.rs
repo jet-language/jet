@@ -4,7 +4,7 @@ use jet_jit::CraneliftBackend;
 
 mod common;
 
-fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
+fn emit_native_aot(bundle: &jet::Driver::CheckedSourceBundle) -> String {
     emit_native_artifact(
         bundle,
         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
@@ -12,7 +12,7 @@ fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
     )
 }
 
-fn emit_test_harness(bundle: &jet::AST::ProgramBundle) -> String {
+fn emit_test_harness(bundle: &jet::Driver::CheckedSourceBundle) -> String {
     emit_native_artifact(
         bundle,
         jet_foundation::MIR::MirArtifactKind::TestExecutable,
@@ -21,7 +21,7 @@ fn emit_test_harness(bundle: &jet::AST::ProgramBundle) -> String {
 }
 
 fn emit_native_artifact(
-    bundle: &jet::AST::ProgramBundle,
+    bundle: &jet::Driver::CheckedSourceBundle,
     kind: jet_foundation::MIR::MirArtifactKind,
     mode: jet_foundation::MIR::MirArtifactBuildMode,
 ) -> String {
@@ -30,7 +30,7 @@ fn emit_native_artifact(
         kind,
         mode,
     );
-    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(&bundle.bundle, &bundle.checked_nominals, request)
         .expect("checked native artifact lowers through MIR");
     mir.validate()
         .expect("canonical MIR validates in output-callable test");
@@ -54,15 +54,15 @@ fn checked_bundle(
     source: &str,
     tag: &str,
     mode: jet::Sema::CompileMode,
-) -> jet::AST::ProgramBundle {
+) -> jet::Driver::CheckedSourceBundle {
     let dir = common::unique_tmp(tag);
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.jet");
     std::fs::write(&file, source).unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, mode);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
-    bundle
+    jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals)
 }
 
 #[test]
@@ -168,8 +168,9 @@ fn aot_dev_and_jit_consume_the_resolved_entry() {
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
 
     let rust = emit_native_aot(&bundle);
     assert!(rust.contains("match __jet_start()"), "{rust}");
@@ -240,7 +241,7 @@ fn qualified_entry_keeps_one_definition_and_effect_identity() {
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let (diagnostics, facts) =
+    let (diagnostics, facts, nominals) =
         jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     let output = bundle.modules[bundle.entry]
@@ -261,6 +262,7 @@ fn qualified_entry_keeps_one_definition_and_effect_identity() {
     assert!(facts.name_ledger.references().values().any(|anchor| {
         anchor.module_path == output.source_path && anchor.def_span == output.definition
     }));
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let rust = emit_native_aot(&bundle);
     assert!(rust.contains("__jet_helper::__jet_start()"), "{rust}");
     assert!(matches!(
@@ -301,7 +303,7 @@ fn qualified_entry_follows_nested_quoted_import_graph() {
     .unwrap();
 
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     let outputs = bundle.modules[bundle.entry]
         .items
@@ -331,6 +333,7 @@ fn qualified_entry_follows_nested_quoted_import_graph() {
     assert_eq!(reexported.source_name, "run");
     assert!(reexported.source_path.ends_with("src/cli.jet"));
 
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let rust = emit_native_aot(&bundle);
     assert!(rust.contains("__jet_command::__jet_run()"), "{rust}");
     assert!(matches!(
@@ -554,7 +557,7 @@ fn checked_default_selects_one_of_multiple_executables() {
         "jet_output_checked_default",
         jet::Sema::CompileMode::Run,
     );
-    let selected = bundle.modules[bundle.entry]
+    let selected = bundle.bundle.modules[bundle.bundle.entry]
         .items
         .iter()
         .find_map(|item| {
@@ -660,8 +663,9 @@ fn check_outputs_are_plural_real_test_harness_entries_without_test_blocks() {
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Test);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Test);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let rust = emit_test_harness(&bundle);
     assert_eq!(rust.matches("// jet-mir-output-check:").count(), 2, "{rust}");
     assert_eq!(rust.matches("fn __jet_output_check_").count(), 2, "{rust}");
@@ -721,11 +725,12 @@ fn typed_executable_output_reuses_the_checked_cli_schema() {
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     let schema = jet_foundation::CLISchema::entry_schema_for_bundle(&bundle)
         .expect("typed Output owns one checked CLI schema");
     assert_eq!(schema.entry_type, "Args");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     let rust = emit_native_aot(&bundle);
     assert!(rust.contains("jet_args_option_base"), "{rust}");
     assert!(rust.contains("__jet_launch(__jet_cli_0)"), "{rust}");

@@ -18,7 +18,8 @@ fn lower_checked(source: &str) -> jet_foundation::MIR::MirProgram {
     std::fs::write(&entry, source).unwrap();
 
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, _, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics
         .into_iter()
         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect();
@@ -29,7 +30,7 @@ fn lower_checked(source: &str) -> jet_foundation::MIR::MirProgram {
         MirArtifactKind::NativeExecutable,
         MirArtifactBuildMode::Dev,
     );
-    jet::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
+    jet::Codegen::TIR::lower_checked_mir_program_for(&bundle, &nominals, request)
         .expect("checked bundle lowers through the public MIR optimizer path")
         .0
 }
