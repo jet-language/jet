@@ -331,15 +331,19 @@ fn fx_constant_marker_type() -> MIRType Never! {
     mir_type_from_kind(MIRTypeKind.Map{key: fx_string(), value: fx_string()})
 }
 
-fn fx_constant_map_read(b: &FxBuilder, map: MIRValueID, name: String) Never! {
-    key :: fx_strings_literal(&b, name)
+fn fx_constant_map_key_read(b: &FxBuilder, map: MIRValueID, key: MIRValueID) Never! {
     value :: fx_value(&b, fx_string(), fx_borrow(), MIROperation.Index{
         call: fx_prelude_id("core.list", "get"), base: map, index: key,
         kind: MIRIndexKind.Map, access: MIRAccess.Read,
         location: MIRPanicLoc{file: fx_source_file(), line: 1, column: 0},
-        context: MIRPanicContext{function: "run", source_line: "status[name]", caret: 1, locals: [MIRPanicLocal]{}},
+        context: MIRPanicContext{function: "run", source_line: "status[key]", caret: 1, locals: [MIRPanicLocal]{}},
     })
     fx_print(&b, value)
+}
+
+fn fx_constant_map_read(b: &FxBuilder, map: MIRValueID, name: String) Never! {
+    key :: fx_strings_literal(&b, name)
+    fx_constant_map_key_read(&b, map, key)
     fx_do(&b, MIROperation.Drop{value: key, kind: MIRDropKind.Value})
 }
 
@@ -369,4 +373,33 @@ fn fx_constants_map() -> MIRProgram Never! {
     fx_do(&b, MIROperation.Drop{value: empty, kind: MIRDropKind.Value})
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     fx_constant_map_program(b)
+}
+
+// MIRConstKey has no width; high U64 keys therefore arrive as decimal BigInt.
+// Both literal and frozen builders must recover the checked unsigned ordering.
+// expect-stdout constants-map-u64: "ZERO\nHIGH\nMAX\nZERO\nHIGH\nMAX\n"
+// expect-static-only constants-map-u64
+fn fx_constants_map_u64() -> MIRProgram Never! {
+    b := fx_builder()
+    map_ty :: mir_type_from_kind(MIRTypeKind.Map{key: fx_narrow(false, 64), value: fx_string()})
+    constant :: MIRConstant.Map{entries: [MIRConstMapEntry]{
+        MIRConstMapEntry{key: MIRConstKey.BigInt{decimal: "18446744073709551615"}, value: MIRConstant.String{value: "MAX"}},
+        MIRConstMapEntry{key: MIRConstKey.Int{value: 0}, value: MIRConstant.String{value: "ZERO"}},
+        MIRConstMapEntry{key: MIRConstKey.BigInt{decimal: "9223372036854775808"}, value: MIRConstant.String{value: "HIGH"}},
+    }}
+    literal :: fx_owned(&b, map_ty, MIROperation.Constant{value: constant})
+    global :: fx_owned(&b, map_ty, MIROperation.Global{name: "fixture.unsigned_status"})
+    keys :: [MIRValueID]{
+        fx_narrow_const(&b, false, 64, 0),
+        fx_narrow_const(&b, false, 64, 9223372036854775808),
+        fx_narrow_const(&b, false, 64, 18446744073709551615),
+    }
+    loop map in ([MIRValueID]{literal, global}) {
+        loop key in keys -> fx_constant_map_key_read(&b, map, key)
+        fx_do(&b, MIROperation.Drop{value: map, kind: MIRDropKind.Value})
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_constant_map_program(b)
+    p.constants = [MIRConstantDef]{fx_static_definition("unsigned_status", map_ty, constant)}
+    p
 }

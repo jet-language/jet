@@ -116,6 +116,13 @@ fn lower_big_int_constant(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, d
     lower_call_runtime(&m, &f, "jet_rt_int_from_static", args, Val(dst))
 }
 
+// Untyped MIR map keys retain large U64s as decimal BigInt. Their checked
+// destination recovers the machine-word bit pattern, not an exact-Int owner.
+fn lower_constant_u64_bits(decimal: String) -> Int Never! {
+    value :: Int.parse(decimal) ?? panic("checked U64 constant is not decimal")
+    lower_wide_word(value)
+}
+
 // Pack a checked machine-float literal into its native carrier. Binary32 is
 // an unsigned low-word payload, rounded once from the MIR's binary64 value.
 // Integer rounding keeps ties-to-even, subnormals and signed zero independent
@@ -196,6 +203,10 @@ fn lower_constant_tree_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, 
             else -> lower_emit(&f, LIRInst.Const{dst: dst, value: value})
         }
         .BigInt(decimal) -> {
+            if lower_is_unsigned_word(ty) {
+                lower_emit(&f, LIRInst.Const{dst: dst, value: lower_constant_u64_bits(decimal)})
+                return Val(dst)
+            }
             if !lower_is_exact_int(ty) {
                 lower_fail(&m, &f, "BigInt constant of a non-Int type is not lowered at O0 yet")
                 return None

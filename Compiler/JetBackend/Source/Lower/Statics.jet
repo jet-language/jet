@@ -269,6 +269,7 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
             return Val(lower_static_pointer(id))
         }
         .BigInt(decimal) -> {
+            if lower_is_unsigned_word(ty) -> return Val(lower_static_word(lower_constant_u64_bits(decimal)))
             if !lower_is_exact_int(ty) {
                 lower_fail(&m, &f, "BigInt constant of a non-Int type is not lowered at O0 yet")
                 return None
