@@ -1,5 +1,5 @@
 use super::refusal;
-use crate::AST::{Func, Stmt, Type};
+use crate::AST::{Func, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::is_covered_enum_ty;
 use crate::Codegen::TIR::is_covered_struct_ty;
@@ -78,17 +78,6 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     f.body
         .iter()
         .all(|statement| stmt_in_subset(statement, cx, &mut locals))
-}
-
-/// c109: is an error-conversion `impl Old -> New { … }` body fully inside the TIR subset?
-/// The body has the Old value bound as `self`, returns the New type, and is emitted at
-/// indent 1 inside the `pub fn <conv>(user_self: Old) -> New` `emit_error_conv` opens.
-/// The signature/braces are fixed by `emit_error_conv`; only the body statements gate.
-pub(crate) fn tir_covers_error_conv_body(body: &[Stmt], cx: &Cx) -> bool {
-    refusal::begin();
-    let mut locals: HashSet<String> = HashSet::new();
-    locals.insert(Syntax::KW_SELF.to_string());
-    body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
 }
 
 /// c109 Phase 7: is this method (an inherent method of `type_name`) fully inside

@@ -1979,29 +1979,32 @@ fn generic_template_param_types<'a>(
         .collect()
 }
 
+/// D-GENERIC-CALL1=A: sema records every checked instantiation, spelled or
+/// inferred, on the call node. Those type arguments are the instance
+/// identity. Rebinding the template against lowered argument values would
+/// read a call result's failure carrier (`Result<Expr<Bool>, Err>`) as its
+/// source type and silently skip the instance; module generics made the same
+/// cut in `demand_module_generic_function`. The lowered arguments are not
+/// consulted.
 pub(crate) fn demand_generic_free_function(
     cx: &Cx,
     name: &str,
-    args: &[TCallArg],
-    explicit_type_args: &[Type],
+    _args: &[TCallArg],
+    checked_type_args: &[Type],
 ) -> Option<String> {
     let type_param_names = cx.fn_type_param_order.get(name)?;
-    if type_param_names.is_empty() {
+    if type_param_names.is_empty() || checked_type_args.len() != type_param_names.len() {
         return None;
     }
-    let sig = cx.fact_sigs(name)?;
-    let param_types = generic_template_param_types(cx, sig.iter().map(|(_, ty)| ty));
-    let shape = generic_call_shape(args, explicit_type_args);
-    let subst = generic_call_substitution(&param_types, type_param_names, &shape)?;
-    let type_args = type_param_names
+    let type_args = checked_type_args
         .iter()
-        .map(|param| subst.get(param).cloned())
-        .collect::<Option<Vec<_>>>()?;
+        .map(|ty| cx.expand_type_aliases(ty))
+        .collect::<Vec<_>>();
     cx.jit_generic_calls
         .borrow_mut()
         .entry(name.to_string())
         .or_default()
-        .push(shape);
+        .push(type_args.clone());
     Some(generic_free_function_instance_key(name, &type_args))
 }
 
@@ -2205,19 +2208,32 @@ fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TF
             if template.type_params.is_empty() || (variadic && unique.len() != 1) {
                 continue;
             }
-            let param_types = generic_template_param_types(
-                cx,
-                template.params.iter().map(|param| &param.ty),
-            );
             let type_param_names = template
                 .type_params
                 .iter()
                 .map(|param| param.name.clone())
                 .collect::<Vec<_>>();
+            let param_types = variadic.then(|| {
+                generic_template_param_types(cx, template.params.iter().map(|param| &param.ty))
+            });
             for actuals in unique {
-                let Some(subst) =
-                    generic_call_substitution(&param_types, &type_param_names, &actuals)
-                else {
+                // An ordinary generic call records sema's checked type
+                // arguments (`demand_generic_free_function`). A trait-bounded
+                // variadic's per-arity `JaiVarN` binders are synthesized after
+                // sema, so only its argument shape can bind them.
+                let subst = match &param_types {
+                    Some(param_types) => {
+                        generic_call_substitution(param_types, &type_param_names, &actuals)
+                    }
+                    None => (actuals.len() == type_param_names.len()).then(|| {
+                        type_param_names
+                            .iter()
+                            .cloned()
+                            .zip(actuals.iter().cloned())
+                            .collect::<std::collections::HashMap<_, _>>()
+                    }),
+                };
+                let Some(subst) = subst else {
                     continue;
                 };
                 let type_args = type_param_names
@@ -5613,12 +5629,10 @@ fn lower_checked_tir_program_on_stack(
                 {
                     funcs.push(lower_test_item(test, &entry_module_identity, &cx));
                 }
-                Item::ErrorConv(ec) => {
-                    if !tir_covers_error_conv_body(&ec.body, &cx) {
-                        continue;
-                    }
-                    funcs.push(lower_error_conv(ec, &cx));
-                }
+                // A checked error conversion always lowers, like a named fn or
+                // test: there is no AST fallback, so a subset gate here would
+                // drop a reachable `?` conversion body without a report.
+                Item::ErrorConv(ec) => funcs.push(lower_error_conv(ec, &cx)),
                 Item::Struct(s) => {
                     if s.type_params.is_empty() {
                         for m in &s.methods {
@@ -11726,28 +11740,23 @@ fn lowered_cost_function_matches(lowered: &str, expected: &str) -> bool {
 }
 
 fn cost_callable_lowered_name(bundle: &ProgramBundle, callable: &TCostCallable) -> Option<String> {
-    if callable.module == bundle.entry {
-        return Some(if callable.method {
-            callable.declaration_name.replace('.', "::")
-        } else {
-            callable.declaration_name.clone()
-        });
-    }
     if callable.method {
+        // Lowering names a method `{Owner}::{method}` with the owner's checked
+        // declaration name verbatim; a compiler-generated nested owner keeps
+        // its dot (`Employee.Patch::merge`, `Payment.Client::Hello`).
+        let (owner_type, method) = cost_callable_owner_and_name(callable);
+        if callable.module == bundle.entry {
+            return Some(format!("{owner_type}::{method}"));
+        }
         // D-MOD-CYCLE1=A: an impl in a package sibling lowers under the
         // identity of the file that declares its owner type.
-        let owner_type = callable
-            .declaration_name
-            .split('.')
-            .next()
-            .unwrap_or(&callable.declaration_name);
         let owner = bundle
             .name_ledger
             .module_identity(impl_owner_module(bundle, callable.module, owner_type))?;
-        return Some(format!(
-            "{owner}::{}",
-            callable.declaration_name.replace('.', "::")
-        ));
+        return Some(format!("{owner}::{owner_type}::{method}"));
+    }
+    if callable.module == bundle.entry {
+        return Some(callable.declaration_name.clone());
     }
     let module = bundle.modules.get(callable.module)?;
     let module_alias = bundle.name_ledger.module_alias(callable.module)?;

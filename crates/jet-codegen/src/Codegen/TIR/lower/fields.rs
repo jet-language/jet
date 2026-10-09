@@ -995,6 +995,12 @@ fn substitute_call_type(
     for (param, actual) in order.iter().zip(type_args) {
         subst.insert(param.clone(), cx.expand_type_aliases(actual));
     }
+    // D-GENERIC-CALL1=A: a complete checked instantiation is authoritative.
+    // Rebinding against lowered argument values would read a call result's
+    // failure carrier as its source type, fail, and leak the binder (`Expr<T>`).
+    if !type_args.is_empty() && type_args.len() == order.len() {
+        return crate::Generics::substitute_type(&declared, &subst);
+    }
     if let Some(sig) = cx.fact_sigs(name) {
         for ((_, template), actual) in sig.iter().zip(args) {
             let actual_ty = if actual.widen_to_vec {
