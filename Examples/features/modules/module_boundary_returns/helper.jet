@@ -1,0 +1,35 @@
+use core.time as time
+use core.math as math
+
+pub struct Secret { pub value: String }
+
+#Error
+pub enum FormError {
+    Empty
+}
+
+pub fn double(value: Int) -> Int { value * 2 }
+
+pub fn parse_count(text: String) -> Int Err! {
+    if text == "" -> return Err("empty")
+    Ok(text.len())
+}
+
+pub fn checked_len(text: String) -> Int FormError! {
+    if text == "" -> return Err(FormError.Empty)
+    Ok(text.len())
+}
+
+pub fn reveal(secret: Secret) -> String { secret.value }
+
+pub fn first<T>(items: [T]) -> T { items[0] }
+
+pub struct Crate<T> { pub item: T }
+
+pub fn unpack<T>(boxed: Crate<T>) -> T { boxed.item }
+
+// A generic function specialized for its caller still reaches the Core
+// functions its own module imports.
+pub fn at_least_one<T>(items: [T]) -> Int { math.max(items.len(), 1) }
+
+pub fn pause() -> time.Duration { 250ms }

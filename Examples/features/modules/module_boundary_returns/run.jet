@@ -1,0 +1,35 @@
+// A module's calls cross the module boundary as the module declares them:
+// a compile-time fold through qualified calls, a Result return handled by the
+// caller's `??`, a failure the caller propagates under the module's error
+// type, a record parameter, generic calls, and a Core leaf spelled through a
+// module alias (`time.Duration`) that is the Core type itself.
+use core.time as time
+
+module helper
+use helper.[Crate]
+
+FOLDED :: prep { helper.double(20) + helper.double(1) }
+
+fn wait_ms(span: time.Duration) -> Int { span.in(.Milliseconds) }
+
+fn total(text: String) -> Int helper.FormError! {
+    count :: helper.checked_len(text)
+    Ok(count + 1)
+}
+
+// The parameter spells the generic head through the module; the argument was
+// built through the member import. Both name the module's one `Crate`.
+fn spelled(boxed: helper.Crate<String>) -> String { helper.unpack(boxed) }
+
+fn run() {
+    print("folded {FOLDED}")
+    print("count {helper.parse_count("abc") ?? 0} {helper.parse_count("") ?? -1}")
+    print("total {total("ab") ?? 0} {total("") ?? -1}")
+    secret :: helper.Secret{value: "ok"}
+    print("secret {helper.reveal(secret)} {helper.first(["x", "y"])}")
+    print("generic {helper.at_least_one([Int]{})} {helper.at_least_one(["a", "b"])}")
+    loose :: Crate<Int>{item: 5}
+    named :: Crate<String>{item: "s"}
+    print("aligned {helper.unpack(loose)} {spelled(named)}")
+    print("wait {wait_ms(helper.pause())}")
+}
