@@ -4537,6 +4537,17 @@ fn carrier_trait_signatures(methods: &str) -> String {
     out
 }
 
+/// `core.encoding.dyn` members whose Prelude kernels live in `jet_std`
+/// (`DynRuntime.rs`): the checked index, lookup, length, arithmetic and setter
+/// surface. The remaining members are flat `JetDynAccess` ABI wrappers.
+fn dyn_runtime_member(member: &str) -> bool {
+    matches!(
+        member,
+        "index_key" | "index_at" | "get_key" | "get_at" | "has" | "keys" | "remove" | "len"
+            | "binary" | "compare" | "set_path"
+    )
+}
+
 fn is_net_tls_client_bridge_call(symbol: &MirSymbol) -> bool {
     matches!(
         symbol,
@@ -4863,6 +4874,93 @@ fn run() {
         )));
     }
 
+}
+
+#[cfg(test)]
+mod dyn_route_tests {
+    /// The checked Dyn surface of `Examples/features/dyn/fields.jet`.
+    const DYN_FIELDS: &str = r#"
+fn run() {
+    row := Dyn.object()
+    row.price = 2.5
+    row.qty = 4
+    row.note = "sale"
+    print(row.price * row.qty)
+    print(row.get("discount")?.to_text() ?? "none")
+    row.qty = "four"
+    loop key in row.keys() -> print("{key} = {row[key]}")
+    print(row.has("note"))
+    print(row.len())
+    removed :: &row.remove("note")
+    print(removed?.to_text() ?? "none")
+    row["len"] = 3
+    print(row["len"])
+}
+"#;
+
+    fn emitted_rust(src: &str) -> String {
+        let (bundle, nominal_facts) = crate::Codegen::TIR::tests::checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (program, artifact) =
+            crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, &nominal_facts, request)
+                .expect("checked Dyn fixture lowers");
+        let mut execution = super::MirRustExecutionConfig::for_artifact(artifact);
+        execution.emit_types = false;
+        execution.emit_runtime = false;
+        super::emit_mir_program(
+            &program,
+            &super::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: super::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution,
+            },
+        )
+    }
+
+    /// `DynRuntime.rs` is included inside `jet_std`; a flat kernel name does
+    /// not resolve in the generated program.
+    #[test]
+    fn dyn_surface_kernels_resolve_through_jet_std() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let rust = emitted_rust(DYN_FIELDS);
+            for kernel in ["set_path", "index_key", "binary", "get_key", "keys", "has", "len", "remove"] {
+                let call = format!("jet_dyn_{kernel}(");
+                let mut calls = 0;
+                for (at, _) in rust.match_indices(&call) {
+                    assert!(
+                        rust[..at].ends_with("jet_std::"),
+                        "Dyn kernel `{call}` is not routed through jet_std:\n{rust}"
+                    );
+                    calls += 1;
+                }
+                assert!(calls > 0, "Dyn kernel `{call}` was not emitted:\n{rust}");
+            }
+        });
+    }
+
+    /// `jet_codec_encode::<String>` borrows `&T`: a String literal crosses as
+    /// a `&String`, never as bare `&str` text.
+    #[test]
+    fn string_literal_lent_to_generic_prelude_formal_is_a_string_borrow() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let rust = emitted_rust(DYN_FIELDS);
+            let mut calls = 0;
+            for (at, _) in rust.match_indices("jet_codec_encode::<String>(") {
+                let call = rust[at..].lines().next().expect("encode call line");
+                assert!(
+                    !call.contains(", \"sale\")") && !call.contains(", \"four\")"),
+                    "String literal crossed a generic `&T` formal as `&str`: {call}\n{rust}"
+                );
+                calls += 1;
+            }
+            assert!(calls >= 2, "both String Dyn writes encode their value:\n{rust}");
+        });
+    }
 }
 
 pub(crate) fn append_web_time_zones(out: &mut String) -> std::io::Result<()> {
@@ -8569,7 +8667,15 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn prelude_symbol(&self, id: MirPreludeCallId) -> String {
-        match &self.prelude_row(id).symbol {
+        let row = self.prelude_row(id);
+        match &row.symbol {
+            // The checked Dyn surface kernels (`DynRuntime.rs`) live inside
+            // `jet_std`; only the thin `JetDynAccess` ABI wrappers are flat.
+            MirSymbol::Prelude(symbol)
+                if row.module == "core.encoding.dyn" && dyn_runtime_member(&row.member) =>
+            {
+                format!("{}jet_std::{symbol}", self.config.root_prefix)
+            }
             MirSymbol::Prelude(symbol) => {
                 if symbol == "jet_plugin_call"
                     || symbol.starts_with("jet_crypto_")
@@ -21631,7 +21737,12 @@ impl<'a> RustEmitter<'a> {
         Some(literal)
     }
 
-    /// Read String parameters borrow static literal text without an owner allocation.
+    /// A borrowed read of a String literal whose String is never built lends
+    /// a process-lifetime String built once on first use (`&'static String`).
+    /// The caller does not know the formal's carrier: `&String`, a generic
+    /// `&T`, and a read text `&str` (through deref coercion) all accept it,
+    /// where bare literal text satisfies only `&str`. A no-OS build has no
+    /// `LazyLock`: it keeps the per-use String.
     fn static_string_literal_reference(
         &self,
         function: &MirFunction,
@@ -21643,7 +21754,9 @@ impl<'a> RustEmitter<'a> {
             return None;
         }
         let text = self.literal_string_value(function, value)?;
-        Some(format!("{text:?}"))
+        Some(format!(
+            "{{ static __JET_LITERAL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {text:?}.to_owned()); &*__JET_LITERAL }}"
+        ))
     }
 
     fn borrowed_literal_symbol(symbol: &str) -> bool {
@@ -33074,8 +33187,13 @@ impl<'a> RustEmitter<'a> {
             ) {
                 return self.borrowed_value_reference(function, arg.value, MirAccess::Read);
             }
-            if let Some(reference) = self.static_string_literal_reference(function, arg.value) {
-                return reference;
+            // A literal whose String is never built (`literal_borrow_only`)
+            // lends its static String; a built literal lends its slot. Bare
+            // literal text would satisfy only a `&str` formal.
+            if self.literal_borrow_only(function, arg.value) {
+                if let Some(reference) = self.static_string_literal_reference(function, arg.value) {
+                    return reference;
+                }
             }
             return self.value_slot_reference(arg.value, false);
         }
