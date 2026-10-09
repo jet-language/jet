@@ -135,7 +135,7 @@ pub fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threa
             report.acceleration_facts += function.optimization.acceleration_facts.len()
             report.decision_rows += function.optimization.decision_rows.len()
         }
-        validation = mir_pass_lint(program, .CanonicalLoopFacts)
+        validation = mir_pass_lint_wave(&program, .CanonicalLoopFacts, threads)
         if validation == .Val(error) -> return mir_optimizer_failed(error, report)
         return mir_optimizer_succeeded(report)
     }
@@ -189,7 +189,7 @@ pub fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threa
         validation = mir_pass_validate_wave(&program, .CanonicalLoopFacts, threads)
         if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     }
-    validation = mir_pass_lint(program, .CanonicalLoopFacts)
+    validation = mir_pass_lint_wave(&program, .CanonicalLoopFacts, threads)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     report.decision_rows = mir_pass_derive_decision_rows(&program)
     mir_pass_sort_decision_rows_for_program(&program)
@@ -473,7 +473,7 @@ fn mir_pass_wave_slots(slots: [Shared<MIRPassWaveSlot>], from: Int, first: Int, 
 fn mir_pass_check(program: &MIRProgram, pass: MIROptimizationPassID, lint: Bool, threads: CompilerThreads) -> MIROptimizationError? {
     validation :: mir_pass_validate_wave(&program, pass, threads)
     if validation != None || !lint -> return validation
-    mir_pass_lint(program, pass)
+    mir_pass_lint_wave(&program, pass, threads)
 }
 
 // The check after `pass`: legality and MIR Lint, only under full
@@ -487,6 +487,44 @@ fn mir_pass_validate_after(program: &MIRProgram, pass: MIROptimizationPassID, fu
 fn mir_pass_lint(program: MIRProgram, pass: MIROptimizationPassID) -> MIROptimizationError? {
     failure :: mir_lint_program(program) ?? return None
     Val(mir_pass_lint_error(pass, failure))
+}
+
+// mir_pass_lint on up to `threads` threads. The lint index is built once
+// over the whole program; then each part lints its functions, moved into its
+// slot, in program order, and the first failure of the first failing part is
+// the result: the program's first failure in program order, as on one thread.
+// Every part joins and every function moves back before the result returns.
+fn mir_pass_lint_wave(program: &MIRProgram, pass: MIROptimizationPassID, threads: CompilerThreads) -> MIROptimizationError? {
+    plan :: mir_pass_wave_plan(program, threads)
+    if plan.workers <= 1 -> return mir_pass_lint(program, pass)
+    shared_index :: shared mir_lint_index(program)
+    slots :: mir_pass_wave_take(&program, plan)
+    failures :: mir_pass_lint_slots(slots, 0, shared_index)
+    loop slot in slots -> mir_pass_wave_restore(&program, slot)
+    if failures.len() == 0 -> return None
+    Val(mir_pass_lint_error(pass, failures[0]))
+}
+
+// One thread: lints its slot's functions on its own copy of the index; the
+// part stops at its first failure (at most one is returned).
+fn mir_pass_lint_slot(slot: Shared<MIRPassWaveSlot>, shared_index: Shared<MIRLintIndex>) -> [MIRLintError] {
+    index := shared_index.guard_read().value
+    permit := slot.guard_edit()
+    mir_lint_owned_part(^index, &permit.value.functions, false)
+}
+
+// Lints `slots[from..]`, one task per slot and the last slot on this thread;
+// returns the first failure in part order (at most one).
+fn mir_pass_lint_slots(slots: [Shared<MIRPassWaveSlot>], from: Int, shared_index: Shared<MIRLintIndex>) -> [MIRLintError] {
+    if from >= slots.len() - 1 -> return mir_pass_lint_slot(slots[from], shared_index)
+    failures := [MIRLintError]{}
+    task.group optimizer_threads {
+        head :: task mir_pass_lint_slot(slots[from], shared_index)
+        rest :: mir_pass_lint_slots(slots, from + 1, shared_index)
+        failures = head.join() ?? panic(compiler_threads_failure_text(err))
+        if failures.len() == 0 -> failures = rest
+    }
+    failures
 }
 
 // The read-only rows every part of a legality wave checks against.
