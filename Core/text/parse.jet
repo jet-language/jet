@@ -714,6 +714,13 @@ fn escape_c(text: String) -> String Never! {
     out
 }
 
+// The byte-oriented padding contract retains the first fill byte, or a space.
+// Restored with ascii_case from the pre-merge implementation (2aa8b0349).
+fn fill_to(fill: String) -> String {
+    if fill.bytes().len() == 0 -> return " "
+    slice_b(fill.bytes(), 0, 1)
+}
+
 fn repeat_char(ch: String, n: Int) -> String {
     s := ""
     i := 0
@@ -724,3 +731,21 @@ fn repeat_char(ch: String, n: Int) -> String {
     s
 }
 
+
+fn ascii_case(b: U8, upper: Bool) -> U8 {
+    n :: b
+    if upper {
+        if n >= 97 && n <= 122 -> return (U8{n - 32})
+        return b
+    }
+    if n >= 65 && n <= 90 -> return (U8{n + 32})
+    b
+}
+
+#Test("parse padding and ASCII capitalization retain their byte contract") {
+    assert_eq(ljust("a", 3, ""), "a  ")
+    assert_eq(rjust("a", 3, "_"), "__a")
+    assert_eq(center("a", 4, "_"), "_a__")
+    assert_eq(capitalize("hELLO"), "Hello")
+    assert_eq(title("hELLO wORLD"), "Hello World")
+}
