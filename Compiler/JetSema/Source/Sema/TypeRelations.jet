@@ -6,6 +6,7 @@ use jet_foundation.[
     FunctionCallMetadata,
     FunctionObligations,
     InternalTag,
+    NamedSpan,
     ParamZone,
     Span,
     Symbol,
@@ -797,12 +798,100 @@ fn sema_type_bound_satisfied_resolved(graph: SemaRegistrationGraph, actual_resol
     return Val(false)
 }
 
+// Rust `TraitRegistry::type_implements_trait`/`implements_trait` for a bound
+// that names an undeclared builtin trait (Generics::BUILTIN_TRAITS): scalars
+// satisfy the builtin family, containers recurse, and a nominal needs an impl,
+// trait block or derive of that trait name.
+fn sema_type_builtin_bound_satisfied(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller_module_identity: String, generic_params: [TGenericParam]) -> Bool? {
+    scalar_family :: bound_name != "Close" && bound_name != "CheckedText"
+    arithmetic :: bound_name == "Add" || bound_name == "Sub" || bound_name == "Mul" || bound_name == "Div"
+    structural :: bound_name == "Equatable" || bound_name == "Comparable"
+    if actual_resolved == {
+        .Int | .Float -> return Val(scalar_family)
+        .Bool | .String | .Char -> return Val(scalar_family && !arithmetic && bound_name != "Numeric")
+        .IntN(_, _) | .InlineRange(_, _, _) | .Float32 -> return Val(scalar_family)
+        .List(inner) | .Option(inner) | .FixedList(inner, _) -> {
+            if structural -> return sema_type_bound_satisfied_with_generics(graph, inner, bound_name, caller_module_identity, generic_params)
+        }
+        .Map(key, _, value) -> {
+            if bound_name == "Equatable" {
+                key_ok :: sema_type_bound_satisfied_with_generics(graph, key, bound_name, caller_module_identity, generic_params) ?? return None
+                if !key_ok -> return Val(false)
+                return sema_type_bound_satisfied_with_generics(graph, value, bound_name, caller_module_identity, generic_params)
+            }
+        }
+        .Result(ok, err) -> {
+            if structural {
+                ok_ok :: sema_type_bound_satisfied_with_generics(graph, ok, bound_name, caller_module_identity, generic_params) ?? return None
+                if !ok_ok -> return Val(false)
+                return sema_type_bound_satisfied_with_generics(graph, err, bound_name, caller_module_identity, generic_params)
+            }
+        }
+        .Tuple(fields) -> {
+            if structural {
+                loop field in fields {
+                    field_ok :: sema_type_bound_satisfied_with_generics(graph, field.ty, bound_name, caller_module_identity, generic_params) ?? return None
+                    if !field_ok -> return Val(false)
+                }
+                return Val(true)
+            }
+        }
+        .TraitObject(bounds) -> return Val(bounds.contains(bound_name))
+        .Tagged(_, inner) -> return sema_type_bound_satisfied_with_generics(graph, inner, bound_name, caller_module_identity, generic_params)
+        .Named(name) -> {
+            if sema_type_name_is_generic(generic_params, name) -> return None
+            if (name == "Decimal" || name == "Fraction") && (bound_name == "Numeric" || bound_name == "Add" || bound_name == "Sub" || bound_name == "Mul" || bound_name == "Comparable") -> return Val(true)
+        }
+        else -> {}
+    }
+    nominal_row :: sema_type_resolve_nominal_row(graph, actual_resolved, caller_module_identity) ?? return None
+    nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+    unresolved_impl := false
+    loop graph_module in graph.modules {
+        loop implementation in graph_module.impls {
+            if implementation.trait_name != (Val(bound_name)) -> next
+            target_matches :: sema_type_graph_impl_matches_nominal(graph, implementation, nominal) ?? {
+                unresolved_impl = true
+                next
+            }
+            if target_matches -> return Val(true)
+        }
+    }
+    if nominal.source == .SourceAST(item) {
+        blocks := [TraitImplBlock]{}
+        derives := [NamedSpan]{}
+        if item == {
+            .Struct(definition) -> {
+                blocks = definition.trait_impls
+                derives = definition.derives
+            }
+            .Enum(definition) -> {
+                blocks = definition.trait_impls
+                derives = definition.derives
+            }
+            .Distinct(definition) -> derives = definition.derives
+            else -> {}
+        }
+        loop block in blocks {
+            if block.trait_name == bound_name -> return Val(true)
+        }
+        loop derive in derives {
+            if derive.name == bound_name -> return Val(true)
+        }
+    }
+    if unresolved_impl || !graph.complete -> return None
+    Val(false)
+}
+
 pub fn sema_type_bound_satisfied_with_generics(graph: SemaRegistrationGraph, actual: Type, bound_name: String, caller_module_identity: String, generic_params: [TGenericParam]) -> Bool? {
     actual_resolved :: sema_type_resolve_declared_with_generics(graph, actual, caller_module_identity, generic_params)
     structural :: sema_type_codec_structural_bound(graph, actual_resolved, bound_name, caller_module_identity, generic_params)
     if structural != None -> return structural
     generic_satisfied := sema_type_generic_bound_satisfied(graph, actual_resolved, bound_name, caller_module_identity, generic_params)
     if generic_satisfied != None -> return generic_satisfied
+    if sema_type_graph_trait_symbol(graph, caller_module_identity, bound_name) == None && sema_type_builtin_trait_symbol(bound_name) != None {
+        return sema_type_builtin_bound_satisfied(graph, actual_resolved, bound_name, caller_module_identity, generic_params)
+    }
     sema_type_bound_satisfied_resolved(graph, actual_resolved, bound_name, caller_module_identity, generic_params)
 }
 
