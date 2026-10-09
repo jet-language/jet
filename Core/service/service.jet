@@ -270,14 +270,14 @@ fn endpoint_show(endpoint: ServiceEndpoint) -> String Never! {
 fn set_delivery(tree: &ServiceTree, delivery: ServiceDelivery) ServiceError! {
     #Unsafe("Services3081: check started before the single delivery-field write") {
         if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change delivery after start"))
-        core.service.__tree_write_delivery(&tree, delivery)
+        core.service.__tree_write_delivery(&tree, ^delivery.copy())
     }
 }
 
 fn set_restart(tree: &ServiceTree, restart: ServiceRestart) ServiceError! {
     #Unsafe("Services1415: root policy write precedes each declared group policy write") {
         if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change restart policy after start"))
-        core.service.__tree_write_restart(&tree, restart)
+        core.service.__tree_write_restart(&tree, ^restart.copy())
         count :: core.service.__tree_group_count(tree)
         loop i in 0..<count -> core.service.__group_write_restart(&tree, i)
     }
@@ -325,7 +325,7 @@ fn select_state_adapter(tree: &ServiceTree, store: ServiceStateStore, schema: St
         if !valid_service_text(schema, 256) -> return Err(ServiceError.Policy("service state schema is empty, too long, or contains control characters"))
         if version < 1 -> return Err(ServiceError.Policy("service state schema version must be positive"))
         core.service.__tree_write_state_adapter(&tree, event_log)
-        core.service.__tree_write_state_authority(&tree, store.path.copy(), schema, version, migration, event_log)
+        core.service.__tree_write_state_authority(&tree, ^store.path.copy(), ^schema.copy(), version, ^migration.copy(), event_log)
     }
 }
 
@@ -514,6 +514,10 @@ fn observe(tree: ServiceTree) -> String Never! {
 // core.service is the typed Jet facade for the registered service provider.
 // Topology, authority, delivery, state, and workflow values are provider
 // handles; this source module does not recreate their runtime state.
+// Mutating tree operations take the same exclusive borrow as the typed builder.
+// Native retaining transports receive explicit moves; borrowed public inputs
+// are copied once at that boundary, while locally owned queues and mailboxes
+// move directly (mailbox copies would fork the channel).
 
 // Plain policy values retain their existing native representation while their
 // constructors and duration projection are source-owned.
@@ -540,30 +544,30 @@ struct ServiceStateStore {
 fn tree(name: String) -> ServiceTree Never! {
     #Unsafe("Allocation only: source supplies every Services.rs initializer field at 2d9953adf:1293-1319, in native evaluation order") {
         return core.service.__tree_allocate(
-            "", // native 1295: authority
-            name, // native 1296: name
+            ^"", // native 1295: authority
+            ^name.copy(), // native 1296: name
             I64{1}, // native 1297: generation
-            ServiceDelivery.AtMostOnce, // native 1298: delivery
-            ServiceRestart.OneForOne, // native 1299: restart
-            (max: I64{5}, per_ms: I64{60000}), // native 1300 / ratified_default 60-61
-            [__TreeWorker]{}, // native 1301: workers
-            [__TreeGroup]{}, // native 1302: groups
+            ^ServiceDelivery.AtMostOnce, // native 1298: delivery
+            ^ServiceRestart.OneForOne, // native 1299: restart
+            ^(max: I64{5}, per_ms: I64{60000}), // native 1300 / ratified_default 60-61
+            ^[__TreeWorker]{}, // native 1301: workers
+            ^[__TreeGroup]{}, // native 1302: groups
             false, // native 1303: started
-            __TreeStateAdapter.Empty, // native 1304: state_adapter
-            None, // native 1305: state_authority
-            None, // native 1306: snapshot
-            [String]{}, // native 1307: event_log
-            [String]{}, // native 1308: dead_letters
-            [(key: String, endpoint: ServiceEndpoint, value: String)]{}, // native 1309: idempotency_seen
-            [(key: String, endpoint: ServiceEndpoint, handler: String)]{}, // native 1310: directory
-            [String]{}, // native 1311: draining
-            [String]{}, // native 1312: partitioned
-            [__TreeWorkflowState]{}, // native 1313: workflows
-            core.service.__tree_task_group_new(), // native 1314: existing task runtime allocation
-            [__TreeSupervisorState]{}, // native 1315: supervisor_tasks
+            ^__TreeStateAdapter.Empty, // native 1304: state_adapter
+            ^None, // native 1305: state_authority
+            ^None, // native 1306: snapshot
+            ^[String]{}, // native 1307: event_log
+            ^[String]{}, // native 1308: dead_letters
+            ^[(key: String, endpoint: ServiceEndpoint, value: String)]{}, // native 1309: idempotency_seen
+            ^[(key: String, endpoint: ServiceEndpoint, handler: String)]{}, // native 1310: directory
+            ^[String]{}, // native 1311: draining
+            ^[String]{}, // native 1312: partitioned
+            ^[__TreeWorkflowState]{}, // native 1313: workflows
+            ^core.service.__tree_task_group_new(), // native 1314: existing task runtime allocation
+            ^[__TreeSupervisorState]{}, // native 1315: supervisor_tasks
             I64{0}, // native 1316: chaos_fails
             I64{0}, // native 1317: previous_generation
-            None // native 1318: last_upgrade
+            ^None // native 1318: last_upgrade
         )
     }
 }
@@ -878,7 +882,7 @@ fn workflow_start(tree: &ServiceTree, id: String, version: Int) -> ServiceWorkfl
         }
         if maximum == 9223372036854775807 -> return Err(ServiceError.Policy("workflow run id exhausted"))
         run_id :: maximum + 1
-        if core.service.__workflow_append(&tree, "workflow-start:{run_id}:{version}:{workflow_frame(id)}") == {
+        if core.service.__workflow_append(&tree, ^"workflow-start:{run_id}:{version}:{workflow_frame(id)}") == {
             .Err(error) -> return Err(error)
             .Ok(_) -> {}
         }
@@ -912,7 +916,7 @@ fn workflow_step(tree: &ServiceTree, run_id: Int, step: String) ServiceError! {
         }
         if core.service.__workflow_outcome_at(tree, index) != None -> return Err(ServiceError.Policy("workflow step follows a terminal workflow outcome"))
         if core.service.__workflow_steps_len(tree, index) >= 100000 -> return Err(ServiceError.Policy("workflow step history limit exceeded"))
-        if core.service.__workflow_append(&tree, "workflow-step:{run_id}:{workflow_frame(step)}") == {
+        if core.service.__workflow_append(&tree, ^"workflow-step:{run_id}:{workflow_frame(step)}") == {
             .Err(error) -> return Err(error)
             .Ok(_) -> {}
         }
@@ -964,7 +968,7 @@ fn workflow_activity(tree: &ServiceTree, run_id: Int, activity: String, key: Str
         }
         if core.service.__workflow_outcome_at(tree, index) != None -> return Err(ServiceError.Policy("workflow activity follows a terminal workflow outcome"))
         payload :: "workflow-activity:{run_id}:1:{max_attempts}:{workflow_frame(activity)}{workflow_frame(key)}"
-        if core.service.__workflow_append(&tree, payload) == {
+        if core.service.__workflow_append(&tree, ^payload) == {
             .Err(error) -> return Err(error)
             .Ok(_) -> {}
         }
@@ -999,7 +1003,7 @@ fn workflow_activity_retry(tree: &ServiceTree, run_id: Int, key: String, outcome
         if !replaying -> core.service.__workflow_set_cursor(&tree, index, core.service.__workflow_history_len(tree, index))
         next_attempt :: activity.attempt + 1
         payload :: "workflow-activity-retry:{run_id}:{next_attempt}:{workflow_frame(key)}{workflow_frame(workflow_outcome_wire(outcome))}"
-        if core.service.__workflow_append(&tree, payload) == {
+        if core.service.__workflow_append(&tree, ^payload) == {
             .Err(error) -> return Err(error)
             .Ok(_) -> {}
         }
@@ -1044,7 +1048,7 @@ fn workflow_activity_complete(tree: &ServiceTree, run_id: Int, key: String, outc
         }
         if !replaying -> core.service.__workflow_set_cursor(&tree, index, core.service.__workflow_history_len(tree, index))
         payload :: "workflow-activity-done:{run_id}:{workflow_frame(key)}{workflow_frame(workflow_outcome_wire(outcome))}"
-        if core.service.__workflow_append(&tree, payload) == {
+        if core.service.__workflow_append(&tree, ^payload) == {
             .Err(error) -> return Err(error)
             .Ok(_) -> {}
         }
@@ -1115,8 +1119,8 @@ fn workflow_activity_definition(tree: ServiceTree, index: Int, key: String) -> W
     loop step_index in 0..<core.service.__workflow_steps_len(tree, index) {
         fields :: core.service.__workflow_step_at(tree, index, step_index).split(":").to_list()
         if fields.len() == 5 && fields[0] == "activity" && fields[2] == key {
-            attempt :: workflow_i64(fields[3]) ?? continue
-            maximum :: workflow_i64(fields[4]) ?? continue
+            attempt :: workflow_i64(fields[3]) ?? next
+            maximum :: workflow_i64(fields[4]) ?? next
             return Val(WorkflowActivityDefinition{activity: fields[1], attempt: attempt, max_attempts: maximum})
         }
     }
@@ -1184,7 +1188,7 @@ fn workflow_replay_retry(tree: &ServiceTree, index: Int, key: String, maximum: I
     assert(workflow_outcome_wire(TaskOutcome.Panicked("λ")) == "Panicked:2:λ")
 }
 
-fn group(tree: ServiceTree, name: String, workers: [String]) ServiceError! {
+fn group(tree: &ServiceTree, name: String, workers: [String]) ServiceError! {
     #Unsafe("Services1546: exclusive tree write borrow preserves validation, reparent, append ordering") {
         if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot add groups after start"))
         facts :: core.service.__group_parts(tree)
@@ -1198,7 +1202,7 @@ fn group(tree: ServiceTree, name: String, workers: [String]) ServiceError! {
                 .Ok(_) -> {}
             }
         }
-        core.service.__group_push(&tree, name, workers)
+        core.service.__group_push(&tree, ^name.copy(), ^workers.copy())
     }
 }
 
@@ -1230,7 +1234,7 @@ fn validate_group(name: String, workers: [String], known: [String], groups: [(na
     }
 }
 
-fn chaos_fail(tree: ServiceTree) -> Int ServiceError! {
+fn chaos_fail(tree: &ServiceTree) -> Int ServiceError! {
     #Unsafe("Services7044: counter write precedes reachable-worker selection and canonical failure policy") {
         if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
         counter :: core.service.__tree_chaos_count(tree)
@@ -1246,7 +1250,7 @@ fn chaos_fail(tree: ServiceTree) -> Int ServiceError! {
     }
 }
 
-fn append_event(tree: ServiceTree, event: String) ServiceError! {
+fn append_event(tree: &ServiceTree, event: String) ServiceError! {
     #Unsafe("Services4575: source owns adapter/authority/payload/count checks and record framing; store append before field push") {
         if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
         // CoreEnumRows registers Empty, Snapshot, EventLog; only EventLog permits append.
@@ -1262,11 +1266,11 @@ fn append_event(tree: ServiceTree, event: String) ServiceError! {
             .Err(error) -> return Err(error)
             .Ok(_) -> {}
         }
-        core.service.__tree_event_push(&tree, record)
+        core.service.__tree_event_push(&tree, ^record)
     }
 }
 
-fn commit_snapshot(tree: ServiceTree, payload: String) ServiceError! {
+fn commit_snapshot(tree: &ServiceTree, payload: String) ServiceError! {
     #Unsafe("Services4525: host record-write leaf retains existing mutex through store write and field assignment; no guard exposed") {
         if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
         // CoreEnumRows registers Empty, Snapshot, EventLog; only Snapshot permits commit.
@@ -1277,7 +1281,7 @@ fn commit_snapshot(tree: ServiceTree, payload: String) ServiceError! {
         authority :: core.service.__tree_state_authority(tree) ?? return Err(ServiceError.Policy("Snapshot state has no injected authority"))
         if !valid_record_payload(payload) -> return Err(ServiceError.Policy("snapshot record exceeds the state record limit"))
         record :: "v{authority.version}:{payload.bytes().len()}:{payload}"
-        return core.service.__snapshot_store_write(&tree, record)
+        return core.service.__snapshot_store_write(&tree, ^record)
     }
 }
 
@@ -1296,6 +1300,16 @@ fn valid_record_payload(text: String) -> Bool Never! {
     assert(valid_record_payload(""))
     assert(valid_record_payload("é"))
     assert(!valid_record_payload("\n"))
+}
+
+#Test("mutating service operations borrow the tree and preserve pre-start policy") {
+    fresh := tree("mutation-contract")
+    assert(if group(&fresh, "g", [String]{"missing"}) == {.Err(.Unknown(message)) -> message == "group `g` references unknown worker `missing`" else -> false})
+    assert(if chaos_fail(&fresh) == {.Err(.NotStarted(message)) -> message == "service tree is not started" else -> false})
+    assert(if append_event(&fresh, "event") == {.Err(.NotStarted(message)) -> message == "service tree is not started" else -> false})
+    assert(if commit_snapshot(&fresh, "snapshot") == {.Err(.NotStarted(message)) -> message == "service tree is not started" else -> false})
+    assert(directory_generation(fresh) == 1)
+    assert(event_count(fresh) == 0)
 }
 
 fn validate_tree_endpoint(tree: ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
@@ -1348,7 +1362,7 @@ fn directory_resolve(tree: ServiceTree, name: String) -> ServiceEndpoint Service
     }
 }
 
-fn send(tree: ServiceTree, endpoint: ServiceEndpoint, message: String) ServiceError! {
+fn send(tree: &ServiceTree, endpoint: ServiceEndpoint, message: String) ServiceError! {
     #Unsafe("Services2558: source owns routing, message checks, worker gate, capacity error text, post-send ordering") {
         if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
         if validate_tree_endpoint(tree, endpoint) == {
@@ -1370,7 +1384,7 @@ fn send(tree: ServiceTree, endpoint: ServiceEndpoint, message: String) ServiceEr
         }
         worker :: core.service.__worker_route(tree, endpoint) ?? return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
         if !worker.running || draining -> return Err(ServiceError.NotStarted("worker `{worker.name}` is not running"))
-        if core.service.__authority_try_send(endpoint, message) == {
+        if core.service.__authority_try_send(endpoint, ^message.copy()) == {
             .Err(.Full(_)) -> return Err(full_tree_mailbox(worker.name, worker.capacity))
             .Err(error) -> return Err(error)
             .Ok(_) -> {}
@@ -1645,7 +1659,7 @@ fn local_delivery_ids(tree: ServiceTree, endpoint: ServiceEndpoint, store: Strin
     }
 }
 
-fn send_durable(tree: ServiceTree, endpoint: ServiceEndpoint, message: String, idempotency_key: String) -> Delivery ServiceError! {
+fn send_durable(tree: &ServiceTree, endpoint: ServiceEndpoint, message: String, idempotency_key: String) -> Delivery ServiceError! {
     #Unsafe("Services3127: no enclosing lock; source owns local deduplication/admission/rollback orchestration") {
         if core.service.__tree_delivery(tree) != ServiceDelivery.DurableAtLeastOnce -> return Err(ServiceError.Policy("send_durable requires DurableAtLeastOnce delivery"))
         authority :: core.service.__tree_state_authority(tree) ?? return Err(ServiceError.Policy("durable service delivery needs its injected authority"))
@@ -1666,7 +1680,7 @@ fn send_durable(tree: ServiceTree, endpoint: ServiceEndpoint, message: String, i
         if draining -> return Err(ServiceError.Unavailable("service endpoint is draining"))
         local_id :: core.service.__delivery_id(runtime, endpoint, message, idempotency_key)
         loop id in local_delivery_ids(tree, endpoint, runtime.store) {
-            if id == local_id -> return core.service.__delivery_allocate(local_id, runtime.store, true, identity.authority, identity.generation)
+            if id == local_id -> return core.service.__delivery_allocate(^local_id, ^runtime.store, true, ^identity.authority, identity.generation)
         }
         delivery :: if core.service.__runtime_send(runtime, endpoint, message, idempotency_key) == {
             .Ok(value) -> value
@@ -1688,7 +1702,7 @@ fn send_durable(tree: ServiceTree, endpoint: ServiceEndpoint, message: String, i
                 if error == {
                     .Full(_) -> {
                         core.service.__runtime_dead_letter(runtime, delivery).drop("seed best-effort dead-letter transition ignores the result")
-                        if core.service.__tree_dead_letter_count(tree) < 100000 -> core.service.__dead_letter_push(&tree, id)
+                        if core.service.__tree_dead_letter_count(tree) < 100000 -> core.service.__dead_letter_push(&tree, ^id)
                     }
                     else -> {}
                 }
@@ -1699,7 +1713,7 @@ fn send_durable(tree: ServiceTree, endpoint: ServiceEndpoint, message: String, i
         if core.service.__mark_delivered(runtime.store, id) == {
             .Err(error) -> {
                 restore_index :: core.service.__worker_named_index(tree, identity.worker) ?? return Err(ServiceError.Policy("{service_error_show(error)}; mailbox rollback failed: endpoint {identity.tree}/{identity.worker} disappeared during durable delivery"))
-                if core.service.__mailbox_restore(&tree, restore_index, before, draining) == {
+                if core.service.__mailbox_restore(&tree, restore_index, ^before, draining) == {
                     .Err(rollback_error) -> return Err(ServiceError.Policy("{service_error_show(error)}; mailbox rollback failed: {service_error_show(rollback_error)}"))
                     .Ok(_) -> return Err(error)
                 }
@@ -1712,13 +1726,13 @@ fn send_durable(tree: ServiceTree, endpoint: ServiceEndpoint, message: String, i
             loop record in records {
                 if record.key == idempotency_key -> seen = true
             }
-            if !seen -> core.service.__idempotency_push(&tree, idempotency_key, endpoint, message)
+            if !seen -> core.service.__idempotency_push(&tree, ^idempotency_key.copy(), endpoint, ^message.copy())
         }
         return delivery
     }
 }
 
-fn receive(tree: ServiceTree, endpoint: ServiceEndpoint) -> String ServiceError! {
+fn receive(tree: &ServiceTree, endpoint: ServiceEndpoint) -> String ServiceError! {
     #Unsafe("Services2629: no enclosing guard; existing atomic authority operations retain their locks") {
         if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
         if validate_tree_endpoint(tree, endpoint) == {
@@ -1764,10 +1778,10 @@ fn receive(tree: ServiceTree, endpoint: ServiceEndpoint) -> String ServiceError!
                             2 -> ServiceError.NotStarted("service authority worker mailbox is closed")
                             else -> ServiceError.Policy("service channel returned an invalid send result")
                         }
-                        return Err(pending_delivery_rollback(&tree, endpoint, target.index, pending.slice(i, pending.len()), before, draining, error))
+                        return Err(pending_delivery_rollback(&tree, endpoint, target.index, ^pending.slice(i, pending.len()), ^before, draining, error))
                     }
                     if core.service.__mark_delivered(record.store, record.id) == {
-                        .Err(error) -> return Err(pending_delivery_rollback(&tree, endpoint, target.index, pending.slice(i, pending.len()), before, draining, error))
+                        .Err(error) -> return Err(pending_delivery_rollback(&tree, endpoint, target.index, ^pending.slice(i, pending.len()), ^before, draining, error))
                         .Ok(_) -> {}
                     }
                 }
@@ -1795,7 +1809,7 @@ fn receive(tree: ServiceTree, endpoint: ServiceEndpoint) -> String ServiceError!
                     restore :: core.service.__worker_route(tree, endpoint)
                     if restore == {
                         .Val(target) -> {
-                            if core.service.__mailbox_restore(&tree, target.index, before, draining) == {
+                            if core.service.__mailbox_restore(&tree, target.index, ^before, draining) == {
                                 .Err(restore_error) -> return Err(ServiceError.Policy("{service_error_show(error)}; drained mailbox restore failed: {service_error_show(restore_error)}"))
                                 .Ok(_) -> return Err(error)
                             }
@@ -1810,17 +1824,17 @@ fn receive(tree: ServiceTree, endpoint: ServiceEndpoint) -> String ServiceError!
     }
 }
 
-fn pending_delivery_rollback(tree: ServiceTree, endpoint: ServiceEndpoint, index: Int, remaining: [(id: String, message: String, store: String)], before: [String], draining: Bool, error: ServiceError) -> ServiceError Never! {
+fn pending_delivery_rollback(tree: &ServiceTree, endpoint: ServiceEndpoint, index: Int, remaining: ^[(id: String, message: String, store: String)], before: ^[String], draining: Bool, error: ServiceError) -> ServiceError Never! {
     #Unsafe("Services2693-2762: retain authority requeue then mailbox-restore ordering and both failure texts") {
-        if core.service.__requeue_pending(endpoint, remaining) == {
+        if core.service.__requeue_pending(endpoint, ^remaining) == {
             .Err(rollback_error) -> {
-                if core.service.__mailbox_restore(&tree, index, before, draining) == {
+                if core.service.__mailbox_restore(&tree, index, ^before, draining) == {
                     .Err(mailbox_error) -> return pending_rollback_error(error, Val(rollback_error), Val(mailbox_error))
                     .Ok(_) -> return pending_rollback_error(error, Val(rollback_error), None)
                 }
             }
             .Ok(_) -> {
-                if core.service.__mailbox_restore(&tree, index, before, draining) == {
+                if core.service.__mailbox_restore(&tree, index, ^before, draining) == {
                     .Err(rollback_error) -> return pending_rollback_error(error, None, Val(rollback_error))
                     .Ok(_) -> return pending_rollback_error(error, None, None)
                 }
@@ -1840,7 +1854,7 @@ fn pending_rollback_error(error: ServiceError, authority_error: ServiceError?, m
         else -> {
             if mailbox_error == {
                 .Val(mailbox) -> return ServiceError.Policy("{service_error_show(error)}; mailbox rollback failed: {service_error_show(mailbox)}")
-                else -> return error
+                else -> return error.copy()
             }
         }
     }
@@ -1891,15 +1905,15 @@ fn worker(tree: &ServiceTree, name: String, handler: __WorkerHandler, handler_na
                     return Err(error)
                 }
             }
-            core.service.__tree_write_authority(&tree, authority.copy())
+            core.service.__tree_write_authority(&tree, ^authority.copy())
         }
-        unchecked :: if core.service.__endpoint_unchecked(route.name.copy(), name.copy(), route.generation, authority) == {
+        unchecked :: if core.service.__endpoint_unchecked(^route.name.copy(), ^name.copy(), route.generation, ^authority) == {
             .Ok(value) -> value
             .Err(error) -> {
                 return Err(error)
             }
         }
-        mailbox :: if core.service.__worker_mailbox_new(unchecked, I64{capacity}, [String]{}) == {
+        mailbox :: if core.service.__worker_mailbox_new(^unchecked, I64{capacity}, ^[String]{}) == {
             .Ok(value) -> value
             .Err(error) -> {
                 return Err(error)
@@ -1914,12 +1928,12 @@ fn worker(tree: &ServiceTree, name: String, handler: __WorkerHandler, handler_na
         worker_task :: core.service.__worker_task_new(__WorkerStatus.Stopped)
         worker_id :: core.service.__topology_worker_id(route.name, name)
         parent_id :: core.service.__topology_root_id(route.name)
-        if core.service.__task_bind_topology(worker_task, __WorkerTopologyKind.Task, worker_id, Val(parent_id)) == {
+        if core.service.__task_bind_topology(worker_task, __WorkerTopologyKind.Task, ^worker_id, ^Val(parent_id)) == {
             .Err(error) -> return Err(error)
             else -> {}
         }
         // Mailbox must move: native Mailbox::clone forks its channel.
-        core.service.__worker_push(&tree, name, handler, handler_name, endpoint.copy(), mailbox, [I64]{}, false, U64{0}, U64{0}, worker_task)
+        core.service.__worker_push(&tree, ^name.copy(), handler, ^handler_name.copy(), ^endpoint.copy(), ^mailbox, ^[I64]{}, false, U64{0}, U64{0}, ^worker_task)
         return endpoint
     }
 }
@@ -2042,10 +2056,10 @@ fn fail_worker(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
                 reason :: "worker `{topology.workers[index]}` spent its restart budget of {max} per {per}ms; the supervisor escalates to its parent group"
                 // Identical ignored Results: native2989,2992.
                 loop worker in facts.workers {
-                    _ :: core.service.__task_escalate(worker.task, reason)
+                    _ :: core.service.__task_escalate(worker.task, ^reason.copy())
                 }
                 loop supervisor in facts.supervisors {
-                    _ :: core.service.__task_escalate(supervisor, reason)
+                    _ :: core.service.__task_escalate(supervisor, ^reason.copy())
                 }
                 loop i in 0..<facts.workers.len() {
                     core.service.__worker_write_running(&tree, i, false) // native2995
@@ -2096,19 +2110,19 @@ fn fail_worker(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
             }
         }
         // Identical ignored Results: native3043-3051.
-        _ :: core.service.__task_fail(facts.workers[failed].task, "worker `{identity.worker}` failed under supervisor")
+        _ :: core.service.__task_fail(facts.workers[failed].task, ^"worker `{identity.worker}` failed under supervisor")
         if scope.supervisor < facts.supervisors.len() {
-            _ :: core.service.__task_fail(facts.supervisors[scope.supervisor], "supervisor restarted worker `{identity.worker}`")
+            _ :: core.service.__task_fail(facts.supervisors[scope.supervisor], ^"supervisor restarted worker `{identity.worker}`")
         }
         loop index in targets {
             // Services1992-1994: append/prune restart times before running.
-            core.service.__worker_write_restarts(&tree, index, worker_pruned(facts.workers[index].restarts, now, per))
+            core.service.__worker_write_restarts(&tree, index, ^worker_pruned(facts.workers[index].restarts, now, per))
             core.service.__worker_write_running(&tree, index, true)
             mailbox :: core.service.__worker_route(tree, facts.workers[index].endpoint) ?? panic("physical worker route must exist")
             messages :: if preserve -> core.service.__mailbox_snapshot(tree, index) else -> [String]{}
             core.service.__mailbox_close(tree, index) // native2000
-            replacement :: core.service.__worker_mailbox_new(facts.workers[index].endpoint, I64{mailbox.capacity}, messages) ?? panic("validated service mailbox must restart with its bounded queue")
-            core.service.__worker_write_mailbox(&tree, index, replacement) // MOVE, native2001-2006
+            replacement :: core.service.__worker_mailbox_new(^facts.workers[index].endpoint.copy(), I64{mailbox.capacity}, ^messages) ?? panic("validated service mailbox must restart with its bounded queue")
+            core.service.__worker_write_mailbox(&tree, index, ^replacement) // MOVE, native2001-2006
             // Native2007-2012 ignores both Results; clamp its u64 time identically.
             at :: U64{if now < 0 -> 0 else -> now}
             _ :: core.service.__record_topology_restart(facts.workers[index].task, at, __WorkerRestartReason.Failed)
