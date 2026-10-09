@@ -2203,6 +2203,11 @@ impl<'a> Checker<'a> {
                 return Some(owner);
             }
         }
+        if let Some(owner) = self.name_ledger.namespace_owner(self.module_idx, type_name) {
+            if mods[owner].registry.contains(type_name) {
+                return Some(owner);
+            }
+        }
 
         // A bare built-in type name (`Path`, `URL`, `DateTime`) that this
         // module neither declares nor imports by name is the built-in. A

@@ -282,6 +282,30 @@ pub(super) fn check_bundle_opts_for_output_inner(
         .collect();
     let mut name_ledger = std::mem::take(&mut bundle.name_ledger);
     name_ledger.clear_sema_facts();
+    let namespace_trait_scopes = {
+        let mut scopes: HashMap<&str, HashMap<String, jet_foundation::Traits::TraitInfo>> =
+            HashMap::new();
+        for (owner, module) in bundle.modules.iter().enumerate() {
+            let Some(root) = name_ledger.module_namespace(owner) else { continue };
+            for item in &module.items {
+                if let Item::Trait(definition) = item {
+                    scopes.entry(root).or_default().insert(
+                        definition.name.clone(),
+                        jet_foundation::Traits::TraitInfo::from_definition(definition),
+                    );
+                }
+            }
+        }
+        let scopes: HashMap<_, _> = scopes.into_iter()
+            .map(|(root, definitions)| (root, std::sync::Arc::new(definitions))).collect();
+        (0..states.len()).map(|module| {
+            name_ledger.module_namespace(module)
+                .and_then(|root| scopes.get(root)).map(std::sync::Arc::clone)
+        }).collect::<Vec<_>>()
+    };
+    for (state, scope) in states.iter_mut().zip(namespace_trait_scopes) {
+        state.trait_reg.namespace_traits = scope;
+    }
 
     for state in &mut states {
         let target_layout = jet_foundation::Layout::TargetLayout::from_build_facts(&state.build_facts);
