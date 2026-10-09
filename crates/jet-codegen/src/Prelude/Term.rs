@@ -952,7 +952,7 @@ pub(crate) fn jet_term_layout_fingerprint() -> [usize; 20] {
 // These seed operations keep the existing locked std writer as the OS door.
 // Replaced by the RtL7 stdio layer; Rust seed/verification dies at cutover.
 pub(crate) fn jet_term_stdio_write_raw(
-    text: &String,
+    text: &str,
     newline: bool,
     stderr: bool,
     flush: bool,

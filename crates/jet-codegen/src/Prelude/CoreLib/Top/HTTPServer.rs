@@ -1229,8 +1229,8 @@ impl JetHTTPStatusCode for jet_foundation::Numeric::JetInt {
     }
 }
 
-fn jet_http_srv_response<S: JetHTTPStatusCode>(status: S, body: &String) -> JetHTTPResponse {
-    jet_http_srv_response_owned(status.jet_http_status_code(), body.clone())
+fn jet_http_srv_response<S: JetHTTPStatusCode>(status: S, body: &str) -> JetHTTPResponse {
+    jet_http_srv_response_owned(status.jet_http_status_code(), body.to_owned())
 }
 fn jet_http_srv_response_owned(status: i64, body: String) -> JetHTTPResponse {
     let (status, body) = if !(100..=599).contains(&status) {
@@ -1885,8 +1885,8 @@ fn jet_http_srv_response_with_headers(
 
 fn jet_http_srv_response_header(
     mut resp: JetHTTPResponse,
-    name: &String,
-    value: &String,
+    name: &str,
+    value: &str,
 ) -> JetHTTPResponse {
     if resp.headers.append(name, value).is_err() {
         resp.status = 500;
@@ -1915,12 +1915,9 @@ fn jet_http_srv_response_body(resp: &JetHTTPResponse) -> JetHTTPBody {
     resp.body.clone()
 }
 
-fn jet_http_mux_serve(
-    addr: &String,
-    mux: JetHTTPMux,
-    tls: Option<JetHTTPServerTls>,
-    deadline: Option<jet_std::Duration>,
-) -> Result<(), JetHTTPError> {
+fn jet_http_mux_serve(addr: &str, mux: JetHTTPMux,
+tls: Option<JetHTTPServerTls>,
+deadline: Option<jet_std::Duration>,) -> Result<(), JetHTTPError> {
     if tls.is_some() {
         return Err(JetHTTPError::IO {
             operation: "TLS server requires the native TLS adapter".to_string(),
@@ -1928,7 +1925,7 @@ fn jet_http_mux_serve(
     }
     let mux = jet_http_mux_with_optional_deadline(mux, deadline.as_ref());
     jet_http_mux_validate(&mux).map_err(|operation| JetHTTPError::IO { operation })?;
-    let listener = std::net::TcpListener::bind(addr.as_str()).map_err(|error| {
+    let listener = std::net::TcpListener::bind(addr).map_err(|error| {
         JetHTTPError::IO {
             operation: format!("bind on `{addr}` failed: {error}"),
         }
@@ -1947,12 +1944,9 @@ fn jet_http_mux_serve(
     .map_err(|operation| JetHTTPError::IO { operation })
 }
 
-fn jet_http_server_bind(
-    addr: &String,
-    mux: JetHTTPMux,
-    tls: Option<JetHTTPServerTls>,
-    deadline: Option<jet_std::Duration>,
-) -> Result<JetHTTPServer, JetHTTPError> {
+fn jet_http_server_bind(addr: &str, mux: JetHTTPMux,
+tls: Option<JetHTTPServerTls>,
+deadline: Option<jet_std::Duration>,) -> Result<JetHTTPServer, JetHTTPError> {
     if tls.is_some() {
         return Err(JetHTTPError::IO {
             operation: "TLS server requires the native TLS adapter".to_string(),
@@ -1982,11 +1976,8 @@ fn jet_http_server_wait(server: &JetHTTPServer) -> Result<JetHTTPShutdownReport,
 }
 
 
-fn jet_http_server_bind_with_tls(
-    addr: &String,
-    mux: JetHTTPMux,
-    tls_conn: Option<JetHTTPTlsConn>,
-) -> Result<JetHTTPServer, JetHTTPError> {
+fn jet_http_server_bind_with_tls(addr: &str, mux: JetHTTPMux,
+tls_conn: Option<JetHTTPTlsConn>,) -> Result<JetHTTPServer, JetHTTPError> {
     // D-HTTP-UNSUPPORTED1=A: refuse before bind I/O on unsupported targets.
     #[cfg(not(any(
         target_os = "linux",
@@ -2018,7 +2009,7 @@ fn jet_http_server_bind_with_tls(
     ))]
     {
         jet_http_mux_validate(&mux).map_err(|operation| JetHTTPError::IO { operation })?;
-        let listener = std::net::TcpListener::bind(addr.as_str()).map_err(|error| {
+        let listener = std::net::TcpListener::bind(addr).map_err(|error| {
             JetHTTPError::IO {
                 operation: format!("bind on `{addr}` failed: {error}"),
             }
@@ -4182,14 +4173,14 @@ fn jet_http_srv_read_streaming(
     )))
 }
 
-fn jet_http_mux_serve_once_raw(addr: &String, mux: JetHTTPMux) -> Result<(), String> {
+fn jet_http_mux_serve_once_raw(addr: &str, mux: JetHTTPMux) -> Result<(), String> {
     jet_http_mux_validate(&mux)?;
-    let listener = std::net::TcpListener::bind(addr.as_str())
+    let listener = std::net::TcpListener::bind(addr)
         .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
     jet_http_mux_serve_once_listener_raw(&JetTCPListener { inner: listener }, &mux)
 }
 
-fn jet_http_mux_serve_once(addr: &String, mux: JetHTTPMux) -> Result<(), JetHTTPError> {
+fn jet_http_mux_serve_once(addr: &str, mux: JetHTTPMux) -> Result<(), JetHTTPError> {
     jet_http_mux_serve_once_raw(addr, mux).map_err(|operation| JetHTTPError::IO { operation })
 }
 
@@ -5067,7 +5058,7 @@ fn jet_http_srv_read_error_response(error: &JetHTTPReadError) -> String {
 }
 
 fn jet_http_mux_serve_tls<V, S>(
-    addr: &String,
+    addr: &str,
     mux: JetHTTPMux,
     tls: JetHTTPServerTls,
     validate: V,
@@ -5089,7 +5080,7 @@ where
         + 'static,
 {
     validate(&tls.cert_pem, &tls.key_pem)?;
-    let listener = std::net::TcpListener::bind(addr.as_str())
+    let listener = std::net::TcpListener::bind(addr)
         .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let tls_conn = jet_http_tls_conn_handler(mux.clone(), tls, session);
@@ -5106,7 +5097,7 @@ where
 }
 
 fn jet_http_server_bind_tls<V, S>(
-    addr: &String,
+    addr: &str,
     mux: JetHTTPMux,
     tls: JetHTTPServerTls,
     validate: V,
@@ -5942,7 +5933,7 @@ fn jet_http_srv_req_method(req: &JetHTTPRequest) -> String {
 fn jet_http_srv_req_path(req: &JetHTTPRequest) -> String {
     req.path.clone()
 }
-fn jet_http_srv_req_param(req: &JetHTTPRequest, name: &String) -> JetOutcome<String, JetAbsent> {
+fn jet_http_srv_req_param(req: &JetHTTPRequest, name: &str) -> JetOutcome<String, JetAbsent> {
     jet_outcome_of(req.params.get(name).cloned())
 }
 fn jet_http_srv_req_body(req: &JetHTTPRequest) -> JetHTTPBody {
@@ -5958,7 +5949,7 @@ fn jet_http_srv_req_trailers(req: &JetHTTPRequest) -> Result<JetHTTPHeaders, Jet
         }
     })
 }
-fn jet_http_srv_req_header(req: &JetHTTPRequest, name: &String) -> JetOutcome<String, JetAbsent> {
+fn jet_http_srv_req_header(req: &JetHTTPRequest, name: &str) -> JetOutcome<String, JetAbsent> {
     jet_outcome_of(req.headers.get(name).cloned())
 }
 
@@ -5982,7 +5973,7 @@ fn jet_http_srv_response_trailers(
     Ok(response)
 }
 
-fn jet_http_srv_static_file(path: &String, mime: &String) -> Result<JetHTTPResponse, JetHTTPError> {
+fn jet_http_srv_static_file(path: &str, mime: &str) -> Result<JetHTTPResponse, JetHTTPError> {
     let candidate = std::path::Path::new(path);
     let parent = candidate.parent().filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| std::path::Path::new("."));
@@ -6002,11 +5993,7 @@ fn jet_http_srv_static_file(path: &String, mime: &String) -> Result<JetHTTPRespo
     Ok(jet_http_srv_response_header(response, &"content-type".to_string(), mime))
 }
 
-fn jet_http_srv_static_file_range(
-    req: &JetHTTPRequest,
-    path: &String,
-    mime: &String,
-) -> Result<JetHTTPResponse, String> {
+fn jet_http_srv_static_file_range(req: &JetHTTPRequest, path: &str, mime: &str, ) -> Result<JetHTTPResponse, String> {
     let candidate = std::path::Path::new(path);
     let parent = candidate.parent().filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| std::path::Path::new("."));
@@ -6674,8 +6661,8 @@ fn jet_http_srv_static_files_handler(
 /// route serves GET; the mux answers HEAD from the same handler.
 fn jet_http_srv_static_files_mount(
     mux: &JetHTTPMux,
-    prefix: &String,
-    root: &String,
+    prefix: &str,
+    root: &str,
     options: JetHTTPStaticOptions,
 ) {
     let trimmed = prefix.trim_end_matches('/');
@@ -6684,14 +6671,14 @@ fn jet_http_srv_static_files_mount(
         mux,
         "GET",
         &pattern,
-        jet_http_srv_static_files_handler(trimmed.to_string(), root.clone(), options),
+        jet_http_srv_static_files_handler(trimmed.to_string(), root.to_owned(), options),
     );
 }
 
 fn jet_http_srv_static_files_mount_defaulted(
     mux: &JetHTTPMux,
-    prefix: &String,
-    root: &String,
+    prefix: &str,
+    root: &str,
     index: Option<bool>,
     dotfiles: Option<bool>,
     follow_links: Option<bool>,
@@ -7036,6 +7023,6 @@ fn jet_http_serve_router(addr: &String, router: JetHTTPRouter) {
     })
 }
 
-fn jet_http_request_param(req: &JetHTTPRequest, name: &String) -> Option<String> {
-    req.params.get(name.as_str()).cloned()
+fn jet_http_request_param(req: &JetHTTPRequest, name: &str) -> Option<String> {
+    req.params.get(name).cloned()
 }

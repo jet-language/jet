@@ -2707,6 +2707,12 @@ impl jet_std::CSVReader {
     }
 }
 
+fn jet_enc_csv_reader_next(
+    reader: &mut jet_std::CSVReader,
+) -> Result<JetOutcome<jet_std::CSVRow, JetAbsent>, jet_std::EncodingError> {
+    reader.next_record().map(jet_outcome_of)
+}
+
 
 enum JetCBORReadFrame {
     Array { remaining: Option<u64>, index: u64 },

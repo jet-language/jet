@@ -56,7 +56,7 @@ fn jet_std_io_read_all_input() -> Result<String, jet_std::IOError> {
     })
 }
 
-fn jet_std_io_read_until(delim: &String) -> Result<String, jet_std::IOError> {
+fn jet_std_io_read_until(delim: &str) -> Result<String, jet_std::IOError> {
     if delim.is_empty() {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
@@ -83,7 +83,7 @@ fn jet_std_io_read_all_raw() -> std::io::Result<String> {
     Ok(input)
 }
 
-fn jet_std_io_read_until_raw(delim: &String) -> std::io::Result<String> {
+fn jet_std_io_read_until_raw(delim: &str) -> std::io::Result<String> {
     use std::io::Read;
     let needle = delim.as_bytes();
     let mut stdin = std::io::stdin().lock();

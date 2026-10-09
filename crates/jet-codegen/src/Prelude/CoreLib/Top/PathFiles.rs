@@ -18,7 +18,7 @@ impl JetDebug for JetPath {
         self.inner.to_string_lossy().to_string()
     }
 }
-fn jet_path_from(s: &String) -> JetPath {
+fn jet_path_from(s: &str) -> JetPath {
     JetPath {
         inner: std::path::PathBuf::from(s),
     }
@@ -39,27 +39,27 @@ fn jet_typed_path_literal(literals: &[&str], holes: Vec<String>) -> JetPath {
     jet_path_from(&text)
 }
 
-fn jet_path_join(p: &JetPath, other: &String) -> JetPath {
+fn jet_path_join(p: &JetPath, other: &str) -> JetPath {
     JetPath {
         inner: std::path::PathBuf::from(jet_std_path_join(
-            &p.inner.to_string_lossy().to_string(),
+            p.inner.to_string_lossy().as_ref(),
             other,
         )),
     }
 }
 fn jet_path_parent(p: &JetPath) -> JetOutcome<JetPath, JetAbsent> {
-    jet_outcome_of(jet_std_path_parent_opt(&p.inner.to_string_lossy().to_string()).map(|par| JetPath {
+    jet_outcome_of(jet_std_path_parent_opt(p.inner.to_string_lossy().as_ref()).map(|par| JetPath {
         inner: std::path::PathBuf::from(par),
     }))
 }
 fn jet_path_extension(p: &JetPath) -> JetOutcome<String, JetAbsent> {
-    jet_outcome_of(jet_std_path_extension_opt(&p.inner.to_string_lossy().to_string()))
+    jet_outcome_of(jet_std_path_extension_opt(p.inner.to_string_lossy().as_ref()))
 }
 fn jet_path_stem(p: &JetPath) -> JetOutcome<String, JetAbsent> {
-    jet_outcome_of(jet_std_path_stem_opt(&p.inner.to_string_lossy().to_string()))
+    jet_outcome_of(jet_std_path_stem_opt(p.inner.to_string_lossy().as_ref()))
 }
 fn jet_path_normalize(p: &JetPath) -> JetPath {
-    jet_path_from(&jet_std_path_normalize(&p.inner.to_string_lossy().into_owned()))
+    jet_path_from(&jet_std_path_normalize(p.inner.to_string_lossy().as_ref()))
 }
 
 /// Lexical containment only. The receiver is the candidate and the argument

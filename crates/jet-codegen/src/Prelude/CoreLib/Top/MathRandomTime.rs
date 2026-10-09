@@ -203,15 +203,11 @@ fn jet_duration_negated(d: &jet_std::Duration) -> jet_std::Duration {
 fn jet_duration_sign(d: &jet_std::Duration) -> i64 {
     jet_duration_kernel_sign(d.ns)
 }
-fn jet_duration_total_in(d: &jet_std::Duration, unit: &String) -> f64 {
+fn jet_duration_total_in(d: &jet_std::Duration, unit: &str) -> f64 {
     jet_duration_kernel_total_in(d.ns, unit)
 }
-fn jet_duration_round(
-    d: &jet_std::Duration,
-    unit: &String,
-    increment: &i64,
-    mode: &String,
-) -> jet_std::Duration {
+fn jet_duration_round(d: &jet_std::Duration, unit: &str, increment: &i64,
+mode: &str,) -> jet_std::Duration {
     let ns = jet_duration_kernel_round(d.ns, unit, *increment, mode).unwrap_or(d.ns);
     jet_std::Duration { ns }
 }
@@ -620,7 +616,7 @@ fn jet_time_now_utc() -> JetDateTime {
 fn jet_time_today() -> JetDate {
     JetDate::today_utc()
 }
-fn jet_time_zone_named(name: &String) -> Result<JetZone, String> {
+fn jet_time_zone_named(name: &str) -> Result<JetZone, String> {
     JetZone::named(name)
 }
 fn jet_time_zone_utc() -> JetZone {
@@ -633,7 +629,7 @@ fn jet_time_zoned_local(
     date: &JetDate,
     time: &JetLocalTime,
     zone: &JetZone,
-    disambiguation: &String,
+    disambiguation: &str,
 ) -> Result<JetZonedDateTime, String> {
     JetZonedDateTime::from_local_with_disambiguation(date, time, zone, disambiguation)
 }
@@ -672,9 +668,9 @@ impl JetDate {
     fn until_duration(
         &self,
         other: JetDate,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -691,9 +687,9 @@ impl JetDate {
     fn since_duration(
         &self,
         other: JetDate,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -707,7 +703,7 @@ impl JetDate {
         }
     }
 
-    fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+    fn format_checked_text(&self, pattern: &str) -> Result<String, jet_std::TextError> {
         self.format_checked(pattern).map_err(jet_time_text_error)
     }
 
@@ -732,9 +728,9 @@ impl JetLocalTime {
     fn until_duration(
         &self,
         other: JetLocalTime,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -751,9 +747,9 @@ impl JetLocalTime {
     fn since_duration(
         &self,
         other: JetLocalTime,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -767,7 +763,7 @@ impl JetLocalTime {
         }
     }
 
-    fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+    fn format_checked_text(&self, pattern: &str) -> Result<String, jet_std::TextError> {
         self.format_checked(pattern).map_err(jet_time_text_error)
     }
 
@@ -830,9 +826,9 @@ impl JetDateTime {
     fn until_duration(
         &self,
         other: JetDateTime,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -849,9 +845,9 @@ impl JetDateTime {
     fn since_duration(
         &self,
         other: JetDateTime,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -869,7 +865,7 @@ impl JetDateTime {
         self.in_zone(&zone)
     }
 
-    fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+    fn format_checked_text(&self, pattern: &str) -> Result<String, jet_std::TextError> {
         self.format_checked(pattern).map_err(jet_time_text_error)
     }
 
@@ -909,23 +905,23 @@ impl JetPeriod {
 }
 
 pub(crate) trait JetPeriodAnchor {
-    fn period_total_in(&self, period: &JetPeriod, unit: &String) -> f64;
+    fn period_total_in(&self, period: &JetPeriod, unit: &str) -> f64;
 }
 
 impl JetPeriodAnchor for JetDate {
-    fn period_total_in(&self, period: &JetPeriod, unit: &String) -> f64 {
+    fn period_total_in(&self, period: &JetPeriod, unit: &str) -> f64 {
         period.total_in_date(unit, self)
     }
 }
 
 impl JetPeriodAnchor for JetDateTime {
-    fn period_total_in(&self, period: &JetPeriod, unit: &String) -> f64 {
+    fn period_total_in(&self, period: &JetPeriod, unit: &str) -> f64 {
         period.total_in_datetime(unit, self)
     }
 }
 
 impl JetPeriod {
-    fn total_in_value<A: JetPeriodAnchor>(&self, unit: &String, anchor: &A) -> f64 {
+    fn total_in_value<A: JetPeriodAnchor>(&self, unit: &str, anchor: &A) -> f64 {
         anchor.period_total_in(self, unit)
     }
 }
@@ -968,9 +964,9 @@ impl JetZonedDateTime {
     fn until_duration(
         &self,
         other: JetZonedDateTime,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -987,9 +983,9 @@ impl JetZonedDateTime {
     fn since_duration(
         &self,
         other: JetZonedDateTime,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -1011,7 +1007,7 @@ impl JetZonedDateTime {
         jet_outcome_of(self.previous_transition())
     }
 
-    fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+    fn format_checked_text(&self, pattern: &str) -> Result<String, jet_std::TextError> {
         self.format_checked(pattern).map_err(jet_time_text_error)
     }
 
@@ -1037,22 +1033,22 @@ fn jet_typed_datetime_literal(literals: &[&str], holes: Vec<String>) -> JetDateT
 }
 
 
-fn jet_mime_from_extension(ext: &String) -> Option<String> {
+fn jet_mime_from_extension(ext: &str) -> Option<String> {
     crate::jet_std::jet_mime_from_extension(ext).map(|s| s.to_string())
 }
-fn jet_mime_extension(mime: &String) -> Option<String> {
+fn jet_mime_extension(mime: &str) -> Option<String> {
     crate::jet_std::jet_extension_from_mime(mime).map(|s| s.to_string())
 }
 
 // D-DECIMAL1 / D-NUMTYPE1: precise numeric constructors and methods.
 // Private source policy bridge. Arithmetic failure is the existing terminal
 // E3010 operation, not a generic panic and not an Outcome with a dummy value.
-fn jet_numeric_stop(message: &String) -> ! {
+fn jet_numeric_stop(message: &str) -> ! {
     jet_arithmetic_stop("", 0, message)
 }
 
 #[inline(always)]
-fn jet_decimal_from_str(s: &String) -> jet_std::JetDecimal {
+fn jet_decimal_from_str(s: &str) -> jet_std::JetDecimal {
     crate::jet_precise_numeric::decimal_from_str(s)
         .map(crate::jet_std::jet_std_decimal_from_exact)
         .unwrap_or_else(|_| {
@@ -1383,7 +1379,7 @@ fn jet_decimal_to_float(a: &jet_std::JetDecimal) -> f64 {
 // D-ENC-DYN1=A+: the dynamic `parse` returns the one rich `Data` value (the
 // user-facing face of `DataTree`). JSON text parses directly to the canonical
 // ordered `DataTree` carrier.
-fn jet_std_json_parse(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+fn jet_std_json_parse(text: &str) -> Result<jet_std::DataTree, jet_std::EncodingError> {
     jet_std::parse_json_datatree(text)
 }
 fn jet_std_json_render(d: &jet_std::DataTree) -> String {
@@ -1463,7 +1459,7 @@ fn jet_std_json_events(d: &jet_std::DataTree) -> String {
     walk(String::new(), d, &mut out);
     out.join("\n")
 }
-fn jet_std_jsonl_parse(text: &String) -> Result<Vec<jet_std::DataTree>, jet_std::EncodingError> {
+fn jet_std_jsonl_parse(text: &str) -> Result<Vec<jet_std::DataTree>, jet_std::EncodingError> {
     let mut out = Vec::new();
     for (idx, line) in text.lines().enumerate() {
         let trimmed = line.trim();
@@ -1492,12 +1488,12 @@ fn jet_std_jsonl_render(rows: &Vec<jet_std::DataTree>) -> String {
     }
     out
 }
-fn jet_std_jsonl_count_rows(text: &String) -> jet_foundation::Numeric::JetInt {
+fn jet_std_jsonl_count_rows(text: &str) -> jet_foundation::Numeric::JetInt {
     jet_std::jet_int_owned_from_i64(
         text.lines().filter(|line| !line.trim().is_empty()).count() as i64,
     )
 }
-fn jet_std_jsonl_append_line(text: &String, value: &jet_std::DataTree) -> String {
+fn jet_std_jsonl_append_line(text: &str, value: &jet_std::DataTree) -> String {
     let rendered = jet_std_json_render_canonical(value);
     if text.is_empty() {
         return format!("{rendered}\n");
@@ -1508,9 +1504,7 @@ fn jet_std_jsonl_append_line(text: &String, value: &jet_std::DataTree) -> String
         format!("{text}\n{rendered}\n")
     }
 }
-fn jet_std_jsonl_first(
-    text: &String,
-) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
+fn jet_std_jsonl_first(text: &str) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
     for (idx, line) in text.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -1533,11 +1527,11 @@ fn jet_std_jsonl_first(
 // `CoreLib/JetStd/JSONDataTree.rs`, shared with the resident JIT host that
 // used to carry a byte-equivalent copy (I8/I9). AOT supplies only the sink it
 // owns: the process's own stderr.
-fn jet_std_json_decode_lenient(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+fn jet_std_json_decode_lenient(text: &str) -> Result<jet_std::DataTree, jet_std::EncodingError> {
     jet_std::jet_std_json_decode_lenient(text, &mut |line| eprintln!("{}", line))
 }
 
-fn jet_string_bytes(s: &String) -> Vec<u8> {
+fn jet_string_bytes(s: &str) -> Vec<u8> {
     s.as_bytes().to_vec()
 }
 fn jet_string_from_bytes(bs: &Vec<u8>) -> Result<String, jet_std::UTF8Error> {
@@ -1585,13 +1579,13 @@ fn jet_time_raw_world_monotonic_ns() -> Option<jet_foundation::Numeric::JetInt> 
 fn jet_time_raw_host_monotonic_ns() -> jet_foundation::Numeric::JetInt {
     jet_std::jet_int_owned_from_i128(jet_time_monotonic_host_sample() as i128)
 }
-fn jet_time_raw_zone_env(name: &String) -> Option<String> {
+fn jet_time_raw_zone_env(name: &str) -> Option<String> {
     jet_time_zone_environment(name)
 }
-fn jet_time_raw_zone_file_bytes(path: &String) -> Option<Vec<u8>> {
+fn jet_time_raw_zone_file_bytes(path: &str) -> Option<Vec<u8>> {
     jet_time_zone_file(path)
 }
-fn jet_time_raw_embedded_zone_bytes(name: &String) -> Option<Vec<u8>> {
+fn jet_time_raw_embedded_zone_bytes(name: &str) -> Option<Vec<u8>> {
     #[cfg(target_arch = "wasm32")]
     { jet_time_embedded_zone_bytes(name).map(|bytes| bytes.to_vec()) }
     #[cfg(not(target_arch = "wasm32"))]

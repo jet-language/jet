@@ -168,6 +168,15 @@ use `'static`. The [borrowed view example](../../Examples/features/memory/borrow
 covers a multi-parameter return, chained and stored length reads, indexing,
 and iteration without converting the borrowed slice to a list.
 
+Read-only text and collection leaves accept `&str`, whether the checked caller
+holds an owned String or a sema-proven String view. Both Rust emitters lend
+that carrier directly to builtin receivers and operands; they do not
+materialize a view for those reads. A leaf that stores text owns it at that
+storage boundary: a string-keyed map update copies its borrowed key only when
+inserting a missing entry.
+User-defined `String` parameters retain their owned-String ABI, so lending a
+view to those parameters still materializes it.
+
 
 ### One reflection model
 

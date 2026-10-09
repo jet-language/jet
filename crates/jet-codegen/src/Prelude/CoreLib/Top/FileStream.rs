@@ -5,29 +5,25 @@
 // the operation policy and line trimming once, so a default-tier deopt calls
 // the same functions as generated AOT code.
 
-pub(crate) fn jet_std_files_open(path: &String) -> Result<JetFileReader, jet_std::IOError> {
+pub(crate) fn jet_std_files_open(path: &str) -> Result<JetFileReader, jet_std::IOError> {
     jet_std_files_open_reader(-1, path, 0)
 }
 
-pub(crate) fn jet_std_files_create(path: &String) -> Result<JetFileWriter, jet_std::IOError> {
+pub(crate) fn jet_std_files_create(path: &str) -> Result<JetFileWriter, jet_std::IOError> {
     jet_std_files_open_writer(-1, path, false, 0, -1, 0)
 }
 
-pub(crate) fn jet_std_files_append(path: &String) -> Result<JetFileWriter, jet_std::IOError> {
+pub(crate) fn jet_std_files_append(path: &str) -> Result<JetFileWriter, jet_std::IOError> {
     jet_std_files_open_writer(-1, path, true, 0, -1, 0)
 }
 
 /// D-CORE-FILEOPEN1 / D-CORE-FILEDIR1: open a reader at `name` relative to a
 /// held directory key (negative: a path). `links`: 0 follow, 1 refuse.
-pub(crate) fn jet_std_files_open_reader(
-    handle: i64,
-    name: &String,
-    links: i64,
-) -> Result<JetFileReader, jet_std::IOError> {
+pub(crate) fn jet_std_files_open_reader(handle: i64, name: &str, links: i64,) -> Result<JetFileReader, jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
-            Some(name.clone()),
+            Some(name.to_owned()),
             "fault injected: FS.Read",
         ));
     }
@@ -41,7 +37,7 @@ pub(crate) fn jet_std_files_open_reader(
         if !meta.is_file() {
             return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
                 jet_std::IOOperation::Read,
-                Some(name.clone()),
+                Some(name.to_owned()),
                 None,
                 Some("not a regular file; use open_directory for a directory".to_string()),
             )));
@@ -49,7 +45,7 @@ pub(crate) fn jet_std_files_open_reader(
     }
     Ok(JetFileReader {
         inner: std::io::BufReader::new(file),
-        path: name.clone(),
+        path: name.to_owned(),
     })
 }
 
@@ -76,18 +72,14 @@ pub(crate) fn jet_std_files_open_reader_nonblocking(
 /// D-CORE-FILEOPEN1 / D-CORE-FILEDIR1: open a writer. `append` keeps existing
 /// bytes; otherwise the file is truncated. `if_exists`: 0 replace, 1 refuse.
 /// `mode` < 0 keeps the default creation mode. `links`: 0 follow, 1 refuse.
-pub(crate) fn jet_std_files_open_writer(
-    handle: i64,
-    name: &String,
-    append: bool,
-    if_exists: i64,
-    mode: i64,
-    links: i64,
-) -> Result<JetFileWriter, jet_std::IOError> {
+pub(crate) fn jet_std_files_open_writer(handle: i64, name: &str, append: bool,
+if_exists: i64,
+mode: i64,
+links: i64,) -> Result<JetFileWriter, jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(name.clone()),
+            Some(name.to_owned()),
             "fault injected: FS.Write",
         ));
     }
@@ -100,7 +92,7 @@ pub(crate) fn jet_std_files_open_writer(
     let file = jet_std::jet_fs_open_at(handle, name, access, if_exists, mode, links)?;
     Ok(JetFileWriter {
         inner: std::io::BufWriter::new(file),
-        path: name.clone(),
+        path: name.to_owned(),
     })
 }
 
@@ -137,10 +129,7 @@ pub(crate) fn jet_std_file_reader_read_line(
     }
 }
 
-pub(crate) fn jet_std_file_writer_write_line(
-    writer: &mut JetFileWriter,
-    line: &String,
-) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_std_file_writer_write_line(writer: &mut JetFileWriter, line: &str, ) -> Result<(), jet_std::IOError> {
     use std::io::Write;
 
     if jet_fault_should_fail("FS.Write") {
@@ -319,11 +308,7 @@ pub(crate) fn jet_std_file_writer_set_mode(writer: &JetFileWriter, mode: i64) ->
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, &writer.path, error))
 }
 
-pub(crate) fn jet_files_link_reader_at_raw(
-    source: &JetFileReader,
-    into: i64,
-    name: &String,
-) -> (bool, bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+pub(crate) fn jet_files_link_reader_at_raw(source: &JetFileReader, into: i64, name: &str, ) -> (bool, bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
     jet_std::jet_fs_link_fd_at_raw(source.inner.get_ref(), into, name)
 }
 

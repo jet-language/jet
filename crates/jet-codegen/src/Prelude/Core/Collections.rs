@@ -787,8 +787,8 @@ fn jet_string_starts_with(text: &str, prefix: &str) -> bool {
 }
 
 #[inline(always)]
-fn jet_string_copy(text: &String) -> String {
-    text.clone()
+fn jet_string_copy(text: &str) -> String {
+    text.to_owned()
 }
 
 #[inline(always)]
@@ -796,7 +796,7 @@ fn jet_string_ends_with(text: &str, suffix: &str) -> bool {
     text.ends_with(suffix)
 }
 #[inline(always)]
-fn jet_string_replace(text: &String, from: &String, to: &String) -> String {
+fn jet_string_replace(text: &str, from: &str, to: &str) -> String {
     text.replace(from, to)
 }
 
@@ -816,7 +816,7 @@ fn jet_deque_to_list<T: Clone>(queue: &std::collections::VecDeque<T>) -> Vec<T> 
 #[inline(always)]
 fn jet_deque_join<T: JetShow>(
     queue: &std::collections::VecDeque<T>,
-    separator: &String,
+    separator: &str,
 ) -> String {
     queue
         .iter()
@@ -889,13 +889,13 @@ pub(crate) fn jet_string_contains(text: &str, needle: &str) -> bool {
     text.contains(needle)
 }
 #[inline(always)]
-fn jet_string_repeat(text: &String, count: i64) -> String {
+fn jet_string_repeat(text: &str, count: i64) -> String {
     text.repeat(count.max(0) as usize)
 }
 
 
 #[inline(always)]
-fn jet_string_count_bytes(text: &String) -> i64 {
+fn jet_string_count_bytes(text: &str) -> i64 {
     text.len() as i64
 }
 
@@ -3344,7 +3344,7 @@ pub(crate) fn jet_coll_counter_from(keys: &[String]) -> JetCounter {
 
 pub(crate) fn jet_coll_counter_add(
     counter: &JetCounter,
-    key: &String,
+    key: &str,
     amount: i64,
 ) -> JetCounter {
     let mut keys = Vec::with_capacity(counter.keys.len() + usize::from(amount != 0));
@@ -3364,21 +3364,21 @@ pub(crate) fn jet_coll_counter_add(
         }
     }
     if !found && amount != 0 {
-        keys.push(key.clone());
+        keys.push(key.to_owned());
         counts.push(amount);
     }
     JetCounter { keys, counts }
 }
 
-pub(crate) fn jet_coll_counter_inc(counter: &JetCounter, key: &String) -> JetCounter {
+pub(crate) fn jet_coll_counter_inc(counter: &JetCounter, key: &str) -> JetCounter {
     jet_coll_counter_add(counter, key, 1)
 }
 
-pub(crate) fn jet_coll_counter_dec(counter: &JetCounter, key: &String) -> JetCounter {
+pub(crate) fn jet_coll_counter_dec(counter: &JetCounter, key: &str) -> JetCounter {
     jet_coll_counter_add(counter, key, -1)
 }
 
-pub(crate) fn jet_coll_counter_get(counter: &JetCounter, key: &String) -> i64 {
+pub(crate) fn jet_coll_counter_get(counter: &JetCounter, key: &str) -> i64 {
     counter
         .keys
         .iter()
@@ -3389,7 +3389,7 @@ pub(crate) fn jet_coll_counter_get(counter: &JetCounter, key: &String) -> i64 {
 
 pub(crate) fn jet_coll_counter_set_count(
     counter: &JetCounter,
-    key: &String,
+    key: &str,
     count: i64,
 ) -> JetCounter {
     let current = jet_coll_counter_get(counter, key);
@@ -3474,7 +3474,7 @@ pub(crate) fn jet_coll_ordered_map() -> JetOrderedMap {
 
 pub(crate) fn jet_coll_map_get(
     map: &JetOrderedMap,
-    key: &String,
+    key: &str,
 ) -> Option<String> {
     map.keys
         .iter()
@@ -3484,16 +3484,16 @@ pub(crate) fn jet_coll_map_get(
 
 pub(crate) fn jet_coll_map_set(
     map: &JetOrderedMap,
-    key: &String,
-    value: &String,
+    key: &str,
+    value: &str,
 ) -> JetOrderedMap {
     let mut keys = Vec::with_capacity(map.keys.len() + 1);
     let mut values = Vec::with_capacity(map.values.len() + 1);
     let mut found = false;
     for (stored_key, stored_value) in map.keys.iter().zip(&map.values) {
         if stored_key == key {
-            keys.push(key.clone());
-            values.push(value.clone());
+            keys.push(key.to_owned());
+            values.push(value.to_owned());
             found = true;
         } else {
             keys.push(stored_key.clone());
@@ -3501,13 +3501,13 @@ pub(crate) fn jet_coll_map_set(
         }
     }
     if !found {
-        keys.push(key.clone());
-        values.push(value.clone());
+        keys.push(key.to_owned());
+        values.push(value.to_owned());
     }
     JetOrderedMap { keys, values }
 }
 
-pub(crate) fn jet_coll_map_remove(map: &JetOrderedMap, key: &String) -> JetOrderedMap {
+pub(crate) fn jet_coll_map_remove(map: &JetOrderedMap, key: &str) -> JetOrderedMap {
     let mut keys = Vec::with_capacity(map.keys.len());
     let mut values = Vec::with_capacity(map.values.len());
     for (stored_key, stored_value) in map.keys.iter().zip(&map.values) {
@@ -3527,7 +3527,7 @@ pub(crate) fn jet_coll_map_values(map: &JetOrderedMap) -> Vec<String> {
     map.values.clone()
 }
 
-pub(crate) fn jet_coll_map_contains(map: &JetOrderedMap, key: &String) -> bool {
+pub(crate) fn jet_coll_map_contains(map: &JetOrderedMap, key: &str) -> bool {
     jet_coll_map_get(map, key).is_some()
 }
 
@@ -3555,7 +3555,7 @@ pub(crate) fn jet_coll_chain_push(
 
 pub(crate) fn jet_coll_chain_get(
     chain: &JetChain,
-    key: &String,
+    key: &str,
 ) -> Option<String> {
     for layer in &chain.layers {
         if let Some(index) = layer.keys.iter().position(|stored_key| stored_key == key) {
@@ -3565,7 +3565,7 @@ pub(crate) fn jet_coll_chain_get(
     None
 }
 
-pub(crate) fn jet_coll_chain_contains(chain: &JetChain, key: &String) -> bool {
+pub(crate) fn jet_coll_chain_contains(chain: &JetChain, key: &str) -> bool {
     jet_coll_chain_get(chain, key).is_some()
 }
 pub(crate) fn jet_coll_set() -> JetStringSet {
@@ -3580,16 +3580,16 @@ pub(crate) fn jet_coll_set_from_list(items: &[String]) -> JetStringSet {
     set
 }
 
-pub(crate) fn jet_coll_set_add(set: &JetStringSet, item: &String) -> JetStringSet {
+pub(crate) fn jet_coll_set_add(set: &JetStringSet, item: &str) -> JetStringSet {
     if jet_coll_set_contains(set, item) {
         return set.clone();
     }
     let mut items = set.items.clone();
-    items.push(item.clone());
+    items.push(item.to_owned());
     JetStringSet { items }
 }
 
-pub(crate) fn jet_coll_set_discard(set: &JetStringSet, item: &String) -> JetStringSet {
+pub(crate) fn jet_coll_set_discard(set: &JetStringSet, item: &str) -> JetStringSet {
     JetStringSet {
         items: set.items.iter().filter(|value| *value != item).cloned().collect(),
     }
@@ -3597,7 +3597,7 @@ pub(crate) fn jet_coll_set_discard(set: &JetStringSet, item: &String) -> JetStri
 
 pub(crate) fn jet_coll_set_remove(
     set: &JetStringSet,
-    item: &String,
+    item: &str,
 ) -> Option<JetStringSet> {
     if !jet_coll_set_contains(set, item) {
         return None;
@@ -3605,7 +3605,7 @@ pub(crate) fn jet_coll_set_remove(
     Some(jet_coll_set_discard(set, item))
 }
 
-pub(crate) fn jet_coll_set_contains(set: &JetStringSet, item: &String) -> bool {
+pub(crate) fn jet_coll_set_contains(set: &JetStringSet, item: &str) -> bool {
     set.items.iter().any(|value| value == item)
 }
 pub(crate) fn jet_coll_set_len(set: &JetStringSet) -> i64 {
