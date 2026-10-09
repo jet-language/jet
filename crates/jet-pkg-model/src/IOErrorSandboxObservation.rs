@@ -245,7 +245,7 @@ fn canonical_plugin_positive9_component_uses_verified_bridge() {
     let mounts = mounts.into_iter()
         .map(|mount| ReadOnlyMount::new(mount.source, mount.destination))
         .collect::<Vec<_>>();
-    let args = [TEST.to_string(), "--ignored".to_string(), "--exact".to_string(), "--nocapture".to_string(), "--test-threads=1".to_string()];
+    let args = [TEST.to_string(), "--ignored".to_string(), "--exact".to_string(), "--show-output".to_string(), "--test-threads=1".to_string()];
     let collected = run_component_fixture(
         &executable, &args, &source, &paths.target_dir, &env, &mounts, component,
         Duration::from_secs(120),
