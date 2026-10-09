@@ -69,7 +69,7 @@ The handle-free event, format, cause, error, and limits declarations are ordinar
 Jet source nominals in `Core/encoding/encoding.jet`. Encoding error Display and
 Debug use the shared location ladder: format, kind, byte offset, optional line
 and column, optional nonempty path, then reason. Attaching a cause does not
-change this rendering. `DataTree` remains the native nominal pending the
+change this rendering. `Dyn` remains the native nominal pending the
 ordered Object/public Map representation ruling; its policy uses borrowed
 ordered Object leaves rather than replacing the carrier.
 
@@ -216,7 +216,7 @@ boundary, without rounding through binary64.
   rule. Their object keys must be text; non-text map keys are `Unsupported`,
   never stringified. Characters use JSON string quoting, including lowercase
   `\u00xx` escapes for C0 controls without a short JSON escape.
-- JSONL readers return `?DataTree`, writers accept `DataTree`, and each
+- JSONL readers return `?Dyn`, writers accept `Dyn`, and each
   non-empty record contains one complete value.
 - CSV readers return `?CSVRow`, writers accept `[String]`, and each record
   follows RFC 4180, including quoted newlines. `CSVRow` has `fields: [String]`

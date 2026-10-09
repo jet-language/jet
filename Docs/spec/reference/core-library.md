@@ -2809,9 +2809,9 @@ native date-time carrier.
 
 ### `core.encoding` — bounded value codecs
 
-`core.encoding` converts complete values to and from `DataTree`. Objects retain
+`core.encoding` converts complete values to and from `Dyn`. Objects retain
 arrival order: the `Object` payload is the ordered pair list
-`[(key: String, value: DataTree)]` (D-DATATREE-ORDER1), and a repeated name is a
+`[(key: String, value: Dyn)]` (D-DATATREE-ORDER1), and a repeated name is a
 `Syntax` error except under `json.parse_allow_duplicates`. Integers and
 floating-point numbers remain distinct, and
 malformed input returns a typed `EncodingError`. The whole-value codecs are
@@ -2926,10 +2926,10 @@ is retained and counts as nonblank (only spaces and tabs make a blank record).
 | `jsonl.to_string(values)` / `dumps(values)` | `String` | Encode values as compact JSON lines with a trailing newline per row. |
 | `jsonl.count_rows(text)` | `Int` | Count nonblank rows. |
 | `jsonl.append_line(text, value)` | `String` | Append one encoded row. |
-| `jsonl.first(text)` | `?DataTree !EncodingError` | Return the first nonblank row. |
+| `jsonl.first(text)` | `?Dyn !EncodingError` | Return the first nonblank row. |
 | `jsonl.reader(text)` | `JSONLReader` | Pull one nonblank record at a time from text already in memory; parse no record beyond the last requested one. |
 | `jsonl.reader(^input, limits)` / `jsonl.writer(^output, limits)` | `JSONLReader !EncodingError` / `JSONLWriter !EncodingError` | Construct bounded file-backed line streams. |
-| `JSONLReader.next()` | `?DataTree !EncodingError` | Return the next row or stable end-of-input. |
+| `JSONLReader.next()` | `?Dyn !EncodingError` | Return the next row or stable end-of-input. |
 | `JSONLWriter.write(value)` / `flush()` / `finish()` | `Unit !EncodingError` | Write records, flush output, or finish the stream. |
 
 ### `core.encoding.csv` — comma-separated rows
@@ -2949,7 +2949,7 @@ stream retains its separate native callback carrier.
 | Function or type | Returns | Description |
 | --- | --- | --- |
 | `csv.rows(text, delimiter, header, skip_blank)` | `[CSVRow] !EncodingError` | Parse physical rows with explicit delimiter, header and blank-line policy. |
-| `csv.parse(text)` / `decode(text)` | `DataTree !EncodingError` | Parse rows as an array of arrays. |
+| `csv.parse(text)` / `decode(text)` | `Dyn !EncodingError` | Parse rows as an array of arrays. |
 | `csv.to_string<T: Encode>(rows)` | `String` | Encode explicit row arrays or typed records; records use the first record's field order as the header. Rows are separated by LF, with no trailing LF. |
 | `csv.reader(^source, limits, delimiter, header, skip_blank)` / `csv.writer(^target, limits)` | `CSVReader !EncodingError -[FS]>` / `CSVWriter !EncodingError -[FS]>` | Construct incremental file-backed CSV objects. Reader defaults retain the header and blank records. |
 | `CSVReader.next()` | `?CSVRow !EncodingError -[IO]>` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. |
@@ -2984,7 +2984,7 @@ serializer.
 
 ### `core.encoding.xml` — bounded XML trees
 
-`core.encoding.xml` uses the lossless namespace-aware `DataTree` schema and
+`core.encoding.xml` uses the lossless namespace-aware `Dyn` schema and
 security rules in [encoding-decisions.md](../encoding-decisions.md#xml-representation-and-security).
 Native authority preserves the complete parse/render options, entity policies,
 lexical evidence, encodings, canonical modes, and located `XMLError` payloads.
@@ -2995,7 +2995,7 @@ codec must not remove its native options or located error payloads.
 
 | Signature | Result | Description |
 | --- | --- | --- |
-| `xml.parse(text)` / `parse_with(text, options)` / `parse_bytes(bytes, options)` | `DataTree !XMLError` | Parse Unicode text or supported byte encodings with bounded, non-I/O entity policy. |
+| `xml.parse(text)` / `parse_with(text, options)` / `parse_bytes(bytes, options)` | `Dyn !XMLError` | Parse Unicode text or supported byte encodings with bounded, non-I/O entity policy. |
 | `xml.to_string(tree)` / `to_bytes(tree, options)` | `String !XMLError` / `[U8] !XMLError` | Render a validated XML document with lexical and encoding options. |
 | `xml.canonical(tree, options)` | `String !XMLError` | Apply Inclusive 1.1 or Exclusive 1.0 canonicalization. |
 | `xml.reader(^input, limits, options)` | `XMLReader !EncodingError` | Construct a bounded file-backed XML event reader. |
@@ -3020,7 +3020,7 @@ part; its helper functions are not exports of the public CBOR module.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
-| `cbor.parse(bytes, options)` | `DataTree !CBORError` | Parse a whole value under depth, item, allocation, and canonical limits. |
+| `cbor.parse(bytes, options)` | `Dyn !CBORError` | Parse a whole value under depth, item, allocation, and canonical limits. |
 | `cbor.to_bytes<T: Encode>(value)` / `to_bytes_canonical(value)` | `[U8] !CBORError` | Encode ordinary or canonical CBOR. |
 | `cbor.reader(^input, limits)` / `writer(^output, limits)` | `CBORReader !EncodingError` / `CBORWriter !EncodingError` | Construct bounded file-backed event streams. |
 | `CBORReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
@@ -3130,7 +3130,7 @@ values rather than native nominal substitutes. `DataError` displays its kind
 and operation, then any row, column, and index in that order, followed by the
 reason; its optional cause is retained but not included in that text.
 `DataWatchStatus` exposes the complete retained status record in a stable field
-order. `DataTree` remains the existing native nominal and ordered-object
+order. `Dyn` remains the existing native nominal and ordered-object
 carrier; source-owned data policy does not introduce a second tree algebra.
 The source plot selector enums preserve the native variant order and spellings,
 including text/detail channels, point scales, row/column facets, zoom/brush
@@ -3476,7 +3476,7 @@ or golden file. The public source is
 | Signature | Result | Description |
 |---|---|---|
 | `assert_equal(comparison: TestComparison) -> Bool` | Boolean | Check the comparison's recorded proof fields. |
-| `compare<E>(cases: [DataTree], reference: fn(DataTree) -> DataTree E!, candidate: fn(DataTree) -> DataTree E!, relation: String) -> TestComparison E!` | comparison | Compare reference and candidate outputs over explicit cases. The callbacks' shared failure type passes up (D-CALLBACK-ERR1=A); callbacks that cannot fail make the comparison `Never!`. |
+| `compare<E>(cases: [Dyn], reference: fn(Dyn) -> Dyn E!, candidate: fn(Dyn) -> Dyn E!, relation: String) -> TestComparison E!` | comparison | Compare reference and candidate outputs over explicit cases. The callbacks' shared failure type passes up (D-CALLBACK-ERR1=A); callbacks that cannot fail make the comparison `Never!`. |
 | `snap(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare or create `__snapshots__/<sanitized-name>.snap`; `JET_UPDATE_SNAPSHOTS=1` rewrites it. Snapshot names retain ASCII letters, digits, `-`, and `_`, replacing other scalars with `_`; an empty name becomes `case`. |
 | `golden(name: String, value: String) -[FS]> Bool` | Boolean | Check a named golden value. |
 | `fixture(name: String) -[FS]> String` | text | Load a named fixture. |

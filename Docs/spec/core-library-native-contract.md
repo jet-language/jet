@@ -732,7 +732,7 @@ This data-provider contract does not claim TLS engine or certificate validation.
 `DataSequences.jet` owns the shared native List header constants
 `DATA_SEQUENCE_BYTES`, `DATA_SEQUENCE_LENGTH`, `DATA_SEQUENCE_CAPACITY`, and
 `DATA_SEQUENCE_DATA`, plus `data_sequence_new`, `data_sequence_slot`, and
-`data_sequence_reserve`. DataTree and TLS certificate sequences use those
+`data_sequence_reserve`. Dyn and TLS certificate sequences use those
 unchanged helpers. TLS byte-list children use `data_u8_list_copy_into` and
 `data_u8_list_drop_fields` from the same provider; their old private TLS
 definitions are removed. The shared sequence index and capacity failure

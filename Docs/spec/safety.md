@@ -1617,17 +1617,17 @@ example retains the negative unsafe-outside-vetted scan.
     },
     {
       "package": "jet",
-      "file": "Compiler/JetRuntime/Source/DataTree.jet",
+      "file": "Compiler/JetRuntime/Source/Dyn.jet",
       "line": 7,
       "column": 5,
-      "reason": "address borrows an initialized word in a live native DataTree or List"
+      "reason": "address borrows an initialized word in a live native Dyn or List"
     },
     {
       "package": "jet",
-      "file": "Compiler/JetRuntime/Source/DataTree.jet",
+      "file": "Compiler/JetRuntime/Source/Dyn.jet",
       "line": 10,
       "column": 5,
-      "reason": "address owns a writable word in a native DataTree or List"
+      "reason": "address owns a writable word in a native Dyn or List"
     },
     {
       "package": "jet",
@@ -3545,7 +3545,7 @@ example retains the negative unsafe-outside-vetted scan.
       "file": "Core/encoding/cbor.jet",
       "line": 95,
       "column": 5,
-      "reason": "inspect private typed carriers without changing public DataTree variants"
+      "reason": "inspect private typed carriers without changing public Dyn variants"
     },
     {
       "package": "jet",
@@ -3608,7 +3608,7 @@ example retains the negative unsafe-outside-vetted scan.
       "file": "Core/encoding/json.jet",
       "line": 706,
       "column": 5,
-      "reason": "preserve the native compiler-private DataTree carriers in Core JSON event projection"
+      "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
     {
       "package": "jet",
@@ -3727,7 +3727,7 @@ example retains the negative unsafe-outside-vetted scan.
       "file": "Core/encoding/toml.jet",
       "line": 779,
       "column": 5,
-      "reason": "inspect compiler-private Bytes and typed carriers; public DataTree variants are unchanged"
+      "reason": "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged"
     },
     {
       "package": "jet",
@@ -3755,7 +3755,7 @@ example retains the negative unsafe-outside-vetted scan.
       "file": "Core/encoding/yaml.jet",
       "line": 390,
       "column": 5,
-      "reason": "inspect compiler-private Bytes and typed carriers; public DataTree variants are unchanged"
+      "reason": "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged"
     },
     {
       "package": "jet",
@@ -7326,8 +7326,8 @@ example retains the negative unsafe-outside-vetted scan.
 | jet | Compiler/JetRuntime/Source/DataEvent.jet | 8:5 | "address owns a writable word in a native DataEvent" |
 | jet | Compiler/JetRuntime/Source/DataLimits.jet | 6:5 | "address borrows an initialized word in a live native limits carrier" |
 | jet | Compiler/JetRuntime/Source/DataLimits.jet | 9:5 | "address owns a writable word in a native limits carrier or getter out slot" |
-| jet | Compiler/JetRuntime/Source/DataTree.jet | 7:5 | "address borrows an initialized word in a live native DataTree or List" |
-| jet | Compiler/JetRuntime/Source/DataTree.jet | 10:5 | "address owns a writable word in a native DataTree or List" |
+| jet | Compiler/JetRuntime/Source/Dyn.jet | 7:5 | "address borrows an initialized word in a live native Dyn or List" |
+| jet | Compiler/JetRuntime/Source/Dyn.jet | 10:5 | "address owns a writable word in a native Dyn or List" |
 | jet | Compiler/JetRuntime/Source/Deadline.jet | 65:5 | "clock_gettime writes two thread-owned TCB words, not retained after the syscall" |
 | jet | Compiler/JetRuntime/Source/Display.jet | 8:5 | "borrows an initialized aligned word in an E4 header, exact-Int node or owned formatter workspace" |
 | jet | Compiler/JetRuntime/Source/Display.jet | 14:5 | "writes an aligned word in an exclusively owned formatter workspace or fresh E4 header" |
@@ -7601,7 +7601,7 @@ example retains the negative unsafe-outside-vetted scan.
 | jet | Core/db/db.jet | 70:5 | "query bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire" |
 | jet | Core/email/email.jet | 77:5 | "DKIM decoding: borrow encoded bytes and keep partial output in a zeroizing Secret" |
 | jet | Core/email/email.jet | 413:5 | "DKIM known-answer fixture reads only synthetic key bytes" |
-| jet | Core/encoding/cbor.jet | 95:5 | "inspect private typed carriers without changing public DataTree variants" |
+| jet | Core/encoding/cbor.jet | 95:5 | "inspect private typed carriers without changing public Dyn variants" |
 | jet | Core/encoding/cbor.jet | 157:5 | "validated private carriers retain byte strings for typed Encode" |
 | jet | Core/encoding/cbor_stream.jet | 209:9 | "the retained key copies exactly the already validated text bytes" |
 | jet | Core/encoding/cbor_stream.jet | 312:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
@@ -7610,7 +7610,7 @@ example retains the negative unsafe-outside-vetted scan.
 | jet | Core/encoding/csv.jet | 768:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
 | jet | Core/encoding/json.jet | 101:5 | "preserve the shipped decoder's hidden stderr effect at its existing host boundary" |
 | jet | Core/encoding/json.jet | 109:5 | "preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary" |
-| jet | Core/encoding/json.jet | 706:5 | "preserve the native compiler-private DataTree carriers in Core JSON event projection" |
+| jet | Core/encoding/json.jet | 706:5 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
 | jet | Core/encoding/json.jet | 870:5 | "Core JSON rendering borrows native private payloads without exposing their constructors" |
 | jet | Core/encoding/stream.jet | 12:9 | "the Object variant was checked immediately before borrowing its ordered backing" |
 | jet | Core/encoding/stream.jet | 20:5 | "transfer the owned ordered entries allocation into the native Object carrier" |
@@ -7627,11 +7627,11 @@ example retains the negative unsafe-outside-vetted scan.
 | jet | Core/encoding/stream.jet | 1405:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
 | jet | Core/encoding/stream.jet | 1416:5 | "transfer the owned UTF-8 String buffer before re-spelling its shortest digits" |
 | jet | Core/encoding/stream.jet | 1742:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
-| jet | Core/encoding/toml.jet | 779:5 | "inspect compiler-private Bytes and typed carriers; public DataTree variants are unchanged" |
+| jet | Core/encoding/toml.jet | 779:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
 | jet | Core/encoding/xml_engine.jet | 134:5 | "all callers iterate or check the UTF-8 byte bounds before borrowing this byte" |
 | jet | Core/encoding/xml_engine.jet | 173:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | jet | Core/encoding/xml_engine.jet | 2218:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
-| jet | Core/encoding/yaml.jet | 390:5 | "inspect compiler-private Bytes and typed carriers; public DataTree variants are unchanged" |
+| jet | Core/encoding/yaml.jet | 390:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
 | jet | Core/files/files.jet | 446:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
 | jet | Core/files/files.jet | 452:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
 | jet | Core/http/server.jet | 76:5 | "move the normalized response head and one-shot body into the transport carrier" |
@@ -8174,7 +8174,7 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file": "Core/crypto/vault.jet", "function": "export_to_recipients", "proof": "`validate_key` runs and the recipient list is bounded to 1..16; the result is recipient-encrypted wrapped bytes, never the plain key."},
   {"file":"Core/email/email.jet","function":"decode_dkim","proof":"The gate reads and writes Secret.bytes, not arbitrary memory. At email.jet:78-95 a nonempty length divisible by four bounds every quartet access and canonical padding/alphabet checks reject malformed input. The only decoded allocation is the fixed 32-byte Secret at :82; :96-104 guard every write with written < 32, never grow a secret-bearing List, and :107 rejects any non-32-byte result. Errors drop the zeroizing Secret; success moves it at :108. Callers supply only a borrowed Secret and cannot choose unchecked indices or receive a plain decoded byte list."},
   {"file":"Core/data/data.jet","function":"bridge_tool_on_path","proof":"__host_path_is_file invokes OsStr::from_encoded_bytes_unchecked (Top/DataStats.rs:11-13), so its input must retain native encoded-byte provenance. data.jet:1090 obtains PATH from the current host's encoded environment; :1092-1108 split only at ASCII colon/semicolon and remove Windows ASCII quotes. :1111-1117 append only ASCII separators and valid UTF-8 tool text, preserving that host encoding. The metadata leaf borrows the owned list and returns Bool/error, not a pointer; the caller cannot supply an unrelated byte allocation to this helper or retain a host borrow."},
-  {"file":"Core/data/data.jet","function":"data_loader_render","proof":"The gate at data.jet:1729 only matches the compiler-private DataTree Number, TypedText and Bytes variants. Each payload is accessed after its matching discriminant at :1730, :1734 or :1738, then read through ordinary String/List operations into the caller's exclusively borrowed output; no unchecked memory, forged carrier or raw pointer is created. Other variants leave the gate for normal recursive rendering. Any typed DataTree input remains a valid enum; callers cannot select a mismatched native payload."},
+  {"file":"Core/data/data.jet","function":"data_loader_render","proof":"The gate at data.jet:1729 only matches the compiler-private Dyn Number, TypedText and Bytes variants. Each payload is accessed after its matching discriminant at :1730, :1734 or :1738, then read through ordinary String/List operations into the caller's exclusively borrowed output; no unchecked memory, forged carrier or raw pointer is created. Other variants leave the gate for normal recursive rendering. Any typed Dyn input remains a valid enum; callers cannot select a mismatched native payload."},
   {"file":"Core/process/process.jet","function":"cmd","proof":"The __spec_fields leaf is layout transfer into ProcessSpec, not process execution (Top/ProcessSpec.rs:6-37). process.jet:92 takes all fields from default_fields(:419-428): paired environment columns are both empty; optional cwd, stdin, timeout, resource limits, terminal and policy are accompanied by their actual presence flags at :95-104, with valid typed placeholders. The sole present numeric limit is 67108864. argv is a typed owned String list; even empty argv is deferred to checked spawn, not indexed here. No descriptor or memory address is supplied or returned, and callers cannot alter the hidden initialized field set."},
   {"file":"Core/http/server.jet","function":"response_body","proof":"The __response_parts gate at server.jet:76 transfers typed Headers and one-shot Body ownership into the response without reading the body. :72-75 normalize every caller status to 100..599 before I64 conversion; all other transport fields at :78-79 are initialized typed constants, absent slots, or empty lists. The consuming body/headers parameters at :69 prevent the caller from reusing moved stream ownership. No pointer or foreign callback is accepted; invalid status cannot reach the unchecked head transfer."},
   {"file":"Core/http/server.jet","function":"access_log_template","proof":"The gate at server.jet:139 calls __route_template with a borrowed typed HTTPRequest. Its provider Top/HTTPServer.rs:6321-6322 only clones the request's stored Option<String>; it neither dereferences caller-supplied addresses nor mutates routing state, consumes the request, or exports a borrowed native reference. Every caller therefore receives owned optional text regardless of whether route metadata was present."},
@@ -8202,8 +8202,8 @@ the function body; they do not exempt a wrapper from the proof requirement.
 {"file":"Core/tui/tui.jet","function":"capability_env_bytes","proof":"__cap_env_bytes at tui.jet:101 borrows a String name and returns an owned optional byte list. Its provider Ui.rs:514-515 obtains var_os and consumes OsString into encoded bytes; no borrowed environment storage is returned and source does not assume UTF-8 (capability_text uses checked String.from_bytes at :112). Arbitrary names cannot manufacture a native pointer or invalidate returned storage."},
 {"file":"Core/tui/tui.jet","function":"capability_stdout_terminal","proof":"The gate at tui.jet:126-127 invokes __stdout_terminal with no caller-supplied values and returns only a copied Bool host terminal fact at :129. It lends no memory, descriptor ownership or callback to the caller; host terminal presence or absence cannot change the typed result's validity."},
 {"file":"Core/tui/tui.jet","function":"normalized_style_test_node","proof":"The local test helper at tui.jet:651-655 calls __node_transfer with initialized text/dimensions, fixed kind/role, an empty child list, explicitly absent accessibility slots and present style slots. Its sole caller(:659-663) obtains StyleWords from style_words(:416-421), whose three flags are bounded bits 1/2/4 and whose colors are normalized by color_words. No arbitrary numeric representation or uninitialized optional slot is passed; the returned retained UINode owns its payload."},
-  {"file":"Core/encoding/cbor.jet","function":"validate","proof":"The cbor.jet:95 gate only matches DataTree's private Number/TypedText variants to reject them(:97-98), and recursively validates initialized Array/Object payloads(:99-104). Discriminant matching precedes payload access; ordered Object storage is borrowed through object_entries while value remains live. No raw address, variant transmute or payload reference escapes in the error/unit result."},
-  {"file":"Core/encoding/cbor.jet","function":"encode_value","proof":"The cbor.jet:157 gate grants access to private DataTree.Bytes only after its matching branch(:171); all byte reads iterate the owned list length(:173). Object entry views are taken only in the Object branch(:179-180) and retain the value borrow throughout bounded index ordering. encode(:111) validates the tree first, rejecting internal Number/TypedText. The caller's exclusively borrowed output receives copied bytes, never native payload references."},
+  {"file":"Core/encoding/cbor.jet","function":"validate","proof":"The cbor.jet:95 gate only matches Dyn's private Number/TypedText variants to reject them(:97-98), and recursively validates initialized Array/Object payloads(:99-104). Discriminant matching precedes payload access; ordered Object storage is borrowed through object_entries while value remains live. No raw address, variant transmute or payload reference escapes in the error/unit result."},
+  {"file":"Core/encoding/cbor.jet","function":"encode_value","proof":"The cbor.jet:157 gate grants access to private Dyn.Bytes only after its matching branch(:171); all byte reads iterate the owned list length(:173). Object entry views are taken only in the Object branch(:179-180) and retain the value borrow throughout bounded index ordering. encode(:111) validates the tree first, rejecting internal Number/TypedText. The caller's exclusively borrowed output receives copied bytes, never native payload references."},
   {"file":"Core/encoding/cbor_stream.jet","function":"retain_key","proof":"__bytes_into_text at cbor_stream.jet:208 consumes stored, which :205 fills with exactly text.count_bytes() bytes obtained through bounds-checked stream.byte_at from a valid String. It neither truncates a scalar nor edits its encoding. Only the exact owned copy moves into the retained key; arbitrary wire bytes cannot reach this transfer."},
   {"file":"Core/encoding/cbor_stream.jet","function":"next_inner","proof":"For a CBOR text item cbor_stream.jet:303 obtains the owned payload, :306 strictly validates that exact list's UTF-8 and returns Syntax on failure, then :308 immediately moves it into __bytes_into_text. No mutation intervenes, and binary items(:304) never use the text transfer. Host/wire callers cannot bypass the validator with malformed payload bytes."},
   {"file":"Core/encoding/csv.jet","function":"close_field","proof":"__bytes_into_text at csv.jet:124 consumes the whole-value parser's field. typed_records(:213-222) obtains complete scalar byte sequences from a valid String, and TypedCSV.push(:138-200) either appends the whole sequence or replaces/removes ASCII CSV syntax; doubled quotes and CRLF are ASCII. Thus field is empty or concatenated complete UTF-8 scalars at every close; it is moved and reset before reuse(:124-126), never exposed as arbitrary caller bytes."},
@@ -8211,17 +8211,17 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/encoding/csv.jet","function":"finish_field","proof":"CSVReader.character(:725-744) validates lead width, all continuation bytes, overlong/surrogate/out-of-range cases before next_inner(:880-882) calls push. push(:798-874) appends each entire validated scalar or only ASCII quote/CRLF escapes. Consequently finish_field's __bytes_into_text(:769) moves only complete UTF-8 storage, then resets field(:771). Partial/invalid wire scalars fail without reaching this gate."},
   {"file":"Core/encoding/json.jet","function":"emit_coercion","proof":"json.jet:101-102 calls __coerce_emit with ordinary borrowed String text; it supplies no pointer, descriptor or callback. The reserved leaf preserves the existing stderr emission boundary, and the helper returns no borrowed storage. Caller-selected message bytes remain valid UTF-8 and cannot become an unchecked address or outlive the call as a native reference."},
   {"file":"Core/encoding/json.jet","function":"coerce_line","proof":"The gate at json.jet:109-110 calls __coerce_now with no arguments and assigns its owned Int clock snapshot. Subsequent interpolation(:112) is safe String construction. No caller can choose a raw memory operand or receive a host borrow through this parameterless scalar query."},
-  {"file":"Core/encoding/json.jet","function":"append_events","proof":"json.jet:707-709 match each private DataTree.Number/TypedText/Bytes discriminant before projecting its initialized String/list into the corresponding typed DataEvent. Only owned enum payloads are returned; no mismatched variant access, pointer formation or borrowed backing view escapes. Public variants are recursively handled outside the gate(:712-735)."},
+  {"file":"Core/encoding/json.jet","function":"append_events","proof":"json.jet:707-709 match each private Dyn.Number/TypedText/Bytes discriminant before projecting its initialized String/list into the corresponding typed DataEvent. Only owned enum payloads are returned; no mismatched variant access, pointer formation or borrowed backing view escapes. Public variants are recursively handled outside the gate(:712-735)."},
   {"file":"Core/encoding/json.jet","function":"write_json","proof":"json.jet:855-870 discriminate private Number/TypedText/Bytes before reading each payload. Number/text are ordinary String inputs to output helpers; Bytes are read only over 0..<bytes.len()(:865-868). The caller holds an exclusive output-list borrow, which receives copied encoding bytes; no native storage reference or unchecked index is returned. Other variants leave the gate for normal recursive rendering."},
-  {"file":"Core/encoding/stream.jet","function":"object_entries","proof":"__object_entries_view requires an Object and returns a borrowed ordered backing view. stream.jet:11 checks that exact discriminant immediately before :13; other variants panic before the intrinsic. The result's `from value` lifetime at :10 ties the view to the same borrowed DataTree, so callers cannot keep it after releasing its owner or reinterpret another payload."},
-  {"file":"Core/encoding/stream.jet","function":"object_from_entries","proof":"__object_from_entries at stream.jet:21 receives a consuming list of typed String/DataTree entries, moving its sole allocation into an initialized Object carrier. No pointer, length or discriminant is supplied separately, and the caller cannot reuse the moved list. Arbitrary duplicate keys affect encoding policy, not the validity or ownership of the native payload."},
-  {"file":"Core/encoding/stream.jet","function":"bytes_payload","proof":"stream.jet:27 checks private DataTree.Bytes before __bytes_view on the same value; all other variants panic(:29). The View<U8> result is declared `from value`(:25), retaining the owner borrow rather than exporting an independent pointer. Callers cannot select a different variant's backing or use the view after the carrier's lifetime."},
+  {"file":"Core/encoding/stream.jet","function":"object_entries","proof":"__object_entries_view requires an Object and returns a borrowed ordered backing view. stream.jet:11 checks that exact discriminant immediately before :13; other variants panic before the intrinsic. The result's `from value` lifetime at :10 ties the view to the same borrowed Dyn, so callers cannot keep it after releasing its owner or reinterpret another payload."},
+  {"file":"Core/encoding/stream.jet","function":"object_from_entries","proof":"__object_from_entries at stream.jet:21 receives a consuming list of typed String/Dyn entries, moving its sole allocation into an initialized Object carrier. No pointer, length or discriminant is supplied separately, and the caller cannot reuse the moved list. Arbitrary duplicate keys affect encoding policy, not the validity or ownership of the native payload."},
+  {"file":"Core/encoding/stream.jet","function":"bytes_payload","proof":"stream.jet:27 checks private Dyn.Bytes before __bytes_view on the same value; all other variants panic(:29). The View<U8> result is declared `from value`(:25), retaining the owner borrow rather than exporting an independent pointer. Callers cannot select a different variant's backing or use the view after the carrier's lifetime."},
   {"file":"Core/encoding/stream.jet","function":"typed_number","proof":"The gate at stream.jet:33-34 constructs the compiler-private Number enum from a consuming typed String; it does not reinterpret memory. Its source caller json.jet:562 is in Parser.number after numeric grammar validation and checked String construction(:561). The owned lexeme is retained for typed decoding, never used as an address or unchecked index; consumers use normal checked numeric parsing. Callers cannot corrupt enum layout or retain the moved String's storage."},
-  {"file":"Core/encoding/stream.jet","function":"typed_string","proof":"__typed_text at stream.jet:40 consumes an initialized String into the private typed-text carrier. UTF-8 is already guaranteed by the String type; this operation neither changes its bytes nor accepts a separately forgeable pointer/length. The caller loses ownership of the moved text and receives an owning DataTree enum, not an escaping borrow."},
+  {"file":"Core/encoding/stream.jet","function":"typed_string","proof":"__typed_text at stream.jet:40 consumes an initialized String into the private typed-text carrier. UTF-8 is already guaranteed by the String type; this operation neither changes its bytes nor accepts a separately forgeable pointer/length. The caller loses ownership of the moved text and receives an owning Dyn enum, not an escaping borrow."},
   {"file":"Core/encoding/stream.jet","function":"read_string","proof":"stream.jet:294 validates the exact decoded byte list, returning Syntax and releasing tracked capacity on failure(:295-296). The __bytes_into_text gate(:299-300) immediately consumes that same list without intervening mutation. Escaped or raw wire bytes therefore cannot bypass UTF-8 validation or expose a dangling parser buffer."},
   {"file":"Core/encoding/stream.jet","function":"number","proof":"Both gates discharge separate obligations: stream.jet:360 rejects invalid JSON numeric grammar and :365 rejects invalid UTF-8 before :371 consumes that exact byte list into String. Only after those checks does :375-376 construct DataEvent.Number when typed_numbers is enabled. The valid initialized lexeme moves into its matching carrier; no unchecked numeric payload reinterpretation or raw buffer reference reaches callers."},
   {"file":"Core/encoding/stream.jet","function":"fold_text","proof":"stream.jet:555 consumes a valid String into __text_into_bytes solely to measure allocation capacity. That byte list is not modified; :557 can fail before reconstruction, otherwise :559 immediately moves the unchanged UTF-8 list into __bytes_into_text. Budget checks affect retention, not validity; no caller receives the intermediate storage or can mutate it between conversions."},
-  {"file":"Core/encoding/stream.jet","function":"fold","proof":"stream.jet:566 checks the private DataEvent.Number discriminant before moving its initialized String through fold_text(:567) into matching DataTree.Number(:568). fold_text preserves UTF-8 while accounting allocation ownership. No other event variant is interpreted as a number; recursion and ordinary event handling occur outside the gate and no native payload borrow escapes."},
+  {"file":"Core/encoding/stream.jet","function":"fold","proof":"stream.jet:566 checks the private DataEvent.Number discriminant before moving its initialized String through fold_text(:567) into matching Dyn.Number(:568). fold_text preserves UTF-8 while accounting allocation ownership. No other event variant is interpreted as a number; recursion and ordinary event handling occur outside the gate and no native payload borrow escapes."},
   {"file":"Core/encoding/stream.jet","function":"text_from_bytes","proof":"stream.jet:834 strictly validates the caller's exact owned byte list, returning EncodingError on failure; :836 then immediately moves it into __bytes_into_text. No mutation or alternate allocation occurs between validation and transfer. Even arbitrary external byte input cannot return a String violating UTF-8 or retain a pointer into the moved list."},
   {"file":"Core/encoding/stream.jet","function":"byte_at","proof":"The unchecked __string_byte at stream.jet:845 is dominated by :841-842, which reject index < 0 or index >= text.count_bytes() before U64 conversion. The borrowed String remains live for the one-byte read; only copied U8 returns. Callers cannot cause a negative, out-of-storage or dangling pointer read through this helper."},
   {"file":"Core/encoding/stream.jet","function":"ascii_text","proof":"Despite its formatter-oriented name, ascii_text admits no unchecked caller assumption: stream.jet:1402 runs strict __utf8_validate on the exact owned list and panics on invalid UTF-8. Only the succeeding path at :1404-1405 consumes it into __bytes_into_text, with no intervening write. Malformed formatter output cannot create an invalid String."},
