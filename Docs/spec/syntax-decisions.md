@@ -4656,6 +4656,8 @@ index, not a substitute for that law.
   `IOContext` has `operation: IOOperation`, `resource: ?String`,
   `os_code: ?Int`, and `cause: ?String`. `IOOperation` is exactly `Read`,
   `Write`, `Flush`, `Connect`, `Accept`, `Close`, `Resolve`, or `Codec`.
+  The compiler-owned `IOContext` and `IOOperation` annotation spellings are
+  available inside Core source only; this does not add public Core exports.
   Clean EOF remains an empty successful read; zero limits are
   `InvalidInput(.Read)`. Native file/network errors preserve stable kind,
   operation, resource, OS code, and owned cause. Display stays concise; no

@@ -174,6 +174,61 @@ impl EncodingError {
 }
 
 #[test]
+fn arrowless_unit_failure_signature_checks_five_line_carrier_body() {
+    let source = "#Error enum MyError { X }\n\
+fn f(bad: Bool) MyError! {\n\
+    if bad -> return Err(MyError.X)\n\
+    Ok(())\n\
+}\n";
+    let (bundle, diagnostics) = check(source);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    let function = bundle.modules[0].items.iter().find_map(|item| match item {
+        Item::Func(function) if function.name == "f" => Some(function),
+        _ => None,
+    }).unwrap();
+    assert!(matches!(
+        function.return_type.as_ref(),
+        Some(Type::Result { ok, err })
+            if **ok == Type::Named("Unit".into()) && err.name().ends_with("MyError")
+    ));
+    assert!(matches!(
+        function.body.last(),
+        Some(jet_sema::AST::Stmt::Return(Some(jet_sema::AST::Expr::Ok(..)), _))
+    ));
+}
+
+#[test]
+fn arrowless_unit_failure_keeps_imported_core_error_identity() {
+    let core = "#Error struct EncodingError { reason: String }\n";
+    let source = "use core.encoding.[EncodingError]\n\
+fn fail(error: EncodingError) EncodingError! { Err(error) }\n\
+fn forward(error: EncodingError) EncodingError! {\n\
+    fail(error) ?? return Err(err)\n\
+    Ok(())\n\
+}\n\
+fn run() {}\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/encoding/encoding.jet", core, &[]),
+        ("pkg-a/src/main.jet", source, &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn io_context_annotations_remain_core_only() {
+    let source = "fn context() -> IOContext Never! {\n\
+    IOContext{operation: IOOperation.Read, resource: None, os_code: None, cause: None}\n\
+}\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/files/files.jet", source, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    let (_, diagnostics) = check(source);
+    assert!(error_codes(&diagnostics).contains(&"E0119"), "{diagnostics:?}");
+}
+
+#[test]
 fn core_source_decimal_decl_and_display_impl_replace_builtin_name() {
     let (_, diagnostics) = check_modules(&[
         ("<corelib>/Core/math/math.jet",

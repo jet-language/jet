@@ -1,6 +1,6 @@
-// A unit-fallible body that ends with `Ok()` returns that `Ok()`: the tail
-// is the body's result, on a plain body, after an early `return Ok()`, and
-// after a fallible call that propagates.
+// An arrowless unit-fallible signature preserves its typed failure carrier.
+// Both `Ok()` and `Ok(())` return Unit success, including in terminal arms;
+// terminal `Err(...)` returns the declared error rather than a default error.
 #Error
 enum StepError {
     Refused
@@ -18,7 +18,7 @@ fn guarded(value: Int) StepError! {
         return Ok()
     }
     print("late")
-    Ok()
+    Ok(())
 }
 
 fn chain(value: Int) StepError! {
@@ -27,11 +27,22 @@ fn chain(value: Int) StepError! {
     Ok()
 }
 
+fn refused() StepError! {
+    if true == {
+        true -> Err(StepError.Refused)
+        false -> Ok(())
+    }
+}
+
 fn run() {
     loop value in [0, 1, -1] {
         if chain(value) == {
             .Ok(_) -> print("ok {value}")
             .Err(error) -> print(error)
         }
+    }
+    if refused() == {
+        .Ok(_) -> print("unexpected")
+        .Err(error) -> print(error)
     }
 }

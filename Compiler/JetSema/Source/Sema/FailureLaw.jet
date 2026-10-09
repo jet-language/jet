@@ -498,9 +498,9 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
         .Named(name) -> {
             if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
             if name == "Never" && !in_return -> &diagnostics.push(sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it (D-NEVER2=B).", "Move `Never` to a function return type, or use `()`/another value type."))
-            // IOOperation has compiler enum rows, but no public annotation origin.
+            // Compiler-owned IO enum/record rows have no public annotation origin.
             // Reuse the Core-only literal origin gate; user declarations stay E0119.
-            unresolved := name == "IOOperation" && !sema_module_is_core_source(environment.module_identity)
+            unresolved := (name == "IOOperation" || name == "IOContext") && !sema_module_is_core_source(environment.module_identity)
             // Owner-only impl metadata cannot manufacture a qualified export.
             owner_annotation :: loop suffix in JET_CORE_OWNER_ANNOTATION_SUFFIXES {
                 if name.ends_with(suffix) -> break true

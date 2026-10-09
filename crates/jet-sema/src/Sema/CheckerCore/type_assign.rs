@@ -396,9 +396,11 @@ impl<'a> Checker<'a> {
                 if core_type_known(n) {
                     return;
                 }
-                // Compiler-owned IO enum annotations are internal to vetted Core,
+                // Compiler-owned IO annotations are internal to vetted Core,
                 // just like Core-only failure record literals; no export is added.
-                if n == Syntax::TYPE_IO_OPERATION && self.module_is_core_source(self.module_idx) {
+                if matches!(n.as_str(), Syntax::TYPE_IO_OPERATION | "IOContext")
+                    && self.module_is_core_source(self.module_idx)
+                {
                     return;
                 }
                 if self.type_param_scope.iter().any(|p| p.name == *n) {

@@ -4807,7 +4807,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
         }
         // #3886 (D-DISCARD1=A): the reachable last line of a function with a
         // written value return is the value it hands back, checked like `return`.
-        if index + 1 == statements.len() && statement == .Expr(tail) && context.value_tail_span == (Val(expr_span(tail))) && !sema_stmt_refutable_expr_diverges(tail) {
+        if index + 1 == statements.len() && statement == .Expr(tail) && (context.value_tail_span == (Val(expr_span(tail))) || (return_type == .Val(Type.Result(ok, _)) && ok == (Type.Named{name: "Unit"}) && sema_stmt_return_expr_is_carrier(tail, return_type, scopes))) && !sema_stmt_refutable_expr_diverges(tail) {
             returned :: sema_stmt_check_returned_value(tail, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if returned == {
                 .Val(value) -> &output.push(TStmt.Return{value: Val(value), span: expr_span(tail)})

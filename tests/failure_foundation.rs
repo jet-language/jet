@@ -6,6 +6,22 @@ use std::fs;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
+
+#[test]
+fn arrowless_unit_failure_contract_keeps_explicit_carrier_tails() {
+    const FIVE_LINE_CASE: &str = "#Error enum MyError { X }\n\
+fn f(bad: Bool) MyError! {\n\
+    if bad -> return Err(MyError.X)\n\
+    Ok(())\n\
+}\n";
+    let source = format!(
+        "{FIVE_LINE_CASE}\nfn run() {{\n\
+         if f(false) == {{ .Ok(_) -> print(\"ok\") .Err(e) -> print(e) }}\n\
+         if f(true) == {{ .Ok(_) -> print(\"unexpected\") .Err(e) -> print(e) }}\n\
+         }}\n"
+    );
+    tir_support::assert_tiers_agree("arrowless_unit_failure_contract", &source, "ok\nX\n");
+}
 const CONTRACT_MATRIX: &str = r#"
 #Error
 enum TypedFailure {
