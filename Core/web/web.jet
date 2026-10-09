@@ -79,17 +79,8 @@ fn on(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
 }
 
 fn openapi(router: HTTPRouter) -> String Never! {
-    checked :: core.web.__openapi_inputs(router)
-    if checked == {
-        .Ok(inputs) -> {
-            rendered :: core.web.__openapi_render(inputs, "Jet HTTP Router", "1", [OpenApiServer]{})
-            if rendered == {
-                .Ok(document) -> document
-                .Err(error) -> core.web.__contract_stop(error)
-            }
-        }
-        .Err(error) -> core.web.__contract_stop(error)
-    }
+    inputs :: core.web.__openapi_inputs(router) ?? core.web.__contract_stop(err)
+    core.web.__openapi_render(^inputs, ^"Jet HTTP Router", ^"1", ^[OpenApiServer]{}) ?? core.web.__contract_stop(err)
 }
 
 fn value(key: String) -[Browser]> String Never! { core.web.value(key) }
