@@ -262,7 +262,7 @@ impl JsonRenderer<'_, '_> {
             | Type::Float
             | Type::Float32
             | Type::Bool => self.line(&format!("{target} += \"{{{expr}}}\"")),
-            Type::Unit => self.literal(target, "null"),
+            Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE => self.literal(target, "null"),
             Type::Char => {
                 self.literal(target, "\"");
                 self.line(&format!("{target} += \"{{{expr}}}\""));
@@ -680,8 +680,7 @@ fn array(tree: &jet_foundation::Dyn::Dyn) -> Option<&[jet_foundation::Dyn::Dyn]>
 
 fn text(tree: &jet_foundation::Dyn::Dyn) -> Option<String> {
     match tree {
-        jet_foundation::Dyn::Dyn::Text(value)
-        | jet_foundation::Dyn::Dyn::TypedText(value) => Some(value.clone()),
+        jet_foundation::Dyn::Dyn::Text(value) => Some(value.clone()),
         _ => None,
     }
 }

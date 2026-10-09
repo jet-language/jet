@@ -1384,7 +1384,7 @@ fn table_mime(value: &crate::Executor::TurnValue) -> Option<String> {
         return None;
     };
     let cell = |value: &Dyn| match value {
-        Dyn::Text(text) | Dyn::TypedText(text) | Dyn::Number(text) => text.clone(),
+        Dyn::Text(text) | Dyn::Number(text) => text.clone(),
         Dyn::Int(number) => number.to_string(),
         Dyn::Float(number) => number.to_string(),
         Dyn::Bool(flag) => flag.to_string(),
