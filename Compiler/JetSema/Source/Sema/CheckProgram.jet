@@ -2811,6 +2811,7 @@ pub fn sema_comptime_graph_with_values(graph: SemaRegistrationGraph, values: [Se
 pub fn sema_comptime_graph_apply_values(graph: &SemaRegistrationGraph, values: [SemaComptimeItemValue]) Never! {
     if values.len() == 0 -> return
     constants :: sema_comptime_constant_values(values)
+    if constants.len() == 0 -> return
     loop module_index in 0..<graph.modules.len() {
         if !sema_comptime_module_takes_values(graph.modules[module_index], constants) -> next
         sema_comptime_module_apply_values(&graph.modules[module_index], constants)
