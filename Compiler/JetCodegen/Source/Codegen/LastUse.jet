@@ -62,7 +62,7 @@ struct JetCodegenLastUseGroup {
 // The control-flow facts move_last_uses reads: each block's predecessors,
 // whether the entry reaches it along explicit edges, and the candidate whose
 // drop flag guards it as a cleanup block (-1 for none).
-struct JetCodegenLastUseCfg {
+struct JetCodegenLastUseCFG {
     pub predecessors: [[Int]]
     pub reachable: [Bool]
     pub guarded: [Int]
@@ -831,7 +831,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
         }
     }
 
-    live_out :: jet_codegen_last_use_live_out(block_count, events, event_start, predecessors)
+    live_out := jet_codegen_last_use_live_out(block_count, events, event_start, predecessors)
 
     // Each value's uses, as parallel (block, index) rows with the terminator
     // at the block's instruction count, to decide whether a read is consumed.
@@ -1002,7 +1002,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
 // flag (every predecessor branches to the block on that flag's then edge).
 // A separate function keeps move_last_uses within what one backend codegen
 // unit compiles quickly.
-fn jet_codegen_last_use_cfg(builder: JetCodegenBuilder, block_count: Int, block_index: [U64:Int], def_block: [U64:Int], def_index: [U64:Int], flag_candidate: [U64:Int]) -> JetCodegenLastUseCfg Never! {
+fn jet_codegen_last_use_cfg(builder: JetCodegenBuilder, block_count: Int, block_index: [U64:Int], def_block: [U64:Int], def_index: [U64:Int], flag_candidate: [U64:Int]) -> JetCodegenLastUseCFG Never! {
     successors := [[Int]]{}
     predecessors := [[Int]]{}
     loop filler in 0..<block_count -> &predecessors.push([Int]{})
@@ -1057,7 +1057,7 @@ fn jet_codegen_last_use_cfg(builder: JetCodegenBuilder, block_count: Int, block_
         }
         &guarded.push(shared_guard)
     }
-    JetCodegenLastUseCfg{predecessors: ^predecessors, reachable: ^reachable, guarded: ^guarded}
+    JetCodegenLastUseCFG{predecessors: ^predecessors, reachable: ^reachable, guarded: ^guarded}
 }
 
 // move_last_uses's backward liveness: the candidates live out of each block.
