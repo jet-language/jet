@@ -6927,13 +6927,31 @@ mod tests {
             );
             println!("canonical bridge test={name} stderr:\n{stderr}");
             let expected_pass = format!("test {name} ... ok");
+            let expected_failure = format!("test {name} ... FAILED");
+            let completed_pass =
+                stdout.lines().filter(|line| *line == expected_pass).count() == 1
+                    && stdout.contains("test result: ok. 1 passed; 0 failed; 0 ignored;");
+            let completed_failure =
+                stdout.lines().filter(|line| *line == expected_failure).count() == 1
+                    && stdout.contains("test result: FAILED. 0 passed; 1 failed; 0 ignored;");
+            // Cargo also returns 101 for a crashed test child. Its child-status
+            // diagnostic plus the named completion packet separates that case
+            // from an ordinary, completed assertion failure.
+            let unsafe_child = stderr.lines().find(|line| {
+                line.trim_start()
+                    .starts_with("process didn't exit successfully:")
+                    && !line.trim_end().ends_with("(exit status: 101)")
+            });
+            let ordinary_completion = unsafe_child.is_none()
+                && ((ran.output.status.success() && completed_pass)
+                    || (ran.output.status.code() == Some(101) && completed_failure));
             let stdout_valid = std::str::from_utf8(&ran.output.stdout).is_ok();
             let stderr_valid = std::str::from_utf8(&ran.output.stderr).is_ok();
             let passed = ran.output.status.success()
+                && ordinary_completion
                 && stdout_valid
                 && stderr_valid
-                && stdout.lines().filter(|line| *line == expected_pass).count() == 1
-                && stdout.contains("test result: ok. 1 passed; 0 failed; 0 ignored;");
+                && completed_pass;
             println!(
                 "canonical bridge test={name} result={} status={}",
                 if passed { "PASS" } else { "FAIL" },
@@ -6946,6 +6964,12 @@ mod tests {
                 );
             }
             all_passed &= passed;
+            if !ordinary_completion {
+                block_reason = Some(format!(
+                    "unsafe child or missing named harness completion: test={name} status={} child={unsafe_child:?}",
+                    ran.output.status,
+                ));
+            }
         }
         for (path, expected) in identities {
             match crate::SHA256::sha256_file_hex(path) {
