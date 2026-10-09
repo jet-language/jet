@@ -51,8 +51,8 @@ by the repository ignore rules.
 After a port, lower the ceilings with
 `node Tools/agent/rust-exit.mjs --update`. This command refuses **any** increase
 and does not modify the registry. A zero ceiling permanently excludes Rust
-from that area. The focused tooling lane is
-`Tools/agent/lane-check.sh --rust-exit-only`; it also exercises planted
+from that area. Run `node Tools/agent/rust-exit.mjs --check` for the focused
+inventory gate and `node --test Tools/agent/rust-exit.test.mjs` for the planted
 unregistered-leaf and one-line-growth refusal fixtures.
 
 ## Law 1 — Naming

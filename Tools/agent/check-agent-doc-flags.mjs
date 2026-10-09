@@ -105,6 +105,30 @@ function documentedFlags(path, text) {
   return findings;
 }
 
+export function nodeSourceFlags(source) {
+  const code = source.replace(/\/\/[^\n]*/g, "");
+  const flags = new Set();
+  const argvNames = "(?:arg|args|argv|flag|process\\.argv)";
+  for (const line of code.split(/\r?\n/)) {
+    if (!new RegExp(`\\b${argvNames}\\b`).test(line)) continue;
+    if (!/(?:===|!==|==|!=|includes\s*\(|indexOf\s*\(|has\s*\()/.test(line)) continue;
+    for (const match of line.matchAll(/--[A-Za-z][A-Za-z0-9-]*/g)) flags.add(match[0]);
+  }
+  // Accept object keys only when the object participates in argv dispatch,
+  // not arbitrary flag-looking strings in help text or spawned commands.
+  const maps = new Map([...code.matchAll(/\bconst\s+(\w+)\s*=\s*(\{[^{}]*\})/g)]
+    .map((match) => [match[1], match[2]]));
+  const dispatch = [
+    ...[...code.matchAll(new RegExp(`(${argvNames})\\s+in\\s+(\\w+)`, "g"))].map((match) => maps.get(match[2]) ?? ""),
+    ...[...code.matchAll(new RegExp(`(\\{[^{}]*\\})\\s*\\[\\s*${argvNames}\\s*\\]`, "g"))].map((match) => match[1]),
+    ...[...code.matchAll(new RegExp(`\\b(\\w+)\\s*\\[\\s*${argvNames}\\s*\\]`, "g"))].map((match) => maps.get(match[1]) ?? ""),
+  ];
+  for (const object of dispatch) {
+    for (const match of object.matchAll(/["'](--[A-Za-z][A-Za-z0-9-]*)["']\s*:/g)) flags.add(match[1]);
+  }
+  return flags;
+}
+
 function sourceFlags(scriptPath) {
   const source = readFileSync(scriptPath, "utf8");
   const flags = new Set();
@@ -112,12 +136,7 @@ function sourceFlags(scriptPath) {
   const isShell = scriptPath.endsWith(".sh") || source.startsWith("#!/usr/bin/env bash");
 
   if (isNode) {
-    for (const rawLine of source.split(/\r?\n/)) {
-      const line = rawLine.replace(/\/\/.*$/, "");
-      if (!/\b(?:arg|args|argv|process\.argv)\b/.test(line)) continue;
-      if (!/(?:===|!==|==|!=|includes\s*\(|indexOf\s*\(|has\s*\()/.test(line)) continue;
-      for (const match of line.matchAll(/--[A-Za-z][A-Za-z0-9-]*/g)) flags.add(match[0]);
-    }
+    for (const flag of nodeSourceFlags(source)) flags.add(flag);
   } else if (isShell) {
     for (const rawLine of source.split(/\r?\n/)) {
       const line = rawLine.replace(/(^|\s)#.*/, "$1");
