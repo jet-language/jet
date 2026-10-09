@@ -8,6 +8,7 @@
 // for its own success type rather than introducing an unconstrained generic.
 // Rendering bindings distinguish element names, namespace prefixes, attributes,
 // and child node kinds; nested scopes do not redeclare an enclosing binding.
+// Integer wire packing uses truncating division; String windows use slice.
 use core.encoding.[Dyn]
 use core.encoding as encoding
 use core.text as unicode
@@ -1414,7 +1415,7 @@ fn encode_text(value: String, target: RenderEncoding) -> [U8] Never! {
         offset += scalar.width
         if code < 0x10000 -> utf16_word(&output, code, target == RenderEncoding.UTF16Le)
         else {
-            utf16_word(&output, 0xd800 + (code - 0x10000) / 1024, target == RenderEncoding.UTF16Le)
+            utf16_word(&output, 0xd800 + (code - 0x10000) /% 1024, target == RenderEncoding.UTF16Le)
             utf16_word(&output, 0xdc00 + (code - 0x10000) % 1024, target == RenderEncoding.UTF16Le)
         }
     }
@@ -1423,9 +1424,9 @@ fn encode_text(value: String, target: RenderEncoding) -> [U8] Never! {
 fn utf16_word(output: &[U8], word: Int, little: Bool) Never! {
     if little {
         &output.push(U8{word % 256})
-        &output.push(U8{word / 256})
+        &output.push(U8{word /% 256})
     } else {
-        &output.push(U8{word / 256})
+        &output.push(U8{word /% 256})
         &output.push(U8{word % 256})
     }
 }
@@ -2393,9 +2394,9 @@ fn scalar_hex(character: Int) -> String Never! {
     digits :: "0123456789ABCDEF"
     result := ""
     loop {
-        digit :: digits[value % 16]
+        digit :: digits.slice(value % 16, value % 16 + 1)
         result = "{digit}{result}"
-        value /= 16
+        value = value /% 16
         if value == 0 -> break
     }
     loop result.len() < 4 -> result = "0{result}"
@@ -2440,7 +2441,7 @@ fn doctype_fields(inside: String) -> DoctypeFields XMLFault! {
         tail :: byte_text(bytes[0..<bytes.len()], start + 1, bytes.len()).trim_end()
         if !tail.ends_with("]") -> return Err(XMLFault.at(start, "DOCTYPE internal subset lacks ]"))
         header = byte_text(bytes[0..<bytes.len()], 0, start).trim()
-        internal_subset = Val(tail[0..<tail.len() - 1])
+        internal_subset = Val(tail.slice(0, tail.len() - 1))
     } else { header = inside.trim() }
     header_bytes :: header.bytes()
     name_end :: whitespace_offset(header_bytes[0..<header_bytes.len()], 0)
@@ -2897,7 +2898,7 @@ impl Scanner {
             raw :: attribute.raw
             if key == "xmlns" || key.starts_with("xmlns:") {
                 prefix := String?{None}
-                if key != "xmlns" -> prefix = Val(key[6..<key.len()])
+                if key != "xmlns" -> prefix = Val(key.slice(6, key.len()))
                 if &seen_ns.insert(prefix) -> return Err(self.fail("duplicate namespace declaration"))
                 if (prefix ?? "") == "xmlns" || ((prefix ?? "") == "xml" && value != "http://www.w3.org/XML/1998/namespace") {
                     return Err(self.fail("reserved namespace prefix binding"))
@@ -3017,20 +3018,20 @@ impl Scanner {
         if self.starts("<!--") {
             taken :: &self.take_until("-->", "unterminated XML comment") ?? return Err(err)
             raw :: ^taken.raw
-            value :: taken.body[4..<taken.body.len()]
+            value :: taken.body.slice(4, taken.body.len())
             if value.contains("--") { return Err(self.fail("XML comment contains --")) }
             return Val(Event.Comment(value: ^value, raw: ^raw))
         }
         if self.starts("<![CDATA[") {
             if self.stack.is_empty() { return Err(self.fail("CDATA outside root element")) }
             taken :: &self.take_until("]]>", "unterminated CDATA") ?? return Err(err)
-            return Val(Event.Cdata(value: taken.body[9..<taken.body.len()], raw: ^taken.raw))
+            return Val(Event.Cdata(value: taken.body.slice(9, taken.body.len()), raw: ^taken.raw))
         }
         if self.starts("<?xml") {
             if self.declaration_seen || self.root_seen || self.offset != 0 { return Err(self.fail("XML declaration is out of order")) }
             taken :: &self.take_until("?>", "unterminated XML declaration") ?? return Err(err)
             raw :: ^taken.raw
-            data :: taken.body[5..<taken.body.len()].trim()
+            data :: taken.body.slice(5, taken.body.len()).trim()
             declaration :: declaration_fields(data) ?? return Err(err)
             version :: ^declaration.version
             encoding :: ^declaration.encoding
@@ -3046,7 +3047,7 @@ impl Scanner {
         if self.starts("<?") {
             taken :: &self.take_until("?>", "unterminated processing instruction") ?? return Err(err)
             raw :: ^taken.raw
-            data :: taken.body[2..<taken.body.len()]
+            data :: taken.body.slice(2, taken.body.len())
             bytes :: data.bytes()
             split :: whitespace_offset(bytes[0..<bytes.len()], 0)
             target :: byte_text(bytes[0..<bytes.len()], 0, split)

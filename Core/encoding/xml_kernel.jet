@@ -151,8 +151,8 @@ fn field_error(error: XMLError) -> [FieldError] Never! {
     }
     path := error.path
     if path == "$" -> path = ""
-    else if path.starts_with("$.") -> path = path[2..<path.len()]
-    else if path.starts_with("$") -> path = path[1..<path.len()]
+    else if path.starts_with("$.") -> path = path.slice(2, path.len())
+    else if path.starts_with("$") -> path = path.slice(1, path.len())
     kind :: reason_name(error.kind)
     [FieldError]{FieldError{path: path, reason: "XML {kind}{location}: {error.reason}"}}
 }
