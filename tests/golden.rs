@@ -7,6 +7,7 @@
 //!   I2 — rustc accepting the generated code; a rejection here is a
 //!        front-end soundness bug, reported loudly
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -486,6 +487,7 @@ fn examples_compile_and_run() {
     // This keeps the corpus census complete without turning implementation
     // files into false golden entries.
     let mut entries = collect_feature_golden_entries(&ex_dir, ext);
+    let rust_defects = rust_known_failures(&root, &entries);
     let filter = fixture_filter("JET_GOLDEN_FILTER");
     entries.retain(|entry| fixture_matches(filter.as_deref(), &entry.shown));
     assert!(
@@ -493,6 +495,17 @@ fn examples_compile_and_run() {
         "JET_GOLDEN_FILTER matched no examples: {}",
         filter.as_deref().unwrap_or("<unfiltered>")
     );
+    // This harness always compiles with the Rust reference, so a listed stem is
+    // reported as SKIP-RUST-DEFECT (never counted as checked); the Jet-built
+    // compiler's runners do not read the list and still hold it to the golden.
+    let mut skipped_rust_defects = Vec::new();
+    entries.retain(|entry| match rust_defects.get(&entry.stem) {
+        Some(defect) => {
+            skipped_rust_defects.push(format!("{} ({defect})", entry.stem));
+            false
+        }
+        None => true,
+    });
     let update_expected = match std::env::var("JET_UPDATE_GOLDEN") {
         Err(_) => false,
         Ok(value) if value == "1" => {
@@ -564,6 +577,15 @@ fn examples_compile_and_run() {
         );
     }
     drop(unavailable);
+    if !skipped_rust_defects.is_empty() {
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr(),
+            "golden SKIP-RUST-DEFECT: {} — {}",
+            skipped_rust_defects.len(),
+            skipped_rust_defects.join(", ")
+        );
+    }
     let failures = failures.lock().unwrap();
     assert!(
         failures.is_empty(),
@@ -576,6 +598,37 @@ fn examples_compile_and_run() {
         "expected at least 2 examples, found {}",
         checked
     );
+}
+
+/// `tests/golden-rust-known-failures.tsv`: the transition list of goldens the
+/// frozen Rust reference compiler gets wrong (stem, then the defect). Every
+/// listed stem must name an existing golden.
+fn rust_known_failures(root: &Path, entries: &[GoldenEntry]) -> BTreeMap<String, String> {
+    let path = root.join("tests/golden-rust-known-failures.tsv");
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let mut defects = BTreeMap::new();
+    for (index, line) in text.lines().enumerate() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (stem, defect) = line.split_once('\t').unwrap_or_else(|| {
+            panic!("{}:{}: expected `stem<TAB>defect`", path.display(), index + 1)
+        });
+        assert!(
+            entries.iter().any(|entry| entry.stem == stem),
+            "{}:{}: `{stem}` is not a golden under Examples/features",
+            path.display(),
+            index + 1
+        );
+        assert!(
+            defects.insert(stem.to_string(), defect.to_string()).is_none(),
+            "{}:{}: `{stem}` is listed twice",
+            path.display(),
+            index + 1
+        );
+    }
+    defects
 }
 
 /// Battery examples declare a first-party battery (`deps: { gui: "0.1.0" }`)
