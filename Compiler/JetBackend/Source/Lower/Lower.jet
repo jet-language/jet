@@ -405,11 +405,11 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     if test_issues.len() > 0 {
         return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}, debug: lir_module_debug_none()}, issues: ^test_issues, entry: None, finalizer: None, callables: [U64:LIRFunctionID]{}}
     }
-    all_roots := ~roots
+    all_roots := roots.copy()
     loop check in checks -> &all_roots.push(check.function)
     prepared := lower_prepare_roots(program, all_roots, shared_sites_dynamic, native_pack, imports, ^runtime_intrinsics)
     if prepared.issues.len() > 0 {
-        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}, debug: lir_module_debug_none()}, issues: ~prepared.issues, entry: None, finalizer: None, callables: [U64:LIRFunctionID]{}}
+        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}, debug: lir_module_debug_none()}, issues: prepared.issues.copy(), entry: None, finalizer: None, callables: [U64:LIRFunctionID]{}}
     }
     test_harness := false
     loop artifact in program.artifacts {
@@ -437,11 +437,11 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         line_starts: [U64:[Int]]{},
         source_rows: [U64:Int]{},
         prelude_positions: [U64:Int]{},
-        asm_foreign: ~prepared.asm_foreign,
-        foreign_rows: ~prepared.foreign_rows,
+        asm_foreign: prepared.asm_foreign.copy(),
+        foreign_rows: prepared.foreign_rows.copy(),
         mir_rows: [U64:Int]{},
-        checked_types: ~prepared.checked_types,
-        close_methods: ~prepared.close_methods,
+        checked_types: prepared.checked_types.copy(),
+        close_methods: prepared.close_methods.copy(),
         mir_sources: [Int]{},
         comptime_budget: !wrap_entry,
         mir_signatures: [LIRSignatureID]{},
@@ -544,7 +544,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     inventory :: lower_trait_key_count(m)
     loop {
         loop cursor < m.glue.len() {
-            glue :: ~m.glue[cursor]
+            glue :: m.glue[cursor].copy()
             if lower_trait_dispatcher(program, glue) {
                 &dispatchers.push(cursor)
                 &glue_functions.push(None)
@@ -561,7 +561,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
             cursor += 1
         }
         if emitted == dispatchers.len() -> break
-        glue :: ~m.glue[dispatchers[emitted]]
+        glue :: m.glue[dispatchers[emitted]].copy()
         function :: if glue.helper != "" -> lower_helper_function(program, &m, glue) else if glue.clone -> lower_clone_glue_function(program, &m, glue) else -> lower_glue_function(program, &m, glue)
         if native_pack -> lower_native_glue_rewrite(program, &m, function)
         glue_functions[dispatchers[emitted]] = Val(function)
@@ -579,7 +579,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         // Getters are published only after the host runs this noarg Unit
         // startup. Emit it last so helper bodies have discovered every fixup.
         startup :: lower_helper_id(&m, "core.shared.init", mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}}))
-        startup_glue :: ~m.glue[startup.value - m.glue_base]
+        startup_glue :: m.glue[startup.value - m.glue_base].copy()
         &functions.push(lower_helper_function(program, &m, startup_glue))
         lowered_entry = Val(startup)
     }
@@ -1657,6 +1657,8 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         lower_frame_cells(p, c, &m, &f)
         lower_sentry_frame(c, &m, &f)
         lower_deadline_frame(c, &f)
+        lower_partial_frame(p, c, m, &f)
+        lower_close_frame(p, &m, &f)
         f.mir_block = MIRBlockID{value: U64.MAX}
         edge :: lower_edge(p, c, &m, &f, c.mir.entry) ?? return
         lower_seal(&f, LIRTerminator.Jump{target: edge})
@@ -1762,6 +1764,8 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
         lower_frame_cells(p, c, &m, &f)
         lower_sentry_frame(c, &m, &f)
         lower_deadline_frame(c, &f)
+        lower_partial_frame(p, c, m, &f)
+        lower_close_frame(p, &m, &f)
     }
     loop instruction in block.instructions {
         if f.failed -> return
@@ -2743,7 +2747,7 @@ fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     if row.projections.len() == 0 {
         if c.slots[slot].write_param >= 0 {
             // Publish both physical and local ownership before Close re-entry.
-            address :: (~f.params[c.slots[slot].write_param]) ?? return lower_fail(&m, &f, "Write parameter of place {place.value} has no pointer")
+            address :: (f.params[c.slots[slot].write_param].copy()) ?? return lower_fail(&m, &f, "Write parameter of place {place.value} has no pointer")
             receiver :: lower_close_receiver_slot(c, f, slot)
             if replace -> lower_partial_drop_stored(p, &m, &f, "slot.{slot}", [LowerGlueField]{}, address, 0, row.ty, receiver)
             lower_close_transfer(c, &f, value)
@@ -2792,9 +2796,9 @@ fn lower_initialize_uninit(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
     header := LIRValueID?{None}
     if c.slots[slot].cell {
-        header = ~f.cells[slot]
+        header = f.cells[slot].copy()
     } else if c.slots[slot].write_param >= 0 {
-        header = ~f.params[c.slots[slot].write_param]
+        header = f.params[c.slots[slot].write_param].copy()
     } else {
         header = Val(lower_new_storage(p, &f, row.ty))
     }
@@ -3842,7 +3846,7 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
         // runtime names the spending function by its row in the program
         // being lowered, which MIR cannot know, so it leads the (start, end) span.
         if symbol == "jet_rt_comptime_enter" || symbol == "jet_rt_comptime_step" {
-            owner :: ~m.mir_sources[f.builder.id.value]
+            owner :: m.mir_sources[f.builder.id.value].copy()
             &lowered.push(lower_const(&f, owner))
         }
         loop arg in args {
@@ -3875,8 +3879,8 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     writebacks := [LowerWriteBack]{}
     temporaries := [LIRValueID]{}
     if !lower_call_args(p, c, &m, &f, args, &lowered, &writebacks, &temporaries) -> return
-    signature :: ~m.mir_signatures[index]
-    result_bytes :: ~m.mir_results[index]
+    signature :: m.mir_signatures[index].copy()
+    result_bytes :: m.mir_results[index].copy()
     if result_bytes > 0 {
         // An inline aggregate result lands in storage the caller supplies.
         storage :: lower_result(p, c, &m, &f, instruction) ?? lower_pointer(&f)
@@ -4072,7 +4076,7 @@ fn lower_write_back(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         lower_set_slot(&f, writeback.slot, Val(updated))
         if rebound == .Val(value) -> lower_define(c, &f, value, updated)
     } else {
-        root :: (~f.current[writeback.slot]) ?? return lower_fail(&m, &f, "place {writeback.place.value} has no value")
+        root :: (f.current[writeback.slot].copy()) ?? return lower_fail(&m, &f, "place {writeback.place.value} has no value")
         walk :: lower_walk_projections(p, c, &m, &f, root, c.slots[writeback.slot].ty, row.projections) ?? return
         updated :: lower_new_value(&f, layout, LIRDrop.Trivial, row.ty.identity)
         lower_read_into(p, &f, updated, writeback.cell, 0, row.ty)

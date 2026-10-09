@@ -27,7 +27,7 @@ fn lower_realtime_callback_type(p: MIRProgram, ty: MIRType) -> Bool Never! {
 }
 
 fn lower_realtime_stream(p: MIRProgram, ty: MIRType) -> Bool Never! {
-    row :: lower_record_runtime_handle(p, ty) ?? return false
+    row :: lower_runtime_handle_type(p, ty) ?? return false
     row.runtime == "JetRealtimeStream" && lower_repr(p, ty) == LowerRepr.Handle{drop: "jet_rt_handle_drop_JetRealtimeStream", clone: "jet_rt_handle_clone_JetRealtimeStream"}
 }
 
@@ -65,8 +65,8 @@ fn lower_realtime_start(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 
 fn lower_helper_realtime_invoke(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
-    env :: ~f.open_params[0]
-    buffer :: ~f.open_params[1]
+    env :: f.open_params[0].copy()
+    buffer :: f.open_params[1].copy()
     unit :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}})
     lower_call_closure_box(p, &m, &f, env, [LIRValueID]{buffer}, unit).drop("Realtime callbacks return Unit")
     lower_seal(&f, LIRTerminator.Return{value: None})
@@ -75,7 +75,7 @@ fn lower_helper_realtime_invoke(p: MIRProgram, m: &LowerModule, glue: LowerGlue)
 
 fn lower_helper_realtime_worker(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_word()))
-    stream :: ~f.open_params[0]
+    stream :: f.open_params[0].copy()
     result :: lower_word(&f)
     lower_call_runtime(&m, &f, "jet_rt_native_realtime_worker", [LIRValueID]{stream}, Val(result))
     lower_seal(&f, LIRTerminator.Return{value: Val(result)})

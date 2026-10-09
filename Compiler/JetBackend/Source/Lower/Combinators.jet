@@ -297,7 +297,7 @@ fn lower_closure_search(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 // Map callbacks receive the borrowed key and value separately, in key order.
 // Explicit Move parameters get their own copies, not the Map's stored owners.
 fn lower_map_callback_input(p: MIRProgram, m: &LowerModule, f: &LowerFunction, closure_ty: MIRType, index: Int, value: LIRValueID, ty: MIRType) -> LIRValueID Never! {
-    if !lower_closure_param_moves(closure_ty, index) || !lower_needs_drop(p, m, ty) -> return ~value
+    if !lower_closure_param_moves(closure_ty, index) || !lower_needs_drop(p, m, ty) -> return value.copy()
     copied :: lower_new_like(&f, value)
     lower_clone_into(p, &m, &f, value, copied, ty)
     copied
@@ -748,7 +748,7 @@ fn lower_sort_run_size(f: &LowerFunction, width: LIRValueID, remaining: LIRValue
 // scalar index buffers, and a moved closure. Each consuming action enters
 // its own typed cleanup scope, recapturing the current delivered Stop.
 fn lower_sort_release(p: MIRProgram, m: &LowerModule, f: &LowerFunction, order: LIRValueID, keys: LIRValueID, scratch: LIRValueID?, length: LIRValueID, key_count: LIRValueID, key_ty: MIRType, by_key: Bool, closure: LIRValueID, closure_ty: MIRType, moved_closure: Bool) Never! {
-    if by_key && lower_needs_drop(p, key_ty) {
+    if by_key && lower_needs_drop(p, m, key_ty) {
         zero :: lower_const(&f, 0)
         release :: lower_sort_loop(&f, zero, key_count)
         slot :: lower_list_address(&f, keys, release.at, lower_list_stride(p, key_ty))

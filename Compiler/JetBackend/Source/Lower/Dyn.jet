@@ -4,13 +4,23 @@
 // Requested checked codec implementations are lowered by Codecs.jet.
 // No unwired runtime/container codec policy is retained here.
 use jet_foundation.[
-    MIRInstruction, MIRLocalID, MIRProgram, MIRType, mir_type_display_name,
+    MIRInstruction, MIRLocalID, MIRNominalRef, MIRProgram, MIRType, MIRTypeKind,
+    mir_type_display_name, mir_type_from_kind,
 ]
 
 fn lower_dyn_type(p: MIRProgram, ty: MIRType) -> Bool Never! {
     definition :: lower_type_def(p, ty) ?? return false
     if definition.kind == .Alias(base) -> return lower_dyn_type(p, base)
     definition.key == "Dyn" && definition.name == "Dyn"
+}
+
+fn lower_dyn_program_type(p: MIRProgram) -> MIRType? Never! {
+    loop definition in p.types {
+        if definition.key == "Dyn" && definition.name == "Dyn" {
+            return Val(mir_type_from_kind(MIRTypeKind.Apply{name: MIRNominalRef{id: definition.id, name: definition.name}, args: [MIRType]{}}))
+        }
+    }
+    None
 }
 
 
@@ -119,8 +129,8 @@ fn lower_dyn_entries(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
 fn lower_helper_dyn_entries(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     shape :: lower_map_shape(p, glue.ty) ?? panic("DataEntriesToMap helper has no Map layout")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
-    source :: ~f.open_params[0]
-    target :: ~f.open_params[1]
+    source :: f.open_params[0].copy()
+    target :: f.open_params[1].copy()
     zero :: lower_const(&f, 0)
     header_offsets :: [Int]{0, 8, 16}
     loop offset in header_offsets -> lower_emit(&f, LIRInst.Store{base: target, offset: offset, value: zero})

@@ -107,6 +107,14 @@ empty. The lowering never decides meaning again (D-TIER-ONEIR1): every
 decision below reads facts MIR already carries (checked types, ownership,
 Prelude routes, phis, drop operations).
 
+All lowering entry points share `lower_selected`'s explicit native-pack,
+shared-site, import-closure and C-export modes. Preparation receives those
+same modes; native imports select their actual render roots once. Function
+entry initializes partial-drop live bits and the consuming Close receiver's
+identity cell on both ordinary and split-entry paths. Ordinary boxed drop
+uses the module's normal glue; receiver-specific structural cleanup stays
+with the Close identity mechanism, not a type-wide drop override.
+
 ### Compiler-unit coverage measurement (S3)
 
 `Compiler/JetBackend/Tests/self-host-rank.mjs <probe> [output-directory]`
@@ -707,6 +715,9 @@ the lifecycle list, runtime stop exports, and routes in one keep-going invocatio
 it regenerates them in dependency order. Narrow worker and held-job checks
 can use `Tools/agent/lane-check.sh --runtime-generators <allparts.rs>` through
 the cheap-check lane; this mode does not invoke Cargo.
+The stop-export generator also accepts explicit `--write` and `--check`.
+Its indexed registry-row parser materializes String `split`'s `Iter<String>`
+with `.to_list()`, as does the handwritten Prelude-effect row parser.
 Text has one C-ABI carrier, `JetCText`, not Rust's unspecified `String` layout.
 Owning headers and buffers are allocated/freed by `jet_rt_alloc`/`jet_rt_free`;
 empty buffers have capacity zero and a non-null dangling pointer. The Rust

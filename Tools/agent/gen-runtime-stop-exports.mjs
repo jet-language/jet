@@ -174,7 +174,7 @@ fn runtime_stop_export_symbols() -> [String] Never! {
     symbols := [String]{}
     loop line in RUNTIME_STOP_EXPORT_ROWS.lines() {
         if line == "" -> next
-        fields :: line.split(" ")
+        fields :: line.split(" ").to_list()
         if fields.len() != 2 || fields[1] != "Panic" -> panic("invalid runtime stop export registry row")
         &symbols.push(fields[0])
     }
@@ -193,13 +193,13 @@ fn runtime_export_can_stop(symbol: String) -> Bool Never! {
 }
 
 export function checkRuntimeStopRegistry(actual, expected) {
-  if (actual !== expected) throw new Error(`${outputPath} is stale; run node Tools/agent/gen-runtime-stop-exports.mjs`);
+  if (actual !== expected) throw new Error(`${outputPath} is stale; run node Tools/agent/gen-runtime-stop-exports.mjs --write`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const args = process.argv.slice(2);
-  if (args.length > 1 || args.some((arg) => !["--check", "--print"].includes(arg))) {
-    throw new Error("usage: gen-runtime-stop-exports.mjs [--check|--print]");
+  if (args.length > 1 || args.some((arg) => !["--check", "--print", "--write"].includes(arg))) {
+    throw new Error("usage: gen-runtime-stop-exports.mjs [--check|--print|--write]");
   }
   const directory = join(root, "Compiler/JetRuntime/Source");
   const sources = readdirSync(directory).filter((name) => name.endsWith(".jet")).sort()

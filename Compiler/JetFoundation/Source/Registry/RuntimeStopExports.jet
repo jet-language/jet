@@ -949,6 +949,7 @@ jet_rt_layout_sub Panic
 jet_rt_layout_suggest Panic
 jet_rt_layout_value Panic
 jet_rt_layout_variable Panic
+jet_rt_logical_env_columns Panic
 jet_rt_logical_env_get Panic
 jet_rt_logical_env_get_os Panic
 jet_rt_logical_env_seed Panic
@@ -1657,6 +1658,7 @@ jet_rt_source_shared_borrow_begin Panic
 jet_rt_source_shared_borrow_end Panic
 jet_rt_source_shared_edit_begin Panic
 jet_rt_source_shared_init Panic
+jet_rt_startup_env_columns Panic
 jet_rt_stm_init Panic
 jet_rt_stop_drop Panic
 jet_rt_string_builder_new Panic
@@ -1854,7 +1856,7 @@ fn runtime_stop_export_symbols() -> [String] Never! {
     symbols := [String]{}
     loop line in RUNTIME_STOP_EXPORT_ROWS.lines() {
         if line == "" -> next
-        fields :: line.split(" ")
+        fields :: line.split(" ").to_list()
         if fields.len() != 2 || fields[1] != "Panic" -> panic("invalid runtime stop export registry row")
         &symbols.push(fields[0])
     }

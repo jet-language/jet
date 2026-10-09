@@ -98,7 +98,7 @@ fn runtime_stop_export_symbols() -> [String] Never! {
     symbols := [String]{}
     loop line in RUNTIME_STOP_EXPORT_ROWS.lines() {
         if line == "" -> next
-        fields :: line.split(" ")
+        fields :: line.split(" ").to_list()
         if fields.len() != 2 || fields[1] != "Panic" -> panic("invalid runtime stop export registry row")
         &symbols.push(fields[0])
     }

@@ -2113,7 +2113,9 @@ fn tir_pattern_shape_children(shape: TPatternShape) -> [TExpr] Never! {
     children := [TExpr]{}
     if shape == {
         .Variant(_, slots, _, _) | .List(slots, _, _) -> {
-            loop slot in slots -> loop child in tir_pattern_slot_children(slot) -> &children.push(child)
+            loop slot in slots {
+                loop child in tir_pattern_slot_children(slot) -> &children.push(child)
+            }
         }
         .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
             if inner == .Val(nested) -> loop child in tir_pattern_shape_children(nested.shape) -> &children.push(child)
