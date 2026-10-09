@@ -1,0 +1,6 @@
+# Port of cli_parts/commands.rs::status_renders_no_claim_without_a_receipt.
+fixture: fixtures/status
+step: jet status run.jet --json
+json: stdout doc $.schema = "jet.status/v1"
+json: stdout doc $.claims = []
+stdout: !~ "\"status_report\"" # original predicate

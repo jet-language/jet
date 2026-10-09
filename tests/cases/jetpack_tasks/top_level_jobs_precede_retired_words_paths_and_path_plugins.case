@@ -1,0 +1,32 @@
+# Port of jetpack_tasks.rs::top_level_jobs_precede_retired_words_paths_and_path_plugins.
+# PENDING-GRAMMAR: batch-two trim equality. ORACLE-LITERAL: jetpack_tasks.rs:505–509,527.
+# env is only the original child's PATH overlay; all CLI argv after {jet} are unchanged.
+requires: os:unix
+fixture: fixtures/lookup-order
+step: env PATH={work}/plugins:{env:PATH|} {jet} deploy
+cwd: project
+stdout.trim: = lookup-job.out # original predicate
+step: env PATH={work}/plugins:{env:PATH|} {jet} serve
+cwd: project
+stdout.trim: = lookup-retired.out # original predicate
+step: env PATH={work}/plugins:{env:PATH|} {jet} output
+cwd: project
+stdout.trim: = lookup-moved.out # original predicate
+step: env PATH={work}/plugins:{env:PATH|} {jet} run deploy
+cwd: project
+stdout.trim: = lookup-path.out # original predicate
+step: env PATH={work}/plugins:{env:PATH|} {jet} deploy.jet
+cwd: project
+exit: nonzero
+stderr: ~ E0101 # original predicate
+stdout: !~ job # original predicate
+step: env PATH={work}/plugins:{env:PATH|} {jet} secret
+cwd: project
+exit: 2
+stderr: ~ E2101 # original predicate
+step: env PATH={work}/plugins:{env:PATH|} {jet} deploy
+cwd: outside
+stdout.trim: = lookup-plugin.out # original predicate
+step: jet help
+cwd: project
+stdout: ~ Usage: # original predicate

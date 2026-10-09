@@ -1,0 +1,8 @@
+# Port of cli_parts/commands.rs::php_bind_launders_parse_failure_as_e3208.
+requires: tool:php
+fixture: fixtures/bind-php
+step: jet inspect bind php {work}/broken.php --pkg broken
+exit: nonzero
+stderr: = bind-php.stderr
+stderr: !~ Parse error # original predicate
+stderr: !~ broken.php on line # original predicate

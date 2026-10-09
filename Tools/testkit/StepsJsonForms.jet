@@ -1,0 +1,67 @@
+use core.encoding.[DataTree]
+use core.encoding.json as json
+use core.files as files
+
+fn kit_steps_json_number(value: DataTree) -> Float? {
+    if value == {
+        .Int(number) -> Val(Float{number})
+        .Float(number) -> Val(number)
+        else -> None
+    }
+}
+
+fn kit_steps_json_canonical(text: String) -> String? {
+    if !text.ends_with("\n") || text.ends_with("\n\n") || text.starts_with("﻿") -> return Val("canonical JSON requires exactly one trailing LF and no BOM")
+    body :: kit_steps_byte_slice(text, 0, text.count_bytes() - 1)
+    tree :: json.parse(body) ?? return Val("canonical JSON parse failed")
+    canonical :: json.canonical(tree) ?? return Val("canonical JSON number or value rejected")
+    if text != ("{canonical}\n") -> return Val("JSON bytes are not canonical")
+    None
+}
+
+fn kit_steps_json_files(directory: String, canonical: Bool) -> String Err! {
+    entries :: files.list_dir(directory) ?? return Err("JSON files directory: {err}")
+    documents := [DataTree]{}
+    loop entry in entries {
+        text :: files.read(entry.path) ?? return Err("JSON files read: {err}")
+        if canonical {
+            failure :: kit_steps_json_canonical(text)
+            if failure == {
+                .Val(message) -> return Err(message)
+                .None -> {}
+            }
+        }
+        &documents.push(json.parse(text) ?? return Err("JSON files parse: {err}"))
+    }
+    Ok(json.to_string(DataTree.Array(documents)))
+}
+
+fn kit_steps_json_zero(tree: DataTree, key: String) -> DataTree {
+    if tree == {
+        .Object(fields) -> {
+            result := [String: DataTree]{}
+            loop pair in fields {
+                _ :: &result.add(pair.key, if pair.key == key -> DataTree.Int(0) else -> kit_steps_json_zero(pair.value, key))
+            }
+            return DataTree.Object(result)
+        }
+        .Array(items) -> {
+            result := [DataTree]{}
+            loop item in items -> &result.push(kit_steps_json_zero(item, key))
+            return DataTree.Array(result)
+        }
+        else -> return ~tree
+    }
+}
+
+fn kit_steps_json_distinct(values: [DataTree]) -> Int {
+    unique := [DataTree]{}
+    loop value in values {
+        present := false
+        loop other in unique {
+            if kit_steps_json_equal(value, other) -> present = true
+        }
+        if !present -> &unique.push(value)
+    }
+    unique.len()
+}

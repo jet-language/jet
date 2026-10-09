@@ -1,0 +1,150 @@
+use core.text.parse as textparse
+
+// Kit grammar spans and Rust-compatible predicates use UTF-8 byte offsets.
+// String.len/index/slice use Unicode scalar positions, so do not mix them here.
+fn kit_steps_byte_slice(text: String, start: Int, end: Int) -> String {
+    String.from_bytes(text.bytes().slice(start, end)) ?? panic("kit byte span is not a UTF-8 boundary")
+}
+
+fn kit_steps_byte_index(text: String, needle: String) -> Int? {
+    offset :: textparse.find(text, needle)
+    if offset < 0 -> None else -> Val(offset)
+}
+
+// UTF-8 subjects are already validated Strings. Scan scalars without allocating
+// an intermediate Char list or a one-character String for each predicate.
+fn kit_steps_scalar(bytes: [U8], start: Int) -> KitScalar {
+    first :: Int.from_u8(bytes[start])
+    width :: if first < 128 -> 1 else if first < 224 -> 2 else if first < 240 -> 3 else -> 4
+    value := if width == 1 -> first else if width == 2 -> first % 32 else if width == 3 -> first % 16 else -> first % 8
+    loop index in (start + 1)..<(start + width) -> value = value * 64 + Int.from_u8(bytes[index]) % 64
+    KitScalar{value: value, next: start + width}
+}
+
+fn kit_steps_unicode_space(code: Int) -> Bool {
+    (code >= 9 && code <= 13) || kit_expect_int_named([32, 133, 160, 5760, 8232, 8233, 8239, 8287, 12288], code) || (code >= 8192 && code <= 8202)
+}
+
+fn kit_expect_int_named(items: [Int], target: Int) -> Bool {
+    loop item in items {
+        if item == target -> return true
+    }
+    false
+}
+
+fn kit_steps_scalar_count(text: String) -> Int {
+    bytes :: text.bytes()
+    index := 0
+    count := 0
+    loop index < bytes.len() {
+        index = kit_steps_scalar(bytes, index).next
+        count += 1
+    }
+    count
+}
+
+fn kit_steps_surround_punctuation(text: String, commas: Bool) -> String {
+    output := [U8]{}
+    quote := 0
+    escaped := false
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if quote != 0 {
+            &output.push(byte)
+            if escaped -> escaped = false
+            else if code == 92 -> escaped = true
+            else if code == quote -> quote = 0
+        } else if code == 34 || code == 39 {
+            quote = code
+            &output.push(byte)
+        } else if commas && code == 44 -> &output.push(U8{32})
+        else if !commas && (code == 40 || code == 41) {
+            &output.push(U8{32})
+            &output.push(byte)
+            &output.push(U8{32})
+        } else {
+            &output.push(byte)
+        }
+    }
+    String.from_bytes(output) ?? panic("punctuation scan changed UTF-8")
+}
+
+// Rust from_utf8_lossy: one U+FFFD per maximal invalid subsequence.
+fn kit_steps_utf8_lossy(bytes: [U8]) -> String {
+    String.from_bytes(bytes) ?? return kit_steps_invalid_utf8(bytes)
+}
+
+fn kit_steps_invalid_utf8(bytes: [U8]) -> String {
+    result := ""
+    start := 0
+    index := 0
+    loop index < bytes.len() {
+        first :: Int.from_u8(bytes[index])
+        width :: if first < 128 -> 1 else if first >= 194 && first <= 223 -> 2 else if first >= 224 && first <= 239 -> 3 else if first >= 240 && first <= 244 -> 4 else -> 0
+        consumed := 1
+        okay := width > 0
+        loop offset in 1..<width {
+            if index + offset >= bytes.len() {
+                okay = false
+                break
+            }
+            byte :: Int.from_u8(bytes[index + offset])
+            allowed :: if {
+                offset != 1 -> byte >= 128 && byte <= 191
+                first == 224 -> byte >= 160 && byte <= 191
+                first == 237 -> byte >= 128 && byte <= 159
+                first == 240 -> byte >= 144 && byte <= 191
+                first == 244 -> byte >= 128 && byte <= 143
+                else -> byte >= 128 && byte <= 191
+            }
+            if !allowed {
+                okay = false
+                break
+            }
+            consumed += 1
+        }
+        if okay {
+            index += width
+            next
+        }
+        prefix :: String.from_bytes(bytes.slice(start, index)) ?? panic("validated UTF-8 prefix")
+        result = "{result}{prefix}�"
+        index += consumed
+        start = index
+    }
+    suffix :: String.from_bytes(bytes.slice(start, bytes.len())) ?? panic("validated UTF-8 suffix")
+    "{result}{suffix}"
+}
+
+fn kit_steps_hex_nibble(byte: U8) -> Int? {
+    code :: Int.from_u8(byte)
+    if code >= 48 && code <= 57 -> return Val(code - 48)
+    if code >= 65 && code <= 70 -> return Val(code - 55)
+    if code >= 97 && code <= 102 -> return Val(code - 87)
+    None
+}
+
+// #4834: switch this test-tooling decoder to Core hex.decode once its
+// duplicate HexError nominal identity is fixed. Validation shares the nibble
+// policy with each-line hex rather than maintaining a second alphabet.
+fn kit_steps_hex_decode(text: String) -> [U8] Err! {
+    if text.len() % 2 != 0 -> return Err("invalid hexadecimal argument: {text}")
+    bytes :: text.bytes()
+    result := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        high :: kit_steps_hex_nibble(bytes[index]) ?? return Err("invalid hexadecimal argument: {text}")
+        low :: kit_steps_hex_nibble(bytes[index + 1]) ?? return Err("invalid hexadecimal argument: {text}")
+        &result.push(U8{high * 16 + low})
+        index += 2
+    }
+    Ok(result)
+}
+
+fn kit_steps_hex_valid(text: String) -> Bool {
+    if text.len() % 2 != 0 -> return false
+    loop byte in text.bytes() {
+        if kit_steps_hex_nibble(byte) == None -> return false
+    }
+    true
+}

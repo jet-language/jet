@@ -1,0 +1,8 @@
+# Port of cli_parts/commands.rs::perl_bind_launders_parse_failure_as_e3208.
+requires: tool:perl
+fixture: fixtures/bind-perl
+step: jet inspect bind perl {work}/broken.pl --pkg broken
+exit: nonzero
+stderr: = bind-perl.stderr
+stderr: !~ syntax error at # original predicate
+stderr: !~ broken.pl line # original predicate

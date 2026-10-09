@@ -1,0 +1,58 @@
+use core.files as files
+
+#Test("JSON any substring differs from scalar membership and ignores nonstrings") {
+    root :: cases_test_root("json-any-string")
+    prefix :: "write: doc = \"[1,true,null,\\\"prefix-tail\\\",{{\\\"name\\\":\\\"tail\\\"}}]\"\n"
+    assert_eq(cases_test_advanced(root, "substring", "{prefix}json: file doc doc $ any ~ \"tail\" # original predicate\n").verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "exact", "{prefix}json: file doc doc $ has \"prefix-tail\"\n").verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "not-exact", "{prefix}json: file doc doc $ has \"tail\"\n").verdict.status, "FAIL")
+    assert_eq(cases_test_advanced(root, "absent", "{prefix}json: file doc doc $ any ~ \"missing\" # original predicate\n").verdict.status, "FAIL")
+    loop payload in ["[]", "[1,true,null]", "{{}}", "1", "null", "\"tail\""] {
+        kit_exec_write(files.join(root, "tests/cases/group/input"), payload)
+        assert_eq(cases_test_advanced(root, "not-array-string", "write: doc input\njson: file doc doc $ any ~ \"tail\" # original predicate\n").verdict.status, "FAIL")
+    }
+    assert_eq(cases_test_advanced(root, "reason", "{prefix}json: file doc doc $ any ~ \"tail\"\n").verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove JSON any scratch")
+}
+
+#Test("same-document inequality is deep and same-document count equality compares containers") {
+    root :: cases_test_root("json-same-document")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "input"), "{{\"a\":[1,2],\"b\":[2,1],\"same\":[1,2],\"short\":[1],\"obj\":{{\"x\":1,\"y\":2}},\"obj2\":{{\"y\":2,\"x\":1}},\"n\":1,\"f\":1.0}}")
+    prefix :: "write: doc input\n"
+    good :: "{prefix}json: file doc doc $.a != $.b\njson: file doc doc $.a #== $.b\njson: file doc doc $.a #== $.obj\njson: file doc doc $.obj == $.obj2\njson: file doc doc $.n == $.f\n"
+    assert_eq(cases_test_advanced(root, "deep", good).verdict.status, "PASS")
+    loop predicate in ["$.a != $.same", "$.obj != $.obj2", "$.a #== $.short", "$.n #== $.f", "$.missing != $.a", "$.a #== $.missing"] {
+        assert_eq(cases_test_advanced(root, "failed", "{prefix}json: file doc doc {predicate}\n").verdict.status, "FAIL")
+    }
+    assert_eq(cases_test_advanced(root, "path", "{prefix}json: file doc doc $.a != $.bad[\n").verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove same-document scratch")
+}
+
+#Test("scalar has retains exact JSON equality for null bool number and text") {
+    root :: cases_test_root("json-has-scalars")
+    prefix :: "write: doc = \"[null,true,1,\\\"one\\\"]\"\n"
+    loop literal in ["null", "true", "1", "1.0", "\"one\""] {
+        assert_eq(cases_test_advanced(root, "present", "{prefix}json: file doc doc $ has {literal}\n").verdict.status, "PASS")
+    }
+    loop literal in ["false", "2", "\"on\""] {
+        assert_eq(cases_test_advanced(root, "absent", "{prefix}json: file doc doc $ has {literal}\n").verdict.status, "FAIL")
+    }
+    assert_eq(cases_test_advanced(root, "invalid", "{prefix}json: file doc doc $ has unknown\n").verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove scalar has scratch")
+}
+
+#Test("JSON array predicates are universal across selections and same-document counts support ndjson") {
+    root :: cases_test_root("json-selection-comparisons")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "ndjson"), "{{\"left\":[1,2],\"right\":[3,4]}}\n{{\"left\":[1],\"right\":[2]}}\n")
+    good :: "write: doc ndjson\njson: file doc ndjson $[*].left #== $[*].right\njson: file doc ndjson $[*].left != $[*].right\n"
+    assert_eq(cases_test_advanced(root, "ndjson", good).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "equal", "write: doc ndjson\njson: file doc ndjson $[*].left != $[*].left\n").verdict.status, "FAIL")
+    prefix :: "write: doc = \"[[\\\"wanted-a\\\"],[\\\"wanted-b\\\"]]\"\n"
+    assert_eq(cases_test_advanced(root, "universal", "{prefix}json: file doc doc $[*] any ~ \"wanted\" # original predicate\n").verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "one-misses", "{prefix}json: file doc doc $[*] any ~ \"wanted-a\" # original predicate\n").verdict.status, "FAIL")
+    empty :: "write: doc = \"{{\\\"rows\\\":[]}}\"\njson: file doc doc $.rows[*] #== $.rows[*]\n"
+    assert_eq(cases_test_advanced(root, "empty-selection", empty).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove JSON selection scratch")
+}

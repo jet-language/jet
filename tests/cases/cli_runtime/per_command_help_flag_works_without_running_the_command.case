@@ -1,0 +1,11 @@
+# Port of cli_parts/runtime.rs::per_command_help_flag_works_without_running_the_command.
+step: jet build --help
+stdout: = help-build.out
+stdout: !~ Error [ # original predicate
+step: jet check -h
+stdout: = help-check.out
+stdout: !~ Error [ # original predicate
+step: jet new --help
+stdout: = help-new.out
+stdout: !~ Error [ # original predicate
+file: new absent

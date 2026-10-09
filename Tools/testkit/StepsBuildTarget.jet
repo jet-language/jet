@@ -1,0 +1,38 @@
+fn kit_steps_build_target_text(text: String) -> Bool {
+    text.contains("{{jet-build-target}}")
+}
+
+fn kit_steps_build_target_used(step: KitStep, plan: KitPlan) -> Bool {
+    loop word in step.argv {
+        if kit_steps_build_target_text(word) -> return true
+    }
+    loop value in [step.stdin, step.cwd, step.stdout_target, step.stderr_target] {
+        if kit_steps_build_target_text(value) -> return true
+    }
+    loop variable in step.environment {
+        if variable.value == {
+            .Val(value) -> { if kit_steps_build_target_text(value) -> return true }
+            .None -> {}
+        }
+    }
+    loop assertion in step.assertions {
+        if kit_steps_build_target_text(assertion.path) || kit_steps_build_target_text(assertion.value) || kit_steps_build_target_text(assertion.extra) || kit_steps_build_target_text(assertion.transform) || kit_steps_build_target_text(assertion.json_path) -> return true
+        loop alternative in assertion.alternatives {
+            if kit_steps_build_target_text(alternative) -> return true
+        }
+    }
+    loop rule in plan.replacements {
+        if !rule.literal_from && kit_steps_build_target_text(rule.from) -> return true
+    }
+    loop rule in step.replacements {
+        if !rule.literal_from && kit_steps_build_target_text(rule.from) -> return true
+    }
+    false
+}
+
+fn kit_steps_build_target_conditions(conditions: [String]) -> Bool {
+    loop condition in conditions {
+        if kit_steps_build_target_text(condition) -> return true
+    }
+    false
+}

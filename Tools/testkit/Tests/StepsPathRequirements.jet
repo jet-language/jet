@@ -1,0 +1,28 @@
+use core.files as files
+
+#Test("path-exists requirements gate files and directories with SKIP-HOST on absence") {
+    root :: cases_test_root("requirements-path")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "present"), "data")
+    present :: "requires: path-exists:{{root}}/tests/cases/group/present\nstep: printf yes\nstdout: = \"yes\"\n"
+    assert_eq(cases_test_advanced(root, "file", present).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "directory", "requires: path-exists:{{root}}/tests/cases/group\nstep: printf yes\nstdout: = \"yes\"\n").verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "absent", "requires: path-exists:{{root}}/not-present\nstep: printf yes\n").verdict.status, "SKIP-HOST")
+    assert_eq(cases_test_advanced(root, "wrong", "requires: path-exists:{{root}}/tests/cases/group/present\nstep: printf yes\nstdout: = \"wrong\"\n").verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove path requirement scratch")
+}
+
+#Test("first-existing requirements capture first present path and never pass absent alternatives") {
+    root :: cases_test_root("requirements-first-existing")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "first"), "a")
+    kit_exec_write(files.join(directory, "second"), "b")
+    prefix :: "requires: first-existing selected = \"{{root}}/missing\" | \"{{root}}/tests/cases/group/first\" | \"{{root}}/tests/cases/group/second\"\nstep: printf ready\n"
+    assert_eq(cases_test_advanced(root, "ordered", "{prefix}cap:selected: = \"{{root}}/tests/cases/group/first\"\n").verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", "{prefix}cap:selected: = \"{{root}}/tests/cases/group/second\"\n").verdict.status, "FAIL")
+    absent :: "requires: first-existing selected = \"{{root}}/missing-a\" | \"{{root}}/missing-b\"\nstep: printf ready\n"
+    assert_eq(cases_test_advanced(root, "none", absent).verdict.status, "SKIP-HOST")
+    invalid :: "requires: first-existing selected = \"{{root}}/missing-a\" + \"{{root}}/missing-b\"\nstep: printf ready\n"
+    assert_eq(cases_test_advanced(root, "invalid", invalid).verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove first existing scratch")
+}

@@ -1,0 +1,126 @@
+use core.files as files
+
+#Test("case limits parse positive bounds and override only the step policy") {
+    plan :: kit_steps_parse_case("step slow: printf x\nlimit: time=2 memory=1024\nstep next: printf x\n")
+    assert_eq(plan.error, "")
+    assert_eq(plan.steps[0].limit_time, 2)
+    assert_eq(plan.steps[0].limit_memory, 1024)
+    assert_eq(plan.steps[1].limit_time, 0)
+    env :: KitEnv{root: "root", scratch: "scratch", jet: "jet", jetpack: "", timeout: 5s, memory_limit: 0}
+    policy :: kit_steps_policy(plan.steps[0], env) ?? panic("valid limits")
+    assert_eq(policy.timeout.ns, 2000000000)
+    assert_eq(policy.memory_limit, 1024)
+    assert_eq(env.timeout.ns, 5000000000)
+    assert_eq(env.memory_limit, 0)
+    loop bound in ["", "time=0", "time=-1", "memory=no", "cpu=2", "time=1 time=2", "memory=1 memory=2"] {
+        assert(kit_steps_parse_case("step: printf x\nlimit: {bound}\n").error != "")
+    }
+}
+
+#Test("explicit time and memory limit receipts are FAIL while harness timeouts stay TIMEOUT") {
+    step :: kit_steps_parse_case("step: printf x\nlimit: time=1 memory=1024\n").steps[0]
+    timeout :: KitRun{stdout: "", stderr: "", code: -1, signal: None, timed_out: true, error: "", limit_hit: "time"}
+    memory :: KitRun{stdout: "", stderr: "", code: -1, signal: Val(9), timed_out: false, error: "", limit_hit: "memory"}
+    assert_eq((kit_steps_failure(step, timeout) ?? panic("time failure")).status, "FAIL")
+    assert_eq((kit_steps_failure(step, memory) ?? panic("memory failure")).status, "FAIL")
+    ordinary :: kit_steps_parse_case("step: printf x\n").steps[0]
+    assert_eq((kit_steps_failure(ordinary, timeout) ?? panic("harness timeout")).status, "TIMEOUT")
+    root :: cases_test_root("explicit-time-limit")
+    cases_test_source(root, "time", "step: jet -c 'exec sleep 2'\nlimit: time=1\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    outcome :: kit_cases_run(cases_test_entry("time"), context)[0]
+    assert_eq(outcome.verdict.status, "FAIL")
+    assert(outcome.verdict.detail.contains("limit hit: time"))
+    assert(outcome.run.elapsed_ns > 0)
+    files.remove_all(root) ?? panic("remove limit scratch")
+}
+
+#Test("elapsed grammar and receipt comparisons pin both labels and the scaling factor") {
+    plan :: kit_steps_parse_case("step first: printf x\nstep second: printf x\nelapsed: second <= 2 * first\n")
+    assert_eq(plan.error, "")
+    assertion :: plan.steps[1].assertions[0]
+    history :: [KitCapturedStep{label: "first", stdout: "", stderr: "", elapsed_ns: 100}, KitCapturedStep{label: "second", stdout: "", stderr: "", elapsed_ns: 150}]
+    assert_eq(kit_steps_elapsed(assertion, history).status, "PASS")
+    tight :: kit_steps_parse_case("step first: printf x\nstep second: printf x\nelapsed: second <= 1 * first\n").steps[1].assertions[0]
+    assert_eq(kit_steps_elapsed(tight, history).status, "FAIL")
+    assert_eq(kit_steps_elapsed(assertion, []).status, "ERROR")
+    loop relation in ["second <= 0 * first", "second <= -1 * first", "second <= nope * first", "missing <= 2 * first", "second <= 2 * missing", "second < 2 * first"] {
+        assert(kit_steps_parse_case("step first: printf x\nstep second: printf x\nelapsed: {relation}\n").error != "")
+    }
+}
+
+#Test("version normalizer uses only the supplied banner and refuses unreadable versions") {
+    assert_eq(kit_steps_version("Jet 1.2.3\nrelease status: prerelease\n"), Val("1.2.3"))
+    assert_eq(kit_steps_version("unrecognized banner\n"), None)
+    assert_eq(kit_steps_version("Jet\n"), None)
+    root :: cases_test_root("version-normalization")
+    kit_exec_write(files.join(root, "tests/cases/group/version.out"), "VERSION 9.8.7\n")
+    cases_test_source(root, "version", "normalize: version\nstep: jet -c 'echo \"1.2.3 9.8.7\"'\nstdout: = version.out\n")
+    context := cases_test_context(root, files.join(root, "scratch"))
+    context.env.version = "1.2.3"
+    assert_eq(kit_cases_run(cases_test_entry("version"), context)[0].verdict.status, "PASS")
+    context.env.version = ""
+    context.env.version_error = "unparseable jet --version banner"
+    assert_eq(kit_cases_run(cases_test_entry("version"), context)[0].verdict.status, "ERROR")
+    files.remove_all(root) ?? panic("remove version scratch")
+}
+
+#Test("case JSON text preserves literals and enforces grammar before invocation") {
+    plan :: kit_steps_parse_case("step: printf x\njson: stdout doc $ = {{\"quoted\":\"don't # change\",\"items\":[1,2]}}\njson: stderr doc $.mean : number # clock sample is nondeterministic\njson: file 'some file.json' ndjson $ #= 2\njson: stdout doc $.records has {{\"kind\":\"runtime\",\"claim\":\"E3001\"}}\n")
+    assert_eq(plan.error, "")
+    assert_eq(plan.steps[0].assertions[0].value, "{{\"quoted\":\"don't # change\",\"items\":[1,2]}}")
+    assert_eq(plan.steps[0].assertions[1].value, "number")
+    assert_eq(plan.steps[0].assertions[2].path, "some file.json")
+    loop assertion in ["stdout doc $ = invalid", "stdout doc $ : number", "stdout doc $ : number #", "stdout doc $ : unknown", "stdout doc $ #= -1", "stdout doc $ has {{}}", "stdout doc $ has []", "stdout doc $[01] = null", "stdout wrong $ = null", "file ../outside doc $ = null"] {
+        assert(kit_steps_parse_case("step: printf x\njson: {assertion}\n").error != "")
+    }
+}
+
+#Test("case JSON assertions read stdout stderr and staged files through the shared checker") {
+    root :: cases_test_root("json-streams-files")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "tree/doc.json"), "{{\"a\":1,\"b\":true,\"records\":[{{\"kind\":\"runtime\",\"claim\":\"E3001\",\"extra\":2}}]}}")
+    kit_exec_write(files.join(directory, "tree/records.json"), "{{\"name\":\"needle\",\"mean_ns\":1}}\n{{\"mean_ns\":1.5,\"name\":\"needle\"}}\n")
+    cases_test_source(root, "doc", "fixture: tree\nstep: jet -c 'cat doc.json; cat records.json >&2'\njson: stdout doc $.a = 1\njson: stdout doc $.b : bool # original predicate\njson: stdout doc $.records has {{\"kind\":\"runtime\",\"claim\":\"E3001\"}}\njson: stderr ndjson $ #= 2\njson: stderr ndjson $[*].name = \"needle\"\njson: stderr ndjson $[*].mean_ns : number # measured duration varies\njson: file doc.json doc $.records #= 1\n")
+    cases_test_source(root, "wrong", "fixture: tree\nstep: jet -c 'cat doc.json'\njson: stdout doc $.a = 2\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    assert_eq(kit_cases_run(cases_test_entry("doc"), context)[0].verdict.status, "PASS")
+    assert_eq(kit_cases_run(cases_test_entry("wrong"), context)[0].verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove JSON scratch")
+}
+
+#Test("environment argv tokens use step values final unsets and empty-value defaults") {
+    root :: cases_test_root("argv-environment")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "set.out"), "step")
+    kit_exec_write(files.join(directory, "unset.out"), "fallback")
+    kit_exec_write(files.join(directory, "base.out"), "1")
+    cases_test_source(root, "env", "env: TOKEN_VALUE=case\nstep: jet -c 'printf \"%s\" \"$1\"' scenario {{env:TOKEN_VALUE|fallback}}\nenv: TOKEN_VALUE=step\nstdout: = set.out\nstep: jet -c 'printf \"%s\" \"$1\"' scenario {{env:TOKEN_VALUE|fallback}}\nunset: TOKEN_VALUE\nstdout: = unset.out\nstep: jet -c 'printf \"%s\" \"$1\"' scenario {{env:TOKEN_VALUE|fallback}}\nenv: TOKEN_VALUE=\nstdout: = unset.out\nstep: jet -c 'printf \"%s\" \"$1\"' scenario {{env:NO_COLOR|fallback}}\nstdout: = base.out\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    assert_eq(kit_cases_run(cases_test_entry("env"), context)[0].verdict.status, "PASS")
+    loop token in ["{{env:|fallback}}", "{{env:NAME|fallback", "{{env:bad-name|fallback}}"] {
+        assert(kit_steps_parse_case("step: printf '{token}'\n").error != "")
+    }
+    assert_eq(kit_steps_parse_case("env: TOKEN_VALUE={{env:NAME|fallback}}\nstep: printf x\n").error, "")
+    assert(kit_steps_parse_case("step: printf x\ncwd: {{env:NAME|fallback}}\n").error.contains("argv-only"))
+    files.remove_all(root) ?? panic("remove argv environment scratch")
+}
+
+#Test("typed JSON normalization attaches only to its step and preserves semantic assertions") {
+    root :: cases_test_root("json-normalizer-attachment")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "tree/doc.json"), "{{ \"elapsed\" : 1.25, \"fixed\":true }}\n")
+    kit_exec_write(files.join(directory, "normalized.out"), "{{ \"elapsed\" : \"<<number>>\", \"fixed\":true }}\n")
+    kit_exec_write(files.join(directory, "plain.out"), "plain\n")
+    cases_test_source(root, "attached", "fixture: tree\nstep first: jet -c 'cat doc.json'\nnormalize: json stdout $.elapsed : number # elapsed duration varies\nstdout: = normalized.out\njson: stdout doc $.elapsed : number # elapsed duration varies\njson: stdout doc $.elapsed = 1.25\ncapture: elapsed stdout doc $.elapsed\nstep: jet -c 'cat doc.json'\njson: stdout doc $.elapsed == first\njson: stdout doc $.elapsed = {{cap:elapsed}}\nstep: jet -c 'echo plain'\nstdout: = plain.out\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    assert_eq(kit_cases_run(cases_test_entry("attached"), context)[0].verdict.status, "PASS")
+    cases_test_source(root, "not-json", "step: jet -c 'echo plain'\nnormalize: json stdout $.elapsed : number # elapsed duration varies\n")
+    assert_eq(kit_cases_run(cases_test_entry("not-json"), context)[0].verdict.status, "FAIL")
+    global :: kit_steps_parse_case("normalize: json stdout $.elapsed : number # elapsed duration varies\nstep: printf x\nstep: printf y\n")
+    assert_eq(global.error, "")
+    assert_eq(global.json_normalize.len(), 1)
+    assert_eq(global.steps[0].json_normalize.len(), 0)
+    assert(kit_steps_parse_case("step: printf x\nnormalize: json stdout $.elapsed : number\n").error != "")
+    files.remove_all(root) ?? panic("remove JSON normalizer scratch")
+}

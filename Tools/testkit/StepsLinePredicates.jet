@@ -1,0 +1,76 @@
+use core.text as strtext
+
+fn kit_steps_rust_lines(text: String) -> [String] {
+    result := [String]{}
+    bytes :: text.bytes()
+    start := 0
+    loop start < bytes.len() {
+        end := start
+        loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
+        stop :: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
+        &result.push(String.from_bytes(bytes.slice(start, stop)) ?? panic("line span is not UTF-8"))
+        start = end + 1
+    }
+    result
+}
+
+fn kit_steps_line_atom(line: String, op: String, value: String) -> Bool {
+    if op == "~" -> return line.contains(value)
+    if op == "!~" -> return !line.contains(value)
+    if op == "^=" -> return line.starts_with(value)
+    if op == "!^=" -> return !line.starts_with(value)
+    if op == "$=" -> return line.ends_with(value)
+    if op == "=" -> return line == value
+    if op == "!=" -> return line != value
+    false
+}
+
+fn kit_steps_expression_words(text: String) -> [String]? {
+    kit_steps_words(kit_steps_surround_punctuation(text, false))
+}
+
+fn kit_steps_expression_atom(words: [String], start: Int, line: String) -> KitLinePredicate {
+    if start >= words.len() -> return KitLinePredicate{valid: false, value: false, next: start}
+    op :: words[start]
+    if op == "!" {
+        inner :: kit_steps_expression_atom(words, start + 1, line)
+        return KitLinePredicate{valid: inner.valid, value: !inner.value, next: inner.next}
+    }
+    if op == "(" {
+        inner :: kit_steps_expression_or(words, start + 1, line)
+        if !inner.valid || inner.next >= words.len() || words[inner.next] != ")" -> return KitLinePredicate{valid: false, value: false, next: inner.next}
+        return KitLinePredicate{valid: true, value: inner.value, next: inner.next + 1}
+    }
+    if op == "chars" {
+        if start + 2 >= words.len() || !kit_expect_named(["=", "!=", "<", "<=", ">", ">="], words[start + 1]) -> return KitLinePredicate{valid: false, value: false, next: start}
+        number :: Int.parse(words[start + 2]) ?? return KitLinePredicate{valid: false, value: false, next: start}
+        return KitLinePredicate{valid: number >= 0, value: kit_steps_compare(kit_steps_scalar_count(line), words[start + 1], number), next: start + 3}
+    }
+    if start + 1 >= words.len() || !kit_expect_named(["~", "!~", "^=", "$=", "=", "!=", "!^="], op) -> return KitLinePredicate{valid: false, value: false, next: start}
+    KitLinePredicate{valid: true, value: kit_steps_line_atom(line, op, words[start + 1]), next: start + 2}
+}
+
+fn kit_steps_expression_and(words: [String], start: Int, line: String) -> KitLinePredicate {
+    result := kit_steps_expression_atom(words, start, line)
+    loop result.valid && result.next < words.len() && words[result.next] == "&&" {
+        right :: kit_steps_expression_atom(words, result.next + 1, line)
+        result = KitLinePredicate{valid: right.valid, value: result.value && right.value, next: right.next}
+    }
+    result
+}
+
+fn kit_steps_expression_or(words: [String], start: Int, line: String) -> KitLinePredicate {
+    result := kit_steps_expression_and(words, start, line)
+    loop result.valid && result.next < words.len() && words[result.next] == "||" {
+        right :: kit_steps_expression_and(words, result.next + 1, line)
+        result = KitLinePredicate{valid: right.valid, value: result.value || right.value, next: right.next}
+    }
+    result
+}
+
+fn kit_steps_expression(text: String, line: String) -> Bool? {
+    words :: kit_steps_expression_words(text) ?? return None
+    result :: kit_steps_expression_or(words, 0, line)
+    if !result.valid || result.next != words.len() -> return None
+    Val(result.value)
+}

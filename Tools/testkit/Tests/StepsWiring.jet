@@ -1,0 +1,64 @@
+use core.files as files
+
+#Test("output file wiring applies to spawned and persistent children only at their join boundary") {
+    root :: cases_test_root("wiring-joins")
+    source :: "spawn batch: jet -c 'printf out; printf err >&2'\nstdout: file batch.out\nstderr: file batch.err\nwait: batch\nfile: batch.out = \"out\"\nfile: batch.err = \"err\"\nsession peer raw: cat\nstdout: file peer.out\nsend peer: \"payload\"\nclose peer\nfile: peer.out = \"payload\"\n"
+    assert_eq(cases_test_advanced(root, "joins", source).verdict.status, "PASS")
+    wrong :: "step: printf actual\nstdout: file result\nfile: result = \"wrong\"\n"
+    assert_eq(cases_test_advanced(root, "wrong-file", wrong).verdict.status, "FAIL")
+    live :: "session peer raw: cat\nstdout: file live.out\nawait: file live.out timeout 1s every 1ms\nclose peer\n"
+    refused :: cases_test_advanced(root, "live-file", live)
+    assert_eq(refused.verdict.status, "REFUSED")
+    assert_eq(refused.verdict.detail, "process-file-fd")
+    files.remove_all(root) ?? panic("remove wiring join scratch")
+}
+
+#Test("null streams discard completed output but forbid recv captures JSON and joined stream assertions") {
+    root :: cases_test_root("wiring-nulls")
+    source :: "step: jet -c 'cat; printf out; printf err >&2'\nstdin: null\nstdout: null\nstderr: null\nstep: printf observed\nstdout: = \"observed\"\n"
+    assert_eq(cases_test_advanced(root, "discard", source).verdict.status, "PASS")
+    loop source in ["step: printf x\nstdout: null\ncapture: value = text stdout\n", "step: printf '{{}}'\nstdout: null\njson: stdout doc $ valid # original predicate\n", "session peer raw: cat\nstdout: null\nrecv peer timeout 1s\nclose peer\n", "spawn peer: printf x\nstdout: null\nwait: peer\nstdout: empty\n", "session peer raw: cat\nstderr: null\nclose peer\nstderr: empty\n", "step: printf x\nstdout: null\nfor line stdout as row\nstep: true\nend for\n"] {
+        refused :: cases_test_advanced(root, "unobservable", source)
+        assert_eq(refused.verdict.status, "REFUSED")
+        assert(refused.verdict.detail.contains("nulled stream"))
+    }
+    loop seam in ["process-null-fd", "process-file-fd"] {
+        refused :: cases_test_advanced(root, "fd-observation", "refused: {seam}\nstep: false\n")
+        assert_eq(refused.verdict.status, "REFUSED")
+        assert_eq(refused.verdict.detail, seam)
+    }
+    files.remove_all(root) ?? panic("remove null wiring scratch")
+}
+
+#Test("all canonical PTY event and per-fd spellings parse and refuse without running the child") {
+    root :: cases_test_root("wiring-pty")
+    loop modifier in ["pty: true", "pty: true size 24x80", "pty: true size 0x0", "pty: true size 0x80", "pty: stdin,stdout,stderr", "pty-send: \"x\\n\" after 1ms", "pty-close: after 1ms", "pty-resize: 30x100 at 1ms"] {
+        refused :: cases_test_advanced(root, "pty", "step: false\n{modifier}\n")
+        assert_eq(refused.verdict.status, "REFUSED")
+        assert_eq(refused.verdict.detail, "pty")
+    }
+    loop modifier in ["pty: false", "pty: output", "pty: true size -1x80", "pty: true size nox0", "pty: true size 0x", "pty-resize: 24x80 after 1ms", "stderr-to-stdout: false", "stdout: file ../escape"] {
+        refused :: cases_test_advanced(root, "noncanonical", "step: false\n{modifier}\n")
+        assert_eq(refused.verdict.status, "REFUSED")
+        assert(refused.verdict.detail != "pty")
+    }
+    files.remove_all(root) ?? panic("remove PTY scratch")
+}
+
+#Test("quoted RHS means literal while spaced snapshots and write templates require explicit path") {
+    root :: cases_test_root("wiring-rhs")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "snapshot"), "expected")
+    kit_exec_write(files.join(directory, "two words.out"), "expected")
+    kit_exec_write(files.join(directory, "two words.template"), "{{cap:message}}\\n")
+    source :: "step: printf expected\nstdout: = snapshot\nstdout: = path \"two words.out\"\ncapture: message = text stdout\nwrite: copy = \"{{cap:message}}\"\nfile: copy = \"expected\"\nwrite: templated path \"two words.template\"\nfile: templated = \"expected\\\\n\"\n"
+    assert_eq(cases_test_advanced(root, "path", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "quoted-name", "step: printf snapshot\nstdout: = \"snapshot\"\n").verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "literal-not-file", "step: printf expected\nstdout: = \"snapshot\"\n").verdict.status, "FAIL")
+    loop assertion in ["stdout: = \"snapshot\"", "stdout: = path \"two words.out\"", "stdout: = snapshot"] {
+        failed :: cases_test_advanced(root, "not-snapshot-literal", "step: printf wrong\n{assertion}\n")
+        assert_eq(failed.verdict.status, "FAIL")
+    }
+    loop source in ["write: value \"not a template\"\n", "write: value = unquoted\n", "step: printf expected\nstdout: == \"expected\"\n"] -> assert_eq(cases_test_advanced(root, "invalid-rhs", source).verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove RHS scratch")
+}

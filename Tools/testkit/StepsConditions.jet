@@ -1,0 +1,214 @@
+use core.files as files
+use core.sys as sys
+
+fn kit_steps_condition_colon(text: String) -> Int? {
+    quote := 0
+    escaped := false
+    depth := 0
+    loop (index, byte) in text.bytes() {
+        c :: Int.from_u8(byte)
+        if quote != 0 {
+            if escaped -> escaped = false
+            else if c == 92 -> escaped = true
+            else if c == quote -> quote = 0
+        } else if c == 34 || c == 39 -> quote = c
+        else if c == 123 || c == 91 || c == 40 -> depth += 1
+        else if c == 125 || c == 93 || c == 41 -> depth -= 1
+        else if c == 58 && depth == 0 {
+            if text.starts_with("when ") && kit_steps_byte_slice(text, 0, index).ends_with("cap") -> next
+            return Val(index)
+        }
+    }
+    None
+}
+
+fn kit_steps_condition_atom_valid(text: String) -> Bool {
+    words :: kit_steps_words(kit_steps_body(text)) ?? return false
+    if words.len() == 0 -> return false
+    kind :: words[0]
+    if kit_expect_named(["os", "os-name", "arch", "env", "env-set", "captured", "dir-readable"], kind) -> return words.len() == 2 && words[1] != ""
+    if kind == "tool" -> return words.len() == 2 && words[1] != ""
+    if kind == "probe" -> return words.len() >= 2
+    if kind == "exit" -> return words.len() == 3 && kit_expect_named(["==", "!="], words[1]) && kit_steps_integer(words[2]) != None
+    if kind.starts_with("cap:") {
+        if kind.len() == 4 || words.len() < 3 -> return false
+        if kit_expect_named(["=", "!=", "~", "^="], words[1]) -> return words.len() == 3
+        if words[1] != "in" -> return false
+        tokens :: kit_steps_tokens(text) ?? return false
+        return kit_steps_string_array(kit_steps_byte_slice(text, tokens[2].start, text.count_bytes())) != None
+    }
+    if kit_expect_named(["stdout", "stderr", "stdout+stderr"], kind) || kind.ends_with(".stdout") || kind.ends_with(".stderr") || kind.ends_with(".stdout+stderr") -> return (words.len() == 3 && kit_expect_named(["=", "!=", "~", "!~"], words[1])) || (words.len() >= 3 && words[1] == "~any")
+    false
+}
+
+// Filesystem and captured-value assertions observe state without inventing a
+// process. Stream, exit and elapsed assertions still need a process owner.
+fn kit_steps_independent_assertion(key: String, original: String) -> Bool {
+    if key == "entries" || key == "tree" -> return true
+    selector := key
+    if key == "json" {
+        words :: kit_steps_words(kit_steps_body(original)) ?? return false
+        if words.len() == 0 -> return false
+        selector = words[0]
+    }
+    subject :: kit_steps_subject(selector)
+    subject == "file" || subject == "file?" || subject.starts_with("cap:")
+}
+
+fn kit_steps_attach_conditions(original: KitPlan, before_steps: Int, before_assertions: Int, conditions: [String]) -> KitPlan {
+    plan := original
+    if conditions.len() == 0 -> return plan
+    if plan.steps.len() > before_steps {
+        loop index in before_steps..<plan.steps.len() -> plan.steps[index].conditions = conditions
+    } else if before_steps > 0 {
+        index :: before_steps - 1
+        loop at in before_assertions..<plan.steps[index].assertions.len() -> plan.steps[index].assertions[at].conditions = conditions
+    }
+    plan
+}
+
+fn kit_steps_condition_atom(text: String, context: KitStepCtx, state: KitStepState) -> Bool {
+    words :: kit_steps_words(kit_steps_body(text)) ?? return false
+    if words.len() == 0 -> return false
+    kind :: words[0]
+    if kind == "os" -> return kit_steps_host_matches(sys.family(), words[1])
+    if kind == "os-name" -> return kit_steps_host_matches(kit_steps_host_name(), words[1])
+    if kind == "arch" -> return kit_steps_host_matches(kit_steps_host_arch(), words[1])
+    if kind == "env" || kind == "env-set" {
+        negative :: words[1].starts_with("!")
+        name :: if negative -> kit_steps_byte_slice(words[1], 1, words[1].count_bytes()) else -> words[1]
+        value :: sys.get(name)
+        present :: if kind == "env-set" -> value != None else -> (value ?? "") != ""
+        return present != negative
+    }
+    if kind == "captured" {
+        present := false
+        loop capture in state.captures {
+            if capture.name == words[1] {
+                if capture.value == {
+                    .Absent -> {}
+                    else -> present = true
+                }
+            }
+        }
+        return present
+    }
+    if kind == "dir-readable" {
+        path :: kit_steps_runtime_expand(words[1], context, state) ?? return false
+        location :: kit_steps_work_path(path, context.env, context.work, context.scratch, state.built) ?? return false
+        _ :: files.list_dir(location) ?? return false
+        return true
+    }
+    if kind == "tool" -> return kit_steps_tools_all(words[1])
+    if kind == "probe" -> return kit_steps_probes_all(kit_steps_byte_slice(text, 6, text.count_bytes()), context.env, context.work, context.scratch)
+    if kind == "exit" -> return (state.last.code == (Int.parse(words[2]) ?? -1)) == (words[1] == "==")
+    if kind.starts_with("cap:") {
+        actual :: kit_steps_captured_subject(kit_steps_byte_slice(kind, 4, kind.count_bytes()), state.captures) ?? return false
+        if words[1] == "in" {
+            tokens :: kit_steps_tokens(text) ?? return false
+            choices :: kit_steps_string_array(kit_steps_byte_slice(text, tokens[2].start, text.count_bytes())) ?? return false
+            loop choice in choices {
+                expanded :: kit_steps_runtime_expand(choice, context, state) ?? return false
+                if actual == expanded -> return true
+            }
+            return false
+        }
+        expected :: kit_steps_runtime_expand(words[2], context, state) ?? return false
+        if words[1] == "~" -> return actual.contains(expected)
+        if words[1] == "^=" -> return actual.starts_with(expected)
+        return (actual == expected) == (words[1] == "=")
+    }
+    reference := kind
+    subject := "stdout"
+    if kind.ends_with(".stdout+stderr") {
+        reference = kit_steps_byte_slice(kind, 0, kind.count_bytes() - 14)
+        subject = "stdout+stderr"
+    }
+    actual :: if kit_expect_named(["stdout", "stderr", "stdout+stderr"], kind) -> kit_steps_select_stream(state.last.stdout, state.last.stderr, kind) else -> kit_steps_history_stream(reference, subject, state.history, false) ?? return false
+    if words[1] == "~any" {
+        loop word in words.slice(2, words.len()) {
+            expanded :: kit_steps_runtime_expand(word, context, state) ?? return false
+            if actual.contains(expanded) -> return true
+        }
+        return false
+    }
+    tokens :: kit_steps_tokens(text) ?? return false
+    value := kit_steps_runtime_expand(words[2], context, state) ?? return false
+    raw :: kit_steps_byte_slice(text, tokens[2].start, tokens[2].end)
+    if !raw.starts_with("\"") && !raw.starts_with("'") -> value = files.read(files.join(context.snapshots, value)) ?? return false
+    if words[1] == "~" -> return actual.contains(value)
+    if words[1] == "!~" -> return !actual.contains(value)
+    (actual == value) == (words[1] == "=")
+}
+
+fn kit_steps_conditions(conditions: [String], context: KitStepCtx, state: KitStepState) -> Bool {
+    loop condition in conditions {
+        if !kit_steps_condition(condition, context, state) -> return false
+    }
+    true
+}
+
+fn kit_steps_condition_tree_atom(text: String, tokens: [KitWord], start: Int, context: KitStepCtx?, state: KitStepState?) -> KitLinePredicate {
+    if start >= tokens.len() -> return KitLinePredicate{valid: false, value: false, next: start}
+    token :: tokens[start].text
+    if token == "!" {
+        inner :: kit_steps_condition_tree_atom(text, tokens, start + 1, context, state)
+        return KitLinePredicate{valid: inner.valid, value: !inner.value, next: inner.next}
+    }
+    if token == "(" {
+        inner :: kit_steps_condition_tree_or(text, tokens, start + 1, context, state)
+        if !inner.valid || inner.next >= tokens.len() || tokens[inner.next].text != ")" -> return KitLinePredicate{valid: false, value: false, next: inner.next}
+        return KitLinePredicate{valid: true, value: inner.value, next: inner.next + 1}
+    }
+    end := start
+    loop end < tokens.len() && !kit_expect_named(["&&", "||", ")"], kit_steps_byte_slice(text, tokens[end].start, tokens[end].end)) -> end += 1
+    if end == start -> return KitLinePredicate{valid: false, value: false, next: end}
+    negative :: token.starts_with("!")
+    atom :: kit_steps_byte_slice(text, tokens[start].start + (if negative -> 1 else -> 0), tokens[end - 1].end)
+    if !kit_steps_condition_atom_valid(atom) -> return KitLinePredicate{valid: false, value: false, next: end}
+    value := false
+    if context == {
+        .Val(current) -> {
+            if state == {
+                .Val(saved) -> value = kit_steps_condition_atom(atom, current, saved)
+                .None -> {}
+            }
+        }
+        .None -> {}
+    }
+    KitLinePredicate{valid: true, value: value != negative, next: end}
+}
+
+fn kit_steps_condition_tree_and(text: String, tokens: [KitWord], start: Int, context: KitStepCtx?, state: KitStepState?) -> KitLinePredicate {
+    result := kit_steps_condition_tree_atom(text, tokens, start, context, state)
+    loop result.valid && result.next < tokens.len() && tokens[result.next].text == "&&" {
+        active :: if result.value -> context else -> None
+        right :: kit_steps_condition_tree_atom(text, tokens, result.next + 1, active, state)
+        result = KitLinePredicate{valid: right.valid, value: result.value && right.value, next: right.next}
+    }
+    result
+}
+
+fn kit_steps_condition_tree_or(text: String, tokens: [KitWord], start: Int, context: KitStepCtx?, state: KitStepState?) -> KitLinePredicate {
+    result := kit_steps_condition_tree_and(text, tokens, start, context, state)
+    loop result.valid && result.next < tokens.len() && tokens[result.next].text == "||" {
+        active :: if result.value -> None else -> context
+        right :: kit_steps_condition_tree_and(text, tokens, result.next + 1, active, state)
+        result = KitLinePredicate{valid: right.valid, value: result.value || right.value, next: right.next}
+    }
+    result
+}
+
+fn kit_steps_condition_valid(text: String) -> Bool {
+    expanded :: kit_steps_surround_punctuation(kit_steps_body(text), false)
+    tokens :: kit_steps_tokens(expanded) ?? return false
+    parsed :: kit_steps_condition_tree_or(expanded, tokens, 0, None, None)
+    parsed.valid && parsed.next == tokens.len()
+}
+
+fn kit_steps_condition(text: String, context: KitStepCtx, state: KitStepState) -> Bool {
+    expanded :: kit_steps_surround_punctuation(kit_steps_body(text), false)
+    tokens :: kit_steps_tokens(expanded) ?? return false
+    parsed :: kit_steps_condition_tree_or(expanded, tokens, 0, Val(context), Val(state))
+    parsed.valid && parsed.next == tokens.len() && parsed.value
+}

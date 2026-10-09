@@ -1,0 +1,37 @@
+use core.files as files
+
+#Test("JSON scalar membership keys alternatives missing inequality and numeric comparisons run through cases") {
+    root :: cases_test_root("json-operators")
+    source :: "write: doc = \"{{\\\"a\\\":1,\\\"b\\\":true,\\\"items\\\":[1,true,null,\\\"x\\\"]}}\"\njson: file doc doc $ keys = [\"b\",\"a\",\"items\"]\njson: file doc doc $.items has 1\njson: file doc doc $.items has true\njson: file doc doc $.items has null\njson: file doc doc $.items has \"x\"\njson: file doc doc $.a in [1,2]\njson: file doc doc $.a >= 1\njson: file doc doc $.a < 2\njson: file doc doc $.missing != 0\njson: file doc doc $.a == $.items[0]\njson: file doc doc $.items[-1] = \"x\"\n"
+    assert_eq(cases_test_advanced(root, "operators", source).verdict.status, "PASS")
+    loop predicate in ["$.items has false", "$.a in [2]", "$.missing != null", "$ keys = []", "$.a > 1", "$.a == $.b"] {
+        failed :: "write: doc = \"{{\\\"a\\\":1,\\\"b\\\":true,\\\"items\\\":[1]}}\"\njson: file doc doc {predicate}\n"
+        assert_eq(cases_test_advanced(root, "failure", failed).verdict.status, "FAIL")
+    }
+    files.remove_all(root) ?? panic("remove JSON operators scratch")
+}
+
+#Test("JSON canonical checks exact LF number spelling key order and every direct file") {
+    root :: cases_test_root("json-canonical")
+    loop payload in ["{{\"a\":1,\"b\":0}}\n", "1e+21\n", "0\n"] {
+        directory :: files.join(root, "tests/cases/group")
+        kit_exec_write(files.join(directory, "payload"), payload)
+        assert_eq(cases_test_advanced(root, "canonical", "write: doc payload\njson: file doc canonical\n").verdict.status, "PASS")
+    }
+    loop payload in ["{{\"b\":0,\"a\":1}}\n", "1.0\n", "-0.0\n", "1e21\n", " 1\n", "1", "1\n\n"] {
+        kit_exec_write(files.join(root, "tests/cases/group/payload"), payload)
+        assert_eq(cases_test_advanced(root, "noncanonical", "write: doc payload\njson: file doc canonical\n").verdict.status, "FAIL")
+    }
+    files.remove_all(root) ?? panic("remove canonical scratch")
+}
+
+#Test("JSON generalized filters sibling operands row binding projections distinct and zero normalization are exact") {
+    root :: cases_test_root("json-filters")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "document"), "{{\"rows\":[{{\"id\":1,\"low\":1,\"high\":2,\"nested\":{{\"name\":\"alpha\"}}}},{{\"id\":2,\"low\":2,\"high\":3,\"nested\":{{\"name\":\"beta\"}}}}],\"a.b\":4}}")
+    source :: "write: doc document\njson: file doc doc $[\"a.b\"] = 4\njson: file doc doc $.rows[?id in [1,2]] #= 2\njson: file doc doc $.rows[?high>@.low] #= 2\njson: file doc doc $.rows[?nested.name^=\"a\"] #= 1\njson: file doc doc $.rows[*].id = [1,2]\njson: file doc doc $.rows[*].id #distinct= 2 # original predicate\njson: file doc doc each $.rows[*] as r: {{r}}.high > {{r.low}} # original predicate\njson: file doc doc each $.rows[?id=9] as r: {{r}}.id = 0\nstep first: cat doc\nstep: cat doc\njson: stdout doc[zero id] $ == first\nmkdir: documents\nwrite: documents/one = \"1\\n\"\nwrite: documents/two = \"2\\n\"\njson: files documents canonical\njson: files documents doc $ #= 2\n"
+    assert_eq(cases_test_advanced(root, "filters", source).verdict.status, "PASS")
+    failed :: "write: doc document\njson: file doc doc each $.rows[*] as r: {{r}}.high < {{r.low}} # original predicate\n"
+    assert_eq(cases_test_advanced(root, "row-failure", failed).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove filters scratch")
+}
