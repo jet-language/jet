@@ -516,6 +516,18 @@ pub fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, typ
             value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
             return sema_expr_expected(value, expected, environment, &diagnostics)
         }
+        target :: sema_call_core_source_target(environment, identity, member, type_args, span, &diagnostics) ?? {
+            &diagnostics.push(sema_error("E0902", span, "source-owned Core call `{record.module_name}.{member}` has no checked source target", "this declaration must execute its owning Jet function", "load the matching Core source export"))
+            return None
+        }
+        params :: sema_call_params_from_type(target.signature) ?? return None
+        if params.len() != args.len() {
+            &diagnostics.push(sema_error("E0902", span, "source-owned Core target `{member}` has the wrong normalized arity", "the checked source signature must accept every normalized argument", "use the matching Core source export"))
+            return None
+        }
+        source_args :: sema_call_core_source_arguments(args, params, environment)
+        value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: type_args, args: source_args}, span)
+        return sema_expr_expected(value, expected, environment, &diagnostics)
     }
     normalized :: sema_call_core_normalized_source_record(record, args)
     if core_call_source_member(normalized) == .Val(member) {
