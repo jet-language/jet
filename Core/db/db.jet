@@ -8,6 +8,7 @@ package {
         db: .Library{ entry: db }
     }
 }
+use core as core
 // D-DEP-DB1: the existing bridge retains the bundled SQLite engine. The held
 // CFFI adapter is preserved on corelib/db2-sqlite-held, not this source cutover.
 
@@ -121,7 +122,6 @@ struct DBPoolReceipt {
     replacements: Int
     replacement_failures: Int
 }
-impl DBPoolReceipt.Show { fn show(self) -> String { pool_receipt_text(self) } }
 impl DBPoolReceipt.Display { fn display(self) -> String { pool_receipt_text(self) } }
 impl DBPoolReceipt.Debug { fn debug(^self) -> String { pool_receipt_text(self) } }
 
@@ -156,7 +156,6 @@ impl DBError.Display { fn display(self) -> String { self.message.copy() } }
 impl DBError.Debug { fn debug(^self) -> String { self.message } }
 impl DBError -> Err { Err(self.message) }
 impl DBValue.Display { fn display(self) -> String { render_value(self) } }
-impl DBValue.Show { fn show(self) -> String { render_value(self) } }
 
 impl DBValue {
     fn is_null(self) -> Bool Never! {
