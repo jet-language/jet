@@ -1291,7 +1291,7 @@ const codecScalars = [
   ...[...fixedInts, "i64"].filter((ty) => ty !== "usize" && ty !== "isize").map((ty) => [ty.toUpperCase(), ty, "Word", "i64", (a) => `${a} as ${ty}`, (v) => `${v} as i64`]),
 ];
 for (const [name, rust, jet, cty, read, write] of codecScalars) {
-  const tree = { name: "DataTree", full: "crate::jet_std::DataTree" };
+  const tree = { name: "Dyn", full: "crate::jet_std::Dyn" };
   const error = { name: "FieldError", full: "crate::jet_std::FieldError" };
   handles.set(tree.name, tree.full);
   handles.set(error.name, error.full);
@@ -1300,12 +1300,12 @@ for (const [name, rust, jet, cty, read, write] of codecScalars) {
   adapters.push({
     symbol: encode, target: "jet_codec_encode", name: encode, label: "canonical scalar Encode", rows: [],
     params: [{ jet, ctys: [cty], expr: ([a]) => name === "String" ? `0, ${paramCarrier("&String", "").expr([a])}` : `0, &(${read(a)})` }],
-    result: { jet: 'Plain{carrier: LowerRouteCarrier.Handle{name: "DataTree"}}', ret: "*mut crate::jet_std::DataTree", outs: [], handles: [tree],
+    result: { jet: 'Plain{carrier: LowerRouteCarrier.Handle{name: "Dyn"}}', ret: "*mut crate::jet_std::Dyn", outs: [], handles: [tree],
       body: (call) => `Box::into_raw(Box::new(${call}))` },
   });
   adapters.push({
     symbol: decode, target: `jet_codec_decode::<${rust}>`, name: decode, label: "canonical scalar Decode", rows: [],
-    params: [{ jet: 'Handle{name: "DataTree"}', ctys: ["*mut crate::jet_std::DataTree"], expr: ([a]) => `0, unsafe { &*${a} }`, handle: tree }],
+    params: [{ jet: 'Handle{name: "Dyn"}', ctys: ["*mut crate::jet_std::Dyn"], expr: ([a]) => `0, unsafe { &*${a} }`, handle: tree }],
     result: { jet: `Result{ok: LowerRouteCarrier.${jet}, err: LowerRouteCarrier.List{elem: LowerRouteCarrier.Handle{name: "FieldError"}}}`, ret: "i64",
       outs: [{ name: "ok", cty }, { name: "err", cty: "*mut u64" }, { name: "err_len", cty: "i64" }], handles: [error],
       body: (call) => `match ${call} {\n            Ok(value) => { unsafe { ok.write(${write("value")}) }; 1 }\n            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }\n        }` },
@@ -1316,9 +1316,9 @@ for (const [name, rust, jet, cty, read, write] of codecScalars) {
 // FieldError envelope, then the native backend invokes the checked Decode impl.
 for (const format of ["json", "toml", "yaml"]) {
   const symbol = `jet_rt_codec_parse_${format}`;
-  const result = resultShape("Result<jet_std::DataTree,Vec<jet_std::FieldError>>", "", false);
+  const result = resultShape("Result<jet_std::Dyn,Vec<jet_std::FieldError>>", "", false);
   if (!result) throw new Error(`gen-c-abi-routes: missing ${format} typed tree carriers`);
-  adapters.push({ symbol, target: `jet_enc_${format}_decode::<crate::jet_std::DataTree>`, name: symbol,
+  adapters.push({ symbol, target: `jet_enc_${format}_decode::<crate::jet_std::Dyn>`, name: symbol,
     label: `canonical typed ${format.toUpperCase()} parse`, rows: [],
     params: [paramCarrier("&String", "")], result });
 }
@@ -1760,7 +1760,7 @@ for (const [name, full] of handleRows) {
 }
 // A member's carrier: { kind, ret, outCty, get(place), cty, make(param) }, or
 // null when no export carries it. `place` is a Rust place of the member.
-// Recursive DataTree collections cross as temporary owned Vec holders. These
+// Recursive Dyn collections cross as temporary owned Vec holders. These
 // exports only marshal storage; ordering/duplicate policy remains in Jet.
 const recordSequences = new Map();
 const recordMember = (ty, path, site) => {
@@ -1954,7 +1954,7 @@ for (const [name, full] of handleRows) {
   }
 }
 // Temporary representation seam (#19): removed when the checked Jet-owned CSV
-// intrinsic/native DataTree+FieldError path replaces this canonical row kernel.
+// intrinsic/native Dyn+FieldError path replaces this canonical row kernel.
 // No CSV, user-shape or row-error policy is reproduced here.
 rs.push(`
     extern "C" {
@@ -1976,7 +1976,7 @@ rs.push(`
         guard(|| {
             use crate::jet_c_abi_iter::{Meta, NativeValue, Header};
             let meta = Meta::copy(meta);
-            let invoke: unsafe extern "C" fn(*mut crate::jet_std::DataTree, *mut u8, *mut u64, *mut *mut u64, *mut i64) -> u64 = std::mem::transmute(invoke);
+            let invoke: unsafe extern "C" fn(*mut crate::jet_std::Dyn, *mut u8, *mut u64, *mut *mut u64, *mut i64) -> u64 = std::mem::transmute(invoke);
             let rows = crate::jet_ring_csv_parse(${paramCarrier("&String", "").expr(["text"])}, &",".to_string(), false, false)
                 .map_err(crate::jet_std::FieldError::one);
             let decoded = rows.and_then(|rows| crate::jet_std::jet_enc_csv_decode_rows(
@@ -1987,7 +1987,7 @@ rs.push(`
                     let mut errors = std::ptr::null_mut();
                     let mut count = 0i64;
                     let consumed = crate::jet_native_callback_body(|| invoke(&mut tree, value.slot_mut(), tag.as_mut_ptr(), &mut errors, &mut count));
-                    assert_eq!(consumed, 0, "typed CSV lends its DataTree input");
+                    assert_eq!(consumed, 0, "typed CSV lends its Dyn input");
                     if tag.assume_init() != 0 {
                         Ok(value.initialized())
                     } else {
@@ -2004,8 +2004,8 @@ rs.push(`
                     }
                 },
                 crate::jet_std::FieldError::under_errors,
-                crate::jet_std::DataTree::Text,
-                crate::jet_std::DataTree::Object,
+                crate::jet_std::Dyn::Text,
+                crate::jet_std::Dyn::Object,
             ));
             match decoded {
                 Ok(rows) => {

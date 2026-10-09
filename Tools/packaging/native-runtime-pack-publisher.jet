@@ -7,7 +7,7 @@ struct NativeRuntimePublicationBlob {
     path: String
 }
 
-fn native_runtime_publication_blobs(fields: [String: DataTree]) -> [NativeRuntimePublicationBlob] NativeRuntimePackError! {
+fn native_runtime_publication_blobs(fields: [String: Dyn]) -> [NativeRuntimePublicationBlob] NativeRuntimePackError! {
     result := [NativeRuntimePublicationBlob]{}
     seen := [String: Bool]{}
     loop value in native_pack_array_field(fields, "blobs") {
@@ -30,7 +30,7 @@ fn native_runtime_publication_input(blobs: [NativeRuntimePublicationBlob], objec
     Err(NativeRuntimePackError.Invalid("publication input {object.text()} has no actual bytes"))
 }
 
-fn native_runtime_publication_steps(store: ArtifactStore, fields: [String: DataTree]) -[FS, Env, Exec, Time, Rand]> [NativeRuntimeObservedStep] NativeRuntimePackError! {
+fn native_runtime_publication_steps(store: ArtifactStore, fields: [String: Dyn]) -[FS, Env, Exec, Time, Rand]> [NativeRuntimeObservedStep] NativeRuntimePackError! {
     census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
     steps := [NativeRuntimeObservedStep]{}
     loop value in native_pack_array_field(fields, "steps") {
@@ -73,8 +73,8 @@ fn native_runtime_publication_execute(mode: String, request_path: String, result
     }
     prepared :: native_runtime_pack_prepare(store, subject, evidence)
     if mode == "prepare" {
-        result :: native_pack_encode(DataTree.Object([String: DataTree]{
-            "schema": DataTree.Text("jet.native-runtime-prepared-subject/v1"), "subject": native_pack_handle_tree(prepared),
+        result :: native_pack_encode(Dyn.Object([String: Dyn]{
+            "schema": Dyn.Text("jet.native-runtime-prepared-subject/v1"), "subject": native_pack_handle_tree(prepared),
             "rail_contract": native_pack_handle_tree(evidence.rail_contract), "admission": native_pack_handle_tree(evidence.admission),
         }))
         files.write_bytes(result_path, result)
@@ -84,11 +84,11 @@ fn native_runtime_publication_execute(mode: String, request_path: String, result
     compiler :: native_pack_handle_field(fields, "compiler")
     published :: native_runtime_pack_publish(store, subject, evidence.approval(prepared, authorization), compiler)
     composition :: NativeCandidateComposition.from_bytes(native_pack_blob(store, published.object, &census))
-    result :: native_pack_encode(DataTree.Object([String: DataTree]{
-        "schema": DataTree.Text("jet.native-runtime-published-candidate/v1"),
+    result :: native_pack_encode(Dyn.Object([String: Dyn]{
+        "schema": Dyn.Text("jet.native-runtime-published-candidate/v1"),
         "compiler": native_pack_handle_tree(compiler), "composition": native_pack_handle_tree(published.object),
         "identity": native_pack_handle_tree(composition.expected_runtime_identity), "approval": native_pack_handle_tree(composition.expected_approval),
-        "subject": native_pack_handle_tree(prepared), "action_key": DataTree.Text(NativeCandidateComposition.action_key(compiler)),
+        "subject": native_pack_handle_tree(prepared), "action_key": Dyn.Text(NativeCandidateComposition.action_key(compiler)),
     }))
     files.write_bytes(result_path, result)
 }

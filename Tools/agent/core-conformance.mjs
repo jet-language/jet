@@ -210,21 +210,21 @@ fn run() {
 use core.encoding.json as api
 
 fn run() {
-    print(api.dumps(DataTree{}) ?? panic(err.reason))
+    print(api.dumps(Dyn{}) ?? panic(err.reason))
 }
 `],
   ["core.encoding.jsonl.dumps", `// core-conformance: core.encoding.jsonl.dumps
 use core.encoding.jsonl as api
 
 fn run() {
-    print(api.dumps([DataTree]{}) ?? panic(err.reason))
+    print(api.dumps([Dyn]{}) ?? panic(err.reason))
 }
 `],
   ["core.encoding.jsonl.append_line", `// core-conformance: core.encoding.jsonl.append_line
 use core.encoding.jsonl as api
 
 fn run() {
-    print(api.append_line("jet", DataTree{}) ?? panic(err.reason))
+    print(api.append_line("jet", Dyn{}) ?? panic(err.reason))
 }
 `],
   ["core.encoding.json.load", `// core-conformance: core.encoding.json.load
