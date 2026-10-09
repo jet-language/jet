@@ -45,10 +45,10 @@ fn nix_test_criterion8_record() -> DataTree {
 
 #Test("nix fallback projections select exactly one accepted field") {
     keys :: [String]{"drvPath", "outputs", "closedGraph", "inputDrvs", "sources", "hashes", "losses", "attestation"}
-    assert_eq(NixFallbackProjection.Graph.select(keys) ?? panic("graph"), "closedGraph")
-    assert_eq(NixFallbackProjection.SelectedOutputs.select(keys) ?? panic("outputs"), "outputs")
-    assert_eq(NixFallbackProjection.Dependencies.select(keys) ?? panic("dependencies"), "inputDrvs")
-    assert_eq(NixFallbackProjection.Proof.select(keys) ?? panic("proof"), "attestation")
+    assert_eq((NixFallbackProjection.Graph).select(keys) ?? panic("graph"), "closedGraph")
+    assert_eq((NixFallbackProjection.SelectedOutputs).select(keys) ?? panic("outputs"), "outputs")
+    assert_eq((NixFallbackProjection.Dependencies).select(keys) ?? panic("dependencies"), "inputDrvs")
+    assert_eq((NixFallbackProjection.Proof).select(keys) ?? panic("proof"), "attestation")
     assert_eq(nix_test_fallback_error(.SelectedOutputs, [String]{"selectedOutputs", "outputs"}), "fallback document has more than one selected outputs field")
     assert_eq(nix_test_fallback_error(.Graph, [String]{"outputs"}), "fallback document has no closed derivation graph field")
 }

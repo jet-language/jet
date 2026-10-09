@@ -59,7 +59,7 @@ const packageSource = [
   'edition: "2028"',
   "authority: {",
   "    holds: {",
-  "        allow: [Env, Exec, FS, IO, Mem.Alloc, Net, Panic, Time]",
+  "        allow: [Env, Exec, Exec.Args, FS, FS.Read, IO, Mem.Alloc, Mem.Rc, Net, Panic, Rand, Time, Time.Wait]",
   "    }",
   "}",
   "",
@@ -170,6 +170,10 @@ async function readManifest(name) {
     if (!publicationEntry && !allowedPrefixes.some((prefix) => sourcePath.startsWith(prefix))) {
       fail(`${where}: sources must live under ${allowedPrefixes.join(" or ")}`);
     }
+    const area = /^Jetpack\/([^/]+)\//.exec(sourcePath)?.[1];
+    if (area !== undefined && area !== section) fail(`${where}: ${sourcePath} belongs under the \`# == ${area} ==\` section`);
+    if (section === null) fail(`${where}: every source belongs to a \`# == Area ==\` section`);
+    if (selectedAreas !== null && !selectedAreas.has(section)) continue;
     // Dependency references have the same live/HEAD rule, never a per-file
     // fallback to a different implementation.
     const fromHead = depsFromHead && section !== process.env.JETPACK_BOOTSTRAP_OWN_AREA;
@@ -189,10 +193,6 @@ async function readManifest(name) {
     }
     const sourceText = bytes.toString("utf8");
     if (!Buffer.from(sourceText, "utf8").equals(bytes)) fail(`${sourcePath}: source is not valid UTF-8`);
-    const area = /^Jetpack\/([^/]+)\//.exec(sourcePath)?.[1];
-    if (area !== undefined && area !== section) fail(`${where}: ${sourcePath} belongs under the \`# == ${area} ==\` section`);
-    if (section === null) fail(`${where}: every source belongs to a \`# == Area ==\` section`);
-    if (selectedAreas !== null && !selectedAreas.has(section)) continue;
     entries.push({ sourcePath, bytes, text: rebaseEmbeds(sourceText, sourcePath, where), where, section });
   }
   return entries;
@@ -288,6 +288,11 @@ function renderTests(text, sourcePath) {
 // own tests in its own unit.
 const unitTests = mode === "publication" ? [] : ownArea === null ? tests : tests.filter((entry) => entry.section === ownArea);
 const units = [...sources, ...unitTests];
+if (mode === "hosted") {
+  const sourcePath = "Jetpack/main.jet";
+  const bytes = await readFile(resolve(sourceRootDir, sourcePath));
+  units.push({ sourcePath, bytes, text: bytes.toString("utf8") });
+}
 if (units.length === 0) fail("Jetpack/Bootstrap/sources.list contains no sources");
 const testPaths = new Set(unitTests.map((entry) => entry.sourcePath));
 
@@ -321,7 +326,7 @@ function blankPackageImports(text) {
   });
 }
 for (const entry of units) {
-  append(`// [jetpack-bootstrap source: ${entry.sourcePath}]\n`);
+  append(`// [jet-bootstrap source: ${entry.sourcePath}]\n`);
   const text = blankPackageImports(entry.text);
   const rendered = testPaths.has(entry.sourcePath) ? renderTests(text, entry.sourcePath) : text;
   const body = rendered ?? text;

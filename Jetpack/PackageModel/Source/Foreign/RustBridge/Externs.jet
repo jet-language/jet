@@ -579,7 +579,7 @@ fn pkg_ffi_foreign_language_for_entry(entry: ExternEntry) -> ForeignLanguage? Ne
     if entry.c_abi {
         // COM type-library binders use the reserved bridge prefix on every
         // generated symbol; the descriptor survives the shared C bridge.
-        if entry.rust_path.starts_with(ForeignLanguage.Com.bridge_prefix()) -> return Val(ForeignLanguage.Com)
+        if entry.rust_path.starts_with((ForeignLanguage.Com).bridge_prefix()) -> return Val(ForeignLanguage.Com)
         return Val(ForeignLanguage.C)
     }
     lang :: entry.inline_lang() ?? return Val(ForeignLanguage.Rust)

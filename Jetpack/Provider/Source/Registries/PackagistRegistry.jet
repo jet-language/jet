@@ -61,7 +61,7 @@ fn provider_packagist_parse_metadata(repository: String, name: String, raw: Stri
                         loop entry in require {
                             dependency_name :: entry.key
                             if dependency_name == "php" || dependency_name.starts_with("ext-") || dependency_name.starts_with("lib-") -> next
-                            if !ScriptRegistryKind.Packagist.valid_name(dependency_name) -> return Err(RegistryError.Reason("package `{name}` has unsafe dependency `{dependency_name}`"))
+                            if !(ScriptRegistryKind.Packagist).valid_name(dependency_name) -> return Err(RegistryError.Reason("package `{name}` has unsafe dependency `{dependency_name}`"))
                             requirement :: provider_script_json_str(entry.value)
                             &dependencies.push(RegistryDependency{name: dependency_name, requirement})
                         }

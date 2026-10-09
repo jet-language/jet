@@ -375,7 +375,7 @@ pub fn pkg_cffi_c_binding_identity_with_entry(project_root: String, lib: String,
     cache_bytes :: files.read_bytes(cache_path) ?? return Err(pkg_bridge_error("could not read {cache_path} for C binding identity: {err}"))
     descriptor :: pkg_binder_descriptor(ForeignLanguage.C) ?? return Err(pkg_bridge_error("C binder descriptor is not registered"))
     identity := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
-    &identity.field("language", ForeignLanguage.C.root().bytes())
+    &identity.field("language", (ForeignLanguage.C).root().bytes())
     &identity.field("binder_schema", C_BINDER_SCHEMA.bytes())
     &identity.field("library", lib.bytes())
     &identity.field("abi", "c_{lib}".bytes())
@@ -425,7 +425,7 @@ fn pkg_cffi_write_c_binding_provenance_with_boundary(project_root: String, lib: 
     }
     cache_sha :: pkg_bridge_sha_file(cache_path)
     fields := [(name: String, value: String)]{
-        (name: "language", value: ForeignLanguage.C.root()),
+        (name: "language", value: (ForeignLanguage.C).root()),
         (name: "abi", value: "c_{lib}"),
         (name: "transport", value: "direct-c-abi"),
         (name: "binder-schema", value: C_BINDER_SCHEMA),
