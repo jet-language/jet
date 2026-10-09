@@ -2817,6 +2817,29 @@ pub fn cached_crypto_helper_path() -> PathBuf {
     bridge_paths(&key, &target, &[]).crypto_helper
 }
 
+// Forward only the existing explicit Cargo worker bound. Restoring the ambient
+// environment would weaken the canonical build sandbox's declared input law.
+fn cargo_bridge_sandbox_env() -> BTreeMap<String, String> {
+    let mut env = BTreeMap::from([
+        (
+            "CARGO_HOME".to_string(),
+            "/work/output/cargo-home".to_string(),
+        ),
+        ("CARGO_TARGET_DIR".to_string(), "/work/output".to_string()),
+        ("HOME".to_string(), "/work/output/home".to_string()),
+        ("SOURCE_DATE_EPOCH".to_string(), "0".to_string()),
+    ]);
+    if let Some(path) = std::env::var_os("PATH") {
+        if !path.is_empty() {
+            env.insert("PATH".to_string(), path.to_string_lossy().into_owned());
+        }
+    }
+    if let Ok(jobs) = std::env::var("CARGO_BUILD_JOBS") {
+        env.insert("CARGO_BUILD_JOBS".to_string(), jobs);
+    }
+    env
+}
+
 fn build_bridge_full(
     entries: &[ExternEntry],
     needs_regex: bool,
@@ -3279,20 +3302,7 @@ fn build_bridge_full(
         "--manifest-path".to_string(),
         "/work/source/Cargo.toml".to_string(),
     ];
-    let mut sandbox_env = BTreeMap::from([
-        (
-            "CARGO_HOME".to_string(),
-            "/work/output/cargo-home".to_string(),
-        ),
-        ("CARGO_TARGET_DIR".to_string(), "/work/output".to_string()),
-        ("HOME".to_string(), "/work/output/home".to_string()),
-        ("SOURCE_DATE_EPOCH".to_string(), "0".to_string()),
-    ]);
-    if let Some(path) = std::env::var_os("PATH") {
-        if !path.is_empty() {
-            sandbox_env.insert("PATH".to_string(), path.to_string_lossy().into_owned());
-        }
-    }
+    let mut sandbox_env = cargo_bridge_sandbox_env();
 
     let cargo_home = std::env::var_os("CARGO_HOME")
         .map(PathBuf::from)
@@ -6697,6 +6707,224 @@ mod tests {
     use super::*;
     use crate::AST::{AccessConvention, Type};
     use std::collections::HashSet;
+
+    // This executes real generated cfg-tests, not a zero-match pkg-model filter.
+    // It is heavy and must be explicitly selected with --ignored --exact.
+    #[test]
+    #[ignore = "builds the canonical Wasmtime bridge; requires an admitted focused proof"]
+    fn canonical_plugin_io_host_tests_use_verified_bridge() {
+        const TESTS: [&str; 2] = [
+            "__jet_plugin::io_error_variant_tests::known_host_io_variants_preserve_original_context",
+            "__jet_plugin::io_error_variant_tests::known_platform_refusal_and_unsupported_codes_preserve_original_context",
+        ];
+        let sandbox_env = cargo_bridge_sandbox_env();
+        assert_eq!(
+            sandbox_env.get("CARGO_BUILD_JOBS").map(String::as_str),
+            Some("1"),
+        );
+        assert!(
+            sandbox_env.keys().all(|key| matches!(
+                key.as_str(),
+                "CARGO_HOME"
+                    | "CARGO_TARGET_DIR"
+                    | "HOME"
+                    | "SOURCE_DATE_EPOCH"
+                    | "PATH"
+                    | "CARGO_BUILD_JOBS"
+            )),
+            "the actual producer environment must not restore ambient variables",
+        );
+        let selected_target = host_target();
+        assert_ne!(selected_target, "unknown-rustc-target");
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/FFI.rs");
+        let source_digest =
+            crate::SHA256::sha256_file_hex(&source).expect("read matching FFI source");
+        let link = build_bridge(
+            &[], false, false, false, false, false, false, true, false,
+        )
+        .expect("materialize and verify the canonical plugin bridge in its mandatory sandbox");
+        let cache_root = bridge_crate_dir(&link);
+        let paths = bridge_paths(&link.cache_identity, &selected_target, &[]);
+        assert_eq!(cache_root, paths.cache_root);
+        assert_eq!(link.rlib_path, paths.rlib);
+        assert_eq!(link.provenance_path, paths.provenance);
+        let manifest_digest = crate::SHA256::sha256_file_hex(&cache_root.join("Cargo.toml"))
+            .expect("canonical generated manifest");
+        let generated_digest = crate::SHA256::sha256_file_hex(&cache_root.join("src/lib.rs"))
+            .expect("canonical generated bridge source");
+        let provenance_digest = crate::SHA256::sha256_file_hex(&link.provenance_path)
+            .expect("verified canonical bridge provenance");
+        let cargo_path = command_path("cargo").expect("actual canonical Cargo executable");
+        let cargo_home = std::env::var_os("CARGO_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| dirs_home().join(".cargo"));
+        let registry = cargo_home
+            .join("registry")
+            .canonicalize()
+            .expect("actual registry used by the canonical materializer");
+        assert!(registry.is_dir());
+        let mut mounts = vec![jet_sema::Comptime::Build::ReadOnlyMount::new(
+            registry,
+            "/work/output/cargo-home/registry",
+        )];
+        let sources =
+            jet_foundation_sources().expect("actual canonical Foundation source closure");
+        mounts.extend(
+            jet_foundation_mounts(&cache_root, &sources)
+                .expect("existing canonical Foundation/Unicode/include mounts"),
+        );
+        let mut cargo_args = vec![
+            "test".into(),
+            "--release".into(),
+            "--target".into(),
+            selected_target.clone(),
+            "--manifest-path".into(),
+            "/work/source/Cargo.toml".into(),
+            "--lib".into(),
+            "--no-run".into(),
+            "--message-format=json".into(),
+        ];
+        let built = jet_sema::Comptime::Build::run_native_sandboxed_with_mounts(
+            &cargo_path,
+            &cargo_args,
+            &cache_root,
+            Some(&paths.target_dir),
+            &sandbox_env,
+            true,
+            &mounts,
+        )
+        .expect("compile the real generated bridge cfg-tests in the mandatory sandbox");
+        let build_stdout =
+            String::from_utf8(built.output.stdout).expect("Cargo compiler-artifact JSON is UTF-8");
+        let build_stderr = String::from_utf8_lossy(&built.output.stderr);
+        println!("canonical bridge no-run stdout:\n{build_stdout}");
+        println!("canonical bridge no-run stderr:\n{build_stderr}");
+        assert!(
+            built.output.status.success(),
+            "canonical generated test build failed",
+        );
+        let mut executable = None;
+        for line in build_stdout.lines().filter(|line| !line.trim().is_empty()) {
+            let artifact = crate::JSON::parse_json_with_limit(line, 16 * 1024 * 1024)
+                .expect("actual Cargo JSON, not guessed binary paths");
+            if artifact
+                .get("reason")
+                .expect("Cargo reason")
+                .as_str()
+                .expect("Cargo reason text")
+                != "compiler-artifact"
+            {
+                continue;
+            }
+            if artifact
+                .get("target")
+                .expect("Cargo target")
+                .get("name")
+                .expect("Cargo target name")
+                .as_str()
+                .expect("target name text")
+                != link.crate_name
+            {
+                continue;
+            }
+            let Ok(binary) = artifact
+                .get("executable")
+                .expect("Cargo executable field")
+                .as_str()
+            else {
+                continue;
+            };
+            assert!(
+                executable.is_none(),
+                "exactly one actual generated library test executable",
+            );
+            let relative = Path::new(binary)
+                .strip_prefix("/work/output")
+                .expect("test executable belongs to this canonical sandbox output");
+            assert!(
+                relative
+                    .components()
+                    .all(|component| matches!(component, std::path::Component::Normal(_))),
+                "no escape from canonical output",
+            );
+            executable = Some(paths.target_dir.join(relative));
+        }
+        let executable = executable.expect("actual nonzero generated test binary artifact");
+        let binary_digest = crate::SHA256::sha256_file_hex(&executable)
+            .expect("actual generated library test binary");
+        println!(
+            "canonical bridge identity={} target={} source={} manifest={} generated={} provenance={} binary={}:{} sandbox={}:{}",
+            link.cache_identity, selected_target, source_digest, manifest_digest, generated_digest,
+            provenance_digest, executable.display(), binary_digest, built.mechanism, built.policy,
+        );
+        for name in TESTS {
+            cargo_args = vec![
+                "test".into(),
+                "--release".into(),
+                "--target".into(),
+                selected_target.clone(),
+                "--manifest-path".into(),
+                "/work/source/Cargo.toml".into(),
+                "--lib".into(),
+                name.into(),
+                "--".into(),
+                "--exact".into(),
+                "--test-threads=1".into(),
+            ];
+            let ran = jet_sema::Comptime::Build::run_native_sandboxed_with_mounts(
+                &cargo_path,
+                &cargo_args,
+                &cache_root,
+                Some(&paths.target_dir),
+                &sandbox_env,
+                true,
+                &mounts,
+            )
+            .expect("execute the actual generated host producer test in the same sandbox");
+            let stdout = String::from_utf8(ran.output.stdout).expect("real unit stdout UTF-8");
+            let stderr = String::from_utf8_lossy(&ran.output.stderr);
+            println!(
+                "canonical bridge test={name} sandbox={}:{} stdout:\n{stdout}",
+                ran.mechanism, ran.policy,
+            );
+            println!("canonical bridge test={name} stderr:\n{stderr}");
+            assert!(
+                ran.output.status.success(),
+                "real named generated test failed: {name}",
+            );
+            let expected_pass = format!("test {name} ... ok");
+            assert_eq!(
+                stdout.lines().filter(|line| *line == expected_pass).count(),
+                1,
+                "actual named PASS required; zero-test success is not proof",
+            );
+            assert!(
+                stdout.contains("test result: ok. 1 passed; 0 failed; 0 ignored;"),
+                "exact one real test, no ignored or filtered substitute",
+            );
+            assert_eq!(
+                crate::SHA256::sha256_file_hex(&executable).unwrap(),
+                binary_digest,
+                "the realized test binary must not change between rehearsal and the paired test",
+            );
+        }
+        assert_eq!(
+            crate::SHA256::sha256_file_hex(&source).unwrap(),
+            source_digest,
+        );
+        assert_eq!(
+            crate::SHA256::sha256_file_hex(&cache_root.join("Cargo.toml")).unwrap(),
+            manifest_digest,
+        );
+        assert_eq!(
+            crate::SHA256::sha256_file_hex(&cache_root.join("src/lib.rs")).unwrap(),
+            generated_digest,
+        );
+        assert_eq!(
+            crate::SHA256::sha256_file_hex(&link.provenance_path).unwrap(),
+            provenance_digest,
+        );
+    }
 
     #[test]
     fn data_provider_requires_direct_call_not_dependency_closure() {
