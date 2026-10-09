@@ -1870,6 +1870,44 @@ function validateDispatcherIdentity(module, member, expression, sourceLine) {
   return actual;
 }
 
+// The runtime unit an owned wrapper calls, when its body reaches a
+// `core.<area>.runtime.<unit>` import and no longer calls its own
+// `core.<module>.<member>` provider; otherwise null.
+function ownedWrapperRuntimeUnit(source, module, member) {
+  const lines = source.split(/\r?\n/);
+  const start = lines.findIndex(function (line) {
+    return new RegExp("^pub\\s+fn\\s+" + member + "\\b").test(line);
+  });
+  if (start < 0) return null;
+  let end = start + 1;
+  while (end < lines.length &&
+      !/^(?:pub\s+)?(?:fn|struct|enum|type|impl|mod|const|trait)\b|^#/.test(lines[end])) {
+    end += 1;
+  }
+  const body = lines.slice(start, end).join("\n");
+  if (body.includes(module + "." + member + "(")) return null;
+  const locals = new Map();
+  for (const match of source.matchAll(
+    /^use\s+(core\.[a-z0-9_]+\.runtime\.[a-z0-9_]+)(?:\.\[([^\]]*)\]|\.([A-Za-z_][A-Za-z0-9_]*))?(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?/gm,
+  )) {
+    const unit = match[1];
+    if (match[2] !== undefined) {
+      for (const item of match[2].split(",").map(function (value) { return value.trim(); }).filter(Boolean)) {
+        const parts = item.split(/\s+as\s+/);
+        locals.set((parts[1] || parts[0]).trim() + "(", unit);
+      }
+    } else if (match[3] !== undefined) {
+      locals.set((match[4] || match[3]) + "(", unit);
+    } else {
+      locals.set((match[4] || unit.split(".").pop()) + ".", unit);
+    }
+  }
+  for (const [local, unit] of locals) {
+    if (new RegExp("(?:^|[^A-Za-z0-9_.])" + local.replace(/[.(]/g, "\\$&")).test(body)) return unit;
+  }
+  return null;
+}
+
 function parseCoreSource(source, root = ROOT) {
   const modules = [];
   const sourceModules = [];
@@ -2678,7 +2716,7 @@ function generatedCoreRuntimeParts() {
   ];
   for (const part of coreRuntimeParts()) {
     lines.push("    CoreSourceModule { module: \"" + part.module + "\", alias: \"" + part.alias +
-      "\", path: \"" + part.path + "\", owned_members: &[] },");
+      "\", path: \"" + part.path + "\", owned_members: &[], impl_types: &[] },");
   }
   lines.push("];", CORE_RUNTIME_PARTS_END);
   return lines.join("\n");
@@ -2918,7 +2956,7 @@ function generatedCoreEnumRows(source, declarations) {
     "",
     "// Source-owned Core nominals (`source_module … types { … }`) in Core.jet",
     "// order; the Rust mirror is CoreModuleExports::CORE_SOURCE_OWNED_TYPES.",
-    "pub CORE_SOURCE_OWNED_TYPES :: [CoreSourceOwnedType]{",
+    "CORE_SOURCE_OWNED_TYPES :: [CoreSourceOwnedType]{",
   );
   for (const entry of declarations.sourceModules) {
     for (const type of entry.ownedTypes) {

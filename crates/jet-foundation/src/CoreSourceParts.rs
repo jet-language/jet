@@ -10,6 +10,9 @@
 //! `core.<area>.runtime.<unit>`; only Core sources (public modules and other
 //! runtime units) may import one, the loader joins a unit only when a loaded
 //! Core source names it, and every item of a loaded unit is kept.
+//!
+//! Every source row uses the complete CoreSourceModule schema, including an
+//! empty impl_types list when the part owns no implementation receivers.
 
 use crate::CoreModuleExports::CoreSourceModule;
 use crate::Diagnostics::{Diagnostic, Span};
@@ -155,114 +158,6 @@ pub const CORE_CRYPTO_CT_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourceP
         path: "Core/crypto/expert_ct.jet",
         owned_members: &[],
         impl_types: &[],
-    },
-};
-pub const CORE_CRYPTO_JETC_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
-    owner: CORE_CRYPTO_JETC_OWNER,
-    source: CoreSourceModule {
-        module: CORE_CRYPTO_JETC_MODULE,
-        alias: CORE_CRYPTO_JETC_ALIAS,
-        path: "Core/crypto/jetc.jet",
-        owned_members: &[],
-    },
-};
-
-pub const CORE_CRYPTO_CT_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
-    owner: "core.crypto",
-    source: CoreSourceModule {
-        module: "__core_crypto_ct",
-        alias: "__core_crypto_ct",
-        path: "Core/crypto/expert_ct.jet",
-        owned_members: &[],
-    },
-};
-pub const CORE_CRYPTO_CT_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
-    owner: "core.crypto",
-    source: CoreSourceModule {
-        module: "__core_crypto_ct",
-        alias: "__core_crypto_ct",
-        path: "Core/crypto/expert_ct.jet",
-        owned_members: &[],
-    },
-};
-
-pub const CORE_ENCODING_STREAM_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
-    owner: CORE_ENCODING_STREAM_OWNER,
-    source: CoreSourceModule {
-        module: CORE_ENCODING_STREAM_MODULE,
-        alias: CORE_ENCODING_STREAM_ALIAS,
-        path: "Core/encoding/stream.jet",
-        owned_members: &["json_reader", "json_writer", "int_is_binary64", "jcs_number", "utf16_units", "compare_units", "sort_by_units"],
-    },
-};
-
-pub const CORE_FILES_PATH_COMPONENTS_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
-    owner: "core.files",
-    source: CoreSourceModule {
-        module: "__core_files_path_components",
-        alias: "__core_files_path_components",
-        path: "Core/files/runtime/kernel_path_components.jet",
-        owned_members: &["from_text", "is_absolute", "components", "components_span", "next", "next_back", "parent_span", "strip_prefix_span", "owned_span", "push", "main_separator"],
-    },
-};
-
-pub const CORE_ENCODING_STREAM_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
-    owner: CORE_ENCODING_STREAM_OWNER,
-    source: CoreSourceModule {
-        module: CORE_ENCODING_STREAM_MODULE,
-        alias: CORE_ENCODING_STREAM_ALIAS,
-        path: "Core/encoding/stream.jet",
-        owned_members: &["json_reader", "json_writer", "jsonl_reader", "jsonl_writer", "object_entries", "object_from_entries", "bytes_payload", "typed_number", "typed_string", "text_from_bytes", "budget", "reserve", "validate_limits", "byte_at", "int_is_binary64", "jcs_number", "utf16_units", "compare_units", "sort_by_units"],
-    },
-};
-
-pub const CORE_ENCODING_CBOR_PARSE_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
-    owner: CORE_ENCODING_CBOR_PARSE_OWNER,
-    source: CoreSourceModule {
-        module: CORE_ENCODING_CBOR_PARSE_MODULE,
-        alias: CORE_ENCODING_CBOR_PARSE_ALIAS,
-        path: "Core/encoding/cbor_parse.jet",
-        owned_members: &["parse", "narrow_bits"],
-    },
-};
-
-pub const CORE_ENCODING_STREAM_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
-    owner: CORE_ENCODING_STREAM_OWNER,
-    source: CoreSourceModule {
-        module: CORE_ENCODING_STREAM_MODULE,
-        alias: CORE_ENCODING_STREAM_ALIAS,
-        path: "Core/encoding/stream.jet",
-        owned_members: &["json_reader", "json_writer", "jsonl_reader", "jsonl_writer", "object_entries", "object_from_entries", "bytes_payload", "typed_number", "typed_string", "text_from_bytes", "budget", "reserve", "validate_limits", "byte_at", "int_is_binary64", "jcs_number", "utf16_units", "compare_units", "sort_by_units"],
-    },
-};
-
-pub const CORE_ENCODING_STREAM_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
-    owner: CORE_ENCODING_STREAM_OWNER,
-    source: CoreSourceModule {
-        module: CORE_ENCODING_STREAM_MODULE,
-        alias: CORE_ENCODING_STREAM_ALIAS,
-        path: "Core/encoding/stream.jet",
-        owned_members: &["json_reader", "json_writer", "jsonl_reader", "jsonl_writer", "object_entries", "object_from_entries", "bytes_payload", "typed_number", "typed_string", "byte_at", "int_is_binary64", "jcs_number", "utf16_units", "compare_units", "sort_by_units"],
-    },
-};
-
-pub const CORE_ENCODING_STREAM_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
-    owner: CORE_ENCODING_STREAM_OWNER,
-    source: CoreSourceModule {
-        module: CORE_ENCODING_STREAM_MODULE,
-        alias: CORE_ENCODING_STREAM_ALIAS,
-        path: "Core/encoding/stream.jet",
-        owned_members: &["json_reader", "json_writer", "jsonl_reader", "jsonl_writer", "object_entries", "object_from_entries", "bytes_payload", "typed_number", "typed_string", "byte_at", "int_is_binary64", "jcs_number", "utf16_units", "compare_units", "sort_by_units"],
-    },
-};
-
-pub const CORE_ENCODING_STREAM_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
-    owner: CORE_ENCODING_STREAM_OWNER,
-    source: CoreSourceModule {
-        module: CORE_ENCODING_STREAM_MODULE,
-        alias: CORE_ENCODING_STREAM_ALIAS,
-        path: "Core/encoding/stream.jet",
-        owned_members: &["json_reader", "json_writer", "int_is_binary64", "jcs_number", "utf16_units", "compare_units", "sort_by_units"],
     },
 };
 
