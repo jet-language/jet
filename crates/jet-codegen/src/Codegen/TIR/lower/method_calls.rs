@@ -10270,8 +10270,23 @@ fn lower_method_call_impl(
                 }
                 _ => return invariant_method_expr(method_span, "unknown checked Dyn operation"),
             };
+            // Sema's `dyn_call` publishes each synthetic `__DynOp__`/`__DynField__`
+            // row's return on the node. The public `Dyn` accessors are checked
+            // against the fixed `dyn_method_return` row and, like every other
+            // fixed handle row, carry only the receiver route, so read that row.
+            let checked_ret = resolved_ret.cloned().or_else(|| {
+                (handle == "Dyn")
+                    .then(|| crate::Sema::dyn_method_return(method, args.len()))
+                    .flatten()
+            });
+            let Some(ty) = checked_ret else {
+                return invariant_method_expr(
+                    method_span,
+                    format!("checked Dyn operation `{method}` has no resolved return type"),
+                );
+            };
             return TExpr {
-                ty: resolved_ret.cloned().expect("checked Dyn operation return"),
+                ty,
                 kind: TExprKind::HandleMethod { recv: Box::new(recv), op, args: values },
             };
         }
