@@ -1945,7 +1945,7 @@ impl<'a> Checker<'a> {
         let owner = self.core_source_owner_module(module, name)?;
         let source = self.modules?.get(owner)?;
         (source.is_core_source && source.items.iter().any(|item|
-            matches!(item, Item::Enum(definition) if definition.name == name))).then_some(owner)
+            matches!(item, crate::AST::Item::Enum(definition) if definition.name == name))).then_some(owner)
     }
 
     /// Resolve import-scope candidates for one spelling through the declaration

@@ -875,7 +875,7 @@ pub(super) fn complete_bundle_check(
     jet_foundation::Diagnostics::order_diagnostics_root_first(&mut diags);
     for (state, module) in states_mut.iter_mut().zip(&bundle.modules) {
         state.items.clone_from(&module.items);
-        count_program_copy(module.items.len());
+        super::CheckInner::count_program_copy(module.items.len());
     }
     let checked_nominals = {
         let _modules = crate::Sema::CheckerCore::open_fragment_module_memos(states_mut);

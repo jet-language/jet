@@ -321,7 +321,12 @@ pub(super) fn check_bundle_opts_for_output_inner(
     if !alias_cycles.is_empty() {
         diags.extend(alias_cycles);
         bundle.name_ledger = name_ledger;
-        return (diags, super::super::Effects::SemIndexEffectFacts::default());
+        // An invalid alias graph cannot publish checked nominal facts.
+        return (
+            diags,
+            super::super::Effects::SemIndexEffectFacts::default(),
+            std::sync::Arc::from([]),
+        );
     }
     bundle.name_ledger = std::mem::take(&mut name_ledger);
     diags.extend(resolve_unit_dimensions(bundle));
@@ -2468,7 +2473,7 @@ fn comptime_module_order(
 }
 
 /// #4601: one copy of a whole module item list.
-fn count_program_copy(elements: usize) {
+pub(super) fn count_program_copy(elements: usize) {
     use jet_foundation::WorkCounters::{add, Work};
     add(Work::ProgramCopies, 1);
     add(Work::ProgramCopyElements, elements);
