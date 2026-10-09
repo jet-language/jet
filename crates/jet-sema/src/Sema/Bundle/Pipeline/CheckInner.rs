@@ -229,7 +229,6 @@ pub(super) fn check_bundle_opts_for_output_inner(
         .iter()
         .enumerate()
         .map(|(module_idx, m)| {
-            count_program_copy(m.items.len());
             let mut registry = builtin_type_registry();
             registry.core_source_module = m.is_core_source()
                 .then(|| jet_foundation::CoreModuleExports::core_source_module_by_alias(&m.alias))
@@ -260,7 +259,9 @@ pub(super) fn check_bundle_opts_for_output_inner(
                     jet_foundation::Names::package_scope_for(&m.path, &bundle.project_root)
                 },
                 module_alias: m.alias.clone(),
-                items: m.items.clone(),
+                // Comptime uses separate rows below. Keep checker snapshots
+                // unmaterialized until those rows have been released.
+                items: Vec::new(),
                 checked_nominals: None,
                 compiler_builtin_error_owner: Some(error_owner),
                 build_facts: bundle.build_facts.clone(),
@@ -494,18 +495,10 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 if super::super::Registration::const_evaluated_at_build(constant))
         })
     });
-    // The comptime rows receive their own item snapshot below; park the
-    // checker items while cloning so the bundle AST is not copied twice.
+    // Checker item snapshots are still empty here: only the comptime rows
+    // retain a deep AST copy while build-time constants are evaluated.
     let mut comptime_states = if needs_comptime_checking {
-        let parked_items: Vec<Vec<Item>> = states
-            .iter_mut()
-            .map(|state| std::mem::take(&mut state.items))
-            .collect();
-        let comptime_states = states.clone();
-        for (state, items) in states.iter_mut().zip(parked_items) {
-            state.items = items;
-        }
-        comptime_states
+        states.clone()
     } else {
         Vec::new()
     };
@@ -694,6 +687,14 @@ pub(super) fn check_bundle_opts_for_output_inner(
         }
     }
     drop(comptime_states);
+    // Registration may inspect a sibling's nominal declarations, so populate
+    // every checker row before processing any module. Do this only after the
+    // comptime snapshots are gone; overlapping the two copies exhausts memory
+    // on large compiler units.
+    for (state, module) in states.iter_mut().zip(&bundle.modules) {
+        state.items = module.items.clone();
+        count_program_copy(module.items.len());
+    }
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         let marker_vocabulary = &marker_vocabularies[idx];
         // Registration and expansion below push bundle-level reports without

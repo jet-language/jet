@@ -91,3 +91,15 @@ fn failed_comptime_qualified_import_stays_unused() {
         "failed qualified comptime resolution must not consume the import: {diagnostics:#?}"
     );
 }
+
+#[test]
+fn deferred_checker_snapshots_keep_comptime_calls_and_body_constants_visible() {
+    let diagnostics = check(
+        "VALUE :: prep { number() }\nfn number() -> Int { 7 }\nfn run() -> Int { VALUE }\n",
+    );
+    assert!(
+        diagnostics.iter().all(|diagnostic|
+            diagnostic.severity != jet_sema::Diagnostics::Severity::Error),
+        "comptime rows need callable bodies before deferred checker snapshots are published: {diagnostics:#?}"
+    );
+}

@@ -441,6 +441,10 @@ around the whole context collection, both before body checking and after its
 checked items are published. Opening the scope only for later body evaluation
 would already have copied every reachable AST once per context. The scope
 closes before module-state mutation, so sharing does not retain stale rows.
+Build-time constant evaluation and ordinary registration do not retain deep
+module-item snapshots concurrently. Checker rows initially contain metadata
+only; their item snapshots are materialized for every module after the
+comptime rows are released, before registration can inspect sibling nominals.
 
 This is a scoped Rust call boundary, not a C ABI or a promise about Rust
 `Vec`, enum or pointer layout. The worker transports a Rust panic payload
