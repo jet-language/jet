@@ -2604,57 +2604,6 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
-        // Source-owned Core members are ordinary checked Jet functions: the
-        // caller sees the wrapper's declared contract (`-> T Never!`,
-        // `-> T E!`), the same row every backend calls.
-        // A same-module native provider row remains a host call. Without a host
-        // row, a qualified source function is still an ordinary declaration,
-        // including calls from its own module.
-        if let Some(source) =
-            jet_foundation::CoreModuleExports::core_source_module(module)
-        {
-            if (jet_foundation::CoreModuleExports::core_source_owns_call(
-                module, name, args.len(),
-                args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
-            ) || (module == "core.encoding.json" && name == "__parse_typed"))
-                && (self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
-                    || crate::Syntax::core_call(module, name)
-                        .is_none_or(|row| row.source_member().is_some()))
-                // Explicit target rows keep the old specialized argument
-                // checker; TIR forwards only its normalized operands.
-                && !crate::Syntax::core_call(module, name)
-                    .is_some_and(|row| row.source_member().is_some() && row.source_target.is_some())
-                && !(module == "core.encoding.json" && name == "decode" && !type_args.is_empty())
-                // #4747: retain width-polymorphic checking; lowering selects
-                // the reserved Jet marshalling wrapper for F32 arguments.
-                && !(module == "core.math" && matches!(name, "cmp" | "is_finite"))
-                // Keep the existing checked fn() signature at the worker-only
-                // source-forward boundary; its source slot is an opaque fn pointer.
-                && !(module == "core.service" && name == "worker")
-            {
-                let source_idx = self.modules.and_then(|modules| {
-                    modules
-                        .iter()
-                        .position(|candidate| candidate.registry.core_source_module
-                            .is_some_and(|loaded| loaded.alias == source.alias && loaded.path == source.path))
-                });
-                if let (Some(alias), Some(source_idx)) = (alias, source_idx) {
-                    return self.infer_import_call(
-                        alias,
-                        source_idx,
-                        name,
-                        alias_span,
-                        span,
-                        type_args,
-                        args,
-                        resolved_ret_out,
-                    );
-                }
-            }
-        }
-        if module == "core.web" && name == "form" {
-            return self.infer_web_form_core_call(span, args);
-        }
         // D-FRONTENDAPI1=A: the compiler surface is a read-only
         // compile-time value API. It is intentionally handled before
         // the ordinary Core effect/fixed-signature tables so it cannot become
@@ -2708,6 +2657,57 @@ impl<'a> Checker<'a> {
                 self.expect_core_arg(name, 0, &input_type, arg);
             }
             return Some(core_compiler_return(name));
+        }
+        // Source-owned Core members are ordinary checked Jet functions: the
+        // caller sees the wrapper's declared contract (`-> T Never!`,
+        // `-> T E!`), the same row every backend calls.
+        // A same-module native provider row remains a host call. Without a host
+        // row, a qualified source function is still an ordinary declaration,
+        // including calls from its own module.
+        if let Some(source) =
+            jet_foundation::CoreModuleExports::core_source_module(module)
+        {
+            if (jet_foundation::CoreModuleExports::core_source_owns_call(
+                module, name, args.len(),
+                args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
+            ) || (module == "core.encoding.json" && name == "__parse_typed"))
+                && (self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
+                    || crate::Syntax::core_call(module, name)
+                        .is_none_or(|row| row.source_member().is_some()))
+                // Explicit target rows keep the old specialized argument
+                // checker; TIR forwards only its normalized operands.
+                && !crate::Syntax::core_call(module, name)
+                    .is_some_and(|row| row.source_member().is_some() && row.source_target.is_some())
+                && !(module == "core.encoding.json" && name == "decode" && !type_args.is_empty())
+                // #4747: retain width-polymorphic checking; lowering selects
+                // the reserved Jet marshalling wrapper for F32 arguments.
+                && !(module == "core.math" && matches!(name, "cmp" | "is_finite"))
+                // Keep the existing checked fn() signature at the worker-only
+                // source-forward boundary; its source slot is an opaque fn pointer.
+                && !(module == "core.service" && name == "worker")
+            {
+                let source_idx = self.modules.and_then(|modules| {
+                    modules
+                        .iter()
+                        .position(|candidate| candidate.registry.core_source_module
+                            .is_some_and(|loaded| loaded.alias == source.alias && loaded.path == source.path))
+                });
+                if let (Some(alias), Some(source_idx)) = (alias, source_idx) {
+                    return self.infer_import_call(
+                        alias,
+                        source_idx,
+                        name,
+                        alias_span,
+                        span,
+                        type_args,
+                        args,
+                        resolved_ret_out,
+                    );
+                }
+            }
+        }
+        if module == "core.web" && name == "form" {
+            return self.infer_web_form_core_call(span, args);
         }
         // D-BUILDQUERY1=A: checked build graph queries are read-only values
         // available only while the selected build/comptime program runs.

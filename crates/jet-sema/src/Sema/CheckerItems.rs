@@ -2931,7 +2931,8 @@ impl<'a> Checker<'a> {
     /// D-MOD2: a chain rooted at a file-module alias names the imported enum
     /// by its qualified spelling — `types.Kind.Beta` → `("types.Kind",
     /// "Beta")`. The path is empty for the bare `types.Kind` receiver.
-    pub(crate) fn fold_enum_variant_path(&self, e: &Expr) -> Option<(String, String)> {
+    /// A constructor receiver extends a type or declared group, never a leaf value.
+    pub(crate) fn fold_enum_variant_path(&self, e: &Expr, constructor_receiver: bool) -> Option<(String, String)> {
         fn walk<'e>(e: &'e Expr) -> Option<(&'e str, Vec<&'e str>)> {
             match e {
                 Expr::Ident(name, _) => Some((name, Vec::new())),
@@ -2947,15 +2948,28 @@ impl<'a> Checker<'a> {
         if segs.is_empty() || self.lookup(root).is_some() {
             return None;
         }
-        if self.imports.contains_key(root) && !self.is_known_enum(root) {
+        let (identity, path) = if self.imports.contains_key(root) && !self.is_known_enum(root) {
             let qualified = format!("{root}.{}", segs[0]);
             if !self.is_known_enum(&qualified) {
                 return None;
             }
             let identity = self.import_qualified_nominal(&qualified)?;
-            return Some((identity, segs[1..].join(".")));
-        }
-        if !self.is_known_enum(root) {
+            (identity, segs[1..].join("."))
+        } else {
+            if !self.is_known_enum(root) {
+                return None;
+            }
+            // D-MOD2: a member-imported enum keeps its canonical owner identity.
+            let identity = if self.member_imported_type(root) {
+                self.imported_nominal_head(root)
+            } else {
+                root.to_string()
+            };
+            (identity, segs.join("."))
+        };
+        if constructor_receiver && !path.is_empty()
+            && !self.with_enum_groups(&identity, |groups| groups.contains_key(&path)).unwrap_or(false)
+        {
             return None;
         }
         // D-MOD2: a member-imported enum (`use types.[Kind]`) keeps its
@@ -3014,19 +3028,27 @@ impl<'a> Checker<'a> {
         &self,
         enum_name: &str,
     ) -> Option<HashMap<String, (Span, Vec<String>)>> {
-        if let Some(g) = self.registry.enum_groups(enum_name) {
-            return Some(g.clone());
+        self.with_enum_groups(enum_name, |groups| groups.clone())
+    }
+    // Keep group facts on one declaration lookup; predicates only borrow the map.
+    fn with_enum_groups<T>(
+        &self,
+        enum_name: &str,
+        query: impl Fn(&HashMap<String, (Span, Vec<String>)>) -> T,
+    ) -> Option<T> {
+        if let Some(groups) = self.registry.enum_groups(enum_name) {
+            return Some(query(groups));
         }
-        if let Some(groups) = self.canonical_enum_registry(enum_name, |registry, leaf| {
-            registry.enum_groups(leaf).cloned()
+        if let Some(result) = self.canonical_enum_registry(enum_name, |registry, leaf| {
+            registry.enum_groups(leaf).map(&query)
         }) {
-            return Some(groups);
+            return Some(result);
         }
         if let Some(mods) = self.modules {
             for idx in self.import_scope_declared_modules(enum_name) {
                 if self.type_is_pub_in(idx, enum_name) {
-                    if let Some(g) = mods[idx].registry.enum_groups(enum_name) {
-                        return Some(g.clone());
+                    if let Some(groups) = mods[idx].registry.enum_groups(enum_name) {
+                        return Some(query(groups));
                     }
                 }
             }
