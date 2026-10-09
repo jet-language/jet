@@ -1,0 +1,418 @@
+// The checked Dyn remains a Jet enum. Runtime routes borrow an opaque
+// runtime tree only at their boundary; this descriptor describes storage,
+// never validation or codec policy (D-EXEC1/I9).
+use jet_foundation.[
+    MIRCallArg, MIRFunctionID, MIRInstruction, MIRLocalID, MIRNominalRef, MIRPreludeCall,
+    MIRProgram, MIRSerdeCodec, MIRType, MIRTypeKind, MIRValueID,
+    mir_type_display_name, mir_type_from_kind,
+]
+
+fn lower_dyn_type(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    definition :: lower_type_def(p, ty) ?? return false
+    if definition.kind == .Alias(base) -> return lower_dyn_type(p, base)
+    definition.key == "Dyn" && definition.name == "Dyn"
+}
+
+fn lower_dyn_program_type(p: MIRProgram) -> MIRType? Never! {
+    loop definition in p.types {
+        if definition.key == "Dyn" && definition.name == "Dyn" {
+            return Val(mir_type_from_kind(MIRTypeKind.Apply{name: MIRNominalRef{id: definition.id, name: definition.name}, args: [MIRType]{}}))
+        }
+    }
+    None
+}
+
+// Two header words [node bytes, row count], followed by rows indexed by the
+// runtime variant's semantic identity, not by the checked declaration order.
+// Each row is [tag, payload offset, boxed, payload bytes, element stride,
+// key offset, value offset, element bytes]. A list is [len, cap, data].
+fn lower_dyn_schema(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType) -> LIRValueID? {
+    key :: "$native.dyn:{lower_mono_fingerprint(ty)}"
+    id := LIRDataID{value: -1}
+    if m.static_rows.get(key) == .Val(row) {
+        id = LIRDataID{value: row}
+    } else {
+        definition :: lower_type_def(p, ty) ?? {
+            lower_fail(&m, &f, "Dyn marshaling has no checked definition")
+            return None
+        }
+        if !lower_dyn_type(p, ty) {
+            lower_fail(&m, &f, "Dyn marshaling of {mir_type_display_name(ty)} has the wrong owner")
+            return None
+        }
+        if definition.kind == .Enum(_, _) {} else {
+            lower_fail(&m, &f, "Dyn marshaling requires the checked enum")
+            return None
+        }
+        names :: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "Array", "Object"}
+        words := [Int]{lower_enum_box_size(p, definition), names.len()}
+        loop name in names {
+            found :: lower_variant(definition, name) ?? {
+                lower_fail(&m, &f, "Dyn marshaling has no {name} variant")
+                return None
+            }
+            offset := 0
+            boxed := 0
+            bytes := 0
+            stride := 0
+            key_offset := 0
+            value_offset := 0
+            element_bytes := 0
+            if name != "Null" {
+                info :: lower_enum_payload_info(p, definition, found.variant, 0) ?? {
+                    lower_fail(&m, &f, "Dyn.{name} marshaling has no payload layout")
+                    return None
+                }
+                offset = info.offset
+                boxed = if info.boxed -> 1 else -> 0
+                bytes = lower_size(p, info.ty).size
+                if name == "Bytes" || name == "Array" || name == "Object" {
+                    elem :: lower_list_element(info.ty) ?? {
+                        lower_fail(&m, &f, "Dyn.{name} marshaling requires a List payload")
+                        return None
+                    }
+                    stride = lower_list_stride(p, elem)
+                    element_bytes = lower_size(p, elem).size
+                    if name == "Object" {
+                        members :: lower_inline_members(p, elem)
+                        if members.len() != 2 || members[0].name != "key" || members[1].name != "value" {
+                            lower_fail(&m, &f, "Dyn.Object marshaling requires checked key/value entries")
+                            return None
+                        }
+                        key_offset = members[0].offset
+                        value_offset = members[1].offset
+                    }
+                }
+            }
+            loop word in [Int]{lower_discriminant(found.index), offset, boxed, bytes, stride, key_offset, value_offset, element_bytes} -> &words.push(word)
+        }
+        id = lower_static_object(&m, words.len() * 8)
+        loop (index, word) in words -> lower_static_store(&m, id, index * 8, lower_static_word(word))
+        &m.static_rows.add(key, id.value).drop("schema absent above")
+    }
+    address :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.DataAddress{dst: address, data: id})
+    Val(address)
+}
+
+fn lower_dyn_to_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, value: LIRValueID) -> LIRValueID? {
+    schema :: lower_dyn_schema(p, &m, &f, ty) ?? return None
+    result :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_dyn_from_native", [LIRValueID]{schema, value}, Val(result))
+    Val(result)
+}
+
+fn lower_dyn_from_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, value: LIRValueID, dst: LIRValueID) Never! {
+    schema :: lower_dyn_schema(p, &m, &f, ty) ?? return
+    lower_call_runtime(&m, &f, "jet_rt_dyn_to_native", [LIRValueID]{schema, value}, Val(dst))
+    lower_call_runtime(&m, &f, "jet_rt_handle_drop_Dyn", [LIRValueID]{value}, None)
+}
+
+// Projection to a Map uses the existing canonical map insertion mechanism:
+// declaration order is walked once and later duplicate keys replace earlier
+// values. The local is borrowed; the result owns cloned entries.
+fn lower_dyn_entries(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, local: MIRLocalID) Never! {
+    slot :: c.local_slots.get(local.value) ?? return lower_fail(&m, &f, "DataEntriesToMap local has no lowered root")
+    source :: lower_slot_root(p, c, &m, &f, slot) ?? return lower_fail(&m, &f, "DataEntriesToMap local has no value")
+    ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "DataEntriesToMap has no checked result type")
+    shape :: lower_map_shape(p, ty) ?? return lower_fail(&m, &f, "DataEntriesToMap result has no Map layout")
+    elem :: lower_list_element(c.slots[slot].ty) ?? return lower_fail(&m, &f, "DataEntriesToMap local is not an entry List")
+    if lower_mono_fingerprint(elem) != lower_mono_fingerprint(shape.entry) -> return lower_fail(&m, &f, "DataEntriesToMap entry type does not match its Map")
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_storage_into(p, &f, dst, ty)
+    lower_call_helper(&m, &f, "data.entries.map", ty, [LIRValueID]{source, dst}, None)
+}
+
+fn lower_helper_dyn_entries(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    shape :: lower_map_shape(p, glue.ty) ?? panic("DataEntriesToMap helper has no Map layout")
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
+    source :: ~f.open_params[0]
+    target :: ~f.open_params[1]
+    zero :: lower_const(&f, 0)
+    loop offset in [Int]{0, 8, 16} -> lower_emit(&f, LIRInst.Store{base: target, offset: offset, value: zero})
+    length :: lower_list_word(&f, source, 0)
+    data :: lower_list_data(&f, source)
+    at :: lower_word(&f)
+    head :: lower_new_block(&f)
+    body :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero})})
+    lower_start(&f, head, [LIRValueID]{at})
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    entry :: lower_list_address(&f, data, at, shape.stride)
+    key :: lower_read_at(p, &f, entry, shape.key_offset, shape.key) ?? return lir_builder_finish(f.builder)
+    value :: lower_read_at(p, &f, entry, shape.value_offset, shape.value) ?? return lir_builder_finish(f.builder)
+    owned_key :: lower_new_value(&f, lower_map_key_layout(p, shape), LIRDrop.Trivial, shape.key.identity)
+    owned_value :: lower_new_value(&f, lower_map_value_layout(p, shape), LIRDrop.Trivial, shape.value.identity)
+    lower_clone_into(p, &m, &f, key, owned_key, shape.key)
+    lower_clone_into(p, &m, &f, value, owned_value, shape.value)
+    lower_call_helper(&m, &f, "map.set", glue.ty, [LIRValueID]{target, owned_key, owned_value}, None)
+    next_at :: lower_word(&f)
+    one :: lower_const(&f, 1)
+    lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+struct LowerCodecMethod { pub function: MIRFunctionID, pub owner: MIRType }
+
+// Resolve the sema-selected Encode/Decode implementation, including its
+// generic owner's concrete arguments. The source method body remains the
+// sole user/derived codec, just as in the Rust backend.
+fn lower_codec_method(p: MIRProgram, ty: MIRType, encode: Bool) -> LowerCodecMethod? Never! {
+    loop implementation in p.impls {
+        if implementation.serde != Val(if encode -> MIRSerdeCodec.Encode else -> MIRSerdeCodec.Decode) -> next
+        matches := lower_mono_fingerprint(implementation.self_type) == lower_mono_fingerprint(ty)
+        if implementation.self_type.kind == .Apply(owner, _) && ty.kind == .Apply(actual, _) -> matches = owner.id == actual.id
+        if !matches -> next
+        loop id in implementation.methods {
+            loop function in p.functions {
+                if function.id == id && function.name == (if encode -> "encode" else -> "decode") -> return Val(LowerCodecMethod{function: id, owner: ty})
+            }
+        }
+    }
+    None
+}
+
+// Mono asks only for the requested codec, not every codec of every reached
+// type. Container helpers recursively reach their element's implementation.
+fn lower_reach_codec(p: MIRProgram, q: &LowerPrepared, ty: MIRType, encode: Bool, parent: Int, site: String) Never! {
+    lower_mono_intern_type(&q, ty, parent)
+    if lower_codec_method(p, ty, encode) == .Val(method) {
+        lower_mono_request(p, &q, method.function, Val(method.owner), [MIRType]{}, parent, site).drop("codec implementation")
+        return
+    }
+    if ty.kind == {
+        .List(elem) | .Option(elem) | .FixedList(elem, _) -> lower_reach_codec(p, &q, elem, encode, parent, site)
+        .Map(_, value) -> lower_reach_codec(p, &q, value, encode, parent, site)
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> lower_reach_codec(p, &q, inner, encode, parent, site)
+        else -> {}
+    }
+}
+
+fn lower_codec_errors_type(p: MIRProgram) -> MIRType? Never! {
+    loop definition in p.types {
+        if definition.key == "FieldError" && definition.name == "FieldError" {
+            elem :: mir_type_from_kind(MIRTypeKind.Apply{name: MIRNominalRef{id: definition.id, name: definition.name}, args: [MIRType]{}})
+            return Val(mir_type_from_kind(MIRTypeKind.List{inner: elem}))
+        }
+    }
+    None
+}
+
+fn lower_codec_result_type(p: MIRProgram, target: MIRType) -> MIRType? Never! {
+    errors :: lower_codec_errors_type(p) ?? return None
+    Val(mir_type_from_kind(MIRTypeKind.Result{ok: target, err: errors}))
+}
+
+// Native FieldError storage is described too: the runtime owns path/reason
+// text and exports the same accumulated errors, without a backend envelope.
+fn lower_codec_error_schema(p: MIRProgram, m: &LowerModule, f: &LowerFunction) -> LIRValueID? {
+    errors :: lower_codec_errors_type(p) ?? {
+        lower_fail(&m, &f, "codec has no checked FieldError type")
+        return None
+    }
+    elem :: lower_list_element(errors) ?? return None
+    key :: "$native.codec.errors"
+    id := LIRDataID{value: -1}
+    if m.static_rows.get(key) == .Val(row) -> id = LIRDataID{value: row}
+    else {
+        members :: lower_inline_members(p, elem)
+        path := -1
+        reason := -1
+        loop member in members {
+            if member.name == "path" -> path = member.offset
+            if member.name == "reason" -> reason = member.offset
+        }
+        if path < 0 || reason < 0 {
+            lower_fail(&m, &f, "codec FieldError has no checked path/reason layout")
+            return None
+        }
+        words :: [Int]{lower_size(p, elem).size, path, reason, lower_list_stride(p, elem)}
+        id = lower_static_object(&m, words.len() * 8)
+        loop (index, word) in words -> lower_static_store(&m, id, index * 8, lower_static_word(word))
+        &m.static_rows.add(key, id.value).drop("schema absent above")
+    }
+    address :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.DataAddress{dst: address, data: id})
+    Val(address)
+}
+
+fn lower_codec_scalar_kind(p: MIRProgram, ty: MIRType) -> Int Never! {
+    if ty.kind == {
+        .Int -> return 0
+        .Bool -> return 1
+        .Float -> return 2
+        .String -> return 3
+        .Char -> return 4
+        .IntN(signed, bits) -> {
+            if bits == 8 -> return if signed -> 5 else -> 6
+            if bits == 16 -> return if signed -> 7 else -> 8
+            if bits == 32 -> return if signed -> 9 else -> 10
+            if bits == 64 -> return if signed -> 11 else -> 12
+        }
+        .Float32 -> return 13
+        .Tagged(_, inner) | .Quantity(inner, _) -> return lower_codec_scalar_kind(p, inner)
+        else -> {}
+    }
+    if lower_type_def(p, ty) == .Val(definition) {
+        if definition.kind == .Alias(base) -> return lower_codec_scalar_kind(p, base)
+    }
+    -1
+}
+
+fn lower_codec_call_method(p: MIRProgram, m: &LowerModule, f: &LowerFunction, method: LowerCodecMethod, source: LIRValueID, dst: LIRValueID) Never! {
+    target :: lower_instance_id(method.function, lower_call_bindings(Val(method.owner), [MIRType]{}))
+    index :: lower_function_index(m, target)
+    if index < 0 -> return lower_fail(&m, &f, "codec implementation {target.value} was not reached")
+    signature :: ~m.mir_signatures[index]
+    lower_emit(&f, LIRInst.Call{dst: Val(dst), signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: [LIRValueID]{source}})
+}
+
+// Static codec calls keep their sema-checked source and target types; their
+// kind operand is not a second policy dispatch (EncodingTraits ignores it).
+fn lower_codec_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, args: [MIRValueID], type_args: [MIRType]) -> Bool Never! {
+    if row.module_name != "core.encoding.codec" || (row.member != "encode" && row.member != "decode") -> return false
+    if args.len() != 2 || type_args.len() != 1 {
+        lower_fail(&m, &f, "codec call has no checked value/target type")
+        return true
+    }
+    source :: lower_use(&m, &f, args[1]) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_call_helper(&m, &f, if row.member == "encode" -> "codec.encode" else -> "codec.decode", type_args[0], [LIRValueID]{source}, Val(dst))
+    true
+}
+
+fn lower_codec_json_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, args: [MIRValueID], type_args: [MIRType]) -> Bool Never! {
+    if row.module_name != "core.encoding.json" || row.member != "decode" || type_args.len() == 0 -> return false
+    if args.len() != 1 || type_args.len() != 1 {
+        lower_fail(&m, &f, "typed JSON decode has no checked source/target type")
+        return true
+    }
+    text :: lower_use(&m, &f, args[0]) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_call_helper(&m, &f, "codec.json.decode", type_args[0], [LIRValueID]{text}, Val(dst))
+    true
+}
+
+fn lower_helper_codec_encode(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    layout :: lower_repr_layout(lower_repr(p, glue.ty)) ?? lir_layout_pointer()
+    f := lower_helper_start(&m, glue, [LIRLayout]{layout}, Val(lir_layout_pointer()))
+    source :: ~f.open_params[0]
+    dst :: lower_pointer(&f)
+    if lower_codec_method(p, glue.ty, true) == .Val(method) {
+        lower_codec_call_method(p, &m, &f, method, source, dst)
+    } else if lower_dyn_type(p, glue.ty) {
+        lower_clone_into(p, &m, &f, source, dst, glue.ty)
+    } else {
+        runtime := LIRValueID{value: -1}
+        kind :: lower_codec_scalar_kind(p, glue.ty)
+        if kind >= 0 {
+            runtime = lower_pointer(&f)
+            if kind == 2 || kind == 13 -> lower_call_runtime(&m, &f, "jet_rt_codec_encode_float", [LIRValueID]{source}, Val(runtime))
+            else {
+                tag :: lower_const(&f, kind)
+                lower_call_runtime(&m, &f, "jet_rt_codec_encode_scalar", [LIRValueID]{tag, source}, Val(runtime))
+            }
+        } else {
+            runtime = lower_codec_encode_container(p, &m, &f, glue.ty, source) ?? return lir_builder_finish(f.builder)
+        }
+        tree_ty :: lower_dyn_program_type(p) ?? {
+            lower_fail(&m, &f, "codec encode has no checked Dyn type")
+            return lir_builder_finish(f.builder)
+        }
+        lower_dyn_from_runtime(p, &m, &f, tree_ty, runtime, dst)
+    }
+    lower_seal(&f, LIRTerminator.Return{value: Val(dst)})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_helper_codec_decode(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    source :: ~f.open_params[0]
+    dst :: lower_pointer(&f)
+    if lower_codec_method(p, glue.ty, false) == .Val(method) {
+        lower_codec_call_method(p, &m, &f, method, source, dst)
+    } else {
+        result_ty :: lower_codec_result_type(p, glue.ty) ?? {
+            lower_fail(&m, &f, "codec decode has no checked FieldError type")
+            return lir_builder_finish(f.builder)
+        }
+        lower_alloc(&m, &f, dst, lower_box_size(p, result_ty))
+        if lower_dyn_type(p, glue.ty) {
+            lower_store_word(&f, dst, 0, 1)
+            owned :: lower_pointer(&f)
+            lower_clone_into(p, &m, &f, source, owned, glue.ty)
+            lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: owned})
+        } else {
+            tree_ty :: lower_dyn_program_type(p) ?? {
+                lower_fail(&m, &f, "codec decode has no checked Dyn type")
+                return lir_builder_finish(f.builder)
+            }
+            runtime :: lower_dyn_to_runtime(p, &m, &f, tree_ty, source) ?? return lir_builder_finish(f.builder)
+            payload :: lower_address(&f, dst, 8)
+            tag :: lower_word(&f)
+            kind :: lower_codec_scalar_kind(p, glue.ty)
+            if kind >= 0 {
+                scalar :: lower_const(&f, kind)
+                errors :: lower_codec_error_schema(p, &m, &f) ?? return lir_builder_finish(f.builder)
+                lower_call_runtime(&m, &f, "jet_rt_codec_decode_scalar", [LIRValueID]{scalar, runtime, payload, payload, errors}, Val(tag))
+            } else {
+                meta :: lower_codec_container_meta(p, &m, &f, glue.ty) ?? return lir_builder_finish(f.builder)
+                lower_call_runtime(&m, &f, "jet_rt_codec_decode_container", [LIRValueID]{runtime, payload, payload, meta}, Val(tag))
+            }
+            lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: tag})
+            lower_call_runtime(&m, &f, "jet_rt_handle_drop_Dyn", [LIRValueID]{runtime}, None)
+        }
+    }
+    lower_seal(&f, LIRTerminator.Return{value: Val(dst)})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_helper_codec_json_decode(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    text :: ~f.open_params[0]
+    result_ty :: lower_codec_result_type(p, glue.ty) ?? {
+        lower_fail(&m, &f, "JSON decode has no checked FieldError type")
+        return lir_builder_finish(f.builder)
+    }
+    errors_ty :: lower_codec_errors_type(p) ?? return lir_builder_finish(f.builder)
+    schema :: lower_codec_error_schema(p, &m, &f) ?? return lir_builder_finish(f.builder)
+    slot :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8, align: 8})
+    errors :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: errors, size: 24, align: 8})
+    tag :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_json_parse_typed", [LIRValueID]{text, slot, errors, schema}, Val(tag))
+    zero :: lower_const(&f, 0)
+    ok :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: ok, condition: LIRCondition.Ne, left: tag, right: zero})
+    parsed :: lower_new_block(&f)
+    failed :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: ok, then_target: lower_target(parsed, [LIRValueID]{}), else_target: lower_target(failed, [LIRValueID]{})})
+    lower_start(&f, failed, [LIRValueID]{})
+    failure :: lower_pointer(&f)
+    lower_alloc(&m, &f, failure, lower_box_size(p, result_ty))
+    lower_emit(&f, LIRInst.Store{base: failure, offset: 0, value: zero})
+    lower_write_at(p, &f, failure, 8, errors, errors_ty)
+    lower_seal(&f, LIRTerminator.Return{value: Val(failure)})
+    lower_start(&f, parsed, [LIRValueID]{})
+    runtime :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: runtime, base: slot, offset: 0})
+    tree_ty :: lower_dyn_program_type(p) ?? {
+        lower_fail(&m, &f, "JSON decode has no checked Dyn type")
+        return lir_builder_finish(f.builder)
+    }
+    native :: lower_pointer(&f)
+    lower_dyn_from_runtime(p, &m, &f, tree_ty, runtime, native)
+    result :: lower_pointer(&f)
+    lower_call_helper(&m, &f, "codec.decode", glue.ty, [LIRValueID]{native}, Val(result))
+    lower_map_drop_value(p, &m, &f, native, tree_ty)
+    lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+    lir_builder_finish(f.builder)
+}
