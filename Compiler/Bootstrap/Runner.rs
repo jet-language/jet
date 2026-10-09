@@ -276,7 +276,9 @@ impl BootstrapRunCompletionOwner {
             });
         };
         let (retirement_requested, retained_roots) = self.resource_liveness()?;
-        if retained_roots != 0 || !retirement_requested {
+        // A consumed factory result can authorize the first retirement request.
+        // Permission is not a prior request, and neither replaces root liveness.
+        if retained_roots != 0 || (!retirement_requested && !self.allow_resource_retirement) {
             return Ok(BootstrapRunCompletionFinish::Pending {
                 retirement_requested,
                 retained_roots,
