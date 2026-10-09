@@ -195,3 +195,236 @@ fn host_error_with_context(context: I64, kind: I64) -> I64 {
     }
     value
 }
+
+// CAbiHost.rs:220 interprets the entire presence word, not a C Bool byte.
+fn host_context_equal(left: I64, right: I64) -> Bool {
+    if (rt_text_word(left) != rt_text_word(right)) -> return false
+    left_present :: rt_text_word(left + I64{16}) != I64{0}
+    right_present :: rt_text_word(right + I64{16}) != I64{0}
+    if (left_present != right_present) -> return false
+    if (left_present && rt_text_word(left + I64{24}) != rt_text_word(right + I64{24})) -> return false
+    return host_optional_text_equal(rt_text_word(left + I64{8}), rt_text_word(right + I64{8})) &&
+        host_optional_text_equal(rt_text_word(left + I64{32}), rt_text_word(right + I64{32}))
+}
+
+fn host_optional_text_equal(left: I64, right: I64) -> Bool {
+    if (left == I64{0} || right == I64{0}) -> return left == right
+    return jet_rt_string_compare(left, right) == I64{0}
+}
+
+#Export(c) fn jet_rt_handle_eq_IOContext(left: I64, right: I64) -> Bool { host_context_equal(left, right) }
+
+#Export(c) fn jet_rt_handle_eq_IOError(left: I64, right: I64) -> Bool {
+    kind :: rt_text_word(left)
+    if (kind != rt_text_word(right)) -> return false
+    if (kind == HOST_IO_KIND_RESOURCE_LIMIT) -> return rt_text_word(left + I64{48}) == rt_text_word(right + I64{48})
+    host_context_equal(left + I64{8}, right + I64{8})
+}
+
+#Export(c) fn jet_rt_handle_clone_IOOperation(value: I64) -> I64 { encoding_enum_clone(value) }
+
+#Export(c) fn jet_rt_handle_drop_IOOperation(value: I64) { encoding_enum_drop(value) }
+
+#Export(c) fn jet_rt_handle_eq_IOOperation(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+
+// Streaming labels follow StructuralDebug.rs:182-228 and the seed's custom
+// JetDebug implementations at preregeneration-runtime.rs:72109-72218.
+fn host_io_operation_label(target: I64, ordinal: I64, debug: Bool) {
+    word :: if {
+        (ordinal == I64{0}) -> I64{1684104530}
+        (ordinal == I64{1}) -> I64{435744764503}
+        (ordinal == I64{2}) -> I64{448613674054}
+        (ordinal == I64{3}) -> I64{32760384594014019}
+        (ordinal == I64{4}) -> I64{128026086171457}
+        (ordinal == I64{5}) -> I64{435728378947}
+        (ordinal == I64{6}) -> I64{28559180746155346}
+        else -> I64{426902843203}
+    }
+    length :: if {
+        (ordinal == I64{0}) -> I64{4}
+        (ordinal == I64{3} || ordinal == I64{6}) -> I64{7}
+        (ordinal == I64{4}) -> I64{6}
+        else -> I64{5}
+    }
+    rt_text_push_word(target, if debug -> word else -> word + I64{32}, length)
+}
+
+fn host_io_kind_debug(target: I64, kind: I64) {
+    if {
+        (kind == I64{0}) -> {
+            rt_text_push_word(target, I64{5288467776652340809}, I64{8})
+            rt_text_push_word(target, I64{1953853550}, I64{4})
+        }
+        (kind == I64{1}) -> rt_text_push_word(target, I64{7236850772014821198}, I64{8})
+        (kind == I64{2}) -> {
+            rt_text_push_word(target, I64{7598543892949132624}, I64{8})
+            rt_text_push_word(target, I64{7234304299306872431}, I64{8})
+        }
+        (kind == I64{3}) -> rt_text_push_word(target, I64{8391700773291780436}, I64{8})
+        (kind == I64{4}) -> {
+            rt_text_push_word(target, I64{7308335478031147331}, I64{8})
+            rt_text_push_word(target, I64{100}, I64{1})
+        }
+        (kind == I64{5}) -> rt_text_push_word(target, I64{110386891156547}, I64{6})
+        (kind == I64{6}) -> rt_text_push_word(target, I64{7813573208857080400}, I64{8})
+        (kind == I64{8}) -> {
+            rt_text_push_word(target, I64{7305808869231650130}, I64{8})
+            rt_text_push_word(target, I64{499984984396}, I64{5})
+        }
+        (kind == I64{9}) -> {
+            rt_text_push_word(target, I64{5006142830275619905}, I64{8})
+            rt_text_push_word(target, I64{495874959736}, I64{5})
+        }
+        (kind == I64{10}) -> {
+            rt_text_push_word(target, I64{8245933071047814741}, I64{8})
+            rt_text_push_word(target, I64{6579572}, I64{3})
+        }
+        else -> rt_text_push_word(target, I64{491327616079}, I64{5})
+    }
+}
+
+fn host_io_kind_show(target: I64, kind: I64) {
+    if {
+        (kind == I64{0}) -> {
+            rt_text_push_word(target, I64{2334106421097295465}, I64{8})
+            rt_text_push_word(target, I64{500186508905}, I64{5})
+        }
+        (kind == I64{1}) -> {
+            rt_text_push_word(target, I64{7959390400869068654}, I64{8})
+            rt_text_push_word(target, I64{100}, I64{1})
+        }
+        (kind == I64{2}) -> {
+            rt_text_push_word(target, I64{7598543892949132656}, I64{8})
+            rt_text_push_word(target, I64{7307493252135939695}, I64{8})
+            rt_text_push_word(target, I64{100}, I64{1})
+        }
+        (kind == I64{3}) -> {
+            rt_text_push_word(target, I64{8462017840422938996}, I64{8})
+            rt_text_push_word(target, I64{116}, I64{1})
+        }
+        (kind == I64{4}) -> {
+            rt_text_push_word(target, I64{7308335478031147363}, I64{8})
+            rt_text_push_word(target, I64{100}, I64{1})
+        }
+        (kind == I64{5}) -> rt_text_push_word(target, I64{110386891156579}, I64{6})
+        (kind == I64{6}) -> {
+            rt_text_push_word(target, I64{7813573208857080432}, I64{8})
+            rt_text_push_word(target, I64{125822987035936}, I64{6})
+        }
+        else -> {
+            rt_text_push_word(target, I64{8030606864214339401}, I64{8})
+            rt_text_push_word(target, I64{114}, I64{1})
+        }
+    }
+}
+
+fn host_io_limit_label(target: I64, limit: I64, debug: Bool) {
+    if debug {
+        if {
+            (limit == I64{0}) -> rt_text_push_word(target, I64{7308613581609394519}, I64{8})
+            (limit == I64{1}) -> rt_text_push_word(target, I64{28549271803752515}, I64{7})
+            (limit == I64{2}) -> rt_text_push_word(target, I64{133532402672973}, I64{6})
+            (limit == I64{3}) -> {
+                rt_text_push_word(target, I64{7308332046536241231}, I64{8})
+                rt_text_push_word(target, I64{115}, I64{1})
+            }
+            else -> rt_text_push_word(target, I64{128047746676047}, I64{6})
+        }
+    } else {
+        if {
+            (limit == I64{0}) -> {
+                rt_text_push_word(target, I64{7883960305295581559}, I64{8})
+                rt_text_push_word(target, I64{101}, I64{1})
+            }
+            (limit == I64{1}) -> rt_text_push_word(target, I64{7308613717771767875}, I64{8})
+            (limit == I64{2}) -> rt_text_push_word(target, I64{133532402673005}, I64{6})
+            (limit == I64{3}) -> {
+                rt_text_push_word(target, I64{7811887318127964271}, I64{8})
+                rt_text_push_word(target, I64{7308326720558866533}, I64{8})
+                rt_text_push_word(target, I64{115}, I64{1})
+            }
+            else -> rt_text_push_word(target, I64{128047746676079}, I64{6})
+        }
+    }
+}
+
+fn host_io_optional_debug(target: I64, text: I64) {
+    if (text == I64{0}) {
+        rt_text_push_word(target, I64{1701736270}, I64{4})
+    } else {
+        rt_text_push_word(target, I64{678191446}, I64{4})
+        rt_text_push_rust_debug_str(target, text)
+        rt_text_push_word(target, I64{41}, I64{1})
+    }
+}
+
+fn host_context_debug_into(target: I64, value: I64) {
+    rt_text_push_word(target, I64{8675468274861035337}, I64{8})
+    rt_text_push_word(target, I64{8243118315560181876}, I64{8})
+    rt_text_push_word(target, I64{9071445244736609}, I64{7})
+    host_io_operation_label(target, rt_text_word(value), true)
+    rt_text_push_word(target, I64{8247620834012831788}, I64{8})
+    rt_text_push_word(target, I64{540697955}, I64{4})
+    host_io_optional_debug(target, rt_text_word(value + I64{8}))
+    rt_text_push_word(target, I64{7237112387817381932}, I64{8})
+    rt_text_push_word(target, I64{2112101}, I64{3})
+    if (rt_text_word(value + I64{16}) == I64{0}) {
+        rt_text_push_word(target, I64{1701736270}, I64{4})
+    } else {
+        rt_text_push_word(target, I64{678191446}, I64{4})
+        rt_text_push_number(target, rt_text_word(value + I64{24}))
+        rt_text_push_word(target, I64{41}, I64{1})
+    }
+    rt_text_push_word(target, I64{4207896374829850668}, I64{8})
+    rt_text_push_word(target, I64{32}, I64{1})
+    host_io_optional_debug(target, rt_text_word(value + I64{32}))
+    rt_text_push_word(target, I64{32032}, I64{2}) // " }"
+}
+
+#Export(c) fn jet_rt_handle_debug_IOContext(value: I64) -> I64 {
+    result :: jet_rt_string_builder_new()
+    host_context_debug_into(result, value)
+    jet_rt_string_builder_finish(result)
+}
+
+#Export(c) fn jet_rt_handle_debug_IOError(value: I64) -> I64 {
+    result :: jet_rt_string_builder_new()
+    kind :: rt_text_word(value)
+    host_io_kind_debug(result, kind)
+    rt_text_push_word(result, I64{40}, I64{1})
+    if (kind == HOST_IO_KIND_RESOURCE_LIMIT) -> host_io_limit_label(result, rt_text_word(value + I64{48}), true)
+    else -> host_context_debug_into(result, value + I64{8})
+    rt_text_push_word(result, I64{41}, I64{1})
+    jet_rt_string_builder_finish(result)
+}
+
+#Export(c) fn jet_rt_handle_show_IOError(value: I64) -> I64 {
+    result :: jet_rt_string_builder_new()
+    kind :: rt_text_word(value)
+    if (kind == HOST_IO_KIND_RESOURCE_LIMIT) {
+        rt_text_push_word(result, I64{2338339510832558704}, I64{8})
+        rt_text_push_word(result, I64{7305808869231650162}, I64{8})
+        rt_text_push_word(result, I64{7286952193241476128}, I64{8})
+        rt_text_push_word(result, I64{4207599433743164280}, I64{8})
+        rt_text_push_word(result, I64{32}, I64{1})
+        host_io_limit_label(result, rt_text_word(value + I64{48}), false)
+    } else {
+        host_io_kind_show(result, kind)
+        rt_text_push_word(result, I64{2334956330985808928}, I64{8})
+        host_io_operation_label(result, rt_text_word(value + I64{8}), false)
+        resource :: rt_text_word(value + I64{16})
+        if (resource != I64{0}) {
+            rt_text_push_word(result, I64{24608}, I64{2}) // " `"
+            rt_text_append(result, rt_text_data(resource), rt_text_len(resource))
+            rt_text_push_word(result, I64{96}, I64{1})
+        }
+        cause :: rt_text_word(value + I64{40})
+        if (cause != I64{0}) {
+            rt_text_push_word(result, I64{8250}, I64{2}) // ": "
+            rt_text_append(result, rt_text_data(cause), rt_text_len(cause))
+        }
+    }
+    jet_rt_string_builder_finish(result)
+}
+
+#Export(c) fn jet_rt_handle_display_IOError(value: I64) -> I64 { jet_rt_handle_show_IOError(value) }
