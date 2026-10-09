@@ -11,6 +11,14 @@ fn core_private_grouped_import_keeps_its_checked_target_through_emit_and_run() {
 
     let mut bundle = jet::Loader::load_entry_with_overlay(entry.to_str().unwrap(), None, false)
         .expect("load Core-private import closure");
+    let time_source = jet_foundation::CoreModuleExports::core_source_module("core.time").unwrap();
+    let time_modules = bundle.modules.iter()
+        .filter(|module| module.path.ends_with(time_source.path))
+        .collect::<Vec<_>>();
+    assert_eq!(time_modules.len(), 1, "Stat's implicit DateTime field must load its source owner once");
+    assert!(time_modules[0].items.iter().any(|item| matches!(
+        item, jet::AST::Item::Struct(row) if row.name == "DateTime"
+    )), "the loaded owner must supply the real DateTime declaration");
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
     assert!(
         !diagnostics.iter().any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error),

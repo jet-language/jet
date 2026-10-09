@@ -20,6 +20,15 @@ leave with the rest of Rust once the Jet back end covers every program (D-EXEC2,
 D-BACKEND-OWN1, owner directive 19). No Core contract is defined as
 permanently owned by a particular compiler implementation.
 
+Loaded declaration graphs close over source-owned Core nominal field and
+payload types, including optional/container members, aliases, and distinct
+bases. An implicit bare name such as `Stat.modified: DateTime` selects the
+registered Core owner (`core.time`), unless a local declaration or generic
+binder owns that name. The owner source and its own declaration dependencies
+join the ordinary checked module queue before MIR nominal facts are frozen;
+emission must not substitute a native carrier, invent an alias declaration, or
+resolve an unrelated module merely because its type shares the leaf name.
+
 Native task-stop publication requires both a current task control and the
 compiler's scoped publication capability: only a checked operation immediately
 followed by MIR `Poll(Propagate)` may arm it. Plain calls and root bodies remain

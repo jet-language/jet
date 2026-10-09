@@ -2686,6 +2686,13 @@ fn load_entry_with_overlays_mode_on_stack(
         .iter()
         .map(|source_module| source_module.module)
         .collect::<HashSet<_>>();
+    for module in &bundle.modules {
+        schedule_core_declaration_owners(
+            &module.items,
+            &mut core_source_modules,
+            &mut scheduled_core_source_modules,
+        );
+    }
     // Private Core parts are scheduled beside their public owner, but their
     // reserved identities are never exposed as public Core import names.
     for part in jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS {
@@ -2811,6 +2818,15 @@ fn load_entry_with_overlays_mode_on_stack(
             }
             _ => true,
         });
+        // Declaration dependencies are not import edges: Stat's DateTime
+        // fields, for example, implicitly name the registered core.time owner.
+        // Schedule them on this same queue so their own declarations close
+        // transitively before sema freezes nominal facts for MIR.
+        schedule_core_declaration_owners(
+            &program.items,
+            &mut core_source_modules,
+            &mut scheduled_core_source_modules,
+        );
         // Core is library source, not the user's program: its parser
         // teaching lints never reach user output. Anything stronger keeps
         // its Core origin so it renders against the Core file, never at a
@@ -5040,6 +5056,113 @@ pub fn core_module_path(imp: &ImportDecl) -> Option<String> {
 }
 
 
+/// Close the loaded declaration graph over implicit source-owned Core types.
+/// Match the codegen nominal fallback: local declarations and generic binders
+/// win; otherwise only a registered, unique Core owner may supply a bare name.
+fn schedule_core_declaration_owners(
+    items: &[Item],
+    pending: &mut Vec<jet_foundation::CoreModuleExports::CoreSourceModule>,
+    scheduled: &mut HashSet<&'static str>,
+) {
+    let owned = items.iter().filter_map(|item| match item {
+        Item::Struct(row) => Some(row.name.as_str()),
+        Item::Enum(row) => Some(row.name.as_str()),
+        Item::Distinct(row) => Some(row.name.as_str()),
+        Item::TypeAlias(row) => Some(row.name.as_str()),
+        _ => None,
+    }).collect::<HashSet<_>>();
+    for item in items {
+        if let Item::CModule(row) = item {
+            if let Some(body) = &row.body {
+                schedule_core_declaration_owners(body, pending, scheduled);
+            }
+        }
+    }
+    let mut schedule_name = |name: &str, binders: &[crate::AST::TypeParam]| {
+        if owned.contains(name) || binders.iter().any(|binder| binder.name == name)
+            || name.contains("::") || name.contains('.')
+        {
+            return;
+        }
+        let module = if let Some(kind) = Syntax::typed_head_kind(name) {
+            let Some(module) = kind.carrier_record_module() else { return };
+            module
+        } else {
+            let mut owners = jet_foundation::CoreModuleExports::core_modules().iter()
+                .filter(|module| module.type_exports.iter().any(|(leaf, _)| *leaf == name));
+            let Some(owner) = owners.next() else { return };
+            if owners.next().is_some() { return; }
+            owner.module
+        };
+        let Some(source) = jet_foundation::CoreModuleExports::core_source_module(module) else { return };
+        if !jet_foundation::CoreModuleExports::CORE_SOURCE_OWNED_TYPES.iter()
+            .any(|row| row.path == source.path && row.name == name)
+        {
+            return;
+        }
+        if scheduled.insert(source.module) {
+            pending.push(*source);
+            for part in jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS {
+                if part.owner == source.module && scheduled.insert(part.source.module) {
+                    pending.push(part.source);
+                }
+            }
+        }
+    };
+    fn visit(
+        ty: &Type,
+        binders: &[crate::AST::TypeParam],
+        name: &mut impl FnMut(&str, &[crate::AST::TypeParam]),
+    ) {
+        match ty {
+            Type::Named(value) => name(value, binders),
+            Type::Apply { name: value, args } => {
+                name(value, binders);
+                for arg in args { visit(arg, binders, name); }
+            }
+            Type::List(inner) | Type::Shared(inner) | Type::Option(inner)
+            | Type::FixedList { elem: inner, .. } | Type::InlineRange { base: inner, .. }
+            | Type::Tagged { inner, .. } | Type::Quantity { base: inner, .. } => visit(inner, binders, name),
+            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                visit(key, binders, name);
+                visit(value, binders, name);
+            }
+            Type::Union(types) => {
+                for ty in types { visit(ty, binders, name); }
+            }
+            Type::Tuple(fields) => {
+                for (_, ty) in fields { visit(ty, binders, name); }
+            }
+            Type::Fn { params, ret, .. } => {
+                for ty in params { visit(ty, binders, name); }
+                if let Some(ty) = ret { visit(ty, binders, name); }
+            }
+            _ => {}
+        }
+    }
+    for item in items {
+        match item {
+            Item::Struct(row) => {
+                for field in &row.fields { visit(&field.ty, &row.type_params, &mut schedule_name); }
+            }
+            Item::Enum(row) => {
+                for variant in &row.variants {
+                    match &variant.payload {
+                        crate::AST::VariantPayload::Single(ty, _) => visit(ty, &row.type_params, &mut schedule_name),
+                        crate::AST::VariantPayload::Named(fields) => {
+                            for field in fields { visit(&field.ty, &row.type_params, &mut schedule_name); }
+                        }
+                        crate::AST::VariantPayload::Unit => {}
+                    }
+                }
+            }
+            Item::Distinct(row) => visit(&row.base, &[], &mut schedule_name),
+            Item::TypeAlias(row) => visit(&row.target, &row.type_params, &mut schedule_name),
+            _ => {}
+        }
+    }
+}
+
 /// Schedule the compiler-private String receiver part `Core/text/string.jet`.
 /// It keeps its reserved internal module identity, never `core.text.string`.
 fn schedule_core_text_string_part(
@@ -6288,6 +6411,25 @@ mod stale_manifest_name_tests {
             import.alias == "parser"
                 && matches!(&import.kind, ImportKind::Module(name, _) if name == part.source.alias)));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn declaration_core_owners_follow_types_not_leaf_coincidences() {
+        let schedule = |source: &str| {
+            let (tokens, diagnostics) = Lexer::lex_generated(source);
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            let (program, diagnostics) = Parser::parse_for_check_with_source(&tokens, source).unwrap();
+            assert!(diagnostics.iter().all(|row| row.severity != crate::Diagnostics::Severity::Error));
+            let mut pending = Vec::new();
+            let mut scheduled = HashSet::new();
+            schedule_core_declaration_owners(&program.items, &mut pending, &mut scheduled);
+            pending.into_iter().map(|row| row.module).collect::<Vec<_>>()
+        };
+        assert!(schedule("struct DateTime { value: Int }\nstruct Stat { modified: DateTime? }\n").is_empty());
+        assert!(schedule("struct Stat<DateTime> { modified: DateTime? }\n").is_empty());
+        assert!(schedule("struct Stat { modified: unrelated.DateTime }\n").is_empty());
+        let owners = schedule("alias Times :: [DateTime?]\nenum Stamp { At(DateTime), Missing }\nstruct Stat { times: Times }\n");
+        assert_eq!(owners.iter().filter(|module| **module == "core.time").count(), 1);
     }
 
     #[test]
