@@ -3433,22 +3433,22 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         return None
     }
     duration := sema_expr_check_duration_binary(op, lhs, rhs, span)
-    if duration != None -> return sema_expr_expected(duration ?? lhs, expected, environment, &diagnostics)
+    if duration != None -> return sema_expr_expected(duration ?? lhs, expected, environment, program, &diagnostics)
     time := sema_expr_check_time_binary(op, lhs, rhs, span, line)
-    if time != None -> return sema_expr_expected(time ?? lhs, expected, environment, &diagnostics)
+    if time != None -> return sema_expr_expected(time ?? lhs, expected, environment, program, &diagnostics)
     if (lhs.ty == Type.Named{name: "Instant"} && rhs.ty == Type.Named{name: "Instant"} && op == BinOp.Add) || (lhs.ty == Type.Named{name: "Duration"} && rhs.ty == Type.Named{name: "Instant"} && op == BinOp.Sub) {
         &diagnostics.push(sema_error("E0127", span, "{sema_expr_binary_name(op)} is not available between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "Time points are positions; only point + delta, point - delta, point - point, and delta + delta are defined", "subtract two Instants for a Duration, or add a Duration to an Instant"))
         return None
     }
-    unit_present := sema_expr_unit_fact(lhs.ty, environment) != None || sema_expr_unit_fact(rhs.ty, environment) != None || sema_expr_unit_dimension(lhs.ty, environment) != None || sema_expr_unit_dimension(rhs.ty, environment) != None
-    unit := sema_expr_check_unit_binary(op, lhs, rhs, span, line, environment, &scopes, context, &diagnostics)
-    if unit != None -> return sema_expr_expected(unit ?? lhs, expected, environment, &diagnostics)
+    unit_present := sema_expr_unit_fact(lhs.ty, environment, program) != None || sema_expr_unit_fact(rhs.ty, environment, program) != None || sema_expr_unit_dimension(lhs.ty, environment, program) != None || sema_expr_unit_dimension(rhs.ty, environment, program) != None
+    unit := sema_expr_check_unit_binary(op, lhs, rhs, span, line, environment, program, &scopes, context, &diagnostics)
+    if unit != None -> return sema_expr_expected(unit ?? lhs, expected, environment, program, &diagnostics)
     if unit_present -> return None
-    distinct_lhs := sema_expr_distinct_facts(lhs.ty, environment, &scopes)
-    distinct_rhs := sema_expr_distinct_facts(rhs.ty, environment, &scopes)
+    distinct_lhs := sema_expr_distinct_facts(lhs.ty, environment, program, &scopes)
+    distinct_rhs := sema_expr_distinct_facts(rhs.ty, environment, program, &scopes)
     if distinct_lhs != None || distinct_rhs != None {
         distinct := sema_expr_check_distinct_binary(op, lhs, rhs, span, line, distinct_lhs, distinct_rhs, &scopes, &diagnostics)
-        if distinct != None -> return sema_expr_expected(distinct ?? lhs, expected, environment, &diagnostics)
+        if distinct != None -> return sema_expr_expected(distinct ?? lhs, expected, environment, program, &diagnostics)
         return None
     }
     source_operator := false
@@ -3468,15 +3468,15 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     }
     geometry_present := sema_expr_geometry_is_point(lhs.ty) || sema_expr_geometry_is_delta(lhs.ty) || sema_expr_geometry_is_point(rhs.ty) || sema_expr_geometry_is_delta(rhs.ty)
     geometry := sema_expr_check_geometry_binary(op, lhs, rhs, span, line, &diagnostics)
-    if geometry != None -> return sema_expr_expected(geometry ?? lhs, expected, environment, &diagnostics)
+    if geometry != None -> return sema_expr_expected(geometry ?? lhs, expected, environment, program, &diagnostics)
     if geometry_present -> return None
     precise := sema_expr_check_precise_binary(op, lhs, rhs, span, line, &diagnostics)
-    if precise != None -> return sema_expr_expected(precise ?? lhs, expected, environment, &diagnostics)
+    if precise != None -> return sema_expr_expected(precise ?? lhs, expected, environment, program, &diagnostics)
     if sema_expr_precise_name(lhs.ty) != None || sema_expr_precise_name(rhs.ty) != None {
         return None
     }
     math := sema_expr_check_math_binary(op, lhs, rhs, span, line, &diagnostics)
-    if math != None -> return sema_expr_expected(math ?? lhs, expected, environment, &diagnostics)
+    if math != None -> return sema_expr_expected(math ?? lhs, expected, environment, program, &diagnostics)
     math_left := sema_expr_type_base_name(lhs.ty)
     math_right := sema_expr_type_base_name(rhs.ty)
     if (math_left != None && sema_expr_is_math_type_name(math_left ?? "")) || (math_right != None && sema_expr_is_math_type_name(math_right ?? "")) {
@@ -3732,25 +3732,25 @@ fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScop
             &diagnostics.push(sema_error("E0112", span, "a binary pattern literal is only valid as a `take_pattern` argument", "this `[U8].{{\"…\"}}` literal has typed holes (`{{name:U<width>}}`), which only `take_pattern` understands", "call it as `reader.take_pattern([U8].{{\"…\"}})`"))
             None
         }
-        .UnitLit(raw, int_value, float_value, suffix, suffix_span, span) -> sema_expression_unit_literal(raw, int_value, float_value, suffix, suffix_span, span, expected, environment, scopes, &diagnostics)
-        .Ident(name, span) -> if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, &scopes, &state, &context, &diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, &scopes, &state, &context, &diagnostics)
-        .ComptimeName(name, span, value) -> sema_expr_check_comptime_name(name, span, value, expected, environment, &scopes, &state, &context, &diagnostics)
+        .UnitLit(raw, int_value, float_value, suffix, suffix_span, span) -> sema_expression_unit_literal(raw, int_value, float_value, suffix, suffix_span, span, expected, environment, program, scopes, &diagnostics)
+        .Ident(name, span) -> if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, &scopes, &state, &context, &diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
+        .ComptimeName(name, span, value) -> sema_expr_check_comptime_name(name, span, value, expected, environment, program, &scopes, &state, &context, &diagnostics)
         .Paren(value, span) -> {
-            checked :: sema_check_expression(value, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            checked :: sema_check_expression(value, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
             return Val(TExpr{ty: checked.ty, kind: checked.kind, span: span, integer_bounds: checked.integer_bounds, cost: checked.cost})
         }
-        .Unary(op, operand, span) -> sema_expr_check_unary(op, operand, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .Binary(op, left, right, span) -> sema_expr_check_binary(op, left, right, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Unary(op, operand, span) -> sema_expr_check_unary(op, operand, expected, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Binary(op, left, right, span) -> sema_expr_check_binary(op, left, right, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Call(call) -> {
             if sema_expression_contextual_result_call(call, expected, scopes) == .Val(success) {
                 payload := Expr.Unit{span: call.name_span}
                 if call.args.len() == 1 -> payload = call.args[0].expr
                 span :: Span{start: call.name_span.start, end: expr_span(payload).end}
                 if !success -> &context.failure_edges.push("")
-                return sema_expression_result_payload(payload, success, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                return sema_expression_result_payload(payload, success, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             }
             sema_stmt_uninit_write_args(call.args, state, scopes, &diagnostics)
-            sema_expr_check_direct_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            sema_expr_check_direct_call(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
         .CallValue(callee, args, span) -> sema_expr_check_indirect_call(callee, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _, _, _, _, _) -> {
@@ -3759,7 +3759,7 @@ fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScop
             unmarked :: sema_receiver_mark_begin(&state, receiver)
             fixed_over :: sema_stmt_uninit_fixed_over_take(receiver, method, args, &state, scopes)
             if fixed_over.len() == 0 -> sema_stmt_uninit_write_args(args, state, scopes, &diagnostics)
-            checked := sema_expr_check_method_call(unmarked, method, method_span, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            checked := sema_expr_check_method_call(unmarked, method, method_span, owner_type_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             loop fact in fixed_over -> sema_ownership_uninit_set(&state, fact)
             receiver_last_use := false
             if unmarked == .Ident(name, _) {
@@ -3770,37 +3770,37 @@ fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScop
         }
         .ListLit(elements, span) -> {
             expanded := sema_expression_list_member_spreads(elements)
-            sema_expression_list(Expr.ListLit{elements: expanded, span: span}, expanded, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            sema_expression_list(Expr.ListLit{elements: expanded, span: span}, expanded, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
-        .MapLit(entries, span) -> sema_expression_map(expr, entries, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .TupleLit(fields, span, _) -> sema_expression_tuple(fields, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .Range(start, end, exclusive, span) -> sema_expression_range(start, end, exclusive, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .Index(base, index, span, kind) -> sema_expression_index(base, index, kind, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .Slice(base, start, end, range, span) -> sema_expression_slice(base, start, end, range, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .Field(base, member, span) -> sema_expression_field(base, member, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .OptField(base, member, member_span, _, span) -> sema_expression_optional_field(base, member, member_span, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .OptMethodCall(receiver, method, method_span, type_args, args, span) -> sema_expression_optional_method_call(receiver, method, method_span, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .Deref(value, span) -> sema_expression_deref(value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .MapLit(entries, span) -> sema_expression_map(expr, entries, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .TupleLit(fields, span, _) -> sema_expression_tuple(fields, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Range(start, end, exclusive, span) -> sema_expression_range(start, end, exclusive, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Index(base, index, span, kind) -> sema_expression_index(base, index, kind, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Slice(base, start, end, range, span) -> sema_expression_slice(base, start, end, range, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Field(base, member, span) -> sema_expression_field(base, member, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .OptField(base, member, member_span, _, span) -> sema_expression_optional_field(base, member, member_span, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .OptMethodCall(receiver, method, method_span, type_args, args, span) -> sema_expression_optional_method_call(receiver, method, method_span, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Deref(value, span) -> sema_expression_deref(value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Place(value, access, span) -> {
             if scopes.ownership_call_depth == 0 && !sema_ownership_check_expression(&state, expr, scopes, &diagnostics) -> return None
-            sema_expression_place(value, access, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            sema_expression_place(value, access, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
-        .TypedLit(head, body, span) -> sema_expression_typed_literal(head, body, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .StructLit(type_name, type_args, _, as_trait, fields, inferred, span) -> sema_expression_struct_literal(type_name, type_args, fields, inferred, as_trait, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .EnumLit(type_name, variant, variant_span, args, leading_dot, span) -> sema_expression_enum_literal(type_name, [Type]{}, variant, args, leading_dot, variant_span, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .Present(value, span) -> sema_expression_present(value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .Ok(value, span) -> sema_expression_result_payload(value, true, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .TypedLit(head, body, span) -> sema_expression_typed_literal(head, body, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .StructLit(type_name, type_args, _, as_trait, fields, inferred, span) -> sema_expression_struct_literal(type_name, type_args, fields, inferred, as_trait, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .EnumLit(type_name, variant, variant_span, args, leading_dot, span) -> sema_expression_enum_literal(type_name, [Type]{}, variant, args, leading_dot, variant_span, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Present(value, span) -> sema_expression_present(value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Ok(value, span) -> sema_expression_result_payload(value, true, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Err(value, span) -> {
             // #3708: an `Err` written anywhere in the body (callbacks too) is
             // a failure source of its own; the empty key never resolves.
             &context.failure_edges.push("")
-            sema_expression_result_payload(value, false, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            sema_expression_result_payload(value, false, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
-        .CompareChain(operands, ops, hooks, span) -> sema_expression_compare_chain(operands, ops, hooks, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .OrFallback(value, fallback, _, span) -> sema_expression_or_fallback(value, fallback, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .Try(value, span, conversion, note) -> sema_expression_try(value, span, conversion, note, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .If(condition, then_body, then_value, else_body, else_value, span) -> sema_expression_if(condition, then_body, then_value, else_body, else_value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .Lambda(lambda) -> sema_expression_lambda(lambda, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .CompareChain(operands, ops, hooks, span) -> sema_expression_compare_chain(operands, ops, hooks, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .OrFallback(value, fallback, _, span) -> sema_expression_or_fallback(value, fallback, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Try(value, span, conversion, note) -> sema_expression_try(value, span, conversion, note, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .If(condition, then_body, then_value, else_body, else_value, span) -> sema_expression_if(condition, then_body, then_value, else_body, else_value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Lambda(lambda) -> sema_expression_lambda(lambda, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .ReduceMarker(name, span) -> {
             &diagnostics.push(sema_error("E2510", span, "`#{name}` is only valid inside a lane `.reduce(…)`", "a reduce-op marker names the fold operation; it isn't a value on its own", "write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`"))
             None

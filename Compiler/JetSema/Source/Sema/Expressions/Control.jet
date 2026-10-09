@@ -746,7 +746,7 @@ fn sema_expression_auto_propagate(expr: Expr, value: ^TExpr, expected: Type?, en
     }
     if sema_expression_failure_carrier_position(expected, value.ty) -> return Val(^value)
     span :: expr_span(expr)
-    conversion :: sema_expression_propagation_conversion(value, Val(expr), span, true, environment, &scopes, &context, &diagnostics) ?? return None
+    conversion :: sema_expression_propagation_conversion(value, Val(expr), span, true, environment, program, &scopes, &context, &diagnostics) ?? return None
     payload :: sema_expression_carrier_payload(value.ty) ?? return None
     location :: sema_expression_panic_location(environment, scopes, span)
     propagated :: sema_tir_expr(payload, TExprKind.TryWithContext{inner: ^value, note: None, convert: conversion, file: location.file, line: location.line, function: location.function}, span)
@@ -1808,9 +1808,9 @@ fn sema_expression_nominal_identity(left: Type, right: Type, environment: SemaSc
 // Rust `nominal_type_identity`: two spellings of one declared type (the
 // written `Kind` and the canonical `module::Kind` a resolved type carries)
 // are the same type at a merge.
-fn sema_expression_nominal_identity(left: Type, right: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_expression_nominal_identity(left: Type, right: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if type_identity_equal(left, right) -> return true
-    type_identity_equal(sema_expr_expected_type(left, environment), sema_expr_expected_type(right, environment))
+    type_identity_equal(sema_expr_expected_type(left, environment, program), sema_expr_expected_type(right, environment, program))
 }
 
 // The expected `T E!` carrier when one branch already produces it and the

@@ -55,8 +55,8 @@ pub fn sema_geometry_restore_owner(ty: Type, source: Type) -> Type Never! {
     }
 }
 
-fn sema_call_geometry_intrinsic_type(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
-    graph_option :: environment.registration_graph
+fn sema_call_geometry_intrinsic_type(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    graph_option :: program.registration_graph
     graph :: graph_option ?? return false
     name :: if ty == { .Named(owner) | .Apply(owner, _) -> owner else -> "" }
     if sema_geometry_nominal_leaf(name) != name -> return true
