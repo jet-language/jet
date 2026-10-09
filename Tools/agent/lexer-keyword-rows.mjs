@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Project the bootstrap lexer keyword() mapping into borrowed Jet byte checks.
-// Spellings remain Syntax constants; TokKind and existing K_* tags own the kinds.
+// Project the canonical Jet lexer keyword table into borrowed Jet byte checks.
+// Spellings remain Jet Syntax constants; Jet token tags own the kinds.
 // Usage: node Tools/agent/lexer-keyword-rows.mjs [--check|--write]
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -14,61 +14,46 @@ const fail = (message) => { throw new Error(`lexer keyword rows: ${message}`); }
 const uncomment = (text) => text.replace(/\/\/[^\n]*/g, "");
 
 export function keywordRows(mapping, syntax, tokens, tags) {
-  const body = uncomment(mapping).match(/^fn keyword\(name: &str\) -> Option<TokKind> \{\s*match name \{([\s\S]*?)\n\s*\}\s*\n\}/m)?.[1];
-  if (!body) fail("unrecognized keyword() function");
-  const rows = [];
-  const spellings = new Set();
-  const kinds = new Set();
+  const body = uncomment(mapping).match(/^LEXER_KEYWORDS :: \[LexerKeyword\]\{([\s\S]*?)^\}/m)?.[1];
+  if (!body) fail("unrecognized LEXER_KEYWORDS table");
   const constants = new Map();
-  for (const match of syntax.matchAll(/^\s*pub\s+const\s+(\w+)\s*:\s*&str\s*=\s*([^;]+);/gm)) {
+  for (const match of syntax.matchAll(/^\s*(\w+)\s*::\s*("(?:[^"\\]|\\.)*")[^\S\n]*(?:\/\/[^\n]*)?$/gm)) {
     const values = constants.get(match[1]) ?? [];
-    values.push(match[2].trim());
+    values.push(match[2]);
     constants.set(match[1], values);
   }
-  const enumBody = uncomment(tokens).match(/^pub enum TokKind \{([\s\S]*?)^\}/m)?.[1];
-  if (!enumBody) fail("missing TokKind enum");
-  const enumKinds = [...enumBody.matchAll(/^\s*(Kw\w+),\s*$/gm)].map((match) => match[1]);
-  const mentionedKinds = enumBody.match(/\bKw\w+\b/g) ?? [];
-  if (!enumKinds.length || mentionedKinds.length !== enumKinds.length ||
-      new Set(enumKinds).size !== enumKinds.length) fail("unparsed/ambiguous keyword token kinds");
+  const tokenTags = [...tokens.matchAll(/^TOKEN_(KW_\w+|TRUE|FALSE|SELF|NULL|BREAK|RETURN) :: \d+\s*$/gm)]
+    .map((match) => `K_${match[1].replace(/^KW_/, "")}`);
+  if (!tokenTags.length || new Set(tokenTags).size !== tokenTags.length) fail("unparsed/ambiguous keyword token kinds");
   const tagNames = [...tags.matchAll(/^(K_\w+) ::/gm)].map((match) => match[1]);
-  let fallback = false;
+  const rows = [];
+  const spellings = new Set(), kinds = new Set(), mappedTags = new Set();
   for (const line of body.split("\n").map((line) => line.trim()).filter(Boolean)) {
-    if (line === "_ => None,") {
-      if (fallback) fail("duplicate keyword fallback");
-      fallback = true;
-      continue;
-    }
-    if (fallback) fail("keyword arm after fallback");
-    const arm = line.match(/^s if s == Syntax::(\w+) => Some\(TokKind::(Kw\w+)\),$/);
-    if (!arm) fail(`unparsed keyword arm: ${line}`);
-    const [, constant, kind] = arm;
+    const arm = line.match(/^LexerKeyword\{constant: "(\w+)", kind: "(Kw\w+)", tag: "(K_\w+)"\},$/);
+    if (!arm) fail(`unparsed keyword row: ${line}`);
+    const [, constant, kind, tag] = arm;
     const values = constants.get(constant) ?? [];
-    if (values.length !== 1 || !/^"(?:[^"\\]|\\.)*"$/.test(values[0])) fail(`unresolved/ambiguous literal Syntax::${constant}`);
+    if (values.length !== 1) fail(`unresolved/ambiguous literal Syntax::${constant}`);
     let spelling;
-    try { spelling = JSON.parse(values[0]); } catch { fail(`unsupported Rust literal Syntax::${constant}`); }
-    // Current keyword authority is ASCII. Fail rather than silently invent a
-    // Unicode normalization/identifier policy if that authority changes.
+    try { spelling = JSON.parse(values[0]); } catch { fail(`unsupported Jet literal Syntax::${constant}`); }
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(spelling)) fail(`unsupported keyword spelling Syntax::${constant}`);
-    const tag = `K_${kind.slice(2).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}`;
-    if (!enumKinds.includes(kind) || tagNames.filter((name) => name === tag).length !== 1) fail(`unresolved token kind ${kind}/${tag}`);
-    if (spellings.has(spelling) || kinds.has(kind)) fail(`duplicate keyword spelling/kind ${constant}/${kind}`);
-    spellings.add(spelling);
-    kinds.add(kind);
+    const kindTag = `K_${kind.slice(2).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}`;
+    if (kindTag !== tag || !tokenTags.includes(tag) || tagNames.filter((name) => name === tag).length !== 1) fail(`unresolved token kind ${kind}/${tag}`);
+    if (spellings.has(spelling) || kinds.has(kind) || mappedTags.has(tag)) fail(`duplicate keyword spelling/kind ${constant}/${kind}`);
+    spellings.add(spelling); kinds.add(kind); mappedTags.add(tag);
     rows.push({ constant, kind, tag, spelling, bytes: [...Buffer.from(spelling, "utf8")] });
   }
-  if (!fallback || !rows.length || enumKinds.some((kind) => !kinds.has(kind))) fail("incomplete keyword mapping/TokKind coverage");
+  if (!rows.length || tokenTags.some((tag) => !mappedTags.has(tag))) fail("incomplete keyword mapping/token coverage");
   return rows;
 }
 
 export function readKeywordRows(root = ROOT) {
   const read = (path) => readFileSync(resolve(root, path), "utf8");
-  const source = read("crates/jet-foundation/src/Syntax.rs");
-  const modules = [...source.matchAll(/^mod (\w+);\s*\npub use \1::\*;/gm)].map((match) => match[1]);
-  if (!modules.length) fail("missing Syntax module exports");
-  const syntax = [source, ...modules.map((name) => read(`crates/jet-foundation/src/Syntax/${name}.rs`))].join("\n");
-  return keywordRows(read("crates/jet-lexer/src/Lexer/mod.rs"), syntax,
-    read("crates/jet-lexer/src/Lexer/Tokens.rs"), read("Compiler/JetLexer/Source/Lexer/Terminators.jet"));
+  const directory = "Compiler/JetFoundation/Data/Syntax";
+  const syntax = readdirSync(resolve(root, directory)).filter((name) => name.endsWith(".jet")).sort()
+    .map((name) => read(`${directory}/${name}`)).join("\n");
+  return keywordRows(read("Compiler/JetLexer/Data/Lexer/Keywords.jet"), syntax,
+    read("Compiler/JetLexer/Source/Lexer/Tokens.jet"), read("Compiler/JetLexer/Source/Lexer/Terminators.jet"));
 }
 
 function branches(rows, offset, indent) {
@@ -101,7 +86,7 @@ export function renderKeywordSpans(rows) {
     group.push(row);
     lengths.set(row.bytes.length, group);
   }
-  let out = `${OPEN}\n// Derived from Rust Lexer::keyword, Syntax literals and TokKind; do not hand edit.\n// No spelling ownership here: Payload still builds the exact token text.\nfn word_kind(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Never! {\n    kind :: if end - start == {\n`;
+  let out = `${OPEN}\n// Derived from Jet Lexer/Keywords and Syntax literals; do not hand edit.\n// No spelling ownership here: Payload still builds the exact token text.\nfn word_kind(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Never! {\n    kind :: if end - start == {\n`;
   for (const [length, group] of [...lengths].sort(([a], [b]) => a - b)) {
     out += `        ${length} -> {\n${branches(group, 0, "            ")}        }\n`;
   }

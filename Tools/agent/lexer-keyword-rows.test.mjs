@@ -18,19 +18,19 @@ test("canonical keyword projection is current and rejects incomplete authority",
     assert.match(generated, new RegExp(`\\b${row.tag}\\b`));
   }
   assert.throws(() => replaceKeywordSpans(source + source, generated), /exactly one/);
-  const mapping = "fn keyword(name: &str) -> Option<TokKind> {\n    match name {\n        s if s == Syntax::KW_FN => Some(TokKind::KwFn),\n        _ => None,\n    }\n}";
-  const syntax = 'pub const KW_FN: &str = "fn";';
-  const tokens = "pub enum TokKind {\n    KwFn,\n    Ident(String),\n}";
+  const mapping = 'LEXER_KEYWORDS :: [LexerKeyword]{\n    LexerKeyword{constant: "KW_FN", kind: "KwFn", tag: "K_FN"},\n}';
+  const syntax = 'KW_FN :: "fn"';
+  const tokens = "TOKEN_KW_FN :: 57\n";
   const tags = "K_FN :: 57\n";
   const parse = (m = mapping, s = syntax, t = tokens, k = tags) => keywordRows(m, s, t, k);
   assert.equal(parse()[0].spelling, "fn");
-  assert.throws(() => parse(mapping.replace("_ => None,", '"extra" => Some(TokKind::KwFn),\n        _ => None,')), /unparsed keyword arm/);
-  assert.throws(() => parse(mapping.replace("_ => None,", "")), /incomplete/);
+  assert.throws(() => parse(mapping.replace("\n}", '\n    invalid row,\n}')), /unparsed keyword row/);
+  assert.throws(() => parse(mapping.replace(/    LexerKeyword.*\n/, "")), /incomplete/);
   assert.throws(() => parse(mapping.replace("KwFn", "KwNew")), /unresolved token kind/);
-  assert.throws(() => parse(mapping, syntax, tokens.replace("Ident(String)", "KwNew,\n    Ident(String)")), /incomplete/);
-  assert.throws(() => parse(mapping, syntax, tokens.replace("KwFn,", "KwFn(String),")), /unparsed/);
+  assert.throws(() => parse(mapping, syntax, tokens + "TOKEN_KW_NEW :: 58\n"), /incomplete/);
+  assert.throws(() => parse(mapping.replace("KwFn", "KwFn(String)")), /unparsed/);
   assert.throws(() => parse(mapping, syntax + "\n" + syntax), /ambiguous/);
-  assert.throws(() => parse(mapping, 'pub const KW_FN: &str = OTHER;'), /unresolved/);
-  assert.throws(() => parse(mapping, 'pub const KW_FN: &str = "fñ";'), /unsupported keyword/);
+  assert.throws(() => parse(mapping, "KW_FN :: OTHER"), /unresolved/);
+  assert.throws(() => parse(mapping, 'KW_FN :: "fñ"'), /unsupported keyword/);
   assert.throws(() => parse(mapping, syntax, tokens, ""), /unresolved token kind/);
 });
