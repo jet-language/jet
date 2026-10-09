@@ -348,6 +348,32 @@ fn lower_route_result_call(m: &LowerModule, f: &LowerFunction, symbol: String, a
     LowerRouteOut{word: selector, slot: slot}
 }
 
+// Int.to_radix is checked String, while the kernel's raw ABI returns
+// Result<Text, Text>. Match MIRRust.rs:31336-31345's caller fault adapter:
+// retain the selected text on success, and report faults at the MIR location.
+fn lower_route_int_radix(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, route: LowerRoute, args: [LIRValueID]) Never! {
+    dst :: lower_result(p, c, &m, &f, instruction)
+    if f.failed -> return
+    out :: lower_route_result_call(&m, &f, route.export, args, LowerRouteCarrier.Text, LowerRouteCarrier.Text)
+    text :: dst ?? lower_new_value(&f, lir_layout_pointer(), lower_route_drop(LowerRouteCarrier.Text), None)
+    lower_emit(&f, LIRInst.Load{dst: text, base: out.slot, offset: 0})
+    zero :: lower_const(&f, 0)
+    succeeded :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: succeeded, condition: LIRCondition.Ne, left: out.word, right: zero})
+    success :: lower_new_block(&f)
+    failure :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: succeeded, then_target: lower_target(success, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
+    lower_start(&f, failure, [LIRValueID]{})
+    message :: lower_pointer(&f)
+    length :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: message, base: text, offset: 0})
+    lower_emit(&f, LIRInst.Load{dst: length, base: text, offset: 8})
+    site :: lower_numeric_location(p, c, &m, &f, instruction, None)
+    lower_noreturn_call(&m, &f, "jet_rt_numeric_stop", [LIRValueID]{site[0], site[1], site[2], message, length})
+    lower_start(&f, success, [LIRValueID]{})
+    if dst == None -> lower_emit(&f, LIRInst.Drop{value: text})
+}
+
 fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, route: LowerRoute, lowered: [LIRValueID], what: String, name: String) Never! {
     result_ty :: lower_checked_type(c, instruction)
     if result_ty == .Val(ty) && lower_route_contains_float32(p, ty) {
@@ -441,6 +467,10 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
         }
         .Result(ok, err) -> {
             ty :: result_ty ?? return lower_fail(&m, &f, "{what} {name} Result result has no checked type")
+            if route.symbol == "jet_std::jet_int_to_radix" && ty.kind == .String {
+                if ok != .Text || err != .Text -> return lower_fail(&m, &f, "Int.to_radix kernel must return the canonical Text/Text Result ABI")
+                return lower_route_int_radix(p, c, &m, &f, instruction, route, lowered)
+            }
             if !lower_route_shape_matches(p, ty, route.result) -> return lower_fail(&m, &f, "{what} {name} result type {mir_type_display_name(ty)} does not match its runtime route")
             dst :: lower_result(p, c, &m, &f, instruction)
             if f.failed -> return

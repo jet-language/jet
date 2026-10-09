@@ -278,6 +278,15 @@ adapter. A count outside I64 stops before the method, matching reference
 and retains its ordinary Err text. The conversion borrows the operand and
 does not broaden the Word ABI for other routes.
 
+`Int.to_radix(base)` remains checked `String`. Its runtime descriptor keeps
+the kernel's raw `Result<Text, Text>` ABI, and Lower supplies the canonical
+caller adapter: success retains the owned String directly, with no Result
+box; failure borrows the selected error text for `jet_rt_numeric_stop` at
+the canonical MIR file and line from `lower_numeric_location`. The selected
+payload matches MIRRust and JetEmit without weakening the checked result.
+The valid/invalid radix Lower fixtures cover both edges without making
+runtime execution claims.
+
 Scan capture classification reuses the canonical `lower_packed_storage_type`
 alias/tag resolver for fixed integers, then requires an `IntN` storage kind.
 The shared word carrier therefore does not admit binary32 as an integer scan
@@ -2052,6 +2061,14 @@ from the Rust compiler's checked MIR through the Jet emitter (MIR from
 bodies that rustc accepts; the same bodies in dispatch form fail with E0502.
 
 ## Testing
+
+The stage0-built golden driver keeps trimmed asm operands as borrowed views:
+matching a named register uses a guarded prefix removal and requires the
+remaining suffix to be the closing brace, rather than calling owned-String
+`slice` on a trimmed view. The `clobbers ` comment prefix uses the same guarded
+removal. Binary-pattern bit widths remain checked `U8` and are explicitly
+widened with `Int.from_u8` at the Lower constant boundary; stage0 does not
+construct an Int directly from a width's fixed storage.
 
 The golden-lowering driver's generated package grants `FS.Read`, `FS.Write`,
 `IO`, `Mem.Alloc`, `Panic`, and `Time`: these are the checked Lower unit's
