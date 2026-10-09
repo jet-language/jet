@@ -562,7 +562,7 @@ pub(crate) fn method_call_in_subset(
                         && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                 }
                 if type_name == "DataEvent" {
-                    return matches!(method, "Bool" | "Int" | "Float" | "Text" | "Bytes" | "Key")
+                    return matches!(crate::Sema::data_event_payload(method), Some(Some(_)))
                         && args.len() == 1
                         && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                 }

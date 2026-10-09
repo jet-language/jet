@@ -6110,7 +6110,7 @@ fn lower_method_call_impl(
                     });
                 }
                 if type_name == "DataEvent"
-                    && matches!(method, "Bool" | "Int" | "Float" | "Text" | "Bytes" | "Key")
+                    && matches!(crate::Sema::data_event_payload(method), Some(Some(_)))
                 {
                     return in_own_frame(|| {
                         let payload = TEnumPayload::Positional(

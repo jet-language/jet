@@ -182,23 +182,10 @@ pub(crate) fn arm_guarded_variant_pattern(cx: &Cx, cond: &Expr, subject: &Expr) 
 }
 
 /// `DataEvent` is a prelude enum whose variants are not entered in the ordinary
-/// user-variant owner table. Keep its surface list here for subset admission;
+/// user-variant owner table. Subset admission reads the canonical Core table;
 /// lowering resolves the concrete enum from the subject's typed TIR expression.
 pub(crate) fn is_data_event_variant(variant: &str) -> bool {
-    matches!(
-        variant,
-        "Null"
-            | "Bool"
-            | "Int"
-            | "Float"
-            | "Text"
-            | "Bytes"
-            | "ArrayStart"
-            | "ArrayEnd"
-            | "ObjectStart"
-            | "Key"
-            | "ObjectEnd"
-    )
+    crate::Sema::data_event_payload(variant).is_some()
 }
 
 pub(crate) fn is_hook_outcome_variant(variant: &str) -> bool {

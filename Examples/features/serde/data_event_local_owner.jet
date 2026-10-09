@@ -1,0 +1,35 @@
+// A module's own `DataEvent` enum and Core's `encoding.DataEvent` are two
+// owners: each constructor and pattern checks against its own payloads.
+use core.encoding as enc
+
+enum DataEvent {
+    Float(Int)
+    Text(Int)
+    Bytes(Int)
+}
+
+fn local_total(event: DataEvent) -> Int {
+    if event == {
+        .Float(value) -> return value
+        .Text(value) -> return value * 10
+        .Bytes(value) -> return value * 100
+    }
+}
+
+fn core_name(event: enc.DataEvent) -> String {
+    if event == {
+        .Float(value) -> return "float {value}"
+        .Text(text) -> return "text {text}"
+        .Bytes(bytes) -> return "bytes {bytes.len()}"
+        .Number(text) -> return "number {text}"
+        else -> return "other"
+    }
+}
+
+fn run() {
+    print(local_total(DataEvent.Float(1)) + local_total(DataEvent.Text(2)) + local_total(DataEvent.Bytes(3)))
+    print(core_name(enc.DataEvent.Float(1.5)))
+    print(core_name(enc.DataEvent.Text("hi")))
+    print(core_name(enc.DataEvent.Bytes([U8]{7, 8})))
+    print(core_name(enc.DataEvent.Number("-0.0")))
+}

@@ -94,6 +94,43 @@ empty. The lowering never decides meaning again (D-TIER-ONEIR1): every
 decision below reads facts MIR already carries (checked types, ownership,
 Prelude routes, phis, drop operations).
 
+### Compiler-unit coverage measurement (S3)
+
+`Compiler/JetBackend/Tests/self-host-rank.mjs <probe> [output-directory]`
+consumes the self-host driver's `run/self.progress`, `run/self.issues` (or
+incremental `self.partial-issues`), preparation issues and conversion metadata.
+It also accepts a parent containing `slices/<package>/` from `run-slices.sh`.
+All slices must come from the same MIR dump: descriptor names identify shared
+functions, concrete instances and glue across slices.
+
+The outputs are `RANKED.tsv` (conditional greedy blocker coverage plus package
+totals), `OVERLAP.tsv`, `PACKAGES.tsv` (functions reached, locally lowered clean,
+percentage clean), and `SLICES.tsv` (completion status per probe). Conversion
+failures are included as blocked function evidence; global preparation failures
+remain separately identified. Clean local lowering does not prove that callees,
+object emission, runtime linking or compiler tests are clean.
+
+Set `SELFHOST_GOLDEN_LOWER` to the matching golden run's `lower/` directory
+(the S3 baseline is `nat-n7full-s0/lower`). Without golden issue artifacts,
+overlap is explicitly unmeasured, never silently classified compiler-only.
+The ranker refuses to report coverage when no lowering measurement exists.
+A partial run never counts its unfinished last-started function as clean;
+drivers may append `run/self.completed` names after flushing each function's
+issues to provide precise completion evidence.
+
+`self-host-slices.mjs <probe>` builds package root inventories from
+`self-all.functions.tsv`, `self-all.sources.tsv` and `compiler.map.json`.
+It writes `SLICE-ORDER.tsv` and `slice-order.txt`, ordered by root function
+count (smallest first, package-name tie break). This is a scheduling heuristic,
+not a claimed bound on reachable dependencies. The slice runner publishes the
+aggregate table after each package so later slices do not hide early evidence.
+`self-host-map.mjs` recovers the same map shape from `package-unit.mjs` source
+markers, preserving UTF-8 byte offsets for package-scale measurements.
+
+The isolated ranker test uses synthetic inputs, not compiler coverage:
+`JET_SCRATCH_ROOT=<disk-path> node Compiler/JetBackend/Tests/self-host-rank.test.mjs`.
+
+
 ### Entry-rooted monomorphization
 
 `Lower/Mono.jet` and `Lower/Reach.jet` prepare the executable inventory in one

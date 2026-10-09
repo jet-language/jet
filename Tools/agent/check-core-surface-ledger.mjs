@@ -2802,9 +2802,18 @@ function generatedCoreEnumRows(source, declarations) {
     "// naming a type is its canonical variant list.",
     "pub CORE_ENUM_ROWS :: [CoreModuleTypeExport]{",
   ];
+  // `core_module_enum_variants` authenticates the exporting module through its
+  // catalog row and reads the leaf's variants here, so every module that
+  // exports one enum leaf must declare the same variants.
+  const seen = new Map();
   for (const module of declarations.modules) {
     for (const type of module.types) {
       if (type.genericArity || !(type.variants && type.variants.length)) continue;
+      const variants = type.variants.join("|");
+      if (seen.has(type.name) && seen.get(type.name) !== variants) {
+        throw new Error(CORE_SOURCE_PATH + ": Core enum leaf " + type.name + " has different variants in " + module.module);
+      }
+      seen.set(type.name, variants);
       lines.push(
         "    CoreModuleTypeExport{name: " + jetStringExpression(type.name) +
         ", kind: CoreLeafKind.Enum{variants: [String]{" +
