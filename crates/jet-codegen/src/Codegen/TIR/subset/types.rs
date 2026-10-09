@@ -511,10 +511,7 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
     }
     if matches!(
         name.as_str(),
-        "Claims"
-            | "AuthError"
-            | "Session"
-            | "Auth"
+        "Auth"
             | "SyncText"
             | "SyncCounter"
             | "SyncMap"
@@ -591,6 +588,7 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
             | "DataLineOptions"
             | "AsyncPolicy" | "FieldError"
             | "EncodingLimits" | "EncodingCause" | "EncodingError"
+            | "__QueryRead"
             | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions"
             | "XMLRenderOptions" | "XMLCanonical" | "XMLError"
             | "RecipientReport" | "SendReport" | "Limits" | "DKIMConfig" | "SMTPConfig"

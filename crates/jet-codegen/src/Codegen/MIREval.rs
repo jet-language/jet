@@ -86,10 +86,6 @@ mod mir_human_output_semantics {
 }
 
 #[allow(dead_code)]
-mod mir_measurement_prelude {
-    include!("../Prelude/Core/Measurement.rs");
-}
-#[allow(dead_code)]
 mod mir_string_bytes_semantics {
     include!("../Prelude/Core/StringBytes.rs");
 }
@@ -2907,12 +2903,12 @@ fn eval_core_call_binding(
     }
     if module == "core.ui" {
         match member {
-            "null_backend" => {
+            "__null_backend" => {
                 return Ok(mir_ui_backend_value(MirUiBackend::Null(
                     mir_ui_kernel::jet_ui_null(),
                 )))
             }
-            "tui_backend" => {
+            "__tui_backend" => {
                 return Ok(mir_ui_backend_value(MirUiBackend::Tui(
                     mir_ui_kernel::jet_ui_tui(),
                 )))
@@ -3010,10 +3006,10 @@ fn eval_core_call_binding(
             resolved_ret,
         );
     }
-    if module == "core.testing" && member == "histories" {
+    if module == "core.testing" && member == "__histories_with_provenance" {
         return crate::Comptime::apply_core_call_without_ambient_with_type_args_and_history_schema(
             module,
-            member,
+            "__histories_with_provenance",
             values,
             span,
             false,
@@ -6246,16 +6242,20 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     self.prelude_row(*route, span)?.fallibility,
                     jet_foundation::MIR::MirCallFallibility::Infallible
                 );
-                let values = self.call_args(frame_index, args, span)?;
-                let value = self.eval_core_call(
-                    *call,
-                    *route,
-                    values,
-                    type_args,
-                    instruction.ty.as_ref(),
-                    data_plan.as_ref(),
-                    span,
-                )?;
+                let value = if let Some(text) = self.plain_enum_display(frame_index, *route, args, span)? {
+                    text
+                } else {
+                    let values = self.call_args(frame_index, args, span)?;
+                    self.eval_core_call(
+                        *call,
+                        *route,
+                        values,
+                        type_args,
+                        instruction.ty.as_ref(),
+                        data_plan.as_ref(),
+                        span,
+                    )?
+                };
                 if (!route_is_fallible
                     && matches!(
                         fallibility,
@@ -6815,9 +6815,15 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 for part in parts {
                     match part {
                         MirStringPart::Literal(value) => output.push_str(value),
-                        MirStringPart::Value(value) => output.push_str(&mir_show(
-                            &runtime_to_data(self.value(frame_index, *value, span)?, span)?,
-                        )),
+                        MirStringPart::Value(value) => {
+                            let ty = self.value_type(frame_index, *value, span)?.clone();
+                            let value = self.value(frame_index, *value, span)?;
+                            if self.contains_source_render_hook(&ty, false, &mut Vec::new()) {
+                                output.push_str(&self.render_source_value(value, &ty, false, span)?);
+                            } else {
+                                output.push_str(&mir_show(&runtime_to_data(value, span)?));
+                            }
+                        }
                     }
                 }
                 Ok(RuntimeValue::Data(MirEvalValue::String(output)))
@@ -13891,6 +13897,175 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
     ) -> Result<RuntimeValue, Diagnostic> {
         self.eval_prelude_runtime(call, args, result_ty, span)
     }
+
+    fn contains_source_render_hook(
+        &self,
+        ty: &MirType,
+        debug: bool,
+        visiting: &mut Vec<jet_foundation::MIR::MirTypeId>,
+    ) -> bool {
+        let operation = if debug { "debug" } else { "show" };
+        if jet_foundation::MIR::mir_source_value_hook(self.program, ty, operation).is_some() {
+            return true;
+        }
+        match ty.kind() {
+            MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. }
+            | MirTypeKind::Shared(inner) | MirTypeKind::Option(inner)
+            | MirTypeKind::Tagged { inner, .. } => self.contains_source_render_hook(inner, debug, visiting),
+            MirTypeKind::Map { key, value } => self.contains_source_render_hook(key, debug, visiting)
+                || self.contains_source_render_hook(value, debug, visiting),
+            MirTypeKind::Result { ok, err } => self.contains_source_render_hook(ok, debug, visiting)
+                || self.contains_source_render_hook(err, debug, visiting),
+            _ => {
+                let Some(def) = self.native_printable_type_def(ty) else { return false };
+                if visiting.contains(&def.id) { return false; }
+                visiting.push(def.id);
+                let substitutions = self.native_print_substitutions(def, ty);
+                let found = match &def.kind {
+                    MirTypeDefKind::Struct { fields, .. } => fields.iter().any(|field| {
+                        !field.computed && self.contains_source_render_hook(
+                            &substitute_print_type(&field.ty, &substitutions), debug, visiting,
+                        )
+                    }),
+                    MirTypeDefKind::Enum { variants, .. } => variants.iter().any(|variant| match &variant.payload {
+                        MirVariantPayload::Unit => false,
+                        MirVariantPayload::Single(inner) => self.contains_source_render_hook(
+                            &substitute_print_type(inner, &substitutions), debug, visiting,
+                        ),
+                        MirVariantPayload::Named(fields) => fields.iter().any(|field| {
+                            self.contains_source_render_hook(&substitute_print_type(&field.ty, &substitutions), debug, visiting)
+                        }),
+                    }),
+                    _ => false,
+                };
+                visiting.pop();
+                found
+            }
+        }
+    }
+
+    /// Shared private Core render hooks also run in the comptime MIR machine.
+    /// Preserve the checked type while descending into containers: a short
+    /// runtime type name is not authority to call a private Core method.
+    fn render_source_value(
+        &mut self,
+        value: RuntimeValue,
+        ty: &MirType,
+        debug: bool,
+        span: Span,
+    ) -> Result<String, Diagnostic> {
+        let operation = if debug { "debug" } else { "show" };
+        if let Some(function) = jet_foundation::MIR::mir_source_value_hook(self.program, ty, operation) {
+            let result = self.invoke_function(function, vec![value], Vec::new(), span)?;
+            return match runtime_to_data(result, span)? {
+                MirEvalValue::String(text) => Ok(text),
+                _ => Err(mir_error_at("source value renderer did not return String", span)),
+            };
+        }
+        if let MirTypeKind::Tagged { inner, .. } | MirTypeKind::Shared(inner) = ty.kind() {
+            return self.render_source_value(value, inner, debug, span);
+        }
+        let value = self.materialize_runtime(value, span)?;
+        let value = runtime_to_data(value, span)?;
+        match (ty.kind(), &value) {
+            (MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. }, MirEvalValue::List(values)) => {
+                let mut rendered = Vec::with_capacity(values.len());
+                for child in values {
+                    rendered.push(self.render_source_value(RuntimeValue::Data(child.clone()), inner, debug, span)?);
+                }
+                return Ok(format!("[{}]", rendered.join(", ")));
+            }
+            (MirTypeKind::Map { key, value: inner }, MirEvalValue::Map(values)) => {
+                let mut rendered = Vec::with_capacity(values.len());
+                for (child_key, child) in values {
+                    let child_key = mir_const_key_value(child_key);
+                    let key = self.render_source_value(RuntimeValue::Data(child_key), key, debug, span)?;
+                    let child = self.render_source_value(RuntimeValue::Data(child.clone()), inner, debug, span)?;
+                    rendered.push((key, child));
+                }
+                return Ok(jet_foundation::StructuralDebug::jet_debug_map(rendered));
+            }
+            (MirTypeKind::Option(inner) | MirTypeKind::Result { ok: inner, .. }, MirEvalValue::Present(child)) => {
+                let child = self.render_source_value(RuntimeValue::Data((**child).clone()), inner, debug, span)?;
+                return Ok(if debug { format!("Val({child})") } else { child });
+            }
+            (MirTypeKind::Result { err: inner, .. }, MirEvalValue::FailedTold(child)) => {
+                let child = self.render_source_value(RuntimeValue::Data((**child).clone()), inner, debug, span)?;
+                return Ok(format!("Err({child})"));
+            }
+            _ => {}
+        }
+        if let Some(def) = self.native_printable_type_def(ty).cloned() {
+            let substitutions = self.native_print_substitutions(&def, ty);
+            match (&def.kind, &value) {
+                (MirTypeDefKind::Struct { fields, .. }, MirEvalValue::Struct { fields: values, .. }) => {
+                    let mut rendered = Vec::with_capacity(fields.len());
+                    for (index, field) in fields.iter().filter(|field| !field.computed).enumerate() {
+                        let Some((_, child)) = values.iter().find(|(name, _)| print_names_match(name, &field.name))
+                            .or_else(|| values.get(index)) else {
+                            return Err(mir_error_at("source render field is missing", span));
+                        };
+                        let child_ty = substitute_print_type(&field.ty, &substitutions);
+                        let child = self.render_source_value(RuntimeValue::Data(child.clone()), &child_ty, debug, span)?;
+                        rendered.push(jet_foundation::StructuralDebug::JetDebugField {
+                            name: mir_source_name(&field.name).to_string(),
+                            value: child,
+                            storage_index: index,
+                            redacted: debug && field.redact,
+                        });
+                    }
+                    return Ok(jet_foundation::StructuralDebug::jet_debug_record_fields(mir_source_name(&def.name), rendered));
+                }
+                (MirTypeDefKind::Enum { variants, .. }, MirEvalValue::Enum { variant, args, .. }) => {
+                    let Some(row) = variants.iter().find(|row| print_names_match(&row.name, variant)) else {
+                        return Err(mir_error_at("source render variant is missing", span));
+                    };
+                    let name = mir_source_name(&row.name);
+                    return match &row.payload {
+                        MirVariantPayload::Unit => Ok(name.to_string()),
+                        MirVariantPayload::Single(child_ty) => {
+                            let Some((_, child)) = args.first() else {
+                                return Err(mir_error_at("source render variant payload is missing", span));
+                            };
+                            let child_ty = substitute_print_type(child_ty, &substitutions);
+                            let child = self.render_source_value(RuntimeValue::Data(child.clone()), &child_ty, debug, span)?;
+                            Ok(jet_foundation::StructuralDebug::jet_debug_variant(name, Some(child)))
+                        }
+                        MirVariantPayload::Named(fields) => {
+                            let mut rendered = Vec::with_capacity(fields.len());
+                            for (index, field) in fields.iter().enumerate() {
+                                let Some((_, child)) = args.iter().find(|(name, _)| name.as_deref().is_some_and(|name| print_names_match(name, &field.name)))
+                                    .or_else(|| args.get(index)) else {
+                                    return Err(mir_error_at("source render variant field is missing", span));
+                                };
+                                let child_ty = substitute_print_type(&field.ty, &substitutions);
+                                let child = self.render_source_value(RuntimeValue::Data(child.clone()), &child_ty, debug, span)?;
+                                rendered.push(jet_foundation::StructuralDebug::JetDebugField {
+                                    name: mir_source_name(&field.name).to_string(),
+                                    value: child,
+                                    storage_index: index,
+                                    redacted: debug && field.redact,
+                                });
+                            }
+                            Ok(jet_foundation::StructuralDebug::jet_debug_record_fields(name, rendered))
+                        }
+                    };
+                }
+                _ => {}
+            }
+        }
+        if let Some(text) = self.render_native_print_value(&value, ty, &BTreeMap::new(), span, debug) {
+            return Ok(text);
+        }
+        let value = crate::Comptime::MirBridge::mir_to_ct_value(value, span)?;
+        if debug {
+            Ok(value.debug_rust())
+        } else {
+            Ok(ct_source_display(&value)
+                .or_else(|| crate::Comptime::display_core_pure_value(&value))
+                .unwrap_or_else(|| value.jet_show()))
+        }
+    }
     /// D-DISPLAYDBG1 / I9: `{value}` of a plain enum (every case a unit case),
     /// or a list/option/map/shared value holding one, renders each case as its
     /// source name, as `print` and the AOT/resident `JetDisplay` renders do.
@@ -13907,15 +14082,21 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             return Ok(None);
         };
         let row = self.prelude_row(call, span)?;
-        if row.module != "core.text.fmt" || row.member != "display" {
+        if row.module != "core.text.fmt" || !matches!(row.member.as_str(), "display" | "debug") {
             return Ok(None);
         }
+        let debug = row.member == "debug";
         let ty = self.value_type(frame_index, arg.value, span)?.clone();
-        if !self.displays_through_plain_enum(&ty) {
-            return Ok(None);
+        if !self.contains_source_render_hook(&ty, debug, &mut Vec::new()) {
+            if debug || !self.displays_through_plain_enum(&ty) {
+                return Ok(None);
+            }
+            let value = self.value(frame_index, arg.value, arg.span)?;
+            return self.native_print_value(value, &ty, span).map(Some);
         }
         let value = self.value(frame_index, arg.value, arg.span)?;
-        self.native_print_value(value, &ty, span).map(Some)
+        let text = self.render_source_value(value, &ty, debug, span)?;
+        Ok(Some(RuntimeValue::Data(MirEvalValue::String(text))))
     }
 
     fn displays_through_plain_enum(&self, ty: &MirType) -> bool {
@@ -13945,6 +14126,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         ty: &MirType,
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
+        if self.contains_source_render_hook(ty, false, &mut Vec::new()) {
+            let text = self.render_source_value(value, ty, false, span)?;
+            return Ok(RuntimeValue::Data(MirEvalValue::String(text)));
+        }
         if !self.native_print_shape(ty, &BTreeMap::new()) {
             return self.print_display_text(value, span);
         }
@@ -14847,6 +15032,24 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             .into_iter()
             .map(|value| runtime_to_data(value, span))
             .collect::<Result<Vec<_>, Diagnostic>>()?;
+        if member == "list_swap" {
+            let first = int_value(values.first().cloned().ok_or_else(|| mir_error_at("List.__swap requires two indices", span))?, span)?;
+            let second = int_value(values.get(1).cloned().ok_or_else(|| mir_error_at("List.__swap requires two indices", span))?, span)?;
+            if let Some(MirEvalValue::List(items)) = self.place_data_mut(frame_index, place_id, span)? {
+                let result = mir_list_swap_checked(items, first, second);
+                return result
+                    .map(|()| Some(RuntimeValue::Data(MirEvalValue::Unit)))
+                    .map_err(|error| self.located_runtime_stop("E3010", "<core.prelude>", 0, &error.message(), span));
+            }
+            let mut receiver = runtime_to_data(self.read_place(frame_index, place_id, span)?, span)?;
+            let MirEvalValue::List(items) = &mut receiver else {
+                return Err(mir_error_at("List.__swap receiver is not a List", span));
+            };
+            mir_list_swap_checked(items, first, second)
+                .map_err(|error| self.located_runtime_stop("E3010", "<core.prelude>", 0, &error.message(), span))?;
+            self.write_place(frame_index, place_id, RuntimeValue::Data(receiver), span)?;
+            return Ok(Some(RuntimeValue::Data(MirEvalValue::Unit)));
+        }
         if let Some(receiver) = self.place_data_mut(frame_index, place_id, span)? {
             let result = mutate_mir_receiver(receiver, &member, values, result_ty, span)?;
             return Ok(Some(RuntimeValue::Data(result)));
@@ -15081,20 +15284,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             Err(_) => MirEvalValue::BigInt(value.to_string()),
         };
         let decimal = |value: f64| MirEvalValue::Float { value, f32: false };
-        let measurement = |value: f64, relative_uncertainty: f64| {
-            let (value, uncertainty) =
-                mir_measurement_prelude::jet_measurement_kernel_from_relative(
-                    value,
-                    relative_uncertainty,
-                );
-            MirEvalValue::Struct {
-                type_name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
-                fields: vec![
-                    ("value".to_string(), decimal(value)),
-                    ("uncertainty".to_string(), decimal(uncertainty)),
-                ],
-            }
-        };
 
         match symbol.as_str() {
             "jet_inline_range_from_int" => Ok(outcome(
@@ -15208,23 +15397,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     },
                 }
             }
-            "jet_unit_conversion_exact_measurement" => {
-                match jet_unit_conversion_exact(float(0)?, text(1)?, text(2)?, text(3)?, text(4)?) {
-                    Some(value) => Ok(MirEvalValue::Present(Box::new(measurement(
-                        value,
-                        float(5)?,
-                    )))),
-                    None => match target.option_inner() {
-                        Some(element) => Ok(MirEvalValue::Absent {
-                            element: element.clone(),
-                        }),
-                        None => Err(mir_error_at(
-                            "exact measured unit conversion requires an Option target",
-                            span,
-                        )),
-                    },
-                }
-            }
             "jet_unit_conversion_rounded" => {
                 let mode = match integer(5)? {
                     0 => UnitRoundingMode::TowardZero,
@@ -15244,28 +15416,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         integer(6)?,
                     )
                     .map(decimal),
-                ))
-            }
-            "jet_unit_conversion_rounded_measurement" => {
-                let mode = match integer(5)? {
-                    0 => UnitRoundingMode::TowardZero,
-                    1 => UnitRoundingMode::Floor,
-                    2 => UnitRoundingMode::Ceiling,
-                    3 => UnitRoundingMode::NearestEven,
-                    _ => return Err(mir_error_at("invalid checked unit rounding tag", span)),
-                };
-                let relative_uncertainty = float(7)?;
-                Ok(outcome(
-                    jet_unit_conversion_rounded(
-                        float(0)?,
-                        text(1)?,
-                        text(2)?,
-                        text(3)?,
-                        text(4)?,
-                        mode,
-                        integer(6)?,
-                    )
-                    .map(|value| measurement(value, relative_uncertainty)),
                 ))
             }
             _ => self.eval_prelude(call, args, Some(target), span),
@@ -15477,40 +15627,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             });
         }
 
-        if type_name == crate::Syntax::TYPE_MEASUREMENT && func == "new" {
-            let [value, uncertainty] = values else {
-                return Some(Err(mir_error_at(
-                    "Measurement.new requires value and uncertainty",
-                    span,
-                )));
-            };
-            let value = match value {
-                CtValue::Float(value) => value.as_f64(),
-                _ => return Some(Err(mir_error_at(
-                    "Measurement.new requires a Float value",
-                    span,
-                ))),
-            };
-            let uncertainty = match uncertainty {
-                CtValue::Float(uncertainty) => uncertainty.as_f64(),
-                _ => return Some(Err(mir_error_at(
-                    "Measurement.new requires a Float uncertainty",
-                    span,
-                ))),
-            };
-            let (value, uncertainty) =
-                mir_measurement_prelude::jet_measurement_kernel_new(value, uncertainty);
-            return Some(Ok(CtValue::Struct {
-                type_name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
-                fields: vec![
-                    ("value".to_string(), CtValue::Float(CtFloat::f64(value))),
-                    (
-                        "uncertainty".to_string(),
-                        CtValue::Float(CtFloat::f64(uncertainty)),
-                    ),
-                ],
-            }));
-        }
         let constructor = match (type_name, func) {
             (_, "from_str") if type_name == crate::Syntax::TYPE_DECIMAL => Some("decimal"),
             (_, "from_parts" | "new") if type_name == crate::Syntax::TYPE_FRACTION => {
@@ -16054,8 +16170,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 "file_reader.path"
                     | "file_writer.path"
                     | "file_reader.read_line"
+                    | "file_reader.read"
                     | "file_writer.write_line"
                     | "file_writer.flush"
+                    | "file_writer.write_all"
+                    | "file_writer.fsync"
             )
         {
             let mut call_args = args.into_iter();
@@ -21725,8 +21844,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
     ) -> Result<RuntimeValue, Diagnostic> {
         let route = self.prelude_row(route_id, span)?;
         let bounded = match member {
-            member if member == crate::Syntax::INTERNAL_CHANNEL_NEW_METHOD => false,
-            member if member == crate::Syntax::INTERNAL_CHANNEL_BOUNDED_METHOD => true,
+            member if member == crate::Syntax::INTERNAL_CHANNEL_NEW_METHOD || member == "__channel_new" => false,
+            member if member == crate::Syntax::INTERNAL_CHANNEL_BOUNDED_METHOD || member == "__channel_bounded" => true,
             _ => {
                 return Err(mir_error_at(
                     "MIR channel constructor has an unknown Core member",
@@ -21799,9 +21918,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
     ) -> Result<RuntimeValue, Diagnostic> {
         let expected_symbol = match member {
             "after" => "jet_std::after_value",
-            "interval" => "jet_std::interval",
-            "yield_now" => "jet_std::jet_task_yield",
-            "current_task" => "jet_std::jet_task_current_trace",
+            "__interval_ms" => "jet_std::interval",
+            "__yield_now" => "jet_std::jet_task_yield",
+            "__task_paused" => "jet_scheduler_task_paused",
+            "__task_cancelled" => "jet_scheduler_task_cancelled_state",
             _ => {
                 return Err(mir_error_at(
                     "MIR core.tasks runtime call has an unknown member",
@@ -21834,7 +21954,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     MirChannelEndpoint::Receiver(channel),
                 )))
             }
-            ("interval", [period]) => {
+            ("__interval_ms", [period]) => {
                 let delay = crate::scheduler::jet_task_interval_ms_defaulted(
                     mir_channel_timer_ms(period.clone(), span)? as i64,
                 );
@@ -21855,13 +21975,25 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     MirChannelEndpoint::Receiver(channel),
                 )))
             }
-            ("yield_now", []) => {
+            ("__yield_now", []) => {
                 crate::scheduler::jet_scheduler_yield_now();
                 Ok(RuntimeValue::Data(MirEvalValue::Unit))
             }
-            ("current_task", []) => Ok(RuntimeValue::Data(MirEvalValue::String(
-                crate::scheduler::jet_scheduler_current_task_trace(),
-            ))),
+            ("__task_paused" | "__task_cancelled", []) => {
+                let flag = if member == "__task_paused" {
+                    crate::scheduler::jet_scheduler_task_paused()
+                } else {
+                    crate::scheduler::jet_scheduler_task_cancelled_state()
+                };
+                Ok(match flag {
+                    Some(flag) => RuntimeValue::Data(MirEvalValue::Present(Box::new(
+                        MirEvalValue::Bool(flag),
+                    ))),
+                    None => RuntimeValue::Absent {
+                        element: MirType::from_kind(MirTypeKind::Bool),
+                    },
+                })
+            }
             _ => Err(mir_error_at(
                 "MIR core.tasks runtime call received the wrong arguments",
                 span,
@@ -22213,11 +22345,30 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 ));
             }
         }
+        if row.module == "core.math" && row.member == "__numeric_stop" {
+            let value = args.into_iter().next()
+                .ok_or_else(|| mir_error_at("MIR numeric stop expects one message", span))?;
+            let MirEvalValue::String(message) = runtime_to_data(value, span)? else {
+                return Err(mir_error_at("MIR numeric stop message is not a String", span));
+            };
+            return Err(self.located_runtime_stop("E3010", "", 0, &message, span));
+        }
         if row.module == "core.files" {
+            if row.member == "__lock_owner" {
+                let [path, fd] = args.as_slice() else {
+                    return Err(mir_error_at("MIR lock owner expects a path and descriptor", span));
+                };
+                let MirEvalValue::String(path) = runtime_to_data(path.clone(), span)? else {
+                    return Err(mir_error_at("MIR lock owner path is not a String", span));
+                };
+                let MirEvalValue::Int(fd) = runtime_to_data(fd.clone(), span)? else {
+                    return Err(mir_error_at("MIR lock owner descriptor is not an Int", span));
+                };
+                return Ok(RuntimeValue::FileOwner(crate::Comptime::mir_fs_lock_owner_raw(path, fd)));
+            }
             let result_name = match row.member.as_str() {
-                "temp_dir" => Some("TempDir"),
-                "temp_file" => Some("TempFile"),
-                "lock" => Some("FileLock"),
+                "temp_dir" | "__temp_dir_raw" => Some("TempDir"),
+                "temp_file" | "__temp_file_raw" => Some("TempFile"),
                 _ => None,
             };
             if result_name.is_some_and(|name| {
@@ -22245,7 +22396,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 let result = match row.member.as_str() {
                     "temp_dir" => crate::Comptime::mir_fs_temp_dir(&path),
                     "temp_file" => crate::Comptime::mir_fs_temp_file(&path),
-                    "lock" => crate::Comptime::mir_fs_lock(&path),
+                    "__temp_dir_raw" => crate::Comptime::mir_fs_temp_dir_raw(path),
+                    "__temp_file_raw" => crate::Comptime::mir_fs_temp_file_raw(path),
                     _ => unreachable!("owner constructor was selected above"),
                 };
                 return Ok(match result {
@@ -22406,7 +22558,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         }
         if row.module == "core.tasks"
             && (row.member == crate::Syntax::INTERNAL_CHANNEL_NEW_METHOD
-                || row.member == crate::Syntax::INTERNAL_CHANNEL_BOUNDED_METHOD)
+                || row.member == crate::Syntax::INTERNAL_CHANNEL_BOUNDED_METHOD
+                || matches!(row.member.as_str(), "__channel_new" | "__channel_bounded"))
         {
             self.ensure_core_route(id, route, span)?;
             return self.eval_channel_constructor(route, &row.member, args, result_ty, span);
@@ -22414,10 +22567,25 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         if row.module == "core.tasks"
             && matches!(
                 row.member.as_str(),
-                "after" | "interval" | "yield_now" | "current_task"
+                "after" | "__interval_ms" | "__yield_now" | "__task_paused" | "__task_cancelled"
             )
         {
             return self.eval_task_runtime_call(&row.member, row.symbol.name(), args, span);
+        }
+        if row.module == "core.tasks"
+            && matches!(row.member.as_str(), "__condition_notify_one" | "__condition_notify_all")
+        {
+            self.ensure_core_route(id, route, span)?;
+            let [condition] = args.as_slice() else {
+                return Err(mir_error_at("MIR Condition notify leaf expects one Condition", span));
+            };
+            let condition = mir_condition_protocol(condition.clone(), span)?;
+            if row.member == "__condition_notify_all" {
+                shared_protocol::jet_shared_condition_notify_all(&condition);
+            } else {
+                shared_protocol::jet_shared_condition_notify_one(&condition);
+            }
+            return Ok(RuntimeValue::Data(MirEvalValue::Unit));
         }
         if let Some(result) = self.eval_typed_core_call(&row, &args, type_args, span)? {
             return Ok(result);
@@ -22470,8 +22638,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             };
             let (function, captures, capture_cells) = self.closure_parts(callback.clone(), span)?;
             return crate::Comptime::with_world_rng_provider(
-                crate::scheduler::jet_scheduler_world_rng_next,
                 crate::scheduler::jet_scheduler_world_rng_seed,
+                crate::scheduler::jet_scheduler_world_rng_state,
+                crate::scheduler::jet_scheduler_world_rng_try_update,
                 || {
                     crate::scheduler::jet_testing_world(|world| {
                         let raw = register_deterministic_world(world);
@@ -22660,7 +22829,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 span,
             );
         }
-        if row.module == "core.net" && row.member == "tcp_listen" {
+        if row.module == "core.net" && matches!(row.member.as_str(), "tcp_listen" | "__tcp_listen") {
             let [address] = args.as_slice() else {
                 return Err(mir_error_at("MIR TCP listener expects one address", span));
             };
@@ -22690,7 +22859,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 fields: vec![("id".to_string(), MirEvalValue::Int(raw))],
             }));
         }
-        if row.module == "core.net" && row.member == "listener_local_socket_addr" {
+        if row.module == "core.net" && matches!(row.member.as_str(), "listener_local_socket_addr" | "__listener_local_socket_addr") {
             self.ensure_core_route(id, route, span)?;
             let [listener] = args.as_slice() else {
                 return Err(mir_error_at(
@@ -23074,24 +23243,26 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             return Ok(RuntimeValue::Data(result));
         }
         self.prelude_row(route, span)?;
+        if row.module == "core.crypto" && row.member == "__zeroize" {
+            // The Write argument is the caller's place, not a CtValue/host
+            // adapter copy. Keep the resident allocation until the wipe ends.
+            let [RuntimeValue::Address(address)] = args.as_slice() else {
+                return Err(mir_error_at(
+                    "core.crypto.__zeroize expects one writable [U8] place",
+                    span,
+                ));
+            };
+            require_address_access(address, MirAccess::Write, span)?;
+            self.zeroize_place_path(address.frame, address.place, &[], span)?;
+            return Ok(RuntimeValue::Data(MirEvalValue::Unit));
+        }
         let mut runtime_args = args
             .into_iter()
             .map(|value| self.materialize_runtime(value, span))
             .collect::<Result<Vec<_>, Diagnostic>>()?;
-        if row.module == "core.crypto" && row.member == "__zeroize" {
-            // D-SHAPE-RESOURCE1=A: the argument is the moved `bytes` storage of
-            // the closing secret. Wipe that storage itself; a CtValue copy
-            // would leave the resident bytes to be freed unwiped.
-            let [RuntimeValue::Data(bytes)] = runtime_args.as_mut_slice() else {
-                return Err(mir_error_at(
-                    "core.crypto.__zeroize expects one owned [U8] argument",
-                    span,
-                ));
-            };
-            mir_zeroize_owned_bytes(bytes, span)?;
-            return Ok(RuntimeValue::Data(MirEvalValue::Unit));
-        }
-        if row.module.is_empty() && row.member == "attach" {
+        if (row.module.is_empty() && row.member == "attach")
+            || (row.module == "core.prelude" && row.member == "__receipt_attach")
+        {
             let [payload_ty] = type_args else {
                 return Err(mir_error_at(
                     "MIR receipt attach requires one checked payload type argument",
@@ -23121,7 +23292,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             .map(crate::Comptime::MirBridge::mir_to_ast_type)
             .collect::<Vec<_>>();
         let resolved_ret = result_ty.map(crate::Comptime::MirBridge::mir_to_ast_type);
-        let history_schema = if row.module == "core.testing" && row.member == "histories" {
+        let history_schema = if row.module == "core.testing" && row.member == "__histories_with_provenance" {
             let provenance =
                 history_provenance_for_execution(self.program, self.execution.as_ref());
             type_args.first().and_then(|command_type| {
@@ -23439,6 +23610,55 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         }
         let _ = span;
         Ok(value)
+    }
+
+    /// Wipe an exclusive byte-list place without the read/writeback adapters'
+    /// clones. Projected storage is moved out temporarily and restored zeroed.
+    fn zeroize_place_path(
+        &mut self,
+        frame_index: usize,
+        place_id: MirPlaceId,
+        extra_steps: &[MoveStep],
+        span: Span,
+    ) -> Result<(), Diagnostic> {
+        if extra_steps.is_empty() {
+            if let Some(bytes) = self.place_data_mut(frame_index, place_id, span)? {
+                return mir_zeroize_bytes(bytes, span);
+            }
+        }
+        let place = program_function(self.program, self.frames[frame_index].function)?
+            .places.iter().find(|place| place.id == place_id)
+            .ok_or_else(|| mir_error_at("MIR zeroize place is unavailable", span))?
+            .clone();
+        let base = match &place.base {
+            MirPlaceBase::Local(local) => self.frames[frame_index].locals.get(local),
+            MirPlaceBase::Parameter(value) | MirPlaceBase::Temporary(value)
+                | MirPlaceBase::Capture(value) => self.frames[frame_index].values.get(value),
+            MirPlaceBase::Static(_) => None,
+        };
+        if let Some(RuntimeValue::Address(address)) = base {
+            let address = address.clone();
+            require_address_access(&address, MirAccess::Write, span)?;
+            let mut steps = self.raw_move_steps_for_place(frame_index, place_id, span)?;
+            steps.extend_from_slice(extra_steps);
+            let steps = self.canonicalize_address_steps(
+                address.frame, address.place, &steps, span,
+            )?;
+            return self.zeroize_place_path(address.frame, address.place, &steps, span);
+        }
+        let mut steps = self.raw_move_steps_for_place(frame_index, place_id, span)?;
+        steps.extend_from_slice(extra_steps);
+        let steps = self.canonicalize_move_steps_for_place(frame_index, place_id, &steps, span)?;
+        self.invalidate_base_overrides(frame_index, &place.base)?;
+        let base = self.take_base_value(frame_index, &place.base, span)?;
+        let (base, mut bytes) = self.take_runtime_steps(base, &steps, span)?;
+        let result = match &mut bytes {
+            RuntimeValue::Data(bytes) => mir_zeroize_bytes(bytes, span),
+            _ => Err(mir_error_at("MIR zeroize place is not [U8] storage", span)),
+        };
+        let restored = self.replace_runtime_steps(base, &steps, bytes, span)?;
+        self.store_base_value(frame_index, &place.base, restored, span)?;
+        result
     }
 
     fn place_data_mut(
@@ -25721,6 +25941,17 @@ fn mutate_mir_receiver(
     )?;
     *receiver = crate::Comptime::MirBridge::ct_to_mir_value(comptime_receiver, span)?;
     crate::Comptime::MirBridge::ct_to_mir_value(result, span)
+}
+
+fn mir_list_swap_checked(
+    items: &mut [MirEvalValue],
+    first: i64,
+    second: i64,
+) -> Result<(), crate::fixed_list::JetFixedListIndexError> {
+    let first = crate::fixed_list::jet_fixed_list_index(items.len(), first, |index| index)?;
+    let second = crate::fixed_list::jet_fixed_list_index(items.len(), second, |index| index)?;
+    items.swap(first, second);
+    Ok(())
 }
 
 fn direct_mutating_collection(
@@ -28162,7 +28393,7 @@ fn mir_zeroize_secret_record(value: &mut MirEvalValue, span: Span) -> Result<(),
         .iter_mut()
         .find(|(name, _)| name == "bytes")
         .ok_or_else(|| mir_error_at("MIR expiring secret has no bytes field", span))?;
-    mir_zeroize_owned_bytes(bytes, span)
+    mir_zeroize_bytes(bytes, span)
 }
 
 type MirClock = std::sync::Mutex<crate::Comptime::ClockRuntime::jet_std::Clock>;
@@ -30590,13 +30821,12 @@ fn runtime_from_ct(value: CtValue, span: Span) -> Result<RuntimeValue, Diagnosti
     }
 }
 
-/// D-SHAPE-RESOURCE1=A: wipe a moved `[U8]` in its own storage. Byte buffers
-/// go through the one vetted volatile kernel; a boxed list wipes each element
-/// cell in place.
-fn mir_zeroize_owned_bytes(value: &mut MirEvalValue, span: Span) -> Result<(), Diagnostic> {
+/// D-SHAPE-RESOURCE1=A: wipe an exclusively borrowed `[U8]` in its own storage.
+/// Byte buffers use the vetted volatile kernel; a boxed list wipes each cell.
+fn mir_zeroize_bytes(value: &mut MirEvalValue, span: Span) -> Result<(), Diagnostic> {
     match value {
         MirEvalValue::Bytes(bytes) => {
-            crate::Comptime::jet_crypto_zeroize(std::mem::take(bytes));
+            crate::Comptime::jet_crypto_zeroize(bytes);
             Ok(())
         }
         MirEvalValue::List(items) => {
@@ -30607,14 +30837,14 @@ fn mir_zeroize_owned_bytes(value: &mut MirEvalValue, span: Span) -> Result<(), D
                         span,
                     ));
                 };
-                // SAFETY: `byte` is a live, uniquely borrowed element of the moved list.
+                // SAFETY: `byte` is a live, uniquely borrowed list element.
                 unsafe { std::ptr::write_volatile(byte, 0) };
             }
             std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
         _ => Err(mir_error_at(
-            "core.crypto.__zeroize expects one owned [U8] argument",
+            "core.crypto.__zeroize expects one writable [U8] argument",
             span,
         )),
     }
@@ -32779,6 +33009,7 @@ fn run() {
                 script_body: std::mem::take(&mut prog.script_body),
                 block_spans: std::mem::take(&mut prog.block_spans),
                 source: src.to_string(),
+                core_identifier_demand: crate::Lexer::core_identifier_demand(&toks),
                 web_target_ceiling: prog.web_target_ceiling,
                 pub_file: prog.pub_file,
                 no_prelude: prog.no_prelude,
@@ -32862,5 +33093,208 @@ fn run() {
             interpret_stdout(EDIT_WAIT_PEER_CYCLE),
             "seen=2 ticket=3\n"
         );
+    }
+
+    #[test]
+    fn mir_expiring_secret_zeroize_preserves_original_record_storage() {
+        for bytes in [
+            MirEvalValue::Bytes(vec![0x11, 0x22, 0x33]),
+            MirEvalValue::List(vec![
+                MirEvalValue::Int(0x11),
+                MirEvalValue::Int(0x22),
+                MirEvalValue::Int(0x33),
+            ]),
+        ] {
+            let original = match &bytes {
+                MirEvalValue::Bytes(bytes) => bytes.as_ptr() as usize,
+                MirEvalValue::List(items) => items.as_ptr() as usize,
+                _ => unreachable!(),
+            };
+            let mut secret = MirEvalValue::Struct {
+                type_name: "Secret".into(),
+                fields: vec![("bytes".into(), bytes)],
+            };
+            mir_zeroize_secret_record(&mut secret, Span::new(0, 0))
+                .expect("expiry must wipe the resident secret record");
+            let MirEvalValue::Struct { fields, .. } = &secret else {
+                panic!("zeroize replaced the secret record");
+            };
+            match &fields[0].1 {
+                MirEvalValue::Bytes(bytes) => {
+                    assert_eq!(bytes.as_ptr() as usize, original);
+                    assert_eq!(bytes, &[0; 3]);
+                }
+                MirEvalValue::List(items) => {
+                    assert_eq!(items.as_ptr() as usize, original);
+                    assert_eq!(items.len(), 3);
+                    assert!(items.iter().all(|item| matches!(item, MirEvalValue::Int(0))));
+                }
+                _ => panic!("zeroize replaced the secret byte carrier"),
+            }
+        }
+    }
+
+    #[test]
+    fn mir_zeroize_writes_the_original_caller_allocation() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            use jet_foundation::MIR::*;
+            // Build the canonical call row directly: this machine-level witness
+            // needs no source loader and must also run against the old signature.
+            let row = MirCoreCall::from_record(
+                jet_foundation::Syntax::core_call("core.crypto", "__zeroize")
+                    .expect("canonical zeroize declaration"),
+            );
+            let route = MirPreludeCall {
+                id: MirPreludeCallId(stable_id("prelude-call", &row.key)),
+                family: MirPreludeFamily::StaticPrelude,
+                module: row.module.clone(),
+                member: row.member.clone(),
+                symbol: MirSymbol::Prelude(row.symbol.name().to_string()),
+                signature: MirCallSignature {
+                    arity: row.arity,
+                    max_arity: row.max_arity,
+                    borrow_mask: row.borrow_mask.clone(),
+                },
+                effect: row.effect,
+                fallibility: MirCallFallibility::Infallible,
+                abi: MirPreludeAbi::Effect,
+                authority: None,
+                db_metadata: None,
+            };
+            let span = Span { start: 0, end: 0 };
+            let ty = MirType::from_kind(MirTypeKind::List(Box::new(
+                MirType::from_kind(MirTypeKind::IntN { signed: false, bits: 8 }),
+            )));
+            let local = MirLocal {
+                id: MirLocalId(1),
+                name: "bytes".into(),
+                span,
+                ty: ty.clone(),
+                place: MirPlaceId(1),
+                mutable: true,
+                ownership: MirOwnership::Owned,
+                comptime: false,
+                uninit: false,
+                arena_view: false,
+                string_view: false,
+                gc_root: false,
+            };
+            let place = MirPlace {
+                id: local.place,
+                span,
+                ty,
+                base: MirPlaceBase::Local(local.id),
+                projections: Vec::new(),
+                access: MirAccess::Write,
+                persist_key: None,
+            };
+            let function = MirFunction {
+                id: MirFunctionId(1),
+                module_id: MirModuleId(1),
+                source_file: MirSourceFileId(1),
+                key: "zeroize-witness.run".into(),
+                module: "zeroize-witness".into(),
+                name: "run".into(),
+                span,
+                kind: MirFunctionKind::Jet,
+                form: MirFunctionForm::TopLevel,
+                visibility: MirVisibility::Private,
+                target_applicability: MirTargetApplicability {
+                    interpreter: true,
+                    ..Default::default()
+                },
+                web_bucket: None,
+                web_marker: None,
+                generic_params: Vec::new(),
+                capture_params: Vec::new(),
+                params: Vec::new(),
+                declared_return: None,
+                return_type: MirType::from_kind(MirTypeKind::Tuple(Vec::new())),
+                failure: MirFailureCarrier::Infallible,
+                effects: MirEffectFacts::default(),
+                captures: None,
+                generator: None,
+                optimization: MirOptimizationFacts::default(),
+                is_unsafe: false,
+                unsafe_gate: None,
+                is_pure: false,
+                memo_bound: None,
+                is_reactive: false,
+                reactive_upgrades: Vec::new(),
+                is_inline: false,
+                is_inline_always: false,
+                is_scalar: false,
+                kernel_proof: None,
+                gc_return: false,
+                return_view_provenance: None,
+                web_param_reconstructions: Vec::new(),
+                blocks: vec![MirBasicBlock {
+                    id: MirBlockId(1),
+                    span,
+                    instructions: Vec::new(),
+                    terminator: MirTerminator::Return { value: None },
+                }],
+                entry: MirBlockId(1),
+                locals: vec![local.clone()],
+                values: Vec::new(),
+                places: vec![place.clone()],
+                scopes: Vec::new(),
+                drops: Vec::new(),
+                foreign_language: None,
+            };
+            let program = MirProgram {
+                cffi: MirCffiFacts::default(),
+                schema_version: MIR_SCHEMA_VERSION,
+                package_identity: "zeroize-witness".into(),
+                facts: MirPackageFacts::default(),
+                names: MirNameFacts::default(),
+                modules: Vec::new(),
+                imports: Vec::new(),
+                types: Vec::new(),
+                traits: Vec::new(),
+                core_owners: Vec::new(),
+                impls: Vec::new(),
+                constants: Vec::new(),
+                fields: Vec::new(),
+                source_files: Vec::new(),
+                functions: vec![function],
+                foreign: Vec::new(),
+                links: Vec::new(),
+                callbacks: Vec::new(),
+                handles: Vec::new(),
+                jobs: Vec::new(),
+                tests: Vec::new(),
+                harnesses: Vec::new(),
+                artifacts: Vec::new(),
+                core_calls: vec![row.clone()],
+                prelude_calls: vec![route.clone()],
+                type_instances: Vec::new(),
+                codec_migrations: HashMap::new(),
+                unreachable: Vec::new(),
+            };
+            let function = &program.functions[0];
+            let bytes = vec![0x53u8, 0x45, 0x43, 0x52, 0x45, 0x54];
+            let original = bytes.as_ptr();
+            let mut frame = Frame::new(function, Vec::new(), Vec::new()).unwrap();
+            frame.locals.insert(local.id, RuntimeValue::Data(MirEvalValue::Bytes(bytes)));
+            let config = MirEvalConfig::default();
+            let mut machine = Machine::new(&program, &config, vec![frame], None, None);
+            let checked_args = function.blocks.iter()
+                .flat_map(|block| block.instructions.iter())
+                .find_map(|instruction| match &instruction.operation {
+                    MirOperation::CoreCall { call, args, .. } if *call == row.id => Some(args),
+                    _ => None,
+                }).expect("checked zeroize arguments");
+            let args = machine.call_args(0, checked_args, place.span)
+                .expect("marshal the real Write argument without cloning");
+            machine.eval_core_call(
+                row.id, route.id, args, &[], None, None, place.span,
+            ).expect("zeroize must accept the caller's writable place");
+            let RuntimeValue::Data(MirEvalValue::Bytes(bytes)) =
+                machine.frames[0].locals.get(&local.id).expect("caller storage remains live")
+            else { panic!("zeroize replaced the caller's buffer carrier") };
+            assert_eq!(bytes.as_ptr(), original, "zeroize replaced rather than wiped the allocation");
+            assert_eq!(bytes, &[0; 6], "the original allocation retained secret bytes");
+        });
     }
 }

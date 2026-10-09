@@ -2069,7 +2069,7 @@ fn run_sema_with_body(
         f.body = body;
     }
     let (diags, mut bundle) = if prog.imports.is_empty() {
-        let mut bundle = program_bundle(src, prog);
+        let mut bundle = program_bundle(src, prog, crate::Lexer::core_identifier_demand(&toks));
         let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check);
         (diags, bundle)
     } else {
@@ -2211,10 +2211,10 @@ fn checked_program(src: &str) -> Result<crate::AST::ProgramBundle, Vec<Diagnosti
     // File imports need Loader resolution. Import-free programs use the same
     // canonical one-module bundle checker as every other compile path.
     let mut bundle = if prog.imports.is_empty() {
-        program_bundle(src, prog)
+        program_bundle(src, prog, crate::Lexer::core_identifier_demand(&toks))
     } else {
         match write_unique_temp_file("check", src) {
-            Err(_) => program_bundle(src, prog),
+            Err(_) => program_bundle(src, prog, crate::Lexer::core_identifier_demand(&toks)),
             Ok(tmp_path) => {
                 let loaded = crate::Loader::load_entry(&tmp_path.to_string_lossy());
                 let _ = std::fs::remove_file(&tmp_path);
@@ -2233,7 +2233,11 @@ fn checked_program(src: &str) -> Result<crate::AST::ProgramBundle, Vec<Diagnosti
     }
 }
 
-fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::ProgramBundle {
+fn program_bundle(
+    src: &str,
+    mut prog: crate::AST::Program,
+    core_identifier_demand: crate::AST::CoreIdentifierDemand,
+) -> crate::AST::ProgramBundle {
     let path = std::path::PathBuf::from("<repl>");
     crate::AST::ProgramBundle {
         entry: 0,
@@ -2242,6 +2246,7 @@ fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::Progr
             path,
             display: "<repl>".to_string(),
             source: src.to_string(),
+            core_identifier_demand,
             alias: "main".to_string(),
             imports: std::mem::take(&mut prog.imports),
             items: std::mem::take(&mut prog.items),

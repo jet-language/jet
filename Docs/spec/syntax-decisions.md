@@ -213,6 +213,15 @@ Fields, including fields reached through list elements, support text append;
 direct indexed compound updates remain E0164 (copy, update, then store).
 User-record compound arithmetic requires the same operator hook as its binary
 form; without that hook sema reports E0360, before any execution tier runs.
+Operator implementation identity includes the left type, trait, and right type
+(D-OPMIX1). Hooks with different right types are distinct trait instantiations,
+not ordinary method-name overloads. Binary operators and explicit calls such as
+`value.mul(rhs)` select the same operand-pair hook; repeating one pair is E0908.
+Fields and ordinary methods still share the hook's member namespace: a field or
+ordinary `mul` beside a `Mul` hook is E0105, regardless of declaration order.
+Dot-call RHS inference and ownership checking happen once. Untyped decimal
+operands select their default exact Decimal pair (`price.mul(1.5)`); ordinary
+method parameters may still contextualize a decimal literal as Float.
 
 **D-INCR1 — Increment/decrement** *(retired 2026-09-28, owner decision, card
 #3727)*: `++` and `--` are not Jet operators. `x += 1` / `x -= 1` (S17) is the
@@ -969,10 +978,17 @@ ban.
 **S45 — Generic functions & types**: `fn largest<T: Comparable>(…)`,
 `struct Pair<T> { }`; multi-trait bounds are lists `<T: [A, B]>`
 (D-VARARGBOUND1). No `where`. **D-LIB2**: associated types + default method
-bodies; no higher-kinded types.
+bodies; no higher-kinded types. Method headers and bodies see the owner's
+generic parameters followed by the method's own parameters. A method parameter
+with the same name shadows the owner parameter; checking that lexical scope
+does not alter the method's declared generic signature.
 
 **S73 — Tuples**: named members only — `p :: (x: 1, y: 2)`, `p.x`, type
 position `(min: Int, max: Int)`. No positional tuples, no `.0`.
+Named tuple identity uses fields sorted by name at construction, irrespective of
+source spelling order. Synthesized Core signatures obey the same invariant,
+including tuples nested in containers, callbacks, and failure domains; assignment
+does not repair or suppress a mismatched identity.
 
 **S76 / D-FIXARR1 — Fixed-size lists**: `[T#N]` is a compile-time-length
 refinement of `[T]`, lowered to a **real stack array**. `::` + literal
@@ -1020,6 +1036,13 @@ is the three-element list; `[[Int]]{xs}` is a one-element list when
 `xs: [Int]` and the whole value when `xs: [[Int]]`; `[String:Int]{m}` is the
 map `m`. Spreads (`...xs`) and inferred-head bodies (`{ … }`, `.{ … }`) always
 use element notation.
+For a scalar conversion, the head is the result type; a nonliteral body is
+checked in its own type before conversion. Thus `Int{I64{value}}` produces an
+`Int`, and `U8{value %% 256}` keeps the inner arithmetic in `Int` rather than
+forcing `256` into a byte operand.
+Literal bodies remain range-checked (`U8{256}` and `I8{-129}` are E1003).
+Machine-float heads contextualize bare or signed decimal literals, not compound
+arithmetic; a Float value passed to `F32{value}` explicitly converts to F32.
 
 **S30 — Enums**:
 

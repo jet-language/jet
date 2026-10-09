@@ -76,3 +76,53 @@ fn run() {
         "all six private TCP field reads and six forged record fields must be rejected: {diagnostics:?}"
     );
 }
+
+#[test]
+fn configured_tls_client_keeps_native_builder_identity_and_exact_labels() {
+    let source = r#"
+use core.net as net
+use core.net.tls as tls
+
+fn run() -[Net, Time.Wait]> {
+    roots :: tls.RootCertificates.from_pem("invalid".bytes()) ?? return
+    config :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? return
+    bounded :: config.with_version_bounds(min: TLSVersion.TLS13, max: TLSVersion.TLS13) ?? return
+    protocols :: bounded.with_alpn(["http/1.1"]) ?? return
+    tcp :: net.tcp_connect("127.0.0.1:1") ?? return
+    _ :: tls.client(^tcp, server_name: "localhost", config: protocols, deadline: 1s)
+}
+"#;
+    tir_support::compile_source("configured_tls_client", source)
+        .expect("source endpoint convenience must not shadow the consumed-stream overload");
+    let bad_labels = source.replace("server_name:", "host:");
+    let diagnostics = tir_support::compile_source("configured_tls_client_bad_labels", &bad_labels)
+        .expect_err("configured TLS client must require its ratified exact labels");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0764"
+                && diagnostic.what == "`tls.client` has no parameter labelled `host`"
+        }),
+        "the canonical call binder must reject the substituted label: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn tls_pem_builders_validate_before_transport_in_aot() {
+    if !tir_support::have_rustc() {
+        return;
+    }
+    let source = r#"
+use core.net.tls as tls
+
+fn run() -[IO, Net]> {
+    print(tls.RootCertificates.from_pem("not PEM".bytes()) == .Err(_))
+    print(tls.ClientIdentity.from_pem(cert_chain: "not PEM".bytes(), private_key: "not PEM".bytes()) == .Err(_))
+    print(tls.ClientConfig.default().with_alpn([""]) == .Err(_))
+    print(tls.ClientConfig.default().with_version_bounds(min: TLSVersion.TLS13, max: TLSVersion.TLS12) == .Err(_))
+}
+"#;
+    let (code, stdout, stderr) =
+        tir_support::build_and_run_full("jet_tls_pem_validation", "invalid_pem", source);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "true\ntrue\ntrue\ntrue\n");
+}

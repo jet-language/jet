@@ -589,7 +589,8 @@ function scanCoreLibSource(text, relativePath) {
         pendingFunction = null;
       }
     } else if (char === "}") {
-      pendingFunction = null;
+      // A default parameter can close a value literal before the function body.
+      if (!pendingFunction || parens === pendingFunction.parens) pendingFunction = null;
       if (gates.length && gates[gates.length - 1] === depth) gates.pop();
       if (frames.length && frames[frames.length - 1].depth === depth) {
         const frame = frames.pop();

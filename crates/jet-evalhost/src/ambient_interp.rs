@@ -18,7 +18,7 @@ use jet_codegen::Comptime::{
 use jet_codegen::embedded_hardware::{
     JetHardwareHost, JetHardwareReplayHost as SharedHardwareReplayHost,
 };
-use jet_foundation::AST::{CtValue, Type};
+use jet_foundation::AST::{CtFloat, CtValue, Type};
 use jet_foundation::Diagnostics::{Diagnostic, Span};
 use jet_foundation::MIR::{
     MirConstKey, MirCoreClosureKind, MirForeign, MirPreludeCallId, MirRuntimeValue, MirSiteId,
@@ -1927,6 +1927,57 @@ fn testing_diag(message: impl Into<String>, span: Span) -> Diagnostic {
     )
 }
 
+// #4821: marshal only physical fd facts from the same private AOT seed.
+fn crypto_file_io_ambient_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    _resolved_ret: Option<Type>,
+    _sink: Option<&mut DevSink>,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if module != "core.crypto" || !method.starts_with("__jetc_") { return None; }
+    use crate::enc_stream::crypto_file_io as raw;
+    let result = match (method, args.as_slice()) {
+        ("__jetc_open_directory", [CtValue::Str(path)]) => raw::jet_crypto_jetc_open_directory(path),
+        ("__jetc_open_child_directory", [CtValue::Int(fd), CtValue::Str(name)]) =>
+            raw::jet_crypto_jetc_open_child_directory(*fd, name),
+        ("__jetc_open_source", [CtValue::Str(path)]) => raw::jet_crypto_jetc_open_source(path),
+        ("__jetc_create_named", [CtValue::Str(path)]) => raw::jet_crypto_jetc_create_named(path),
+        ("__jetc_tmpfile", [CtValue::Int(fd)]) => raw::jet_crypto_jetc_tmpfile(*fd),
+        ("__jetc_read", [CtValue::Int(fd), CtValue::Int(count)]) => raw::jet_crypto_jetc_read(*fd, *count),
+        ("__jetc_write", [CtValue::Int(fd), bytes, CtValue::Int(offset), CtValue::Int(count)]) => {
+            let bytes = match jet_foundation::Prelude::jet_as_bytes(bytes, span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            raw::jet_crypto_jetc_write(*fd, &bytes, *offset, *count)
+        }
+        ("__jetc_seek", [CtValue::Int(fd), CtValue::Int(offset)]) => raw::jet_crypto_jetc_seek(*fd, *offset),
+        ("__jetc_fsync", [CtValue::Int(fd)]) => raw::jet_crypto_jetc_fsync(*fd),
+        ("__jetc_link", [CtValue::Int(fd), CtValue::Int(parent), CtValue::Str(name)]) =>
+            raw::jet_crypto_jetc_link(*fd, *parent, name),
+        ("__jetc_close", [CtValue::Int(fd)]) => raw::jet_crypto_jetc_close(*fd),
+        ("__jetc_stat", [CtValue::Int(fd)]) => {
+            let stat = raw::jet_crypto_jetc_stat(*fd);
+            return Some(Ok(CtValue::Struct { type_name: "__JetcStat".into(), fields: vec![
+                ("status".into(), CtValue::Int(stat.status)), ("errno".into(), CtValue::Int(stat.errno)),
+                ("dev".into(), CtValue::Int(stat.dev)), ("ino".into(), CtValue::Int(stat.ino)),
+                ("len".into(), CtValue::Int(stat.len)), ("mtime".into(), CtValue::Int(stat.mtime)),
+                ("mtime_ns".into(), CtValue::Int(stat.mtime_ns)), ("nlink".into(), CtValue::Int(stat.nlink)),
+                ("is_file".into(), CtValue::Bool(stat.is_file)), ("is_dir".into(), CtValue::Bool(stat.is_dir)),
+            ] }));
+        }
+        // The checked private signatures own validation; no alternate behavior
+        // or a second diagnostic is introduced for malformed internal calls.
+        _ => return None,
+    };
+    Some(Ok(CtValue::Struct { type_name: "__JetcRaw".into(), fields: vec![
+        ("value".into(), CtValue::Int(result.value)), ("errno".into(), CtValue::Int(result.errno)),
+        ("bytes".into(), CtValue::Bytes(result.bytes)), ("linux".into(), CtValue::Bool(result.linux)),
+    ] }))
+}
+
 fn testing_ambient_core_call(
     module: &str,
     method: &str,
@@ -1939,40 +1990,46 @@ fn testing_ambient_core_call(
         return None;
     }
     match method {
-        "golden" => {
-            let [CtValue::Str(path), CtValue::Str(actual)] = args.as_slice() else {
-                return Some(Err(testing_diag(
-                    "core.testing.golden received malformed arguments",
-                    span,
-                )));
-            };
-            Some(Ok(CtValue::Bool(
-                crate::testing_shared::jet_testing_golden_result(path, actual).is_ok_and(|value| value),
-            )))
-        }
-        "fixture" => {
+        "__evidence_read" => {
             let [CtValue::Str(path)] = args.as_slice() else {
-                return Some(Err(testing_diag(
-                    "core.testing.fixture received malformed arguments",
-                    span,
-                )));
+                return Some(Err(testing_diag("core.testing.__evidence_read received malformed arguments", span)));
             };
-            Some(Ok(CtValue::Str(
-                crate::testing_shared::jet_testing_fixture_result(path).unwrap_or_default(),
-            )))
+            let facts = crate::testing_shared::jet_testing_evidence_read_raw(path);
+            Some(Ok(CtValue::Struct { type_name: "__EvidenceRead".into(), fields: vec![("ok".into(), CtValue::Bool(facts.ok)), ("text".into(), CtValue::Str(facts.text)), ("missing".into(), CtValue::Bool(facts.missing))] }))
         }
-        "temp_dir" => {
-            let [CtValue::Str(prefix)] = args.as_slice() else {
-                return Some(Err(testing_diag(
-                    "core.testing.temp_dir received malformed arguments",
-                    span,
-                )));
+        // I9 preserved gap: this tier has never observed native failure TLS.
+        "__record_failure" if matches!(args.as_slice(), [CtValue::Str(_), CtValue::Str(_)]) => Some(Ok(CtValue::Unit)),
+        "__clear_failure" if args.is_empty() => Some(Ok(CtValue::Unit)),
+        "__temp_facts" if args.is_empty() => {
+            let facts = crate::testing_shared::jet_testing_temp_facts_raw();
+            Some(Ok(CtValue::Struct { type_name: "__TempFacts".into(), fields: vec![("pid".into(), CtValue::Int(facts.pid as i64)), ("thread".into(), CtValue::Str(facts.thread))] }))
+        }
+        "__temp_join" => {
+            let [CtValue::Str(name)] = args.as_slice() else {
+                return Some(Err(testing_diag("core.testing.__temp_join received malformed arguments", span)));
             };
-            Some(
-                crate::testing_shared::jet_testing_temp_dir_path(prefix)
-                    .map(CtValue::Str)
-                    .map_err(|error| testing_diag(error.to_string(), span)),
-            )
+            let facts = crate::testing_shared::jet_testing_temp_join_raw(name);
+            Some(Ok(CtValue::Struct { type_name: "__TempPath".into(), fields: vec![("path".into(), CtValue::Bytes(facts.path)), ("text".into(), CtValue::Str(facts.text))] }))
+        }
+        "__temp_remove" => {
+            let [CtValue::Bytes(path)] = args.as_slice() else {
+                return Some(Err(testing_diag("core.testing.__temp_remove received malformed arguments", span)));
+            };
+            let facts = crate::testing_shared::jet_testing_temp_remove_raw(path);
+            Some(Ok(CtValue::Struct { type_name: "__TempRemove".into(), fields: vec![("ok".into(), CtValue::Bool(facts.ok)), ("missing".into(), CtValue::Bool(facts.missing)), ("cause".into(), CtValue::Str(facts.cause))] }))
+        }
+        "__temp_create" => {
+            let [CtValue::Bytes(path)] = args.as_slice() else {
+                return Some(Err(testing_diag("core.testing.__temp_create received malformed arguments", span)));
+            };
+            let facts = crate::testing_shared::jet_testing_temp_create_raw(path);
+            Some(Ok(CtValue::Struct { type_name: "__TempCreate".into(), fields: vec![("ok".into(), CtValue::Bool(facts.ok)), ("cause".into(), CtValue::Str(facts.cause))] }))
+        }
+        "__text_window" => {
+            let [CtValue::Str(text), CtValue::Int(start), CtValue::Int(end)] = args.as_slice() else {
+                return Some(Err(testing_diag("core.testing.__text_window received malformed arguments", span)));
+            };
+            Some(Ok(CtValue::Str(crate::testing_shared::jet_testing_text_window_raw(text, *start as u64, *end as u64))))
         }
         _ => None,
     }
@@ -1998,6 +2055,23 @@ fn sys_getpid_ambient_core_call(
 /// (`CoreHost::jit_env_*`, the host copy of the Prelude `EnvInit` overlay), so
 /// `set`/`unset`/`vars`/`get` agree with each other and with spawned children,
 /// and `executable` is the Prelude `jet_std_os_executable` kernel.
+fn files_fault_ambient_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    _resolved_ret: Option<Type>,
+    _sink: Option<&mut DevSink>,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if module != "core.files" || method != "__fault_should_fail" {
+        return None;
+    }
+    let [CtValue::Str(effect)] = args.as_slice() else {
+        return Some(Err(hardware_diag("core.files.__fault_should_fail expects one String", span)));
+    };
+    Some(Ok(CtValue::Bool(crate::fault_injection::jet_fault_should_fail(effect))))
+}
+
 fn sys_env_ambient_core_call(
     module: &str,
     method: &str,
@@ -2011,6 +2085,23 @@ fn sys_env_ambient_core_call(
     }
     let failed = |message: &str| CtValue::failed(Box::new(CtValue::Str(message.to_string())));
     match (method, args.as_slice()) {
+        ("__startup_env_columns", []) => Some(Ok(CtValue::List(
+            crate::CoreHost::jet_sys_startup_env_columns_raw().into_iter().map(CtValue::Bytes).collect(),
+        ))),
+        ("__env_columns", []) => Some(Ok(CtValue::List(
+            crate::CoreHost::jet_sys_env_columns_raw().into_iter().map(CtValue::Bytes).collect(),
+        ))),
+        ("__env_key_compare", [CtValue::Bytes(left), CtValue::Bytes(right)]) => Some(Ok(CtValue::Int(
+            crate::CoreHost::jet_sys_env_key_compare_raw(left, right),
+        ))),
+        ("__current_dir", []) => Some(Ok(match crate::CoreHost::os_rt::jet_sys_current_dir_raw() {
+            Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+            Err(cause) => failed(&cause),
+        })),
+        ("__set_current_dir", [CtValue::Str(path)]) => Some(Ok(match crate::CoreHost::os_rt::jet_sys_set_current_dir_raw(path) {
+            Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+            Err(cause) => failed(&cause),
+        })),
         ("get", [CtValue::Str(name)]) => Some(Ok(match crate::CoreHost::jit_env_value(name) {
             Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
             None => CtValue::absent(Type::String),
@@ -2031,11 +2122,83 @@ fn sys_env_ambient_core_call(
             ))),
             Err(error) => failed(error),
         })),
-        ("executable", []) => Some(Ok(CtValue::Str(
-            crate::CoreHost::os_executable_text(),
-        ))),
+        ("__executable", []) => Some(Ok(match crate::CoreHost::os_executable_text() {
+            Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+            None => CtValue::absent(Type::String),
+        })),
+        ("__cpu_count", []) => Some(Ok(sys_optional_int(crate::CoreHost::os_rt::jet_sys_cpu_count_raw()))),
+        ("__groups_count", []) => Some(Ok(sys_optional_int(crate::CoreHost::os_rt::jet_sys_groups_count_raw()))),
+        ("__umask", [CtValue::Int(mask)]) => Some(Ok(sys_optional_int(crate::CoreHost::os_rt::jet_sys_umask_raw(*mask)))),
+        ("__errno_text", [CtValue::Int(errno)]) => Some(Ok(CtValue::Str(crate::CoreHost::os_rt::jet_sys_errno_text_raw(*errno)))),
+        ("__getpgid", [CtValue::Int(pid)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_getpgid_raw(*pid)))),
+        ("__getsid", [CtValue::Int(pid)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_getsid_raw(*pid)))),
+        ("__getpriority", [CtValue::Int(who)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_getpriority_raw(*who)))),
+        ("__setpriority", [CtValue::Int(who), CtValue::Int(priority)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_setpriority_raw(*who, *priority)))),
+        ("__setuid", [CtValue::Int(uid)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_setuid_raw(*uid)))),
+        ("__setgid", [CtValue::Int(gid)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_setgid_raw(*gid)))),
+        ("__setpgid", [CtValue::Int(pid), CtValue::Int(pgid)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_setpgid_raw(*pid, *pgid)))),
+        ("__kill", [CtValue::Int(pid), CtValue::Int(signal)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_kill_raw(*pid, *signal)))),
+        ("__fork", []) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_fork_raw()))),
+        ("__setsid", []) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_setsid_raw()))),
+        ("__setpgrp", []) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_setpgrp_raw()))),
+        ("__utime", [CtValue::Str(path), CtValue::Int(atime), CtValue::Int(mtime)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_utime_raw(path, *atime, *mtime)))),
+        ("__mkfifo", [CtValue::Str(path), CtValue::Int(mode)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_mkfifo_raw(path, *mode)))),
+        ("__initgroups", [CtValue::Str(user), CtValue::Int(group)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_initgroups_raw(user, *group)))),
+        ("__wait", []) => Some(Ok(sys_wait_value(crate::CoreHost::os_rt::jet_sys_wait_raw()))),
+        ("__waitpid", [CtValue::Int(pid), CtValue::Int(options)]) => Some(Ok(sys_wait_value(crate::CoreHost::os_rt::jet_sys_waitpid_raw(*pid, *options)))),
+        ("__pipe", []) => {
+            let (available, value, errno, read_fd, write_fd) = crate::CoreHost::os_rt::jet_sys_pipe_raw();
+            Some(Ok(sys_tuple(&["available", "value", "errno", "read_fd", "write_fd"], vec![
+                CtValue::Bool(available), sys_exact(value), sys_exact(errno), sys_exact(read_fd), sys_exact(write_fd),
+            ])))
+        }
+        ("__groups_fill", [CtValue::Int(capacity)]) => {
+            let values = crate::CoreHost::os_rt::jet_sys_groups_fill_raw(*capacity);
+            Some(Ok(CtValue::List(values.into_iter().map(sys_exact).collect())))
+        }
+        ("__loadavg", []) => {
+            let (available, count, first, second, third) = crate::CoreHost::os_rt::jet_sys_loadavg_raw();
+            Some(Ok(sys_tuple(&["available", "count", "first", "second", "third"], vec![
+                CtValue::Bool(available), sys_exact(count), CtValue::Float(CtFloat::f64(first)),
+                CtValue::Float(CtFloat::f64(second)), CtValue::Float(CtFloat::f64(third)),
+            ])))
+        }
+        ("__times", []) => {
+            let (available, user, system, child_user, child_system, elapsed, ticks) = crate::CoreHost::os_rt::jet_sys_times_raw();
+            Some(Ok(sys_tuple(&["available", "user", "system", "child_user", "child_system", "elapsed", "ticks"], vec![
+                CtValue::Bool(available), sys_exact(user), sys_exact(system), sys_exact(child_user), sys_exact(child_system), sys_exact(elapsed), sys_exact(ticks),
+            ])))
+        }
         _ => None,
     }
+}
+
+fn sys_optional_int(value: Option<i64>) -> CtValue {
+    match value {
+        Some(value) => CtValue::Present(Box::new(CtValue::Int(value))),
+        None => CtValue::absent(Type::Int),
+    }
+}
+
+fn sys_exact(value: jet_foundation::Numeric::JetInt) -> CtValue {
+    CtValue::Int(value.to_i64().expect("OS sample originated as i64"))
+}
+
+fn sys_tuple(names: &[&str], values: Vec<CtValue>) -> CtValue {
+    CtValue::Struct {
+        type_name: format!("({})", names.join(",")),
+        fields: names.iter().zip(values).map(|(name, value)| ((*name).to_string(), value)).collect(),
+    }
+}
+
+fn sys_sample_value(sample: (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt)) -> CtValue {
+    let (available, value, errno) = sample;
+    sys_tuple(&["available", "value", "errno"], vec![CtValue::Bool(available), sys_exact(value), sys_exact(errno)])
+}
+
+fn sys_wait_value(sample: (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt)) -> CtValue {
+    let (available, value, errno, status) = sample;
+    sys_tuple(&["available", "value", "errno", "status"], vec![CtValue::Bool(available), sys_exact(value), sys_exact(errno), sys_exact(status)])
 }
 
 
@@ -2090,6 +2253,12 @@ pub fn with_interpreter_ambient<R>(
         context.register_core_call(sys_getpid_ambient_core_call);
         context.register_core_call(sys_env_ambient_core_call);
         context.register_core_call(testing_ambient_core_call);
+        context.register_core_call(files_fault_ambient_core_call);
+        context.register_core_call(crypto_file_io_ambient_core_call);
+        context.register_core_call(crate::Time::ambient_core_call);
+        context.register_core_call(crate::IO::ambient_core_call);
+        context.register_core_call(crate::CoreHost::walk_ambient_core_call);
+        context.register_core_call(crate::IO::terminal8_ambient_core_call);
         context.register_mir_extern(crate::Ffi::ambient_mir_extern_call);
         context.register_mir_handle(crate::Process::ambient_mir_handle);
         let previous = ACTIVE_CONTEXT.with(|slot| slot.replace(Some(context.clone())));

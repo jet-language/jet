@@ -67,7 +67,7 @@ fn run() {
     lock_path :: files.join(root, "value.lock")
     shown_lock_path :: make_lock_path(lock_path)
     print(shown_lock_path == lock_path)
-    print(!files.exists(lock_path))
+    print(files.exists(lock_path))
 }
 "#
     .replace("__FIXTURE__", &fixture);
@@ -354,7 +354,7 @@ fn run() {
     lock :: files.lock(lock_path) ?? panic("lock")
     print(files.exists(lock_path))
     close(^lock)
-    print(!files.exists(lock_path))
+    print(files.exists(lock_path))
 
     // The old owner's lexical exit must not delete a new ordinary file at
     // the same path after its consuming close.
@@ -461,13 +461,14 @@ fn failed_replacement(root: String) -> String {
     old_path :: files.join(root, "old.lock")
     owner := files.lock(old_path) ?? panic("old lock")
     occupied :: files.join(root, "occupied.lock")
-    files.write(occupied, "occupied") ?? panic("occupy")
-    owner = files.lock(occupied) ?? {
+    contender :: files.lock(occupied) ?? panic("hold occupied")
+    owner = files.lock(occupied, timeout: Val(core.time.duration_ms(1))) ?? {
         print(files.exists(old_path))
+        close(^contender)
         files.remove(occupied) ?? panic("remove occupied")
         return old_path
     }
-    panic("lock of occupied path must fail")
+    panic("lock of held path must time out")
 }
 
 fn replace_aggregate_slot() {
@@ -486,7 +487,7 @@ fn run() {
     print(!files.exists(paths[1]))
     replace_moved_slot()
     old_lock :: failed_replacement("__ROOT__")
-    print(!files.exists(old_lock))
+    print(files.exists(old_lock))
     replace_aggregate_slot()
 }
 "#.replace("__ROOT__", &root);

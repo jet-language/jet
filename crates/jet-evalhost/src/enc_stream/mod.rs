@@ -31,6 +31,7 @@ mod stdin_reader {
 }
 
 pub(crate) use stdin_reader::JetStdinReader as SourceStdinReader;
+pub(crate) use stdin_reader::jet_stdin_line_raw;
 
 pub(crate) fn source_stdin_reader() -> SourceStdinReader {
     stdin_reader::jet_std_io_stdin()
@@ -48,7 +49,7 @@ mod file_stream {
 
     mod jet_std {
         pub(super) use crate::ProcessPrelude::process_prelude::jet_std::{
-            io_error_at, IOError, IOOperation
+            io_error_at, jet_fs_link_fd_at_raw, jet_fs_open_at, jet_fs_stat_file, IOContext, IOError, IOOperation
         };
 
         pub(super) fn jet_std_files_writer_refusal(path: &String) -> Option<IOError> {
@@ -67,6 +68,11 @@ mod file_stream {
     }
 
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FileStream.rs");
+}
+
+// #4821 private physical seed shared with AOT. No crypto policy lives here.
+pub(crate) mod crypto_file_io {
+    include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoFileIo.rs");
 }
 
 /// Canonical stream runtime (jet_std types + EncodingStream algorithm).
@@ -233,15 +239,6 @@ pub(crate) mod runtime {
             pub(crate) terminal: Option<EncodingError>,
             pub(crate) eof: bool,
             pub(crate) record_index: i64
-        }
-        pub struct CSVWriter {
-            pub(crate) output: super::JetFileWriter,
-            pub(crate) limits: EncodingLimits,
-            pub(crate) terminal: Option<EncodingError>,
-            pub(crate) total: i64,
-            pub(crate) record_index: i64,
-            pub(crate) finished: bool,
-            pub(crate) pending_crlf: bool
         }
         pub struct XMLReader {
             pub(crate) input: super::JetFileReader,
@@ -435,42 +432,6 @@ pub(crate) mod runtime {
         reader: &mut jet_std::JSONLReader,
     ) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
         jet_enc_jsonl_reader_next(reader).map(|found| found.ok())
-    }
-    pub(crate) fn enc_csv_writer(
-        output: JetFileWriter,
-        limits: jet_std::EncodingLimits,
-    ) -> Result<jet_std::CSVWriter, jet_std::EncodingError> {
-        jet_enc_csv_writer(output, limits)
-    }
-    pub(crate) fn enc_csv_reader(
-        input: JetFileReader,
-        limits: jet_std::EncodingLimits,
-        delimiter: String,
-        header: bool,
-        skip_blank: bool,
-    ) -> Result<jet_std::CSVReader, jet_std::EncodingError> {
-        jet_enc_csv_reader(input, limits, delimiter, header, skip_blank)
-    }
-    pub(crate) fn enc_csv_writer_write(
-        writer: &mut jet_std::CSVWriter,
-        row: Vec<String>,
-    ) -> Result<(), jet_std::EncodingError> {
-        jet_enc_csv_writer_write(writer, row)
-    }
-    pub(crate) fn enc_csv_writer_flush(
-        writer: &mut jet_std::CSVWriter,
-    ) -> Result<(), jet_std::EncodingError> {
-        jet_enc_csv_writer_flush(writer)
-    }
-    pub(crate) fn enc_csv_writer_finish(
-        writer: &mut jet_std::CSVWriter,
-    ) -> Result<(), jet_std::EncodingError> {
-        jet_enc_csv_writer_finish(writer)
-    }
-    pub(crate) fn enc_csv_reader_next(
-        reader: &mut jet_std::CSVReader,
-    ) -> Result<Option<jet_std::CSVRow>, jet_std::EncodingError> {
-        jet_enc_csv_reader_next(reader).map(|found| found.ok())
     }
     pub(crate) fn enc_cbor_writer(
         output: JetFileWriter,

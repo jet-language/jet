@@ -14,9 +14,6 @@ use jet_foundation::Diagnostics::{Diagnostic, Span};
 // The Foundation carrier's tier-side accessors are a trait defined by the
 // included Prelude `DataTree.rs`; the host adapters below call them by name.
 
-mod encoding_base_rt {
-    include!("../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
-}
 
 mod encoding_error_rt {
 }
@@ -156,6 +153,14 @@ pub(crate) mod data_query_rt {
     include!("../../jet-codegen/src/Prelude/Core/LazyTablePlan.rs");
 }
 
+mod csv_query_raw {
+    use super::json_rt as jet_std;
+    include!("../../jet-codegen/src/Prelude/Core/CsvQueryRead.rs");
+    pub(crate) mod sql {
+        include!("../../jet-codegen/src/Prelude/Core/SqlQuery.rs");
+    }
+}
+
 /// Canonical YAML via build.rs-stripped include (trailing prelude brace removed).
 mod yaml_rt {
     use super::json_rt::DataTree;
@@ -164,13 +169,6 @@ mod yaml_rt {
     include!(concat!(env!("OUT_DIR"), "/yaml_std.rs"));
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    encoding_base_rt::jet_std_hex_encode(&bytes.to_vec())
-}
-
-fn hex_decode(text: &str) -> Result<Vec<u8>, String> {
-    encoding_base_rt::jet_std_hex_decode(&text.to_string())
-}
 
 // ── CSV (shared with the AOT Prelude and comptime parser) ─────────────────────
 
@@ -266,9 +264,78 @@ fn decode_under_ambient_core_call(
     Some(Ok(result))
 }
 
+// Aliases for the exact existing D-JSON3 clock and stderr leaves. The walk
+// and audit formatting stay in Core/encoding/json.jet.
+fn coerce_ambient_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    _span: Span,
+    _resolved_ret: Option<Type>,
+    sink: Option<&mut jet_codegen::Comptime::DevSink>,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if module != "core.encoding" {
+        return None;
+    }
+    let value = match (method, args.as_slice()) {
+        ("__coerce_now", []) => CtValue::Int(
+            crate::enc_stream::runtime::jet_raw_json_coerce_now(),
+        ),
+        ("__coerce_emit", [CtValue::Str(line)]) => {
+            if let Some(sink) = sink {
+                sink.stderr.push_str(&crate::IO::term_prelude::jet_term_print_frame(line));
+            } else {
+                crate::enc_stream::runtime::jet_raw_json_coerce_emit(line);
+            }
+            CtValue::Unit
+        }
+        _ => return None,
+    };
+    Some(Ok(value))
+}
+
+fn csv_query_ambient_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    _resolved_ret: Option<Type>,
+    _sink: Option<&mut jet_codegen::Comptime::DevSink>,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if module != "core.encoding" { return None; }
+    let result = match (method, args.as_slice()) {
+        ("__query_read_bounded", [CtValue::Str(path), CtValue::Int(max)]) => {
+            csv_query_raw::jet_data_query_read_bounded(path, *max).map(|sample| {
+                let size = i64::try_from(sample.size).map(CtValue::Int).unwrap_or_else(|_| {
+                    CtValue::BigInt(jet_foundation::Numeric::CtBigInt::from_str(&sample.size.to_string())
+                        .expect("metadata length is an exact unsigned integer"))
+                });
+                CtValue::Struct { type_name: "__QueryRead".to_string(), fields: vec![
+                    ("size".to_string(), size), ("bytes".to_string(), CtValue::Bytes(sample.bytes)),
+                ] }
+            })
+        }
+        ("__query_validate_fields", [CtValue::List(fields), CtValue::Str(sql)]) => {
+            let fields = fields.iter().map(|field| match field {
+                CtValue::Str(field) => Ok(field.clone()),
+                _ => Err(decode_under_diag("CSV query header is not [String]", span)),
+            }).collect::<Result<Vec<_>, _>>();
+            let fields = match fields { Ok(fields) => fields, Err(error) => return Some(Err(error)) };
+            csv_query_raw::sql::jet_data_query_validate_fields_raw(&fields, sql).map(|()| CtValue::Unit)
+        }
+        _ => return None,
+    };
+    Some(Ok(match result {
+        Ok(value) => CtValue::Present(Box::new(value)),
+        Err(reason) => CtValue::failed(Box::new(CtValue::Str(reason))),
+    }))
+}
+
 pub(crate) fn register_interpreter_ambient(
     context: &mut crate::InterpreterAmbientContext,
 ) {
     context.register_core_call(decode_under_ambient_core_call);
+    context.register_core_call(coerce_ambient_core_call);
+    context.register_core_call(csv_query_ambient_core_call);
 }
 

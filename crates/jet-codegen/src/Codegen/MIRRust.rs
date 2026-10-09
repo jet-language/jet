@@ -17,6 +17,8 @@ use jet_foundation::Shape::ShapeProjectionKind;
 use jet_foundation::Syntax::CoreCallSymbol;
 use jet_foundation::MIR::*;
 
+const CORE_NET_RESOLVE_ERROR_TYPE: &str = "<corelib>/Core/net::Core/net/net.jet::__ResolveError";
+
 /// Which MIR target partition this printer emits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MirRustTarget {
@@ -1175,15 +1177,8 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
             let unit = units.as_ref().map(|units| units.module_unit(def.module, def.span.start));
             if emitter.declares_type_def(def) || carrierless_records.contains(&def.id) {
                 emitter.emit_type_def(def, EmissionUnits::sink(&mut units, out, unit));
-            } else if emitter.module_selected(def.module)
-                && !emitter.runtime_declares_type(def)
-                && is_canonical_core_native_type(&def.key)
-                && is_source_owned_core_web_query_enum(&def.key)
-            {
-                emitter.emit_structural_show_impl(def, EmissionUnits::sink(&mut units, out, unit));
             }
         }
-        emitter.emit_period_anchor_impls(EmissionUnits::sink(&mut units, out, None));
         emitter.emit_history_strategies(EmissionUnits::sink(&mut units, out, None));
         for trait_def in &program.traits {
             let emit_compiler_rollback = trait_def.name == crate::Syntax::TRAIT_ROLLBACK;
@@ -3075,47 +3070,6 @@ fn wrap_cfg_not_release(out: &mut String, start: usize, indent: usize) {
 }
 
 
-fn is_source_owned_core_compute_shape(name: &str) -> bool {
-    name.starts_with("<corelib>/Core/compute::")
-}
-fn is_source_owned_core_net_shape(name: &str) -> bool {
-    if !name.starts_with("<corelib>/") {
-        return false;
-    }
-    let leaf = crate::Codegen::core_source_type_leaf(name);
-    (name.starts_with("<corelib>/Core/net::")
-        && matches!(
-            leaf,
-            "SocketAddr"
-                | "UDPSocket"
-                | "UDPPacket"
-                | "UnixStream"
-                | "UnixListener"
-                | "SRVRecord"
-        ))
-        || (name.starts_with("<corelib>/Core/net/tls::")
-            && matches!(leaf, "TLSCertificate" | "TLSPeerIdentity"))
-}
-
-fn is_source_owned_core_web_query_shape(name: &str) -> bool {
-    name.starts_with("<corelib>/Core/web::Core/web/query.jet::")
-        && matches!(
-            crate::Codegen::core_source_type_leaf(name),
-            "WebQuery" | "WebQueryState" | "WebMutationState"
-        )
-}
-fn is_source_owned_core_web_query_enum(name: &str) -> bool {
-    name.starts_with("<corelib>/Core/web::Core/web/query.jet::")
-        && matches!(
-            crate::Codegen::core_source_type_leaf(name),
-            "WebQueryNetworkMode" | "WebMutationStatus" | "WebQueryStatus"
-        )
-}
-
-fn native_core_query_enum_variant_name(name: &str) -> &str {
-    name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-        .unwrap_or(name)
-}
 
 /// The Rust identifier of one Jet enum variant. A grouped leaf keeps its complete
 /// dotted identity (`Net.Ping`), which is not a Rust identifier, so it takes the
@@ -3129,40 +3083,13 @@ fn mangle_variant(name: &str) -> String {
     }
 }
 
-fn native_core_query_enum_trait_impl<'a>(
-    type_name: &str,
-    rust_trait: &str,
-    value_method: &str,
-    variants: impl Iterator<Item = &'a str>,
-) -> String {
-    let mut out = String::new();
-    let _ = writeln!(out, "impl {rust_trait} for {type_name} {{");
-    let _ = writeln!(out, "    fn {value_method}(&self) -> String {{");
-    let _ = writeln!(out, "        match self {{");
-    for source_variant in variants {
-        let variant = native_core_query_enum_variant_name(source_variant);
-        let variant_name = quote_rust_string(variant);
-        let _ = writeln!(
-            out,
-            "            Self::{variant} => jet_debug_variant({variant_name}, None),"
-        );
-    }
-    let _ = writeln!(out, "        }}");
-    let _ = writeln!(out, "    }}\n}}\n");
-    out
-}
-
-
 /// Core native maps are leaf-indexed, but only canonical Core identities may
 /// be reduced to a leaf. Keep arbitrary qualified user types intact.
 fn core_native_probe_name(name: &str) -> &str {
     // Keep canonical Core source types when their shape differs from a
     // same-leaf native carrier.
     if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy"))
-        || is_source_owned_core_compute_shape(name)
-        || is_source_owned_core_net_shape(name)
-        || is_source_owned_core_web_query_shape(name)
-        || crate::Codegen::core_source_record_owns_layout(name)
+        || jet_foundation::CoreModuleExports::core_source_owns_type(name)
     {
         name
     } else if name.starts_with("<corelib>/") {
@@ -3184,11 +3111,7 @@ fn expression_path_generics(path: String) -> String {
 }
 
 fn has_native_type_projection(name: &str) -> bool {
-    if is_source_owned_core_compute_shape(name)
-        || is_source_owned_core_net_shape(name)
-        || is_source_owned_core_web_query_shape(name)
-        || crate::Codegen::core_source_record_owns_layout(name)
-    {
+    if jet_foundation::CoreModuleExports::core_source_owns_type(name) {
         return false;
     }
     let probe = core_native_probe_name(name);
@@ -3242,7 +3165,10 @@ fn is_net_tls_client_bridge_call(symbol: &MirSymbol) -> bool {
     matches!(
         symbol,
         MirSymbol::Prelude(symbol) | MirSymbol::Runtime(symbol)
-            if symbol == "jet_net_tls_client"
+            if matches!(symbol.as_str(),
+                "jet_net_tls_client" | "jet_net_tls_client_deadline" |
+                "jet_net_tls_client_config_deadline" | "jet_tls_root_certificates_from_pem" |
+                "jet_tls_client_identity_from_pem")
     )
 }
 
@@ -3269,8 +3195,7 @@ fn native_net_error_detail_field(
 mod core_native_projection_tests {
     use super::{
         core_native_probe_name, is_canonical_core_native_type, is_net_tls_client_bridge_call,
-        is_source_owned_core_web_query_enum, native_core_query_enum_trait_impl,
-        native_core_query_enum_variant_name, native_net_error_detail_field, MirSymbol,
+        native_net_error_detail_field, MirSymbol,
     };
 
     #[test]
@@ -3305,12 +3230,25 @@ mod core_native_projection_tests {
             "<corelib>/Core/http::Core/http/http.jet::Body",
             "<corelib>/Core/http::Core/http/http.jet::Headers",
             "<corelib>/Core/http::Core/http/http.jet::Query",
+            "<corelib>/Core/time::Core/time/time.jet::LocalDate",
+            "<corelib>/Core/time::Core/time/time.jet::LocalTime",
+            "<corelib>/Core/time::Core/time/time.jet::DateTime",
+            "<corelib>/Core/time::Core/time/time.jet::Period",
+            "<corelib>/Core/time::Core/time/time.jet::Zone",
+            "<corelib>/Core/time::Core/time/time.jet::ZonedDateTime",
+            "<corelib>/Core/time::Core/time/time.jet::Instant",
+            "<corelib>/Core/time::Core/time/time.jet::TimeError",
         ] {
             assert_eq!(core_native_probe_name(source_record), source_record);
             assert!(!is_canonical_core_native_type(source_record));
-            if crate::Codegen::core_source_record_owns_layout(source_record) {
-                assert!(crate::Codegen::core_rust_type_name(source_record).is_none());
-            }
+            assert!(crate::Codegen::core_rust_type_name(source_record).is_none());
+        }
+        assert_eq!(crate::Codegen::core_rust_type_name("app::TimeError"), None);
+        for source_type in [
+            "Instant", "Date", "LocalDate", "LocalTime", "DateTime", "Period", "Zone",
+            "ZonedDateTime", "TimeError",
+        ] {
+            assert!(crate::Codegen::root_prelude_rust_type_name(source_type).is_none());
         }
         assert_eq!(
             crate::Codegen::root_prelude_rust_type_name("WebQuery"),
@@ -3336,38 +3274,30 @@ mod core_native_projection_tests {
             crate::Codegen::compute_handle_rust_type("Tensor"),
             Some("JetTensor")
         );
-        assert_eq!(
-            crate::Codegen::root_prelude_rust_type_name(core_native_probe_name(query_mode)),
-            Some("JetWebQueryNetworkMode")
-        );
-        assert_eq!(
-            crate::Codegen::root_prelude_rust_type_name(core_native_probe_name(mutation_status)),
-            Some("JetWebMutationStatus")
-        );
-        assert_eq!(
-            crate::Codegen::root_prelude_rust_type_name(core_native_probe_name(query_status)),
-            Some("JetWebQueryStatus")
-        );
-        assert!(is_canonical_core_native_type(query_mode));
-        assert!(is_canonical_core_native_type(mutation_status));
-        assert!(is_canonical_core_native_type(query_status));
+        for source_enum in [query_mode, mutation_status, query_status] {
+            assert_eq!(core_native_probe_name(source_enum), source_enum);
+            assert!(!is_canonical_core_native_type(source_enum));
+        }
         assert!(!is_canonical_core_native_type(
             "<corelib>/Core/web::Core/web/query.jet::WebQueryError"
         ));
         let source_owned_policy = "<corelib>/Core/sync::Core/sync/policy.jet::RowPolicy";
         assert_eq!(core_native_probe_name(source_owned_policy), source_owned_policy);
         assert!(!is_canonical_core_native_type(source_owned_policy));
-        for source_record in [
-            "<corelib>/Core/net::Core/net/net.jet::SocketAddr",
-            "<corelib>/Core/net::Core/net/net.jet::UDPPacket",
-            "<corelib>/Core/net::Core/net/net.jet::UnixListener",
-            "<corelib>/Core/net::Core/net/net.jet::UnixStream",
-            "<corelib>/Core/net/tls::Core/net/tls.jet::TLSCertificate",
-            "<corelib>/Core/net/tls::Core/net/tls.jet::TLSPeerIdentity",
+        for (source_record, native_record) in [
+            ("<corelib>/Core/net::Core/net/net.jet::SocketAddr", "JetSocketAddr"),
+            ("<corelib>/Core/net::Core/net/net.jet::UDPPacket", "JetUDPPacket"),
+            ("<corelib>/Core/net::Core/net/net.jet::UnixListener", "JetUnixListener"),
+            ("<corelib>/Core/net::Core/net/net.jet::UnixStream", "JetUnixStream"),
+            ("<corelib>/Core/net/tls::Core/net/tls.jet::TLSCertificate", "JetTLSCertificate"),
+            ("<corelib>/Core/net/tls::Core/net/tls.jet::TLSPeerIdentity", "JetTLSPeerIdentity"),
         ] {
-            assert_eq!(core_native_probe_name(source_record), source_record);
-            assert!(!is_canonical_core_native_type(source_record));
+            assert!(is_canonical_core_native_type(source_record));
+            assert_eq!(crate::Codegen::core_rust_type_name(source_record), Some(native_record));
         }
+        let srv_record = "<corelib>/Core/net::Core/net/net.jet::SRVRecord";
+        assert!(!is_canonical_core_native_type(srv_record));
+        assert_eq!(crate::Codegen::core_rust_type_name(srv_record), None);
 
         let user_name = "app::ComputeError";
         assert_eq!(core_native_probe_name(user_name), user_name);
@@ -3376,65 +3306,6 @@ mod core_native_projection_tests {
             crate::Codegen::compute_handle_rust_type(core_native_probe_name(user_name)),
             None
         );
-    }
-    #[test]
-    fn native_query_enum_traits_keep_native_carriers_and_source_variant_names() {
-        let cases = [
-            (
-                "<corelib>/Core/web::Core/web/query.jet::WebQueryNetworkMode",
-                "JetWebQueryNetworkMode",
-                &["Online", "Always", "OfflineFirst"][..],
-            ),
-            (
-                "<corelib>/Core/web::Core/web/query.jet::WebMutationStatus",
-                "JetWebMutationStatus",
-                &["Idle", "Pending", "Success", "Error", "Settled"][..],
-            ),
-            (
-                "<corelib>/Core/web::Core/web/query.jet::WebQueryStatus",
-                "JetWebQueryStatus",
-                &["Pending", "Fresh", "Stale", "Fetching", "Error", "Offline"][..],
-            ),
-        ];
-
-        for (source_type, native_type, variants) in cases {
-            assert!(is_source_owned_core_web_query_enum(source_type));
-            for (rust_trait, value_method) in
-                [("JetShow", "jet_show"), ("JetDebug", "jet_debug")]
-            {
-                let actual = native_core_query_enum_trait_impl(
-                    native_type,
-                    rust_trait,
-                    value_method,
-                    variants.iter().copied(),
-                );
-                let mut expected = format!(
-                    "impl {rust_trait} for {native_type} {{\n    fn {value_method}(&self) -> String {{\n        match self {{\n"
-                );
-                for variant in variants {
-                    expected.push_str(&format!(
-                        "            Self::{variant} => jet_debug_variant(\"{variant}\", None),\n"
-                    ));
-                }
-                expected.push_str("        }\n    }\n}\n\n");
-                assert_eq!(actual, expected);
-            }
-        }
-        assert_eq!(
-            native_core_query_enum_variant_name(&format!(
-                "{}OfflineFirst",
-                jet_foundation::Syntax::GENERATED_NAME_PREFIX
-            )),
-            "OfflineFirst"
-        );
-
-
-        assert!(!is_source_owned_core_web_query_enum(
-            "<corelib>/Core/web::Core/web/query.jet::WebQueryError"
-        ));
-        assert!(!is_source_owned_core_web_query_enum(
-            "app::Core/web/query.jet::WebQueryStatus"
-        ));
     }
 
     #[test]
@@ -5145,7 +5016,7 @@ impl<'a> RustEmitter<'a> {
 
     fn native_email_struct_field_argument(&self, id: MirFieldId, value: &str) -> Option<String> {
         let (owner, field) = self.native_email_field(id)?;
-        if owner == "Address"
+        if matches!(owner, "Address" | "__EmailAddressView")
             && field.name == "display"
             && matches!(
                 field.ty.kind(),
@@ -5160,7 +5031,7 @@ impl<'a> RustEmitter<'a> {
 
     fn native_email_struct_field_result(&self, id: MirFieldId, value: &str) -> Option<String> {
         let (owner, field) = self.native_email_field(id)?;
-        if owner == "Address"
+        if matches!(owner, "Address" | "__EmailAddressView")
             && field.name == "display"
             && matches!(
                 field.ty.kind(),
@@ -5479,7 +5350,7 @@ impl<'a> RustEmitter<'a> {
                     else {
                         continue;
                     };
-                    if row.module != "core.testing" || row.member != "histories" {
+                    if row.module != "core.testing" || row.member != "__histories_with_provenance" {
                         continue;
                     }
                     let Some(target) = type_args.first() else {
@@ -5560,14 +5431,18 @@ impl<'a> RustEmitter<'a> {
                 self.resolve_ffi_symbol(&format!("jet_ffi::{symbol}"))
             }
             CoreCallSymbol::Rust(symbol) => self.resolve_ffi_symbol(symbol),
+            CoreCallSymbol::SourceOwned => panic!("source-owned Core declaration reached MIR Rust emission"),
         }
     }
     fn core_row(&self, id: MirCoreCallId) -> &MirCoreCall {
-        self.program
+        let row = self.program
             .core_calls
             .iter()
             .find(|row| row.id == id)
-            .unwrap_or_else(|| panic!("MIR Core call ID {:?} has no row", id))
+            .unwrap_or_else(|| panic!("MIR Core call ID {:?} has no row", id));
+        assert!(!matches!(row.symbol, CoreCallSymbol::SourceOwned),
+            "source-owned Core declaration reached MIR Rust emission");
+        row
     }
 
     fn validate_core_arity(&self, row: &MirCoreCall, args: &[MirCallArg]) {
@@ -5599,7 +5474,7 @@ impl<'a> RustEmitter<'a> {
     ) -> String {
         let row = self.core_row(id);
         self.validate_core_arity(row, args);
-        if row.module == "core.testing" && row.member == "histories" {
+        if row.module == "core.testing" && row.member == "__histories_with_provenance" {
             return self.history_call_expression(function, args, type_args, &row.borrow_mask);
         }
         self.call_symbol_for_function(
@@ -5934,6 +5809,9 @@ impl<'a> RustEmitter<'a> {
         if args.is_empty() && name.name == STM_TYPE {
             return format!("{}JetSharedTransaction", self.config.root_prefix);
         }
+        if args.is_empty() && name.name == CORE_NET_RESOLVE_ERROR_TYPE {
+            return format!("{}Jet__ResolveError", self.config.root_prefix);
+        }
         if name.name == jet_foundation::Syntax::TYPE_PTR {
             let [element] = args else {
                 panic!("MIR Ptr type must have exactly one element argument");
@@ -6018,9 +5896,6 @@ impl<'a> RustEmitter<'a> {
                 self.view_lifetime_prefix(),
                 self.rust_type(&args[0])
             );
-        }
-        if name.name == "Instant" {
-            return self.rust_root_prelude_type("JetInstant", args);
         }
         if name.name == "RealtimeStream" {
             return format!("{}jet_std::JetRealtimeStream", self.config.root_prefix);
@@ -6150,13 +6025,6 @@ impl<'a> RustEmitter<'a> {
         if name.name == jet_foundation::Syntax::TYPE_HTML && args.is_empty() {
             return "String".to_string();
         }
-        if name.name == jet_foundation::Syntax::TYPE_MEASUREMENT && args.len() == 1 {
-            return format!(
-                "{}jet_std::JetMeasurement<{}>",
-                self.config.root_prefix,
-                self.rust_type(&args[0])
-            );
-        }
         if let Some(root_name) = crate::Codegen::root_prelude_rust_type_name(native_name) {
             return self.rust_root_prelude_type(root_name, args);
         }
@@ -6214,6 +6082,9 @@ impl<'a> RustEmitter<'a> {
             return format!("{}jet_std::DataStream", self.config.root_prefix);
         }
         if let Some(core_name) = crate::Codegen::core_rust_type_name(&name.name) {
+            if core_name == "String" {
+                return "String".to_string();
+            }
             // D-DBPOLICY-BIND1: RowPolicy is a root-level re-export from the
             // Sync carrier, not a `jet_std` import.
             if core_name == "JetRowPolicy" || core_name == "JetTaskFailure" {
@@ -7781,9 +7652,8 @@ impl<'a> RustEmitter<'a> {
             }
             _ => owner,
         };
-        // An inherent impl on a carrier the runtime declares (Core `URL` and
-        // `MIME` are the Prelude's `JetURL`/`JetMIME`) is rejected once the
-        // runtime is its own crate (E0116). Its methods form a crate-local
+        // An inherent impl on a carrier the runtime declares is rejected once
+        // the runtime is its own crate (E0116). Its methods form a crate-local
         // extension trait instead; the generated crate is one flat namespace,
         // so every `recv.__jet_method()` call site sees the trait.
         let carrier_trait = (implementation.trait_ref.is_none()
@@ -8956,7 +8826,6 @@ impl<'a> RustEmitter<'a> {
         };
         if !def.generic_params.is_empty()
             || variants.is_empty()
-            || is_source_owned_core_web_query_enum(&def.key)
             || !variants
                 .iter()
                 .all(|variant| matches!(&variant.payload, MirVariantPayload::Unit))
@@ -9076,6 +8945,15 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn emit_structural_show_impl(&self, def: &MirTypeDef, out: &mut String) {
+        if let Some(hook) = self.source_value_hook_symbol(def, "show") {
+            let name = self.type_name(def.id);
+            let _ = writeln!(out,
+                "impl JetShow for {name} {{ fn jet_show(&self) -> String {{ self.{hook}() }} }}\n\
+                 impl JetDebug for {name} {{ fn jet_debug(&self) -> String {{ self.{hook}() }} }}\n\
+                 impl std::fmt::Debug for {name} {{ fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{ f.write_str(&self.{hook}()) }} }}"
+            );
+            return;
+        }
         let emit_show = def.auto_printable
             && !self.selected_trait_impl_for_type(def, crate::Generics::PRINTABLE);
         let emit_debug = self.derives_trait(def, crate::Generics::DEBUG)
@@ -9091,33 +8969,6 @@ impl<'a> RustEmitter<'a> {
         }
         if (!emit_show && !emit_debug) || matches!(&def.kind, MirTypeDefKind::Alias { .. }) {
             return;
-        }
-        if is_source_owned_core_web_query_enum(&def.key) {
-            if let MirTypeDefKind::Enum { variants, .. } = &def.kind {
-                if variants
-                    .iter()
-                    .all(|variant| matches!(&variant.payload, &MirVariantPayload::Unit))
-                {
-                    let name = self.type_name(def.id);
-                    if emit_show {
-                        out.push_str(&native_core_query_enum_trait_impl(
-                            &name,
-                            "JetShow",
-                            "jet_show",
-                            variants.iter().map(|variant| variant.name.as_str()),
-                        ));
-                    }
-                    if emit_debug {
-                        out.push_str(&native_core_query_enum_trait_impl(
-                            &name,
-                            "JetDebug",
-                            "jet_debug",
-                            variants.iter().map(|variant| variant.name.as_str()),
-                        ));
-                    }
-                    return;
-                }
-            }
         }
         if emit_show && !selected_display {
             self.emit_structural_impl(def, crate::Generics::PRINTABLE, "JetShow", "jet_show", out);
@@ -9202,11 +9053,7 @@ impl<'a> RustEmitter<'a> {
                             .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
                             .unwrap_or(variant.name.as_str()),
                     );
-                    let variant_path = if is_source_owned_core_web_query_enum(&def.key) {
-                        format!("Self::{}", native_core_query_enum_variant_name(&variant.name))
-                    } else {
-                        format!("Self::{}", mangle_variant(&variant.name))
-                    };
+                    let variant_path = format!("Self::{}", mangle_variant(&variant.name));
                     match &variant.payload {
                         MirVariantPayload::Unit => {
                             let _ = writeln!(
@@ -9434,6 +9281,17 @@ impl<'a> RustEmitter<'a> {
             && self.history_native_type_name(&def.key).is_none()
     }
 
+    fn source_value_hook_symbol(&self, def: &MirTypeDef, operation: &str) -> Option<String> {
+        jet_foundation::CoreModuleExports::core_source_value_hook(&def.key, operation)?;
+        let ty = self.type_instances.get(&def.id).copied()
+            .unwrap_or_else(|| panic!("source value hook has no checked type instance"));
+        let id = jet_foundation::MIR::mir_source_value_hook(self.program, ty, operation)
+            .unwrap_or_else(|| panic!("source value hook for {} is missing or ambiguous", def.key));
+        let function = self.program.functions.iter().find(|function| function.id == id)
+            .unwrap_or_else(|| panic!("source value hook function is unavailable"));
+        Some(self.rust_method_symbol(function))
+    }
+
     fn emit_type_def(&self, def: &'a MirTypeDef, out: &mut String) {
         self.push_generic_scope(&def.generic_params);
         let name = self.type_name(def.id);
@@ -9618,6 +9476,9 @@ impl<'a> RustEmitter<'a> {
                     derives.push(trait_name);
                 }
             }
+        }
+        if self.source_value_hook_symbol(def, "debug").is_some() {
+            derives.retain(|name| *name != "Debug");
         }
         if !derives.is_empty() && !matches!(&def.kind, MirTypeDefKind::Alias { .. }) {
             let _ = writeln!(out, "#[derive({})]", derives.join(", "));
@@ -9915,7 +9776,7 @@ impl<'a> RustEmitter<'a> {
                 .program
                 .core_calls
                 .iter()
-                .filter(|row| row.module == "core.testing" && row.member == "histories")
+                .filter(|row| row.module == "core.testing" && row.member == "__histories_with_provenance")
                 .map(|row| row.id)
                 .collect::<BTreeSet<_>>();
             !histories.is_empty()
@@ -10908,80 +10769,6 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
-    fn emit_period_anchor_impls(&self, out: &mut String) {
-        for def in &self.program.types {
-            if !self.module_selected(def.module) {
-                continue;
-            }
-            let MirTypeDefKind::Enum { variants, .. } = &def.kind else {
-                continue;
-            };
-            if variants.len() != 3 {
-                continue;
-            }
-            let mut has_date = false;
-            let mut has_local_date = false;
-            let mut has_date_time = false;
-            for variant in variants {
-                let MirVariantPayload::Single(payload) = &variant.payload else {
-                    has_date = false;
-                    has_local_date = false;
-                    has_date_time = false;
-                    break;
-                };
-                let MirTypeKind::Apply { name: nominal, .. } = payload.kind() else {
-                    has_date = false;
-                    has_local_date = false;
-                    has_date_time = false;
-                    break;
-                };
-                match nominal.name.as_str() {
-                    "Date" => has_date = true,
-                    "LocalDate" => has_local_date = true,
-                    "DateTime" => has_date_time = true,
-                    _ => {
-                        has_date = false;
-                        has_local_date = false;
-                        has_date_time = false;
-                        break;
-                    }
-                }
-            }
-            if !(has_date && has_local_date && has_date_time) {
-                continue;
-            }
-
-            let name = self.type_name(def.id);
-            let trait_name = format!("{}JetPeriodAnchor", self.config.root_prefix);
-            let _ = writeln!(out, "impl {trait_name} for {name} {{");
-            let _ = writeln!(
-                out,
-                "    fn period_total_in(&self, period: &{}JetPeriod, unit: &String) -> f64 {{",
-                self.config.root_prefix
-            );
-            let _ = writeln!(out, "        match self {{");
-            for variant in variants {
-                let MirVariantPayload::Single(payload) = &variant.payload else {
-                    unreachable!("validated period anchor union variant payload");
-                };
-                let MirTypeKind::Apply { name: nominal, .. } = payload.kind() else {
-                    unreachable!("validated period anchor union payload type");
-                };
-                let _ = writeln!(
-                    out,
-                    "            {name}::{}(anchor) => anchor.period_total_in(period, unit),",
-                    mangle_variant(&variant.name)
-                );
-                debug_assert!(matches!(
-                    nominal.name.as_str(),
-                    "Date" | "LocalDate" | "DateTime"
-                ));
-            }
-            let _ = writeln!(out, "        }}");
-            let _ = writeln!(out, "    }}");
-            let _ = writeln!(out, "}}\n");
-        }
-    }
 
     fn emit_columnar_row_adapter(&self, def: &MirTypeDef, declared: &[MirField], out: &mut String) {
         let fields = declared
@@ -21029,7 +20816,7 @@ impl<'a> RustEmitter<'a> {
             MirOperation::Call { callee, args, type_args } => {
                 let emitted = self.call(function, callee, args, type_args);
                 match callee {
-                    MirCallee::Core(id) => self.core_int_result(
+                    MirCallee::Core(id) => self.core_native_result(
                         self.core_row(*id),
                         emitted,
                         result.map(|value| self.value_type(function, value)),
@@ -21042,7 +20829,7 @@ impl<'a> RustEmitter<'a> {
                     _ => self.call_result_expression(function, callee, result, emitted),
                 }
             }
-            MirOperation::CoreCall { call, route, args, type_args, data_plan, fallibility, .. } => {
+            MirOperation::CoreCall { call, route, args, type_args, data_plan, .. } => {
                 if let Some(emitted) = self.source_math_call(function, *call, args, type_args, result) {
                     return emitted;
                 }
@@ -21067,15 +20854,7 @@ impl<'a> RustEmitter<'a> {
                         emitted
                     }
                 };
-                match fallibility {
-                    MirCallFallibility::Failure(MirFailureCarrier::Optional { .. }) => {
-                        format!(
-                            "({emitted}).ok_or({}JetAbsent)",
-                            self.config.root_prefix
-                        )
-                    }
-                    _ => emitted,
-                }
+                emitted
             }
             MirOperation::IndirectCall { callee, args, type_args } => {
                 self.indirect_call(function, *callee, args, type_args)
@@ -23239,17 +23018,31 @@ impl<'a> RustEmitter<'a> {
                     panic!("MIR captured function called without a Closure operation");
                 }
                 let borrow_mask = self.parameter_borrow_mask(&row.params);
-                self.call_symbol_for_function(
-                    function,
-                    self.function_name(*id),
-                    args,
-                    if row.generic_params.is_empty() {
-                        &[]
-                    } else {
-                        type_args
-                    },
-                    Some(&borrow_mask),
-                )
+                if row.module == "core_core_service" && row.name == "worker" {
+                    assert_eq!(args.len(), 5, "checked source worker ABI");
+                    let rendered = args.iter().enumerate().map(|(index, arg)| {
+                        if index == 2 {
+                            let handler = self.service_worker_handler(function, arg.value);
+                            let handler = format!("({handler} as {}JetServiceWorkerHandler)", self.config.root_prefix);
+                            if borrow_mask[index] { format!("&{handler}") } else { handler }
+                        } else {
+                            self.call_arg_for_function_with_literal(function, arg, borrow_mask[index], false)
+                        }
+                    }).collect::<Vec<_>>().join(", ");
+                    format!("{}({rendered})", self.function_name(*id))
+                } else {
+                    self.call_symbol_for_function(
+                        function,
+                        self.function_name(*id),
+                        args,
+                        if row.generic_params.is_empty() {
+                            &[]
+                        } else {
+                            type_args
+                        },
+                        Some(&borrow_mask),
+                    )
+                }
             }
             MirCallee::Associated {
                 function: target,
@@ -25270,7 +25063,7 @@ impl<'a> RustEmitter<'a> {
             .iter()
             .find(|row| row.id == call)
             .unwrap_or_else(|| panic!("MIR Core call {:?} has no canonical row", call));
-        if row.module == "core.testing" && row.member == "histories" {
+        if row.module == "core.testing" && row.member == "__histories_with_provenance" {
             return self.history_call_expression(
                 function,
                 args,
@@ -25449,17 +25242,6 @@ impl<'a> RustEmitter<'a> {
                 self.config.root_prefix
             );
         }
-        // `core.service.runtime(store, retention: Duration)`: the kernel keeps
-        // retention as whole milliseconds, the same `ns / 1_000_000` the
-        // interpreter route takes from the checked Duration.
-        if row.module == "core.service" && row.member == "runtime" && args.len() == 2 {
-            let store = self.call_arg_for_function(function, &args[0], false);
-            let retention = self.call_arg_for_function(function, &args[1], false);
-            return format!(
-                "{}({store}, ({retention}).ns / 1_000_000)",
-                self.prelude_symbol(route)
-            );
-        }
         let emitted = self.core_call_symbol_for_function(
             function,
             row,
@@ -25469,15 +25251,15 @@ impl<'a> RustEmitter<'a> {
             type_args,
             location,
         );
-        let emitted = self.core_time_error_result(row, emitted, result_type);
-        self.core_int_result(row, emitted, result_type)
+        self.core_native_result(row, emitted, result_type)
     }
 
-    /// A Core row's `Int` results cross the kernel boundary by one registry
-    /// fact (`MirCoreCall::native_int_result`): a raw-machine-word row widens
-    /// each `Int` leaf from `i64`; every other row already returns the owned
-    /// exact carrier and passes through unchanged.
-    fn core_int_result(&self, row: &MirCoreCall, emitted: String, ty: Option<&MirType>) -> String {
+    /// Convert native optional ABI shapes to the owned absence carrier before
+    /// applying a row's recorded machine-word Int widening. The optional
+    /// bridge also accepts already-owned carriers without copying.
+    fn core_native_result(&self, row: &MirCoreCall, emitted: String, ty: Option<&MirType>) -> String {
+        let emitted = ty.and_then(|ty| self.native_optional_result(&emitted, ty))
+            .unwrap_or(emitted);
         if !row.native_int_result {
             return emitted;
         }
@@ -25485,35 +25267,34 @@ impl<'a> RustEmitter<'a> {
             .unwrap_or(emitted)
     }
 
-    /// `core.time` kernels report a failure as its reason text; the checked
-    /// signature names the source `TimeError { reason }` record. Build that
-    /// record at the kernel boundary.
-    fn core_time_error_result(&self, row: &MirCoreCall, emitted: String, ty: Option<&MirType>) -> String {
-        if row.module != "core.time" {
-            return emitted;
-        }
-        let Some(MirTypeKind::Result { err, .. }) = ty.map(MirType::kind) else {
-            return emitted;
-        };
-        let Some(owner) = err.identity else {
-            return emitted;
-        };
-        if core_native_probe_name(&self.type_def(owner).key) != "TimeError" {
-            return emitted;
-        }
-        let reason = self
-            .program
-            .fields
-            .iter()
-            .find(|row| row.owner == owner && row.field.name == "reason")
-            .unwrap_or_else(|| panic!("MIR Core TimeError has no reason field row"));
-        format!(
-            "({emitted}).map_err(|__jet_reason| {} {{ {}: __jet_reason }})",
-            self.rust_type(err),
-            self.field_name(reason.id)
-        )
-    }
 
+    fn native_optional_result(&self, value: &str, ty: &MirType) -> Option<String> {
+        match ty.kind() {
+            MirTypeKind::Option(inner) => {
+                let converted = format!("jet_foundation::Outcome::jet_optional_from_native({value})");
+                Some(match self.native_optional_result("__jet_optional_value", inner) {
+                    Some(inner) => format!("({converted}).map(|__jet_optional_value| {inner})"),
+                    None => converted,
+                })
+            }
+            MirTypeKind::Tagged { inner, .. }
+            | MirTypeKind::InlineRange { base: inner, .. }
+            | MirTypeKind::Quantity { base: inner, .. } => self.native_optional_result(value, inner),
+            MirTypeKind::Result { ok, err } => {
+                let ok = self.native_optional_result("__jet_native_value", ok);
+                let err = self.native_optional_result("__jet_native_error", err);
+                match (ok, err) {
+                    (Some(ok), Some(err)) => Some(format!(
+                        "({value}).map(|__jet_native_value| {ok}).map_err(|__jet_native_error| {err})"
+                    )),
+                    (Some(ok), None) => Some(format!("({value}).map(|__jet_native_value| {ok})")),
+                    (None, Some(err)) => Some(format!("({value}).map_err(|__jet_native_error| {err})")),
+                    (None, None) => None,
+                }
+            }
+            _ => None,
+        }
+    }
     /// Narrow a Jet value into a native host slot (record field or enum
     /// payload): the inverse of `native_int_result` for `Int` leaves under
     /// Option/Result/List. The generic helper lets the Prelude's declared Rust
@@ -26428,6 +26209,9 @@ impl<'a> RustEmitter<'a> {
                 location,
                 fallibility,
             } => {
+                if matches!(self.prelude_row(*call).member.as_str(), "conversion_exact" | "conversion_rounded") {
+                    return self.unit_conversion(function, value, parameters, target, *call);
+                }
                 if matches!(
                     self.prelude_row(*call).member.as_str(),
                     "checked_widen"
@@ -26464,6 +26248,68 @@ impl<'a> RustEmitter<'a> {
                 }
             }
         }
+    }
+
+    // Paired with Jet Emit/Operations.jet::jet_rust_emit_unit_conversion.
+    // Normalize the scalar conversion before source Measurement propagation.
+    fn unit_conversion(
+        &self,
+        function: &MirFunction,
+        value: MirValueId,
+        parameters: &[MirValueId],
+        target: &MirType,
+        call: MirPreludeCallId,
+    ) -> String {
+        let rounded = self.prelude_row(call).member == "conversion_rounded";
+        assert_eq!(parameters.len(), if rounded { 6 } else { 4 });
+        let wrap = |ty: &MirType, value: &str| {
+            if self.is_distinct_type(ty) { format!("{}({value})", self.rust_type(ty)) }
+            else { value.to_string() }
+        };
+        let mut input = self.value_owned(value);
+        if self.is_distinct_type(self.value_type(function, value)) {
+            input = format!("({input}).0");
+        }
+        let mut args = Vec::with_capacity(parameters.len() + 1);
+        args.push(input);
+        args.extend(parameters[..4].iter().map(|parameter| format!("&({})", self.value_owned(*parameter))));
+        let mut digit_setup = String::new();
+        if rounded {
+            let mode = self.value_owned(parameters[4]);
+            let root = &self.config.root_prefix;
+            args.push(format!("match {root}jet_std::jet_int_owned_to_i64(&({mode})).expect(\"checked unit rounding tag\") {{ 0 => {root}UnitRoundingMode::TowardZero, 1 => {root}UnitRoundingMode::Floor, 2 => {root}UnitRoundingMode::Ceiling, 3 => {root}UnitRoundingMode::NearestEven, _ => unreachable!(\"checked unit rounding tag\") }}"));
+            if matches!(self.value_type(function, parameters[5]).kind(), MirTypeKind::Int) {
+                let digits = self.value_slot_reference(parameters[5], false);
+                digit_setup = if target.result_parts().is_some() {
+                    format!("let __jet_unit_digits = {root}jet_std::jet_int_owned_to_i64(&({digits})).map_err(|error| error.to_string())?;")
+                } else {
+                    format!("let __jet_unit_digits = {root}jet_std::jet_int_owned_to_i64(&({digits})).unwrap_or_else(|error| panic!(\"unit conversion digits are out of range: {{}}\", error));")
+                };
+                args.push("__jet_unit_digits".to_string());
+            } else {
+                args.push(self.value_owned(parameters[5]));
+            }
+        }
+        let result = self.prelude_call_args(call, &args);
+        if let Some((ok, error)) = target.result_parts() {
+            assert!(matches!(error.kind(), MirTypeKind::String));
+            let converted = wrap(ok, "value");
+            if rounded {
+                return format!("(|| -> {} {{ {digit_setup} ({result}).map(|value| {converted}).map_err(|error| error.to_string()) }})()", self.rust_type(target));
+            }
+            return format!("(|| -> {} {{ let value = ({result}).ok_or_else(|| \"unit conversion is not exactly representable\".to_string())?; Ok({converted}) }})()", self.rust_type(target));
+        }
+        if let Some(inner) = target.option_inner() {
+            let converted = wrap(inner, "value");
+            let optional = if rounded { format!("({result}).ok()") } else { result };
+            return format!("{{ {digit_setup} jet_foundation::Outcome::jet_optional_from_native({optional}).map(|value| {converted}) }}");
+        }
+        let unwrapped = if rounded {
+            format!("({result}).unwrap_or_else(|error| panic!(\"unit conversion failed: {{}}\", error))")
+        } else {
+            format!("({result}).unwrap_or_else(|| panic!(\"unit conversion is not exactly representable\"))")
+        };
+        format!("{{ {digit_setup} {} }}", wrap(target, &unwrapped))
     }
 
     fn numeric_conversion(
@@ -30275,7 +30121,10 @@ impl<'a> RustEmitter<'a> {
                     frame_schedule_derivation.as_ref(),
                     location.as_ref(),
                 );
-                let emitted = if self.prelude_row(*call).member == "file_reader.read_line" {
+                let emitted = if matches!(
+                    self.prelude_row(*call).member.as_str(),
+                    "file_reader.read_line" | "stdin.read_line"
+                ) {
                     format!(
                         "({emitted}).map(|line| line.ok_or({}JetAbsent))",
                         self.config.root_prefix,
@@ -32925,8 +32774,8 @@ impl<'a> RustEmitter<'a> {
                 format!(
                     "{}jet_fraction_from_parts({}, {})",
                     self.config.root_prefix,
-                    part("numerator"),
-                    part("denominator"),
+                    part("num_value"),
+                    part("den_value"),
                 )
             }
             MirConstant::Struct { type_name, fields } => {

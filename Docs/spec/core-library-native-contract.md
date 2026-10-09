@@ -47,6 +47,8 @@ native-dispatch metadata. A `source_module` row names the canonical Jet source
 path and the members that it owns. The corresponding `Core/**/*.jet` file owns
 public algorithms, validation, defaults, policy, effects, authority, typed
 errors, and composition.
+Native method-table inventories track only tables the compiler still ships;
+source-owned types must not keep obsolete native inventory entries after cutover.
 
 The generator must verify that:
 
@@ -58,6 +60,18 @@ The generator must verify that:
 - effect, authority, capability, fallback, signature, and tier metadata remain
   consistent.
 
+The generated Rust-bootstrap `CORE_CALLS` item alone permits long-running
+constant evaluation: the complete declaration registry exceeds rustc's
+const-evaluator step guard. This does not change row order, lookup facts,
+runtime initialization, or the Jet-native contract; the generator owns the
+item-level attribute alongside the table.
+
+Shared bootstrap kernels embedded by comptime bind representation helpers
+locally, without copying their policy. Borrowed list indexing lives with the
+shared collection kernel so both embeddings use the same bounds check and
+E3010 stop. Recursive mkdir dispatch names the single no-fault-probe raw leaf;
+the source caller, not a second evaluator arm, owns the FS.Write preflight.
+
 The generated Rust tables are projections, not a second API catalog. Never
 hand-edit them. The main generated views are
 [`CoreModuleExports.rs`](../../crates/jet-foundation/src/CoreModuleExports.rs),
@@ -67,6 +81,23 @@ such as [`Core.rs`](../../crates/jet-codegen/src/Prelude/Core.rs),
 [`PortableCore.rs`](../../crates/jet-codegen/src/Prelude/PortableCore.rs), and
 [`CoreLib/`](../../crates/jet-codegen/src/Prelude/CoreLib/) provide registered
 leaves and adapters; they do not become an independent public API registry.
+
+### Borrowed UI-host callback scopes
+
+The seed `HostServices.rs` adapter exposes borrowed hosts only through the
+lexical `jet_ui_with_host` callback. Its lifetime-bound restoration guard and
+unsafe installer are private: safe callers cannot retain, forget, or reorder a
+guard while leaving a borrowed host in thread-local storage. The stored thin
+pointer addresses the wrapper's live stack-held host reference; no trait-object
+lifetime is transmuted. Unwinding restores the predecessor before that reference
+or the host borrow ends.
+
+Current-host access holds its mutable thread-local borrow throughout the host
+callback. Re-entry is refused with a diagnostic panic before a second mutable
+host reference can be created; nested host installation during that callback
+is likewise refused. Ordinary nested lexical host scopes remain valid.
+`crates/jet-codegen/tests/ui_host_scope.rs` covers the rejected dangling guard
+and recursive-callback rejection with subsequent access and unwind recovery.
 
 ## Jet semantics and native leaves
 
@@ -93,6 +124,66 @@ while the host supplies a typed transport leaf. `core.crypto` keeps typed
 values and fail-closed policy in Jet; the OS CSPRNG is a host cell. The raw
 algorithm controls in `core.crypto.expert` remain an explicit audited door, not
 a hidden provider policy.
+
+`core.email` decodes DKIM key material into a fixed, zero-filled Secret buffer.
+It validates every encoded quartet before applying the final 32-byte length
+rule; a late alphabet or padding error still takes precedence over length.
+Borrowed Secret bytes may be read or written by index inside audited Core
+code, but their storage must never grow, shrink, or be freed through ordinary
+List operations without the Secret owner's zeroization.
+
+The `core.http.client` transport entries `get`, `post`, and `request` remain
+native rows. String-only source forwarders narrow the existing typed-URL
+contract and change the transport result's checked failure carrier; they are
+not a source-owned transport implementation. Session configuration and policy
+continue to use the Jet source around those same native rows.
+Typed URLs are rendered through their registered source `to_string` method
+before entering the transport's String ABI; both semantic checkers preserve
+the source nominal identity while checking that crossing.
+
+`core.math` keeps IEEE classification, adjacent-value and exponent composition,
+rounding/conversion policy, remainder validation, distance accumulation, and
+special-function approximations in Jet. Its numeric host boundary is limited
+to primitive bit casts and libm operations that Jet cannot yet express through
+an intrinsic or an external call. A classification or composite operation is
+not a native leaf merely because Rust exposes it as a scalar method.
+
+The caller-owned RNG stream uses SplitMix64, distinct from the ambient
+generator. Its Jet value kernels retain explicit wrapping U64 transitions and
+the complete U128 product for Lemire bounded rejection; modulo-only selection
+is not equivalent. A zero word-width bound denotes the full signed-64 domain.
+Equal endpoints and rejected backwards intervals do not advance the state.
+
+`core.net.url.URL` is a source-owned record. Typed `URL{"…"}` heads validate
+their literal skeleton in sema, then call `core.net.url.literal` as an ordinary
+Jet function. That function applies the validator's Unicode-whitespace boundary
+through `core.text.trim`, parses the skeleton once, and substitutes holes inside
+components without trimming hole values; interpolated slashes, authority
+delimiters, and dot segments never become URL grammar. All backends compile the
+same source constructor, accessors, normalization, and rendering rather than
+projecting a native URL carrier or concatenating a backend-local URL string.
+
+`core.perf` owns unit-interval validation, rejected-value errors, the `1.0`
+default, reset semantics, and f32 rounding in Jet. The provider only loads and
+stores one zero-initialized atomic word. Jet encodes a stored IEEE value as its
+signed f64 bit pattern plus one, reserving zero for the default; this preserves
+both signed zeros without assigning policy to the native cell.
+Both cell leaves carry `Env` and use the ambient runtime route, so a source
+read cannot be folded into the default while compiling the program. Prelude
+`Perf.*` calls load the same source module as an explicit `core.perf` import.
+
+`core.game.raylib` sound handles are Jet records retaining the supplied path.
+`play_sound` preserves the existing non-empty-path acceptance contract, not a
+claim of native audio submission; this pair requires no host operation.
+The `color` constructor also runs entirely in Jet: each channel is clamped to
+`0..255` before the existing drawing carrier is constructed. No native or
+compile-time color constructor duplicates that normalization.
+
+`core.web.virtual` windows are Jet records. Window construction, measured-size
+estimation, bounded slicing and indices, and `WebVirtualWindow.facts_json` use
+the source implementation rather than a native window carrier. The facts
+method emits all nine stored fields in declaration order without serializing
+row payloads or recomputing layout.
 
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,

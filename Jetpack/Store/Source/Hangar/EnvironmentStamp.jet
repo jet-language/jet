@@ -125,7 +125,7 @@ fn store_append_external_metadata_stamp(stamp: &[U8], metadata: Stat) Never! {
     }
     store_append_environment_stamp_field(&stamp, kind.bytes())
     store_append_environment_stamp_field(&stamp, "{metadata.size}".bytes())
-    nanos :: metadata.modified.unix_ns
+    nanos :: metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
     seconds :: nanos /% 1000000000
     modified :: if nanos < 0 -> "" else -> "{seconds}:{nanos - seconds * 1000000000}"
     store_append_environment_stamp_field(&stamp, modified.bytes())

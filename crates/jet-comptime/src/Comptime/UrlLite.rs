@@ -15,13 +15,6 @@ mod url_kernel {
         pub typed_path: Option<Vec<(String, bool)>>,
     }
 
-    #[derive(Clone, Debug, PartialEq)]
-    pub struct JetMIME {
-        pub top: String,
-        pub sub: String,
-        pub parameters: Vec<Vec<String>>,
-    }
-
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
@@ -40,8 +33,6 @@ mod url_kernel {
 }
 
 pub(super) type UrlParts = url_kernel::JetURLParts;
-/// The one MIME value the HTTP message kernel names as `jet_std::JetMIME`.
-pub(crate) use url_kernel::JetMIME;
 
 /// Re-enter the canonical URL kernel from the `core.net.url.URL` record fields
 /// without reparsing or normalizing; the kernel owns the projection.
@@ -79,10 +70,6 @@ pub(super) fn validate_typed_url_literal(literals: &[String]) -> Result<(), Stri
     url_kernel::jet_validate_typed_url_literal(&literal_refs)
 }
 
-pub(super) fn typed_url_literal(literals: &[String], holes: &[String]) -> UrlParts {
-    let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
-    url_kernel::jet_typed_url_parts_literal(&literal_refs, holes.to_vec())
-}
 
 pub(super) fn from_parts(
     scheme: &str,
@@ -105,14 +92,7 @@ pub(super) fn file(path: &str) -> UrlParts {
 }
 
 pub(super) fn data(mime_rendered: &str, text: &str) -> UrlParts {
-    let mime = url_kernel::JetMIME::parse(&mime_rendered.to_string()).unwrap_or_else(|_| {
-        url_kernel::JetMIME {
-            top: mime_rendered.to_string(),
-            sub: String::new(),
-            parameters: Vec::new(),
-        }
-    });
-    url_kernel::JetURLParts::data(&mime, &text.to_string())
+    url_kernel::JetURLParts::data(mime_rendered, &text.to_string())
 }
 
 pub(super) fn url_render_query(pairs: &[(String, String)]) -> String {

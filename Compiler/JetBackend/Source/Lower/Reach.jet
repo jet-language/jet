@@ -6,6 +6,7 @@ use jet_foundation.[
     MIRFailureCarrier, MIRFunction, MIRFunctionID,
     MIROperation, MIRProgram, MIRSemanticOp, MIRType,
     MIRValueID,
+    mir_source_value_hook,
 ]
 
 fn lower_reach_optional(p: MIRProgram, q: &LowerPrepared, id: MIRFunctionID?, parent: Int, site: String) Never! {
@@ -282,6 +283,12 @@ fn lower_reach_concrete_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, pare
     fingerprint :: lower_mono_fingerprint(ty)
     first :: q.lifecycle.get(fingerprint) ?? -1
     lower_reach_edges(p, &q, first, parent, "lifecycle of {mir_type_display_name(ty)}")
+    operations :: [String]{"clone", "show", "debug"}
+    loop operation in operations {
+        if mir_source_value_hook(p, ty, operation) == .Val(id) {
+            lower_mono_request(p, &q, id, Val(ty), [MIRType]{}, parent, "source {operation} hook").drop("source value hook")
+        }
+    }
     if ty.kind == {
         .Apply(_, args) -> {
             loop arg in args -> lower_mono_intern_type(&q, arg, parent)

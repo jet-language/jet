@@ -73,8 +73,9 @@ impl<'a> Checker<'a> {
             ("core.mem", "Pool") => Some(Type::Named(Syntax::MEM_POOL.to_string())),
             ("core.mem", "Fixed") => Some(Type::Named(Syntax::MEM_FIXED.to_string())),
             ("core.mem", "AllocError") => Some(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
-            // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` constructs explicit solver state.
-            ("core.compute.solve", "Solver") => Some(Type::Named(Syntax::SOLVER_TYPE.to_string())),
+            ("core.compute.solve", "Solver") => self
+                .core_source_owner_module(module, name)
+                .map(|owner| Type::Named(self.canonical_nominal_name(owner, name))),
             // D-GAME1/2/3 + D-WD10: static sentinels for `game.Scene.new`,
             // `game.Replay.record` and `game.Backend.headless`.
             ("core.game", "Scene") => Some(Type::Named("GameSceneType".to_string())),

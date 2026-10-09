@@ -327,63 +327,9 @@ pub fn sema_call_try_ui_handle_method(receiver: Expr, receiver_value: TExpr, met
         return SemaMethodSpecialCheck{handled: true, value: Val(checked)}
     }
     if sema_ui_browser_known_owner(owner) -> return sema_ui_browser_method(receiver, receiver_value, owner, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    if sema_ui_sketch_owner(owner) -> return sema_ui_sketch_method(receiver, receiver_value, owner, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     SemaMethodSpecialCheck{handled: false, value: None}
 }
 
-fn sema_ui_sketch_owner(owner: String) -> Bool Never! {
-    owner == "HyperLogLog" || owner == "TDigest" || owner == "CountMinSketch" || owner == "ReservoirSampler"
-}
-
-fn sema_ui_sketch_method_known(owner: String, method: String) -> Bool Never! {
-    if owner == "HyperLogLog" || owner == "CountMinSketch" -> return method == "add" || method == "count"
-    if owner == "TDigest" -> return method == "add" || method == "quantile"
-    if owner == "ReservoirSampler" -> return method == "add" || method == "sample"
-    false
-}
-
-fn sema_ui_sketch_args(owner: String, method: String) -> [Type] Never! {
-    if method == "add" -> return [Type]{if owner == "TDigest" -> Type.Float else -> Type.String}
-    if method == "quantile" -> return [Type]{Type.Float}
-    [Type]{}
-}
-
-fn sema_ui_sketch_result(owner: String, method: String) -> Type Never! {
-    if method == "count" -> return Type.Int
-    if method == "quantile" -> return Type.Float
-    if method == "sample" -> return Type.List{element: Type.String}
-    sema_ui_handle_unit()
-}
-
-fn sema_ui_sketch_method(receiver: Expr, receiver_value: TExpr, owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if !sema_ui_sketch_method_known(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    record :: sema_call_core_receiver_record(receiver_value.ty, method, args.len(), span, &diagnostics) ?? {
-        _ := sema_ui_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    required_types := sema_ui_sketch_args(owner, method)
-    if args.len() != required_types.len() {
-        _ := sema_ui_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    params := [SemaCallParam]{}
-    loop index in 0..<required_types.len() {
-        access :: sema_call_core_access(record, index) ?? AccessConvention.Move
-        &params.push(sema_ui_handle_positional("arg{index}", required_types[index], access))
-    }
-    checked_args := args
-    binding :: sema_call_bind_args("{owner}.{method}", params, &checked_args, span, &diagnostics) ?? {
-        _ := sema_ui_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    typed :: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, &checked_args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, params, &checked_args, scopes, span, &diagnostics)
-    if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    result_type := sema_ui_sketch_result(owner, method)
-    value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.SketchMethod{sketch: owner, method: method}, args: typed.values}, span)
-    checked :: sema_expression_call_expected(value, expected, environment, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    SemaMethodSpecialCheck{handled: true, value: Val(checked)}
-}
 
 fn sema_ui_browser_known_owner(owner: String) -> Bool Never! {
     owner == "Browser" || owner == "BrowserContext" || owner == "BrowserPage" || owner == "BrowserFrame" || owner == "BrowserLocator" || owner == "BrowserIntercept" || owner == "BrowserEvent" || owner == "BrowserAbilities" || owner == "BrowserTrace" || owner == "BrowserReceipt" || owner == "BrowserPrivacy" || owner == "BrowserProtocol" || owner == "BrowserLocked" || owner == "BrowserTestServer" || owner == "BrowserTestReport" || owner == "BrowserTestConfig"

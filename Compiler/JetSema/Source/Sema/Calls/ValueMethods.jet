@@ -17,21 +17,16 @@ use jet_foundation.[
     ParamZone,
     Span,
     SymbolID,
-    SymbolKind,
     TBuiltinOp,
     TCallArg,
     TClosureOp,
     TExpr,
     TExprKind,
-    TMethodRef,
     TNumericOp,
-    TPreludeArg,
-    TStaticOwner,
     Type,
     builtin_method_bind,
     builtin_method_row,
     expr_span,
-    symbol_id,
     type_name,
     type_tuple_struct_name,
 ]
@@ -142,13 +137,15 @@ fn sema_value_method_option_map(receiver: Expr, receiver_value: TExpr, inner: Ty
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }
 
-fn sema_value_method_static_arg(value: TExpr) -> TCallArg Never! {
+fn sema_value_method_source_arg(value: TExpr) -> TCallArg Never! {
     TCallArg{value: value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
 }
 
-// D-FAIL-CARRIER1=A: `.or_err("why")` lifts a clean absence into a failure;
-// the payload rides through and the Prelude's `JetOptionalView::or_err`
-// holds the one meaning.
+// D-FAIL-CARRIER1=A: preserve the old seed TIR method_calls.rs:4287-4288:
+// materialize the Read receiver first, then the eager reason, with the same
+// owned TCallArg flags. Only this existing view passes those evaluated copies
+// to its canonical source body's move parameters; it does not move the user
+// place or establish a general Read-checked call to a move parameter.
 fn sema_value_method_option_or_err(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     why :: sema_value_method_argument(args[0], "or_err", 0, Type.String, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     updated_args := args
@@ -156,8 +153,12 @@ fn sema_value_method_option_or_err(receiver: Expr, receiver_value: TExpr, inner:
     ownership := sema_ownership_check_method_call(&state, "Option.or_err", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_effect_record_intrinsic_effects(environment, &scopes, &context, "Option.or_err", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    reference := TMethodRef{symbol: symbol_id(SymbolKind.Function, "", "JetOptionalView", "or_err"), name: "or_err", mangled: false, trait_owner: None, operator_identity: None}
-    kind := TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "JetOptionalView", generics: [TPreludeArg]{}}, owner_type: None, method: reference, type_args: [Type]{}, args: [TCallArg]{sema_value_method_static_arg(receiver_value), sema_value_method_static_arg(why)}}
+    route :: sema_call_core_resolve_route(environment, "core.prelude", "option_or_err", [Type]{inner}, 1, false, 2, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    target :: if route == {
+        .Source(source) -> source
+        .Core(_) -> panic("Option.or_err must resolve its canonical Jet source body")
+    }
+    kind := TExprKind.Call{callee: target.symbol.id, type_args: target.type_args, args: [TCallArg]{sema_value_method_source_arg(receiver_value), sema_value_method_source_arg(why)}}
     value := sema_tir_expr(Type.Result{ok: inner, err: Type.Named{name: "Err"}}, kind, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }

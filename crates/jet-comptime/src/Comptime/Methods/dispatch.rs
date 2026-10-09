@@ -23,7 +23,7 @@ use super::core_calls::{
     apply_core_call_with_type, apply_data_line_call, apply_history_rng_method,
     apply_impure_core_call_with_type, as_float,
     as_string, display_core_pure_value, eval_regex_replace_all_with, io_error_value,
-    jet_term_print_frame, normalize_path_args, sketch_add, solver_new, solver_require,
+    jet_term_print_frame, normalize_path_args,
     IoErrorOperation,
 };
 use super::repl_process::apply_repl_authorized_core_call_with_type;
@@ -886,7 +886,7 @@ impl<'a> Interp<'a> {
             let line = format!(
                 "{} {site} = {}",
                 crate::Syntax::DEBUG_TRACE_PREFIX,
-                self.debug_value(&value)
+                self.debug_value(&value, span)?
             );
             if let Some(sink) = self.sink.as_mut() {
                 sink.stderr.push_str(&jet_term_print_frame(&line));
@@ -1188,6 +1188,32 @@ impl<'a> Interp<'a> {
         Ok((value, frame))
     }
 
+    fn source_value_render(
+        &mut self,
+        value: &CtValue,
+        operation: &str,
+        span: Span,
+    ) -> Result<Option<String>, Diagnostic> {
+        let name = match value {
+            CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => type_name,
+            _ => return Ok(None),
+        };
+        let Some(hook) = jet_foundation::CoreModuleExports::core_source_value_hook(name, operation) else {
+            return Ok(None);
+        };
+        let function = self.methods.get(&(name.clone(), hook.to_string())).copied()
+            .ok_or_else(|| unsupported("checked source value renderer is missing", span))?;
+        if function.params.len() != 1 {
+            return Err(unsupported("checked source value renderer has invalid arity", span));
+        }
+        let mut frame = HashMap::new();
+        frame.insert(function.params[0].name.clone(), value.clone());
+        match self.call_func(&format!("{name}.{hook}"), function, frame)? {
+            CtValue::Str(text) => Ok(Some(text)),
+            _ => Err(unsupported("source value renderer did not return String", span)),
+        }
+    }
+
     /// c139 (D-DISPLAYDBG1/2): render `v` as `{value}` interpolation / `print`
     /// would in the compiled program. When `v`'s type has a user-written
     /// `impl Type.Display { fn display(self) -> String { … } }`, run that exact Jet
@@ -1199,8 +1225,11 @@ impl<'a> Interp<'a> {
     pub(in super::super) fn show_value(
         &mut self,
         v: &CtValue,
-        _span: Span,
+        span: Span,
     ) -> Result<String, Diagnostic> {
+        if let Some(text) = self.source_value_render(v, "show", span)? {
+            return Ok(text);
+        }
         let type_name = match v {
             CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => {
                 Some(type_name.clone())
@@ -1275,7 +1304,14 @@ impl<'a> Interp<'a> {
         }
     }
 
-    pub(in super::super) fn debug_value(&self, v: &CtValue) -> String {
+    pub(in super::super) fn debug_value(&mut self, v: &CtValue, span: Span) -> Result<String, Diagnostic> {
+        if let Some(text) = self.source_value_render(v, "debug", span)? {
+            return Ok(text);
+        }
+        Ok(self.debug_fallback_value(v))
+    }
+
+    fn debug_fallback_value(&self, v: &CtValue) -> String {
         match v {
             CtValue::Struct { type_name, fields } => {
                 let Some(def) = self.structs.get(type_name) else {

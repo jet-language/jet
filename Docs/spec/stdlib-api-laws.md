@@ -285,6 +285,21 @@ The core-library slate ratifies these durable rules:
 - **D-CORE-USELIST1=A** — every grouped `use` uses square brackets. `as` gives
   a shorter local name; without `as`, the local name is the final component
   after the last dot. Existing brace item imports use the same list form.
+- **Stdio source representation** — `Stdout` and `Stderr` retain their declared
+  public `fd: Int` fields on every tier. Factories return `1` and `2`; record
+  construction, display, debug, and equality use those fields. The field is
+  informational: even a user-constructed token with another value writes to
+  its named process stream. Jet owns each public operation's fault checkpoint,
+  error context, and flush decision. Nonempty writes and line writes flush;
+  an empty write flushes only on a terminal. Write and its selected flush share
+  one held writer lock, and both failures keep the original `Write` context.
+  Explicit `flush` uses one `IO.Flush` checkpoint and a `Flush` context.
+- **Stdin source representation** — `StdinHandle` retains its public `fd: Int`;
+  both `stdin()` and `buffered()` produce `0`. The field is informational:
+  constructed tokens still read the one process-wide buffered stdin and do not
+  close its borrowed descriptor. `read_line` checks `IO.Read` once, preserves
+  typed read errors, distinguishes EOF from an empty line, and removes every
+  trailing CR or LF in source.
 
 ## Extended Core API doctrine
 
@@ -479,3 +494,100 @@ node Tools/agent/check-core-surface-ledger.mjs --core-api-release-check
 `--check` proves the source-derived inventory and frozen record shape. The
 release check requires complete measured evidence and an accepted Jet win for
 every manifest entry.
+
+### Resident environment column transport
+
+The interpreter and resident host bind the canonical `core.sys.__env_columns`
+and `__startup_env_columns` leaves, not the retired count/name/value transport.
+Logical columns come from one snapshot under the existing logical-cell lock;
+startup columns cache immutable host `vars_os` separately. Both preserve
+platform encoded name/value bytes and let source `env_columns` pair them.
+The key comparison reuses Windows ordinal comparison and byte ordering on
+other hosts. Neither bridge writes the operating-system environment.
+
+### Realtime cancellation access
+
+`RealtimeStream.cancel(&self)` forwards its write-borrowed stream to
+`core.rt.__cancel(&self)`. The public method and its provider call both retain
+the explicit write-access marker; cancellation does not consume the stream.
+
+## Testing evidence source policy
+
+`core.testing.golden` and `fixture` own success/failure selection and exact
+evidence messages in `Core/testing/testing.jet`. Golden diffs compare at most
+64 KiB and 256 inclusive-newline lines per input; their delete-first LCS tie
+rule and UTF-8-safe 32 KiB output limit preserve the existing native policy.
+The host supplies only file-read facts, failure TLS transport, and selected
+string byte windows. These leaves do not add checkpoints to the old testing
+operations.
+
+`temp_dir` owns Unicode-scalar prefix sanitation, ASCII-only thread sanitation,
+the `jet_test_` name, remove-before-create ordering, NotFound handling, and
+error wording. Filesystem facts and actions remain raw host leaves returning
+private plain records, never tuples. `__TempPath.path` is opaque platform
+`OsString::into_encoded_bytes()` output: source must not construct, slice,
+edit, or decode it, and passes it unchanged to remove/create. The displayed
+lossy String is separate, so non-UTF-8 temporary roots retain their original
+filesystem spelling. The native borrow is same-platform and allocation-free.
+`Fake` owns its state, locale, tables, rendering, and deterministic choices,
+sharing the existing public source RNG's seeded draw helper rather than a
+second RNG identity.
+`test_suite` snapshots the existing native harness state. `histories` owns
+the three copy-before-callback wrappers; the existing engine still owns
+history execution and compiler-derived command provenance.
+
+I9 preserved gaps: the interpreter does not observe native testing-failure
+TLS, and the native-only suite snapshot remains on its existing tier support.
+Testing `world` is **native and uncredited**: exact interpreter diagnostic-error
+cleanup requires an unavailable capture/rethrow rail, so its existing
+callback/handle-unregister/wait/close/scope-restore order is unchanged.
+## Source Fake clean cutover
+
+The private state and locale fields, seed-bit conversion, exact locale salt,
+fixed draw order, tables, Display, Debug, clone, and equality belong to
+`Core/testing/testing.jet::Fake`. The seeded helper is the existing source
+`core.math.random.__seeded_int`, not another RNG or native Fake carrier.
+
+Removed native routes → source replacements (reviewed pre-removal line anchors):
+
+- `Context.rs:1218`, `Emit/Types.jet:2665`, `core_types.rs:277`,
+  `Traits.rs:2702` → source nominal Fake and ordinary record traits.
+- `Collections.rs:558,2103,2908,3890,3952` and
+  `method_calls.rs:6290` → source Fake methods and ordinary parameter/borrow rules.
+- Rust `TIR/mod.rs:14242`, `routes.rs:2078`, `subset/handles.rs:248,561`,
+  `tir_to_mir_expr.rs:4506`; Jet `TIR.jet:948`, `HandleMethods.jet:1043,1355`
+  → source locale/name/email/host/address bodies, no closed Fake handle operations.
+- Comptime `Builtins.rs:1438`, `dispatch/eval_method.rs:2355`,
+  `Methods/core_calls.rs:378`, `plain_calls.rs:1243` → ordinary source dispatch.
+- `Core.jet:414`, `CoreHostSignatures.jet:191`, `fixed_sigs.rs:1864`,
+  `Codegen/mod.rs:3865`, native `FakeData.rs:1-69`,
+  `CommonTypes.rs:2822,6819` → source constructor, fields, rendering and tables.
+- `Syntax/core_surface.rs:996` → source type identity, no builtin Fake marker.
+
+The Jet Foundation collection/trait registries and Jet Sema builtin-owner
+registry had no Fake-specific path; they intentionally remain unchanged.
+Generated C-ABI/route views remain frozen until the E2 final artifact permits
+central regeneration. Receipt-2 temporarily restores the Rust Fake carrier,
+its Clone/PartialEq/JetShow support, the six FakeData functions and their
+helpers, and the Prelude include verbatim from `459cfe7cd^`, solely to satisfy
+references in those frozen generated files. Core source ownership, registry
+rows, and compiler/comptime dispatch remain cut over. This dead generated-route
+glue dies at the post-freeze regeneration; it is not a source compatibility path.
+
+## Browser resident adapter cleanup
+
+The unused `BrowserHost::eval_core_call` plain-call dispatcher is removed,
+along with its orphan-only `profile_value`, `profile_ct`, `timeout_ct`, and
+`locked_ct` conversions. Repository-wide binding, qualified-call, string, and
+macro searches found no callers. Unrelated compiler/MIR `eval_core_call`
+functions are not that binding. The resident method adapter, handle table,
+live timeout/locked conversions, and included AOT providers are unchanged.
+
+### Realtime receipt presentation
+
+`Core/rt/rt.jet::RealtimeReceipt` owns `render_json`, `render`, and
+`frames_per_buffer`. The first two preserve the eight native receipt fields'
+fixed labels, order, punctuation and whitespace (`Realtime.rs:119-144`
+before removal); the last returns `requested_frames` (`Realtime.rs:147-149`).
+All three read the existing receipt without effects or new host leaves.
+The provider still owns bounded receipt observations and stream lifetime.

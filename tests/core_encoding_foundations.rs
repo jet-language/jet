@@ -35,3 +35,23 @@ fn run() {
         "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
     );
 }
+
+#[test]
+fn source_encoding_error_display_has_one_bundle_implementation() {
+    tir_support::assert_tiers_agree(
+        "source_encoding_error_display",
+        r#"
+use core.encoding.[EncodingError, EncodingErrorKind, EncodingFormat]
+
+fn run() {
+    err :: EncodingError{
+        format: .CBOR, kind: .Syntax, byte_offset: 7,
+        line: Val(2), column: Val(3), path: "$[0]",
+        reason: "truncated item", cause: None,
+    }
+    print("{err}")
+}
+"#,
+        "CBOR Syntax at byte 7, line 2, column 3, path $[0]: truncated item\n",
+    );
+}

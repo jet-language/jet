@@ -12,30 +12,20 @@ package {
 use core as core
 use core.files as files
 
-pub struct WatchHandle { pub kind: String, pub target: String }
-pub struct WatchSet { pub handles: [WatchHandle] }
 
 pub fn files(path: String) -[FS]> WatchHandle IOError! {
-    if path.bytes().len() == 0 {
-        return Err(IOError.InvalidInput(IOContext{
-            operation: .Resolve,
-            resource: Val(path),
-            os_code: None,
-            cause: Val("empty path"),
-        }))
-    }
-    core.watcher.files(path)
+    core.watcher.__files(path)
 }
 
 pub fn process_pid(pid: Int) -> WatchHandle Never! {
-    core.watcher.process_pid(pid)
+    core.watcher.__process_pid(pid)
 }
 
 pub fn port(host: String, port: Int) -[Net]> WatchHandle Never! {
-    core.watcher.port(host, port)
+    core.watcher.__port(host, port)
 }
 
-pub fn set() -> WatchSet Never! { core.watcher.set() }
+pub fn set() -> WatchSet Never! { core.watcher.__set() }
 
 
 pub fn add(set: WatchSet, handle: WatchHandle) -[IO]> WatchSet Never! {

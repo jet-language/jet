@@ -53,6 +53,15 @@ fn jet_process_on_signal(signal: &jet_std::ProcessSignal) {
     }
 }
 
+// Existing shared signal host operation; source computes the mask and formats
+// the deterministic on_signal failure. L7 replacement, dies at cutover.
+fn jet_process_signal_arm_raw(mask: i64) -> Result<(), String> {
+    let _ = jet_scheduler_root_task_control();
+    let callback: std::sync::Arc<dyn Fn() + Send + Sync + 'static> =
+        std::sync::Arc::new(|| jet_scheduler_root_task_control().cancel());
+    jet_process_signal_register(mask as usize, callback)
+}
+
 fn jet_process_spec_timeout(
     mut spec: jet_std::ProcessSpec,
     timeout: &jet_std::Duration,
@@ -291,9 +300,13 @@ fn jet_process_command_builder_with_identity(
     }
     let mut command = std::process::Command::new(executable_identity.unwrap_or(&spec.cmd[0]));
     command.args(&spec.cmd[1..]);
-    if let Some(cwd) = &spec.cwd {
-        command.current_dir(cwd);
+    if !spec.inherited_directories.iter().any(|entry| entry.as_cwd) {
+        if let Some(cwd) = &spec.cwd {
+            command.current_dir(cwd);
+        }
     }
+    jet_std::jet_process_attach_held_directories(&mut command, &spec.inherited_directories)
+        .map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Resolve, spec.cmd.first().cloned(), error))?;
     if spec.env_clear || !spec.env_set.is_empty() || !spec.env_remove.is_empty() {
         let child_env = jet_process_environment(spec)?;
         command.env_clear();
@@ -3319,4 +3332,19 @@ fn jet_process_stream_next_line<R: std::io::Read>(
     handle: &std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<R>>>>,
 ) -> Result<Option<String>, jet_std::IOError> {
     jet_process_child_read_line(&mut handle.borrow_mut())
+}
+
+// Temporary OS shared-pipe buffered read. Shared position/BufReader lifetime
+// are unchanged; source owns EOF, UTF8 and the one-CRLF terminator rule.
+// Replaced by Jet runtime L7, dies at cutover (CoreFiles1-2 ledger).
+fn jet_process_stream_line_bytes_raw<R: std::io::Read>(
+    handle: &std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<R>>>>,
+) -> Result<Vec<u8>, jet_std::IOError> {
+    let mut held = handle.borrow_mut();
+    let Some(reader) = held.as_mut() else { return Ok(Vec::new()); };
+    let mut bytes = Vec::new();
+    std::io::BufRead::read_until(reader, b'\n', &mut bytes).map_err(|error| jet_std::IOError::other(
+        jet_std::IOOperation::Read, Some("process output".to_string()), error,
+    ))?;
+    Ok(bytes)
 }

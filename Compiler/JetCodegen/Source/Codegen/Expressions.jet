@@ -779,6 +779,14 @@ fn jet_codegen_lower_core_call_arg(builder: &JetCodegenBuilder, program: JetCode
         .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .Move(_) | .ResourceTake(_) -> access = MIRAccess.Move
         else -> if jet_codegen_for_in_iter_element(argument.ty) != None -> access = MIRAccess.Move
     }
+    if record.module_name == "core.net.tls" && record.member == "client" && index > 0 && place == None {
+        source :: if argument.kind == {
+            .Clone(value, _) -> value
+            else -> argument
+        }
+        place = jet_codegen_lower_expression_place(&builder, program, source, MIRAccess.Read)
+        if place != None -> access = MIRAccess.Read
+    }
     if access == MIRAccess.Move && jet_codegen_ownership(argument.ty).mode == MIROwnershipMode.Copy -> access = MIRAccess.Read
     // Rust `lower_core_call_arg`: only an owned iterator moves out of its own
     // place (a Move-access place, as MovePlace requires); every other
@@ -878,7 +886,6 @@ fn jet_codegen_precise_type_key(type_name: String) -> String Never! {
 fn jet_codegen_precise_builtin_route(builder: &JetCodegenBuilder, program: JetCodegenProgram, type_name: String, function: String, arity: Int, carrier: TFailureCarrier) -> MIRPreludeCallID Never! {
     type_key := jet_codegen_precise_type_key(type_name)
     symbol := "jet_{type_key}_{function}"
-    if type_name == "Measurement" && function == "new" -> symbol = "jet_std::JetMeasurement::new"
     by_value := function == "new" || function == "from_parts" || (function.starts_with("from_") && function != "from_str")
     borrow_mask := [Bool]{}
     index := 0
@@ -889,7 +896,91 @@ fn jet_codegen_precise_builtin_route(builder: &JetCodegenBuilder, program: JetCo
     jet_codegen_intern_route(&builder, program, MIRPreludeFamily.PreciseBuiltin, type_name, function, symbol, arity, borrow_mask, None, carrier, MIRPreludeABI.Value)
 }
 
-fn jet_codegen_lower_precise_builtin(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, result_type: Type, type_name: String, function: String, args: [TExpr], carrier: TFailureCarrier) -> MIRValueID {
+fn jet_codegen_precise_source_helper(owner: String, operation: String) -> String? Never! {
+    if owner == "Int" && operation == "abs" -> return Val("abs")
+    if owner == "Fraction" {
+        return if operation == {
+            "new" -> Val("__fraction_new")
+            "from_parts" -> Val("__fraction_from_parts")
+            "from_owned_parts" -> Val("__fraction_from_owned_parts")
+            "from_int" -> Val("__fraction_from_int")
+            "from_float" -> Val("__fraction_from_float")
+            "from_decimal" -> Val("__decimal_to_fraction")
+            "add" -> Val("__fraction_add")
+            "sub" -> Val("__fraction_sub")
+            "mul" -> Val("__fraction_mul")
+            "div" -> Val("__fraction_div")
+            "equal" -> Val("__fraction_equal")
+            "numerator" -> Val("__fraction_numerator")
+            "denominator" -> Val("__fraction_denominator")
+            "owned_numerator" -> Val("__fraction_owned_numerator")
+            "owned_denominator" -> Val("__fraction_owned_denominator")
+            "is_zero" -> Val("__fraction_is_zero")
+            "to_int" -> Val("__fraction_to_int")
+            "to_float" -> Val("__fraction_to_float")
+            "to_decimal" -> Val("__fraction_to_decimal")
+            "to_string" -> Val("__fraction_to_string")
+            else -> None
+        }
+    }
+    if owner == "Decimal" {
+        return if operation == {
+            "from_str" -> Val("__decimal_from_str")
+            "from_int" -> Val("__decimal_from_int")
+            "from_float" -> Val("__decimal_from_float")
+            "from_fraction" -> Val("__decimal_from_fraction")
+            "add" -> Val("__decimal_add")
+            "sub" -> Val("__decimal_sub")
+            "mul" -> Val("__decimal_mul")
+            "div" -> Val("__decimal_div")
+            "equal" -> Val("__decimal_equal")
+            "compare" -> Val("__decimal_compare")
+            "floor" -> Val("__decimal_floor")
+            "ceil" -> Val("__decimal_ceil")
+            "round" -> Val("__decimal_round")
+            "to_int" -> Val("__decimal_to_int")
+            "to_float" -> Val("__decimal_to_float")
+            "to_fraction" -> Val("__decimal_to_fraction")
+            "to_string" -> Val("__decimal_to_string")
+            else -> None
+        }
+    }
+    if owner == "Complex" {
+        return if operation == {
+            "abs" -> Val("__complex_abs")
+            "from_parts" -> Val("__complex_from_parts")
+            "add" -> Val("__complex_add")
+            "sub" -> Val("__complex_sub")
+            "mul" -> Val("__complex_mul")
+            "div" -> Val("__complex_div")
+            "to_string" -> Val("__complex_to_string")
+            else -> None
+        }
+    }
+    None
+}
+
+fn jet_codegen_lower_precise_builtin(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, type_name: String, function: String, args: [TExpr], carrier: TFailureCarrier) -> MIRValueID {
+    span :: expression.span
+    result_type :: expression.ty
+    helper := jet_codegen_precise_source_helper(type_name, function)
+    if helper == .Val(name) {
+        loop semantic_module in program.modules {
+            if semantic_module.module_name != "core.math" || (type_name != "Int" && semantic_module.nominal_positions.get(type_name) == None) -> next
+            target :: jet_codegen_find_function_by_key(program.function_index, name, semantic_module.module_identity) ?? panic("checked precise source helper was pruned")
+            call_args := [MIRCallArg]{}
+            loop argument in args {
+                value :: jet_codegen_lower_expr(&builder, program, argument)
+                &call_args.push(jet_codegen_numeric_call_arg(value, argument.span))
+            }
+            returned :: jet_codegen_executable_function_return_type(target, [Type]{})
+            value :: jet_codegen_emit_value(&builder, program, span, returned, MIROperation.Call{callee: MIRCallee.User{function: jet_codegen_function_id(target)}, args: call_args, type_args: [MIRType]{}})
+            if jet_codegen_is_plain_call_return(returned, result_type) {
+                return jet_codegen_reconcile_plain_call_return(&builder, program, expression, target.key, value, returned)
+            }
+            return value
+        }
+    }
     values := [MIRValueID]{}
     loop argument in args -> &values.push(jet_codegen_lower_expr(&builder, program, argument))
     type_id := jet_codegen_type_instance_id(Type.Named{name: type_name}, program.modules, builder.function.module_identity, builder.generic_type_names)
@@ -907,7 +998,7 @@ fn jet_codegen_lower_registered_math_constructor(builder: &JetCodegenBuilder, pr
     if record.member == "fraction" && (!is_optional || !optional_failure) -> panic("checked core.math.fraction constructor lost its optional result policy")
     type_name := if record.member == "fraction" -> "Fraction" else -> "Decimal"
     function := if record.member == "fraction" -> "new" else -> "from_str"
-    Val(jet_codegen_lower_precise_builtin(&builder, program, expression.span, expression.ty, type_name, function, args, failure))
+    Val(jet_codegen_lower_precise_builtin(&builder, program, expression, type_name, function, args, failure))
 }
 
 
@@ -2136,7 +2227,52 @@ fn jet_codegen_lower_fn_value(builder: &JetCodegenBuilder, program: JetCodegenPr
     }
 }
 
+fn jet_codegen_geometry_source_target(builder: JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type, operation: String) -> TFunc? Never! {
+    head :: jet_codegen_type_head_name(owner_type) ?? return None
+    owner :: jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, head, builder.generic_type_names) ?? return None
+    source_module := false
+    loop semantic_module in program.modules {
+        if semantic_module.module_identity == owner.module_identity && semantic_module.module_name == "core.math" {
+            source_module = true
+            break
+        }
+    }
+    if !source_module -> return None
+    if owner.name == {
+        "ScreenPoint" | "ScreenDelta" | "WorldPoint" | "WorldDelta" | "ViewPoint" | "ViewDelta" | "CameraPoint" | "CameraDelta" | "DevicePoint" | "DeviceDelta" | "Point2" | "Delta2" | "Transform" | "Transform2" -> {}
+        else -> return None
+    }
+    selected := TFunc?{None}
+    loop function in program.function_index.rows {
+        if function.module_identity != owner.module_identity || function.source_file != "Core/math/math.jet" -> next
+        if function.kind != .Method(_, _) -> next
+        if function.name != operation && !function.name.ends_with("::{operation}") -> next
+        target_owner :: jet_codegen_method_owner_type(function.kind) ?? next
+        target_head :: jet_codegen_type_head_name(target_owner) ?? next
+        if !jet_codegen_owner_heads_match(target_head, owner.qualified_name, owner.module_identity) -> next
+        if selected != None -> panic("checked geometry source method is ambiguous")
+        selected = Val(function)
+    }
+    Val(selected ?? panic("checked geometry source method was pruned"))
+}
+
 fn jet_codegen_lower_math_builtin(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, type_name: String, function: String, args: [TExpr]) -> MIRValueID {
+    if function == "new" || function == "affine" {
+        target := jet_codegen_geometry_source_target(builder, program, expression.ty, function)
+        if target == .Val(source) {
+            returned :: jet_codegen_checked_method_return_type(builder, program, source, expression.ty, [Type]{})
+            owner :: jet_codegen_lower_type_for_function(expression.ty, builder, program)
+            call_args := [MIRCallArg]{}
+            loop argument in args {
+                value :: jet_codegen_lower_expr(&builder, program, argument)
+                &call_args.push(jet_codegen_numeric_call_arg(value, argument.span))
+            }
+            value :: jet_codegen_emit_value(&builder, program, expression.span, returned, MIROperation.Call{callee: MIRCallee.Associated{function: jet_codegen_function_id(source), owner: owner}, args: call_args, type_args: [MIRType]{}})
+            if jet_codegen_is_plain_call_return(returned, expression.ty) -> return jet_codegen_reconcile_plain_call_return(&builder, program, expression, source.key, value, returned)
+            return value
+        }
+    }
+    if type_name == "Int" && function == "abs" -> return jet_codegen_lower_precise_builtin(&builder, program, expression, type_name, function, args, jet_codegen_failure_carrier_for_type(expression.ty))
     values := [MIRValueID]{}
     loop argument in args -> &values.push(jet_codegen_lower_expr(&builder, program, argument))
     jet_codegen_emit_math_builtin(&builder, program, expression, type_name, function, values)
@@ -3529,15 +3665,6 @@ fn jet_codegen_unit_rounding_code(mode: TUnitRoundingMode) -> Int Never! {
     }
 }
 
-fn jet_codegen_unit_measurement_type(ty: Type) -> Bool Never! {
-    if ty == {
-        .Apply(name, args) -> name == "Measurement" && args.len() == 1 && args[0] == Type.Float
-        .Option(inner) -> jet_codegen_unit_measurement_type(inner)
-        .Result(ok, _) -> jet_codegen_unit_measurement_type(ok)
-        .Tagged(_, inner) -> jet_codegen_unit_measurement_type(inner)
-        else -> false
-    }
-}
 
 fn jet_codegen_unit_distinct_base(builder: JetCodegenBuilder, program: JetCodegenProgram, ty: Type) -> Type? {
     name := ""
@@ -4064,26 +4191,15 @@ fn jet_codegen_lower_unit_convert(builder: &JetCodegenBuilder, program: JetCodeg
         base_type := jet_codegen_lower_type_for_function(base, builder, program)
         raw_value = jet_codegen_emit_value(&builder, program, argument.span, base, MIROperation.Convert{value: raw_value, parameters: [MIRValueID]{}, target: base_type, conversion: MIRConversion.Transparent})
     }
-    measured := relative_uncertainty != None && jet_codegen_unit_measurement_type(expression.ty)
     rounded := rounding != None
     member := ""
     symbol := ""
     borrow_mask := [Bool]{}
     if {
-        rounded && measured -> {
-            member = "conversion_rounded_measurement"
-            symbol = "jet_std::jet_unit_conversion_rounded_measurement"
-            borrow_mask = [Bool]{false, true, true, true, true, false, false, false}
-        }
         rounded -> {
             member = "conversion_rounded"
             symbol = "jet_unit_conversion_rounded"
             borrow_mask = [Bool]{false, true, true, true, true, false, false}
-        }
-        measured -> {
-            member = "conversion_exact_measurement"
-            symbol = "jet_std::jet_unit_conversion_exact_measurement"
-            borrow_mask = [Bool]{false, true, true, true, true, false}
         }
         else -> {
             member = "conversion_exact"
@@ -4100,9 +4216,6 @@ fn jet_codegen_lower_unit_convert(builder: &JetCodegenBuilder, program: JetCodeg
         rounding_value :: rounding
         &parameters.push(jet_codegen_numeric_constant_int(&builder, program, expression.span, jet_codegen_unit_rounding_code(rounding_value.mode)))
         &parameters.push(jet_codegen_lower_expr(&builder, program, rounding_value.digits))
-    }
-    if measured {
-        &parameters.push(jet_codegen_emit_value(&builder, program, expression.span, Type.Float, MIROperation.Constant{value: MIRConstant.Float{value: relative_uncertainty ?? 0.0, f32: false, spelling: None}}))
     }
     route := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.units", member, symbol, borrow_mask.len(), borrow_mask, None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
     if line < 0 -> panic("checked unit conversion line is negative")
@@ -4367,7 +4480,54 @@ fn jet_codegen_list_read_view(expression: TExpr, value: TExpr, access: AccessCon
     None
 }
 
+// Read P / Next from checked operand types; do not unify source method binders.
+fn jet_codegen_checked_geometry_transform_type_args(owner: Type, operation: String, args: [TExpr]) -> [Type]? Never! {
+    if owner == {
+        .Apply(name, owner_args) -> {
+            stock :: name == "Transform" || name.ends_with("::Transform")
+            generic :: name == "Transform2" || name.ends_with("::Transform2")
+            if !stock && !generic -> return None
+            if generic && owner_args.len() > 0 && owner_args[0] == Type.Float && (operation == "then" || operation == "inverse") -> return None
+            if operation == "inverse" -> return Val([Type]{})
+            if args.len() == 0 -> return None
+            if operation == "point" || operation == "point_at_depth" || operation == "ray" -> return Val([Type]{args[0].ty})
+            if operation == "then" && args[0].ty == .Apply(next_name, next_args) {
+                next_stock :: next_name == "Transform" || next_name.ends_with("::Transform")
+                next_generic :: next_name == "Transform2" || next_name.ends_with("::Transform2")
+                if stock != next_stock || generic != next_generic || next_args.len() == 0 -> return None
+                return Val([Type]{next_args[next_args.len() - 1]})
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
 fn jet_codegen_lower_handle_method(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MIRValueID {
+    if operation == .MathMethod(_, method, _) {
+        type_args := jet_codegen_checked_geometry_transform_type_args(receiver.ty, method, args)
+        if type_args == .Val(checked_args) {
+            target := jet_codegen_geometry_source_target(builder, program, receiver.ty, method)
+            if target == .Val(source) {
+                returned :: jet_codegen_checked_method_return_type(builder, program, source, receiver.ty, checked_args)
+                owner :: jet_codegen_lower_type_for_function(receiver.ty, builder, program)
+                access := MIRAccess.Read
+                if source.kind == {
+                    .Method(convention, _) -> access = jet_codegen_lower_access(convention ?? panic("checked geometry source method has no receiver convention"))
+                    else -> panic("checked geometry source method is not an instance function")
+                }
+                call_args := [MIRCallArg]{jet_codegen_method_receiver_arg(&builder, program, receiver, access)}
+                loop argument in args {
+                    value :: jet_codegen_lower_expr(&builder, program, argument)
+                    &call_args.push(jet_codegen_numeric_call_arg(value, argument.span))
+                }
+                lowered_types := [MIRType]{}
+                loop ty in checked_args -> &lowered_types.push(jet_codegen_lower_type_for_function(ty, builder, program))
+                jet_codegen_note_core_module(&builder, program, source.module_name)
+                return jet_codegen_emit_value(&builder, program, expression.span, returned, MIROperation.Call{callee: MIRCallee.Method{function: jet_codegen_function_id(source), owner: owner}, args: call_args, type_args: lowered_types})
+            }
+        }
+    }
     if operation == {
         .SerdeEncode -> {
             if args.len() != 0 -> panic("checked Serde encode has unexpected arguments")
@@ -4442,10 +4602,7 @@ fn jet_codegen_lower_typed_text_interpolation(builder: &JetCodegenBuilder, progr
             member = "sh_interpolate"
             symbol = "jet_typed_sh_interpolate"
         }
-        .URL -> {
-            member = "url_literal"
-            symbol = "jet_std::jet_typed_url_literal"
-        }
+        .URL -> panic("URL recipes must call core.net.url.literal")
         .Path -> {
             member = "path_literal"
             symbol = "jet_typed_path_literal"
@@ -5032,7 +5189,7 @@ fn jet_codegen_lower_host_call(builder: &JetCodegenBuilder, program: JetCodegenP
         .ExpiringValueNew(value, duration, clock) -> return jet_codegen_lower_expiring_new(&builder, program, expression, value, duration, clock, value.ty, false)
         .StrMatchScan(subject, parts, probe) -> return jet_codegen_lower_string_match_scan(&builder, program, expression, subject, parts, probe)
         .BinMatchScan(subject, parts, probe) -> return jet_codegen_lower_binary_match_scan(&builder, program, expression, subject, parts, probe)
-        .EnvSet(name, value, location) -> return jet_codegen_lower_env_set(&builder, program, expression, name, value, location)
+        .EnvSet(name, value, _) -> return jet_codegen_lower_env_set(&builder, program, expression, name, value)
         .GCEdit(root, _, edges, edit, index_temp, kind) -> return jet_codegen_lower_gc_edit(&builder, program, expression, root, edges, edit, index_temp, kind)
         .SwitchSubjectField(field) -> return jet_codegen_lower_switch_subject(&builder, program, expression, Val(field))
         .SwitchSubjectValue -> return jet_codegen_lower_switch_subject(&builder, program, expression, None)
@@ -5110,17 +5267,30 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Convert{value: value, parameters: [MIRValueID]{}, target: target, conversion: MIRConversion.Transparent})
         }
         .UnitConvert(_, argument, scale, offset, rounding, fallible, relative_uncertainty, file, line) -> jet_codegen_lower_unit_convert(&builder, program, expression, argument, scale, offset, rounding, fallible, relative_uncertainty, file, line)
-        .PreciseBuiltin(type_name, function, args) -> jet_codegen_lower_precise_builtin(&builder, program, expression.span, expression.ty, type_name, function, args, jet_codegen_failure_carrier_for_type(expression.ty))
+        .PreciseBuiltin(type_name, function, args) -> jet_codegen_lower_precise_builtin(&builder, program, expression, type_name, function, args, jet_codegen_failure_carrier_for_type(expression.ty))
         .MathBuiltin(type_name, function, args) -> jet_codegen_lower_math_builtin(&builder, program, expression, type_name, function, args)
         .CoreCall(record, args, _, type_args, widen_to_vec, data_plan, failure) -> {
             canonical_record := jet_codegen_canonical_core_record(record)
+            if canonical_record.module_name == "core.encoding" && canonical_record.member == "__edition" {
+                // The loader resolved this fact; codecs own every edition policy.
+                year :: Int.parse(program.edition) ?? panic("resolved package edition is not an integer")
+                return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: MIRConstant.Int{value: year, width: None, spelling: None}})
+            }
             if canonical_record.module_name == "core.encoding.xml" && canonical_record.member == "decode" {
                 return jet_codegen_lower_xml_typed_decode(&builder, program, expression, args, type_args, data_plan) ?? panic("checked typed XML decode has no target type")
             }
             registered_math := jet_codegen_lower_registered_math_constructor(&builder, program, expression, canonical_record, args, type_args, data_plan, failure)
             if registered_math != None -> return registered_math ?? panic("checked precise math constructor lowering disappeared")
-            call := jet_codegen_intern_core_call(&builder, program, canonical_record)
-            route := jet_codegen_intern_core_route(&builder, program, canonical_record, failure)
+            route := if canonical_record.module_name == "core.net.tls" && canonical_record.member == "client" && args.len() > 2 -> {
+                symbol :: if args.len() == {
+                    3 -> "jet_net_tls_client_deadline"
+                    4 -> "jet_net_tls_client_config_deadline"
+                    else -> panic("TLS client requires two, three or four checked operands")
+                }
+                mask := [Bool]{false}
+                loop _ in 1..<args.len() -> &mask.push(true)
+                jet_codegen_static_prelude_call(&builder, program, canonical_record.module_name, canonical_record.member, symbol, mask, canonical_record.effect_kind, failure, false)
+            } else -> jet_codegen_intern_core_route(&builder, program, canonical_record, failure)
             lowered_args := [MIRCallArg]{}
             index := 0
             loop index < args.len() {
@@ -5139,10 +5309,16 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
             }
             lowered_types := [MIRType]{}
             loop ty in type_args -> &lowered_types.push(jet_codegen_lower_type_for_function(ty, builder, program))
-            call_failure := jet_codegen_core_call_fallibility(failure, builder, program)
             if (canonical_record.module_name == "core.sys" && canonical_record.member == "stop") || (canonical_record.module_name == "core.process" && canonical_record.member == "exit") {
                 jet_codegen_emit_explicit_stop_cleanups(&builder, program)
             }
+            // The consumed-stream overloads use their checked native ABI,
+            // rather than pairing it with the host/port CoreCall signature.
+            if canonical_record.module_name == "core.net.tls" && canonical_record.member == "client" && args.len() > 2 {
+                return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: route, args: lowered_args, owner_type_args: [MIRPreludeTypeArg]{}, type_args: lowered_types}})
+            }
+            call := jet_codegen_intern_core_call(&builder, program, canonical_record)
+            call_failure := jet_codegen_core_call_fallibility(failure, builder, program)
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.CoreCall{call: call, route: route, args: lowered_args, type_args: lowered_types, fallibility: call_failure, data_plan: data_plan})
         }
         .Call(callee, type_args, args) -> {
@@ -6786,4 +6962,30 @@ fn jet_codegen_lower_take_pattern(builder: &JetCodegenBuilder, program: JetCodeg
         }
         else -> panic("checked handle operation is not a take_pattern operation")
     }
+}
+
+#Test("Int.abs extends the existing source helper gate by one exact key") {
+    assert_eq(jet_codegen_precise_source_helper("Int", "abs"), Val("abs"))
+    assert_eq(jet_codegen_precise_source_helper("Int", "add"), None)
+}
+
+#Test("Geometry P and Next binders read checked operand facts") {
+    stock :: Type.Apply{name: "Transform", args: [Type]{Type.Named{name: "Screen"}, Type.Named{name: "World"}}}
+    next_type :: Type.Apply{name: "Transform", args: [Type]{Type.Named{name: "World"}, Type.Named{name: "Device"}}}
+    next :: TExpr{ty: next_type, kind: TExprKind.Unit, span: Span{start: 0, end: 0}, integer_bounds: None, cost: None}
+    assert_eq(jet_codegen_checked_geometry_transform_type_args(stock, "then", [TExpr]{next}), Val([Type]{Type.Named{name: "Device"}}))
+    point_type :: Type.Apply{name: "Point2", args: [Type]{Type.Float, Type.Named{name: "Screen"}}}
+    point :: TExpr{ty: point_type, kind: TExprKind.Unit, span: Span{start: 0, end: 0}, integer_bounds: None, cost: None}
+    operations :: [String]{"point", "point_at_depth", "ray"}
+    loop operation in operations {
+        assert_eq(jet_codegen_checked_geometry_transform_type_args(stock, operation, [TExpr]{point}), Val([Type]{point_type}))
+    }
+    narrow :: Type.Apply{name: "Transform2", args: [Type]{Type.Float32, Type.Named{name: "Screen"}, Type.Named{name: "World"}}}
+    narrow_next :: Type.Apply{name: "Transform2", args: [Type]{Type.Float32, Type.Named{name: "World"}, Type.Named{name: "View"}}}
+    checked_next :: TExpr{ty: narrow_next, kind: TExprKind.Unit, span: Span{start: 0, end: 0}, integer_bounds: None, cost: None}
+    assert_eq(jet_codegen_checked_geometry_transform_type_args(narrow, "then", [TExpr]{checked_next}), Val([Type]{Type.Named{name: "View"}}))
+    held :: Type.Apply{name: "Transform2", args: [Type]{Type.Float, Type.Named{name: "Screen"}, Type.Named{name: "World"}}}
+    assert_eq(jet_codegen_checked_geometry_transform_type_args(held, "inverse", [TExpr]{}), None)
+    cross :: TExpr{ty: held, kind: TExprKind.Unit, span: Span{start: 0, end: 0}, integer_bounds: None, cost: None}
+    assert_eq(jet_codegen_checked_geometry_transform_type_args(stock, "then", [TExpr]{cross}), None)
 }

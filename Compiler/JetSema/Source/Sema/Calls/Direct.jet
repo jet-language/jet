@@ -430,7 +430,8 @@ fn sema_call_check_ambient_print(call: Call, environment: SemaScopeEnvironment, 
             complete = false
             next
         }
-        &values.push(checked)
+        formatted :: if checked.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked}, Type.String, checked.span, environment) ?? return SemaDirectSpecialCheck{handled: true, value: None} else -> checked
+        &values.push(formatted)
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     unit :: Type.Named{name: "Unit"}
@@ -501,7 +502,8 @@ fn sema_call_check_term_eprint(record: CoreCallRecord, args: [CallArg], span: Sp
             next
         }
         if parts.len() > 0 -> &parts.push(TStrPart.Literal{text: "\n"})
-        &parts.push(TStrPart.Interpolation{value: checked, format: TStrFormat.Display})
+        formatted :: if checked.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked}, Type.String, checked.span, environment) ?? return SemaDirectSpecialCheck{handled: true, value: None} else -> checked
+        &parts.push(TStrPart.Interpolation{value: formatted, format: TStrFormat.Display})
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_call_core_record_effects(record, span, [Type]{}, unit, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
@@ -670,7 +672,7 @@ pub fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: 
         .None -> {}
     }
     diagnostics_before := diagnostics.len()
-    route := sema_call_core_resolve_import_route(environment, scopes, alias, member, call.type_args, expected_type_arg_count, true, call.args.len(), call.name_span, call.name_span, &context, &diagnostics)
+    route := sema_call_core_resolve_import_route(environment, scopes, alias, member, call.type_args, expected_type_arg_count, true, call.args.len(), sema_call_core_first_is_move(call.args), call.name_span, call.name_span, &context, &diagnostics)
     route_value :: route ?? {
         if diagnostics.len() != diagnostics_before -> return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: false, value: None}
@@ -973,6 +975,22 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     if candidate.generic_params.len() > 0 && candidate.generic_substitutions.len() != candidate.generic_params.len() {
         inferred_facts := sema_call_collect_inference_facts(params, binding, source_args, environment, &scopes, &state, &tail_store, &context)
         sema_call_lambda_failure_facts(&inferred_facts, candidate.generic_params, params, binding, source_args, environment, &scopes, &state, &tail_store, &context)
+        if sema_call_http_source_json_target(candidate, environment) {
+            loop parameter in candidate.generic_params {
+                loop bound in parameter.bounds {
+                    if bound != "Encode" -> next
+                    loop index in 0..<inferred_facts.parameter_types.len() {
+                        if inferred_facts.parameter_types[index] == (Type.Named{name: parameter.name}) {
+                            body_type :: inferred_facts.argument_types[index]
+                            if !sema_serde_type_is_admissible(environment, body_type, SemaSerdeDirection.Encode) {
+                                sema_call_http_check_serde(SemaSerdeDirection.Encode, body_type, source_args[index].expr.span(), environment, &diagnostics)
+                                return None
+                            }
+                        }
+                    }
+                }
+            }
+        }
         inferred :: sema_call_infer_direct_target_from_types(candidate, inferred_facts.parameter_types, inferred_facts.argument_types, expected, environment, &scopes, call.name_span, &diagnostics) ?? return None
         candidate = inferred
         params = sema_call_params_from_type(candidate.signature) ?? {
@@ -1049,6 +1067,23 @@ pub fn sema_call_check_direct_target(state: &SemaOwnershipState, target: SemaCal
 }
 
 pub fn sema_call_check_direct(state: &SemaOwnershipState, call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if call.name == "measurement" && sema_scope_resolve_index(scopes, call.name) == None {
+        labeled :: call.args.len() == 2 && call.args[0].label == None && (if call.args[1].label == { .Val(label) -> label.name == "uncertainty" else -> false })
+        if !labeled {
+            loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            &diagnostics.push(sema_error("E0104", call.name_span, "`measurement` needs a value and labeled uncertainty", "a measured value enters the exactness plane at one explicit constructor", "write `measurement(value, uncertainty: standard_uncertainty)`"))
+            return None
+        }
+        values := [TExpr]{}
+        loop argument in call.args {
+            value :: sema_check_expression(argument.expr, Val(Type.Float), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            if !sema_ownership_check_call_receiver(&state, argument.expr, AccessConvention.Read, scopes, argument.span, &diagnostics) -> return None
+            &values.push(value)
+        }
+        result :: Type.Apply{name: "Measurement", args: [Type]{Type.Float}}
+        value :: sema_expression_measurement_source_call("__measurement_new", values, result, call.name_span, environment) ?? return None
+        return sema_expr_expected(value, expected, environment, &diagnostics)
+    }
     special :: sema_call_try_knowledge_builtin(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if special.handled -> return special.value
     if sema_call_default_err_candidate(call, expected, scopes) {

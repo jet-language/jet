@@ -141,6 +141,12 @@ pub(crate) mod collection_semantics {
         panic!("{message}");
     }
 
+    // Share the Prelude bounds kernel and the comptime stop transport.
+    include!("../../jet-codegen/src/Prelude/Core/FixedList.rs");
+    fn jet_arithmetic_stop(file: &str, line: u32, message: &str) -> ! {
+        jet_panic_rich_code("E3010", file, line, "", "", 0, 0, message, "")
+    }
+
     include!("../../jet-codegen/src/Prelude/Core/Loadable.rs");
     include!("../../jet-codegen/src/Prelude/Core/Values.rs");
     // D-DATAFRAME1 / card #2447: the JIT uses the shared typed table-plan

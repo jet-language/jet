@@ -1,3 +1,5 @@
+mod common;
+
 #[test]
 fn imported_secret_type_keeps_its_static_conversion_apis() {
     let output = jet::compile(
@@ -83,4 +85,60 @@ fn run() { scoped([U8]{1, 2, 3}) }
         scoped.contains(&format!("<{secret} as __jet_Close>::close(")),
         "the scope exit must close the live Secret, not drop it:\n{scoped}"
     );
+}
+
+/// Observe the still-live allocation at the volatile wipe, before Close frees it.
+/// Reading a raw pointer after Close would instead be a use-after-free.
+#[test]
+fn secret_close_zeroizes_the_original_allocation() {
+    let output = jet::compile(
+        r#"
+use core.crypto as crypto
+
+fn scoped(seed: ^[U8]) {
+    secret := crypto.Secret{bytes: ^seed}
+    close(^secret)
+}
+
+fn run() { scoped(^[U8]{1, 2, 3}) }
+"#,
+    )
+    .expect("a consuming Secret.Close should compile");
+    let header_end = output.rust.find("_cscoped(__jet_seed").expect("scoped function emitted");
+    let header_start = output.rust[..header_end].rfind("fn ").expect("scoped header");
+    let scoped = &output.rust[header_start + 3..header_end + "_cscoped".len()];
+    let mut rust = output.rust.replacen("fn main() {", "fn __original_main() {", 1);
+    rust.push_str(&format!(
+        r#"
+fn main() {{
+    let bytes = vec![0x53u8, 0x45, 0x43, 0x52, 0x45, 0x54];
+    let original = bytes.as_ptr() as usize;
+    let observed = std::rc::Rc::new(std::cell::Cell::new(false));
+    let seen = observed.clone();
+    jet_crypto_entropy_set_zeroize_test_observer(move |wiped| {{
+        assert_eq!(wiped.as_ptr() as usize, original, "Close wiped a copy");
+        assert_eq!(wiped, &[0; 6], "original allocation retained secret bytes");
+        seen.set(true);
+    }});
+    {scoped}(bytes);
+    jet_crypto_entropy_clear_zeroize_test_observer();
+    assert!(observed.get(), "Close never reached the volatile wipe");
+}}
+"#
+    ));
+    let root = common::unique_tmp("jet_secret_close_original_allocation");
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("main.rs");
+    let binary = root.join("main");
+    std::fs::write(&source, rust).unwrap();
+    let built = std::process::Command::new("rustc")
+        .args(["--edition", "2021", "--cfg", "test"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(built.status.success(), "generated Close rejected:\n{}", String::from_utf8_lossy(&built.stderr));
+    let ran = std::process::Command::new(&binary).output().unwrap();
+    assert!(ran.status.success(), "original allocation was not zeroized:\n{}", String::from_utf8_lossy(&ran.stderr));
 }

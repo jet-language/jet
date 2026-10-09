@@ -348,7 +348,7 @@ fn store_broker_stage_created_at(path: String, info: Stat) -> Int StoreError! {
             .Err(_) -> {}
         }
     }
-    seconds :: info.modified.unix_ns /% 1000000000
+    seconds :: (info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) /% 1000000000
     Ok(if seconds < 0 -> 0 else -> seconds)
 }
 

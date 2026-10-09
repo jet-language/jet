@@ -25,7 +25,7 @@ use std::sync::mpsc;
 const MAX_FRONTEND_WORKERS: usize = 8;
 
 pub(crate) enum PreparedFrontendModule {
-    Parsed(crate::AST::Program, Vec<Diagnostic>),
+    Parsed(crate::AST::Program, Vec<Diagnostic>, crate::AST::CoreIdentifierDemand),
     LexFailed(Vec<Diagnostic>),
     ParseFailed(Vec<Diagnostic>),
 }
@@ -433,7 +433,11 @@ fn prepare_frontend_module(source: &str) -> PreparedFrontendModule {
         return PreparedFrontendModule::LexFailed(lex_diags);
     }
     match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
-        Ok((program, teaching)) => PreparedFrontendModule::Parsed(program, teaching),
+        Ok((program, teaching)) => PreparedFrontendModule::Parsed(
+            program,
+            teaching,
+            Lexer::core_identifier_demand(&tokens),
+        ),
         Err(diagnostics) => PreparedFrontendModule::ParseFailed(diagnostics),
     }
 }
@@ -2656,18 +2660,18 @@ fn load_entry_with_overlays_mode_on_stack(
         build_facts,
         edition: package_edition,
     };
-    // A bare `URL` (a type or a typed `URL{"…"}` head) is the `core.net.url`
-    // record, so a module that names it loads that Core source without a `use`.
-    let url_carrier = jet_foundation::Syntax::TypedHeadKind::URL.carrier_record_module();
-    let names_url_carrier = bundle
-        .modules
-        .iter()
-        .any(|module| source_names_identifier(&module.source, "URL"));
+    // Automatic owners come only from the canonical parse's identifiers.
+    // The lowercase URL typed head and Option.or_err retain their existing
+    // owners; literal metadata and comments do not load library source.
     let mut core_source_modules = jet_foundation::CoreModuleExports::core_source_modules()
         .iter()
         .copied()
         .filter(|source_module| {
-            (names_url_carrier && Some(source_module.module) == url_carrier)
+            bundle.modules.iter().any(|module| {
+                module.core_identifier_demand.bare_modules.contains(&source_module.module)
+                    || (module.core_identifier_demand.option_or_err
+                        && source_module.module == "core.prelude")
+            })
                 || bundle.modules.iter().any(|module| {
                     module.imports.iter().any(|import| {
                         core_source_import_module(import).as_deref() == Some(source_module.module)
@@ -2679,18 +2683,13 @@ fn load_entry_with_overlays_mode_on_stack(
         .iter()
         .map(|source_module| source_module.module)
         .collect::<HashSet<_>>();
-    // `Core/text/string.jet` is a compiler-private source part of `core.text`.
-    // Schedule it beside its public owner without adding a public module row or
-    // teaching ordinary Core import resolution about the reserved identity.
-    if scheduled_core_source_modules
-        .contains(jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER)
-    {
-        if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
-            jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
-        ) {
-            if scheduled_core_source_modules.insert(part.source.module) {
-                core_source_modules.push(part.source);
-            }
+    // Private Core parts are scheduled beside their public owner, but their
+    // reserved identities are never exposed as public Core import names.
+    for part in jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS {
+        if scheduled_core_source_modules.contains(part.owner)
+            && scheduled_core_source_modules.insert(part.source.module)
+        {
+            core_source_modules.push(part.source);
         }
     }
     let mut core_source_module_index = 0;
@@ -2740,16 +2739,11 @@ fn load_entry_with_overlays_mode_on_stack(
                     core_source_modules.push(*dependency);
                 }
             }
-            // A source package importing `core.text` also schedules the
-            // compiler-private String receiver part. It remains keyed by its
-            // reserved internal module identity, not by `core.text.string`.
-            if dependency == jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER {
-                if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
-                    jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
-                ) {
-                    if scheduled_core_source_modules.insert(part.source.module) {
-                        core_source_modules.push(part.source);
-                    }
+            for part in jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS {
+                if dependency == part.owner
+                    && scheduled_core_source_modules.insert(part.source.module)
+                {
+                    core_source_modules.push(part.source);
                 }
             }
         }
@@ -2802,6 +2796,7 @@ fn load_entry_with_overlays_mode_on_stack(
             path: PathBuf::from(core_path),
             display,
             source,
+            core_identifier_demand: Lexer::core_identifier_demand(&tokens),
             alias,
             imports: std::mem::take(&mut program.imports),
             items: program.items,
@@ -4457,8 +4452,8 @@ fn load_file_located(
         .and_then(|cache| cache.remove(&norm))
         .filter(|entry| entry.source == source)
         .map(|entry| entry.module);
-    let (mut prog, teaching) = match prepared {
-        Some(PreparedFrontendModule::Parsed(program, teaching)) => (program, teaching),
+    let (mut prog, teaching, core_identifier_demand) = match prepared {
+        Some(PreparedFrontendModule::Parsed(program, teaching, demand)) => (program, teaching, demand),
         Some(PreparedFrontendModule::LexFailed(diagnostics)) => {
             return Err(LoaderError::at(display, &source, diagnostics));
         }
@@ -4475,7 +4470,7 @@ fn load_file_located(
                 return Err(LoaderError::at(display, &source, lex_diags));
             }
             match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
-                Ok(parsed) => parsed,
+                Ok((program, teaching)) => (program, teaching, Lexer::core_identifier_demand(&tokens)),
                 Err(diagnostics) => return Err(LoaderError::at(display, &source, diagnostics)),
             }
         }
@@ -4622,6 +4617,7 @@ fn load_file_located(
         path: path.to_path_buf(),
         display: display.to_string(),
         source: source.clone(),
+        core_identifier_demand,
         alias,
         imports: imports.clone(),
         items: prog.items,
@@ -4983,17 +4979,6 @@ pub fn core_module_path(imp: &ImportDecl) -> Option<String> {
     imp.core_module_path()
 }
 
-/// True when `source` spells `name` as a whole identifier. A comment or string
-/// that mentions it only schedules one more Core source, never a wrong one.
-fn source_names_identifier(source: &str, name: &str) -> bool {
-    let is_ident = |byte: u8| byte == b'_' || byte.is_ascii_alphanumeric();
-    let bytes = source.as_bytes();
-    source.match_indices(name).any(|(start, _)| {
-        let end = start + name.len();
-        (start == 0 || !is_ident(bytes[start - 1]))
-            && bytes.get(end).map_or(true, |byte| !is_ident(*byte))
-    })
-}
 
 /// Resolve Core source package imports, including selective `use core.x.[T]`
 /// imports that `ImportDecl::core_module_path` intentionally leaves unqualified.
@@ -5960,14 +5945,43 @@ mod stale_manifest_name_tests {
             prepared
                 .get(&normalize_path(&first))
                 .map(|entry| &entry.module),
-            Some(PreparedFrontendModule::Parsed(_, _))
+            Some(PreparedFrontendModule::Parsed(_, _, _))
         ));
         assert!(matches!(
             prepared
                 .get(&normalize_path(&second))
                 .map(|entry| &entry.module),
-            Some(PreparedFrontendModule::Parsed(_, _))
+            Some(PreparedFrontendModule::Parsed(_, _, _))
         ));
+    }
+
+    #[test]
+    fn core_demand_metadata_does_not_load_owners_but_real_names_keep_import_closure() {
+        let root = tempdir("lexical-core-demand");
+        let entry = root.join("main.jet");
+        let names = jet_foundation::CoreModuleExports::CORE_BARE_SOURCE_MODULES
+            .iter()
+            .map(|row| format!("\"{}\"", row.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let source = format!("pub fn run() {{\n    names :: [String]{{{names}}}\n    print(names.len())\n}}\n");
+        fs::write(&entry, &source).unwrap();
+        let data = load_entry(entry.to_str().unwrap()).expect("literal metadata source loads");
+        assert!(data.modules.iter().all(|module| !module.is_core_source()));
+        assert!(data.modules.iter().all(|module| module.core_identifier_demand.prelude_modules.is_empty()));
+
+        fs::write(&entry, "pub fn run(value: URL) {}\n").unwrap();
+        let real = load_entry(entry.to_str().unwrap()).expect("real URL owner loads");
+        fs::write(&entry, "use core.net.url as imported_url\npub fn run() {}\n").unwrap();
+        let imported = load_entry(entry.to_str().unwrap()).expect("explicit URL owner loads");
+        let core_paths = |bundle: &ProgramBundle| {
+            bundle.modules.iter().filter(|module| module.is_core_source())
+                .map(|module| module.path.clone()).collect::<std::collections::BTreeSet<_>>()
+        };
+        let real_paths = core_paths(&real);
+        assert!(!real_paths.is_empty(), "real identifiers must retain their owner source");
+        assert_eq!(real_paths, core_paths(&imported), "bare demand keeps explicit-import dependency/private-part closure");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

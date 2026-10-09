@@ -1,6 +1,42 @@
 // core-conformance: core.jobs.queue
+// Run with a fresh JET_JOB_QUEUE_DB path supplied at process startup.
+package {
+    name: "jobs-conformance"
+    authority: { holds: { allow: [DB, FS.Read, FS.Write, IO, Mem.Alloc, Rand, Time, Time.Wait] } }
+}
 use core.jobs as api
 
+#Job(.Dev)
+fn process(payload: String) { print(payload) }
+
 fn run() {
-    print(api.queue())
+    queue := api.queue() ?? panic("queue authority/provider rejected")
+    completed :: &queue.enqueue(process, "complete", key: "conformance-complete") ?? panic("enqueue failed")
+    failed :: &queue.enqueue(process, "fail", key: "conformance-fail") ?? panic("enqueue failed")
+    cancelled :: queue.delay(process, "cancel", for: 1s) ?? panic("delay failed")
+    dead :: queue.delay(process, "dead", for: 1s) ?? panic("delay failed")
+    print(completed.queue)
+    print((queue.receipt(completed.id) ?? panic("receipt missing")).state)
+    records :: queue.inspect(16, true) ?? panic("inspect failed")
+    print(records.len())
+    print((queue.events(completed.id) ?? panic("events failed")).len())
+    claims :: queue.claim("conformance", 1) ?? panic("claim failed")
+    assert(claims.len() == 1)
+    active :: claims[0]
+    print((queue.heartbeat(active) ?? panic("heartbeat failed")).state)
+    print((queue.acknowledge(active, JobResult{type_id: "conformance-result", bytes: [], publish: false}) ?? panic("acknowledge failed")).state)
+    retry :: queue.claim("conformance", 1) ?? panic("claim failed")
+    assert(retry.len() == 1)
+    retry_active :: retry[0]
+    print((queue.fail(retry_active, JobError{type_id: "conformance-error", reason: "failure", detail: None}) ?? panic("fail failed")).state)
+    print((queue.cancel(cancelled.id, "conformance cancellation") ?? panic("cancel failed")).state)
+    print((queue.dead_letter(dead.id, "conformance dead letter") ?? panic("dead letter failed")).state)
+    queue.recover_expired() ?? panic("recovery failed")
+    print("recovered")
+    print((queue.status() ?? panic("status failed")).depth)
+    print((queue.pause() ?? panic("pause failed")).paused)
+    print((queue.resume() ?? panic("resume failed")).paused)
+    print((queue.wait(1ms) ?? panic("wait failed")).depth)
+    print(queue.prune() ?? panic("prune failed"))
+    print((queue.receipt(failed.id) ?? panic("receipt missing")).attempts)
 }

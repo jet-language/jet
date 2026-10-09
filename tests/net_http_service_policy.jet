@@ -1,0 +1,98 @@
+package {
+    name: "net-http-service-policy-tests"
+    authority: { holds: { allow: [Net, Time.Wait, FS.Read, IO, Mem.Alloc] } }
+}
+
+// Import the canonical Core owners: a Core/... file used as the entry is user
+// source and cannot directly exercise its compiler-reserved carrier leaves.
+use core.net as net
+use core.http.client as client
+use core.http.server as server
+use core.service as service
+use core.jobs as jobs
+
+#Test("imported network policy owns canonical address text")
+fn _() {
+    ip :: net.ip_addr("2001:0db8:0:0:0:0:0:1") ?? panic("IP")
+    assert(net.ip_to_string(ip) == "2001:db8::1")
+    socket :: net.socket_addr_parse("[fe80::1%4294967295]:65535") ?? panic("socket")
+    assert(net.socket_to_string(socket) == "[fe80::1%4294967295]:65535")
+}
+
+#Test("socket numeric fast path preserves IPv4 IPv6 and port boundaries")
+fn _() {
+    first :: net.socket_addr("127.0.0.1", 0) ?? panic("IPv4 numeric")
+    last :: net.socket_addr("::1", 65535) ?? panic("IPv6 numeric")
+    scoped :: net.socket_addr("[fe80::1%7]", 80) ?? panic("scoped IPv6 numeric")
+    assert(net.socket_to_string(first) == "127.0.0.1:0")
+    assert(net.socket_to_string(last) == "[::1]:65535")
+    assert(net.socket_to_string(scoped) == "[fe80::1%7]:80")
+}
+
+#Test("bracketed IPv6 resolver grammar matches the platform socket parser")
+fn _() {
+    cases :: [(host: String, expected: String)]{
+        (host: "[::1]", expected: "[::1]:443"),
+        (host: "[0:0:0:0:0:0:0:1]", expected: "[::1]:443"),
+        (host: "[0000:0000:0000:0000:0000:0000:0000:0001]", expected: "[::1]:443"),
+        (host: "[::ffff:1.2.3.4]", expected: "[::ffff:1.2.3.4]:443"),
+        (host: "[0:0:0:0:0:ffff:0102:0304]", expected: "[::ffff:1.2.3.4]:443"),
+        (host: "[fe80::1%7]", expected: "[fe80::1%7]:443"),
+    }
+    loop item in cases {
+        address :: net.socket_addr(item.host, 443) ?? panic("bracketed IPv6")
+        assert(net.socket_to_string(address) == item.expected)
+    }
+}
+
+#Test("bad bracketed IPv6 keeps its exact platform resolver address")
+fn _() {
+    if net.socket_addr("[zz]", 80) == {
+        .Err(error) -> {
+            assert(net.error_operation(error) == Val("resolve socket address"))
+            assert(net.error_address(error) == Val("[zz]:80"))
+        }
+        .Ok(_) -> assert(false)
+    }
+}
+
+#Test("imported server policy preserves credentials and formats access logs")
+fn _() {
+    credentials :: server.tls("not yet validated", "")
+    assert(credentials.cert_pem == "not yet validated" && credentials.key_pem == "")
+    request :: client.request("GET", "http://127.0.0.1/logs/42?secret=x")
+    assert(server.access_log(request, -7) == "GET /logs/42 -7")
+}
+
+#Test("imported service and jobs policy is value policy, not copied runtime state")
+fn _() {
+    assert(service.restart_one_for_one() == ServiceRestart.OneForOne)
+    assert(service.delivery_at_most_once() == ServiceDelivery.AtMostOnce)
+    assert(jobs.is_terminal(JobQueueState.Completed))
+    assert(!jobs.is_terminal(JobQueueState.Queued))
+    assert(jobs.is_cancelled(JobQueueState.Cancelled))
+}
+
+#Test("response policy transfers defaults and retains the one-shot body")
+fn _() {
+    response :: server.response(99, "must not publish")
+    assert(response.status() == 500)
+    assert(response.protocol() == "HTTP/1.1")
+    assert(response.remote_address() == "")
+    assert(response.redirect_history().len() == 0)
+    assert(response.timings().len() == 0)
+    assert(!response.reused_connection())
+    assert(response.raw_content_encoding() == None)
+    assert((response.body().text(64) ?? panic("error body")) == "500 Internal Server Error")
+    if response.body().text(64) == {
+        .Err(.BodyConsumed) -> {}
+        else -> panic("response body must be consumed once")
+    }
+    events :: server.sse("ready")
+    assert((events.header("content-type") ?? panic("SSE content type")) == "text/event-stream")
+    assert((events.header("cache-control") ?? panic("SSE cache")) == "no-cache")
+    assert((events.body().text(64) ?? panic("SSE body")) == "data: ready\n\n")
+    json :: server.json(200, "witness")
+    assert((json.header("content-type") ?? panic("JSON content type")) == "application/json; charset=utf-8")
+    assert((json.body().text(64) ?? panic("JSON body")) == "\"witness\"")
+}

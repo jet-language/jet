@@ -1338,7 +1338,7 @@ fn status_close_adapter(
     lib: &str,
     functions: &mut [ExternFn],
     facts: &[FfiHandleFact],
-) -> Option<(FfiCloseAdapter, Item)> {
+) -> Option<(FfiCloseAdapter, Item, crate::AST::CoreIdentifierDemand)> {
     for fact in facts.iter().filter(|fact| fact.lib == lib) {
         let Some(constructor_idx) = functions.iter().position(|function| {
             function.close.as_ref().is_some_and(|(name, _)| name == &fact.close)
@@ -1396,6 +1396,7 @@ fn status_close_adapter(
                 adapter_function: adapter_name,
             },
             Item::Func(adapter),
+            crate::Lexer::core_identifier_demand(&tokens),
         ));
     }
     None
@@ -1618,11 +1619,13 @@ fn assemble_loaded(
         cffi.link_closure = FfiLinkClosure::new(direct, transitive);
 
         let mut adapter_items = Vec::new();
-        while let Some((adapter, item)) =
+        let mut core_identifier_demand = crate::AST::CoreIdentifierDemand::default();
+        while let Some((adapter, item, demand)) =
             status_close_adapter(lib, &mut merged, &cffi.handle_facts)
         {
             cffi.close_adapters.push(adapter);
             adapter_items.push(item);
+            core_identifier_demand.merge(demand);
         }
 
         let alias = synthetic_alias(lib);
@@ -1640,6 +1643,7 @@ fn assemble_loaded(
             path: std::path::PathBuf::from(format!("<c.{lib}>")),
             display: format!("c.{lib}"),
             source: String::new(),
+            core_identifier_demand,
             alias,
             imports: Vec::new(),
             items,
@@ -1698,6 +1702,8 @@ fn assemble_loaded(
                             path: std::path::PathBuf::from(format!("<c.{lib}>")),
                             display: format!("c.{lib}"),
                             source: String::new(),
+                            // This foreign namespace has no declarations or Jet source.
+                            core_identifier_demand: crate::AST::CoreIdentifierDemand::default(),
                             alias: synthetic_alias(&lib),
                             imports: Vec::new(),
                             items: vec![Item::CModule(CModule {
@@ -3339,6 +3345,7 @@ fn load_cache_source(
         path: path.to_path_buf(),
         display,
         source: source.to_string(),
+        core_identifier_demand: crate::Lexer::core_identifier_demand(&toks),
         alias: format!("__c_cache_{lib}"),
         imports: std::mem::take(&mut prog.imports),
         items: std::mem::take(&mut prog.items),

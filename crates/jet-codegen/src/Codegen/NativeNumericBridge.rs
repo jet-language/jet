@@ -935,9 +935,9 @@ fn fraction_input(value: &MirRuntimeValue, span: Span) -> Result<CtFraction, Dia
     let mut denominator = None;
     for (name, value) in fields {
         match name.as_str() {
-            "numerator" if numerator.is_none() => numerator = Some(exact_integer_value_ref(value, span)?),
-            "denominator" if denominator.is_none() => denominator = Some(exact_integer_value_ref(value, span)?),
-            "numerator" | "denominator" => {
+            "num_value" if numerator.is_none() => numerator = Some(exact_integer_value_ref(value, span)?),
+            "den_value" if denominator.is_none() => denominator = Some(exact_integer_value_ref(value, span)?),
+            "num_value" | "den_value" => {
                 return Err(bridge_error(span, "native Fraction carrier has a duplicate field"));
             }
             _ => return Err(bridge_error(span, "native Fraction carrier has an unknown field")),
@@ -1655,6 +1655,21 @@ mod tests {
         let value = CtBigInt::from_str("18446744073709551615").expect("u64 max parses");
         assert_eq!(fixed_left(&value, false, Span::new(0, 0)).unwrap(), -1);
         assert_eq!(fixed_result_value(-1), MirRuntimeValue::Int(-1));
+    }
+
+    #[test]
+    fn fraction_bridge_uses_source_private_storage_and_keeps_exact_parts() {
+        use jet_foundation::Numeric::CtFraction;
+
+        let numerator = CtBigInt::from_str("18446744073709551616").unwrap();
+        let fraction = CtFraction::from_bigints(numerator, CtBigInt::from_int(3)).unwrap();
+        let carrier = super::fraction_value(fraction.clone(), Span::new(0, 0)).unwrap();
+        let MirRuntimeValue::Struct { fields, .. } = &carrier else {
+            panic!("Fraction bridge must retain its nominal carrier");
+        };
+        assert_eq!(fields[0].0, "num_value");
+        assert_eq!(fields[1].0, "den_value");
+        assert_eq!(super::fraction_input(&carrier, Span::new(0, 0)).unwrap(), fraction);
     }
 
     #[test]

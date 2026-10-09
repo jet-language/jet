@@ -1,0 +1,17 @@
+// Named-zone lookup is civil policy: Env and FS.Read, never ambient Time.
+use core as core
+use core.time as time
+use core.time as tz
+use core.time.[zone, parse_zoned]
+
+fn configured(name: String) -[Env, FS.Read]> Zone TimeError! { time.zone(name) }
+fn parsed(text: String) -[Env, FS.Read]> ZonedDateTime TimeError! { time.parse_zoned(text) }
+fn qualified(name: String) -[Env, FS.Read]> Zone TimeError! { core.time.zone(name) }
+fn aliased(name: String) -[Env, FS.Read]> Zone TimeError! { tz.zone(name) }
+fn imported(name: String) -[Env, FS.Read]> Zone TimeError! { zone(name) }
+fn qualified_parse(text: String) -[Env, FS.Read]> ZonedDateTime TimeError! { core.time.parse_zoned(text) }
+fn aliased_parse(text: String) -[Env, FS.Read]> ZonedDateTime TimeError! { tz.parse_zoned(text) }
+fn imported_parse(text: String) -[Env, FS.Read]> ZonedDateTime TimeError! { parse_zoned(text) }
+fn fixed() -[]> Zone Never! { time.utc() }
+fn timestamp(text: String) -[]> DateTime TimeError! { time.parse_rfc3339(text) }
+fn run() {}

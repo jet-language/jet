@@ -1662,12 +1662,11 @@ pub(crate) fn core_source_sig_map(
             let Item::Func(function) = item else {
                 continue;
             };
-            if !function.is_pub
-                || !jet_foundation::CoreModuleExports::core_source_owns(
-                    source.module,
-                    &function.name,
-                )
-            {
+            // A SourceOwned declaration can name a different checked export.
+            // Index exported functions, not just public Core member spellings:
+            // `take` may target `__take_bytes` without exporting another Core API.
+            if !function.is_pub && !crate::Syntax::CORE_CALLS.iter()
+                .any(|row| row.targets_source_function(source.module, &function.name)) {
                 continue;
             }
             let params = function

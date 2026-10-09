@@ -60,6 +60,13 @@ pub enum EncodingErrorKind {
     State,
 }
 
+// Private plain CSV read facts; policy lives in Core/encoding/csv.jet.
+#[derive(Clone, Debug)]
+pub struct __QueryRead {
+    pub size: u64,
+    pub bytes: Vec<u8>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EncodingCause {
     pub kind: String,

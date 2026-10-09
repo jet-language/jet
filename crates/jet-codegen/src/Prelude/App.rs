@@ -2064,9 +2064,6 @@ source.onmessage = () => location.reload();
         app.serve_on(port)
     }
 
-    pub fn jet_web_virtual_window_facts(window: &super::JetWebVirtualWindow) -> String {
-        window.facts_json()
-    }
 
 }
 pub use jet_app_impl::{

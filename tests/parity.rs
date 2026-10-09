@@ -627,12 +627,6 @@ fn aot_specialized_value_methods() -> BTreeSet<Entry> {
 
     let time = read("crates/jet-sema/src/Sema/CheckerCoreLib/net_text_time.rs");
     let mut entries = BTreeSet::new();
-    add_arm(
-        &mut entries,
-        &time,
-        "MIME",
-        "Type::Named(n) if n == \"MIME\" => match method {",
-    );
     let date_marker = "Type::Named(n) if n == \"Date\" || n == \"LocalDate\" => match method {";
     add_arm(&mut entries, &time, "Date", date_marker);
     add_arm(&mut entries, &time, "LocalDate", date_marker);
@@ -1796,6 +1790,12 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             Class::Covered
         );
     }
+    // MIME methods are ordinary authored Core impls, not specialized native
+    // receiver dispatch entries in this inventory.
+    assert!(jet_foundation::CoreModuleExports::core_source_owns_type(
+        "<corelib>/Core/net::Core/net/mime.jet::MIME"
+    ));
+    let mime_source = read("Core/net/mime.jet");
     for method in [
         "media_type",
         "subtype",
@@ -1804,9 +1804,9 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         "param",
         "params",
     ] {
-        assert_eq!(
-            record(&records, Surface::Value, "MIME", method).class,
-            Class::Covered
+        assert!(
+            mime_source.contains(&format!("pub fn {method}(")),
+            "source-owned MIME.{method} must remain authored"
         );
     }
     for owner in ["Date", "LocalDate"] {
@@ -2165,7 +2165,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         "ViewMut.join Covered (JoinSep)"
     );
     assert_eq!(
-        record(&records, Surface::Fixed, "core.crypto.random", "bytes").class,
+        record(&records, Surface::Fixed, "core.crypto.random", "__os_entropy").class,
         Class::Boundary
     );
 

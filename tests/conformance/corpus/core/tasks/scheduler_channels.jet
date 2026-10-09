@@ -1,0 +1,18 @@
+// core-conformance: core.tasks.channel
+// Builtin scheduler channels return sender first and receiver second.
+fn run() {
+    pair :: channel<Int>()
+    pair.sender.send(41)
+    assert_eq(pair.receiver.receive() ?? panic("channel closed"), 41)
+    pair.sender.close()
+
+    bounded :: channel<Int>(capacity: 0)
+    bounded.sender.send(42)
+    assert_eq(bounded.receiver.receive() ?? panic("bounded channel closed"), 42)
+    bounded.sender.close()
+    print("scheduler channel names: 41,42")
+}
+
+#Test("scheduler channel names route sends to their matching receivers") {
+    run()
+}

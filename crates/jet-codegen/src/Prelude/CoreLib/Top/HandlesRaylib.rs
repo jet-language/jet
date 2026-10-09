@@ -54,6 +54,31 @@ macro_rules! jet_db_bridge {
                 self.handle
             }
         }
+        // Mechanical queue leaf marshaling, over this same SQLite bridge.
+        fn jet_db_queue_raw_open(path: &String) -> u64 {
+            $bridge::jet_db_open(path)
+        }
+        fn jet_db_queue_raw_close(handle: u64) -> bool {
+            $bridge::jet_db_close(handle)
+        }
+        fn jet_db_queue_raw_begin(handle: u64) -> bool {
+            $bridge::jet_db_begin(handle)
+        }
+        fn jet_db_queue_raw_commit(handle: u64) -> bool {
+            $bridge::jet_db_commit(handle)
+        }
+        fn jet_db_queue_raw_rollback(handle: u64) -> bool {
+            $bridge::jet_db_rollback(handle)
+        }
+        fn jet_db_queue_raw_execute(handle: u64, sql: &String, params: &Vec<jet_std::DBValue>) -> Result<i64, jet_std::DBError> {
+            let params = jet_std::jet_db_encode_params(params);
+            jet_std::jet_db_decode_execute_result(&$bridge::jet_db_execute(handle, sql, &params))
+        }
+        fn jet_db_queue_raw_query(handle: u64, sql: &String, params: &Vec<jet_std::DBValue>) -> Result<Vec<JetMap<String, jet_std::DBValue>>, jet_std::DBError> {
+            let params = jet_std::jet_db_encode_params(params);
+            jet_std::jet_db_decode_query_result(&$bridge::jet_db_query(handle, sql, &params))
+        }
+
 
         fn jet_db_open(path: &String) -> JetDbConnection {
             let handle = $bridge::jet_db_open(path);
@@ -408,11 +433,6 @@ struct RaylibColor {
     a: i64,
 }
 
-/// D-GAME-LOOP1=A: typed sound handle (headless-safe; native play is best-effort).
-#[derive(Clone, Debug)]
-struct RaylibSound {
-    path: String,
-}
 
 type RaylibAtlasRegion = JetRaylibAtlasRegion;
 
@@ -914,9 +934,6 @@ fn jet_raylib_close_window(window: &RaylibWindow) {
     }
 }
 
-fn jet_raylib_color(r: i64, g: i64, b: i64, a: i64) -> RaylibColor {
-    RaylibColor { r, g, b, a }
-}
 
 fn jet_raylib_key_code(name: &String) -> i32 {
     match name.as_str() {
@@ -1020,12 +1037,4 @@ fn jet_raylib_set_target_fps(fps: i64) {
     }
 }
 
-fn jet_raylib_load_sound(path: &String) -> RaylibSound {
-    RaylibSound { path: path.clone() }
-}
-
-/// Returns whether a play was accepted (always true for a non-empty path in headless).
-fn jet_raylib_play_sound(sound: &RaylibSound) -> bool {
-    !sound.path.is_empty()
-}
 // jet:raylib-end

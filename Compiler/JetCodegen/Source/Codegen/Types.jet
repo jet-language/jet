@@ -752,6 +752,7 @@ JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS :: prep { [JetCodegenCompilerOwnedRecord
     JetCodegenCompilerOwnedRecord{name: "PluginFault", fields: [String]{"export", "message", "frames"}},
     JetCodegenCompilerOwnedRecord{name: "IOContext", fields: [String]{"operation", "resource", "os_code", "cause"}},
     JetCodegenCompilerOwnedRecord{name: "NetErrorDetail", fields: [String]{"operation", "address", "name", "message", "os_code"}},
+    JetCodegenCompilerOwnedRecord{name: "__ResolveError", fields: [String]{"kind", "has_os_code", "os_code", "message"}},
     JetCodegenCompilerOwnedRecord{name: "AsyncPolicy", fields: [String]{"capacity", "overflow"}},
     JetCodegenCompilerOwnedRecord{name: "CSVRow", fields: [String]{"fields", "line"}},
     JetCodegenCompilerOwnedRecord{name: "DataLineOptions", fields: [String]{"title", "x_label", "y_label", "markers", "reference", "style", "color", "legend"}},
@@ -762,11 +763,17 @@ JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS :: prep { [JetCodegenCompilerOwnedRecord
     JetCodegenCompilerOwnedRecord{name: "EncodingCause", fields: [String]{"kind", "os_code", "message"}},
     JetCodegenCompilerOwnedRecord{name: "EncodingError", fields: [String]{"format", "kind", "byte_offset", "line", "column", "path", "reason", "cause"}},
     JetCodegenCompilerOwnedRecord{name: "EncodingLimits", fields: [String]{"buffer_bytes", "max_depth", "max_item_bytes", "max_total_bytes", "max_expansion_depth", "max_expansion_bytes"}},
+    JetCodegenCompilerOwnedRecord{name: "CBOROptions", fields: [String]{"max_depth", "max_items", "max_bytes", "require_canonical"}},
+    JetCodegenCompilerOwnedRecord{name: "CBORError", fields: [String]{"kind", "byte_offset", "path", "reason"}},
+    JetCodegenCompilerOwnedRecord{name: "XMLLimits", fields: [String]{"max_depth", "max_nodes", "max_attributes_per_element", "max_name_bytes", "max_text_bytes", "max_entity_declarations", "max_entity_depth", "max_entity_replacement_bytes"}},
+    JetCodegenCompilerOwnedRecord{name: "XMLParseOptions", fields: [String]{"entities", "limits"}},
+    JetCodegenCompilerOwnedRecord{name: "XMLRenderOptions", fields: [String]{"encoding", "lexical"}},
+    JetCodegenCompilerOwnedRecord{name: "XMLCanonical", fields: [String]{"mode", "comments", "inclusive_prefixes"}},
+    JetCodegenCompilerOwnedRecord{name: "XMLError", fields: [String]{"kind", "byte_offset", "line", "column", "path", "reason"}},
     JetCodegenCompilerOwnedRecord{name: "DataProvenance", fields: [String]{"source", "format", "authority"}},
     JetCodegenCompilerOwnedRecord{name: "DataSchema", fields: [String]{"identity", "format", "columns", "projection"}},
     JetCodegenCompilerOwnedRecord{name: "DataSnapshotIdentity", fields: [String]{"id", "source", "content", "schema", "format"}},
     JetCodegenCompilerOwnedRecord{name: "DataLoaderStatus", fields: [String]{"identity", "freshness", "invalidated_by", "error", "cleanup", "buffered_bytes", "backpressure", "last_good"}},
-    JetCodegenCompilerOwnedRecord{name: "Claims", fields: [String]{"subject", "audience", "issuer", "expires_at", "not_before", "issued_at"}},
     JetCodegenCompilerOwnedRecord{name: "WebFormFieldSpec", fields: [String]{"name", "value_type", "required", "default", "label", "control", "group", "wire_name"}},
     JetCodegenCompilerOwnedRecord{name: "WebFormFieldState", fields: [String]{"name", "value_type", "required", "value", "touched", "validating", "errors"}},
     JetCodegenCompilerOwnedRecord{name: "WebTableState", fields: [String]{"sort", "filter", "page_index", "page_size", "selected_keys", "selection_anchor", "focus_key", "page_mode"}},
@@ -812,7 +819,6 @@ JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS :: prep { [JetCodegenCompilerOwnedRecord
     JetCodegenCompilerOwnedRecord{name: "TempFile", fields: [String]{"path"}},
     JetCodegenCompilerOwnedRecord{name: "FileLock", fields: [String]{"path"}},
     JetCodegenCompilerOwnedRecord{name: "WatchEvent", fields: [String]{"path", "domain", "kind"}},
-    JetCodegenCompilerOwnedRecord{name: "Stat", fields: [String]{"size", "modified_ms", "created_ms", "readonly", "is_file", "is_dir", "is_symlink", "kind", "mode"}},
     JetCodegenCompilerOwnedRecord{name: "DataColumn", fields: [String]{"id", "name", "type_name", "nullable"}},
     JetCodegenCompilerOwnedRecord{name: "DataStatus", fields: [String]{"step", "path", "clone_value", "ownership", "trust", "fallback", "replacement"}},
     JetCodegenCompilerOwnedRecord{name: "FontFace", fields: [String]{"family", "size", "style"}},
@@ -885,7 +891,7 @@ fn jet_codegen_compiler_owned_core_record_fields(record: JetCodegenCompilerOwned
 // row's own type parameters (`jet_codegen_compiler_owned_generic_params`), or
 // None when no such row exists. Rows follow Rust compiler_owned_type_defs:
 // `FieldError`, `Range`, the generic Core carriers, the geometry records, the
-// keyed-vault records, `Measurement`, the data summaries, `AllocError`,
+// keyed-vault records, the data summaries, `AllocError`,
 // `VJPRun`, the Core records and the math records. Callers resolve declared
 // nominals first, as Rust's rows dedupe by key in favour of declarations.
 fn jet_codegen_compiler_owned_record_fields(name: String) -> [TypeTupleField]? Never! {
@@ -926,7 +932,6 @@ fn jet_codegen_compiler_owned_record_fields(name: String) -> [TypeTupleField]? N
         key :: Type.Apply{name: "KeyRef", args: [Type]{t}}
         return Val([TypeTupleField]{TypeTupleField{name: "previous", ty: key}, TypeTupleField{name: "current", ty: key}})
     }
-    if name == "Measurement" -> return Val([TypeTupleField]{TypeTupleField{name: "value", ty: t}, TypeTupleField{name: "uncertainty", ty: t}})
     if name == "DataPivotCell" -> return Val(jet_codegen_compiler_owned_core_record_fields(JetCodegenCompilerOwnedRecord{name: name, fields: [String]{"row_key", "column_key", "count", "sum", "mean"}}))
     if name == "AllocError" -> return Val(jet_codegen_compiler_owned_core_record_fields(JetCodegenCompilerOwnedRecord{name: name, fields: [String]{"requested_bytes", "allocator"}}))
     if name == "DataSummary" -> return Val(jet_codegen_compiler_owned_core_record_fields(JetCodegenCompilerOwnedRecord{name: name, fields: [String]{"count", "sum", "mean", "min", "max", "median", "variance", "stddev"}}))
@@ -992,12 +997,12 @@ JET_CODEGEN_COMPILER_OWNED_MATH_RECORDS :: prep { [JetCodegenCompilerOwnedRecord
 
 // The carrier record rows of Rust compiler_owned_type_defs between `Range`
 // and the Core records (generic Core carriers, geometry, keyed vault,
-// `Measurement`, data summaries, `AllocError`, `VJPRun`), in program order.
+// data summaries, `AllocError`, `VJPRun`), in program order.
 JET_CODEGEN_COMPILER_OWNED_CARRIER_RECORDS :: prep { [String]{
     "DataJoin", "Group", "DataSnapshot",
     "Point2", "Delta2", "ScreenPoint", "WorldPoint", "ViewPoint", "CameraPoint", "DevicePoint",
     "ScreenDelta", "WorldDelta", "ViewDelta", "CameraDelta", "DeviceDelta", "Ray2", "Transform", "Transform2",
-    "KeyRef", "MutationPlan", "VaultWrite", "Rotation", "Measurement", "DataPivotCell", "AllocError", "DataSummary", "VJPRun",
+    "KeyRef", "MutationPlan", "VaultWrite", "Rotation", "DataPivotCell", "AllocError", "DataSummary", "VJPRun",
 } }
 
 // The type parameters of a compiler-owned row (Rust compiler_owned_type_defs
@@ -1009,7 +1014,7 @@ fn jet_codegen_compiler_owned_generic_params(name: String) -> [String] Never! {
     if name == "Point2" || name == "Delta2" -> return [String]{"T", "Space"}
     if name == "Ray2" || name == "Transform2" -> return [String]{"T", "From", "To"}
     if name == "Transform" -> return [String]{"From", "To"}
-    if name == "DataSnapshot" || name == "KeyRef" || name == "MutationPlan" || name == "VaultWrite" || name == "Rotation" || name == "Measurement" || name == "VJPRun" -> return [String]{"T"}
+    if name == "DataSnapshot" || name == "KeyRef" || name == "MutationPlan" || name == "VaultWrite" || name == "Rotation" || name == "VJPRun" -> return [String]{"T"}
     [String]{}
 }
 
@@ -1104,6 +1109,14 @@ fn jet_codegen_compiler_owned_enum_payload(name: String, variant: String) -> Jet
         carries_value :: if name == "HookDecision" -> "Transform" else -> "Continue"
         if variant == carries_value -> return jet_codegen_compiler_owned_single(Type.Named{name: "T"})
         if variant == "Fail" -> return jet_codegen_compiler_owned_single(Type.Named{name: "E"})
+        return JetCodegenCompilerOwnedPayload.Unit
+    }
+    if name == "DataEvent" {
+        if variant == "Bool" -> return jet_codegen_compiler_owned_single(Type.Bool)
+        if variant == "Int" -> return jet_codegen_compiler_owned_single(Type.Int)
+        if variant == "Float" -> return jet_codegen_compiler_owned_single(Type.Float)
+        if variant == "Number" || variant == "Text" || variant == "Key" -> return jet_codegen_compiler_owned_single(Type.String)
+        if variant == "Bytes" -> return jet_codegen_compiler_owned_single(Type.List{element: Type.IntN{signed: false, bits: 8}})
         return JetCodegenCompilerOwnedPayload.Unit
     }
     if name == "WsError" {

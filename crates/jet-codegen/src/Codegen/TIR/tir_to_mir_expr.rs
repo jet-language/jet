@@ -1016,6 +1016,11 @@ pub(super) fn lower_receiver_place(
             Some(ctx.lower_index_place(base, index, kind, access)?)
         }
         TExprKind::Field { recv, field, .. } => {
+            // D-TYPE2-TIME1: `d.ns` is a scalar projection with no field
+            // place; the caller's value path reads it.
+            if is_duration_ns_projection(ctx, recv, field) {
+                return Ok(None);
+            }
             let Some(base) = lower_receiver_place(ctx, recv, access)? else {
                 return Ok(None);
             };
@@ -1731,6 +1736,37 @@ pub(super) fn lower_expr(
             func,
             args,
         } => {
+            if matches!(func.as_str(), "new" | "affine") {
+                if let Some(function) = ctx.geometry_source_target(&expr.ty, func)? {
+                    let returned = ctx.function_registry.method_call_return_type_for(function, &[], &expr.ty)
+                        .map_err(|message| ctx.error(ctx.span(), message))?
+                        .unwrap_or_else(|| expr.ty.clone());
+                    let owner = ctx.mir_type(&expr.ty)?;
+                    let args = args.iter().map(|argument| ctx.lower_plain_arg(argument)).collect::<Result<Vec<_>, _>>()?;
+                    let value = ctx.emit("geometry-source-constructor", Some(returned.clone()), MirOperation::Call {
+                        callee: MirCallee::Associated { function, owner }, args, type_args: Vec::new(),
+                    })?;
+                    return if super::mir::is_plain_call_return(&returned, &expr.ty) {
+                        ctx.reconcile_plain_call_return(expr, value, &returned)
+                    } else { Ok(value) };
+                }
+            }
+            if type_name == "Int" && func == "abs" {
+                if let Some(function) = ctx.precise_source_target(type_name, func)? {
+                    let args = args.iter().map(|argument| ctx.lower_plain_arg(argument)).collect::<Result<Vec<_>, _>>()?;
+                    let returned = ctx.function_registry.call_return_type_for(function, &[])
+                        .map_err(|message| ctx.error(ctx.span(), message))?;
+                    let value = ctx.emit("int-abs-source-call", returned.clone(), MirOperation::Call {
+                        callee: MirCallee::User(function), args, type_args: Vec::new(),
+                    })?;
+                    if let Some(returned) = returned {
+                        if super::mir::is_plain_call_return(&returned, &expr.ty) {
+                            return ctx.reconcile_plain_call_return(expr, value, &returned);
+                        }
+                    }
+                    return Ok(value);
+                }
+            }
             let args = lower_values(ctx, args)?;
             let type_id = math_builtin_type_id(ctx, type_name)?;
             let route = if crate::Sema::is_geometry_type(type_name) {
@@ -1754,6 +1790,29 @@ pub(super) fn lower_expr(
             func,
             args,
         } => {
+            if let Some(function) = ctx.precise_source_target(type_name, func)? {
+                let args = args.iter()
+                    .map(|argument| ctx.lower_plain_arg(argument))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let returned = ctx.function_registry.call_return_type_for(function, &[])
+                    .map_err(|message| ctx.error(ctx.span(), message))?;
+                let call_type = returned.as_ref().cloned().unwrap_or_else(|| expr.ty.clone());
+                let value = ctx.emit(
+                    "precise-source-call",
+                    Some(call_type),
+                    MirOperation::Call {
+                        callee: MirCallee::User(function),
+                        args,
+                        type_args: Vec::new(),
+                    },
+                )?;
+                if let Some(returned) = returned {
+                    if super::mir::is_plain_call_return(&returned, &expr.ty) {
+                        return ctx.reconcile_plain_call_return(expr, value, &returned);
+                    }
+                }
+                return Ok(value);
+            }
             let args = lower_values(ctx, args)?;
             let type_id = ctx.nominal_type_id(type_name)?;
             let call = ctx.intern_prelude_route(super::precise_builtin_route(
@@ -2101,13 +2160,7 @@ pub(super) fn lower_expr(
             boxed: _,
         } => {
             let field = crate::Syntax::compiler_fact_member(field).unwrap_or(field);
-            // D-TYPE2-TIME1: Duration is a compiler-owned unit quantity over an
-            // i64 nanosecond carrier, not a record. `d.ns` reads that carrier
-            // through the canonical scalar projection on every tier.
-            if field == "ns"
-                && matches!(recv.ty.without_user_tags(), Type::Named(name) if name == crate::Syntax::DURATION_TYPE)
-                && !ctx.has_field_owner(&recv.ty)
-            {
+            if is_duration_ns_projection(ctx, recv, field) {
                 let carrier = TExpr {
                     ty: Type::Int,
                     kind: TExprKind::HandleMethod {
@@ -3113,34 +3166,6 @@ pub(super) fn lower_expr(
                         }),
                     );
                 }
-                if module == "core.email" && member == "limits_safe" {
-                    let call = ctx.intern_prelude_route(super::TPreludeRoute {
-                        family: MirPreludeFamily::StaticPrelude,
-                        module: module.clone(),
-                        member: member.clone(),
-                        symbol: MirSymbol::Prelude("jet_email::Limits::safe".to_string()),
-                        signature: MirCallSignature {
-                            arity: 0,
-                            max_arity: 0,
-                            borrow_mask: Vec::new(),
-                        },
-                        effect: None,
-                        fallibility: carrier.clone(),
-                        abi: MirPreludeAbi::Value,
-                        authority: None,
-                        db_metadata: None,
-                    })?;
-                    return ctx.emit(
-                        "email-limits-safe",
-                        Some(expr.ty.clone()),
-                        MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
-                            call,
-                            args,
-                            owner_type_args,
-                            type_args,
-                        }),
-                    );
-                }
                 if module == "core.data.plot" && member == "column" && args.len() == 2 {
                     let mut call_args = args.into_iter();
                     let receiver = call_args
@@ -3343,6 +3368,21 @@ pub(super) fn lower_expr(
             data_plan,
             fallibility,
         } => {
+            if record.module == "core.encoding" && record.member == "__edition" {
+                let edition = jet_foundation::PackageEdition::package_edition();
+                let year = edition.parse::<i64>().map_err(|_| {
+                    ctx.error(ctx.span(), "resolved package edition is not an integer")
+                })?;
+                return ctx.emit(
+                    "package-edition",
+                    Some(expr.ty.clone()),
+                    MirOperation::Constant(MirConstant::Int {
+                        value: year,
+                        width: None,
+                        spelling: None,
+                    }),
+                );
+            }
             if record.module == "core.reflect" && record.member == "of" {
                 let [arg] = args.as_slice() else {
                     return Err(ctx.error(
@@ -3499,37 +3539,6 @@ pub(super) fn lower_expr(
                     }),
                 );
             }
-            if record.module == "core.http.server" && record.member == "json" {
-                let [status, value] = args.as_slice() else {
-                    return Err(ctx.error(
-                        ctx.span(),
-                        "HTTP server JSON MIR projection requires status and body operands",
-                    ));
-                };
-                let status = ctx.lower_core_call_arg(status, 0, record, false)?;
-                let encoded = TExpr {
-                    ty: Type::Named(crate::Syntax::TYPE_DATA.to_string()),
-                    kind: value.kind.clone(),
-                };
-                let body = lower_serde_encode(ctx, &encoded, value)?;
-                let mut body = mir_value_arg(ctx, body);
-                body.source_index = Some(1);
-                let call = MirCoreCall::from_record(record).id;
-                let route = ctx.intern_core_route(record, fallibility)?;
-                let lowered_fallibility = ctx.lower_call_fallibility(fallibility)?;
-                return ctx.emit(
-                    "http-server-json",
-                    Some(expr.ty.clone()),
-                    MirOperation::CoreCall {
-                        call,
-                        route,
-                        args: vec![status, body],
-                        type_args: Vec::new(),
-                        fallibility: lowered_fallibility,
-                        data_plan: None,
-                    },
-                );
-            }
             let data_plan = data_plan
                 .as_ref()
                 .map(|plan| lower_data_plan(ctx, plan))
@@ -3567,10 +3576,22 @@ pub(super) fn lower_expr(
                     format_route.member = "decimal".to_string();
                 }
                 ctx.intern_prelude_route(format_route)?
+            } else if record.module == "core.net.tls" && record.member == "client" && args.len() > 2 {
+                let symbol = match args.len() {
+                    3 => "jet_net_tls_client_deadline",
+                    4 => "jet_net_tls_client_config_deadline",
+                    _ => return Err(ctx.error(ctx.span(), "TLS client requires two, three or four checked operands")),
+                };
+                let mut tls_route = direct_prelude_route(
+                    record.module, record.member, symbol, args.len(),
+                    &[false, true, true, true][..args.len()], fallibility,
+                );
+                tls_route.symbol = MirSymbol::Runtime(symbol.to_string());
+                tls_route.effect = record.effect;
+                ctx.intern_prelude_route(tls_route)?
             } else {
                 ctx.intern_core_route(record, fallibility)?
             };
-            let lowered_fallibility = ctx.lower_call_fallibility(fallibility)?;
             let lowered = args
                 .iter()
                 .enumerate()
@@ -3708,6 +3729,22 @@ pub(super) fn lower_expr(
                     }),
                 );
             }
+            // Consumed-stream TLS overloads have distinct native signatures;
+            // like typed format overloads, they are checked Prelude routes,
+            // not the host/port CoreCall ABI.
+            if record.module == "core.net.tls" && record.member == "client" && args.len() > 2 {
+                return ctx.emit(
+                    "core-call-tls-stream",
+                    Some(expr.ty.clone()),
+                    MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+                        call: route,
+                        args: lowered,
+                        owner_type_args: Vec::new(),
+                        type_args,
+                    }),
+                );
+            }
+            let lowered_fallibility = ctx.lower_call_fallibility(fallibility)?;
             ctx.emit(
                 "core-call",
                 Some(expr.ty.clone()),
@@ -4114,6 +4151,27 @@ pub(super) fn lower_expr(
             )
         }
         TExprKind::HandleMethod { recv, op, args } => {
+            if let super::THandleOp::MathMethod { method, .. } = op {
+                if let Some(type_args) = geometry_checked_transform_type_args(&recv.ty, method, args) {
+                    if let Some(function) = ctx.geometry_source_target(&recv.ty, method)? {
+                        let returned = ctx.function_registry.method_call_return_type_for(function, &type_args, &recv.ty)
+                            .map_err(|message| ctx.error(ctx.span(), message))?
+                            .unwrap_or_else(|| expr.ty.clone());
+                        let owner = ctx.mir_type(&recv.ty)?;
+                        let access = ctx.function_registry.receiver_access.get(&function).copied()
+                            .ok_or_else(|| ctx.error(ctx.span(), "checked geometry source method has no receiver convention"))?;
+                        let mut receiver = ctx.lower_plain_arg(recv)?;
+                        receiver.access = access;
+                        let mut call_args = Vec::with_capacity(args.len() + 1);
+                        call_args.push(receiver);
+                        for argument in args { call_args.push(ctx.lower_plain_arg(argument)?); }
+                        let type_args = lower_mir_types(ctx, &type_args)?;
+                        return ctx.emit("geometry-source-method", Some(returned), MirOperation::Call {
+                            callee: MirCallee::Method { function, owner }, args: call_args, type_args,
+                        });
+                    }
+                }
+            }
             if matches!(op, super::THandleOp::EventMethod { .. })
                 || matches!(
                     op,
@@ -4486,25 +4544,22 @@ pub(super) fn lower_expr(
                 super::THandleOp::GameSceneOnFrame { derivation, .. } => derivation.clone(),
                 _ => None,
             };
-            let (mut receiver, _) = lower_builtin_receiver(
+            let (receiver, _) = lower_builtin_receiver(
                 ctx,
                 recv,
                 matches!(
                     op,
                     THandleOp::FileReaderReadLine
+                        | THandleOp::StdinReadLine
+                        | THandleOp::FileReaderRead
                         | THandleOp::AllocReset
                         | THandleOp::FileWriterWriteLine
                         | THandleOp::FileWriterFlush
-                        | THandleOp::CSVWriterWrite
-                        | THandleOp::CSVWriterFlush
-                        | THandleOp::CSVWriterFinish
+                        | THandleOp::FileWriterWriteAll
+                        | THandleOp::FileWriterFsync
                         | THandleOp::ClockTick
                         | THandleOp::ClockAdvance
                         | THandleOp::ClockWait
-                        | THandleOp::FakeName
-                        | THandleOp::FakeEmail
-                        | THandleOp::FakeHost
-                        | THandleOp::FakeAddress
                         | THandleOp::TcpStreamRead
                         | THandleOp::TcpStreamWrite
                         | THandleOp::TcpStreamClose
@@ -4528,14 +4583,8 @@ pub(super) fn lower_expr(
                         | THandleOp::TLSStreamWriteAllDeadline
                         | THandleOp::TLSStreamClose
                         | THandleOp::TLSStreamCloseWrite
-                        | THandleOp::SolverRequire
                 ),
             )?;
-            // `Solver.new(seed)`'s seed is its receiver slot: the kernel
-            // takes the native i64 word, so the exact Int narrows here.
-            if matches!(op, THandleOp::SolverNew) {
-                receiver = lower_builtin_native_int(ctx, receiver, &recv.ty)?;
-            }
             let source_args = args;
             let mut args = lower_handle_method_args(ctx, source_args)?;
             if matches!(
@@ -8069,7 +8118,9 @@ fn lower_host_call(
             let args = vec![mir_value_arg(ctx, shown), mir_value_arg(ctx, path)];
             emit_host_route_call(ctx, expr, route, args)
         }
-        THostCall::EnvSet { name, value, loc } => {
+        // 3ea7c9cc2: `core.sys.set` is the source-compatible Unit form; the
+        // kernel itself stops with E3001 on an invalid name or value.
+        THostCall::EnvSet { name, value, .. } => {
             let record = crate::Syntax::core_call("core.sys", "set").ok_or_else(|| {
                 ctx.error(
                     ctx.span(),
@@ -8090,17 +8141,13 @@ fn lower_host_call(
                     MirAccess::Move
                 };
             }
-            let core_result_ty = Type::Result {
-                ok: Box::new(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
-                err: Box::new(Type::Named("EnvError".to_string())),
-            };
-            let core_carrier = super::TFailureCarrier::from_checked_type(&core_result_ty);
+            let core_carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
             let core_call = MirCoreCall::from_record(record).id;
             let core_route = ctx.intern_core_route(record, &core_carrier)?;
             let core_fallibility = ctx.lower_call_fallibility(&core_carrier)?;
-            let result = ctx.emit(
+            ctx.emit(
                 "core-sys-set",
-                Some(core_result_ty.clone()),
+                Some(expr.ty.clone()),
                 MirOperation::CoreCall {
                     call: core_call,
                     route: core_route,
@@ -8109,74 +8156,6 @@ fn lower_host_call(
                     fallibility: core_fallibility,
                     data_plan: None,
                 },
-            )?;
-            let condition = ctx.emit(
-                "core-sys-set-ok",
-                Some(Type::Bool),
-                MirOperation::ResultIsOk { subject: result },
-            )?;
-            let failure = ctx.new_block(ctx.span(), "core-sys-set.failure")?;
-            let join = ctx.new_block(ctx.span(), "core-sys-set.join")?;
-            ctx.terminate(MirTerminator::Branch {
-                condition,
-                then_target: join,
-                else_target: failure,
-            });
-            ctx.switch_to(failure);
-            let error = ctx.emit(
-                "core-sys-set-error",
-                Some(Type::Named("EnvError".to_string())),
-                MirOperation::ResultValue {
-                    subject: result,
-                    ok: false,
-                },
-            )?;
-            let error = lower_direct_string_format(
-                ctx,
-                error,
-                &Type::Named("EnvError".to_string()),
-                &crate::AST::StrFormat::Display,
-                &Type::String,
-            )?;
-            let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-            let route = super::require_stop_route("require", 1, &expr.ty, &carrier)?;
-            let call = ctx.intern_prelude_route(route)?;
-            let location = MirPanicLoc {
-                file: ctx.source_file_id_for(&loc.file),
-                line: loc.line,
-                column: loc.col,
-            };
-            let context = MirPanicContext {
-                function: loc.fn_name.clone(),
-                source_line: loc.src_line.clone(),
-                caret: loc.caret,
-                locals: loc
-                    .locals
-                    .iter()
-                    .filter_map(|(name, local)| {
-                        ctx.local_id_for(local).ok().map(|id| (name.clone(), id))
-                    })
-                    .collect(),
-            };
-            ctx.emit(
-                "core-sys-set-stop",
-                Some(expr.ty.clone()),
-                MirOperation::Semantic(MirSemanticOp::RequireStop {
-                    call,
-                    kind: MirRequireKind::Require,
-                    condition: Some(condition),
-                    location,
-                    context,
-                    values: vec![error],
-                    always_stops: false,
-                }),
-            )?;
-            ctx.terminate(MirTerminator::Jump { target: join });
-            ctx.switch_to(join);
-            ctx.emit(
-                "core-sys-set-unit",
-                Some(expr.ty.clone()),
-                MirOperation::Constant(MirConstant::Unit),
             )
         }
         THostCall::NumericBounds { ty, member } => {
@@ -8639,6 +8618,16 @@ fn http_shutdown_report_field_route(field: &str) -> Option<(i64, TPreludeRoute)>
             db_metadata: None,
         },
     ))
+}
+
+/// D-TYPE2-TIME1: Duration is a compiler-owned unit quantity over an i64
+/// nanosecond carrier, not a record. `d.ns` reads that carrier through the
+/// canonical scalar projection on every tier, never through a field place.
+fn is_duration_ns_projection(ctx: &LowerCtx, recv: &TExpr, field: &str) -> bool {
+    let field = crate::Syntax::compiler_fact_member(field).unwrap_or(field);
+    field == "ns"
+        && matches!(recv.ty.without_user_tags(), Type::Named(name) if name == crate::Syntax::DURATION_TYPE)
+        && !ctx.has_field_owner(&recv.ty)
 }
 
 fn lower_http_shutdown_report_field(
@@ -11147,4 +11136,31 @@ fn unsupported_pattern<T>(ctx: &mut LowerCtx, variant: impl Into<String>) -> Res
     let span = ctx.span();
     let variant = variant.into();
     Err(ctx.error(span, format!("{variant} has no canonical MIR projection")))
+}
+
+/// Read method binders from the operand types already resolved by the checker.
+/// This is not inference: `Next` is the checked next transform's output space
+/// and `P` is the checked point's exact type. Cross-nominal paths remain gated.
+pub(super) fn geometry_checked_transform_type_args(
+    owner: &Type,
+    operation: &str,
+    args: &[TExpr],
+) -> Option<Vec<Type>> {
+    let Type::Apply { name, args: owner_args } = owner else { return None };
+    let family = crate::Sema::geometry_nominal_leaf(name);
+    if !matches!(family, "Transform" | "Transform2") { return None }
+    if family == "Transform2" && owner_args.first() == Some(&Type::Float)
+        && matches!(operation, "then" | "inverse") {
+        return None; // D-TRANSFORM-IDENTITY1: legacy result is the other nominal.
+    }
+    match operation {
+        "point" | "point_at_depth" | "ray" => Some(vec![args.first()?.ty.clone()]),
+        "then" => {
+            let Type::Apply { name: next_name, args: next_args } = &args.first()?.ty else { return None };
+            if crate::Sema::geometry_nominal_leaf(next_name) != family { return None }
+            Some(vec![next_args.last()?.clone()])
+        }
+        "inverse" => Some(Vec::new()),
+        _ => None,
+    }
 }

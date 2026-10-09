@@ -24,7 +24,7 @@ fn store_test_seal_fixture(verification: &StoreVerification, roots: HangarRoots,
 
 fn store_test_mtime_seconds(path: String) -> Int Never! {
     info :: files.stat(path) ?? panic("stat")
-    info.modified.unix_ns /% 1000000000
+    (info.modified.to_unix_ns() ?? panic("mtime")) /% 1000000000
 }
 
 fn store_test_set_mtime(path: String, seconds: Int) Never! {

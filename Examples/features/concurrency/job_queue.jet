@@ -1,18 +1,15 @@
 // D-JOB-QUEUE1: one typed job flows through the durable queue lifecycle.
+// Set JET_JOB_QUEUE_DB to a fresh database path before launching this example.
 package {
     name: "job_queue"
-    authority: { holds: { allow: [Env, IO, Mem.Alloc] } }
+    authority: { holds: { allow: [DB, FS.Read, FS.Write, IO, Mem.Alloc, Rand, Time, Time.Wait] } }
 }
 
 use core.jobs as jobs
-use core.sys as sys
-use core.testing as testing
 
 #Job(.Dev) fn process(payload: String) { print("job:{payload}") }
 
 fn run() {
-    root := testing.temp_dir("job-queue")
-    sys.set("JET_JOB_QUEUE_DB", Path.from(root).join("jobs.db").to_string())
     queue :: jobs.queue() ?? return
 
     first :: &queue.enqueue(process, "now", key: "first") ?? return

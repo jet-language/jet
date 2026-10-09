@@ -301,6 +301,13 @@ qualified as `core.math.random` (D-NAME-ALIAS1=A, D-CORE-PRELUDE1=A).
 A user declaration shadows a readable prelude alias; the language-owned built-in
 names remain reserved. `#NoPrelude` disables the readable prelude aliases for that
 file, so use the qualified Core call instead (D-NAME-ALIAS1=A, D-PRELUDEX1=A).
+
+Automatic Core source loading and readable-prelude alias injection use identifiers
+from the canonical lexer, including code inside string interpolation.
+Text inside string literals, raw/foreign payloads, and comments is data, not
+identifier demand; explicit imports and their dependency/private-part closure
+are unchanged.
+
 The readable prelude is a closed set. A candidate must satisfy its seven
 membership tests: measured frequency; total and safe behavior; names that never
 carry semantics; no better home; first-hour coverage; one fixed set for every
@@ -1057,6 +1064,10 @@ results, enum payloads, named aggregates, callbacks, and closed trait dispatch
 carry the same hidden relation. Temporary owners, unbounded dynamic dispatch,
 and incompatible read/write paths are E2305, or E2307 for string views
 (D-MEM-VIEWRET1, D-MEMPROVENANCE2=A).
+Constructing a struct prefixes each contained view's output path with its field
+name, including nested structs and views already bound to local names. This
+does not turn a local owner into a caller-owned one: returning such an aggregate
+still rejects views into values made here or consumed by a `^` parameter.
 At a string boundary, fill `View<str>` only from `.trim()`, `.after()`,
 `.before()`, or a tracked string-view binding; a plain owned `String` is not a
 borrowed window.
@@ -1428,6 +1439,9 @@ representation. An unknown root is a language error, not a new effect.
 cannot be granted by an authority, positive effect ceiling, or package budget.
 Memory events such as `Mem.Alloc` and `Mem.Rc` remain visible to diagnostics
 and denial facts; they do not have to be listed in a positive effect ceiling.
+The same exclusion applies to inferred purity: an explicit empty effect row
+`-[]>` admits allocation, heap copies, and panic facts without requesting a
+positive right. Ambient effects such as `IO` still violate that empty ceiling.
 `Mem.Alloc(above: N)` is the parameterized memory-denial spelling. An explicit
 memory or panic denial still rejects a reachable operation (D-EFFTREE1,
 D-PANICROOT1, D-AUTHORITY-MEM1).
@@ -1595,8 +1609,10 @@ an all-zero shared secret. HKDF output is at most 8160 bytes. Argon2id accepts
 bytes. Invalid expert parameters use the `CryptoError` family.
 
 `crypto.file_seal(recipients, source, destination)` and
-`crypto.file_open(identity, source, destination)` use the recipient-based JETC
-v2 envelope. The fixed prefix is `JETC`, version 2, kind 1, suite 1, flags 0,
+`crypto.file_open(identity, source, destination)` have unit success and the
+explicit `FileCryptoError!` contract. The identity is read-borrowed rather than
+moved. Both use the recipient-based JETC v2 envelope. The fixed prefix is `JETC`,
+version 2, kind 1, suite 1, flags 0,
 followed by little-endian header and body lengths. The authenticated header
 contains a 16-byte file id, an ephemeral X25519 public key, a 16-byte nonce
 prefix, a fixed 1 MiB chunk size, 1–256 canonical recipient stanzas, no

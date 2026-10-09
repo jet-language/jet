@@ -164,7 +164,7 @@ fn publication_with_index_lock<T>(repo: String, name: String, action: fn() -[FS,
                 else -> return Err(err)
             }
             if files.stat(path) == .Ok(metadata) {
-                if time.unix_ns() - metadata.modified.unix_ns > 300000000000 {
+                if time.unix_ns() - (metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) > 300000000000 {
                     files.remove(path).drop("stale index lock reclamation is best-effort; the next attempt re-races")
                     next
                 }

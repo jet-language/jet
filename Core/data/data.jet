@@ -14,7 +14,11 @@ use core.files.[FileReader]
 use core.math as math
 use core.encoding as encoding
 use core.encoding.[EncodingError, EncodingLimits]
+use core.encoding.json as json_codec
+use core.encoding.csv as csv_codec
+use __core_encoding_stream as encoding_stream
 use core.crypto.[sha256]
+use core.sys as sys
 module arrow
 
 module loader
@@ -530,25 +534,100 @@ pub fn database<T>(query: String, parameters: [String], authority: String, limit
 }
 
 pub fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
-    core.data.value<T>(value, limits)
+    payload := [U8]{}
+    data_loader_render(&payload, value.encode())
+    data_loader_check_payload(limits, payload.len(), "data.value") ?? return Err(err)
+    kind := DataLoaderKind.Value
+    locator := "value"
+    member := ""
+    parameters := [String]{}
+    format := DataFormat.JSON
+    owned_limits := ~limits
+    authority := DataAuthority{scope: "local", revision: ""}
+    loader := core.mem.__loader_new<T>(^kind, ^locator, ^member, ^parameters, ^format, ^owned_limits, ^authority) ?? return Err(err)
+    loader.payload = Val(payload)
+    Ok(loader)
 }
 
-pub fn load_default<T>(locator: String) -> DataLoader<T> DataError! {
-    core.data.load_default<T>(locator)
+/// Infer a core format from the final path extension, without reading the
+/// source. Query/fragment suffixes do not participate in format detection.
+pub fn load_default<T>(locator: String) -[FS, Net, DB]> DataLoader<T> DataError! {
+    load<T>(locator, DataLimits.safe())
 }
 
 pub fn load<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> DataError! {
-    core.data.load<T>(locator, limits)
+    format :: locator_format(locator)
+    if locator.starts_with("http://") || locator.starts_with("https://") {
+        if url<T>(locator, format, "network", limits) == {
+            .Ok(loader) -> return Ok(loader)
+            .Err(error) -> return Err(load_format_error(error, format))
+        }
+    }
+    if file<T>(locator, format, limits) == {
+        .Ok(loader) -> Ok(loader)
+        .Err(error) -> Err(load_format_error(error, format))
+    }
 }
 
-pub fn csv<T: Decode>(text: String) -> [T] DataError! {
-    rows :: core.data.csv<T>(text) ?? return Err(data_error(DataErrorKind.Decode, "CSV decode failed", "csv"))
-    Ok(rows)
+fn load_format_error(error: DataError, format: String) -> DataError Never! {
+    if error.kind == .InvalidArgument && error.reason == "unknown data format" {
+        return data_error(DataErrorKind.Bridge, "format `{format}` is provider-owned; import its package", "data.loader")
+    }
+    ~error
 }
 
-pub fn json<T: Decode>(text: String) -> [T] DataError! {
-    rows :: core.data.json<T>(text) ?? return Err(data_error(DataErrorKind.Decode, "JSON decode failed", "json"))
-    Ok(rows)
+fn locator_format(locator: String) -> String DataError! {
+    path :: locator.split("?").to_list()[0].split("#").to_list()[0]
+    segments :: path.split("/").to_list()
+    name :: segments[segments.len() - 1]
+    parts :: name.split(".").to_list()
+    if parts.len() < 2 {
+        return Err(data_error(DataErrorKind.Bridge, "source has no core format; import a provider package", "data.load"))
+    }
+    parts[parts.len() - 1]
+}
+
+#Test("load discovers the final path extension before query and fragment") {
+    local :: load_default<Int>("dir.with.dot/items.CSV?version=.json#part") ?? panic("local loader")
+    assert_eq(local.source.locator, "dir.with.dot/items.CSV?version=.json#part")
+    assert(local.format == .CSV)
+    remote :: load_default<Int>("https://example.test/items.ndjson#part.json") ?? panic("remote loader")
+    assert(remote.source.kind == .URL)
+    assert(remote.format == .JSONL)
+    assert_eq(remote.authority.scope, "network")
+    assert_eq(remote.limits.max_output_rows, 1000000)
+}
+
+#Test("load does not infer a format from a directory or query") {
+    if load_default<Int>("dir.csv/items?format=.json") == {
+        .Ok(_) -> panic("extensionless source accepted")
+        .Err(error) -> {
+            assert(error.kind == .Bridge)
+            assert_eq(error.operation, "data.load")
+            assert_eq(error.reason, "source has no core format; import a provider package")
+        }
+    }
+    if load_default<Int>("items.txt") == {
+        .Ok(_) -> panic("provider format accepted")
+        .Err(error) -> {
+            assert(error.kind == .Bridge)
+            assert_eq(error.operation, "data.loader")
+            assert_eq(error.reason, "format `txt` is provider-owned; import its package")
+        }
+    }
+}
+
+pub fn csv<T: Decode>(text: String) -> [T] [FieldError]! {
+    csv_codec.decode<T>(text)
+}
+
+pub fn json<T: Decode>(text: String) -> [T] [FieldError]! {
+    json_codec.decode<[T]>(text)
+}
+
+#Test("typed data JSON reuses exact number decoding") {
+    rows :: json<Int>("[9007199254740993,1e2,-9007199254740993]") ?? panic("typed data JSON")
+    assert_eq(rows, [Int]{9007199254740993, 100, -9007199254740993})
 }
 
 pub fn csv_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> DataError! {
@@ -726,10 +805,6 @@ pub fn rolling_mean(values: [Float], window: Int) -> [Float] DataError! {
         &out.push(normalize_zero(mean_value))
     }
     Ok(out)
-}
-
-pub fn query<T>(rows: [T]) -> Query<T> Never! {
-    Query<T>{rows: rows, sql: "", operations: [String]{"scan"}}
 }
 
 pub fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U>] DataError! {
@@ -968,10 +1043,87 @@ pub fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> Str
     Ok(render_line_options_svg(labels, values, options))
 }
 
-pub fn status() -> [DataStatus] Never! { core.data.status() }
+/// Native facts and live, explicitly opted-in bridge availability.
+pub fn status() -[FS, Env]> [DataStatus] Never! {
+    rows := [DataStatus]{}
+    native_steps :: [String]{"core.data.csv", "core.data.stats", "core.data.query", "core.data.stream", "core.data.schema", "core.data.json"}
+    loop step in native_steps {
+        &rows.push(DataStatus{step: step, path: "native", clone_value: "none", ownership: "jet", trust: "native", fallback: "none", replacement: "native"})
+    }
+    bridge_steps :: [String]{"py.*", "r.*", "gpu.*"}
+    loop step in bridge_steps -> &rows.push(bridge_status(step))
+    rows
+}
 
-pub fn require_bridge(provider: String) DataError! {
-    core.data.require_bridge(provider)
+pub fn require_bridge(provider: String) DataError! -[FS, Env]> {
+    step :: bridge_provider(provider) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data bridge provider `{provider}`; expected py, r, or gpu", "require_bridge"))
+    facts :: bridge_status(step)
+    if facts.path == "available" -> return Ok(())
+    return Err(data_error(DataErrorKind.Bridge, "{step} unavailable (clone_value={facts.clone_value}, ownership={facts.ownership}, trust={facts.trust}, fallback={facts.fallback}, replacement={facts.replacement})", "require_bridge"))
+}
+
+fn bridge_provider(provider: String) -> String? Never! {
+    name := trim(provider)
+    loop name.ends_with(".") -> name = String.from_bytes(name.bytes()[0..<name.bytes().len() - 1]) ?? ""
+    if name.ends_with(".*") -> name = String.from_bytes(name.bytes()[0..<name.bytes().len() - 2]) ?? ""
+    name = upper(name)
+    if name == "PY" || name == "PYTHON" -> return Val("py.*")
+    if name == "R" -> return Val("r.*")
+    if name == "GPU" || name == "CUDA" || name == "METAL" || name == "VULKAN" || name == "WEBGPU" -> return Val("gpu.*")
+    None
+}
+
+fn bridge_status(step: String) -[FS, Env]> DataStatus Never! {
+    path := "unavailable"
+    if step == "r.*" && bridge_tool_on_path("Rscript") {
+        if sys.get("JET_DATA_R_BRIDGE") == .Val(enabled) {
+            if enabled == "1" -> path = "available"
+        }
+    }
+    if step == "py.*" -> return DataStatus{step: step, path: path, clone_value: "owned-copy", ownership: "python-sidecar", trust: "untrusted-foreign", fallback: "none", replacement: "core.data native lists/query/stats"}
+    if step == "r.*" -> return DataStatus{step: step, path: path, clone_value: "owned-copy", ownership: "r-sidecar", trust: "untrusted-foreign", fallback: "none", replacement: "core.data Query<T> typed round-trip"}
+    DataStatus{step: step, path: path, clone_value: "device-transfer", ownership: "device-buffer", trust: "untrusted-accelerator", fallback: "none", replacement: "core.data / Tensor native CPU path"}
+}
+
+fn bridge_tool_on_path(tool: String) -[FS, Env]> Bool Never! {
+    // Keep opaque native path bytes: PATH need not be UTF-8.
+    path :: core.sys.__host_env("PATH") ?? return false
+    windows :: sys.is_windows()
+    delimiter :: if windows -> U8{59} else -> U8{58}
+    directory := [U8]{}
+    quoted := false
+    index := 0
+    loop {
+        at_end :: index == path.len()
+        if !at_end {
+            b :: path[index]
+            index += 1
+            if windows && b == (U8{34}) {
+                quoted = !quoted
+                next
+            }
+            if b != delimiter || quoted {
+                &directory.push(b)
+                next
+            }
+        }
+        if directory.len() > 0 {
+            last :: directory[directory.len() - 1]
+            drive_relative :: windows && directory.len() == 2 && directory[1] == (U8{58})
+            if last != (U8{47}) && (!windows || last != (U8{92})) && !drive_relative {
+                &directory.push(if windows -> U8{92} else -> U8{47})
+            }
+        }
+        loop b in tool.bytes() -> &directory.push(b)
+        is_file := false
+        #Unsafe("native path bytes originate from the host environment and are split at ASCII boundaries") {
+            is_file = core.data.__host_path_is_file(directory) ?? false
+        }
+        if is_file -> return true
+        if at_end -> break
+        directory = [U8]{}
+    }
+    false
 }
 
 fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, parameters: [String], format_name: String, authority_name: String, limits: DataLimits) -> DataLoader<T> DataError! {
@@ -1103,13 +1255,16 @@ fn valid_authority(text: String) -> Bool Never! {
 }
 
 fn parse_format(name: String) -> DataFormat? Never! {
-    normalized := upper(trim(name))
+    normalized := upper(name)
     if normalized == {
         "CSV" -> Val(DataFormat.CSV)
         "JSON" -> Val(DataFormat.JSON)
         "JSONL" -> Val(DataFormat.JSONL)
+        "NDJSON" -> Val(DataFormat.JSONL)
         "PARQUET" -> Val(DataFormat.Parquet)
         "ARROW" -> Val(DataFormat.Arrow)
+        "ARROW-IPC" -> Val(DataFormat.Arrow)
+        "FEATHER" -> Val(DataFormat.Arrow)
         else -> None
     }
 }
@@ -1522,4 +1677,168 @@ fn upper(text: String) -> String Never! {
         if n >= 97 && n <= 122 -> &out.push(U8{n - 32}) else -> &out.push(b)
     }
     String.from_bytes(out) ?? ""
+}
+
+#Test("Plot aggregate absence is the native enum constructor") {
+    none :: plot.__plot_aggregate_none()
+    assert(none == plot.__plot_aggregate_none())
+    assert(none != JetDataPlotAggregate.Sum)
+}
+
+// Native DataFlow.rs::jet_data_loader_canonical_tree sorts object keys by
+// UTF-8 lexical order, but keeps Debug float spelling and exact Number text.
+fn data_loader_put_text(out: &[U8], text: String) Never! {
+    loop index in 0..<text.count_bytes() -> &out.push(encoding_stream.byte_at(text, index))
+}
+
+fn data_loader_put_control(out: &[U8], value: Int) Never! {
+    &out.push(U8{92})
+    &out.push(U8{117})
+    &out.push(U8{48})
+    &out.push(U8{48})
+    hex :: "0123456789abcdef"
+    &out.push(encoding_stream.byte_at(hex, value >> 4))
+    &out.push(encoding_stream.byte_at(hex, value & 15))
+}
+
+fn data_loader_quote(out: &[U8], text: String) Never! {
+    &out.push(U8{34})
+    index := 0
+    loop index < text.count_bytes() {
+        byte :: encoding_stream.byte_at(text, index)
+        n :: Int.from_u8(byte)
+        if n == 34 || n == 92 {
+            &out.push(U8{92})
+            &out.push(byte)
+        } else if n == 10 || n == 13 || n == 9 {
+            &out.push(U8{92})
+            &out.push(if n == 10 -> U8{110} else if n == 13 -> U8{114} else -> U8{116})
+        } else if n < 32 || n == 127 {
+            data_loader_put_control(&out, n)
+        } else if n == 194 && index + 1 < text.count_bytes() && Int.from_u8(encoding_stream.byte_at(text, index + 1)) <= 159 {
+            // Rust char::is_control includes the C1 scalars U+0080..U+009F.
+            index += 1
+            data_loader_put_control(&out, Int.from_u8(encoding_stream.byte_at(text, index)))
+        } else -> &out.push(byte)
+        index += 1
+    }
+    &out.push(U8{34})
+}
+
+fn data_loader_render(out: &[U8], tree: encoding.DataTree) Never! {
+    #Unsafe("inspect existing private Decode carriers only inside checked Core data source") {
+        if tree == .Number(text) {
+            data_loader_put_text(&out, text)
+            return
+        }
+        if tree == .TypedText(text) {
+            data_loader_quote(&out, text)
+            return
+        }
+        if tree == .Bytes(bytes) {
+            &out.push(U8{91})
+            loop (index, byte) in bytes {
+                if index != 0 -> &out.push(U8{44})
+                data_loader_put_text(&out, "{byte}")
+            }
+            &out.push(U8{93})
+            return
+        }
+    }
+    if tree == {
+        .Null -> data_loader_put_text(&out, "null")
+        .Bool(value) -> data_loader_put_text(&out, if value -> "true" else -> "false")
+        .Int(value) -> data_loader_put_text(&out, "{value}")
+        .Float(value) -> data_loader_put_text(&out, "{value:Debug}")
+        .Text(value) -> data_loader_quote(&out, value)
+        .Array(values) -> {
+            &out.push(U8{91})
+            loop (index, value) in values {
+                if index != 0 -> &out.push(U8{44})
+                data_loader_render(&out, value)
+            }
+            &out.push(U8{93})
+        }
+        .Object(_) -> {
+            entries :: encoding_stream.object_entries(tree)
+            indices := [Int]{}
+            loop index in 0..<entries.len() -> &indices.push(index)
+            &indices.sort_by((left: Int, right: Int) -> entries[left].key <=> entries[right].key)
+            &out.push(U8{123})
+            loop (position, index) in indices {
+                if position != 0 -> &out.push(U8{44})
+                data_loader_quote(&out, entries[index].key)
+                &out.push(U8{58})
+                data_loader_render(&out, entries[index].value)
+            }
+            &out.push(U8{125})
+        }
+        else -> panic("unknown native DataTree carrier")
+    }
+}
+
+fn data_loader_check_payload(limits: DataLimits, bytes: Int, operation: String) DataError! {
+    if bytes > limits.encoding.max_item_bytes -> return Err(data_error(.Limit, "payload is {bytes} bytes; max_item_bytes is {limits.encoding.max_item_bytes}", operation))
+    if limits.encoding.max_total_bytes == .Val(limit) {
+        if bytes > limit -> return Err(data_error(.Limit, "payload is {bytes} bytes; max_total_bytes is {limit}", operation))
+    }
+    Ok(())
+}
+
+#Encode
+struct DataLoaderPortRecord {
+    z: Float
+    a: String
+}
+
+#Test("value loader preserves canonical payload and user-record return type") {
+    record :: DataLoaderPortRecord{z: Float{2.0}, a: "x"}
+    loader :: value<DataLoaderPortRecord>(record, DataLimits.safe()) ?? panic("value loader")
+    payload :: loader.payload ?? panic("value payload")
+    assert_eq(payload, [U8]{123, 34, 97, 34, 58, 34, 120, 34, 44, 34, 122, 34, 58, 50, 46, 48, 125})
+    assert_eq(loader.source.kind, DataLoaderKind.Value)
+    assert_eq(loader.source.locator, "value")
+    assert_eq(loader.authority.scope, "local")
+    assert_eq(loader.format, DataFormat.JSON)
+    assert(loader.last_good == None)
+    assert(!loader.cancelled)
+    assert(!loader.offline)
+
+    limits := DataLimits.safe()
+    limits.encoding.max_item_bytes = 1
+    limits.encoding.buffer_bytes = 1
+    if value<String>("x", limits) == {
+        .Err(error) -> {
+            assert(error.kind == .Limit)
+            assert_eq(error.operation, "data.value")
+            assert_eq(error.reason, "payload is 3 bytes; max_item_bytes is 1")
+        }
+        else -> panic("value payload limit must precede constructor validation")
+    }
+}
+
+#Test("value canonical strings retain native C0 and C1 control escaping") {
+    text :: encoding_stream.text_from_bytes([U8]{8, 127, 194, 128, 194, 159, 9}) ?? panic("control text")
+    out := [U8]{}
+    data_loader_quote(&out, text)
+    assert_eq(out, [U8]{34, 92, 117, 48, 48, 48, 56, 92, 117, 48, 48, 55, 102, 92, 117, 48, 48, 56, 48, 92, 117, 48, 48, 57, 102, 92, 116, 34})
+}
+
+#Test("data CSV and JSON preserve malformed input field-error strings") {
+    if csv<Int>("n\n\"7\"x") == {
+        .Err(errors) -> {
+            assert_eq(errors.len(), 1)
+            assert_eq(errors[0].path, "")
+            assert_eq(errors[0].reason, "E2701: CSV row 2, line 2, column 4 — only quote, comma, CRLF, LF, or EOF may follow a closing quote")
+        }
+        else -> panic("malformed CSV accepted")
+    }
+    if json<Int>("[1e]") == {
+        .Err(errors) -> {
+            assert_eq(errors.len(), 1)
+            assert_eq(errors[0].path, "")
+            assert_eq(errors[0].reason, "invalid JSON (line 1): bad number")
+        }
+        else -> panic("malformed JSON accepted")
+    }
 }

@@ -498,7 +498,7 @@ pub fn store_maybe_auto_clean(verification: &StoreVerification, roots: HangarRoo
     if sys.get("JETPACK_AUTO_CLEAN_ALWAYS") == None {
         if files.stat(stamp) == {
             .Ok(metadata) -> {
-                if now.unix_ns - metadata.modified.unix_ns < STORE_AUTO_CLEAN_AFTER_SECONDS * STORE_NANOS_PER_SECOND -> return Ok(None)
+                if now.unix_ns - (metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) < STORE_AUTO_CLEAN_AFTER_SECONDS * STORE_NANOS_PER_SECOND -> return Ok(None)
             }
             .Err(_) -> {}
         }

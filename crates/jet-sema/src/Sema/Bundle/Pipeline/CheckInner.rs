@@ -36,6 +36,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
     diags.extend(validate_script_entries(bundle));
     default_entry_return(bundle);
     diags.extend(inject_units_prelude(bundle));
+    resolve_default_time_literals(bundle);
     super::super::Prelude::inject(bundle);
     diags.extend(super::super::Casing::validate_bundle(bundle));
     // D-OSTARGET2=B (ratified 2026-07-03): fold every `prep if $build.os == {
@@ -205,6 +206,26 @@ pub(super) fn check_bundle_opts_for_output_inner(
         .enumerate()
         .map(|(module_idx, m)| {
             count_program_copy(m.items.len());
+            let mut registry = builtin_type_registry();
+            registry.core_source_module = m.is_core_source()
+                .then(|| jet_foundation::CoreModuleExports::core_source_module_by_alias(&m.alias))
+                .flatten()
+                .filter(|source| m.path.strip_prefix(crate::Diagnostics::CORE_SOURCE_ROOT)
+                    .is_ok_and(|path| path == std::path::Path::new(source.path)));
+            if let Some(source) = registry.core_source_module {
+                for row in jet_foundation::CoreModuleExports::CORE_SOURCE_OWNED_TYPES {
+                    if row.path == source.path && m.items.iter().any(|item| match item {
+                        Item::Struct(definition) => definition.name == row.name,
+                        Item::Enum(definition) => definition.name == row.name,
+                        Item::Distinct(definition) => definition.name == row.name,
+                        Item::TypeAlias(definition) => definition.name == row.name,
+                        _ => false,
+                    }) {
+                        registry.types.remove(row.name);
+                        registry.source_owned_types.insert(row.name);
+                    }
+                }
+            }
             ModuleState {
                 module_path: m.display.clone(),
                 source: m.source.clone(),
@@ -223,7 +244,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 diverging_functions: std::sync::Arc::clone(&empty_divergence),
                 fixed_length_write_params: std::sync::Arc::clone(&empty_write_params),
                 funcs: HashMap::new(),
-                registry: builtin_type_registry(),
+                registry,
                 consts: HashMap::new(),
                 imports: HashMap::new(),
                 inline_foreign_imports: HashMap::new(),
@@ -252,6 +273,11 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 fragment_facts: Default::default(),
             }
         })
+        .collect();
+    // Every module seeds against the loaded bundle, including primitive-left
+    // hooks whose source-owned operand is declared in a different Core module.
+    let source_owned_types: HashSet<&'static str> = states.iter()
+        .flat_map(|state| state.registry.source_owned_types.iter().copied())
         .collect();
     let mut name_ledger = std::mem::take(&mut bundle.name_ledger);
     name_ledger.clear_sema_facts();
@@ -742,6 +768,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 Item::Impl(i) => {
                     if !i.type_name.contains('.')
                         && !st.registry.contains(&i.type_name)
+                        && !st.registry.source_owns_impl(&i.type_name)
                         && sibling_type_owner(&name_ledger, idx, &i.type_name).is_none()
                         && !super::opmix_allows_builtin_impl(i, &module.items)
                     {
@@ -839,6 +866,10 @@ pub(super) fn check_bundle_opts_for_output_inner(
                         }
                         TypeRegistry {
                             types,
+                            source_owned_types: st.registry.source_owned_types.clone(),
+                            core_source_module: st.registry.core_source_module,
+                            opaque_methods: st.registry.opaque_methods.clone(),
+                            operator_signatures: st.registry.operator_signatures.clone(),
                             error_types: st.registry.error_types.clone(),
                             unit_types: st.registry.unit_types.clone(),
                             unit_facts: st.registry.unit_facts.clone(),
@@ -1482,7 +1513,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
         st.trait_reg.register_synthetic_rollback();
         st.trait_reg.register_synthetic_display_debug();
         st.trait_reg.register_synthetic_close();
-        st.trait_reg.register_synthetic_operators();
+        st.trait_reg.register_synthetic_operators(|name| source_owned_types.contains(name));
         st.trait_reg.register_synthetic_iter_index();
         st.trait_reg.register_synthetic_io();
         st.trait_reg.register_synthetic_driver();
@@ -1945,6 +1976,22 @@ pub(super) fn check_bundle_opts_for_output_inner(
                     name_ledger.record_import_target(idx, imp.span, target);
                 }
                 continue;
+            }
+            // Sealed Core parts are loaded with reserved aliases, not public
+            // module paths. Bind their exact loaded identity only for Core.
+            if module.path.to_string_lossy().starts_with(crate::Diagnostics::CORE_SOURCE_ROOT) {
+                if let ImportKind::Module(name, _) = &imp.kind {
+                    if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part_by_alias(name) {
+                        if let Some(target) = bundle.modules.iter().position(|candidate|
+                            candidate.alias == part.source.alias
+                                && candidate.path.to_string_lossy().starts_with(crate::Diagnostics::CORE_SOURCE_ROOT))
+                        {
+                            st.imports.insert(alias, target);
+                            name_ledger.record_import_target(idx, imp.span, target);
+                            continue;
+                        }
+                    }
+                }
             }
             if let Some(target) = name_ledger.import_target(idx, imp.span) {
                 st.imports.insert(alias, target);

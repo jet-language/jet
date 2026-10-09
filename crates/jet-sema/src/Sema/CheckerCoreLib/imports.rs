@@ -443,7 +443,15 @@ impl<'a> Checker<'a> {
             let is_pub = self
                 .name_ledger
                 .visible(self.module_idx, mod_idx, &semantic_name);
-            if !is_pub && mod_idx != self.module_idx {
+            // Reuse the source JSON lexer for typed core.data rows without
+            // making its private entry point an application-visible API.
+            let private_typed_json_seam = semantic_name == "__parse_typed"
+                && jet_foundation::CoreModuleExports::core_source_module_by_alias(&target.module_alias)
+                    .is_some_and(|source| source.module == "core.encoding.json")
+                && self.name_ledger.module_alias(self.module_idx)
+                    .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
+                    .is_some_and(|source| source.module == "core.data");
+            if !is_pub && mod_idx != self.module_idx && !private_typed_json_seam {
                 self.diags.push(private_item(name, span));
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);
@@ -519,6 +527,9 @@ impl<'a> Checker<'a> {
                 .get(&semantic_name)
                 .cloned()
                 .unwrap_or_default();
+            let source_json = semantic_name == "json"
+                && jet_foundation::CoreModuleExports::core_source_module("core.http.server")
+                    .is_some_and(|source| target.module_alias == source.alias);
             let mut subst = HashMap::new();
             let mut pre_inferred = Vec::new();
             if !type_args.is_empty() {
@@ -556,12 +567,20 @@ impl<'a> Checker<'a> {
                         }
                         for bound in &param.bounds {
                             if !self.type_satisfies_bound(&actual, bound) {
-                                self.diags.push(crate::Generics::e0905(
-                                    &actual.name(),
-                                    bound,
-                                    span,
-                                    false,
-                                ));
+                                let encoding_span = if source_json && bound == crate::Generics::ENCODE {
+                                    sig.params.iter().position(|(_, ty)| matches!(ty, Type::Named(name) if name == &param.name))
+                                        .and_then(|index| args.get(index)).map(|arg| arg.expr.span())
+                                } else { None };
+                                if let Some(encoding_span) = encoding_span {
+                                    self.check_encodable(&actual, encoding_span);
+                                } else {
+                                    self.diags.push(crate::Generics::e0905(
+                                        &actual.name(),
+                                        bound,
+                                        span,
+                                        false,
+                                    ));
+                                }
                             }
                         }
                         subst.insert(param.name.clone(), actual);
@@ -577,20 +596,28 @@ impl<'a> Checker<'a> {
                     !sig.is_extern,
                 );
                 if inference.complete {
-                    if let Some((ty, bound)) = type_params.iter().find_map(|param| {
+                    if let Some((param, ty, bound)) = type_params.iter().find_map(|param| {
                         let ty = inference.subst.get(&param.name)?;
                         param
                             .bounds
                             .iter()
                             .find(|bound| !self.type_satisfies_bound(ty, bound))
-                            .map(|bound| (ty, bound))
+                            .map(|bound| (param, ty, bound))
                     }) {
-                        self.diags.push(crate::Generics::e0905(
-                            &ty.name(),
-                            bound,
-                            span,
-                            false,
-                        ));
+                        let encoding_span = if source_json && bound == crate::Generics::ENCODE {
+                            sig.params.iter().position(|(_, ty)| matches!(ty, Type::Named(name) if name == &param.name))
+                                .and_then(|index| args.get(index)).map(|arg| arg.expr.span())
+                        } else { None };
+                        if let Some(encoding_span) = encoding_span {
+                            self.check_encodable(ty, encoding_span);
+                        } else {
+                            self.diags.push(crate::Generics::e0905(
+                                &ty.name(),
+                                bound,
+                                span,
+                                false,
+                            ));
+                        }
                     }
                 }
                 pre_inferred = inference.pre_inferred;

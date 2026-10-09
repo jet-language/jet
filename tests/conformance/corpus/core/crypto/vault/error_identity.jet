@@ -1,0 +1,64 @@
+// core-conformance: core.crypto.vault.error_identity
+// D-CRYPTO-VAULT1=A: the closed case order and named redacted payloads.
+use core.crypto as crypto
+use core.crypto.vault as vault
+
+fn error_name(error: vault.VaultError) -> String Never! {
+    if error == {
+        .InvalidName -> "InvalidName"
+        .NotFound -> "NotFound"
+        .WrongType -> "WrongType"
+        .Revoked -> "Revoked"
+        .Locked -> "Locked"
+        .AuthorityDenied -> "AuthorityDenied"
+        .Conflict -> "Conflict"
+        .UnsupportedProvider -> "UnsupportedProvider"
+        .InvalidEncoding -> "InvalidEncoding"
+        .DurabilityUnknown -> "DurabilityUnknown"
+        .Crypto(cause) -> {
+            if cause == {
+                .Unavailable -> "Crypto"
+                else -> panic("Crypto must contain the public CryptoError case")
+            }
+        }
+        .IO{operation, redacted_path} -> {
+            assert_eq(operation, "read")
+            assert_eq(redacted_path, "<vault>")
+            "IO"
+        }
+        .Internal{incident_id} -> {
+            assert_eq(incident_id, "vault-4835")
+            "Internal"
+        }
+    }
+}
+
+fn status_name(status: vault.KeyStatus) -> String Never! {
+    if status == {
+        .Active -> "Active"
+        .Retired -> "Retired"
+        .Revoked -> "Revoked"
+    }
+}
+
+fn run() {
+    cases :: [vault.VaultError]{
+        .InvalidName, .NotFound, .WrongType, .Revoked, .Locked,
+        .AuthorityDenied, .Conflict, .UnsupportedProvider, .InvalidEncoding,
+        .DurabilityUnknown, .Crypto(crypto.CryptoError.Unavailable),
+        .IO{operation: "read", redacted_path: "<vault>"},
+        .Internal{incident_id: "vault-4835"}
+    }
+    names :: [String]{
+        "InvalidName", "NotFound", "WrongType", "Revoked", "Locked",
+        "AuthorityDenied", "Conflict", "UnsupportedProvider", "InvalidEncoding",
+        "DurabilityUnknown", "Crypto", "IO", "Internal"
+    }
+    loop index in 0..<cases.len() {
+        assert_eq(error_name(cases[index]), names[index])
+    }
+    assert_eq(status_name(vault.KeyStatus.Active), "Active")
+    assert_eq(status_name(vault.KeyStatus.Retired), "Retired")
+    assert_eq(status_name(vault.KeyStatus.Revoked), "Revoked")
+    print("vault:13-errors:3-statuses")
+}

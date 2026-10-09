@@ -176,6 +176,98 @@ fn core_enum_variants_in(rows: [CoreModuleTypeExport], name: String) -> [String]
     None
 }
 
+// One source-owned Core nominal (`source_module … types { … }` in
+// Prelude/Core.jet; Rust `CoreModuleExports::CoreSourceOwnedType`).
+pub struct CoreSourceOwnedType {
+    pub path: String
+    pub name: String
+}
+
+// Rust `CoreModuleExports::core_source_owns_type`: whether a checked Core
+// identity (`<corelib>/Core/net::Core/net/url.jet::URL`) names a source-owned
+// Core nominal. An owned type is the Jet declaration on every tier: no tier
+// projects it onto a native carrier or routes its methods to an adapter.
+pub fn core_source_owns_type(name: String) -> Bool Never! {
+    core_source_owns_type_in(CORE_SOURCE_OWNED_TYPES, name)
+}
+
+// The table is a read parameter, so the scan reads its rows in place.
+fn core_source_owns_type_in(rows: [CoreSourceOwnedType], name: String) -> Bool Never! {
+    if !name.starts_with("<corelib>/") -> return false
+    parts :: name.split("::").to_list()
+    if parts.len() < 3 -> return false
+    leaf :: parts[parts.len() - 1]
+    file :: parts[parts.len() - 2]
+    loop row in rows {
+        if row.name == leaf && row.path == file -> return true
+    }
+    false
+}
+
+// D-CAP10: the existing public bool(p) arity targets one reserved source
+// method. This is not an overload mechanism or a native receiver route.
+CORE_SOURCE_BOOL_P_OWNER :: [CoreSourceOwnedType]{
+    CoreSourceOwnedType{path: "Core/math/random.jet", name: "RNG"},
+}
+pub fn core_source_receiver_method(identity: String, method: String, nargs: Int) -> String Never! {
+    if method == "bool" && nargs == 1 && core_source_owns_type(identity) && core_source_owns_type_in(CORE_SOURCE_BOOL_P_OWNER, identity) -> return "__bool_p"
+    method
+}
+
+// Exact Rust CoreModuleExports table: an established bare spelling's
+// declaring source owner, never a general public-alias re-export mechanism.
+pub struct CoreBareSourceModule {
+    pub name: String
+    pub module_name: String
+}
+pub CORE_BARE_SOURCE_MODULES :: [CoreBareSourceModule]{
+    CoreBareSourceModule{name: "URL", module_name: "core.net.url"},
+    CoreBareSourceModule{name: "Perf", module_name: "core.perf"},
+    CoreBareSourceModule{name: "RNG", module_name: "core.testing"},
+    CoreBareSourceModule{name: "Vec2", module_name: "core.math"},
+    CoreBareSourceModule{name: "Vec3", module_name: "core.math"},
+    CoreBareSourceModule{name: "Vec4", module_name: "core.math"},
+    CoreBareSourceModule{name: "Mat3", module_name: "core.math"},
+    CoreBareSourceModule{name: "Mat4", module_name: "core.math"},
+    CoreBareSourceModule{name: "F64x4", module_name: "core.math"},
+    CoreBareSourceModule{name: "ScreenPoint", module_name: "core.math"},
+    CoreBareSourceModule{name: "ScreenDelta", module_name: "core.math"},
+    CoreBareSourceModule{name: "WorldPoint", module_name: "core.math"},
+    CoreBareSourceModule{name: "WorldDelta", module_name: "core.math"},
+    CoreBareSourceModule{name: "ViewPoint", module_name: "core.math"},
+    CoreBareSourceModule{name: "ViewDelta", module_name: "core.math"},
+    CoreBareSourceModule{name: "CameraPoint", module_name: "core.math"},
+    CoreBareSourceModule{name: "CameraDelta", module_name: "core.math"},
+    CoreBareSourceModule{name: "DevicePoint", module_name: "core.math"},
+    CoreBareSourceModule{name: "DeviceDelta", module_name: "core.math"},
+    CoreBareSourceModule{name: "Point2", module_name: "core.math"},
+    CoreBareSourceModule{name: "Delta2", module_name: "core.math"},
+    CoreBareSourceModule{name: "TransformError", module_name: "core.math"},
+    CoreBareSourceModule{name: "Transform", module_name: "core.math"},
+    CoreBareSourceModule{name: "Transform2", module_name: "core.math"},
+    CoreBareSourceModule{name: "Ray2", module_name: "core.math"},
+    CoreBareSourceModule{name: "Fraction", module_name: "core.math"},
+    CoreBareSourceModule{name: "Decimal", module_name: "core.math"},
+    CoreBareSourceModule{name: "Complex", module_name: "core.math"},
+}
+pub fn core_bare_source_module(name: String) -> String? Never! {
+    loop row in CORE_BARE_SOURCE_MODULES {
+        if row.name == name -> return Val(row.module_name)
+    }
+    None
+}
+
+// Private semantic routes belong to an exact source declaration, never a
+// short nominal spelling. They do not add public trait implementations.
+pub fn core_source_value_hook(name: String, operation: String) -> String? Never! {
+    if !name.starts_with("<corelib>/") -> return None
+    if !name.ends_with("::Core/compute/solve.jet::Solver") -> return None
+    if operation == {
+        "show" -> Val("__show")
+        "debug" -> Val("__debug")
+        else -> None
+    }
+}
 // The variant names of a compiler-owned Core enum family with payload rows
 // (`IOError`, `IOOperation`, `ProcessStreamMode`, ...), in table order.
 pub fn core_enum_payload_variants(name: String) -> [String]? {
@@ -351,6 +443,7 @@ pub struct CoreRecordFieldRow {
 pub struct CoreRecordLiteralRow {
     pub owner: String
     pub fields: [TypeTupleField]
+    pub core_only: Bool{false}
 }
 
 // Corelib nominal types carry a source identity; the record oracle is keyed
@@ -375,6 +468,14 @@ fn core_record_field_in(rows: [CoreRecordFieldRow], owner: String, field: String
 
 pub fn core_record_literal_fields(owner: String) -> [TypeTupleField]? {
     core_record_literal_fields_in(CORE_RECORD_LITERAL_ROWS, core_record_leaf(owner))
+}
+
+pub fn core_record_literal_is_core_only(owner: String) -> Bool Never! {
+    leaf :: core_record_leaf(owner)
+    loop row in CORE_RECORD_LITERAL_ROWS {
+        if row.owner == leaf -> return row.core_only
+    }
+    false
 }
 
 fn core_record_literal_fields_in(rows: [CoreRecordLiteralRow], owner: String) -> [TypeTupleField]? {

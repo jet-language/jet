@@ -1764,19 +1764,18 @@ pub trait JetUiHost {
 }
 
 // JET_VETTED_UNSAFE_BEGIN: jet_ui_host_scope
-// AUDIT: this narrow seam stores a borrowed trait object in a thread-local
-// callback scope. Safe Rust cannot place that non-'static borrow in ambient
-// storage; the transmute changes only the erased lifetime, not the data/vtable
-// representation. The scope guard must restore the predecessor before the host
-// borrow ends, callbacks must stay inside that scope, and thread-local access
-// prevents cross-thread use. Violating those rules causes use-after-borrow or
-// aliasing mutable host access.
+// AUDIT: the TLS pointer addresses the stack-held host reference, not a
+// lifetime-transmuted trait object. Only jet_ui_with_host installs it; that
+// safe lexical wrapper owns the private lifetime-bound guard and restores TLS
+// before the stack reference or host borrow ends, including during unwinding.
+// The unsafe installer must never expose its guard to safe callers (forgetting
+// a public guard would leave TLS dangling). A mutable TLS borrow stays live
+// across each callback, refusing re-entry before another host reference exists.
 
 thread_local! {
-    /// The current host is scoped to one backend/event-loop call.  A raw
-    /// pointer is safe here because the guard never outlives the borrow used
-    /// to install it and restores the previous value on drop.
-    static JET_UI_CURRENT_HOST: std::cell::RefCell<Option<*mut dyn JetUiHost>> =
+    /// Points to the borrowed host reference inside jet_ui_with_host's stack
+    /// frame. The private scope restores its predecessor before that frame ends.
+    static JET_UI_CURRENT_HOST: std::cell::RefCell<Option<*mut ()>> =
         std::cell::RefCell::new(None);
     /// Non-native tiers share one deterministic host instance rather than
     /// constructing a new service state for every call.
@@ -1784,11 +1783,12 @@ thread_local! {
         std::cell::RefCell::new(JetUiHeadlessHost::new());
 }
 
-pub struct JetUiHostScope {
-    previous: Option<*mut dyn JetUiHost>,
+struct JetUiHostScope<'a, H: ?Sized> {
+    previous: Option<*mut ()>,
+    borrow: std::marker::PhantomData<&'a mut H>,
 }
 
-impl Drop for JetUiHostScope {
+impl<H: ?Sized> Drop for JetUiHostScope<'_, H> {
     fn drop(&mut self) {
         JET_UI_CURRENT_HOST.with(|slot| {
             slot.replace(self.previous);
@@ -1796,33 +1796,42 @@ impl Drop for JetUiHostScope {
     }
 }
 
-/// Install one host for the duration of the surrounding backend/event-loop
-/// operation.  Nested scopes restore their predecessor.
-pub fn jet_ui_host_scope(host: &mut dyn JetUiHost) -> JetUiHostScope {
-    // SAFETY: the slot only erases the borrow's lifetime; the returned guard
-    // restores the previous pointer on drop, and `jet_ui_with_current_host`
-    // dereferences it only while a caller still holds that guard, so the
-    // pointer never outlives the borrow it was made from.
-    let pointer: *mut (dyn JetUiHost + 'static) =
-        unsafe { std::mem::transmute(host as *mut dyn JetUiHost) };
-    let previous = JET_UI_CURRENT_HOST.with(|slot| slot.replace(Some(pointer)));
-    JetUiHostScope { previous }
+/// Install a stack-held host reference. The caller must keep the reference
+/// alive and drop the guard in lexical LIFO order; it must not leak the guard.
+unsafe fn jet_ui_host_scope<'a, 'host>(
+    host: &'a mut &'host mut dyn JetUiHost,
+) -> JetUiHostScope<'a, &'host mut dyn JetUiHost> {
+    let pointer = (host as *mut &mut dyn JetUiHost).cast::<()>();
+    let previous = JET_UI_CURRENT_HOST.with(|slot| {
+        slot.try_borrow_mut()
+            .expect("UI host callback cannot install another host while borrowed")
+            .replace(pointer)
+    });
+    JetUiHostScope { previous, borrow: std::marker::PhantomData }
 }
 
-pub fn jet_ui_with_host<R>(host: &mut dyn JetUiHost, body: impl FnOnce() -> R) -> R {
-    let _scope = jet_ui_host_scope(host);
+/// Lend a host to ambient service calls for this callback only. Nested scopes
+/// restore their predecessor; current-host callbacks may not re-enter.
+pub fn jet_ui_with_host<R>(mut host: &mut dyn JetUiHost, body: impl FnOnce() -> R) -> R {
+    // SAFETY: host is a live stack reference and the private guard cannot escape
+    // this frame. It drops before host, on both ordinary return and unwinding.
+    let _scope = unsafe { jet_ui_host_scope(&mut host) };
     body()
 }
 
 pub fn jet_ui_with_current_host<R>(body: impl FnOnce(&mut dyn JetUiHost) -> R) -> R {
-    let current = JET_UI_CURRENT_HOST.with(|slot| *slot.borrow());
-    if let Some(pointer) = current {
-        // SAFETY: `pointer` is installed only by `jet_ui_host_scope`, whose
-        // guard is held by the caller for the duration of this callback.
-        unsafe { body(&mut *pointer) }
-    } else {
-        JET_UI_DEFAULT_HEADLESS_HOST.with(|host| body(&mut *host.borrow_mut()))
-    }
+    JET_UI_CURRENT_HOST.with(|slot| {
+        let current = slot.try_borrow_mut()
+            .expect("UI host callback cannot re-enter current-host access");
+        if let Some(pointer) = *current {
+            // SAFETY: the lexical scope keeps the stack-held reference and its
+            // host live. The mutable TLS borrow remains held across body, so
+            // neither recursive access nor a nested installation can alias it.
+            unsafe { body(&mut **pointer.cast::<&mut dyn JetUiHost>()) }
+        } else {
+            JET_UI_DEFAULT_HEADLESS_HOST.with(|host| body(&mut *host.borrow_mut()))
+        }
+    })
 }
 // JET_VETTED_UNSAFE_END: jet_ui_host_scope
 
@@ -1872,11 +1881,15 @@ pub fn jet_ui_host_shortcuts_dispatch(
 }
 
 pub fn jet_font_shape(text: &str, face: &JetFontFace) -> JetGlyphRun {
-    jet_ui_with_current_host(|host| {
-        host.shape_text(text, face).unwrap_or_else(|error| {
-            panic!("font shaping host contract failure: {error:?}")
-        })
+    jet_font_shape_raw(text, face).unwrap_or_else(|cause| {
+        panic!("font shaping host contract failure: {cause}")
     })
+}
+
+// OWNER #32: single host shaping operation; source owns the panic policy.
+// Replaced by Jet runtime layer L8, dies at cutover.
+pub fn jet_font_shape_raw(text: &str, face: &JetFontFace) -> Result<JetGlyphRun, String> {
+    jet_ui_with_current_host(|host| host.shape_text(text, face).map_err(|error| format!("{error:?}")))
 }
 #[cfg(target_arch = "wasm32")]
 const JET_WASM_FONT_MAX_TEXT_BYTES: usize = 4 * 1024 * 1024;
@@ -2127,20 +2140,25 @@ pub fn jet_ui_host_file_filter(
     }
 }
 
-pub fn jet_ui_host_file_filter_text() -> JetUiFileFilter {
-    JetUiFileFilter::text()
-}
-
-pub fn jet_ui_host_fs_rights_read() -> JetUiFsRights {
-    JetUiFsRights::read()
-}
-
-pub fn jet_ui_host_fs_rights_write() -> JetUiFsRights {
-    JetUiFsRights::write()
-}
-
-pub fn jet_ui_host_fs_rights_read_write() -> JetUiFsRights {
-    JetUiFsRights::read_write()
+/// Raw request slot transfer, without request defaults or grant validation.
+pub fn jet_ui_host_raw_request_transfer(
+    kind: jet_foundation::Numeric::JetInt,
+    title: &str,
+    grant: &JetUiFsGrant,
+    directory_absent: bool,
+    filters: Vec<JetUiFileFilter>,
+    allow_multiple: bool,
+) -> JetUiFileDialogRequest {
+    assert!(directory_absent, "audited request carrier has no directory payload");
+    let kind = match kind.to_i64().expect("audited request kind") {
+        0 => JetUiFileDialogKind::Open,
+        1 => JetUiFileDialogKind::Save,
+        _ => unreachable!("invalid audited request kind"),
+    };
+    JetUiFileDialogRequest {
+        kind, title: title.to_owned(), grant: grant.clone(),
+        initial_directory: None, filters, allow_multiple,
+    }
 }
 
 pub fn jet_ui_host_fs_grant(
@@ -2153,13 +2171,7 @@ pub fn jet_ui_host_fs_grant(
     }
 }
 
-pub fn jet_ui_host_open_request(grant: JetUiFsGrant) -> JetUiFileDialogRequest {
-    JetUiFileDialogRequest::open(grant)
-}
 
-pub fn jet_ui_host_save_request(grant: JetUiFsGrant) -> JetUiFileDialogRequest {
-    JetUiFileDialogRequest::save(grant)
-}
 
 pub fn jet_ui_host_shortcut(
     key: &str,

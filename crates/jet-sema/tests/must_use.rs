@@ -30,6 +30,7 @@ fn err_codes(src: &str) -> Vec<String> {
             script_body: std::mem::take(&mut prog.script_body),
             block_spans: std::mem::take(&mut prog.block_spans),
             source: src.to_string(),
+            core_identifier_demand: Lexer::core_identifier_demand(&toks),
             web_target_ceiling: prog.web_target_ceiling,
             pub_file: prog.pub_file,
             no_prelude: prog.no_prelude,
@@ -176,4 +177,28 @@ fn run() {
 "#;
     let codes = err_codes(src);
     assert!(codes.is_empty(), "expected clean compile, got {:?}", codes);
+}
+
+#[test]
+fn operator_hooks_resolve_by_rhs_in_binary_and_dot_calls() {
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/OperatorRhsFixtures.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}
+
+#[test]
+fn duplicate_operator_pair_is_coherence_error_not_method_name_collision() {
+    let codes = err_codes(include_str!("../../../tests/ui/operator_duplicate_hook.jet"));
+    assert_eq!(codes, ["E0908"], "unexpected errors: {codes:?}");
+}
+
+#[test]
+fn scalar_conversion_heads_do_not_contextualize_arithmetic_operands() {
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/ScalarConversionFixtures.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}
+
+#[test]
+fn embedded_generic_methods_keep_owner_and_method_scopes() {
+    let codes = err_codes(include_str!("../../../tests/ui/embedded_generic_method_scope.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
 }

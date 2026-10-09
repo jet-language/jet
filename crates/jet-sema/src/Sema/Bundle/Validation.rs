@@ -1415,11 +1415,8 @@ fn collect_body_jobs<'m>(
                     // typed derive body can fill a method hole with `T`, and
                     // the generated `impl Type.Trait` must have the same
                     // scope as a hand-written trait impl.
-                    m.type_params = if own_params.is_empty() {
-                        owner_params.cloned().unwrap_or_default()
-                    } else {
-                        own_params.clone()
-                    };
+                    m.type_params =
+                        method_type_param_scope(owner_params.map_or(&[], Vec::as_slice), &own_params);
                     let raw_protocol_return =
                         uses_raw_protocol_function_return(trait_name.as_deref(), false, m);
                     jobs.push(BodyJob {
@@ -1504,6 +1501,20 @@ fn collect_body_jobs<'m>(
     jobs
 }
 
+// Match Jet's sema_function_merge_generic_params: enclosing parameters first,
+// except names shadowed by the method; then the method's own parameters.
+fn method_type_param_scope(
+    owner_params: &[crate::AST::TypeParam],
+    own_params: &[crate::AST::TypeParam],
+) -> Vec<crate::AST::TypeParam> {
+    owner_params
+        .iter()
+        .filter(|outer| !own_params.iter().any(|inner| inner.name == outer.name))
+        .chain(own_params)
+        .cloned()
+        .collect()
+}
+
 /// The method jobs of one struct or enum: its own methods, then the methods
 /// of its nested trait impls. Trait impls nested in a type are real method
 /// bodies too. They inherit the type's generic parameters, just as the Rust
@@ -1520,9 +1531,7 @@ fn push_owner_method_jobs<'m>(
 ) {
     for m in methods.iter_mut() {
         let own_params = std::mem::take(&mut m.type_params);
-        if own_params.is_empty() {
-            m.type_params = owner_params.to_vec();
-        }
+        m.type_params = method_type_param_scope(owner_params, &own_params);
         jobs.push(BodyJob {
             owner: Some(owner.to_string()),
             raw_protocol_return: false,
@@ -1541,11 +1550,7 @@ fn push_owner_method_jobs<'m>(
         let generated_anchor = compiler_generated.then_some(block.trait_span);
         for m in block.methods.iter_mut() {
             let own_params = std::mem::take(&mut m.type_params);
-            m.type_params = if own_params.is_empty() {
-                owner_params.to_vec()
-            } else {
-                own_params.clone()
-            };
+            m.type_params = method_type_param_scope(owner_params, &own_params);
             // Generated serde methods temporarily carry inherited, inferred
             // bounds solely for sema. Their Rust generics belong on the
             // enclosing impl, not on the method.

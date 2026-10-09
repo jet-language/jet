@@ -665,29 +665,6 @@ fn data_loader_format(format: &str) -> Option<&'static str> {
     }
 }
 
-fn data_loader_format_for_locator(locator: &str) -> Result<String, CtValue> {
-    let path = locator
-        .split(|character| character == '?' || character == '#')
-        .next()
-        .unwrap_or(locator);
-    let path = path.rsplit_once('/').map_or(path, |(_, path)| path);
-    let Some(extension) = path.rsplit_once('.').map(|(_, extension)| extension) else {
-        return Err(data_loader_failure(
-            "Bridge",
-            "data.load",
-            "source has no core format; import a provider package",
-        ));
-    };
-    data_loader_format(extension)
-        .map(str::to_string)
-        .ok_or_else(|| {
-            data_loader_failure(
-                "Bridge",
-                "data.load",
-                format!("format `{extension}` is provider-owned; import its package"),
-            )
-        })
-}
 
 fn data_kernel_limits_safe() -> DataKernelLimits {
     DataKernelLimits {
@@ -2753,6 +2730,9 @@ pub fn eval_data_call_in_state(
     data_plan: Option<&jet_foundation::MIR::MirDataPlan>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if module == "core.data.plot" && method == "__plot_aggregate_none" {
+        return Some(Ok(plot_aggregate_none_value()));
+    }
     // D-QUERY-RETAIN1=A: receiver Core rows carry an empty module. The
     // `Query`/`DataGroupedQuery` carrier is argument 0; callbacks are MIR
     // standalone closures invoked through the shared closure host. The
@@ -2815,7 +2795,7 @@ pub fn eval_data_call_in_state(
     if module == "core.data"
         && matches!(
             method,
-            "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value"
+            "file" | "file_member" | "url" | "database" | "value"
         )
     {
         return Some(data_loader_constructor_in_state(
@@ -3009,75 +2989,6 @@ fn data_loader_constructor_in_state(
     let operation = format!("core.data.{method}");
     let (kind, locator, member, parameters, format, authority, limits, payload, seed) =
         match method {
-            "load" => {
-                let locator = data_loader_string_arg(args, 0, method, span)?;
-                let limits = data_limits_from_value(args.get(1));
-                let format = match data_loader_format_for_locator(&locator) {
-                    Ok(format) => format,
-                    Err(error) => return Ok(error),
-                };
-                let kind = if locator.starts_with("http://")
-                    || locator.starts_with("https://")
-                {
-                    jet_foundation::PreludeDataFlow::LoaderKind::URL
-                } else {
-                    jet_foundation::PreludeDataFlow::LoaderKind::File
-                };
-                let scope = if kind == jet_foundation::PreludeDataFlow::LoaderKind::URL {
-                    "network"
-                } else {
-                    "local"
-                };
-                let authority = match data_loader_authority(scope, "") {
-                    Ok(authority) => authority,
-                    Err(error) => return Ok(error),
-                };
-                (
-                    kind,
-                    locator,
-                    String::new(),
-                    Vec::new(),
-                    format,
-                    authority,
-                    limits,
-                    None,
-                    None,
-                )
-            }
-            "load_default" => {
-                let locator = data_loader_string_arg(args, 0, method, span)?;
-                let format = match data_loader_format_for_locator(&locator) {
-                    Ok(format) => format,
-                    Err(error) => return Ok(error),
-                };
-                let kind = if locator.starts_with("http://")
-                    || locator.starts_with("https://")
-                {
-                    jet_foundation::PreludeDataFlow::LoaderKind::URL
-                } else {
-                    jet_foundation::PreludeDataFlow::LoaderKind::File
-                };
-                let scope = if kind == jet_foundation::PreludeDataFlow::LoaderKind::URL {
-                    "network"
-                } else {
-                    "local"
-                };
-                let authority = match data_loader_authority(scope, "") {
-                    Ok(authority) => authority,
-                    Err(error) => return Ok(error),
-                };
-                (
-                    kind,
-                    locator,
-                    String::new(),
-                    Vec::new(),
-                    format,
-                    authority,
-                    data_kernel_limits_safe(),
-                    None,
-                    None,
-                )
-            }
             "file" => {
                 let path = data_loader_string_arg(args, 0, method, span)?;
                 let format = data_loader_string_arg(args, 1, method, span)?;
@@ -3480,73 +3391,10 @@ pub(super) fn eval_data_loader_call(
 ) -> Option<Result<CtValue, Diagnostic>> {
     let operation = format!("{module}.{method}");
     match (module, method) {
-        ("core.data", "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value") => {
+        ("core.data", "file" | "file_member" | "url" | "database" | "value") => {
             let result = (|| -> Result<CtValue, Diagnostic> {
                 let (kind, locator, member, parameters, format, authority, limits, payload, seed) =
                     match method {
-                        "load" => {
-                            let locator = data_loader_string_arg(args, 0, method, span)?;
-                            let limits = data_limits_from_value(args.get(1));
-                            let format = match data_loader_format_for_locator(&locator) {
-                                Ok(format) => format,
-                                Err(error) => return Ok(error),
-                            };
-                            let kind = if locator.starts_with("http://")
-                                || locator.starts_with("https://")
-                            {
-                                jet_foundation::PreludeDataFlow::LoaderKind::URL
-                            } else {
-                                jet_foundation::PreludeDataFlow::LoaderKind::File
-                            };
-                            let scope = if kind
-                                == jet_foundation::PreludeDataFlow::LoaderKind::URL
-                            {
-                                "network"
-                            } else {
-                                "local"
-                            };
-                            let authority = match data_loader_authority(scope, "") {
-                                Ok(authority) => authority,
-                                Err(error) => return Ok(error),
-                            };
-                            (
-                                kind,
-                                locator,
-                                String::new(),
-                                Vec::new(),
-                                format,
-                                authority,
-                                limits,
-                                None,
-                                None,
-                            )
-                        }
-                        "load_default" => {
-                            let locator = data_loader_string_arg(args, 0, method, span)?;
-                            let format = match data_loader_format_for_locator(&locator) {
-                                Ok(format) => format,
-                                Err(error) => return Ok(error),
-                            };
-                            let kind = if locator.starts_with("http://")
-                                || locator.starts_with("https://")
-                            {
-                                jet_foundation::PreludeDataFlow::LoaderKind::URL
-                            } else {
-                                jet_foundation::PreludeDataFlow::LoaderKind::File
-                            };
-                            let scope = if kind
-                                == jet_foundation::PreludeDataFlow::LoaderKind::URL
-                            {
-                                "network"
-                            } else {
-                                "local"
-                            };
-                            let authority = match data_loader_authority(scope, "") {
-                                Ok(authority) => authority,
-                                Err(error) => return Ok(error),
-                            };
-                            (kind, locator, String::new(), Vec::new(), format, authority, data_kernel_limits_safe(), None, None)
-                        }
                         "file" => {
                             let path = data_loader_string_arg(args, 0, method, span)?;
                             let format = data_loader_string_arg(args, 1, method, span)?;
@@ -4600,6 +4448,10 @@ fn plot_channel_value(channel: data_plot_rt::JetDataPlotChannel) -> CtValue {
 
 fn plot_aggregate_value(aggregate: data_plot_rt::JetDataPlotAggregate) -> CtValue {
     plot_enum_value("JetDataPlotAggregate", aggregate.as_str())
+}
+
+pub(crate) fn plot_aggregate_none_value() -> CtValue {
+    plot_enum_value("JetDataPlotAggregate", &format!("{:?}", data_plot_rt::jet_data_plot_aggregate_none()))
 }
 
 fn plot_filter_op_value(op: data_plot_rt::JetDataPlotFilterOp) -> CtValue {

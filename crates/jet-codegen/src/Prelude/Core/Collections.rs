@@ -378,6 +378,20 @@ fn jet_list_reverse<T>(xs: &mut [T]) {
 }
 
 #[inline(always)]
+fn jet_index_vec_ref<'a, T>(xs: &'a [T], i: i64, file: &str, line: u32) -> &'a T {
+    jet_fixed_list_index(xs.len(), i, |index| &xs[index])
+        .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()))
+}
+// Embedded Core-only port seam; dies at Rust cutover.
+#[inline(always)]
+fn jet_list_swap<T>(xs: &mut [T], first: i64, second: i64) {
+    // Borrow-only indexing checks reuse the ordinary indexing stop exactly.
+    let _ = jet_index_vec_ref(xs, first, "<core.prelude>", 0);
+    let _ = jet_index_vec_ref(xs, second, "<core.prelude>", 0);
+    xs.swap(first as usize, second as usize);
+}
+
+#[inline(always)]
 fn jet_list_sort<T: Ord>(xs: &mut [T]) {
     xs.sort();
 }

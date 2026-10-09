@@ -513,11 +513,11 @@ pub(crate) fn jet_crypto_entropy_fail_closed(
 }
 
 /// D-SHAPE-RESOURCE1=A: the one vetted wipe behind `core.crypto.__zeroize`.
-/// Each secret-bearing Core type's `Close` hands its owned bytes here, so the
-/// zeroing is volatile and fenced and cannot be elided before the buffer is
-/// freed.
-pub fn jet_crypto_zeroize(mut bytes: Vec<u8>) {
-    jet_crypto_entropy_zeroize(&mut bytes);
+/// Each secret-bearing Core type's `Close` lends its resident bytes exclusively.
+/// Wipe that allocation in place, before its owner releases it; accepting an
+/// owned adapter copy would leave the caller's storage unwiped.
+pub fn jet_crypto_zeroize(bytes: &mut Vec<u8>) {
+    jet_crypto_entropy_zeroize(bytes);
 }
 
 fn jet_crypto_uuid_format(bytes: &[u8; 16]) -> String {

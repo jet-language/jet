@@ -109,7 +109,48 @@ pub fn after(delay: time.Duration, value: Int{0}) -[Time]> Receiver<Int> Never! 
 }
 
 pub fn interval(period: time.Duration) -[Time]> Receiver<Int> Never! {
-    core.tasks.interval(period)
+    core.tasks.__interval_ms(interval_milliseconds(period))
+}
+
+fn interval_milliseconds(period: time.Duration) -> Int Never! {
+    milliseconds :: period.ns /% 1000000
+    if milliseconds < 1 -> return 1
+    milliseconds
+}
+
+// These functions back compiler-private channel rows, not new public API.
+module scheduler {
+    use core as core
+
+    fn channel<T>() -> (sender: Sender<T>, receiver: Receiver<T>) Never! {
+        pair :: core.tasks.__channel_new<T>()
+        (sender: pair.sender, receiver: pair.receiver)
+    }
+
+    #Test("scheduler channel preserves its named sender and receiver") {
+        pair :: channel<Int>()
+        pair.sender.send(41)
+        assert_eq(pair.receiver.receive() ?? panic("channel closed"), 41)
+        pair.sender.close()
+    }
+
+    fn bounded<T>(capacity: Int) -> (sender: Sender<T>, receiver: Receiver<T>) Never! {
+        limit :: if capacity < 1 -> 1 else -> capacity
+        pair :: core.tasks.__channel_bounded<T>(limit)
+        (sender: pair.sender, receiver: pair.receiver)
+    }
+
+    #Test("scheduler bounded channel preserves its named sender and receiver") {
+        pair :: bounded<Int>(0)
+        pair.sender.send(42)
+        assert_eq(pair.receiver.receive() ?? panic("bounded channel closed"), 42)
+        pair.sender.close()
+    }
+}
+
+impl Condition {
+    pub fn notify_one(self) Never! { core.tasks.__condition_notify_one(self) }
+    pub fn notify_all(self) Never! { core.tasks.__condition_notify_all(self) }
 }
 
 pub fn yield_now() Never! -[Time.Wait]> { host_yield() }
@@ -136,9 +177,17 @@ fn host_sleep_ms(ms: Int) -[Time]> {
 }
 
 
-fn host_yield() -[Time.Wait]> { core.tasks.yield_now() }
+fn host_yield() -[Time.Wait]> { core.tasks.__yield_now() }
 
-fn host_task_id() -> String { core.tasks.current_task() }
+fn host_task_id() -> String {
+    paused :: core.tasks.__task_paused() ?? false
+    cancel :: core.tasks.__task_cancelled() ?? false
+    task_trace(paused, cancel)
+}
+
+fn task_trace(paused: Bool, cancel: Bool) -> String Never! {
+    "paused={paused},cancel={cancel}"
+}
 
 /// Receiver metadata is owned by the scheduler's typed handle.
 pub fn is_timer(rx: Receiver<Int>) -> Bool Never! { rx.is_timer() }
@@ -181,3 +230,21 @@ pub fn spawn_name(name: String) -> String Never! {
 }
 
 
+
+#Test("current task has idle defaults outside a scheduled task") {
+    assert_eq(current_task(), "paused=false,cancel=false")
+}
+
+#Test("task trace preserves the pause and cancellation fields") {
+    assert_eq(task_trace(true, false), "paused=true,cancel=false")
+    assert_eq(task_trace(false, true), "paused=false,cancel=true")
+    assert_eq(task_trace(true, true), "paused=true,cancel=true")
+}
+
+#Test("interval periods truncate whole milliseconds and never spin at zero") {
+    assert_eq(interval_milliseconds(time.Duration{ns: -1000000}), 1)
+    assert_eq(interval_milliseconds(time.Duration{ns: 0}), 1)
+    assert_eq(interval_milliseconds(time.Duration{ns: 999999}), 1)
+    assert_eq(interval_milliseconds(time.Duration{ns: 1999999}), 1)
+    assert_eq(interval_milliseconds(time.Duration{ns: 2000000}), 2)
+}

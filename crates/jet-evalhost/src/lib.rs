@@ -116,11 +116,6 @@ pub(crate) use jet_codegen::fault_injection;
 mod Process;
 mod Raylib;
 mod testing_shared {
-    #[allow(unused_imports)]
-    pub use jet_foundation::Outcome::*;
-    // The typed evidence error is one type across tiers; the compiler's
-    // `test_report` module is its canonical host-side home.
-    pub(crate) use jet_codegen::Codegen::test_report::TestEvidenceError;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs");
 }
 mod Ui;

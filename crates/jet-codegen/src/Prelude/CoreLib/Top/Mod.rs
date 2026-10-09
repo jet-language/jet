@@ -881,3 +881,124 @@ pub fn jet_mod_load(path: &String, grant: &JetModGrant) -> Result<JetMod, String
         payload_path: staged.keep(),
     })
 }
+
+// The parsed borrow stays internal; metadata moves out and payload bytes
+// remain in their one owning buffer until the existing staging operation.
+struct JetModLoadContext {
+    bytes: Vec<u8>,
+    payload_offset: usize,
+    header: Option<JetLibHeader<'static>>,
+    staged: Option<JetModStagedPayload>,
+    handle: usize,
+}
+impl Drop for JetModLoadContext {
+    fn drop(&mut self) {
+        if self.handle != 0 {
+            jet_mod_native::close(self.handle);
+            self.handle = 0;
+        }
+        // The staged field drops AFTER close, matching load's old error path.
+    }
+}
+thread_local! {
+    static JET_MOD_LOAD_CONTEXTS: std::cell::RefCell<Vec<Option<JetModLoadContext>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+fn jet_mod_with_context<R>(id: i64, f: impl FnOnce(&mut JetModLoadContext) -> R) -> R {
+    JET_MOD_LOAD_CONTEXTS.with(|contexts| {
+        let mut contexts = contexts.borrow_mut();
+        f(contexts.get_mut((id - 1) as usize).and_then(Option::as_mut).expect("live Core loader context"))
+    })
+}
+fn jet_mod_supported_raw() -> bool { jet_mod_native::SUPPORTED }
+fn jet_mod_os_raw() -> String { std::env::consts::OS.to_string() }
+fn jet_mod_read_context_raw(path: &String, grant: &JetModGrant) -> Result<i64, String> {
+    let source = granted_path(std::path::Path::new(path), grant)?;
+    let bytes = std::fs::read(&source).map_err(|error| JetModFailure::from_io(&error)
+        .tag(format!("cannot read library `{}`: {error}", source.display())))?;
+    Ok(JET_MOD_LOAD_CONTEXTS.with(|contexts| {
+        let mut contexts = contexts.borrow_mut();
+        let context = JetModLoadContext { bytes, payload_offset: 0, header: None, staged: None, handle: 0 };
+        if let Some(index) = contexts.iter().position(Option::is_none) {
+            contexts[index] = Some(context);
+            (index + 1) as i64
+        } else {
+            contexts.push(Some(context));
+            contexts.len() as i64
+        }
+    }))
+}
+fn jet_mod_parse_context_raw(id: i64) -> Result<(), String> {
+    jet_mod_with_context(id, |context| {
+        let header = jetlib_header(&context.bytes)?;
+        context.payload_offset = context.bytes.len() - header.payload.len();
+        context.header = Some(JetLibHeader {
+            compiler_version: header.compiler_version, compiler_build: header.compiler_build,
+            library_name: header.library_name, entry: header.entry, target: header.target,
+            target_triple: header.target_triple, linker_identity: header.linker_identity,
+            abi_identity: header.abi_identity, abi_version: header.abi_version,
+            exports: header.exports, effects: header.effects, payload_digest: header.payload_digest,
+            payload: &[],
+        });
+        Ok(())
+    })
+}
+fn jet_mod_check_context_raw(id: i64) -> Result<(), String> {
+    jet_mod_with_context(id, |context| check_before_map(context.header.as_ref().expect("parsed header")))
+}
+fn jet_mod_context_name_raw(id: i64) -> String {
+    jet_mod_with_context(id, |context| context.header.as_ref().expect("parsed header").library_name.clone())
+}
+fn jet_mod_context_digest_raw(id: i64) -> bool {
+    jet_mod_with_context(id, |context| payload_digest(&context.bytes[context.payload_offset..]) ==
+        context.header.as_ref().expect("parsed header").payload_digest)
+}
+fn jet_mod_stage_context_raw(id: i64) -> Result<(), String> {
+    jet_mod_with_context(id, |context| {
+        context.staged = Some(stage_payload(&context.bytes[context.payload_offset..])?);
+        Ok(())
+    })
+}
+fn jet_mod_open_context_raw(id: i64) -> Result<(), String> {
+    jet_mod_with_context(id, |context| {
+        context.handle = jet_mod_native::open(context.staged.as_ref().expect("staged payload")
+            .path.as_deref().expect("staged payload path missing"))?;
+        Ok(())
+    })
+}
+fn jet_mod_exports_count_raw(id: i64) -> i64 {
+    jet_mod_with_context(id, |context| context.header.as_ref().expect("parsed header").exports.len() as i64)
+}
+fn jet_mod_export_info_raw(id: i64, index: i64) -> (String, String, bool) {
+    jet_mod_with_context(id, |context| {
+        let export = &context.header.as_ref().expect("parsed header").exports[index as usize];
+        (export.name.clone(), export.symbol.clone(), export.scalar == JetModScalar::Text)
+    })
+}
+fn jet_mod_resolve_export_raw(id: i64, index: i64) -> Result<(), String> {
+    jet_mod_with_context(id, |context| {
+        let export = &mut context.header.as_mut().expect("parsed header").exports[index as usize];
+        export.pointer = jet_mod_native::symbol(context.handle, &export.symbol)?;
+        Ok(())
+    })
+}
+fn jet_mod_resolve_symbol_raw(id: i64, symbol: &String) -> Result<(), String> {
+    jet_mod_with_context(id, |context| jet_mod_native::symbol(context.handle, symbol).map(|_| ()))
+}
+fn jet_mod_close_context_raw(id: i64) {
+    JET_MOD_LOAD_CONTEXTS.with(|contexts| {
+        if let Some(slot) = contexts.borrow_mut().get_mut((id - 1) as usize) { drop(slot.take()); }
+    });
+}
+fn jet_mod_finish_context_raw(id: i64) -> JetMod {
+    JET_MOD_LOAD_CONTEXTS.with(|contexts| {
+        let mut context = contexts.borrow_mut()[(id - 1) as usize].take().expect("live loader context");
+        let module = JetMod {
+            handle: context.handle,
+            exports: std::mem::take(&mut context.header.as_mut().expect("parsed header").exports),
+            payload_path: context.staged.take().expect("staged payload").keep(),
+        };
+        context.handle = 0;
+        module
+    })
+}

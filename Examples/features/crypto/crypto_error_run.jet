@@ -5,14 +5,14 @@ use core.crypto as crypto
 use core.crypto.[FileCryptoError]
 
 // A typed step that names its failure, as `crypto.file_open` does.
-fn publish(ready: Bool) -> Bool FileCryptoError! {
-    if !ready -> return Err(FileCryptoError.PublishFailed)
-    Ok(true)
+fn publish(ready: Bool) FileCryptoError! {
+    if !ready -> return Err(FileCryptoError.DestinationIO)
+    Ok()
 }
 
 // Both crypto errors reach the default `Err` here with no declaration:
 // `from_bytes` can fail with `CryptoError`, `publish` with `FileCryptoError`.
-fn store(seed: [U8]) -> Bool {
+fn store(seed: [U8]) Err! {
     key :: crypto.SigningKey.from_bytes(seed)
     print(key.public_key().bytes.len())
     publish(false)

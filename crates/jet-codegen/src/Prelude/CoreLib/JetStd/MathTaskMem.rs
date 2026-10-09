@@ -850,10 +850,6 @@ macro_rules! jet_lane_show {
         super::jet_scheduler_yield_now();
     }
 
-    /// Control-plane trace of the currently running task (or the idle defaults).
-    pub fn jet_task_current_trace() -> String {
-        super::jet_scheduler_current_task_trace()
-    }
 
     fn jet_select_duration_ns(value: &jet_foundation::Numeric::JetInt) -> i64 {
         jet_int_owned_to_i64(value).unwrap_or_else(|error| {

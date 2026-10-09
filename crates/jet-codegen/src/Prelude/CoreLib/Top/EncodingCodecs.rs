@@ -1,77 +1,3 @@
-// ── D-UUIDENC1=A: core.encoding.hex / core.encoding.base64 / core.crypto.uuid ───────
-// Pure std implementations; zero external crates (I6); memory-safe (I1).
-
-fn jet_std_b64_decode(text: &String) -> Result<Vec<u8>, String> {
-    jet_std_b64_decode_opts(text, false, false)
-}
-
-fn jet_std_b64_decode_opts(
-    text: &String,
-    allow_whitespace: bool,
-    allow_missing_padding: bool,
-) -> Result<Vec<u8>, String> {
-    if __JET_PACKAGE_EDITION >= 2027 {
-        jet_base_encoding_strict::decode_base64(text, allow_whitespace, allow_missing_padding)
-    } else {
-        jet_xml_pull::base_encoding_2026::decode_base64(text)
-    }
-}
-
-fn jet_std_b64_decodebytes(text: &String) -> Result<Vec<u8>, String> {
-    jet_std_b64_decode_opts(text, true, false)
-}
-
-fn jet_std_b64url_decode(text: &String) -> Result<Vec<u8>, String> {
-    jet_std_b64url_decode_opts(text, false, false)
-}
-
-fn jet_std_b64url_decode_opts(
-    text: &String,
-    allow_whitespace: bool,
-    allow_padding: bool,
-) -> Result<Vec<u8>, String> {
-    if __JET_PACKAGE_EDITION >= 2027 {
-        jet_base_encoding_strict::decode_base64url(text, allow_whitespace, allow_padding)
-    } else {
-        jet_xml_pull::base_encoding_2026::decode_base64url(text)
-    }
-}
-
-fn jet_std_base32_decode(text: &String) -> Result<Vec<u8>, String> {
-    jet_std_base32_decode_opts(text, false, false, false)
-}
-fn jet_std_base32hex_decode(text: &String) -> Result<Vec<u8>, String> {
-    const STANDARD: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-    let mut canonical = String::with_capacity(text.len());
-    for ch in text.chars() {
-        let mapped = match ch {
-            '0'..='9' => STANDARD[(ch as u8 - b'0') as usize],
-            'A'..='V' => STANDARD[(ch as u8 - b'A' + 10) as usize],
-            '=' => b'=',
-            _ => return Err("invalid Base32hex character".to_string()),
-        };
-        canonical.push(mapped as char);
-    }
-    jet_std_base32_decode(&canonical)
-}
-
-fn jet_std_base32_decode_opts(
-    text: &String,
-    allow_whitespace: bool,
-    allow_missing_padding: bool,
-    allow_lowercase: bool,
-) -> Result<Vec<u8>, String> {
-    if __JET_PACKAGE_EDITION >= 2027 {
-        jet_base_encoding_strict::decode_base32(
-            text,
-            allow_whitespace,
-            allow_missing_padding,
-            allow_lowercase,
-        )
-    } else {
-        jet_xml_pull::base_encoding_2026::decode_base32(text)
-    }
-}
 
 fn jet_xml_to_data_tree(value: crate::jet_xml_pull::Value) -> jet_std::DataTree {
     match value {
@@ -364,58 +290,6 @@ fn jet_enc_xml_decode_bytes<T: __jet_Decode>(
     T::jet_decode(&jet_xml_to_data_tree(projected))
 }
 
-fn jet_cbor_value_error(path: &str, reason: impl Into<String>) -> jet_std::CBORError {
-    jet_std::CBORError {
-        kind: jet_std::CBORErrorKind::Unsupported,
-        byte_offset: 0,
-        path: path.to_string(),
-        reason: reason.into(),
-    }
-}
-
-fn jet_cbor_value_at(
-    value: &jet_std::DataTree,
-    path: &str,
-) -> Result<crate::jet_cbor_kernel::Value, jet_std::CBORError> {
-    match value {
-        jet_std::DataTree::Null => Ok(crate::jet_cbor_kernel::Value::Null),
-        jet_std::DataTree::Bool(value) => Ok(crate::jet_cbor_kernel::Value::Bool(*value)),
-        jet_std::DataTree::Int(value) => Ok(crate::jet_cbor_kernel::Value::Int(*value)),
-        jet_std::DataTree::Float(value) => Ok(crate::jet_cbor_kernel::Value::Float(*value)),
-        jet_std::DataTree::Number(text) => Err(jet_cbor_value_error(
-            path,
-            format!("JSON number carrier {text:?} is not a CBOR value"),
-        )),
-        jet_std::DataTree::TypedText(text) => Err(jet_cbor_value_error(
-            path,
-            format!("typed text carrier {text:?} is not a CBOR value"),
-        )),
-        jet_std::DataTree::Text(value) => Ok(crate::jet_cbor_kernel::Value::Text(value.clone())),
-        jet_std::DataTree::Bytes(value) => Ok(crate::jet_cbor_kernel::Value::Bytes(value.clone())),
-        jet_std::DataTree::Array(values) => {
-            let mut output = Vec::with_capacity(values.len());
-            for (index, value) in values.iter().enumerate() {
-                let child_path = format!("{path}[{index}]");
-                output.push(jet_cbor_value_at(value, &child_path)?);
-            }
-            Ok(crate::jet_cbor_kernel::Value::Array(output))
-        }
-        jet_std::DataTree::Object(entries) => {
-            let mut output = Vec::with_capacity(entries.len());
-            for (key, value) in entries {
-                let child_path = format!("{path}[{key:?}]");
-                output.push((key.clone(), jet_cbor_value_at(value, &child_path)?));
-            }
-            Ok(crate::jet_cbor_kernel::Value::Object(output))
-        }
-    }
-}
-
-fn jet_cbor_value(
-    value: &jet_std::DataTree,
-) -> Result<crate::jet_cbor_kernel::Value, jet_std::CBORError> {
-    jet_cbor_value_at(value, "$")
-}
 
 fn jet_cbor_tree(value: crate::jet_cbor_kernel::Value) -> jet_std::DataTree {
     match value {
@@ -512,32 +386,6 @@ fn jet_cbor_field_error(error: jet_std::EncodingError) -> Vec<jet_std::FieldErro
     )
 }
 
-fn jet_enc_cbor_to_bytes<T: __jet_Encode>(
-    value: &T,
-) -> Result<Vec<u8>, jet_std::CBORError> {
-    let tree = value.jet_encode();
-    let value = jet_cbor_value(&tree)?;
-    crate::jet_cbor_kernel::encode(&value, false).map_err(jet_cbor_typed_error)
-}
-
-fn jet_enc_cbor_to_bytes_canonical<T: __jet_Encode>(
-    value: &T,
-) -> Result<Vec<u8>, jet_std::CBORError> {
-    let tree = value.jet_encode();
-    let value = jet_cbor_value(&tree)?;
-    crate::jet_cbor_kernel::encode(&value, true).map_err(jet_cbor_typed_error)
-}
-
-fn jet_enc_cbor_encode(value: &jet_std::DataTree) -> Vec<u8> {
-    jet_enc_cbor_to_bytes(value).unwrap_or_else(|error| {
-        let message = format!("cbor.encode failed: {}", error.reason);
-        jet_runtime_stop("E3001", "", 0, &message)
-    })
-}
-
-fn jet_enc_cbor_decode_legacy(bytes: &Vec<u8>) -> Result<jet_std::DataTree, String> {
-    jet_enc_cbor_parse(bytes, jet_std::CBOROptions::safe()).map_err(|error| error.reason)
-}
 
 fn jet_enc_cbor_parse_with(
     bytes: &Vec<u8>,
@@ -546,13 +394,6 @@ fn jet_enc_cbor_parse_with(
 ) -> Result<jet_std::DataTree, crate::jet_cbor_kernel::Error> {
     crate::jet_cbor_kernel::decode(bytes, &jet_cbor_options(&options), allow_bytes)
         .map(jet_cbor_tree)
-}
-
-fn jet_enc_cbor_parse(
-    bytes: &Vec<u8>,
-    options: jet_std::CBOROptions,
-) -> Result<jet_std::DataTree, jet_std::CBORError> {
-    jet_enc_cbor_parse_with(bytes, options, false).map_err(jet_cbor_typed_error)
 }
 
 fn jet_cbor_decode_source_error(error: jet_std::EncodingError) -> Vec<jet_std::FieldError> {

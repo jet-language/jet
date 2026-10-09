@@ -2455,6 +2455,38 @@ fn jet_rust_emit_prelude_call_borrow_mask(ctx: &JetRustEmitContext, function: MI
     mask
 }
 
+// MIRRust service_worker_handler: only the existing worker slot uses fn().
+// Source forwarding does not introduce a general callback conversion.
+fn jet_rust_emit_service_worker_handler(ctx: &JetRustEmitContext, function: MIRFunction, handler: MIRValueID) -> String Never! {
+    producer :: jet_rust_emit_find_value_instruction(ctx, function, handler) ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR service worker handler is not a checked function value", "the worker slot must retain its checked function item", Val(function.span))
+        return ""
+    }
+    if producer.operation == {
+        .Closure(target_id, captures, _) -> {
+            if captures.len() != 0 {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR service worker handler captures its environment", "service workers accept checked function items, not closures", Val(function.span))
+                return ""
+            }
+            target_index :: jet_rust_emit_function_index(ctx, target_id) ?? {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR service worker target is missing", "checked worker identity must resolve to its source function", Val(function.span))
+                return ""
+            }
+            if ctx.program.functions[target_index].params.len() != 0 {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR service worker handler takes parameters", "the checked worker slot has the existing fn() shape", Val(function.span))
+                return ""
+            }
+            target :: jet_rust_emit_function_name(&ctx, target_id)
+            root :: ~ctx.config.root_prefix
+            return "|| {{ if let Err(__jet_error) = <_ as {root}jet_std::JetIntoDispatchResult<String>>::into_dispatch_result({target}()) {{ panic!(\"service worker failed: {{}}\", __jet_error) }} }}"
+        }
+        else -> {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR service worker handler is not a checked function value", "the worker slot must retain its checked function item", Val(function.span))
+            return ""
+        }
+    }
+}
+
 fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: MIRCallee, args: [MIRCallArg], type_args: [MIRType], result: MIRValueID?) -> String Never! {
     mask := jet_rust_emit_call_borrow_mask(&ctx, callee, function, args)
     rendered_args :: if callee == {
@@ -2472,6 +2504,31 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: M
             jet_rust_emit_call_arguments(&ctx, function, args, mask)
         }
         .Foreign(id) -> jet_rust_emit_foreign_arguments(&ctx, function, id, args)
+        .User(id) -> {
+            index :: jet_rust_emit_function_index(ctx, id) ?? return ""
+            target :: ctx.program.functions[index]
+            rendered := ""
+            if target.module_name == "core_core_service" && target.name == "worker" {
+                if args.len() != 5 {
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "checked source worker ABI", "the existing worker normalization supplies exactly five arguments", Val(function.span))
+                    return ""
+                }
+                values := [String]{}
+                loop (position, arg) in args {
+                    if position == 2 {
+                        adapter :: jet_rust_emit_service_worker_handler(&ctx, function, arg.value)
+                        handler :: "({adapter} as {ctx.config.root_prefix}JetServiceWorkerHandler)"
+                        &values.push(if mask[position] -> "&{handler}" else -> handler)
+                    } else {
+                        &values.push(jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, mask[position]))
+                    }
+                }
+                rendered = values.join(", ")
+            } else {
+                rendered = jet_rust_emit_call_arguments(&ctx, function, args, mask)
+            }
+            rendered
+        }
         else -> jet_rust_emit_call_arguments(&ctx, function, args, mask)
     }
     generic :: jet_rust_emit_generic_call_args(&ctx, type_args)
@@ -2649,6 +2706,9 @@ fn jet_rust_emit_exact_int_argument(ctx: &JetRustEmitContext, ty: MIRType, value
 // narrows at the call with a checked range stop. `core.reactive.signal`
 // constructs `JetSignal<JetInt>` and keeps the exact carrier.
 fn jet_rust_emit_core_call_argument(ctx: &JetRustEmitContext, function: MIRFunction, module_name: String, member: String, symbol: String, index: Int, arg: MIRCallArg, borrowed: Bool, declared: Type?, location: MIRPanicLoc?) -> String Never! {
+    if module_name == "core.service" && member == "worker" && index == 2 {
+        return jet_rust_emit_service_worker_handler(&ctx, function, arg.value)
+    }
     value_type :: jet_rust_emit_value_type(ctx, function, arg.value)
     value_is_int :: value_type.kind == MIRTypeKind.Int
     exact_int_carrier :: module_name == "core.reactive" && member == "signal"
@@ -2743,7 +2803,7 @@ fn jet_rust_emit_core_call_untyped(module_name: String, member: String) -> Bool 
         module_name == "core.prelude" -> member == "keep"
         module_name == "core.reactive" -> member == "derived" || member == "signal"
         module_name == "core.tasks" -> member == "after"
-        module_name == "core.term" -> member == "eprint" || member == "print"
+        module_name == "core.term" -> member == "print"
         module_name == "core.testing" -> member == "histories"
         module_name == "core.text" -> member == "display_width"
         module_name == "core.text.fmt" -> member == "pretty"
@@ -2838,7 +2898,6 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction,
     } else if result == .Val(result_value) {
         // MIRRust core_call: a native-word kernel result re-enters the Jet carrier.
         result_ty :: jet_rust_emit_value_type(ctx, function, result_value)
-        if module_name == "core.time" && jet_rust_emit_core_time_error_result(&ctx, expression, result_ty) == .Val(adapted) -> expression = adapted
         if jet_rust_emit_native_int_result(&ctx, expression, result_ty) == .Val(widened) -> expression = widened
     }
     if module_name == "core.crypto.vault" && member == "current" -> expression = "({expression}).map(|value| match value {{ Some(value) => Ok(value), None => Err({ctx.config.root_prefix}JetAbsent) }})"
@@ -2857,23 +2916,6 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction,
     expression
 }
 
-// MIRRust core_time_error_result: `core.time` kernels report a failure as its
-// reason text; the checked signature names the source `TimeError { reason }`
-// record, built here at the kernel boundary.
-fn jet_rust_emit_core_time_error_result(ctx: &JetRustEmitContext, expression: String, ty: MIRType) -> String? {
-    if ty.kind == {
-        .Result(_, err) -> {
-            owner :: err.identity ?? return None
-            index :: ctx.type_index_by_id.get(jet_rust_emit_id_key(owner.value)) ?? return None
-            if jet_rust_emit_core_native_probe_name(ctx.program.types[index].key) != "TimeError" -> return None
-            loop row in ctx.program.fields {
-                if row.owner == owner && row.field.name == "reason" -> return Val("({expression}).map_err(|__jet_reason| {jet_rust_emit_type(&ctx, err)} {{ {jet_rust_emit_field_name(&ctx, row.id)}: __jet_reason }})")
-            }
-            return None
-        }
-        else -> return None
-    }
-}
 
 fn jet_rust_emit_index_operand(ctx: &JetRustEmitContext, function: MIRFunction, index: MIRValueID, location: MIRPanicLoc) -> String Never! {
     ty := jet_rust_emit_value_type(ctx, function, index)
@@ -3618,7 +3660,8 @@ fn jet_rust_emit_field_read(ctx: &JetRustEmitContext, function: MIRFunction, bas
     }
     if key == "WebFormFieldSpec" && (field_name == "default" || field_name == "group") -> return "({value}).ok_or({root}JetAbsent)"
     if field_row == .Val(declared) {
-        if jet_rust_emit_core_email_type_name(key) == (Val("Address")) && declared.name == "display" {
+        email_owner :: jet_rust_emit_core_email_type_name(key)
+        if (email_owner == (Val("Address")) || email_owner == (Val("__EmailAddressView"))) && declared.name == "display" {
             if declared.ty.kind == .Option(inner) {
                 if inner.kind == MIRTypeKind.String -> return "({value}).ok_or({root}JetAbsent)"
             }
@@ -3698,7 +3741,7 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MIRFunction
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "unit conversion route is missing", "each checked unit conversion must retain its exact StaticPrelude kernel", Val(function.span))
         return "unreachable!(\"missing unit conversion route\")"
     }
-    rounded :: route_row.member == "conversion_rounded" || route_row.member == "conversion_rounded_measurement"
+    rounded :: route_row.member == "conversion_rounded"
     args := [String]{jet_rust_emit_value_owned(ctx, function, value)}
     digits_index :: if rounded -> 5 else -> -1
     loop index in 0..<parameters.len() {
@@ -3721,6 +3764,11 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MIRFunction
             }
         }
         if {
+            index == 4 && rounded -> {
+                mode :: jet_rust_emit_value_owned(ctx, function, parameter)
+                root :: ctx.config.root_prefix
+                &args.push("match {root}jet_std::jet_int_owned_to_i64(&({mode})).expect(\"checked unit rounding tag\") {{ 0 => {root}UnitRoundingMode::TowardZero, 1 => {root}UnitRoundingMode::Floor, 2 => {root}UnitRoundingMode::Ceiling, 3 => {root}UnitRoundingMode::NearestEven, _ => unreachable!(\"checked unit rounding tag\") }}")
+            }
             index == digits_index && jet_rust_emit_value_type(ctx, function, parameter).kind == MIRTypeKind.Int -> {
             &args.push("__jet_unit_digits")
             }
@@ -3736,7 +3784,7 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MIRFunction
         &args.push("{location.line}u32")
         }
         args.len() != expected -> {
-        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "unit conversion ABI has an unexpected parameter count", "exact, measured, rounded, and measured-rounded routes use 5/6/7/8 arguments without source-location suffixes", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "unit conversion ABI has an unexpected parameter count", "exact and rounded scalar routes use 5/7 arguments without source-location suffixes", Val(function.span))
         return "unreachable!(\"unit conversion ABI\")"
         }
     }
@@ -3768,8 +3816,8 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MIRFunction
         }
         .Option(inner) -> {
             converted := jet_rust_emit_unit_wrap(&ctx, inner, "value")
-            if rounded -> return "({result}).ok().map(|value| {converted})"
-            return "({result}).map(|value| {converted})"
+            optional :: if rounded -> "({result}).ok()" else -> result
+            return "jet_foundation::Outcome::jet_optional_from_native({optional}).map(|value| {converted})"
         }
         else -> {}
     }
@@ -4856,7 +4904,11 @@ fn jet_rust_emit_handle_method_values(ctx: &JetRustEmitContext, function: MIRFun
             else -> &rendered.push(jet_rust_emit_value_consume(ctx, function, value))
         }
     }
-    jet_rust_emit_route_call(&ctx, call, rendered)
+    emitted :: jet_rust_emit_route_call(&ctx, call, rendered)
+    if row.member == "file_reader.read_line" || row.member == "stdin.read_line" {
+        return "({emitted}).map(|line| line.ok_or({ctx.config.root_prefix}JetAbsent))"
+    }
+    emitted
 }
 
 // MIRRust prelude_handle_method: a by-value argument after the receiver whose

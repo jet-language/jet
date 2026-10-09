@@ -4,20 +4,6 @@ fn jet_std_fs_read_link(path: &String) -> Result<String, jet_std::IOError> {
 fn jet_std_fs_hard_link(from: &String, to: &String) -> Result<(), jet_std::IOError> {
     jet_std_fs_hard_link_path(from, to)
 }
-fn jet_std_fs_stat(path: &String) -> Result<jet_std::Stat, jet_std::IOError> {
-    jet_fs_stat(path).map(|stat| jet_std::Stat {
-        size: stat.size,
-        modified_ms: stat.modified_ms,
-        created_ms: stat.created_ms,
-        readonly: stat.readonly,
-        is_file: stat.is_file,
-        is_dir: stat.is_dir,
-        is_symlink: stat.is_symlink,
-        kind: stat.kind,
-        mode: stat.mode,
-    })
-}
-
 fn jet_std_fs_walk(
     path: &String,
     ignore_name: JetOutcome<String, JetAbsent>,
@@ -41,6 +27,13 @@ fn jet_std_fs_walk_with_ignore(
             "fault injected: FS.Read",
         ));
     }
+    jet_std_fs_walk_with_ignore_raw(path, ignore_name)
+}
+
+fn jet_std_fs_walk_with_ignore_raw(
+    path: &String,
+    ignore_name: Option<&str>,
+) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
     let mut out = jet_fs_walk_parallel_with_ignore(
         path,
         path,
@@ -63,6 +56,14 @@ fn jet_std_fs_walk_parallel(
 ) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
     let ignore_name = jet_std_fs_walk_ignore_name(ignore_name);
     jet_std_fs_walk_parallel_with_ignore(path, ignore_name.as_deref())
+}
+
+pub(crate) fn jet_std_fs_walk_parallel_raw(
+    path: &String,
+    ignore_name: JetOutcome<String, JetAbsent>,
+) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+    let ignore_name = jet_std_fs_walk_ignore_name(ignore_name);
+    jet_std_fs_walk_with_ignore_raw(path, ignore_name.as_deref())
 }
 
 fn jet_std_fs_walk_parallel_with_ignore(
@@ -123,9 +124,6 @@ fn jet_std_io_args() -> Vec<String> {
     std::env::args().collect()
 }
 
-fn jet_std_io_process_args() -> Vec<String> {
-    jet_process_args_view(jet_std_io_args())
-}
 // #1480: jet_std_io_input moved to IoLineStream.rs so the JIT host can
 // `include!` the same Prelude source (I9); still in scope here via the
 // shared crate-root closure both files get concatenated into for AOT.
@@ -147,34 +145,7 @@ fn jet_std_io_prompt_read() -> Result<JetTermRead, jet_std::IOError> {
 }
 
 // D-IO-PROMPT1=A: safe defaults and one terminal-owned secret-input path.
-fn jet_std_io_eprint(text: &String) {
-    let _ = jet_term_write_stderr_line(text, false);
-}
 
-fn jet_std_io_confirm(prompt: &String) -> bool {
-    jet_term_confirm_with_io(
-        prompt,
-        |text| {
-            if jet_fault_should_fail("IO.Write") {
-                return Err(jet_std::IOError::other(
-                    jet_std::IOOperation::Write,
-                    Some("stdout".to_string()),
-                    "fault injected: IO.Write",
-                ));
-            }
-            if jet_fault_should_fail("IO.Flush") {
-                return Err(jet_std::IOError::other(
-                    jet_std::IOOperation::Flush,
-                    Some("stdout".to_string()),
-                    "fault injected: IO.Flush",
-                ));
-            }
-            jet_term_write_stdout(text, true)
-                .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
-        },
-        jet_std_io_prompt_read,
-    )
-}
 
 fn jet_std_io_choose(prompt: &String, items: &Vec<String>) -> Result<String, jet_std::IOError> {
     jet_term_choose_with_io(
@@ -252,9 +223,6 @@ fn jet_std_io_input_secret(prompt: &String) -> Result<String, jet_std::IOError> 
 // #1480 / D-STDIN1: line-stream ownership moved to the shared
 // Core/StdinReader.rs fragment so AOT, JIT, and Source use one reader kernel.
 
-fn jet_std_io_binread(path: &str) -> Result<Vec<u8>, jet_std::IOError> {
-    jet_std_fs_read_bytes(path)
-}
 
 // D-COREIO1=A: stdout/stderr stream handles and TTY-aware terminal helpers.
 // The handles are zero-sized tokens for the process streams; their methods
@@ -742,19 +710,6 @@ fn jet_std_env_vars() -> Result<Vec<String>, jet_std::EnvError> {
 fn jet_std_env_snapshot_raw() -> JetEnvEntries {
     jet_env_read().clone()
 }
-fn jet_std_env_current_dir() -> Result<String, jet_std::IOError> {
-    std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, None, e))
-}
-fn jet_std_env_home_dir() -> Option<String> {
-    jet_std_env_get(&"HOME".to_string()).or_else(|| jet_std_env_get(&"USERPROFILE".to_string()))
-}
-
-fn jet_std_os_set_current_dir(path: &String) -> Result<(), jet_std::IOError> {
-    std::env::set_current_dir(path)
-        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, Some(path.clone()), e))
-}
 
 /// The AOT adapter for the one signal mechanism (#2027). It owns only what a
 /// generated program's handler shape needs: `Arc<dyn Fn>` storage, the
@@ -862,110 +817,16 @@ fn jet_std_os_on_interrupt(handler: std::sync::Arc<dyn Fn() + Send + Sync + 'sta
     jet_os_interrupt::on_interrupt(handler);
 }
 
-fn jet_testing_snap(name: &String, actual: &String) -> bool {
-    let path =
-        std::path::Path::new("__snapshots__").join(format!("{}.snap", sanitize_test_name(name)));
-    let update = std::env::var("JET_UPDATE_SNAPSHOTS").ok().as_deref() == Some("1");
-    if update || !path.is_file() {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        return std::fs::write(&path, actual).is_ok();
-    }
-    std::fs::read_to_string(path)
-        .map(|s| s == *actual)
-        .unwrap_or(false)
-}
-
-fn jet_testing_record_evidence_failure(error: TestEvidenceError) {
-    let (message, detail) = error.report_parts();
-    jet_testing_record_failure(message, detail);
-}
-
-fn jet_testing_golden(path: &String, actual: &String) -> bool {
-    match jet_testing_golden_result(path, actual) {
-        Ok(value) => {
-            jet_testing_clear_failure();
-            value
-        }
-        Err(error) => {
-            jet_testing_record_evidence_failure(error);
-            false
-        }
-    }
-}
-
-fn jet_testing_fixture(path: &String) -> String {
-    match jet_testing_fixture_result(path) {
-        Ok(contents) => {
-            jet_testing_clear_failure();
-            contents
-        }
-        Err(error) => {
-            jet_testing_record_evidence_failure(error);
-            String::new()
-        }
-    }
-}
 
 
-fn jet_testing_temp_dir(prefix: &String) -> String {
-    match jet_testing_temp_dir_path(prefix) {
-        Ok(path) => path,
-        Err(error) => jet_panic("<core.testing>", 0, &error.to_string()),
-    }
-}
 
-fn jet_testing_corpus(path: &String) -> Vec<String> {
-    let mut entries = Vec::new();
-    if let Ok(read) = std::fs::read_dir(path) {
-        let mut paths = read
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .collect::<Vec<_>>();
-        paths.sort();
-        for p in paths {
-            if p.is_file() {
-                if let Ok(text) = std::fs::read_to_string(p) {
-                    entries.push(text);
-                }
-            }
-        }
-    }
-    entries
-}
 
-fn sanitize_test_name(name: &str) -> String {
-    let mut out = String::new();
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-            out.push(ch);
-        } else {
-            out.push('_');
-        }
-    }
-    if out.is_empty() {
-        "case".to_string()
-    } else {
-        out
-    }
-}
 
 fn jet_std_process_exit(code: i64) -> ! {
     jet_runtime_explicit_exit(code)
 }
 fn jet_std_process_workspace() -> JetAuthority {
     JetAuthority::workspace()
-}
-fn jet_std_process_run(cmd: &Vec<String>) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
-    jet_process_spec_run(&jet_std_process_cmd(cmd))
-}
-fn jet_std_process_run_with_authority(
-    cmd: &Vec<String>,
-    authority: &JetAuthority,
-) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
-    let spec =
-        jet_process_spec_under_wire(jet_std_process_cmd(cmd), &jet_authority_to_wire(authority));
-    jet_process_spec_run(&spec)
 }
 fn jet_std_process_spec_under(
     spec: jet_std::ProcessSpec,
@@ -977,4 +838,66 @@ fn jet_std_process_pipeline(
     specs: &Vec<jet_std::ProcessSpec>,
 ) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
     jet_process_spec_pipeline(specs)
+}
+
+// Temporary transport for the Jet logical-environment policy. The existing
+// cell remains the only process writer until the pinned source Shared lands.
+// These are seed/verification leaves, replaced by Jet runtime L7/L8 and die
+// at cutover; no operation below mutates the operating system environment.
+fn jet_sys_env_value_raw(name: &String) -> Option<Vec<u8>> {
+    jet_env_value_raw(name).map(std::ffi::OsString::into_encoded_bytes)
+}
+
+fn jet_sys_env_columns_raw() -> Vec<Vec<u8>> {
+    jet_std_env_snapshot_raw().into_iter()
+        .flat_map(|(name, value)| [name.into_encoded_bytes(), value.into_encoded_bytes()])
+        .collect()
+}
+
+fn jet_sys_startup_env_columns_raw() -> Vec<Vec<u8>> {
+    static STARTUP: std::sync::OnceLock<Vec<Vec<u8>>> = std::sync::OnceLock::new();
+    STARTUP.get_or_init(|| std::env::vars_os()
+        .flat_map(|(name, value)| [name.into_encoded_bytes(), value.into_encoded_bytes()])
+        .collect()).clone()
+}
+
+// JET_VETTED_UNSAFE_BEGIN: jet_env_windows
+#[cfg(windows)]
+fn jet_sys_env_key_compare_raw(left: &Vec<u8>, right: &Vec<u8>) -> i64 {
+    // SAFETY: Core supplies whole valid UTF-8 names or startup OsString WTF-8
+    // names. Neither slicing nor arbitrary user FFI can reach this boundary.
+    let left = unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(left) };
+    let right = unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(right) };
+    match jet_env_key_cmp(left, right) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+// JET_VETTED_UNSAFE_END: jet_env_windows
+
+#[cfg(not(windows))]
+fn jet_sys_env_key_compare_raw(left: &Vec<u8>, right: &Vec<u8>) -> i64 {
+    match left.cmp(right) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
+// Temporary dotenv I/O seed. No injected FS checkpoint: the native typed
+// config reader did not take that rail. File selection, missing-file policy,
+// overlay, tree construction and error provenance are now Core/sys source.
+// Replaced by Jet runtime L7; dies at cutover (CoreFiles1-2 ledger).
+fn jet_sys_dotenv_read_raw(path: &String) -> Result<String, (bool, String)> {
+    std::fs::read_to_string(path).map_err(|error| (
+        error.kind() == std::io::ErrorKind::NotFound, error.to_string(),
+    ))
+}
+
+// Existing DataTree::Object projection only: unlike source maps, this carrier
+// preserves the native config tree's ordered duplicate keys on scalar/object
+// prefix collisions. No sorting, deduplication, parsing, or codec validation.
+fn jet_sys_config_object_raw(pairs: Vec<(String, jet_std::DataTree)>) -> jet_std::DataTree {
+    jet_std::DataTree::Object(pairs)
 }

@@ -998,18 +998,18 @@ use core.data.sketch.reservoir as reservoir
 fn sketch_edges() -> String {
     cardinality := hll.new()
     empty_count :: cardinality.count()
-    cardinality.add("same")
-    cardinality.add("same")
+    &cardinality.add("same")
+    &cardinality.add("same")
     distribution := tdigest.new()
     empty_quantile :: distribution.quantile(0.5)
-    distribution.add(-1.0)
-    distribution.add(1.0)
+    &distribution.add(-1.0)
+    &distribution.add(1.0)
     frequencies := cms.new()
     missing :: frequencies.count("missing")
-    frequencies.add("seen")
+    &frequencies.add("seen")
     sample := reservoir.new(0)
-    sample.add("first")
-    sample.add("second")
+    &sample.add("first")
+    &sample.add("second")
     return "{empty_count}|{cardinality.count()}|{empty_quantile}|{distribution.quantile(0.0)}|{distribution.quantile(1.0)}|{missing}|{frequencies.count("seen")}|{sample.sample().len()}"
 }"#,
             ),
@@ -1062,7 +1062,8 @@ fn xml_edges() -> String {
     book_name :: xml.expanded_name(children[0]) ?? panic("book name")
     attribute :: xml.attribute(children[0], "id")
     id :: attribute ?? "missing"
-    return "{root_name.local}|{children.len()}|{book_name.local}|{id}|{xml.to_string(document)}"
+    rendered :: xml.to_string(document) ?? panic("xml render")
+    return "{root_name.local}|{children.len()}|{book_name.local}|{id}|{rendered}"
 }"#,
             ),
         ),
@@ -1543,6 +1544,33 @@ fn public_transcript_covers_solver_exactly() {
         "solver_view()",
     ]);
     assert_eq!(values, [format!("\"{SOLVER_EXPECTED}\" : String")]);
+}
+
+const SOLVER_RENDER_DECLS: &str = r#"use core.compute.solve as solve
+fn solver_render_view() -> String {
+    solver := solve.Solver.new(-17)
+    &solver.require(true)
+    &solver.require(false)
+    &solver.require(false)
+    return "{solver}|{solver:Debug}|{[solver]}"
+}"#;
+const SOLVER_RENDER_EXPECTED: &str =
+    "Solver { seed: -17, checked: 3, failures: 2 }|Solver { seed: -17, checked: 3, failures: 2 }|[Solver { seed: -17, checked: 3, failures: 2 }]";
+
+#[test]
+fn solver_source_render_hooks_match_aot_comptime_and_dev_tiers() {
+    let source = parity_source("solver_render_view()", SOLVER_RENDER_DECLS);
+    assert_eq!(
+        check_aot_comptime("solver/source-render", &source),
+        SOLVER_RENDER_EXPECTED
+    );
+    check_dev_tiers("solver-source-render", &source, SOLVER_RENDER_EXPECTED);
+}
+
+#[test]
+fn public_transcript_covers_solver_source_render_hooks() {
+    let values = exact_values(&[SOLVER_RENDER_DECLS, "solver_render_view()"]);
+    assert_eq!(values, [format!("\"{SOLVER_RENDER_EXPECTED}\" : String")]);
 }
 
 const ARCHIVE_DECLS: &str = r#"use core.archive as archive

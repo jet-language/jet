@@ -37,9 +37,6 @@ pub const RESERVED_TYPES: &[&str] = &[
     // D-VALIDATE1: the `Validate.over(s)` namespace is compiler-owned; it is
     // not a user-defined data type that can shadow the validation surface.
     Syntax::TYPE_VALIDATE,
-    // D-SOLVER-LIB1=A: `Solver` is the Core finite-solver handle. Reserving it
-    // prevents a user type from being mistaken for the runtime solver handle.
-    Syntax::SOLVER_TYPE,
     Syntax::TYPE_BUILD_CONTEXT,
     Syntax::TYPE_BUILD_PLAN,
     Syntax::TYPE_BUILD_ACTION,
@@ -554,12 +551,6 @@ pub fn builtin_method_return(
         Type::Named(n) if n == "HistoryRNG" => history_rng_method_return(method, arg_count),
         Type::Named(n) if n == crate::Syntax::DETERMINISTIC_WORLD_TYPE => {
             deterministic_world_method_return(method, arg_count)
-        }
-        Type::Named(n) if n == crate::Syntax::FAKE_TYPE => fake_method_return(method, arg_count),
-        // D-SOLVER-LIB1=A: explicit finite solver handle. `new(seed)` constructs
-        // state; `require(Bool)` records a checked constraint; query methods read it.
-        Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => {
-            solver_method_return(method, arg_count)
         }
         // D-SHAPE-DURATIONCONVERT1=A: checked whole-unit read.
         Type::Named(n) if n == crate::Syntax::DURATION_TYPE => {
@@ -1361,9 +1352,6 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
             err: Box::new(Type::Named(crate::Syntax::TYPE_UTF8_ERROR.to_string())),
         })),
         (Type::String, "from_bytes_lossy", 1) => Some(Some(Type::String)),
-        (Type::Named(n), "new", 1) if n == crate::Syntax::SOLVER_TYPE => {
-            Some(Some(Type::Named(crate::Syntax::SOLVER_TYPE.to_string())))
-        }
         (Type::Named(n), "new", 0) if n == crate::Syntax::TYPE_CONDITION => {
             Some(Some(Type::Named(crate::Syntax::TYPE_CONDITION.to_string())))
         }
@@ -1388,7 +1376,6 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "workspace", 0) if n == crate::Syntax::TYPE_AUTHORITY => {
             Some(Some(Type::Named(crate::Syntax::TYPE_AUTHORITY.to_string())))
         }
-        (Type::Named(n), "today", 0) if n == "Date" => Some(Some(Type::Named("Date".to_string()))),
         (Type::Named(n), "home", 0) if n == "Path" => Some(Some(Type::Named("Path".to_string()))),
         (Type::Named(n), method, 1)
             if n == crate::Syntax::DURATION_TYPE
@@ -1489,6 +1476,7 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
+        ("__swap", 2) => Some(None),
         ("push" | "append" | "insert" | "reverse" | "sort" | "sort_desc" | "clear", _) => Some(None),
         ("try_push", 1) | ("try_reserve", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::Named("Unit".to_string())),
@@ -2101,24 +2089,7 @@ fn history_rng_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
     }
 }
 
-fn fake_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-    match (method, nargs) {
-        ("name" | "email" | "host" | "address", 0) => Some(Some(Type::String)),
-        ("locale", 1) => Some(Some(Type::Named(crate::Syntax::FAKE_TYPE.to_string()))),
-        _ => None,
-    }
-}
 
-/// D-SOLVER-LIB1=A: explicit finite solver state. This first Core slice admits
-/// ordinary Bool constraints only; richer domains stay future library work.
-fn solver_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-    match (method, nargs) {
-        ("require", 1) => Some(None),
-        ("failure_count", 0) => Some(Some(Type::Int)),
-        ("status", 0) => Some(Some(Type::String)),
-        _ => None,
-    }
-}
 
 /// D-SHAPE-DURATIONCONVERT1=A: one checked whole-unit reader.
 fn duration_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
@@ -2773,6 +2744,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                 | "remove"
                 | "extend"
                 | "reverse"
+                | "__swap"
                 | "sort"
                 | "sort_by"
                 | "sort_desc"
@@ -2906,10 +2878,6 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
             )
         }
         Type::Named(n) if n == "HistoryRNG" => matches!(method, "next_u64" | "below"),
-        Type::Named(n) if n == crate::Syntax::FAKE_TYPE => {
-            matches!(method, "name" | "email" | "host" | "address")
-        }
-        Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => matches!(method, "require"),
         _ => false,
     }
 }
@@ -3091,6 +3059,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "push" | "append" | "try_push" | "contains" => Some(vec![(**inner).clone()]),
             "try_reserve" => Some(vec![Type::Int]),
             "insert" => Some(vec![Type::Int, (**inner).clone()]),
+            "__swap" => Some(vec![Type::Int, Type::Int]),
             "get" => Some(vec![Type::Int]),
             "index_of" | "index" => Some(vec![(**inner).clone()]),
             "remove" => Some(vec![
@@ -3888,15 +3857,6 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             }]),
             _ => Some(vec![]),
         },
-        Type::Named(n) if n == crate::Syntax::FAKE_TYPE => match method {
-            "locale" => Some(vec![Type::String]),
-            _ => Some(vec![]),
-        },
-        Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => match method {
-            "new" => Some(vec![Type::Int]),
-            "require" => Some(vec![Type::Bool]),
-            _ => Some(vec![]),
-        },
         Type::Named(n) if n == crate::Syntax::DURATION_TYPE => Some(vec![]),
         _ => None,
     }
@@ -3950,8 +3910,6 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
                 if name == Syntax::CLOCK_TYPE
                     || name == Syntax::RNG_TYPE
                     || name == "HistoryRNG"
-                    || name == Syntax::FAKE_TYPE
-                    || name == Syntax::SOLVER_TYPE
         )
     {
         // TIR lowers these through helpers whose first argument is an explicit

@@ -106,12 +106,12 @@ fn services_probe_http(url: String, expected_status: Int?) -[Net, Time.Wait]> Bo
     if host == "" || host.contains("[") || host.contains("]") -> return false
     address :: net.socket_addr_parse("{host}:{port}") ?? return false
     stream :: net.tcp_connect_timeout(address, SERVICES_PROBE_CONNECT_MS) ?? return false
-    net.set_read_timeout(stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a read timeout still reads once")
-    net.set_write_timeout(stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a write timeout still writes once")
+    net.set_read_timeout(&stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a read timeout still reads once")
+    net.set_write_timeout(&stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a write timeout still writes once")
     crlf :: "{env_shell_control(13)}\n"
     request :: "GET /{path} HTTP/1.1{crlf}Host: {host}{crlf}Connection: close{crlf}{crlf}"
-    net.tcp_write_all_bytes(stream, request.bytes()) ?? return false
-    bytes :: net.tcp_read_bytes(stream, 1024) ?? return false
+    net.tcp_write_all_bytes(&stream, request.bytes()) ?? return false
+    bytes :: net.tcp_read_bytes(&stream, 1024) ?? return false
     response :: String.from_bytes_lossy(bytes)
     if !response.starts_with("HTTP/") -> return false
     words :: trust_text_words(response.removeprefix("HTTP/"))

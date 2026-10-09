@@ -705,12 +705,46 @@ pub struct PackageGuarantees {
     pub application_authority: crate::Authority::ApplicationAuthority,
 }
 
+/// Core auto-demand derived once from the canonical parse token stream.
+/// Literal/comment payload never enters this fact; registry order is retained
+/// for bare owners and readable-prelude owners keep their existing sorted order.
+#[derive(Debug, Default)]
+pub struct CoreIdentifierDemand {
+    pub bare_modules: Vec<&'static str>,
+    pub option_or_err: bool,
+    pub prelude_modules: Vec<&'static str>,
+}
+
+impl CoreIdentifierDemand {
+    /// Combine facts when canonical generated declarations join a module.
+    pub fn merge(&mut self, other: Self) {
+        self.option_or_err |= other.option_or_err;
+        for module in other.bare_modules {
+            if !self.bare_modules.contains(&module) {
+                self.bare_modules.push(module);
+            }
+        }
+        self.bare_modules.sort_unstable_by_key(|module| {
+            crate::CoreModuleExports::CORE_BARE_SOURCE_MODULES
+                .iter()
+                .position(|row| row.module_name == *module)
+        });
+        for module in other.prelude_modules {
+            if !self.prelude_modules.contains(&module) {
+                self.prelude_modules.push(module);
+            }
+        }
+        self.prelude_modules.sort_unstable();
+    }
+}
+
 #[derive(Debug)]
 pub struct LoadedModule {
     pub path: std::path::PathBuf,
     /// Stable path string for diagnostics/codegen (e.g. `Examples/features/21_imports/main.jet`).
     pub display: String,
     pub source: String,
+    pub core_identifier_demand: CoreIdentifierDemand,
     /// Namespace when this file is imported (`import … as alias`).
     pub alias: String,
     pub imports: Vec<ImportDecl>,

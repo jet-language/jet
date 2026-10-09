@@ -338,7 +338,6 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/ColumnList.rs"),
     include_str!("../Prelude/Core/UnicodeString.rs"),
     include_str!("../Prelude/Core/Ascii.rs"),
-    include_str!("../Prelude/Core/ProcessArgs.rs"),
     // D-STR-CONCAT1: the owned String `+`/`+=` result is one kernel for every
     // execution tier; the evaluator and JIT include this same source.
     include_str!("../Prelude/Core/StringConcat.rs"),
@@ -353,10 +352,9 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/ExpiringSecret.rs"),
     include_str!("../Prelude/Core/SetAlgebra.rs"),
     include_str!("../Prelude/Core/Duration.rs"),
-    include_str!("../Prelude/Core/Measurement.rs"),
     include_str!("../Prelude/Core/TimeMonotonic.rs"),
+    include_str!("../Prelude/Core/TimeFacts.rs"),
     include_str!("../Prelude/Core/Time.rs"),
-    include_str!("../Prelude/Core/Sketch.rs"),
     include_str!("../Prelude/Core/Contracts.rs"),
     include_str!("../Prelude/Core/MapKey.rs"),
     include_str!("../Prelude/Core/RuntimeStack.rs"),
@@ -392,6 +390,7 @@ const PRELUDE_PARTS: &[&str] = &[
     // no Prelude tree to read from.
     include_str!("../Prelude/Core/FSIgnore.rs"),
     include_str!("../Prelude/Core/FSWalk.rs"),
+    include_str!("../Prelude/Core/FSWalk8Raw.rs"),
     include_str!("../Prelude/CoreLib/JetStd/Iter.rs"),
     include_str!("../Prelude/Core/CollectionFailure.rs"),
     include_str!("../Prelude/Core/SortKernel.rs"),
@@ -1048,6 +1047,11 @@ const ORDERING_ENUM: &str = concat!(
 );
 const COMPARABLE_TRAIT: &str =
     "pub trait __jet_Comparable: Sized { fn compare(&self, rhs: &Self) -> __jet_Ordering; }\n";
+
+// Core source (`Core/font/font.jet`) compares the native `FontStyle` carrier
+// with `==`, which MIR lowers through `__jet_Comparable`. HostServices.rs is
+// also included by hosts without the trait, so the impl lives beside its push.
+const FONT_STYLE_COMPARABLE: &str = "impl __jet_Comparable for JetFontStyle { fn compare(&self, rhs: &Self) -> __jet_Ordering { match (*self as u8).cmp(&(*rhs as u8)) { std::cmp::Ordering::Less => __jet_Ordering::__jet_Less, std::cmp::Ordering::Equal => __jet_Ordering::__jet_Equal, std::cmp::Ordering::Greater => __jet_Ordering::__jet_Greater } } }\n";
 
 fn push_comparable_primitive_impls(out: &mut String) {
     for ty in COMPARABLE_PRIMITIVES {
@@ -1913,6 +1917,15 @@ const JETSTD_FFI_CALLBACKS_PRELUDE: &str = concat!(
     include_str!("../Prelude/CoreLib/JetStd/FfiCallbacks.rs"),
     "\n// JET_VETTED_UNSAFE_END: jet_std_ffi_callbacks\n",
 );
+// #3593: held directories, *at(2) opens, identity stat, rename modes, and
+// extended attributes. AOT and the interpreter include this one file.
+const FILE_HANDLES_PRELUDE: &str = concat!(
+    include_str!("../Prelude/CoreLib/JetStd/FileHandles.rs"),
+    "\n",
+    include_str!("../Prelude/CoreLib/JetStd/Files1Raw.rs"),
+    "\n",
+    include_str!("../Prelude/CoreLib/JetStd/FileLockRaw.rs"),
+);
 const SHARED_ROUTES_PRELUDE: &str =
     include_str!("../Prelude/CoreLib/Top/SharedRoutes.rs");
 
@@ -1926,6 +1939,7 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/EncodingTypes.rs"),
     JETSTD_COMMON_TYPES_PRELUDE,
     MAPPED_FILE_PRELUDE,
+    FILE_HANDLES_PRELUDE,
     JETSTD_XML_OPTIONS_PRELUDE,
     include_str!("../Prelude/CommandSuite.rs"),
     // D-DBPOLICY1=A: the closed row-policy language, compiled once. `DBPluginWire`
@@ -2281,9 +2295,6 @@ pub(crate) fn runtime_parts_for_used_core(
     if matches(&["core.reflect", "core.compiler.lang"]) {
         parts.insert(Part::Reflect);
     }
-    if matches(&["core.auth"]) || parts.contains(&Part::Crypto) {
-        parts.insert(Part::AuthTokens);
-    }
     if matches(&["core.auth", "app", "core.web"]) {
         parts.insert(Part::AuthSession);
     }
@@ -2560,6 +2571,7 @@ fn core_runtime_body_for_with_policy(
     if needs_ui_host {
         body.push_str(&canonical_font_prelude());
         body.push_str(include_str!("../Prelude/Core/HostServices.rs"));
+        body.push_str(FONT_STYLE_COMPARABLE);
     }
     if needs_ui_surface {
         body.push_str("\nmod jet_tui_kernel {\n");
@@ -3143,6 +3155,7 @@ pub(crate) fn push_full_corelib_prelude_with_policy(
     if runtime_parts.contains(&MirRuntimePartId::Ui) {
         out.push_str(&canonical_font_prelude());
         out.push_str(include_str!("../Prelude/Core/HostServices.rs"));
+        out.push_str(FONT_STYLE_COMPARABLE);
         out.push_str("\nmod jet_tui_kernel {\n");
         out.push_str(TUI_KERNEL_PRELUDE);
         out.push_str("\n}\n");
@@ -3228,10 +3241,12 @@ fn push_typed_core_optional_parts(
             out.push_str(include_str!("../Prelude/CoreLib/Top/TestingShared.rs"));
         }
         out.push_str(include_str!("../Prelude/CoreLib/Top/IoLineStream.rs"));
+        out.push_str(include_str!("../Prelude/Core/Terminal8Raw.rs"));
         out.push_str(include_str!("../Prelude/Core/EnvConfig.rs"));
         out.push_str(include_str!("../Prelude/Core/EnvProjection.rs"));
         out.push_str(include_str!("../Prelude/Core/FSOps.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FileStream.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoFileIo.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSRuntimeOps.rs"));
         out.push_str(include_str!("../Prelude/Core/StdinReader.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
@@ -3295,6 +3310,8 @@ impl JetDbRequestScope { fn enter(_: Option<String>) -> Self { Self } }\n",
     if runtime_parts.contains(&MirRuntimePartId::Browser) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Browser.rs"));
         out.push_str(include_str!("../Prelude/BrowserTest.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7BrowserRaw.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7ReportRaw.rs"));
     }
     if runtime_parts.contains(&MirRuntimePartId::Args) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Args.rs"));
@@ -3304,12 +3321,8 @@ impl JetDbRequestScope { fn enter(_: Option<String>) -> Self { Self } }\n",
     if runtime_parts.contains(&MirRuntimePartId::Reflect) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Reflect.rs"));
     }
-    if runtime_parts.contains(&MirRuntimePartId::AuthTokens) {
-        out.push_str(include_str!("../Prelude/CoreLib/Top/Auth.rs"));
-    }
     if runtime_parts.contains(&MirRuntimePartId::AuthSession) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSession.rs"));
-        out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSessionRender.rs"));
     }
     if runtime_parts.contains(&MirRuntimePartId::Sync) {
         out.push_str("\nmod jet_sync {\n");
@@ -3384,6 +3397,7 @@ fn push_typed_app_preludes(out: &mut String, runtime_parts: &BTreeSet<MirRuntime
         || runtime_parts.contains(&MirRuntimePartId::Apps)
     {
         out.push_str(LIVEQUERY_PRELUDE);
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7LiveRaw.rs"));
     }
     if !runtime_parts.contains(&MirRuntimePartId::Apps) {
         return;
@@ -3398,6 +3412,7 @@ fn push_typed_app_preludes(out: &mut String, runtime_parts: &BTreeSet<MirRuntime
     out.push_str(&flat_prelude_body(WEB_TABLE_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEB_VIRTUAL_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEB_STORE_PRELUDE_RAW));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7WebRaw.rs"));
     out.push_str(&flat_prelude_body(WEBSERVERFN_PRELUDE_RAW));
 }
 
@@ -3602,7 +3617,7 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/Core/FileHandleOwners.rs"));
 
     for part in CORELIB_KERNEL_PARTS {
-        if (!needs_mapped_file && *part == MAPPED_FILE_PRELUDE)
+        if (!needs_mapped_file && (*part == MAPPED_FILE_PRELUDE || *part == FILE_HANDLES_PRELUDE))
             || (!needs_shared && *part == SHARED_ROUTES_PRELUDE)
         {
             continue;
@@ -3803,7 +3818,6 @@ fn push_corelib_prelude_body(
     );
     let needs_args = core_usage_matches(used_core, &["core.args"]);
     let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.compiler.lang"]);
-    let needs_auth_tokens = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
     let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app", "core.web"]);
     let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "core.web", "core.db"]);
     let needs_services = core_usage_matches(used_core, &["core.service"]);
@@ -3856,6 +3870,7 @@ fn push_corelib_prelude_body(
     out.push_str("fn jet_log_process_exit(code: i64) { std::process::exit(code as i32); }\n");
     out.push_str(include_str!("../Prelude/Core/LogState.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/Log.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7LogRaw.rs"));
     out.push_str(include_str!(
         "../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"
     ));
@@ -3871,7 +3886,6 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/Core/NetPure.rs"));
     out.push_str(include_str!("../Prelude/Core/NetError.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
-    out.push_str(include_str!("../Prelude/CoreLib/Top/Solver.rs"));
     // Scheduler waits always call the deadline raiser, and FakeData below
     // always uses the seeded stream. They are kernel dependencies, not
     // conditional math surface.
@@ -3980,12 +3994,14 @@ fn push_corelib_prelude_body(
         // #1480: split out of FSIoEnvOsTesting.rs so the JIT host can
         // `include!` this exact source (I9 — single Prelude source of truth).
         out.push_str(include_str!("../Prelude/CoreLib/Top/IoLineStream.rs"));
+        out.push_str(include_str!("../Prelude/Core/Terminal8Raw.rs"));
         // D-CONFIG-ENV1 / I9: source overlay and dotenv parsing are one
         // Prelude fragment for AOT and the interpreter ambient adapter.
         out.push_str(include_str!("../Prelude/Core/EnvConfig.rs"));
         out.push_str(include_str!("../Prelude/Core/EnvProjection.rs"));
         out.push_str(include_str!("../Prelude/Core/FSOps.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FileStream.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoFileIo.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSRuntimeOps.rs"));
         out.push_str(include_str!("../Prelude/Core/StdinReader.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
@@ -4067,6 +4083,8 @@ impl JetDbRequestScope {{ fn enter(_: Option<String>) -> Self {{ Self }} }}\n",
     if needs_browser {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Browser.rs"));
         out.push_str(include_str!("../Prelude/BrowserTest.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7BrowserRaw.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7ReportRaw.rs"));
     }
     if needs_args {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Args.rs"));
@@ -4076,14 +4094,9 @@ impl JetDbRequestScope {{ fn enter(_: Option<String>) -> Self {{ Self }} }}\n",
     if needs_reflect {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Reflect.rs"));
     }
-    if needs_auth_tokens {
-        // D-AUTH2=A: JWT/PASETO verify prelude.
-        out.push_str(include_str!("../Prelude/CoreLib/Top/Auth.rs"));
-    }
     if needs_auth_session {
         // D-AUTH1=A: sessions + `app.auth` prelude.
         out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSession.rs"));
-        out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSessionRender.rs"));
     }
     if needs_sync {
         // D-SYNC1=A / D-DBPOLICY1=A: CRDT values + row policies.
@@ -4252,6 +4265,7 @@ fn push_app_preludes(out: &mut String, used_core: &std::collections::HashSet<Str
     }
     if needs_live {
         out.push_str(LIVEQUERY_PRELUDE);
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7LiveRaw.rs"));
     }
     if needs_web_suite {
         out.push_str(&flat_prelude_body(CORE_WEB_PENDING_PRELUDE_RAW));
@@ -4263,6 +4277,7 @@ fn push_app_preludes(out: &mut String, used_core: &std::collections::HashSet<Str
         out.push_str(&flat_prelude_body(WEB_TABLE_PRELUDE_RAW));
         out.push_str(&flat_prelude_body(WEB_VIRTUAL_PRELUDE_RAW));
         out.push_str(&flat_prelude_body(WEB_STORE_PRELUDE_RAW));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7WebRaw.rs"));
         out.push_str(&flat_prelude_body(WEBSERVERFN_PRELUDE_RAW));
     }
 }
@@ -4903,10 +4918,17 @@ mod tests {
                 !emitted.contains(filesystem_source),
                 "a non-filesystem closure must not pull in FSRuntimeOps"
             );
+            assert!(
+                !emitted.contains("fn jet_fs_directory_fd_raw")
+                    && !emitted.contains("fn jet_process_attach_held_directories"),
+                "retained descriptor carriers must not select filesystem operations"
+            );
             for owner in [
                 "pub struct JetTempDirOwner",
                 "pub struct JetTempFileOwner",
                 "pub struct JetFileLockOwner",
+                "pub(crate) struct JetProcessDirectory",
+                "impl PartialEq for JetProcessDirectory",
             ] {
                 assert_eq!(
                     emitted.matches(owner).count(),
@@ -5023,6 +5045,7 @@ mod tests {
                 path: PathBuf::from(root).join("main.jet"),
                 display: "main.jet".into(),
                 source: src.into(),
+                core_identifier_demand: crate::Lexer::core_identifier_demand(&tokens),
                 alias: "main".into(),
                 imports: std::mem::take(&mut program.imports),
                 items: std::mem::take(&mut program.items),

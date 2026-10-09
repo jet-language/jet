@@ -12,6 +12,51 @@ exercise the contracts. The Rust-hosted compiler remains the reference
 execution path; `Compiler/` is a staged compiler port, not a claim that Jet is
 self-hosted.
 
+Application and `#Test` helper functions retain their canonical entry-module
+call identity in both single-file and multi-file packages; the absence of
+sibling modules does not change callable resolution.
+The private testing evidence and temporary-path records are ordinary Core
+source records; lowering uses their checked declarations rather than synthetic
+compiler-owned records. Their raw host transports retain paired Prelude carrier
+name mappings until the host runtime is replaced at cutover.
+
+Whole-file filesystem checks, atomic-write sequencing, scoped path selection,
+logical environment policy, signal masks, and line decoding live in Jet source.
+Their reserved raw bindings preserve the existing host handles and shared read
+buffers until the Jet runtime replaces those leaves at cutover. File lines trim
+all trailing CR/LF bytes; process-pipe lines remove only one LF and its preceding
+CR, preserving an unterminated final CR.
+`ProcessStdin.close` registers its existing provider close directly under the
+canonical receiver name. Taking the optional writer drops the sole native
+descriptor; repeated closes are harmless. There is no extra Jet forwarding
+facade or source-level close policy at this host-only boundary.
+
+Caller-owned `RNG`, `testing.RNG`, and `math.random.RNG` name one Jet nominal:
+`RNG { state: U64 }`. It is not implicitly copyable; an explicit clone creates an
+independent stream. Display is `RNG { .. }`. SplitMix64 transitions, bounded
+rejection sampling, distributions, and collection draws are source behavior;
+`bool(p)` retains its existing arity-specific receiver row. Bare source-loading
+triggers remain limited to URL/url, Perf, and RNG; unrelated Core aliases do not
+become bare names, and Date retains its existing annotation identity.
+Bounded caller-owned draws keep the complete 64-by-64 product in exact `Int`
+before selecting its high and low words. Rejection thresholds and stream
+consumption remain identical to the native SplitMix64 seed.
+
+`Fraction` keeps its reduced exact-`Int` parts in private storage, distinct from
+the public `numerator()` and `denominator()` accessors. Field and method names
+share one member namespace; the storage names are not a construction API.
+
+Manual Core `Debug` implementations use the Prelude's consuming `debug(^self)`
+contract; `Display` reads `self`. Neither formatting projection changes its text.
+`WrappedVaultKey` likewise keeps encrypted bytes in private storage separate
+from `bytes()`, which still returns an owned copy.
+
+File-backed JSON and CBOR writers pass borrowed byte views across the write
+boundary. Private CBOR sorting uses integral heap indexes and swaps paired
+key/value entries in place. Logical environment removal uses an explicit list
+slot; Dotenv replacement preserves sibling order and moves only the selected
+entry, rather than copying its subtree.
+
 <!-- Stable IDs bind these public Core declarations to reviewed feature depth. -->
 <!-- FEATURE_CLAIMS:BEGIN -->
 <!-- FEATURE_CLAIM: claim.core-foundation | Core foundations are reachable Jet software. -->
@@ -30,6 +75,101 @@ Core is the canonical first-party namespace. Import modules by their `core.*`
 name; there is no `jet.*` or `std.*` library namespace. Core wrappers keep
 source-facing types and policy in Jet while typed provider leaves perform the
 operations that require the host environment.
+
+Source-owned declarations retain their checked signatures, effects, and authority
+requirements in the Core registry. They have no host symbol: calls execute the
+owning Jet source function, not a separate Core dispatcher implementation. Host
+operations beneath that source may remain registered raw leaves while their
+runtime layer is ported; this does not create a second implementation of the
+public declaration's policy.
+Private source-part registration explicitly records built-in receiver
+implementation ownership in `impl_types`. An empty list does not suppress the
+part's own nominal declarations.
+Directory creation shares the existing `jet_std_fs_create_dir_all_raw` host
+operation; its callers keep their own fault preflight and error resource.
+
+Devtools checked publication constructs its package/module/panel identities
+and ordered, JSON-escaped field envelope in `Core/devtools/devtools.jet`.
+The private typed-payload leaf retains the existing validated event and global
+sink, including silent rejection of invalid events and no durable-delivery
+claim when no sink is installed. Volatile memory access retains the checked
+compiler intrinsic and its audited pointer obligations.
+Encoding stream capacity/reservation/layout operations use their canonical
+private `core.mem.__list_capacity`, `__list_reserve_exact`, and `__type_size`
+leaves directly; no public wrapper or duplicate alias is introduced.
+
+Compiled-module loading sequences grant/read, header checks, digest, staging,
+native mapping, export resolution, and Text release-symbol checks in Jet.
+The private context owns one file buffer and parsed metadata; the header borrow
+never escapes a raw operation. Ordinary Close first unloads any opened native
+library, then removes its staged payload, matching the verification provider's
+error path. Successful finish transfers those resources into the existing Mod.
+
+Email address, attachment, envelope, and message construction validates in
+`Core/email/email.jet`: control-character refusal precedes address parsing,
+mailbox grammar is ASCII dot-atom or quoted local, MIME and physical-header
+limits precede attachment size, and envelopes require 1–100 recipients.
+The same source computes the native conservative wire bound and assembles MIME:
+UTF-8 encoded words never split a scalar, transfer base64 folds at 76 bytes,
+and native-order SHA-256 absorption determines mixed/alternative boundaries.
+BCC participates in envelope and boundary generation, never visible headers.
+Private whole-carrier views and builders only marshal native storage; refusal
+errors retain the original Configuration operation strings.
+The canonical `core.files.__create_dir_all_raw` leaf calls the shared recursive
+directory-creation host operation without a second fault probe; source callers
+retain their own FS.Write preflight and the host's Write/path error context.
+Filesystem internal host calls use their canonical `core.files.__*` names
+directly. There is no second `__files7_*` alias layer: the Prelude's existing
+registry entries provide the raw host boundary until Jet runtime L7 replaces
+them at Rust cutover.
+The Rust verification tier single-homes filesystem syscall tails in
+`jet_std_fs_*_raw` functions. Native seed entry points retain their original
+fault probes and call those tails; Jet entry points can perform the same
+preflight once before the raw call. Temporary and lock results still own the
+native cleanup resource, rather than substituting a path-only record.
+Logging and browser filesystem facts follow the same canonical boundary:
+Jet owns filtering, field normalization, configuration precedence and lock
+validation. Registered host leaves retain the existing log sink/span state
+and exact host path/metadata behavior until their runtime layers cut over.
+Web live/store snapshots project the resident locked state; they do not keep
+another registry. Table source helpers retain shared column and state identity
+through the registered carrier leaves. Browser reports and server owners keep
+the existing serializer and process resources behind that same boundary.
+Table page loaders, generation checks, and publication stores operate on those
+same carriers. Cross-page key validation lends the existing page-key vectors
+under the registry's one lock before committing the accepted page.
+Client table ordering stays in Jet source: host leaves expose checked column
+accessors, shared row snapshots, and canonical page construction without a
+second key/filter/sort implementation.
+Qualified calls to a source-only Core export resolve to the loaded declaration,
+including calls from its own Core module (`core.sys.usize_max()` is one such
+export). Same-module native provider rows retain their host boundary when that
+row exists; qualified spelling does not invent another implementation.
+The same direct-boundary rule applies to the held reader, directory, xattr,
+writer-stat and lock operations: canonical private names select the existing
+host kernels without source pass-through facades. Path permission and ownership
+policy uses the compile-target OS family, not a duplicate platform detector.
+`walk`, `walk_parallel`, and `walk_files` own traversal in Jet: depth starts at zero for root
+entries, results sort by shown path, ancestor symlinks are refused, and each
+directory inherits the existing ignore matcher. The private context preserves
+native path identities (including non-Unicode names) until its scope guard
+releases it. Failed directory batches are discarded while already queued work
+continues; the earliest error is selected by native directory-path ordering.
+Directory removal/listing, hard links, socket mode checks, canonicalization,
+and temporary directory/lock creation also perform their fault policy in Jet.
+Temporary directory and file names share the same Jet prefix, process-ID,
+clock-fallback, and host-path policy. Glob and directory copy retain native
+dispatch until their traversal, matching, and copy-selection policies move to Jet.
+Terminal reads and prompt/style/progress policy likewise use source-owned
+declarations. Their registered private facts call the single existing terminal
+and stdin kernels; the Rust seed entry points retain their fault preflight.
+`take` forwards through the registered source target `__take_bytes`, preserving
+the keyword spelling without a parser exception. Jet rejects a negative count
+before the read fault probe; the existing stdin kernel performs the one raw read.
+Raylib's display/input/texture operations keep the existing registered host
+bindings, with source-owned argument policy. Font shaping returns the existing
+host result through a private leaf; the Jet entry owns the exact failure panic
+and never selects an approximate fallback implicitly.
 
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep
@@ -668,7 +808,9 @@ Core registry.
 
 `core.files` combines whole-file helpers, streaming handles, path operations,
 and filesystem metadata. Path-taking calls accept `String` and the checked
-`Path` value. Filesystem calls carry the `FS` effect; current-directory and
+`Path` value through `String | Path` parameters. Read access borrows either
+member; widening a path argument does not consume the caller's value.
+Filesystem calls carry the `FS` effect; current-directory and
 environment-derived helpers also carry `Env` (D-FILES-WRITE1).
 `read_bytes` also borrows a String view (for example, `path.trim()`); the
 runtime does not materialize an owned path just to perform the read.
@@ -697,38 +839,137 @@ Whole-file and metadata functions:
 
 | API | Result | Description |
 | --- | --- | --- |
-| `read(path)` | `String !IOError` | Read a UTF-8 text file. Invalid UTF-8 is an `IOError`. |
+| `read(path)` | `String !IOError` | Read a UTF-8 text file. Invalid UTF-8 is `IOError.InvalidInput` with cause `stream did not contain valid UTF-8`. |
 | `read_bytes(path)` | `[U8] !IOError` | Read raw bytes. |
 | `write(path, text)` | `!IOError` | Create or replace a text file. |
 | `write_bytes(path, bytes)` | `!IOError` | Create or replace raw bytes. |
 | `append_all(path, text)` | `!IOError` | Append text in one whole-file call. |
 | `map(path)` | `MappedFile !IOError` | Map a file into the checked byte-view carrier. |
-| `read_at(path, offset, count)` | `[U8] !IOError` | Read a bounded byte range. |
-| `write_at(path, offset, bytes)` | `!IOError` | Write bytes at an offset. |
-| `write_atomic(path, bytes)` | `!IOError` | Publish bytes through a temporary file and rename. |
-| `fsync(path)` | `!IOError` | Flush a file to stable storage. |
+| `read_at(path, offset, count)` | `[U8] !IOError` | Read one bounded byte range; negative offset or count is clamped to zero. |
+| `write_at(path, offset, bytes)` | `!IOError` | Write bytes at an offset; negative offset is clamped to zero. |
+| `write_atomic(path, bytes)` | `!IOError` | Reserve one of 128 same-directory `.jet_tmp_<pid>_<sequence>` names, write and sync it, preserve available target permissions, close, then rename; on Unix, sync the parent after publication. |
+| `fsync(path)` | `!IOError` | Flush a file, or a folder so earlier renames inside it are durable. |
+| `open(path, links:)` / `create(path, if_exists:, mode:, links:)` / `append(path, mode:, links:)` | `FileReader` / `FileWriter !IOError` | Open a close-on-exec stream handle. `if_exists: .Refuse` creates exclusively, `mode` sets a new file's bits before the umask, and `links: .Refuse` refuses a final symbolic link. |
+| `open_directory(path)` | `Directory !IOError` | Hold a directory whose last part is a real directory, not a link. |
+| `samefile(a, b)` | `Bool !IOError` | Compare the two entries' `FileID`s. |
+| `extended_attribute_names(path)` / `extended_attribute(path, name)` / `set_extended_attribute(path, name, value)` | `[String]` / `[U8]?` / `!IOError` | Act on the path itself, never a final link's target. Names are sorted. |
 | `exists(path)` / `is_dir(path)` / `is_file(path)` | `Bool` | Return false when the path cannot be observed; these helpers do not raise a missing-path error. |
-| `stat(path)` | `Stat !IOError` | Read size, timestamps, mode, permissions, and file-kind facts. |
+| `stat(path)` / `lstat(path)` | `Stat !IOError` | Describe the entry itself, never a final link's target. |
 | `set_mode(path, mode)` | `!IOError` | Set Unix mode bits; non-Unix providers use their documented readonly mapping. |
 | `list_dir(path)` | `[DirEntry] !IOError` | List entries in name order. |
-| `create_dir(path)` / `create_dir_all(path)` | `!IOError` | Create one directory or its missing parents. |
+| `create_dir(path)` / `create_dir_all(path)` | `!IOError` | Both preserve the existing recursive directory-creation behavior, including missing parents. |
 | `remove(path)` / `remove_dir(path)` / `remove_all(path)` | `!IOError` | Remove a file, empty directory, or tree. |
 | `copy(from, to)` / `copy_dir(from, to)` | `!IOError` | Copy one regular file or a directory tree. Directory copy does not dereference symlinks or special entries. |
-| `rename(from, to)` | `!IOError` | Rename or move a path. |
+| `rename(from, to, if_exists:)` | `!IOError` | Rename or move a path; `.Replace` (default), `.Refuse`, or `.Swap`. |
 | `symlink(original, link)` / `hard_link(original, link)` | `!IOError` | Create symbolic or hard links. |
 | `read_link(path)` | `String !IOError` | Read a symbolic-link target. |
 | `canonicalize(path)` / `absolute(path)` | `String !IOError` | Resolve an existing path with symlinks, or make an absolute lexical path without requiring existence. |
 | `walk(root, ignore)` / `walk_parallel(root, ignore)` | `[WalkEntry] !IOError` | Traverse recursively with an optional ignore-file name. The parallel spelling keeps the same ordering and no-follow policy. |
 | `walk_files(root, ignore)` | `[WalkEntry] !IOError` | Traverse regular files only. |
-| `glob(pattern)` | `[String] !IOError` | Return paths matching the bounded glob pattern. |
+| `glob(pattern)` | `[String] !IOError` | Return sorted shown paths matching the native byte glob grammar. |
 | `temp_dir(prefix)` / `temp_file(prefix)` | `TempDir` / `TempFile !IOError` | Create temporary resources whose handles retain `.path`. |
-| `lock(path)` | `FileLock !IOError` | Create an advisory lock whose handle owns its cleanup. |
+| `lock(path, timeout: Duration?{None})` / `try_lock(path)` | `FileLock !IOError` / `FileLock? !IOError` | Acquire an exclusive system lock; `try_lock` returns None only for contention. |
+
+`exists` and `is_dir` follow a final symbolic link; a broken link returns
+false. Their false-on-host-error policy is Jet-owned; the host boundary
+supplies only the following-metadata fact or the host error.
+
+`glob` and `copy_dir` own their DFS policy in `Core/files/files.jet`. Native
+entries contexts retain `DirEntry` and source/destination paths, not reconstructed
+UTF-8 names. Directory copy processes unsorted `ReadDir` order, copies only
+regular files, and releases each entry after use. All host failures report the
+top-level source path, even for destination writes. Read then write fault
+preflights occur once, before traversal.
+Comptime and the resident interpreter marshal those same registered native
+entry facts; neither routes public glob or directory copy to a Rust traversal.
+
+Glob first collects each directory's children, orders native basenames, then
+visits depth-first without following directory symlinks. `*` matches any bytes
+(including separators), `?` consumes one byte, and brackets are literal.
+The starting directory is the prefix before the first `*`/`?`, cut at its last
+host separator; absent or empty directory prefixes mean `.`. Matching uses the
+native shown path unchanged, including a leading `./`, and there is no special
+literal-path existence shortcut. All glob errors report the original pattern.
+
+`absolute` keeps host lexical spelling, including `.` and `..`, repeated
+separators, and nonexistent paths. It leaves a host-absolute input unchanged;
+otherwise Jet obtains the current directory and joins using host path grammar.
+It does not apply the portable `collapse` operation.
+
+`mktemp(prefix)` only composes a name; it does not create the file. Jet replaces
+each non-ASCII-alphanumeric Unicode scalar with one underscore and combines the
+result with the process ID and the unsigned Unix-nanosecond clock sample, using
+zero when that sample is unavailable. The directory is the host temporary
+directory (not the logical environment overlay). Its effects include environment
+and clock observation as well as the filesystem surface.
 
 `walk`, `walk_parallel`, and `walk_files` accept the optional `ignore` value;
 `fs.walk(root)` is the convenience form. `DirEntry` has `name`, `path`, and
-`is_dir`. `Stat` has `size`, `modified_ms`, `created_ms`, `readonly`, `is_file`,
-`is_dir`, `is_symlink`, `kind`, and `mode`. `WalkEntry` exposes `path`,
+`is_dir`. `Stat` has `size`, `kind`, `mode`, `readonly`, `is_file`, `is_dir`,
+`is_symlink`, `id: FileID{device, inode}`, `links`, `owner: Int?` (None on
+Windows), `size_on_disk`, `modified` and `changed` (`DateTime`, nanosecond
+precision), and `created: DateTime?` (None where the file system keeps no
+birth time). `WalkEntry` exposes `path`,
 `relative`, `is_dir`, and `depth` through the checked type projection.
+The compiler-owned `IOOperation` enum describes the operation within this
+failure context. Its annotation is available to vetted Core source, not a new
+application-visible type export; user annotations retain E0119.
+
+Store-grade contracts (D-CORE-FILEERROR1, D-CORE-FILEOPEN1, D-CORE-FILESTAT1,
+D-CORE-FILEDIR1, D-CORE-HANDLEFD1, D-CORE-FILERENAME1, D-CORE-FILEXATTR1,
+D-CORE-FILELOCK1):
+
+- `IOError.AlreadyExists` reports an existing target a call was asked not to
+  replace (`EEXIST`, `ERROR_FILE_EXISTS`, `ERROR_ALREADY_EXISTS`).
+  `IOError.Unsupported` reports a request this system or file system cannot
+  perform (`ENOTSUP`, `EOPNOTSUPP`, `ENOSYS`, `ERROR_NOT_SUPPORTED`). Both
+  carry the shared `IOContext`; match the kind, never `os_code`.
+- `files.lock(path)` creates a missing regular lock file with mode `0o600`
+  before umask, opens it close-on-exec without following a final link, and
+  waits for an exclusive advisory system lock. `timeout:` bounds the wait
+  and reports `IOError.TimedOut`; `files.try_lock(path)` returns None only
+  for contention. After acquisition, Core revalidates the opened identity
+  against the path and retries a replaced binding. `FileLock.path` remains
+  read-only. Consuming `close(^lock)`, scope exit, or process exit releases
+  the kernel lock; release never removes the lock file. Unix uses `flock`;
+  Windows uses `LockFileEx` and denies delete sharing. A directory is not a
+  lock file; holding a directory and locking a regular file are distinct.
+- A `Directory` keeps working after its path is renamed or removed. Its
+  methods (`open`, `create`, `open_directory`, `create_directory`, `list`,
+  `stat`, `entry_stat`, `read_link`, `rename(from, to, into:, if_exists:)`,
+  `remove`, `remove_directory`, `fsync`) take a relative name of plain parts
+  separated by `/`. Each part is opened without following a link; `..`, `.`,
+  empty parts, and absolute names are `IOError.InvalidInput`. `create_directory`
+  on an existing name is `AlreadyExists`. The handle is close-on-exec and
+  closes at scope exit.
+  `list()` returns `DirectoryEntry`: `raw_name` preserves the native basename
+  exactly, and `name_is_unicode` says whether `name` is lossless UTF-8. For an
+  invalid UTF-8 name, `name` and `path` are display text, not an identity.
+- `directory.lock()` acquires a nonblocking exclusive advisory flock on the
+  held directory itself. Its `AdvisoryLock` owns an independent close-on-exec
+  descriptor, so renaming the directory or closing the original `Directory`
+  does not release the lock. A contended lock is an `IOError`; explicit
+  `close(^lock)` or scope exit releases it, without deleting a name. Systems
+  without directory flock report `Unsupported`. This differs from locking
+  the regular file named by `files.lock(path)`.
+- Publish through a held directory by exclusively creating a temporary sibling,
+  writing and setting mode through its handle, calling `writer.fsync()`, then
+  `directory.rename(temp, destination)` and `directory.fsync()`. Rename replaces
+  the destination entry atomically: it does not write through a destination
+  symlink or alter another hard link's contents. Metadata from `reader.stat()`
+  describes the opened identity even after the destination is replaced.
+  Read-only kernel calls borrow their argument place; inspecting a held reader
+  or writer does not copy or duplicate the native owner.
+- `rename(..., if_exists: .Refuse)` is `AlreadyExists` when the target exists;
+  a file system without no-replace renames falls back to link-then-unlink for
+  files and reports `Unsupported` for folders. `.Swap` exchanges two existing
+  names in one step; a missing name is `NotFound` and a system without
+  exchange is `Unsupported`.
+- Extended attributes on Windows, or on a file system without them, report
+  no names and no values; writes are `Unsupported`.
+  Native optional replies are converted to the owned absence carrier at the
+  kernel boundary, including inside `IOError!`; an absent value is not an I/O
+  failure, and an actual I/O failure retains its original report.
 
 The retired raw-String `read_dir` helper is not a reserved method name:
 user struct and trait methods named `read_dir` participate in normal resolution.
@@ -738,6 +979,11 @@ return `View<U8> !IOError`, and `lines()` yields `ViewIter<View<U8>>`.
 Copying a line with `~line` produces `[U8]`, not `[[U8]]`. A `FileScope`
 parameter imported as `files.FileScope` retains its checked `read` method;
 source qualification does not change its capability dispatch.
+Scoped reads select only captured authority roots, reject parent/root/prefix
+components in the relative name, and keep descriptor-relative no-follow opening
+as the security boundary. If every eligible root fails, the last OS error is
+returned; invalid UTF-8 retains its byte offset and invalid-sequence length.
+
 
 Streaming constructors keep memory bounded:
 
@@ -759,10 +1005,13 @@ fn count_lines(path: String) -> Int IOError! {
 | `open(path)` | `FileReader !IOError` | Open a buffered reader. |
 | `create(path)` | `FileWriter !IOError` | Create or replace a buffered writer. |
 | `append(path)` | `FileWriter !IOError` | Open a buffered appending writer. |
-| `reader.read_line()` | `?String !IOError` | Read one line without its newline; return `None` at EOF. |
+| `reader.read_line()` | `?String !IOError` | Read from the shared buffered position, remove all trailing CR/LF bytes, and return `None` only at EOF. A final unterminated line is returned; invalid UTF-8 is `IOError.InvalidInput`. |
+| `reader.read(max)` | `[U8] !IOError` | Read up to `max` bytes from the shared position; an empty list is EOF. |
+| `reader.stat()` / `writer.stat()` | `Stat !IOError` | Describe the open file itself (fstat); a writer's buffered bytes count only after a flush. |
 | `reader.lines()` in a loop source | stream of `String` | Pull lines without loading the complete file. |
-| `writer.write_line(text)` | `!IOError` | Write text and a newline. |
-| `writer.flush()` | `!IOError` | Flush pending writer bytes. |
+| `writer.write_line(text)` / `writer.write_all(bytes)` | `!IOError` | Write text and a newline, or every byte of `bytes` (buffered). |
+| `writer.flush()` / `writer.fsync()` | `!IOError` | Flush pending writer bytes; `fsync` also makes the file's data durable. |
+| `writer.set_mode(mode)` | `!IOError` | Set the open file's permission bits; Windows keeps only read-only. |
 
 Readers, writers, temporary resources, and locks own their provider resource
 until lexical scope exit or an explicit `close(^handle)` consumes the handle.
@@ -816,7 +1065,8 @@ fn run() {
 | `file(path)` / `data(mime, payload)` | `URL` | Build `file:` and `data:` values. |
 | `query(pairs)` / `urlencode(pairs)` | `String` | Encode repeated query pairs. |
 | `percent_encode(text)` / `percent_decode(text)` | `String` / `String !URLError` | Encode or decode URL components. |
-| `u.scheme` / `u.host` / `u.port` / `u.path` / `u.query` / `u.fragment` | component values | Read the parsed URL fields; `port` uses the default-port convention. |
+| `u.scheme()` / `u.path()` / `u.query()` | `String` | Read parsed URL components. |
+| `u.host()` / `u.port()` / `u.fragment()` | `String?` / `Int?` / `String?` | Read optional components; `port()` is present only for an explicitly written authority port. |
 | `u.path_segments()` / `u.query_pairs()` | `[String]` / `[[String]]` | Read decoded path and repeated query pairs. |
 | `u.normalize()` / `u.join(relative)` | `URL` / `URL !URLError` | Return a normalized URL or resolve a relative reference. |
 | `u.to_string()` / `u.default_port()` | `String` / `?Int` | Render the URL, keeping an explicitly written port, or read the scheme's registered default port. |
@@ -920,6 +1170,16 @@ default) or `tls`; the corresponding default ports are 587 and 465.
 optional `SMTP_DKIM_SIGNED_HEADERS`; partial configuration fails before
 connecting.
 
+The safe limits, environment configuration, and private configuration predicates
+live in `Core/email`. Before creating a mailer, `smtp_from_env` checks limits,
+host, port/security pairing, authentication name, CA PEM, and DKIM header policy,
+in that order. The first invalid limit is reported in field declaration order.
+`Limits.safe()` supplies the same six bounds used by `smtp_from_env`; DKIM
+environment keys require canonical standard base64 independently of edition.
+The decoder borrows the encoded `Secret`, uses whole four-byte groups, and
+keeps partial decoded output in a `Secret` so malformed input follows the same
+zeroizing ownership path as successful decoding.
+
 `Mailer.send(message)` reports relay acceptance in `SendReport`, not inbox
 delivery. A cancellation after message submission is `DeliveryUnknown`; Core
 does not retry an uncertain submission. Use separate mailers for separate DKIM
@@ -1004,6 +1264,10 @@ explicit bounded byte/text read.
 `core.http.server` builds a typed multiplexer and serves HTTP/1.1. `bind` and
 `serve` accept optional `HTTPServerTLS` and optional deadlines; `serve_once`
 and `serve_once_listener` provide testable one-request entry points.
+The Jet `tls(cert, key)` constructor preserves both PEM strings verbatim,
+including empty or malformed material. Loading and validating those credentials
+belongs to the listener's TLS setup, not to construction.
+
 
 | API | Result | Description |
 | --- | --- | --- |
@@ -1020,6 +1284,28 @@ and `serve_once_listener` provide testable one-request entry points.
 | `cors_policy(origins)` / `cors(mux, policy)` | policy/unit | Validate a CORS origin policy and install it. |
 | `access_log(request, status)` | `String` | Render a stable access-log line. |
 | `request_id(mux)` | unit | Install request-id middleware. |
+
+The Jet CORS constructor accepts named-origin lists or `.Any`/`.List` policies.
+Empty method/header lists retain the published defaults, credentials default to
+false, and max age defaults to 86400 seconds. Explicit max ages are preserved,
+including negative values. Wildcard origins with credentials are refused before
+the policy reaches transport middleware.
+
+`access_log` uses a stored route template when one is present (including an
+empty template); otherwise it strips the query from the request path.
+Method, selected path, and the supplied status are rendered as three
+space-separated fields without status validation.
+
+`response` and `json` preserve statuses from 100 through 599. Outside that
+range they select status 500 and replace the body with
+`500 Internal Server Error`. Response metadata defaults to HTTP/1.1, empty
+remote address, redirect history and timings, no raw content encoding, and a
+non-reused connection. JSON adds `application/json; charset=utf-8`; `sse`
+wraps its text as `data: {body}\n\n`, adds `text/event-stream` and disables
+caching with `cache-control: no-cache`. The selected body is transferred into
+the transport's one-shot body resource without eager consumption.
+Typed response JSON decoding enforces the supplied body-byte cap before
+decoding, returning `HTTPError.BodyTooLarge` when the body exceeds that cap.
 
 ### `core.net.ws` — WebSocket transport
 
@@ -1044,6 +1330,16 @@ failures, timeout, cancellation, closed connections, and unsupported targets.
 versioned WebDriver BiDi over `core.net.ws`, with a capability-checked CDP
 expert path. Profiles are isolated by default, and receipts and traces keep
 only redacted audit facts.
+Profile construction is Jet-owned and accepts exactly `bidi-2025.5` (version
+`2025.5`) or `bidi-2024.11` (version `2024.11`). It does not trim, case-fold,
+or substitute an unknown profile name.
+`connect_profile(endpoint, profile, timeout)` sequences the handshake in Jet:
+raw WebSocket connection and timeout setup, `session.status` ready/message
+validation, then `session.new` with ordered empty `alwaysMatch` capabilities.
+The session-started carrier fact is recorded before validating the session ID
+and capabilities. CDP requires the first `goog:cdp` field to be exactly true.
+Socket/command operations and the three native carrier tails remain registered
+raw leaves; there is no whole-handshake adapter.
 
 | API | Result | Description |
 | --- | --- | --- |
@@ -1120,7 +1416,7 @@ fn run() {
 | `x25519(secret, public)` / `x25519_shared(secret, public)` | `SharedSecret !CryptoError` | Perform typed X25519 agreement and reject invalid keys. |
 | `x25519_public(secret)` | `X25519PublicKey !CryptoError` | Derive the public key. |
 | `seal(recipients, bytes, aad)` / `open(identity, box, aad)` | `Sealed !CryptoError` / `[U8] !CryptoError` | Use the recipient envelope with internal key and nonce handling. |
-| `file_seal(recipients, source, destination)` / `file_open(identity, source, destination)` | `Bool !FileCryptoError` | Seal or open bounded authenticated files with atomic publication. |
+| `file_seal(recipients, source, destination)` / `file_open(identity, source, destination)` | `FileCryptoError!` (unit success) | Stream authenticated JETC v2 files in bounded 1 MiB chunks, with atomic no-overwrite publication; success has no Boolean payload. |
 | `sign(signing_key, bytes)` / `verify(verify_key, bytes, signature)` | `Signature !CryptoError` / `Bool !CryptoError` | Use nominal Ed25519 signing and verification. |
 | `wrap(secret, recipient)` / `unwrap(identity, wrapped)` | `WrappedKey !CryptoError` / `Secret !CryptoError` | Wrap a nominal Secret for an X25519 recipient. |
 | `password_hash(password)` / `password_verify(password, stored)` | `PasswordHash !CryptoError` / `Bool !CryptoError` | Hash and verify a nominal Secret with the Core password policy. |
@@ -1172,6 +1468,13 @@ raw X25519 still rejects non-contributory peers. See
 [`crypto_suite.jet`](../../../Examples/features/crypto/crypto_suite.jet) and
 [`crypto_envelope.jet`](../../../Examples/features/crypto/crypto_envelope.jet).
 
+AES-256-GCM uses a 32-byte key, a 12-byte nonce, and a 16-byte appended tag.
+Its source substitution uses fixed bitplane operations rather than
+secret-indexed lookup tables; GHASH uses 128 masked fixed-width steps.
+Open authenticates all 16 tag bytes before producing plaintext and returns
+`CryptoError.OpenFailed` for a bad tag. These source-level properties do not
+by themselves establish a machine-code timing guarantee for a compiler target.
+
 ### `core.crypto.random` — operating-system cryptographic randomness
 
 `core.crypto.random` is a fail-closed operating-system CSPRNG. It is distinct
@@ -1219,7 +1522,7 @@ fn provision() -[Secret, IO]> {
 | `get(name)` | `?String` | Read the separate untyped repository-secret value. |
 | `current<T>(name)` | `?KeyRef<T> !VaultError` | Return the active generation, if one exists. |
 | `versions<T>(name)` | `[KeyRef<T>] !VaultError` | Return generations in provider order. |
-| `load<T>(&key)` / `status<T>(&key)` | `T !VaultError` / `KeyStatus !VaultError` | Load an exact non-revoked key or inspect `Current`, `Retired`, or `Revoked`. |
+| `load<T>(&key)` / `status<T>(&key)` | `T !VaultError` / `KeyStatus !VaultError` | Load an exact Active or Retired key, or inspect `Active`, `Retired`, or `Revoked`. |
 | `prepare_generate<T>(name)` / `prepare_store<T>(name, ^key)` | `MutationPlan<T> !VaultError` | Prepare a typed mutation without publishing it. |
 | `prepare_import_signing` / `prepare_import_x25519` | typed plan `!VaultError` | Prepare a checked 32-byte signing or X25519 secret import. |
 | `prepare_rotate<T>(name)` | `MutationPlan<T> !VaultError` | Prepare a rotation for a named generation. |
@@ -1230,6 +1533,17 @@ fn provision() -[Secret, IO]> {
 | `export_to_passphrase<T>(&key, &passphrase)` | `WrappedVaultKey !KeyWrapError` | Export a typed key under a bounded nominal Secret. |
 | `prepare_import_wrapped<T>` / `authorize_wrapped_import<T>` / `commit_import_wrapped<T>` | typed results | Bind, authorize, and commit a wrapped-key import. |
 
+`VaultError` is closed: `InvalidName`, `NotFound`, `WrongType`, `Revoked`,
+`Locked`, `AuthorityDenied`, `Conflict`, `UnsupportedProvider`,
+`InvalidEncoding`, `DurabilityUnknown`, `Crypto(CryptoError)`,
+`IO{operation: String, redacted_path: String}`, and `Internal{incident_id: String}`.
+The `Crypto` payload is a matchable `CryptoError` case (`OpenFailed`,
+`VerifyFailed`, `KeyRejected`, `Length`, or `Unavailable`), never backend text.
+Invalid names or reasons return `InvalidName` before provider access; raw key
+imports that are not exactly 32 bytes return `InvalidEncoding`. Missing or wrong
+identity and age-open failures return `Locked`. Error payloads never contain
+key or store bytes, identity material, raw OS prose, or foreign paths.
+
 Mutation plans, writes, and wrapped-import plans are one-use typed carriers.
 Provider authorization is required for every write; source, workspace settings,
 environment variables, DAP, and stdin do not silently authorize it. The
@@ -1237,29 +1551,40 @@ persistent format authenticates type and origin, and failures redact paths,
 identities, recipients, backend text, and key bytes. Revocation is local
 bearer-copy state: an already exported envelope cannot be remotely erased.
 
+Wrapped backups are parsed in Jet before a `WrappedVaultKey` is constructed:
+JVKW/v1 length, version, mode, type, origin identity, sorted unique recipients,
+and fixed Argon2id parameters are checked without examining plaintext key bytes.
+`.bytes()` deliberately returns an owned copy of the encrypted backup.
+`KeyUnlock.Recipient` and `.Passphrase` retain read views of the original secret;
+the owner must remain live through wrapped import. No copied-secret carrier is
+created. Name and authorization-reason limits count UTF-8 bytes, and reject
+Unicode controls; reasons must also be NFC and exclude U+2028/U+2029.
+
 `ExpiringSecret<T>` is the lifetime wrapper for `Secret`, `SigningKey`, and
 `X25519SecretKey`. Construct it with an injected `Clock` and a `Duration`; use
 `.with` for a non-escaping read loan. Expiry returns `Expired`, and the wrapper
-destroys the owned credential through its zeroizing drop path. A system clock
-adds the `Time` effect. See
+destroys the owned credential through its zeroizing drop path. Expiry wipes the
+resident byte storage with the same volatile kernel used by explicit secret
+close, without a copied buffer or a replacement allocation. A system clock adds
+the `Time` effect. See
 [`vault_keys.jet`](../../../Examples/features/crypto/vault_keys.jet) and
 [`expiring_secret.jet`](../../../Examples/features/memory/expiring_secret.jet).
 
 ### `core.auth` — token verification and sessions
 
 `core.auth` verifies the closed JWT and PASETO forms and provides password,
-OAuth, magic-link, and cookie-session helpers. The Jet layer performs strict
-claim and input validation; provider calls handle the database/session boundary.
+OAuth, magic-link, and cookie-session helpers. It is Jet source; the host keeps
+only the D-AUTH1=A byte cell that holds the session store.
 
 | API | Result | Description |
 | --- | --- | --- |
-| `verify_jwt(token, key, audience, issuer, clock_skew)` | `Claims !AuthError` | Verify a three-part HS256 JWT with exact integer `exp`, optional `nbf`/`iat`, and audience/issuer checks. |
-| `verify_paseto(token, key, audience)` | `Claims !AuthError` | Verify `v4.public` with a 32-byte Ed25519 public key and the supplied audience. |
-| `register_user(name, password)` | `Session !AuthError` | Register a validated identity and issue a session. |
-| `password_login(name, password, ttl_s, flags)` | `Session !AuthError` | Validate credentials and issue a bounded session lifetime. |
-| `oauth_begin(provider)` / `oauth_finish(state, assertion, ttl_s, flags)` | state/session `!AuthError` | Start and finish the provider-backed OAuth assertion flow. |
-| `magic_link_issue(email, ttl_s, flags)` / `magic_link_consume(token, ttl_s, flags)` | token/session `!AuthError` | Issue and consume an email token with a bounded lifetime. |
-| `session_validate(cookie, ttl_s)` | `Session !AuthError` | Validate the signed session cookie and return its session carrier. |
+| `verify_jwt(token, key, audience, issuer, clock_skew)` | `Claims !AuthError` | Verify a three-part HS256 JWT with exact integer `exp`, optional `nbf`/`iat`, and audience/issuer checks. Omitting `issuer` skips the issuer check; a given issuer must equal `iss`. |
+| `verify_paseto(token, key, audience, issuer, clock_skew, footer, implicit)` | `Claims !AuthError` | Verify `v4.public` with a 32-byte Ed25519 public key; issuer, clock skew, footer, and implicit assertion are optional labeled arguments. |
+| `register_user(user_id, password_hash)` | `Unit !Err` | Register an identity with an already-computed password hash (`DB`). |
+| `password_login(user_id, password_hash, now_ms, ttl_ms)` | `Session !Err` | Validate credentials and issue a bounded session lifetime (`DB`, `Rand`). |
+| `oauth_begin(provider)` / `oauth_finish(state, assertion, now_ms, ttl_ms)` | state/session `!Err` | Start and finish the provider-backed OAuth assertion flow (`DB`, `Env`, `Rand`; `oauth_begin` also `Time`). |
+| `magic_link_issue(user_id, now_ms, ttl_ms)` / `magic_link_consume(token, now_ms, ttl_ms)` | token/session `!Err` | Issue and consume a token with a bounded lifetime (`DB`, `Rand`). |
+| `session_validate(session_id, now_ms)` | `Session !Err` | Validate the session identifier and return its session carrier (`DB`). |
 | `session_user(session)` / `session_cookie(session)` / `session_id(session)` | `String` | Project the validated session fields. |
 | `session_show(session)` | `String` | Render a redacted session summary; cookie bytes are not printed. |
 
@@ -1267,13 +1592,15 @@ JWT accepts only HS256 and requires a key of at least 32 bytes. PASETO accepts
 only `v4.public`, a 32-byte key, a non-empty normalized audience, and canonical
 base64url segments. Unknown algorithms, malformed JSON, wrong signatures,
 expired or not-yet-valid claims, wrong audiences, and invalid inputs fail
-closed. `Claims` contains `issuer`, `audience`, `subject`, `expires_at`, and the
-validated payload JSON. `AuthError` has `Rejected`, `Expired`, `Malformed`, and
-`Unavailable` cases.
+closed. `Claims` contains `subject`, `audience`, `issuer`, `expires_at`,
+`not_before`, and `issued_at`; subject, issuer, not-before, and issued-at are
+optional. `AuthError` retains `MalformedToken`, `UnsupportedToken`,
+`InvalidSignature`, `WeakKey`, `MissingClaim`, `WrongAudience`, `WrongIssuer`,
+`TokenExpired`, `DecodeError`, and `TokenNotYetValid`, including their payloads.
 
 Session cookies use the fixed `jet_session=` form with `HttpOnly`, `Secure`,
-`SameSite=Lax`, and `Path=/` attributes. TTL and flags are checked before the
-provider call; the current helper accepts zero flags. See
+`SameSite=Lax`, and `Path=/` attributes. Session helpers take explicit
+millisecond timestamps and lifetimes. See
 [`auth_tokens.jet`](../../../Examples/features/crypto/auth_tokens.jet) and
 [`auth_sessions.jet`](../../../Examples/features/crypto/auth_sessions.jet).
 
@@ -1321,6 +1648,10 @@ ports (D-WATCH-SCOPE1). Polling is explicit: a handle or set does not own a
 background thread or shell process, and the public module has no callback
 registration method.
 
+Watch constructors retain provider-owned resource state, not string-backed
+handle records. `files(path)` passes the path to the provider unchanged; its
+filesystem error is not replaced by a source-only empty-path error.
+
 | API | Result | Description |
 | --- | --- | --- |
 | `files(path)` / `recursive(path)` | `WatchHandle !IOError` | Watch a path; the recursive spelling uses the host's recursive file snapshot. |
@@ -1347,6 +1678,8 @@ handling a closed event enum. See
 style. Terminal stream operations follow the [bounded buffering law](../spec.md#bounded-buffering-law).
 `term.print` and `term.eprint` are variadic like the prelude `print`: each
 argument writes on its own line to stdout or stderr (D-VERDICT-1321-1).
+`eprint` requires `IO` and `Time.Wait`; `binread` and `binwrite` additionally
+require `FS` because they access files rather than terminal streams.
 
 ```jet
 use core.term as term
@@ -1384,6 +1717,17 @@ fn run() {
 `Key` enum contains `Char`, `Escape`, `Backspace`, `Tab`, the four arrow keys,
 and `Unknown`. `confirm` treats a bare Enter as no; `choose` returns an input
 error after its finite retry budget or when stdin closes.
+
+Read a buffered handle with `&reader.read_line()`: each call mutably lends
+the reader and returns `String? !IOError`. Ordinary failure propagation
+preserves the optional line, so EOF remains `None` rather than an I/O error.
+
+The executable terminal-source examples cover binary-file composition, UTF-8
+stderr, CRLF line reads and EOF, plus confirmation with a closed-input default:
+[`terminal_source.jet`](../../../Examples/features/io/terminal_source.jet) and
+[`terminal_confirm.jet`](../../../Examples/features/io/terminal_confirm.jet).
+Their programs and transcripts are shared by the golden and native harnesses;
+they do not require a bespoke Rust test or direct `rustc` invocation.
 
 ### `core.args` — declarative command-line parsing (D-ARGS1)
 
@@ -1495,9 +1839,13 @@ dynamic code loading; `get`, `set`, `clear`, `copy`, `equal`, `getfile`,
 ### `core.sys` — environment and system facts
 
 `core.sys` exposes the process environment, working directory, platform facts,
-process identifiers, and explicitly unsafe POSIX controls. Environment names
-and values are checked by the provider; `get` returns `None` for an unset name,
-while `unset` and `vars` report `EnvError` for invalid or non-Unicode state.
+process identifiers, and explicitly unsafe POSIX controls. Jet source validates
+environment names and values; `get` returns `None` for an unset name or a
+non-Unicode value, while `unset` rejects invalid names and `vars` rejects
+non-Unicode names or values. Names use the platform's environment-key order.
+Mutation changes only Jet's process-lifetime logical overlay, never the host
+environment block. Child overlays snapshot once, apply sets in order, then
+apply removals; an explicitly empty value is not an absent value.
 
 ```jet
 use core.sys as sys
@@ -1524,22 +1872,37 @@ fn run() {
 | `home_dir()` / `temp_dir()` | `?String -[Env]>` / `String -[Env]>` | Return platform home or temporary-directory values. |
 | `name()` / `family()` / `arch()` | `String -[Env]>` | Return OS name, OS family, and CPU architecture. |
 | `platform()` / `is_windows()` / `is_unix()` / `is_linux()` / `is_macos()` | platform values `-[Env]>` | Query the environment-derived platform facts. |
-| `executable()` / `hostname()` / `username()` / `release()` / `version()` | `String -[Env]>` | Return process and operating-system facts. |
+| `executable()` / `username()` | `String -[Env]>` | Return process facts. |
+| `hostname()` | `String -[Env, FS]>` | Return the host name. |
+| `release()` / `version()` | `String -[Env, FS, Exec, Time.Wait]>` | Read operating-system facts; macOS queries run `uname` or `sw_vers`. |
 | `pid()` / `getpid()` / `getppid()` / `cpu_count()` | `Int -[Env]>` | Return process IDs or a logical CPU count of at least one. |
 | `getuid()` / `geteuid()` / `getgid()` / `getegid()` / `getpgrp()` | `Int -[Env]>` | Return POSIX identity and process-group values where supported. |
 | `getgroups()` | `[Int] -[Env]>` | Return supplementary group IDs. |
 | `expand(value)` | `String -[Env]>` | Expand `$VAR`, `${VAR}`, and the supported percent form from the environment. |
-| `uptime()` | `Float -[Time, Env]>` | Read system uptime. |
+| `uptime()` | `Float -[Time, Env, FS]>` | Read system uptime from `/proc/uptime` on Linux. |
 | `loadavg()` / `times()` | `[Float] -[Env]>` | Return load averages or process CPU times. |
 | `exitcode(status)` / `success(status)` | `Int` / `Bool` | Interpret a wait status without an effect. |
 | `sync()` | `Unit -[FS, Env]>` | Flush filesystem buffers. |
 | `getpgid(pid)` / `getsid(pid)` | `Int !IOError -[Env]>` | Inspect POSIX process-group or session state. |
+
+`usize_max()` is a pure `U64` constant derived at compile time from the
+selected target's pointer layout (#4483), not from the
+compiler process's environment or the inspected executable. Missing layouts
+and pointer widths outside the one-to-eight-byte carrier fail at compile time
+rather than substituting the host width.
 
 The source-compatible `set` form reports an invalid environment call as E3001;
 its future typed error form is a language-edition change, not a second Core
 namespace. Names must be non-empty and contain neither NUL nor `=`; values
 cannot contain NUL. `vars` does not silently skip an unrepresentable entry:
 `EnvError.NonUnicode` reports it.
+
+OS-fact fallback selection, release-file parsing, supplementary-group sizing,
+load-average fallback, process-time conversion, and POSIX syscall error contexts
+are implemented in `Core/sys/sys.jet`. Temporary native leaves provide only host
+availability, syscall return values, errno, or host bytes. `release`/`version`
+keep the first matching release-file field, including an empty field; they do
+not interpret it as shell syntax.
 
 POSIX process/session controls are `#Unsafe` functions: every call needs an OS
 gate and an enclosing audited `#Unsafe("reason")` region (E3103 otherwise),
@@ -1562,6 +1925,14 @@ whether the call goes through the module alias or a direct import:
 
 The `core.sys` module does not export `on_interrupt`; use the process signal
 and task APIs for interrupt handling.
+
+Typed `sys.decode<T>()` keeps the existing `Dotenv` annotation and `Decode`
+protocol. Its source policy requires a project-relative file with no parent
+components, treats a missing dotenv file as empty, folds environment names in
+ASCII, and overlays logical process values over dotenv values. Empty values
+remain values; `__` separates lowercase field segments. Decoder failures retain
+their field paths and `E2416` provenance; secret/password/token/key path segments
+redact the rejected value.
 ---
 
 ### `core.process` — process execution
@@ -1583,6 +1954,20 @@ policy-bearing `ProcessSpec`. `process.cmd` never invokes a shell: each
 argument remains a separate string, including spaces and shell metacharacters.
 Use `process.shell` only when the command line is intentionally delegated to
 the platform shell (D-PROCESS1).
+
+Command defaults are initialized by Jet before transfer into the temporary
+native carrier: stdin is closed, stdout and stderr are captured, the output
+limit is 64 MiB, and working directory, timeout, resource limits, terminal,
+and authority binding are absent. An empty argument vector is accepted by
+`cmd`; launching it reports the existing process error.
+
+Compiler store subprocesses retain directory authority rather than reopening
+its pathname: the private bridge duplicates the held directory into the process
+carrier, then installs the chosen child descriptor and working directory before
+exec. Closing or renaming the original directory cannot redirect that child to
+a replacement at the old name. This is not a public `ProcessSpec` builder;
+targets without this descriptor transfer report `Unsupported` rather than
+falling back to a lexical working directory.
 
 ```jet
 use core.process as process
@@ -1628,7 +2013,7 @@ fn run() -[Exec, Time.Wait]> {
 | `process.on_signal(signal)` | `Unit -[Exec]>` | Register the process signal policy for one `ProcessSignal` value. |
 | `process.signal_number(signal)` | `Int` | Convert a `ProcessSignal` value to its platform signal number where one exists. |
 | `process.list2cmdline(argv)` | `String` | Format an argument vector for display using Windows command-line quoting rules. |
-| `ProcessSignal` | type | Closed variants: `Interrupt`, `Terminate`, `Hangup`, `Child`, `User1`, and `User2`. |
+| `ProcessSignal` | type | Closed variants: `Term`, `Hup`, and `Int`, matching the shared signal dispatcher. |
 | `ProcessReceipt` | type | The immutable result of a run, including status, output, policy digests, backend, authority, descendants, limits, and redaction facts. |
 | `ProcessSpec` | type | The executable, arguments, stream policy, authority, terminal policy, limits, and detachment policy for a child. |
 
@@ -1722,7 +2107,7 @@ child to the parent's corresponding stream.
 | `child.exited()` | `Bool !IOError` | Poll without waiting. |
 | `child.kill()` / `.terminate()` / `.interrupt()` | `Unit !IOError` | Send the corresponding termination request. |
 | `child.stdin.write(text)` / `.close()` | `Unit !IOError` | Write to or close a streamed child input. |
-| `child.stdout.lines()` / `child.stderr.lines()` | line stream | Read lines from a streamed output pipe; the parent remains responsible for draining it. |
+| `child.stdout.lines()` / `child.stderr.lines()` | line stream | Read from the shared buffered pipe position, removing one LF and its preceding CR only. A final bare CR remains; invalid UTF-8 is `IOError.Other` on `process output`. The parent remains responsible for draining it. |
 
 A terminal session is an opt-in process mode. It supplies terminal-sized input
 and output through the terminal policy and fails with a typed error when the
@@ -1773,7 +2158,8 @@ fn run() {
 | `math.inv(x)` / `math.signum(x)` | `Float` | Reciprocal or floating-point signum. |
 | `math.float32(x)` / `math.float64(x)` | `Float` | Convert through the corresponding floating-point representation. |
 | `math.fabs(x)` / `math.real(x)` / `math.imag(x)` / `math.conj(x)` | `Float` | Absolute floating-point value and scalar component helpers. |
-| `math.is_nan(x)`, `is_inf(x)`, `is_finite(x)` | `Bool` | Test NaN, infinity, or finite status. `isnan`, `isinf`, and `isfinite` are aliases. |
+| `math.is_nan(x)`, `is_inf(x)`, `is_finite(x)` | `Bool` | Test NaN, infinity, or finite status. `is_finite` accepts both `Float` and `F32`. `isnan`, `isinf`, and `isfinite` are aliases. |
+| `math.cmp(a, b)` | `Int` | Accept matching `Float` or `F32` operands and return `-1`, `0`, or `1`; NaN sorts after non-NaN values, two NaNs compare equal, and signed zeros compare equal. |
 | `math.is_normal(x)`, `is_subnormal(x)`, `is_canonical(x)`, `is_signed(x)`, `is_zero(x)`, `is_integer(x)`, `sign_bit(x)` | `Bool` | Inspect floating-point representation properties. |
 | `math.next_up(x)` / `next_down(x)` / `next_after(x, toward)` / `nextafter(x, toward)` | `Float` | Move to an adjacent representable value. |
 | `math.significand(x)` / `math.ulp(x)` | `Float` | Return the significand or unit in the last place. |
@@ -1790,6 +2176,27 @@ fn run() {
 | `math.saturating_add(a,b)`, `saturating_sub(a,b)`, `saturating_mul(a,b)` | `Int` | Perform integer arithmetic while clamping overflow to the representable endpoint. |
 | `math.factorial(n)` / `math.binomial(n, k)` / `math.perm(n, k)` | `?Int` | Return optional combinatorial results when the input or result is outside the supported integer domain; `comb` aliases `binomial`. |
 
+#### Exact numbers
+
+`Fraction` stores an arbitrary-precision numerator and a positive denominator,
+reduced by their greatest common divisor. Zero denominators are rejected;
+division by a zero fraction stops. A finite `Float` converts using its exact
+binary significand and exponent, without a decimal-text round trip.
+`Decimal` stores a sign, arbitrary-precision magnitude, and decimal scale.
+Parsing retains written scale, addition and subtraction use the finer operand
+scale, and multiplication removes trailing zeros only down to that finer scale.
+Division returns a `Fraction`; conversion to a `Decimal` rejects repeating
+denominators. Decimal rounding uses ties away from zero.
+
+The policies and rendering live in `Core/math/math.jet`. Checked precise TIR
+operations resolve their reserved helpers by the loaded math module identity;
+they do not resolve a user function with the same helper spelling.
+The bare and `core.math`-qualified `Fraction`, `Decimal`, and `Complex`
+spellings name the same declarations; local user types retain their own
+declaration identity.
+Their `Display` implementations use the canonical `fn display(self) -> String`
+contract: rendering borrows the value and keeps the exact text policy above.
+
 #### Measurement propagation
 
 A measured value stores a numeric value and a nonnegative standard uncertainty.
@@ -1798,6 +2205,17 @@ uncorrelated inputs**: addition and subtraction use root-sum-square
 uncertainty, and multiplication, division, and square root use the
 corresponding first-order derivatives. Exact inputs have zero uncertainty.
 **Correlated errors are out of scope** (D-TYPE2-UNCERT1).
+
+`Measurement<T>` is a source-owned generic record with private observations.
+Construct Float measurements with `measurement(value, uncertainty: sigma)`;
+read them through `value()` and `uncertainty()`, not record fields or literals.
+Arithmetic uses `+`, `-`, `*`, `/`, and `math.sqrt`; named arithmetic and
+`sqrt()` methods are not alternate spellings. Exact scalar operands enter
+these operations with zero uncertainty. Measured unit conversion first keeps
+the scalar exact/rounded conversion's failure, then constructs uncertainty
+from the converted value and the relative scale uncertainty. Ordinary
+measurement Display uses Float Debug text (`1e-8`), while `units.show` retains
+Float Display text.
 
 #### Linear algebra
 
@@ -1852,7 +2270,7 @@ fn run() {
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `units.from(magnitude, unit)` | `Measurement<Float>` | Jet-owned construction of SI value `magnitude * unit` with zero uncertainty; the host only represents the measurement. |
+| `units.from(magnitude, unit)` | `Measurement<Float>` | Jet-owned construction of SI value `magnitude * unit` with zero uncertainty. |
 | `units.si(value)` | `Measurement<Float>` | Construct a value in the SI base scale. |
 | `units.scale(value, factor)` | `Measurement<Float>` | Scale a measured value. |
 | `units.add(a, b)` / `units.sub(a, b)` | `Measurement<Float>` | Add or subtract measured values with propagated uncertainty. |
@@ -1875,6 +2293,13 @@ fn run() {
 cryptographic random source. Ambient draws use the `Rand` effect; explicit
 `RNG` values make a stream visible and reproducible. Use `core.crypto.random`
 for security-sensitive bytes or secrets (D-DET1).
+
+The ambient stream uses a Jet xorshift transition over a 64-bit state word;
+an atomic compare/exchange preserves a single draw order inside a deterministic
+world. Seeding and replay retain the same words and history as the native
+stream. `core.math.random()` also consumes that stream and carries `Rand`;
+it retains its 64-bit floating-point projection, while
+`core.math.random.float()` uses an exactly representable 53-bit draw.
 
 ```jet
 use core.math.random as random
@@ -1926,6 +2351,12 @@ non-square, nonfinite, singular, unsupported-device, and limit failures are
 | `solve.dense(a: Tensor, b: Tensor)` | `Tensor !ComputeError` | Factor and solve a dense system in one operation. |
 | `solve.lu(a: Tensor)` | `LinearSolver !ComputeError` | Build a partial-pivoting LU factorization carrier for a square CPU tensor. |
 | `LinearSolver` | type | Stores solver kind, dimension, factors, pivots, and device. |
+
+The independent finite `Solver` counter is not an LU factorization:
+`Solver.new(seed)` starts with zero checks and failures, `&solver.require(ok)`
+counts every requirement and records failed ones, and `failure_count()` reads
+the failure count. `status()` returns `"ok"` until a failure, then `"failed"`.
+Copying this value copies its counters independently.
 
 The supported strict reproducible profiles are `F64Strict+Reproducible` and
 `F32Strict+Reproducible`. The solver is CPU-only and rejects tensors above the
@@ -2040,7 +2471,7 @@ comparison as `==`; it does not normalize or clone either string.
 | `text.lower(value)` / `upper(value)` / `casefold(value)` | `String` | Apply Unicode-aware scalar case mappings supported by the runtime. |
 | `text.caseless_eq(a, b)` | `Bool` | Compare after case folding. |
 | `text.nfc(value)` / `nfd(value)` / `nfkc(value)` / `nfkd(value)` | `String` | Apply the named normalization form. |
-| `text.graphemes(value)` / `words(value)` / `sentences(value)` | `[String]` | Return grapheme, word, or sentence segments. |
+| `text.graphemes(value)` / `words(value)` / `sentences(value)` | `[String]` | Return grapheme segments or Unicode 17.0.0 UAX #29 words/sentences. Words keep only segments containing an Alphabetic or Numeric scalar; sentences trim Unicode White_Space and drop empty segments. |
 | `text.char_indices(value)` | `[String]` | Return scalar strings with their UTF-8 byte indexes. |
 | `text.display_width(value)` | `Int` | Compute terminal display width under the portable text-width policy (D-TEXTWIDTH1=B); ambiguous scalars are narrow. |
 | `text.grapheme_views(value)` / `word_views(value)` / `line_views(value)` / `byte_views(value)` | `[String]` | Produce views or segments for the requested boundaries. |
@@ -2064,9 +2495,42 @@ separate core module contract (D-STR-DECLINE1=C).
 ### `core.time` — dates, durations, and clocks
 
 `core.time` uses the proleptic Gregorian calendar, including year `0` (1 BCE),
-and integer Unix conversion formulas. Date arithmetic and parsing helpers are
-pure unless their signature carries `Time`; `now`, `now_utc`, `today`,
-`instant`, `start`, `sleep`, and `sleep_until` read or wait on the host clock.
+and integer Unix conversion formulas. Date arithmetic and numeric-offset
+parsing are pure. `zone` and `parse_zoned` carry `Env` and `FS.Read` because
+named-zone lookup consults environment variables and TZif files, even when a
+particular call uses UTC or bundled web data. `now`, `now_utc`, `today`,
+`instant`, `start`, `sleep`, and `sleep_until` carry `Time`.
+
+The civil carriers (`Date`/`LocalDate`, `LocalTime`, `DateTime`, `Period`,
+`Zone`, `ZonedDateTime`, and `Instant`) and their arithmetic, parsing,
+formatting, and text codecs are implemented in `Core/time/time.jet` on all
+tiers. `Date` aliases `LocalDate`; immutable zone tables are plain values,
+copied with their zone, and borrowed reads need no shared-memory guard or
+`Time.Wait` effect. Native seams supply raw clock samples, environment values
+and TZif bytes. `sleep` resolves to its loaded source declaration before
+compiler import rows and delegates to the shared scheduler,
+including its deadline, shielding, cancellation, and timer policy; it is not a
+separate host wait. Zero and negative durations still check the wait boundary
+(their parked duration is zero), as do already-elapsed `sleep_until` deadlines.
+Wall-clock selection prefers a deterministic-world sample, then a replay
+override, then the raw host clock; calendar policy does not live in those
+adapters. Browser hosts supply bundled TZif bytes and report environment and
+filesystem samples as absent.
+
+Core's reserved `__` seams are loaded only through the trusted embedded-Core
+loader. To check this implementation, check a program importing `core.time`,
+not `Core/time/time.jet` as a user entry: user-written reserved names still
+produce E0067.
+
+Codec compatibility is intentionally separate from strict public parsing:
+the `LocalTime` wire format drops fractional seconds, and the `DateTime`
+wire decoder retains its permissive fraction policy. Civil `.with` and zoned
+`.with_time` return `TimeError`, as do public parsing and local-zone
+constructors. Inspect `error.reason` for validation or disambiguation details;
+`.with_time` preserves the error returned by `zoned_local`.
+Date `.until` and `.since` round their exact day-to-nanosecond intermediate
+before saturating the final `Duration` to its signed nanosecond range.
+
 `zone` accepts UTC/GMT/Z and numeric offsets; the runtime host also resolves
 named IANA zones from TZif data. On native hosts, lookup checks
 `JET_TZDB_DIR`, `TZDIR`, `$JET_ROOT/Core/time/tzdb`, the repository's
@@ -2092,9 +2556,9 @@ fn run() {
 | Function or type | Returns | Description |
 | --- | --- | --- |
 | `time.is_leap_year(year)` | `Bool` | Test leap-year status under the proleptic Gregorian calendar. |
-| `time.days_in_month(year, month)` | `Int` | Return the number of days; an invalid month returns `0`. |
+| `time.days_in_month(year, month)` | `Int` | Return the number of days; an invalid month retains the civil calendar's `30`-day default. |
 | `time.period(start, end)` / `period_days(n)` / `period_months(n)` / `period_years(n)` | `Period` | Construct calendar periods. |
-| `time.utc()` / `time.zone(name)` | `Zone` / `Zone !TimeError` | Construct UTC, a numeric-offset zone, or a named IANA TZif zone. |
+| `time.utc()` / `time.zone(name)` | `Zone` / `Zone !TimeError -[Env, FS.Read]>` | Construct UTC, a numeric-offset zone, or a named IANA TZif zone. |
 | `time.utcoffset(zone)` | `Int` | Return the zone offset represented by the zone. |
 | `time.gmtime(seconds)` / `time.ctime(seconds)` / `time.asctime(date_time)` | date or `String` | Convert Unix time or format a date. |
 | `time.time(hour, minute, second)` / `time.local_time(hour, minute, second)` | `LocalTime` | Construct a local time; seconds through `60` can represent an input leap-second shape. |
@@ -2103,8 +2567,8 @@ fn run() {
 | `time.from_timestamp(seconds)` / `from_unix_seconds(seconds)` / `from_unix_ms(ms)` / `from_unix_microseconds(us)` / `from_unix_nanoseconds(ns)` | `DateTime` | Convert Unix-based values at the named precision. |
 | `time.from_iso_week(year, week, weekday)` / `parse_iso_week_date(text)` | `LocalDate !TimeError` | Convert or parse an ISO week date. |
 | `time.parse(text)` / `parse_time(text)` | `LocalDate !TimeError` / `LocalTime !TimeError` | Parse supported date or time text, including the documented leap-second shape. |
-| `time.parse_rfc3339(text)` | `DateTime !TimeError` | Parse an RFC3339 timestamp through the zoned parser. |
-| `time.parse_zoned(text)` | `ZonedDateTime !TimeError` | Parse an RFC9557 date-time with a bracketed IANA zone and a matching UTC offset. |
+| `time.parse_rfc3339(text)` | `DateTime !TimeError` | Parse an RFC3339 timestamp with a numeric UTC offset without named-zone lookup. |
+| `time.parse_zoned(text)` | `ZonedDateTime !TimeError -[Env, FS.Read]>` | Parse an RFC9557 date-time with a bracketed IANA zone and a matching UTC offset. |
 | `time.zoned_local(date, local_time, zone, disambiguation)` | `ZonedDateTime !TimeError` | Resolve local time in a zone with `compatible`, `earlier`, `later`, or `reject` policy. |
 | `time.now()` / `now_utc()` / `today()` / `start()` | time value `-[Time]>` | Read the host wall clock. |
 | `time.instant()` | `Instant -[Time]>` | Read the monotonic clock as a Time point: `t + 5min` is an `Instant`, `b - a` and `t.elapsed()` are `Duration`s. An `Instant` has no epoch and no fields (D-TIME-INSTANT1=A). |
@@ -2142,6 +2606,11 @@ instant, while `later` chooses the later instant. For a spring-forward gap,
 the post-transition offset. `reject` reports ambiguous, nonexistent, or
 otherwise unresolved local times instead of choosing one.
 
+`ZonedDateTime` equality compares the complete instant and the zone name, not
+the zone's transition-table identity or contents. The name is immutable
+metadata outside the shared transition table, so this comparison does not
+acquire a shared guard or widen the `Equatable` effect contract.
+
 Duration literals use the supported `ns`, `us`, `ms`, `s`, `min`, `h`, and `d`
 suffixes. A runtime `Duration` carries checked nanoseconds; a deterministic
 function should receive a `Clock` explicitly rather than reading `time.now()`
@@ -2154,19 +2623,23 @@ replayed (D-TIMERES1=A; D-DET-CAPAPI).
 week calculations without locale tables. Its module-global weekday constants
 are `MONDAY :: 0` through `SUNDAY :: 6`.
 
+All calendar behavior is implemented in the embedded `Core/time/calendar.jet`
+source shared by the execution tiers, including epoch conversion without a
+native date-time carrier.
+
 | Function or value | Returns | Description |
 | --- | --- | --- |
 | `calendar.isleap(year)` | `Bool` | Test leap-year status. |
-| `calendar.leapdays(y1, y2)` | `Int` | Count leap days in a half-open year range. |
+| `calendar.leapdays(y1, y2)` | `Int` | Count leap days between the smaller and larger endpoint, excluding the larger year. |
 | `calendar.weekday(year, month, day)` | `Int` | Return Monday `0` through Sunday `6`. |
-| `calendar.monthrange(year, month)` | `(Int, Int)` | Return the first weekday and day count. |
+| `calendar.monthrange(year, month)` | `(days: Int, weekday: Int)` | Return the day count and Monday-based first weekday. Invalid months retain the `30`-day default. |
 | `calendar.monthcalendar(year, month)` / `monthcalendar_start(year, month, firstweekday)` | `[[Int]]` | Build a month grid. |
 | `calendar.yearcalendar(year)` | `[[[Int]]]` | Build a year calendar. |
 | `calendar.day_name(index)` / `day_abbr(index)` | `String` | Return fixed English day names. |
 | `calendar.month_name(index)` / `month_abbr(index)` | `String` | Return fixed English month names. |
-| `calendar.weekheader(width, firstweekday)` | `[String]` | Format abbreviated weekday headers. |
+| `calendar.weekheader(width, firstweekday)` | `[String]` | Clip abbreviated weekday names or pad them on the right; widths below `1` use `1`. |
 | `calendar.formatmonth(year, month, width)` / `formatyear(year)` | `String` | Render a month or year calendar. |
-| `calendar.timegm(year, month, day, hour, minute, second)` | `Int` | Convert a UTC calendar tuple to Unix seconds. |
+| `calendar.timegm(year, month, day, hour, minute, second)` | `Int` | Convert a UTC calendar tuple to Unix seconds, constraining civil fields and preserving a `23:59:60` leap label as the next epoch second. |
 
 ### `core.encoding` — bounded value codecs
 
@@ -2175,6 +2648,14 @@ insertion order, integers and floating-point numbers remain distinct, and
 malformed input returns a typed `EncodingError`. The whole-value codecs are
 pure; readers and writers expose the same boundaries incrementally. The
 shared codec shape and value tree follow D-ENC1, D-JSONVERB1, and D-SERDE13.
+
+The reason-only `HexError`, `base32.Base32Error`, `base64.Base64Error`, and
+`core.crypto.uuid.UUIDError` render only their `reason` in Display and Debug
+formatting. `encoding.HexError` and `encoding.hex.HexError` name the same type.
+`EncodingError.Display` is registered from its Core source declaration, not a
+second synthetic implementation. Its byte, line, column, path, and reason
+projection is the same on every execution tier.
+
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
@@ -2187,6 +2668,13 @@ shared codec shape and value tree follow D-ENC1, D-JSONVERB1, and D-SERDE13.
 | `encoding.bytes_to_hex(bytes)` / `hex_to_bytes(text)` | `String` / `[U8] !HexError` | Convert bytes to or from lowercase hexadecimal. |
 | `encoding.hex_nibble(value)` / `hex_value(value)` | `U8` / `?Int` | Encode a nibble or look up a hexadecimal value. |
 | `encoding.wrap32(value)` | `Int` | Wrap an integer to 32 bits. |
+
+`DataEvent.Number(text)` carries the exact JSON numeric lexeme, including
+large exact integers and numbers not representable by the scalar event
+carriers. User code can construct it and match `.Number(text)` with a `String`
+payload on every tier. JSON and CBOR event writers retain their `Unsupported`
+rejection of `Number` events (valid or malformed lexemes), before emitting
+payload bytes; applications decode the lexeme to a supported scalar first.
 
 The standard formats are exposed as `core.encoding.base32`, `base64`, `binary`,
 `cbor`, `csv`, `hex`, `ini`, `json`, `jsonl`, `toml`, `xml`, and `yaml`.
@@ -2233,9 +2721,18 @@ The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 | `json.pointer(tree, path)` | `DataTree !EncodingError` | Select by RFC 6901 JSON Pointer; a missing member or bad step is a located error, JSON `null` is a value. |
 | `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `DataTree !EncodingError` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
 | `json.events(value)` | `[DataEvent]` | Produce the canonical event sequence for a tree. |
-| `json.reader(text)` / `json.reader_allow_duplicates(text)` / `json.writer()` | `JSONReader` / `JSONWriter` | Construct a pull reader (rejecting, or reporting every repeated name) or a value writer. |
-| `JSONReader.next()` | `DataEvent !EncodingError` | Return the next event. |
-| `JSONWriter.write(value)` / `to_string()` | `Unit` / `String` | Feed values and finish an encoded value. |
+| `json.reader(text)` / `reader_allow_duplicates(text)` | `JSONReader` | Pull events over text already held in memory; the duplicate-permitting reader reports each key occurrence. Its `next()` returns `DataEvent !EncodingError`, including an error after exhaustion. |
+| `json.reader(^input, limits)` / `json.writer(^output, limits, canonical)` | `JSONReader !EncodingError` / `JSONWriter !EncodingError` | Construct bounded file-backed event streams. |
+| `JSONReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
+| `JSONWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
+
+The text and file overloads retain separate checked layouts. A consumed
+`^FileReader` selects the bounded file contract; a `String` selects the source
+text parser. Neither overload constructs the other overload's handle.
+
+Typed `core.data.json<T>` reuses the source JSON parser while retaining exact
+number lexemes until `Decode<T>` selects the destination representation. Its
+parser entry is compiler-private, not an application-visible JSON function.
 
 ### `core.encoding.jsonl` — line-delimited JSON
 
@@ -2243,6 +2740,8 @@ The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 skipped, each nonblank line is parsed independently, and one malformed line
 returns an `EncodingError`. Compact output writes one value and a trailing
 newline per row.
+Records end at LF; a CR immediately before LF is stripped. A final bare CR
+is retained and counts as nonblank (only spaces and tabs make a blank record).
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
@@ -2251,9 +2750,10 @@ newline per row.
 | `jsonl.count_rows(text)` | `Int` | Count nonblank rows. |
 | `jsonl.append_line(text, value)` | `String` | Append one encoded row. |
 | `jsonl.first(text)` | `?DataTree !EncodingError` | Return the first nonblank row. |
-| `jsonl.reader(text)` / `jsonl.writer()` | `JSONLReader` / `JSONLWriter` | Construct incremental line reader or writer. |
+| `jsonl.reader(text)` | `JSONLReader` | Pull one nonblank record at a time from text already in memory; parse no record beyond the last requested one. |
+| `jsonl.reader(^input, limits)` / `jsonl.writer(^output, limits)` | `JSONLReader !EncodingError` / `JSONLWriter !EncodingError` | Construct bounded file-backed line streams. |
 | `JSONLReader.next()` | `?DataTree !EncodingError` | Return the next row or stable end-of-input. |
-| `JSONLWriter.write(value)` / `to_string()` | `Unit` / `String` | Write rows and finish the line stream. |
+| `JSONLWriter.write(value)` / `flush()` / `finish()` | `Unit !EncodingError` | Write records, flush output, or finish the stream. |
 
 ### `core.encoding.csv` — comma-separated rows
 
@@ -2263,18 +2763,21 @@ newline per row.
 ending, otherwise an `Unsupported` error), drops the first record when
 `header` is true, and keeps it when `header` is false; `skip_blank` only skips
 blank physical rows (D-ROWS1).
-The query helper is filesystem-only and supports `SELECT *` and
-`SELECT COUNT(*)`.
+The filesystem query helper decodes header-named records into a typed query;
+it is distinct from the physical row parser.
+The public file-backed `CSVReader` and `CSVWriter` are ordinary source-owned
+holders, not native resource-table handles. The typed `core.data.csv_reader<T>`
+stream retains its separate native callback carrier.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
 | `csv.rows(text, delimiter, header, skip_blank)` | `[CSVRow] !EncodingError` | Parse physical rows with explicit delimiter, header and blank-line policy. |
 | `csv.parse(text)` / `decode(text)` | `DataTree !EncodingError` | Parse rows as an array of arrays. |
-| `csv.to_string(rows)` | `String` | Encode `CSVRow` values. |
-| `csv.reader(text)` / `csv.writer()` | `CSVReader` / `CSVWriter` | Construct incremental CSV objects. |
-| `CSVReader.next()` | `?CSVRow` | Return the next physical row. |
-| `CSVWriter.write_row(fields)` / `to_string()` | `Unit` / `String` | Write a string-field row and finish the CSV value. |
-| `csv.query(path, sql)` | `DataTree !EncodingError -[FS]>` | Run the bounded `SELECT *` or `SELECT COUNT(*)` filesystem query. |
+| `csv.to_string<T: Encode>(rows)` | `String` | Encode explicit row arrays or typed records; records use the first record's field order as the header. Rows are separated by LF, with no trailing LF. |
+| `csv.reader(^source, limits, delimiter, header, skip_blank)` / `csv.writer(^target, limits)` | `CSVReader !EncodingError -[FS]>` / `CSVWriter !EncodingError -[FS]>` | Construct incremental file-backed CSV objects. Reader defaults retain the header and blank records. |
+| `CSVReader.next()` | `?CSVRow !EncodingError -[IO]>` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. |
+| `CSVWriter.write(^fields)` / `flush()` / `finish()` | `Unit !EncodingError -[IO]>` | Write comma-delimited string fields; CRLF is deferred until the next record or finish. Flush does not finish a record. |
+| `csv.query<T>(path, sql)` | `Query<T> ![FieldError] -[FS]>` | Decode typed header-named records and apply the bounded query plan. |
 | `CSVRow` | type | Physical line number and parsed string fields. |
 
 ### `core.encoding.toml` — TOML values
@@ -2302,34 +2805,47 @@ serializer.
 
 ### `core.encoding.xml` — bounded XML trees
 
-`core.encoding.xml` parses well-formed XML 1.0 without DTDs into ordered trees
-with `name`, `attrs`, and `children`. Only predefined and numeric entities are
-accepted. Resource limits apply to depth and input size. `canonical` means
-parse followed by this module's deterministic serializer; it is not W3C XML
-Canonicalization.
+`core.encoding.xml` uses the lossless namespace-aware `DataTree` schema and
+security rules in [encoding-decisions.md](../encoding-decisions.md#xml-representation-and-security).
+Native authority preserves the complete parse/render options, entity policies,
+lexical evidence, encodings, canonical modes, and located `XMLError` payloads.
+The native CBOR and XML options/error records retain checked MIR owner rows
+even when no source module declares them. Their field shapes come from the
+same checked Core field registry used by type checking; removing a source
+codec must not remove its native options or located error payloads.
+
 | Signature | Result | Description |
 | --- | --- | --- |
-| `xml.parse(text)` / `decode(text)` / `parse_bytes(bytes)` | `DataTree !EncodingError` | Parse XML text or bytes without DTD processing. |
-| `xml.parse_with(text, limits)` | `DataTree !EncodingError` | Parse with explicit bounded limits. |
-| `xml.to_string(tree)` / `to_bytes(tree)` | `String` / `[U8]` | Serialize an XML tree. |
-| `xml.canonical(text)` | `String !EncodingError` | Parse and produce deterministic module serialization, not W3C C14N. |
-| `xml.reader(text)` | `XMLReader !EncodingError` | Construct an incremental XML reader. |
-| `xml.attribute(name, value)` / `content(text)` / `expanded_name(name)` / `root(tree)` | `DataTree` or `String` | Construct or inspect XML attributes, text content, expanded names, or root. |
-| `xml.XMLWriter.write(value)` / `to_string()` / `flush()` / `finish()` | varies | Build and finish an XML stream. |
+| `xml.parse(text)` / `parse_with(text, options)` / `parse_bytes(bytes, options)` | `DataTree !XMLError` | Parse Unicode text or supported byte encodings with bounded, non-I/O entity policy. |
+| `xml.to_string(tree)` / `to_bytes(tree, options)` | `String !XMLError` / `[U8] !XMLError` | Render a validated XML document with lexical and encoding options. |
+| `xml.canonical(tree, options)` | `String !XMLError` | Apply Inclusive 1.1 or Exclusive 1.0 canonicalization. |
+| `xml.reader(^input, limits, options)` | `XMLReader !EncodingError` | Construct a bounded file-backed XML event reader. |
+| `xml.attribute(element, name)` / `content(element)` / `expanded_name(node)` / `root(document)` | varies `!XMLError` | Inspect attributes, content, expanded names, and the document root. |
+| `XMLWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write XML events, flush output, or validate and finish the stream. |
 
-### `core.encoding.cbor` — definite-length CBOR
+XML rendering is fallible at both runtime and compile time. Invalid document
+trees return the located `XMLError`; callers must handle it explicitly rather
+than relying on an empty-string fallback. Compile-time code that stops on the
+error is reported by the ordinary compile-time-stop diagnostic.
 
-`core.encoding.cbor` handles RFC 8949 definite-length major types `0` through
-`5` and common simple and float64 values. It rejects indefinite-length items,
-tags, half and single floats, and byte strings that cannot be represented in
-`DataTree`. Canonical output sorts map keys by encoded byte order.
+### `core.encoding.cbor` — bounded CBOR
+
+`core.encoding.cbor` handles RFC 8949 integer, text, array, map, simple,
+and float16/32/64 values, including indefinite strings and containers.
+Dynamic `parse` rejects byte strings; typed `decode<[U8]>` preserves them.
+Tags and duplicate text map keys are unsupported. Canonical mode requires
+shortest arguments and float widths, a canonical NaN, definite containers,
+and bytewise map-key order. Encoding uses the shortest exact float width.
+Whole-value parsing and preferred float-width checks share a sealed source
+part; its helper functions are not exports of the public CBOR module.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
-| `cbor.parse(bytes)` / `decode(bytes)` | `DataTree !EncodingError` | Parse supported definite-length CBOR. |
-| `cbor.to_bytes(value)` / `to_bytes_canonical(value)` | `[U8]` | Encode ordinary or canonical CBOR. |
-| `cbor.reader(bytes)` / `writer()` | `CBORReader` / `CBORWriter` | Construct byte reader or writer carriers. |
-| `CBORWriter.write(value)` / `write_canonical(value)` / `to_bytes()` | `Unit` / `[U8]` | Append ordinary or canonical values and finish the byte stream. |
+| `cbor.parse(bytes, options)` | `DataTree !CBORError` | Parse a whole value under depth, item, allocation, and canonical limits. |
+| `cbor.to_bytes<T: Encode>(value)` / `to_bytes_canonical(value)` | `[U8] !CBORError` | Encode ordinary or canonical CBOR. |
+| `cbor.reader(^input, limits)` / `writer(^output, limits)` | `CBORReader !EncodingError` / `CBORWriter !EncodingError` | Construct bounded file-backed event streams. |
+| `CBORReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
+| `CBORWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
 
 ### `core.encoding.hex` — hexadecimal bytes
 
@@ -2361,8 +2877,10 @@ alphabet is exposed separately.
 ### `core.encoding.base64` — standard and URL-safe base64
 
 `core.encoding.base64` supports standard padded and URL-safe unpadded forms.
-Whitespace, mixed alphabets, invalid padding, and nonzero unused bits are
-rejected.
+Edition 2027 rejects whitespace, mixed alphabets, invalid padding, and
+nonzero unused bits, except that the explicitly line-wrapped decoder accepts
+ASCII whitespace. Edition 2026 retains the historical decoder acceptance
+rules; the caller's resolved package edition selects the policy.
 
 | Function | Returns | Description |
 | --- | --- | --- |
@@ -2486,8 +3004,8 @@ fn run() {
 | `show(plot)` / `render(plot, backend)` | `JetDataPlotRender !DataError` | Render through the selected backend. |
 | `bar_text(groups)` / `bar_svg(groups)` | `String !DataError` | Render `Group<String, Int>` bars as text or SVG. |
 | `line_text(groups, options)` / `line_svg(groups, options)` | `String !DataError` | Render `Group<String, Float>` lines with `DataLineOptions`. |
-| `status()` | `[DataStatus]` | Report native and bridge path, ownership, trust, fallback, and replacement facts. |
-| `require_bridge(provider)` | `Unit !DataError` | Fail closed when a requested `py`, `r`, or `gpu` bridge is unavailable. |
+| `status()` | `[DataStatus] -[FS, Env]` | Report native and bridge path, ownership, trust, fallback, and replacement facts. Live R availability reads `PATH` and `JET_DATA_R_BRIDGE`, then checks files. |
+| `require_bridge(provider)` | `Unit !DataError -[FS, Env]` | Fail closed when a requested `py`, `r`, or `gpu` bridge is unavailable; use the same live availability facts as `status`. |
 
 Query methods filter, sort, map, extrema, joins, grouping, collection, and
 watching while retaining typed positions for errors. `Query<T>.plan()` returns
@@ -2555,6 +3073,11 @@ portable inspection renderer: it does not require a GPU, and it makes missing
 values explicit as zero. The module contract is defined in
 [`Core/data/plot.jet`](../../../Core/data/plot.jet) and exercised by the plot
 corpus under [`tests/conformance/corpus/core/data/plot/`](../../../tests/conformance/corpus/core/data/plot/).
+
+The aggregate selector retains the native absence value, distinct from
+`Count`, `Sum`, `Mean`, `Min`, and `Max`. Core internals obtain that value
+through the registered `__plot_aggregate_none()` raw enum constructor;
+there is no renamed source variant or alternate aggregate representation.
 
 
 A plot aligns values by position with `labels`. If there are fewer values than
@@ -2691,6 +3214,27 @@ when it is closed or at capacity, so callers that require backpressure must use
 the scheduler receiver surface. Cancellation closes the receiver and leaves
 its handle available for identity and ownership.
 Generic channels return `(Sender<T>, Receiver<T>)`; tasks send owned values and do not use `async`/`await` (`D-CONC-CHAN1`; `D-SHAPE-COPY1`). Cancellation and pause/resume are control-plane requests on owned task handles (`D-COROUTINE1`), while shared memory uses `Shared<T>` guards and `Condition` rather than a raw lock (`D-SHAREDGUARD1`).
+`Condition` and `RealtimeStream` remain native carriers. Their registered Core
+source owners supply their declared methods without manufacturing a struct or
+enum declaration. This ownership does not export `tasks.Condition`: use the
+existing bare `Condition` spelling, and keep ordinary application impls on
+these builtin carriers rejected.
+Qualified annotation checks derive these owner-only names and compiler-owned
+Core enum names from generated metadata, and still require a public type export
+from the imported module.
+
+The source scheduler-channel constructors preserve the declared
+`(sender: Sender<T>, receiver: Receiver<T>)` pair by projecting the raw
+channel's fields by name, rather than returning `TaskState` or depending on
+the raw tuple's positional order. Bounded scheduler channels clamp capacities
+below one to one. Interval periods truncate to whole milliseconds and clamp to at least
+one millisecond; their first delivered tick is one.
+
+The source `Condition` extension delegates notification to the existing shared
+condition protocol, preserving parked waiters rather than fabricating state.
+The realtime stream extension likewise observes and cancels the same provider
+worker; its source callback constructor rejects nonpositive rates before
+crossing the provider boundary.
 
 ### `core.prelude` — small compiler-owned helpers
 
@@ -2723,7 +3267,7 @@ or golden file. The public source is
 |---|---|---|
 | `assert_equal(comparison: TestComparison) -> Bool` | Boolean | Check the comparison's recorded proof fields. |
 | `compare<E>(cases: [DataTree], reference: fn(DataTree) -> DataTree E!, candidate: fn(DataTree) -> DataTree E!, relation: String) -> TestComparison E!` | comparison | Compare reference and candidate outputs over explicit cases. The callbacks' shared failure type passes up (D-CALLBACK-ERR1=A); callbacks that cannot fail make the comparison `Never!`. |
-| `snap(name: String, value: String) -[FS]> Bool` | Boolean | Check a named snapshot. |
+| `snap(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare or create `__snapshots__/<sanitized-name>.snap`; `JET_UPDATE_SNAPSHOTS=1` rewrites it. Snapshot names retain ASCII letters, digits, `-`, and `_`, replacing other scalars with `_`; an empty name becomes `case`. |
 | `golden(name: String, value: String) -[FS]> Bool` | Boolean | Check a named golden value. |
 | `fixture(name: String) -[FS]> String` | text | Load a named fixture. |
 | `temp_dir(prefix: String) -[FS]> String` | path | Allocate an isolated temporary directory. |
@@ -2804,8 +3348,8 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `preview(name: String, viewport: ?UIPreviewViewport, body: fn() -> UINode) -> UIPreview` | preview | Describe a named preview. |
 | `playground(name: String, viewport: ?UIPreviewViewport, body: fn() -> UINode) -> UIPreview` | preview | Describe a named interactive playground. |
 | `desktop() -> UIPreviewViewport`, `phone() -> UIPreviewViewport`, `tablet() -> UIPreviewViewport` | viewport | Select standard preview dimensions. |
-| `key_event(code: String) -> InputEvent` | event | Create a key event. |
-| `resize_event(width: Float, height: Float) -> InputEvent` | event | Create a resize event. |
+| `key_event(code: String) -> InputEvent` | event | Create `InputEvent.Key{code: code}`. |
+| `resize_event(width: Float, height: Float) -> InputEvent` | event | Create `InputEvent.Resize{size: Size{width: width, height: height}}`. |
 | `reactive_render(body: fn())` | — | Ask the provider to render a reactive body. |
 | `gtk_backend() -> GtkBackend`, `tui_backend() -> TUIBackend`, `null_backend() -> NullBackend` | backend | Select a backend handle. |
 | `aria_role_button() -> UIAriaRole`, `aria_role_container() -> UIAriaRole` | role | Construct standard accessibility roles. |
@@ -2823,6 +3367,21 @@ supplies a platform-native callback API.
 The native GTK `present` call runs its application loop until a window
 close request quits that loop. GTK's default close handler still owns window
 teardown; a signal-owned loop reference keeps its callback data live.
+UI backend allocation and host capability/dialog/clipboard/IME/drag polling
+enter Jet source before reserved Core-only provider leaves. Public UI
+capability admission and the existing per-function Core effect rows remain
+unchanged. Lexical filesystem grants and accessibility metadata construction
+are Jet policy, not host facade calls.
+Terminal/GTK backend allocation, shortcut registration/dispatch, and host
+accessibility attach/project also enter their Jet public functions first.
+`attach` preserves its public `Unit !UIHostError` contract: Core discards the
+private provider's returned canonical node only on success and propagates
+the same typed host error on failure.
+TUI capability selection, ASCII-only case folding, encoded-OS flag semantics,
+dimension parsing, and defaults are Jet policy. The private environment-byte
+leaf samples the same startup facts; the shared terminal leaf remains the
+canonical stdout `IsTerminal` sample. No environment effect is added to the
+existing public capability row.
 
 ### `core.reactive` — explicit signals and dependency tracking
 
@@ -2885,6 +3444,11 @@ bounded asynchronous delivery. It does not use a stringly named global event
 bus. The source contract is [`Core/event/event.jet`](../../../Core/event/event.jet),
 and the event conformance corpus covers listener lifetime, policy, and
 async-result behavior.
+
+`new<T>()` composes `with_policy<T>(policy_sync())` in Jet source.
+`async_result` rejects a nonpositive capacity with `InvalidCapacity` before
+allocating dispatch state. Listener cells, scope identities, and scheduler
+resources remain provider-owned.
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3196,47 +3760,62 @@ provider report a typed `NetError` or `IOError`; the module does not silently
 turn a missing transport into a successful no-op. The implementation is
 [`Core/net/net.jet`](../../../Core/net/net.jet).
 
+`SocketAddr` and `UDPPacket` retain the native provider carrier so resolver and
+socket results keep the nominal types accepted by transport operations. Jet owns
+IP parsing/canonical rendering, socket-text parsing/rendering, and lossy UDP
+UTF-8 decoding. Compiler-private, audited leaves transfer only native address
+representation; they do not choose validation, defaults, or error policy.
+`SRVRecord` is explicitly assembled from resolver fields.
+
+`socket_addr` checks the port range `0..=65535` and parses numeric IPv4/IPv6
+addresses in Jet. Ordinary host names use the platform resolver, including its
+configured name-service sources; answers retain platform order and the first
+answer is selected without sorting or deduplication. An empty successful
+answer reports the existing “no address” network error, rather than a fabricated
+address. Explicit `DnsResolver.at` lookups remain separate from ordinary
+platform resolution.
+
 | Signature | Result | Description |
 |---|---|---|
-| `gethostname() -> String` | text | Read the local host name. |
-| `ip_addr(text: String) -[Net, Time.Wait]> IPAddr !NetError` | address | Parse an IP address. |
+| `gethostname() -[Env]> String` | text | Read the local host name. |
+| `ip_addr(text: String) -> IPAddr !NetError` | address | Parse an IP address. |
 | `ip_to_string(addr: IPAddr) -> String` / `ip_is_ipv4(addr: IPAddr) -> Bool` | text/Boolean | Render an address or test its family. |
-| `socket_addr(host: String, port: Int) -[Net, Time.Wait]> SocketAddr !NetError` | address | Build an address after checking the port. |
-| `socket_addr_parse(text: String) -[Net, Time.Wait]> SocketAddr !NetError` | address | Parse a rendered socket address. |
+| `socket_addr(host: String, port: Int) -[Net]> SocketAddr !NetError` | address | Build an address after checking the port. |
+| `socket_addr_parse(text: String) -> SocketAddr !NetError` | address | Parse a rendered socket address. |
 | `socket_host(addr: SocketAddr) -> String` / `socket_port(addr) -> Int` | scalar | Read address components. |
 | `socket_to_string(addr: SocketAddr) -> String` / `socket_type(stream: TCPStream) -> String` | text | Render an address or identify a stream. |
-| `tcp_listen(addr: String) -[Net, Time.Wait]> TCPListener !NetError` / `tcp_listen_addr(addr: SocketAddr) -[Net, Time.Wait]> TCPListener !NetError` | listener | Bind a TCP listener. |
+| `tcp_listen(addr: String) -[Net]> TCPListener !NetError` / `tcp_listen_addr(addr: SocketAddr) -[Net]> TCPListener !NetError` | listener | Bind a TCP listener. |
 | `tcp_accept(listener: TCPListener) -[Net, Time.Wait]> TCPStream !NetError` | stream | Accept one connection. |
 | `tcp_connect(addr: String) -[Net, Time.Wait]> TCPStream !NetError` / `tcp_connect_addr(addr: SocketAddr) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect to a TCP endpoint. |
 | `tcp_connect_timeout(addr: SocketAddr, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect with a nonnegative timeout. |
 | `tcp_connect_happy(host: String, port: Int, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect through the address-family race. |
-| `create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream !NetError` / `create_server(host, port) -[Net, Time.Wait]> TCPListener !NetError` | endpoint | Build host/port TCP endpoints. |
-| `send(stream: TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text. |
-| `tcp_read(stream: TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
-| `tcp_read_text(stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. |
-| `tcp_write(stream, text: String) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_bytes(stream, bytes) -[Net, Time.Wait]> Int !NetError` | unit/count | Write text or bytes. |
-| `tcp_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_text(stream, text) -[Net, Time.Wait]> Unit !NetError` | unit | Write all bytes or text. |
-| `tcp_shutdown(stream, how: NetShutdown) -[Net, Time.Wait]> Unit !NetError` / `tcp_close(stream) -[Net, Time.Wait]> Unit !NetError` | — | Shut down or close a stream. |
-| `tcp_reply(stream, status: String, body: String) -[Net, Time.Wait]> Unit !NetError` | — | Write one checked reply with a three-digit status. |
-| `tcp_ready(stream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady !NetError` | readiness | Wait for a readiness interest until a deadline. |
+| `create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream !NetError` / `create_server(host, port) -[Net]> TCPListener !NetError` | endpoint | Build host/port TCP endpoints. |
+| `send(&stream: TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text through the caller's exclusive stream window. |
+| `tcp_read(&stream: TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(&stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
+| `tcp_read_text(&stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. |
+| `tcp_write(&stream, text: String) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_bytes(&stream, bytes) -[Net, Time.Wait]> Int !NetError` | unit/count | Write text or bytes. |
+| `tcp_write_all_bytes(&stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_text(&stream, text) -[Net, Time.Wait]> Unit !NetError` | unit | Write all bytes or text. |
+| `tcp_shutdown(&stream, how: NetShutdown) -[Net]> Unit !NetError` / `tcp_close(&stream) -[Net]> Unit !NetError` | — | Shut down or close a stream. |
+| `tcp_reply(^stream, status: String, body: String) -[Net, Time.Wait]> Unit !NetError` | — | Consume a stream, write one checked reply with a three-digit status, and close it. |
+| `tcp_ready(&stream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady !NetError` | readiness | Wait for a readiness interest until a deadline. |
 | `ready_readable(ready: NetReady) -> Bool` / `ready_writable(ready) -> Bool` | Boolean | Inspect readiness. |
-| `tcp_local_addr(stream)`, `tcp_peer_addr(stream)` | `String !NetError` | Read rendered stream endpoints. |
-| `tcp_local_socket_addr(stream)`, `tcp_peer_socket_addr(stream)`, `listener_local_socket_addr(listener)` | `SocketAddr !NetError` | Read typed stream/listener endpoints. |
-| `set_timeout(stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | — | Set a nonnegative timeout. |
-| `set_read_timeout(stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` / `set_write_timeout(stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | — | Set read or write timeouts in milliseconds. |
-| `nodelay(stream) -[Net, Time.Wait]> Bool !NetError` / `set_nodelay(stream, on: Bool) -[Net, Time.Wait]> Unit !NetError` | option | Read or set TCP no-delay. |
-| `ttl(stream) -[Net, Time.Wait]> Int !NetError` / `set_ttl(stream, hops: Int) -[Net, Time.Wait]> Unit !NetError` | option | Read or set the TTL. |
-| `sendfile(stream, path: String) -[Net, FS, Time.Wait]> Int !NetError` | count | Send file bytes through a TCP stream. |
-| `udp_bind(addr: String) -[Net, Time.Wait]> UDPSocket !NetError` / `udp_bind_addr(addr: SocketAddr) -[Net, Time.Wait]> UDPSocket !NetError` | socket | Bind a UDP socket. |
-| `udp_local_addr(socket: UDPSocket) -[Net, Time.Wait]> SocketAddr !NetError` / `udp_set_timeout(socket, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | address/— | Inspect a UDP endpoint or set its timeout. |
+| `tcp_local_addr(stream) -[Net]> String !NetError`, `tcp_peer_addr(stream) -[Net]> String !NetError` | text | Read rendered stream endpoints. |
+| `tcp_local_socket_addr(stream) -[Net]> SocketAddr !NetError`, `tcp_peer_socket_addr(stream) -[Net]> SocketAddr !NetError`, `listener_local_socket_addr(listener) -[Net]> SocketAddr !NetError` | address | Read typed stream/listener endpoints. |
+| `set_timeout(&stream, timeout_ms: Int) -[Net]> Unit !NetError` | — | Set a nonnegative timeout on the caller's stream, without copying the handle. |
+| `set_read_timeout(&stream, timeout_ms: Int) -[Net]> Unit !NetError` / `set_write_timeout(&stream, timeout_ms: Int) -[Net]> Unit !NetError` | — | Set read or write timeouts in milliseconds. |
+| `nodelay(stream) -[Net]> Bool !NetError` / `set_nodelay(&stream, on: Bool) -[Net]> Unit !NetError` | option | Read or set TCP no-delay. |
+| `ttl(stream) -[Net]> Int !NetError` / `set_ttl(&stream, hops: Int) -[Net]> Unit !NetError` | option | Read or set the TTL. |
+| `sendfile(&stream, path: String) -[Net, Time.Wait]> Int !NetError` | count | Send file bytes through a TCP stream. |
+| `udp_bind(addr: String) -[Net]> UDPSocket !NetError` / `udp_bind_addr(addr: SocketAddr) -[Net]> UDPSocket !NetError` | socket | Bind a UDP socket. |
+| `udp_local_addr(socket: UDPSocket) -[Net]> SocketAddr !NetError` / `udp_set_timeout(socket, timeout_ms: Int) -[Net]> Unit !NetError` | address/— | Inspect a UDP endpoint or set its timeout. |
 | `udp_send_to(socket, text, addr) -[Net, Time.Wait]> Int !NetError` / `udp_send_bytes_to(socket, bytes, addr) -[Net, Time.Wait]> Int !NetError` | count | Send text or bytes to a datagram address. |
 | `udp_recv_from(socket, limit) -[Net, Time.Wait]> UDPPacket !NetError` / `udp_receive(socket, limit) -[Net, Time.Wait]> UDPPacket !NetError` | packet | Receive a bounded datagram. |
 | `udp_packet_data(packet)`, `udp_packet_bytes(packet)`, `udp_packet_addr(packet)` | scalar | Read packet text, bytes, or address. |
 | `udp_packet_original_len(packet) -> Int` / `udp_packet_truncated(packet) -> Bool` | scalar | Inspect datagram length and truncation. |
-| `unix_listen(path: String) -[Net, FS, Time.Wait]> UnixListener !NetError` / `unix_connect(path) -[Net, FS, Time.Wait]> UnixStream !NetError` | endpoint | Use Unix-domain sockets. |
-| `unix_accept(listener) -[Net, Time.Wait]> UnixStream !NetError` / `unix_read(stream) -[Net, Time.Wait]> String !NetError` | stream/text | Accept or read a Unix stream. |
-| `unix_write(stream, text) -[Net, Time.Wait]> Unit !NetError` / `unix_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | unit/bytes | Write text or read bytes. |
-| `unix_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(stream, how) -[Net, Time.Wait]> Unit !NetError` / `unix_close(stream) -[Net, Time.Wait]> Unit !NetError` | — | Write all bytes or close a Unix stream. |
+| `unix_listen(path: String) -[Net]> UnixListener !NetError` / `unix_connect(path) -[Net, Time.Wait]> UnixStream !NetError` | endpoint | Use Unix-domain sockets. |
+| `unix_accept(listener) -[Net, Time.Wait]> UnixStream !NetError` / `unix_read(&stream) -[Net, Time.Wait]> String !NetError` | stream/text | Accept or read a Unix stream. |
+| `unix_write(&stream, text) -[Net, Time.Wait]> Unit !NetError` / `unix_read_bytes(&stream, n) -[Net, Time.Wait]> [U8] !NetError` | unit/bytes | Write text or read bytes through the caller's exclusive stream window. |
+| `unix_write_all_bytes(&stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(&stream, how) -[Net]> Unit !NetError` / `unix_close(&stream) -[Net]> Unit !NetError` | — | Write all bytes or close the same Unix stream. |
 | `dns_a(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa(name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve IPv4 or IPv6 records. |
 | `dns_a_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa_at(server, name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve A or AAAA records through an explicit server. |
 | `dns_txt(name: String, ms: Int) -[Net, Time.Wait]> [String] !NetError` / `dns_ptr(addr, ms) -[Net, Time.Wait]> [String] !NetError` | records | Resolve TXT or PTR records. |
@@ -3253,6 +3832,46 @@ The `*_at` DNS forms take an explicit server, and `error_operation`,
 `NetError`. Ports are checked in `0..=65535`; timeout and deadline values are
 nonnegative milliseconds. A blocking socket call declares `Net` and
 `Time.Wait`, so the suspension boundary remains visible.
+
+Effects follow the existing per-function Core rows, not a module-wide waiting
+annotation. TCP listen and address getters, socket options, UDP bind/options,
+and Unix listen/shutdown/close require `Net` without `Time.Wait`. Accept,
+connect, byte transfer, DNS, and the other listed waiting operations retain
+their existing `Time.Wait` leaf. Reserved raw aliases mirror those same rows;
+moving public validation into Jet does not widen the authority contract.
+TCP reply, TCP option access, and UDP bind enter their Jet public functions
+before the corresponding reserved `__tcp_reply`, `__set_*`, `__nodelay`,
+`__ttl`, and `__udp_bind*` leaves. Raw leaves retain existing native error
+mapping, borrow/move conventions, and interpreter-route availability.
+UDP address, timeout, send, and receive operations and Unix listen, accept,
+read, byte-write, shutdown, and close also enter Jet source first. Their
+reserved raw leaves preserve exactly the public operation's existing effect
+row and supported interpreter/native tiers.
+HTTP client `get`, `post`, and `request`, and server `mux`, `serve_once`,
+`serve_once_listener`, `static_file`, `static_file_range`, `cors`, and
+`request_id` likewise enter their Jet source functions before the reserved
+raw leaves. Existing specialized public admission remains unchanged;
+callback-bearing host leaves retain their original unsupported AOT tiers.
+HTTP router creation, parsing, and dispatch, TLS byte I/O, and WebSocket
+connect/upgrade are also source-owned; the reserved transport/carrier leaves
+keep their old effects (including no new WebSocket effect) and tier support.
+Reserved Unix connect, TLS client handshake, HTTP serve/bind, static-files,
+and middleware leaves use full positional signatures inside Core. Their
+public overload selection, implicit option defaults, and escaping callback
+admission still precede source forwarding; registration of a raw alias alone
+does not replace those public admission checks.
+
+DNS error classification is Jet source policy. Reserved Core-only
+`__dns_*_lookup` leaves call the existing resolver and return its raw string
+cause; Jet preserves not-found, cancellation, protocol, timeout, and generic
+failure precedence and caller-name context. Public signatures and unsupported
+tier behavior are unchanged; raw leaves keep the same `Net` and `Time.Wait`
+requirements as their public operations.
+
+`unix_connect` retains the native entry so its ratified `deadline:` overload is
+not narrowed to a path-only source wrapper. Unix and TLS byte/text wrappers use
+the native access contract: reads and writes borrow the named stream with `&`,
+not a copied local handle.
 
 ### `core.net.tls` — TLS stream wrapper
 
@@ -3271,9 +3890,9 @@ protocols are passed through the native TLS provider. See [`Core/net/tls.jet`](.
 | `ClientConfig.default().with_version_bounds(min: version, max: version)` | `ClientConfig !IOError` | Select inclusive `.TLS12` / `.TLS13` bounds; reversed bounds fail before network use. |
 | `tls.client(^tcp, server_name:, config:, deadline:)` | `TLSStream !NetError` | Consume the connected TCP stream, verify the server name, apply configuration, and use the earliest handshake deadline. |
 | `client(host: String, port: Int)` | `TLSStream !IOError` | Convenience form that connects and verifies a host and port. |
-| `read(stream: TLSStream, n: Int)` / `read_text(stream, n)` | `[U8] !IOError` / `String !IOError` | Read bounded TLS bytes or checked UTF-8 text. |
-| `write(stream: TLSStream, bytes: [U8])` / `write_all(stream, bytes)` | `Int !IOError` / `!IOError` | Write application bytes, partially or completely. |
-| `write_text(stream: TLSStream, text)` / `close(stream)` | `!IOError` | Write text or send close-notify; repeated close is harmless. |
+| `read(&stream: TLSStream, n: Int)` / `read_text(&stream, n)` | `[U8] !IOError` / `String !IOError` | Read bounded TLS bytes or checked UTF-8 text. |
+| `write(&stream: TLSStream, bytes: [U8])` / `write_all(&stream, bytes)` | `Int !IOError` / `!IOError` | Write application bytes, partially or completely. |
+| `write_text(&stream: TLSStream, text)` / `close(stream)` | `!IOError` | Write text or send close-notify on the same handle; repeated close is harmless. |
 | `stream.peer_identity()` | `TLSPeerIdentity` | Read the verified server name, certificate chain, cipher suite, and negotiated TLS version. |
 | `stream.read(limit, deadline:)` / `stream.write_all(bytes, deadline:)` | matching results | Apply explicit per-call deadlines on the same TLS handle. |
 | `stream.close_write(deadline:)` | `!IOError` | Flush close-notify and close only writes while reads continue. |
@@ -3281,6 +3900,20 @@ protocols are passed through the native TLS provider. See [`Core/net/tls.jet`](.
 TLS handshake, read, write, and close-notify use the consumed socket's shared
 readiness path. Handshake failures use `NetError`; stream failures use the
 `IOError` tree, including cancellation, timeout, closed, and protocol errors.
+
+`TLSCertificate` and `TLSPeerIdentity` also retain the provider carrier: peer
+identity returns verified native certificate values, not independent Jet
+records. Keeping one nominal carrier avoids missing declarations and mismatched
+certificate-chain layouts without changing the public API.
+
+The consumed-stream overload is distinct from `client(host, port)`: using
+`tls.client(^tcp, server_name:, config:, deadline:)` keeps the immutable native
+configuration and returns `NetError`, with the explicit budget combined with
+the ambient earliest deadline. `RootCertificates.from_pem` and
+`ClientIdentity.from_pem` validate through the same provider used by the
+handshake before any TCP stream is consumed. A custom-only trust policy never
+loads system roots. The `net/tls_peer_identity` example exercises that path
+against the checked-in local CA and checks the verified peer chain.
 
 ### `core.db` — checked database boundaries
 
@@ -3313,6 +3946,26 @@ control belong to the migration/control path, not to arbitrary interpolated
 application values. Migrations record their name and checksum so a changed
 migration cannot silently replace an applied one.
 
+Rows are inspectable `[String: DBValue]` maps. The closed value carrier has
+`Null`, `Int`, `Float`, `Text`, `Bool`, and `Blob([U8])` variants; SQLite Boolean
+affinity returns integer `0`/`1`, which the Boolean reader accepts. Blob reads
+preserve every byte, including empty blobs, without text conversion. `DBError`
+retains the driver's message rather than exposing a raw engine pointer.
+
+Pool receipts remain opaque values produced by a pool. Their equality and
+Show/Display/Debug projection are source-owned: each projection preserves the
+`db.pool lifecycle=...` text and the complete ordered set of pool counters.
+
+`open`, `open_memory`, `pool`, `policy`, `policy_audit`, `transaction`, and
+`migrate` enter through ordinary Core source functions. Their reserved
+Core-internal provider leaves retain the existing SQLite host bridge during
+native-driver admission; this changes neither public signatures nor engine
+identity. Pool `max` remains a required labeled argument. Transaction and
+migration retain both `DB` and `Time.Wait`, including at the provider boundary.
+
+The existing registered Rust SQLite bridge remains the raw host boundary under
+the Jet source policy until runtime cutover. The separate CFFI `__Driver`
+adapter is held; it is not part of this source-owned Core integration.
 ### `core.compute` — checked tensors and explicit devices
 
 `core.compute` provides dense tensors, shape-checked operations, sparse CSR
@@ -3376,15 +4029,102 @@ structured values, not an untyped supervisor log. The source is
 runtime model is also exercised by the service examples and tests.
 The tree is the single public topology boundary; workers, delivery, and restart policies remain typed rather than string-keyed (`D-SERVICE1=D`).
 
+Restart/delivery policy constructors and runtime retention projection are Jet
+policy. `state_store` requires `FS.Read`: it inspects the target and lexical
+ancestors with metadata-only reads, without normalizing away `..`, refusing
+symbolic links and unsuitable file kinds while allowing absent paths. Generation/event/dead-letter getters
+read native storage metadata without reconstructing scheduler state.
+The private metadata carrier does not acquire a Windows identity handle;
+constructor validation therefore adds no identity-open failures.
+
+`ServiceError` and `DeliveryReceipt` are ordinary Jet enum/record values.
+All ten error cases carry a String; their service display is the message alone.
+Receipts retain every original field, including authority and signature, and
+their service display preserves the existing field order and labels.
+`TaskOutcome` retains Finished, Panicked(String), Cancelled and DeadlineBlown:
+display uses the raw panic reason, while Debug quotes and escapes that String.
+`core.rt.RealtimeReceipt` preserves the eight scalar provider facts in their
+original positional order.
+
+Restart/delivery/state-empty selection and dead-letter draining enforce their
+original validation order in Jet. Private single-field host leaves only read
+or write the existing service tree storage, under the caller's exclusive borrow.
+The signing key remains the exact 32 bytes decoded from the current `sa-`
+authority token; this port adds no key cache or security-policy change.
+The Core-internal `__authority_signing_key` shares that one decoder with jobs;
+it is source policy, not a second host signer or an additional authority store.
+Endpoint input and authority-status validation also live in that module.
+The reserved `__authority_validate` preserves native check order, including
+partition-before-generation for an exact registry entry, and reads one
+consistent snapshot of the existing endpoint registry for its fallback scans.
+The fresh-tree constructor supplies all initial fields in Jet, in their native
+evaluation order: generation 1, OneForOne restart with a 5/60000ms budget,
+AtMostOnce delivery, no authority/snapshot/upgrade, and empty topology/state
+stores. Its two temporary host leaves only allocate the existing task runtime
+and materialize those supplied fields. Seven private type-name bindings expose
+the existing field types without introducing a new carrier; both compiler
+mappers bind the same names and retire at the Jet-runtime cutover.
+
+Worker registration, failure/restart selection, restart-window counting and
+mailbox-depth selection are Jet policy. Registration retains the checked
+top-level function item, validates before entropy/allocation/publication, and
+supplies every worker seed. Failure retains declaration-order group scope,
+strict `at > saturating_sub(now, per_ms)` windows, reverse authority rollback,
+escalation, durable-mailbox preservation and partition reassertion in native
+write order (`Services.rs:2917–3078`, restart helper `1983–2012`). The depth and
+count readers deliberately retain native's weaker name/tree match after
+endpoint validation; they do not substitute the stricter routing predicate.
+
+Worker mechanical transports **die at the Jet-runtime cutover**: one aggregate
+parts leaf supplies only absent worker/group supervision facts; setters write
+the existing fields, and partition status/failure share the original single
+mutex acquisition (`3070–3073`). Seven paired private aliases preserve exact
+native shapes: `__WorkerMailbox` (`JetServiceMailbox`, `758–762`, fields
+endpoint/capacity/channel), `__WorkerChannel` (the Arc channel at `761`),
+`__WorkerHandler` (`JetServiceWorkerHandler = fn()`, `821`), `__WorkerStatus`
+(`JetServiceSupervisorStatus`, `123–130`), `__WorkerTopologyKind`
+(`JetServiceTopologyKind`, `134–137`), `__WorkerTopologyState` and
+`__WorkerRestartReason` (the existing DevtoolsTopologyPanel enums at `62–70`
+and `282–288`). Only the existing checked worker parameter forwards a function
+pointer. Mailboxes move: native `Mailbox::clone` forks its channel and is not
+a valid source transfer. Alias, checked-slot and no-clone fixtures cover these
+seams; they introduce no state, policy cache or replacement runtime carrier.
+
+Snapshot/event-log selection, replay framing, topology/observation text, and
+workflow history/outcome selection are Jet policies. Durable reads retain the
+existing host storage/replay operation during the Rust-seed tier; field
+projections expose only existing facts and retire at the Jet-runtime cutover.
+Group membership validation and chaos-failure ordering are Jet policies.
+Group reparenting retains its original per-worker order, and chaos increments
+its checked counter before selecting the first running worker.
+Event append and snapshot commit validate their adapter, authority, payload,
+and limits in Jet and frame UTF-8 byte lengths there. Snapshot persistence and
+the snapshot field assignment remain inside the same existing host mutex;
+event persistence retains the existing locked store append before the local
+event record is appended. No lock guard or second authority is exposed.
+Directory resolution owns lookup, generation errors, expiration remapping,
+and running/draining checks in Jet; its proof check calls the existing
+authority operation without adding a registry or signing-key cache.
+Tree sends validate routing and payloads in Jet, preserve the native repeated
+authority checks, remap mailbox-capacity failures to the worker-specific text,
+and update accounting only after successful atomic authority sends.
+Durable tree sends and receives own local deduplication, pending-message
+admission, receipt marking, and rollback orchestration in Jet. Each existing
+authority/storage operation retains its internal locks; a failed pending send
+requeues the remaining authority suffix before restoring the pre-send mailbox.
+Combined rollback failures preserve the original diagnostic and recovery text.
+Generation rollout and start/stop policies remain native pending a reviewed
+lock-lifetime seam; this source port does not claim those rows are complete.
+
 | Signature | Result | Description |
 |---|---|---|
 | `tree(name: String) -> ServiceTree` | tree | Create a named service topology. |
-| `tree.worker<T>(name: String, handler, capacity: Int) -> ServiceWorker<T>` | worker | Add a bounded-mailbox worker. |
+| `tree.worker(name: String, handler, capacity: Int) -> ServiceEndpoint !ServiceError` | endpoint | Register a checked top-level handler with a bounded mailbox. |
 | `tree.start()` / `tree.stop()` | — | Start or stop the service tree. |
 | `tree.show() -> DataTree` | tree | Inspect topology and delivery state. |
 | `tree.set_restart(strategy: ServiceRestart)` | — | Select one-for-one, all-for-one, or rest-for-one restart. |
 | `runtime(store: String, retention: Duration) -> ServiceRuntime` | runtime | Describe runtime storage and retention. |
-| `state_store(path: String) -> ServiceStateStore !ServiceError` | store | Open a durable state store. |
+| `state_store(path: String) -[FS.Read]> ServiceStateStore !ServiceError` | store | Validate a durable state-store path and its lexical ancestors. |
 | `restart_one_for_one()`, `restart_one_for_all()`, `restart_rest_for_one()` | strategy | Construct restart strategies. |
 | `delivery_at_most_once()`, `delivery_durable()` | policy | Select at-most-once or durable delivery. |
 
@@ -3494,6 +4234,52 @@ language:
 boundary. Use `Int.parse`/`Float.parse` for named parse errors, and
 `core.text.parse.parse_int`/`parse_float` when an Option result is the desired
 API.
+
+## `core.jobs` — durable receiver lifecycle
+
+`jobs.queue() -[DB, FS.Read, FS.Write, Time]> JobQueue ServiceError!` opens the
+durable SQLite provider under the package authority. `JobQueue` has private state,
+not an in-memory record collection passed between free functions. Queue
+identity, capacity, retry budget, leases, and retention come from the
+authority/provider policy.
+
+| Receiver operation | Result | Contract |
+| --- | --- | --- |
+| `enqueue(job, payload, key:)` / `delay(job, payload, for:)` | `JobQueueReceipt !ServiceError` | Encode a checked job payload and atomically enqueue it; an optional key identifies duplicates. |
+| `receipt(id)` / `inspect(limit, include_payload)` / `events(id)` | receipt / records / events | Observe signed receipts, bounded records, or ordered state events. |
+| `claim(worker, limit)` / `heartbeat(claim)` | claims / receipt | Claim bounded due work and renew a checked lease. |
+| `acknowledge(claim, result)` / `fail(claim, error)` | `JobQueueReceipt !ServiceError` | Settle a checked claim with a typed result or error. |
+| `cancel(id, reason)` / `dead_letter(id, reason)` | `JobQueueReceipt !ServiceError` | Commit an explicit terminal state. |
+| `recover_expired()` / `status()` / `pause()` / `resume()` / `wait(timeout)` / `prune()` | unit / status / count | Recover leases, inspect or control admission, wait, and prune by retention policy. |
+
+Payloads and results carry `type_id`, encoded `bytes`, and explicit `publish`.
+Claims carry their signed receipt, payload, worker, lease token, and lease
+expiry. A status reports queued, running, retrying, completed, failed,
+dead-lettered, and cancelled counts rather than exposing mutable queue storage.
+All receiver operations retain typed `ServiceError` failures.
+
+The source-owned lifecycle exposes the effects it actually consumes:
+
+| Operation | Effects |
+| --- | --- |
+| `queue()` | `DB`, `FS.Read`, `FS.Write`, `Time` |
+| `receipt` / `inspect` / `events` | `DB` |
+| `claim` | `DB`, `Rand`, `Time` |
+| `enqueue` / `delay` / `heartbeat` / `acknowledge` / `fail` / `cancel` / `dead_letter` / `recover_expired` / `status` / `pause` / `resume` / `prune` | `DB`, `Time` |
+| `wait` | `DB`, `Time`, `Time.Wait` |
+
+`JET_JOB_QUEUE_DB` is a startup-only provider-path exception: a nonempty UTF-8
+startup value selects the database; otherwise `.jet/state/jobs.db` is used.
+Logical environment overlays do not redirect this provider. Set an isolated
+database path before launching examples or conformance programs.
+
+The state transitions, SQL, row projections, CBOR payloads, signed receipts,
+retry policy, event fields, and commit-before-publication ordering are Jet
+source in `Core/jobs/jobs.jet`. The private SQLite and Devtools leaves call
+the existing host kernels; they do not implement a second queue or sink.
+The compiler checks the declared `#Job` identity and its payload type before
+normalizing the name and forwarding `enqueue`/`delay` to their checked source
+targets; arbitrary function values or string-selected jobs are not admitted.
 
 ## `core` — built Core modules
 
@@ -3619,6 +4405,9 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.web.table`
 - `core.web.virtual`
 
+The sketch types are source-owned plain values: cloning one produces independent
+storage, and mutating a sketch uses its `&self` receiver with an explicit `&` call.
+
 ### Writing Core in Jet
 
 The Rust-hosted compiler remains Jet's production and reference compiler. Jet
@@ -3636,6 +4425,12 @@ corpus, and any examples that exercise the contract. The registry and loader
 list are the executable authority; this reference explains the durable rules
 and points to those files instead of duplicating their generated details.
 The audited intrinsic/ABI kernel is the only provider seam; ordinary Core packages remain Jet source. Archive byte-format calls cross that seam only where the source implementation requires them.
+
+The overloaded Unix connect and TLS client calls retain their checked public
+argument forms before forwarding into their owning Jet entry points. HTTP
+server serve/bind and static-file mounts likewise forward normalized options;
+`HTTPMux.middleware` forwards only after the existing escaping-callback
+admission. The original effects and resource conventions remain in force.
 
 ### Examples in the repository
 

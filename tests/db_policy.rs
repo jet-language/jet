@@ -330,3 +330,47 @@ fn sqlite_blob_round_trip_preserves_bytes_across_tiers() {
         "direct:[0, 1, 2, 127, 128, 255]\nexplicit:[0, 1, 2, 127, 128, 255]\nequal:true\n",
     );
 }
+
+#[test]
+fn typed_row_reads_preserve_missing_and_conversion_errors_across_tiers() {
+    assert_tiers_agree(
+        "db_typed_row_source",
+        r#"
+use core.db as db
+
+fn run() {
+    row :: [String: DBValue]{
+        "integer": DBValue.Int(42),
+        "float": DBValue.Float(1.5),
+        "text": DBValue.Text("jet"),
+        "true": DBValue.Bool(true),
+        "zero": DBValue.Int(0),
+        "one": DBValue.Int(1),
+        "two": DBValue.Int(2),
+        "null": DBValue.Null,
+        "whole-float": DBValue.Float(1.0),
+        "large-float": DBValue.Float(1e21),
+        "small-float": DBValue.Float(1e-7),
+        "blob": DBValue.Blob([U8]{1, 2}),
+    }
+    print(db.row_int(row, "integer") ?? -1)
+    print(db.row_float(row, "integer") ?? -1.0)
+    print(db.row_float(row, "float") ?? -1.0)
+    print(db.row_text(row, "text") ?? "missing")
+    print(db.row_bool(row, "true") ?? false)
+    print(db.row_bool(row, "zero") ?? true)
+    print(db.row_bool(row, "one") ?? false)
+    db.row_value(row, "missing") ? _value -> print("unexpected") ! error -> print(error.message)
+    db.row_int(row, "text") ? _value -> print("unexpected") ! error -> print(error.message)
+    db.row_float(row, "null") ? _value -> print("unexpected") ! error -> print(error.message)
+    db.row_text(row, "integer") ? _value -> print("unexpected") ! error -> print(error.message)
+    db.row_bool(row, "two") ? _value -> print("unexpected") ! error -> print(error.message)
+    db.row_int(row, "whole-float") ? _value -> print("unexpected") ! error -> print(error.message)
+    db.row_int(row, "large-float") ? _value -> print("unexpected") ! error -> print(error.message)
+    db.row_int(row, "small-float") ? _value -> print("unexpected") ! error -> print(error.message)
+    db.row_text(row, "blob") ? _value -> print("unexpected") ! error -> print(error.message)
+}
+"#,
+        "42\n42.0\n1.5\njet\ntrue\nfalse\ntrue\nmissing column `missing`\nexpected an int, got jet\nexpected a float, got null\nexpected text, got 42\nexpected a bool, got 2\nexpected an int, got 1\nexpected an int, got 1000000000000000000000\nexpected an int, got 0.0000001\nexpected text, got [1, 2]\n",
+    );
+}

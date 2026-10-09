@@ -889,16 +889,23 @@ where
 {
     JetUiPreviewRegistry::new(previews)
 }
-pub fn jet_ui_phone() -> JetUiPreviewViewport {
-    JetUiPreviewViewport::phone()
-}
 
-pub fn jet_ui_tablet() -> JetUiPreviewViewport {
-    JetUiPreviewViewport::tablet()
-}
 
-pub fn jet_ui_desktop() -> JetUiPreviewViewport {
-    JetUiPreviewViewport::desktop()
+/// Raw viewport slot transfer; source supplies all bounded values and policy.
+pub fn jet_ui_raw_viewport_transfer(
+    device: jet_foundation::Numeric::JetInt,
+    width: jet_foundation::Numeric::JetInt,
+    height: jet_foundation::Numeric::JetInt,
+    scale: jet_foundation::Numeric::JetInt,
+) -> JetUiPreviewViewport {
+    let word = |value: jet_foundation::Numeric::JetInt| value.to_i64().expect("audited viewport word");
+    let device = match word(device) {
+        0 => JetUiPreviewDevice::Phone,
+        1 => JetUiPreviewDevice::Tablet,
+        2 => JetUiPreviewDevice::Desktop,
+        _ => unreachable!("invalid audited viewport device"),
+    };
+    JetUiPreviewViewport { device, width: word(width) as u32, height: word(height) as u32, scale: word(scale) as u16 }
 }
 
 /// Compiler-only provenance attachment for inline preview calls.  The public

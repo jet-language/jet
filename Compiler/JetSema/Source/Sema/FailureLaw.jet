@@ -6,6 +6,8 @@
 use jet_foundation.[
     AccessConvention,
     CallArg,
+    CORE_ENUM_PAYLOAD_ROWS,
+    CORE_SOURCE_OWNED_ROWS,
     Diagnostic,
     ErrorConvDef,
     Expr,
@@ -24,6 +26,7 @@ use jet_foundation.[
     TStmt,
     Type,
     ast_func,
+    core_module_has_type,
     expr_span,
     symbol_id,
     tir_expr_children,
@@ -55,6 +58,25 @@ JET_CORE_ERROR_TYPES :: prep { [String]{
     "ParseError", "PluginError",
     "TaskFailure", "TextError", "UTF8Error", "VaultError", "WsError", "XMLError", "FieldError",
 } }
+
+// Owning an opaque impl or a compiler enum menu does not create an export.
+// Derive the qualified annotation gate from the same generated ownership rows.
+JET_CORE_OWNER_ANNOTATION_SUFFIXES :: prep { sema_core_owner_annotation_suffixes() }
+
+fn sema_core_owner_annotation_suffixes() -> [String] Never! {
+    suffixes := [String]{}
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        loop name in row.impl_types {
+            suffix :: ".{name}"
+            if !suffixes.contains(suffix) -> &suffixes.push(suffix)
+        }
+    }
+    loop row in CORE_ENUM_PAYLOAD_ROWS {
+        suffix :: ".{row.enum_name}"
+        if !suffixes.contains(suffix) -> &suffixes.push(suffix)
+    }
+    suffixes
+}
 
 // A canonical owner identity (`<corelib>/Core/crypto::Core/crypto/uuid.jet::UUIDError`)
 // reduces to its `::` leaf; a qualified spelling to its `.` leaf.
@@ -448,6 +470,28 @@ pub fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, g
         .Named(name) -> {
             if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
             if name == "Never" && !in_return -> &diagnostics.push(sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it (D-NEVER2=B).", "Move `Never` to a function return type, or use `()`/another value type."))
+            // IOOperation has compiler enum rows, but no public annotation origin.
+            // Reuse the Core-only literal origin gate; user declarations stay E0119.
+            unresolved := name == "IOOperation" && !sema_module_is_core_source(environment.module_identity)
+            // Owner-only impl metadata cannot manufacture a qualified export.
+            owner_annotation :: loop suffix in JET_CORE_OWNER_ANNOTATION_SUFFIXES {
+                if name.ends_with(suffix) -> break true
+            } ?? false
+            if owner_annotation {
+                parts :: name.split(".").to_list()
+                if sema_call_core_import_module(environment, parts[0]) == .Val(imported_module) {
+                    module_name := imported_module
+                    loop index in 1..<(parts.len() - 1) -> module_name = "{module_name}.{parts[index]}"
+                    unresolved = !core_module_has_type(module_name, parts[parts.len() - 1])
+                }
+            }
+            if unresolved && !generic_names.contains(name) {
+                declared := false
+                if environment.registration_graph == .Val(graph) {
+                    declared = sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None
+                }
+                if !declared -> &diagnostics.push(sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", "check the spelling, or define the struct or enum first"))
+            }
         }
         .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_check_failure_contract_type(inner, span, false, generic_names, environment, &diagnostics)
         .Map(key, _, value) -> {

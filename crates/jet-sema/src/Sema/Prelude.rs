@@ -6,8 +6,7 @@ use crate::AST::{
     Stmt, TryConvert,
 };
 use jet_foundation::Prelude as CorePrelude;
-use jet_foundation::Prelude::Target;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 const INTERNAL_PREFIX: &str = "__jet_prelude_";
 
@@ -225,17 +224,7 @@ pub(crate) fn inject(bundle: &mut ProgramBundle) {
         if module.no_prelude {
             continue;
         }
-        let modules: BTreeSet<&'static str> = CorePrelude::entries()
-            .iter()
-            .filter_map(|entry| match entry.target {
-                Target::Core {
-                    module: core_module,
-                    ..
-                } if source_mentions_identifier(&module.source, entry.name) => Some(core_module),
-                _ => None,
-            })
-            .collect();
-        for core_module in modules {
+        for &core_module in &module.core_identifier_demand.prelude_modules {
             if module.imports.iter().any(|import| {
                 import.import_alias().starts_with(INTERNAL_PREFIX)
                     && import.core_module_path().as_deref() == Some(core_module)
@@ -294,11 +283,3 @@ pub(crate) fn is_prelude_name(name: &str) -> bool {
     CorePrelude::entry(name).is_some()
 }
 
-fn source_mentions_identifier(source: &str, name: &str) -> bool {
-    source.match_indices(name).any(|(start, _)| {
-        let before = source[..start].chars().next_back();
-        let after = source[start + name.len()..].chars().next();
-        !before.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
-            && !after.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
-    })
-}

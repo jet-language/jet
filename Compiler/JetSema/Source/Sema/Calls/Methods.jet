@@ -21,6 +21,7 @@ use jet_foundation.[
     TStmt,
     Type,
     TypeTupleField,
+    core_source_receiver_method,
     expr_span,
     symbol_id,
     type_name,
@@ -626,12 +627,13 @@ pub fn sema_call_check_method_candidate(state: &SemaOwnershipState, receiver: Ex
 
 pub fn sema_call_check_method(state: &SemaOwnershipState, receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     receiver_value :: sema_check_expression(receiver, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    candidates := sema_call_local_method_candidates(environment, method, owner_type_args, type_args)
+    routed_method :: core_source_receiver_method(if method == "bool" && args.len() == 1 -> sema_expr_receiver_nominal_identity(environment, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
+    candidates := sema_call_local_method_candidates(environment, routed_method, owner_type_args, type_args)
     if environment.registration_graph == .Val(graph) {
-        trait_candidates :: sema_call_trait_method_candidates(graph, receiver_value.ty, method, type_args, environment.module_identity, environment.package_identity, environment.generic_params, method_span, &diagnostics)
+        trait_candidates :: sema_call_trait_method_candidates(graph, receiver_value.ty, routed_method, type_args, environment.module_identity, environment.package_identity, environment.generic_params, method_span, &diagnostics)
         if trait_candidates.len() > 0 -> candidates = trait_candidates
     }
-    candidate :: sema_call_resolve_method(receiver_value.ty, method, args, method_span, candidates, environment, &diagnostics) ?? return None
+    candidate :: sema_call_resolve_method(receiver_value.ty, routed_method, args, method_span, candidates, environment, &diagnostics) ?? return None
     checked :: sema_call_method_checked_from_value(&state, receiver, receiver_value, candidate, args, [SemaCallDefaultValue]{}, expected, environment, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
     Val(checked.value)
 }

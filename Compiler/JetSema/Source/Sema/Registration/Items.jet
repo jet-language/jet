@@ -5,6 +5,7 @@
 // defaults remain AST references keyed by FunctionDefaultRef.
 use jet_foundation.[
     AccessConvention,
+    CORE_SOURCE_OWNED_ROWS,
     CLICommandBinding,
     CallContractRow,
     CallablePolicy,
@@ -62,6 +63,7 @@ use jet_foundation.[
     core_enum_variant_payload,
     core_module_export,
     core_module_has_type,
+    core_source_owns_type,
     expr_span,
     mir_builtin_codec_trait_ref,
     sema_reserved_type_name,
@@ -414,6 +416,7 @@ pub struct SemaRegistrationModuleInput {
     pub package_identity: String
     pub module_identity: String
     pub module_name: String
+    pub core_source_alias: String
     pub module_path: String
     pub source_file: String
     pub source_segments: [SemaSourceSegment]
@@ -442,6 +445,7 @@ pub struct SemaRegistrationModule {
     pub package_identity: String
     pub module_identity: String
     pub module_name: String
+    pub core_source_alias: String
     pub module_path: String
     pub source_file: String
     pub source_segments: [SemaSourceSegment]
@@ -1215,6 +1219,14 @@ fn sema_registration_trait_method(method: TraitMethodSig, module_identity: Strin
     SemaRegistrationTraitMethod{symbol: symbol, declaration: method, signature: signature, identity: type_identity(signature), identity_key: sema_registration_function_identity_key(module_identity, owner.id.key, signature), parameters: parameters}
 }
 
+// Hook callable identity is the operand pair, not the ordinary owner/name key.
+fn sema_registration_operator_owner(owner: SymbolID, module_identity: String, left: Type, trait_name: String?, rhs: Type?) -> SymbolID Never! {
+    trait_value :: trait_name ?? return owner
+    if !sema_checked_operator_trait(trait_value) -> return owner
+    right :: rhs ?? left
+    symbol_id(SymbolKind.Impl, module_identity, owner.key, "{type_name(left)}::{trait_value}<{type_name(right)}>")
+}
+
 fn sema_registration_nominal(item: Item, module_identity: String, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> SemaRegistrationNominal? {
     if item == {
         .Struct(definition) -> {
@@ -1227,7 +1239,8 @@ fn sema_registration_nominal(item: Item, module_identity: String, fallback_sourc
             trait_methods :: [SemaRegistrationTraitMethod]{}
             loop block in definition.trait_impls {
                 loop method in block.methods {
-                    &methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_identity, Val(symbol.id), fallback_source_file, fallback_source_origin, source_segments, &diagnostics))
+                    hook_owner :: sema_registration_operator_owner(symbol.id, module_identity, ty, Val(block.trait_name), block.operator_rhs)
+                    &methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_identity, Val(hook_owner), fallback_source_file, fallback_source_origin, source_segments, &diagnostics))
                 }
             }
             Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Struct, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: generic_identity_key, fields: sema_registration_struct_fields(definition, symbol, &diagnostics), variants: [SemaRegistrationVariant]{}, methods: methods, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
@@ -1242,7 +1255,8 @@ fn sema_registration_nominal(item: Item, module_identity: String, fallback_sourc
             trait_methods :: [SemaRegistrationTraitMethod]{}
             loop block in definition.trait_impls {
                 loop method in block.methods {
-                    &methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_identity, Val(symbol.id), fallback_source_file, fallback_source_origin, source_segments, &diagnostics))
+                    hook_owner :: sema_registration_operator_owner(symbol.id, module_identity, ty, Val(block.trait_name), block.operator_rhs)
+                    &methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_identity, Val(hook_owner), fallback_source_file, fallback_source_origin, source_segments, &diagnostics))
                 }
             }
             Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Enum, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: generic_identity_key, fields: [SemaRegistrationField]{}, variants: sema_registration_enum_variants(definition, symbol, &diagnostics), methods: methods, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
@@ -1582,7 +1596,7 @@ fn sema_registration_add_root(module_row: &SemaRegistrationModule, item: Item, s
     }
     name :: sema_registration_root_name(item)
     if name == "" -> return true
-    if !sema_registration_reserved_type_rule(item, name, &diagnostics) -> return false
+    if !sema_registration_reserved_type_rule(module_row, item, name, &diagnostics) -> return false
     if sema_registration_module_has_name(module_row, name) {
         &diagnostics.push(sema_defined_twice(name, "module declarations share one namespace", sema_registration_root_span(item)))
         return false
@@ -1623,7 +1637,7 @@ fn sema_registration_push_declaration(module_row: &SemaRegistrationModule, item:
 // E0106: the Rust reference's `register_struct`/`register_enum`/
 // `register_distinct`/`register_type_alias` reject a built-in type name
 // before the declaration registers.
-fn sema_registration_reserved_type_rule(item: Item, name: String, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_registration_reserved_type_rule(module_row: SemaRegistrationModule, item: Item, name: String, diagnostics: &[Diagnostic]) -> Bool {
     kind :: if item == {
         .Struct(_) -> "struct"
         .Enum(_) -> "enum"
@@ -1632,6 +1646,9 @@ fn sema_registration_reserved_type_rule(item: Item, name: String, diagnostics: &
         else -> ""
     }
     if kind == "" || !sema_reserved_type_name(name) -> return true
+    // `item` is the loaded declaration; canonical identity supplies the exact
+    // source path and name from CORE_SOURCE_OWNED_TYPES, never the export superset.
+    if core_source_owns_type("{module_row.module_identity}::{name}") -> return true
     &diagnostics.push(sema_error("E0106", sema_registration_root_span(item), "the name `{name}` is built in and can't be redefined", "`{name}` is provided by the language itself", "choose a different name for this {kind}"))
     false
 }
@@ -1659,7 +1676,7 @@ fn sema_registration_value_type_rules(module_row: SemaRegistrationModule, item: 
             }
         }
         .TypeAlias(definition) -> {
-            if definition.type_params.len() == 0 {
+            if definition.type_params.len() == 0 && !(definition.target == .Named(_)) {
                 &diagnostics.push(sema_error("E0324", definition.name_span, "a type alias needs type parameters — write `alias Name<T> :: …`", "transparent `alias` is only for shortening generic spellings (D-TYPEALIAS1)", "for a distinct type name over a primitive, use `struct Name(BaseType)` instead"))
                 return false
             }
@@ -1703,6 +1720,9 @@ fn sema_registration_impl(module_row: SemaRegistrationModule, definition: ImplDe
             target_identity = type_identity(target_type)
             target_identity_key = "{module_row.module_identity}:{type_identity_key(target_type)}"
         }
+        if sema_registration_source_owns_impl(owner_row, definition.type_name) {
+            target_module_identity = Val(owner_row.module_identity)
+        }
     }
     trait_symbol := Symbol?{None}
     trait_identity := TypeIdentity?{None}
@@ -1723,7 +1743,8 @@ fn sema_registration_impl(module_row: SemaRegistrationModule, definition: ImplDe
         associated_symbol :: Symbol{id: symbol_id(SymbolKind.Type, module_row.module_identity, symbol.id.key, declaration.name), kind: SymbolKind.Type, name: declaration.name, module_name: module_row.module_identity, owner: Val(symbol.id.key), span: declaration.span, ty: Val(declaration.ty), visibility: 0}
         SemaRegistrationAssociatedType{symbol: associated_symbol, declaration: declaration, ty: declaration.ty, identity: type_identity(declaration.ty), identity_key: "{symbol.id.key}:{declaration.name}:{type_identity_key(declaration.ty)}"}
     }
-    methods :: loop method in definition.methods -> sema_registration_function(method, sema_raw_protocol_function_return(definition.trait_name, false, method), module_row.module_identity, Val(owner_id), module_row.source_file, module_row.source_origin, module_row.source_segments, &diagnostics)
+    hook_owner :: sema_registration_operator_owner(owner_id, module_row.module_identity, target_type, definition.trait_name, definition.operator_rhs)
+    methods :: loop method in definition.methods -> sema_registration_function(method, sema_raw_protocol_function_return(definition.trait_name, false, method), module_row.module_identity, Val(hook_owner), module_row.source_file, module_row.source_origin, module_row.source_segments, &diagnostics)
     SemaRegistrationImpl{
         symbol: symbol,
         declaration: definition,
@@ -1774,6 +1795,19 @@ fn sema_registration_add_impl(module_row: &SemaRegistrationModule, item: Item, d
 
 fn sema_registration_unknown_impl_target(definition: ImplDef) -> Diagnostic {
     sema_error("E0301", definition.type_span, "the impl target `{definition.type_name}` is not a registered type", "an implementation needs one nominal declaration in the resolved module graph", "declare or import the target type before its impl")
+}
+
+// Opaque impl ownership is metadata, not a nominal declaration or public export.
+pub fn sema_registration_source_owns_impl(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
+    if !module_row.module_identity.starts_with("<corelib>/") -> return false
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        if row.module_name != module_row.module_name || row.alias != module_row.core_source_alias || module_row.source_file != "<corelib>/{row.path}" -> next
+        if !sema_reserved_type_name(name) && !core_module_has_type(row.module_name, name) -> next
+        loop owner in row.impl_types {
+            if owner == name -> return true
+        }
+    }
+    false
 }
 
 // D-OPMIX1 (Rust `opmix_allows_builtin_impl`): an operator hook on a built-in
@@ -1905,6 +1939,7 @@ fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, temp
         package_identity: input.package_identity,
         module_identity: input.module_identity,
         module_name: input.module_name,
+        core_source_alias: input.core_source_alias,
         module_path: input.module_path,
         source_file: input.source_file,
         source_segments: input.source_segments,
@@ -1959,7 +1994,7 @@ fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, temp
     // an invalid nominal must not produce methods that cascade from E0106.
     item_index := 0
     loop item_index < module_row.program.items.len() {
-        if !sema_registration_reserved_type_rule(module_row.program.items[item_index], sema_registration_root_name(module_row.program.items[item_index]), &diagnostics) {
+        if !sema_registration_reserved_type_rule(module_row, module_row.program.items[item_index], sema_registration_root_name(module_row.program.items[item_index]), &diagnostics) {
             _ := &module_row.program.items.remove(item_index, .Slot)
         } else {
             item_index += 1

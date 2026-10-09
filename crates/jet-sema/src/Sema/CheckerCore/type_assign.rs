@@ -396,6 +396,11 @@ impl<'a> Checker<'a> {
                 if core_type_known(n) {
                     return;
                 }
+                // Compiler-owned IO enum annotations are internal to vetted Core,
+                // just like Core-only failure record literals; no export is added.
+                if n == Syntax::TYPE_IO_OPERATION && self.module_is_core_source(self.module_idx) {
+                    return;
+                }
                 if self.type_param_scope.iter().any(|p| p.name == *n) {
                     return;
                 }
@@ -566,7 +571,8 @@ impl<'a> Checker<'a> {
                     self.check_declared_type_rules(&substitute_type(&target, &subst), span);
                     return;
                 }
-                let core_generic_arity = match import_ns {
+                let source_owned = self.source_owns_nominal(name);
+                let core_generic_arity = if source_owned { None } else { match import_ns {
                     Some(namespace) => self
                         .core_imports
                         .get(namespace)
@@ -584,7 +590,7 @@ impl<'a> Checker<'a> {
                             }
                         }),
                     None => jet_foundation::CoreModuleExports::core_generic_arity(lookup_name),
-                };
+                }};
                 if let Some(expected) = core_generic_arity {
                     if args.len() != expected {
                         self.diags.push(Diagnostic::error(
@@ -600,7 +606,7 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 }
-                let is_core_generic = core_generic_arity.is_some()
+                let is_core_generic = !source_owned && (core_generic_arity.is_some()
                     || (unqualified
                         && matches!(
                             lookup_name,
@@ -648,7 +654,7 @@ impl<'a> Checker<'a> {
                             // and one nominal space; transforms carry two.
                             | "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2"
                         ))
-                    || (unqualified && is_core_view_generic(ty));
+                    || (unqualified && is_core_view_generic(ty)));
                 if is_core_generic
                     && matches!(
                         lookup_name,

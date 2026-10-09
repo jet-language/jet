@@ -1126,9 +1126,8 @@ fn run() {
     assert_eq!(stdout, "5\n1\n10\n7\n");
 }
 
-/// c109 Phase 17: prelude HTTP values use their canonical Core constructors. The
-/// prelude types live in `jet_std`, which a standalone `rustc` here can't link, so
-/// this asserts the emitted Rust dispatches through the shared helper symbols.
+/// Source HTTP constructors reach their reserved resource transfer rather than
+/// a public native policy row; the client remains a typed transport constructor.
 #[test]
 fn prelude_struct_construction() {
     let src = "\
@@ -1158,11 +1157,9 @@ fn run() {
             jet::render_diagnostics(&shown, src, &diags)
         )
     });
-    // HTTPResponse: the shared server constructor helper.
     assert!(
-        out.rust
-            .contains(r#"return jet_http_srv_response(200i64, &((*__jet_body)));"#),
-        "HTTPResponse constructor helper missing:\n{}",
+        out.rust.contains("jet_http_srv_raw_response_parts("),
+        "source HTTPResponse resource transfer missing:\n{}",
         out.rust
     );
     // HTTPRequest: the shared client request helper.

@@ -29,15 +29,12 @@ use crate::Codegen::TIR::is_measurement_method_name;
 use crate::Codegen::TIR::is_process_handle_method_name;
 use crate::Codegen::TIR::is_reactive_effect_method_name;
 use crate::Codegen::TIR::is_reactive_method_name;
-use crate::Codegen::TIR::is_sketch_method_name;
-use crate::Codegen::TIR::is_sketch_type;
 use crate::Codegen::TIR::is_ui_backend_method_name;
 use crate::Codegen::TIR::is_watch_handle_type;
 use crate::Codegen::TIR::is_watch_method_name;
 use crate::Codegen::TIR::lambda_in_subset;
 use crate::Codegen::TIR::router_register_in_subset;
 use crate::Codegen::TIR::service_method_route;
-use crate::Codegen::TIR::solve_new_type;
 use crate::Codegen::TIR::subset::core_call_args_in_subset;
 use crate::Codegen::TIR::tls_static_op;
 use crate::Codegen::foreign_binding_method_key;
@@ -678,11 +675,6 @@ pub(crate) fn method_call_in_subset(
         };
         return return_ok && arity_ok && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
-    // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` mirrors `mem.Arena.new()`:
-    // receiver is a module-field sentinel, not a runtime value.
-    if solve_new_type(receiver, method, cx, locals).is_some() {
-        return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-    }
     if duration_new_unit(receiver, method, locals).is_some() {
         return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
@@ -1024,11 +1016,6 @@ pub(crate) fn method_call_in_subset(
     if recv_type.as_deref() == Some("App") && is_app_method_name(method, args.len()) {
         // `.routes(from: "…")` uses a labeled arg; other builder methods stay
         // positional. Labels are erased at emit — only the expression matters.
-        return expr_in_subset(receiver, cx, locals)
-            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-    }
-    // Shape (d8) [D-APPROX1=A]: a sketch method (HyperLogLog/TDigest/CMS/ReservoirSampler).
-    if is_sketch_type(recv_type.as_deref()) && is_sketch_method_name(recv_type.as_deref(), method) {
         return expr_in_subset(receiver, cx, locals)
             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
@@ -1687,7 +1674,7 @@ pub(crate) fn static_method_call_in_subset(
     }
     if type_name == "Perf"
         && !cx.fact_type_name("Perf")
-        && core_call_covered("core.perf", method)
+        && jet_foundation::CoreModuleExports::core_source_owns_call("core.perf", method, args.len(), false)
     {
         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }

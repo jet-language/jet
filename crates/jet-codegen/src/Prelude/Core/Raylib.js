@@ -31,15 +31,6 @@ function jet_raylib_key_down(_name) {
   return false;
 }
 
-function jet_raylib_color(r, g, b, a) {
-  return {
-    type_name: "RaylibColor",
-    r: Number(r),
-    g: Number(g),
-    b: Number(b),
-    a: Number(a),
-  };
-}
 
 function jet_raylib_draw_rectangle(_x, _y, _width, _height, _color) {}
 function jet_raylib_draw_text(_text, _x, _y, _size, _color) {}
@@ -52,13 +43,6 @@ function jet_raylib_gamepad_axis(_gamepad, _axis) {
   return 0;
 }
 
-function jet_raylib_load_sound(path) {
-  return { type_name: "RaylibSound", path: String(path) };
-}
-
-function jet_raylib_play_sound(sound) {
-  return Boolean(sound && sound.path);
-}
 
 function jet_raylib_atlas_name(path) {
   const parts = String(path).split(/[\\/]/);

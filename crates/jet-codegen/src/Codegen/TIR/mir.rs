@@ -196,7 +196,7 @@ pub(super) struct FunctionRegistry {
 impl FunctionRegistry {
     fn build(
         functions: &[TFunc],
-        entry_sibling_calls: Option<&(String, String)>,
+        entry_call_alias: Option<&(String, String)>,
     ) -> Result<Self, LowerError> {
         let mut registry = Self {
             by_key: HashMap::new(),
@@ -315,9 +315,9 @@ impl FunctionRegistry {
                 .entry(function.name.clone())
                 .or_default()
                 .push(id);
-            // D-MOD-CYCLE1=A: a package sibling calls an entry function by the
-            // imported spelling `<entry alias>::<name>`; it names this row.
-            if let Some((entry_module, prefix)) = entry_sibling_calls {
+            // A canonical entry-qualified call names the entry row, even
+            // when its package has no sibling modules.
+            if let Some((entry_module, prefix)) = entry_call_alias {
                 if matches!(&function.kind, TFuncKind::TopLevel)
                     && function.module == *entry_module
                     && !function.name.contains("::")
@@ -4356,7 +4356,6 @@ fn parse_runtime_part(key: &str) -> Option<MirRuntimePartId> {
         Browser,
         Args,
         Reflect,
-        AuthTokens,
         AuthSession,
         Sync,
         Services,
@@ -4736,6 +4735,13 @@ const BUILTIN_TASK_GROUP_IDENTITY_KEY: &str = "builtin:task-group";
 /// the leaf (`core.files.path`'s `Path`) is a different type and never claims
 /// the bare spelling. Every other name may match by leaf.
 fn row_claims_bare_name(row: &MirTypeDef, name: &str) -> bool {
+    if matches!(name, "Fraction" | "Decimal" | "Complex")
+        && jet_foundation::CoreModuleExports::core_source_owns_type(&row.key)
+    {
+        return jet_foundation::CoreModuleExports::core_source_module("core.math")
+            .is_some_and(|source| row.name == name
+                && row.key.ends_with(&format!("{}::{name}", source.path)));
+    }
     let Some(kind) = crate::Syntax::typed_head_kind(name) else {
         return true;
     };
@@ -6580,6 +6586,9 @@ impl<'a> LowerCtx<'a> {
             }
             jet_foundation::Syntax::CoreCallSymbol::Rust(name) => {
                 jet_foundation::MIR::MirSymbol::Runtime(name.to_string())
+            }
+            jet_foundation::Syntax::CoreCallSymbol::SourceOwned => {
+                return Err(self.error(self.span(), "source-owned Core declaration reached a host route".to_string()));
             }
         };
         let fallibility = call_fallibility(self, carrier)?;
@@ -11137,6 +11146,68 @@ impl<'a> LowerCtx<'a> {
         self.function_id_for(name)
     }
 
+    pub(super) fn precise_source_target(
+        &self,
+        owner: &str,
+        operation: &str,
+    ) -> Result<Option<MirFunctionId>, LowerError> {
+        let Some(helper) = super::precise_source_helper(owner, operation) else {
+            return Ok(None);
+        };
+        let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.math") else {
+            return Ok(None);
+        };
+        let Some(module) = self.modules.iter().find(|module| module.path == source.path) else {
+            return Ok(None);
+        };
+        let owned = (owner == "Int" && operation == "abs") || self.type_defs.iter().any(|definition| {
+            definition.name == owner && definition.key == format!("{}::{owner}", module.key)
+                && jet_foundation::CoreModuleExports::core_source_owns_type(&definition.key)
+        });
+        if !owned {
+            return Ok(None);
+        }
+        self.function_id_for(&format!("{}::{helper}", module.key)).map(Some)
+    }
+
+    pub(super) fn geometry_source_target(
+        &self,
+        owner: &Type,
+        operation: &str,
+    ) -> Result<Option<MirFunctionId>, LowerError> {
+        let Some(name) = owner.base_name() else { return Ok(None) };
+        if !crate::Sema::is_geometry_type(name) { return Ok(None) }
+        let type_id = self.type_id_for(name)?;
+        let Some(definition) = self.type_defs.iter().find(|definition| definition.id == type_id) else {
+            return Ok(None);
+        };
+        if !jet_foundation::CoreModuleExports::core_source_owns_type(&definition.key) {
+            return Ok(None);
+        }
+        let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.math") else {
+            return Ok(None);
+        };
+        let Some(module) = self.modules.iter().find(|module| module.path == source.path) else {
+            return Ok(None);
+        };
+        let mut selected = None;
+        for (target, functions) in &self.function_registry.by_target {
+            if target.module != module.key || target.method != operation || target.trait_name.is_some() {
+                continue;
+            }
+            for function in functions {
+                let Some(target_owner) = self.function_registry.owner_types.get(function) else { continue };
+                if target_owner.base_name().is_none_or(|head| canonical_target_type(&module.key, head) != definition.key) {
+                    continue;
+                }
+                if selected.replace(*function).is_some() {
+                    return Err(self.error(self.span(), "checked geometry source method is ambiguous"));
+                }
+            }
+        }
+        selected.map(Some).ok_or_else(|| self.error(self.span(), "checked geometry source method was pruned"))
+    }
+
     pub(super) fn lower_pattern(
         &mut self,
         pattern: &TPattern,
@@ -11819,6 +11890,24 @@ impl<'a> LowerCtx<'a> {
         record: &'static jet_foundation::Syntax::CoreCallRecord,
         widen_to_vec: bool,
     ) -> Result<MirCallArg, LowerError> {
+        // A registry read argument borrows the checked place even when sema
+        // inserted an implicit Clone for ordinary value consumption. Explicit
+        // copies/moves and mutation borrows keep their own access convention.
+        let borrowed_place = if record.signature.borrow_mask.get(index).copied() == Some(true)
+            || (record.module == "core.net.tls" && record.member == "client" && index >= 2)
+        {
+            let source = match &arg.kind {
+                TExprKind::Clone(inner, _) => &**inner,
+                _ => arg,
+            };
+            if matches!(&arg.kind, TExprKind::Borrow { .. }) {
+                None
+            } else {
+                super::tir_to_mir_expr::lower_receiver_place(self, source, MirAccess::Read)?
+            }
+        } else {
+            None
+        };
         let (access, place) = match &arg.kind {
             TExprKind::Borrow { place, mutable } => {
                 let access = if *mutable {
@@ -11829,6 +11918,7 @@ impl<'a> LowerCtx<'a> {
                 let place = self.lower_place(&TPlace::Expr(Box::new((**place).clone())), access)?;
                 (access, Some(place))
             }
+            _ if borrowed_place.is_some() => (MirAccess::Read, borrowed_place),
             TExprKind::Clone(..)
             | TExprKind::ExplicitCopy(_)
             | TExprKind::MaterializeView(_)

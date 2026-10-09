@@ -353,3 +353,99 @@ pub fn comments(toks: &[Token]) -> Vec<Token> {
         .cloned()
         .collect()
 }
+
+/// Compiler-internal Core demand from the existing canonical token stream.
+/// String payload and comments are not identifiers; interpolation expressions
+/// already carry their own canonical tokens and are visited without re-lexing.
+pub fn core_identifier_demand(tokens: &[Token]) -> jet_foundation::AST::CoreIdentifierDemand {
+    use jet_foundation::{CoreModuleExports, Prelude};
+
+    fn collect(
+        tokens: &[Token],
+        bare_names: &mut [bool],
+        prelude_entries: &[Prelude::Entry],
+        demand: &mut jet_foundation::AST::CoreIdentifierDemand,
+    ) {
+        for token in tokens {
+            match &token.kind {
+                TokKind::Ident(name) => {
+                    demand.option_or_err |= name == "or_err";
+                    for (index, bare) in CoreModuleExports::CORE_BARE_SOURCE_MODULES.iter().enumerate() {
+                        if name == bare.name || (name == "url" && bare.name == "URL") {
+                            bare_names[index] = true;
+                        }
+                    }
+                    if let Some(entry) = prelude_entries.iter().find(|entry| entry.name == name) {
+                        if let Prelude::Target::Core { module, .. } = entry.target {
+                            if !demand.prelude_modules.contains(&module) {
+                                demand.prelude_modules.push(module);
+                            }
+                        }
+                    }
+                }
+                TokKind::Str(parts) => {
+                    for part in parts {
+                        if let StrTokPart::Interp(nested) = part {
+                            collect(nested, bare_names, prelude_entries, demand);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut demand = jet_foundation::AST::CoreIdentifierDemand::default();
+    let mut bare_names = [false; CoreModuleExports::CORE_BARE_SOURCE_MODULES.len()];
+    collect(tokens, &mut bare_names, Prelude::entries(), &mut demand);
+    for (index, bare) in CoreModuleExports::CORE_BARE_SOURCE_MODULES.iter().enumerate() {
+        if bare_names[index] && !demand.bare_modules.contains(&bare.module_name) {
+            demand.bare_modules.push(bare.module_name);
+        }
+    }
+    // Preserve the alias injector's existing BTreeSet module order.
+    demand.prelude_modules.sort_unstable();
+    demand
+}
+
+#[cfg(test)]
+mod core_identifier_demand_tests {
+    use crate::Lexer;
+
+    #[test]
+    fn core_identifier_demand_ignores_literal_and_comment_payloads() {
+        for source in [
+            "\"URL Perf RNG Vec2 url or_err Clock Path read_file\"",
+            "`URL Perf RNG Vec2 url or_err Clock Path read_file`",
+            "\"\"\"\nURL Perf RNG Vec2 url or_err Clock Path read_file\n\"\"\"",
+            "\"{{URL}} {{RNG}} {{or_err}}\"",
+            "// URL RNG url or_err\n/* Perf /* Vec2 */ Clock Path read_file */\n",
+            "#FFI(c) fn f() { \"\"\"URL RNG {Vec2} url or_err\"\"\" }",
+            "URLExtra prefixURL _URL 变量URL URL变量",
+        ] {
+            let (tokens, diagnostics) = Lexer::lex(source);
+            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
+            let demand = Lexer::core_identifier_demand(&tokens);
+            assert!(demand.bare_modules.is_empty(), "{source:?}: {demand:?}");
+            assert!(!demand.option_or_err, "{source:?}: {demand:?}");
+            assert!(demand.prelude_modules.is_empty(), "{source:?}: {demand:?}");
+        }
+    }
+
+    #[test]
+    fn core_identifier_demand_keeps_real_and_nested_interpolation_identifiers() {
+        let source = "\"literal URL {RNG} {\"Perf {Vec2}\"} {value.or_err(\"url\")}\"";
+        let (tokens, diagnostics) = Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let demand = Lexer::core_identifier_demand(&tokens);
+        assert_eq!(demand.bare_modules, ["core.testing", "core.math"]);
+        assert!(demand.option_or_err);
+
+        let (tokens, diagnostics) = Lexer::lex("Vec2 RNG Perf URL url value.or_err()");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let demand = Lexer::core_identifier_demand(&tokens);
+        assert_eq!(demand.bare_modules, ["core.net.url", "core.perf", "core.testing", "core.math"]);
+        assert!(demand.option_or_err);
+        assert!(demand.prelude_modules.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+}

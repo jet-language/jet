@@ -177,7 +177,7 @@ pub(crate) fn register_distinct(
     funcs: &HashMap<String, FuncSig>,
     consts: &HashMap<String, Type>,
 ) {
-    if is_reserved_type(&d.name) {
+    if registry.reserves_type_name(&d.name) {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", d.name),
@@ -255,7 +255,7 @@ pub(crate) fn register_distinct(
     }
 }
 
-/// D-TYPEALIAS1 / D-ALIAS-OP1=B: register `alias Name<T> :: …` — generic shortcuts only.
+/// D-VIS-REEXPORT1 / D-ALIAS-BIND2: bare nominal aliases preserve their target's identity.
 pub(crate) fn register_type_alias(
     a: &crate::AST::TypeAliasDef,
     registry: &mut TypeRegistry,
@@ -263,7 +263,7 @@ pub(crate) fn register_type_alias(
     funcs: &HashMap<String, FuncSig>,
     consts: &HashMap<String, Type>,
 ) {
-    if is_reserved_type(&a.name) {
+    if registry.reserves_type_name(&a.name) {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", a.name),
@@ -281,7 +281,7 @@ pub(crate) fn register_type_alias(
         ));
         return;
     }
-    if a.type_params.is_empty() {
+    if a.type_params.is_empty() && !matches!(&a.target, Type::Named(_)) {
         diags.push(crate::Generics::e0324(a.name_span));
         return;
     }
@@ -2279,7 +2279,7 @@ pub(crate) fn register_enum(
     funcs: &HashMap<String, FuncSig>,
     consts: &HashMap<String, Type>,
 ) {
-    if is_reserved_type(&e.name) {
+    if registry.reserves_type_name(&e.name) {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", e.name),
@@ -2425,22 +2425,27 @@ fn register_type_methods_inner(
         let (type_name, methods, field_names) = match item {
             Item::Struct(s) => (
                 s.name.as_str(),
-                s.methods
-                    .iter()
-                    .chain(s.trait_impls.iter().flat_map(|block| block.methods.iter()))
+                s.methods.iter().map(|method| (method, None, None))
+                    .chain(s.trait_impls.iter().flat_map(|block| block.methods.iter()
+                        .map(move |method| (method, Some(block.trait_name.as_str()), block.operator_rhs.as_ref()))))
                     .collect::<Vec<_>>(),
                 registry.field_names(&s.name),
             ),
             Item::Enum(e) => (
                 e.name.as_str(),
-                e.methods
-                    .iter()
-                    .chain(e.trait_impls.iter().flat_map(|block| block.methods.iter()))
+                e.methods.iter().map(|method| (method, None, None))
+                    .chain(e.trait_impls.iter().flat_map(|block| block.methods.iter()
+                        .map(move |method| (method, Some(block.trait_name.as_str()), block.operator_rhs.as_ref()))))
                     .collect::<Vec<_>>(),
                 Vec::new(),
             ),
             _ => continue,
         };
+        for (method, trait_name, rhs) in &methods {
+            if let Some(key) = operator_signature_key(type_name, *trait_name, &method.name, *rhs) {
+                registry.operator_signatures.entry(key).or_insert_with(|| func_to_method_sig(method));
+            }
+        }
         let Some(type_def) = registry.types.get_mut(type_name) else {
             continue;
         };
@@ -2448,9 +2453,17 @@ fn register_type_methods_inner(
             TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
             TypeDef::Distinct { .. } | TypeDef::Alias { .. } => continue,
         };
-        for m in methods {
+        for (m, trait_name, _) in &methods {
             if field_names.iter().any(|f| f == &m.name) {
                 diags.push(method_field_clash(&m.name, type_name, m.name_span));
+            }
+            if trait_name.is_some_and(is_operator_trait) {
+                if methods.iter().any(|(other, other_trait, _)| {
+                    other.name == m.name && !other_trait.is_some_and(is_operator_trait)
+                }) {
+                    diags.push(method_defined_twice(&m.name, type_name, m.name_span, false));
+                }
+                continue;
             }
             if methods_map.contains_key(&m.name) {
                 if !error_on_duplicate {
@@ -2506,22 +2519,46 @@ pub(crate) fn register_impl_methods(
 ) {
     for item in items {
         let Item::Impl(i) = item else { continue };
-        if !registry.contains(&i.type_name) {
+        if i.trait_name.as_deref().is_some_and(is_operator_trait) {
+            let field_names = registry.field_names(&i.type_name);
+            for method in &i.methods {
+                if field_names.iter().any(|name| name == &method.name) {
+                    diags.push(method_field_clash(&method.name, &i.type_name, method.name_span));
+                }
+                if registry.method(&i.type_name, &method.name).is_some() {
+                    diags.push(method_defined_twice(&method.name, &i.type_name, method.name_span, false));
+                }
+                let key = operator_signature_key(&i.type_name, i.trait_name.as_deref(), &method.name, i.operator_rhs.as_ref()).unwrap();
+                registry.operator_signatures.entry(key).or_insert_with(|| func_to_method_sig(method));
+            }
+            continue;
+        }
+        if !registry.contains(&i.type_name) && !registry.source_owns_impl(&i.type_name) {
             continue;
         }
         let field_names = registry.field_names(&i.type_name);
-        let Some(type_def) = registry.types.get_mut(&i.type_name) else {
-            continue;
-        };
-        let methods_map = match type_def {
-            TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
-            TypeDef::Distinct { .. } | TypeDef::Alias { .. } => continue,
+        let hook_signatures = &registry.operator_signatures;
+        let methods_map = if registry.source_owns_impl(&i.type_name) {
+            registry.opaque_methods.entry(i.type_name.clone()).or_default()
+        } else {
+            let Some(type_def) = registry.types.get_mut(&i.type_name) else {
+                continue;
+            };
+            match type_def {
+                TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
+                TypeDef::Distinct { .. } | TypeDef::Alias { .. } => continue,
+            }
         };
         for m in &i.methods {
             if field_names.iter().any(|f| f == &m.name) {
                 diags.push(method_field_clash(&m.name, &i.type_name, m.name_span));
             }
-            if methods_map.contains_key(&m.name) {
+            let hook_name_clash = hook_signatures.keys().any(|key| {
+                let Some((owner, tail)) = key.split_once("::") else { return false; };
+                let Some((_, method_rhs)) = tail.split_once("::") else { return false; };
+                owner == i.type_name && method_rhs.split_once('<').is_some_and(|(name, _)| name == m.name)
+            });
+            if methods_map.contains_key(&m.name) || hook_name_clash {
                 let is_ctor = m.self_param().is_none();
                 diags.push(method_defined_twice(
                     &m.name,

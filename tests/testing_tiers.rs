@@ -41,3 +41,50 @@ fn run() {{
         "true\nfalse\nfalse\n0\n9\n",
     );
 }
+
+#[test]
+fn testing_corpus_orders_paths_and_skips_non_text_files_across_tiers() {
+    let scratch = common::Scratch::new("testing_corpus_source");
+    let fixture = scratch.path.join("corpus");
+    std::fs::create_dir(&fixture).expect("create corpus fixture");
+    std::fs::write(fixture.join("z.txt"), "last").expect("write last corpus entry");
+    std::fs::write(fixture.join("a.txt"), "first").expect("write first corpus entry");
+    std::fs::write(fixture.join("b.bin"), [255_u8]).expect("write invalid UTF-8 corpus entry");
+    std::fs::create_dir(fixture.join("c.dir")).expect("create ignored directory");
+    let source = format!(
+        r#"use core.testing as testing
+
+fn run() {{
+    values :: testing.corpus("{}")
+    print(values.len())
+    loop value in values -> print(value)
+    print(testing.corpus("{}").len())
+}}
+"#,
+        jet_string(&fixture),
+        jet_string(&fixture.join("missing")),
+    );
+    assert_tiers_agree("testing_corpus_source", &source, "2\nfirst\nlast\n0\n");
+}
+
+#[test]
+fn testing_snap_declares_env_and_obeys_updates_across_tiers() {
+    assert_tiers_agree(
+        "testing_snap_source",
+        r#"use core.testing as testing
+use core.sys as sys
+
+fn run() {
+    sys.set("JET_UPDATE_SNAPSHOTS", "1")
+    print(testing.snap("source snap é", "first\n"))
+    sys.set("JET_UPDATE_SNAPSHOTS", "0")
+    print(testing.snap("source snap é", "second\n"))
+    sys.set("JET_UPDATE_SNAPSHOTS", "1")
+    print(testing.snap("source snap é", "second\n"))
+    sys.set("JET_UPDATE_SNAPSHOTS", "0")
+    print(testing.snap("source snap é", "second\n"))
+}
+"#,
+        "true\nfalse\ntrue\ntrue\n",
+    );
+}

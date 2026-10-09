@@ -311,12 +311,17 @@ pub(crate) fn append_runtime_mir_codec(
             keep(emit_id_from_host_converter(out, symbols, &host_by_name, &definition.name));
             continue;
         }
+        // The only native-program ingress is the scoped host-shape view below;
+        // a full-program Source copy has no caller after that cutover.
+        if definition.name == "MIRProgram" {
+            continue;
+        }
         if custom_source_converter(&definition.name) || source_only_type(&definition.name) || native_type_absent(&definition.name, &host_by_name) {
             continue;
         }
         keep(match &definition.body {
             Body::Struct(fields) => {
-                emit_struct_from_host_converter(out, symbols, &host_by_name, &pairs, definition, fields)
+                emit_struct_from_host_converter(out, symbols, &host_by_name, &pairs, definition, fields, false)
             }
             Body::Enum(variants) => {
                 emit_enum_from_host_converter(out, symbols, &host_by_name, &pairs, definition, variants)
@@ -344,9 +349,12 @@ pub(crate) fn append_runtime_mir_codec(
             "Source MirProgram must remain a struct".to_string(),
         ));
     }
+    if let Body::Struct(fields) = &program.body {
+        emit_struct_from_host_converter(out, symbols, &host_by_name, &pairs, program, fields, true)?;
+    }
     writeln!(
         out,
-        "#[doc(hidden)]\npub(crate) fn __jet_bootstrap_mir_program_from_host(\n    value: &::jet_foundation::MIR::MirProgram,\n) -> Result<{program_source}, String> {{\n    __jet_bootstrap_with_trap_routes(__jet_bootstrap_host_trap_routes(value), || __jet_bootstrap_mir_MIRProgram_from_host(value))\n}}\n"
+        "#[doc(hidden)]\npub(crate) fn __jet_bootstrap_mir_host_shape_program_from_host(\n    value: &::jet_foundation::MIR::MirProgram,\n) -> Result<{program_source}, String> {{\n    __jet_bootstrap_mir_MIRProgram_host_shape_from_host(value)\n}}\n"
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
     // Runner's packaging (compiler image, run-from-host wrapper) names the
@@ -546,6 +554,7 @@ fn emit_struct_from_host_converter(
     pairs: &PairRecords,
     definition: &Definition,
     source_fields: &[Field],
+    shape_only: bool,
 ) -> Result<(), BootstrapHostCodecError> {
     let source = symbols.type_symbol(&definition.name)?;
     let host_path = host_type_path(&definition.name, host_by_name);
@@ -575,6 +584,15 @@ fn emit_struct_from_host_converter(
     let mut initializers = Vec::new();
     for source_field in source_fields {
         let source_field_symbol = symbols.field_symbol(&definition.name, &source_field.name)?;
+        // This is a scoped view, not a round-trip program. Preserve the header
+        // and the four tables read by the canonical Source shape accessor;
+        // unrelated collection rows must never be converted or cloned.
+        if shape_only {
+            if let Some(empty) = host_shape_empty_field(source_field) {
+                initializers.push(format!("        {source_field_symbol}: {empty},"));
+                continue;
+            }
+        }
         if let Some(expression) = custom_struct_field_from_host(&definition.name, &source_field.name) {
             initializers.push(format!("        {source_field_symbol}: {expression},"));
             continue;
@@ -621,13 +639,24 @@ fn emit_struct_from_host_converter(
     writeln!(
         out,
         "fn __jet_bootstrap_mir_{}_from_host(value: &{}) -> Result<{}, String> {{\n{checks}    Ok({} {{\n{}\n    }})\n}}\n",
-        definition.name,
+        if shape_only { format!("{}_host_shape", definition.name) } else { definition.name.clone() },
         host_path,
         source,
         source,
         initializers.join("\n"),
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
+}
+
+fn host_shape_empty_field(field: &Field) -> Option<&'static str> {
+    if matches!(field.name.as_str(), "types" | "core_owners" | "modules" | "handles") {
+        return None;
+    }
+    match parse_type(&field.ty) {
+        Ok(TypeExpr::List(_)) => Some("::std::vec::Vec::new().into()"),
+        Ok(TypeExpr::Map(..)) => Some("::std::collections::HashMap::new()"),
+        _ => None,
+    }
 }
 
 fn emit_enum_from_host_converter(
@@ -2102,8 +2131,7 @@ fn emit_binary_overflow_derivation(
          fn __jet_bootstrap_fixed_trap_member(member: &str) -> bool {{\n    member.split_once(\".trap.\").is_some_and(|(width, op)| matches!(width, \"i8\" | \"i16\" | \"i32\" | \"i64\" | \"u8\" | \"u16\" | \"u32\" | \"u64\") && matches!(op, \"add\" | \"sub\" | \"mul\" | \"div\" | \"pow\" | \"shl\" | \"shr\"))\n}}\n\
          fn __jet_bootstrap_with_trap_routes<T>(routes: ::std::collections::BTreeSet<u64>, convert: impl FnOnce() -> Result<T, String>) -> Result<T, String> {{\n    let previous = __JET_BOOTSTRAP_TRAP_ROUTES.with(|cell| cell.replace(Some(routes)));\n    let result = convert();\n    __JET_BOOTSTRAP_TRAP_ROUTES.with(|cell| *cell.borrow_mut() = previous);\n    result\n}}\n\
          fn __jet_bootstrap_binary_traps(dispatch: &::jet_foundation::MIR::MirBinaryDispatch) -> Result<bool, String> {{\n    match dispatch {{\n        ::jet_foundation::MIR::MirBinaryDispatch::Primitive => Ok(false),\n        ::jet_foundation::MIR::MirBinaryDispatch::Prelude {{ call, .. }} => __JET_BOOTSTRAP_TRAP_ROUTES.with(|cell| cell.borrow().as_ref().map(|routes| routes.contains(&call.0))).ok_or_else(|| \"MIR Binary overflow derives from the program's Prelude routes; convert the whole program\".to_string()),\n    }}\n}}\n\
-         fn __jet_bootstrap_source_trap_routes(value: &{program}) -> ::std::collections::BTreeSet<u64> {{\n    value.{prelude_calls}.iter().filter(|row| matches!(row.{family}, {overflow}) && __jet_bootstrap_fixed_trap_member(&row.{member})).map(|row| row.{id}.{id_value}).collect()\n}}\n\
-         fn __jet_bootstrap_host_trap_routes(value: &::jet_foundation::MIR::MirProgram) -> ::std::collections::BTreeSet<u64> {{\n    value.prelude_calls.iter().filter(|row| matches!(row.family, ::jet_foundation::MIR::MirPreludeFamily::Overflow) && __jet_bootstrap_fixed_trap_member(&row.member)).map(|row| row.id.0).collect()\n}}\n"
+         fn __jet_bootstrap_source_trap_routes(value: &{program}) -> ::std::collections::BTreeSet<u64> {{\n    value.{prelude_calls}.iter().filter(|row| matches!(row.{family}, {overflow}) && __jet_bootstrap_fixed_trap_member(&row.{member})).map(|row| row.{id}.{id_value}).collect()\n}}\n"
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
 }
@@ -2605,7 +2633,7 @@ fn read_identifier(input: &str, cursor: &mut usize) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_definitions, parse_type, Body, TypeExpr};
+    use super::{host_shape_empty_field, parse_definitions, parse_type, Body, TypeExpr, SOURCE_MIR_SCHEMA};
 
     #[test]
     fn source_schema_parser_retains_nested_typed_rows() {

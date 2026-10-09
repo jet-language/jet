@@ -138,6 +138,17 @@ pub fn corelib_wrapper_needs_unsafe_or_proof() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("fn fork opens #Unsafe"), "{stderr}");
 
+    // Default-value braces belong to the parameter list, not the function body.
+    fixture.write(
+        "Core/sys/sys.jet",
+        "pub fn default_gated(value: Int{0}, option: Int?{None}) -> Int Never! {\n    #Unsafe(\"default fixture gate\") { value }\n}\npub fn default_plain(value: Int{0}) -> Int Never! { value }\n",
+    );
+    let output = ratchet(&fixture, true);
+    assert!(!output.status.success(), "default-parameter wrapper needs a proof");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("fn default_gated opens #Unsafe"), "{stderr}");
+    assert!(!stderr.contains("fn default_plain"), "{stderr}");
+
     fixture.write(
         "Core/sys/sys.jet",
         "pub fn fork() -> Int IOError! {\n    core.sys.fork()\n}\n",

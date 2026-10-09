@@ -1413,7 +1413,9 @@ fn mir_image_static_str(value: String) -> Result<&'static str, String> {
     for record in crate::Syntax::CORE_CALLS {
         if record.module == value { return Ok(record.module); }
         if record.member == value { return Ok(record.member); }
-        if record.symbol.name() == value { return Ok(record.symbol.name()); }
+        if let crate::Syntax::CoreCallSymbol::Prelude(name) | crate::Syntax::CoreCallSymbol::Rust(name) = record.symbol {
+            if name == value { return Ok(name); }
+        }
         if let Some(item) = record.receiver_types.iter().copied().find(|item| *item == value) { return Ok(item); }
         if let Some(item) = record.effect_leaf.filter(|item| *item == value) { return Ok(item); }
         if let Some(marker) = record.marker {
@@ -1435,6 +1437,24 @@ fn mir_image_static_str(value: String) -> Result<&'static str, String> {
     let item: &'static str = Box::leak(value.into_boxed_str());
     unowned.insert(item);
     Ok(item)
+}
+#[test]
+fn mir_image_unknown_static_string_restores_past_source_owned_rows() {
+    assert!(crate::Syntax::CORE_CALLS.iter().any(|record|
+        matches!(record.symbol, crate::Syntax::CoreCallSymbol::SourceOwned)));
+    let value = "__mir_image_fixture_string_absent_from_core_registry__";
+    let mut interner = MirProgramImageInterner::default();
+    let mut writer = MirProgramImageWriter { bytes: Vec::new(), interner: &mut interner };
+    writer.write_string(value).unwrap();
+    let body = writer.finish();
+    let bytes = mir_image_assemble(interner, body).unwrap();
+    let (tables, cursor) = mir_image_read_tables(&bytes).unwrap();
+    let mut reader = MirProgramImageReader { bytes: &bytes, cursor, tables: &tables, bodies: true };
+    let restored = mir_image_static_str(reader.read_string().unwrap()).unwrap();
+    reader.finish().unwrap();
+    assert_eq!(restored, value);
+    // A second restore must reuse the process-wide interned entry.
+    assert!(std::ptr::eq(restored, mir_image_static_str(value.to_string()).unwrap()));
 }
 "#,
     );

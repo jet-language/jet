@@ -1047,6 +1047,57 @@ pub(crate) fn ambient_core_call(
     _resolved_ret: Option<Type>,
     _sink: Option<&mut jet_codegen::Comptime::DevSink>,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    // JetEval delegates these Ambient rows through its existing host adapter.
+    // This boundary only marshals the existing SQLite bridge/wire carriers.
+    if module == "core.db" {
+        let raw = match (method, args.as_slice()) {
+            ("__queue_raw_open", [CtValue::Str(path)]) => {
+                Some(Ok(CtValue::Int(runtime::jet_db_open(path) as i64)))
+            }
+            ("__queue_raw_close", [CtValue::Int(handle)]) => {
+                Some(Ok(CtValue::Bool(runtime::jet_db_close(*handle as u64))))
+            }
+            ("__queue_raw_begin", [CtValue::Int(handle)]) => {
+                Some(Ok(CtValue::Bool(runtime::jet_db_begin(*handle as u64))))
+            }
+            ("__queue_raw_commit", [CtValue::Int(handle)]) => {
+                Some(Ok(CtValue::Bool(runtime::jet_db_commit(*handle as u64))))
+            }
+            ("__queue_raw_rollback", [CtValue::Int(handle)]) => {
+                Some(Ok(CtValue::Bool(runtime::jet_db_rollback(*handle as u64))))
+            }
+            ("__queue_raw_execute" | "__queue_raw_query", [CtValue::Int(handle), CtValue::Str(sql), CtValue::List(params)]) => {
+                Some(params.iter().map(|value| ambient_db_value(value, span))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(|params| {
+                        let params = wire::jet_db_encode_params(&params);
+                        if method == "__queue_raw_execute" {
+                            db_outcome(wire::jet_db_decode_execute_result(
+                                &runtime::jet_db_execute(*handle as u64, sql, &params)), CtValue::Int)
+                        } else {
+                            db_outcome(wire::jet_db_decode_query_result(
+                                &runtime::jet_db_query(*handle as u64, sql, &params)),
+                                |rows| CtValue::List(rows.into_iter().map(db_row_ct).collect()))
+                        }
+                    }))
+            }
+            _ => None,
+        };
+        if raw.is_some() {
+            return raw;
+        }
+    }
+    // Reserved Core source leaves retain this one SQLite host implementation.
+    let method = match (module, method) {
+        ("core.db", "__open") => "open",
+        ("core.db", "__open_memory") => "open_memory",
+        ("core.db", "__pool") => "pool",
+        ("core.db", "__policy") => "policy",
+        ("core.db", "__policy_audit") => "policy_audit",
+        ("core.db", "__transaction") => "transaction",
+        ("core.db", "__migrate") => "migrate",
+        _ => method,
+    };
     if module == "core.db" && (method == "migrate" || method == "transaction") {
         let [scope, CtValue::Str(label), steps] = args.as_slice() else {
             return Some(Err(db_diag(
@@ -1269,19 +1320,6 @@ fn connection_core_call(
                     CtValue::Str(wire::jet_db_policy_audit_line(&table, compiled, &user))
                 })
                 .ok_or_else(|| db_diag("unknown database scope handle", span))
-        }),
-        (
-            "core.db",
-            "row_value" | "row_int" | "row_float" | "row_text" | "row_bool",
-            [row, CtValue::Str(key)],
-        ) => db_row_from_ct(row, span).map(|row| match method {
-            "row_value" => db_outcome(wire::jet_db_row_value(&row, key), db_value_ct),
-            "row_int" => db_outcome(wire::jet_db_row_int(&row, key), CtValue::Int),
-            "row_float" => db_outcome(wire::jet_db_row_float(&row, key), |value| {
-                CtValue::Float(jet_foundation::AST::CtFloat::f64(value))
-            }),
-            "row_text" => db_outcome(wire::jet_db_row_text(&row, key), CtValue::Str),
-            _ => db_outcome(wire::jet_db_row_bool(&row, key), CtValue::Bool),
         }),
         ("core.handle", "db.with_policy", [connection, policy, CtValue::Str(user)])
             if is_handle_value(connection, "DBConnection") =>

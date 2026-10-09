@@ -247,11 +247,6 @@ fn write_prelude_enum_meta(manifest: &PathBuf) {
             "DataEvent",
         ),
         (
-            "AuthError",
-            "../jet-codegen/src/Prelude/CoreLib/Top/Auth.rs",
-            "JetAuthError",
-        ),
-        (
             "HTTPError",
             "../jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs",
             "JetHTTPError",

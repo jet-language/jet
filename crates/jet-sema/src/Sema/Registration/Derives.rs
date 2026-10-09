@@ -624,6 +624,10 @@ mod tests {
         };
         let mut registry = TypeRegistry {
             types: std::collections::HashMap::new(),
+            source_owned_types: std::collections::HashSet::new(),
+            core_source_module: None,
+            opaque_methods: std::collections::HashMap::new(),
+            operator_signatures: std::collections::HashMap::new(),
             error_types: std::collections::HashSet::new(),
             unit_types: std::collections::HashSet::new(),
             unit_facts: std::collections::HashMap::new(),
@@ -664,6 +668,10 @@ mod tests {
         assert!(diags.is_empty(), "built-in derive diagnostics: {diags:?}");
         let mut registry = TypeRegistry {
             types: std::collections::HashMap::new(),
+            source_owned_types: std::collections::HashSet::new(),
+            core_source_module: None,
+            opaque_methods: std::collections::HashMap::new(),
+            operator_signatures: std::collections::HashMap::new(),
             error_types: std::collections::HashSet::new(),
             unit_types: std::collections::HashSet::new(),
             unit_facts: std::collections::HashMap::new(),

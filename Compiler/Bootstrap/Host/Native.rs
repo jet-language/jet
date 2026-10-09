@@ -1518,6 +1518,7 @@ fn bootstrap_required_callable<'a>(
 struct BootstrapNativeHelperRoots {
     callback_transfer: jet_foundation::MIR::MirFunctionId,
     host_type_shape: jet_foundation::MIR::MirFunctionId,
+    host_shape_rows: jet_foundation::MIR::MirFunctionId,
 }
 
 fn checked_bootstrap_callable<'a>(
@@ -1585,6 +1586,7 @@ fn checked_bootstrap_native_helper_roots(
     Ok(BootstrapNativeHelperRoots {
         callback_transfer: checked("jet_eval_callback_transfer")?,
         host_type_shape: checked("jet_eval_host_type_shape_from_program")?,
+        host_shape_rows: checked("jet_eval_program_shape_rows")?,
     })
 }
 
@@ -1870,18 +1872,29 @@ fn emit_bootstrap_native_compile_entry(
     let callback_transfer = helpers.callback_transfer.0.to_string();
     let host_type_shape = helpers.host_type_shape.0.to_string();
     let shape_callable = checked_bootstrap_callable(bindings, "jet_eval_host_type_shape_from_program")?;
-    if shape_callable.metadata.parameter_types.len() != 3 {
+    let shape_rows_callable = checked_bootstrap_callable(bindings, "jet_eval_program_shape_rows")?;
+    if shape_callable.metadata.parameter_types.len() != 4
+        || !shape_callable.metadata.parameter_types[..2].iter().all(|ty| ty.starts_with('&'))
+        || shape_rows_callable.metadata.parameter_types.len() != 1
+        || !shape_rows_callable.metadata.parameter_types[0].starts_with('&')
+        || shape_rows_callable.metadata.function != helpers.host_shape_rows
+    {
         return Err(BootstrapHostCodecError::InvalidMetadata(
-            "Source host-shape accessor must take its program, checked type, and source span".to_string(),
+            "Source host-shape accessor must borrow its program and cached rows, then take its checked type and source span; its row builder must borrow the program".to_string(),
         ));
     }
     let shape_arguments = bootstrap_call_arguments(
         &shape_callable.metadata.parameter_types,
         &[
-            ("__jet_shape_program", "__jet_shape_program.clone()"),
+            ("__jet_shape_program", "__jet_shape_program"),
+            ("__jet_shape_rows", "__jet_shape_rows"),
             ("__jet_shape_type", "__jet_shape_type.clone()"),
             ("__jet_shape_span", "__jet_shape_span.clone()"),
         ],
+    );
+    let shape_rows_arguments = bootstrap_call_arguments(
+        &shape_rows_callable.metadata.parameter_types,
+        &[("__jet_shape_program", "__jet_shape_program")],
     );
     let generated = r#"
 #[doc(hidden)]
@@ -2040,15 +2053,13 @@ pub fn __jet_bootstrap_compile_with_native(
             .clone();
         let __jet_template = __jet_bootstrap_native_adapter_template(
             &__jet_bindings,
-            __jet_compiler_image.program.as_ref(),
-            __jet_compiler_image.header.artifact,
+            __jet_compiler_image.as_ref(),
             __jet_receiver_type.clone(),
         )?;
         let (__jet_numeric_object, __jet_numeric_identity) =
             __jet_bootstrap_native_numeric_callable_template(
                 &__jet_bindings,
-                __jet_compiler_image.program.as_ref(),
-                __jet_compiler_image.header.artifact,
+                __jet_compiler_image.as_ref(),
             )?;
         let __jet_numeric_type = crate::__jet_bootstrap_entry_field_type(
             __jet_compiler_image.program.as_ref(),
@@ -2061,15 +2072,13 @@ pub fn __jet_bootstrap_compile_with_native(
         if !__jet_numeric_callable_type.same_checked_type(&__jet_numeric_identity.callable_type) {
             return Err("numeric callable template differs from the exact checked config field".to_string());
         }
-        let __jet_image_execution = __jet_compiler_image.program
-            .sealed_execution_identity(Some(__jet_compiler_image.header.artifact))
-            .map_err(|error| error.to_string())?;
+        let __jet_image_execution = &__jet_compiler_image.header.identity;
         let __jet_numeric_registration = __jet_bootstrap_native_binding_registration(
             &__jet_root_lease,
             None,
             __jet_compiler_image.program.as_ref(),
             __jet_compiler_image.header.artifact,
-            &__jet_image_execution,
+            __jet_image_execution,
             vec!["SemaRegistrationHostHooks".to_string(), "numeric_unit_conversion_exact".to_string()],
             @new.JetEvalNativeBindingIdentity.Callable@{ binding: @s.JetEvalNativeCallableBinding@{
                 key: __jet_numeric_identity.key.clone(),
@@ -2091,12 +2100,14 @@ pub fn __jet_bootstrap_compile_with_native(
             .and_then(|function| function.params.first())
             .map(|parameter| &parameter.ty)
             .ok_or_else(|| "checked Source Machine parameter disappeared".to_string())?;
-        // The Source projection exists only for these host-shape queries,
-        // which read type, field, Core-owner and handle rows: it is converted
-        // from the restored body-free signature program and dropped below.
-        let mut __jet_shape_program = crate::__jet_bootstrap_mir_program_from_host(
+        // Project only nominal definitions, Core owners, checked modules and
+        // exact handle lifecycles through the canonical MIR field converters.
+        // One Source index serves all ABI queries; no function/type-instance
+        // tables are converted, and the scoped view is dropped below.
+        let mut __jet_shape_program = crate::__jet_bootstrap_mir_host_shape_program_from_host(
             __jet_compiler_image.program.as_ref(),
         )?;
+        let mut __jet_shape_rows = __HOST_SHAPE_ROWS_SYMBOL__(__HOST_SHAPE_ROWS_ARGUMENTS__);
         let mut __jet_shape_for = |checked_type: &::jet_foundation::MIR::MirType|
             -> Result<crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape, String> {
             let mut __jet_shape_type = __jet_bootstrap_type_from_host(checked_type)?;
@@ -2116,16 +2127,16 @@ pub fn __jet_bootstrap_compile_with_native(
             __jet_shared_payload_shapes.insert(key, __jet_shape_for(&payload_type)?);
         }
         drop(__jet_shape_for);
+        drop(__jet_shape_rows);
         drop(__jet_shape_program);
         let __jet_native_adapter = __JetBootstrapNativeAdapter::new_with_bindings(
             __jet_root_lease,
             __jet_bindings,
-            __jet_compiler_image.program.clone(),
+            __jet_compiler_image.clone(),
             __jet_machine_abi_shape,
             __jet_shared_payload_shapes,
             __jet_completion_scope.clone(),
             __jet_callback_jobs.clone(),
-            __jet_compiler_image.header.artifact,
             __jet_receiver_type,
             __jet_template,
             vec![__jet_numeric_registration],
@@ -2193,6 +2204,8 @@ pub fn __jet_bootstrap_compile_with_native(
         .replace("__HOST_TYPE_SHAPE_ID__", &host_type_shape)
         .replace("__HOST_TYPE_SHAPE_SYMBOL__", &shape_callable.metadata.symbol)
         .replace("__HOST_TYPE_SHAPE_ARGUMENTS__", &shape_arguments)
+        .replace("__HOST_SHAPE_ROWS_SYMBOL__", &shape_rows_callable.metadata.symbol)
+        .replace("__HOST_SHAPE_ROWS_ARGUMENTS__", &shape_rows_arguments)
         .replace("__HOST_FIELD_OWNER__", &host_field.owner.0.to_string())
         .replace("__HOST_FIELD_ID__", &host_field.field.0.to_string())
         .replace("__NUMERIC_FIELD_OWNER__", &numeric_field.owner.0.to_string())
@@ -2716,7 +2729,7 @@ fn emit_bootstrap_task_roots_fixture(
     let config = symbols.type_symbol("JetEvalConfig")?;
     let span = symbols.type_symbol("Span")?;
     let carrier = symbols.type_symbol("JetEvalSharedHostCarrier")?;
-    let fixture = checked_task_roots_callable(bindings, "jet_eval_task_roots_fixture", 6, true)?;
+    let fixture = checked_task_roots_callable(bindings, "jet_eval_task_roots_fixture", 7, true)?;
     let produce =
         checked_task_roots_callable(bindings, "jet_eval_task_roots_fixture_shared_produce", 3, false)?;
     let consume =
@@ -2732,6 +2745,7 @@ fn emit_bootstrap_task_roots_fixture(
         &fixture.parameter_types,
         &[
             program_place,
+            ("__jet_shape_program", "__jet_shape_program"),
             config_place,
             ("__jet_callback", "__jet_callback"),
             ("__jet_resource_handle", "__jet_resource_handle"),
@@ -2759,6 +2773,7 @@ fn emit_bootstrap_task_roots_fixture(
          #[allow(unused_mut)]\n\
          pub(crate) fn __jet_bootstrap_task_roots_fixture(\n\
          \x20   __jet_program: &mut {program},\n\
+         \x20   __jet_checked_program: &::jet_foundation::MIR::MirProgram,\n\
          \x20   __jet_config: &mut {config},\n\
          \x20   __jet_callback: &::jet_foundation::MIR::MirFunctionId,\n\
          \x20   __jet_resource_handle: &::jet_foundation::MIR::MirHandleId,\n\
@@ -2768,6 +2783,7 @@ fn emit_bootstrap_task_roots_fixture(
          \x20   let mut __jet_resource_handle = __jet_bootstrap_mir_MIRHandleID_from_host(__jet_resource_handle)?;\n\
          \x20   let mut __jet_resource_raw = jet_foundation::Numeric::JetInt::from_i64(__jet_resource_raw);\n\
          \x20   let mut __jet_span = __jet_bootstrap_task_roots_span()?;\n\
+         \x20   let mut __jet_shape_program = __jet_bootstrap_mir_host_shape_program_from_host(__jet_checked_program)?;\n\
          \x20   Ok({fixture_symbol}({fixture_arguments}))\n\
          }}\n\
          #[doc(hidden)]\n\

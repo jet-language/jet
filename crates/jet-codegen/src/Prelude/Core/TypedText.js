@@ -111,22 +111,8 @@ function jet_typed_datetime_literal(literals, holes) {
   return jet_time_parse_rfc3339(jet_typed_datetime_interpolate(literals, holes));
 }
 
-
-function jet_typed_url_literal(literals, holes) {
-  const source = Array.isArray(literals) ? literals : [];
-  const values = Array.isArray(holes) ? holes : [];
-  const output = [];
-  for (let index = 0; index < source.length; index += 1) {
-    output.push(String(source[index]));
-    if (index < values.length) output.push(jet_show(values[index]));
-  }
-  return output.join("");
-}
-
-
 function jet_typed_path_literal(literals, holes) {
   return jet_typed_path_interpolate(literals, holes);
 }
 
 globalThis["jet_typed_path_literal"] = jet_typed_path_literal;
-globalThis["jet_std::jet_typed_url_literal"] = jet_typed_url_literal;

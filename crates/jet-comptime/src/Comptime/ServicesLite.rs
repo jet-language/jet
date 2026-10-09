@@ -6,6 +6,14 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CtFloat, CtReport, CtValue, Type};
 use crate::MIR::{MirNominalRef, MirRuntimeValue, MirType, MirTypeKind};
 
+// Representation-only binding for the shared Prelude service kernels.
+// This Rust-hosted transport dies at the Jet-runtime cutover.
+mod jet_std {
+    pub fn jet_int_owned_from_i64(value: i64) -> jet_foundation::Numeric::JetInt {
+        jet_foundation::Numeric::JetInt::from_i64(value)
+    }
+}
+
 trait JetShow {
     fn jet_show(&self) -> String;
 }
@@ -680,8 +688,10 @@ fn runtime_to_state_store(value: &MirRuntimeValue, span: Span) -> Result<JetServ
         .find(|(name, _)| name == "path")
         .map(|(_, value)| value)
         .ok_or_else(|| unsupported("ServiceStateStore path", span))?;
-    let path = runtime_to_service_string(path, MAX_SERVICE_STATE_STORE, "service state store", span)?;
-    jet_services_state_store(path).map_err(|error| unsupported(&error.jet_show(), span))
+    let MirRuntimeValue::String(path) = path else {
+        return Err(unsupported("ServiceStateStore.path carrier", span));
+    };
+    Ok(JetServiceStateStore { path: path.clone() })
 }
 
 fn state_authority_to_runtime(authority: &JetServiceStateAuthority) -> MirRuntimeValue {
@@ -2328,8 +2338,9 @@ fn runtime_value_to_service_runtime(value: &MirRuntimeValue, span: Span) -> Resu
         .iter()
         .find_map(|(name, value)| (name == "store").then_some(value))
         .ok_or_else(|| unsupported("ServiceRuntime.store", span))
-        .and_then(|value| {
-            runtime_to_service_string(value, SERVICE_AUTH_MAX_STORE, "ServiceRuntime.store", span)
+        .and_then(|value| match value {
+            MirRuntimeValue::String(value) => Ok(value.clone()),
+            _ => Err(unsupported("ServiceRuntime.store carrier", span)),
         })?;
     let retention_ms = fields
         .iter()
@@ -2339,7 +2350,7 @@ fn runtime_value_to_service_runtime(value: &MirRuntimeValue, span: Span) -> Resu
             MirRuntimeValue::Int(value) => Ok(*value),
             _ => Err(unsupported("ServiceRuntime.retention_ms", span)),
         })?;
-    Ok(jet_services_runtime(store, retention_ms))
+    Ok(JetServiceRuntime { store, retention_ms })
 }
 
 fn service_runtime_to_value(runtime: &JetServiceRuntime) -> MirRuntimeValue {
@@ -2544,46 +2555,28 @@ pub fn apply_runtime(
         args.get(i)
             .ok_or_else(|| unsupported(&format!("core.service.{method} arg {i}"), span))
     };
+    // Compiler-private, borrowed representation reads; do not reconstruct a
+    // scheduler-bearing JetServiceTree just to inspect one stored field.
+    if matches!(method, "__tree_generation" | "__tree_event_count" | "__tree_dead_letter_count") {
+        let MirRuntimeValue::Struct { fields, .. } = one(0)? else {
+            return Err(unsupported("ServiceTree raw carrier", span));
+        };
+        let name = match method {
+            "__tree_generation" => "generation",
+            "__tree_event_count" => "event_log",
+            _ => "dead_letters",
+        };
+        let value = fields.iter().find(|(field, _)| field == name).map(|(_, value)| value);
+        return match (method, value) {
+            ("__tree_generation", Some(MirRuntimeValue::Int(value))) => Ok(MirRuntimeValue::Int(*value)),
+            (_, Some(MirRuntimeValue::List(values))) => Ok(MirRuntimeValue::Int(values.len() as i64)),
+            _ => Err(unsupported("ServiceTree raw carrier field", span)),
+        };
+    }
     match method {
         "tree" => {
             let name = runtime_to_service_string(one(0)?, MAX_SERVICE_NAME, "tree name", span)?;
             Ok(tree_to_runtime(&jet_services_tree(name)))
-        }
-        "runtime" => {
-            let store = runtime_to_service_string(
-                one(0)?,
-                SERVICE_AUTH_MAX_STORE,
-                "ServiceRuntime.store",
-                span,
-            )?;
-            let retention_ms = match one(1)? {
-                MirRuntimeValue::Struct { type_name, fields } if type_name == "Duration" => fields
-                    .iter()
-                    .find_map(|(name, value)| match (name.as_str(), value) {
-                        ("ns", MirRuntimeValue::Int(ns)) => Some(*ns / 1_000_000),
-                        _ => None,
-                    })
-                    .ok_or_else(|| unsupported("ServiceRuntime.retention_ms", span))?,
-                _ => return Err(unsupported("ServiceRuntime.retention_ms", span)),
-            };
-            Ok(service_runtime_to_value(&jet_services_runtime(store, retention_ms)))
-        }
-        "restart_one_for_one" => Ok(restart_to_runtime(jet_services_restart_one_for_one())),
-        "restart_one_for_all" => Ok(restart_to_runtime(jet_services_restart_one_for_all())),
-        "restart_rest_for_one" => Ok(restart_to_runtime(jet_services_restart_rest_for_one())),
-        "delivery_at_most_once" => Ok(delivery_to_runtime(jet_services_delivery_at_most_once())),
-        "delivery_durable" => Ok(delivery_to_runtime(jet_services_delivery_durable())),
-        "state_store" => {
-            let path = runtime_to_service_string(
-                one(0)?,
-                MAX_SERVICE_STATE_STORE,
-                "service state store",
-                span,
-            )?;
-            Ok(match jet_services_state_store(path) {
-                Ok(store) => MirRuntimeValue::Present(Box::new(state_store_to_runtime(&store))),
-                Err(error) => MirRuntimeValue::FailedTold(Box::new(map_err(error))),
-            })
         }
         "set_restart" => {
             let mut tree = runtime_to_tree(one(0)?, span)?;
@@ -2768,10 +2761,6 @@ pub fn apply_runtime(
                 Err(error) => MirRuntimeValue::FailedTold(Box::new(map_err(error))),
             })
         }
-        "dead_letter_count" => Ok(MirRuntimeValue::Int(jet_services_dead_letter_count(&runtime_to_tree(
-            one(0)?,
-            span,
-        )?))),
         "drain_dead_letters" => {
             let mut tree = runtime_to_tree(one(0)?, span)?;
             Ok(match jet_services_drain_dead_letters(&mut tree) {
@@ -2858,10 +2847,6 @@ pub fn apply_runtime(
                 Err(e) => mutate_err(tree, map_err(e)),
             })
         }
-        "event_count" => Ok(MirRuntimeValue::Int(jet_services_event_count(&runtime_to_tree(
-            one(0)?,
-            span,
-        )?))),
         "replay_events" => Ok(MirRuntimeValue::String(jet_services_replay_events(&runtime_to_tree(
             one(0)?,
             span,
@@ -3056,9 +3041,6 @@ pub fn apply_runtime(
                 Err(e) => MirRuntimeValue::FailedTold(Box::new(map_err(e))),
             })
         }
-        "directory_generation" => Ok(MirRuntimeValue::Int(jet_services_directory_generation(
-            &runtime_to_tree(one(0)?, span)?,
-        ))),
         "drain_worker" | "partition_worker" | "reconcile_worker" => {
             let mut tree = runtime_to_tree(one(0)?, span)?;
             let endpoint = runtime_to_endpoint(one(1)?, span)?;
@@ -3235,9 +3217,6 @@ pub fn interpreter_job_cbor_bytes(
 }
 
 
-pub fn service_runtime_value(store: String, retention_ms: i64) -> MirRuntimeValue {
-    service_runtime_to_value(&jet_services_runtime(store, retention_ms))
-}
 
 pub fn service_show_value(value: &CtValue) -> Option<String> {
     ct_to_runtime_value(value)
@@ -3348,6 +3327,24 @@ pub fn apply_jobs_runtime(
     args: &[MirRuntimeValue],
     span: Span,
 ) -> Result<MirRuntimeValue, Diagnostic> {
+    if method == "__sleep_ms" {
+        jet_job_queue_sleep_ms(queue_int(queue_one(args, 0, method, span)?, "core.jobs", method, span)?);
+        return Ok(MirRuntimeValue::Unit);
+    }
+    if method == "__publish_parts" {
+        let text = |index| match queue_one(args, index, method, span)? {
+            MirRuntimeValue::String(value) => Ok(value),
+            _ => Err(unsupported("core.jobs.__publish_parts expects String parts", span)),
+        };
+        jet_job_queue_publish_parts(
+            queue_int(queue_one(args, 0, method, span)?, "core.jobs", method, span)?,
+            text(1)?,
+            text(2)?,
+            text(3)?.clone(),
+            text(4)?.clone(),
+        );
+        return Ok(MirRuntimeValue::Unit);
+    }
     let endpoint = match jet_services_active_execution_endpoint() {
         Ok(endpoint) => endpoint,
         Err(error) => return Ok(queue_failed(error)),

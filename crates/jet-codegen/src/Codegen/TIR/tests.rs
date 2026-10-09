@@ -252,6 +252,7 @@ fn checked_bundle(src: &str) -> (
             script_body: std::mem::take(&mut prog.script_body),
             block_spans: std::mem::take(&mut prog.block_spans),
             source: src.to_string(),
+            core_identifier_demand: crate::Lexer::core_identifier_demand(&toks),
             web_target_ceiling: prog.web_target_ceiling,
             pub_file: prog.pub_file,
             no_prelude: prog.no_prelude,
@@ -374,6 +375,7 @@ fn loaded_core_source_signatures_include_transitive_files_calls() {
             path: std::path::PathBuf::from(format!("{alias}.jet")),
             display: format!("{alias}.jet"),
             source: source.to_string(),
+            core_identifier_demand: crate::Lexer::core_identifier_demand(&tokens),
             alias: alias.to_string(),
             imports: std::mem::take(&mut program.imports),
             items: std::mem::take(&mut program.items),
@@ -2035,6 +2037,47 @@ fn borrowed_builtin_arguments_are_never_copied() {
             1,
             "a stored builtin argument is copied exactly once:\n{keep}"
         );
+    });
+}
+
+#[test]
+fn borrowed_core_provider_arguments_are_never_copied() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust(
+            "use core as core\nfn style_text(value: String) -> String {\n core.term.style(value, \"bold\")\n}\nfn run() {}\n",
+        );
+        let body = emitted_fn_body(&rust, "style_utext");
+        assert!(!body.contains(".clone()"), "Core read argument was copied:\n{body}");
+    });
+}
+
+#[test]
+fn single_module_entry_qualified_calls_resolve() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let bundle = checked_bundle("fn helper() {}\nfn run() { helper()\nreturn\n}\n");
+        assert!(bundle.name_ledger.namespace_siblings(bundle.entry).next().is_none());
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let mut program = super::lower_checked_tir_program_for(&bundle, request)
+            .expect("lower single-module entry");
+        let prefix = program.entry_call_alias.as_ref().expect("recorded entry alias").1.clone();
+        let run = program.funcs.iter_mut().find(|function| function.name == "run")
+            .expect("entry run");
+        let call = run.body.iter_mut().find_map(|statement| match statement {
+            TStmt::ExprStmt(TExpr { kind: TExprKind::Call { name, .. }, .. }) => Some(name),
+            TStmt::ExprStmt(TExpr { kind: TExprKind::Try { inner, .. }, .. }) => {
+                match &mut inner.kind {
+                    TExprKind::Call { name, .. } => Some(name),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }).expect("helper call");
+        *call = format!("{prefix}{}", crate::Codegen::mangle("helper"));
+        super::mir::lower_tir_to_mir(program).expect("resolve canonical entry-qualified helper");
     });
 }
 
@@ -4595,4 +4638,25 @@ fn optimizer_fact_channel_absence_keeps_conservative_defaults() {
     assert!(!facts.no_cross_iteration_deps);
     assert!(facts.comptime_value.is_none());
     assert!(facts.cost.is_none());
+}
+
+#[test]
+fn geometry_method_binders_are_the_checked_operand_facts() {
+    use super::tir_to_mir_expr::geometry_checked_transform_type_args as binders;
+    let named = |name: &str| Type::Named(name.to_string());
+    let stock = Type::Apply { name: "Transform".into(), args: vec![named("Screen"), named("World")] };
+    let next = TExpr { ty: Type::Apply { name: "Transform".into(), args: vec![named("World"), named("Device")] }, kind: TExprKind::IntLit(0, None) };
+    assert_eq!(binders(&stock, "then", &[next]), Some(vec![named("Device")]));
+    let point_type = Type::Apply { name: "Point2".into(), args: vec![Type::Float, named("Screen")] };
+    let point = TExpr { ty: point_type.clone(), kind: TExprKind::IntLit(0, None) };
+    for method in ["point", "point_at_depth", "ray"] {
+        assert_eq!(binders(&stock, method, &[point.clone()]), Some(vec![point_type.clone()]));
+    }
+    let narrow = Type::Apply { name: "Transform2".into(), args: vec![Type::Float32, named("Screen"), named("World")] };
+    let next = TExpr { ty: Type::Apply { name: "Transform2".into(), args: vec![Type::Float32, named("World"), named("View")] }, kind: TExprKind::IntLit(0, None) };
+    assert_eq!(binders(&narrow, "then", &[next]), Some(vec![named("View")]));
+    let held = Type::Apply { name: "Transform2".into(), args: vec![Type::Float, named("Screen"), named("World")] };
+    assert_eq!(binders(&held, "inverse", &[]), None);
+    let cross = TExpr { ty: held, kind: TExprKind::IntLit(0, None) };
+    assert_eq!(binders(&stock, "then", &[cross]), None);
 }

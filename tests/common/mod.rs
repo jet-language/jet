@@ -779,6 +779,16 @@ const STDIN_READLINE_STDIN: ExampleStdin = ExampleStdin {
     tty_only: "",
 };
 
+const TERMINAL_SOURCE_STDIN: ExampleStdin = ExampleStdin {
+    piped: "first\r\nsecond\n",
+    tty_only: "",
+};
+
+const TERMINAL_CONFIRM_STDIN: ExampleStdin = ExampleStdin {
+    piped: " YeS \r\n",
+    tty_only: "",
+};
+
 /// `loops/read_sentinel` answers: two lines, the blank sentinel, then a line
 /// the loop must never print because the sentinel already stopped it.
 const READ_SENTINEL_STDIN: ExampleStdin = ExampleStdin {
@@ -801,6 +811,8 @@ pub fn example_stdin(stem: &str) -> Option<&'static ExampleStdin> {
         "io/stdin_input" => Some(&STDIN_INPUT_STDIN),
         "io/stdin_read_all" => Some(&STDIN_READ_ALL_STDIN),
         "io/stdin_readline" => Some(&STDIN_READLINE_STDIN),
+        "io/terminal_source" => Some(&TERMINAL_SOURCE_STDIN),
+        "io/terminal_confirm" => Some(&TERMINAL_CONFIRM_STDIN),
         "loops/read_sentinel" => Some(&READ_SENTINEL_STDIN),
         _ => None,
     }
@@ -1979,6 +1991,9 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     s = strip_vetted_module(&s, "jet_taskgroup_borrowed_spawn");
     s = strip_vetted_module(&s, "jet_std_common_types");
     s = strip_vetted_module(&s, "jet_fs_chown");
+    s = strip_vetted_module(&s, "jet_fs_handles");
+    s = strip_vetted_module(&s, "jetc_fd_seed");
+    s = strip_vetted_module(&s, "jet_file_lock_native");
     s = strip_vetted_module(&s, "jet_std_math_task_mem");
     s = strip_vetted_module(&s, "jet_std_reactive_event_watch");
     s = strip_vetted_module(&s, "jet_std_ffi_callbacks");
@@ -2282,6 +2297,7 @@ fn audited_source_markers_strip_only_registered_regions() {
         "jet_testing_history_top",
         "jet_data_flow",
         "jet_native_comptime_channel",
+        "jetc_fd_seed",
     ];
     let mut generated = String::new();
     for name in names {

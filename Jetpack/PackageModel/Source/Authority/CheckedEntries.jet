@@ -44,7 +44,7 @@ pub struct FileIdentity {
         if kind == AuthorityKind.Directory {
             return FileIdentity{kind: kind, length: 0, modified_ns: None, device: info.id.device, inode: info.id.inode}
         }
-        FileIdentity{kind: kind, length: info.size, modified_ns: Val(info.modified.unix_ns), device: info.id.device, inode: info.id.inode}
+        FileIdentity{kind: kind, length: info.size, modified_ns: Val(info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")), device: info.id.device, inode: info.id.inode}
     }
 }
 

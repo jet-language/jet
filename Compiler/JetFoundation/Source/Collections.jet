@@ -426,6 +426,7 @@ COLLECTION_OPERATIONS :: prep { [CollectionOperationRow]{
     collection_op(CollectionReceivers.List, "remove", 1, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element, CollectionArg.RemoveBy}, CollectionResult.OptionElement, CollectionOp.ListRemove, CollectionLaw.Mutate, "None"),
     collection_op(CollectionReceivers.List, "pop", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.Pop}, CollectionLaw.Mutate, "None"),
     collection_op(CollectionReceivers.List, "reverse", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Reverse}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.List, "__swap", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Integer, CollectionArg.Integer}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.SwapList}, CollectionLaw.Mutate, "Unit"),
     collection_op(CollectionReceivers.List, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
     collection_op(CollectionReceivers.List, "get", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Integer}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.GetList}, CollectionLaw.Lookup, "None"),
     collection_op(CollectionReceivers.List, "index_of", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.OptionInt, CollectionOp.Builtin{op: TBuiltinOp.IndexOf}, CollectionLaw.Lookup, "None"),
@@ -617,14 +618,15 @@ fn collection_arg_is_callback(arg: CollectionArg) -> Bool Never! {
     }
 }
 
-// E0106 (#4432): `Unit` is the built-in no-information type (`-> Unit`,
-// `Result<Unit, E>`) the compiler carries as `Type.Named{name: "Unit"}`, so a
-// user type of that name would be indistinguishable from it. The Rust
-// reference's `Collections::RESERVED_TYPES` reserves it with the other
-// built-in type names; porting the rest of that list is the E0106 row of the
-// Rust-Jet parity ledger.
+// E0106: the same reserved vocabulary as Rust Collections::RESERVED_TYPES.
+// Source-owned Core declarations are admitted by registration, not by weakening
+// this predicate for users or for unrelated Core modules.
+// BEGIN GENERATED RESERVED TYPES
+// Source: crates/jet-foundation/src/Collections.rs; regenerate with gen-core-tables.mjs --write
+SEMA_RESERVED_TYPES :: [String]{"HashMap", "BTreeMap", "Map", "Char", "Bits", "Bytes", "Set", "Rank", "PriorityQueue", "Cache", "Iter", "ViewIter", "MemoStats", "RemoveBy", "Ordering", "Range", "SharedGuard", "Shared.Weak", "Condition", "Tally", "Queue", "Decimal", "Duration", "DurationUnit", "RangeError", "ExpiringValue", "Authority", "Validate", "BuildContext", "BuildPlan", "BuildAction", "BuildTarget", "BuildToolchain", "BuildProbe", "BuildSigningIdentity", "BuildError", "ProgramInfo", "Cell", "CellReadGuard", "CellEditGuard", "Unit"}
+// END GENERATED RESERVED TYPES
 pub fn sema_reserved_type_name(name: String) -> Bool Never! {
-    name == "Unit"
+    SEMA_RESERVED_TYPES.contains(name)
 }
 
 pub fn sema_collection_receiver_element(receiver: Type) -> Type? {

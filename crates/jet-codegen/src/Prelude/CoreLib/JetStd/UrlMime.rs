@@ -129,7 +129,8 @@
             }
         }
 
-        pub fn data(mime: &JetMIME, text: &String) -> Self {
+        /// `mime` is the rendered media type (`core.net.mime.MIME.to_string()`).
+        pub fn data(mime: &str, text: &String) -> Self {
             JetURLParts {
                 scheme: "data".to_string(),
                 username: None,
@@ -138,7 +139,7 @@
                 port: None,
                 path: format!(
                     "{},{}",
-                    mime.to_string_value(),
+                    mime,
                     jet_url_percent_encode(text, false)
                 ),
                 query: Vec::new(),
@@ -360,10 +361,8 @@
             out
         }
 
-        /// D-BOUND-HEAD1=A: the `core.net.url.URL` record projection every
-        /// tier shares (AOT `JetURL`, the JIT record, the evaluator struct).
-        /// An absent port takes the scheme default, as `core.net.url.parse`
-        /// does; the flag records an authority port written in the source.
+        /// Projection used by the compiler's raw pure-call validation kernel.
+        /// The executable URL carrier and typed constructor live in Core Jet.
         pub fn core_port(&self) -> (i64, bool) {
             let port = self
                 .port
@@ -454,116 +453,6 @@
         JetURLParts::parse_without_normalization_with_marker(&skeleton, Some(&marker)).map(|_| ())
     }
 
-    /// D-BOUND-HEAD1=A: URL heads parse the literal skeleton once. Hole values
-    /// are assembled after parsing, so path and authority boundaries remain
-    /// opaque to URL normalization and reparsing.
-    pub fn jet_typed_url_parts_literal(
-        literals: &[&str],
-        holes: Vec<String>,
-    ) -> JetURLParts {
-        let Ok(url) = jet_typed_url_literal_checked(literals, holes) else {
-            // The parser/sema boundary rejects malformed heads before this
-            // constructor is lowered. There is no user-facing runtime error
-            // path to recover here, and manufacturing a URL would be worse
-            // than terminating the violated compiler invariant.
-            std::process::abort();
-        };
-        url
-    }
-
-    fn jet_typed_url_literal_checked(
-        literals: &[&str],
-        holes: Vec<String>,
-    ) -> Result<JetURLParts, String> {
-        if literals.len() != holes.len() + 1 {
-            return Err("typed URL literal and hole counts do not match".to_string());
-        }
-        let (marker, mut url) = jet_typed_url_marker(literals)?;
-        let mut hole_index = 0;
-        let (scheme, _) = jet_url_apply_typed_holes(
-            &url.scheme,
-            &marker,
-            &holes,
-            &mut hole_index,
-        )?;
-        url.scheme = scheme.to_ascii_lowercase();
-        if let Some(username) = url.username.take() {
-            url.username = Some(jet_url_apply_typed_holes(
-                &username,
-                &marker,
-                &holes,
-                &mut hole_index,
-            )?.0);
-        }
-        if let Some(password) = url.password.take() {
-            url.password = Some(jet_url_apply_typed_holes(
-                &password,
-                &marker,
-                &holes,
-                &mut hole_index,
-            )?.0);
-        }
-        if let Some(host) = url.host.take() {
-            let (host, parts) = jet_url_apply_typed_holes(
-                &host,
-                &marker,
-                &holes,
-                &mut hole_index,
-            )?;
-            url.host = Some(host);
-            url.typed_host = parts;
-        }
-        let (path, path_parts) = jet_url_apply_typed_holes(
-            &url.path,
-            &marker,
-            &holes,
-            &mut hole_index,
-        )?;
-        url.path = path;
-        url.typed_path = path_parts;
-        if let Some(parts) = url.typed_path.take() {
-            let parts = if url.scheme == "data" {
-                parts
-            } else {
-                jet_url_normalize_typed_path(parts)
-            };
-            url.path = parts
-                .iter()
-                .map(|(part, _)| part.as_str())
-                .collect();
-            url.typed_path = Some(parts);
-        } else if url.scheme != "data" {
-            url.path = jet_url_remove_dot_segments(&url.path);
-        }
-        for (key, value) in &mut url.query {
-            let key_value = jet_url_apply_typed_holes(
-                key,
-                &marker,
-                &holes,
-                &mut hole_index,
-            )?.0;
-            *key = key_value;
-            let value_value = jet_url_apply_typed_holes(
-                value,
-                &marker,
-                &holes,
-                &mut hole_index,
-            )?.0;
-            *value = value_value;
-        }
-        if let Some(fragment) = url.fragment.take() {
-            url.fragment = Some(jet_url_apply_typed_holes(
-                &fragment,
-                &marker,
-                &holes,
-                &mut hole_index,
-            )?.0);
-        }
-        if hole_index != holes.len() {
-            return Err("typed URL holes do not match its literal skeleton".to_string());
-        }
-        Ok(url)
-    }
 
     impl PartialEq for JetURLParts {
         fn eq(&self, other: &Self) -> bool {
@@ -596,64 +485,6 @@
         }
     }
 
-    impl JetMIME {
-        pub fn parse(input: &String) -> Result<Self, String> {
-            let parts = jet_mime_parse_parts(input)?;
-            Ok(JetMIME {
-                top: parts.top,
-                sub: parts.sub,
-                parameters: parts
-                    .params
-                    .into_iter()
-                    .map(|(name, value)| vec![name, value])
-                    .collect(),
-            })
-        }
-        /// The `[name, value]` rows as kernel pairs.
-        fn parameter_pairs(&self) -> impl Iterator<Item = (&str, &str)> {
-            self.parameters.iter().filter_map(|row| match row.as_slice() {
-                [name, value] => Some((name.as_str(), value.as_str())),
-                _ => None,
-            })
-        }
-        pub fn media_type(&self) -> String {
-            self.top.clone()
-        }
-        pub fn subtype(&self) -> String {
-            self.sub.clone()
-        }
-        pub fn essence(&self) -> String {
-            jet_mime_essence(&self.top, &self.sub)
-        }
-        pub fn param(&self, name: &String) -> JetOutcome<String, JetAbsent> {
-            jet_outcome_of(jet_mime_param(self.parameter_pairs(), name).map(str::to_string))
-        }
-        pub fn params(&self) -> Vec<Vec<String>> {
-            self.parameters.clone()
-        }
-        pub fn to_string_value(&self) -> String {
-            jet_mime_to_string(&self.top, &self.sub, self.parameter_pairs())
-        }
-    }
-
-    impl crate::JetShow for JetMIME {
-        fn jet_show(&self) -> String {
-            self.to_string_value()
-        }
-    }
-
-    impl crate::JetDisplay for JetMIME {
-        fn jet_display(&self) -> String {
-            self.to_string_value()
-        }
-    }
-
-    impl crate::JetDebug for JetMIME {
-        fn jet_debug(&self) -> String {
-            self.to_string_value()
-        }
-    }
-
     fn jet_typed_url_marker_name(literals: &[&str]) -> String {
         let mut nonce = 0;
         loop {
@@ -665,12 +496,6 @@
         }
     }
 
-    fn jet_typed_url_marker(literals: &[&str]) -> Result<(String, JetURLParts), String> {
-        let marker = jet_typed_url_marker_name(literals);
-        let skeleton = jet_typed_url_skeleton(literals, &marker);
-        let url = JetURLParts::parse_without_normalization_with_marker(&skeleton, Some(&marker))?;
-        Ok((marker, url))
-    }
 
     fn jet_url_typed_authority(rest: &str) -> Option<&str> {
         let rest = rest.strip_prefix("//")?;
@@ -692,41 +517,6 @@
         skeleton
     }
 
-    fn jet_url_apply_typed_holes(
-        value: &str,
-        marker: &str,
-        holes: &[String],
-        hole_index: &mut usize,
-    ) -> Result<(String, Option<Vec<(String, bool)>>), String> {
-        let mut parts = Vec::new();
-        let mut cursor = 0;
-        while let Some(offset) = value[cursor..].find(marker) {
-            let start = cursor + offset;
-            let literal = &value[cursor..start];
-            if !literal.is_empty() || parts.is_empty() {
-                parts.push((literal.to_string(), false));
-            }
-            let hole = holes
-                .get(*hole_index)
-                .ok_or_else(|| "typed URL holes do not match its literal skeleton".to_string())?
-                .clone();
-            parts.push((hole, true));
-            *hole_index += 1;
-            cursor = start + marker.len();
-        }
-        if parts.is_empty() {
-            return Ok((value.to_string(), None));
-        }
-        let tail = &value[cursor..];
-        if !tail.is_empty() {
-            parts.push((tail.to_string(), false));
-        }
-        let assembled = parts
-            .iter()
-            .map(|(part, _)| part.as_str())
-            .collect::<String>();
-        Ok((assembled, Some(parts)))
-    }
 
     fn jet_url_render_data_mime_literal(value: &str) -> String {
         let mut out = String::new();

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 mod Comptime;
 pub(super) mod ComptimeReuse;
-mod Units;
+pub(crate) mod Units;
 
 mod GenericModules;
 mod InlineCalls;
@@ -29,7 +29,7 @@ mod Validation;
 
 pub use Comptime::bundle_has_comptime_evaluation;
 use Comptime::stmts_have_comptime_evaluation;
-use Units::{inject_units_prelude, resolve_unit_dimensions};
+use Units::{inject_units_prelude, resolve_default_time_literals, resolve_unit_dimensions};
 pub use PackageSeal::{
     sealed_package_count, with_package_records, PackageRecordStore, PackageReuse,
     PackageReuseRow,
@@ -1230,6 +1230,10 @@ fn builtin_type_registry() -> TypeRegistry {
     );
     TypeRegistry {
         types,
+        source_owned_types: HashSet::new(),
+        core_source_module: None,
+        opaque_methods: HashMap::new(),
+        operator_signatures: HashMap::new(),
         error_types: HashSet::new(),
         unit_types,
         unit_facts,
@@ -2320,6 +2324,7 @@ mod structure_tests {
                 path: std::path::PathBuf::from("cache-accounting.jet"),
                 display: "cache-accounting.jet".to_string(),
                 source: source.to_string(),
+                core_identifier_demand: crate::Lexer::core_identifier_demand(&tokens),
                 alias: "main".to_string(),
                 imports: std::mem::take(&mut program.imports),
                 items: std::mem::take(&mut program.items),

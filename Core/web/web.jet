@@ -83,12 +83,26 @@ pub fn form(input: WebFormInput, action: String) -> WebFormTyped WebFormError! {
 }
 
 
+// The web backend's DOM binding is DomRuntime.js::on. `jet_web_on` has
+// registry entries but no Rust implementation in this repository; this
+// forwarding declaration is not a Rust-to-Jet implementation or cutover.
+// Native callback admission must keep the actual backend contract.
 pub fn on(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
     core.web.on(path, title, handler)
 }
 
 pub fn openapi(router: HTTPRouter) -> String Never! {
-    core.web.openapi(router)
+    checked :: core.web.__openapi_inputs(router)
+    if checked == {
+        .Ok(inputs) -> {
+            rendered :: core.web.__openapi_render(inputs, "Jet HTTP Router", "1", [OpenApiServer]{})
+            if rendered == {
+                .Ok(document) -> document
+                .Err(error) -> core.web.__contract_stop(error)
+            }
+        }
+        .Err(error) -> core.web.__contract_stop(error)
+    }
 }
 
 pub fn value(key: String) -[Browser]> String Never! { core.web.value(key) }
@@ -122,7 +136,10 @@ pub fn live_get(q: LiveQuery) -> String Never! { q.data }
 
 pub fn live_show(q: LiveQuery) -> String Never! { "{q.key}@{q.generation}" }
 
-pub fn live_stats() -> String Never! { core.web.live_stats() }
+pub fn live_stats() -> String Never! {
+    facts :: core.web.__live_stats_snapshot() ?? return "LiveStats(error=live registry unavailable)"
+    "LiveStats(queries={facts.queries},active={facts.active},refreshing={facts.refreshing},limit=1024,evictions={facts.evictions},invalidations={facts.invalidations},ws_pushes={facts.ws_pushes})"
+}
 
 pub fn signal_push(q: LiveQuery, payload: String) -> LiveQuery Never! { sync_query(q, payload) }
 

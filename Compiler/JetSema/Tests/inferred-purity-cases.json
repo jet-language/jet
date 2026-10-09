@@ -1,0 +1,33 @@
+[
+  {
+    "name": "pure-inferred-interpolation",
+    "sourcePath": "tests/fixtures/pure_deny_only_interpolation.jet",
+    "errors": []
+  },
+  {
+    "name": "pure-inferred-owned-string-copy",
+    "source": "fn copy_value(value: String) -> String { return value }\nfn compute(value: String) -[]> String { return copy_value(value) }\nfn run() { print(compute(\"text\")) }\n",
+    "errors": []
+  },
+  {
+    "name": "pure-inferred-panic",
+    "source": "fn stop() -> Int { return panic(\"stop\") }\nfn compute() -[]> Int { return stop() }\nfn run() {}\n",
+    "errors": []
+  },
+  {
+    "name": "pure-inferred-interpolation-and-io",
+    "source": "fn format(value: Int) -> String { print(value)\nreturn \"{value}\" }\nfn compute(value: Int) -[]> String { return format(value) }\nfn run() { print(compute(42)) }\n",
+    "errors": ["E3401"],
+    "errorCount": 1
+  },
+  {
+    "name": "pure-explicit-interpolation-denial",
+    "source": "fn format(value: Int) -> String { return \"{value}\" }\nfn compute(value: Int) -[!Mem.Alloc]> String { return format(value) }\nfn run() { print(compute(42)) }\n",
+    "errors": ["E0921"]
+  },
+  {
+    "name": "panic-explicit-denial",
+    "sourcePath": "tests/ui/panic_effect_prohibition.jet",
+    "errors": ["E0749"]
+  }
+]

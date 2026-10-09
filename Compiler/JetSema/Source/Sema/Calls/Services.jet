@@ -18,9 +18,12 @@ use jet_foundation.[
     TFailureCarrier,
     TFunc,
     THandleOp,
+    TGenericParam,
     TStmt,
+    StrPart,
     TStrPart,
     Type,
+    core_source_owns_type,
     UnOp,
     expr_span,
     tir_expr_children,
@@ -610,4 +613,92 @@ pub fn sema_validate_service_handler_graph(modules: [SemaGraphModuleResult]) -> 
         }
     }
     diagnostics
+}
+
+// The checked #Job identity is normalized BEFORE the registered source target.
+// This is the same compiler-owned contract as Rust CheckerInfer/calls/
+// method_calls.rs: enqueue/delay are not string-selected public operations.
+fn sema_job_queue_nominal(environment: SemaScopeEnvironment, leaf: String) -> String Never! {
+    graph :: environment.registration_graph ?? return leaf
+    loop module_index in 0..<graph.modules.len() {
+        if graph.modules[module_index].module_name != "core.jobs" -> next
+        loop nominal_index in 0..<graph.modules[module_index].nominals.len() {
+            nominal :: graph.modules[module_index].nominals[nominal_index]
+            if nominal.symbol.name == leaf {
+                if nominal.compiler_owned -> return leaf
+                return "{nominal.symbol.module_name}::{leaf}"
+            }
+        }
+    }
+    leaf
+}
+
+fn sema_job_queue_function(expression: Expr, environment: SemaScopeEnvironment) -> SemaRegistrationRowRef? {
+    if expression == .Paren(inner, _) -> return sema_job_queue_function(inner, environment)
+    name :: if expression == {
+        .Ident(name, _) -> name
+        else -> { return None }
+    }
+    graph :: environment.registration_graph ?? return None
+    resolved :: sema_registration_lookup_name(graph, environment.module_identity, name) ?? return None
+    if resolved.symbol.kind != SymbolKind.Function -> return None
+    module_index :: sema_registration_module_index(graph, resolved.source_module_identity) ?? return None
+    loop index in 0..<graph.modules[module_index].functions.len() {
+        if graph.modules[module_index].functions[index].symbol.id.key != resolved.symbol.id.key -> next
+        if !graph.modules[module_index].functions[index].declaration.is_job || graph.modules[module_index].functions[index].declaration.params.len() != 1 -> return None
+        return Val(SemaRegistrationRowRef{module_index: module_index, row: index})
+    }
+    None
+}
+
+pub fn sema_job_queue_identity_error(method: String, span: Span) -> Diagnostic Never! {
+    sema_error("E0112", span, "`JobQueue.{method}` expects a checked `#Job` function", "the queue identity is attached to the declared #Job and cannot be selected by an arbitrary function value", "pass the name of a #Job function with exactly one payload parameter")
+}
+
+pub fn sema_call_try_job_queue_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    unhandled :: SemaMethodSpecialCheck{handled: false, value: None}
+    failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    if method != "enqueue" && method != "delay" -> return unhandled
+    queue_name :: if receiver_value.ty == {
+        .Named(name) -> name
+        else -> { return unhandled }
+    }
+    if queue_name != "JobQueue" && !(core_source_owns_type(queue_name) && queue_name.ends_with("::JobQueue")) -> return unhandled
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics) -> return failed
+    required :: if method == "enqueue" -> 2 else -> 3
+    if args.len() != required && !(method == "enqueue" && args.len() == 3) {
+        sema_services_report_arity(method, args.len(), required, span, &diagnostics)
+        sema_services_check_untyped_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return failed
+    }
+    updated_args := args
+    if args.len() == 3 && !sema_services_bind_labels("JobQueue.{method}", &updated_args, [String]{"", "", if method == "enqueue" -> "key" else -> "for"}, span, &diagnostics) -> return failed
+    job :: sema_job_queue_function(updated_args[0].expr, environment) ?? {
+        &diagnostics.push(sema_job_queue_identity_error(method, expr_span(updated_args[0].expr)))
+        sema_services_check_untyped_args(updated_args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return failed
+    }
+    graph :: environment.registration_graph ?? return failed
+    job_name :: graph.modules[job.module_index].functions[job.row].declaration.name
+    payload_type :: sema_type_resolve_declared_with_generics(graph, graph.modules[job.module_index].functions[job.row].declaration.params[0].ty, graph.modules[job.module_index].module_identity, [TGenericParam]{})
+    job_span :: expr_span(updated_args[0].expr)
+    updated_args[0].expr = Expr.Str{parts: [StrPart]{StrPart.Lit{text: job_name}}, span: job_span}
+    sema_call_http_check_serde(SemaSerdeDirection.Encode, payload_type, expr_span(updated_args[1].expr), environment, &diagnostics)
+    payload :: sema_check_expression(updated_args[1].expr, Val(payload_type), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
+    last_type :: if method == "enqueue" -> Type.Option{inner: Type.String} else -> Type.Named{name: "Duration"}
+    last :: if updated_args.len() == 3 -> sema_check_expression(updated_args[2].expr, Val(last_type), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed else -> sema_tir_expr(last_type, TExprKind.Absent, span)
+    parameter_types :: if updated_args.len() == 3 -> [Type]{Type.String, payload_type, last_type} else -> [Type]{Type.String, payload_type}
+    params :: sema_services_method_params(parameter_types, [AccessConvention]{})
+    ownership :: sema_ownership_check_method_call(&state, "JobQueue.{method}", receiver, AccessConvention.Write, params, &updated_args, scopes, span, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return failed
+    // Source takes its immutable shared handle as a normal read, not the old
+    // native mutable carrier. Receiver ownership has already been checked.
+    normalized :: [TExpr]{receiver_value, sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: job_name}}}, job_span), payload, last}
+    record :: sema_call_core_receiver_record(Type.Named{name: "JobQueue"}, method, normalized.len(), span, &diagnostics) ?? return failed
+    result_type :: sema_services_result_type(Type.Named{name: sema_job_queue_nominal(environment, "JobQueueReceipt")})
+    failure :: sema_services_result_carrier(result_type)
+    if !sema_call_core_record_effects(record, span, [Type]{payload_type}, result_type, failure, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return failed
+    sema_services_record_direct_effect(environment, &scopes, &context, "Time", "JobQueue.{method}", span, &diagnostics)
+    value :: sema_call_core_tir(record, normalized, span, [Type]{payload_type}, [Bool]{}, None, result_type, failure, expected, environment, &diagnostics)
+    SemaMethodSpecialCheck{handled: true, value: value}
 }

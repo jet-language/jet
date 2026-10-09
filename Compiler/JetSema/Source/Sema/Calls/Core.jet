@@ -6,6 +6,7 @@
 use jet_foundation.[
     AccessConvention,
     CORE_CALL_COVERAGE_SEMA,
+    CORE_SOURCE_OWNED_ROWS,
     Call,
     CallArg,
     CoreCallDefault,
@@ -26,15 +27,25 @@ use jet_foundation.[
     StrPart,
     SymbolID,
     SymbolKind,
+    TCallArg,
     TExpr,
     TExprKind,
     TFailureCarrier,
     TGenericParam,
     TStmt,
     Type,
+    ViewProvenance,
+    ViewProvenanceEntry,
+    ViewProvenanceMap,
+    ViewSource,
+    ViewSourcePath,
+    ViewSourceProjection,
+    CoreCallSymbol,
+    TCallArg,
     core_call,
     core_call_accepts_arity,
     core_call_coverage_contains,
+    core_call_source_member,
     core_call_projection,
     core_call_typed_signature,
     core_call_typed_signature_for,
@@ -157,19 +168,25 @@ pub fn sema_call_core_require_imported_unsafe(environment: SemaScopeEnvironment,
     false
 }
 
-fn sema_call_core_source_target(environment: SemaScopeEnvironment, module_identity: String, member: String, type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
+fn sema_call_core_source_target(environment: SemaScopeEnvironment, module_identity: String, member: String, type_args: [Type], span: Span, registered_source_target: Bool, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
     module_index :: sema_registration_module_index(graph, module_identity) ?? return None
     // Module rows are read in place; binding one would copy its whole program.
     source_name :: graph.modules[module_index].module_name
-    if (source_name == "core.http.client" && member == "request") || (source_name == "core.http.server" && member == "response") -> return None
+    if sema_call_core_module_identity(environment, source_name) != Val(module_identity) -> return None
+    if source_name == "core.http.client" && member == "request" -> return None
+    if source_name == "core.encoding.json" && member == "decode" && type_args.len() != 0 -> return None
     caller_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
-    // Only the source module itself keeps the host row for its own members
-    // (Rust core_call.rs: by registered identity, never by file name, so a
-    // user `perf.jet` is not `Core/perf/perf.jet`).
-    if graph.modules[module_index].module_identity == graph.modules[caller_index].module_identity -> return None
-    export :: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? return None
+    // Same-owner native providers keep their host row. A source-only function
+    // has no such row and still resolves to its declaration from this module.
+    if !registered_source_target && graph.modules[module_index].module_identity == graph.modules[caller_index].module_identity {
+        if core_call(source_name, member) == .Val(record) {
+            if record.symbol != CoreCallSymbol.SourceOwned -> return None
+        }
+    }
+    private_typed_json_seam :: member == "__parse_typed" && source_name == "core.encoding.json" && graph.modules[module_index].module_identity.starts_with("<corelib>/") && graph.modules[caller_index].module_name == "core.data" && graph.modules[caller_index].module_identity.starts_with("<corelib>/")
+    export :: (if registered_source_target || private_typed_json_seam -> sema_registration_resolve_export(graph, module_index, member, module_identity, graph.modules[module_index].package_identity, [String]{}) else -> sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{})) ?? return None
     row :: sema_call_export_function_row(environment, export) ?? {
         &diagnostics.push(sema_call_not_callable(member, export.symbol.ty ?? Type.Named{name: "Unknown"}, span))
         return None
@@ -246,7 +263,10 @@ fn sema_call_core_module_identity(environment: SemaScopeEnvironment, module_name
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
     loop module_row in graph.modules {
-        if module_row.module_name == module_name -> return Val(module_row.module_identity)
+        if module_row.module_name != module_name || !sema_module_is_core_source(module_row.module_identity) -> next
+        loop owner in CORE_SOURCE_OWNED_ROWS {
+            if owner.module_name == module_name && owner.alias == module_row.core_source_alias && module_row.source_file == "<corelib>/{owner.path}" -> return Val(module_row.module_identity)
+        }
     }
     None
 }
@@ -311,13 +331,32 @@ pub fn sema_call_core_receiver_record(receiver_type: Type, member: String, actua
     Val(record)
 }
 
+pub fn sema_call_core_first_is_move(args: [CallArg]) -> Bool Never! {
+    args.len() > 0 && args[0].convention == AccessConvention.Move
+}
+
+fn sema_call_core_native_resource_consumer(module_name: String, member: String, first_is_move: Bool) -> Bool Never! {
+    // #4747: the fixed floating constraint preserves Float/F32 inference.
+    // The checked TIR call below selects the reserved source wrapper.
+    (module_name == "core.math" && (member == "cmp" || member == "is_finite" || member == "sqrt")) ||
+    ((module_name == "core.encoding.json" || module_name == "core.encoding.jsonl") && member == "reader" && first_is_move) ||
+        (module_name == "core.net.tls" && member == "client" && first_is_move) ||
+        // Worker alone keeps checked fn() inference; its source slot is opaque.
+        (module_name == "core.service" && member == "worker")
+}
+
+fn sema_call_core_has_explicit_source_target(module_name: String, member: String) -> Bool Never! {
+    row :: core_call(module_name, member) ?? return false
+    row.symbol == CoreCallSymbol.SourceOwned && row.source_target != None
+}
+
 // Source exports resolve as ordinary functions. Only remaining static members
 // can become CoreCall nodes; this prevents registry rows from shadowing source.
-pub fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+pub fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     diagnostic_count := diagnostics.len()
-    source_identity :: sema_call_core_module_identity(environment, module_name)
+    source_identity :: if sema_call_core_has_explicit_source_target(module_name, member) || sema_call_core_native_resource_consumer(module_name, member, first_is_move) -> None else -> sema_call_core_module_identity(environment, module_name)
     source :: if source_identity == {
-        .Val(identity) -> sema_call_core_source_target(environment, identity, member, type_args, span, &diagnostics)
+        .Val(identity) -> sema_call_core_source_target(environment, identity, member, type_args, span, false, &diagnostics)
         .None -> None
     }
     if source == {
@@ -330,7 +369,7 @@ pub fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_na
     Val(SemaCoreCallRoute.Core{record: record})
 }
 
-pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, requested_member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, requested_member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     imported :: sema_call_core_import_target(environment, alias) ?? return None
     if !sema_call_core_import_is_unshadowed(environment, scopes, imported) -> return None
     member :: sema_call_core_import_member(imported, requested_member) ?? return None
@@ -339,7 +378,7 @@ pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, sc
     // D-VERDICT-1321-1: `core.term` owns only the one-argument print, eprint
     // and progress wrappers; other arities keep the fixed Core route.
     variadic_term :: imported.module_name == "core.term" && (member == "print" || member == "eprint" || member == "progress") && actual_arity != 1
-    source :: if variadic_term -> None else -> sema_call_core_source_target(environment, imported.module_identity, member, type_args, span, &diagnostics)
+    source :: if variadic_term || sema_call_core_has_explicit_source_target(imported.module_name, member) || sema_call_core_native_resource_consumer(imported.module_name, member, first_is_move) -> None else -> sema_call_core_source_target(environment, imported.module_identity, member, type_args, span, false, &diagnostics)
     if source == {
         .Val(target) -> return Val(SemaCoreCallRoute.Source{target: target})
         .None -> {}
@@ -354,11 +393,11 @@ pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, sc
 // module alias's known Core submodule (`core.math.fabs(n)` under `use core as
 // core`) routes against that submodule by name, exactly as an alias of the
 // submodule itself would.
-pub fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+pub fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     imported :: sema_call_core_import_target(environment, alias) ?? return None
     if imported.item != None -> return None
     if !sema_call_core_record_import_reference(environment, scopes, imported, alias_span, &context) -> return None
-    sema_call_core_resolve_route(environment, module_name, member, type_args, expected_type_arg_count, infer_when_omitted, actual_arity, span, &diagnostics)
+    sema_call_core_resolve_route(environment, module_name, member, type_args, expected_type_arg_count, infer_when_omitted, actual_arity, first_is_move, span, &diagnostics)
 }
 
 // D-VERDICT-1321-1 (Rust core_call.rs `("core.term", "print")`): an imported
@@ -416,6 +455,41 @@ pub fn sema_call_core_check_typed_argument(value: TExpr, expected: Type, environ
     sema_expr_expected(typed, Val(expected), environment, &diagnostics)
 }
 
+// Width selection is the existing checked mathematical normalization; it is
+// separate from source forwarding and never widens F32 values.
+fn sema_call_core_normalized_source_record(record: CoreCallRecord, args: [TExpr]) -> CoreCallRecord Never! {
+    normalized := record
+    if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.math" && (record.member == "cmp" || record.member == "is_finite") && args.len() > 0 && args[0].ty == Type.Float32 {
+        normalized.source_target = Val("__{record.member}_f32")
+    }
+    if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.net" && record.member == "unix_connect" {
+        normalized.source_target = Val(if args.len() == 1 -> "__unix_connect_entry" else -> "__unix_connect_deadline_entry")
+    }
+    if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.net.tls" && record.member == "client" {
+        if args.len() == 4 -> normalized.source_target = Val("__client_config_deadline_entry")
+        else if args.len() == 3 -> normalized.source_target = Val("__client_deadline_entry")
+        else if args.len() == 2 && args[0].ty != Type.String -> normalized.source_target = Val("__client_stream_entry")
+        else -> normalized.source_target = Val("client")
+    }
+    normalized
+}
+
+fn sema_call_core_source_arguments(args: [TExpr], params: [SemaCallParam], environment: SemaScopeEnvironment) -> [TCallArg] Never! {
+    result := [TCallArg]{}
+    loop index in 0..<args.len() {
+        value :: args[index]
+        param :: params[index]
+        &result.push(TCallArg{value: value, template_items: [SymbolID]{},
+            borrow: param.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
+            mut_borrow: param.convention == AccessConvention.Write, clone: false, arc_clone: false,
+            fn_coerce: None, widen_to_vec: false,
+            widen_to_union: sema_call_widen_union(param.ty ?? value.ty, value.ty),
+            box_as_trait: sema_call_box_as_trait(param.ty ?? value.ty, value.ty, environment),
+            label: None, spread: false})
+    }
+    result
+}
+
 pub fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], widen_to_vec: [Bool], data_plan: MIRDataPlan?, result_type: Type, fallibility: TFailureCarrier, expected: Type?, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
     process_run_boundary :: record.module_name == "core.process" && record.member == "run" && args.len() == record.signature.arity + 1
     if !core_call_accepts_arity(record, args.len()) && !process_run_boundary {
@@ -423,6 +497,44 @@ pub fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, typ
         range :: if maximum > record.signature.arity -> "between {record.signature.arity} and {maximum}" else -> "{record.signature.arity}"
         &diagnostics.push(sema_error("E0104", span, "`{record.module_name}.{record.member}` expects {range} argument(s), got {args.len()}", "the registered Core call arity is fixed", "provide the registered number of arguments"))
         return None
+    }
+    if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && args[0].ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) {
+        value :: sema_expression_measurement_source_call("__measurement_sqrt", args, result_type, span, environment) ?? return None
+        return sema_expr_expected(value, expected, environment, &diagnostics)
+    }
+    if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && args[0].ty == Type.Float {
+        identity :: sema_call_core_module_identity(environment, "core.math") ?? return None
+        if sema_call_core_source_target(environment, identity, "sqrt", type_args, span, &diagnostics) == .Val(target) {
+            argument :: TCallArg{value: args[0], template_items: [SymbolID]{}, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+            value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
+            return sema_expr_expected(value, expected, environment, &diagnostics)
+        }
+    }
+    normalized :: sema_call_core_normalized_source_record(record, args)
+    if core_call_source_member(normalized) == .Val(member) {
+        source_module := record.module_name
+        source_member := member
+        if member.starts_with("core.") {
+            parts := member.split(".")
+            source_member = &parts.pop() ?? return None
+            source_module = parts.join(".")
+        }
+        identity :: sema_call_core_module_identity(environment, source_module) ?? {
+            &diagnostics.push(sema_error("E0902", span, "source-owned Core module `{source_module}` is not loaded", "this declaration has no host implementation route", "load the owning Core source package"))
+            return None
+        }
+        target :: sema_call_core_source_target(environment, identity, source_member, type_args, span, true, &diagnostics) ?? {
+            &diagnostics.push(sema_error("E0902", span, "source-owned Core call `{record.module_name}.{member}` has no checked source target", "this declaration must execute its owning Jet function", "load the matching Core source export"))
+            return None
+        }
+        params :: sema_call_params_from_type(target.signature) ?? return None
+        if params.len() != args.len() {
+            &diagnostics.push(sema_error("E0902", span, "source-owned Core target `{member}` has the wrong normalized arity", "the checked source signature must accept every normalized argument", "use the matching Core source export"))
+            return None
+        }
+        source_args :: sema_call_core_source_arguments(args, params, environment)
+        value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: type_args, args: source_args}, span)
+        return sema_expr_expected(value, expected, environment, &diagnostics)
     }
     value := sema_tir_expr(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, data_plan: data_plan, fallibility: fallibility}, span)
     sema_expr_expected(value, expected, environment, &diagnostics)
@@ -656,6 +768,41 @@ fn sema_call_core_posix_control(member: String) -> Bool Never! {
 
 fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !sema_pin_check_call(record.module_name, record.member, args, &diagnostics) -> return None
+    if record.module_name == "core.term" && (record.member == "__stdio_write" || record.member == "__stdio_bytes" || record.member == "__stdio_flush" || record.member == "__stdio_fault" || record.member == "__stdout_terminal" || record.member == "__stderr_terminal" || record.member == "__stdin_line") {
+        if !environment.source_file.starts_with("<corelib>/") || !environment.module_name.starts_with("core.") {
+            &diagnostics.push(sema_error("E0510", span, "stdio raw leaves are compiler-private", "raw stdio operations are restricted to checked Core source", "use the public core.term API"))
+            return None
+        }
+    }
+    if record.module_name == "core.mem" && record.member == "__loader_new" {
+        if !environment.source_file.starts_with("<corelib>/") || environment.module_name != "core.data" {
+            &diagnostics.push(sema_error("E0510", span, "data loader construction is compiler-private", "the native loader constructor is restricted to checked Core data source", "use core.data.value"))
+            return None
+        }
+    }
+    if record.module_name == "core.encoding" && (record.member == "__coerce_now" || record.member == "__coerce_emit") {
+        if !environment.source_file.starts_with("<corelib>/") || environment.module_name != "core.encoding.json" || context.unsafe_depth == 0 {
+            &diagnostics.push(sema_error("E0510", span, "JSON coercion host leaves are compiler-private", "the existing hidden Time/IO boundary is restricted to audited Core JSON source", "use the public JSON decoder"))
+            return None
+        }
+    }
+    if record.module_name == "core.encoding" && (record.member == "__query_read_bounded" || record.member == "__query_validate_fields") {
+        if !environment.source_file.starts_with("<corelib>/") || environment.module_name != "core.encoding.csv" {
+            &diagnostics.push(sema_error("E0510", span, "CSV query leaves are compiler-private", "raw CSV query mechanics are restricted to Core CSV source", "use csv.query<T>"))
+            return None
+        }
+    }
+    backing :: (record.module_name == "core.mem" && (record.member == "__list_capacity" || record.member == "__list_reserve_exact" || record.member == "__type_size")) || (record.module_name == "core.encoding" && (record.member == "__read_byte" || record.member == "__read_into" || record.member == "__write_bytes" || record.member == "__write_text" || record.member == "__flush" || record.member == "__utf8_validate" || record.member == "__bytes_into_text" || record.member == "__text_into_bytes" || record.member == "__string_byte" || record.member == "__object_from_entries" || record.member == "__object_entries_view" || record.member == "__bytes_view" || record.member == "__typed_text"))
+    checked_backing_source :: environment.source_file.starts_with("<corelib>/") && (environment.module_name == "__core_encoding_stream" || environment.module_name == "__core_encoding_cbor_stream" || environment.module_name == "core.encoding.csv" || environment.module_name == "core.encoding.xml" || environment.module_name == "__core_encoding_xml_engine" || ((record.module_name == "core.mem" || (record.module_name == "core.encoding" && record.member == "__utf8_validate")) && environment.module_name == "__core_encoding_cbor_parse"))
+    if backing && !checked_backing_source {
+        &diagnostics.push(sema_error("E0510", span, "encoding backing leaves are compiler-private", "raw carrier operations are restricted to vetted Core encoding internals", "use the public JSON or JSONL API"))
+        return None
+    }
+    audited :: record.module_name == "core.encoding" && (record.member == "__bytes_into_text" || record.member == "__string_byte" || record.member == "__object_from_entries" || record.member == "__object_entries_view" || record.member == "__bytes_view" || record.member == "__typed_text")
+    if audited && context.unsafe_depth == 0 {
+        &diagnostics.push(sema_error("E0510", span, "raw encoding carrier access requires an audited #Unsafe region", "the caller must establish the carrier variant or byte bounds", "check the precondition immediately before the audited call"))
+        return None
+    }
     canonical_record :: sema_call_core_record(record.module_name, record.member, args.len(), span, &diagnostics) ?? return None
     if !core_call_coverage_contains(canonical_record.coverage, CORE_CALL_COVERAGE_SEMA) {
         &diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` has no source semantic call contract", "only SEMA-authorized Core records enter fixed-call checking", "use a SEMA-covered Core call"))
@@ -664,6 +811,12 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
     // #1465: POSIX process/session control requires `#Unsafe` (I1); checking continues.
     if canonical_record.module_name == "core.sys" && context.unsafe_depth == 0 && sema_call_core_posix_control(canonical_record.member) {
         &diagnostics.push(sema_error("E3101", span, "`core.sys.{canonical_record.member}` requires an audited `#Unsafe` region", "POSIX process and session control can change credentials, signals, and process topology (I1)", "wrap the call in `#Unsafe(\"posix {canonical_record.member}: …\") {{ … }}` and gate the host OS with `prep if $build.os` / `#Target(OS.*)`"))
+    }
+    if context.unsafe_depth == 0 && ((canonical_record.module_name == "core.ui" && (canonical_record.member == "__node_transfer" || canonical_record.member == "__viewport_transfer" || canonical_record.member == "__accessibility_transfer" || canonical_record.member == "__shortcut_transfer")) || (canonical_record.module_name == "core.ui.host" && canonical_record.member == "__request_transfer")) {
+        &diagnostics.push(sema_error("E3101", span, "`{canonical_record.module_name}.{canonical_record.member}` requires an audited `#Unsafe` region", "raw host carrier transfer trusts the Core packer's validated tags, words, and retained slots", "use the safe `core.ui` constructors, or wrap a vetted Core transfer in `#Unsafe(\"UI carrier transfer: …\") {{ … }}`"))
+    }
+    if canonical_record.module_name == "core.http.server" && canonical_record.member == "__response_parts" && context.unsafe_depth == 0 {
+        &diagnostics.push(sema_error("E3101", span, "`core.http.server.__response_parts` requires an audited `#Unsafe` region", "the transport transfer trusts the source response policy and consumes body ownership", "wrap the transfer in `#Unsafe(\"normalized response ownership transfer\") {{ … }}`"))
     }
     actual_accesses :: loop argument in args -> argument.convention
     signature :: sema_call_core_typed_signature(canonical_record, args.len(), actual_accesses, [Type]{}) ?? {
@@ -695,6 +848,13 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
     // and record the call fact; the native kernel takes no inferred generic.
     fallibility := sema_expression_failure_carrier(result_type)
     if !sema_call_core_record_effects(canonical_record, span, resolved_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return None
+    if canonical_record.module_name == "core.encoding" && (canonical_record.member == "__object_entries_view" || canonical_record.member == "__bytes_view") {
+        sources :: [ViewSourcePath]{ViewSourcePath{source: ViewSource.Parameter{index: 0}, projections: [ViewSourceProjection]{}}}
+        provenance :: ViewProvenanceMap{entries: [ViewProvenanceEntry]{ViewProvenanceEntry{slot: [String]{}, value: ViewProvenance{sources: sources, mutable: false}}}}
+        callable :: Type.Fn{params: [Type]{}, ret: Val(result_type), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: Val(provenance)}
+        facts :: sema_call_return_view_facts(callable, None, args, binding, scopes, &state, span)
+        &context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
+    }
     value :: sema_call_core_tir(canonical_record, values, span, type_args, loop _ in values -> false, None, result_type, fallibility, None, environment, &diagnostics) ?? return None
     sema_expression_call_expected(sema_call_with_binder_pins(^pins, ^value, span), expected, environment, context, &diagnostics)
 }
@@ -707,7 +867,7 @@ pub fn sema_call_core_check_fixed(environment: SemaScopeEnvironment, module_name
         .Val(signature) -> expected_type_arg_count = signature.type_parameters.len()
         .None -> {}
     }
-    route :: sema_call_core_resolve_route(environment, module_name, member, type_args, expected_type_arg_count, true, args.len(), span, &diagnostics) ?? return None
+    route :: sema_call_core_resolve_route(environment, module_name, member, type_args, expected_type_arg_count, true, args.len(), sema_call_core_first_is_move(args), span, &diagnostics) ?? return None
     if route == {
         .Source(target) -> return sema_call_core_check_source_owned(target, "{module_name}.{member}", type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Core(record) -> return sema_call_core_check_fixed_record(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -731,4 +891,25 @@ pub fn sema_call_core_identity_value(value: TExpr, type_args: [Type], expected: 
         result = sema_expr_expected(value, Val(required), environment, &diagnostics) ?? return None
     }
     sema_expr_expected(result, expected, environment, &diagnostics)
+}
+
+#Test("private loader constructor substitutes a user record return type") {
+    record :: core_call("core.mem", "__loader_new") ?? panic("loader constructor row")
+    user_record :: Type.Named{name: "UserRec"}
+    signature :: sema_call_core_typed_signature(record, 7, [AccessConvention]{}, [Type]{user_record}) ?? panic("loader constructor signature")
+    result :: sema_call_core_result_type(signature, [Type]{user_record}, [TExpr]{}) ?? panic("loader constructor result")
+    assert_eq(result, Type.Result{ok: Type.Apply{name: "DataLoader", args: [Type]{user_record}}, err: Type.Named{name: "DataError"}})
+}
+
+#Test("worker checked-function inference changes no other Core route") {
+    moves :: [Bool]{false, true}
+    loop row in CORE_CALLS {
+        loop moved in moves {
+            previous :: (row.module_name == "core.math" && (row.member == "cmp" || row.member == "is_finite")) ||
+                ((row.module_name == "core.encoding.json" || row.module_name == "core.encoding.jsonl") && row.member == "reader" && moved) ||
+                (row.module_name == "core.net.tls" && row.member == "client" && moved)
+            worker :: row.module_name == "core.service" && row.member == "worker"
+            assert(sema_call_core_native_resource_consumer(row.module_name, row.member, moved) == (previous || worker))
+        }
+    }
 }

@@ -157,11 +157,6 @@ impl<'a> Interp<'a> {
                             );
                         }
                     }
-                    if self.core_imports.get(alias).map(String::as_str) == Some("core.email")
-                        && type_name == "Limits"
-                    {
-                        return Ok(super::super::super::EmailAdapter::limits_safe_value());
-                    }
                     if self.core_imports.get(alias).map(String::as_str) == Some("core.data")
                         && type_name == "DataLimits"
                     {
@@ -170,31 +165,6 @@ impl<'a> Interp<'a> {
                         );
                     }
                 }
-            }
-        }
-        // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` — module-field sentinel constructor.
-        if method == "new" {
-            let solver_ctor = match receiver {
-                Expr::Ident(type_name, _) if type_name == crate::Syntax::SOLVER_TYPE => true,
-                Expr::Field(base, type_name, _)
-                    if type_name == crate::Syntax::SOLVER_TYPE
-                        && matches!(
-                            base.as_ref(),
-                            Expr::Ident(alias, _)
-                                if self.core_imports.get(alias).map(String::as_str)
-                                    == Some("core.compute.solve")
-                        ) =>
-                {
-                    true
-                }
-                _ => false,
-            };
-            if solver_ctor {
-                let mut argv = Vec::with_capacity(args.len());
-                for a in args {
-                    argv.push(self.eval(&a.expr, scope)?);
-                }
-                return solver_new(&argv, span);
             }
         }
         // D-SHAPE-CONVERT1=A: numeric-backed distinct/unit conversion is the
@@ -402,14 +372,6 @@ impl<'a> Interp<'a> {
                     })),
                 });
             }
-            // D-SOLVER-LIB1=A: bare `Solver.new(seed)` (same state as `solve.Solver.new`).
-            if type_name == crate::Syntax::SOLVER_TYPE && method == "new" {
-                let mut argv = Vec::with_capacity(args.len());
-                for a in args {
-                    argv.push(self.eval(&a.expr, scope)?);
-                }
-                return solver_new(&argv, span);
-            }
             // Only intercept known built-in type names; user struct names use normal path.
             let is_builtin_type = crate::AST::numeric_type_from_name(type_name).is_some()
                 || matches!(type_name.as_str(), "Bool" | "String")
@@ -518,6 +480,9 @@ impl<'a> Interp<'a> {
                 // Plot construction/rendering also needs the sema-resolved
                 // row type and declaration metadata. Keep this route beside
                 // the typed table path, before generic Core dispatch.
+                if module == "core.data.plot" && method == "__plot_aggregate_none" {
+                    return Ok(super::super::super::DataPipeline::plot_aggregate_none_value());
+                }
                 if matches!(
                     (module.as_str(), method),
                     (
@@ -1973,6 +1938,7 @@ impl<'a> Interp<'a> {
             "extend",
             "clear",
             "reverse",
+            "__swap",
             "sort",
             "sort_desc",
         ];
@@ -1981,15 +1947,7 @@ impl<'a> Interp<'a> {
                 Some(value) => value,
                 None => self.eval(receiver, scope)?,
             };
-            let handled_here = matches!(&container, CtValue::List(_) | CtValue::Map(_))
-                || matches!(
-                    &container,
-                    CtValue::Struct { type_name, .. }
-                        if method == "add" && matches!(
-                            type_name.as_str(),
-                            "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
-                        )
-                );
+            let handled_here = matches!(&container, CtValue::List(_) | CtValue::Map(_));
             if handled_here {
                 let mut argv = Vec::new();
                 for a in args {
@@ -2016,11 +1974,6 @@ impl<'a> Interp<'a> {
                             Ok(CtValue::Unit)
                         }
                     };
-                }
-                if let Some(result) = sketch_add(&container, &argv, span) {
-                    let (ret, updated) = result?;
-                    self.write_back(receiver, updated, scope)?;
-                    return Ok(ret);
                 }
                 let ret = apply_mutating(&mut container, method, argv, span)?;
                 self.write_back(receiver, container, scope)?;
@@ -2369,42 +2322,6 @@ impl<'a> Interp<'a> {
                     scope,
                 )?;
                 return Ok(value);
-            }
-            (
-                CtValue::Struct { type_name, .. },
-                method @ ("locale" | "name" | "email" | "host" | "address"),
-            ) if type_name == crate::Syntax::FAKE_TYPE => {
-                if method != "locale" && !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
-                    return Err(unsupported("Fake method on a temporary value", span));
-                }
-                // The kernel advances the generator's own state, so it needs a
-                // mutable value; `recv` is bound by the match, so take a local
-                // copy and write it back below exactly as the RNG arm does.
-                let mut fake_recv = recv.clone();
-                let value = super::super::core_calls::apply_fake_method(
-                    &mut fake_recv,
-                    method,
-                    &argv,
-                    span,
-                )?;
-                if method != "locale" {
-                    self.write_back(receiver, fake_recv, scope)?;
-                }
-                return Ok(value);
-            }
-            // D-SOLVER-LIB1=A: `solver.require(ok)` records a Bool constraint in place.
-            (CtValue::Struct { type_name, .. }, "require")
-                if type_name == crate::Syntax::SOLVER_TYPE =>
-            {
-                if !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
-                    return Err(unsupported("Solver method on a temporary value", span));
-                }
-                let Some(result) = solver_require(&recv, &argv, span) else {
-                    return Err(unsupported("`Solver.require`", span));
-                };
-                let (ret, updated) = result?;
-                self.write_back(receiver, updated, scope)?;
-                return Ok(ret);
             }
             _ => {}
         }

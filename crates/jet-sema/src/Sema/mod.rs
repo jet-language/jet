@@ -648,6 +648,13 @@ impl UnitFact {
 #[derive(Clone)]
 pub(crate) struct TypeRegistry {
     types: HashMap<String, TypeDef>,
+    /// Exact ledger authority intersected with declarations loaded from that Core file.
+    source_owned_types: HashSet<&'static str>,
+    core_source_module: Option<&'static jet_foundation::CoreModuleExports::CoreSourceModule>,
+    /// Source methods on native carriers, separate from nominal declarations.
+    opaque_methods: HashMap<String, HashMap<String, MethodSig>>,
+    /// Validated operator-hook signatures, never ordinary name-only members.
+    operator_signatures: HashMap<String, MethodSig>,
     /// D-FAILURE-FOUNDATION1=A: user-named types carrying `#Error` may be
     /// used as explicit callable failure domains.
     error_types: HashSet<String>,
@@ -677,6 +684,19 @@ pub(crate) struct TypeRegistry {
 }
 
 impl TypeRegistry {
+    pub(crate) fn source_owns_type(&self, name: &str) -> bool {
+        self.source_owned_types.contains(name)
+    }
+
+    pub(crate) fn source_owns_impl(&self, name: &str) -> bool {
+        self.core_source_module.is_some_and(|source| source.impl_types.contains(&name))
+            && crate::Sema::CheckerCoreLib::core_type_known(name)
+    }
+
+    pub(crate) fn reserves_type_name(&self, name: &str) -> bool {
+        crate::Collections::is_reserved_type(name) && !self.source_owns_type(name)
+    }
+
 
     pub(crate) fn receipt_section(&self, type_name: &str) -> Option<&ReceiptSectionMeta> {
         self.receipt_sections.get(type_name)
@@ -855,6 +875,9 @@ impl TypeRegistry {
     }
 
     fn method(&self, type_name: &str, method: &str) -> Option<&MethodSig> {
+        if let Some(signature) = self.opaque_methods.get(type_name).and_then(|methods| methods.get(method)) {
+            return Some(signature);
+        }
         match self.types.get(type_name) {
             Some(TypeDef::Struct { methods, .. }) | Some(TypeDef::Enum { methods, .. }) => {
                 methods.get(method)

@@ -27,6 +27,28 @@ pub enum Type {
     Measure(measure: Measure)
 }
 
+// Shared primitive spelling authority for parsed types and Core call contracts.
+pub fn foundation_named_type(name: String) -> Type Never! {
+    if name == {
+        "Int" -> Type.Int
+        "Float" | "F64" -> Type.Float
+        "F32" -> Type.Float32
+        "Bool" -> Type.Bool
+        "String" -> Type.String
+        "Char" -> Type.Char
+        "I8" -> Type.IntN{signed: true, bits: 8}
+        "I16" -> Type.IntN{signed: true, bits: 16}
+        "I32" -> Type.IntN{signed: true, bits: 32}
+        "I64" -> Type.IntN{signed: true, bits: 64}
+        "U8" -> Type.IntN{signed: false, bits: 8}
+        "U16" -> Type.IntN{signed: false, bits: 16}
+        "U32" -> Type.IntN{signed: false, bits: 32}
+        "U64" -> Type.IntN{signed: false, bits: 64}
+        "Shared" -> Type.Named{name: name}
+        else -> Type.Named{name: name}
+    }
+}
+
 pub struct TypeTupleField {
     pub name: String
     pub ty: Type

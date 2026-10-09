@@ -391,6 +391,44 @@ fn one_fake_record_projects_without_a_consumer_arm() {
 }
 
 #[test]
+fn source_owned_metadata_admits_sema_and_rejects_every_executable_projection() {
+    use jet_foundation::Syntax::{
+        core_call_projection_in, core_call_table_violations, CoreCallCoverage,
+        CoreCallInterpreterRoute, CoreCallProjectionError, CoreCallRecord, CoreCallSymbol,
+    };
+    const ROWS: &[CoreCallRecord] = &[
+        CoreCallRecord::source_owned("core.ui.host", "shortcut", &[true, false])
+            .with_ui_capabilities(&["UI.Shortcuts"]),
+    ];
+    let row = &ROWS[0];
+    let original = CoreCallRecord::new(
+        "core.ui.host", "shortcut", "jet_ui_host_shortcut", true, &[true, false],
+    ).with_ui_capabilities(&["UI.Shortcuts"]);
+    assert_eq!(row.symbol, CoreCallSymbol::SourceOwned);
+    assert_eq!(row.signature, original.signature);
+    assert_eq!(row.effect, original.effect);
+    assert_eq!(row.capability, original.capability);
+    assert_eq!(row.ui_capabilities, original.ui_capabilities);
+    assert_eq!(row.interpreter_route, CoreCallInterpreterRoute::None);
+    assert!(!row.has_direct_symbol());
+    assert!(core_call_table_violations(ROWS).is_empty());
+    assert_eq!(
+        core_call_projection_in(ROWS, "core.ui.host", "shortcut", CoreCallCoverage::SEMA, 2),
+        Ok(row),
+    );
+    for projection in [
+        CoreCallCoverage::TIR_SUBSET, CoreCallCoverage::TIR_EVAL,
+        CoreCallCoverage::AOT, CoreCallCoverage::INTERPRETER, CoreCallCoverage::COMPTIME,
+    ] {
+        assert_eq!(
+            core_call_projection_in(ROWS, "core.ui.host", "shortcut", projection, 2),
+            Err(CoreCallProjectionError::Uncovered { projection }),
+        );
+    }
+    assert!(std::panic::catch_unwind(|| row.symbol.name()).is_err());
+}
+
+#[test]
 fn coverage_guard_rejects_a_missing_tier_projection() {
     const SEMA_ONLY: &[jet_foundation::Syntax::CoreCallRecord] =
         &[jet_foundation::Syntax::CoreCallRecord::new_with_coverage(
@@ -567,7 +605,7 @@ fn sema_tir_and_comptime_route_plain_calls_through_the_record() {
 #[test]
 fn plain_row_guards_reject_second_tables_and_missing_projection_hooks() {
     let table = read("crates/jet-foundation/src/Syntax/core_calls.rs");
-    assert!(table.contains("pub const CORE_CALLS"));
+    assert!(table.contains("pub static CORE_CALLS"));
     assert!(table.contains("pub struct CoreCallSignature"));
     assert!(table.contains("pub struct CoreCallCoverage"));
     assert!(table.contains("pub fn core_call_projection"));

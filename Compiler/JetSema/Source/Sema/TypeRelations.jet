@@ -21,6 +21,7 @@ use jet_foundation.[
     ViewSource,
     ViewSourcePath,
     ViewSourceProjection,
+    core_bare_source_module,
     core_module_export,
     symbol_id,
     type_identity_equal,
@@ -447,6 +448,14 @@ fn sema_type_graph_resolve_named(graph: SemaRegistrationGraph, name: String, cal
     if resolved.symbol.kind == {
         .Trait -> Type.TraitObject{bounds: [String]{sema_type_graph_canonical_symbol_name(graph, resolved)}}
         .Type -> {
+            if sema_type_graph_nominal_row(graph, resolved.symbol.id.key) == .Val(row) {
+                nominal :: graph.modules[row.module_index].nominals[row.row]
+                if nominal.source == .SourceAST(.TypeAlias(definition)) {
+                    if definition.type_params.len() == 0 && definition.target == .Named(_) {
+                        return sema_type_graph_resolve_named(graph, type_name(definition.target), nominal.symbol.module_name)
+                    }
+                }
+            }
             if sema_type_graph_nominal_row(graph, resolved.symbol.id.key) != None -> return Type.Named{name: sema_type_graph_canonical_symbol_name(graph, resolved)}
             if resolved.source_module_identity.starts_with("<corelib>/") -> return resolved.symbol.ty ?? Type.Named{name: name}
             Type.Named{name: name}
@@ -457,6 +466,7 @@ fn sema_type_graph_resolve_named(graph: SemaRegistrationGraph, name: String, cal
 
 fn sema_type_graph_resolve_apply_name(graph: SemaRegistrationGraph, name: String, caller_module_identity: String) -> String Never! {
     resolved :: sema_type_graph_lookup_symbol(graph, caller_module_identity, name) ?? return name
+    if sema_type_source_owns_nominal(graph, name, caller_module_identity) -> return sema_type_graph_canonical_symbol_name(graph, resolved)
     if resolved.symbol.kind == SymbolKind.Type && resolved.source_module_identity.starts_with("<corelib>/") && sema_type_graph_nominal_row(graph, resolved.symbol.id.key) == None {
         if resolved.symbol.ty == .Val(builtin) {
             if builtin == .Named(leaf) -> return leaf
@@ -646,11 +656,26 @@ fn sema_type_graph_lookup_symbol(graph: SemaRegistrationGraph, module_identity: 
         }
     }
     parts :: name.split(".").to_list()
-    if parts.len() < 2 -> return None
-    alias := parts[0]
-    target_name := [String]{}
-    loop index in 1..<parts.len() -> &target_name.push(parts[index])
-    sema_registration_lookup_qualified(graph, module_identity, alias, target_name.join("."))
+    if parts.len() >= 2 {
+        alias := parts[0]
+        target_name := [String]{}
+        loop index in 1..<parts.len() -> &target_name.push(parts[index])
+        return sema_registration_lookup_qualified(graph, module_identity, alias, target_name.join("."))
+    }
+    // Only the established bare-owner trigger set may supply a global alias.
+    // Local declarations and explicit imports have already won above.
+    bare_owner :: core_bare_source_module(name) ?? return None
+    loop row in sema_registration_nominal_rows_named(graph, name) {
+        module_row :: graph.modules[row.module_index]
+        nominal :: module_row.nominals[row.row]
+        if module_row.module_name != bare_owner
+            || !module_row.module_identity.starts_with("<corelib>/")
+            || nominal.kind != SemaRegistrationNominalKind.TypeAlias
+            || nominal.generic_params.len() != 0
+            || nominal.symbol.visibility < 2 -> next
+        return Val(SemaRegistrationResolvedSymbol{symbol: nominal.symbol, source_module_identity: module_row.module_identity, target_module_identity: module_row.module_identity, visibility: nominal.symbol.visibility})
+    }
+    None
 }
 
 fn sema_type_graph_base_name(ty: Type) -> String? {
@@ -668,6 +693,13 @@ pub fn sema_type_resolve_nominal_row(graph: SemaRegistrationGraph, actual: Type,
     resolved :: sema_type_graph_lookup_symbol(graph, caller_module_identity, name) ?? return None
     if resolved.symbol.kind != SymbolKind.Type -> return None
     sema_type_graph_nominal_row(graph, resolved.symbol.id.key)
+}
+
+// The ledger alone is not declaration authority: require the registered row.
+pub fn sema_type_source_owns_nominal(graph: SemaRegistrationGraph, name: String, caller_module_identity: String) -> Bool Never! {
+    row :: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, caller_module_identity) ?? return false
+    nominal :: graph.modules[row.module_index].nominals[row.row]
+    core_source_owns_type("{nominal.symbol.module_name}::{nominal.symbol.name}")
 }
 
 fn sema_type_graph_trait_symbol(graph: SemaRegistrationGraph, module_identity: String, bound_name: String) -> Symbol? {
@@ -767,6 +799,15 @@ fn sema_type_bound_satisfied_resolved(graph: SemaRegistrationGraph, actual_resol
     nominal_row :: sema_type_resolve_nominal_row(graph, actual_resolved, caller_module_identity) ?? return None
     nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     trait_symbol :: sema_type_graph_trait_symbol(graph, caller_module_identity, bound_name) ?? return None
+    // These provider-backed Core owners already implement the consuming runtime
+    // Close protocol. Check the declaring identity, never the display path or
+    // an application's same-named struct.
+    if bound_name == "Close" && nominal.symbol.module_name.starts_with("<corelib>/Core/files::") {
+        if nominal.symbol.name == {
+            "FileReader" | "FileWriter" | "FileLock" | "TempDir" | "TempFile" -> return Val(true)
+            else -> {}
+        }
+    }
     unresolved_impl := false
     if graph.impl_traits_indexed {
         // Only the impls of this trait, from the registration index.
@@ -997,7 +1038,7 @@ fn sema_type_core_leaf_name(graph: SemaRegistrationGraph, name: String, caller_m
     loop index in 0..<last -> &owner_parts.push(parts[index])
     module_name :: sema_registration_module_name(graph, owner_parts.join("::")) ?? return None
     if module_name == "core.crypto" -> return None
-    if (leaf == "SQL" || leaf == "HTML" || leaf == "Sh" || leaf == "URL" || leaf == "Path" || leaf == "DateTime") && !(leaf == "URL" && module_name == "core.net.url") -> return None
+    if (leaf == "SQL" || leaf == "HTML" || leaf == "Sh" || leaf == "URL" || leaf == "Path" || leaf == "DateTime") && !(leaf == "URL" && module_name == "core.net.url") && !(leaf == "DateTime" && module_name == "core.time") -> return None
     exports :: core_module_export(module_name) ?? return None
     if !exports.type_exports.contains(leaf) -> return None
     if sema_type_graph_lookup_symbol(graph, caller_module_identity, leaf) != None -> return None

@@ -3,6 +3,7 @@ use crate::AST::{
     OrFallback, Pattern, Stmt, StrPart, TryConvert, Type, TypedLitBody, UnOp,
 };
 use crate::Codegen::Cx;
+use super::method_calls::lower_measurement_source_call;
 use crate::Codegen::TIR::ListSpreadPart;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TAddressLifetime;
@@ -57,7 +58,6 @@ use crate::Codegen::TIR::lower_require_stop;
 use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::module_call_source_return_type;
 use crate::Codegen::TIR::preserve_typed_list_shape;
-use crate::Codegen::TIR::solve_new_type;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::tir_address_lifetime;
 use crate::Codegen::TIR::unit_type;
@@ -415,12 +415,11 @@ pub(crate) fn resolve_unknown_index_kind(
     let index_ty = index_t.ty.without_user_tags();
     let is_range = matches!(index_ty, Type::Named(name) if name == Syntax::TYPE_RANGE);
     match base_ty {
-        Type::List(_) => Some(if is_range {
+        Type::List(_) | Type::FixedList { .. } => Some(if is_range {
             IndexKind::Range
         } else {
             IndexKind::List
         }),
-        Type::FixedList { .. } => Some(IndexKind::List),
         Type::Apply { name, args }
             if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
                 && args.len() == 1 =>
@@ -732,11 +731,9 @@ fn canonicalize_operator_method_identity(expr: &mut TExpr, cx: &Cx) {
 /// calls. These routes deliberately remain total: an absent AST annotation must
 /// not turn a known checked root/handle operation into an unresolved MIR call.
 fn fallback_checked_method_return(
-    receiver: &Expr,
     method: &str,
     recv_type: Option<&str>,
     cx: &Cx,
-    env: &LowerEnv,
 ) -> Option<Type> {
     let is_root = match recv_type {
         Some(name) => {
@@ -761,12 +758,6 @@ fn fallback_checked_method_return(
         && matches!(method, Syntax::TXN_ON_COMMIT | Syntax::TXN_ON_ROLLBACK)
     {
         return Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
-    }
-    if method == Syntax::MEM_ALLOC_NEW || method == "new" {
-        let locals = env.locals.keys().cloned().collect::<HashSet<_>>();
-        if solve_new_type(receiver, method, cx, &locals).is_some() {
-            return Some(Type::Named(Syntax::SOLVER_TYPE.to_string()));
-        }
     }
     None
 }
@@ -802,7 +793,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             unreachable!("method chain contains only method calls")
         };
         let resolved_ret = resolved_ret.clone().or_else(|| {
-            fallback_checked_method_return(receiver, method, recv_type.as_deref(), cx, env)
+            fallback_checked_method_return(method, recv_type.as_deref(), cx)
         });
         // A field receiver does not persist `recv_type` on the AST method
         // node, and a specialized generic operator (`left < right` under
@@ -1484,14 +1475,14 @@ pub(super) fn lower_or_fallback(
 }
 
 fn lower_expr_node(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-    canonicalize_pre_tier_expr(match e {
+    super::method_calls::lower_checked_core_source_expr(canonicalize_pre_tier_expr(match e {
         Expr::MethodCall { .. } => lower_method_chain(e, cx, env),
         Expr::ListLit(elems, _) => lower_list_lit(elems, cx, env),
         Expr::OrFallback {
             value, fallback, ..
         } => lower_or_fallback(value, fallback, cx, env),
         _ => lower_expr_inner(e, cx, env),
-    })
+    }), cx)
 }
 
 /// Lower callee preconditions at the call site.  The argument values are
@@ -3727,6 +3718,9 @@ fn lower_boundary_typed_lit(
     }
     let kind = Syntax::typed_head_kind(type_name).filter(|kind| kind.is_boundary())?;
     let ty = Type::Named(kind.internal_type_name().to_string());
+    if kind == Syntax::TypedHeadKind::URL {
+        return Some(lower_url_recipe(literals, holes, cx));
+    }
     Some(TExpr {
         ty,
         kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TypedTextInterp {
@@ -3736,6 +3730,49 @@ fn lower_boundary_typed_lit(
             trusted_html,
         })),
     })
+}
+
+fn lower_url_recipe(literals: Vec<String>, holes: Vec<TExpr>, cx: &Cx) -> TExpr {
+    let signature = cx.core_source_sigs
+        .get(&("core.net.url".to_string(), "literal".to_string()))
+        .expect("URL literal source signature is loaded");
+    let ty = signature.return_type.as_ref().expect("URL literal return type").clone();
+    let literals = literals.into_iter().map(|text| TExpr {
+        ty: Type::String,
+        kind: TExprKind::StrLit(vec![TStrPart::Lit(text)]),
+    }).collect();
+    let holes = holes.into_iter().map(|hole| TExpr {
+        ty: Type::String,
+        kind: TExprKind::StrLit(vec![TStrPart::Interp(hole, crate::AST::StrFormat::Display)]),
+    }).collect();
+    let args = [literals, holes].into_iter().map(|elements| TCallArg {
+        value: TExpr {
+            ty: Type::List(Box::new(Type::String)),
+            kind: TExprKind::ListLit(elements),
+        },
+        template_items: None,
+        borrow: true,
+        mut_borrow: false,
+        clone: false,
+        arc_clone: false,
+        fn_coerce: None,
+        widen_to_vec: false,
+        widen_to_union: None,
+        box_as_trait: None,
+    }).collect();
+    TExpr {
+        ty: ty.clone(),
+        kind: TExprKind::ModuleCall {
+            form: crate::Codegen::TIR::TModuleCallForm::Qualified {
+                rust_mod: signature.module_identity.clone(),
+                rust_fn: "literal".to_string(),
+            },
+            target_return: Some(crate::Codegen::TIR::module_call_target_return(cx, Some(&ty))
+                .expect("URL literal checked return")),
+            type_args: Vec::new(),
+            args,
+        },
+    }
 }
 
 /// D-BYTELIT1=B: mirror sema's byte-text rewrite for raw comptime fragments
@@ -3867,6 +3904,9 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
             },
         };
     }
+    if matches!(&value.ty, Type::Apply { name, args } if name == "Measurement" && args == &[Type::Float]) {
+        return lower_measurement_source_call("__measurement_show", [value], Type::String, Span::new(0, 0), cx);
+    }
     let Type::Named(name) = &value.ty else {
         return value;
     };
@@ -3910,7 +3950,8 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
 /// backend sees the erased numeric carrier.
 fn lower_print_value(value: TExpr, cx: &Cx) -> TExpr {
     let printable_unit = value.ty.quantity_parts().is_some() || cx.unit_label(&value.ty).is_some();
-    let explicit_display = matches!(&value.ty, Type::Named(name) if cx.has_display_type(name));
+    let explicit_display = matches!(&value.ty, Type::Named(name) if cx.has_display_type(name))
+        || matches!(&value.ty, Type::Apply { name, args } if name == "Measurement" && args == &[Type::Float]);
     if printable_unit || explicit_display {
         lower_display_value(value, cx)
     } else {
@@ -5094,10 +5135,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         }
                     }
                 }
-                // D-TYPE2-UNCERT1=A: sema has made exact operands explicit
-                // zero-uncertainty measurements. Reuse the resident measurement
-                // handle op so AOT, JIT, interpreter, comptime, REPL and web call
-                // the same Prelude kernel.
+                // Sema has made exact operands explicit zero-uncertainty
+                // measurements; the implementation is an ordinary source call.
                 if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
                     && matches!((&lhs.ty, &rhs.ty), (
                         Type::Apply { name: left, .. },
@@ -5105,23 +5144,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     ) if left == Syntax::TYPE_MEASUREMENT && right == Syntax::TYPE_MEASUREMENT)
                 {
                     return in_own_frame(|| {
-                        return TExpr {
-                            ty: lhs.ty.clone(),
-                            kind: TExprKind::HandleMethod {
-                                recv: Box::new(lhs),
-                                op: THandleOp::MeasurementMethod {
-                                    method: match op {
-                                        BinOp::Add => "add",
-                                        BinOp::Sub => "sub",
-                                        BinOp::Mul => "mul",
-                                        BinOp::Div => "div",
-                                        _ => unreachable!(),
-                                    }
-                                    .to_string(),
-                                },
-                                args: vec![rhs],
-                            },
+                        let result = lhs.ty.clone();
+                        let function = match op {
+                            BinOp::Add => "__measurement_add",
+                            BinOp::Sub => "__measurement_sub",
+                            BinOp::Mul => "__measurement_mul",
+                            BinOp::Div => "__measurement_div",
+                            _ => unreachable!(),
                         };
+                        return lower_measurement_source_call(function, [lhs, rhs], result, *span, cx);
                     });
                 }
                 // D-SHAPE-QUANTITY1=A: sema has already validated compatibility.
@@ -5986,30 +6017,20 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     });
                 }
                 // D-TYPE2-UNCERT1=A: the canonical source constructor uses the
-                // existing typed Prelude route directly. `core.units.from` is
-                // source-owned and is not a second CoreCall dispatcher entry.
+                // ordinary source function. The checked constructor spelling
+                // remains distinct from `core.units.from`.
                 if call.name == "measurement"
                     && !cx.sigs.contains_key(&call.name)
                     && !env.locals.contains_key(&call.name)
                     && call.args.len() == 2
                 {
                     return in_own_frame(|| {
-                        let args = call
-                            .args
-                            .iter()
-                            .map(|argument| lower_expr(&argument.expr, cx, env))
-                            .collect::<Vec<_>>();
-                        TExpr {
-                            ty: Type::Apply {
-                                name: Syntax::TYPE_MEASUREMENT.to_string(),
-                                args: vec![Type::Float],
-                            },
-                            kind: TExprKind::PreciseBuiltin {
-                                type_name: Syntax::TYPE_MEASUREMENT.to_string(),
-                                func: "new".to_string(),
-                                args,
-                            },
-                        }
+                        let args = call.args.iter().map(|argument| lower_expr(&argument.expr, cx, env));
+                        let result = Type::Apply {
+                            name: Syntax::TYPE_MEASUREMENT.to_string(),
+                            args: vec![Type::Float],
+                        };
+                        lower_measurement_source_call("__measurement_new", args, result, call.name_span, cx)
                     });
                 }
                 // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
@@ -6097,6 +6118,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 trusted_html.push(trusted);
                                 holes.push(hole);
                             }
+                        }
+                        if kind == Syntax::TypedHeadKind::URL {
+                            return lower_url_recipe(literals, holes, cx);
                         }
                         let ty = Type::Named(kind.internal_type_name().to_string());
                         if kind == Syntax::TypedHeadKind::HTML && holes.is_empty() {

@@ -129,6 +129,22 @@ mod tests {
         assert_eq!(CtFraction::new(1, 3).unwrap().to_string_rep(), "1/3");
     }
 
+    #[test]
+    fn fraction_carrier_uses_private_storage_names_and_round_trips() {
+        for (numerator, denominator) in [(6, -8), (0, -87), (1, 3), (7, 2)] {
+            let fraction = CtFraction::new(numerator, denominator).unwrap();
+            let value = fraction.to_value();
+            let crate::AST::CtValue::Struct { fields, .. } = &value else {
+                panic!("Fraction must retain its nominal carrier");
+            };
+            assert_eq!(fields[0].0, "num_value");
+            assert_eq!(fields[1].0, "den_value");
+            let restored = CtFraction::from_value(&value).unwrap();
+            assert_eq!(restored, fraction);
+            assert_eq!(restored.to_string_rep(), fraction.to_string_rep());
+        }
+    }
+
     /// D-INTBIG1 (#1436): exact `Int` arithmetic on machine-word values stays
     /// in the inline carrier with no heap traffic, and values crossing the
     /// ~63-bit spill boundary in either direction round-trip exactly.
@@ -445,11 +461,11 @@ impl CtFraction {
             type_name: Syntax::TYPE_FRACTION.to_string(),
             fields: vec![
                 (
-                    "numerator".to_string(),
+                    "num_value".to_string(),
                     ct_int_value(self.numerator.clone()),
                 ),
                 (
-                    "denominator".to_string(),
+                    "den_value".to_string(),
                     ct_int_value(self.denominator.clone()),
                 ),
             ],
@@ -471,9 +487,9 @@ impl CtFraction {
                 crate::AST::CtValue::BigInt(value) => value.clone(),
                 _ => return Err(format!("malformed Fraction.{name}")),
             };
-            if name == "numerator" {
+            if name == "num_value" {
                 numerator = Some(value);
-            } else if name == "denominator" {
+            } else if name == "den_value" {
                 denominator = Some(value);
             }
         }

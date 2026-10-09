@@ -990,6 +990,7 @@ fn parse_pattern_tree(template: &Template, class: &str) -> PatternTree {
         path: PathBuf::from("<codemod-pattern>"),
         display: "<codemod-pattern>".to_string(),
         source: wrapped.clone(),
+        core_identifier_demand: jet::Lexer::core_identifier_demand(&tokens),
         alias: "pattern".to_string(),
         imports: program.imports,
         items: program.items,

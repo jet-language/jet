@@ -1391,6 +1391,15 @@ impl THandleOp {
                 Some(Effect::FS),
                 carrier,
             ),
+            FileReaderRead => h(
+                "file_reader.read",
+                "jet_std_file_reader_read",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::FS),
+                carrier,
+            ),
             FileReaderPath => h(
                 "file_reader.path",
                 "jet_std_file_reader_path",
@@ -1457,6 +1466,24 @@ impl THandleOp {
             FileWriterFlush => h(
                 "file_writer.flush",
                 "jet_std_file_writer_flush",
+                1,
+                1,
+                &[true],
+                Some(Effect::FS),
+                carrier,
+            ),
+            FileWriterWriteAll => h(
+                "file_writer.write_all",
+                "jet_std_file_writer_write_all",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::FS),
+                carrier,
+            ),
+            FileWriterFsync => h(
+                "file_writer.fsync",
+                "jet_std_file_writer_fsync",
                 1,
                 1,
                 &[true],
@@ -1544,15 +1571,6 @@ impl THandleOp {
                 Some(Effect::IO),
                 carrier,
             ),
-            CSVReaderNext => h(
-                "csv_reader.next",
-                "jet_enc_csv_reader_next",
-                1,
-                1,
-                &[true],
-                Some(Effect::IO),
-                carrier,
-            ),
             DataStreamNext => h(
                 "data_stream.next",
                 "jet_data_stream_next",
@@ -1628,33 +1646,6 @@ impl THandleOp {
             XMLWriterFinish => h(
                 "xml_writer.finish",
                 "jet_enc_xml_writer_finish",
-                1,
-                1,
-                &[true],
-                Some(Effect::IO),
-                carrier,
-            ),
-            CSVWriterWrite => h(
-                "csv_writer.write",
-                "jet_enc_csv_writer_write",
-                2,
-                2,
-                &[true, false],
-                Some(Effect::IO),
-                carrier,
-            ),
-            CSVWriterFlush => h(
-                "csv_writer.flush",
-                "jet_enc_csv_writer_flush",
-                1,
-                1,
-                &[true],
-                Some(Effect::IO),
-                carrier,
-            ),
-            CSVWriterFinish => h(
-                "csv_writer.finish",
-                "jet_enc_csv_writer_finish",
                 1,
                 1,
                 &[true],
@@ -2046,87 +2037,6 @@ impl THandleOp {
                 2,
                 &[true, false],
                 Some(Effect::Rand),
-                carrier,
-            ),
-            FakeLocale => h(
-                "fake.locale",
-                "jet_fake_locale",
-                2,
-                2,
-                &[true, true],
-                Some(Effect::Rand),
-                carrier,
-            ),
-            FakeName => h(
-                "fake.name",
-                "jet_fake_name",
-                1,
-                1,
-                &[true],
-                Some(Effect::Rand),
-                carrier,
-            ),
-            FakeEmail => h(
-                "fake.email",
-                "jet_fake_email",
-                1,
-                1,
-                &[true],
-                Some(Effect::Rand),
-                carrier,
-            ),
-            FakeHost => h(
-                "fake.host",
-                "jet_fake_host",
-                1,
-                1,
-                &[true],
-                Some(Effect::Rand),
-                carrier,
-            ),
-            FakeAddress => h(
-                "fake.address",
-                "jet_fake_address",
-                1,
-                1,
-                &[true],
-                Some(Effect::Rand),
-                carrier,
-            ),
-            SolverNew => h(
-                "solver.new",
-                "jet_solver_new",
-                1,
-                1,
-                &[false],
-                None,
-                carrier,
-            ),
-            SolverRequire => h(
-                "solver.require",
-                "jet_solver_require",
-                2,
-                2,
-                &[true, false],
-                None,
-                carrier,
-            ),
-            SolverFailureCount => h(
-                "solver.failure_count",
-                "jet_solver_failure_count",
-                1,
-                1,
-                &[true],
-                None,
-                carrier,
-            ),
-            SolverStatus => h(
-                "solver.status",
-                "jet_solver_status",
-                1,
-                1,
-                &[true],
-                None,
                 carrier,
             ),
             GameSceneNew => h(
@@ -3154,33 +3064,6 @@ impl THandleOp {
             HTTPClientMethod { kind, method } => http_client_request_route(kind, method, carrier)?,
             HTTPServerMethod { .. } | EmailMethod { .. } => primitive(),
             RegexMethod { kind, method } => regex_route(kind, method, carrier)?,
-            UrlMimeMethod { kind, method } => url_mime_route(kind, method, carrier)?,
-            SketchMethod { sketch, method } => {
-                let (arity, borrow_mask): (usize, &[bool]) =
-                    match (sketch.as_str(), method.as_str()) {
-                        ("HyperLogLog", "add") | ("CountMinSketch", "add" | "count") => {
-                            (2, &[true, true])
-                        }
-                        ("HyperLogLog", "count") | ("ReservoirSampler", "sample") => (1, &[true]),
-                        ("TDigest", "add" | "quantile") | ("ReservoirSampler", "add") => {
-                            (2, &[true, false])
-                        }
-                        _ => {
-                            return Err(route_error(format!(
-                                "unknown checked sketch method `{sketch}.{method}`"
-                            )));
-                        }
-                    };
-                h(
-                    &format!("{sketch}.{method}"),
-                    &format!("Jet{sketch}::{method}"),
-                    arity,
-                    arity,
-                    borrow_mask,
-                    None,
-                    carrier,
-                )
-            }
             CivilTimeMethod { kind, method } => civil_time_route(kind, method, carrier)?,
             ProcessSpecMethod { method, args_len } => match (method.as_str(), *args_len) {
                 ("cwd", 1) => h(
@@ -4181,19 +4064,6 @@ impl THandleOp {
                 Some(Effect::DB),
                 carrier,
             ),
-            MeasurementMethod { method } => measurement_route(method, carrier)?,
-            WebVirtualWindowFacts => prelude(
-                MirPreludeFamily::HandleMethod,
-                "core.web.virtual",
-                "facts_json",
-                "jet_web_virtual_window_facts",
-                1,
-                1,
-                &[true],
-                None,
-                carrier,
-                MirPreludeAbi::Value,
-            ),
             AppMethod { method, args_len } => app_route(method, *args_len, carrier),
             DevServerMethod { method } => devserver_route(method, carrier),
             LayoutMethod { method } => layout_method_route(method, carrier)?,
@@ -4595,64 +4465,6 @@ fn regex_route(
     ))
 }
 
-/// D-URL1=A: checked MIME projections. `URL` is the `core.net.url` record, so
-/// its documented methods lower through the declaration, never a handle row.
-fn url_mime_route(
-    kind: &str,
-    method: &str,
-    carrier: &TFailureCarrier,
-) -> Result<TRoutePlan, LowerError> {
-    let (symbol, borrow_mask): (&str, &[bool]) = match (kind, method) {
-        ("MIME", "media_type") => ("jet_std::JetMIME::media_type", &[true][..]),
-        ("MIME", "subtype") => ("jet_std::JetMIME::subtype", &[true][..]),
-        ("MIME", "essence") => ("jet_std::JetMIME::essence", &[true][..]),
-        ("MIME", "params") => ("jet_std::JetMIME::params", &[true][..]),
-        ("MIME", "to_string") => ("jet_std::JetMIME::to_string_value", &[true][..]),
-        ("MIME", "param") => ("jet_std::JetMIME::param", &[true, true][..]),
-        _ => {
-            return Err(route_error(format!(
-                "unknown checked URL/MIME method `{kind}.{method}`"
-            )));
-        }
-    };
-    let member = format!("{kind}.{method}");
-    Ok(h(
-        &member,
-        symbol,
-        borrow_mask.len(),
-        borrow_mask.len(),
-        borrow_mask,
-        None,
-        carrier,
-    ))
-}
-
-fn measurement_route(method: &str, carrier: &TFailureCarrier) -> Result<TRoutePlan, LowerError> {
-    let (symbol, borrow_mask): (&str, &[bool]) = match method {
-        "value" => ("jet_std::JetMeasurement::value", &[true][..]),
-        "uncertainty" => ("jet_std::JetMeasurement::uncertainty", &[true][..]),
-        "add" => ("jet_std::JetMeasurement::add", &[true, false][..]),
-        "sub" => ("jet_std::JetMeasurement::sub", &[true, false][..]),
-        "mul" => ("jet_std::JetMeasurement::mul", &[true, false][..]),
-        "div" => ("jet_std::JetMeasurement::div", &[true, false][..]),
-        "sqrt" => ("jet_std::JetMeasurement::sqrt", &[true][..]),
-        _ => {
-            return Err(route_error(format!(
-                "unknown checked measurement method `{method}`"
-            )));
-        }
-    };
-    let member = format!("Measurement.{method}");
-    Ok(h(
-        &member,
-        symbol,
-        borrow_mask.len(),
-        borrow_mask.len(),
-        borrow_mask,
-        None,
-        carrier,
-    ))
-}
 
 fn reactive_method_route(
     receiver: &Type,
@@ -5466,6 +5278,15 @@ impl TBuiltinOp {
                 1,
                 1,
                 &[true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            SwapList => b(
+                "list_swap",
+                "jet_list_swap",
+                3,
+                3,
+                &[true, false, false],
                 Some(Effect::Mem),
                 carrier,
             ),
@@ -8586,19 +8407,7 @@ pub(super) fn precise_builtin_route(
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
     let _ = result;
-    // Measurement is a typed Prelude carrier, not a decimal-like numeric
-    // implementation. Keep its existing AOT/JIT method symbol and use the
-    // shared PreciseBuiltin route shape for the source constructor.
-    let symbol = if type_name == "Measurement" && func == "new" {
-        "jet_std::JetMeasurement::new".to_string()
-    } else {
-        // The shared Prelude spells every precise-numeric entry point as
-        // `jet_<type>_<func>` (`Prelude/CoreLib/Top/MathRandomTime.rs`:
-        // `jet_decimal_from_str(&String)`, `jet_decimal_add(&a, &b)`,
-        // `jet_fraction_from_parts(i64, i64)`). Constructors take their
-        // parts by value, `from_str` and every method borrow.
-        format!("jet_{}_{func}", type_name.to_ascii_lowercase())
-    };
+    let symbol = format!("jet_{}_{func}", type_name.to_ascii_lowercase());
     let by_value =
         matches!(func, "new" | "from_parts") || (func.starts_with("from_") && func != "from_str");
     let borrow_mask = vec![!by_value; arity];
@@ -9299,23 +9108,6 @@ pub(super) fn distinct_conversion_route(
     }
 }
 
-fn is_measurement_type(ty: &Type) -> bool {
-    matches!(
-        ty.without_user_tags(),
-        Type::Apply { name, args }
-            if name == "Measurement"
-                && args.len() == 1
-                && matches!(args[0].without_user_tags(), Type::Float)
-    )
-}
-
-fn is_measured_conversion_result(ty: &Type) -> bool {
-    match ty.without_user_tags() {
-        Type::Option(inner) => is_measurement_type(inner),
-        Type::Result { ok, .. } => is_measurement_type(ok),
-        _ => false,
-    }
-}
 
 pub(super) fn unit_conversion_route(
     destination: &str,
@@ -9326,10 +9118,9 @@ pub(super) fn unit_conversion_route(
     result: &Type,
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
-    let _ = (destination, scale, offset);
-    let measured = relative_uncertainty.is_some() && is_measured_conversion_result(result);
-    match (rounding, measured) {
-        (None, false) => prelude_route_row(
+    let _ = (destination, scale, offset, relative_uncertainty, result);
+    match rounding {
+        None => prelude_route_row(
             MirPreludeFamily::StaticPrelude,
             "core.units",
             "conversion_exact",
@@ -9342,20 +9133,7 @@ pub(super) fn unit_conversion_route(
             MirPreludeAbi::Value,
             "exact unit conversion",
         ),
-        (None, true) => prelude_route_row(
-            MirPreludeFamily::StaticPrelude,
-            "core.units",
-            "conversion_exact_measurement",
-            "jet_std::jet_unit_conversion_exact_measurement",
-            6,
-            6,
-            &[false, true, true, true, true, false],
-            None,
-            carrier,
-            MirPreludeAbi::Value,
-            "exact measured unit conversion",
-        ),
-        (Some(_), false) => prelude_route_row(
+        Some(_) => prelude_route_row(
             MirPreludeFamily::StaticPrelude,
             "core.units",
             "conversion_rounded",
@@ -9367,19 +9145,6 @@ pub(super) fn unit_conversion_route(
             carrier,
             MirPreludeAbi::Value,
             "rounded unit conversion",
-        ),
-        (Some(_), true) => prelude_route_row(
-            MirPreludeFamily::StaticPrelude,
-            "core.units",
-            "conversion_rounded_measurement",
-            "jet_std::jet_unit_conversion_rounded_measurement",
-            8,
-            8,
-            &[false, true, true, true, true, false, false, false],
-            None,
-            carrier,
-            MirPreludeAbi::Value,
-            "rounded measured unit conversion",
         ),
     }
 }
@@ -9548,12 +9313,9 @@ pub(super) fn typed_text_interp_route(
             2,
             vec![true, false],
         ),
-        TTypedTextInterpKind::URL => (
-            "url_literal",
-            "jet_std::jet_typed_url_literal",
-            2,
-            vec![true, false],
-        ),
+        TTypedTextInterpKind::URL => {
+            return Err(route_error("URL recipes must call core.net.url.literal"));
+        }
         TTypedTextInterpKind::Path => (
             "path_literal",
             "jet_typed_path_literal",

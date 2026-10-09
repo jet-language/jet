@@ -8,6 +8,7 @@
 // fail closed.
 use jet_foundation.[
     MIRStringFormat,
+    MIRFunctionID,
     MIRType,
     MIRVariantPayload,
     Span,
@@ -16,6 +17,98 @@ use jet_foundation.[
     TComptimeValue,
     foundation_debug_quoted,
 ]
+
+fn jet_eval_source_value_hook(machine: JetEvalMachine, ty: MIRType, operation: String) -> MIRFunctionID? Never! {
+    if ty.kind == {
+        .Tagged(_, inner) -> jet_eval_source_value_hook(machine, inner, operation)
+        .Apply(owner, _) -> if operation == {
+            "clone" -> machine.rows.source_clone_hooks.get(owner.id.value)
+            "debug" -> machine.rows.source_debug_hooks.get(owner.id.value)
+            else -> machine.rows.source_show_hooks.get(owner.id.value)
+        }
+        else -> None
+    }
+}
+
+fn jet_eval_render_runtime_value(machine: &JetEvalMachine, value: JetEvalRuntimeValue, format: MIRStringFormat, value_ty: MIRType?, span: Span) -> String? {
+    if !jet_eval_validate_borrow(value, &machine, span) -> return None
+    if value_ty == .Val(ty) {
+        if ty.kind == .Tagged(_, inner) -> return jet_eval_render_runtime_value(&machine, value, format, Val(inner), span)
+        if format == .Display || format == .Debug {
+            operation :: if format == .Debug -> "debug" else -> "show"
+            if jet_eval_source_value_hook(machine, ty, operation) == .Val(id) {
+                result :: jet_eval_invoke(&machine, id, [JetEvalRuntimeValue]{value}, [JetEvalRuntimeValue]{}, span) ?? return None
+                if result == .Data(.String(text)) -> return Val(text)
+                jet_eval_drop_value(&machine, result, span)
+                jet_eval_compiler_fail(&machine, span, "source value renderer did not return String")
+                return None
+            }
+            if value == .Result(ok, child) {
+                child_ty :: jet_eval_host_option_child_type(&machine, Val(ty), ok, span) ?? return None
+                shown :: jet_eval_render_runtime_value(&machine, child, format, Val(child_ty), span) ?? return None
+                if format == .Display && ok -> return Val(shown)
+                return Val(if ok -> "Val({shown})" else -> "Err({shown})")
+            }
+            if value == .Aggregate(aggregate) {
+                if aggregate == {
+                    .List(values) -> {
+                        child_ty :: jet_eval_host_sequence_element_type(&machine, Val(ty), span) ?? return None
+                        rendered := [String]{}
+                        loop child in values -> &rendered.push(jet_eval_render_runtime_value(&machine, child, format, Val(child_ty), span) ?? return None)
+                        return Val("[{rendered.join(", ")}]")
+                    }
+                    .Map(entries) -> {
+                        if ty.kind == .Map(key_ty, child_ty) {
+                            rendered := [String]{}
+                            loop entry in entries {
+                                key :: jet_eval_render_runtime_value(&machine, entry.key, format, Val(key_ty), span) ?? return None
+                                child :: jet_eval_render_runtime_value(&machine, entry.value, format, Val(child_ty), span) ?? return None
+                                &rendered.push("{key}: {child}")
+                            }
+                            return Val(jet_eval_format_debug_map(rendered))
+                        }
+                    }
+                    .Struct(name, fields) -> {
+                        rendered := [String]{}
+                        loop field in fields {
+                            if format == .Debug && jet_eval_format_memo_field(field.name) -> next
+                            if format == .Display && (field.name == "on_click" || field.name == "on_drop") -> next
+                            child_ty :: jet_eval_host_struct_field_type(&machine, Val(ty), field.name, span) ?? return None
+                            child :: jet_eval_render_runtime_value(&machine, field.value, format, Val(child_ty), span) ?? return None
+                            &rendered.push("{jet_eval_format_source_name(field.name)}: {child}")
+                        }
+                        leaf :: jet_eval_format_source_name(name)
+                        if rendered.len() == 0 -> return Val(if format == .Debug -> "{leaf} {{}}" else -> name)
+                        return Val("{leaf} {{ {rendered.join(", ")} }}")
+                    }
+                    .Enum(name, variant, args) -> {
+                        rendered := [String]{}
+                        labeled := true
+                        loop arg in args { if arg.name == None -> labeled = false }
+                        loop (index, arg) in args {
+                            child_ty :: jet_eval_host_enum_arg_type(&machine, Val(ty), variant, arg.name, index, span) ?? return None
+                            child :: jet_eval_render_runtime_value(&machine, arg.value, format, Val(child_ty), span) ?? return None
+                            if arg.name == .Val(label) {
+                                &rendered.push(if format == .Debug && labeled -> "{jet_eval_format_source_name(label)}: {child}" else -> "{label} = {child}")
+                            } else {
+                                &rendered.push(child)
+                            }
+                        }
+                        if format == .Debug {
+                            leaf :: jet_eval_format_source_name(variant)
+                            if rendered.len() == 0 -> return Val(leaf)
+                            return Val(if labeled -> "{leaf} {{ {rendered.join(", ")} }}" else -> "{leaf}({rendered.join(", ")})")
+                        }
+                        if rendered.len() == 0 -> return Val("{name}::{variant}")
+                        return Val("{name}::{variant}({rendered.join(", ")})")
+                    }
+                }
+            }
+        }
+    }
+    data :: jet_eval_data(value, &machine, span) ?? return None
+    jet_eval_format_string_value_full(&machine, data, format, value_ty, span)
+}
 
 pub fn jet_eval_format_string_value_full(
     machine: &JetEvalMachine,
@@ -120,8 +213,8 @@ fn jet_eval_format_core_renderer(name: String) -> Bool Never! {
     if name == {
         "MIME" | "Path" | "Complex" | "Fraction" | "Decimal" | "DateTime" | "LocalDate" | "LocalTime" | "Date" | "Duration" -> true
         "Period" | "Zone" | "ZonedDateTime" | "Instant" | "Envelope" | "Address" | "Message" | "Attachment" | "URL" -> true
-        "ServiceWorkflow" | "ServiceUpgradeReceipt" | "EncodingError" | "FieldError" | "DataError" | "Measurement" -> true
-        "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler" | "DataTree" | "IOError" -> true
+        "ServiceWorkflow" | "ServiceUpgradeReceipt" | "EncodingError" | "FieldError" | "DataError" -> true
+        "DataTree" | "IOError" -> true
         else -> false
     }
 }

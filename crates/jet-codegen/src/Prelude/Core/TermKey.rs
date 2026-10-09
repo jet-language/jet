@@ -99,13 +99,10 @@ pub const fn jet_term_key_modifier_bits(key: &JetKey) -> u8 {
 
 #[cfg(unix)]
 mod jet_term_unix {
-    use std::io::Read;
 
     pub fn read_key() -> super::JetKey {
         use super::JetKey;
-        let mut buf = [0u8; 6];
-        let stdin = std::io::stdin();
-        let n = stdin.lock().read(&mut buf).unwrap_or(0);
+        let (buf, n) = super::jet_term_read_key_bytes_raw();
         if n == 0 {
             return JetKey::Unknown;
         }
@@ -173,12 +170,10 @@ mod jet_term_unix {
 
 #[cfg(windows)]
 mod jet_term_windows {
-    use std::io::Read;
 
     pub fn read_key() -> super::JetKey {
         use super::JetKey;
-        let mut buf = [0u8; 6];
-        let n = std::io::stdin().lock().read(&mut buf).unwrap_or(0);
+        let (buf, n) = super::jet_term_read_key_bytes_raw();
         if n == 0 {
             return JetKey::Unknown;
         }

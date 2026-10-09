@@ -30,6 +30,7 @@ mod loadable_kernel {
 
 include!("../../jet-foundation/src/LiveLifecycle.rs");
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs");
+include!("../../jet-codegen/src/Prelude/CoreLib/Top/CoreSlice7LiveRaw.rs");
 
 /// Canonical reactive core (JetSignal / JetDerived / jet_reactive_effect*).
 #[allow(unused_imports)]

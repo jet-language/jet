@@ -169,18 +169,4 @@ fn jet_jit_net_unix_set_timeout(_stream: i64, timeout: i64) -> i64 {
 
 jet_http_client_bridge!(native_http);
 
-#[cfg(test)]
-mod http_adapter_tests {
-    use super::*;
-
-    #[test]
-    fn cors_defaulting_preserves_explicit_max_age() {
-        let origins = JetHTTPCorsOrigins::List(vec!["https://app.example".to_string()]);
-        let defaulted = jet_http_cors_policy_defaulted(&origins, None, None, None, None).unwrap();
-        let explicit =
-            jet_http_cors_policy_defaulted(&origins, None, None, None, Some(i64::MIN)).unwrap();
-        assert_eq!(defaulted.max_age_secs, 86_400);
-        assert_eq!(explicit.max_age_secs, i64::MIN);
-    }
-}
 

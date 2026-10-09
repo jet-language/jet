@@ -148,7 +148,25 @@ impl<'a> Checker<'a> {
         self.borrow_ctx = true;
         let got = self.infer(&mut arg.expr);
         if let Some(got) = got {
-            if matches!(got, Type::String) || matches!(got, Type::Named(ref n) if n == "URL") {
+            if matches!(got, Type::String) {
+                return;
+            }
+            if matches!(got, Type::Named(ref name) if self.same_declared_name_identity("URL", name)) {
+                let span = arg.expr.span();
+                let receiver = std::mem::replace(&mut arg.expr, Expr::Absent(span));
+                arg.expr = Expr::MethodCall {
+                    receiver: Box::new(receiver),
+                    method: "to_string".to_string(),
+                    method_span: span,
+                    owner_type_args: Vec::new(),
+                    type_args: Vec::new(),
+                    args: Vec::new(),
+                    recv_type: None,
+                    resolved_ret: None,
+                    operator_rhs: None,
+                    checked_widen: false,
+                };
+                self.infer(&mut arg.expr);
                 return;
             }
             self.diags.push(Diagnostic::error(

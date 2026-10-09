@@ -25,10 +25,8 @@ pub(crate) mod runtime {
     include!("../../jet-pkg-model/src/Prelude/SecretsCrypto.rs");
     include!("../../jet-pkg-model/src/Prelude/VaultKeyWrap.rs");
 
-    use crate::Encoding::json_rt as jet_std;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
-    include!("../../jet-codegen/src/Prelude/CoreLib/Top/Auth.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
 
     pub fn clone_secret(secret: &Secret) -> Secret {
@@ -432,14 +430,26 @@ fn crypto_password_carrier(text: String) -> CtValue {
     }
 }
 
-fn crypto_error_value(error: impl std::fmt::Display) -> CtValue {
-    CtValue::Struct {
-        type_name: "CryptoError".to_string(),
-        fields: vec![("reason".to_string(), CtValue::Str(error.to_string()))]
-    }
+fn crypto_error_value(error: runtime::JetCryptoError) -> CtValue {
+    use runtime::JetCryptoError;
+    // Core owns this payload-free public projection; backend details never
+    // become an unmatchable Struct { reason } in either direct or vault errors.
+    let variant = match error {
+        JetCryptoError::OpenFailed => "OpenFailed",
+        JetCryptoError::NonContributoryKey
+        | JetCryptoError::InvalidEncoding { .. }
+        | JetCryptoError::UnsupportedVersion { .. }
+        | JetCryptoError::UnsupportedAlgorithm { .. }
+        | JetCryptoError::PasswordPolicy { .. } => "KeyRejected",
+        JetCryptoError::InvalidLength { .. } | JetCryptoError::OutputLength { .. } => "Length",
+        JetCryptoError::EntropyUnavailable
+        | JetCryptoError::ResourceUnavailable { .. }
+        | JetCryptoError::Internal { .. } => "Unavailable",
+    };
+    vault_enum("CryptoError", variant, Vec::new())
 }
 
-fn crypto_failed(error: impl std::fmt::Display) -> Result<CtValue, Diagnostic> {
+fn crypto_failed(error: runtime::JetCryptoError) -> Result<CtValue, Diagnostic> {
     Ok(CtValue::failed(Box::new(crypto_error_value(error))))
 }
 
@@ -637,13 +647,7 @@ fn vault_error_value(error: runtime::JetVaultError) -> CtValue {
         JetVaultError::Crypto(error) => vault_enum(
             "VaultError",
             "Crypto",
-            vec![(
-                None,
-                CtValue::Struct {
-                    type_name: "CryptoError".to_string(),
-                    fields: vec![("reason".to_string(), CtValue::Str(error.to_string()))]
-                },
-            )],
+            vec![(None, crypto_error_value(error))],
         ),
         JetVaultError::IO {
             operation,
@@ -984,21 +988,6 @@ fn ambient_core_call(
                     type_name: type_name.to_string(),
                     fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))]
                 }))
-            }
-            "__zeroize" => {
-                let [bytes] = args.as_slice() else {
-                    return Some(Err(vault_diag(
-                        "core.crypto.__zeroize received malformed arguments",
-                        span,
-                    )));
-                };
-                match jet_as_bytes(bytes, span) {
-                    Ok(bytes) => {
-                        runtime::jet_crypto_zeroize(bytes);
-                        Some(Ok(CtValue::Unit))
-                    }
-                    Err(error) => Some(Err(error))
-                }
             }
             "__x25519_generate" => Some(crypto_result(
                 runtime::jet_crypto_x25519_generate_impl(),
@@ -1899,3 +1888,63 @@ pub(crate) fn register_interpreter_ambient(
     context.register_core_call(ambient_core_call);
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_crypto_case(value: CtValue, expected: &str) {
+        let CtValue::Enum { type_name, variant, args } = value else {
+            panic!("CryptoError must be a matchable enum, not backend text");
+        };
+        assert_eq!(type_name, "CryptoError");
+        assert_eq!(variant, expected);
+        assert!(args.is_empty(), "the public CryptoError cases are payload-free");
+    }
+
+    #[test]
+    fn crypto_error_projection_covers_every_backend_variant() {
+        use runtime::JetCryptoError;
+        let cases = [
+            (JetCryptoError::OpenFailed, "OpenFailed"),
+            (JetCryptoError::NonContributoryKey, "KeyRejected"),
+            (JetCryptoError::InvalidEncoding { operation: "decode", value_kind: "key" }, "KeyRejected"),
+            (JetCryptoError::UnsupportedVersion { operation: "decode", version: 0 }, "KeyRejected"),
+            (JetCryptoError::UnsupportedAlgorithm { operation: "decode", algorithm: "unknown".into() }, "KeyRejected"),
+            (JetCryptoError::PasswordPolicy { reason: "policy" }, "KeyRejected"),
+            (JetCryptoError::InvalidLength { operation: "import", parameter: "bytes", expected: "32", actual: 0 }, "Length"),
+            (JetCryptoError::OutputLength { operation: "derive", minimum: 1, maximum: 32, actual: 0 }, "Length"),
+            (JetCryptoError::EntropyUnavailable, "Unavailable"),
+            (JetCryptoError::ResourceUnavailable { resource: "memory" }, "Unavailable"),
+            (JetCryptoError::Internal { incident_id: "crypto-4835" }, "Unavailable"),
+        ];
+        for (error, expected) in cases {
+            assert_crypto_case(crypto_error_value(error), expected);
+        }
+    }
+
+    #[test]
+    fn vault_crypto_entropy_failure_is_a_nested_public_enum() {
+        struct ResetEntropy;
+        impl Drop for ResetEntropy {
+            fn drop(&mut self) {
+                runtime::jet_crypto_entropy_clear_test_provider();
+            }
+        }
+        runtime::jet_crypto_entropy_set_test_provider(|_| runtime::JetCryptoEntropyStep::Failed);
+        let _reset = ResetEntropy;
+        let error = match <runtime::JetSigningKey as runtime::JetVaultKey>::generate() {
+            Err(error) => error,
+            Ok(_) => panic!("a rejected entropy provider must not generate a key"),
+        };
+        assert!(matches!(error, runtime::JetVaultError::Crypto(runtime::JetCryptoError::EntropyUnavailable)));
+        let CtValue::Enum { type_name, variant, mut args } = vault_error_value(error) else {
+            panic!("VaultError must remain an enum");
+        };
+        assert_eq!(type_name, "VaultError");
+        assert_eq!(variant, "Crypto");
+        assert_eq!(args.len(), 1);
+        let (label, cause) = args.pop().unwrap();
+        assert_eq!(label, None, "Crypto has one positional CryptoError payload");
+        assert_crypto_case(cause, "Unavailable");
+    }
+}

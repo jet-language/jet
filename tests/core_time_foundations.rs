@@ -42,8 +42,8 @@ fn core_time_root_date_and_duration_carriers_match_across_tiers() {
 use core.time as time
 
 fn run() {
-    date :: Date{year: 2024, month: 2, day: 29}
-    span :: Duration{ns: 1500000000}
+    date :: time.parse("2024-02-29") ?? panic("valid leap date")
+    span :: time.duration_ns(1500000000)
     print(date)
     print(date.year())
     print(date.month())
@@ -106,3 +106,57 @@ fn run() {
         "false\ntrue\ntrue\n0\n1\n9223372036854775807\n0\n0\n",
     );
 }
+
+#[test]
+fn core_calendar_predicates_preserve_signed_years_and_invalid_months_across_tiers() {
+    tir_support::assert_tiers_agree(
+        "core_time_calendar_predicates",
+        r#"
+use core.time as time
+use core.time.calendar as calendar
+
+fn run() {
+    years :: [Int]{-400, -100, -4, 0, 1900, 2000, 2023, 2024}
+    loop year in years {
+        print(time.is_leap_year(year))
+        print(calendar.isleap(year))
+    }
+    months :: [Int]{0, 1, 2, 4, 12, 13}
+    loop month in months -> print(time.days_in_month(2024, month))
+    print(time.days_in_month(1900, 2))
+    print(time.days_in_month(2000, 2))
+}
+"#,
+        "true\ntrue\nfalse\nfalse\ntrue\ntrue\ntrue\ntrue\nfalse\nfalse\ntrue\ntrue\nfalse\nfalse\ntrue\ntrue\n30\n31\n29\n30\n31\n30\n28\n29\n",
+    );
+}
+
+#[test]
+fn civil_with_methods_preserve_time_error_reasons_across_tiers() {
+    tir_support::assert_tiers_agree(
+        "core_time_typed_overflow",
+        r#"
+use core.time as time
+
+fn run() {
+    date :: time.new(2024, 1, 31)
+    if date.with(2024, 2, 31, "reject") == {
+        .Ok(_) -> print("date accepted")
+        .Err(error) -> print(error.reason == "date fields are outside the valid range: 2024-02-31")
+    }
+    datetime :: time.datetime(2024, 1, 31, 12, 0, 0)
+    if datetime.with(2024, 1, 31, 24, 0, 0, "reject") == {
+        .Ok(_) -> print("time accepted")
+        .Err(error) -> print(error.reason == "time fields are outside the valid range: 24:00:00")
+    }
+    zoned :: datetime.in_zone(time.utc())
+    if zoned.with_time(time.local_time(1, 2, 3), "invalid") == {
+        .Ok(_) -> print("zone accepted")
+        .Err(error) -> print(error.reason == "invalid disambiguation: invalid")
+    }
+}
+"#,
+        "true\ntrue\ntrue\n",
+    );
+}
+

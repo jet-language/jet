@@ -953,6 +953,16 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         // The allocation-failure record is declared once at the Prelude root
         // (PortableAlloc.rs); every Rust projection spells it `AllocError`.
         n if n == Syntax::TYPE_ALLOC_ERROR => Some("AllocError"),
+        "__EvidenceRead" => Some("JetTestingEvidenceRead"),
+        "__TempFacts" => Some("JetTestingTempFacts"),
+        "__TempPath" => Some("JetTestingTempPath"),
+        "__TempRemove" => Some("JetTestingTempRemove"),
+        "__TempCreate" => Some("JetTestingTempCreate"),
+        "__JetcRaw" => Some("JetCryptoJetcRaw"),
+        "__JetcStat" => Some("JetCryptoJetcStat"),
+        "__LockCall" => Some("jet_std::JetFsLockCall"),
+        "__LockIdentity" => Some("jet_std::JetFsLockIdentity"),
+        "__LockWait" => Some("jet_std::JetFsLockWait"),
         "Transaction" => Some("JetTransaction"),
         "Counter" => Some("JetCounter"),
         "OrderedMap" => Some("JetOrderedMap"),
@@ -979,16 +989,10 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "NullBackend" => Some("JetNullBackend"),
         "TUIBackend" => Some("JetTuiBackend"),
         "GtkBackend" => Some("JetGtkBackend"),
-        // D-AUTH1=A: authentication carriers are Prelude-root values.
-        "Session" => Some("JetAuthSession"),
+        // D-AUTH1=A: the `app.auth` carrier is a Prelude-root value.
         "Auth" => Some("JetAuthApp"),
         // D-DBPOLICY-BIND1: RowPolicy is re-exported by the root Sync carrier.
         "RowPolicy" => Some("JetRowPolicy"),
-        // D-APPROX1=A: native sketch carriers are Prelude-root values.
-        "HyperLogLog" => Some("JetHyperLogLog"),
-        "TDigest" => Some("JetTDigest"),
-        "CountMinSketch" => Some("JetCountMinSketch"),
-        "ReservoirSampler" => Some("JetReservoirSampler"),
         "JetDate" | "JetInstant" | "JetLocalTime" | "JetDateTime" | "JetPeriod" | "JetZone"
         | "JetZonedDateTime" => Some(name),
         "WebMutationStatus" => Some("JetWebMutationStatus"),
@@ -1033,8 +1037,6 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "WebTableRow" => Some("JetWebTableRow"),
         "WebTablePage" => Some("JetWebTablePage"),
         "WebTable" => Some("JetWebTable"),
-        "WebVirtualViewport" => Some("JetWebVirtualViewport"),
-        "WebVirtualWindow" => Some("JetWebVirtualWindow"),
         "WebVirtualPlan" => Some("JetWebVirtualPlan"),
         "WebVirtualPlanViewport" => Some("JetWebVirtualPlanViewport"),
         "Atomic" => Some("JetAtomic"),
@@ -1132,30 +1134,14 @@ pub(crate) fn core_source_type_leaf(name: &str) -> &str {
         .unwrap_or(name)
 }
 
-pub(crate) fn core_source_record_owns_layout(name: &str) -> bool {
-    let leaf = core_source_type_leaf(name);
-    (name.starts_with("<corelib>/Core/regex::")
-        && matches!(
-            leaf,
-            "Regex" | "Match" | "RegexFlags" | "RegexFlag" | "Pattern" | "Node"
-        ))
-        || (name.starts_with("<corelib>/Core/web::Core/web/table.jet::")
-            && matches!(
-                leaf,
-                "WebTable" | "WebTableSort" | "WebTableFilter" | "WebTableColumn"
-                    | "WebTableRow" | "WebTablePage" | "WebTableState"
-            ))
-        // core.http's message values are source records; their leaves collide
-        // with the native server carriers (`Body`, `Headers`) and DataQuery.
-        || (name.starts_with("<corelib>/Core/http::Core/http/http.jet::")
-            && matches!(leaf, "Body" | "Headers" | "Header" | "Query"))
-}
-
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     // core.sync's policy list is source-owned (`allow`/`deny`). The root
     // database row policy is a different native carrier (`table`/`expression`).
+    // A source-owned Core nominal (`source_module … types { … }`, e.g. the
+    // core.http message records whose leaves collide with the native server
+    // carriers) keeps its declared layout: no native carrier aliases it.
     if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy"))
-        || core_source_record_owns_layout(name)
+        || jet_foundation::CoreModuleExports::core_source_owns_type(name)
     {
         return None;
     }
@@ -1239,24 +1225,12 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // `RNG` handle's Prelude carrier is `jet_std::Rng`.
         "Clock" => Some("Clock"),
         "RNG" => Some("Rng"),
-        "Fake" => Some("Fake"),
-        // D-SOLVER-LIB1=A: explicit finite solver state.
-        "Solver" => Some("Solver"),
         // D-SHAPE-DURATION1/D-SHAPE-DURATIONCONVERT1: checked duration values.
         "Duration" => Some("Duration"),
         "DurationUnit" => Some("DurationUnit"),
         // D-FOUND-COREAPI1 / #2853: event-time late-event policy carrier.
         "LateEventDisposition" => Some("JetLateEventDisposition"),
         "RangeError" => Some("RangeError"),
-        "Instant" => Some("JetInstant"),
-        "Date" | "LocalDate" => Some("JetDate"),
-        "LocalTime" => Some("JetLocalTime"),
-        "DateTime" => Some("JetDateTime"),
-        "Period" => Some("JetPeriod"),
-        "Zone" => Some("JetZone"),
-        "ZonedDateTime" => Some("JetZonedDateTime"),
-        "URL" => Some("JetURL"),
-        "MIME" => Some("JetMIME"),
         "DataLoaderKind" => Some("DataLoaderKind"),
         "DataFormat" => Some("DataFormat"),
         "DataFreshness" => Some("DataFreshness"),
@@ -1284,7 +1258,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-LSDIR1=A: fs.list_dir returns [DirEntry].
         "DirEntry" => Some("DirEntry"),
         // D-FSOPS1 / D-WATCH-SCOPE1: typed filesystem and watcher values.
-        "Stat" => Some("Stat"),
         "WalkEntry" => Some("WalkEntry"),
         "WatchEvent" => Some("WatchEvent"),
         // stdlib-api-laws D4: `WatchEvent`'s two closed field enums.
@@ -1325,6 +1298,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "EncodingLimits" => Some("EncodingLimits"),
         "EncodingError" => Some("EncodingError"),
         "EncodingCause" => Some("EncodingCause"),
+        "__QueryRead" => Some("__QueryRead"),
         "EncodingFormat" => Some("EncodingFormat"),
         "EncodingErrorKind" => Some("EncodingErrorKind"),
         // D-VALIDATE1: the accumulated validation error lives in jet_std too.
@@ -1348,7 +1322,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "JSONLReader" => Some("JSONLReader"),
         "JSONLWriter" => Some("JSONLWriter"),
         "CSVReader" => Some("CSVReader"),
-        "CSVWriter" => Some("CSVWriter"),
         "CSVRow" => Some("CSVRow"),
         "XMLReader" => Some("XMLReader"),
         "XMLWriter" => Some("XMLWriter"),
@@ -1365,7 +1338,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-RAYLIB1=A: display-gated graphics bridge types.
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
-        "RaylibSound" => Some("RaylibSound"),
         "RaylibTextureAtlas" => Some("RaylibTextureAtlas"),
         // D-TYPEDSQL-SINK1=A: `SQL` is a checked `(String, Vec<DBValue>)`
         // carrier. It remains a known core value type for subset gating; the
@@ -1431,6 +1403,9 @@ pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
         "Message" => Some("Message"),
         "Attachment" => Some("Attachment"),
         "Envelope" => Some("Envelope"),
+        "__EmailAddressView" => Some("__EmailAddressView"),
+        "__EmailAttachmentView" => Some("__EmailAttachmentView"),
+        "__EmailMessageView" => Some("__EmailMessageView"),
         "SMTPSecurity" => Some("SMTPSecurity"),
         "RecipientPolicy" => Some("RecipientPolicy"),
         "RecipientReport" => Some("RecipientReport"),
@@ -1568,7 +1543,6 @@ pub(crate) fn raylib_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
-        "RaylibSound" => Some("RaylibSound"),
         "RaylibTextureAtlas" => Some("RaylibTextureAtlas"),
         _ => None,
     }
@@ -1620,6 +1594,27 @@ pub(crate) fn service_handle_rust_type(name: &str) -> Option<&'static str> {
         "DeliveryEvent" => Some("JetDeliveryEvent"),
         "TaskOutcome" => Some("JetTaskOutcome"),
         "TaskStatus" => Some("JetTaskStatus"),
+        // Allocation-only private transports; Services.rs native field cites.
+        // All seven bindings die at the Jet-runtime cutover.
+        "__TreeWorker" => Some("JetServiceWorker"), // Services.rs:954
+        "__TreeGroup" => Some("JetServiceGroup"), // Services.rs:955
+        "__TreeStateAdapter" => Some("JetServiceStateAdapter"), // Services.rs:957
+        "__TreeStateAuthority" => Some("JetServiceStateAuthority"), // Services.rs:958
+        "__TreeWorkflowState" => Some("JetServiceWorkflow"), // Services.rs:966
+        "__TreeTaskGroup" => Some("JetServiceTreeTaskGroup"), // Services.rs:970
+        "__TreeSupervisorState" => Some("JetServiceTreeSupervisorState"), // Services.rs:971
+        "__DeliveryFacts" => Some("JetServiceDeliveryFacts"),
+        "__DeliveryRecord" => Some("JetServiceDeliveryRecord"),
+        "__EndpointMailbox" => Some("JetServiceEndpointMailbox"),
+        "__MailboxRead" => Some("JetServiceMailboxRead"),
+        // Worker policy transports; exact native shapes, mechanical, dies at cutover.
+        "__WorkerMailbox" => Some("JetServiceMailbox"), // Services.rs:758-762
+        "__WorkerChannel" => Some("JetServiceWorkerChannel"), // Services.rs:761, exact Arc type alias
+        "__WorkerHandler" => Some("JetServiceWorkerHandler"), // Services.rs:821
+        "__WorkerStatus" => Some("JetServiceSupervisorStatus"), // Services.rs:123-130
+        "__WorkerTopologyKind" => Some("JetServiceTopologyKind"), // Services.rs:134-137
+        "__WorkerTopologyState" => Some("JetDevtoolsTopologySupervisorState"), // DevtoolsTopologyPanel.rs:62-70
+        "__WorkerRestartReason" => Some("JetDevtoolsTopologyRestartReason"), // DevtoolsTopologyPanel.rs:282-288
         _ => None,
     }
 }
@@ -2469,9 +2464,6 @@ impl Cx {
         }
         match (self.any_core_import_module(alias), leaf) {
             (Some("core.crypto"), leaf) => core_crypto_type_name(leaf),
-            (Some("core.auth"), "Claims") => Some("Claims"),
-            (Some("core.auth"), "AuthError") => Some("AuthError"),
-            (Some("core.auth"), "Session") => Some("Session"),
             (Some("core.auth"), "Auth") => Some("Auth"),
             (Some("core.sync"), "SyncText") => Some("SyncText"),
             (Some("core.sync"), "SyncCounter") => Some("SyncCounter"),
@@ -2503,6 +2495,9 @@ impl Cx {
             (Some("core.email"), "Message") => Some("Message"),
             (Some("core.email"), "Attachment") => Some("Attachment"),
             (Some("core.email"), "Envelope") => Some("Envelope"),
+            (Some("core.email"), "__EmailAddressView") => Some("__EmailAddressView"),
+            (Some("core.email"), "__EmailAttachmentView") => Some("__EmailAttachmentView"),
+            (Some("core.email"), "__EmailMessageView") => Some("__EmailMessageView"),
             (Some("core.email"), "SMTPSecurity") => Some("SMTPSecurity"),
             (Some("core.email"), "Limits") => Some("Limits"),
             (Some("core.email"), "RecipientPolicy") => Some("RecipientPolicy"),
@@ -2523,8 +2518,12 @@ impl Cx {
             (Some("core.encoding.jsonl"), "JSONLReader") => Some("JSONLReader"),
             (Some("core.encoding.jsonl"), "JSONLWriter") => Some("JSONLWriter"),
             (Some("core.encoding.csv"), "CSVReader") => Some("CSVReader"),
-            (Some("core.encoding.csv"), "CSVWriter") => Some("CSVWriter"),
             (Some("core.encoding.csv"), "CSVRow") => Some("CSVRow"),
+            (Some("core.service"), "__DeliveryFacts") => Some("JetServiceDeliveryFacts"),
+            (Some("core.service"), "__DeliveryRecord") => Some("JetServiceDeliveryRecord"),
+            (Some("core.service"), "__EndpointMailbox") => Some("JetServiceEndpointMailbox"),
+            (Some("core.service"), "__MailboxRead") => Some("JetServiceMailboxRead"),
+            (Some("core.encoding.csv"), "__QueryRead") => Some("__QueryRead"),
             (Some("core.encoding.xml"), "XMLReader") => Some("XMLReader"),
             (Some("core.encoding.xml"), "XMLWriter") => Some("XMLWriter"),
             (Some("core.encoding.xml"), "XMLLimits") => Some("XMLLimits"),
@@ -3411,15 +3410,6 @@ impl Cx {
             Type::Named(name) if name == Syntax::TYPE_ALLOC_ERROR => {
                 format!("{}AllocError", self.root_prefix)
             }
-            Type::Named(name) if name == "Claims" && !self.type_names.contains(name) => {
-                format!("{}JetAuthClaims", self.root_prefix)
-            }
-            Type::Named(name) if name == "AuthError" && !self.type_names.contains(name) => {
-                format!("{}JetAuthError", self.root_prefix)
-            }
-            Type::Named(name) if name == "Session" && !self.type_names.contains(name) => {
-                format!("{}JetAuthSession", self.root_prefix)
-            }
             Type::Named(name) if name == "Auth" && !self.type_names.contains(name) => {
                 format!("{}JetAuthApp", self.root_prefix)
             }
@@ -3457,27 +3447,6 @@ impl Cx {
             }
             // D-PENDING1=B: Loadable<Unknown, Unknown> placeholders — Rust infers the type.
             Type::Named(name) if name == "Unknown" => "_".to_string(),
-            // D-APPROX1=A: sketch types → opaque Rust structs.
-            Type::Named(name) if name == "HyperLogLog" => "JetHyperLogLog".to_string(),
-            Type::Named(name) if name == "TDigest" => "JetTDigest".to_string(),
-            Type::Named(name) if name == "CountMinSketch" => "JetCountMinSketch".to_string(),
-            Type::Named(name) if name == "ReservoirSampler" => "JetReservoirSampler".to_string(),
-            // D-TIMEDEPTH1=A: civil-time types → opaque Rust structs.
-            Type::Named(name) if name == "Date" => "JetDate".to_string(),
-            Type::Named(name) if name == "LocalDate" => "JetDate".to_string(),
-            Type::Named(name) if name == "LocalTime" => "JetLocalTime".to_string(),
-            Type::Named(name) if name == "DateTime" => "JetDateTime".to_string(),
-            Type::Named(name) if name == "Instant" => "JetInstant".to_string(),
-            Type::Named(name) if name == "Period" => "JetPeriod".to_string(),
-            Type::Named(name) if name == "Zone" => "JetZone".to_string(),
-            Type::Named(name) if name == "ZonedDateTime" => "JetZonedDateTime".to_string(),
-            // D-URL1=A: URL/MIME values live in the corelib prelude module.
-            Type::Named(name) if name == "URL" => {
-                format!("{}jet_std::JetURL", self.root_prefix)
-            }
-            Type::Named(name) if name == "MIME" => {
-                format!("{}jet_std::JetMIME", self.root_prefix)
-            }
             Type::Named(name)
                 if matches!(
                     name.as_str(),
@@ -3485,6 +3454,7 @@ impl Cx {
                         | "Message"
                         | "Attachment"
                         | "Envelope"
+                        | "__EmailAddressView" | "__EmailAttachmentView" | "__EmailMessageView"
                         | "SMTPSecurity"
                         | "RecipientPolicy"
                         | "RecipientReport"
@@ -3498,6 +3468,9 @@ impl Cx {
                     "Message" => "Message",
                     "Attachment" => "Attachment",
                     "Envelope" => "Envelope",
+                    "__EmailAddressView" => "__EmailAddressView",
+                    "__EmailAttachmentView" => "__EmailAttachmentView",
+                    "__EmailMessageView" => "__EmailMessageView",
                     "SMTPSecurity" => "SMTPSecurity",
                     "RecipientPolicy" => "RecipientPolicy",
                     "RecipientReport" => "RecipientReport",
@@ -3933,10 +3906,7 @@ impl Cx {
                 if resolved == "AllocError" {
                     return format!("{}AllocError", self.root_prefix);
                 }
-                if resolved == "Claims"
-                    || resolved == "AuthError"
-                    || resolved == "Session"
-                    || resolved == "Auth"
+                if resolved == "Auth"
                     || resolved == "SyncText"
                     || resolved == "SyncCounter"
                     || resolved == "SyncMap"
@@ -3948,9 +3918,6 @@ impl Cx {
                     || resolved == "RowPolicy"
                 {
                     let rust = match resolved {
-                        "Claims" => "JetAuthClaims",
-                        "AuthError" => "JetAuthError",
-                        "Session" => "JetAuthSession",
                         "Auth" => "JetAuthApp",
                         "SyncText" => "JetSyncText",
                         "SyncCounter" => "JetSyncCounter",
@@ -3976,6 +3943,7 @@ impl Cx {
                         | "Message"
                         | "Attachment"
                         | "Envelope"
+                        | "__EmailAddressView" | "__EmailAttachmentView" | "__EmailMessageView"
                         | "SMTPSecurity"
                         | "RecipientPolicy"
                         | "RecipientReport"
@@ -4317,14 +4285,6 @@ impl Cx {
                     self.root_prefix,
                     self.rust_type(&args[0]),
                     self.rust_type(&args[1])
-                )
-            }
-            // D-HONESTNUM1=A: Measurement<T> → jet_std::JetMeasurement<T>.
-            Type::Apply { name, args } if name == Syntax::TYPE_MEASUREMENT && !args.is_empty() => {
-                format!(
-                    "{}jet_std::JetMeasurement<{}>",
-                    self.root_prefix,
-                    self.rust_type(&args[0])
                 )
             }
             Type::Apply { name, args } if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 => {
@@ -5430,53 +5390,6 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         cx.enum_variants
             .insert("ServiceError".to_string(), error_variants);
         cx.cloneable.insert("ServiceError".to_string());
-    }
-    if cx.core_imports.values().any(|module| module == "core.auth") {
-        let zero = Span::new(0, 0);
-        let field = |name: &str, ty: Type| VariantField {
-            name: name.to_string(),
-            name_span: zero,
-            ty,
-            ty_span: zero,
-        };
-        let mut variants = vec![
-            ("InvalidSignature".to_string(), VariantPayload::Unit),
-            ("WeakKey".to_string(), VariantPayload::Unit),
-            ("TokenExpired".to_string(), VariantPayload::Unit),
-        ];
-        variants.extend(
-            [
-                "MalformedToken",
-                "UnsupportedToken",
-                "MissingClaim",
-                "DecodeError",
-            ]
-            .into_iter()
-            .map(|name| (name.to_string(), VariantPayload::Single(Type::String, zero))),
-        );
-        variants.push((
-            "WrongAudience".to_string(),
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::String),
-            ]),
-        ));
-        variants.push((
-            "WrongIssuer".to_string(),
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::Option(Box::new(Type::String))),
-            ]),
-        ));
-        // Keep the existing discriminants stable; append the new unit
-        // variant to the canonical AuthError surface.
-        variants.push(("TokenNotYetValid".to_string(), VariantPayload::Unit));
-        for (variant, _) in &variants {
-            cx.variant_owner
-                .insert(variant.clone(), "AuthError".to_string());
-        }
-        cx.enum_variants.insert("AuthError".to_string(), variants);
-        cx.cloneable.insert("AuthError".to_string());
     }
     if cx
         .core_imports
@@ -7552,7 +7465,6 @@ fn core_type_cloneable(name: &str) -> bool {
                 | "JSONLReader"
                 | "JSONLWriter"
                 | "CSVReader"
-                | "CSVWriter"
                 | "XMLReader"
                 | "XMLWriter"
                 | "CBORReader"
@@ -8016,6 +7928,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn service_allocation_type_aliases_match_the_jet_mapper() {
+        let jet = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../Compiler/JetCodegen/Source/Emit/Types.jet"
+        ));
+        for (alias, rust, jet_case) in [
+            ("__TreeWorker", "JetServiceWorker", "\"__TreeWorker\" -> Val(\"JetServiceWorker\")"),
+            ("__TreeGroup", "JetServiceGroup", "\"__TreeGroup\" -> Val(\"JetServiceGroup\")"),
+            ("__TreeStateAdapter", "JetServiceStateAdapter", "\"__TreeStateAdapter\" -> Val(\"JetServiceStateAdapter\")"),
+            ("__TreeStateAuthority", "JetServiceStateAuthority", "\"__TreeStateAuthority\" -> Val(\"JetServiceStateAuthority\")"),
+            ("__TreeWorkflowState", "JetServiceWorkflow", "\"__TreeWorkflowState\" -> Val(\"JetServiceWorkflow\")"),
+            ("__TreeTaskGroup", "JetServiceTreeTaskGroup", "\"__TreeTaskGroup\" -> Val(\"JetServiceTreeTaskGroup\")"),
+            ("__TreeSupervisorState", "JetServiceTreeSupervisorState", "\"__TreeSupervisorState\" -> Val(\"JetServiceTreeSupervisorState\")"),
+        ] {
+            assert_eq!(service_handle_rust_type(alias), Some(rust));
+            assert!(jet.contains(jet_case), "paired Jet mapper differs for {alias}");
+        }
+    }
+
+    #[test]
     fn source_file_handles_use_the_native_owned_carriers() {
         let prefix = "<corelib>/Core/files::Core/files/files.jet::";
         for (leaf, rust) in [
@@ -8045,6 +7977,33 @@ mod tests {
         assert!(crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_type(
             "<corelib>/Core/process::Core/process/process.jet::ProcessStreamMode"
         ));
+    }
+
+    #[test]
+    fn service_delivery_transport_aliases_match_the_jet_mapper() {
+        let jet = include_str!("../../../../Compiler/JetCodegen/Source/Emit/Types.jet");
+        for (alias, rust, jet_case) in [
+            ("__DeliveryFacts", "JetServiceDeliveryFacts", "\"__DeliveryFacts\" -> Val(\"JetServiceDeliveryFacts\")"),
+            ("__DeliveryRecord", "JetServiceDeliveryRecord", "\"__DeliveryRecord\" -> Val(\"JetServiceDeliveryRecord\")"),
+            ("__EndpointMailbox", "JetServiceEndpointMailbox", "\"__EndpointMailbox\" -> Val(\"JetServiceEndpointMailbox\")"),
+            ("__MailboxRead", "JetServiceMailboxRead", "\"__MailboxRead\" -> Val(\"JetServiceMailboxRead\")"),
+        ] {
+            assert_eq!(service_handle_rust_type(alias), Some(rust));
+            assert!(jet.contains(jet_case), "paired Jet mapper differs for {alias}");
+        }
+        for (alias, rust) in [
+            ("__EvidenceRead", "JetTestingEvidenceRead"),
+            ("__TempFacts", "JetTestingTempFacts"),
+            ("__TempPath", "JetTestingTempPath"),
+            ("__TempRemove", "JetTestingTempRemove"),
+            ("__TempCreate", "JetTestingTempCreate"),
+        ] {
+            assert_eq!(root_prelude_rust_type_name(alias), Some(rust));
+            assert!(
+                jet.contains(&format!("\"{alias}\" -> Val(\"{rust}\")")),
+                "paired Jet mapper differs for {alias}",
+            );
+        }
     }
 
     #[test]
@@ -8084,5 +8043,20 @@ mod tests {
             args: vec![Type::Bool],
         });
         assert_eq!(expanded.name(), "fn(*, force: Bool) -> Int");
+    }
+
+    #[test]
+    fn worker_policy_private_transports_match_existing_native_shapes() {
+        for (name, rust) in [
+            ("__WorkerMailbox", "JetServiceMailbox"),
+            ("__WorkerChannel", "JetServiceWorkerChannel"),
+            ("__WorkerHandler", "JetServiceWorkerHandler"),
+            ("__WorkerStatus", "JetServiceSupervisorStatus"),
+            ("__WorkerTopologyKind", "JetServiceTopologyKind"),
+            ("__WorkerTopologyState", "JetDevtoolsTopologySupervisorState"),
+            ("__WorkerRestartReason", "JetDevtoolsTopologyRestartReason"),
+        ] {
+            assert_eq!(service_handle_rust_type(name), Some(rust));
+        }
     }
 }

@@ -737,21 +737,7 @@ fn jet_browser_connect_profile(
     let conn = jet_ws_connect(endpoint).map_err(jet_browser_ws_error)?;
     conn.set_timeout(timeout.milliseconds)
         .map_err(jet_browser_ws_error)?;
-    let browser = JetBrowser {
-        state: std::rc::Rc::new(std::cell::RefCell::new(JetBrowserState {
-            conn,
-            next_id: 1,
-            closed: false,
-            session_started: false,
-            timeout_ms: timeout.milliseconds,
-            profile: profile.name.clone(),
-            cdp: false,
-            trace: vec!["connect".to_string()],
-            trace_bytes: "connect".len(),
-            events: std::collections::VecDeque::new(),
-            test_actions: None,
-        })),
-    };
+    let browser = jet_browser_from_connection_raw(conn, profile, timeout);
     let status = jet_browser_command(
         &browser,
         "session.status",
@@ -776,15 +762,45 @@ fn jet_browser_connect_profile(
             jet_browser_object(vec![("alwaysMatch", jet_browser_object(Vec::new()))]),
         )]),
     )?;
-    browser.state.borrow_mut().session_started = true;
+    jet_browser_session_started_raw(&browser);
     let _session_id = jet_browser_string(&new_session, "sessionId")?;
     let capabilities = jet_browser_get(&new_session, "capabilities")
         .filter(|value| matches!(value, jet_std::DataTree::Object(_)))
         .ok_or_else(|| JetBrowserError::new("protocol"))?;
     let cdp = jet_browser_get(capabilities, "goog:cdp")
         .is_some_and(|value| matches!(value, jet_std::DataTree::Bool(true)));
-    browser.state.borrow_mut().cdp = cdp;
+    jet_browser_cdp_raw(&browser, cdp);
     Ok(browser)
+}
+
+// Single-home carrier tails from connect_profile:740-754/779/786.
+// Handshake sequencing and validation are Core source, not these facts.
+fn jet_browser_from_connection_raw(
+    conn: JetWsConn,
+    profile: &JetBrowserProfile,
+    timeout: JetBrowserTimeout,
+) -> JetBrowser {
+    JetBrowser {
+        state: std::rc::Rc::new(std::cell::RefCell::new(JetBrowserState {
+            conn,
+            next_id: 1,
+            closed: false,
+            session_started: false,
+            timeout_ms: timeout.milliseconds,
+            profile: profile.name.clone(),
+            cdp: false,
+            trace: vec!["connect".to_string()],
+            trace_bytes: "connect".len(),
+            events: std::collections::VecDeque::new(),
+            test_actions: None,
+        })),
+    }
+}
+fn jet_browser_session_started_raw(browser: &JetBrowser) {
+    browser.state.borrow_mut().session_started = true;
+}
+fn jet_browser_cdp_raw(browser: &JetBrowser, cdp: bool) {
+    browser.state.borrow_mut().cdp = cdp;
 }
 
 fn jet_browser_abilities(browser: &JetBrowser) -> JetBrowserAbilities {

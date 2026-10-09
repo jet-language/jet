@@ -548,8 +548,8 @@ struct EnvelopeStableIdentity {
             device: info.id.device,
             inode: info.id.inode,
             length: info.size,
-            modified_ns: info.modified.unix_ns,
-            changed_ns: info.changed.unix_ns,
+            modified_ns: info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds"),
+            changed_ns: info.changed.to_unix_ns() ?? panic("file times fit Unix nanoseconds"),
             mode: info.mode,
             links: info.links
         }

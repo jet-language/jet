@@ -162,6 +162,18 @@ pub fn core_effect_leaf(module: &str, method: &str) -> Option<&'static str> {
 }
 
 fn core_effect_leaf_legacy(module: &str, method: &str) -> Option<&'static str> {
+    if module == "core.service" && method == "state_store" {
+        return Some("FS.Read");
+    }
+    if module == "core.time" && matches!(method, "zone" | "parse_zoned" | "__zone_file_bytes") {
+        return Some("FS.Read");
+    }
+    if matches!(
+        (module, method),
+        ("core.net", "gethostname") | ("core.sys", "hostname")
+    ) {
+        return Some("FS.Read");
+    }
     if (module == "core.tasks" && method == "timeout")
         || (module == "core.http" && method == "serve")
         || (module == "core.http.client" && matches!(method, "get" | "post" | "request"))
@@ -221,6 +233,15 @@ pub const fn receiver_effect_leaf(type_name: &str, method: &str) -> Option<&'sta
 /// Fallback for special calls that do not yet have a plain Core-call row.
 /// Plain rows never reach this resolver; their effect is stored on the row.
 fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
+    if module == "core.service" && method == "state_store" {
+        return Some(Effect::FS);
+    }
+    if module == "core.net" && method == "gethostname" {
+        return Some(Effect::Env);
+    }
+    if (module, method) == ("core.http.server", "__response_parts") {
+        return None;
+    }
     if matches!(
         (module, method),
         ("core.sys", "success") | ("core.process", "status_ok")
@@ -238,6 +259,12 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
     // / `random.int(…)` stay rejected (E3403).
     // Civil constructors mint deterministic values, so (like `time.clock`) they
     // carry no effect.
+    if module == "core.time" && method == "__zone_env" {
+        return Some(Effect::Env);
+    }
+    if module == "core.time" && matches!(method, "zone" | "parse_zoned" | "__zone_file_bytes") {
+        return Some(Effect::FS);
+    }
     if matches!(
         (module, method),
         (
@@ -249,10 +276,10 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
                 | "period_days"
                 | "period_months"
                 | "period_years"
-                | "zone"
                 | "utc"
                 | "zoned"
                 | "zoned_local"
+                | "__embedded_zone_bytes"
         ) | ("core.math.random", "rng")
     ) {
         return None;
@@ -281,6 +308,9 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
                     | "is_ipv4"
                     | "is_ipv6"
             )
+            | ("core.net", "__ip_from_bytes" | "__ip_bytes" | "__ip_is_v4"
+                | "__socket_from_parts" | "__socket_ip" | "__socket_port" | "__socket_scope"
+                | "__udp_packet_addr")
             | (
                 "core.net",
                 "socket_addr_parse" | "socket_host" | "socket_port" | "socket_to_string"
@@ -329,8 +359,15 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
             _ => Some(Effect::Net),
         };
     }
-    // Encoding stream constructors own a live file handle.  Whole-value
-    // codecs remain pure; only reader/writer construction reaches the host.
+    // I/O through an already-owned encoding handle retains the native
+    // possession-method effect; it does not acquire ambient FS authority.
+    if module == "core.encoding"
+        && matches!(method, "__read_byte" | "__read_into" | "__write_bytes" | "__write_text" | "__flush")
+    {
+        return Some(Effect::IO);
+    }
+    // Encoding stream constructors retain FS authority. Whole-value codecs
+    // remain pure; the possession-method I/O leaves are handled above.
     if matches!(
         (module, method),
         (
@@ -351,6 +388,7 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
         // the deterministic implementation when no accelerator is installed.
         "core.compute" if method != "device_cpu" => Effect::GPU,
         "core.files" => Effect::FS,
+        "core.crypto" if method.starts_with("__jetc_") => Effect::FS,
         // D-BROWSER-AUTO1=A: browser automation is a versioned network protocol.
         "core.net"
         | "core.net.tls"
@@ -360,14 +398,16 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
         // D-RAYLIB1=A: windowing/drawing/input/audio bridge.
         "core.game.raylib" => Effect::GPU,
         "core.time" => Effect::Time,
+        "core.math" if method == "random" => Effect::Rand,
         "core.math.random" | "core.crypto.random" => Effect::Rand,
         "core.sys" => Effect::Env,
         "core.process" => Effect::Exec,
         "core.term" => Effect::IO,
         "core.db" => Effect::DB,
-        // D-AUTH1: the storeful session APIs read and write a live user store.
-        // Declared here so the comptime tier reads the same fact the run tier
-        // does, instead of naming these seven methods in a list of its own.
+        // D-AUTH1: the storeful session APIs read and write a live user store,
+        // and the store cell they go through is that store. Declared here so
+        // the comptime tier reads the same fact the run tier does, instead of
+        // naming these methods in a list of its own.
         "core.auth"
             if matches!(
                 method,
@@ -378,6 +418,8 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
                     | "magic_link_consume"
                     | "oauth_begin"
                     | "oauth_finish"
+                    | "__store_load"
+                    | "__store_replace"
             ) =>
         {
             Effect::DB

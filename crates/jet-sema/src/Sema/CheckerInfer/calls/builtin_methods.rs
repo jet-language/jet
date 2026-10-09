@@ -513,6 +513,15 @@ impl<'a> Checker<'a> {
         span: Span,
         ret: Option<Type>,
     ) -> Option<Type> {
+        let ret = if matches!(recv_ty, Type::Named(name) if name == crate::Syntax::CLOCK_TYPE)
+            && method == "now"
+        {
+            self.core_source_owner_module("core.time", "Instant")
+                .map(|owner| Type::Named(self.canonical_nominal_name(owner, "Instant")))
+                .or(ret)
+        } else {
+            ret
+        };
         self.check_builtin_method_labels(method, args);
         let mut call_access = self.call_access_frame();
         let receiver_borrow = Collections::builtin_receiver_borrow(recv_ty, method);

@@ -52,17 +52,22 @@ pub struct GlyphRun {
 }
 
 pub fn system(style: FontStyle) -> FontFace Never! {
-    core.font.system(style)
-}
-
-pub fn shape(text: String, face: FontFace) -> GlyphRun Never! {
-    core.font.shape(text, face)
+    if style == FontStyle.Monospace -> return FontFace{family: "monospace", size: 14.0, style: style}
+    if style == FontStyle.Title -> return FontFace{family: "system-ui", size: 24.0, style: style}
+    FontFace{family: "system-ui", size: 14.0, style: style}
 }
 
 pub fn shape_with(face: FontFace, text: String) -> GlyphRun Never! {
     // This is the explicit opt-in for deterministic approximate metrics.
     // `shape` is the only path that requests the FontShaping capability.
     shape_fallback(face, text)
+}
+
+pub fn shape(text: String, face: FontFace) -> GlyphRun Never! {
+    if core.font.__shape_text(text, face) == {
+        .Ok(run) -> run
+        .Err(cause) -> panic("font shaping host contract failure: {cause}")
+    }
 }
 
 fn shape_fallback(face: FontFace, text: String) -> GlyphRun {
@@ -149,3 +154,15 @@ fn decode_cp(raw: [U8], i: Int) -> DecodePair {
     DecodePair{cp: cp, next: i + width}
 }
 
+
+#Test("system font styles have canonical family and size defaults") {
+    body :: system(.Body)
+    title :: system(.Title)
+    mono :: system(.Monospace)
+    assert_eq(body.family, "system-ui")
+    assert_eq(body.size, 14.0)
+    assert_eq(title.family, "system-ui")
+    assert_eq(title.size, 24.0)
+    assert_eq(mono.family, "monospace")
+    assert_eq(mono.size, 14.0)
+}

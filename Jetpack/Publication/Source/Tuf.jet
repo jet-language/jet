@@ -424,7 +424,7 @@ fn publication_tuf_with_checkpoint_lock(state: String, action: fn() IOError! -[F
                 else -> return Err(err)
             }
             if files.stat(lock_path) == .Ok(metadata) {
-                if !metadata.is_symlink && metadata.is_file && time.unix_ns() - metadata.modified.unix_ns > 300000000000 {
+                if !metadata.is_symlink && metadata.is_file && time.unix_ns() - (metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) > 300000000000 {
                     authority.remove(lock_name).drop("stale checkpoint lock reclamation is best-effort; the next attempt re-races")
                     next
                 }

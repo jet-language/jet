@@ -165,13 +165,6 @@ mod jet_std {
         pub typed_path: Option<Vec<(String, bool)>>,
     }
 
-    #[derive(Clone, Debug, PartialEq)]
-    pub struct JetMIME {
-        pub top: String,
-        pub sub: String,
-        pub parameters: Vec<Vec<String>>,
-    }
-
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
@@ -4152,13 +4145,13 @@ fn canonical_router_precedence_methods_and_conflicts() {
 
     let logs = jet_http_mux_new();
     jet_http_mux_add(&logs, "GET", "/logs/:id/*rest", |req| {
-        jet_http_srv_response(200, &jet_http_srv_access_log(&req, 200))
+        jet_http_srv_response(200, &jet_http_srv_raw_route_template(&req).expect("selected route template"))
     });
     assert_eq!(
         jet_http_mux_dispatch(&logs, request("GET", "/logs/42/a/b?secret=x"))
             .unwrap()
             .body,
-        "GET /logs/:id/*rest 200"
+        "/logs/:id/*rest"
     );
 }
 
@@ -7179,14 +7172,13 @@ fn builtin_middleware_timeout_body_limit_cors_compress_and_access_log() {
         Err(JetHTTPError::BodyTooLarge { limit: 4 })
     ));
 
-    let policy = jet_http_cors_policy(
-        &JetHTTPCorsOrigins::List(vec!["https://app.example".to_string()]),
-        &Vec::new(),
-        &Vec::new(),
-        false,
-        86_400,
-    )
-    .unwrap();
+    let policy = JetHTTPCorsPolicy {
+        origins: JetHTTPCorsOrigins::List(vec!["https://app.example".to_string()]),
+        allow_methods: "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS".to_string(),
+        allow_headers: "content-type, authorization, x-request-id".to_string(),
+        credentials: false,
+        max_age_secs: 86_400,
+    };
     let cors = jet_http_mw_cors(
         &policy,
         std::sync::Arc::new(|_| Ok(jet_http_srv_response(200, &"ok".to_string()))),
@@ -7394,22 +7386,10 @@ fn static_files_mount_refuses_escapes_dotfiles_and_link_escapes() {
     std::fs::remove_dir_all(base).unwrap();
 }
 
-/// D-HTTP-CORS1=A: no policy means no headers, a named origin is stamped, and
-/// `.Any` with credentials is refused when the policy is built.
+/// Runtime CORS headers: construction/defaults and wildcard-credential rejection
+/// are covered by the source-owned Core/http/server.jet #Tests.
 #[test]
-fn cors_policy_rejects_any_origin_with_credentials_and_stamps_named_origins() {
-    let refused = jet_http_cors_policy(
-        &JetHTTPCorsOrigins::Any,
-        &Vec::new(),
-        &Vec::new(),
-        true,
-        86_400,
-    );
-    let Err(JetHTTPError::Policy { reason }) = refused else {
-        panic!("`.Any` origins with credentials must be refused");
-    };
-    assert!(reason.contains("CORS credentials need named origins"));
-    assert!(reason.contains("set credentials to false"));
+fn cors_stamps_named_origins_and_omits_headers_without_a_policy() {
 
     // No policy installed means the mux sends no CORS header at all.
     let bare = jet_http_mux_new();
@@ -7432,14 +7412,13 @@ fn cors_policy_rejects_any_origin_with_credentials_and_stamps_named_origins() {
     .unwrap();
     assert_eq!(plain.headers.get("access-control-allow-origin"), None);
 
-    let policy = jet_http_cors_policy(
-        &JetHTTPCorsOrigins::List(vec!["https://app.example".to_string()]),
-        &vec!["GET".to_string(), "POST".to_string()],
-        &vec!["content-type".to_string()],
-        true,
-        600,
-    )
-    .unwrap();
+    let policy = JetHTTPCorsPolicy {
+        origins: JetHTTPCorsOrigins::List(vec!["https://app.example".to_string()]),
+        allow_methods: "GET, POST".to_string(),
+        allow_headers: "content-type".to_string(),
+        credentials: true,
+        max_age_secs: 600,
+    };
     let mux = jet_http_mux_new();
     jet_http_srv_install_cors(&mux, &policy);
     jet_http_mux_add(&mux, "GET", "/api", |_| {
@@ -7505,8 +7484,13 @@ fn cors_policy_rejects_any_origin_with_credentials_and_stamps_named_origins() {
     assert_eq!(denied.headers.get("access-control-allow-origin"), None);
 
     // `.Any` without credentials is a valid policy and answers every origin.
-    let any =
-        jet_http_cors_policy(&JetHTTPCorsOrigins::Any, &Vec::new(), &Vec::new(), false, 0).unwrap();
+    let any = JetHTTPCorsPolicy {
+        origins: JetHTTPCorsOrigins::Any,
+        allow_methods: "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS".to_string(),
+        allow_headers: "content-type, authorization, x-request-id".to_string(),
+        credentials: false,
+        max_age_secs: 0,
+    };
     let any_mux = jet_http_mux_new();
     jet_http_srv_install_cors(&any_mux, &any);
     jet_http_mux_add(&any_mux, "GET", "/api", |_| {
@@ -7527,30 +7511,3 @@ fn cors_policy_rejects_any_origin_with_credentials_and_stamps_named_origins() {
     );
 }
 
-/// D-HTTP-JSON1=A: `server.json` labels the encoded body, and the typed decode
-/// used by `req.json<T>()` / `resp.json<T>(limit)` honours the body cap.
-#[test]
-fn server_json_sets_the_content_type_and_the_body_cap_still_holds() {
-    let response = jet_http_srv_json(201, &"payload".to_string());
-    assert_eq!(response.status, 201);
-    assert_eq!(
-        response.headers.get("content-type"),
-        Some(&"application/json; charset=utf-8".to_string())
-    );
-    assert_eq!(
-        response.body.bytes(64).unwrap(),
-        br#"{"ok":true}"#.as_slice()
-    );
-
-    let body = JetHTTPBody::from_text(r#"{"a":1}"#.to_string());
-    let decoded: String = jet_http_body_json(&body, 64).unwrap();
-    assert_eq!(decoded, r#"{"a":1}"#);
-
-    // The typed decode reads through the shared body reader, so the framing cap
-    // rejects an oversized body before any decode runs.
-    let oversized = JetHTTPBody::from_text(r#"{"a":1}"#.to_string());
-    assert!(matches!(
-        jet_http_body_json::<String>(&oversized, 2),
-        Err(JetHTTPError::BodyTooLarge { limit: 2 })
-    ));
-}

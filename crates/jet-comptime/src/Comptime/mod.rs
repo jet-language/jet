@@ -63,7 +63,7 @@ pub mod ServicesLite;
 pub mod SyncLite;
 mod TextLite;
 pub use TextLite::file_reader_next_line;
-pub use TextLite::{mir_fs_lock, mir_fs_temp_dir, mir_fs_temp_file, MirFileOwner};
+pub use TextLite::{mir_fs_lock_owner_raw, mir_fs_temp_dir, mir_fs_temp_file, mir_fs_temp_dir_raw, mir_fs_temp_file_raw, MirFileOwner};
 pub mod MirBridge;
 pub mod Template;
 mod TypedDecode;
@@ -149,13 +149,12 @@ pub use Methods::{
     apply_repl_authorized_core_call_with_type, display_core_pure_value,
     eval_regex_replace_all_with, history_callback_fingerprint, history_command_schema_from_mir,
     jet_crypto_zeroize,
-    set_trace_id, sketch_add, with_world_rng_provider, HistoryCommandSchema,
+    set_trace_id, with_world_rng_provider, HistoryCommandSchema,
 };
 pub use Methods::{apply_seeded_rng_method, apply_seeded_rng_method_with_type};
 // I9: the TIR evaluator in jet-codegen calls this same fake-data kernel, so it
 // must be reachable from outside this crate. One kernel, every tier.
 pub use DataPipeline::DataPipelineState;
-pub use Methods::apply_fake_method;
 #[doc(hidden)]
 pub use Methods::{
     eval_build_time_io, eval_net_fetch, is_tier2_core_call, project_rejection,
@@ -271,10 +270,13 @@ pub fn evaluate_typed_head(
     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
     let shown_holes = render_typed_holes(holes, span)?;
     match kind {
-        Syntax::TypedHeadKind::URL => {
-            let url = UrlLite::typed_url_literal(literals, &shown_holes);
-            Ok(Methods::url_parts_to_ct(&url))
-        }
+        Syntax::TypedHeadKind::URL => Err(Diagnostic::error(
+            "E0003",
+            "URL recipes must call core.net.url.literal".to_string(),
+            "URL construction belongs to its checked Core source function".to_string(),
+            "report a typed URL that bypassed source-call lowering".to_string(),
+            Some(span),
+        )),
         Syntax::TypedHeadKind::Path => Ok(CtValue::Struct {
             type_name: Syntax::TYPE_PATH.to_string(),
             fields: vec![(

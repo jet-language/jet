@@ -1737,6 +1737,7 @@ pub(crate) fn is_printable(
         Type::Named(n) => {
             registry.is_unit_type(n)
                 || registry.distinct_is_printable(n)
+                || trait_reg.implements_trait(n, Generics::DISPLAY)
                 || trait_reg.implements_trait(n, Generics::PRINTABLE)
                 || is_core_shown_type(n)
         }
@@ -1744,7 +1745,8 @@ pub(crate) fn is_printable(
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
             (name == "View" && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
-                || (trait_reg.implements_trait(name, Generics::PRINTABLE)
+                || ((trait_reg.implements_trait(name, Generics::DISPLAY)
+                    || trait_reg.implements_trait(name, Generics::PRINTABLE))
                     && args.iter().all(|a| is_printable(a, registry, trait_reg)))
         }
         Type::Tuple(fields) => fields

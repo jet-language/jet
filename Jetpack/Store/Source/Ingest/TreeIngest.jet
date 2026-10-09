@@ -16,7 +16,7 @@ pub struct DigestStamp {
 }
 
 pub fn store_object_stamp(info: files.Stat) -> DigestStamp Never! {
-    DigestStamp{device: info.id.device, inode: info.id.inode, size: info.size, modified_ns: info.modified.unix_ns}
+    DigestStamp{device: info.id.device, inode: info.id.inode, size: info.size, modified_ns: info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")}
 }
 
 // One memoized digest: which kind of digest it is, and the stamp it holds for.

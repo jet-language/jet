@@ -7,8 +7,19 @@ carriers are registered in [`Core.jet`](../../crates/jet-codegen/src/Prelude/Cor
 and sourced from [`Core/encoding`](../../Core/encoding/encoding.jet); the
 shared Prelude ABI is in
 [`EncodingTypes.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs)
-and stream behavior is in
-[`EncodingStream.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs).
+and source stream policy is in
+[`stream.jet`](../../Core/encoding/stream.jet). The native file handle
+constructors remain in
+[`EncodingStream.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs)
+until the owned-callback holder cutover (#4739) is proven.
+The owned byte/String raw leaves transfer the same allocation on the Rust tier.
+Native byte Lists currently use word slots, so their C-ABI boundary narrows or
+widens storage instead; packed small-scalar List layout is tracked separately
+in #4749. Borrowed Object-entry views preserve their original ordered backing
+and freeze the input owner through declared return provenance (#4737).
+Source handle protocol methods preserve the shipped `IO` effect. They do not
+acquire ambient `FS` authority; native file constructors retain their existing
+`FS` effect until the holder cutover.
 Use the vocabulary in [Jet vocabulary](vocabulary.md). Conformance evidence
 lives in [`tests/encoding_corpus.rs`](../../tests/encoding_corpus.rs),
 [`tests/encoding_parity.rs`](../../tests/encoding_parity.rs), and the
@@ -27,6 +38,14 @@ helpers, not `DataTree` adapters. This keeps one tree walker and one set of
 format adapters while preserving the distinction between text serialization
 and byte alphabets.
 
+The native carrier also retains compiler-private `Number`, `TypedText`,
+and `Bytes` payloads for target-directed decoding and byte encoders. They
+are not additional public constructors. Vetted Core internals may borrow
+these payloads inside audited `#Unsafe` regions (#4737). The private Object
+entry view borrows the input's ordered backing storage; it neither converts
+the Object to a sorted map nor clones its children.
+
+
 Use one adapter identity per format for whole-value operations and bounded
 reader/writer operations. The streaming formats are JSON, JSONL, CSV, XML,
 and CBOR. Reader/writer access is a mode of the same codec, not a second
@@ -41,6 +60,25 @@ format handles and format-only options/events in
 `core.encoding.json`, `core.encoding.jsonl`, `core.encoding.csv`,
 `core.encoding.xml`, and `core.encoding.cbor`. `FileReader` and `FileWriter`
 remain `core.files` types; do not add duplicate re-exports. (D-ENCSTREAM-SURFACE1=A)
+The handle-free event, format, cause, error, and limits declarations are ordinary
+Jet source nominals in `Core/encoding/encoding.jet`. Encoding error Display and
+Debug use the shared location ladder: format, kind, byte offset, optional line
+and column, optional nonempty path, then reason. Attaching a cause does not
+change this rendering. `DataTree` remains the native nominal pending the
+ordered Object/public Map representation ruling; its policy uses borrowed
+ordered Object leaves rather than replacing the carrier.
+
+Compact and pretty JSON serialization route through their Jet `Encode` wrappers;
+the old native serializer dispatcher rows are metadata-only source-owned rows.
+The CBOR whole-value rows likewise execute their existing source encoders and
+parser. Alphabet decoders already use source ownership, not native dispatcher
+aliases. `Examples/features/serde/encoding_source_cutover.jet` records focused
+vectors for these routing contracts.
+Untyped `json.decode` performs the D-JSON3 coercion walk in Jet. The wall-clock
+snapshot and stderr emission remain private raw adapters to the existing seed
+operations. Their shipped hidden Time/IO effects are preserved, not promoted
+to new public effects; this truthfulness gap is tracked in the cutover ledger.
+Typed `decode<T>` remains the existing target-directed compiler lowering.
 
 `EncodingLimits` has these fields:
 
@@ -182,6 +220,12 @@ decision.
   shared expansion budgets. Chunk boundaries cannot change events or errors.
   Collecting events reconstructs the structurally equal whole tree; lexical
   evidence belongs only to the XML fields below.
+  XML parsing, projection, rendering, canonicalization, and reader policy are
+  authored in Jet and share compiler-private `xml_engine` / `xml_kernel`
+  source parts. The reader's only input operation is the private `__read_into`
+  raw leaf: one read through the owned FileReader buffer into already-reserved
+  capacity, with no growth or retry; EOF and IO errors retain zero buffer length.
+  XML coordinates distinguish UTF-8 byte offsets from scalar-based columns.
 ```jet
 use core.encoding as encoding
 use core.encoding.json as json
@@ -1195,3 +1239,99 @@ diagnostic registry, snapshots in
 [`tests/ui/cbor_encode_removed`](../../tests/ui/cbor_encode_removed/), and
 [`tests/encoding_edition.rs`](../../tests/encoding_edition.rs). Runtime
 parse/decode failures remain typed Core values, not compiler diagnostics.
+
+## Encoding provider ownership
+
+The source codec policy calls these existing registered seed leaves directly;
+they are not additional public wrappers. Their exact temporary registrations
+are journaled in the integration leaf ledger under `JsonStreams7` and die at
+native cutover. This inventory distinguishes a source policy receipt from an
+unexercised native carrier or runtime receipt.
+
+| Registered provider | Source policy consumer | Provider boundary |
+| --- | --- | --- |
+| `core.encoding.__edition` | `base32.jet` and `base64.jet` decode entry points | Resolved package edition intrinsic; source selects strict/legacy rules |
+| `core.encoding.__read_byte` | `stream.jet` JSON pull and `csv.jet` reader | Existing file read; source handles parsing, limits and lifecycle |
+| `core.encoding.__write_bytes` | `stream.jet` JSON push and `csv.jet` writer | Existing file write-all; source owns encoding and limits |
+| `core.encoding.__flush` | `stream.jet` JSON push and `csv.jet` writer | Existing file flush; source owns sticky terminal failure |
+| `core.encoding.__utf8_validate` | `cbor_parse.jet` text chunks and `stream.jet` text conversion | Existing strict validator; source chooses validation point and maps errors |
+| `core.encoding.__bytes_into_text` | `stream.jet` and `csv.jet` validated text transfer | Consume exact validated UTF-8 allocation without copying |
+| `core.encoding.__string_byte` | `stream.jet` checked string-byte accessor | Borrow byte only after source bounds proof |
+| `core.encoding.__object_from_entries` | `stream.jet` owned object construction | Move ordered entries into the existing native carrier |
+| `core.encoding.__write_text` | `csv.jet` field output and `stream.jet` JSON push | Borrow UTF-8 storage for existing file write-all |
+| `core.encoding.__text_into_bytes` | `stream.jet` record accounting and canonical numbers | Consume text allocation without copying |
+| `core.encoding.__typed_text` | `stream.jet` typed-text retention | Move text into the existing private Decode carrier |
+| `core.encoding.__object_entries_view` | `stream.jet` checked Object view | Borrow ordered entries, preserving the owner |
+| `core.encoding.__bytes_view` | `stream.jet` checked Bytes view | Borrow payload, preserving the owner |
+
+The native Object carrier remains an explicitly gated bridge: these transfers
+do not claim that the public `Map` shape has become an ordered source list.
+The unused `__object_into_entries` and `__tree_tag` registry rows were removed
+along with their seed functions, signatures, gates and native lowering handlers.
+A repository-wide reference search found declarations and handlers only, not
+any Jet codec, Rust TIR/MIR emitter, JS or comptime consumer.
+
+The D-JSON3 `__coerce_now` and `__coerce_emit` registrations use the ambient
+interpreter route as well as the existing AOT host symbols. The resident
+aliases call the same epoch-millisecond sampling leaf and the same stderr
+leaf; when a capture sink is present, they marshal through the existing
+terminal newline frame. Coercion traversal and audit formatting remain in
+`json.jet`. The shipped hidden Time/IO effects remain unchanged pending the
+separately recorded effect-truthfulness ruling.
+
+`core.encoding.json.writer` now constructs a source `JSONWriter` around the
+existing Jet `stream.JSONPush` policy. `write`, `flush`, and `finish` delegate
+within Jet, retaining the event state machine, canonical mode, bounded
+allocation checks and sticky errors. File writes and flushes alone cross the
+registered provider boundary above. The target remains consumed, default
+limits remain safe, and canonical mode defaults to false.
+
+`core.encoding.jsonl.writer` uses the shipped native JSONL policy, not the
+earlier source helper's immediate-LF behavior. A successful write emits value
+bytes only; the next write closes the preceding LF before validating its new
+record, and `finish` closes the final LF. `flush` does not close that LF, so
+dropping without finish retains an incomplete line. Before emitting a record,
+the source preflights decoded tree size/depth and reserves its exact wire size
+plus the deferred LF against the total limit. Errors retain native record
+index/path projection and sticky-terminal behavior. These differences follow
+`EncodingStream.rs`'s `jet_jsonl_tree_size`, `jet_jsonl_wire_size`,
+`JSONLWriter.write_record`, `flush_output`, and `finish_output`.
+
+Typed `csv.decode<T>` owns the native header-to-record policy in Jet. The
+whole-value comma parser retains blank records, doubled quotes, CRLF rules,
+Unicode-scalar columns and the exact `E2701` failure text. It intentionally
+does not impose streaming `EncodingLimits` on the shipped unbounded whole-value
+operation. Each header names a text cell (missing cells are empty; extra cells
+are ignored), and all typed errors are accumulated in data-record order with
+the native `row N` path prefix.
+
+CBOR file streams retain the existing `CBORReader`/`CBORWriter` names,
+consuming file factories, optional pull events and IO method effects.
+The private `cbor_stream.jet` part of `core.encoding` owns the native
+`EncodingStream.rs` reader policy (`raw`, `arg`, `payload`, `string`,
+`retain_key`, `close_event`, `next_event`) and writer policy (`scalar`,
+`accept`, `write_key`, `close_array`, `close_object`, `write_event`,
+`flush_output`, `finish_output`). Definite and indefinite input, chunked
+strings, duplicate keys, preferred float widths, retained-item/heap bounds,
+error paths and sticky terminal state stay in Jet. Only the already
+registered byte read, byte write, flush, UTF-8 and allocation leaves remain.
+Whole-value float kernels are shared, not reimplemented.
+
+The writer buffers nested encoded items and sorts encoded map keys in
+place before committing one definite-length root. `flush` only flushes the
+file; it does not close an unfinished container. `finish` requires one
+complete root, is idempotent after success, and preserves the first failure.
+Known-answer source tests cover definite/indefinite nesting, chunked text,
+all float widths, item/total bounds, map order, and flush/finish behavior.
+The checked shared allocation helper distinguishes heap-ceiling failure
+from allocator refusal; existing Bool callers still map either to false.
+
+Typed `csv.query<T>` owns the bounded-input and validation policy in source.
+Its raw read leaf receives the caller's bound, opens once, reports the open
+file's metadata size, and reads at most bound+1 bytes (without touching an
+already oversized file). Source checks the 512 MiB metadata bound before the
+growth bound, validates UTF-8 once, then transfers the allocation without a
+copy. CSV syntax and header/SQL-field validation precede typed decode errors;
+successful typed rows reuse `rows.query(SQL)`, never a second SQL engine.
+The private plain `__QueryRead` carrier keeps the path-based Ambient route,
+so the input policy does not introduce an interpreter-only file-handle gap.

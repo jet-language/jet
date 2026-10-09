@@ -8,20 +8,17 @@ use core.crypto as crypto
 // fallback generator. A missing or rejected provider is `CryptoError.Unavailable`.
 //
 // This is not `core.math.random`. Math RNG is deterministic and seedable.
-// Crypto RNG is neither. The kernel is `host_csprng`; bounds checks are Jet.
+// Crypto RNG is neither. The only host step is `__os_entropy` (one OS CSPRNG
+// fill); bounds, the exact-length check and the error meaning are Jet.
 /// `n` random bytes from the OS CSPRNG. `n` must be 0..=1048576.
 pub fn bytes(n: Int) -[Rand]> [U8] CryptoError! {
     if n < 0 || n > 1048576 -> return Err(.Length)
     if n == 0 -> return Ok([U8]{})
-    out :: host_csprng(n) ?? return Err(.Unavailable)
+    out :: core.crypto.random.__os_entropy(n) ?? return Err(.Unavailable)
     if out.len() != n -> return Err(.Unavailable)
     Ok(out)
 }
 
-fn host_csprng(n: Int) -[Rand]> [U8] CryptoError! {
-    core.crypto.random.bytes(n) ?? return Err(.Unavailable)
-}
- 
 
 pub fn u32() -[Rand]> U32 CryptoError! {
     b :: bytes(4) ?? return Err(.Unavailable)

@@ -33,6 +33,7 @@ fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
             items: std::mem::take(&mut program.items),
             script_body: std::mem::take(&mut program.script_body),
             source: src.into(),
+            core_identifier_demand: Lexer::core_identifier_demand(&tokens),
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling,
             pub_file: program.pub_file,
@@ -104,11 +105,15 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
         modules.push(LoadedModule {
             path: PathBuf::from(path),
             display: (*path).into(),
-            alias: path.trim_end_matches(".jet").into(),
+            alias: path.strip_prefix("<corelib>/")
+                .and_then(|path| jet_foundation::CoreModuleExports::core_source_modules()
+                    .iter().find(|source| source.path == path))
+                .map_or_else(|| path.trim_end_matches(".jet").into(), |source| source.alias.into()),
             imports: std::mem::take(&mut program.imports),
             items: std::mem::take(&mut program.items),
             script_body: std::mem::take(&mut program.script_body),
             source: (*src).into(),
+            core_identifier_demand: Lexer::core_identifier_demand(&tokens),
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling,
             pub_file: program.pub_file,
@@ -145,6 +150,111 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
     };
     let diagnostics = check_bundle(&mut bundle, CompileMode::Eval);
     (bundle, diagnostics)
+}
+
+#[test]
+fn core_source_decimal_decl_and_display_impl_replace_builtin_name() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/math/math.jet",
+         "struct Decimal { value: Int }\nimpl Decimal.Display { fn display(self) -> String Never! { \"decimal\" } }\n",
+         &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    let errors: Vec<_> = diagnostics.iter().filter(|d| d.severity == Severity::Error).collect();
+    assert!(errors.is_empty(), "Core Decimal errors: {errors:?}");
+}
+
+#[test]
+fn unrelated_core_module_cannot_redefine_decimal() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/time/time.jet", "struct Decimal { value: Int }\n", &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(diagnostics.iter().any(|d| d.code == "E0106"), "{diagnostics:?}");
+}
+
+#[test]
+fn core_source_mixed_operator_displaces_seed_but_duplicate_source_impl_still_fails() {
+    let source = "struct Vec3 { x: Float }\nimpl Float.Div(Vec3) { fn div(self, rhs: Vec3) -> Vec3 Never! { rhs } }\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/math/math.jet", source, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(!diagnostics.iter().any(|d| d.code == "E0908"), "{diagnostics:?}");
+    let duplicate = format!("{source}\nimpl Float.Div(Vec3) {{ fn div(self, rhs: Vec3) -> Vec3 Never! {{ rhs }} }}\n");
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/math/math.jet", &duplicate, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(diagnostics.iter().any(|d| d.code == "E0908"), "{diagnostics:?}");
+}
+
+#[test]
+fn imported_core_primitive_left_operator_uses_source_result() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/math/math.jet",
+         "pub struct Vec3 { x: Float }\nimpl Float.Div(Vec3) { fn div(self, rhs: Vec3) -> Int Never! { 17 } }\n",
+         &[]),
+        ("pkg-a/src/main.jet",
+         "use core.math.[Vec3]\nfn answer(left: Float, right: Vec3) -> Int Never! { left / right }\nfn dot(left: Float, right: Vec3) -> Int Never! { left.div(right) }\nfn run() {}\n",
+         &[]),
+    ]);
+    let errors: Vec<_> = diagnostics.iter().filter(|d| d.severity == Severity::Error).collect();
+    assert!(errors.is_empty(), "source result was shadowed by a seed row: {errors:?}");
+}
+
+#[test]
+fn core_rng_private_method_resolves_inside_own_impl() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/math/random.jet",
+         "pub struct RNG { state: Int }\nimpl RNG { fn float_open(self) -> Float Never! { 0.5 } pub fn sample(self) -> Float Never! { self.float_open() } }\n",
+         &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    let errors: Vec<_> = diagnostics.iter().filter(|d| d.severity == Severity::Error).collect();
+    assert!(errors.is_empty(), "private source RNG method errors: {errors:?}");
+}
+
+#[test]
+fn io_operation_annotations_are_core_only() {
+    let source = "fn retain(operation: IOOperation) -> IOOperation Never! { operation }\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/term/term.jet", source, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "Core IOOperation: {diagnostics:?}");
+    let (_, diagnostics) = check("fn retain(operation: IOOperation) {}\nfn run() {}\n");
+    assert_eq!(error_codes(&diagnostics), ["E0119"], "{diagnostics:?}");
+}
+
+#[test]
+fn opaque_core_impl_methods_displace_only_their_builtin_names() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/tasks/tasks.jet",
+         "impl Condition { pub fn notify_one(self) Never! {} pub fn notify_all(self) Never! {} }\nfn own(condition: Condition) Never! { condition.notify_one() }\n",
+         &[]),
+        ("<corelib>/Core/rt/rt.jet",
+         "impl RealtimeStream { pub fn is_cancelled(self) -> Bool Never! { true } }\n",
+         &[]),
+        ("pkg-a/src/main.jet",
+         "use core.tasks as tasks\nuse core.rt as rt\nfn notify(condition: Condition) Never! { condition.notify_all() }\nfn observe(stream: RealtimeStream) -> Bool Never! { stream.is_cancelled() }\nfn other(text: String) -> Int Never! { text.len() }\nfn run() {}\n",
+         &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "opaque Core methods: {diagnostics:?}");
+}
+
+#[test]
+fn source_only_core_qualified_calls_resolve_inside_and_across_core_modules() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/sys/sys.jet",
+         "pub fn usize_max() -> U64 Never! { U64{255} }\nfn own() -> U64 Never! { core.sys.usize_max() }\n",
+         &[]),
+        ("<corelib>/Core/tui/tui.jet",
+         "fn foreign() -> U64 Never! { core.sys.usize_max() }\n",
+         &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "qualified Core source calls: {diagnostics:?}");
 }
 
 fn error_codes(diags: &[Diagnostic]) -> Vec<&str> {

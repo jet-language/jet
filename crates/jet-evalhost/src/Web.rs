@@ -110,6 +110,7 @@ pub(crate) mod web_rt {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs");
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/CoreSlice7WebRaw.rs");
     include!("../../jet-codegen/src/Prelude/DevServer.rs");
 }
 

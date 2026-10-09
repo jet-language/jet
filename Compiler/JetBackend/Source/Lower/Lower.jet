@@ -2848,6 +2848,7 @@ fn lower_print_releases(c: LowerContext, f: LowerFunction, value: MIRValueID, lo
 }
 
 fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, semantic: MIRSemanticOp) Never! {
+    if semantic == .DataEntriesToMap(_, local) -> return lower_data_entries_to_map(p, c, &m, &f, instruction, local)
     if semantic == .Print(call, value) {
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "print names missing Prelude call {call.value}")
         text :: lower_show(p, c, &m, &f, value) ?? return

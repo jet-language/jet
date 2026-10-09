@@ -2426,6 +2426,7 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
         "NetErrorDetail",
         &["operation", "address", "name", "message", "os_code"],
     ),
+    ("__ResolveError", &["kind", "has_os_code", "os_code", "message"]),
     ("AsyncPolicy", &["capacity", "overflow"]),
     ("CSVRow", &["fields", "line"]),
     (
@@ -2493,6 +2494,13 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "max_expansion_bytes",
         ],
     ),
+    ("CBOROptions", &["max_depth", "max_items", "max_bytes", "require_canonical"]),
+    ("CBORError", &["kind", "byte_offset", "path", "reason"]),
+    ("XMLLimits", &["max_depth", "max_nodes", "max_attributes_per_element", "max_name_bytes", "max_text_bytes", "max_entity_declarations", "max_entity_depth", "max_entity_replacement_bytes"]),
+    ("XMLParseOptions", &["entities", "limits"]),
+    ("XMLRenderOptions", &["encoding", "lexical"]),
+    ("XMLCanonical", &["mode", "comments", "inclusive_prefixes"]),
+    ("XMLError", &["kind", "byte_offset", "line", "column", "path", "reason"]),
     ("DataProvenance", &["source", "format", "authority"]),
     (
         "DataSchema",
@@ -2513,17 +2521,6 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "buffered_bytes",
             "backpressure",
             "last_good",
-        ],
-    ),
-    (
-        "Claims",
-        &[
-            "subject",
-            "audience",
-            "issuer",
-            "expires_at",
-            "not_before",
-            "issued_at",
         ],
     ),
     (
@@ -2668,6 +2665,9 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("Address", &[]),
     ("Message", &[]),
     ("Attachment", &[]),
+    ("__EmailAddressView", &["display", "mailbox"]),
+    ("__EmailAttachmentView", &["filename", "mime", "bytes"]),
+    ("__EmailMessageView", &["from", "to", "bcc", "subject", "text", "html", "attachments", "wire_upper"]),
     (
         "RecipientReport",
         &["address", "accepted", "code", "message"],
@@ -2736,20 +2736,6 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("TempFile", &["path"]),
     ("FileLock", &["path"]),
     ("WatchEvent", &["path", "domain", "kind"]),
-    (
-        "Stat",
-        &[
-            "size",
-            "modified_ms",
-            "created_ms",
-            "readonly",
-            "is_file",
-            "is_dir",
-            "is_symlink",
-            "kind",
-            "mode",
-        ],
-    ),
     ("DataColumn", &["id", "name", "type_name", "nullable"]),
     (
         "DataStatus",
@@ -3048,7 +3034,6 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
                 crate::Codegen::file_handle_rust_type(source_name),
                 Some("JetFileReader" | "JetFileWriter" | "JetFileScope")
             ))
-        || name == crate::Syntax::TYPE_MEASUREMENT
         || name == crate::Syntax::TYPE_ERR
         // Core/compute declares its own `VJPRun` record (source-owned shape);
         // only the autodiff transform's bare `VJPRun` is the native carrier.
@@ -3841,21 +3826,6 @@ fn compiler_owned_type_defs<'a>(
             }];
             row
         }))
-        .chain(std::iter::once({
-            let mut row = compiler_owned_record(
-                module,
-                crate::Syntax::TYPE_MEASUREMENT,
-                [
-                    ("value", Type::Named("T".to_string())),
-                    ("uncertainty", Type::Named("T".to_string())),
-                ],
-            );
-            row.generic_params = vec![super::TGenericParam {
-                name: "T".to_string(),
-                bounds: Vec::new(),
-            }];
-            row
-        }))
         .chain(std::iter::once(compiler_owned_record(
             module,
             "DataPivotCell",
@@ -3938,4 +3908,85 @@ pub(crate) fn is_compiler_owned_trait(name: &str) -> bool {
             | crate::Generics::DIV
             | crate::Syntax::TRAIT_ROLLBACK
     )
+}
+
+#[cfg(test)]
+mod native_encoding_record_tests {
+    use super::*;
+
+    #[test]
+    fn private_source_records_do_not_get_synthetic_compiler_owned_rows() {
+        let emitter = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../Compiler/JetCodegen/Source/Emit/Types.jet"
+        ));
+        let emitter_records = emitter
+            .split("JET_RUST_EMIT_COMPILER_OWNED_CORE_RECORDS :: prep")
+            .nth(1)
+            .expect("paired compiler-owned record inventory")
+            .split("} }")
+            .next()
+            .expect("paired compiler-owned record entries");
+        let codegen = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../Compiler/JetCodegen/Source/Codegen/Types.jet"
+        ));
+        let codegen_records = codegen
+            .split("JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS :: prep")
+            .nth(1)
+            .expect("Source Codegen compiler-owned record inventory")
+            .split("} }")
+            .next()
+            .expect("Source Codegen compiler-owned record entries");
+        for (module, name) in [
+            ("core.service", "__DeliveryFacts"),
+            ("core.service", "__DeliveryRecord"),
+            ("core.service", "__MailboxRead"),
+            ("core.encoding.csv", "__QueryRead"),
+            ("core.crypto", "__JetcRaw"),
+            ("core.crypto", "__JetcStat"),
+            ("core.testing", "__EvidenceRead"),
+            ("core.testing", "__TempFacts"),
+            ("core.testing", "__TempPath"),
+            ("core.testing", "__TempRemove"),
+            ("core.testing", "__TempCreate"),
+        ] {
+            let source = jet_sema::CoreSources::core_source_text(module).expect(module);
+            assert!(source.contains(&format!("struct {name} {{")), "{module}::{name}");
+            assert!(!is_compiler_owned_core_record(name), "{name}");
+            assert!(!is_compiler_owned_type(name), "{name}");
+            assert!(!emitter_records.contains(&format!("\"{name}\"")), "{name}");
+            assert!(!codegen_records.contains(&format!("\"{name}\"")), "{name}");
+            if matches!(module, "core.testing" | "core.crypto") {
+                let rust = crate::Codegen::Context::root_prelude_rust_type_name(name)
+                    .expect("raw transport retains its root carrier mapping");
+                assert!(emitter.contains(&format!("\"{name}\" -> Val(\"{rust}\")")), "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn native_encoding_records_keep_checked_mir_owners_without_source_modules() {
+        let rows = compiler_owned_type_defs("encoding-fixture", false, None).collect::<Vec<_>>();
+        for (name, count) in [
+            ("CBOROptions", 4), ("CBORError", 4), ("XMLLimits", 8),
+            ("XMLParseOptions", 2), ("XMLRenderOptions", 2),
+            ("XMLCanonical", 3), ("XMLError", 6),
+        ] {
+            let row = rows.iter().find(|row| row.name == name).expect(name);
+            assert!(is_compiler_owned_core_record(name));
+            assert!(crate::Codegen::core_rust_type_name(name).is_some());
+            let TirTypeDefKind::Struct { fields, .. } = &row.kind else {
+                panic!("{name} must have its checked record shape");
+            };
+            assert_eq!(fields.len(), count, "{name}");
+            for field in fields {
+                assert_eq!(
+                    Some(field.ty.clone()),
+                    crate::Sema::core_struct_field_type(name, &field.name, &[]),
+                    "{name}.{}", field.name,
+                );
+            }
+        }
+    }
 }

@@ -443,17 +443,6 @@ pub struct CSVReader {
     pub(crate) eof: bool,
     pub(crate) record_index: i64,
 }
-pub struct CSVWriter {
-    pub(crate) output: super::JetFileWriter,
-    pub(crate) limits: EncodingLimits,
-    pub(crate) terminal: Option<EncodingError>,
-    pub(crate) total: i64,
-    pub(crate) record_index: i64,
-    pub(crate) finished: bool,
-    // D-ENCSTREAM-SURFACE1: record CRLF is stream closure; finish emits it.
-    // Drop without finish leaves the last row unterminated on the wire.
-    pub(crate) pending_crlf: bool,
-}
 pub struct XMLReader {
     pub(crate) input: super::JetFileReader,
     pub(crate) limits: EncodingLimits,
@@ -504,10 +493,15 @@ pub struct CBORWriter {
     pub(crate) allocation: super::JetEncodingAllocationBudget,
 }
 
+// ProcessSpec is unconditional; its retained descriptor carrier belongs to
+// the common owner closure, not the optional filesystem operation fragment.
+pub(crate) use super::JetProcessDirectory;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessSpec {
     pub cmd: Vec<String>,
     pub cwd: Option<String>,
+    pub(crate) inherited_directories: Vec<JetProcessDirectory>,
     pub env_clear: bool,
     pub env_set: Vec<(String, String)>,
     pub env_remove: Vec<String>,

@@ -24,13 +24,14 @@ pub enum CoreCallCompletionKind { Synchronous Pending Event }
 pub enum CoreCapabilityKind { Pure NativeRequired PortableFallback ExplicitSimulation }
 
 pub enum CoreCallPureRoute {
-    NoPureRoute MIME Email EncodingXML Time Math Measurement Date DateTime SketchHLL SketchTDigest
+    NoPureRoute MIME Email EncodingXML Time Math Date DateTime SketchHLL SketchTDigest
     SketchCMS SketchReservoir UI Raylib IO Net Crypto
 }
 
 pub enum CoreCallInterpreterRoute { NoRoute Pure(route: CoreCallPureRoute) Ambient TypedIntrinsic }
 
-pub enum CoreCallSymbol { Prelude(name: String) Rust(name: String) }
+// SourceOwned carries declaration facts only; execution uses the owning Jet function.
+pub enum CoreCallSymbol { Prelude(name: String) Rust(name: String) SourceOwned }
 
 pub struct CoreCallSignature {
     pub arity: Int
@@ -80,6 +81,8 @@ pub struct CoreCallRecord {
     pub pure_route: CoreCallPureRoute
     pub interpreter_route: CoreCallInterpreterRoute
     pub symbol: CoreCallSymbol
+    // Optional checked Jet export name after special-call normalization.
+    pub source_target: String?
     pub coverage: CoreCallCoverage
     pub aot_direct: Bool
     // Rust: CoreCallRecord::native_int_result. The kernel returns its `Int`
@@ -112,22 +115,46 @@ fn core_call_one_of(value: String, choices: [String]) -> Bool Never! {
 
 fn core_call_effect_for(module_name: String, member: String) -> Effect? {
     if {
+        module_name == "core.files" && member == "__temp_path_sample" -> Val(Effect.Time)
+        module_name == "core.files" && member == "__temp_directory" -> Val(Effect.Env)
+        module_name == "core.files" && core_call_one_of(member, [String]{"__host_path_is_absolute", "__host_path_join", "__fault_should_fail", "__os_family"}) -> None
+        module_name == "core.log" && member == "__metric_publish" -> None
+        module_name == "core.devtools" && member == "__publish_payload" -> None
+        module_name == "core.web" && core_call_one_of(member, [String]{"__openapi_inputs", "__openapi_render", "__contract_stop", "__live_stats_snapshot"}) -> None
+        module_name == "core.web.store" && core_call_one_of(member, [String]{"__transact", "__facts_snapshot"}) -> None
+        module_name == "core.web.table" && core_call_one_of(member, [String]{"__columns", "__replace_columns", "__state", "__set_state", "__alias",
+            "__has_loader", "__invoke_loader", "__generation", "__query_facts", "__state_equal", "__page_facts",
+            "__commit_keys", "__loading_store", "__error_store", "__page_store",
+            "__state_store", "__has_key", "__page_accessor_keys", "__page_keys", "__page_replace_keys",
+            "__column_info", "__cell", "__rows", "__row_key", "__make_page"}) -> None
+        module_name == "core.mod" && core_call_one_of(member, [String]{"__supported", "__os",
+            "__parse_context", "__check_context", "__context_name", "__context_digest", "__exports_count", "__export_info", "__finish_context"}) -> None
+        module_name == "core.mod" && core_call_one_of(member, [String]{"__read_context", "__stage_context"}) -> Val(Effect.FS)
+        module_name == "core.process" && member == "__with_directory_raw" -> Val(Effect.FS)
+        module_name == "core.time" && member == "__zone_env" -> Val(Effect.Env)
+        module_name == "core.time" && core_call_one_of(member, [String]{"zone", "parse_zoned", "__zone_file_bytes"}) -> Val(Effect.FS)
         (module_name == "core.time" && core_call_one_of(member, [String]{
             "clock", "time", "local_time", "parse_time", "new", "parse", "from_timestamp",
             "period", "period_days", "period_months", "period_years", "parse_rfc3339",
             "from_unix_ms", "from_unix_seconds", "from_unix_microseconds", "from_unix_nanoseconds",
-            "parse_iso_week_date", "from_iso_week", "parse_zoned", "datetime", "zone", "utc",
-            "zoned", "zoned_local", "days_in_month", "is_leap_year"
+            "parse_iso_week_date", "from_iso_week", "datetime", "utc",
+            "zoned", "zoned_local", "days_in_month", "is_leap_year",
+            "__embedded_zone_bytes"
         })) || (module_name == "core.math.random" && member == "rng") -> None
         module_name == "core.time" && core_call_one_of(member, [String]{"now", "now_utc", "today", "instant", "sleep", "sleep_until", "start"}) -> Val(Effect.Time)
         module_name == "core.rt" && member == "callback" -> Val(Effect.Time)
+        module_name == "core.math" && member == "random" -> Val(Effect.Rand)
         (module_name == "core.math.random" && core_call_one_of(member, [String]{
             "int", "float", "float_range", "bool", "normal", "exponential", "pick", "weighted_pick",
             "sample", "shuffle", "seed", "split", "bytes"
         })) || (module_name == "core.crypto.random" && member == "bytes") -> Val(Effect.Rand)
         member == "style_force" && module_name == "core.term" -> None
+        module_name == "core.net" && member == "gethostname" -> Val(Effect.Env)
+        module_name == "core.http.server" && member == "__response_parts" -> None
         module_name == "core.net" && core_call_one_of(member, [String]{
             "ip_addr", "ip_to_string", "ip_is_ipv4", "ip", "ipv4", "ipv6", "parse_ip", "is_ipv4",
+            "__ip_from_bytes", "__ip_bytes", "__ip_is_v4", "__socket_from_parts",
+            "__socket_ip", "__socket_port", "__socket_scope", "__udp_packet_addr",
             "is_ipv6", "socket_addr_parse", "socket_host", "socket_port", "socket_to_string",
             "ready_readable", "ready_writable", "error_operation", "error_address", "error_name",
             "error_message", "error_os_code", "dns_srv_target", "dns_srv_port", "dns_srv_priority",
@@ -135,38 +162,46 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
             "udp_packet_original_len", "udp_packet_truncated"
         }) -> None
         module_name == "core.watcher" -> if member == {
-            "files" -> Val(Effect.FS)
-            "process_pid" -> Val(Effect.Exec)
-            "port" -> Val(Effect.Net)
+            "files" | "__files" -> Val(Effect.FS)
+            "process_pid" | "__process_pid" -> Val(Effect.Exec)
+            "port" | "__port" -> Val(Effect.Net)
             else -> None
         }
         module_name == "core.web.browser" -> if {
-            core_call_one_of(member, [String]{"profile", "timeout"}) -> None
-            member == "locked" -> Val(Effect.FS)
+            core_call_one_of(member, [String]{"profile", "timeout", "__path_join", "__html_path",
+                "__report_options", "__report_json", "__report_html", "__report_text", "__write_report_bytes", "__server_stop"}) -> None
+            core_call_one_of(member, [String]{"locked", "__read_text", "__is_file", "__file_size", "__modified_ms"}) -> Val(Effect.FS)
             member == "config_from_env" -> Val(Effect.Env)
             else -> Val(Effect.Net)
         }
+        module_name == "core.encoding" && core_call_one_of(member, [String]{"__read_byte", "__read_into", "__write_bytes", "__write_text", "__flush"}) -> Val(Effect.IO)
         // Encoding readers and writers.
         (core_call_one_of(module_name, [String]{
             "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor"
         }) && core_call_one_of(member, [String]{"reader", "writer"})) || (module_name == "core.encoding.csv" && member == "query") -> Val(Effect.FS)
         module_name == "core.compute" && member != "device_cpu" -> Val(Effect.GPU)
+        module_name == "core.data" && member == "__host_path_is_file" -> Val(Effect.FS)
         module_name == "core.files" -> Val(Effect.FS)
+        module_name == "core.service" && member == "state_store" -> Val(Effect.FS)
         module_name == "core.net" || module_name == "core.net.tls" || module_name == "core.http.client" || module_name == "core.http.server" || module_name == "core.http.middleware" || (module_name == "core.http" && core_call_one_of(member, [String]{"serve", "get"})) -> Val(Effect.Net)
         module_name == "core.game.raylib" -> Val(Effect.GPU)
         module_name == "core.time" -> Val(Effect.Time)
         module_name == "core.math.random" || module_name == "core.crypto.random" -> Val(Effect.Rand)
         // Key generation draws from the OS generator, like crypto.random.bytes.
         module_name == "core.crypto" && core_call_one_of(member, [String]{"__x25519_generate", "__signing_generate"}) -> Val(Effect.Rand)
+        module_name == "core.perf" && core_call_one_of(member, [String]{"__read_bits", "__write_bits", "fidelity", "override_fidelity", "reset_fidelity"}) -> Val(Effect.Env)
         module_name == "core.sys" && member == "success" -> None
         module_name == "core.sys" -> Val(Effect.Env)
         module_name == "core.process" && member == "status_ok" -> None
         module_name == "core.process" -> Val(Effect.Exec)
+        module_name == "core.term" && core_call_one_of(member, [String]{
+            "__stdio_fault", "__stdout_terminal", "__stderr_terminal"
+        }) -> None
         module_name == "core.term" -> Val(Effect.IO)
         module_name == "core.db" || module_name == "core.jobs" -> Val(Effect.DB)
         module_name == "core.auth" && core_call_one_of(member, [String]{
             "register_user", "password_login", "session_validate", "magic_link_issue", "magic_link_consume",
-            "oauth_begin", "oauth_finish"
+            "oauth_begin", "oauth_finish", "__store_load", "__store_replace"
         }) -> Val(Effect.DB)
         module_name == "core.plugin" || module_name == "core.mod" -> Val(Effect.Exec)
         module_name == "core.log" -> Val(Effect.Log)
@@ -183,48 +218,71 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
 }
 
 fn core_call_effect_leaf_for(module_name: String, member: String) -> String? {
+    if (module_name == "core.net" && member == "gethostname") || (module_name == "core.sys" && member == "hostname") -> return Val("FS.Read")
     if {
+        module_name == "core.process" && member == "__with_directory_raw" -> Val("FS.Read")
+        module_name == "core.service" && member == "state_store" -> Val("FS.Read")
+        module_name == "core.time" && core_call_one_of(member, [String]{"zone", "parse_zoned", "__zone_file_bytes"}) -> Val("FS.Read")
         module_name == "core.time" && core_call_one_of(member, [String]{"sleep", "sleep_until"}) -> Val("Time.Wait")
-        module_name == "core.tasks" && member == "yield_now" -> Val("Time.Wait")
+        module_name == "core.tasks" && core_call_one_of(member, [String]{"yield_now", "__yield_now"}) -> Val("Time.Wait")
         module_name == "core.files" && member == "scope" -> Val("FS.Read")
         // A file operation names the one leaf it needs, so `--allow=FS.Read`
         // covers a read and never a write. `copy` and `copy_dir` both read and
         // write, so they keep the bare `FS` root.
         module_name == "core.files" && core_call_one_of(member, [String]{
             "read", "read_bytes", "read_at", "read_link", "map", "open", "exists", "is_dir", "is_fifo", "is_socket",
-            "stat", "lstat", "list_dir", "walk", "walk_parallel", "walk_files", "glob", "canonicalize", "absolute"
+            "stat", "lstat", "list_dir", "walk", "walk_parallel", "walk_files", "glob", "canonicalize", "absolute",
+            // #3593 provider leaves behind Core/files/files.jet.
+            "__open_reader", "__open_directory", "__close_directory", "__list_directory", "__stat_at", "__path_kind", "__read_link_at",
+            "__xattr_names", "__xattr_get", "__reader_stat", "__writer_stat", "__metadata_directory", "__directory_fd",
+            "__map_raw", "__list_dir_raw", "__stat_mode_raw", "__canonicalize_raw", "__walk_parallel_raw",
+            "__entries_context", "__entries_close", "__entries_release", "__entries_read_dir",
+            "__entries_next", "__entries_file_type", "__entries_before", "__entries_shown"
         }) -> Val("FS.Read")
         module_name == "core.files" && core_call_one_of(member, [String]{
             "write", "write_bytes", "write_at", "write_atomic", "append_all", "create", "append", "fsync", "remove",
             "remove_dir", "remove_all", "create_dir", "create_dir_all", "rename", "symlink", "hard_link", "chown",
-            "set_mode", "mkdtemp", "mktemp", "temp_dir", "temp_file", "lock"
+            "set_mode", "mkdtemp", "mktemp", "temp_dir", "temp_file", "lock", "__open_writer", "__create_directory",
+            "__fsync_directory", "__rename_at", "__remove_at", "__xattr_set", "__writer_set_mode", "__flock",
+            "__remove_raw", "__remove_dir_raw", "__remove_all_raw", "__hard_link_raw", "__fsync_raw", "__chown_raw",
+            "__set_mode_raw", "__symlink_directory_raw", "__symlink_raw", "__mkdtemp_raw", "__temp_dir_raw", "__temp_file_raw",
+            "try_lock", "__lock_open", "__lock_try", "__lock_wait", "__lock_close", "__lock_fd_identity", "__lock_path_identity", "__lock_owner",
+            "__entries_mkdir", "__entries_copy"
         }) -> Val("FS.Write")
         // D-AUTH-AMBIENT1=A: reading the program's own arguments is a leaf of
         // `Exec`; spawning a process keeps the ungranted `Exec` root.
         module_name == "core.process" && core_call_one_of(member, [String]{"argv", "args"}) -> Val(EFFECT_LEAF_EXEC_ARGS)
         module_name == "core.term" && core_call_one_of(member, [String]{
             "confirm", "choose", "input_secret", "read_all_input", "readline", "read_until", "take", "binread",
-            "binwrite", "progress", "read_key"
+            "binwrite", "progress", "read_key", "__terminal8_line", "__terminal8_write_stdout", "__terminal8_write_stderr", "__terminal8_mode_enter", "__terminal8_mode_leave", "__terminal8_read_all", "__terminal8_read_until", "__terminal8_key_bytes"
         }) -> Val("Time.Wait")
         module_name == "core.sys" && core_call_one_of(member, [String]{"wait", "waitpid"}) -> Val("Time.Wait")
         module_name == "core.process" && core_call_one_of(member, [String]{"run", "pipeline"}) -> Val("Time.Wait")
         module_name == "core.net" && core_call_one_of(member, [String]{
+            "__resolve_ordered",
+            "__tcp_accept", "__tcp_connect", "__tcp_connect_addr", "__tcp_connect_timeout", "__tcp_connect_happy",
+            "__tcp_reply",
+            "__udp_send_to", "__udp_recv_from", "__udp_send_bytes_to", "__udp_receive",
+            "__unix_accept", "__unix_read", "__unix_write_all_bytes",
+            "__unix_connect_host", "__unix_connect_deadline_host",
             "tcp_accept", "tcp_connect", "tcp_connect_addr", "tcp_connect_timeout", "tcp_connect_happy", "tcp_read",
             "tcp_write", "tcp_read_bytes", "tcp_read_text", "tcp_write_bytes", "tcp_write_all_bytes", "tcp_write_text",
             "tcp_ready", "sendfile", "tcp_reply", "udp_send_to", "udp_recv_from", "udp_send_bytes_to", "udp_receive",
             "unix_accept", "unix_connect", "unix_read", "unix_write", "unix_read_bytes", "unix_write_all_bytes",
             "dns_a", "dns_aaaa", "dns_a_at", "dns_aaaa_at", "dns_txt", "dns_txt_at", "dns_ptr", "dns_srv",
-            "dns_srv_at", "getservbyname", "getservbyport", "tls_connect", "tls_read", "tls_write", "tls_close"
+            "dns_srv_at", "getservbyname", "getservbyport", "tls_connect", "tls_read", "tls_write", "tls_close",
+            "__dns_a_lookup", "__dns_aaaa_lookup", "__dns_a_at_lookup", "__dns_aaaa_at_lookup",
+            "__dns_txt_lookup", "__dns_txt_at_lookup", "__dns_ptr_lookup", "__dns_srv_lookup", "__dns_srv_at_lookup",
         }) -> Val("Time.Wait")
         // TLS waits.
-        module_name == "core.net.tls" && core_call_one_of(member, [String]{"client", "read", "read_text", "write", "write_all", "write_text", "close"}) -> Val("Time.Wait")
+        module_name == "core.net.tls" && core_call_one_of(member, [String]{"client", "read", "read_text", "write", "write_all", "write_text", "close", "__read", "__write", "__write_all", "__client_stream", "__client_deadline", "__client_config_deadline"}) -> Val("Time.Wait")
         // HTTP waits.
-        (module_name == "core.http.client" && core_call_one_of(member, [String]{"get", "post", "request"})) || (module_name == "core.http" && member == "get") || (module_name == "core.http.server" && core_call_one_of(member, [String]{"serve", "serve_once", "serve_once_listener"})) -> Val("Time.Wait")
+        (module_name == "core.http.client" && core_call_one_of(member, [String]{"get", "post", "request", "__get", "__post", "__request"})) || (module_name == "core.http" && member == "get") || (module_name == "core.http.server" && core_call_one_of(member, [String]{"serve", "serve_once", "serve_once_listener", "__serve_once", "__serve_once_listener", "__serve"})) -> Val("Time.Wait")
         // Encoding readers and writers.
         (core_call_one_of(module_name, [String]{
             "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor"
         }) && core_call_one_of(member, [String]{"reader", "writer"})) || (module_name == "core.encoding.csv" && member == "query") -> Val("Time.Wait")
-        module_name == "core.db" && core_call_one_of(member, [String]{"transaction", "migrate"}) -> Val("Time.Wait")
+        module_name == "core.db" && core_call_one_of(member, [String]{"transaction", "__transaction", "migrate", "__migrate"}) -> Val("Time.Wait")
         module_name == "core.jobs" && core_call_one_of(member, [String]{"wait", "poll"}) -> Val("Time.Wait")
         module_name == "core.service" && core_call_one_of(member, [String]{
             "send", "send_durable", "receive", "endpoint_send", "endpoint_receive", "workflow_sleep",
@@ -298,6 +356,7 @@ pub fn core_call_new(module_name: String, member: String, symbol: String, prelud
         pure_route: CoreCallPureRoute.NoPureRoute,
         interpreter_route: route,
         symbol: if prelude -> CoreCallSymbol.Prelude{name: symbol} else -> CoreCallSymbol.Rust{name: symbol},
+        source_target: None,
         coverage: CoreCallCoverage{bits: coverage_bits},
         aot_direct: true,
         native_int_result: false,
@@ -305,6 +364,35 @@ pub fn core_call_new(module_name: String, member: String, symbol: String, prelud
         marker: None,
         authority: None,
     }
+}
+
+pub fn core_call_source_owned(module_name: String, member: String, borrow_mask: [Bool]) -> CoreCallRecord Never! {
+    row := core_call_new(module_name, member, member, false, borrow_mask)
+    row.symbol = CoreCallSymbol.SourceOwned
+    row.coverage = CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}
+    row.interpreter_route = CoreCallInterpreterRoute.NoRoute
+    row.aot_direct = false
+    row
+}
+pub fn core_call_with_source_owned(row: ^CoreCallRecord) -> CoreCallRecord Never! {
+    updated := row
+    updated.symbol = CoreCallSymbol.SourceOwned
+    updated.coverage = CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}
+    updated.interpreter_route = CoreCallInterpreterRoute.NoRoute
+    updated.aot_direct = false
+    updated
+}
+
+
+pub fn core_call_with_source_target(row: ^CoreCallRecord, target: String) -> CoreCallRecord Never! {
+    updated := row
+    updated.source_target = Val(target)
+    updated
+}
+
+pub fn core_call_source_member(row: CoreCallRecord) -> String? Never! {
+    if row.symbol != CoreCallSymbol.SourceOwned -> return None
+    Val(row.source_target ?? row.member)
 }
 
 pub fn core_call_new_with_coverage(module_name: String, member: String, symbol: String, prelude: Bool, borrow_mask: [Bool], coverage: CoreCallCoverage) -> CoreCallRecord Never! {
@@ -329,6 +417,7 @@ pub fn core_call_receiver(receiver_types: [String], member: String, borrow_mask:
         pure_route: CoreCallPureRoute.NoPureRoute,
         interpreter_route: CoreCallInterpreterRoute.TypedIntrinsic,
         symbol: CoreCallSymbol.Rust{name: ""},
+        source_target: None,
         coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN},
         aot_direct: false,
         native_int_result: false,
@@ -492,6 +581,7 @@ pub fn core_call_capability_is_well_formed(capability: CoreCapabilityContract) -
 pub fn core_call_symbol_name(symbol: CoreCallSymbol) -> String Never! {
     if symbol == {
         .Prelude(name) | .Rust(name) -> name
+        .SourceOwned -> panic("source-owned Core declarations have no host symbol")
     }
 }
 
@@ -552,6 +642,7 @@ fn core_marker_application_in(rows: [CoreCallRecord], module_name: String, membe
 
 pub fn core_call_projection_in(rows: [CoreCallRecord], module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult Never! {
     row :: core_call_in(rows, module_name, member) ?? return CoreCallProjectionResult.Error{error: CoreCallProjectionError.Unknown}
+    if row.symbol == CoreCallSymbol.SourceOwned && projection != CORE_CALL_COVERAGE_SEMA -> return CoreCallProjectionResult.Error{error: CoreCallProjectionError.Uncovered{projection: projection}}
     authority_boundary_form :: actual_arity == row.signature.arity + 1 && module_name == "core.process" && member == "run"
     if {
         !core_call_coverage_contains(row.coverage, projection) -> CoreCallProjectionResult.Error{error: CoreCallProjectionError.Uncovered{projection: projection}}

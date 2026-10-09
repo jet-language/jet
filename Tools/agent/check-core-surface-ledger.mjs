@@ -119,10 +119,9 @@ const CORE_API_SYNTAX_MARKERS = [
 ];
 const AGENT_RUNNER = "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks";
 const AGENT_SCORING = "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed";
-// Fake-data helpers are an internal deterministic test capability, not a
-// public collection container. Keep dispatch discovery strict without scoring
-// this private table as Core API.
-const PRIVATE_COLLECTION_METHOD_FUNCTIONS = new Set(["fake_method_return", "view_iter_method_return"]);
+// ViewIter shares Iter's scored operations. Keep dispatch discovery strict
+// without scoring the internal table as a separate Core container.
+const PRIVATE_COLLECTION_METHOD_FUNCTIONS = new Set(["view_iter_method_return"]);
 // Internal Prelude helpers may be present in the compiler dispatcher without
 // being public module members. Core.jet declares these adapter-only rows
 // alongside ordinary dispatcher rows; there is no second handwritten key list.
@@ -592,7 +591,6 @@ const TYPE_CONTAINER = {
   CompilerSyntaxTree: "core.compiler",
   CompilerNode: "core.compiler",
   BuildContext: "core.compiler",
-  Solver: "core.compute.solve",
   Authority: "core.process",
   Clock: "core.time",
   Duration: "core.time",
@@ -605,9 +603,9 @@ const TYPE_CONTAINER = {
   Period: "core.time",
   Zone: "core.time",
   ZonedDateTime: "core.time",
-  // Exact Rust type names harvested from url_mime_method_return. `URL` is the
-  // `core.net.url` source record: its methods come from the declaration.
-  MIME: "core.net.mime",
+  // Exact Rust type names harvested from regex_method_return. `URL` and `MIME`
+  // are `core.net.url`/`core.net.mime` source records: their methods come from
+  // the declarations.
   Regex: "core.regex",
   Match: "core.regex",
   ExpiringValue: "core.time.expiring",
@@ -638,8 +636,6 @@ const COLLECTION_METHOD_FUNCTIONS = {
   deterministic_world_method_return: "DeterministicWorld",
   rng_method_return: "Rng",
   history_rng_method_return: "HistoryRng",
-  solver_method_return: "Solver",
-  fake_method_return: null,
   duration_method_return: "Duration",
   task_method_return: "Task",
   receiver_method_return: "Receiver",
@@ -1468,7 +1464,7 @@ function translateStringSlice(expression, context) {
 function translatePureRoute(expression, context) {
   const match = expression.trim().match(/^CoreCallPureRoute::([A-Za-z][A-Za-z0-9_]*)$/);
   const variants = new Set([
-    "None", "Mime", "Email", "EncodingXml", "Time", "Math", "Measurement", "Date",
+    "None", "Mime", "Email", "EncodingXml", "Time", "Math", "Date",
     "DateTime", "SketchHll", "SketchTDigest", "SketchCms", "SketchReservoir", "Ui",
     "Raylib", "Io", "Net", "Crypto",
   ]);
@@ -1615,6 +1611,13 @@ function expectRustArgumentCount(name, args, count, context) {
 }
 
 function translateCoreCallConstructor(name, args, context) {
+  if (name === "CoreCallRecord::source_owned") {
+    expectRustArgumentCount(name, args, 3, context);
+    return "core_call_source_owned(" +
+      rustStringExpression(args[0], context) + ", " +
+      rustStringExpression(args[1], context) + ", " +
+      translateBoolSlice(args[2], context) + ")";
+  }
   if (name === "sema_web_call") {
     expectRustArgumentCount(name, args, 4, context);
     return "core_call_web(" +
@@ -1670,7 +1673,7 @@ function translateCoreCallConstructor(name, args, context) {
 }
 
 function translateCoreCallMethod(record, name, args, context) {
-  if (name === "without_direct_aot" || name === "with_native_int_result") {
+  if (name === "without_direct_aot" || name === "with_native_int_result" || name === "with_source_owned") {
     expectRustArgumentCount(name, args, 0, context);
     return "core_call_" + name + "(" + record + ")";
   }
@@ -1706,6 +1709,10 @@ function translateCoreCallMethod(record, name, args, context) {
   if (name === "with_ui_capabilities") {
     return "core_call_with_ui_capabilities(" + record + ", " +
       translateStringSlice(argument, context) + ")";
+  }
+  if (name === "with_source_target") {
+    return "core_call_with_source_target(" + record + ", " +
+      rustStringExpression(argument, context) + ")";
   }
   if (name === "with_marker") {
     return "core_call_with_marker(" + record + ", " +
@@ -1794,7 +1801,7 @@ function coreCallReceiverTypes(argument, sourceLine) {
 
 function coreCallIdentity(expression, sourceLine) {
   const call = expression.match(
-    /^(?:(CoreCallRecord::(new_with_coverage|new|receiver_with_coverage|receiver_with_symbol|receiver))|(sema_web_call))\s*\(/,
+    /^(?:(CoreCallRecord::(source_owned|new_with_coverage|new|receiver_with_coverage|receiver_with_symbol|receiver))|(sema_web_call))\s*\(/,
   );
   if (!call) {
     throw new Error("dispatcher row has no CoreCallRecord adapter at line " + sourceLine);
@@ -1807,10 +1814,29 @@ function coreCallIdentity(expression, sourceLine) {
   if (args.length <= memberIndex || (moduleIndex !== null && args.length <= moduleIndex)) {
     throw new Error("dispatcher row adapter has no module/member identity at line " + sourceLine);
   }
+  let sourceMember = coreCallIdentityValue(args[memberIndex], "member", sourceLine);
+  if (constructor === "CoreCallRecord::source_owned") {
+    const value = expression.trim();
+    const context = "source-owned dispatcher line " + sourceLine;
+    let position = readRustCall(value, 0, context).end;
+    while (position < value.length) {
+      while (/\s/.test(value[position] || "")) position += 1;
+      if (position >= value.length) break;
+      // Identity readers also receive the remainder of a Rust row array.
+      if (value[position] !== ".") break;
+      const method = readRustCall(value, position + 1, context);
+      if (method.name === "with_source_target") {
+        expectRustArgumentCount(method.name, method.args, 1, context);
+        sourceMember = coreCallIdentityValue(method.args[0], "source target", sourceLine);
+      }
+      position = method.end;
+    }
+  }
   return {
     constructor: constructor,
     module: moduleIndex === null ? "" : coreCallIdentityValue(args[moduleIndex], "module", sourceLine),
     member: coreCallIdentityValue(args[memberIndex], "member", sourceLine),
+    sourceMember: sourceMember,
     receiverTypes: receiver ? coreCallReceiverTypes(args[0], sourceLine) : [],
   };
 }
@@ -1953,7 +1979,7 @@ function parseCoreSource(source) {
       continue;
     }
     const sourceModule = line.match(
-      /^source_module\s+([A-Za-z_][A-Za-z0-9_.]*)\s+path\s+([^\s]+)\s+alias\s+([A-Za-z_][A-Za-z0-9_]*)\s+owns\s+\{([^}]*)\}$/,
+      /^source_module\s+([A-Za-z_][A-Za-z0-9_.]*)\s+path\s+([^\s]+)\s+alias\s+([A-Za-z_][A-Za-z0-9_]*)\s+owns\s+\{([^}]*)\}(?:\s+types\s+\{([^}]*)\})?(?:\s+impls\s+\{([^}]*)\})?$/,
     );
     if (sourceModule) {
       const module = sourceModule[1];
@@ -1966,6 +1992,15 @@ function parseCoreSource(source) {
         throw new Error("duplicate Core source alias `" + alias + "` at line " + sourceLine);
       }
       const ownedMembers = coreList(sourceModule[4], "Core.jet line " + sourceLine);
+      // `types { … }` names the module's source-owned nominals: every tier uses
+      // the Jet declaration and no native carrier projection exists for them.
+      const ownedTypes = sourceModule[5] === undefined
+        ? []
+        : coreList(sourceModule[5], "Core.jet line " + sourceLine);
+      // Owner-only impl admission never exports a type or changes its carrier.
+      const implTypes = sourceModule[6] === undefined
+        ? []
+        : coreList(sourceModule[6], "Core.jet line " + sourceLine);
       // Type-only Core sources may own nominals and static methods without free functions.
       if (!existsSync(join(ROOT, path))) {
         throw new Error("Core source module path does not exist at line " + sourceLine + ": " + path);
@@ -1977,6 +2012,8 @@ function parseCoreSource(source) {
         path: path,
         alias: alias,
         ownedMembers: ownedMembers,
+        ownedTypes: ownedTypes,
+        implTypes: implTypes,
         sourceLine: sourceLine,
       });
       continue;
@@ -2111,15 +2148,42 @@ function parseCoreSource(source) {
           sourceModule.module + "." + member + "`");
       }
     }
+    const typeNames = new Set(modules.find(function (entry) {
+      return entry.module === sourceModule.module;
+    }).types.map(function (type) { return type.name; }));
+    for (const type of sourceModule.ownedTypes) {
+      if (!typeNames.has(type)) {
+        throw new Error("Core source module owns undeclared type `" +
+          sourceModule.module + "." + type + "`");
+      }
+    }
+  }
+  const sourceTargets = new Map();
+  for (const row of dispatcherRows) {
+    if (row.kind === "receiver") continue;
+    const identity = coreCallIdentity(row.expression, row.sourceLine);
+    if (identity.constructor === "CoreCallRecord::source_owned") {
+      sourceTargets.set(row.module + "." + identity.member, identity.sourceMember);
+    }
   }
   for (const sourceModule of sourceModules) {
     const sourceFunctions = new Set(Array.from(
-      read(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+      read(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
     ).map(function (match) { return match[1]; }));
     for (const member of sourceModule.ownedMembers) {
-      if (!sourceFunctions.has(member)) {
+      const target = sourceTargets.get(sourceModule.module + "." + member) ?? member;
+      if (!sourceFunctions.has(target)) {
         throw new Error("Core source module does not define owned member `" +
-          sourceModule.module + "." + member + "` at line " + sourceModule.sourceLine);
+          sourceModule.module + "." + member + "` target `" + target + "` at line " + sourceModule.sourceLine);
+      }
+    }
+    const sourceTypes = new Set(Array.from(
+      read(sourceModule.path).matchAll(/^(?:pub\s+)?(?:struct|enum|alias)\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+    ).map(function (match) { return match[1]; }));
+    for (const type of sourceModule.ownedTypes) {
+      if (!sourceTypes.has(type)) {
+        throw new Error("Core source module does not declare owned type `" +
+          sourceModule.module + "." + type + "` at line " + sourceModule.sourceLine);
       }
     }
   }
@@ -2138,6 +2202,12 @@ function parseCoreSource(source) {
   }
   for (const row of dispatcherRows) {
     if (row.kind === "receiver") continue;
+    if (coreCallIdentity(row.expression, row.sourceLine).constructor === "CoreCallRecord::source_owned" &&
+        !sourceModules.some(source => source.module === row.module &&
+          source.ownedMembers.includes(coreDispatcherMemberValue(row.member)))) {
+      throw new Error("source-owned dispatcher row has no owning source_module: " +
+        row.module + "." + row.member);
+    }
     if (!moduleSet.has(row.module) && row.kind !== "adapter") {
       throw new Error("dispatcher row names missing Core module `" + row.module + "`");
     }
@@ -2208,7 +2278,7 @@ function coreModuleInventory() {
 // a source declaration.
 function publicDispatcherRows() {
   const source = read(CORE_CALLS_PATH);
-  const start = source.indexOf("pub const CORE_CALLS");
+  const start = source.indexOf("pub static CORE_CALLS");
   const end = source.indexOf("\n];", start);
   if (start < 0 || end < 0) {
     throw new Error("CoreCall dispatcher table is missing its bounded source");
@@ -2429,6 +2499,15 @@ function generatedCoreExports(source, declarations) {
     "    pub alias: &'static str,",
     "    pub path: &'static str,",
     "    pub owned_members: &'static [&'static str],",
+    "    pub impl_types: &'static [&'static str],",
+    "}",
+    "",
+    "/// One source-owned Core nominal: `name` is declared by the Core source at",
+    "/// `path` and no tier projects it onto a native carrier.",
+    "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
+    "pub struct CoreSourceOwnedType {",
+    "    pub path: &'static str,",
+    "    pub name: &'static str,",
     "}",
     "",
     "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
@@ -2484,7 +2563,14 @@ function generatedCoreExports(source, declarations) {
       "\", path: \"" + entry.path +
       "\", owned_members: &[" +
       entry.ownedMembers.map(function (member) { return "\"" + member + "\""; }).join(", ") +
-      "] },");
+      "], impl_types: &[" + entry.implTypes.map(type => "\"" + type + "\"").join(", ") + "] },");
+  }
+  lines.push("];", "");
+  lines.push("pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[");
+  for (const entry of declarations.sourceModules) {
+    for (const type of entry.ownedTypes) {
+      lines.push("    CoreSourceOwnedType { path: \"" + entry.path + "\", name: \"" + type + "\" },");
+    }
   }
   lines.push("];", "");
   lines.push("pub const CORE_ROOT_TYPES: &[&str] = &[" +
@@ -2621,7 +2707,9 @@ function generatedCoreCalls(source, declarations) {
   lines.push(
     "];",
     "",
-    "pub const CORE_CALLS: &[CoreCallRecord] = &[",
+    "// Evaluate the immutable bootstrap registry once, not in every consuming crate.",
+    "#[allow(long_running_const_eval)]",
+    "pub static CORE_CALLS: &[CoreCallRecord] = &[",
   );
   for (const row of declarations.dispatcherRows) {
     lines.push("    " + coreDispatcherExpression(row, ambientKeys) + ",");
@@ -2724,6 +2812,19 @@ function generatedCoreEnumRows(source, declarations) {
       );
     }
   }
+  lines.push(
+    "}",
+    "",
+    "// Source-owned Core nominals (`source_module … types { … }`) in Core.jet",
+    "// order; the Rust mirror is CoreModuleExports::CORE_SOURCE_OWNED_TYPES.",
+    "pub CORE_SOURCE_OWNED_TYPES :: [CoreSourceOwnedType]{",
+  );
+  for (const entry of declarations.sourceModules) {
+    for (const type of entry.ownedTypes) {
+      lines.push("    CoreSourceOwnedType{path: " + jetStringExpression(entry.path) +
+        ", name: " + jetStringExpression(type) + "},");
+    }
+  }
   lines.push("}", "// END GENERATED CORE ENUM ROWS", "");
   return lines.join("\n");
 }
@@ -2787,6 +2888,12 @@ function rustPayloadType(expression, constants, rel) {
   const text = expression.replace(/\s+/g, "");
   const scalar = { "Type::Int": "Type.Int", "Type::Bool": "Type.Bool", "Type::String": "Type.String", "Type::Char": "Type.Char", "Type::Float": "Type.Float" };
   if (scalar[text]) return scalar[text];
+  if (text === "u8_ty()") {
+    const body = rustFunctionBody(read(CORE_TYPES_RS_PATH), "u8_ty", CORE_TYPES_RS_PATH);
+    const integer = /Type::IntN\s*\{\s*signed:\s*(true|false),\s*bits:\s*(\d+),?\s*\}/.exec(body);
+    if (!integer) throw new Error(rel + ": u8_ty payload factory changed shape");
+    return "Type.IntN{signed: " + integer[1] + ", bits: " + integer[2] + "}";
+  }
   const named = /^Type::Named\((.+)\.to_string\(\)\)$/.exec(text);
   if (named) return "Type.Named{name: " + jetStringExpression(rustSyntaxString(named[1], constants, rel)) + "}";
   const list = /^Type::List\(Box::new\((.+)\)\)$/.exec(text);
@@ -2887,6 +2994,20 @@ function rustTaskFailureVariantFamily(source, constants) {
   return { name: "TaskFailure", rows };
 }
 
+function rustDataEventVariantFamily(source, constants) {
+  const body = rustFunctionBody(source, "core_encoding_variants", CORE_TYPES_RS_PATH);
+  const units = /"DataEvent" => &\[([^\]]*)\]/.exec(body);
+  const payloads = /if enum_name == "DataEvent" \{\s*for \(name, ty\) in \[([\s\S]*?)\]\s*\{/.exec(body);
+  if (!units || !payloads) throw new Error(CORE_TYPES_RS_PATH + ": DataEvent variant table changed shape");
+  const rows = Array.from(units[1].matchAll(/"([^"]*)"/g), (match) => ({ variant: match[1], payload: [] }));
+  for (const match of payloads[1].matchAll(/\(\s*("[^"]+"|Syntax::\w+),\s*([\s\S]*?)\),\s*(?=\(|$)/g)) {
+    rows.push({ variant: rustSyntaxString(match[1], constants, CORE_TYPES_RS_PATH),
+      payload: [rustPayloadType(match[2], constants, CORE_TYPES_RS_PATH)] });
+  }
+  if (rows.length !== 12) throw new Error(CORE_TYPES_RS_PATH + ": DataEvent payload projection is incomplete");
+  return { name: "DataEvent", rows };
+}
+
 function coreEnumPayloadFamilies(declarations) {
   const constants = rustSyntaxConstants();
   const coreTypes = read(CORE_TYPES_RS_PATH);
@@ -2904,6 +3025,7 @@ function coreEnumPayloadFamilies(declarations) {
   families.push(...rustIOVariantFamilies(coreTypes, constants));
   if (!/core_plugin_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": plugin enum resolver is missing");
   families.push(...rustPluginVariantFamilies(coreTypes, constants));
+  families.push(rustDataEventVariantFamily(coreTypes, constants));
   const declared = new Set();
   for (const module of declarations.modules) {
     for (const type of module.types) {
@@ -3141,7 +3263,8 @@ function methodNames(body, constants) {
   for (const arm of allMatchArms(body, "match method")) {
     addResolved(arm.lhs.split(" if ")[0]);
   }
-  return methods;
+  // Reserved embedded-Core storage seams are not user collection APIs.
+  return new Set(Array.from(methods).filter(name => !name.startsWith("__")));
 }
 
 // Discovery keyed on dispatch, not on a name. A name-suffix scan cannot see a
@@ -3340,11 +3463,12 @@ function collectionInventory() {
   for (const table of inlineTables(dispatch.inlineArms, source, constants)) tables.push(table);
 
   // D-TIMEDEPTH1: civil-time methods are typed in net_text_time.rs, not Collections.
-  // D-URL1: URL/MIME methods live in the same file (url_mime_method_return).
+  // URL and MIME are `core.net.url`/`core.net.mime` source records: their
+  // methods come from the declarations.
   {
     const civilText = read(NET_TEXT_TIME_PATH);
     const civilSources = [{ path: NET_TEXT_TIME_PATH, text: civilText }];
-    for (const tableName of ["civil_time_method_return", "url_mime_method_return", "regex_method_return"]) {
+    for (const tableName of ["civil_time_method_return", "regex_method_return"]) {
       const civilBody = tableBody(tableName, civilSources);
       if (!civilBody) {
         throw new Error(tableName + " missing from net_text_time.rs");
@@ -5731,6 +5855,49 @@ function hostileFixtures() {
   const board = towerBoard();
   const results = [];
 
+  results.push(rejects("source-owned dispatcher lacks a source owner",
+    "source-owned dispatcher row has no owning source_module", function () {
+    parseCoreSource([
+      "bootstrap Syntax depends_on []",
+      "bootstrap Effects depends_on [Syntax]",
+      "bootstrap Core depends_on [Effects]",
+      "bootstrap Derives depends_on [Core]",
+      "module core.fake exports {call}",
+      'dispatcher_row plain core.fake call | CoreCallRecord::source_owned("core.fake", "call", &[])',
+    ].join("\n"));
+  }));
+  results.push(holds("source-owned constructor preserves its declaration facts", function () {
+    const actual = translateCoreCallExpression(
+      'CoreCallRecord::source_owned("core.ui.host", "shortcut", &[false, false]).with_ui_capabilities(&["UI.Shortcuts"])',
+      "source-owned constructor fixture");
+    if (actual !== 'core_call_with_ui_capabilities(core_call_source_owned("core.ui.host", "shortcut", [Bool]{false, false}), [String]{"UI.Shortcuts"})') {
+      throw new Error("source-owned constructor lost its signature or UI capability facts: " + actual);
+    }
+  }));
+  results.push(holds("source-owned builder preserves normalized source targets", function () {
+    const actual = translateCoreCallExpression(
+      'CoreCallRecord::new("core.net", "unix_connect", "jet_net_unix_connect", true, &[true]).with_max_arity(2).with_source_owned().with_source_target("__unix_connect_entry")',
+      "source-owned builder fixture");
+    const expected = 'core_call_with_source_target(core_call_with_source_owned(core_call_with_max_arity(core_call_new("core.net", "unix_connect", "jet_net_unix_connect", true, [Bool]{true}), 2)), "__unix_connect_entry")';
+    if (actual !== expected) {
+      throw new Error("source-owned builder lost its declaration facts or target: " + actual);
+    }
+  }));
+  results.push(holds("source-owned targets resolve generically without changing public identity", function () {
+    const actual = coreCallIdentity(
+      'CoreCallRecord::source_owned("core.fake", "call", &[false]).with_source_target("__checked_call"),',
+      1);
+    if (actual.module !== "core.fake" || actual.member !== "call" ||
+        actual.sourceMember !== "__checked_call") {
+      throw new Error("source-owned target changed the public identity or was ignored");
+    }
+    const ordinary = coreCallIdentity(
+      'CoreCallRecord::source_owned("core.fake", "call", &[false]),', 1);
+    if (ordinary.sourceMember !== "call") {
+      throw new Error("a source-owned declaration without a target lost its member");
+    }
+  }));
+
   results.push(rejects("public dispatcher names a non-ledger module",
     "public dispatcher row names a non-ledger module", function () {
     validatePublicDispatcher(ledger.inventory.modules, [
@@ -5977,6 +6144,13 @@ function hostileFixtures() {
       collectionInventory();
     } finally {
       delete COLLECTION_METHOD_FUNCTIONS.build_result;
+    }
+  }));
+
+  results.push(holds("reserved Core storage seams are not public collection methods", function () {
+    const names = methodNames('match (method, nargs) { ("__swap", 2) => Some(None), ("get", 1) => Some(None) }', new Map());
+    if (names.has("__swap") || !names.has("get")) {
+      throw new Error("reserved method filtering hid a public method or exposed __swap");
     }
   }));
 

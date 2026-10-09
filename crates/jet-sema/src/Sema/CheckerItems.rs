@@ -382,7 +382,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn qualify_method_signature(&self, owner_mod: usize, owner_name: &str, sig: &mut MethodSig) {
+    pub(crate) fn qualify_method_signature(&self, owner_mod: usize, owner_name: &str, sig: &mut MethodSig) {
         if owner_mod == self.module_idx {
             return;
         }
@@ -474,6 +474,13 @@ impl<'a> Checker<'a> {
         type_name: &str,
         method: &str,
     ) -> Option<(usize, MethodSig)> {
+        // Native carrier impls have a source owner, but no nominal declaration.
+        // Only a bare compiler type may select these exact loaded-owner rows.
+        if let Some((owner, signature)) = self.resolve_opaque_method_sig(type_name, method) {
+            let mut signature = signature.clone();
+            self.qualify_method_signature(owner, type_name, &mut signature);
+            return Some((owner, signature));
+        }
         let (import_ns, leaf) = self.struct_type_name_parts(type_name);
         let owner = self.struct_owner_module(leaf, import_ns)?;
         let mut sig = if owner == self.module_idx {
@@ -485,6 +492,20 @@ impl<'a> Checker<'a> {
         };
         self.qualify_method_signature(owner, leaf, &mut sig);
         Some((owner, sig))
+    }
+
+    pub(crate) fn resolve_opaque_method_sig(
+        &self, type_name: &str, method: &str,
+    ) -> Option<(usize, &MethodSig)> {
+        if self.registry.source_owns_impl(type_name) {
+            return self.registry.opaque_methods.get(type_name)?.get(method)
+                .map(|signature| (self.module_idx, signature));
+        }
+        self.modules?.iter().enumerate().find_map(|(owner, module)| {
+            if !module.registry.source_owns_impl(type_name) { return None; }
+            module.registry.opaque_methods.get(type_name)?.get(method)
+                .map(|signature| (owner, signature))
+        })
     }
 
     pub(crate) fn method_names_for_type_name(&self, type_name: &str) -> Vec<String> {
@@ -817,21 +838,6 @@ impl<'a> Checker<'a> {
                 ));
             }
             return Some(Type::Named(type_name.to_string()));
-        }
-        if type_name == "Limits" && method == "safe" {
-            if !args.is_empty() {
-                self.diags.push(Diagnostic::error(
-                    "E0101",
-                    format!("`Limits.safe` takes 0 arguments, got {}", args.len()),
-                    "safe SMTP limits are fixed defaults".to_string(),
-                    "remove the arguments".to_string(),
-                    Some(span),
-                ));
-                for arg in args {
-                    self.infer(&mut arg.expr);
-                }
-            }
-            return Some(Type::Named("Limits".to_string()));
         }
         if type_name == "DataLimits" && method == "safe" {
             if !args.is_empty() {
@@ -1933,6 +1939,11 @@ impl<'a> Checker<'a> {
             }
         }
     }
+    pub(crate) fn module_is_core_source(&self, owner: usize) -> bool {
+        self.name_ledger.module(owner)
+            .is_some_and(|module| module.package.starts_with("<corelib>/"))
+    }
+
     pub(crate) fn core_source_owner_module(&self, module: &str, type_name: &str) -> Option<usize> {
         let source = jet_foundation::CoreModuleExports::core_source_modules()
             .iter()
@@ -1976,15 +1987,6 @@ impl<'a> Checker<'a> {
             })
     }
 
-    /// A Core record whose leaf is also a built-in type name but which is not
-    /// that built-in (the `core.files.path` record `Path`) is identified by its
-    /// canonical path. Its bare leaf names the built-in, so the two never unify
-    /// by spelling.
-    pub(crate) fn core_nominal_shadowing_builtin(&self, module: &str, leaf: &str) -> Option<String> {
-        let owner = self.core_source_owner_module(module, leaf)?;
-        self.record_distinct_from_builtin(owner, leaf)
-            .then(|| self.canonical_nominal_name(owner, leaf))
-    }
 
     /// An imported function signature retains the declaration's nominal
     /// owners, including generated foreign records, implicit package
@@ -2167,6 +2169,9 @@ impl<'a> Checker<'a> {
                 .carrier_record_module()
                 .and_then(|module| self.core_source_owner_module(module, type_name));
         }
+        if type_name == "Limits" {
+            return self.core_source_owner_module("core.email", type_name);
+        }
         // Cache misses and ambiguities after querying the declaration-name
         // index, rather than scanning unrelated modules and registries.
         if let Some(owner) = self.nominal_owner_cache.borrow().get(type_name) {
@@ -2174,7 +2179,27 @@ impl<'a> Checker<'a> {
         }
         let mut found = None;
         for declaration in self.name_ledger.declarations_named(type_name) {
-            let idx = declaration.module;
+            let mut idx = declaration.module;
+            if let Some((params, target)) = mods[idx].registry.type_alias(type_name) {
+                if params.is_empty() {
+                    if mods[idx].module_path.starts_with(crate::Diagnostics::CORE_SOURCE_ROOT)
+                        && jet_foundation::CoreModuleExports::core_bare_source_module(type_name).is_none()
+                        && !jet_foundation::CoreModuleExports::CORE_ROOT_TYPES.contains(&type_name)
+                    {
+                        continue;
+                    }
+                    if let Type::Named(target) = self.bare_alias_target(idx, target) {
+                        let (namespace, leaf) = Self::split_type_name(&target);
+                        if leaf == type_name {
+                            if let Some(home) = namespace.and_then(|namespace|
+                                self.name_ledger.nominal_module(&format!("{namespace}::{leaf}")))
+                            {
+                                idx = home;
+                            }
+                        }
+                    }
+                }
+            }
             if declaration.name == type_name
                 && mods[idx].registry.contains(type_name)
                 && self.type_is_pub_in(idx, type_name)
@@ -2259,7 +2284,7 @@ impl<'a> Checker<'a> {
         };
         registry.implements_trait(leaf, trait_name)
             || (trait_name == crate::Syntax::TRAIT_CLOSE
-                && state.is_some_and(|state| state.module_path.starts_with("<corelib>/"))
+                && self.module_is_core_source(owner)
                 && registry.synthetic_close_types.contains(leaf))
     }
 
@@ -2457,6 +2482,20 @@ impl<'a> Checker<'a> {
         let (normalized, registry, trait_reg) = self.capability_type_context(ty);
         trait_reg.type_implements_trait(&normalized, crate::Generics::COMPARABLE)
             || crate::Sema::Diagnostics::types_comparable(&normalized, registry)
+    }
+
+    /// Whether `print` can show `ty`. An imported nominal (a Core source
+    /// struct's in-body `impl Display`) is judged by its declaring module's
+    /// registries, like equality and ordering above.
+    pub(crate) fn is_printable_type(&self, ty: &Type) -> bool {
+        if crate::Sema::Diagnostics::is_printable(ty, self.registry, self.trait_reg)
+            || crate::Sema::Diagnostics::is_displayable(ty, self.registry, self.trait_reg)
+        {
+            return true;
+        }
+        let (normalized, registry, trait_reg) = self.capability_type_context(ty);
+        crate::Sema::Diagnostics::is_printable(&normalized, registry, trait_reg)
+            || crate::Sema::Diagnostics::is_displayable(&normalized, registry, trait_reg)
     }
 
     pub(crate) fn incomparable_field_type(&self, ty: &Type) -> Option<String> {
@@ -2705,9 +2744,6 @@ impl<'a> Checker<'a> {
         if matches!(enum_name, "SMTPSecurity" | "RecipientPolicy" | "EmailError") {
             return true;
         }
-        if enum_name == "AuthError" {
-            return true;
-        }
         if matches!(
             enum_name,
             "DeliveryState" | "ServiceError" | "TaskOutcome" | "TaskStatus"
@@ -2863,9 +2899,6 @@ impl<'a> Checker<'a> {
             return Some(v);
         }
         if let Some(v) = core_tls_variants(enum_name) {
-            return Some(v);
-        }
-        if let Some(v) = core_auth_variants(enum_name) {
             return Some(v);
         }
         None
@@ -3181,12 +3214,9 @@ impl<'a> Checker<'a> {
         // history records use the same path with their concrete command argument.
         if let Some(core_fields) = core_constructable_fields(type_name)
             .or_else(|| core_generic_constructable_fields(type_name, type_args))
+            .filter(|_| !crate::Sema::CheckerCoreLib::core_record_literal_is_core_only(type_name)
+                || self.module_is_core_source(self.module_idx))
         {
-            let str_map_ty = Type::Map {
-                key: Box::new(Type::String),
-                key_span: None,
-                value: Box::new(Type::String),
-            };
             let provided_names: std::collections::HashSet<String> =
                 fields.iter().map(|(n, ..)| n.clone()).collect();
             for (fname, _, fexpr) in fields.iter_mut() {
@@ -4794,6 +4824,16 @@ impl<'a> Checker<'a> {
             ) => {
                 let display_enum_name = self.display_type_name(enum_name, None);
                 if is_json_type_name(enum_name) {
+                    if matches!(variant.as_str(), "Bytes" | "TypedText")
+                        && !(self.in_unsafe && self.name_ledger.module_alias(self.module_idx).is_some_and(|alias|
+                            jet_foundation::CoreModuleExports::CORE_SOURCE_MODULES.iter().any(|source| source.alias == alias)
+                            || jet_foundation::CoreSourceParts::core_private_source_part_by_alias(alias).is_some()))
+                    {
+                        self.diags.push(Diagnostic::error("E0510", "private DataTree carrier pattern".to_string(),
+                            "native carrier payloads may be borrowed only by vetted Core internals inside #Unsafe".to_string(),
+                            "use the public DataTree variants".to_string(), Some(span)));
+                        return HashMap::new();
+                    }
                     let Some(expected) = core_json_pattern_types(variant) else {
                         self.diags.push(Diagnostic::error(
                             "E0305",

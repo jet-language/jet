@@ -649,12 +649,11 @@ fn collect_item_erasures(
 pub struct TirProgram {
     /// Stable package identity supplied by the checked bundle.
     pub package_identity: String,
-    /// D-MOD-CYCLE1=A: the entry's module identity and the call prefix its
-    /// package siblings use for it (`__jet_run::`). A sibling reaches an entry
-    /// function through the ordinary imported-call spelling, while the entry
-    /// lowers its own functions unprefixed; MIR resolves the first to the
-    /// second. `None` when the entry has no package siblings.
-    pub entry_sibling_calls: Option<(String, String)>,
+    /// The entry's canonical module identity and recorded qualified-call prefix
+    /// (`__jet_run::`). Both same-module calls and package siblings can use
+    /// that spelling; entry function rows retain their unprefixed names.
+    /// Only compiler fragments without a loaded entry have no alias.
+    pub entry_call_alias: Option<(String, String)>,
     pub facts: TirPackageFacts,
     /// Display path of the entry module retained for temporary diagnostics.
     pub source_file: String,
@@ -4693,7 +4692,7 @@ fn lower_mir_fragment_program(
     };
     let mut tir = TirProgram {
         package_identity: "comptime-fragment".to_string(),
-        entry_sibling_calls: None,
+        entry_call_alias: None,
         facts: TirPackageFacts::default(),
         source_file: file.clone(),
         source_text: String::new(),
@@ -6700,13 +6699,10 @@ fn lower_checked_tir_program_on_stack(
         }
         let mut program = TirProgram {
             package_identity: bundle.build_facts.package_name.clone(),
-            entry_sibling_calls: (bundle.name_ledger.namespace_siblings(bundle.entry).next().is_some())
-                .then(|| {
-                    (
-                        entry_module_identity.clone(),
-                        format!("{}::", mangle(&bundle.modules[bundle.entry].alias)),
-                    )
-                }),
+            entry_call_alias: Some((
+                entry_module_identity.clone(),
+                format!("{}::", mangle(&bundle.modules[bundle.entry].alias)),
+            )),
             facts: TirPackageFacts {
                 project_root: bundle.project_root.display().to_string(),
                 used_core,
@@ -10712,8 +10708,51 @@ fn checked_core_source_call_edges(
         let Some(source_path) = bundle.name_ledger.module_path(callable.module) else {
             continue;
         };
+        let authored_math = jet_foundation::CoreModuleExports::core_source_module("core.math")
+            .is_some_and(|source| bundle.modules[callable.module].alias == source.alias
+                && bundle.modules[callable.module].display.as_str() == source.path);
+        let mut precise_families = [false; 3];
+        let mut int_abs = false;
+        // Source helper bodies have explicit checked calls. Their parameter
+        // names do not request every operation on the represented carrier.
+        if !authored_math {
+        for parameter in &function.params {
+            note_precise_source_type(&parameter.ty, &mut precise_families);
+        }
+        if let Some(returned) = &function.return_type {
+            note_precise_source_type(returned, &mut precise_families);
+        }
+        }
         for statement in &function.body {
-            statement.for_each_expr(&mut |expression: &Expr| match expression {
+            statement.for_each_expr(&mut |expression: &Expr| {
+                if matches!(expression, Expr::MethodCall { method, recv_type: Some(owner), .. } if method == "abs" && owner == "Int") {
+                    int_abs = true;
+                }
+                if !authored_math {
+                match expression {
+                    Expr::Call(call) => {
+                        if let Some(returned) = &call.resolved_ret {
+                            note_precise_source_type(returned, &mut precise_families);
+                        }
+                    }
+                    Expr::MethodCall { recv_type, resolved_ret, .. } => {
+                        if let Some(owner) = recv_type {
+                            note_precise_source_name(owner, &mut precise_families);
+                        }
+                        if let Some(returned) = resolved_ret {
+                            note_precise_source_type(returned, &mut precise_families);
+                        }
+                    }
+                    Expr::StructLit { type_name, .. } => {
+                        note_precise_source_name(type_name, &mut precise_families);
+                    }
+                    Expr::TypedLit { head: Some(ty), .. } => {
+                        note_precise_source_type(ty, &mut precise_families);
+                    }
+                    _ => {}
+                }
+                }
+                match expression {
                 Expr::Call(call) if core_modules.contains(&callable.module) => {
                     if let Some(target) = checked_local_function_call_target(
                         bundle,
@@ -10735,7 +10774,16 @@ fn checked_core_source_call_edges(
                         imports,
                         &bundle.name_ledger,
                         source_path,
-                    ) else {
+                    ).or_else(|| {
+                        // Perf's Prelude static spelling synthesizes the same
+                        // source call as an authored core.perf module call.
+                        matches!(receiver.as_ref(), Expr::Ident(name, _) if name == "Perf")
+                            .then(|| {
+                                bundle.name_ledger.declaration(callable.module, "Perf").is_none()
+                            })
+                            .filter(|builtin| *builtin)
+                            .map(|_| "core.perf".to_string())
+                    }) else {
                         return;
                     };
                     let Some(signature) = checked_core_source_signature(
@@ -10765,7 +10813,26 @@ fn checked_core_source_call_edges(
                     }
                 }
                 _ => {}
+                }
             });
+        }
+        if let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.math") {
+            for (target_index, target) in callables.iter().enumerate() {
+                if !bundle.modules.get(target.module).is_some_and(|module| {
+                    module.alias == source.alias && module.display.as_str() == source.path
+                }) {
+                    continue;
+                }
+                let Some(name) = target.source_name.as_deref() else { continue };
+                if int_abs && name == "abs" {
+                    edges.push((caller_index, target_index));
+                }
+                for (family, prefix) in ["__fraction_", "__decimal_", "__complex_"].iter().enumerate() {
+                    if precise_families[family] && name.starts_with(prefix) {
+                        edges.push((caller_index, target_index));
+                    }
+                }
+            }
         }
     }
     edges.sort_unstable();
@@ -10773,10 +10840,103 @@ fn checked_core_source_call_edges(
     edges
 }
 
+// Temporary bridge from the existing checked precise operation to its source
+// body. Both the bootstrap reachability closure and the MIR output gate use it.
+fn precise_source_helper(owner: &str, operation: &str) -> Option<&'static str> {
+    Some(match (owner, operation) {
+        ("Int", "abs") => "abs",
+        ("Fraction", "new") => "__fraction_new",
+        ("Fraction", "from_parts") => "__fraction_from_parts",
+        ("Fraction", "from_owned_parts") => "__fraction_from_owned_parts",
+        ("Fraction", "from_int") => "__fraction_from_int",
+        ("Fraction", "from_float") => "__fraction_from_float",
+        ("Fraction", "from_decimal") => "__decimal_to_fraction",
+        ("Fraction", "add") => "__fraction_add",
+        ("Fraction", "sub") => "__fraction_sub",
+        ("Fraction", "mul") => "__fraction_mul",
+        ("Fraction", "div") => "__fraction_div",
+        ("Fraction", "equal") => "__fraction_equal",
+        ("Fraction", "numerator") => "__fraction_numerator",
+        ("Fraction", "denominator") => "__fraction_denominator",
+        ("Fraction", "owned_numerator") => "__fraction_owned_numerator",
+        ("Fraction", "owned_denominator") => "__fraction_owned_denominator",
+        ("Fraction", "is_zero") => "__fraction_is_zero",
+        ("Fraction", "to_int") => "__fraction_to_int",
+        ("Fraction", "to_float") => "__fraction_to_float",
+        ("Fraction", "to_decimal") => "__fraction_to_decimal",
+        ("Fraction", "to_string") => "__fraction_to_string",
+        ("Decimal", "from_str") => "__decimal_from_str",
+        ("Decimal", "from_int") => "__decimal_from_int",
+        ("Decimal", "from_float") => "__decimal_from_float",
+        ("Decimal", "from_fraction") => "__decimal_from_fraction",
+        ("Decimal", "add") => "__decimal_add",
+        ("Decimal", "sub") => "__decimal_sub",
+        ("Decimal", "mul") => "__decimal_mul",
+        ("Decimal", "div") => "__decimal_div",
+        ("Decimal", "equal") => "__decimal_equal",
+        ("Decimal", "compare") => "__decimal_compare",
+        ("Decimal", "floor") => "__decimal_floor",
+        ("Decimal", "ceil") => "__decimal_ceil",
+        ("Decimal", "round") => "__decimal_round",
+        ("Decimal", "to_int") => "__decimal_to_int",
+        ("Decimal", "to_float") => "__decimal_to_float",
+        ("Decimal", "to_fraction") => "__decimal_to_fraction",
+        ("Decimal", "to_string") => "__decimal_to_string",
+        ("Complex", "abs") => "__complex_abs",
+        ("Complex", "from_parts") => "__complex_from_parts",
+        ("Complex", "add") => "__complex_add",
+        ("Complex", "sub") => "__complex_sub",
+        ("Complex", "mul") => "__complex_mul",
+        ("Complex", "div") => "__complex_div",
+        ("Complex", "to_string") => "__complex_to_string",
+        _ => return None,
+    })
+}
+
+fn note_precise_source_name(name: &str, families: &mut [bool; 3]) {
+    for (index, owner) in ["Fraction", "Decimal", "Complex"].iter().enumerate() {
+        if name == *owner || (jet_foundation::CoreModuleExports::core_source_owns_type(name)
+            && name.rsplit("::").next() == Some(*owner))
+        {
+            families[index] = true;
+        }
+    }
+}
+
+fn note_precise_source_type(ty: &Type, families: &mut [bool; 3]) {
+    match ty.without_user_tags() {
+        Type::Named(name) | Type::Apply { name, .. } => note_precise_source_name(name, families),
+        Type::Option(inner) | Type::Shared(inner) | Type::List(inner) => {
+            note_precise_source_type(inner, families);
+        }
+        Type::Result { ok, err } => {
+            note_precise_source_type(ok, families);
+            note_precise_source_type(err, families);
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod checked_function_reference_tests {
     use super::*;
 
+    #[test]
+    fn precise_checked_type_facts_bound_the_bootstrap_helper_family() {
+        let mut families = [false; 3];
+        note_precise_source_type(&Type::Named("Fraction".to_string()), &mut families);
+        assert_eq!(families, [true, false, false]);
+        let helpers = ["__fraction_mul", "__fraction_add", "__decimal_mul", "__complex_abs"];
+        let kept = helpers.into_iter().filter(|name| {
+            ["__fraction_", "__decimal_", "__complex_"].iter().enumerate()
+                .any(|(index, prefix)| families[index] && name.starts_with(prefix))
+        }).collect::<Vec<_>>();
+        assert_eq!(kept, ["__fraction_mul", "__fraction_add"]);
+        assert_eq!(precise_source_helper("Fraction", "mul"), Some("__fraction_mul"));
+        assert_eq!(precise_source_helper("Int", "abs"), Some("abs"));
+        assert_eq!(precise_source_helper("Int", "add"), None);
+        assert_eq!(precise_source_helper("Measurement", "mul"), None);
+    }
     #[test]
     fn core_module_function_reference_is_a_reachability_edge() {
         let reference = jet_foundation::Names::NameReference {
@@ -13553,6 +13713,8 @@ pub enum TBuiltinOp {
     IndexOf,
     /// `reverse()` → `(recv).reverse()`.
     Reverse,
+    /// Embedded Core-only storage move; no Clone or Close.
+    SwapList,
     /// `sort()` (no comparator) → `(recv).sort()`.
     Sort,
     /// `sort_desc()` → the shared descending Prelude kernel.
@@ -14139,6 +14301,8 @@ pub enum THandleOp {
     },
     /// FileReader: `read_line()` → `{root}jet_std_file_reader_read_line(&mut (recv))`.
     FileReaderReadLine,
+    /// #3593 FileReader: `read(max)` → `{root}jet_std_file_reader_read(&mut (recv), a0)`.
+    FileReaderRead,
     /// Read-only projection of the path retained by a live provider handle.
     FileReaderPath,
     /// D-FOUND-VIEW1=A: mapped-file byte window (`Result<View<[U8]>, IOError>`).
@@ -14155,6 +14319,10 @@ pub enum THandleOp {
     FileWriterWriteLine,
     /// FileWriter: `flush()` → `{root}jet_std_file_writer_flush(&mut (recv))`.
     FileWriterFlush,
+    /// #3593 FileWriter: `write_all(bytes)` → `{root}jet_std_file_writer_write_all(&mut (recv), &(a0))`.
+    FileWriterWriteAll,
+    /// #3593 FileWriter: `fsync()` → `{root}jet_std_file_writer_fsync(&mut (recv))`.
+    FileWriterFsync,
     /// Read-only projection of the path retained by a live provider handle.
     FileWriterPath,
     /// D-ENCSTREAM-SURFACE1=A: JSON pull reader/writer lifecycle.
@@ -14166,7 +14334,6 @@ pub enum THandleOp {
     JSONLWriterWrite,
     JSONLWriterFlush,
     JSONLWriterFinish,
-    CSVReaderNext,
     /// D-DATAFLOW1=A: typed pull `DataStream<T>.next()` → `?T !DataError`.
     DataStreamNext,
     /// D-FOUND-COREAPI1 / #2853: shared event-time stream operators.
@@ -14179,9 +14346,6 @@ pub enum THandleOp {
     XMLWriterWrite,
     XMLWriterFlush,
     XMLWriterFinish,
-    CSVWriterWrite,
-    CSVWriterFlush,
-    CSVWriterFinish,
     CBORReaderNext,
     CBORWriterWrite,
     CBORWriterFlush,
@@ -14255,20 +14419,6 @@ pub enum THandleOp {
     HistoryRngNextU64,
     /// D-TEST-STRATEGY1=A HistoryRng: `below(bound)` consumes the callback RNG.
     HistoryRngBelow,
-    /// D-TESTDATA1 Fake: locale and deterministic fake-data domain draws.
-    FakeLocale,
-    FakeName,
-    FakeEmail,
-    FakeHost,
-    FakeAddress,
-    /// D-SOLVER-LIB1=A: `Solver.new(seed)` → `{root}jet_solver_new(seed)`.
-    SolverNew,
-    /// D-SOLVER-LIB1=A: `solver.require(ok)` → `{root}jet_solver_require(&mut solver, ok)`.
-    SolverRequire,
-    /// D-SOLVER-LIB1=A: `solver.failure_count()` → `{root}jet_solver_failure_count(&solver)`.
-    SolverFailureCount,
-    /// D-SOLVER-LIB1=A: `solver.status()` → `{root}jet_solver_status(&solver)`.
-    SolverStatus,
     GameSceneNew,
     GameReplayRecord,
     GameBackendHeadless,
@@ -14523,12 +14673,6 @@ pub enum THandleOp {
         method: String,
         callback_index: Option<usize>,
     },
-    /// D-HONESTNUM1=A: `Measurement<Float>` arithmetic / accessors.
-    /// `.add(m)/.sub(m)/.mul(m)/.div(m)` → `(recv).<method>(a0)` → `JetMeasurement<f64>`.
-    /// `.value()/.uncertainty()` → `(recv).<method>()` → `f64`.
-    MeasurementMethod {
-        method: String,
-    },
     /// D-LAYOUT1 / D-LAYOUT-GATES1: an instance method on `LayoutHandle`
     /// (`.h`/`.v`/`.value`/`.suggest`/`.is_feasible`/`.conflict`) or
     /// `Constraint` (`.required`/`.strong`/`.medium`/`.weak`). Every Jet
@@ -14548,18 +14692,8 @@ pub enum THandleOp {
     ExpiringMethod {
         method: String,
     },
-    /// D-APPROX1=A: method call on a sketch data structure (HyperLogLog/TDigest/CMS/ReservoirSampler).
-    SketchMethod {
-        sketch: String,
-        method: String,
-    },
     /// D-TIMEDEPTH1=A: method call on a civil-time type (Date/DateTime).
     CivilTimeMethod {
-        kind: String,
-        method: String,
-    },
-    /// D-URL1=A: method call on URL/MIME value types.
-    UrlMimeMethod {
         kind: String,
         method: String,
     },
@@ -14647,8 +14781,6 @@ pub enum THandleOp {
         /// calls carry one extra lowered argument: the checked input binding.
         args_len: usize,
     },
-    /// D-WEBVIRTUAL1: project a virtual window through its canonical facts API.
-    WebVirtualWindowFacts,
     /// D-DBPOLICY-BIND1: bind a validated RowPolicy + user to a DBConnection.
     DBWithPolicy,
     /// D-DBPOOL1: bounded acquisition, readiness, draining, and receipt share

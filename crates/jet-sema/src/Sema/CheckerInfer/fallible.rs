@@ -427,6 +427,7 @@ impl<'a> Checker<'a> {
                         &module,
                         method,
                         args.len(),
+                        args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
                     ) {
                         return None;
                     }
@@ -434,7 +435,7 @@ impl<'a> Checker<'a> {
                         .modules?
                         .iter()
                         .position(|candidate| candidate.module_alias == source.alias)?;
-                    self.resolve_failure_function_in_module(source_idx, method.clone())?
+                    self.resolve_failure_function_in_module(source_idx, method.to_string())?
                 } else {
                     let Expr::Ident(alias, _) = receiver.without_parens() else {
                         return None;
@@ -1218,8 +1219,12 @@ impl<'a> Checker<'a> {
         span: Span,
         is_option: &mut bool,
     ) -> Option<Type> {
+        let subject = match value.as_ref().without_parens() {
+            Expr::Place(inner, _, _) => inner.as_ref().without_parens(),
+            subject => subject,
+        };
         let suppress_auto = matches!(
-            value.as_ref().without_parens(),
+            subject,
             Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
         );
         // A locally handled carrier must not publish callback fallibility. The

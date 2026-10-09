@@ -898,6 +898,70 @@ fn resolved_core_fixed_sig(
     span: Span,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
+    if module == "core.mem"
+        && matches!(name, "__list_capacity" | "__list_reserve_exact" | "__type_size" | "__loader_new")
+    {
+        let [element] = type_args else {
+            diags.push(Diagnostic::error(
+                "E0119",
+                format!("`{name}` expects one type argument"),
+                "the compiler-private allocation primitive needs its checked element type".to_string(),
+                format!("write `{name}<T>(...)`"),
+                Some(span),
+            ));
+            return None;
+        };
+        let (parameters, result) = core_fixed_sig(module, name)?;
+        let substitution_name = if name == "__loader_new" { "T" } else { "__element" };
+        let substitution = std::collections::HashMap::from([(substitution_name.to_string(), element.clone())]);
+        return Some((
+            parameters.into_iter().map(|(access, ty)| {
+                let ty = crate::Generics::substitute_type(&ty, &substitution);
+                (access, ty)
+            }).collect(),
+            result.map(|ty| crate::Generics::substitute_type(&ty, &substitution)),
+        ));
+    }
+    if (module == "core.tasks" && matches!(name, "__channel_new" | "__channel_bounded"))
+        || (module == "core.prelude" && name == "__receipt_attach")
+    {
+        let [element] = type_args else {
+            diags.push(Diagnostic::error(
+                "E0119",
+                format!("`{name}` expects one type argument"),
+                "the compiler-private leaf needs its checked payload type".to_string(),
+                format!("write `{name}<T>(...)`"),
+                Some(span),
+            ));
+            return None;
+        };
+        if name == "__receipt_attach" {
+            return Some((
+                vec![
+                    (AccessConvention::Read, element.clone()),
+                    (AccessConvention::Read, Type::String),
+                    (AccessConvention::Read, Type::String),
+                    (AccessConvention::Read, Type::String),
+                ],
+                Some(unit_ty()),
+            ));
+        }
+        let parameters = if name == "__channel_bounded" {
+            vec![(AccessConvention::Read, Type::Int)]
+        } else {
+            Vec::new()
+        };
+        return Some((parameters, Some(Type::Tuple(vec![
+            ("sender".to_string(), Box::new(Type::Apply {
+                name: Syntax::TYPE_SENDER.to_string(),
+                args: vec![element.clone()],
+            })),
+            ("receiver".to_string(), Box::new(Type::Apply {
+                name: Syntax::TYPE_RECEIVER.to_string(),
+                args: vec![element.clone()],
+            })),
+        ]))));
+    }
     let (params, ret) = match Syntax::core_call(module, name) {
         Some(row) => {
             let row = Syntax::core_call_projection(
@@ -2290,6 +2354,29 @@ fn core_call_argument_convention(
 }
 
 impl<'a> Checker<'a> {
+    // #4747: native width inference stays authoritative, but source reachability
+    // must name the same Jet body that lowering will select.
+    fn record_math_scalar_source_reference(&mut self, name: &str, width: &Type, span: Span) {
+        let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.math") else {
+            return;
+        };
+        if self.name_ledger.module_alias(self.module_idx) == Some(source.alias) {
+            return;
+        }
+        let Some(owner) = self.modules.and_then(|modules| {
+            modules.iter().position(|module| module.module_alias == source.alias)
+        }) else {
+            return;
+        };
+        let member = match (name, width) {
+            ("cmp", Type::Float32) => "__cmp_f32",
+            ("is_finite", Type::Float32) => "__is_finite_f32",
+            _ => name,
+        };
+        self.record_function_reference(owner, member, span);
+        self.record_edge(format!("{}.{member}", source.alias), span);
+    }
+
     /// Infer a callback retained by a reactive/UI host. Retention owns the
     /// lambda's captures, and the host ABI uses the checked SendFn carrier;
     /// ordinary escaping inference would otherwise leave borrowed/Rc facts
@@ -2322,6 +2409,106 @@ impl<'a> Checker<'a> {
         args: &mut Vec<crate::AST::CallArg>,
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
+        if module == "core.term"
+            && matches!(name, "__stdio_write" | "__stdio_bytes" | "__stdio_flush"
+                | "__stdio_fault" | "__stdout_terminal" | "__stderr_terminal" | "__stdin_line")
+        {
+            let vetted = self.name_ledger.module_alias(self.module_idx)
+                .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
+                .is_some();
+            if !vetted {
+                self.diags.push(Diagnostic::error(
+                    "E0510",
+                    "stdio raw leaves are compiler-private".to_string(),
+                    "raw stdio operations are restricted to checked Core source".to_string(),
+                    "use the public core.term API".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
+        }
+        if module == "core.mem" && name == "__loader_new" {
+            let vetted = self.name_ledger.module_alias(self.module_idx)
+                .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
+                .is_some_and(|source| source.module == "core.data");
+            if !vetted {
+                self.diags.push(Diagnostic::error(
+                    "E0510",
+                    "data loader construction is compiler-private".to_string(),
+                    "the native loader constructor is restricted to checked Core data source".to_string(),
+                    "use core.data.value".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
+        }
+        let encoding_backing_leaf = (module == "core.mem"
+            && matches!(name, "__list_capacity" | "__list_reserve_exact" | "__type_size"))
+            || (module == "core.encoding"
+                && matches!(name,
+                    "__read_byte" | "__read_into" | "__write_bytes" | "__write_text" | "__flush"
+                    | "__utf8_validate" | "__bytes_into_text" | "__text_into_bytes"
+                    | "__string_byte" | "__object_from_entries"
+                    | "__typed_text" | "__object_entries_view" | "__bytes_view"));
+        let source_alias = self.name_ledger.module_alias(self.module_idx);
+        let checked_csv = source_alias
+            .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
+            .is_some_and(|source| source.module == "core.encoding.csv");
+        if module == "core.encoding" && matches!(name, "__query_read_bounded" | "__query_validate_fields") && !checked_csv {
+            self.diags.push(Diagnostic::error("E0510", "CSV query leaves are compiler-private".to_string(),
+                "raw CSV query mechanics are restricted to Core CSV source".to_string(), "use csv.query<T>".to_string(), Some(span)));
+            return None;
+        }
+        let checked_xml = source_alias
+            .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
+            .is_some_and(|source| source.module == "core.encoding.xml");
+        let checked_backing_source = source_alias
+            == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_STREAM_ALIAS)
+            || checked_csv
+            || checked_xml
+            || source_alias == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_CBOR_STREAM_ALIAS)
+            || source_alias == Some("__core_encoding_xml_engine")
+            || ((module == "core.mem" || (module == "core.encoding" && name == "__utf8_validate"))
+                && source_alias == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_CBOR_PARSE_ALIAS));
+        if encoding_backing_leaf && !checked_backing_source {
+            self.diags.push(Diagnostic::error(
+                "E0510",
+                format!("`{module}.{name}` is compiler-private"),
+                "encoding backing primitives are available only to vetted Core encoding sources".to_string(),
+                "use the public encoding API".to_string(),
+                Some(span),
+            ));
+            return None;
+        }
+        if module == "core.encoding"
+            && matches!(name, "__coerce_now" | "__coerce_emit")
+        {
+            let vetted = source_alias
+                .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
+                .is_some_and(|source| source.module == "core.encoding.json");
+            if !vetted || !self.in_unsafe {
+                self.diags.push(Diagnostic::error(
+                    "E0510", "JSON coercion host leaves are compiler-private".to_string(),
+                    "the existing hidden Time/IO boundary is restricted to audited Core JSON source".to_string(),
+                    "use the public JSON decoder".to_string(), Some(span),
+                ));
+                return None;
+            }
+        }
+        if module == "core.encoding"
+            && matches!(name, "__bytes_into_text" | "__string_byte"
+                | "__object_from_entries" | "__typed_text" | "__object_entries_view" | "__bytes_view")
+            && !self.in_unsafe
+        {
+            self.diags.push(Diagnostic::error(
+                "E0510",
+                format!("`{module}.{name}` requires an audited `#Unsafe` region"),
+                "the caller must establish the raw carrier's validity, variant, or bounds precondition".to_string(),
+                "place the checked transfer in a vetted Core `#Unsafe` region".to_string(),
+                Some(span),
+            ));
+            return None;
+        }
         if let Some(alias) = alias.filter(|_| core_call_is_known(module, name)) {
             self.record_import_alias_reference(alias, alias_span);
         }
@@ -2399,23 +2586,57 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error("E0510", what, why, fix, Some(span)));
             }
         }
+        if matches!((module, name), ("core.ui", "__node_transfer" | "__viewport_transfer" | "__accessibility_transfer" | "__shortcut_transfer") | ("core.ui.host", "__request_transfer")) && !self.in_unsafe {
+            self.diags.push(Diagnostic::error(
+                "E3101",
+                format!("`{module}.{name}` requires an audited `#Unsafe` region"),
+                "raw host carrier transfer trusts the Core packer's validated tags, words, and retained slots".to_string(),
+                "use the safe `core.ui` constructors, or wrap a vetted Core transfer in `#Unsafe(\"UI carrier transfer: …\") { … }`".to_string(),
+                Some(span),
+            ));
+        }
+        if module == "core.http.server" && name == "__response_parts" && !self.in_unsafe {
+            self.diags.push(Diagnostic::error(
+                "E3101",
+                "`core.http.server.__response_parts` requires an audited `#Unsafe` region".to_string(),
+                "the transport transfer trusts the source response policy and consumes body ownership".to_string(),
+                "wrap the transfer in `#Unsafe(\"normalized response ownership transfer\") { … }`".to_string(),
+                Some(span),
+            ));
+        }
         // Source-owned Core members are ordinary checked Jet functions: the
         // caller sees the wrapper's declared contract (`-> T Never!`,
-        // `-> T E!`), the same row every backend calls. Only the source module
-        // itself keeps the fixed signature, so its `core.<same module>`
-        // provider calls do not recurse back into the wrapper. The module is
-        // identified by its registered alias, never by file name: a user
-        // `uuid.jet` is not `Core/crypto/uuid.jet`.
+        // `-> T E!`), the same row every backend calls.
+        // A same-module native provider row remains a host call. Without a host
+        // row, a qualified source function is still an ordinary declaration,
+        // including calls from its own module.
         if let Some(source) =
             jet_foundation::CoreModuleExports::core_source_module(module)
         {
-            if jet_foundation::CoreModuleExports::core_source_owns_call(module, name, args.len())
-                && self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
+            if (jet_foundation::CoreModuleExports::core_source_owns_call(
+                module, name, args.len(),
+                args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
+            ) || (module == "core.encoding.json" && name == "__parse_typed"))
+                && (self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
+                    || crate::Syntax::core_call(module, name)
+                        .is_none_or(|row| row.source_member().is_some()))
+                // Explicit target rows keep the old specialized argument
+                // checker; TIR forwards only its normalized operands.
+                && !crate::Syntax::core_call(module, name)
+                    .is_some_and(|row| row.source_member().is_some() && row.source_target.is_some())
+                && !(module == "core.encoding.json" && name == "decode" && !type_args.is_empty())
+                // #4747: retain width-polymorphic checking; lowering selects
+                // the reserved Jet marshalling wrapper for F32 arguments.
+                && !(module == "core.math" && matches!(name, "cmp" | "is_finite"))
+                // Keep the existing checked fn() signature at the worker-only
+                // source-forward boundary; its source slot is an opaque fn pointer.
+                && !(module == "core.service" && name == "worker")
             {
                 let source_idx = self.modules.and_then(|modules| {
                     modules
                         .iter()
-                        .position(|candidate| candidate.module_alias == source.alias)
+                        .position(|candidate| candidate.registry.core_source_module
+                            .is_some_and(|loaded| loaded.alias == source.alias && loaded.path == source.path))
                 });
                 if let (Some(alias), Some(source_idx)) = (alias, source_idx) {
                     return self.infer_import_call(
@@ -2940,32 +3161,7 @@ impl<'a> Checker<'a> {
             }
             return fixed_sig.as_ref().and_then(|(_, ret)| ret.clone());
         }
-        if module == "core.auth" && matches!(name, "verify_jwt" | "verify_paseto") {
-            let required = if name == "verify_jwt" {
-                &[
-                    (1, "key"),
-                    (2, "audience"),
-                    (3, "issuer"),
-                    (4, "clock_skew"),
-                ][..args.len().min(5).saturating_sub(1)]
-            } else {
-                &[
-                    (1, "key"),
-                    (2, "audience"),
-                    (3, "issuer"),
-                    (4, "clock_skew"),
-                    (5, "footer"),
-                    (6, "implicit"),
-                ][..args.len().min(7).saturating_sub(1)]
-            };
-            super::net_text_time::require_exact_labels(
-                &format!("auth.{name}"),
-                args,
-                required,
-                span,
-                &mut self.diags,
-            );
-        } else if module == "core.net.tls" && name == "client" {
+        if module == "core.net.tls" && name == "client" {
             let required = match args.len() {
                 3 => &[(1, "server_name"), (2, "deadline")][..],
                 4 => &[(1, "server_name"), (2, "config"), (3, "deadline")][..],
@@ -3010,53 +3206,7 @@ impl<'a> Checker<'a> {
         {
             return self.infer_compute_transform(name, span, args);
         }
-        let sig = if module == "core.auth" && name == "verify_jwt" && (3..=5).contains(&args.len())
-        {
-            let mut params = vec![
-                (AccessConvention::Read, Type::String),
-                (AccessConvention::Read, Type::List(Box::new(u8_ty()))),
-                (AccessConvention::Read, Type::String),
-            ];
-            if args.len() >= 4 {
-                params.push((AccessConvention::Read, Type::String));
-            }
-            if args.len() >= 5 {
-                params.push((AccessConvention::Read, Type::Named("Duration".to_string())));
-            }
-            Some((
-                params,
-                Some(result_ty(
-                    Type::Named("Claims".to_string()),
-                    Type::Named("AuthError".to_string()),
-                )),
-            ))
-        } else if module == "core.auth" && name == "verify_paseto" && (3..=7).contains(&args.len())
-        {
-            let mut params = vec![
-                (AccessConvention::Read, Type::String),
-                (AccessConvention::Read, Type::List(Box::new(u8_ty()))),
-                (AccessConvention::Read, Type::String),
-            ];
-            if args.len() >= 4 {
-                params.push((AccessConvention::Read, Type::String));
-            }
-            if args.len() >= 5 {
-                params.push((AccessConvention::Read, Type::Named("Duration".to_string())));
-            }
-            if args.len() >= 6 {
-                params.push((AccessConvention::Read, Type::List(Box::new(u8_ty()))));
-            }
-            if args.len() >= 7 {
-                params.push((AccessConvention::Read, Type::List(Box::new(u8_ty()))));
-            }
-            Some((
-                params,
-                Some(result_ty(
-                    Type::Named("Claims".to_string()),
-                    Type::Named("AuthError".to_string()),
-                )),
-            ))
-        } else if module == "core.net.tls"
+        let sig = if module == "core.net.tls"
             && name == "client"
             && args.len() == 2
             && args
@@ -3073,6 +3223,19 @@ impl<'a> Checker<'a> {
                     Type::Named("IOError".to_string()),
                 )),
             ))
+        } else if module == "core.net.tls" && name == "client" && (3..=4).contains(&args.len()) {
+            let mut params = vec![
+                (AccessConvention::Move, Type::Named("TCPStream".to_string())),
+                (AccessConvention::Read, Type::String),
+            ];
+            if args.len() == 4 {
+                params.push((AccessConvention::Read, Type::Named("TLSClientConfig".to_string())));
+            }
+            params.push((AccessConvention::Read, Type::Named("Duration".to_string())));
+            Some((params, Some(result_ty(
+                Type::Named("TLSStream".to_string()),
+                Type::Named("NetError".to_string()),
+            ))))
         } else if module == "core.net" && name == "unix_connect" && args.len() == 2 {
             Some((
                 vec![
@@ -4984,6 +5147,9 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
+                if name == "is_finite" {
+                    self.record_math_scalar_source_reference(name, &ty, span);
+                }
                 return Some(Type::Bool);
             }
             ("core.math", "sign") => {
@@ -5167,7 +5333,8 @@ impl<'a> Checker<'a> {
                         .push(wrong_core_arity(name, wanted, args.len(), span));
                 }
                 if name == "cmp" || name == "next_after" || name == "nextafter" {
-                    let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
+                    // An unsuffixed float literal operand is a Float here, not a Decimal.
+                    let Some(first) = args.get_mut(0).and_then(|a| self.infer_with_expected(&mut a.expr, &Type::Float)) else {
                         for a in args.iter_mut().skip(1) {
                             self.infer(&mut a.expr);
                         }
@@ -5187,7 +5354,9 @@ impl<'a> Checker<'a> {
                         ));
                         return None;
                     }
-                    if let Some(got) = args.get_mut(1).and_then(|a| self.infer(&mut a.expr)) {
+                    // The second operand takes the first's float width, so an
+                    // unsuffixed literal (`cmp(nan(), 1.0)`) checks as that width.
+                    if let Some(got) = args.get_mut(1).and_then(|a| self.infer_with_expected(&mut a.expr, &first)) {
                         if got != first {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
@@ -5200,6 +5369,9 @@ impl<'a> Checker<'a> {
                                 Some(args[1].expr.span()),
                             ));
                         }
+                    }
+                    if name == "cmp" {
+                        self.record_math_scalar_source_reference(name, &first, span);
                     }
                     return Some(if name == "cmp" { Type::Int } else { first });
                 }
@@ -5873,7 +6045,7 @@ impl<'a> Checker<'a> {
             // D-TEST-STRATEGY1=A: one optional explicit strategy replaces the
             // compiler-derived strategy when present. The runner remains the
             // shared Foundation implementation and keeps typed callbacks.
-            ("core.testing", "histories") => {
+            ("core.testing", "histories" | "__histories_with_provenance") => {
                 if type_args.len() == 1 {
                     self.check_declared_type(&type_args[0], span);
                 } else {
@@ -6328,7 +6500,7 @@ impl<'a> Checker<'a> {
             // D-EVENT1=D: first-party typed Event/Hook family. Constructors are
             // module functions so the semantic family is one Core library surface,
             // not new syntax.
-            ("core.event", "scope") => {
+            ("core.event", "scope" | "__scope_new") => {
                 if !args.is_empty() {
                     self.diags
                         .push(wrong_core_arity("scope", 0, args.len(), span));
@@ -6339,7 +6511,7 @@ impl<'a> Checker<'a> {
                 }
                 return Some(Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()));
             }
-            ("core.event", "policy_sync") => {
+            ("core.event", "policy_sync" | "__policy_sync") => {
                 if !args.is_empty() {
                     self.diags
                         .push(wrong_core_arity("policy_sync", 0, args.len(), span));
@@ -6375,7 +6547,7 @@ impl<'a> Checker<'a> {
                     args: vec![type_args[0].clone()],
                 });
             }
-            ("core.event", "with_policy") => {
+            ("core.event", "with_policy" | "__event_with_policy") => {
                 if args.len() != 1 {
                     self.diags
                         .push(wrong_core_arity("with_policy", 1, args.len(), span));
@@ -6406,7 +6578,7 @@ impl<'a> Checker<'a> {
                     args: vec![type_args[0].clone()],
                 });
             }
-            ("core.event", "async_result") => {
+            ("core.event", "async_result" | "__async_new") => {
                 if args.len() != 2 {
                     self.diags
                         .push(wrong_core_arity("async_result", 2, args.len(), span));
@@ -6449,7 +6621,7 @@ impl<'a> Checker<'a> {
                     )),
                 });
             }
-            ("core.event", "hook") => {
+            ("core.event", "hook" | "__hook_new") => {
                 if args.len() != 1 {
                     self.diags
                         .push(wrong_core_arity("hook", 1, args.len(), span));
@@ -6476,7 +6648,7 @@ impl<'a> Checker<'a> {
                     args: vec![type_args[0].clone(), type_args[1].clone()],
                 });
             }
-            ("core.event", "decision_hook") => {
+            ("core.event", "decision_hook" | "__decision_hook_new") => {
                 if args.len() != 1 {
                     self.diags
                         .push(wrong_core_arity("decision_hook", 1, args.len(), span));
@@ -6917,31 +7089,6 @@ impl<'a> Checker<'a> {
                 self.expect_core_arg("tls", 1, &Type::String, &mut args[1]);
                 return Some(Type::Named("HTTPServerTLS".to_string()));
             }
-            ("core.http.server", "response") => {
-                if args.len() != 2 {
-                    self.diags
-                        .push(wrong_core_arity("response", 2, args.len(), span));
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    return None;
-                }
-                self.expect_core_arg("response", 0, &Type::Int, &mut args[0]);
-                self.expect_core_arg("response", 1, &Type::String, &mut args[1]);
-                return Some(Type::Named("HTTPResponse".to_string()));
-            }
-            ("core.http.server", "sse") => {
-                if args.len() != 1 {
-                    self.diags
-                        .push(wrong_core_arity("sse", 1, args.len(), span));
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    return None;
-                }
-                self.expect_core_arg("sse", 0, &Type::String, &mut args[0]);
-                return Some(Type::Named("HTTPResponse".to_string()));
-            }
             ("core.http.server", "static_file") => {
                 if args.len() != 2 {
                     self.diags
@@ -7155,22 +7302,6 @@ impl<'a> Checker<'a> {
                 );
                 return Some(Type::Named("Unit".to_string()));
             }
-            // D-HTTP-JSON1=A: one typed JSON response.
-            ("core.http.server", "json") => {
-                if args.len() != 2 {
-                    self.diags
-                        .push(wrong_core_arity("json", 2, args.len(), span));
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    return None;
-                }
-                self.expect_core_arg("json", 0, &Type::Int, &mut args[0]);
-                if let Some(value) = self.infer(&mut args[1].expr) {
-                    self.check_encodable(&value, args[1].expr.span());
-                }
-                return Some(Type::Named("HTTPResponse".to_string()));
-            }
             ("core.http.middleware", "compress") => {
                 if args.len() != 2 {
                     self.diags
@@ -7258,37 +7389,6 @@ impl<'a> Checker<'a> {
                 }
                 self.expect_core_arg("from_timestamp", 0, &Type::Int, &mut args[0]);
                 return Some(Type::Named("DateTime".to_string()));
-            }
-            // D-APPROX1=A: sketch constructors.
-            ("core.data.sketch.hll", "new") => {
-                for a in args.iter_mut() {
-                    self.infer(&mut a.expr);
-                }
-                return Some(Type::Named("HyperLogLog".to_string()));
-            }
-            ("core.data.sketch.tdigest", "new") => {
-                for a in args.iter_mut() {
-                    self.infer(&mut a.expr);
-                }
-                return Some(Type::Named("TDigest".to_string()));
-            }
-            ("core.data.sketch.cms", "new") => {
-                for a in args.iter_mut() {
-                    self.infer(&mut a.expr);
-                }
-                return Some(Type::Named("CountMinSketch".to_string()));
-            }
-            ("core.data.sketch.reservoir", "new") => {
-                if args.len() != 1 {
-                    self.diags
-                        .push(wrong_core_arity("new", 1, args.len(), span));
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    return None;
-                }
-                self.expect_core_arg("new", 0, &Type::Int, &mut args[0]);
-                return Some(Type::Named("ReservoirSampler".to_string()));
             }
             // D-NUMTYPE1=A: core.math.fraction(top, bottom) answers an exact
             // ratio, or nothing when the bottom is zero.
@@ -7565,6 +7665,11 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            if encoding_backing_leaf {
+                // Backing calls borrow native owners even when their nominal
+                // type is not a built-in String/List/Map (DataTree, file IO).
+                self.borrow_ctx = true;
+            }
             self.expect_core_arg(name, i, param_ty, arg);
             if retained_ui_callback {
                 self.lambda_escapes = saved_callback_escapes;
@@ -7597,5 +7702,24 @@ impl<'a> Checker<'a> {
         } else {
             compute_alias_ret.or(ret)
         }
+    }
+}
+
+#[cfg(test)]
+mod loader_constructor_signature_tests {
+    use super::*;
+
+    #[test]
+    fn substitutes_user_record_return_type() {
+        let record = Type::Named("UserRec".to_string());
+        let mut diagnostics = Vec::new();
+        let (_, result) = resolved_core_fixed_sig(
+            "core.mem", "__loader_new", &[record.clone()], Span::new(0, 0), &mut diagnostics,
+        ).expect("registered loader constructor");
+        assert!(diagnostics.is_empty());
+        assert_eq!(result, Some(result_ty(
+            Type::Apply { name: "DataLoader".to_string(), args: vec![record] },
+            Type::Named("DataError".to_string()),
+        )));
     }
 }

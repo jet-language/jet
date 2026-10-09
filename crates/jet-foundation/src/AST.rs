@@ -28,7 +28,7 @@ mod program_imports;
 pub use crate::Names::{mangle, mangle_generated, mangle_path, member_name, NameLedger};
 pub use program_imports::{
     core_import_maps, core_list_path, core_list_prefix, member_import_local, target_profile_path,
-    rewrite_core_item_call, walk_imports, AppliedRuleApplication, CoreListPath, ErrorConvDef,
+    rewrite_core_item_call, walk_imports, AppliedRuleApplication, CoreIdentifierDemand, CoreListPath, ErrorConvDef,
     FencedNames, FencedStatement, ForeignImportError, ForeignLanguage, ForeignNamespace,
     ImportBinding, ImportDecl, ImportKind, InlineVersion, LoadedModule, MigrationDecl, MigrationOp,
     PackageGuarantees, Program, ProgramBundle, TryConvert,

@@ -1,0 +1,32 @@
+// D-HTTP-JSON1=A: source server.json labels encoded bytes, and typed response
+// decoding enforces the body cap before decoding. Oracle literals migrated from
+// http_server_lifecycle.rs after the 3f0287c4a Core-source cutover.
+use core.http.server as server
+use core.encoding.json as json
+
+#Encode
+struct Payload { ok: Bool }
+
+#Codable
+struct Number { a: Int }
+
+fn run() {
+    response :: server.json(201, Payload{ok: true})
+    assert(response.status() == 201)
+    assert((response.header("content-type") ?? panic("JSON content type")) == "application/json; charset=utf-8")
+    bytes :: response.body().bytes(64) ?? panic("JSON response bytes")
+    assert(bytes == "{{\"ok\":true}}".bytes())
+
+    body :: server.response(200, "{{\"a\":1}}")
+    decoded :: body.json<Number>(64) ?? panic("typed JSON body")
+    assert(decoded.a == 1)
+    assert(json.to_string(decoded.encode()) == "{{\"a\":1}}")
+
+    // The typed decode shares the body reader, which rejects an oversized body
+    // before any decode runs. Use a fresh one-shot body for the capped read.
+    oversized :: server.response(200, "{{\"a\":1}}")
+    if oversized.json<Number>(2) == {
+        .Err(.BodyTooLarge(limit)) -> assert(limit == 2)
+        else -> panic("typed JSON read must enforce the body cap")
+    }
+}

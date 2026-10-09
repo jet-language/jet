@@ -2424,3 +2424,108 @@ fn durable_lifecycle_crash_window_recovers_and_replays_one_identity() {
         "crash-window replay did not rebuild the signed history: {recovered}"
     );
 }
+
+#[test]
+fn state_store_metadata_policy_matches_all_tiers() {
+    let scratch = common::Scratch::new("service_state_store_metadata");
+    fs::write(scratch.path.join("state"), b"state").unwrap();
+    let root = scratch.path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let source = r#"
+package { authority: { holds: { allow: [FS.Read, IO, Mem.Alloc] } } }
+use core.service as service
+fn policy_reason(error: ServiceError) -> String Never! {
+    if error == .Policy(reason) -> return reason
+    panic("expected policy refusal")
+}
+fn run() {
+    service.state_store("__ROOT__/state") ?? panic("existing file")
+    print("file")
+    service.state_store("__ROOT__/absent/store") ?? panic("absent file")
+    print("absent")
+    if service.state_store("__ROOT__") == {
+        .Err(error) -> print(policy_reason(error) == "service state store is not a regular file; repair or replace the state store before retrying")
+        .Ok(_) -> panic("directory accepted as state store")
+    }
+    if service.state_store("__ROOT__/state/child") == {
+        .Err(error) -> {
+            reason :: policy_reason(error)
+            print(reason.starts_with("cannot inspect service state store: "))
+            print(reason.ends_with("; repair or replace the state store before retrying"))
+        }
+        .Ok(_) -> panic("non-directory path component accepted")
+    }
+}
+"#.replace("__ROOT__", &root);
+    tir_support::assert_tiers_agree("state_store_metadata", &source, "file\nabsent\ntrue\ntrue\ntrue\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn state_store_keeps_lexical_symlink_ancestor_before_dotdot_on_all_tiers() {
+    let scratch = common::Scratch::new("service_state_store_lexical_link");
+    fs::create_dir(scratch.path.join("real")).unwrap();
+    std::os::unix::fs::symlink(scratch.path.join("real"), scratch.path.join("link")).unwrap();
+    let root = scratch.path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let source = r#"
+package { authority: { holds: { allow: [FS.Read, IO, Mem.Alloc] } } }
+use core.service as service
+fn run() {
+    if service.state_store("__ROOT__/link/../store") == {
+        .Err(.Policy(reason)) -> print(reason == "service state parent is a symlink: __ROOT__/link; repair or replace the state store before retrying")
+        .Err(_) -> panic("wrong refusal kind")
+        .Ok(_) -> panic("lexical symlink ancestor disappeared")
+    }
+}
+"#.replace("__ROOT__", &root);
+    tir_support::assert_tiers_agree("state_store_lexical_link", &source, "true\n");
+}
+
+#[test]
+fn source_worker_slot_keeps_checked_function_item_and_moves_the_mailbox() {
+    let scratch = common::Scratch::new("service_worker_source_slot");
+    fs::write(scratch.path.join("package.jet"), "name: \"worker-slot\"\nversion: \"0.1.0\"\n").unwrap();
+    let source = r#"
+use core.service as service
+fn named_worker() {}
+fn run() {
+    tree := service.tree("slot")
+    endpoint :: tree.worker("worker", named_worker, capacity: 2) ?? panic("worker")
+    tree.group("group", ["worker"]) ?? panic("group")
+    tree.start() ?? panic("start")
+    tree.send(endpoint, "message") ?? panic("send")
+    assert((tree.mailbox_depth(endpoint) ?? panic("depth")) == 1)
+    tree.fail_worker(endpoint) ?? panic("failure")
+    assert((tree.restarts(endpoint) ?? panic("restarts")) == 1)
+    tree.stop() ?? panic("stop")
+}
+"#;
+    let entry = scratch.path.join("main.jet");
+    fs::write(&entry, source).unwrap();
+    let shown = entry.to_string_lossy();
+    let output = jet::compile_with_path(source, &shown).unwrap_or_else(|diagnostics| {
+        panic!("{}", jet::render_diagnostics(&shown, source, &diagnostics))
+    });
+    assert!(output.rust.contains("JetServiceWorkerHandler)"), "missing checked fn() forward");
+    assert!(output.rust.contains("service worker failed: {{}}") || output.rust.contains("service worker failed: {}"));
+    assert!(output.rust.contains("jet_services_raw_group_push("), "existing source-owned group hop changed");
+    let mut pushed = false;
+    let mut replaced = false;
+    for line in output.rust.lines() {
+        for (symbol, position, seen) in [
+            ("jet_services_raw_worker_push(", 5, &mut pushed),
+            ("jet_services_raw_worker_write_mailbox(", 2, &mut replaced),
+        ] {
+            if line.contains(&format!("fn {}", symbol)) { continue; }
+            if let Some((_, arguments)) = line.split_once(symbol) {
+                let mailbox = arguments.split(',').nth(position).expect("checked mailbox argument");
+                assert!(!mailbox.contains(".clone()"), "Mailbox::clone forks the channel: {line}");
+                *seen = true;
+            }
+        }
+    }
+    assert!(pushed && replaced, "source worker and restart must move their mailboxes");
+    if have_rustc() {
+        let (status, _, stderr) = build_and_run_full("worker_mailbox_move", "main", source);
+        assert_eq!(status, 0, "{stderr}");
+    }
+}

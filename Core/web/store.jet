@@ -19,6 +19,13 @@ pub struct WebStore<T> {
     pub history_enabled: Bool
     pub history_limit: Int
     pub subs: Int
+
+    pub fn set(self, value: T) -> WebStoreTransaction<T> Never! {
+        set<T>(&self, value)
+    }
+    pub fn facts_json(self) -> String Never! {
+        facts_json<T>(self)
+    }
 }
 
 pub struct WebStoreEvent {
@@ -89,9 +96,9 @@ pub fn batch<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(
 }
 
 pub fn set<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! {
-    store.value = value
-    record<T>(&store)
-    WebStoreTransaction<T>{label: "set", value: store.value}
+    // WebStore.rs:594-595: one reactive transaction, label set, no changed
+    // field names, root replacement; the runtime gate defers reentrant events.
+    core.web.store.__transact(store, "set", [String]{}, (state) -> state = value)
 }
 
 pub fn set_state<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! { set<T>(&store, value) }
@@ -223,7 +230,9 @@ pub fn inspect<T>(store: WebStore<T>) -> WebStoreInspection Never! {
 }
 
 pub fn facts_json<T>(store: WebStore<T>) -> String Never! {
-    "{{\"name\":\"{esc_json(store.name)}\",\"cursor\":{store.cursor},\"generation\":{store.generation},\"history\":{store.history.len()}}}"
+    // WebStore.rs:917-929: guard the ledger before reading all six facts.
+    facts :: core.web.store.__facts_snapshot(store)
+    "{{\"name\":\"{esc_json(store.name)}\",\"generation\":{facts.generation},\"cursor\":{facts.cursor},\"history_length\":{facts.history_length},\"history_limit\":{facts.history_limit},\"event_length\":{facts.event_length},\"history_enabled\":{facts.history_enabled}}}"
 }
 
 pub fn event_json<T>(store: WebStore<T>) -> String Never! {
@@ -251,21 +260,36 @@ fn tail<T>(values: [T], count: Int) -> [T] Never! {
     out
 }
 fn esc_json(text: String) -> String {
-    out := ""
-    loop b in text.bytes() {
-        if b == (U8{34}) {
-            out = "{out}\\\""
-        } else if b == (U8{92}) {
-            out = "{out}\\\\"
-        } else if b == (U8{10}) {
-            out = "{out}\\n"
-        } else if b == (U8{13}) {
-            out = "{out}\\r"
-        } else if b == (U8{9}) {
-            out = "{out}\\t"
-        } else {
-            out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
+    raw :: text.bytes()
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        b :: raw[i]
+        escaped := ""
+        if {
+            b == (U8{34}) -> escaped = "\\\""
+            b == (U8{92}) -> escaped = "\\\\"
+            b == (U8{10}) -> escaped = "\\n"
+            b == (U8{13}) -> escaped = "\\r"
+            b == (U8{9}) -> escaped = "\\t"
+            b < (U8{32}) || b == (U8{127}) -> escaped = control_escape(Int{b})
+            b == (U8{194}) && i + 1 < raw.len() && raw[i + 1] >= (U8{128}) && raw[i + 1] <= (U8{159}) -> {
+                escaped = control_escape(Int{raw[i + 1]})
+                i += 1
+            }
         }
+        if escaped == "" -> &out.push(b) else -> loop e in escaped.bytes() -> &out.push(e)
+        i += 1
     }
-    out
+    String.from_bytes(out) ?? ""
+}
+
+fn control_escape(value: Int) -> String Never! {
+    digits :: "0123456789abcdef".bytes()
+    String.from_bytes([U8]{U8{92}, U8{117}, U8{48}, U8{48}, digits[value /% 16], digits[value % 16]}) ?? ""
+}
+
+#Test("store facts quoting preserves Unicode and escapes Rust control scalars") {
+    controls :: String.from_bytes([U8]{U8{206}, U8{187}, U8{194}, U8{133}, U8{0}, U8{127}, U8{10}}) ?? ""
+    assert_eq(esc_json(controls), "λ\\u0085\\u0000\\u007f\\n")
 }

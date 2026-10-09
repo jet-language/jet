@@ -20,6 +20,23 @@ use crate::AST::{
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
+const OPERATOR_HOOKS: &[(&str, &str)] = &[
+    (Syntax::TRAIT_ADD, "add"),
+    (Syntax::TRAIT_SUB, "sub"),
+    (Syntax::TRAIT_MUL, "mul"),
+    (Syntax::TRAIT_DIV, "div"),
+    (Syntax::TRAIT_EQUATABLE, "equal"),
+    (Syntax::TRAIT_COMPARABLE, "compare"),
+];
+
+pub fn operator_hook_name(trait_name: &str) -> Option<&'static str> {
+    OPERATOR_HOOKS.iter().find_map(|&(name, hook)| (name == trait_name).then_some(hook))
+}
+
+pub fn operator_hook_trait(method: &str) -> Option<&'static str> {
+    OPERATOR_HOOKS.iter().find_map(|&(name, hook)| (hook == method).then_some(name))
+}
+
 /// D-OPMIX1 / D-FOUND-OPMIX1=A: one checked operator hook and its concrete
 /// right-hand type. `rhs` is always concrete in this table; a bare
 /// `impl Type.Op` is recorded with the owner's type as its right-hand operand.
@@ -1473,14 +1490,7 @@ impl TraitRegistry {
             return;
         }
         if operator_trait {
-            let expected_method = match trait_name {
-                Syntax::TRAIT_ADD => "add",
-                Syntax::TRAIT_SUB => "sub",
-                Syntax::TRAIT_MUL => "mul",
-                Syntax::TRAIT_DIV => "div",
-                Syntax::TRAIT_EQUATABLE => "equal",
-                _ => "compare",
-            };
+            let expected_method = operator_hook_name(trait_name).unwrap();
             let owner_name = owner_type.name();
             let rhs_name = rhs_type.name();
             let expected_result = match trait_name {
@@ -2105,6 +2115,11 @@ impl TraitRegistry {
         {
             return true;
         }
+        // The sealed dynamic tree's codec is the identity bridge, just as in
+        // Source sema's structural codec-bound authority.
+        if Syntax::is_data_type_name(type_name) && matches!(trait_name, ENCODE | DECODE) {
+            return true;
+        }
         if self
             .trait_impls
             .contains(&(type_name.to_string(), trait_name.to_string()))
@@ -2625,7 +2640,6 @@ impl TraitRegistry {
             "BrowserError",
             crate::Syntax::TYPE_BYTES,
             "Clock",
-            "CountMinSketch",
             "DataError",
             "DataTracked",
             "DataWatch",
@@ -2667,7 +2681,6 @@ impl TraitRegistry {
             "HTTPRouter",
             "HTTPStatus",
             "HTTPVersion",
-            "HyperLogLog",
             "ID",
             "Instant",
             "IOError",
@@ -2700,9 +2713,7 @@ impl TraitRegistry {
             "Regex",
             "RegexFlags",
             "RegexMatch",
-            "ReservoirSampler",
             "RNG",
-            "Fake",
             "Size",
             "SocketAddr",
             "Solver",
@@ -2711,7 +2722,6 @@ impl TraitRegistry {
             "TestSuite",
             "TcpListener",
             "TcpStream",
-            "TDigest",
             "TempDir",
             "TempFile",
             "TextError",
@@ -2799,10 +2809,6 @@ impl TraitRegistry {
         self.auto_equatable.insert("TLSVersion".to_string());
         self.trait_impls
             .insert((Syntax::TYPE_RANGE.to_string(), DISPLAY.to_string()));
-        // D-ENCSTREAM-SURFACE1=A: EncodingError Display is the exact stream error
-        // projection law; Format/Kind/Cause/Error compare by value.
-        self.trait_impls
-            .insert(("EncodingError".to_string(), DISPLAY.to_string()));
         self.trait_impls.insert(("PluginError".to_string(), DISPLAY.to_string()));
         self.auto_debug.insert("PluginError".to_string());
         self.auto_equatable.insert("PluginLimit".to_string());
@@ -2874,7 +2880,7 @@ impl TraitRegistry {
     }
 
     /// D-OPDEF1=A: operator symbols are sugar over ordinary hook traits.
-    pub fn register_synthetic_operators(&mut self) {
+    pub fn register_synthetic_operators(&mut self, source_owns_type: impl Fn(&str) -> bool) {
         for (trait_name, method, ret) in [
             (Syntax::TRAIT_ADD, "add", Type::Named(String::new())),
             (Syntax::TRAIT_SUB, "sub", Type::Named(String::new())),
@@ -2913,6 +2919,13 @@ impl TraitRegistry {
                 Type::Named("Vec3".to_string()),
             ),
         ] {
+            // The source declaration owns the complete instantiated row.
+            // Never seed a second operator beside either source-owned operand.
+            if source_owns_type(left)
+                || matches!(&rhs, Type::Named(name) | Type::Apply { name, .. } if source_owns_type(name))
+            {
+                continue;
+            }
             if !self.operator_impls.iter().any(|implementation| {
                 implementation.left == left
                     && implementation.trait_name == trait_name
