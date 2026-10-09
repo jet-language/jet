@@ -471,12 +471,12 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     loop (index, descriptor) in prepared.functions {
         signature :: m.mir_signatures[index].copy()
         id :: LIRFunctionID{value: index}
-        function :: if failed_functions.get(descriptor.id.value) != None {
+        function :: if failed_functions.get(descriptor.id.value) != None -> {
             lower_failed_function(m, id, descriptor.name, signature)
-        } else {
+        } else -> {
             before :: m.issues.len()
             lowered :: if descriptor.instance_row >= 0 -> lower_function(program, &m, prepared.instances[descriptor.instance_row], id, signature) else -> lower_function(program, &m, program.functions[descriptor.source_row], id, signature)
-            if m.issues.len() > before {
+            if m.issues.len() > before -> {
                 &failed_functions.add(descriptor.id.value, true).drop("a failed body has one inventory slot")
                 lower_failed_function(m, id, descriptor.name, signature)
             } else -> lowered
