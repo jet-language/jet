@@ -1,5 +1,5 @@
 // Real pure canonical SQL composition; no native session or authority mocked.
-use core.db.sql as db_query_fixture_sql
+use core.db.runtime.kernel_sql_query as db_query_fixture_sql
 #Test("DB canonical projection retains requested field order") {
     source :: jet_cli_db_load_jsonl_source("source", "rows.jsonl", "{\"a\":1,\"b\":\"first\"}\n{\"a\":2,\"b\":\"second\"}", 4) ?? panic("source")
     query :: db_query_fixture_sql.parse_sql_query("SELECT b AS label, a FROM source WHERE a >= 2") ?? panic("query")
