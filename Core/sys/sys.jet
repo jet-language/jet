@@ -11,11 +11,13 @@ package {
 use core as core
 use core.net as net
 use core.files as files
-use core.process as process
-use core.text.parse as text
+use core.process as process_api
+use core.text.parse as text_parse
 
 use core.encoding.[Dyn]
+use core.sys.[EnvError]
 use __core_files_path_components as host_path
+use __core_files_path_components.[PathPlatform]
 // Reused from Foundation CLISchema/TargetWidth (a736ba79d). This pointer
 // record measures the selected build target, never the compiler host.
 #Layout(c)
@@ -381,7 +383,7 @@ fn success(code: Int) -> Bool Never! { code == 0 }
 fn uptime() -[Time, Env, FS]> Float Never! {
     if name() != "linux" -> return 0.0
     contents :: files.read("/proc/uptime") ?? return 0.0
-    fields :: text.split_ws(contents)
+    fields :: text_parse.split_ws(contents)
     if fields.len() == 0 -> return 0.0
     Float.parse(fields[0]) ?? 0.0
 }
@@ -447,12 +449,12 @@ fn getsid(pid: Int) -[Env]> Int IOError! {
 fn sync() Never! -[FS, Env]> { core.sys.__sync_os() }
 
 #Unsafe("posix stop: the caller accepts that the process ends here after the shared cleanup boundary") fn stop(code: Int) Never! -[Env, Exec]> {
-    process.exit(code)
+    process_api.exit(code)
 }
 
-fn set_current_dir(path: String) IOError! -[FS, Env]> {
+fn set_current_dir(path: String) -[FS, Env]> () IOError! {
     if core.sys.__set_current_dir(path) == {
-        .Ok(_) -> Ok()
+        .Ok(_) -> Ok(())
         .Err(cause) -> Err(syscall_input(.Resolve, Val(path), cause))
     }
 }
@@ -647,7 +649,7 @@ fn release_field(config: String, key: String) -> String? Never! {
 }
 
 fn command_fact(argv: [String]) -[Exec, Time.Wait]> String Never! {
-    receipt :: process.cmd(argv).run() ?? return ""
+    receipt :: process_api.cmd(argv).run() ?? return ""
     core.text.trim(receipt.output)
 }
 
@@ -684,7 +686,7 @@ fn syscall_error(operation: IOOperation, resource: String?, errno: Int) -> IOErr
 fn syscall_input(operation: IOOperation, resource: String?, cause: String) -> IOError {
     // Preserve the existing Other context: the host's cause string includes
     // errno, while the public os_code field was historically absent.
-    IOError.Other(IOContext{operation: operation.copy(), resource: resource, os_code: None, cause: Val(cause)})
+    IOError.Other(IOContext{operation: operation, resource: resource, os_code: None, cause: Val(cause)})
 }
 
 fn has_nul(value: String) -> Bool {
@@ -705,8 +707,8 @@ fn has_nul(value: String) -> Bool {
 // selection and the typed codec remain the compiler's established lowering.
 // Everything between metadata and codec, and error provenance afterwards,
 // is source policy rather than a second codec or host environment writer.
-fn __decode_tree(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS.Read, Env]> (tree: Dyn, origins: [(name: String, path: String)]) [FieldError]! {
-    platform :: if core.files.__path_windows() -> host_path.PathPlatform.Windows else -> host_path.PathPlatform.Unix
+fn __decode_tree(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS, Env, Exec]> (tree: Dyn, origins: [(name: String, path: String)]) [FieldError]! {
+    platform :: if core.files.__path_windows() -> PathPlatform.Windows else -> PathPlatform.Unix
     path :: host_path.from_text(file, platform)
     if host_path.is_absolute(path) -> return Err(config_error("E2416: Dotenv.file must be project-relative"))
     cursor := host_path.components(path)
@@ -729,10 +731,7 @@ fn __decode_tree(prefix: String, file: String, allow: [String], names: [(env_nam
         value :: String.from_bytes(entry.value) ?? next
         &process.push((name: name, value: value))
     }
-    values :: if config_entries(prefix, dotenv, allow, process) == {
-        .Ok(entries) -> entries
-        .Err(reason) -> { return Err(config_error("E2416: {reason}")) }
-    }
+    values :: config_entries(prefix, dotenv, allow, process) ?? return Err(err)
     tree := ConfigTree.Object([(key: String, value: ConfigTree)]{})
     origins := [(name: String, path: String)]{}
     loop entry in values {
@@ -839,8 +838,9 @@ fn config_dotenv_value(value: String) -> String Never! {
     comment :: config_find(raw, " #".bytes()) ?? return trimmed
     core.text.trim_end(slice_ascii(raw, 0, comment))
 }
+// Dotenv syntax joins the same typed FieldError domain as Decode failures.
 
-fn config_entries(prefix: String, dotenv: String?, allow: [String], process: [(name: String, value: String)]) -> [ConfigEntry] String! {
+fn config_entries(prefix: String, dotenv: String?, allow: [String], process: [(name: String, value: String)]) -> [ConfigEntry] [FieldError]! {
     values := [ConfigValue]{}
     if dotenv == .Val(contents) {
         raw :: contents.bytes()
@@ -856,7 +856,7 @@ fn config_entries(prefix: String, dotenv: String?, allow: [String], process: [(n
             if line.len() > 0 && line.bytes()[0] != (U8{35}) {
                 bytes :: line.bytes()
                 if bytes.len() >= 7 && slice_ascii(bytes, 0, 7) == "export " -> line = slice_ascii(bytes, 7, bytes.len())
-                equal :: config_find(line.bytes(), "=".bytes()) ?? return Err("invalid .env line {line_index}")
+                equal :: config_find(line.bytes(), "=".bytes()) ?? return Err(config_error("E2416: invalid .env line {line_index}"))
                 name :: core.text.trim(slice_ascii(line.bytes(), 0, equal))
                 if config_allowed(name, allow) {
                     value :: config_dotenv_value(slice_ascii(line.bytes(), equal + 1, line.bytes().len()))
@@ -954,7 +954,7 @@ fn config_tree(^tree: ConfigTree) -> Dyn Never! {
 
 #Test("Dotenv malformed unallowed lines still error and decoder secret errors are redacted") {
     if config_entries("", Val("not an assignment"), [String]{"ONLY_THIS"}, [(name: String, value: String)]{}) == {
-        .Err(reason) -> assert_eq(reason, "invalid .env line 1")
+        .Err(errors) -> assert_eq(errors[0].reason, "E2416: invalid .env line 1")
         .Ok(_) -> assert(false)
     }
     errors :: __decode_errors([FieldError]{FieldError{path: "db.password", reason: "rejected supersecret"}}, [(name: String, path: String)]{(name: "APP_DB__PASSWORD", path: "db.password")})
