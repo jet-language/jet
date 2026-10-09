@@ -361,6 +361,8 @@ fn sema_function_memory_plan_finish(plan: &SemaFunctionMemoryPlan, planned: &Sem
     complete := plan.diagnostics.len() == 0
     loop function in plan.functions {
         if !function.complete -> complete = false
+        key :: sema_function_memory_key(function.module_identity, function.function.span)
+        if positions.get(key) == None -> positions[key] = index
     }
     plan.complete = complete
 }

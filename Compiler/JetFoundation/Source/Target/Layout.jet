@@ -194,6 +194,50 @@ fn jet_target_layout_query(engine: TargetLayoutEngine) -> JetTargetLayoutQuery N
     query
 }
 
+// The target/profile and registry are fixed for this query. Completed byte
+// facts are keyed by registry row plus generic arguments, never by an active
+// recursion path. Cycle-dependent unknown results must not enter the memo.
+struct JetTargetLayoutQuery {
+    item_positions: [String:Int]
+    qualified_positions: [String:Int]
+    resolution_positions: [String:Int]
+    active: [String:Bool]
+    cycle_hits: Int
+    completed_positions: [String:Int]
+    completed: [ByteLayout?]
+}
+
+// Rust: none (Jet-only pass)
+fn jet_target_layout_resolution_key(owner: String, source: String) -> String Never! {
+    "{owner.bytes().len()}:{owner}{source}"
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::new
+fn jet_target_layout_query(engine: TargetLayoutEngine) -> JetTargetLayoutQuery Never! {
+    query := JetTargetLayoutQuery{
+        item_positions: [String:Int]{},
+        qualified_positions: [String:Int]{},
+        resolution_positions: [String:Int]{},
+        active: [String:Bool]{},
+        cycle_hits: 0,
+        completed_positions: [String:Int]{},
+        completed: [ByteLayout?]{},
+    }
+    loop position in 0..<engine.items.len() {
+        name :: jet_target_layout_item_name(engine.items[position])
+        if query.item_positions.get(name) == None -> query.item_positions[name] = position
+    }
+    loop position in 0..<engine.qualified_items.len() {
+        name :: engine.qualified_items[position].qualified_name
+        if query.qualified_positions.get(name) == None -> query.qualified_positions[name] = position
+    }
+    loop position in 0..<engine.name_resolutions.len() {
+        key :: jet_target_layout_resolution_key(engine.name_resolutions[position].owner_qualified_name, engine.name_resolutions[position].source_name)
+        if query.resolution_positions.get(key) == None -> query.resolution_positions[key] = position
+    }
+    query
+}
+
 pub fn jet_target_layout_support_unknown() -> MIRLayoutSupportFacts Never! {
     MIRLayoutSupportFacts{
         proven: false,

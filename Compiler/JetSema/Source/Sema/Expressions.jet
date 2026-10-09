@@ -3163,6 +3163,10 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
         &diagnostics.push(sema_dyn_condition_error(span))
         return None
     }
+    if sema_dyn_is_type(sema_expr_expected_type(value.ty, environment)) {
+        &diagnostics.push(sema_dyn_condition_error(span))
+        return None
+    }
     if value.ty == Type.Bool || sema_expr_is_integer(value.ty) {
         result_ty := if value.ty == Type.Bool -> Type.Bool else -> sema_expr_numeric_base(value.ty)
         return sema_expr_expected(sema_tir_expr(result_ty, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span), expected, environment, program, &diagnostics)
@@ -3190,6 +3194,17 @@ fn sema_expr_float_literal(value: Float, is_f32: Bool, raw: String?, span: Span,
     ty := Type.Float
     if expected == (Val(Type.Float32)) || (is_f32 && expected != (Val(Type.Float))) -> ty = Type.Float32
     sema_expr_expected(sema_tir_expr(ty, TExprKind.FloatLit{value: value}, span), expected, environment, program, &diagnostics)
+}
+
+// The opposite Dyn operand contextualizes a fractional literal without
+// rechecking either expression (Decimal variables still do not auto-wrap).
+fn sema_dyn_float_literal_value(expr: Expr) -> Float? Never! {
+    if expr == {
+        .Float(value, _, is_f32, _) -> if is_f32 -> None else -> Val(value)
+        .Paren(inner, _) -> sema_dyn_float_literal_value(inner)
+        .Unary(op, inner, _) -> if op == UnOp.Neg -> Val(-(sema_dyn_float_literal_value(inner) ?? return None)) else -> None
+        else -> None
+    }
 }
 
 // The opposite Dyn operand contextualizes a fractional literal without
