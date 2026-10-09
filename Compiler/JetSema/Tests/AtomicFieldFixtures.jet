@@ -25,8 +25,12 @@ fn atomic_field_test_source(name: String, source: String, accepted: Bool, atomic
                     if field.value.kind == .StaticCall(owner, _, method, _, args) {
                         if owner == .Prelude(_, path, generics) {
                             if path != "JetAtomic" || generics.len() != 1 || method.name != "new" || args.len() != 1 -> panic("{name}: wrong Atomic constructor")
-                        } else -> panic("{name}: Atomic initializer must use canonical Prelude owner")
-                    } else -> panic("{name}: Atomic initializer must be a typed constructor")
+                        } else {
+                            panic("{name}: Atomic initializer must use canonical Prelude owner")
+                        }
+                    } else {
+                        panic("{name}: Atomic initializer must be a typed constructor")
+                    }
                 } else {
                     if sema_atomic_field_inner(field.field.ty) != None -> panic("{name}: ordinary generic acquired an Atomic carrier")
                 }

@@ -257,7 +257,9 @@ fn lower_scan_match(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         lower_call_runtime(&m, &f, "jet_rt_string_data", [LIRValueID]{value}, Val(data))
         lower_call_runtime(&m, &f, "jet_rt_string_byte_len", [LIRValueID]{value}, Val(length))
         parts = lower_scan_text_parts(p, &m, &f, payload, pattern, false) ?? return
-    } else -> return lower_fail(&m, &f, "pattern match has no descriptors")
+    } else {
+        return lower_fail(&m, &f, "pattern match has no descriptors")
+    }
     rows :: lower_scan_rows(&f, parts)
     hit :: lower_word(&f)
     input_stride :: lower_const(&f, stride)

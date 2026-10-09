@@ -486,7 +486,9 @@ fn bootstrap_native_codec_collect(program: MIRProgram, graph: SemaRegistrationGr
             } else if args.len() == 0 && bootstrap_native_codec_is_builtin(ty, "Never") {
                 source = "Never"
                 shape = .Never
-            } else -> bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, path, Val(ty), "nominal ID has no unique retained checked definition")
+            } else {
+                bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, path, Val(ty), "nominal ID has no unique retained checked definition")
+            }
         }
         .Shared(inner) -> {
             // Census the actual payload as well as the missing physical owner.

@@ -58,7 +58,9 @@ fn jet_cli_perf_browser_decode(text: String, pid: Int, started: String) -> JetCL
             index :: paths[path]
             &sources[index].symbols.push((name: name, kind: fields[3]))
             symbols[name] = path
-        } else -> return Err(jet_cli_read_error("browser source identity TSV is malformed"))
+        } else {
+            return Err(jet_cli_read_error("browser source identity TSV is malformed"))
+        }
     }
     if sources.len() == 0 -> return Err(jet_cli_read_error("browser relay has no source identities"))
     maps := [TraceSourceMap]{}

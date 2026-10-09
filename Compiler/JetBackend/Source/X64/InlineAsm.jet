@@ -121,7 +121,9 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
         } else if rest.starts_with("xadd ") {
             mnemonic = "xadd"
             rest = rest.slice(5, rest.len())
-        } else -> return Val("unsupported lock instruction")
+        } else {
+            return Val("unsupported lock instruction")
+        }
     } else if mnemonic == "cmpxchg" || mnemonic == "xadd" -> return Val("atomic instruction requires lock")
     operands :: rest.split(",").to_list()
     first :: operands[0].trim()

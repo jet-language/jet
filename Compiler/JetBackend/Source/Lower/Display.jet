@@ -476,8 +476,12 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
             }
             lower_seal(&f, LIRTerminator.Unreachable)
             falls_through = false
-        } else -> lower_fail(&m, &f, "displaying {definition.name} is not lowered at O0 yet")
-    } else -> lower_fail(&m, &f, "displaying {mir_type_display_name(glue.ty)} is not lowered at O0 yet")
+        } else {
+            lower_fail(&m, &f, "displaying {definition.name} is not lowered at O0 yet")
+        }
+    } else {
+        lower_fail(&m, &f, "displaying {mir_type_display_name(glue.ty)} is not lowered at O0 yet")
+    }
     if falls_through -> lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, done, [LIRValueID]{})
     text :: lower_render_string(&f)
