@@ -225,11 +225,15 @@ pub fn sema_comptime_body_capture(
 ) -> SemaComptimeBodySource Never! {
     function_key := sema_scope_function_owner_key(scopes)
     destination_key := sema_comptime_body_destination_key(function_key, source_span, site_span)
+    key :: "{environment.module_identity}::{destination_key}"
+    if context.comptime_body_source_modules.get(environment.module_identity) == .Val(slot) {
+        if context.comptime_body_source_rows[slot].get(key) == .Val(row) -> return context.comptime_body_sources[row]
+    }
     source := SemaComptimeBodySource{
         module_identity: environment.module_identity,
         function_key: function_key,
         source_file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, source_span),
-        key: "{environment.module_identity}::{destination_key}",
+        key: key,
         destination_key: destination_key,
         name: name,
         expression: expression,

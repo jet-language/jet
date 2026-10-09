@@ -198,7 +198,15 @@ fn parser_lookahead_kind_forward(state: JetParserState, start: Int, skip: Int) -
 }
 
 fn parser_current_kind(state: &JetParserState) -> Int Never! {
-    parser_current(&state).kind
+    // Keep parser_current's split-token, trivia, and EOF cursor rules.
+    if state.pending_type_gt {
+        return TOKEN_GT
+    }
+    parser_skip_trivia(&state)
+    if state.position < 0 || state.position >= state.tokens.len() {
+        return TOKEN_EOF
+    }
+    state.tokens[state.position].kind
 }
 
 fn parser_kind_at(state: &JetParserState, offset: Int) -> Int Never! {

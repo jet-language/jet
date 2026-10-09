@@ -405,6 +405,9 @@ pub struct SemaRegistrationImportBinding {
     pub symbol: Symbol
     pub declaration: Item?
     pub target_module_identity: String
+    // Resolved against this graph's fixed module order during registration;
+    // Core namespace bindings may name a module that was not loaded.
+    pub target_module_index: Int?
     pub visibility: Int
 }
 
@@ -2201,14 +2204,24 @@ fn sema_registration_add_import(graph: &SemaRegistrationGraph, registered: &Sema
     &graph.modules[source_index].imports.push(SemaRegistrationImport{source_module_identity: source_identity, source_package_identity: source_package, target_module_identity: target_identity, target_package_identity: target_package, declaration: declaration, visibility: visibility, bindings: [SemaRegistrationImportBinding]{}})
 }
 
-fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_index: Int) {
+// Resolve each exact identity once per pass, including known absences (-1).
+// The cache belongs to one graph with a fixed module order; import bindings
+// retain their answer through graph clones and staged value application.
+pub fn sema_registration_cached_module_index(graph: SemaRegistrationGraph, identity: String, indices: &[String:Int]) -> Int? {
+    if indices.get(identity) == .Val(index) -> return if index < 0 -> None else -> Val(index)
+    index :: sema_registration_module_index(graph, identity)
+    indices[identity] = index ?? -1
+    index
+}
+
+fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_index: Int, import_module_indices: &[String:Int]) {
     source_identity := graph.modules[module_index].module_identity
     source_package := graph.modules[module_index].package_identity
     import_count :: graph.modules[module_index].imports.len()
     loop import_index in 0..<import_count {
         declaration := graph.modules[module_index].imports[import_index].declaration
         target_identity := graph.modules[module_index].imports[import_index].target_module_identity
-        target_index :: sema_registration_module_index(graph, target_identity) ?? {
+        target_index :: sema_registration_cached_module_index(graph, target_identity, &import_module_indices) ?? {
             sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0003", declaration.span, "the import target is not in the declaration graph", "qualified imports resolve through the exact loaded module identity", "retain the loader's source and module identity for this import"))
             next
         }
@@ -2229,7 +2242,8 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                     }
                     import_visibility :: graph.modules[module_index].imports[import_index].visibility
                     module_symbol :: Symbol{id: symbol_id(SymbolKind.Import, source_identity, submodule, local), kind: SymbolKind.Import, name: local, module_name: submodule, owner: None, span: declaration.span, ty: None, visibility: import_visibility}
-                    sema_registration_push_import_binding(&graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: module_symbol, declaration: None, target_module_identity: submodule, visibility: import_visibility})
+                    submodule_index :: sema_registration_cached_module_index(graph, submodule, &import_module_indices)
+                    sema_registration_push_import_binding(&graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: module_symbol, declaration: None, target_module_identity: submodule, target_module_index: submodule_index, visibility: import_visibility})
                     next
                 }
                 resolved :: sema_registration_resolve_export(graph, target_index, item.original, source_identity, source_package, [String]{})
@@ -2241,7 +2255,8 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                             else -> {
                                 imported_symbol := export.symbol
                                 imported_symbol.name = local
-                                sema_registration_push_import_binding(&graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: imported_symbol, declaration: export.declaration, target_module_identity: export.source_module_identity, visibility: export.visibility})
+                                origin_index :: sema_registration_cached_module_index(graph, export.source_module_identity, &import_module_indices)
+                                sema_registration_push_import_binding(&graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: imported_symbol, declaration: export.declaration, target_module_identity: export.source_module_identity, target_module_index: origin_index, visibility: export.visibility})
                                 if declaration.is_pub || declaration.is_package_pub {
                                     &graph.modules[module_index].exports.push(SemaRegistrationExport{name: local, symbol: imported_symbol, declaration: export.declaration, source_module_identity: export.source_module_identity, visibility: if declaration.is_pub -> 2 else -> 1})
                                 }
@@ -2271,7 +2286,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                     else -> {
                         import_visibility :: graph.modules[module_index].imports[import_index].visibility
                         module_symbol :: Symbol{id: symbol_id(SymbolKind.Import, source_identity, target_identity, declaration.alias), kind: SymbolKind.Import, name: declaration.alias, module_name: target_identity, owner: None, span: declaration.alias_span, ty: None, visibility: import_visibility}
-                        sema_registration_push_import_binding(&graph, module_index, import_index, SemaRegistrationImportBinding{original: target.module_name, local: declaration.alias, symbol: module_symbol, declaration: None, target_module_identity: target_identity, visibility: import_visibility})
+                        sema_registration_push_import_binding(&graph, module_index, import_index, SemaRegistrationImportBinding{original: target.module_name, local: declaration.alias, symbol: module_symbol, declaration: None, target_module_identity: target_identity, target_module_index: Val(target_index), visibility: import_visibility})
                     }
                 }
             }
@@ -2456,9 +2471,10 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
         }
         module_index += 1
     }
+    import_module_indices := [String:Int]{}
     module_index = 0
     loop module_index < graph.modules.len() {
-        sema_registration_populate_imports(&graph, module_index)
+        sema_registration_populate_imports(&graph, module_index, &import_module_indices)
         sema_inline_modules_check_imports(&graph, module_index)
         module_index += 1
     }
