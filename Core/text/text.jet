@@ -29,6 +29,8 @@ module html
 module combinators
 
 use __core_text_segmentation_tables as segment_tables
+use core.text.runtime.kernel_unicode_string as text_unicode_string
+use core.text.runtime.kernel_text_width as text_width
 
 /// Byte-offset cursor into UTF-8 text. Line and column are 1-based.
 struct Cursor {
@@ -47,7 +49,7 @@ fn cursor_advance(text: String, cur: Cursor) -> Cursor Never! {
     raw :: text.bytes()
     if cur.offset < 0 -> return Cursor{offset: 0, line: 1, column: 1}
     if cur.offset >= raw.len() -> return cur.copy()
-    width :: utf8_width_at(raw, cur.offset)
+    width :: text_unicode_string.utf8_width_at(raw, cur.offset)
     next :: cur.offset + width
     if raw[cur.offset] == (U8{10}) -> return Cursor{offset: next, line: cur.line + 1, column: 1}
     Cursor{offset: next, line: cur.line, column: cur.column + 1}
@@ -111,7 +113,7 @@ fn char_indices(text: String) -> [String] Never! {
 
 fn display_width(text: String) -> Int Never! {
     total := 0
-    loop cluster in split_graphemes(text) -> total = total + cluster_width(decode_scalars(cluster))
+    loop cluster in split_graphemes(text) -> total = total + text_width.cluster_width(decode_scalars(cluster))
     total
 }
 
@@ -193,7 +195,7 @@ fn trim_end(text: String) -> String Never! {
     i := pairs.len() - 1
     loop i >= 0 {
         if !is_space_cp(pairs[i].cp) {
-            end = pairs[i].index + utf8_width_at(text.bytes(), pairs[i].index)
+            end = pairs[i].index + text_unicode_string.utf8_width_at(text.bytes(), pairs[i].index)
             break
         }
         i = i - 1
@@ -232,6 +234,11 @@ fn splitn(text: String, sep: String, n: Int) -> [String] Never! { split_limit(te
 
 fn rsplitn(text: String, sep: String, n: Int) -> [String] Never! { split_limit(text, sep, n, true) }
 
+
+fn ascii_alpha(b: U8) -> Bool {
+    n :: b
+    (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+}
 
 fn ascii_space(b: U8) -> Bool {
     n :: b
@@ -859,9 +866,10 @@ fn is_midnum_q(class: Int) -> Bool Never! { class == WB_MIDNUM || class == WB_MI
 fn word_reduce(pairs: [IndexedCp], byte_len: Int) -> [WordUnit] Never! {
     units := [WordUnit]{}
     table :: segment_tables.UNICODE_WORD_BREAK
+    window :: table[0..<table.len()]
     loop i in 0..<pairs.len() {
         cp :: pairs[i].cp
-        class :: segment_tag(table[0..<table.len()], cp)
+        class :: segment_tag(window, cp)
         end :: if i + 1 < pairs.len() -> pairs[i + 1].index else -> byte_len
         count :: units.len()
         if count > 0 && (class == WB_EXTEND || class == WB_FORMAT || class == WB_ZWJ) {
@@ -905,12 +913,13 @@ fn word_boundaries(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
     if pairs.len() == 0 -> return out
     units :: word_reduce(pairs, byte_len)
     pictographic :: segment_tables.UNICODE_EXTENDED_PICTOGRAPHIC
+    pictographic_window :: pictographic[0..<pictographic.len()]
     ri_run := 0
     loop i in 0..<units.len() {
         class :: units[i].class
         ri_run = if class == WB_RI -> ri_run + 1 else -> 0
         if i + 1 < units.len() {
-            split :: if class == WB_RI && units[i + 1].class == WB_RI -> ri_run % 2 == 0 else -> word_break_at(units, i, pictographic[0..<pictographic.len()])
+            split :: if class == WB_RI && units[i + 1].class == WB_RI -> ri_run % 2 == 0 else -> word_break_at(units, i, pictographic_window)
             if split -> &out.push(units[i].end)
         }
     }
@@ -922,13 +931,15 @@ fn split_words(text: String) -> [String] Never! {
     pairs :: decode_indexed(text)
     alphabetic :: segment_tables.UNICODE_ALPHABETIC
     numeric :: segment_tables.UNICODE_NUMERIC
+    alphabetic_window :: alphabetic[0..<alphabetic.len()]
+    numeric_window :: numeric[0..<numeric.len()]
     out := [String]{}
     start := 0
     at := 0
     loop end in word_boundaries(pairs, raw.len()) {
         keep := false
         loop at < pairs.len() && pairs[at].index < end {
-            if !keep -> keep = segment_contains(alphabetic[0..<alphabetic.len()], pairs[at].cp) || segment_contains(numeric[0..<numeric.len()], pairs[at].cp)
+            if !keep -> keep = segment_contains(alphabetic_window, pairs[at].cp) || segment_contains(numeric_window, pairs[at].cp)
             at = at + 1
         }
         if keep -> &out.push(slice_bytes(raw, start, end))
@@ -998,8 +1009,9 @@ fn sentence_boundaries(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
     if pairs.len() == 0 -> return out
     units := [SentenceUnit]{}
     table :: segment_tables.UNICODE_SENTENCE_BREAK
+    window :: table[0..<table.len()]
     loop i in 0..<pairs.len() {
-        class :: segment_tag(table[0..<table.len()], pairs[i].cp)
+        class :: segment_tag(window, pairs[i].cp)
         end :: if i + 1 < pairs.len() -> pairs[i + 1].index else -> byte_len
         count :: units.len()
         if count > 0 && (class == SB_EXTEND || class == SB_FORMAT) {
