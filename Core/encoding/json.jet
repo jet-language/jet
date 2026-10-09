@@ -719,6 +719,9 @@ fn append_events(value: Dyn) -> [DataEvent] Never! {
         .Int(n) -> &out.push(DataEvent.Int(n))
         .Float(n) -> &out.push(DataEvent.Float(n))
         .Text(s) -> &out.push(DataEvent.Text(s))
+        // JSON events carry temporal values as their RFC 3339 text, not a
+        // format-specific event variant absent from the shared DataEvent rail.
+        .DateTime(_) -> &out.push(DataEvent.Text(value.to_text() ?? ""))
         .Array(items) -> {
             &out.push(DataEvent.ArrayStart)
             loop item in items {
@@ -730,9 +733,9 @@ fn append_events(value: Dyn) -> [DataEvent] Never! {
         .Object(_) -> {
             entries :: stream.object_entries(value)
             &out.push(DataEvent.ObjectStart)
-            loop key in value.keys() {
-                &out.push(DataEvent.Key(key))
-                chunk := append_events(value[key])
+            loop pair in entries {
+                &out.push(DataEvent.Key(pair.key))
+                chunk := append_events(pair.value)
                 loop event in chunk -> &out.push(event)
             }
             &out.push(DataEvent.ObjectEnd)
@@ -925,15 +928,15 @@ fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) -> () EncodingE
                 return Ok(())
             }
             i := 0
-            loop key in value.keys() {
+            loop pair in entries {
                 if pretty {
                     &out.push(U8{10})
                     write_indent(&out, indent + 1)
                 }
-                write_json_string(&out, key)
+                write_json_string(&out, pair.key)
                 &out.push(U8{58})
                 if pretty -> &out.push(U8{32})
-                write_json(&out, value[key], pretty, indent + 1) ?? return Err(err)
+                write_json(&out, pair.value, pretty, indent + 1) ?? return Err(err)
                 i += 1
                 if i < value.len() -> &out.push(U8{44})
             }
