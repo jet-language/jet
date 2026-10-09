@@ -612,15 +612,29 @@ fn moved_command_registry_agrees_with_dispatch_exceptions() {
     let mut declared = Vec::new();
     for group in jet::CLI::command_groups() {
         for action in group.actions {
-            let dispatch_exempts =
-                jet::CLI::moved_command(action.name).is_none() && action.name != "install";
-            assert_eq!(
-                action.also_canonical_top_level, dispatch_exempts,
-                "registry and moved_command disagree for {} {}",
-                group.name, action.name
-            );
+            let top_level_row = jet::CLI::COMMANDS
+                .iter()
+                .any(|command| command.name == action.name);
+            let teaches_move = jet::CLI::moved_command(action.name).is_some();
             if action.also_canonical_top_level {
+                // A declared spelling is a live top-level command, so the bare
+                // word dispatches there instead of teaching its grouped spelling.
+                assert!(
+                    top_level_row && !teaches_move,
+                    "{} {} is declared canonical but bare dispatch disagrees",
+                    group.name,
+                    action.name
+                );
                 declared.push(format!("{} {}", group.name, action.name));
+            } else if !top_level_row
+                && action.name != "install"
+                && !jet::CLI::is_retired_root(action.name)
+            {
+                assert!(
+                    teaches_move,
+                    "registry and moved_command disagree for {} {}",
+                    group.name, action.name
+                );
             }
         }
     }
@@ -628,8 +642,9 @@ fn moved_command_registry_agrees_with_dispatch_exceptions() {
         declared,
         vec![
             "inspect audit",
+            "inspect bind",
             "env test",
-            "gc report",
+            "cache status",
             "perf run",
             "perf test",
         ]
