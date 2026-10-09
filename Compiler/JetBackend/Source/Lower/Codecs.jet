@@ -59,15 +59,6 @@ fn lower_codec_scalar(ty: MIRType) -> String? Never! {
     }
 }
 
-fn lower_codec_tree(p: MIRProgram) -> MIRType? Never! {
-    loop definition in p.types {
-        ty :: mir_type_from_kind(MIRTypeKind.Apply{name: MIRNominalRef{id: definition.id, name: definition.name}, args: [MIRType]{}})
-        if lower_record_handle(p, ty) == .Val(runtime) {
-            if runtime == "DataTree" -> return Val(ty)
-        }
-    }
-    None
-}
 
 fn lower_codec_method_call(p: MIRProgram, m: &LowerModule, f: &LowerFunction, method: LowerCodecMethod, source: LIRValueID, dst: LIRValueID) Never! {
     target :: lower_instance_id(method.function, lower_call_bindings(Val(method.owner), [MIRType]{}))
@@ -88,7 +79,7 @@ fn lower_codec_decode_into(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ta
     scalar :: lower_codec_scalar(target) ?? return lower_fail(&m, &f, "Decode<{mir_type_display_name(target)}> has no reachable selected method or canonical scalar carrier")
     route :: lower_runtime_route("jet_rt_codec_decode_{scalar}") ?? return lower_fail(&m, &f, "canonical scalar Decode adapter is missing")
     if !lower_route_shape_matches(p, result, route.result) -> return lower_fail(&m, &f, "canonical scalar Decode result does not match checked FieldError storage")
-    runtime :: lower_record_to_runtime(p, &m, &f, tree, "DataTree", source)
+    runtime :: lower_dyn_to_runtime(p, &m, &f, tree, source) ?? return
     if route.result == .Result(ok, err) {
         out :: lower_route_result_call(&m, &f, route.export, [LIRValueID]{runtime}, ok, err)
         lower_alloc(&m, &f, dst, lower_box_size(p, result))
@@ -109,7 +100,7 @@ fn lower_codec_decode_into(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ta
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
         lower_start(&f, merge, [LIRValueID]{})
     }
-    lower_call_runtime(&m, &f, "jet_rt_handle_drop_DataTree", [LIRValueID]{runtime}, None)
+    lower_call_runtime(&m, &f, "jet_rt_handle_drop_Dyn", [LIRValueID]{runtime}, None)
 }
 
 fn lower_codec_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg], types: [MIRType]) -> Bool Never! {
@@ -141,16 +132,16 @@ fn lower_codec_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         }
         result :: lower_checked_type(c, instruction) ?? return true
         if !lower_route_shape_matches(p, result, route.result) {
-            lower_fail(&m, &f, "canonical scalar Encode result does not match checked DataTree storage")
+            lower_fail(&m, &f, "canonical scalar Encode result does not match checked Dyn storage")
             return true
         }
         runtime :: lower_pointer(&f)
         lower_call_runtime(&m, &f, route.export, [LIRValueID]{source}, Val(runtime))
-        lower_record_from_runtime(p, &m, &f, result, runtime, Val(dst))
+        lower_dyn_from_runtime(p, &m, &f, result, runtime, dst)
         return true
     }
-    tree :: lower_codec_tree(p) ?? {
-        lower_fail(&m, &f, "typed Decode has no checked DataTree declaration")
+    tree :: lower_dyn_program_type(p) ?? {
+        lower_fail(&m, &f, "typed Decode has no checked Dyn declaration")
         return true
     }
     result :: lower_checked_type(c, instruction) ?? return true
@@ -186,7 +177,7 @@ fn lower_codec_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         runtime :: lower_pointer(&f)
         lower_emit(&f, LIRInst.Load{dst: runtime, base: out.slot, offset: 0})
         native :: lower_pointer(&f)
-        lower_record_from_runtime(p, &m, &f, tree, runtime, Val(native))
+        lower_dyn_from_runtime(p, &m, &f, tree, runtime, native)
         decoded :: lower_pointer(&f)
         lower_codec_decode_into(p, &m, &f, target, result, tree, native, decoded)
         lower_map_drop_value(p, &m, &f, native, tree)
@@ -261,8 +252,8 @@ fn lower_codec_csv(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
         lower_fail(&m, &f, "typed CSV failures do not match canonical FieldError storage")
         return true
     }
-    if lower_codec_tree(p) == None {
-        lower_fail(&m, &f, "typed CSV has no checked DataTree declaration")
+    if lower_dyn_program_type(p) == None {
+        lower_fail(&m, &f, "typed CSV has no checked Dyn declaration")
         return true
     }
     source :: lower_use(&m, &f, args[0].value) ?? return true
@@ -302,18 +293,17 @@ fn lower_codec_csv(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
 fn lower_helper_codec_csv_decode(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     target :: if glue.ty.kind == .Result(ok, _) -> ok else -> panic("CSV callback needs its checked Decode Result")
     errors :: if glue.ty.kind == .Result(_, err) -> err else -> panic("CSV callback needs its checked failures")
-    tree :: lower_codec_tree(p) ?? panic("CSV callback needs its checked DataTree")
+    tree :: lower_dyn_program_type(p) ?? panic("CSV callback needs its checked Dyn")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer(), lir_layout_pointer(), lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_word()))
     borrowed :: ~f.open_params[0]
     output :: ~f.open_params[1]
     status_out :: ~f.open_params[2]
     errors_out :: ~f.open_params[3]
     length_out :: ~f.open_params[4]
-    native_slot :: lower_pointer(&f)
-    lower_emit(&f, LIRInst.StackSlot{dst: native_slot, size: 8, align: 8})
-    lower_call_helper(&m, &f, "record.in", tree, [LIRValueID]{borrowed, native_slot}, None)
+    owned :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_handle_clone_Dyn", [LIRValueID]{borrowed}, Val(owned))
     native :: lower_pointer(&f)
-    lower_emit(&f, LIRInst.Load{dst: native, base: native_slot, offset: 0})
+    lower_dyn_from_runtime(p, &m, &f, tree, owned, native)
     decoded :: lower_pointer(&f)
     lower_codec_decode_into(p, &m, &f, target, glue.ty, tree, native, decoded)
     stopped :: lower_word(&f)

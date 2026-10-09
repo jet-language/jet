@@ -23,9 +23,9 @@ extern void jet_rt_native_task_cancel(int64_t);
 extern int64_t jet_scheduler_native_propagate(void);
 extern void jet_scheduler_shield_enter(void);
 extern void jet_scheduler_shield_leave(void);
-extern int64_t jet_rt_record_new_DataTree_Null(void);
-extern Text *jet_rt_record_get_DataTree_Text(int64_t);
-extern void jet_rt_handle_drop_DataTree(int64_t);
+extern int64_t jet_rt_record_new_Dyn_Null(void);
+extern Text *jet_rt_record_get_Dyn_Text(int64_t);
+extern void jet_rt_handle_drop_Dyn(int64_t);
 extern int64_t jet_rt_record_tag_JetTaskFailure(int64_t);
 extern Text *jet_rt_record_get_JetTaskFailure_Panicked(int64_t);
 extern void jet_rt_handle_drop_JetTaskFailure(int64_t);
@@ -88,7 +88,8 @@ extern bool jet_bit_set_has(int64_t, int64_t);
 extern void jet_bitset_remove(int64_t, int64_t);
 extern int64_t jet_loop_range_init(int64_t, int64_t, int64_t, uint8_t, uint8_t);
 extern int64_t jet_rt_record_new_DataEvent_Int(int64_t);
-extern int64_t jet_rt_record_new_DataTree_Int(int64_t);
+extern int64_t jet_rt_record_new_Dyn_Int(int64_t);
+extern int64_t jet_rt_record_get_Dyn_Int(int64_t);
 extern int64_t jet_rt_record_new_Duration(int64_t);
 extern int64_t jet_rt_record_new_EncodingLimits(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_DataLimits(int64_t, int64_t, int64_t, int64_t, int64_t);
@@ -173,6 +174,7 @@ static const char *expected_reason(int64_t mode) {
         if (test >= 7 && test <= 10) return "Invalid shift count";
         if (test >= 11 && test <= 13) return "Value doesn't fit in destination type";
         if (test == 15) return overflow_reason;
+        if (test == 24) return reason;
         return range_reason;
     }
     if (mode == 2 || (mode >= 33 && mode <= 36)) return numeric_reason;
@@ -230,7 +232,17 @@ static void run_int_stop(int64_t test) {
         assert(jet_loop_range_init(test == 20 ? big : 0, test == 21 ? big : 1, test == 19 ? big : 1, 1, 0) == 0);
     } else if (test == 22) assert(jet_rt_record_new_JetAsyncPolicy(big, 0) == 0);
     else if (test == 23) assert(jet_rt_record_new_DataEvent_Int(big) == 0);
-    else if (test == 24) assert(jet_rt_record_new_DataTree_Int(big) == 0);
+    else if (test == 24) {
+        /* Canonical Dyn keeps large exact Int instead of narrowing it. */
+        int64_t tree = jet_rt_record_new_Dyn_Int(big);
+        assert(tree != 0 && jet_scheduler_native_propagate() == 0);
+        int64_t retained = jet_rt_record_get_Dyn_Int(tree);
+        assert(retained == big);
+        jet_rt_int_drop(retained);
+        /* Exercise the real variant guard after the successful owner path. */
+        assert(jet_rt_record_get_Dyn_Text(tree) == NULL);
+        jet_rt_handle_drop_Dyn(tree);
+    }
     else if (test == 25) assert(jet_rt_record_new_Duration(big) == 0);
     else if (test == 26) assert(jet_rt_record_new_EncodingCause(WORD(&key), WORD(&big), WORD(&key)) == 0);
     else if (test >= 27 && test <= 29) {
@@ -365,10 +377,10 @@ static void run_stop(int64_t mode) {
         return;
     }
     if (mode == 0) {
-        int64_t tree = jet_rt_record_new_DataTree_Null();
+        int64_t tree = jet_rt_record_new_Dyn_Null();
         /* Nested payload -> clone chain must stop before cloning NULL. */
-        assert(jet_rt_record_get_DataTree_Text(tree) == NULL);
-        jet_rt_handle_drop_DataTree(tree);
+        assert(jet_rt_record_get_Dyn_Text(tree) == NULL);
+        jet_rt_handle_drop_Dyn(tree);
     } else if (mode == 1 || mode == 28) {
         Text file = {(unsigned char *)"<core.prelude>", 14, 0};
         Text message = {(unsigned char *)reason, sizeof(reason) - 1, 0};

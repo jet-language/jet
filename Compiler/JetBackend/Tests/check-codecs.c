@@ -7,7 +7,7 @@
 typedef void *Handle;
 extern Handle jet_rt_string_from_static(const char *, int64_t);
 extern void jet_rt_string_drop(Handle);
-extern void jet_rt_handle_drop_DataTree(Handle);
+extern void jet_rt_handle_drop_Dyn(Handle);
 extern void jet_rt_handle_drop_FieldError(Handle);
 extern void jet_rt_free(void *, int64_t, int64_t);
 extern Handle jet_rt_codec_encode_U8(int64_t);
@@ -65,7 +65,7 @@ int main(void) {
         Handle *errors = NULL;
         assert(jet_rt_codec_decode_U8(tree, &value, &errors, &count) == 1);
         assert(value == bytes[i]);
-        jet_rt_handle_drop_DataTree(tree);
+        jet_rt_handle_drop_Dyn(tree);
     }
     Handle minimum = jet_rt_codec_encode_I64(INT64_MIN);
     int64_t value = 0, count = -1;
@@ -75,7 +75,7 @@ int main(void) {
     assert(jet_rt_codec_decode_U8(minimum, &value, &errors, &count) == 0);
     assert(count == 1);
     drop_errors(errors, count);
-    jet_rt_handle_drop_DataTree(minimum);
+    jet_rt_handle_drop_Dyn(minimum);
 
     // The typed JSON intrinsic preserves integers outside signed/binary64 range.
     Handle text = jet_rt_string_from_static("18446744073709551615", 20);
@@ -83,7 +83,7 @@ int main(void) {
     assert(jet_rt_codec_parse_json(text, &tree, &errors, &count) == 1);
     assert(jet_rt_codec_decode_U64(tree, &value, &errors, &count) == 1);
     assert((uint64_t)value == UINT64_MAX);
-    jet_rt_handle_drop_DataTree(tree);
+    jet_rt_handle_drop_Dyn(tree);
     jet_rt_string_drop(text);
 
     text = jet_rt_string_from_static("{", 1);
