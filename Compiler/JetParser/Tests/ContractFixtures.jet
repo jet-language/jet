@@ -110,6 +110,56 @@ fn pc_formatter_edit_boundaries() {
     pc_require(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 2, end: 0}, new_text: "a"}}) == None, "reversed edit")
 }
 
+// Exercise the production Source parser, not the reference parser used to
+// compile this fixture. Semantic Output field/binder checks belong to sema.
+fn pc_output_provider() {
+    loop kind in ([String]{"Library", "Executable", "Service", "Check", "Environment", "Image", "Bundle", "System", "Fleet"}) {
+        source :: "app :: Output.{kind}{{ name: \"artifact\", entry: run }}\n"
+        parsed :: parse_source(source.bytes())
+        pc_require(parsed.diagnostics.len() == 0 && parsed.program.script_body.len() == 0, "{kind} enters the item route before module bindings")
+        pc_require(parsed.program.items.len() == 1, "{kind} produces exactly one declaration")
+        if parsed.program.items[0] == .Const(value) {
+            pc_require(value.name == "app" && value.name_span == Span{start: 0, end: 3}, "{kind} preserves the bare binding name span")
+            pc_require(value.span == Span{start: 0, end: source.len() - 1}, "{kind} declaration ends at the constructor close")
+            pc_require(!value.is_pub && !value.is_package_pub && !value.is_comptime && !value.mutable && !value.is_persist, "{kind} stays a default-private immutable runtime declaration")
+            pc_require(value.rust_kind == RustConstKind.Const && value.attrs.len() == 0 && value.meta == None && value.ct == None && value.persist_span == None && value.resolved_output == None, "{kind} preserves ordinary Const tags")
+            pc_require(if value.ty == .Val(annotation) && annotation == .Named(type_name) -> type_name == "Output" else -> false, "{kind} carries the canonical Output type")
+            if value.value == .EnumLit(type_name, variant_name, variant_site, args, leading_dot, span) {
+                pc_require(type_name == "Output" && variant_name == kind && !leading_dot, "{kind} keeps its qualified closed-sum constructor")
+                pc_require(span == Span{start: 7, end: source.len() - 1} && variant_site == Val(Span{start: 14, end: 14 + kind.len()}), "{kind} keeps constructor and variant byte spans")
+                pc_require(args.len() == 2, "{kind} retains both named fields")
+                pc_require(if args[0] == .Named(label, _) -> label == "name" else -> false, "{kind} retains first field label")
+                pc_require(if args[1] == .Named(label, argument) && argument == .Ident(name, _) -> label == "entry" && name == "run" else -> false, "{kind} retains the bare callable address")
+            } else { panic("Output provider lost the {kind} constructor") }
+        } else { panic("Output provider lost the {kind} Const item") }
+    }
+    source :: "defaults: {{ run: app, check: checker, enter: env }}\n"
+    parsed :: parse_source(source.bytes())
+    pc_require(parsed.diagnostics.len() == 0 && parsed.program.items.len() == 1 && parsed.program.script_body.len() == 0, "defaults enters the dedicated item route")
+    if parsed.program.items[0] == .Const(value) {
+        pc_require(value.name == "defaults" && value.name_span == Span{start: 0, end: 8} && value.span == Span{start: 0, end: source.len() - 1}, "defaults preserves existing Source declaration spans")
+        pc_require(if value.ty == .Val(annotation) && annotation == .Named(type_name) -> type_name == "__OutputDefaults" else -> false, "defaults retains the existing internal tag")
+        pc_require(!value.is_pub && !value.is_package_pub && !value.is_comptime && !value.mutable && !value.is_persist && value.rust_kind == RustConstKind.Const && value.attrs.len() == 0 && value.meta == None && value.ct == None && value.resolved_output == None, "defaults keeps its default Const facts")
+        if value.value == .StructLit(type_name, type_args, import_ns, as_trait, fields, inferred, span) {
+            pc_require(type_name == "" && type_args.len() == 0 && import_ns == None && as_trait == None && inferred && span == Span{start: 10, end: source.len() - 1}, "defaults retains the anonymous named-field record")
+            pc_require(fields.len() == 3, "defaults preserves all three addresses")
+            labels :: [String]{"run", "check", "enter"}
+            addresses :: [String]{"app", "checker", "env"}
+            loop index in 0..<fields.len() {
+                field :: fields[index]
+                pc_require(field.name == labels[index], "defaults preserves field order")
+                pc_require(if field.value == .Ident(name, _) -> name == addresses[index] else -> false, "defaults preserves bare Output addresses")
+            }
+        } else { panic("Output defaults provider lost its record") }
+    } else { panic("Output defaults provider lost its Const item") }
+    plain :: parse_source("plain :: 1\n".bytes())
+    pc_require(plain.diagnostics.len() == 0 && plain.program.script_body.len() == 0, "ordinary module bindings retain their route")
+    pc_require(if plain.program.items[0] == .Const(value) -> value.name == "plain" && value.ty == None else -> false, "ordinary bindings do not acquire Output tags")
+    nested :: parse_source("module group {{\n app :: Output.Executable{{ name: \"artifact\", entry: run }}\n defaults: {{ run: app }}\n}}\n".bytes())
+    pc_require(nested.diagnostics.len() == 0, "inline module item dispatch uses the same provider")
+    pc_require(if nested.program.items[0] == .CodeModule(value) && value.body == .Val(body) -> body.len() == 2 else -> false, "inline module retains both Output declarations")
+}
+
 // Kind-only queries are checked against the existing whole-token accessor.
 // This semantic oracle is not a production allocation or timing measurement.
 fn pc_current_kind_equivalence() {
@@ -175,7 +225,9 @@ fn run() {
     pc_formatter_edit_boundaries()
     pc_trait_effect_slots()
     pc_current_kind_equivalence()
+    pc_output_provider()
     print("V48 semicolon edits/recovery: passed")
     print("marker registry/parser status: passed")
     print("trait effect-arrow slots: passed")
+    print("Output provider AST facts: passed")
 }
