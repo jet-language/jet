@@ -222,6 +222,10 @@ pub fn cli_finish_workspace_load(cache: &WorkspaceDeclarationCache, dir: String,
     if env_workspace_lock_write(&cache, dir, snapshot.plan) == {
         .Ok(_) -> Ok(Val(snapshot.plan))
         .Err(error) -> {
+            if error == .Gate(gate) {
+                terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", gate.diagnostics))
+                return Err(CLIError.Reported(EXIT_USAGE))
+            }
             lock_path :: files.join(dir, UNIFIED_LOCK_FILE)
             diagnostic :: pkg_lock_e1202_workspace_write(lock_path, error.message())
             terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}))

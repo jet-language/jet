@@ -20,6 +20,15 @@ objects, process state, or a lock only at the operation that owns that write.
 Read-only inspection does not realize packages, run jobs, start services, or
 apply managed files.
 
+Trust-store grants check `trust_grant` before opening or creating the store.
+Workspace lock publication checks `force_pin` for `.Force` overlays and
+`dependency_grant` for nonempty build grants before acquiring its process lock.
+Invocation choices use their own audited gate: build flags, session flags, and
+force pins; `--allow` also checks `dependency_grant`. An organization or checked
+Package `.Forbid` returns E3415 with the gate, written site, and policy origin,
+without changing the store or publishing the lock. `.GateOnly` does not deny an
+explicit writer, and a one-shot `--trust` never persists a grant.
+
 ## Package roots and Config facts
 
 `package.jet` is the canonical package manifest. A migration-era `pkg.jet` can
