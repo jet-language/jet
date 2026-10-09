@@ -116,8 +116,8 @@ fn scan_text_validate(data: I64, len: I64, stride: I64, parts: I64, count: I64, 
     index := I64{0}
     loop index < count {
         row :: parts + index * I64{64}
-        tag :: rt_text_word(row)
-        if (tag == I64{0}) {
+        row_tag :: rt_text_word(row)
+        if (row_tag == I64{0}) {
             n :: rt_text_word(row + I64{16})
             if (n > len - cursor || !scan_equal(data + cursor * stride, stride, rt_text_word(row + I64{8}), n)) { return I64{-1} }
             cursor += n
@@ -130,17 +130,17 @@ fn scan_text_validate(data: I64, len: I64, stride: I64, parts: I64, count: I64, 
             }
             raw :: data + cursor * stride
             length :: end - cursor
-            if (tag == I64{2} || tag == I64{5}) {
+            if (row_tag == I64{2} || row_tag == I64{5}) {
                 parsed :: scan_integer(raw, length, stride)
                 if !parsed.valid { return I64{-1} }
-                if (tag == I64{5} && (parsed.word < rt_text_word(row + I64{8}) || parsed.word > rt_text_word(row + I64{16}))) { return I64{-1} }
+                if (row_tag == I64{5} && (parsed.word < rt_text_word(row + I64{8}) || parsed.word > rt_text_word(row + I64{16}))) { return I64{-1} }
                 rt_text_store(row + I64{48}, parsed.word)
-            } else if (tag == I64{3}) {
+            } else if (row_tag == I64{3}) {
                 decimal :: scan_decimal(raw, length, stride)
                 if !decimal.valid { return I64{-1} }
                 rt_text_store(row + I64{48}, cursor)
                 rt_text_store(row + I64{56}, length)
-            } else if (tag == I64{4}) {
+            } else if (row_tag == I64{4}) {
                 parsed :: scan_bool(raw, length, stride)
                 if (parsed < I64{0}) { return I64{-1} }
                 rt_text_store(row + I64{48}, parsed)
@@ -161,13 +161,13 @@ fn scan_binary_validate(data: I64, len: I64, stride: I64, parts: I64, count: I64
     index := I64{0}
     loop index < count {
         row :: parts + index * I64{64}
-        tag :: rt_text_word(row)
-        if (tag == I64{16}) {
+        row_tag :: rt_text_word(row)
+        if (row_tag == I64{16}) {
             n :: rt_text_word(row + I64{16})
             byte_position :: position /% I64{8}
             if ((position & I64{7}) != I64{0} || n > len - byte_position || !scan_equal(data + byte_position * stride, stride, rt_text_word(row + I64{8}), n)) { return I64{-1} }
             position += n * I64{8}
-        } else if (tag == I64{17}) {
+        } else if (row_tag == I64{17}) {
             width :: rt_text_word(row + I64{8})
             if (width > total - position) { return I64{-1} }
             value := I64{0}
@@ -246,8 +246,8 @@ fn scan_materialize(data: I64, stride: I64, parts: I64, count: I64) {
     index := I64{0}
     loop index < count {
         row :: parts + index * I64{64}
-        tag :: rt_text_word(row)
-        if (tag != I64{0} && tag != I64{16}) {
+        row_tag :: rt_text_word(row)
+        if (row_tag != I64{0} && row_tag != I64{16}) {
             destination :: rt_text_word(row + I64{32})
             storage :: rt_text_word(row + I64{40})
             if (storage == I64{5}) {
@@ -255,13 +255,13 @@ fn scan_materialize(data: I64, stride: I64, parts: I64, count: I64) {
                 next
             }
             value := rt_text_word(row + I64{48})
-            if (tag == I64{1}) {
+            if (row_tag == I64{1}) {
                 raw :: data + value * stride
                 length :: rt_text_word(row + I64{56})
                 value = scan_text_copy(raw, length, stride)
-            } else if (tag == I64{18}) {
+            } else if (row_tag == I64{18}) {
                 value = scan_bytes_copy(data + value * stride, rt_text_word(row + I64{56}), stride, rt_text_word(row + I64{24}))
-            } else if (tag == I64{3}) {
+            } else if (row_tag == I64{3}) {
                 value = scan_float_bits(data + value * stride, rt_text_word(row + I64{56}), stride)
             } else if (storage == I64{1}) { value = jet_int_owned_from_i64(value) }
             if (storage == I64{3}) { rt_text_put(destination, value) } else if (storage == I64{0}) {

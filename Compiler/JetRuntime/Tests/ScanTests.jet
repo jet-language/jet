@@ -5,9 +5,9 @@ fn scan_test_require(ok: Bool) {
     trap_exit(I64{1})
     loop {}
 }
-fn scan_test_row(row: I64, tag: I64, a: I64, b: I64, destination: I64, storage: I64) {
+fn scan_test_row(row: I64, row_tag: I64, a: I64, b: I64, destination: I64, storage: I64) {
     coll_zero(row, I64{64})
-    rt_text_store(row, tag)
+    rt_text_store(row, row_tag)
     rt_text_store(row + I64{8}, a)
     rt_text_store(row + I64{16}, b)
     rt_text_store(row + I64{24}, I64{8})
@@ -193,14 +193,14 @@ fn scan_stream_tests() {
     jet_rt_string_drop(text)
     jet_cursor_skip_ws(cursor)
     scan_test_require(rt_text_word(cursor + I64{24}) == I64{3})
-    copy :: jet_rt_handle_clone_JetCursor(cursor)
+    cloned_cursor :: jet_rt_handle_clone_JetCursor(cursor)
     scan_test_row(rows, I64{1}, I64{0}, I64{0}, slots, I64{4})
     scan_test_require(jet_rt_cursor_take_pattern(cursor, rows, I64{1}, slots + I64{8}) == I64{1})
     capture :: rt_text_word(slots)
-    scan_test_require(rt_text_len(capture) == I64{2} && rt_text_word(copy + I64{24}) == I64{3})
+    scan_test_require(rt_text_len(capture) == I64{2} && rt_text_word(cloned_cursor + I64{24}) == I64{3})
     jet_rt_string_drop(capture)
     jet_rt_handle_drop_JetCursor(cursor)
-    jet_rt_handle_drop_JetCursor(copy)
+    jet_rt_handle_drop_JetCursor(cloned_cursor)
     jet_rt_free(rows, I64{64}, I64{8})
     jet_rt_free(slots, I64{32}, I64{8})
     jet_rt_free(input, I64{64}, I64{8})
@@ -216,8 +216,8 @@ fn scan_test_f32(input: I64, slots: I64, word: I64) {
             at += I64{1}
         }
         reader :: jet_reader_over(input, I64{4}, I64{1})
-        tag :: if (order == I64{0}) -> jet_reader_read_f32_le(reader, slots, slots + I64{8}) else -> jet_reader_read_f32_be(reader, slots, slots + I64{8})
-        scan_test_require(tag == I64{1} && rt_text_word(slots) == word)
+        status :: if (order == I64{0}) -> jet_reader_read_f32_le(reader, slots, slots + I64{8}) else -> jet_reader_read_f32_be(reader, slots, slots + I64{8})
+        scan_test_require(status == I64{1} && rt_text_word(slots) == word)
         scan_test_require(jet_reader_at_end(reader))
         jet_rt_handle_drop_JetReader(reader)
         order += I64{1}
