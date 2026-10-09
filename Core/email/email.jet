@@ -653,9 +653,11 @@ fn attachment(filename: String, mime: String, bytes: [U8]) -> Attachment EmailEr
     physical_header_len("Content-Disposition", "attachment; filename*=UTF-8''".bytes().len() + percent_encoded_len(filename)) ? unit -> unit ! error -> return Err(error)
     if bytes.len() > 26214400 ->
         return Err(construction_error("LimitExceeded", "attachment exceeds 26214400 bytes"))
-    // Public builders borrow their inputs; only the owning private carrier
-    // receives explicit copies (fresh normalized MIME text needs no copy).
-    Ok(core.email.__attachment_parts(filename.copy(), ascii_lower(mime), bytes.copy()))
+    // Public builders borrow; transfer explicit owned copies to the carrier.
+    owned_filename :: filename.copy()
+    owned_mime :: ascii_lower(mime)
+    owned_bytes :: bytes.copy()
+    Ok(core.email.__attachment_parts(^owned_filename, ^owned_mime, ^owned_bytes))
 }
 
 fn envelope(from: Address, recipients: [Address]) -> Envelope EmailError! {
@@ -663,7 +665,9 @@ fn envelope(from: Address, recipients: [Address]) -> Envelope EmailError! {
         return Err(construction_error("envelope", "email envelope needs at least one recipient"))
     if recipients.len() > 100 ->
         return Err(construction_error("envelope", "email envelope exceeds 100 recipients"))
-    Ok(core.email.__envelope_parts(from.copy(), recipients.copy()))
+    owned_from :: from.copy()
+    owned_recipients :: recipients.copy()
+    Ok(core.email.__envelope_parts(^owned_from, ^owned_recipients))
 }
 
 #Test("email address grammar preserves quoted local and display rules") {
@@ -871,8 +875,16 @@ fn message(from: Address, to: [Address], bcc: [Address], subject: String, text: 
     loop address in to -> &recipients.push(address)
     loop address in bcc -> &recipients.push(address)
     // Recipient bounds are checked above; transfer this fresh list directly.
-    checked_envelope :: core.email.__envelope_parts(from.copy(), ^recipients)
-    Ok(core.email.__message_parts(from.copy(), to.copy(), bcc.copy(), subject.copy(), text.copy(), html.copy(), attachments.copy(), ^checked_envelope, ^upper))
+    owned_from :: from.copy()
+    checked_envelope :: core.email.__envelope_parts(^owned_from, ^recipients)
+    message_from :: from.copy()
+    message_to :: to.copy()
+    message_bcc :: bcc.copy()
+    message_subject :: subject.copy()
+    message_text :: text.copy()
+    message_html :: html.copy()
+    message_attachments :: attachments.copy()
+    Ok(core.email.__message_parts(^message_from, ^message_to, ^message_bcc, ^message_subject, ^message_text, ^message_html, ^message_attachments, ^checked_envelope, ^upper))
 }
 
 fn mime_lines(bytes: [U8]) -> String Never! {
