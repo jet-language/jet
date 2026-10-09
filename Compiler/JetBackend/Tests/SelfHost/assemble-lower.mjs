@@ -89,7 +89,7 @@ const BACKEND = [
 const support = [];
 for (const [path, names] of SUPPORT_ITEMS) for (const name of names) support.push(item(path, name));
 const zone = read("Compiler/JetFoundation/Source/Types/Types.jet").split("\n");
-const zoneStart = zone.findIndex((line) => line.startsWith("pub fn param_zone_name("));
+const zoneStart = zone.findIndex((line) => line.startsWith("fn param_zone_name("));
 support.push(zone.slice(zoneStart, zone.findIndex((line, index) => index > zoneStart && line === "}") + 1).join("\n"));
 const parts = [
   "// [unit source: Foundation items named by the Jet MIR schema]",

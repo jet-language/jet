@@ -102,28 +102,28 @@ if (callableStatics && (abiOnly || sanitizeOnly)) throw new Error("--callable-st
 const small = abiOnly || sanitizeOnly;
 const parts = [
   ...(small ? [
-    item("Compiler/JetFoundation/Source/MIR/MIR.jet", "pub struct MIRTypeID "),
+    item("Compiler/JetFoundation/Source/MIR/MIR.jet", "struct MIRTypeID "),
     body("Compiler/JetFoundation/Source/Text/RustDebug.jet"),
   ] : [
     "// [unit source: Foundation items named by MIR.jet]",
-    item("Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet", "pub struct Span {"),
-    item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", "pub enum Effect "),
+    item("Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet", "struct Span {"),
+    item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", "enum Effect "),
     // MIR.jet's Core-call and layout facts (as run-lint-fixtures.mjs): the Rust emitter needs a declaration row for
     // every nominal type the unit names.
     ...[
-      "pub enum SinkClass ",
-      "pub enum CoreCallFallibility ",
-      "pub enum CoreCallPureRoute {",
-      "pub enum CoreCallInterpreterRoute ",
-      "pub enum CoreCallSymbol ",
-      "pub struct CoreMarkerApplication {",
+      "enum SinkClass ",
+      "enum CoreCallFallibility ",
+      "enum CoreCallPureRoute {",
+      "enum CoreCallInterpreterRoute ",
+      "enum CoreCallSymbol ",
+      "struct CoreMarkerApplication {",
     ].map((head) => item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", head)),
-    item("Compiler/JetFoundation/Source/Types/Types.jet", "pub enum ParamZone {"),
-    item("Compiler/JetFoundation/Source/Types/Types.jet", "pub fn param_zone_name("),
+    item("Compiler/JetFoundation/Source/Types/Types.jet", "enum ParamZone {"),
+    item("Compiler/JetFoundation/Source/Types/Types.jet", "fn param_zone_name("),
     ...[
-      "pub struct ByteLayout {",
-      "pub struct FieldLayoutFacts {",
-      "pub struct LayoutFacts {",
+      "struct ByteLayout {",
+      "struct FieldLayoutFacts {",
+      "struct LayoutFacts {",
     ].map((head) => item("Compiler/JetFoundation/Source/Target/Layout.jet", head)),
     body("Compiler/JetFoundation/Source/DerivationTypes.jet"),
     body("Compiler/JetFoundation/Source/MIR/MIR.jet"),
