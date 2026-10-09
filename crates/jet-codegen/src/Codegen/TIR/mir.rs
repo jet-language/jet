@@ -7088,7 +7088,7 @@ impl<'a> LowerCtx<'a> {
     /// Exits taken before the stop keep the actions in their sealed chains.
     pub(super) fn emit_explicit_stop_cleanups(&mut self) -> Result<(), LowerError> {
         self.seal_all_exit_chains()?;
-        self.emit_deferred_cleanups_from(0, true)
+        self.emit_cleanup_actions(0, true, false, true)
     }
 
     /// D-SHAPE-RESOURCE1=A: run the cleanups that must happen before the one
@@ -7097,7 +7097,7 @@ impl<'a> LowerCtx<'a> {
     /// Plain releases are skipped because the process is ending anyway, and
     /// the actions stay registered for sibling paths that continue.
     pub(super) fn emit_stop_path_cleanups(&mut self) -> Result<(), LowerError> {
-        self.emit_cleanup_actions(0, false, true)
+        self.emit_cleanup_actions(0, false, true, false)
     }
 
     /// Whether a stop at this point owes any cleanup: a deferred action, or
@@ -7152,7 +7152,7 @@ impl<'a> LowerCtx<'a> {
         from_depth: usize,
         consume: bool,
     ) -> Result<(), LowerError> {
-        self.emit_cleanup_actions(from_depth, consume, false)
+        self.emit_cleanup_actions(from_depth, consume, false, false)
     }
 
     fn emit_cleanup_actions(
@@ -7160,6 +7160,7 @@ impl<'a> LowerCtx<'a> {
         from_depth: usize,
         consume: bool,
         stop_path: bool,
+        explicit_stop: bool,
     ) -> Result<(), LowerError> {
         let from_depth = from_depth.min(self.defer_stack.len());
         for depth in (from_depth..self.defer_stack.len()).rev() {
@@ -7169,13 +7170,16 @@ impl<'a> LowerCtx<'a> {
             } else {
                 self.defer_stack[depth].actions.clone()
             };
-            // D-SHAPE-RESOURCE1=A: explicit deferred actions run first in
-            // reverse registration order; the automatic safety net then
-            // closes or releases every still-live local in reverse
-            // declaration order.
+            // Within an explicit process.exit/os.stop cleanup frame, deferred
+            // closes precede scope guards, each group newest first. Keep the
+            // existing cross-frame traversal and other exits' categories;
+            // neither order is decided by this local explicit-stop correction.
             let (automatic, explicit): (Vec<_>, Vec<_>) = actions
                 .into_iter()
-                .partition(|action| matches!(action, DeferredCleanup::DropPlace { .. }));
+                .partition(|action| {
+                    matches!(action, DeferredCleanup::DropPlace { .. })
+                        || explicit_stop && matches!(action, DeferredCleanup::Guard(_))
+                });
             for index in (0..explicit.len()).rev() {
                 self.emit_cleanup_suffix(depth, &explicit[..index], &automatic,
                     explicit[index], stop_path)?;
@@ -10356,6 +10360,7 @@ impl<'a> LowerCtx<'a> {
                 ty: mir_ty.clone(),
                 access,
                 ownership,
+                place_only: false,
             });
             let names: &[&str] = if runtime == source {
                 &[source.as_str()]

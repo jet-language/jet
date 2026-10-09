@@ -1291,6 +1291,17 @@ fn verify_function(
                 span: capture.span,
             });
         }
+        if capture.place_only
+            && !matches!((capture.access, capture.ownership.mode),
+                (MirAccess::Read, MirOwnershipMode::ReadBorrow)
+                | (MirAccess::Write, MirOwnershipMode::WriteBorrow))
+        {
+            return Err(MirLegalityError::InvalidReference {
+                function: function.id,
+                subject: "place-only capture must lend a borrowed address".to_string(),
+                span: capture.span,
+            });
+        }
         verify_type(&capture.ty, capture.span, function.id)?;
         verify_ownership(
             capture.ownership,
@@ -15318,6 +15329,7 @@ fn encode_capture_param(
     writer.mir_type(&param.ty);
     writer.debug(&param.access);
     writer.debug(&param.ownership);
+    writer.bool(param.place_only);
 }
 
 fn encode_foreign(writer: &mut CanonicalWriter, foreign: &MirForeign) {

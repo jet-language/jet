@@ -63,7 +63,7 @@ fn fx_closures() -> MIRProgram Never! {
     sum :: fx_int_op(&lb, MIRBinaryOp.Add, "add", k, base_now)
     fx_block(&lb, 0, MIRTerminator.Return{value: Val(sum)})
     lambda_base := fx_function("lambda_base", lb, fx_int())
-    lambda_base.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "base", span: fx_span(), ty: fx_int(), access: MIRAccess.Read, ownership: mir_owned_ownership()}}
+    lambda_base.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "base", span: fx_span(), ty: fx_int(), access: MIRAccess.Read, ownership: mir_owned_ownership(), place_only: false}}
 
     // (n: Int) -> { total += n }, total by reference.
     la := fx_builder()
@@ -75,7 +75,7 @@ fn fx_closures() -> MIRProgram Never! {
     fx_do(&la, MIROperation.WritePlace{place: total_place, value: total_new})
     fx_block(&la, 0, MIRTerminator.Return{value: None})
     lambda_add := fx_function("lambda_add", la, fx_unit())
-    lambda_add.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "total", span: fx_span(), ty: fx_int(), access: MIRAccess.Write, ownership: mir_ownership_from_access(MIRAccess.Write)}}
+    lambda_add.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "total", span: fx_span(), ty: fx_int(), access: MIRAccess.Write, ownership: mir_ownership_from_access(MIRAccess.Write), place_only: false}}
 
     r := fx_builder()
     base :: fx_local(&r, "base", fx_int(), mir_copy_ownership())

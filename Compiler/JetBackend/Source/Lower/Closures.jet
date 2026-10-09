@@ -121,6 +121,14 @@ fn lower_capture(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
     ty :: lower_checked_type(c, instruction) ?? return lower_alias_absent(&f, instruction)
     if lower_repr_layout(lower_repr(p, ty)) == None -> return lower_alias_absent(&f, instruction)
     address :: lower_capture_address(p, c, &m, &f, slot) ?? return
+    index :: lower_capture_index(c.mir, slot)
+    if c.mir.capture_params[index].place_only {
+        if !lower_capture_by_ref(c.mir.capture_params[index]) -> return lower_fail(&m, &f, "place-only capture slot {slot} is not a borrowed address")
+        // Its address is used through MIRPlaceBase.Capture by frame_cells.
+        // The checked verifier forbids SSA uses; do not read uninitialized
+        // cell bytes or manufacture a scalar/inline value for this anchor.
+        return lower_alias_absent(&f, instruction)
+    }
     if lower_is_inline(p, ty) -> return lower_alias(c, &f, instruction, address)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     lower_emit(&f, LIRInst.Load{dst: dst, base: address, offset: 0})

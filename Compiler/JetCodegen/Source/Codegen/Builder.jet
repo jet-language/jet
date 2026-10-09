@@ -1,6 +1,7 @@
 // Per-function MIR construction primitives shared by expression and statement
 // lowering. IDs are stable for the checked function and source traversal.
 use jet_foundation.[
+    CanonicalPassJournal,
     MIRAccess,
     MIRBasicBlock,
     MIRBlockID,
@@ -31,6 +32,8 @@ use jet_foundation.[
     MIRPreludeCallID,
     MIRPollKind,
     MIRProjection,
+    MIRRetainedRootCellAction,
+    MIRRetainedRootCellBinding,
     MIRScope,
     MIRScopeFact,
     MIRScopeID,
@@ -339,6 +342,7 @@ struct JetCodegenProgram {
     pub field_symbols: [String:[JetCodegenFieldSymbolRow]]
     pub source_files: [MIRSourceFile]
     pub source_index: JetCodegenSourceIndex
+    pub canonical_journal: Shared<CanonicalPassJournal>?{None}
     // Unified host/stop contract (#4720): lower stop points (MIR Poll/Stopped)
     // for the native execution host. Only host compilations (session turns,
     // compiler callables) set it; every other compilation produces none.
@@ -383,6 +387,11 @@ struct JetCodegenBuilder {
     pub params: [MIRParam]
     pub capture_params: [MIRCaptureParam]
     pub capture_facts: MIRCaptureFacts?
+    // Physical capture addresses lend storage; the checked places still own it.
+    pub retained_root: Bool
+    pub retained_cells: [MIRRetainedRootCellBinding]
+    pub retained_deferred: [JetCodegenRetainedDeferred]
+    pub retained_grant_context: JetCodegenRetainedGrantContext?
     pub bindings: [JetCodegenBinding]
     pub loops: [JetCodegenLoopTarget]
     pub prelude_calls: [MIRPreludeCall]
@@ -822,6 +831,10 @@ fn jet_codegen_new_builder(function: TFunc, program: JetCodegenProgram) -> JetCo
         params: [MIRParam]{},
         capture_params: [MIRCaptureParam]{},
         capture_facts: None,
+        retained_root: false,
+        retained_cells: [MIRRetainedRootCellBinding]{},
+        retained_deferred: [JetCodegenRetainedDeferred]{},
+        retained_grant_context: None,
         bindings: [JetCodegenBinding]{},
         loops: [JetCodegenLoopTarget]{},
         prelude_calls: [MIRPreludeCall]{},
@@ -890,6 +903,10 @@ struct JetCodegenFunctionState {
     pub params: [MIRParam]
     pub capture_params: [MIRCaptureParam]
     pub capture_facts: MIRCaptureFacts?
+    pub retained_root: Bool
+    pub retained_cells: [MIRRetainedRootCellBinding]
+    pub retained_deferred: [JetCodegenRetainedDeferred]
+    pub retained_grant_context: JetCodegenRetainedGrantContext?
     pub bindings: [JetCodegenBinding]
     pub loops: [JetCodegenLoopTarget]
     pub prelude_calls: [MIRPreludeCall]
@@ -950,6 +967,10 @@ fn jet_codegen_begin_function(builder: &JetCodegenBuilder, program: JetCodegenPr
         params: [MIRParam]{},
         capture_params: [MIRCaptureParam]{},
         capture_facts: None,
+        retained_root: false,
+        retained_cells: [MIRRetainedRootCellBinding]{},
+        retained_deferred: [JetCodegenRetainedDeferred]{},
+        retained_grant_context: None,
         bindings: [JetCodegenBinding]{},
         loops: [JetCodegenLoopTarget]{},
         prelude_calls: [MIRPreludeCall]{},
@@ -1016,6 +1037,10 @@ fn jet_codegen_function_state(builder: JetCodegenBuilder, program: JetCodegenPro
         params: builder.params,
         capture_params: builder.capture_params,
         capture_facts: builder.capture_facts,
+        retained_root: builder.retained_root,
+        retained_cells: builder.retained_cells,
+        retained_deferred: builder.retained_deferred,
+        retained_grant_context: builder.retained_grant_context,
         bindings: builder.bindings,
         loops: builder.loops,
         prelude_calls: builder.prelude_calls,
@@ -1069,6 +1094,10 @@ fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, program: JetC
     builder.params = ^state.params
     builder.capture_params = ^state.capture_params
     builder.capture_facts = ^state.capture_facts
+    builder.retained_root = state.retained_root
+    builder.retained_cells = ^state.retained_cells
+    builder.retained_deferred = ^state.retained_deferred
+    builder.retained_grant_context = ^state.retained_grant_context
     builder.bindings = ^state.bindings
     builder.loops = ^state.loops
     builder.prelude_calls = ^state.prelude_calls
@@ -1227,6 +1256,7 @@ fn jet_codegen_emit(builder: &JetCodegenBuilder, program: JetCodegenProgram, spa
     instruction := MIRInstruction{id: op_id, span: span, source_line: None, result: result, ty: mir_ty, operation: operation}
     at :: builder.block_positions.get(builder.current.value) ?? panic("Jet codegen emitted into a missing MIR block")
     &builder.blocks[at].instructions.push(instruction)
+    jet_codegen_record_retained_instruction(&builder, instruction)
     if operation == {
         .MovePlace(place) -> jet_codegen_set_drop_live(&builder, program, place, false)
         .InitializeUninit(place) -> jet_codegen_set_drop_live(&builder, program, place, true)
@@ -1255,6 +1285,7 @@ fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, program: JetCodegenPro
     instruction := MIRInstruction{id: op_id, span: span, source_line: None, result: Val(value), ty: Val(ty), operation: operation}
     at :: builder.block_positions.get(builder.current.value) ?? panic("Jet codegen emitted into a missing MIR block")
     &builder.blocks[at].instructions.push(instruction)
+    jet_codegen_record_retained_instruction(&builder, instruction)
     if operation == {
         .MovePlace(place) -> jet_codegen_set_drop_live(&builder, program, place, false)
         .InitializeUninit(place) -> jet_codegen_set_drop_live(&builder, program, place, true)
@@ -1372,7 +1403,13 @@ fn jet_codegen_retain_place_access(builder: &JetCodegenBuilder, program: JetCode
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::register_owned_drop
 fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, ty: Type, ownership: MIROwnership, initialized: Bool) Never! {
-    if ownership.drop == MIRDropKind.NoDrop || jet_codegen_ownership(ty).mode == MIROwnershipMode.Copy -> return
+    retained :: jet_codegen_retained_cell_index(builder, place) >= 0
+    if !retained && (ownership.drop == MIRDropKind.NoDrop || jet_codegen_ownership(ty).mode == MIROwnershipMode.Copy) -> return
+    if retained {
+        loop record in builder.drop_live_places {
+            if record.place == place -> return
+        }
+    }
     identity := "{builder.function.key}|drop-live|{place.value}"
     local_id := MIRLocalID{value: stable_id("mir-local", identity)}
     live_place := MIRPlaceID{value: stable_id("mir-place", "{identity}|place")}
@@ -1407,14 +1444,6 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, program: JetCodeg
         access: MIRAccess.Write,
         persist_key: None,
     })
-    // The flag reads false on every path that never reached the binding: an
-    // exit's drop chain releases every local its frame registers, including
-    // ones bound after that exit. Entry-block writes dominate every path.
-    resume_block := builder.current
-    builder.current = builder.entry
-    cleared := jet_codegen_emit_value(&builder, program, owner_span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: false}})
-    _ := jet_codegen_emit(&builder, program, owner_span, None, MIROperation.WritePlace{place: live_place, value: cleared})
-    builder.current = resume_block
     record := JetCodegenDropLive{
         place: place,
         live: live_place,
@@ -1422,13 +1451,25 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, program: JetCodeg
         kind: ownership.drop,
         span: owner_span,
     }
+    jet_codegen_attach_retained_live(&builder, program, record)
+    // Ordinary lexical flags require dominating false writes. Retained root
+    // flags are the existing canonical child cells: turn entry never resets them.
+    if !retained {
+        resume_block := builder.current
+        builder.current = builder.entry
+        cleared := jet_codegen_emit_value(&builder, program, owner_span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: false}})
+        _ := jet_codegen_emit(&builder, program, owner_span, None, MIROperation.WritePlace{place: live_place, value: cleared})
+        builder.current = resume_block
+    }
     &builder.drop_live_places.push(record)
     &builder.drop_live_all.push(record)
     if builder.cleanup_frames.len() == 0 -> panic("drop cleanup registered without an active cleanup frame")
     frame_index := builder.cleanup_frames.len() - 1
-    &builder.cleanup_frames[frame_index].actions.push(JetCodegenCleanupAction.DropPlace{record: record})
-    initial := jet_codegen_emit_value(&builder, program, owner_span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: initialized}})
-    _ := jet_codegen_emit(&builder, program, owner_span, None, MIROperation.WritePlace{place: live_place, value: initial})
+    if ownership.drop != MIRDropKind.NoDrop -> &builder.cleanup_frames[frame_index].actions.push(JetCodegenCleanupAction.DropPlace{record: record})
+    if !retained {
+        initial := jet_codegen_emit_value(&builder, program, owner_span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: initialized}})
+        _ := jet_codegen_emit(&builder, program, owner_span, None, MIROperation.WritePlace{place: live_place, value: initial})
+    }
 }
 fn jet_codegen_emit_drop_cleanup(builder: &JetCodegenBuilder, program: JetCodegenProgram, record: JetCodegenDropLive) Never! {
     if !jet_codegen_current_is_open(builder, program) -> return
@@ -1437,10 +1478,15 @@ fn jet_codegen_emit_drop_cleanup(builder: &JetCodegenBuilder, program: JetCodege
     next_block := jet_codegen_new_block(&builder, program, record.span, "drop-live-next")
     jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: live, then_target: drop_block, else_target: next_block})
     jet_codegen_switch_block(&builder, program, drop_block)
+    previous_grant :: builder.retained_grant_context
+    if jet_codegen_retained_cell_index(builder, record.place) >= 0 {
+        builder.retained_grant_context = Val(JetCodegenRetainedGrantContext{place: record.place, action: MIRRetainedRootCellAction.Cleanup})
+    }
     // The cleanup consumes the owned value, so its shared place row carries
     // Move access (Rust `emit_owned_place_cleanup`).
     jet_codegen_retain_place_access(&builder, program, record.place, MIRAccess.Move)
     value := jet_codegen_emit_value(&builder, program, record.span, record.ty, MIROperation.MovePlace{place: record.place})
+    builder.retained_grant_context = previous_grant
     scope_close := jet_codegen_scope_end_close_function(builder, program, record.ty)
     if scope_close == {
         .Val(function) -> jet_codegen_emit_scope_end_close(&builder, program, function, record.ty, value, record.span)
@@ -1466,8 +1512,10 @@ fn jet_codegen_emit_cleanup_action(builder: &JetCodegenBuilder, program: JetCode
     cleanup_scope :: if builder.stop_cleanup_active -> Val(jet_codegen_begin_stop_cleanup(&builder, program)) else -> MIRScopeID?{None}
     if action == {
         .DeferredCall(thunk) -> {
-            current_span := builder.current_span
-            _ := jet_codegen_emit(&builder, program, current_span, None, MIROperation.IndirectCall{callee: thunk, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+            if !jet_codegen_emit_retained_deferred(&builder, program, thunk) {
+                current_span := builder.current_span
+                _ := jet_codegen_emit(&builder, program, current_span, None, MIROperation.IndirectCall{callee: thunk, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+            }
         }
         .DropPlace(record) -> jet_codegen_emit_drop_cleanup(&builder, program, record)
     }
@@ -1544,9 +1592,10 @@ fn jet_codegen_emit_explicit_stop_cleanups(builder: &JetCodegenBuilder, program:
     jet_codegen_emit_cleanups_from_frame_depth(&builder, program, 0)
 }
 
-fn jet_codegen_register_deferred_call(builder: &JetCodegenBuilder, program: JetCodegenProgram, thunk: MIRValueID) Never! {
+fn jet_codegen_register_deferred_call(builder: &JetCodegenBuilder, program: JetCodegenProgram, thunk: MIRValueID, result_type: Type) Never! {
     if builder.cleanup_frames.len() == 0 -> panic("defer registered without an active cleanup frame")
     frame_index := builder.cleanup_frames.len() - 1
+    if builder.retained_root && frame_index == 0 -> jet_codegen_retain_deferred_call(&builder, program, thunk, result_type)
     &builder.cleanup_frames[frame_index].actions.push(JetCodegenCleanupAction.DeferredCall{thunk: thunk})
     builder.cleanup_frames[frame_index].explicit = builder.cleanup_frames[frame_index].explicit + 1
 }
@@ -1555,7 +1604,7 @@ fn jet_codegen_terminate_cleanup_frame_depth(builder: JetCodegenBuilder, program
     if terminator == {
         .Return(_) -> {
             if depth != -1 -> panic("function return carries a loop cleanup depth")
-            return 0
+            return if builder.retained_root -> 1 else -> 0
         }
         // A stop leaves the function: every frame's cleanup runs.
         .Stopped -> return 0
@@ -2011,6 +2060,9 @@ fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, program: JetCod
 }
 
 fn jet_codegen_bind_local(builder: &JetCodegenBuilder, program: JetCodegenProgram, local: TLocal, ty: Type, mutable: Bool, parameter: MIRValueID?, parameter_access: MIRAccess?, string_view: Bool) -> MIRPlaceID Never! {
+    if builder.retained_root && builder.scope_depth == 0 && parameter == None && !string_view && local.symbol_id != None {
+        return jet_codegen_bind_retained_root(&builder, program, local, ty, mutable)
+    }
     jet_codegen_bind_local_with_base(&builder, program, local, ty, mutable, parameter, None, parameter_access, None, string_view)
 }
 

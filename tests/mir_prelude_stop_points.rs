@@ -358,3 +358,86 @@ fn shared_stop_predicate_table() {
         std::fs::write(path, rendered).expect("write exercised Rust predicate results");
     }
 }
+
+#[test]
+fn explicit_process_stops_close_defers_before_guards() {
+    use jet_foundation::MIR::{MirBlockId, MirConstant, MirPlaceId, MirValueId};
+    use std::collections::{HashMap, HashSet};
+    jet::run_compiler_work(|| {
+        let scratch = common::Scratch::new("mir_explicit_cleanup_order");
+        let entry = scratch.path.join("main.jet");
+        std::fs::write(&entry, include_str!("fixtures/mir_explicit_cleanup_order.jet")).unwrap();
+        let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+        let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+            .into_iter().filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)).collect();
+        assert!(errors.is_empty(), "{errors:#?}");
+        let request = MirArtifactRequest::new(MirArtifactTarget::RustAot,
+            MirArtifactKind::NativeExecutable, MirArtifactBuildMode::Dev);
+        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request).unwrap();
+        let mir = jet::Codegen::TIR::lower_native_tir_to_mir(tir).unwrap();
+        mir.validate().unwrap();
+        let mut witnessed = Vec::new();
+        for name in ["exit_case", "stop_case"] {
+            let function = mir.functions.iter().find(|function| function.name == name).unwrap();
+            let owners: HashMap<MirPlaceId, &str> = function.locals.iter()
+                .filter(|local| matches!(local.name.as_str(), "first" | "second" | "_guard_1" | "_guard_2"))
+                .map(|local| (local.place, local.name.as_str())).collect();
+            assert_eq!(owners.len(), 4, "{name} lost its checked cleanup owners");
+            let mut booleans: HashMap<MirValueId, bool> = HashMap::new();
+            let mut flags: HashMap<MirPlaceId, bool> = HashMap::new();
+            let mut seen: HashSet<MirBlockId> = HashSet::new();
+            let mut current = function.entry;
+            let mut order = Vec::new();
+            'path: loop {
+                assert!(seen.insert(current), "{name} cleanup path cycles");
+                let block = function.blocks.iter().find(|block| block.id == current).unwrap();
+                for instruction in &block.instructions {
+                    if let MirOperation::CoreCall { call, .. } = instruction.operation {
+                        let row = mir.core_calls.iter().find(|row| row.id == call).unwrap();
+                        if (row.module == "core.process" && row.member == "exit")
+                            || (row.module == "core.sys" && row.member == "stop")
+                        {
+                            assert_eq!(order, ["second", "first", "_guard_2", "_guard_1"], "{name}");
+                            witnessed.push(format!("{name}\t{}\n", order.join("\t")));
+                            break 'path;
+                        }
+                    }
+                    match (&instruction.operation, instruction.result) {
+                        (MirOperation::Constant(MirConstant::Bool(value)), Some(id)) => {
+                            booleans.insert(id, *value);
+                        }
+                        (MirOperation::ReadPlace(place), Some(id)) => {
+                            if let Some(value) = flags.get(place) { booleans.insert(id, *value); }
+                        }
+                        (MirOperation::WritePlace { place, value }, _) => {
+                            if let Some(value) = booleans.get(value) { flags.insert(*place, *value); }
+                        }
+                        (MirOperation::MovePlace { place }, _) => {
+                            if let Some(owner) = owners.get(place) { order.push(*owner); }
+                        }
+                        _ => {}
+                    }
+                }
+                current = match block.terminator {
+                    MirTerminator::Jump { target } => target,
+                    MirTerminator::Poll { resume, .. } => resume,
+                    MirTerminator::Branch { condition, then_target, else_target } => {
+                        if *booleans.get(&condition).expect("fixture live flag has no checked state") {
+                            then_target
+                        } else {
+                            else_target
+                        }
+                    }
+                    _ => panic!("{name} left its ordinary path before the explicit stop"),
+                };
+            }
+        }
+        if let Some(path) = std::env::var_os("JET_EXPLICIT_CLEANUP_ORDER_RESULTS") {
+            let mut fixture_path = path.clone();
+            fixture_path.push(".fixture.jet");
+            std::fs::write(fixture_path, include_bytes!("fixtures/mir_explicit_cleanup_order.jet"))
+                .expect("write the fixture actually checked by the Rust cleanup producer");
+            std::fs::write(path, witnessed.concat()).expect("write exercised Rust cleanup order");
+        }
+    });
+}

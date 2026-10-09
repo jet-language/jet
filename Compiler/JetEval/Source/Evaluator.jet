@@ -1868,6 +1868,13 @@ fn jet_eval_capture(machine: &JetEvalMachine, frame_index: Int, slot: Int, span:
         jet_eval_compiler_fail(&machine, span, "MIR capture metadata is unavailable")
         return None
     }
+    if machine.program.functions[function].capture_params[slot].place_only {
+        // This is the existing place address, not the cell's uninitialized value.
+        anchor :: machine.frames[frame_index].captures[slot]
+        if anchor == .Address(_, _, _) -> return jet_eval_borrow_value(anchor, &machine, span)
+        jet_eval_compiler_fail(&machine, span, "place-only MIR capture must retain an actual place address")
+        return None
+    }
     access := machine.program.functions[function].capture_params[slot].access
     if machine.frames[frame_index].captures_borrowed {
         if access == MIRAccess.Move {
