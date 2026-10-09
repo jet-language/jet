@@ -452,7 +452,7 @@ fn sync() Never! -[FS, Env]> { core.sys.__sync_os() }
     process_api.exit(code)
 }
 
-fn set_current_dir(path: String) -[FS, Env]> () IOError! {
+fn set_current_dir(path: String) IOError! -[FS, Env]> {
     if core.sys.__set_current_dir(path) == {
         .Ok(_) -> Ok(())
         .Err(cause) -> Err(syscall_input(.Resolve, Val(path), cause))

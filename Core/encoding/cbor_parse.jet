@@ -67,12 +67,12 @@ struct Parser {
 }
 
 impl Parser {
-    fn charge(&self, size: Int, offset: Int, path: String, what: String) -> () CBORError! {
+    fn charge(&self, size: Int, offset: Int, path: String, what: String) CBORError! {
         if size > self.options.max_bytes - self.live -> return Err(failure(.Limit, offset, path, "{what} allocation exceeds max_bytes {self.options.max_bytes}"))
         self.live += size
     }
 
-    fn reserve<T>(&self, values: &[T], count: Int, slot: Int, offset: Int, path: String, what: String) -> () CBORError! {
+    fn reserve<T>(&self, values: &[T], count: Int, slot: Int, offset: Int, path: String, what: String) CBORError! {
         capacity :: mem.__list_capacity<T>(values)
         if count <= capacity - values.len() -> return
         retained :: self.live - capacity * slot
@@ -88,12 +88,12 @@ impl Parser {
         self.live = retained + actual * slot
     }
 
-    fn count(&self, offset: Int, path: String) -> () CBORError! {
+    fn count(&self, offset: Int, path: String) CBORError! {
         self.items += 1
         if self.items > self.options.max_items -> return Err(failure(.Limit, offset, path, "max_items {self.options.max_items} exceeded"))
     }
 
-    fn indefinite(self, offset: Int, path: String) -> () CBORError! {
+    fn indefinite(self, offset: Int, path: String) CBORError! {
         if self.options.require_canonical -> return Err(failure(.NonCanonical, offset, path, "indefinite-length CBOR is not Core deterministic"))
     }
 

@@ -870,7 +870,7 @@ fn write_canonical(out: &[U8], value: Dyn, path: &[String], depth: Int) -> Bool 
 }
 
 
-fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) -> () EncodingError! {
+fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) EncodingError! {
     #Unsafe("Core JSON rendering borrows native private payloads without exposing their constructors") {
         if value == .Number(text) {
             write_ascii(&out, text)
@@ -949,7 +949,7 @@ fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) -> () EncodingE
     }
     Ok(())
 }
-fn write_json_float(out: &[U8], n: Float) -> () EncodingError! {
+fn write_json_float(out: &[U8], n: Float) EncodingError! {
     if !math.is_finite(n) -> return Err(value_error(EncodingErrorKind.Unsupported, "$", "JSON cannot encode a non-finite Float"))
     write_ascii(&out, "{n}")
     Ok(())

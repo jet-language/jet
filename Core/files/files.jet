@@ -640,7 +640,7 @@ fn io_err(operation: String, path: String, message: String) -> IOError Never! {
 
 
 // Public checkpoints precede OS work exactly once, not once per raw leaf.
-fn file_fault(operation_path: String, operation: IOOperation, path: String) -> () IOError! {
+fn file_fault(operation_path: String, operation: IOOperation, path: String) IOError! {
     if core.testing.__fault_should_fail(operation_path) {
         return Err(IOError.Other(IOContext{
             operation: operation, resource: Val(path), os_code: None,
@@ -650,7 +650,7 @@ fn file_fault(operation_path: String, operation: IOOperation, path: String) -> (
     Ok()
 }
 
-fn file_writer_refusal(path: String) -[FS.Write]> () IOError! {
+fn file_writer_refusal(path: String) IOError! -[FS.Write]> {
     if core.files.__writer_refusal(path) == {
         .None -> {}
         .Val(error) -> return Err(error)
@@ -677,28 +677,28 @@ fn map(path: String | Path) -[FS.Read]> MappedFile IOError! {
 }
 
 
-fn write(path: String | Path, text: String) -[FS.Write]> () IOError! {
+fn write(path: String | Path, text: String) IOError! -[FS.Write]> {
     target :: path_text(path)
     file_fault("FS.Write", .Write, target)
     core.files.__write_bytes_os(target, text.bytes())
 }
 
 
-fn write_bytes(path: String, bytes: [U8]) -[FS.Write]> () IOError! {
+fn write_bytes(path: String, bytes: [U8]) IOError! -[FS.Write]> {
     file_writer_refusal(path)
     file_fault("FS.Write", .Write, path)
     core.files.__write_bytes_os(path, bytes)
 }
 
 
-fn append_all(path: String | Path, text: String) -[FS.Write]> () IOError! {
+fn append_all(path: String | Path, text: String) IOError! -[FS.Write]> {
     target :: path_text(path)
     file_fault("FS.Write", .Write, target)
     core.files.__append_bytes_os(target, text.bytes())
 }
 
 
-fn write_atomic(path: String, bytes: [U8]) -[FS.Write]> () IOError! {
+fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
     file_writer_refusal(path)
     file_fault("FS.Write", .Write, path)
     platform :: file_path_platform()
@@ -826,7 +826,7 @@ fn files8_other(operation: IOOperation, resource: String?, cause: String) -> IOE
     IOError.Other(IOContext{operation: operation, resource: resource, os_code: None, cause: Val(cause)})
 }
 
-fn files8_preflight(probe: String, operation: IOOperation, path: String) -> () IOError! {
+fn files8_preflight(probe: String, operation: IOOperation, path: String) IOError! {
     if core.files.__fault_should_fail(probe) -> return Err(files8_other(operation, Val(path), "fault injected: {probe}"))
     Ok(())
 }
@@ -1385,7 +1385,7 @@ fn walk_error(operation: IOOperation, kind: Int, code: Int?, cause: String?, res
     }
 }
 
-fn walk_validate(context: Int, directory: Int, root: String) -[FS]> () IOError! {
+fn walk_validate(context: Int, directory: Int, root: String) IOError! -[FS]> {
     source :: core.files.__walk_validation_path(context, directory)
     loop ancestor in core.files.__walk_ancestors(context, source) {
         metadata :: core.files.__walk_metadata(context, ancestor)

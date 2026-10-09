@@ -16,9 +16,9 @@ struct CBORReader {
 struct CBORWriter {
     output: codec.CBORPush
 
-    fn write(&self, event: ^DataEvent) -[IO, Time.Wait]> () EncodingError! { &self.output.write(^event) }
-    fn flush(&self) -[IO, Time.Wait]> () EncodingError! { &self.output.flush() }
-    fn finish(&self) -[IO, Time.Wait]> () EncodingError! { &self.output.finish() }
+    fn write(&self, event: ^DataEvent) EncodingError! -[IO, Time.Wait]> { &self.output.write(^event) }
+    fn flush(&self) EncodingError! -[IO, Time.Wait]> { &self.output.flush() }
+    fn finish(&self) EncodingError! -[IO, Time.Wait]> { &self.output.finish() }
 }
 
 fn reader(input: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORReader EncodingError! {
@@ -91,7 +91,7 @@ fn unsupported(path: String, reason: String) -> CBORError Never! {
     CBORError{kind: .Unsupported, byte_offset: 0, path: path, reason: reason}
 }
 
-fn validate(value: Dyn, path: String) -> () CBORError! {
+fn validate(value: Dyn, path: String) CBORError! {
     #Unsafe("inspect private typed carriers without changing public Dyn variants") {
         if value == {
             .Number(text) -> return Err(unsupported(path, "JSON number carrier {text:Debug} is not a CBOR value"))
@@ -153,7 +153,7 @@ fn key_before(left: String, right: String) -> Bool Never! {
     false
 }
 
-fn encode_value(value: Dyn, out: &[U8], canonical: Bool) -> () CBORError! {
+fn encode_value(value: Dyn, out: &[U8], canonical: Bool) CBORError! {
     #Unsafe("validated private carriers retain byte strings for typed Encode") {
         if value == {
             .Null -> &out.push(U8{246})

@@ -40,7 +40,7 @@ fn release<T>(allocation: stream.AllocationBudget, values: &[T]) Never! {
     allocation.release(size)
 }
 
-fn limits_checked(limits: EncodingLimits) -> () EncodingError! {
+fn limits_checked(limits: EncodingLimits) EncodingError! {
     stream.validate_limits(limits) ?? {
         out := err
         out.format = .CBOR
@@ -132,7 +132,7 @@ struct CBORPull {
         Ok(Val(value))
     }
 
-    fn grow_payload(&self, bytes: &[U8]) -> () EncodingError! {
+    fn grow_payload(&self, bytes: &[U8]) EncodingError! {
         capacity :: mem.__list_capacity<U8>(bytes)
         if bytes.len() < capacity -> return
         next :: if capacity == 0 -> 8 else -> capacity * 2
@@ -485,7 +485,7 @@ struct CBORPush {
         failure
     }
 
-    fn replacement(self, old: Int, size: Int) -> () EncodingError! {
+    fn replacement(self, old: Int, size: Int) EncodingError! {
         if self.retained - old + size > self.limits.max_item_bytes -> return Err(error(.Limit, self.total, "$", "max_item_bytes {self.limits.max_item_bytes} exceeded"))
     }
 
@@ -527,7 +527,7 @@ struct CBORPush {
         Ok(out)
     }
 
-    fn accept(&self, ^input: [U8]) -[IO, Time.Wait]> () EncodingError! {
+    fn accept(&self, ^input: [U8]) EncodingError! -[IO, Time.Wait]> {
         bytes := ^input
         size :: bytes.len()
         self.replacement(0, size) ?? {
@@ -580,7 +580,7 @@ struct CBORPush {
         release<U8>(self.allocation, &bytes)
     }
 
-    fn write_key(&self, text: String) -> () EncodingError! {
+    fn write_key(&self, text: String) EncodingError! {
         at :: self.frames.len() - 1
         if at < 0 || !self.frames[at].object || self.frames[at].key != None -> return Err(error(.State, self.total, "$", "Key outside CBOR object or before prior value"))
         size :: length_size(text.count_bytes()) + text.count_bytes()
@@ -598,7 +598,7 @@ struct CBORPush {
         self.retained += size
     }
 
-    fn close_frame(&self, ^input: WriteFrame) -[IO, Time.Wait]> () EncodingError! {
+    fn close_frame(&self, ^input: WriteFrame) EncodingError! -[IO, Time.Wait]> {
         frame := ^input
         heap :: frame_heap(frame)
         old := 0
@@ -637,7 +637,7 @@ struct CBORPush {
         &self.accept(^out)
     }
 
-    fn write_inner(&self, event: DataEvent) -[IO, Time.Wait]> () EncodingError! {
+    fn write_inner(&self, event: DataEvent) EncodingError! -[IO, Time.Wait]> {
         if self.finished -> return Err(error(.State, self.total, "$", "write called after finish"))
         if event == {
             .ArrayStart | .ObjectStart -> {
@@ -665,17 +665,17 @@ struct CBORPush {
         }
     }
 
-    fn write(&self, event: ^DataEvent) -[IO, Time.Wait]> () EncodingError! {
+    fn write(&self, event: ^DataEvent) EncodingError! -[IO, Time.Wait]> {
         if self.terminal == .Val(first) -> return Err(first.copy())
         &self.write_inner(event) ?? return Err(&self.fail(^err))
     }
 
-    fn flush(&self) -[IO, Time.Wait]> () EncodingError! {
+    fn flush(&self) EncodingError! -[IO, Time.Wait]> {
         if self.terminal == .Val(first) -> return Err(first.copy())
         encoding.__flush(&self.output) ?? return Err(&self.fail(io_error(self.total, "$", err)))
     }
 
-    fn finish(&self) -[IO, Time.Wait]> () EncodingError! {
+    fn finish(&self) EncodingError! -[IO, Time.Wait]> {
         if self.terminal == .Val(first) -> return Err(first.copy())
         if self.finished -> return
         if self.frames.len() != 0 || !self.root_written -> return Err(&self.fail(error(.State, self.total, "$", "finish requires one complete CBOR root")))
