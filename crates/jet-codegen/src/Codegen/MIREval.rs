@@ -5923,6 +5923,7 @@ impl<'a, 'state> Machine<'a, 'state> {
         instruction: &MirInstruction,
     ) -> Result<Action, Diagnostic> {
         let span = instruction.span;
+        let function = program_function(self.program, self.frames[frame_index].function)?;
         let result = match &instruction.operation {
             MirOperation::Call {
                 callee: MirCallee::Prelude(call),
