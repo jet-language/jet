@@ -1817,36 +1817,7 @@ fn current_stmts(items: &mut [Item], fn_name: &str, current_len: usize) -> Vec<S
     body.split_off(body.len() - current_len)
 }
 
-fn repl_executable_stmts(mut stmts: Vec<Stmt>) -> Vec<Stmt> {
-    for stmt in &mut stmts {
-        if let Stmt::Val(binding) = stmt {
-            if let Expr::Place(inner, crate::AST::PlaceAccess::Read, _) = &binding.init {
-                // The tree-walker owns CtValues, so a checked read window is
-                // represented by evaluating its already-validated place.
-                binding.init = (**inner).clone();
-            }
-        }
-    }
-    stmts
-}
 
-fn restore_move_diagnostic(d: Diagnostic, moved_names: &HashSet<String>) -> Diagnostic {
-    if d.code == "E0956" {
-        if let Some(name) = moved_names
-            .iter()
-            .find(|name| d.what.contains(&format!("the name `{name}`")))
-        {
-            return Diagnostic::error(
-                "E0121",
-                format!("`{name}` was given away earlier, so it can't be used here"),
-                "after a value moves somewhere else, the old name no longer holds it".to_string(),
-                format!("give away a copy instead (`{name}.copy()`) where it moved"),
-                d.span,
-            );
-        }
-    }
-    d
-}
 
 /// Build a complete synthetic Jet source from accumulated declarations +
 /// new item, then run sema. The successful rebuild retains this checked AST.
