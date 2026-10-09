@@ -1159,6 +1159,25 @@ pub(super) fn write_window_receiver(ty: &Type) -> bool {
     }
 }
 
+fn lower_handle_receiver(
+    ctx: &mut LowerCtx,
+    recv: &TExpr,
+    mutating: bool,
+    borrowed: bool,
+) -> Result<(jet_foundation::MIR::MirValueId, Option<jet_foundation::MIR::MirPlaceId>), LowerError> {
+    if borrowed && !mutating && !crate::Collections::is_iter_type(&recv.ty) {
+        if let Some(place) = lower_receiver_place(ctx, recv, MirAccess::Read)? {
+            let receiver = ctx.emit(
+                "handle-borrowed-receiver",
+                Some(recv.ty.clone()),
+                MirOperation::AddressOf { place, access: MirAccess::Read },
+            )?;
+            return Ok((receiver, Some(place)));
+        }
+    }
+    lower_builtin_receiver(ctx, recv, mutating)
+}
+
 fn lower_builtin_receiver(
     ctx: &mut LowerCtx,
     recv: &TExpr,
@@ -1567,8 +1586,8 @@ pub(super) fn lower_expr(
             let initializer = ctx.function_id_for(initializer)?;
             let key = format!("shared-site:{}", initializer.0);
             let id = jet_foundation::MIR::MirConstantId(stable_id("mir-constant", &key));
-            let (module, declaration_span) = *ctx.function_registry.declaration_sites
-                .get(&initializer).expect("checked Shared initializer has no declaration metadata");
+            let (module, declaration_span) = ctx.function_registry.declaration_site_for(initializer)
+                .expect("checked Shared initializer has no declaration metadata");
             if !ctx.shared_sites.iter().any(|row| row.id == id) {
                 ctx.shared_sites.push(jet_foundation::MIR::MirConstantDef {
                     id,
@@ -1585,16 +1604,6 @@ pub(super) fn lower_expr(
                 });
             }
             ctx.emit("global-shared", Some(expr.ty.clone()), MirOperation::Global { name: key })
-        }
-        TExprKind::DataEntriesToMap(local) => {
-            let local = ctx.local_id_for(local)?;
-            let call =
-                ctx.intern_prelude_route(super::data_entries_to_map_route(&expr.ty, &carrier)?)?;
-            ctx.emit(
-                "data-entries-to-map",
-                Some(expr.ty.clone()),
-                MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { call, local }),
-            )
         }
         TExprKind::Call {
             name,
@@ -4617,7 +4626,8 @@ pub(super) fn lower_expr(
                 super::THandleOp::GameSceneOnFrame { derivation, .. } => derivation.clone(),
                 _ => None,
             };
-            let (receiver, _) = lower_builtin_receiver(
+            let route = op.prelude_route(&recv.ty, &carrier)?;
+            let (receiver, _) = lower_handle_receiver(
                 ctx,
                 recv,
                 matches!(
@@ -4630,9 +4640,6 @@ pub(super) fn lower_expr(
                         | THandleOp::FileWriterFlush
                         | THandleOp::FileWriterWriteAll
                         | THandleOp::FileWriterFsync
-                        | THandleOp::ClockTick
-                        | THandleOp::ClockAdvance
-                        | THandleOp::ClockWait
                         | THandleOp::TcpStreamRead
                         | THandleOp::TcpStreamWrite
                         | THandleOp::TcpStreamClose
@@ -4656,6 +4663,9 @@ pub(super) fn lower_expr(
                         | THandleOp::TLSStreamWriteAllDeadline
                         | THandleOp::TLSStreamClose
                         | THandleOp::TLSStreamCloseWrite
+                        | THandleOp::GameBackendPresent
+                        | THandleOp::GameSceneOnFrame { .. }
+                        | THandleOp::GameSceneComponent
                 ),
                 route.signature.borrow_mask.first().copied().unwrap_or(false),
             )?;

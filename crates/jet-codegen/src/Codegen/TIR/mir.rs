@@ -21,7 +21,7 @@ use super::tir_to_mir_types::{
     lower_mir_convention, lower_param_zone, lower_type, lower_type_defs, lower_view_provenance,
 };
 use super::{
-    TCallArg, TContract, TContractDisposition, TContractResult, TExpr, TExprKind, TFailureCarrier,
+    TBuiltinOp, TCallArg, TContract, TContractDisposition, TContractResult, TExpr, TExprKind, TFailureCarrier,
     TFunc, TFuncKind, TGenericParam, THardwareSetup, TLambda, TLambdaBody, TLocal, TPattern,
     TPlace, TPreludeRoute, TRoutePlan, TStmt, TTargetApplicability, TVisibility, TirErasureReason,
     TirProgram,
@@ -46,7 +46,7 @@ use jet_foundation::MIR::{
     MirHarnessPlan, MirImplDef, MirImplId, MirImport, MirImportId, MirImportItem, MirImportKind,
     MirIndexKind, MirInstruction, MirJob, MirJobCachePolicy, MirJobDispatch, MirJobId,
     MirJobSchedule, MirJobScope, MirJobSkip, MirKernelFacts, MirLinkArtifact, MirLinkArtifactKind,
-    MirLinkUnit, MirLinkUnitId, MirLocal, MirLocalId, MirNameFacts, MirNominalRef, MirOpId,
+    MirLinkUnit, MirLinkUnitId, MirLocal, MirLocalId, MirModuleId, MirNameFacts, MirNominalRef, MirOpId,
     MirOperation, MirOptimizationDecision, MirOptimizationFacts, MirOptimizationRejection,
     MirOutputCheck, MirOutputCheckId, MirOwnership, MirOwnershipMode, MirPackageFacts,
     MirPanicContext, MirPanicLoc, MirParam, MirPattern, MirPatternBinding, MirPatternField, MirPayloadKind,
@@ -416,6 +416,9 @@ impl FunctionRegistry {
     }
     pub(super) fn return_type_for(&self, id: MirFunctionId) -> Option<Type> {
         self.return_types.get(&id).cloned().flatten()
+    }
+    pub(super) fn declaration_site_for(&self, id: MirFunctionId) -> Option<(MirModuleId, Span)> {
+        self.declaration_sites.get(&id).copied()
     }
     pub(super) fn call_return_type_for(
         &self,
@@ -1169,7 +1172,7 @@ pub fn lower_native_tir_to_mir(program: TirProgram) -> Result<MirProgram, LowerE
 
 fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool) -> Result<MirProgram, LowerError> {
     let mut function_registry =
-        FunctionRegistry::build(&program.funcs, program.entry_sibling_calls.as_ref())?;
+        FunctionRegistry::build(&program.funcs, program.entry_call_alias.as_ref())?;
     function_registry.stop_points = stop_points;
     let mut types = lower_type_defs(&program.declarations.type_defs, &function_registry)?;
     lower_anonymous_union_type_defs(&program, &mut types)?;
@@ -7934,9 +7937,81 @@ impl<'a> LowerCtx<'a> {
         result.map(|_| ())
     }
 
+    /// A destructured temporary is no longer a whole owner. Retire its
+    /// whole-value cleanup and keep cleanup only for fields the pattern omits.
+    /// Moving bound fields has already transferred their cleanup to the bindings.
+    pub(super) fn finish_owned_destructure(
+        &mut self,
+        place: MirPlaceId,
+        ty: &Type,
+        bound_fields: &[(String, String)],
+    ) -> Result<(), LowerError> {
+        let frame = self.defer_stack.last().expect("destructure has a cleanup frame");
+        let original = frame.actions.iter().position(|action| {
+            matches!(action, DeferredCleanup::DropPlace { place: owner, .. } if *owner == place)
+        });
+        let before = frame.actions.len();
+        if let Some(flag) = self.drop_live_places.get(&place).copied() {
+            let off = self.emit(
+                "destructure.live.clear",
+                Some(Type::Bool),
+                MirOperation::Constant(MirConstant::Bool(false)),
+            )?;
+            self.emit(
+                "destructure.live.write",
+                None,
+                MirOperation::WritePlace { place: flag, value: off },
+            )?;
+        }
+        let owner = field_owner_type(ty);
+        if let Type::Tuple(fields) = owner {
+            for (name, _) in fields.iter().rev() {
+                self.register_omitted_destructure_field(place, ty, name, bound_fields)?;
+            }
+        } else {
+            let id = self.field_owner_id_for_type(owner)?;
+            let definitions = self.type_defs;
+            let definition = definitions.iter().find(|definition| definition.id == id)
+                .ok_or_else(|| self.error(self.span(), "missing destructure owner"))?;
+            let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+                return Err(self.error(self.span(), "destructure owner has no fields"));
+            };
+            for field in fields.iter().rev().filter(|field| !field.computed) {
+                self.register_omitted_destructure_field(place, ty, &field.name, bound_fields)?;
+            }
+        }
+        let frame = self.defer_stack.last_mut().expect("destructure has a cleanup frame");
+        let added = frame.actions.len() - before;
+        if let Some(position) = original {
+            // Keep this one owner's remainder at its original scope position.
+            // Cleanup is LIFO, so reversed registration preserves field order.
+            frame.actions[position..].rotate_right(added);
+            frame.actions.remove(position + added);
+        } else if added != 0 {
+            return Err(self.error(self.span(), "owned destructure has no original cleanup position"));
+        }
+        Ok(())
+    }
+
+    fn register_omitted_destructure_field(
+        &mut self,
+        place: MirPlaceId,
+        ty: &Type,
+        name: &str,
+        bound_fields: &[(String, String)],
+    ) -> Result<(), LowerError> {
+        if bound_fields.iter().any(|(_, field)| field == name) {
+            return Ok(());
+        }
+        let field_ty = self.checked_field_type(ty, name)?;
+        let field_place = self.project_field_place(place, name, field_ty.clone(), self.span())?;
+        self.register_owned_drop(field_place, &field_ty, self.ownership_for(&field_ty), true)
+    }
+
     fn register_owned_drop(
         &mut self,
         place: MirPlaceId,
+        ty: &Type,
         ownership: MirOwnership,
         initialized: bool,
     ) -> Result<(), LowerError> {
@@ -8982,7 +9057,7 @@ impl<'a> LowerCtx<'a> {
             mir_place.base = MirPlaceBase::Parameter(param_value);
         }
         if matches!(access, MirAccess::Move) {
-            self.register_owned_drop(place, MirOwnership::from_access(access), true)?;
+            self.register_owned_drop(place, ty, MirOwnership::from_access(access), true)?;
             self.register_file_owner(place)?;
         }
         Ok(())
@@ -9090,7 +9165,7 @@ impl<'a> LowerCtx<'a> {
             string_view: false,
             gc_root: false,
         });
-        self.register_owned_drop(place, ownership, false)?;
+        self.register_owned_drop(place, &ty, ownership, false)?;
         Ok(place)
     }
     /// Bind a source-level place window to its checked owner place. A single
@@ -9863,7 +9938,7 @@ impl<'a> LowerCtx<'a> {
                         let call = ctx.intern_prelude_route(super::index_route(MirIndexKind::List, MirAccess::Read, &elem, &TFailureCarrier::Infallible)?)?;
                         let place = ctx.project_window_place(window, MirProjection::Index {
                             kind: MirIndexKind::List, index, call, write_call: None,
-                            location, context, span: ctx.span(),
+                            location, context: Some(context), span: ctx.span(),
                         }, &elem)?;
                         if let MirPatternBinding::Bind { name, .. } = slot {
                             ctx.bind_window_binding(name, elem.clone(), place)?;
@@ -9986,7 +10061,7 @@ impl<'a> LowerCtx<'a> {
         let cache = self.bind_local(&local, cache_ty.clone(), true, false, false)?;
         let current = self.current;
         if let Some(head) = self.pattern_lookup_head { self.current = head; }
-        let absent = self.emit_checked("pattern.lookup.uninitialized", Some(&cache_ty), MirOperation::Absent { element: lower_type(lookup_ty) })?;
+        let absent = self.emit_checked("pattern.lookup.uninitialized", Some(&cache_ty), MirOperation::Absent)?;
         self.emit_checked("pattern.lookup.initialize", None, MirOperation::WritePlace { place: cache, value: absent })?;
         self.current = current;
         self.pattern_lookup_caches.insert(identity, cache);
@@ -10000,7 +10075,7 @@ impl<'a> LowerCtx<'a> {
         match operation {
             Some(MirOperation::Constant(MirConstant::Int { value, .. })) => format!("int:{value}"),
             Some(MirOperation::Constant(MirConstant::Enum { type_name, variant, args })) if args.is_empty() => {
-                let owner = self.nominal_identities.get(type_name).expect("checked enum map key");
+                let owner = self.type_id_for(type_name).expect("checked enum map key");
                 format!("enum:{}:{variant}", owner.0)
             }
             Some(MirOperation::Enum { type_id, variant, args }) if args.is_empty() => format!("enum:{}:{variant}", type_id.0),
@@ -10843,7 +10918,7 @@ impl<'a> LowerCtx<'a> {
             if moved {
                 let source_local = TLocal::user(source.clone());
                 let source_place = self.place_for_local(&source_local, access)?;
-                self.register_owned_drop(source_place, ownership, true)?;
+                self.register_owned_drop(source_place, ty, ownership, true)?;
             }
         }
         Ok(())
@@ -11802,7 +11877,7 @@ impl<'a> LowerCtx<'a> {
             row.id == scope && row.kind == MirScopeKind::ScopeMember
                 && row.name.as_deref() != Some("skip") && row.name.as_deref() != Some("measure")
         }) {
-            self.emit_poll(MirPollKind::Propagate)?;
+            self.emit_poll(MirPollKind::Propagate, false)?;
         }
         Ok(())
     }
