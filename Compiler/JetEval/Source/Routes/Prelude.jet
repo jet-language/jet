@@ -186,17 +186,17 @@ fn jet_eval_route_parse_integer_failure(text: String, radix: Int) -> String Neve
     "invalid base-{radix} integer `{trimmed}`"
 }
 
-// The receiver-first String rows of `string_method_route` and the zero-copy
-// text-view rows. The evaluator calls the same String operations the compiled
-// program calls, so `find` stays a byte offset and a view reads as the text it
-// borrows on every tier (I9; MIREval's builtin table and
-// `TextLite::string_route`).
+// The receiver-first String rows of `string_method_route`, including owned
+// before/after results and their zero-copy text-view counterparts.
+// The evaluator calls the compiled program's String operations, so `find`
+// stays a byte offset and views read as borrowed text on every tier (I9;
+// MIREval's builtin table and `TextLite::string_route`).
 fn jet_eval_route_is_text_member(member: String) -> Bool Never! {
     if member == {
         "title" | "casefold" | "find" | "rfind" | "strip" | "lstrip" | "rstrip" | "zfill" | "center" | "ljust" | "rjust" | "expandtabs" | "partition" | "rpartition" -> true
         "isalnum" | "isalpha" | "isascii" | "isdecimal" | "isdigit" | "isidentifier" | "isnumeric" | "isprintable" | "isspace" | "istitle" | "islower" | "isupper" -> true
         "is_lower" | "is_upper" | "capitalize" | "swapcase" | "reverse" | "normalize" | "remove_prefix" | "remove_suffix" -> true
-        "string_before_view" | "string_after_view" | "string_trim_view" | "string_index_of" | "last_index_of" -> true
+        "string_before" | "string_after" | "string_before_view" | "string_after_view" | "string_trim_view" | "string_index_of" | "last_index_of" -> true
         else -> false
     }
 }
@@ -226,7 +226,7 @@ fn jet_eval_route_text_method(member: String, args: [TComptimeValue], machine: &
         }
     }
     want_text :: if member == {
-        "find" | "rfind" | "partition" | "rpartition" | "remove_prefix" | "remove_suffix" | "string_before_view" | "string_after_view" | "string_index_of" | "last_index_of" | "center" | "ljust" | "rjust" -> 1
+        "find" | "rfind" | "partition" | "rpartition" | "remove_prefix" | "remove_suffix" | "string_before" | "string_after" | "string_before_view" | "string_after_view" | "string_index_of" | "last_index_of" | "center" | "ljust" | "rjust" -> 1
         else -> 0
     }
     want_number :: if member == {
@@ -279,8 +279,8 @@ fn jet_eval_route_text_method(member: String, args: [TComptimeValue], machine: &
         "normalize" -> TComptimeValue.String{value: receiver.normalize()}
         "remove_prefix" -> TComptimeValue.String{value: receiver.removeprefix(needle)}
         "remove_suffix" -> TComptimeValue.String{value: receiver.removesuffix(needle)}
-        "string_before_view" -> TComptimeValue.String{value: receiver.before(needle)}
-        "string_after_view" -> TComptimeValue.String{value: receiver.after(needle)}
+        "string_before" | "string_before_view" -> TComptimeValue.String{value: receiver.before(needle)}
+        "string_after" | "string_after_view" -> TComptimeValue.String{value: receiver.after(needle)}
         "string_trim_view" -> TComptimeValue.String{value: receiver.trim()}
         else -> TComptimeValue.Unit
     }
