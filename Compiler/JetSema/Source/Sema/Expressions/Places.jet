@@ -427,7 +427,9 @@ fn sema_expression_math_swizzle(receiver: TExpr, type_name_value: String, member
             121 -> 1
             122 -> 2
             119 -> 3
-            else -> return SemaDirectSpecialCheck{handled: false, value: None}
+            else -> {
+                return SemaDirectSpecialCheck{handled: false, value: None}
+            }
         }
         letter :: if lane == {
             0 -> "x"
@@ -453,7 +455,6 @@ fn sema_expression_math_swizzle(receiver: TExpr, type_name_value: String, member
         else -> Type.Named{name: "Vec{lanes.len()}"}
     }
     SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_expr(result_ty, TExprKind.MathSwizzleRead{type_name: type_name_value, receiver: receiver, lanes: lanes}, span))}
-}
 }
 
 // Rust `numeric_type_from_name` + `numeric_const_type`: the type of
