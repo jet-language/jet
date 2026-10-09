@@ -2038,6 +2038,86 @@ mod tests {
     use super::*;
 
     #[test]
+    fn inspect_threads_preserves_targets_and_options_on_every_plane() {
+        for plane in InspectPlane::ALL {
+            for options in [vec!["--threads", "1"], vec!["--threads=1"]] {
+                for target_first in [false, true] {
+                    let mut args = vec!["inspect".to_string(), plane.name().to_string()];
+                    if target_first {
+                        args.push("input.jet".to_string());
+                    }
+                    args.extend(options.iter().map(|word| word.to_string()));
+                    if !target_first {
+                        args.push("input.jet".to_string());
+                    }
+                    let request = parse_inspect_args(&args).unwrap();
+                    assert_eq!(request.plane, plane);
+                    assert_eq!(request.scope, InspectScope::Target("input.jet".to_string()));
+                    assert_eq!(request.options, options);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn inspect_joined_values_do_not_consume_the_target_on_every_plane() {
+        for plane in InspectPlane::ALL {
+            for flag in [
+                "--before", "--color", "--facts", "--gate", "--kind", "--output",
+                "--profile", "--scope", "--set", "--target", "--topic",
+            ] {
+                for options in [vec![flag.to_string(), "value".to_string()], vec![format!("{flag}=value")]] {
+                    let mut args = vec!["inspect".to_string(), plane.name().to_string()];
+                    args.extend(options.iter().cloned());
+                    args.push("input.jet".to_string());
+                    let request = parse_inspect_args(&args).unwrap();
+                    assert_eq!(request.plane, plane);
+                    assert_eq!(request.scope, InspectScope::Target("input.jet".to_string()));
+                    assert_eq!(request.options, options);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn inspect_threads_preserves_live_replay_and_scope_errors_on_every_plane() {
+        for plane in InspectPlane::ALL {
+            let scopes: [(&[&str], InspectScope); 4] = [
+                (&["--live", "23"], InspectScope::Live(23)),
+                (&["--live=23"], InspectScope::Live(23)),
+                (&["--replay", "saved.json"], InspectScope::Replay("saved.json".to_string())),
+                (&["--replay=saved.json"], InspectScope::Replay("saved.json".to_string())),
+            ];
+            for (words, scope) in scopes {
+                let mut args = vec!["inspect".to_string(), plane.name().to_string()];
+                args.extend(words.iter().map(|word| word.to_string()));
+                args.extend(["--threads".to_string(), "1".to_string()]);
+                let request = parse_inspect_args(&args).unwrap();
+                assert_eq!(request.scope, scope);
+                assert_eq!(request.options, args[2..]);
+            }
+            for (words, expected) in [
+                (
+                    vec!["first.jet", "--threads", "1", "second.jet"],
+                    "inspect accepts at most one file or package target",
+                ),
+                (
+                    vec!["input.jet", "--threads=1", "--live", "23"],
+                    "inspect accepts a target, `--live PID`, or `--replay ARTIFACT` as one scope",
+                ),
+                (
+                    vec!["--live", "23", "--threads", "1", "--replay", "saved.json"],
+                    "inspect accepts at most one of `--live PID` or `--replay ARTIFACT`",
+                ),
+            ] {
+                let mut args = vec!["inspect".to_string(), plane.name().to_string()];
+                args.extend(words.iter().map(|word| word.to_string()));
+                assert_eq!(parse_inspect_args(&args).unwrap_err(), expected);
+            }
+        }
+    }
+
+    #[test]
     fn job_argv_forwards_every_word_after_the_job_name() {
         let split = |words: &[&str]| {
             let mut args = words.iter().map(|word| word.to_string()).collect::<Vec<_>>();
