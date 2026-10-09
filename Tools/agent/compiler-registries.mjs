@@ -97,14 +97,29 @@ const stripImports = (text, seen) => text.replace(/^use (?:jet_\w+|compiler_boot
         if (seen.has(line.trimEnd())) return line.replace(/[^\n]/g, ' ');
         seen.add(line.trimEnd()); return line;
     });
+// Same report/run omissions as the existing run-lint-fixtures assembler;
+// only its MIR builders are support, never a second executable entry.
+function lintBuilderSupport(text) {
+    let skipping = false;
+    return text.split('\n').filter(line => {
+        if (skipping) {
+            if (line === '}') skipping = false;
+            return false;
+        }
+        if (/^(?:pub )?fn (?:fx_report\w*|run)\(/.test(line)) {
+            skipping = line.trimEnd().endsWith('{');
+            return false;
+        }
+        return true;
+    }).join('\n');
+}
 function inventory() {
     return readdirSync(join(repo, 'Compiler'), { withFileTypes: true }).filter(item => item.isDirectory()).sort((a, b) => a.name.localeCompare(b.name)).flatMap(item => {
         const directory = join(repo, 'Compiler', item.name, 'Tests');
         return existsSync(directory) ? filesUnder(directory).map(path => {
             const source = relative(repo, path), text = readFileSync(path, 'utf8'), masked = codeMask(text);
             const names = testsIn(text), entry = /^fn run\s*\(/m.test(masked);
-            const abiRegistry = (/Tests\.jet$/.test(source) && /\bfn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(masked))
-                || /#Export\s*\(\s*c\s*\)\s+(?:(?:pub|priv)\s+)?fn\b/.test(masked);
+            const abiRegistry = /Tests\.jet$/.test(source) && /\bfn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(masked);
             const nestedInput = /\/Tests\/(?:fixtures|Fixtures)\//.test(source);
             return { package: item.name, source, sha256: hash(Buffer.from(text)), names, entry,
                 role: !nestedInput && (names.length || entry || abiRegistry) ? 'registry' : 'support-or-fixture' };
@@ -204,6 +219,8 @@ function generate() {
         const sources = [row.source];
         if (row.package === 'JetParser' && row.names.length) sources.unshift('Compiler/JetParser/Tests/Support.jet');
         if (row.source === 'Compiler/JetParser/Tests/SelfHost.jet') sources.push('Compiler/JetParser/Tests/SelfHostProbe.jet');
+        if (['Compiler/JetOptimizer/Tests/CanonicalOrderingFixtures.jet', 'Compiler/JetOptimizer/Tests/LintFixtures.jet'].includes(row.source)) sources.unshift('Compiler/JetBackend/Tests/LowerFixtures.jet');
+        if (row.source === 'Compiler/JetFoundation/Tests/Trace/Validation.jet') sources.unshift('Compiler/JetFoundation/Tests/Trace/JetTrace.jet');
         const id = row.id;
         const stdout = mode === 'test' ? 'jet.test.v1' : `JET_COMPILER_REGISTRY PASS ${id} tests=1\n`;
         const entry = { id, package: row.package, mode, path: join(out, id, 'registry.jet'), cwd: join(out, id),
@@ -215,12 +232,14 @@ function generate() {
         let body = standalone ? '' : base;
         for (const path of sources) {
             let text = readFileSync(join(repo, path), 'utf8');
+            if (path === 'Compiler/JetBackend/Tests/LowerFixtures.jet') text = lintBuilderSupport(text);
             if (path === row.source && mode === 'run') text = text.replace(/^fn run(?=\s*\()/m, 'fn compiler_registry_body');
             body += `\n// [compiler registry source: ${path}]\n` + stripImports(text, seen) + '\n';
         }
         if (mode === 'run') body += `\nfn run() {\n    compiler_registry_body()\n    print(${JSON.stringify(stdout.trimEnd())})\n}\n`;
         entry.sha256 = hash(Buffer.from(body));
-        entry.testNames = mode === 'test' ? [...(standalone ? [] : baseNames), ...row.names] : [];
+        entry.testNames = mode === 'test' ? testsIn(body) : [];
+        if (mode === 'test') entry.testCount = entry.testNames.length;
         mkdirSync(entry.cwd, { recursive: true });
         writeFileSync(entry.path, body);
         writeFileSync(join(entry.cwd, 'package.jet'), 'name: "compiler_registry"\nversion: "0.0.1"\nedition: "2028"\n');

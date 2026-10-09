@@ -129,4 +129,11 @@ and feeds the complete corpus to the original Jet registry. GoldenLower then
 uses the existing native run-only golden comparator; LintCorpus requires every
 lint count and findings file to be empty. No synthetic input program substitutes
 for either corpus.
+Dyn/native-layout coverage initializes the real runtime and runs both the
+permuted native descriptor round trip and the registered DateTime E3001 stop.
+Optimizer fixtures append the actual LowerFixtures MIR builders (omitting its
+separate report/run entry); trace validation appends JetTrace shared helpers and
+counts every resulting `#Test` block, including the helper file's tests.
+Export-only ABI doors with no test entry remain visible as support inventory,
+not invented standalone registries.
 

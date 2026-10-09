@@ -64,7 +64,7 @@ function specification(id) {
         if (crypto.has(name)) return { type: 'suite', runner: rt + 'run-crypto-fixtures.mjs', modes: ['assemble', 'lower', 'link', 'run'], crypto: true };
         if (plain[name]) return { type: 'plain', name, call: plain[name][0], expected: plain[name][1], runner: rt + 'check-runtime.mjs' };
         if (suites[name]) return { type: 'suite', runner: rt + suites[name][0], modes: suites[name][1], name };
-        if (['EnvironmentLeaves', 'FaultSchedule', 'IterCharge', 'ProgressState', 'HostFault', 'FloatBits', 'TerminalColor', 'TrapReport', 'VaultHooks', 'VaultProvider', 'Thread', 'HostSpawn', 'CompilerEnv', 'CompilerRoutes', 'CompilerNeededJSON', 'CompilerNeededURL', 'CompilerNeededMathText'].includes(name)) return { type: 'c', name, runner: be + 'run-runtime.mjs' };
+        if (['EnvironmentLeaves', 'FaultSchedule', 'IterCharge', 'ProgressState', 'HostFault', 'FloatBits', 'TerminalColor', 'TrapReport', 'VaultHooks', 'VaultProvider', 'Thread', 'HostSpawn', 'CompilerEnv', 'CompilerRoutes', 'CompilerNeededJSON', 'CompilerNeededURL', 'CompilerNeededMathText', 'DynNative'].includes(name)) return { type: 'c', name, runner: be + 'run-runtime.mjs' };
         if (name === 'GenericRouteSchema') return { type: 'direct', runner: 'Compiler/JetRuntime/Tests/GenericRouteSchema.jet', expected: '' };
         return { blocked: `No registered transport for ${id}; the source must not be counted without an exact native verdict` };
     }
@@ -146,6 +146,7 @@ export function planTransport(entry, { jet, repo, runtimePack }) {
         } else {
             run(join(out, 'driver'), spec.name === 'CompilerRoutes' ? [out] : []); if (spec.name === 'HostFault') run(join(out, 'driver'), ['unreachable']);
             if (spec.name === 'CompilerEnv') run(join(out, 'driver'), ['empty']);
+            if (spec.name === 'DynNative') run(join(out, 'driver'), ['datetime'], { code: 70, stdout: '' });
         }
     } else if (spec.type === 'direct') {
         steps.push({ action: 'copy real source to isolated project', source: join(repo, spec.runner) }); build(join(out, 'unit.jet')); run(join(out, 'registry-native.exe'), [], { code: 0, stdout: spec.expected, stderr: '' });
@@ -206,7 +207,8 @@ export function planTransport(entry, { jet, repo, runtimePack }) {
 function cSource(name, repo) {
     const head = '#define _GNU_SOURCE\n#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n';
     const exports = { FaultSchedule: 'jet_rt_fault_schedule_fixture', IterCharge: 'jet_rt_iter_charge_fixture', ProgressState: 'jet_rt_progress_state_fixture', CompilerNeededJSON: 'jet_rt_compiler_needed_json_fixture', CompilerNeededURL: 'jet_rt_compiler_needed_url_fixture', CompilerNeededMathText: 'jet_rt_compiler_math_text_fixture' };
-    if (exports[name]) return head + `extern int64_t ${exports[name]}(void);\nint main(void) { return (int)${exports[name]}(); }\n`;
+    if (exports[name]) return head + `extern char **environ;\nextern void jet_rt_host_arguments(int64_t,char **,char **);\nextern int64_t ${exports[name]}(void);\nint main(int argc,char **argv) { jet_rt_host_arguments(argc,argv,environ); return (int)${exports[name]}(); }\n`;
+    if (name === 'DynNative') return head + 'extern char **environ;\nextern void jet_rt_host_arguments(int64_t,char **,char **);\nextern int64_t jet_rt_dyn_native_fixture(void);\nextern void jet_rt_dyn_native_datetime_trap_fixture(void);\nint main(int argc,char **argv) { jet_rt_host_arguments(argc,argv,environ); if(argc==2 && !strcmp(argv[1],"datetime")) { jet_rt_dyn_native_datetime_trap_fixture(); return 91; } return (int)jet_rt_dyn_native_fixture(); }\n';
     if (name === 'EnvironmentLeaves') return head + 'extern char **environ;\nextern int64_t jet_rt_environment_leaves_fixture(int64_t,int64_t,int64_t);\nint main(int argc,char **argv) { char invalid[]="JET_LEAF_INVALID=\\xff"; if (putenv(invalid)||setenv("JET_LEAF_EMPTY","",1)||unsetenv("JET_LEAF_MISSING")) return 100; return (int)jet_rt_environment_leaves_fixture(argc,(intptr_t)argv,(intptr_t)environ); }\n';
     if (name === 'HostFault') return head + 'extern int64_t jet_rt_host_fault_fixture(int64_t,_Bool);\nint main(int argc,char **argv) { (void)argv; return (int)jet_rt_host_fault_fixture((intptr_t)"A",argc>1); }\n';
     if (name === 'FloatBits') return head + 'extern int64_t jet_rt_test_f64_bits(double);\nextern double jet_rt_test_f64_from_bits(int64_t);\nint main(void) { const uint64_t words[]={0,UINT64_C(0x8000000000000000),1,UINT64_C(0x7ff0000000000000),UINT64_C(0xfff0000000000000),UINT64_C(0x7ff8000000000001),UINT64_C(0x3ff0000000000000),UINT64_C(0xffffffffffffffff)}; for(unsigned i=0;i<sizeof(words)/sizeof(*words);i++) { double value; memcpy(&value,&words[i],8); if((uint64_t)jet_rt_test_f64_bits(value)!=words[i]) return 1; value=jet_rt_test_f64_from_bits((int64_t)words[i]); uint64_t back; memcpy(&back,&value,8); if(back!=words[i]) return 2; } return 0; }\n';
@@ -347,6 +349,12 @@ export async function runTransport(entry, { jet, repo, logDir, runtimePack, runt
                 const expected = { VaultHooks: 'vault hooks witness OK (TLS ownership, exact stops, 8 root-filtered two-phase barriers)\n', VaultProvider: 'vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)\n', Thread: 'tls ok\n', HostSpawn: 'process raw: ok\n', CompilerEnv: 'compiler environment routes: Jet-only (Rust frozen)\n', CompilerRoutes: 'compiler routes: Jet-only (Rust frozen)\n' }[spec.name] ?? '';
                 exact(execute(binary, spec.name === 'CompilerRoutes' ? [out] : []), expected);
                 if (spec.name === 'CompilerEnv') exact(execute(binary, ['empty']), expected);
+                if (spec.name === 'DynNative') {
+                    const { trapLiteral } = await import(pathToFileURL(join(repo, rt + 'report-literals.mjs')));
+                    const stopped = execute(binary, ['datetime'], { expectedCode: 70 });
+                    const header = trapLiteral('trap_msg_header_panic').toString() + 'Dyn DateTime is not yet bridged natively';
+                    if (stopped.stdout !== '' || !stopped.stderr.startsWith(header) || !stopped.stderr.endsWith(trapLiteral('trap_footer_e3001').toString())) throw Error('Dyn DateTime must publish the exact registered E3001 message/footer');
+                }
             }
         } else if (spec.type === 'calls') {
             node(spec.runner, out, ...(spec.session ? ['--session'] : []));
