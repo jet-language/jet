@@ -2,6 +2,8 @@
 // D-COPY-WORD1: migrate the retired prefix ~ to the built-in .copy() method.
 // Usage: node Tools/agent/migrate-copy-sigil.mjs --check|--write [file/directory ...]
 //        node Tools/agent/migrate-copy-sigil.mjs --self-test
+// File owners only: --owner-write /absolute/owned/file.jet [...] explicitly
+// authorizes writes to those dirty files; directories and implicit tree denied.
 // --check lists every site (including dirty files), with package totals; exits 1
 // when sites remain. --write refuses tracked/untracked dirty files, recording
 // them in ~/.cache/jet-dev/scratch/CopySigilMigration/dirty-files.tsv.
@@ -18,7 +20,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -238,7 +240,7 @@ function deliberate(root, file) {
   return /e0941/i.test(file) || (existsSync(resolve(root, file.replace(/\.jet$/, '.stderr'))) && /\bE0941\b/.test(readFileSync(resolve(root, file.replace(/\.jet$/, '.stderr')), 'utf8')));
 }
 function filesAt(path) {
-  if (!statSync(path).isDirectory()) return path.endsWith('.jet') ? [path] : [];
+  if (!statSync(path).isDirectory()) return /\.(?:jet|jet\.template|template)$/.test(path) ? [path] : [];
   return readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap((entry) => {
     if (['.git', 'node_modules', 'target', '.agent-worktrees'].includes(entry.name) || entry.isSymbolicLink()) return [];
     return filesAt(resolve(path, entry.name));
@@ -303,8 +305,10 @@ function selfTest() {
 }
 function main(args) {
   if (args.length === 1 && args[0] === '--self-test') { selfTest(); return; }
-  const mode = args.shift();
-  if (!['--check', '--write'].includes(mode) || args.some((arg) => arg.startsWith('--'))) throw new Error('usage: --check|--write [file/directory ...], or --self-test');
+  const requested = args.shift(), ownerWrite = requested === '--owner-write';
+  const mode = ownerWrite ? '--write' : requested;
+  if (!['--check', '--write'].includes(mode) || args.some((arg) => arg.startsWith('--'))) throw new Error('usage: --check|--write [file/directory ...], --owner-write /absolute/file [...], or --self-test');
+  if (ownerWrite && (!args.length || args.some((arg) => !isAbsolute(arg) || !statSync(arg).isFile()))) throw new Error('--owner-write requires explicit absolute file paths owned by the caller');
   const paths = args.length ? args.map((arg) => resolve(ROOT, arg)) : [ROOT];
   const files = [...new Set(paths.flatMap(filesAt))].sort();
   const dirty = dirtyPaths(ROOT), counts = new Map(), skipped = [], changed = [];
@@ -326,7 +330,7 @@ function main(args) {
     for (const site of migrated.sites) console.log(`${file}:${site.line}:${site.column}\t${source.slice(site.start, site.end).replaceAll('\n', '\\n')}`);
     if (mode === '--write') {
       // Recheck just before each write so another agent's edits aren't captured.
-      if (reserved.has(file) || dirty.has(file) || dirtyPaths(ROOT).has(file)) {
+      if (!ownerWrite && (reserved.has(file) || dirty.has(file) || dirtyPaths(ROOT).has(file))) {
         skipped.push([owner(file), file, migrated.sites.length]); continue;
       }
       if (readFileSync(path, 'utf8') !== source) throw new Error(`concurrent edit: ${file}`);
@@ -335,9 +339,9 @@ function main(args) {
   }
   for (const [name, count] of [...counts].sort()) console.log(`package\t${name}\t${count}`);
   mkdirSync(SCRATCH, { recursive: true });
-  writeFileSync(resolve(SCRATCH, mode === '--check' ? 'check-counts.tsv' : 'write-counts.tsv'), [...counts].sort().map(([name, count]) => `${name}\t${count}\n`).join(''));
+  if (!ownerWrite) writeFileSync(resolve(SCRATCH, mode === '--check' ? 'check-counts.tsv' : 'write-counts.tsv'), [...counts].sort().map(([name, count]) => `${name}\t${count}\n`).join(''));
   console.log(`copy-sigil sites: ${total}`);
-  if (mode === '--write') {
+  if (mode === '--write' && !ownerWrite) {
     mkdirSync(SCRATCH, { recursive: true });
     writeFileSync(resolve(SCRATCH, 'dirty-files.tsv'), 'owner\tfile\tsites\n' + skipped.sort((a, b) => a.join('\t').localeCompare(b.join('\t'))).map((row) => row.join('\t') + '\n').join(''));
     writeFileSync(resolve(SCRATCH, 'changed-files.tsv'), changed.map((file) => file + '\n').join(''));
