@@ -41,6 +41,11 @@ fn trap_syscall(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I6
 }
 
 fn trap_write(address: I64, count: I64) {
+    capture :: scheduler_root_capture_pointer(scheduler_report_control_current())
+    if (capture != I64{0}) {
+        rt_text_append(capture, address, count)
+        return
+    }
     at := I64{0}
     loop at < count {
         written :: trap_syscall(I64{1}, I64{2}, address + at, count - at, I64{0}, I64{0}, I64{0})
@@ -52,6 +57,16 @@ fn trap_write(address: I64, count: I64) {
 
 // Generated report literals use this path even when the allocator is failing.
 fn trap_write_word(word: I64, count: I64) {
+    capture :: scheduler_root_capture_pointer(scheduler_report_control_current())
+    if (capture != I64{0}) {
+        rt_text_append_raw_word(capture, word, count)
+        return
+    }
+    trap_write_word_raw(word, count)
+}
+
+// Canonical host-defect rows can write without a GS probe or capture lookup.
+fn trap_write_word_raw(word: I64, count: I64) {
     remaining := word
     length := count
     loop length > (I64{0}) {
@@ -67,6 +82,7 @@ fn trap_write_word(word: I64, count: I64) {
 }
 
 fn rt_trap_invalid_box_layout() {
+    trap_root_prepare()
     trap_flush_stdout()
     trap_invalid_layout_head()
     trap_footer_e3001()
@@ -79,7 +95,36 @@ fn trap_write_handle(handle: I64) {
 
 
 fn trap_exit(status: I64) {
+    if (scheduler_report_domain() == I64{1}) {
+        text :: scheduler_root_capture_take(scheduler_control_current())
+        if (text == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+        _ := scheduler_root_publish_owned(text, status)
+        return
+    }
+    trap_defect_exit(status)
+}
+fn trap_defect_prepare() {
+    control :: scheduler_report_control_current()
+    if (control != I64{0}) -> jet_rt_string_drop(scheduler_root_capture_take(control))
+}
+fn trap_defect_exit(status: I64) {
     _ := trap_syscall(I64{231}, status, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+}
+
+// A failed GS syscall cannot establish ownership of any TCB. Host stdout
+// metadata is already initialized before Thread's bootstrap/attach stage; its
+// unbounded raw mutex/flush path has no TLS, allocation, or user callbacks.
+fn trap_gs_failure() {
+    trap_flush_stdout()
+    trap_defect_unreachable_head()
+    trap_defect_newline()
+    loop { trap_defect_exit(I64{101}) }
+}
+fn trap_root_prepare() {
+    if (scheduler_report_domain() == I64{1}) {
+        _ := scheduler_panic_check()
+        scheduler_root_capture_begin()
+    }
 }
 
 // Keep both the value and divisor non-positive: neither I64.MIN's negation
@@ -107,6 +152,10 @@ fn trap_line(line: I64) -> I64 Never! {
 }
 
 fn trap_header(code: I64) {
+    trap_root_prepare()
+    trap_header_bytes(code)
+}
+fn trap_header_bytes(code: I64) {
     trap_flush_stdout()
     if {
         (code == I64{0}) -> trap_msg_header_panic()
@@ -166,6 +215,10 @@ fn trap_context(file: I64, file_len: I64, line: I64, function: I64, function_len
 }
 
 fn trap_footer(code: I64) {
+    trap_footer_bytes(code)
+    trap_exit(I64{70})
+}
+fn trap_footer_bytes(code: I64) {
     // Exact active registry rows; backticks protect the raw message from the
     // sentence-case pass in RuntimeDiagnosticCore.rs.
     if {
@@ -173,7 +226,18 @@ fn trap_footer(code: I64) {
         (code == I64{1}) -> trap_footer_e3010()
         else -> trap_footer_e3011()
     }
-    trap_exit(I64{70})
+}
+
+// A transported Task panic owns only its reason. Render before publishing
+// the Root record, reusing the original registered bytes and retaining its
+// metadata. No second publication or formatter runs on an existing stop.
+fn trap_root_panic_report(message: I64) -> I64 {
+    scheduler_root_capture_begin()
+    trap_header_bytes(I64{0})
+    trap_write_handle(message)
+    trap_msg_prelude_end()
+    trap_footer_bytes(I64{0})
+    scheduler_root_capture_take(scheduler_control_current())
 }
 
 fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
@@ -194,14 +258,14 @@ fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, mes
 // CAbiRoutes.rs:11-12: publish the seed's raw native-Int range reason.
 // Root rendering stays separate so task publication never prints a report.
 fn trap_native_index_range_stop() {
-    message :: jet_rt_alloc(I64{40}, I64{8})
+    message :: alloc_required_valid(I64{40}, I64{8})
     trap_store(message, I64{5269323123273261422})
     trap_store(message + I64{8}, I64{7887324063362741358})
     trap_store(message + I64{16}, I64{7305815396256607845})
     trap_store(message + I64{24}, I64{8391173023733081189})
     trap_store(message + I64{32}, I64{111494907916832})
     published :: rt_task_panic_publish(message, I64{38}, I64{0})
-    jet_rt_free(message, I64{40}, I64{8})
+    alloc_release_valid(message, I64{40}, I64{8})
     if published -> return
     trap_native_index_range_root()
 }
@@ -216,7 +280,7 @@ fn trap_native_index_range_root() {
 // Registered E3010 overflow: tasks carry the exact root message; the root
 // report stays unchanged even where the seed uses raw Rust arithmetic.
 #Export(c) fn jet_rt_panic_overflow() {
-    message :: jet_rt_alloc(I64{80}, I64{8})
+    message :: alloc_required_valid(I64{80}, I64{8})
     trap_store(message, I64{7598242313330583636})
     trap_store(message + I64{8}, I64{2333824980546840692})
     trap_store(message + I64{16}, I64{8606216600190023279})
@@ -228,7 +292,7 @@ fn trap_native_index_range_root() {
     trap_store(message + I64{64}, I64{7021710449270399077})
     trap_store(message + I64{72}, I64{694511470})
     published :: rt_task_panic_publish(message, I64{76}, I64{0})
-    jet_rt_free(message, I64{80}, I64{8})
+    alloc_release_valid(message, I64{80}, I64{8})
     if published -> return
     trap_header(I64{1})
     trap_msg_overflow()
@@ -262,7 +326,7 @@ fn trap_native_index_range_root() {
     // Outcome.rs:2463-2466 supplies the one list-index reason. Reuse the
     // existing decimal formatter, including I64.MIN; publication copies it.
     message :: jet_rt_string_builder_new()
-    scratch :: jet_rt_alloc(I64{24}, I64{8})
+    scratch :: alloc_required_valid(I64{24}, I64{8})
     rt_text_push_word(message, I64{8391166443842267252}, I64{8})
     rt_text_push_word(message, I64{139374716960}, I64{5})
     coll_render_i64(message, scratch, len)
@@ -273,7 +337,7 @@ fn trap_native_index_range_root() {
     rt_text_push_word(message, I64{8369779874393449504}, I64{8})
     rt_text_push_word(message, I64{128039039558944}, I64{6})
     published :: rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{0})
-    jet_rt_free(scratch, I64{24}, I64{8})
+    alloc_release_valid(scratch, I64{24}, I64{8})
     jet_rt_string_drop(message)
     if published -> return
     trap_header(I64{1})
@@ -288,23 +352,55 @@ fn trap_native_index_range_root() {
 // MIR Never is not a program-side stop. The Rust host's thread/source/backtrace
 // prefix is not Jet semantics; preserve the unreachable! body and status 101.
 #Export(c) fn jet_rt_unreachable(reason: I64, length: I64) {
+    trap_defect_prepare()
     trap_flush_stdout()
     trap_msg_unreachable()
     trap_write(reason, length)
     trap_msg_newline()
-    trap_exit(I64{101})
+    trap_defect_exit(I64{101})
 }
 
 // Vec::with_capacity(capacity as usize) and growth overflow are foreign
 // Rust String panics under CAbi guard: body + newline, exit 101, not a Jet stop.
 fn rt_seq_capacity_overflow_stop() {
+    trap_defect_prepare()
     trap_flush_stdout()
     trap_write_word(I64{8751735851445150051}, I64{8})
     trap_write_word(I64{8028904877209317152}, I64{8})
     trap_write_word(I64{119}, I64{1})
     trap_msg_newline()
-    trap_exit(I64{101})
+    trap_defect_exit(I64{101})
 }
+
+// These CAbi getters index Vec[index as usize]. Their bounds panic is a
+// foreign String host defect, not a Jet record-variant or Root program stop.
+// Keep the raw reason and the x64 unsigned index, including negative I64.
+fn rt_seq_index_oob_stop(length: I64, index: I64) {
+    trap_defect_prepare()
+    trap_flush_stdout()
+    alloc_write_word(I64{8462017926321696361}, I64{8})
+    alloc_write_word(I64{8462090116149485684}, I64{8})
+    alloc_write_word(I64{7307218077177046126}, I64{8})
+    alloc_write_word(I64{2338328219547429920}, I64{8})
+    alloc_write_size(length)
+    alloc_write_word(I64{7307218078150255136}, I64{8})
+    alloc_write_word(I64{7575186950109161760}, I64{8})
+    alloc_write_word(I64{8307}, I64{2})
+    if (index >= I64{0}) {
+        alloc_write_size(index)
+    } else {
+        // Unsigned index = 2 * half + lowBit. Both the decimal quotient and
+        // last digit fit signed I64; no MIN negation or unsigned cast is used.
+        half :: (index >> I64{1}) & I64{9223372036854775807}
+        quotient :: half /% I64{5}
+        last :: (half % I64{5}) * I64{2} + (index & I64{1})
+        alloc_write_size(quotient)
+        alloc_write_word(I64{48} + last, I64{1})
+    }
+    alloc_write_word(I64{10}, I64{1})
+    trap_defect_exit(I64{101})
+}
+
 
 #Export(c) fn jet_panic(file: I64, line: I64, message: I64) {
     trap_simple(I64{0}, trap_word(file), trap_word(file + I64{8}), trap_line(line), trap_word(message), trap_word(message + I64{8}))
@@ -315,14 +411,14 @@ fn rt_seq_capacity_overflow_stop() {
 // task-publication path. At root its header + message + prelude_end + footer
 // is byte-identical to jet_panic("<core.prelude>", 0, message).
 fn rt_record_variant_panic() {
-    message :: jet_rt_alloc(I64{33}, I64{8})
+    message :: alloc_required_valid(I64{33}, I64{8})
     trap_store(message, I64{8511913738388071794})
     trap_store(message + I64{8}, I64{7575182590666699361})
     trap_store(message + I64{16}, I64{8391735665924334702})
     trap_store(message + I64{24}, I64{7453001576142499616})
     trap_put(message + I64{32}, I64{101})
     jet_rt_panic_message(message, I64{33})
-    jet_rt_free(message, I64{33}, I64{8})
+    alloc_release_valid(message, I64{33}, I64{8})
 }
 
 fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, caret: I64, message: I64, locals: I64) {

@@ -93,7 +93,10 @@ fn host_context_copy(value: I64) -> I64 {
 }
 
 #Export(c) fn jet_rt_record_new_IOContext(operation: I64, resource: I64, os_code: I64, cause: I64) -> I64 {
-    if (operation < I64{0} || operation >= HOST_IO_OP_COUNT) -> host_record_index_refused()
+    if (operation < I64{0} || operation >= HOST_IO_OP_COUNT) {
+        host_record_index_refused()
+        return I64{0}
+    }
     raw_code := I64{0}
     if (os_code != I64{0}) {
         #Unsafe("the optional code box borrows one initialized exact-Int word") {
@@ -142,7 +145,10 @@ fn host_context_text(value: I64, offset: I64, some: I64) -> I64 {
 
 fn host_error_context(value: I64, kind: I64) -> I64 {
     #Unsafe("value borrows a complete error header; the selected payload must match its canonical tag") {
-        if (os_load_i64(value) != kind) -> host_record_index_refused()
+        if (os_load_i64(value) != kind) {
+            host_record_index_refused()
+            return I64{0}
+        }
     }
     host_context_copy(wrapping(value + I64{8}))
 }
@@ -164,13 +170,19 @@ fn host_error_with_context(context: I64, kind: I64) -> I64 {
 
 #Export(c) fn jet_rt_record_get_IOError_ResourceLimit(value: I64) -> I64 {
     #Unsafe("value borrows an initialized ResourceLimit error") {
-        if (os_load_i64(value) != HOST_IO_KIND_RESOURCE_LIMIT) -> host_record_index_refused()
+        if (os_load_i64(value) != HOST_IO_KIND_RESOURCE_LIMIT) {
+            host_record_index_refused()
+            return I64{0}
+        }
         return os_load_i64(wrapping(value + I64{48}))
     }
 }
 
 #Export(c) fn jet_rt_record_new_IOError_ResourceLimit(limit: I64) -> I64 {
-    if (limit < I64{0} || limit >= HOST_PROCESS_LIMIT_COUNT) -> host_record_index_refused()
+    if (limit < I64{0} || limit >= HOST_PROCESS_LIMIT_COUNT) {
+        host_record_index_refused()
+        return I64{0}
+    }
     value :: jet_rt_alloc(I64{56}, I64{8})
     #Unsafe("value exclusively owns seven initialized words; ResourceLimit has no text children") {
         os_store_i64(value, HOST_IO_KIND_RESOURCE_LIMIT)

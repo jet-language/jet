@@ -53,7 +53,7 @@ fn thread_base() -> I64 {
 fn thread_set_base(base: I64) {
     #Unsafe("GS is reserved for Jet and base is a live self-addressed TCB or zero at detach") {
         status :: os_syscall_i64(I64{158}, I64{4097}, base, I64{0}, I64{0}, I64{0}, I64{0})
-        if (status != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
+        if (status != I64{0}) { trap_gs_failure() }
     }
 }
 

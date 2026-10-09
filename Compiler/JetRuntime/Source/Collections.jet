@@ -69,13 +69,13 @@ fn coll_meta_drop(meta: I64) {
 }
 
 fn coll_call1(code: I64, a: I64) -> I64 {
-    #Unsafe("checked native descriptor callback; slot storage remains live for the synchronous call") {
+    #Unsafe("checked native value-returning callback; its raw argument stays valid for the synchronous call") {
         return os_call1_i64(code, a)
     }
 }
 
 fn coll_call2(code: I64, a: I64, b: I64) -> I64 {
-    #Unsafe("checked clone/equality/comparison callback; both payload slots remain live") {
+    #Unsafe("checked native value-returning callback; both raw arguments stay valid for the synchronous call") {
         return os_call2_i64(code, a, b)
     }
 }
@@ -116,7 +116,13 @@ fn coll_slot_clone(source: I64, target: I64, meta: I64) {
 
 fn coll_slot_drop(slot: I64, meta: I64) {
     code :: trap_word(meta + I64{16})
-    if (code != I64{0}) { coll_call1_unit(code, slot) }
+    if (code != I64{0}) {
+        saved :: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
+        jet_scheduler_shield_enter()
+        coll_call1_unit(code, slot)
+        jet_scheduler_shield_leave()
+        jet_rt_session_cleanup_leave(saved)
+    }
 }
 
 fn coll_slot_free(slot: I64, meta: I64) {
@@ -1205,7 +1211,10 @@ fn coll_loop_range_stop(exhausted: Bool) {
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     last :: jet_int_owned_to_i64(end)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    if (stride == I64{0}) { coll_loop_range_stop(false) }
+    if (stride == I64{0}) {
+        coll_loop_range_stop(false)
+        return I64{0}
+    }
     cursor :: jet_rt_alloc(I64{40}, I64{8})
     trap_store(cursor, first)
     trap_store(cursor + I64{8}, last)
@@ -1227,7 +1236,10 @@ fn coll_loop_range_stop(exhausted: Bool) {
 }
 
 #Export(c) fn jet_loop_range_value(cursor: I64) -> I64 {
-    if !jet_loop_range_has_next(cursor) -> coll_loop_range_stop(true)
+    if !jet_loop_range_has_next(cursor) {
+        coll_loop_range_stop(true)
+        return I64{0}
+    }
     jet_int_owned_from_i64(trap_word(cursor))
 }
 

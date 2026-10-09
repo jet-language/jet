@@ -36,8 +36,12 @@ fn rt_text_bytes_copy(target: I64, source: I64, len: I64) {
 }
 
 fn rt_text_copy(ptr: I64, len: I64) -> I64 {
-    header :: jet_rt_alloc(I64{24}, I64{8})
+    header :: alloc_required_valid(I64{24}, I64{8})
     data :: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
+    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
+        alloc_release_valid(header, I64{24}, I64{8})
+        return I64{0}
+    }
     rt_text_bytes_copy(data, ptr, len)
     rt_text_store(header, data)
     rt_text_store(header + I64{8}, len)
@@ -112,39 +116,61 @@ fn rt_text_capacity_stop() {
     rt_text_push_word(message, I64{2340029477383401569}, I64{8})
     rt_text_push_word(message, I64{8606216600190023279}, I64{8})
     jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+    jet_rt_string_drop(message)
 }
 
-fn rt_text_append(target: I64, ptr: I64, len: I64) {
-    if (len == I64{0}) {
-        return
+// Shared growth keeps byte append and registered-report word append exact:
+// a word contains UTF-8 bytes, not scalar values to encode a second time.
+fn rt_text_reserve_extra(target: I64, old: I64, used: I64, extra: I64) -> I64 {
+    if (extra > I64{9223372036854775807} - used) {
+        rt_text_capacity_stop()
+        return I64{0}
     }
+    needed :: used + extra
+    cap :: rt_text_word(target + I64{16})
+    if (needed <= cap) -> return old
+    grown :: if (cap <= I64{4611686018427387903}) -> cap * I64{2} else -> needed
+    capacity :: if {
+        needed > grown -> needed
+        (grown < I64{16}) -> I64{16}
+        else -> grown
+    }
+    data :: jet_rt_alloc(capacity, I64{1})
+    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) -> return I64{0}
+    rt_text_bytes_copy(data, old, used)
+    before :: jet_rt_session_status()
+    if (cap != I64{0}) -> jet_rt_free(old, cap, I64{1})
+    if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) {
+        jet_rt_free(data, capacity, I64{1})
+        return I64{0}
+    }
+    rt_text_store(target, data)
+    rt_text_store(target + I64{16}, capacity)
+    data
+}
+fn rt_text_append(target: I64, ptr: I64, len: I64) {
+    if (len == I64{0}) -> return
     old :: rt_text_data(target)
     used :: rt_text_len(target)
-    cap :: rt_text_word(target + I64{16})
-    if (len > I64{9223372036854775807} - used) {
-        rt_text_capacity_stop()
-        return
-    }
-    needed :: used + len
-    data := old
-    source := ptr
-    if needed > cap {
-        grown :: if (cap <= I64{4611686018427387903}) -> cap * I64{2} else -> needed
-        capacity :: if {
-            needed > grown -> needed
-            (grown < I64{16}) -> I64{16}
-            else -> grown
-        }
-        data = jet_rt_alloc(capacity, I64{1})
-        rt_text_bytes_copy(data, old, used)
-        // Self append (including a borrowed subwindow) survives relocation.
-        if (cap != I64{0} && ptr >= old && ptr < old + used) { source = data + (ptr - old) }
-        if (cap != I64{0}) { jet_rt_free(old, cap, I64{1}) }
-        rt_text_store(target, data)
-        rt_text_store(target + I64{16}, capacity)
-    }
+    aliases :: ptr >= old && ptr < old + used
+    data :: rt_text_reserve_extra(target, old, used, len)
+    if (data == I64{0}) -> return
+    // Borrowed self windows survive relocation; empty headers have no window.
+    source :: if aliases -> data + (ptr - old) else -> ptr
     rt_text_bytes_copy(data + used, source, len)
-    rt_text_store(target + I64{8}, needed)
+    rt_text_store(target + I64{8}, used + len)
+}
+fn rt_text_append_raw_word(target: I64, word: I64, count: I64) {
+    if (count <= I64{0}) -> return
+    used :: rt_text_len(target)
+    data :: rt_text_reserve_extra(target, rt_text_data(target), used, count)
+    if (data == I64{0}) -> return
+    at := I64{0}
+    loop at < count {
+        rt_text_put(data + used + at, (word >> (at * I64{8})) & I64{255})
+        at += I64{1}
+    }
+    rt_text_store(target + I64{8}, used + count)
 }
 
 fn rt_text_push_scalar(target: I64, scalar: I64) {
@@ -168,8 +194,14 @@ fn rt_text_push_scalar(target: I64, scalar: I64) {
         capacity :: if (grown < I64{16}) -> I64{16} else -> grown
         old :: rt_text_data(target)
         data :: jet_rt_alloc(capacity, I64{1})
+        if (data == I64{0} && jet_rt_session_propagate() != I64{0}) -> return
         rt_text_bytes_copy(data, old, used)
+        before :: jet_rt_session_status()
         if (cap != I64{0}) { jet_rt_free(old, cap, I64{1}) }
+        if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) {
+            jet_rt_free(data, capacity, I64{1})
+            return
+        }
         rt_text_store(target, data)
         rt_text_store(target + I64{16}, capacity)
     }
@@ -205,6 +237,10 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
     if at == len -> return rt_text_copy(ptr, len)
     result :: jet_rt_string_builder_new()
     rt_text_append(result, ptr, at)
+    if (jet_rt_session_propagate() != I64{0}) {
+        jet_rt_string_drop(result)
+        return I64{0}
+    }
     loop at < len {
         width :: rt_text_valid_width(ptr + at, len - at)
         if {
@@ -222,6 +258,10 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
                 }
                 rt_text_append(result, ptr + start, at - start)
             }
+        }
+        if (jet_rt_session_propagate() != I64{0}) {
+            jet_rt_string_drop(result)
+            return I64{0}
         }
     }
     result
@@ -246,8 +286,12 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
         return I64{0}
     }
     len :: left_len + right_len
-    header :: jet_rt_alloc(I64{24}, I64{8})
+    header :: alloc_required_valid(I64{24}, I64{8})
     data :: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
+    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
+        alloc_release_valid(header, I64{24}, I64{8})
+        return I64{0}
+    }
     rt_text_bytes_copy(data, rt_text_data(left), left_len)
     rt_text_bytes_copy(data + left_len, rt_text_data(right), right_len)
     rt_text_store(header, data)
@@ -261,8 +305,10 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
         return
     }
     cap :: rt_text_word(value + I64{16})
+    before :: jet_rt_session_status()
     if (cap != I64{0}) { jet_rt_free(rt_text_data(value), cap, I64{1}) }
-    jet_rt_free(value, I64{24}, I64{8})
+    if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) -> return
+    alloc_release_valid(value, I64{24}, I64{8})
 }
 
 fn rt_text_equal_bytes(left: I64, right: I64, len: I64) -> Bool {
@@ -424,8 +470,12 @@ fn rt_text_find_bytes(data: I64, len: I64, pattern: I64, n: I64, start: I64, las
 }
 
 fn rt_text_builder_with_capacity(cap: I64) -> I64 {
-    header :: jet_rt_alloc(I64{24}, I64{8})
+    header :: alloc_required_valid(I64{24}, I64{8})
     data :: if (cap == I64{0}) -> I64{1} else -> jet_rt_alloc(cap, I64{1})
+    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
+        alloc_release_valid(header, I64{24}, I64{8})
+        return I64{0}
+    }
     rt_text_store(header, data)
     rt_text_store(header + I64{8}, I64{0})
     rt_text_store(header + I64{16}, cap)
@@ -450,6 +500,7 @@ fn rt_text_builder_with_capacity(cap: I64) -> I64 {
         return
     }
     suffix :: rt_text_lossy(ptr, len)
+    if (suffix == I64{0} && jet_rt_session_propagate() != I64{0}) -> return
     jet_rt_string_builder_push(target, suffix)
     jet_rt_string_drop(suffix)
 }
@@ -494,6 +545,7 @@ fn rt_text_push_word(target: I64, word: I64, len: I64) {
     at := I64{0}
     loop at < len {
         rt_text_push_scalar(target, (word >> (at * I64{8})) & I64{255})
+        if (jet_rt_session_propagate() != I64{0}) -> return
         at += I64{1}
     }
 }
@@ -564,7 +616,7 @@ fn rt_text_slice_range(value: I64, start: I64, end: I64, exclusive: U8, file: I6
 // phase, done flag. Empty separators yield leading/trailing empty strings and
 // one piece per Unicode scalar, exactly like Rust str::split.
 fn text_iter_state(text: I64, separator: I64) -> I64 {
-    state :: jet_rt_alloc(I64{40}, I64{8})
+    state :: alloc_required_valid(I64{40}, I64{8})
     rt_text_store(state, jet_rt_string_clone(text))
     rt_text_store(state + I64{8}, jet_rt_string_clone(separator))
     rt_text_store(state + I64{16}, I64{0})
@@ -607,7 +659,7 @@ fn text_iter_pull(state: I64) -> I64 {
             }
         }
     }
-    slot :: jet_rt_alloc(I64{8}, I64{8})
+    slot :: alloc_required_valid(I64{8}, I64{8})
     rt_text_store(slot, rt_text_slice(text, start, end))
     slot
 }
@@ -615,7 +667,7 @@ fn text_iter_pull(state: I64) -> I64 {
 fn text_iter_drop(state: I64) {
     jet_rt_string_drop(rt_text_word(state))
     jet_rt_string_drop(rt_text_word(state + I64{8}))
-    jet_rt_free(state, I64{40}, I64{8})
+    alloc_release_valid(state, I64{40}, I64{8})
 }
 
 #Export(c) fn jet_rt_native_iter_string_split(text: I64, separator: I64, meta: I64) -> I64 {
@@ -630,7 +682,7 @@ fn text_iter_drop(state: I64) {
     // Rust rsplit's matches are rightmost nonoverlapping matches, not the
     // forward split's matches (they differ for overlapping separators).
     list :: coll_list_new()
-    slot :: jet_rt_alloc(I64{8}, I64{8})
+    slot :: alloc_required_valid(I64{8}, I64{8})
     end := rt_text_len(text)
     loop {
         found :: rt_text_find_bytes(rt_text_data(text), end, rt_text_data(separator), n, I64{0}, true)
@@ -640,7 +692,7 @@ fn text_iter_drop(state: I64) {
         if (found < I64{0}) { break }
         end = found
     }
-    jet_rt_free(slot, I64{8}, I64{8})
+    alloc_release_valid(slot, I64{8}, I64{8})
     data :: rt_text_word(list + I64{16})
     left := I64{0}
     right := rt_text_word(list) - I64{1}
@@ -654,7 +706,7 @@ fn text_iter_drop(state: I64) {
         right -= I64{1}
     }
     iter :: jet_rt_native_iter_from_list(list, meta, I64{1})
-    jet_rt_free(list, I64{24}, I64{8})
+    alloc_release_valid(list, I64{24}, I64{8})
     iter
 }
 
@@ -693,6 +745,7 @@ fn rt_c_string_stop(kind: I64) {
         at += I64{1}
     }
     data :: jet_rt_alloc(len + I64{1}, I64{1})
+    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) -> return I64{0}
     rt_text_bytes_copy(data, source, len)
     rt_text_put(data + len, I64{0})
     data

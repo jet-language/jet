@@ -197,6 +197,58 @@ fn os_call_address_two(address: Int, first: Int, second: Int) -> Int {
     """
 }
 
+#[Unsafe("calls machine code; the caller holds the mapping and its checked zero-argument Unit System V signature"), FFI(asm)]
+fn os_call_address_unit(address: Int) {
+    """
+    push {address}
+    pop r11
+    call r11
+    ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
+    """
+}
+
+#[Unsafe("calls machine code; the caller holds the mapping and its checked one-word Unit System V signature"), FFI(asm)]
+fn os_call_address_one_unit(address: Int, first: Int) {
+    """
+    push {address}
+    push {first}
+    pop rdi
+    pop r11
+    call r11
+    ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
+    """
+}
+
+#[Unsafe("calls machine code; the caller holds the mapping and its checked two-word Unit System V signature"), FFI(asm)]
+fn os_call_address_two_unit(address: Int, first: Int, second: Int) {
+    """
+    push {address}
+    push {first}
+    push {second}
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
+    ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
+    """
+}
+
+#[Unsafe("calls machine code; the caller holds the mapping and its checked three-word Unit System V signature"), FFI(asm)]
+fn os_call_address_three_unit(address: Int, first: Int, second: Int, third: Int) {
+    """
+    push {address}
+    push {first}
+    push {second}
+    push {third}
+    pop rdx
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
+    ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
+    """
+}
+
 #[Unsafe("dlopen reads the NUL-terminated path at `path`"), FFI(c)]
 fn os_dl_open(path: Int) -> Int {
     """
@@ -438,6 +490,23 @@ fn os_syscall_stack4_i64(number: I64, a1: I64, w0: I64, w1: I64, w2: I64, w3: I6
 fn os_tls_base_i64() -> I64 {
     """
     mov rax, qword ptr gs:[0] ; -> return
+    """
+}
+
+// Cold startup/defect reports may run while GS is deliberately zero. Probe the
+// actual base without dereferencing it; attached hot reads keep their leaf above.
+#[Unsafe("ARCH_GET_GS writes one initialized aligned stack word only during this syscall; no TLS or heap is read, and the push/pop is balanced"), FFI(asm)]
+fn os_tls_base_probe_i64() -> I64 {
+    """
+    mov rdx, 0
+    push rdx
+    mov rsi, rsp
+    mov rdi, 4100
+    mov rax, 158
+    syscall
+    pop rdx
+    or rax, rdx ; -> return
+    ; clobbers rcx, r11, rdi, rsi, rdx
     """
 }
 
