@@ -6,6 +6,7 @@
 // unit by Compiler/JetBackend/Tests/run-lower-fixtures.mjs and is never listed
 // in Compiler/Bootstrap/sources.list.
 use jet_foundation.[
+    mir_integer_constant,
     MIRAccess,
     MIRArtifactPlan,
     MIRBasicBlock,
@@ -224,7 +225,7 @@ fn fx_arg(value: MIRValueID, access: MIRAccess) -> MIRCallArg Never! {
 }
 
 fn fx_int_const(b: &FxBuilder, value: Int) -> MIRValueID Never! {
-    fx_copy(&b, fx_int(), MIROperation.Constant{value: MIRConstant.Int{value: value, width: None, spelling: None}})
+    fx_copy(&b, fx_int(), MIROperation.Constant{value: mir_integer_constant(value, None, None)})
 }
 
 fn fx_print(b: &FxBuilder, value: MIRValueID) Never! {

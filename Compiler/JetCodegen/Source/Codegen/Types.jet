@@ -52,6 +52,7 @@ use jet_foundation.[
     mir_type_with_identity,
     symbol_id,
     type_mir_identity_key,
+    type_name,
 ]
 use jet_sema.[
     SemaGraphModuleResult,
@@ -656,8 +657,7 @@ fn jet_codegen_lower_view_provenance_map(provenance: ViewProvenanceMap?) -> [MIR
 }
 
 struct JetCodegenResolvedField {
-    pub module_identity: String
-    pub nominal_name: String
+    pub owner_key: String
     pub field_name: String
 }
 
@@ -681,8 +681,7 @@ fn jet_codegen_field_symbol_index(modules: [SemaGraphModuleResult]) -> [String:[
                     owner_key: nominal.symbol.id.key,
                     name: field.symbol.name,
                     resolved: JetCodegenResolvedField{
-                        module_identity: semantic_module.module_identity,
-                        nominal_name: nominal.symbol.name,
+                        owner_key: jet_codegen_nominal_type_key(semantic_module.module_identity, nominal),
                         field_name: field.symbol.name,
                     },
                 })
@@ -728,7 +727,7 @@ fn jet_codegen_range_record_fields() -> [TypeTupleField] Never! {
 
 fn jet_codegen_range_record_field_id(member: String) -> MIRFieldID Never! {
     field :: jet_codegen_compiler_owned_record_field(JET_CODEGEN_RANGE_RECORD, member) ?? panic("compiler-owned Range record has no field `{member}`")
-    jet_codegen_mir_field_id(JetCodegenResolvedField{module_identity: "", nominal_name: JET_CODEGEN_RANGE_RECORD, field_name: field.name})
+    jet_codegen_mir_field_id(JetCodegenResolvedField{owner_key: JET_CODEGEN_RANGE_RECORD, field_name: field.name})
 }
 
 // One compiler-owned Core record: its bare canonical name and the Core record
@@ -1195,62 +1194,161 @@ fn jet_codegen_is_compiler_owned_row(name: String) -> Bool Never! {
     jet_codegen_compiler_owned_record_fields(name) != None || jet_codegen_compiler_owned_enum_variants(name) != None
 }
 
-fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_module_identity: String, generic_names: [String], owner_type: Type, member: String) -> JetCodegenResolvedField Never! {
-    owner_name :: if owner_type == {
-        .Named(name) -> name
-        .Apply(name, _) -> name
-        else -> panic("checked field access owner is not a nominal type")
+fn jet_codegen_field_owner_kind(ty: Type) -> String Never! {
+    if ty == {
+        .Int -> "Int"
+        .Float -> "Float"
+        .Bool -> "Bool"
+        .String -> "String"
+        .Char -> "Char"
+        .List(_) -> "List"
+        .Map(_, _, _) -> "Map"
+        .Shared(_) -> "Shared"
+        .Option(_) -> "Option"
+        .Result(_, _) -> "Result"
+        .Fn(_, _, _, _, _, _) -> "Fn"
+        .Named(_) -> "Named"
+        .Apply(_, _) -> "Apply"
+        .TraitObject(_) -> "TraitObject"
+        .Tuple(_) -> "Tuple"
+        .FixedList(_, _) -> "FixedList"
+        .IntN(_, _) -> "IntN"
+        .InlineRange(_, _, _) -> "InlineRange"
+        .Float32 -> "Float32"
+        .Tagged(_, _) -> "Tagged"
+        .Union(_) -> "Union"
+        .Quantity(_, _) -> "Quantity"
+        .Measure(_) -> "Measure"
+    }
+}
+
+fn jet_codegen_field_resolution_ice(function_key: String, original: Type, owner: Type, member: String, reason: String) -> String Never! {
+    "ICE: checked field `{member}` in function `{function_key}`: {reason}; owner `{type_name(original)}` (kind {jet_codegen_field_owner_kind(original)}), normalized owner `{type_name(owner)}` (kind {jet_codegen_field_owner_kind(owner)})"
+}
+
+// Rust tuple_field_name/math_field_name accept unsigned decimal positions,
+// not the wider Int.parse grammar (underscores, whitespace, or negative signs).
+fn jet_codegen_field_position(member: String) -> Int? Never! {
+    bytes :: member.bytes()
+    length :: bytes.len()
+    if length == 0 -> return None
+    at := if bytes[0] == (U8{43}) -> 1 else -> 0
+    if at == length -> return None
+    loop at < length {
+        digit :: bytes[at]
+        if digit < (U8{48}) || digit > (U8{57}) -> return None
+        at += 1
+    }
+    position :: Int.parse(member) ?? return None
+    if position > 18446744073709551615 -> return None
+    Val(position)
+}
+
+// One field-identity path for every checked owner shape. In particular, indexed
+// and optional projections must not bypass tuple or read/write-window handling.
+// Rust: LowerCtx::field_id_for_type, field_owner_type, and field_id_for.
+fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_module_identity: String, generic_names: [String], owner_type: Type, member: String, function_key: String) -> JetCodegenResolvedField Never! {
+    normalized :: jet_codegen_qualify_type(owner_type, modules, current_module_identity, generic_names)
+    owner :: jet_codegen_field_owner_type(normalized)
+    if owner == .Tuple(fields) {
+        name := String?{None}
+        if jet_codegen_field_position(member) == .Val(position) {
+            if position < fields.len() -> name = Val(fields[position].name)
+        } else {
+            loop field in fields {
+                if field.name == member {
+                    name = Val(field.name)
+                    break
+                }
+            }
+        }
+        field_name :: name ?? panic(jet_codegen_field_resolution_ice(function_key, owner_type, owner, member, "tuple field is missing"))
+        lowered :: jet_codegen_lower_canonical_type(owner, modules, current_module_identity, generic_names)
+        return JetCodegenResolvedField{owner_key: mir_type_identity_key(lowered), field_name: field_name}
+    }
+    owner_name :: if owner == {
+        .Named(name) | .Apply(name, _) -> name
+        else -> panic(jet_codegen_field_resolution_ice(function_key, owner_type, owner, member, "owner has no registered field row"))
     }
     identity := jet_codegen_find_nominal_identity(modules, current_module_identity, owner_name, generic_names)
-    if identity == None && jet_codegen_compiler_owned_record_fields(owner_name) == .Val(fields) {
-        loop field in fields {
-            if field.name == member -> return JetCodegenResolvedField{module_identity: "", nominal_name: owner_name, field_name: field.name}
-        }
-        panic("checked field access member `{owner_name}.{member}` has no registered field")
+    math_name :: if identity == {.Val(row) -> row.name else -> owner_name}
+    position := Int?{None}
+    if math_name == "F32x4" || math_name == "F64x2" || math_name == "Vec2" || math_name == "Vec3" || math_name == "Vec4" {
+        position = jet_codegen_field_position(member)
     }
-    nominal_identity :: identity ?? panic("checked field access owner `{owner_name}` has no registered nominal type")
+    if identity == .Val(nominal_identity) {
+        loop semantic_module in modules {
+            if semantic_module.module_identity != nominal_identity.module_identity -> next
+            loop definition in semantic_module.declarations.type_defs {
+                if definition.key != nominal_identity.key -> next
+                if definition.kind == {
+                    .Struct(fields, _) -> {
+                        loop (index, field) in fields {
+                            indexed :: position == Val(index) && (field.name == "x" || field.name == "y" || field.name == "z" || field.name == "w")
+                            if field.name == member || indexed -> return JetCodegenResolvedField{owner_key: definition.key, field_name: field.name}
+                        }
+                    }
+                    .Enum(variants, _) -> {
+                        loop variant in variants {
+                            if variant.payload == .Named(fields) {
+                                loop field in fields {
+                                    if field.name == member -> return JetCodegenResolvedField{owner_key: "{definition.key}::{variant.name}", field_name: field.name}
+                                }
+                            }
+                        }
+                    }
+                    else -> {}
+                }
+                panic(jet_codegen_field_resolution_ice(function_key, owner_type, owner, member, "owner/member has no registered field"))
+            }
+        }
+    }
+    // A builtin owner may be registered without a source declaration. Only its
+    // exact canonical key can select a compiler-owned row; a scoped user alias
+    // or same-leaf declaration must not acquire the builtin's fields.
+    owner_key :: if identity == {.Val(row) -> row.key else -> owner_name}
+    if jet_codegen_compiler_owned_record_fields(owner_key) == .Val(fields) {
+        loop (index, field) in fields {
+            indexed :: position == Val(index) && (field.name == "x" || field.name == "y" || field.name == "z" || field.name == "w")
+            if field.name == member || indexed -> return JetCodegenResolvedField{owner_key: owner_key, field_name: field.name}
+        }
+    }
+    if jet_codegen_compiler_owned_enum_variants(owner_key) == .Val(variants) {
+        loop variant in variants {
+            if jet_codegen_compiler_owned_enum_payload(owner_key, variant) == .Named(fields) {
+                loop field in fields {
+                    if field.name == member -> return JetCodegenResolvedField{owner_key: "{owner_key}::{variant}", field_name: field.name}
+                }
+            }
+        }
+    }
+    panic(jet_codegen_field_resolution_ice(function_key, owner_type, owner, member, "owner/member has no registered field"))
+}
+
+// Build the checked field reference that Sema would have produced for
+// `owner_type.member`, for TIR that Codegen synthesizes itself.
+fn jet_codegen_field_ref_by_name(modules: [SemaGraphModuleResult], current_module_identity: String, generic_names: [String], owner_type: Type, member: String, ty: Type, function_key: String) -> TFieldRef Never! {
+    resolved :: jet_codegen_resolve_field_by_name(modules, current_module_identity, generic_names, owner_type, member, function_key)
+    // Compiler-owned rows and structural tuples have no checked nominal symbol.
+    identity := jet_codegen_find_nominal_identity(modules, current_module_identity, resolved.owner_key, generic_names)
+    if identity == None {
+        return TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", resolved.owner_key, resolved.field_name), name: resolved.field_name, ty: ty, boxed: false}
+    }
+    nominal_identity :: identity ?? panic("resolved field lost its nominal identity")
     loop semantic_module in modules {
         if semantic_module.module_identity != nominal_identity.module_identity -> next
         loop nominal in semantic_module.nominals {
             if nominal.symbol.name != nominal_identity.name -> next
             loop field in nominal.fields {
-                if field.symbol.name == member {
-                    return JetCodegenResolvedField{
-                        module_identity: semantic_module.module_identity,
-                        nominal_name: nominal.symbol.name,
-                        field_name: field.symbol.name,
-                    }
-                }
-            }
-            panic("checked field access member `{owner_name}.{member}` has no registered field")
-        }
-    }
-    panic("checked field access nominal disappeared from Codegen input")
-}
-
-// Build the checked field reference that Sema would have produced for
-// `owner_type.member`, for TIR that Codegen synthesizes itself.
-fn jet_codegen_field_ref_by_name(modules: [SemaGraphModuleResult], current_module_identity: String, generic_names: [String], owner_type: Type, member: String, ty: Type) -> TFieldRef Never! {
-    resolved :: jet_codegen_resolve_field_by_name(modules, current_module_identity, generic_names, owner_type, member)
-    // A compiler-owned record row has no checked nominal; Sema leaves such a
-    // field reference open (`owner: None`), keyed by the bare owner spelling.
-    if resolved.module_identity == "" && jet_codegen_find_nominal_identity(modules, current_module_identity, resolved.nominal_name, generic_names) == None {
-        return TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", resolved.nominal_name, member), name: member, ty: ty, boxed: false}
-    }
-    loop semantic_module in modules {
-        if semantic_module.module_identity != resolved.module_identity -> next
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.name != resolved.nominal_name -> next
-            loop field in nominal.fields {
-                if field.symbol.name == member -> return TFieldRef{owner: Val(nominal.symbol.id), field: field.symbol.id, name: member, ty: ty, boxed: false}
+                if field.symbol.name == resolved.field_name -> return TFieldRef{owner: Val(nominal.symbol.id), field: field.symbol.id, name: resolved.field_name, ty: ty, boxed: false}
             }
         }
     }
-    panic("checked field access member has no registered field")
+    panic(jet_codegen_field_resolution_ice(function_key, owner_type, jet_codegen_field_owner_type(owner_type), member, "synthesized field reference has no registered field"))
 }
 
 fn jet_codegen_mir_field_id(field: JetCodegenResolvedField) -> MIRFieldID Never! {
-    mir_field_id("{jet_codegen_qualified_type_key(field.module_identity, field.nominal_name)}::{field.field_name}")
+    mir_field_id("{field.owner_key}::{field.field_name}")
 }
 
 fn jet_codegen_mir_type_id_for_symbol(modules: [SemaGraphModuleResult], symbol: SymbolID) -> MIRTypeID Never! {

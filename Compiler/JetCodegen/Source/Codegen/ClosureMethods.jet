@@ -3,7 +3,7 @@ use jet_foundation.[
     Effect,
     MIRAccess,
     MIRCallArg,
-    MIRConstant,
+    mir_integer_constant,
     MIROperation,
     MIRPreludeABI,
     MIRPreludeFamily,
@@ -243,7 +243,7 @@ fn jet_codegen_lower_closure_method(builder: &JetCodegenBuilder, program: JetCod
         &lowered_args.push(jet_codegen_host_call_value_arg(value, argument.span, MIRAccess.Read, None))
     }
     if operation == TClosureOp.ParaMap && args.len() == 1 {
-        limit := jet_codegen_emit_value(&builder, program, expression.span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: 9223372036854775807, width: None, spelling: None}})
+        limit := jet_codegen_emit_value(&builder, program, expression.span, Type.Int, MIROperation.Constant{value: mir_integer_constant(9223372036854775807, None, None)})
         &lowered_args.push(jet_codegen_host_call_value_arg(limit, expression.span, MIRAccess.Read, None))
     }
     if lowered_args.len() + 1 != route.arity -> panic("checked closure method operand count disagrees with its canonical Prelude route")

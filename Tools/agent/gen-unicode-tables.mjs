@@ -432,7 +432,35 @@ const HEADER_COMMENT = `// GENERATED FILE — do not hand-edit.
 const MODULE_HEADER = HEADER_COMMENT + "#![allow(dead_code)]\n";
 const FLAT_HEADER = HEADER_COMMENT;
 
-const stringBody = `
+// Foundation's host module keeps std Option and &String. The flat Prelude
+// serves borrowed text routes and the checked JetOutcome absence carrier.
+// Both projections use the same Unicode data and split/search semantics.
+function splitKernel(name, search, foundationModule) {
+  if (foundationModule) {
+    return `pub fn ${name}(s: &String, sep: &String) -> Option<(String, String)> {
+    s.${search}(sep).map(|at| (
+        s[..at].to_string(),
+        s[at + sep.len()..].to_string(),
+    ))
+}`;
+  }
+  return `pub fn ${name}(
+    s: &str,
+    sep: &str,
+) -> jet_foundation::Outcome::JetOutcome<
+    (String, String),
+    jet_foundation::Outcome::JetAbsent,
+> {
+    match s.${search}(sep) {
+        Some(at) => Ok((s[..at].to_string(), s[at + sep.len()..].to_string())),
+        None => Err(jet_foundation::Outcome::JetAbsent),
+    }
+}`;
+}
+
+function stringBody(foundationModule) {
+  const textReference = foundationModule ? "&String" : "&str";
+  return `
 pub const UNICODE_STRING_VERSION: &str = "17.0.0";
 
 pub static UNICODE_LOWER_POOL: &[u32] = &[${lower.pool.join(",")}];
@@ -541,21 +569,21 @@ pub fn jet_unicode_trim(s: &str) -> String {
     jet_unicode_trim_view(s).to_string()
 }
 
-pub fn jet_unicode_index_of(s: &String, needle: &String) -> Option<i64> {
+pub fn jet_unicode_index_of(s: ${textReference}, needle: ${textReference}) -> Option<i64> {
     s.find(needle)
         .map(|byte| s[..byte].chars().count() as i64)
 }
 
-pub fn jet_unicode_last_index_of(s: &String, needle: &String) -> Option<i64> {
+pub fn jet_unicode_last_index_of(s: ${textReference}, needle: ${textReference}) -> Option<i64> {
     s.rfind(needle)
         .map(|byte| s[..byte].chars().count() as i64)
 }
 
-pub fn jet_unicode_count(s: &String, needle: &String) -> i64 {
+pub fn jet_unicode_count(s: ${textReference}, needle: ${textReference}) -> i64 {
     if needle.is_empty() {
         return 0;
     }
-    let mut rest = s.as_str();
+    let mut rest = ${foundationModule ? "s.as_str()" : "s"};
     let mut count = 0i64;
     while let Some(at) = rest.find(needle) {
         count += 1;
@@ -564,32 +592,11 @@ pub fn jet_unicode_count(s: &String, needle: &String) -> i64 {
     count
 }
 
-pub fn jet_unicode_split_once(
-    s: &String,
-    sep: &String,
-) -> jet_foundation::Outcome::JetOutcome<
-    (String, String),
-    jet_foundation::Outcome::JetAbsent,
-> {
-    match s.find(sep) {
-        Some(at) => Ok((s[..at].to_string(), s[at + sep.len()..].to_string())),
-        None => Err(jet_foundation::Outcome::JetAbsent),
-    }
-}
+${splitKernel("jet_unicode_split_once", "find", foundationModule)}
 
-pub fn jet_unicode_cut_last(
-    s: &String,
-    sep: &String,
-) -> jet_foundation::Outcome::JetOutcome<
-    (String, String),
-    jet_foundation::Outcome::JetAbsent,
-> {
-    match s.rfind(sep) {
-        Some(at) => Ok((s[..at].to_string(), s[at + sep.len()..].to_string())),
-        None => Err(jet_foundation::Outcome::JetAbsent),
-    }
-}
+${splitKernel("jet_unicode_cut_last", "rfind", foundationModule)}
 `;
+}
 
 const tablesBody = `
 pub const UNICODE_VERSION: &str = "17.0.0";
@@ -649,8 +656,8 @@ pub static UNICODE_SENTENCE_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(sentenceR
 pub static UNICODE_INCB: &[(u32,u32,u8)] = &[${fmtU32Triples(incbRanges)}];
 `;
 
-const stringModuleOut = MODULE_HEADER + stringBody;
-const stringFlatOut = FLAT_HEADER + stringBody;
+const stringModuleOut = MODULE_HEADER + stringBody(true);
+const stringFlatOut = FLAT_HEADER + stringBody(false);
 const tablesFlatOut = FLAT_HEADER + tablesBody;
 
 const outPaths = [

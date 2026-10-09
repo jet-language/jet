@@ -68,7 +68,6 @@ fn cli_recipe_inventory_is_manifest_owned_and_ast_checked() {
         "root:Tools/gauntlet/entries",
         "root:tests/agent_workloads/adapters",
         "root:tests/compiled_workloads/adapters/jet",
-        "file:Jetpack/CLI/Source/Entry/Main.jet",
     ] {
         assert!(
             matches!(source_profile(selector), "typed-cli" | "typed-cli-doc"),
@@ -104,6 +103,37 @@ fn cli_recipe_inventory_is_manifest_owned_and_ast_checked() {
 }
 
 #[test]
+fn jetpack_engine_entry_is_the_ratified_raw_process_protocol() {
+    let policy = CorpusPolicy::load().unwrap();
+    let entry = policy
+        .manifest()
+        .sources
+        .iter()
+        .find(|source| source.selector == "file:Jetpack/CLI/Source/Entry/Main.jet")
+        .expect("engine protocol source is inventoried");
+    assert_eq!(entry.role, SourceRole::RawProtocol);
+    assert_eq!(entry.profile, "protocol");
+    assert_eq!(entry.decision, "D-JPK-DISPATCH1=B");
+    let source = include_str!("../Jetpack/CLI/Source/Entry/Main.jet");
+    let (tokens, lex_errors) = jet::Lexer::lex(source);
+    assert!(lex_errors.is_empty(), "{lex_errors:?}");
+    let program = jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        jet::Parser::parse(&tokens).expect("engine protocol source parses")
+    });
+    assert!(jet_foundation::CLISchema::entry_schema(&program.items).is_none());
+    for symbol in [
+        "cli_jetpack_main",
+        "ENGINE_PROTOCOL_FLAG",
+        "COMPILER_VERSION",
+        "EXTENSION_HOST_SUBCOMMAND",
+        "BUILD_PLUGIN_HOST_SUBCOMMAND",
+        "cli_run",
+    ] {
+        assert!(source.contains(symbol), "engine protocol lost {symbol}");
+    }
+}
+
+#[test]
 fn fixture_roles_and_approved_builder_boundary_are_explicit() {
     let policy = CorpusPolicy::load().unwrap();
     policy
@@ -130,6 +160,33 @@ fn fixture_roles_and_approved_builder_boundary_are_explicit() {
 }
 
 #[test]
+fn inline_package_keeps_the_reviewed_shield_group_site() {
+    let policy = CorpusPolicy::load().unwrap();
+    let path = "Examples/features/concurrency/shield_commit.jet";
+    let source = include_str!("../Examples/features/concurrency/shield_commit.jet");
+    let violations = policy
+        .evaluate_source(path, source)
+        .expect("inline package must preserve exact AST exception offsets");
+    assert!(violations.is_empty(), "{violations:?}");
+    let shifted = format!("\n{source}");
+    let error = policy
+        .evaluate_source(path, &shifted)
+        .expect_err("moving a reviewed site still requires a new exact review");
+    assert!(error.contains("stmt:task.group@699..827"), "{error}");
+}
+
+#[test]
+fn cancellation_capsule_keeps_one_exact_shielded_loser_join() {
+    let policy = CorpusPolicy::load().unwrap();
+    let path = "Examples/features/concurrency/conformance_capsule.jet";
+    let source = include_str!("../Examples/features/concurrency/conformance_capsule.jet");
+    assert!(policy.evaluate_source(path, source).unwrap().is_empty());
+    let shifted = format!("\n{source}");
+    let error = policy.evaluate_source(path, &shifted).unwrap_err();
+    assert!(error.contains("stmt:task.group@4382..4510"), "{error}");
+}
+
+#[test]
 fn inventory_rejects_new_source_or_producer_without_a_row() {
     let policy = CorpusPolicy::load().unwrap();
     let error = policy
@@ -151,7 +208,7 @@ fn manifest_rejects_a_scope_without_source_coverage() {
     let policy = CorpusPolicy::load().unwrap();
     let mut manifest = policy.manifest().clone();
     manifest.scopes.push(RuleScopeRow {
-        rule: "entry-implicit".to_string(),
+        rule: "entry-explicit".to_string(),
         selector: "file:unclassified/entry.jet".to_string(),
         reason: "synthetic uncovered scope".to_string(),
     });
@@ -165,32 +222,32 @@ fn manifest_rejects_a_scope_without_source_coverage() {
 fn manifest_rejects_a_finding_without_an_executable_guard() {
     let policy = CorpusPolicy::load().unwrap();
     let mut manifest = policy.manifest().clone();
-    manifest.scopes.retain(|scope| scope.rule != "entry-implicit");
+    manifest.scopes.retain(|scope| scope.rule != "entry-explicit");
     let error = manifest
         .validate()
         .expect_err("every finding must retain a corpus or domain guard");
-    assert!(error.contains("entry-implicit has no executable corpus or domain guard"), "{error}");
+    assert!(error.contains("entry-explicit has no executable corpus or domain guard"), "{error}");
 }
 
 #[test]
 fn exception_matching_is_occurrence_scoped() {
     let policy = CorpusPolicy::load().unwrap();
-    let site = "fn:run@0..0".to_string();
+    let site = "call:process.argv@0..0".to_string();
     let candidate = SemanticViolation::new(
-        "tests/ui/E-CALL-VALUE_call_result_not_called.jet",
-        "entry-implicit",
+        "tests/ui/args_spec_bad_parse_arity.jet",
+        "raw-cli-fixed-shape",
         site,
     );
     policy
         .validate_occurrences(
-            "tests/ui/E-CALL-VALUE_call_result_not_called.jet",
+            "tests/ui/args_spec_bad_parse_arity.jet",
             std::slice::from_ref(&candidate),
         )
         .expect("the recorded single occurrence is accepted");
     let duplicate = vec![candidate.clone(), candidate];
     let error = policy
         .validate_occurrences(
-            "tests/ui/E-CALL-VALUE_call_result_not_called.jet",
+            "tests/ui/args_spec_bad_parse_arity.jet",
             &duplicate,
         )
         .expect_err("a second occurrence cannot reuse one exception");
@@ -316,13 +373,53 @@ fn maintained_guidance_allow_explains_itself_at_the_source_site() {
 }
 
 #[test]
+fn explicit_entry_rule_matches_ordinary_file_execution() {
+    let policy = CorpusPolicy::load().unwrap();
+    for path in [
+        "Examples/features/basics/hello.jet",
+        "Examples/features/types/entry_law.jet",
+        "Examples/learn/entry_law.jet",
+        "tests/agent_workloads/llm_digest/first_program.jet",
+    ] {
+        for source in [
+            r#"fn run() { print("hello") }"#,
+            r#"VALUE :: 1
+fn helper() -> Int { VALUE }
+fn run() { print(helper()) }"#,
+            r#"fn helper() -> Int { 1 }"#,
+        ] {
+            let violations = policy.evaluate_source(path, source).unwrap();
+            assert!(
+                !violations.iter().any(|violation| violation.rule == "entry-explicit"),
+                "explicit execution and declaration-only files must be accepted: {path}: {violations:?}"
+            );
+        }
+        for (source, expected) in [
+            (r#"print("hello")"#, 1),
+            (r#"print("before")
+fn run() { print("inside") }
+print("after")"#, 2),
+        ] {
+            let violations = policy.evaluate_source(path, source).unwrap();
+            let entries = violations
+                .iter()
+                .filter(|violation| violation.rule == "entry-explicit")
+                .collect::<Vec<_>>();
+            assert_eq!(entries.len(), expected, "loose execution: {path}");
+            assert!(entries.iter().all(|violation| violation.site.starts_with("stmt:top-level@")));
+        }
+    }
+    assert!(!policy.manifest().exceptions.iter().any(|exception| exception.rule == "entry-explicit"));
+}
+
+#[test]
 fn card_2375_rules_reject_each_reintroduced_ceremony() {
     let policy = CorpusPolicy::load().unwrap();
     let cases = [
         (
             "Examples/features/basics/hello.jet",
-            r#"fn run() { print("hello") }"#,
-            "entry-implicit",
+            r#"print("hello")"#,
+            "entry-explicit",
         ),
         (
             "Docs/spec/guides/first-hour.md",
@@ -923,4 +1020,43 @@ fn generated_protocol_override_requires_a_distinct_envelope_shape() {
     assert!(ordinary
         .iter()
         .any(|violation| violation.rule == "generated-protocol-override"));
+}
+
+#[test]
+fn package_manifest_snapshots_preserve_canonical_authority_meaning() {
+    let policy = CorpusPolicy::load().unwrap();
+    for (snapshot, expected) in [("base", vec!["FS".to_string()]), ("head", vec!["FS".to_string(), "Net".to_string()])] {
+        let path = format!("Examples/learn/semantic_review/02_authority/{snapshot}.package.jet");
+        let source = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(&path)).unwrap();
+        assert!(policy.evaluate_source(&path, &source).unwrap().is_empty());
+        let facts = jet::Package::PackageFacts::parse(&source, &path).unwrap();
+        assert_eq!(facts.name, "review_authority");
+        assert_eq!(facts.version.as_deref(), Some("0.1.0"));
+        assert_eq!(facts.edition.as_deref(), Some("2026"));
+        assert_eq!(facts.authority.holds.allow, Some(expected));
+    }
+}
+
+#[test]
+fn package_manifest_snapshot_registry_does_not_skip_ordinary_jet_filenames() {
+    let policy = CorpusPolicy::load().unwrap();
+    let path = "Examples/learn/semantic_review/02_authority/ordinary.package.jet";
+    assert!(policy.evaluate_source(path, "fn run() { value :: 1 }").unwrap().is_empty());
+    let error = policy.evaluate_source(path, "fn run() { value: Int = 1 }").unwrap_err();
+    assert!(error.contains("Jet parser rejected corpus source"), "{error}");
+    assert!(error.contains("E0003"), "{error}");
+}
+
+#[test]
+fn package_manifest_snapshots_reject_invalid_manifest_meaning() {
+    let policy = CorpusPolicy::load().unwrap();
+    let path = "Examples/learn/semantic_review/02_authority/base.package.jet";
+    for source in [
+        "name: \"review_authority\"\nunknown_field: true\n",
+        "name: \"review_authority\"\nauthority: { holds: { allow: 42 } }\n",
+        "fn run() { value :: 1 }\n",
+    ] {
+        let error = policy.evaluate_source(path, source).unwrap_err();
+        assert!(error.contains("Package parser rejected corpus snapshot"), "{error}");
+    }
 }

@@ -12,6 +12,7 @@ use jet_foundation.[
     MIRCallablePolicyChain,
     MIRConstKey,
     MIRConstant,
+    mir_integer_constant,
     MIRField,
     MIRFieldID,
     MIRForeignID,
@@ -2410,7 +2411,8 @@ fn jet_rust_emit_constant(ctx: &JetRustEmitContext, constant: MIRConstant, ty: M
             rendered := [String]{}
             loop entry in entries {
                 key :: if entry.key == {
-                    .Int(literal) -> if typed -> jet_rust_emit_constant(&ctx, MIRConstant.Int{value: literal, width: None, spelling: None}, key_ty) else -> jet_rust_emit_const_key(&ctx, entry.key)
+                    .Int(literal) -> if typed -> jet_rust_emit_constant(&ctx, mir_integer_constant(literal, None, None), key_ty) else -> jet_rust_emit_const_key(&ctx, entry.key)
+                    .BigInt(decimal) -> if typed -> jet_rust_emit_constant(&ctx, MIRConstant.BigInt{decimal: decimal}, key_ty) else -> jet_rust_emit_const_key(&ctx, entry.key)
                     else -> jet_rust_emit_const_key(&ctx, entry.key)
                 }
                 &rendered.push("({key}, {jet_rust_emit_constant(&ctx, entry.value, value_ty)})")
@@ -2476,6 +2478,7 @@ fn jet_rust_emit_constant(ctx: &JetRustEmitContext, constant: MIRConstant, ty: M
 fn jet_rust_emit_const_key(ctx: &JetRustEmitContext, key: MIRConstKey) -> String Never! {
     if key == {
         .Int(value) -> "{value}"
+        .BigInt(decimal) -> jet_rust_emit_constant(&ctx, MIRConstant.BigInt{decimal: decimal}, mir_type_from_kind(MIRTypeKind.Int))
         .String(value) -> if jet_rust_emit_is_core_layer(&ctx) -> jet_rust_emit_quote(value) else -> "{jet_rust_emit_quote(value)}.to_string()"
         .Bool(value) -> if value -> "true" else -> "false"
         .Char(value) -> jet_rust_emit_char_literal(value)

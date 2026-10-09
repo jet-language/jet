@@ -26,6 +26,8 @@ use jet_foundation.[
     MIRConstMapEntry,
     MIRConstReport,
     MIRConstant,
+    mir_integer_constant,
+    mir_integer_key,
     MIRCopyFact,
     MIRConversion,
     MIRCoreClosureKind,
@@ -296,11 +298,11 @@ fn jet_codegen_lower_string_format_value(builder: &JetCodegenBuilder, program: J
     args := [MIRCallArg]{jet_codegen_numeric_call_arg(value, span)}
     if digits == .Val(count) {
         borrow_mask = [Bool]{integer, false}
-        constant := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: count, width: None, spelling: None}})
+        constant := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: mir_integer_constant(count, None, None)})
         &args.push(jet_codegen_numeric_call_arg(constant, span))
     } else if pad_width == .Val(width_value) {
         borrow_mask = [Bool]{true, false, true}
-        width := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: width_value, width: None, spelling: None}})
+        width := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: mir_integer_constant(width_value, None, None)})
         fill := jet_codegen_emit_value(&builder, program, span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: pad_fill}})
         &args.push(jet_codegen_numeric_call_arg(width, span))
         &args.push(jet_codegen_numeric_call_arg(fill, span))
@@ -1198,7 +1200,7 @@ fn jet_codegen_swizzle_places(builder: &JetCodegenBuilder, program: JetCodegenPr
     write_call := jet_codegen_lane_index_write_route(&builder, program, type_name, carrier)
     places := [MIRPlaceID]{}
     loop lane in lanes {
-        index := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: lane, width: None, spelling: None}})
+        index := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: mir_integer_constant(lane, None, None)})
         projections := [MIRProjection]{}
         loop projection in root.projections -> &projections.push(projection)
         identity := jet_codegen_identity(&builder, program, "place", span, "math-lane", "{root.id.value}:{lane}")
@@ -1371,7 +1373,7 @@ fn jet_codegen_lower_expression_place(builder: &JetCodegenBuilder, program: JetC
             if field == {
                 None -> return Val(base)
                 Val(name) -> {
-                    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_ty, name)
+                    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_ty, name, builder.function.key)
                     return Val(jet_codegen_project_field_place(&builder, program, base, expression.span, expression.ty, jet_codegen_mir_field_id(resolved)))
                 }
             }
@@ -1595,7 +1597,7 @@ fn jet_codegen_lower_optional_field(builder: &JetCodegenBuilder, program: JetCod
         .Option(inner) -> inner
         else -> panic("checked optional field base is not optional")
     }
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, inner_type, member)
+    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, inner_type, member, builder.function.key)
     field_id := jet_codegen_mir_field_id(resolved)
     selected_type := if {
         flatten -> expression.ty
@@ -1709,7 +1711,11 @@ fn jet_codegen_lower_struct_literal(builder: &JetCodegenBuilder, program: JetCod
 
 fn jet_codegen_lower_comptime_key(value: TComptimeKey) -> MIRConstKey? {
     if value == {
-        .Int(number) -> Val(MIRConstKey.Int{value: number})
+        .Int(number) -> Val(mir_integer_key(number))
+        .BigInt(decimal) -> {
+            number :: Int.parse(decimal) ?? return None
+            Val(mir_integer_key(number))
+        }
         .String(text) -> Val(MIRConstKey.String{value: text})
         .Bool(flag) -> Val(MIRConstKey.Bool{value: flag})
         .Char(character) -> Val(MIRConstKey.Char{value: character})
@@ -1733,17 +1739,9 @@ fn jet_codegen_lower_comptime_key(value: TComptimeKey) -> MIRConstKey? {
     }
 }
 
-// Rust `CtValue::Int` is an i64; an evaluated exact Int outside that range is
-// the reference's `CtValue::BigInt`, so it lowers to `MIRConstant.BigInt`
-// (`prep { 0xffffffffffffffff }` must not become `JetInt::from_i64(u64::MAX)`).
-fn jet_codegen_comptime_int_constant(number: Int) -> MIRConstant Never! {
-    if number < -9223372036854775807 - 1 || number > 9223372036854775807 -> return MIRConstant.BigInt{decimal: "{number}"}
-    MIRConstant.Int{value: number, width: None, spelling: None}
-}
-
 fn jet_codegen_lower_comptime_value(value: TComptimeValue, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> MIRConstant? {
     if value == {
-        .Int(number) -> Val(jet_codegen_comptime_int_constant(number))
+        .Int(number) -> Val(mir_integer_constant(number, None, None))
         .Float(number, bits) -> Val(MIRConstant.Float{value: number, f32: bits == 32, spelling: None})
         .Bool(flag) -> Val(MIRConstant.Bool{value: flag})
         .Char(character) -> Val(MIRConstant.Char{value: character})
@@ -2897,7 +2895,7 @@ fn jet_codegen_lower_method_call(builder: &JetCodegenBuilder, program: JetCodege
 }
 
 fn jet_codegen_numeric_constant_int(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, value: Int) -> MIRValueID Never! {
-    jet_codegen_emit_value(&builder, program, span, Type.IntN{signed: true, bits: 64}, MIROperation.Constant{value: MIRConstant.Int{value: value, width: None, spelling: None}})
+    jet_codegen_emit_value(&builder, program, span, Type.IntN{signed: true, bits: 64}, MIROperation.Constant{value: mir_integer_constant(value, None, None)})
 }
 
 fn jet_codegen_numeric_constant_bool(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, value: Bool) -> MIRValueID Never! {
@@ -3190,7 +3188,7 @@ fn jet_codegen_lower_core_closure_call(builder: &JetCodegenBuilder, program: Jet
                 None -> {}
                 Val(group_value) -> &values.push(jet_codegen_lower_expr(&builder, program, group_value))
             }
-            &values.push(jet_codegen_emit_value(&builder, program, expression.span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: spawn_site, width: None, spelling: None}}))
+            &values.push(jet_codegen_emit_value(&builder, program, expression.span, Type.Int, MIROperation.Constant{value: mir_integer_constant(spawn_site, None, None)}))
             label_text = label ?? ""
             &values.push(jet_codegen_emit_value(&builder, program, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: label_text}}))
             spawned := jet_codegen_lower_lambda(&builder, program, executable, false, "spawn").value
@@ -3633,8 +3631,8 @@ fn jet_codegen_try_site_values(builder: &JetCodegenBuilder, program: JetCodegenP
     column := jet_codegen_source_column_at(builder, program, span)
     file_value := jet_codegen_emit_value(&builder, program, span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: file}})
     line_ty := Type.IntN{signed: false, bits: 32}
-    line_value := jet_codegen_emit_value(&builder, program, span, line_ty, MIROperation.Constant{value: MIRConstant.Int{value: line, width: Val(MIRIntegerWidth{signed: false, bits: 32}), spelling: None}})
-    column_value := jet_codegen_emit_value(&builder, program, span, line_ty, MIROperation.Constant{value: MIRConstant.Int{value: column, width: Val(MIRIntegerWidth{signed: false, bits: 32}), spelling: None}})
+    line_value := jet_codegen_emit_value(&builder, program, span, line_ty, MIROperation.Constant{value: mir_integer_constant(line, Val(MIRIntegerWidth{signed: false, bits: 32}), None)})
+    column_value := jet_codegen_emit_value(&builder, program, span, line_ty, MIROperation.Constant{value: mir_integer_constant(column, Val(MIRIntegerWidth{signed: false, bits: 32}), None)})
     function_value := jet_codegen_emit_value(&builder, program, span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: function}})
     [MIRValueID]{file_value, line_value, column_value, function_value}
 }
@@ -4158,7 +4156,7 @@ fn jet_codegen_lower_pool_slot_value(builder: &JetCodegenBuilder, program: JetCo
             slot
         }
         Val(name) -> {
-            resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_type, name)
+            resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_type, name, builder.function.key)
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Field{base: slot, field: jet_codegen_mir_field_id(resolved)})
         }
     }
@@ -4213,7 +4211,7 @@ fn jet_codegen_lower_index_value(builder: &JetCodegenBuilder, program: JetCodege
             // record), so the slice reads only its range operand.
             base_value := jet_codegen_lower_expr(&builder, program, base)
             range_value := jet_codegen_lower_expr(&builder, program, index)
-            unused_bound := jet_codegen_emit_value(&builder, program, index.span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: 0, width: None, spelling: None}})
+            unused_bound := jet_codegen_emit_value(&builder, program, index.span, Type.Int, MIROperation.Constant{value: mir_integer_constant(0, None, None)})
             call := jet_codegen_slice_route(&builder, program, base.ty, true, carrier)
             return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Slice{call: call, base: base_value, start: unused_bound, end: unused_bound, range: Val(range_value), location: panic_location})
         }
@@ -4447,7 +4445,7 @@ fn jet_codegen_lower_carrier_fact(builder: &JetCodegenBuilder, program: JetCodeg
         .Result(_, error) -> error
         else -> unwrapped_type
     }
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, report_type, field)
+    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, report_type, field, builder.function.key)
     value := jet_codegen_lower_expr(&builder, program, receiver)
     carrier := jet_codegen_failure_carrier_for_type(receiver.ty)
     member := if notes -> "notes" else -> "partial"
@@ -4551,20 +4549,7 @@ fn jet_codegen_field_owner_type(ty: Type) -> Type Never! {
 }
 
 fn jet_codegen_host_field_id(builder: JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type, field_name: String) -> MIRFieldID Never! {
-    owner := jet_codegen_field_owner_type(owner_type)
-    if owner == {
-        .Tuple(fields) -> {
-            loop field in fields {
-                if field.name == field_name {
-                    mir_type := jet_codegen_lower_type_for_function(owner, builder, program)
-                    return mir_field_id("{mir_type_identity_key(mir_type)}::{field_name}")
-                }
-            }
-            panic("checked tuple projection field is missing")
-        }
-        else -> {}
-    }
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, owner, field_name)
+    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, owner_type, field_name, builder.function.key)
     jet_codegen_mir_field_id(resolved)
 }
 
@@ -4713,8 +4698,8 @@ fn jet_codegen_numeric_bound_constant(ty: Type, member: String) -> MIRConstant? 
         if member == "EPSILON" -> return Val(MIRConstant.Float{value: 2.220446049250313e-16, f32: false, spelling: None})
     }
     if ty == Type.Int {
-        if member == "MAX" -> return Val(MIRConstant.Int{value: 9223372036854775807, width: None, spelling: None})
-        if member == "MIN" -> return Val(MIRConstant.Int{value: -9223372036854775808, width: None, spelling: None})
+        if member == "MAX" -> return Val(mir_integer_constant(9223372036854775807, None, None))
+        if member == "MIN" -> return Val(mir_integer_constant(-9223372036854775808, None, None))
     }
     if ty == {
         .IntN(signed, bits) -> {
@@ -4772,7 +4757,7 @@ fn jet_codegen_numeric_bound_constant(ty: Type, member: String) -> MIRConstant? 
                     }
                 }
             }
-            return Val(MIRConstant.Int{value: value, width: width, spelling: None})
+            return Val(mir_integer_constant(value, width, None))
         }
         else -> {}
     }
@@ -4782,7 +4767,7 @@ fn jet_codegen_numeric_bound_constant(ty: Type, member: String) -> MIRConstant? 
 fn jet_codegen_lower_memo_stats(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, name: String) -> MIRValueID Never! {
     function :: jet_codegen_function_id_for_name(builder, program, name)
     name_value := jet_codegen_emit_value(&builder, program, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: "{function.value}"}})
-    bound_value := jet_codegen_emit_value(&builder, program, expression.span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: -1, width: None, spelling: None}})
+    bound_value := jet_codegen_emit_value(&builder, program, expression.span, Type.Int, MIROperation.Constant{value: mir_integer_constant(-1, None, None)})
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.memo", "stats", "jet_memo_stats", 2, [Bool]{false, false}, None, carrier, MIRPreludeABI.Value)
     args := [MIRCallArg]{
@@ -5025,7 +5010,7 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
                 None -> None
                 Val(source) -> Val(MIRIntegerWidth{signed: source.signed, bits: source.bits})
             }
-            jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: MIRConstant.Int{value: value, width: mir_width, spelling: None}})
+            jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: mir_integer_constant(value, mir_width, None)})
         }
         .FloatLit(value) -> jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: MIRConstant.Float{value: value, f32: expression.ty == Type.Float32, spelling: None}})
         .BoolLit(value) -> jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: MIRConstant.Bool{value: value}})
@@ -5444,7 +5429,7 @@ fn jet_codegen_pattern_integer_width(ty: Type) -> MIRIntegerWidth? {
 }
 
 fn jet_codegen_pattern_integer_constant(builder: &JetCodegenBuilder, program: JetCodegenProgram, ty: Type, value: Int, span: Span) -> MIRValueID Never! {
-    constant := if jet_codegen_unwrap_pattern_tags(ty) == Type.Char -> MIRConstant.Char{value: value} else -> MIRConstant.Int{value: value, width: jet_codegen_pattern_integer_width(ty), spelling: None}
+    constant := if jet_codegen_unwrap_pattern_tags(ty) == Type.Char -> MIRConstant.Char{value: value} else -> mir_integer_constant(value, jet_codegen_pattern_integer_width(ty), None)
     jet_codegen_emit_value(&builder, program, span, ty, MIROperation.Constant{value: constant})
 }
 
@@ -5653,11 +5638,6 @@ fn jet_codegen_pattern_variant_slot_type(builder: JetCodegenBuilder, program: Je
     }
     owner :: pattern.enum_type ?? panic("checked variant pattern has no canonical owner")
     jet_codegen_pattern_variant_payload_type(builder, program, subject_ty, owner, variant, index)
-}
-
-fn jet_codegen_pattern_field_id(builder: JetCodegenBuilder, program: JetCodegenProgram, subject_ty: Type, field: String) -> MIRFieldID Never! {
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, jet_codegen_unwrap_pattern_tags(subject_ty), field)
-    jet_codegen_mir_field_id(resolved)
 }
 
 fn jet_codegen_pattern_binding_fact(pattern: TPattern, name: String) -> TPatternBindingFact Never! {
@@ -6165,7 +6145,7 @@ fn jet_codegen_lower_pattern_shape_test(builder: &JetCodegenBuilder, program: Je
                 if field == {
                     .Bind(_, _, _) -> {}
                     .Value(name, value, field_span) -> {
-                        field_id := jet_codegen_pattern_field_id(builder, program, subject.ty, name)
+                        field_id := jet_codegen_host_field_id(builder, program, subject.ty, name)
                         projected := jet_codegen_emit_value(&builder, program, field_span, value.ty, MIROperation.Field{base: subject_value, field: field_id})
                         expected := jet_codegen_lower_expr(&builder, program, value)
                         dispatch := jet_codegen_binary_dispatch(&builder, program, TBinaryOp.Eq, false, value.ty, field_span, 0)
@@ -6295,7 +6275,7 @@ fn jet_codegen_bind_pattern_shape(builder: &JetCodegenBuilder, program: JetCodeg
                     .Bind(field_name, name, _) -> {
                         if name != "" && name != "_" {
                             fact := jet_codegen_pattern_binding_fact(pattern, name)
-                            field_id := jet_codegen_pattern_field_id(builder, program, subject.ty, field_name)
+                            field_id := jet_codegen_host_field_id(builder, program, subject.ty, field_name)
                             if window == .Val(base) {
                                 window_place := jet_codegen_project_window_place(&builder, program, base, MIRProjection.Field{field: field_id, span: fact.span}, fact.ty, fact.span)
                                 jet_codegen_bind_window_binding(&builder, program, fact, window_place)
@@ -6546,7 +6526,7 @@ fn jet_codegen_lower_math_swizzle_read(builder: &JetCodegenBuilder, program: Jet
     context := MIRPanicContext{function: builder.function.name, source_line: source.source_line ?? "", caret: 0, locals: [MIRPanicLocal]{}}
     values := [MIRValueID]{}
     loop lane in lanes {
-        index := jet_codegen_emit_value(&builder, program, expression.span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: lane, width: None, spelling: None}})
+        index := jet_codegen_emit_value(&builder, program, expression.span, Type.Int, MIROperation.Constant{value: mir_integer_constant(lane, None, None)})
         call := jet_codegen_lane_index_route(&builder, program, type_name, scalar, jet_codegen_failure_carrier_for_type(scalar))
         &values.push(jet_codegen_emit_value(&builder, program, expression.span, scalar, MIROperation.Index{call: call, base: base, index: index, kind: MIRIndexKind.Lane, access: MIRAccess.Read, location: location, context: context}))
     }
@@ -6642,7 +6622,7 @@ fn jet_codegen_lower_index_hook_failure(builder: &JetCodegenBuilder, program: Je
     call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.index", "index_miss", "jet_panic", 3, [Bool]{true, false, true}, Val(Effect.Panic), TFailureCarrier.Diverges{value: never}, MIRPreludeABI.Control)
     source_file := builder.function.source_file
     file := jet_codegen_emit_value(&builder, program, span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: source_file}})
-    line_value := jet_codegen_emit_value(&builder, program, span, Type.IntN{signed: false, bits: 32}, MIROperation.Constant{value: MIRConstant.Int{value: line, width: Val(MIRIntegerWidth{signed: false, bits: 32}), spelling: None}})
+    line_value := jet_codegen_emit_value(&builder, program, span, Type.IntN{signed: false, bits: 32}, MIROperation.Constant{value: mir_integer_constant(line, Val(MIRIntegerWidth{signed: false, bits: 32}), None)})
     message := jet_codegen_emit_value(&builder, program, span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: "index miss"}})
     values := [MIRValueID]{file, line_value, message}
     args := [MIRCallArg]{}
@@ -6682,14 +6662,14 @@ fn jet_codegen_lower_index_hook(builder: &JetCodegenBuilder, program: JetCodegen
 
 fn jet_codegen_lower_layout_field_index(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, base: TExpr, field_name: String, line: Int) -> MIRValueID {
     field_type := Type.Named{name: "LayoutField"}
-    fields_ref :: jet_codegen_field_ref_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, base.ty, "fields", Type.List{element: field_type})
+    fields_ref :: jet_codegen_field_ref_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, base.ty, "fields", Type.List{element: field_type}, builder.function.key)
     fields := TExpr{ty: Type.List{element: field_type}, kind: TExprKind.Field{receiver: base, field: fields_ref}, span: expression.span, integer_bounds: None, cost: None}
     owner_key := "{builder.function.key}::layout-field-select@{expression.span.start}..{expression.span.end}"
     parameter_symbol := symbol_id(SymbolKind.Parameter, builder.function.module_identity, owner_key, "layout_field")
     parameter := tir_symbol_local("layout_field", expression.span, parameter_symbol)
     parameter.deref = true
     parameter_value := TExpr{ty: field_type, kind: TExprKind.Local{local: parameter}, span: expression.span, integer_bounds: None, cost: None}
-    name_ref :: jet_codegen_field_ref_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, field_type, "name", Type.String)
+    name_ref :: jet_codegen_field_ref_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, field_type, "name", Type.String, builder.function.key)
     name := TExpr{ty: Type.String, kind: TExprKind.Field{receiver: parameter_value, field: name_ref}, span: expression.span, integer_bounds: None, cost: None}
     expected_name := TExpr{ty: Type.String, kind: TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: field_name}}}, span: expression.span, integer_bounds: None, cost: None}
     predicate := TExpr{ty: Type.Bool, kind: TExprKind.Binary{op: TBinaryOp.Eq, overflow: false, line: line, lhs: name, rhs: expected_name}, span: expression.span, integer_bounds: None, cost: None}

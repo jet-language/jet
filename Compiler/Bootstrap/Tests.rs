@@ -97,12 +97,24 @@ MATERIALIZED_LIST :: prep { ~(SOURCE_LIST[0..<SOURCE_LIST.len()]) }
 MATERIALIZED_BYTES :: prep { ~(SOURCE_BYTES[0..<SOURCE_BYTES.len()]) }
 MATERIALIZED_LIST_LEN :: prep { MATERIALIZED_LIST.len() }
 MATERIALIZED_BYTES_LEN :: prep { MATERIALIZED_BYTES.len() }
+MIR_INTEGER_MAX :: 18446744073709551615
 
 pub fn main() {
     print("bootstrap-small-program")
     print("{MATERIALIZED_TEXT}")
     print("{MATERIALIZED_LIST_LEN}")
     print("{MATERIALIZED_BYTES_LEN}")
+    direct := 18446744073709551615
+    sized := U64{18446744073709551615}
+    a := 'a'
+    space := ' '
+    non_ascii := 'π'
+    scalar_keys := [Char:Int]{'a': 97, ' ': 32, 'π': 960}
+    print("{MIR_INTEGER_MAX}")
+    print("{direct}")
+    print("{sized}")
+    print("{a}{space}{non_ascii}")
+    print("{scalar_keys.len()}")
 }
 "#;
 const SMALL_PROGRAM_MANIFEST: &str = r#"name: "bootstrap_small"
@@ -4336,8 +4348,12 @@ fn assert_small_program_runs(binary: &Path, stage: &str) {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(
         stdout.lines().collect::<Vec<_>>(),
-        vec!["bootstrap-small-program", "π🙂", "2", "6"],
-        "{stage} generated compiler must execute String/List/Bytes materialization copies: {stdout:?}"
+        vec![
+            "bootstrap-small-program", "π🙂", "2", "6",
+            "18446744073709551615", "18446744073709551615",
+            "18446744073709551615", "a π", "3",
+        ],
+        "{stage} generated compiler must preserve materialization copies, exact integers and Unicode MIR constants/keys: {stdout:?}"
     );
 }
 

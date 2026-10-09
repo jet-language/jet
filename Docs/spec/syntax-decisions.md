@@ -304,6 +304,8 @@ work belongs inside `fn run`. Loose top-level statements are E0621, and an
 imported file with loose statements is E0620. Notebook and REPL adapters may
 construct an explicit `fn run` for their submitted fragment. `fn dev`,
 `fn build`, and `#Test` declarations remain legal beside module globals.
+The maintained example corpus enforces this same explicit-entry law: an
+ordinary `fn run` is not optional teaching ceremony.
 
 **D-CLI-POS1=A — positional by default, `#Flag` to opt out** *(ratified
 2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from
@@ -983,6 +985,9 @@ D-LIT-DOT1=B)*: named struct and typed-literal heads touch their braces:
 dot remains only for enum unit/payload selectors such as `.Tls13` and
 `.Password{ username: u }`. Dotted literal heads are E0320. Every field
 exactly once, any order; flush style `Point{x: 3.0, y: 4.0}` (S29-FLUSH).
+Qualified generic heads retain their arguments too:
+`library.Record<T>{ field: expr }` has the same construction meaning as
+`Record<T>{ field: expr }`; the adjacent `<…>{` is not a comparison chain.
 `{}` constructs an empty inferred value.
 **D-DOTCTOR3=A** *(ratified 2026-07-24, amended by D-LIT-DOT1=B)*: the same
 `Type{ body }` head is
@@ -5100,6 +5105,14 @@ deps: {
     parsekit: { git: "https://github.com/acme/parsekit", tag: "v0.4.1" },
 }
 ```
+
+**D-JPK-DISPATCH1=B — engine process boundary** *(ratified 2026-07-02,
+Tower decision D-JPK-DISPATCH1, card c03cwakt)*: engine verbs execute the
+`jetpack` binary by name instead of linking the package manager into the
+compiler. The seam forwards the original argument vector and preserves exit
+codes, JSON diagnostics, and version-skew handling. The engine's hidden
+protocol dispatcher is a raw process boundary, not a `#CLI` teaching entry;
+this does not change the typed CLI recipe for user-facing fixed-shape programs.
 
 **U30 / D-JPK-TOOLCHAIN1 — Toolchain pin**: `package.jet` carries a top-level
 `jet:` field pinning the toolchain (channel semantics per D-JPK-CHANNEL1;

@@ -11,6 +11,9 @@ use jet_foundation.[
     MIRComponentSignatureDescriptor,
     MIRConstKey,
     MIRConstant,
+    mir_integer_constant,
+    tir_comptime_integer_key,
+    mir_big_integer_key_compare,
     MIRCoreOwner,
     MIRDBQueryMetadata,
     MIRDerivationRef,
@@ -1820,7 +1823,11 @@ fn jet_eval_decimal_value(value: String) -> TComptimeValue Never! {
     if normalized_option == None -> return TComptimeValue.BigInt{decimal: value}
     normalized :: normalized_option ?? return TComptimeValue.BigInt{decimal: value}
     parsed :: Int.parse(normalized) ?? return TComptimeValue.BigInt{decimal: normalized}
-    TComptimeValue.Int{value: parsed}
+    if mir_integer_constant(parsed, None, None) == {
+        .Int(number, _, _) -> TComptimeValue.Int{value: number}
+        .BigInt(decimal) -> TComptimeValue.BigInt{decimal: decimal}
+        else -> panic("decimal value materialization is not an integer")
+    }
 }
 
 
@@ -1835,7 +1842,11 @@ fn jet_eval_decimal_text(value: TComptimeValue) -> String? {
 
 fn jet_eval_data_key(value: TComptimeValue, machine: &JetEvalMachine, span: Span) -> TComptimeKey? {
     if value == {
-        .Int(number) -> return Val(TComptimeKey.Int{value: number})
+        .Int(number) -> return Val(tir_comptime_integer_key(number))
+        .BigInt(decimal) -> {
+            number :: Int.parse(decimal) ?? return None
+            return Val(tir_comptime_integer_key(number))
+        }
         .String(text) -> return Val(TComptimeKey.String{value: text})
         .Bool(flag) -> return Val(TComptimeKey.Bool{value: flag})
         .Char(character) -> return Val(TComptimeKey.Char{value: character})
@@ -1903,13 +1914,18 @@ fn jet_eval_insert_map_entry(entries: [TComptimeMapEntry], key: TComptimeKey, va
     output
 }
 
-// The total key order: variant rank (Int, String, Bool, Char, Tuple, Struct,
-// Enum), then payload. Rust: the derived `Ord` of MIR.rs::MirConstKey.
+// Exact Int carriers share numeric order; other kinds retain their MIR rank.
+// Rust: MIR.rs::MirConstKey::cmp.
 fn jet_eval_key_compare(left: TComptimeKey, right: TComptimeKey) -> Int Never! {
     rank_order :: jet_eval_int_order(jet_eval_key_rank(left), jet_eval_key_rank(right))
     if rank_order != 0 -> return rank_order
     if left == .Int(left_number) {
         if right == .Int(right_number) -> return jet_eval_int_order(left_number, right_number)
+        if right == .BigInt(decimal) -> return if decimal.starts_with("-") -> 1 else -> -1
+    }
+    if left == .BigInt(decimal) {
+        if right == .BigInt(right_decimal) -> return mir_big_integer_key_compare(decimal, right_decimal)
+        if right == .Int(_) -> return if decimal.starts_with("-") -> -1 else -> 1
     }
     if left == .String(left_text) {
         if right == .String(right_text) -> return jet_eval_string_order(left_text, right_text)
@@ -1940,9 +1956,10 @@ fn jet_eval_key_compare(left: TComptimeKey, right: TComptimeKey) -> Int Never! {
     0
 }
 
+
 fn jet_eval_key_rank(key: TComptimeKey) -> Int Never! {
     if key == {
-        .Int(_) -> 0
+        .Int(_) | .BigInt(_) -> 0
         .String(_) -> 1
         .Bool(_) -> 2
         .Char(_) -> 3
@@ -2111,7 +2128,8 @@ fn jet_eval_integer_constant_value(value: Int, signed: Bool, bits: Int) -> TComp
 
 fn jet_eval_key_from_mir(key: MIRConstKey) -> TComptimeKey Never! {
     if key == {
-        .Int(value) -> TComptimeKey.Int{value: value}
+        .Int(value) -> tir_comptime_integer_key(value)
+        .BigInt(decimal) -> tir_comptime_integer_key(Int.parse(decimal) ?? panic("invalid canonical MIR integer key"))
         .String(value) -> TComptimeKey.String{value: value}
         .Bool(value) -> TComptimeKey.Bool{value: value}
         .Char(value) -> TComptimeKey.Char{value: value}

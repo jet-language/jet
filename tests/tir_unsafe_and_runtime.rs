@@ -228,6 +228,64 @@ cell :: 1337
     }
 }
 
+/// D-MEM-SENTRY1 / I1: every audited `#Unsafe` region lowers to its OWN sentry
+/// scope (source line and reason): a gated `#Unsafe fn` body, a block, and a
+/// block inside `#Test` (present in the test harness build). A caller's region
+/// must not stand in for the gated function it calls.
+#[test]
+fn every_unsafe_region_kind_enters_its_own_sentry_scope() {
+    let src = "\
+#Unsafe(\"the cell is live on this frame\")
+fn peek(v: Int) -> Int {
+    cell :: v
+    p :: *cell
+    p.*
+}
+
+fn run() {
+    #Unsafe(\"call the gated reader\") {
+        print(peek(42))
+    }
+}
+
+#Test(\"gated reader\") {
+    #Unsafe(\"test region calls the gated reader\") {
+        assert_eq(peek(1), 1)
+    }
+}
+";
+    let dir = std::env::temp_dir().join(format!("jet_tir_unsafe_regions_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let jet_path = dir.join("regions.jet");
+    fs::write(&jet_path, src).unwrap();
+    let shown = jet_path.to_string_lossy().into_owned();
+    let render = |diags: Vec<jet::Diagnostics::Diagnostic>| jet::render_diagnostics(&shown, src, &diags);
+    let run = jet::compile_with_path(src, &shown)
+        .unwrap_or_else(|diags| panic!("front end rejected:\n{}", render(diags)))
+        .rust;
+    let (harness, _) = jet::compile_tests_with_path(src, &shown)
+        .unwrap_or_else(|diags| panic!("test harness rejected:\n{}", render(diags)));
+    let sentry = |line: u32, reason: &str| {
+        format!("jet_mem::jet_sentry_scope(true, {shown:?}, {line}, {reason:?})")
+    };
+    let function_gate = format!("let __jet_function_gate = {};", sentry(1, "the cell is live on this frame"));
+    for (build, rust) in [("run", &run), ("test", &harness)] {
+        assert!(
+            rust.contains(&function_gate),
+            "{build} build: gated fn body lacks its own sentry scope:\n{rust}"
+        );
+    }
+    assert!(
+        run.contains(&sentry(9, "call the gated reader")),
+        "block region lacks its sentry scope:\n{run}"
+    );
+    assert!(
+        harness.contains(&sentry(15, "test region calls the gated reader")),
+        "#Test region lacks its sentry scope in the harness:\n{harness}"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
 /// D-HARDENED1 / D-FFI-CAP1: a capability edge must marshal through the
 /// shared memory Prelude before entering the hidden foreign bridge. The bridge
 /// crate cannot own a second sentry kernel, so the call-site adapter is the

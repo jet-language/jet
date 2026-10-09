@@ -3,6 +3,7 @@ use jet_foundation.[
     MIRBasicBlock,
     MIRBlockID,
     MIRConstant,
+    mir_integer_value,
     MIRCopyCost,
     MIRFieldID,
     MIRFixedReductionFact,
@@ -377,18 +378,18 @@ fn mir_pass_loop_trip_count(analysis: MIRPassLoopAnalysis, init: MIRInstruction?
             start_constant :: mir_pass_constant_for(analysis.constants, start) ?? return None
             end_constant :: mir_pass_constant_for(analysis.constants, end) ?? return None
             first :: if start_constant == {
-                .Int(value, _, _) -> value
+                .Int(value, width, _) -> mir_integer_value(value, width)
                 else -> { return None }
             }
             last :: if end_constant == {
-                .Int(value, _, _) -> value
+                .Int(value, width, _) -> mir_integer_value(value, width)
                 else -> { return None }
             }
             step_value :: if step == {
                 .Val(step_id) -> {
                     step_constant :: mir_pass_constant_for(analysis.constants, step_id) ?? return None
                     if step_constant == {
-                        .Int(value, _, _) -> value
+                        .Int(value, width, _) -> mir_integer_value(value, width)
                         else -> { return None }
                     }
                 }

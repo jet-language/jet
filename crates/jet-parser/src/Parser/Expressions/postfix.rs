@@ -166,7 +166,7 @@ impl<'a> Parser<'a> {
                                     let span = expr.span();
                                     expr = self.struct_lit_after_name(full, Vec::new(), span)?;
                                 } else {
-                                    expr = self.struct_lit_after_import(alias, type_name, start)?;
+                                    expr = self.struct_lit_after_import(alias, type_name, Vec::new(), start)?;
                                 }
                                 continue;
                             }
@@ -188,13 +188,22 @@ impl<'a> Parser<'a> {
                             continue;
                         }
                     }
-                    // D-GENERIC-CALL1=A: optional call-site type arguments on
-                    // every method call, such as `decode<Order>(…)`.
-                    let type_args = if self.at_turbofish() {
+                    let generic_literal = allow_struct_lit
+                        && member.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+                        && self.at_type_args_before(TokKind::LBrace);
+                    let type_args = if generic_literal || self.at_turbofish() {
                         self.parse_turbofish()?
                     } else {
                         Vec::new()
                     };
+                    if generic_literal {
+                        if let Expr::Ident(alias, _) = &expr {
+                            let full = format!("{alias}.{member}");
+                            let span = expr.span();
+                            expr = self.struct_lit_after_path(full, type_args, span)?;
+                            continue;
+                        }
+                    }
                     if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
                         let mut args = Vec::new();
@@ -396,7 +405,7 @@ impl<'a> Parser<'a> {
                             let span = expr.span();
                             expr = self.struct_lit_after_name(full, Vec::new(), span)?;
                         } else {
-                            expr = self.struct_lit_after_import(alias, type_name, start)?;
+                            expr = self.struct_lit_after_import(alias, type_name, Vec::new(), start)?;
                         }
                     } else if allow_struct_lit
                         && matches!(

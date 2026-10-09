@@ -419,12 +419,21 @@ pub struct TComptimeMapEntry {
 
 pub enum TComptimeKey {
     Int(value: Int)
+    BigInt(decimal: String)
     String(value: String)
     Bool(value: Bool)
     Char(value: Int)
     Tuple(fields: [TComptimeKeyField])
     Struct(type_name: String, fields: [TComptimeKeyField])
     Enum(type_name: String, variant: String)
+}
+
+pub fn tir_comptime_integer_key(number: Int) -> TComptimeKey Never! {
+    if mir_integer_constant(number, None, None) == {
+        .Int(value, _, _) -> TComptimeKey.Int{value: value}
+        .BigInt(decimal) -> TComptimeKey.BigInt{decimal: decimal}
+        else -> panic("integer key materialization is not an integer")
+    }
 }
 
 pub struct TComptimeKeyField {

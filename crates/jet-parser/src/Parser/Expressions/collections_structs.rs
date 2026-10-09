@@ -502,6 +502,7 @@ impl<'a> Parser<'a> {
                 return self.struct_lit_after_import(
                     import_ns.to_string(),
                     local_name.to_string(),
+                    type_args,
                     start_span.start,
                 );
             }
@@ -513,6 +514,7 @@ impl<'a> Parser<'a> {
         &mut self,
         alias: String,
         type_name: String,
+        type_args: Vec<Type>,
         start: usize,
     ) -> Result<Expr, Diagnostic> {
         // D-BOUND-SINK1=A: imported library text heads use the same
@@ -520,7 +522,11 @@ impl<'a> Parser<'a> {
         // body remains the ordinary imported struct constructor.
         if !brace_body_looks_like_fields(&self.toks, self.pos + 1) {
             let head_name = format!("{alias}.{type_name}");
-            let head = Type::Named(head_name);
+            let head = if type_args.is_empty() {
+                Type::Named(head_name)
+            } else {
+                Type::Apply { name: head_name, args: type_args }
+            };
             let body = self.typed_lit_body_for_head(&head)?;
             let end = self.toks[self.pos.saturating_sub(1)].span.end;
             return Ok(Expr::TypedLit {
@@ -534,7 +540,7 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos.saturating_sub(1)].span.end;
         Ok(Expr::StructLit {
             type_name,
-            type_args: Vec::new(),
+            type_args,
             import_ns: Some(alias),
             as_trait: None,
             fields,

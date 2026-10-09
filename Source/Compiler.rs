@@ -2552,6 +2552,7 @@ fn status_source_map(map: &SourceMap) -> StatusValue {
 fn status_map_key(key: &CtKey) -> String {
     match key {
         CtKey::Int(value) => value.to_string(),
+        CtKey::BigInt(value) => value.to_string_rep(),
         CtKey::Str(value) => value.clone(),
         CtKey::Bool(value) => value.to_string(),
         CtKey::Char(value) => value.to_string(),

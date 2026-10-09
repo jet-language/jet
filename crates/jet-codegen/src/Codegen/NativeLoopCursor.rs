@@ -260,6 +260,7 @@ fn value_iterator(
 fn const_key_value(key: MirConstKey) -> MirRuntimeValue {
     match key {
         MirConstKey::Int(value) => MirRuntimeValue::Int(value),
+        MirConstKey::BigInt(value) => MirRuntimeValue::BigInt(value),
         MirConstKey::String(value) => MirRuntimeValue::String(value),
         MirConstKey::Bool(value) => MirRuntimeValue::Bool(value),
         MirConstKey::Char(value) => MirRuntimeValue::Char(value),

@@ -15335,6 +15335,7 @@ fn encode_foreign(writer: &mut CanonicalWriter, foreign: &MirForeign) {
     writer.option_u64(foreign.close_function.map(|function| function.0));
     writer.option_u64(foreign.close_foreign.map(|foreign| foreign.0));
     writer.option_u64(foreign.undo_function.map(|function| function.0));
+    writer.debug(&foreign.unsafe_gate);
 }
 
 fn encode_failure_carrier(writer: &mut CanonicalWriter, carrier: &MirFailureCarrier) {
@@ -15935,6 +15936,10 @@ fn encode_mir_const_key(writer: &mut CanonicalWriter, key: &MirConstKey) {
         MirConstKey::Int(value) => {
             writer.tag("int");
             writer.u64(*value as u64);
+        }
+        MirConstKey::BigInt(value) => {
+            writer.tag("bigint");
+            writer.str(value);
         }
         MirConstKey::String(value) => {
             writer.tag("string");

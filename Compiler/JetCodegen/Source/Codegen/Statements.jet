@@ -17,6 +17,7 @@ use jet_foundation.[
     MIRCallSignature,
     MIRCallee,
     MIRConstant,
+    mir_integer_constant,
     MIRCopyFact,
     MIRConversion,
     MIRDropKind,
@@ -981,7 +982,7 @@ fn jet_codegen_for_in_tuple_field_id(builder: JetCodegenBuilder, program: JetCod
             return mir_field_id("{mir_type_identity_key(tuple_type)}::{member}")
         }
         else -> {
-            resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, untagged, member)
+            resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, untagged, member, builder.function.key)
             return jet_codegen_mir_field_id(resolved)
         }
     }
@@ -1015,7 +1016,7 @@ fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, program: JetCod
     index_local := if variable_two == None -> tir_user_local("read_walk_index_{span.start}", span) else -> variable
     item_local := variable_two ?? variable
     index_place := jet_codegen_bind_local(&builder, program, index_local, Type.Int, true, None, None, false)
-    zero := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: 0, width: None, spelling: None}})
+    zero := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: mir_integer_constant(0, None, None)})
     _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: index_place, value: zero})
     condition_block := jet_codegen_new_block(&builder, program, span, "read-walk-condition")
     body_block := jet_codegen_new_block(&builder, program, span, "read-walk-body")
@@ -1036,7 +1037,7 @@ fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, program: JetCod
     if jet_codegen_current_is_open(builder, program) -> jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: advance_block})
     jet_codegen_switch_block(&builder, program, advance_block)
     current_index := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.ReadPlace{place: index_place})
-    one := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: 1, width: None, spelling: None}})
+    one := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: mir_integer_constant(1, None, None)})
     next_index := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Binary{op: MIRBinaryOp.Add, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: current_index, right: one})
     _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: index_place, value: next_index})
     jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: condition_block})
@@ -1109,7 +1110,7 @@ fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, program: JetCodegenProg
     if indexed_pair {
         index_local := tir_user_local("for_in_index_{span.start}", span)
         index_place := jet_codegen_bind_local(&builder, program, index_local, Type.Int, true, None, None, false)
-        zero := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: 0, width: None, spelling: None}})
+        zero := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: mir_integer_constant(0, None, None)})
         _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: index_place, value: zero})
         sequence_index_place = Val(index_place)
     }
@@ -1172,7 +1173,7 @@ fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, program: JetCodegenProg
         index_place :: sequence_index_place ?? panic("checked indexed for-in lost its index local")
         current_index := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.ReadPlace{place: index_place})
         delta := if step_value == {
-            .None -> jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: 1, width: None, spelling: None}})
+            .None -> jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: mir_integer_constant(1, None, None)})
             .Val(value) -> {
                 step_expr :: step ?? panic("checked for-in step disappeared")
                 int_ty :: jet_codegen_lower_type_for_function(Type.Int, builder, program)
@@ -1298,7 +1299,7 @@ fn jet_codegen_lower_index_field_assign(builder: &JetCodegenBuilder, program: Je
     element_type := jet_codegen_index_element_type(assign.base.ty, kind)
     location := jet_codegen_assignment_panic_location(&builder, program, span, assign.is_map)
     base_place := jet_codegen_index_place(&builder, program, assign.base, assign.index, tir_kind, element_type, MIRAccess.Write, location, span)
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_type, assign.field)
+    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_type, assign.field, builder.function.key)
     place := jet_codegen_project_field_place(&builder, program, base_place, span, assign.field_ty, jet_codegen_mir_field_id(resolved))
     assigned := if assign.op == {
         None -> right
@@ -1343,7 +1344,7 @@ fn jet_codegen_lower_math_swizzle_assign(builder: &JetCodegenBuilder, program: J
             call := jet_codegen_lane_index_route(&builder, program, right_type_name, scalar_ty, carrier)
             ordinal := 0
             loop ordinal < lanes.len() {
-                lane_index := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: ordinal, width: None, spelling: None}})
+                lane_index := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: mir_integer_constant(ordinal, None, None)})
                 &right_values.push(jet_codegen_emit_value(&builder, program, span, scalar_ty, MIROperation.Index{call: call, base: right, index: lane_index, kind: MIRIndexKind.Lane, access: MIRAccess.Read, location: location, context: context}))
                 ordinal += 1
             }
@@ -2836,7 +2837,7 @@ fn jet_codegen_lower_pattern_probe(builder: &JetCodegenBuilder, program: JetCode
     type_id := jet_codegen_pattern_mir_type_id(builder, program, expression.ty)
     fields := [MIRFieldValue]{}
     loop (index, field) in types {
-        field_id := jet_codegen_pattern_field_id(builder, program, expression.ty, field.name)
+        field_id := jet_codegen_host_field_id(builder, program, expression.ty, field.name)
         value := jet_codegen_emit_value(&builder, program, expression.span, field.ty, MIROperation.PatternCapture{matched: matched, index: index})
         &fields.push(MIRFieldValue{field: field_id, value: value})
     }
@@ -3098,7 +3099,7 @@ fn jet_codegen_lower_switch_subject(builder: &JetCodegenBuilder, program: JetCod
     subject :: builder.switch_subject ?? panic("checked switch subject is not available")
     subject_value := subject.value
     if field == .Val(name) {
-        field_id := jet_codegen_pattern_field_id(builder, program, subject.ty, name)
+        field_id := jet_codegen_host_field_id(builder, program, subject.ty, name)
         return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Field{base: subject_value, field: field_id})
     }
     subject_value

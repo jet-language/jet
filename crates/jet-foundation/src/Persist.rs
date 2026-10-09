@@ -436,6 +436,7 @@ fn runtime_value_supported(value: &MirRuntimeValue) -> bool {
 fn runtime_key_supported(key: &crate::MIR::MirConstKey) -> bool {
     match key {
         crate::MIR::MirConstKey::Int(_)
+        | crate::MIR::MirConstKey::BigInt(_)
         | crate::MIR::MirConstKey::String(_)
         | crate::MIR::MirConstKey::Bool(_)
         | crate::MIR::MirConstKey::Char(_)
@@ -546,6 +547,7 @@ fn runtime_shape_compatible(old_shape: &str, new_shape: &str) -> bool {
 fn ct_to_runtime_key(key: &crate::AST::CtKey) -> Option<crate::MIR::MirConstKey> {
     match key {
         crate::AST::CtKey::Int(value) => Some(crate::MIR::MirConstKey::Int(*value)),
+        crate::AST::CtKey::BigInt(value) => Some(crate::MIR::MirConstKey::from_bigint(value)),
         crate::AST::CtKey::Str(value) => {
             Some(crate::MIR::MirConstKey::String(value.clone()))
         }

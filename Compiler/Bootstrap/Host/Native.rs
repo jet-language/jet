@@ -2425,6 +2425,19 @@ fn emit_bootstrap_host_factory(
         "JetDriverAuthorizedSourceRoot",
         "foreign_cache_files",
     )?;
+    let root_directories =
+        symbols.field_symbol("JetDriverAuthorizedSourceRoot", "directories")?;
+    let request_gate_set = symbols.field_symbol("JetDriverCompileRequest", "gate_set")?;
+    let gate_set_type = symbols.type_symbol("GateSet")?;
+    let gate_set_allowed = symbols.field_symbol("GateSet", "allowed")?;
+    let gate_set_build_flag = symbols.field_symbol("GateSet", "build_flag")?;
+    let gate_set_session_flag = symbols.field_symbol("GateSet", "session_flag")?;
+    let request_gate_policies =
+        symbols.field_symbol("JetDriverCompileRequest", "gate_policies")?;
+    let request_external_gate_entries =
+        symbols.field_symbol("JetDriverCompileRequest", "external_gate_entries")?;
+    let request_evaluation_entry =
+        symbols.field_symbol("JetDriverCompileRequest", "evaluation_entry")?;
     let file_type = symbols.type_symbol("JetDriverAuthorizedSourceFile")?;
     let file_path = symbols.field_symbol("JetDriverAuthorizedSourceFile", "path")?;
     let file_relative_path =
@@ -2462,6 +2475,9 @@ fn emit_bootstrap_host_factory(
             "            {file_identity}: file.identity.clone(),\n",
             "            {file_source}: file.source.clone(),\n",
             "        }}).collect::<Vec<_>>(),\n",
+            "        // The host snapshot carries no App directory listing: the\n",
+            "        // field's declared default (`[AppAuthorizedDirectory]{{}}`).\n",
+            "        {root_directories}: Vec::new(),\n",
             "    }}).collect::<Vec<_>>();\n",
             "    // The Core library bodies the Rust loader embeds: every public source\n",
             "    // module row plus the compiler-private parts, in table order.\n",
@@ -2505,6 +2521,13 @@ fn emit_bootstrap_host_factory(
             "        // explicit host opt-in for tests and verification runs.\n",
             "        {request_mir_lint_every_pass}: ::std::env::var_os(\"JET_BOOTSTRAP_MIR_LINT_EVERY_PASS\").is_some_and(|value| value == \"1\"),\n",
             "        {request_mode}: {mode_program},\n",
+            "        // The declared defaults of the request's gate and evaluation rows:\n",
+            "        // the bootstrap host passes no invocation gates, package gate\n",
+            "        // policies, external gate rows, or evaluation entry.\n",
+            "        {request_gate_set}: {gate_set_type} {{ {gate_set_allowed}: Vec::new(), {gate_set_build_flag}: false, {gate_set_session_flag}: false }},\n",
+            "        {request_gate_policies}: Vec::new(),\n",
+            "        {request_external_gate_entries}: Vec::new(),\n",
+            "        {request_evaluation_entry}: Err(Default::default()),\n",
             "        // D-JOBS1=A: the bootstrap host takes no `--threads` cap, so the\n",
             "        // compiler admits threads automatically up to the reported cores\n",
             "        // and within the memory Linux reports available, lowered to the\n",
@@ -2535,6 +2558,15 @@ fn emit_bootstrap_host_factory(
         root_allow_hardlinks = root_allow_hardlinks,
         root_files = root_files,
         root_foreign_cache_files = root_foreign_cache_files,
+        root_directories = root_directories,
+        request_gate_set = request_gate_set,
+        gate_set_type = gate_set_type,
+        gate_set_allowed = gate_set_allowed,
+        gate_set_build_flag = gate_set_build_flag,
+        gate_set_session_flag = gate_set_session_flag,
+        request_gate_policies = request_gate_policies,
+        request_external_gate_entries = request_external_gate_entries,
+        request_evaluation_entry = request_evaluation_entry,
         file_type = file_type,
         file_path = file_path,
         file_relative_path = file_relative_path,
@@ -3518,7 +3550,10 @@ fn __jet_bootstrap_key_fields_to_host(fields: &[@t.TComptimeKeyField@]) -> Resul
 }
 fn __jet_bootstrap_key_to_host(value: &@t.TComptimeKey@) -> Result<::jet_foundation::MIR::MirConstKey, String> {
     match value {
-        @p.TComptimeKey.Int@{ value } => Ok(::jet_foundation::MIR::MirConstKey::Int(value.to_i64().ok_or_else(|| "constant key exceeds i64".to_string())?)),
+        // Source Int owns the standalone runtime carrier; host MIR receives its
+        // canonical value, never the runtime's nominal CtBigInt allocation.
+        @p.TComptimeKey.Int@{ value } => Ok(match value.to_i64() { Some(number) => ::jet_foundation::MIR::MirConstKey::Int(number), None => ::jet_foundation::MIR::MirConstKey::BigInt(value.to_string_rep()) }),
+        @p.TComptimeKey.BigInt@{ decimal } => Ok(::jet_foundation::MIR::MirConstKey::from_bigint(&::jet_foundation::Numeric::CtBigInt::from_str(decimal)?)),
         @p.TComptimeKey.String@{ value } => Ok(::jet_foundation::MIR::MirConstKey::String(value.clone())),
         @p.TComptimeKey.Bool@{ value } => Ok(::jet_foundation::MIR::MirConstKey::Bool(*value)),
         @p.TComptimeKey.Char@{ value } => Ok(::jet_foundation::MIR::MirConstKey::Char(char::from_u32(value.to_i64().ok_or_else(|| "constant key character exceeds i64".to_string())? as u32).ok_or_else(|| "constant key character is invalid".to_string())?)),
@@ -3620,6 +3655,7 @@ fn __jet_bootstrap_ct_from_host(value: &::jet_foundation::MIR::MirRuntimeValue) 
 fn __jet_bootstrap_runtime_key_from_host(value: &::jet_foundation::MIR::MirRuntimeValue) -> Result<::jet_foundation::MIR::MirConstKey, String> {
     match value {
         ::jet_foundation::MIR::MirRuntimeValue::Int(value) => Ok(::jet_foundation::MIR::MirConstKey::Int(*value)),
+        ::jet_foundation::MIR::MirRuntimeValue::BigInt(value) => Ok(::jet_foundation::MIR::MirConstKey::from_bigint(&::jet_foundation::Numeric::CtBigInt::from_str(value)?)),
         ::jet_foundation::MIR::MirRuntimeValue::String(value) => Ok(::jet_foundation::MIR::MirConstKey::String(value.clone())),
         ::jet_foundation::MIR::MirRuntimeValue::Bool(value) => Ok(::jet_foundation::MIR::MirConstKey::Bool(*value)),
         ::jet_foundation::MIR::MirRuntimeValue::Char(value) => Ok(::jet_foundation::MIR::MirConstKey::Char(*value)),
@@ -3708,6 +3744,7 @@ fn __jet_bootstrap_key_fields_from_host(fields: &[(String, ::jet_foundation::MIR
 fn __jet_bootstrap_key_from_host(value: &::jet_foundation::MIR::MirConstKey) -> Result<@t.TComptimeKey@, String> {
     match value {
         ::jet_foundation::MIR::MirConstKey::Int(value) => Ok(@new.TComptimeKey.Int@{ value: jet_foundation::Numeric::JetInt::from_i64(*value) }),
+        ::jet_foundation::MIR::MirConstKey::BigInt(decimal) => Ok(@new.TComptimeKey.BigInt@{ decimal: decimal.clone() }),
         ::jet_foundation::MIR::MirConstKey::String(value) => Ok(@new.TComptimeKey.String@{ value: value.clone() }),
         ::jet_foundation::MIR::MirConstKey::Bool(value) => Ok(@new.TComptimeKey.Bool@{ value: *value }),
         ::jet_foundation::MIR::MirConstKey::Char(value) => Ok(@new.TComptimeKey.Char@{ value: jet_foundation::Numeric::JetInt::from_i64(i64::from(*value as u32)) }),
@@ -3737,6 +3774,7 @@ fn __jet_bootstrap_ct_key_fields_from_host(fields: &[(String, ::jet_foundation::
 fn __jet_bootstrap_ct_key_value_from_host(value: &::jet_foundation::MIR::MirConstKey) -> Result<@t.TComptimeValue@, String> {
     match value {
         ::jet_foundation::MIR::MirConstKey::Int(value) => Ok(@new.TComptimeValue.Int@{ value: jet_foundation::Numeric::JetInt::from_i64(*value) }),
+        ::jet_foundation::MIR::MirConstKey::BigInt(decimal) => Ok(@new.TComptimeValue.BigInt@{ decimal: decimal.clone() }),
         ::jet_foundation::MIR::MirConstKey::String(value) => Ok(@new.TComptimeValue.String@{ value: value.clone() }),
         ::jet_foundation::MIR::MirConstKey::Bool(value) => Ok(@new.TComptimeValue.Bool@{ value: *value }),
         ::jet_foundation::MIR::MirConstKey::Char(value) => Ok(@new.TComptimeValue.Char@{ value: jet_foundation::Numeric::JetInt::from_i64(i64::from(*value as u32)) }),
@@ -4462,6 +4500,12 @@ fn emit_bootstrap_foreign_callback(
     let foreign_close_function = symbols.field_symbol("MIRForeign", "close_function")?;
     let foreign_close_foreign = symbols.field_symbol("MIRForeign", "close_foreign")?;
     let foreign_undo_function = symbols.field_symbol("MIRForeign", "undo_function")?;
+    let foreign_unsafe_gate = symbols.field_symbol("MIRForeign", "unsafe_gate")?;
+    let unsafe_gate_file = symbols.field_symbol("MIRUnsafeGate", "file")?;
+    let unsafe_gate_line = symbols.field_symbol("MIRUnsafeGate", "line")?;
+    let unsafe_gate_reason = symbols.field_symbol("MIRUnsafeGate", "reason")?;
+    let unsafe_gate_enabled = symbols.field_symbol("MIRUnsafeGate", "enabled")?;
+    let unsafe_gate_fenced = symbols.field_symbol("MIRUnsafeGate", "fenced")?;
     let foreign_id_value = symbols.field_symbol("MIRForeignID", "value")?;
     let module_id_value = symbols.field_symbol("MIRModuleID", "value")?;
     let link_unit_id_value = symbols.field_symbol("MIRLinkUnitID", "value")?;
@@ -4588,6 +4632,16 @@ fn emit_bootstrap_foreign_callback(
              let close_function = value.{foreign_close_function}.ok().map(|id| ::jet_foundation::MIR::MirFunctionId(id.{function_id_value}));
              let close_foreign = value.{foreign_close_foreign}.ok().map(|id| ::jet_foundation::MIR::MirForeignId(id.{foreign_id_value}));
              let undo_function = value.{foreign_undo_function}.ok().map(|id| ::jet_foundation::MIR::MirFunctionId(id.{function_id_value}));
+             let unsafe_gate = match value.{foreign_unsafe_gate}.ok() {{
+                 Some(gate) => Some(::jet_foundation::MIR::MirUnsafeGate {{
+                     file: gate.{unsafe_gate_file},
+                     line: gate.{unsafe_gate_line}.to_string_rep().parse::<u32>().map_err(|_| \"foreign unsafe gate line is not a u32\".to_string())?,
+                     reason: gate.{unsafe_gate_reason},
+                     enabled: gate.{unsafe_gate_enabled},
+                     fenced: gate.{unsafe_gate_fenced},
+                 }}),
+                 None => None,
+             }};
              Ok(::jet_foundation::MIR::MirForeign {{
                  id: ::jet_foundation::MIR::MirForeignId(value.{foreign_id}.{foreign_id_value}),
                  module_id: ::jet_foundation::MIR::MirModuleId(value.{foreign_module_id}.{module_id_value}),
@@ -4614,6 +4668,7 @@ fn emit_bootstrap_foreign_callback(
                  close_function,
                  close_foreign,
                  undo_function,
+                 unsafe_gate,
              }})
          }}
          fn __jet_bootstrap_native_foreign_call<T>(

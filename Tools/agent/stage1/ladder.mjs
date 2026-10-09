@@ -85,8 +85,8 @@ fn jet_ladder_optimizer_complete(program: &MIRProgram) -> Bool {
 `,
   codegen: `use jet_codegen.[JetRustEmitConfig, JetRustEmitResult, jet_rust_emit_program, lower_functions]
 
-fn jet_ladder_codegen_lower(functions: [TFunc], modules: [SemaGraphModuleResult], source_files: [MIRSourceFile]) -> Int {
-    lower_functions(functions, modules, source_files, None).functions.len()
+fn jet_ladder_codegen_lower(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile]) -> Int {
+    lower_functions(&functions, &modules, source_files, compiler_threads_single(), None).functions.len()
 }
 
 fn jet_ladder_codegen_emit(program: MIRProgram, config: JetRustEmitConfig) -> Bool {

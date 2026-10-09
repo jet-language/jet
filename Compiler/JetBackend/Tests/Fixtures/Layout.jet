@@ -11,6 +11,7 @@ use jet_foundation.[
     MIRAccess,
     MIRCallee,
     MIRConstant,
+    mir_integer_constant,
     MIRDropKind,
     MIREnumArg,
     MIRField,
@@ -41,7 +42,7 @@ use jet_foundation.[
 fn fx_i64() -> MIRType Never! { mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64}) }
 
 fn fx_i64_const(b: &FxBuilder, value: Int) -> MIRValueID Never! {
-    fx_copy(&b, fx_i64(), MIROperation.Constant{value: MIRConstant.Int{value: value, width: Val(MIRIntegerWidth{signed: true, bits: 64}), spelling: None}})
+    fx_copy(&b, fx_i64(), MIROperation.Constant{value: mir_integer_constant(value, Val(MIRIntegerWidth{signed: true, bits: 64}), None)})
 }
 
 fn fx_stored_or_computed(owner: String, name: String, ty: MIRType, computed: Bool) -> MIRField Never! {

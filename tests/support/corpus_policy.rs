@@ -5,6 +5,7 @@
 //! The manifest owns classification and provenance; the AST pass owns the
 //! recurrence rules; the domain tests decide when to call this adapter.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -135,7 +136,7 @@ pub fn rule_registry() -> &'static [RuleSpec] {
         RuleSpec { name: "dogfood-json-url-list", why: "dogfood JSON, URL, and list operations have one typed path", replacement: "use the typed JSON, URL, or list API" },
         RuleSpec { name: "raw-cli-process-boundary", why: "a canonical program must not repeatedly reconstruct the process boundary", replacement: "use the one typed entry boundary or one explicit expert boundary" },
         RuleSpec { name: "product-parser-regression", why: "the parser boundary must reject the recorded invalid shape", replacement: "keep the shared parser regression fixture and assertion" },
-        RuleSpec { name: "entry-implicit", why: "the first-contact program should be its top-level body", replacement: "move the ordinary first-contact body to top level" },
+        RuleSpec { name: "entry-explicit", why: "ordinary-file execution belongs in an explicit fn run (D-ENTRY-SCRIPT1=C)", replacement: "move loose executable statements into fn run" },
         RuleSpec { name: "process_args_view", why: "the maintained corpus should use the canonical process argument view", replacement: "replace process.argv().skip(1) with process.args()" },
         RuleSpec { name: "message_text", why: "the maintained corpus should use the message-level HTTP text default", replacement: "replace body().text(default_limit) with text()" },
         RuleSpec { name: "redundant_fixed_cleanup", why: "the maintained corpus should keep plain Fixed output free of grouping cleanup", replacement: "delete the grouping-separator cleanup" },
@@ -533,7 +534,7 @@ impl CorpusPolicy {
             };
             if row.role == SourceRole::GeneratedOutput
                 || !proof_matches(&row.proof, gate)
-                || !semantic_role(row.role)
+                || (!semantic_role(row.role) && row.profile != "package-manifest")
             {
                 continue;
             }
@@ -591,6 +592,16 @@ impl CorpusPolicy {
                 "inventory:source",
             ));
         };
+        // Named manifest snapshots are explicit registry entries, never a
+        // filename-suffix exception for ordinary Jet programs.
+        if row.profile == "package-manifest" {
+            if row.role != SourceRole::RawProtocol || row.selector.strip_prefix("file:") != Some(path) {
+                return Err(format!("Package snapshot requires an exact raw-protocol source row: {path}"));
+            }
+            jet::Package::PackageFacts::parse(source, path)
+                .map_err(|error| format!("Package parser rejected corpus snapshot `{path}`: {error:?}"))?;
+            return Ok(Vec::new());
+        }
         if !semantic_role(row.role) {
             return Ok(Vec::new());
         }
@@ -2280,7 +2291,7 @@ fn parse_program(source_label: &str, source: &str) -> Result<Program, String> {
             ));
         }
         let parse_source = strip_inline_package(source, &tokens);
-        let (parse_tokens, parse_diagnostics) = jet::Lexer::lex(parse_source);
+        let (parse_tokens, parse_diagnostics) = jet::Lexer::lex(&parse_source);
         if !parse_diagnostics.is_empty() {
             return Err(format!(
                 "Jet lexer rejected corpus source `{source_label}`: {parse_diagnostics:?}"
@@ -2292,17 +2303,17 @@ fn parse_program(source_label: &str, source: &str) -> Result<Program, String> {
     })
 }
 
-fn strip_inline_package<'a>(source: &'a str, tokens: &[Token]) -> &'a str {
+fn strip_inline_package<'a>(source: &'a str, tokens: &[Token]) -> Cow<'a, str> {
     let Some((package_index, package_token)) = tokens.iter().enumerate().find(|(_, token)| {
         !matches!(
             &token.kind,
             TokKind::LineComment(_) | TokKind::BlockComment(_)
         )
     }) else {
-        return source;
+        return Cow::Borrowed(source);
     };
     if !matches!(&package_token.kind, TokKind::Ident(name) if name == "package") {
-        return source;
+        return Cow::Borrowed(source);
     }
     let Some(open_index) = tokens
         .iter()
@@ -2310,7 +2321,7 @@ fn strip_inline_package<'a>(source: &'a str, tokens: &[Token]) -> &'a str {
         .skip(package_index + 1)
         .find_map(|(index, token)| matches!(&token.kind, TokKind::LBrace).then_some(index))
     else {
-        return source;
+        return Cow::Borrowed(source);
     };
     let mut depth = 0usize;
     for token in tokens.iter().skip(open_index) {
@@ -2319,13 +2330,22 @@ fn strip_inline_package<'a>(source: &'a str, tokens: &[Token]) -> &'a str {
             TokKind::RBrace => {
                 depth = depth.saturating_sub(1);
                 if depth == 0 {
-                    return &source[token.span.end..];
+                    // Reviewed sites are offsets in the original source. Removing
+                    // the package prefix shifts every AST span and invalidates
+                    // exact-site exceptions even when the program is unchanged.
+                    let mut masked = source.as_bytes().to_vec();
+                    for byte in &mut masked[..token.span.end] {
+                        if !matches!(*byte, b'\n' | b'\r') {
+                            *byte = b' ';
+                        }
+                    }
+                    return Cow::Owned(String::from_utf8(masked).expect("masked Jet source is UTF-8"));
                 }
             }
             _ => {}
         }
     }
-    source
+    Cow::Borrowed(source)
 }
 
 fn evaluate_program(
@@ -2524,25 +2544,14 @@ fn evaluate_program(
             ));
         }
     }
-    if applies(manifest, path, row, "entry-implicit")
-        && program
-            .items
-            .iter()
-            .any(|item| matches!(item, Item::Func(function) if function.name == "run"))
-    {
-        let span = program
-            .items
-            .iter()
-            .find_map(|item| match item {
-                Item::Func(function) if function.name == "run" => Some(function.span),
-                _ => None,
-            })
-            .unwrap_or(Span { start: 0, end: 0 });
-        violations.push(SemanticViolation::new(
-            path,
-            "entry-implicit",
-            site("fn:run", span),
-        ));
+    if applies(manifest, path, row, "entry-explicit") {
+        for statement in &program.script_body {
+            violations.push(SemanticViolation::new(
+                path,
+                "entry-explicit",
+                site("stmt:top-level", statement.span()),
+            ));
+        }
     }
     if applies(manifest, path, row, "codable-structural") {
         for structure in structures {

@@ -4,6 +4,8 @@ use jet_foundation.[
     MIRBlockID,
     MIRBinaryOp,
     MIRConstant,
+    mir_integer_constant,
+    mir_integer_value,
     MIRFunction,
     MIRIntegerWidth,
     MIROperation,
@@ -430,7 +432,7 @@ fn mir_pass_constant_put(constants: &[U64:MIRConstant], value: MIRValueID, const
 
 fn mir_pass_scalar_constant(constant: MIRConstant) -> MIRConstant? {
     if constant == {
-        .Int(value, width, _) -> Val(MIRConstant.Int{value: value, width: width, spelling: None})
+        .Int(value, width, _) -> Val(mir_integer_constant(value, width, None))
         .Bool(value) -> Val(MIRConstant.Bool{value: value})
         .Char(value) -> Val(MIRConstant.Char{value: value})
         else -> None
@@ -481,10 +483,11 @@ fn mir_pass_fold_unary(op: MIRUnaryOp, value: MIRConstant, ty: MIRType) -> MIRCo
         }
         .Neg -> {
             if value == {
-                .Int(number, width, _) -> {
+                .Int(payload, width, _) -> {
+                    number :: mir_integer_value(payload, width)
                     result :: mir_pass_checked_sub(0, number) ?? return None
                     output_width :: mir_pass_integer_width(ty, width)
-                    if mir_pass_fits_integer(result, output_width) -> Val(MIRConstant.Int{value: result, width: output_width, spelling: None}) else -> None
+                    if mir_pass_fits_integer(result, output_width) -> Val(mir_integer_constant(result, output_width, None)) else -> None
                 }
                 else -> None
             }
@@ -525,9 +528,11 @@ fn mir_pass_fold_binary(op: MIRBinaryOp, left: MIRConstant, right: MIRConstant, 
                 else -> None
             }
         }
-        .Int(left_value, left_width, _) -> {
+        .Int(left_payload, left_width, _) -> {
+            left_value :: mir_integer_value(left_payload, left_width)
             if right == {
-                .Int(right_value, _, _) -> {
+                .Int(right_payload, right_width, _) -> {
+                    right_value :: mir_integer_value(right_payload, right_width)
                     if op == {
                         .Eq -> Val(MIRConstant.Bool{value: left_value == right_value})
                         .Ne -> Val(MIRConstant.Bool{value: left_value != right_value})
@@ -538,7 +543,7 @@ fn mir_pass_fold_binary(op: MIRBinaryOp, left: MIRConstant, right: MIRConstant, 
                         else -> {
                             result :: mir_pass_integer_result(op, left_value, right_value) ?? return None
                             width :: mir_pass_integer_width(ty, left_width)
-                            if mir_pass_fits_integer(result, width) -> Val(MIRConstant.Int{value: result, width: width, spelling: None}) else -> None
+                            if mir_pass_fits_integer(result, width) -> Val(mir_integer_constant(result, width, None)) else -> None
                         }
                     }
                 }

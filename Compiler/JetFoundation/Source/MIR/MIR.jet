@@ -1328,6 +1328,7 @@ pub struct MIRConstantDef { pub id: MIRConstantID, pub module_id: MIRModuleID, p
 
 pub enum MIRConstKey {
     Int(value: Int)
+    BigInt(decimal: String)
     String(value: String)
     Bool(value: Bool)
     Char(value: Int)
@@ -1362,6 +1363,47 @@ pub enum MIRConstant {
 }
 
 pub struct MIRIntegerWidth { pub signed: Bool, pub bits: Int }
+
+// Native MIR Int carries an i64. Keep an unbounded value outside that range in
+// BigInt; a checked U64 literal instead keeps the seed's signed-bit i64 payload
+// and its width. Both emitters recover the same unsigned value from that pair.
+pub fn mir_integer_constant(number: Int, width: MIRIntegerWidth?, spelling: String?) -> MIRConstant Never! {
+    payload := number
+    if width == Val(word) {
+        if !word.signed && word.bits == 64 && number > 9223372036854775807 {
+            payload = number - 18446744073709551616
+        }
+    }
+    if payload < -9223372036854775807 - 1 || payload > 9223372036854775807 -> return MIRConstant.BigInt{decimal: "{payload}"}
+    MIRConstant.Int{value: payload, width: width, spelling: spelling}
+}
+
+pub fn mir_integer_key(number: Int) -> MIRConstKey Never! {
+    if mir_integer_constant(number, None, None) == {
+        .Int(value, _, _) -> MIRConstKey.Int{value: value}
+        .BigInt(decimal) -> MIRConstKey.BigInt{decimal: decimal}
+        else -> panic("integer key materialization is not an integer")
+    }
+}
+
+// Both decimals are canonical BigInt keys, so sign, digit count, then lexical
+// order compare their exact numeric values without parsing or allocating limbs.
+pub fn mir_big_integer_key_compare(left: String, right: String) -> Int Never! {
+    left_negative :: left.starts_with("-")
+    right_negative :: right.starts_with("-")
+    if left_negative != right_negative -> return if left_negative -> -1 else -> 1
+    order :: if left.len() < right.len() -> -1 else -> if left.len() > right.len() -> 1 else -> if left < right -> -1 else -> if left > right -> 1 else -> 0
+    if left_negative -> -order else -> order
+}
+
+// Decode the i64 payload only for readers doing mathematical comparisons or
+// arithmetic. Machine-word lowering and canonical digesting keep the raw bits.
+pub fn mir_integer_value(payload: Int, width: MIRIntegerWidth?) -> Int Never! {
+    if width == Val(word) {
+        if !word.signed && word.bits == 64 && payload < 0 -> return payload + 18446744073709551616
+    }
+    payload
+}
 
 pub struct MIRConstMapEntry { pub key: MIRConstKey, pub value: MIRConstant }
 
@@ -2982,6 +3024,9 @@ pub struct MIRForeign {
     pub close_function: MIRFunctionID?
     pub close_foreign: MIRForeignID?
     pub undo_function: MIRFunctionID?
+    // D-MEM-SENTRY1: the declaration's own `#Unsafe("reason")` gate for an
+    // audited inline foreign function. Every call runs inside its sentry scope.
+    pub unsafe_gate: MIRUnsafeGate?
 }
 
 pub enum MIRJobScope { Dev Ship Internal }

@@ -76,6 +76,8 @@ const CASES: &[&str] = &[
     "[\"b\": 2, \"a\": 1, \"c\": 3].values().to_list()",
     "\"a,b,c\".split(\",\").skip(1).first()",
     "[2: \"two\", 1: \"one\"].keys().to_list()",
+    "[18446744073709551615: \"large\", -9223372036854775809: \"negative\", 0: \"zero\"].keys().to_list()",
+    "[18446744073709551615: \"large\"].get(9223372036854775807 + 9223372036854775808)",
     "Rank.from([1, 2, 3]).intersection(Rank.from([2, 3, 4])).to_list()",
     "Rank.from([1, 2, 3]).difference(Rank.from([2, 3, 4])).to_list()",
     "Rank.from([1, 2, 3]).symmetric_difference(Rank.from([2, 3, 4])).to_list()",
@@ -474,6 +476,23 @@ fn comptime_exact_int_matches_runtime() {
     );
     for (i, expr) in cases {
         check_comptime_case(i, expr);
+    }
+}
+
+#[test]
+fn comptime_arbitrary_precision_map_keys_match_runtime() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping exact Int map-key differential");
+        return;
+    }
+    let cases = CASES
+        .iter()
+        .enumerate()
+        .filter(|(_, expr)| expr.starts_with("[18446744073709551615:"))
+        .collect::<Vec<_>>();
+    assert_eq!(cases.len(), 2, "exact Int map-key witnesses must stay focused");
+    for (index, expression) in cases {
+        check_comptime_case(index, expression);
     }
 }
 

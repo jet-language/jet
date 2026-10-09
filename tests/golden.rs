@@ -54,6 +54,44 @@ impl Drop for GoldenScratch {
     }
 }
 
+/// One example's generated source and executable. Removed when the example's
+/// check passes, so a full run does not leave ~2.5 GB of binaries in the test
+/// temp directory; a failing example keeps them for inspection.
+struct ProgramFiles([PathBuf; 2]);
+
+impl Drop for ProgramFiles {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        for path in &self.0 {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+/// Keep the prebuilt runtime directory to this test build's keys: a runtime
+/// exported before the binary was linked belongs to an earlier build, and a
+/// checkout's long-lived target dir would otherwise gain ~120 MB per stale key
+/// on every rebuild. A pruned key that is still current rebuilds once.
+fn prune_prebuilt_runtimes_older_than(prebuilt: &Path, exe: &Path) {
+    let Ok(built) = fs::metadata(exe).and_then(|meta| meta.modified()) else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(prebuilt) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let stale = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|modified| modified < built);
+        if stale && entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
 struct FeatureFixtureScratch {
     root: PathBuf,
     entry: PathBuf,
@@ -414,12 +452,24 @@ fn examples_compile_and_run() {
     let ffi_cache = scratch.join("ffi");
     // #2074/#2516: the store is content-addressed and re-verified against the
     // artifact digest on every hit, so sharing it across runs cannot
-    // resurrect a stale artifact — a wrong key is a miss, never a reuse. A
-    // per-run store would instead pay one cold runtime compile per key on
-    // every golden run, which is the exact cost this substrate exists to
-    // remove. Living under the target dir keeps `cargo clean` as the reset.
+    // resurrect a stale artifact — a wrong key is a miss, never a reuse.
+    // Living under the target dir keeps `cargo clean` as the reset.
     let store = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jet-golden-store");
     std::env::set_var("JET_STORE_DIR", &store);
+    // D-BUILD-PREBUILT1: the runtime/Core closure is compiled once per test
+    // build, not once per example process. Every example links the
+    // `jet-runtime/<key>` rlib beside this binary in place, the layout a
+    // shipped `jet` reads; the first process to need a key builds and exports
+    // it while the others wait (`common::add_generated_rust`). Without this,
+    // each example process verified and copied a ~120 MB rlib out of its
+    // store, and every golden shard compiled every key it met.
+    let exe = std::env::current_exe().expect("golden test binary path");
+    let prebuilt = exe
+        .parent()
+        .expect("golden test binary has a directory")
+        .join(jet_store::runtime::PREBUILT_DIR_NAME);
+    prune_prebuilt_runtimes_older_than(&prebuilt, &exe);
+    std::env::set_var(jet_store::runtime::PREBUILD_EXPORT_ENV, &prebuilt);
     std::env::set_var("JET_FFI_CACHE_DIR", &ffi_cache);
     let jetpack_root = scratch.join("jetpack-root");
     let _scratch = GoldenScratch { path: scratch };
@@ -712,6 +762,18 @@ fn source_audit_regions(source: &str) -> Vec<AuditRegion> {
     regions
 }
 
+/// True when the source declares a `#Test` block, read from Jet tokens so a
+/// string or comment naming the marker does not count.
+fn source_declares_tests(source: &str) -> bool {
+    use jet::Lexer::TokKind;
+    let (mut tokens, _) = jet::Lexer::lex(source);
+    tokens.retain(|token| !jet::Lexer::is_comment(&token.kind));
+    tokens.windows(2).any(|pair| {
+        pair[0].kind == TokKind::Hash
+            && matches!(&pair[1].kind, TokKind::Ident(name) if name == "Test")
+    })
+}
+
 fn audit_region_failures(
     source: &str,
     file: &str,
@@ -840,7 +902,20 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     let user_code = strip_vetted_prelude_modules(&rust_code);
 
     if let Some(approved) = GATED_UNSAFE_REGIONS.get(stem) {
-        let failures = audit_region_failures(&src, &compile_path, approved, &user_code);
+        // `#Test` bodies (and the regions inside them) exist only in the test
+        // harness build, so the evidence is the run build plus that harness.
+        let mut audit_code = user_code.clone();
+        if source_declares_tests(&src) {
+            let (harness, _) = jet::compile_tests_with_path(&src, &compile_path).unwrap_or_else(|diags| {
+                panic!(
+                    "audited example {stem} failed the test-harness front end:\n{}",
+                    jet::render_diagnostics(&entry.shown, &src, &diags)
+                )
+            });
+            audit_code.push('\n');
+            audit_code.push_str(&strip_vetted_prelude_modules(&harness));
+        }
+        let failures = audit_region_failures(&src, &compile_path, approved, &audit_code);
         assert!(
             failures.is_empty(),
             "audited example {stem} lost source-region evidence:\n{}",
@@ -908,6 +983,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         flat_stem
     ));
     let bin = dir.join(format!("jet_golden_{}_{}", std::process::id(), flat_stem));
+    let _program_files = ProgramFiles([rs.clone(), bin.clone()]);
     let mut rustc_cmd = Command::new("rustc");
     let _runtime_lease = add_generated_rust(&mut rustc_cmd, &rs, &rust_code, ffi_link.is_some(), &[]);
     rustc_cmd.arg("-o").arg(&bin);
@@ -997,18 +1073,31 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         .join("expected")
         .join(format!("{}.stderr.out", stem));
     if err_path.exists() {
+        let expected_err = fs::read_to_string(&err_path)
+            .unwrap_or_else(|_| panic!("missing Examples/features/expected/{stem}.err.out"));
+        let expected_code = expected_failure_exit(stem, &expected_err).unwrap_or_else(|| {
+            panic!("ambiguous failure exit oracle for example {stem}: {expected_err:?}")
+        });
         let code = run.status.code();
-        assert!(
-            code == Some(70) || code == Some(1),
-            "exit code mismatch for example {stem}: expected 70 (panic) or 1 (uncaught Err), got {code:?}"
-        );
+        assert_eq!(code, Some(expected_code), "exit code mismatch for example {stem}");
+        let out_path = env.ex_dir.join("expected").join(format!("{stem}.out"));
+        if env.update_expected {
+            if out_path.exists() || !run.stdout.is_empty() {
+                fs::write(&out_path, &run.stdout).unwrap();
+            }
+        } else {
+            let expected_stdout = match fs::read(&out_path) {
+                Ok(bytes) => bytes,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+                Err(error) => panic!("could not read {}: {error}", out_path.display()),
+            };
+            assert_failure_stdout(stem, &expected_stdout, &run.stdout);
+        }
         let actual_err = String::from_utf8_lossy(&run.stderr);
         if env.update_expected {
             fs::write(&err_path, actual_err.as_bytes()).unwrap();
         } else {
-            let expected_err = fs::read_to_string(&err_path)
-                .unwrap_or_else(|_| panic!("missing Examples/features/expected/{}.err.out", stem));
-            if actual_err != expected_err {
+            if run.stderr.as_slice() != expected_err.as_bytes() {
                 panic!(
                     "stderr mismatch for example {stem}:\n{}",
                     unified_diff(
@@ -1128,14 +1217,17 @@ fn record_golden_receipt(
         .ex_dir
         .join("expected")
         .join(format!("{}.stderr.out", entry.stem));
-    let expected = if err_path.is_file() {
-        err_path
+    let mut expected_paths = if err_path.is_file() {
+        let mut paths = vec![err_path];
+        if stdout_path.is_file() {
+            paths.push(stdout_path);
+        }
+        paths
     } else if stdout_path.is_file() {
-        stdout_path
+        vec![stdout_path]
     } else {
         return;
     };
-    let mut expected_paths = vec![expected];
     if stderr_path.is_file() {
         expected_paths.push(stderr_path);
     }
@@ -1588,4 +1680,81 @@ fn audit_region_source_scan_uses_jet_strings_and_markers() {
     assert_eq!(regions[0].line, 4);
     assert_eq!(regions[1].reason, "function reason");
     assert_eq!(regions[1].line, 6);
+}
+
+fn expected_failure_exit(stem: &str, stderr: &str) -> Option<i32> {
+    // D-FAIL-EXIT1 / S36: runtime faults are not unhandled entry returns.
+    // D-DEADLINE1 explicitly gives an expired join (E3003) exit 70.
+    if stderr.starts_with("Stop [") || stderr.starts_with("Error [E3003]:") {
+        return Some(70);
+    }
+    if stderr.starts_with("Runtime fault [R0801]:")
+        || stderr.starts_with("Runtime fault [R0802]:")
+    {
+        // D-MEM-SENTRY1 is a runtime fault. Reject an oracle which itself
+        // claims another exit rather than silently accepting its contradiction.
+        if stderr.lines().any(|line| {
+            line.trim().strip_prefix("exit:").is_some_and(|exit| exit.trim() != "70")
+        }) {
+            return None;
+        }
+        return Some(70);
+    }
+    // io/log_fatal.jet:10-11 suppresses emission before log.fatal exits 1
+    // (ledger #1474). Empty stderr alone is not an exit oracle.
+    if stderr.is_empty() {
+        return (stem == "io/log_fatal").then_some(1);
+    }
+    // Source-proved entry returns (D-FAIL-EXIT1), not a generic Error-prefix
+    // inference. Each source leaves the named Err unhandled at run's edge;
+    // fatal_exit instead explicitly calls process.exit(1).
+    match stem {
+        "errors/propagation_journey"
+        | "errors/propagation_journey_direct"
+        | "errors/propagation_journey_one_hop"
+        | "errors/propagation_journey_core"
+        | "errors/error_context"
+        | "errors/default_error_conversion"
+        | "errors/default_err_edge"
+        | "errors/fatal_exit"
+        | "serde/decode_error_exit"
+        | "crypto/crypto_error_run" => Some(1),
+        _ => None,
+    }
+}
+
+fn assert_failure_stdout(stem: &str, expected: &[u8], actual: &[u8]) {
+    if actual != expected {
+        panic!(
+            "output mismatch for failing example {stem}:\n{}",
+            unified_diff(
+                &format!("Examples/features/expected/{stem}.out"),
+                &format!("Examples/features/{stem} stdout (actual)"),
+                &String::from_utf8_lossy(expected),
+                &String::from_utf8_lossy(actual),
+            )
+        );
+    }
+}
+
+#[test]
+fn failure_oracle_requires_exact_exit_and_stdout() {
+    assert_eq!(expected_failure_exit("test", "Stop [E3001]: panic\n"), Some(70));
+    assert_eq!(expected_failure_exit("test", "Stop [E3012]: Stack overflow\n"), Some(70));
+    assert_eq!(expected_failure_exit("test", "Error [E3003]: Deadline exceeded\n"), Some(70));
+    assert_eq!(expected_failure_exit("errors/default_err_edge", "Error [RUNFAIL]: bad input\n"), Some(1));
+    assert_eq!(expected_failure_exit("errors/fatal_exit", "[fatal] bad input\n"), Some(1));
+    assert_eq!(expected_failure_exit("test", "Error [E3999]: unknown fault\n"), None);
+    assert_eq!(expected_failure_exit("test", "Error: unknown entry\n"), None);
+    assert_eq!(expected_failure_exit("test", "Runtime fault [R0802]: bad storage\nexit: 70\n"), Some(70));
+    assert_eq!(expected_failure_exit("test", "Runtime fault [R0802]: bad storage\nexit: 1\n"), None);
+    assert_eq!(expected_failure_exit("test", "Runtime fault [R0802]: bad storage\n"), Some(70));
+    assert_eq!(expected_failure_exit("serde/decode_error_exit", "[at `name`: expected Text]\n  failed here: run (a.jet:1)\n"), Some(1));
+    assert_eq!(expected_failure_exit("io/log_fatal", ""), Some(1));
+    assert_eq!(expected_failure_exit("unknown", ""), None);
+    assert_eq!(expected_failure_exit("test", "unknown report\n"), None);
+    assert_failure_stdout("empty", b"", b"");
+    assert_failure_stdout("close", b"closed\n", b"closed\n");
+    assert!(std::panic::catch_unwind(|| assert_failure_stdout("close", b"closed\n", b"")).is_err());
+    assert!(std::panic::catch_unwind(|| assert_failure_stdout("empty", b"", b"unexpected\n")).is_err());
 }

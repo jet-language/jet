@@ -91,6 +91,20 @@ fn quote_rust_string(value: &str) -> String {
     crate::Codegen::escape_rust_str(value)
 }
 
+/// The sentry guard for one audited `#Unsafe` gate (D-MEM-SENTRY1). Block
+/// scopes, gated function bodies, and gated foreign calls share this spelling.
+fn sentry_gate_scope(gate: &jet_foundation::MIR::MirUnsafeGate) -> String {
+    let constructor = if gate.fenced {
+        "jet_sentry_fenced_scope"
+    } else {
+        "jet_sentry_scope"
+    };
+    format!(
+        "jet_mem::{constructor}({}, {:?}, {}, {:?})",
+        gate.enabled, gate.file, gate.line, gate.reason
+    )
+}
+
 fn allocator_view_inner(ty: &MirType) -> Option<&MirType> {
     match ty.kind() {
         MirTypeKind::Tagged {
@@ -8132,6 +8146,26 @@ impl<'a> RustEmitter<'a> {
                 "impl{generics} JetLoopSource for {owner}{bounds}\n{{\n    fn jet_loop_source(self, source_kind: JetLoopSourceKind, by_value: bool) -> Box<dyn Iterator<Item = JetLoopAny>> {{\n        jet_iterable_loop_source(self, source_kind, by_value)\n    }}\n}}\n"
             );
         }
+        // A source-written `Debug` impl suppresses the type's Rust
+        // `derive(Debug)`, yet the derive capability counts it as Debug, so a
+        // row holding the type still derives `Debug`. The hosted Prelude's
+        // `JetDebug` is no Rust `Debug`; the owning crate bridges the two
+        // through the written impl (its redaction included).
+        if !implementation.compiler_generated
+            && !self.is_no_os()
+            && implementation
+                .trait_ref
+                .as_ref()
+                .is_some_and(|trait_ref| trait_ref.name == jet_foundation::Syntax::TRAIT_DEBUG)
+            && self
+                .implementation_owner_def(&implementation.self_type)
+                .is_some_and(|definition| self.declares_type_def(definition))
+        {
+            let _ = writeln!(
+                out,
+                "impl{generics} ::core::fmt::Debug for {owner} {{\n    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {{\n        f.write_str(&<Self as JetDebug>::jet_debug(self))\n    }}\n}}\n"
+            );
+        }
         self.pop_generic_scope();
         for function in functions {
             if self.owner_independent_static(function) {
@@ -8447,8 +8481,22 @@ impl<'a> RustEmitter<'a> {
         method: &str,
     ) -> String {
         let value = format!("({receiver}.{})", self.field_name(field.id));
-        if def.boxed_edges.iter().any(|candidate| candidate == edge) {
-            format!("{value}.as_ref().{method}()")
+        let boxed = def.boxed_edges.iter().any(|candidate| candidate == edge);
+        self.structural_member_text(&field.ty, &value, boxed, method)
+    }
+
+    /// The `method` text of one structural member `value` (a place of type
+    /// `ty`, boxed when its edge is): a member reaching a labeled tuple
+    /// renders through `structural_text`, since a plain Rust tuple has no
+    /// protocol impl; any other member through its own impl.
+    fn structural_member_text(&self, ty: &MirType, value: &str, boxed: bool, method: &str) -> String {
+        let value = if boxed {
+            format!("{value}.as_ref()")
+        } else {
+            value.to_string()
+        };
+        if Self::shows_labeled_tuple(ty) {
+            self.structural_text(ty, &value, method, 0)
         } else {
             format!("{value}.{method}()")
         }
@@ -9148,16 +9196,13 @@ impl<'a> RustEmitter<'a> {
                                 "            {variant_path} => jet_debug_variant({variant_name}, None),"
                             );
                         }
-                        MirVariantPayload::Single(_) => {
-                            let value = if def
+                        MirVariantPayload::Single(payload_ty) => {
+                            let boxed = def
                                 .boxed_edges
                                 .iter()
-                                .any(|candidate| candidate == &variant.name)
-                            {
-                                format!("payload.as_ref().{value_method}()")
-                            } else {
-                                format!("payload.{value_method}()")
-                            };
+                                .any(|candidate| candidate == &variant.name);
+                            let value =
+                                self.structural_member_text(payload_ty, "payload", boxed, value_method);
                             let _ = writeln!(
                                 out,
                                 "            {variant_path}(payload) => jet_debug_variant({variant_name}, Some({value})),"
@@ -9196,19 +9241,16 @@ impl<'a> RustEmitter<'a> {
                                     .enumerate()
                                     .map(|(index, (storage_index, field))| {
                                         let edge = format!("{}.{}", variant.name, field.name);
-                                        let value = if def
+                                        let boxed = def
                                             .boxed_edges
                                             .iter()
-                                            .any(|candidate| candidate == &edge)
-                                        {
-                                            format!(
-                                                "__jet_show_field_{index}.as_ref().{value_method}()"
-                                            )
-                                        } else {
-                                            format!(
-                                                "__jet_show_field_{index}.{value_method}()"
-                                            )
-                                        };
+                                            .any(|candidate| candidate == &edge);
+                                        let value = self.structural_member_text(
+                                            &field.ty,
+                                            &format!("__jet_show_field_{index}"),
+                                            boxed,
+                                            value_method,
+                                        );
                                         let field_name = quote_rust_string(
                                             field
                                                 .name
@@ -14808,10 +14850,11 @@ impl<'a> RustEmitter<'a> {
                 indent = body_indent
             );
         }
-        let has_sentry_frame = function
-            .scopes
-            .iter()
-            .any(|scope| scope.kind == MirScopeKind::Unsafe);
+        let has_sentry_frame = function.unsafe_gate.is_some()
+            || function
+                .scopes
+                .iter()
+                .any(|scope| scope.kind == MirScopeKind::Unsafe);
         let has_sentry_scope = function
             .scopes
             .iter()
@@ -14825,6 +14868,18 @@ impl<'a> RustEmitter<'a> {
                 out,
                 "{:indent$}let __jet_sentry_frame = jet_mem::jet_sentry_frame();",
                 "",
+                indent = body_indent
+            );
+        }
+        // D-MEM-SENTRY1 / I1: a gated `#Unsafe("reason") fn` is one audited
+        // region, so its whole body runs inside that gate's sentry. Declared
+        // before the block-scope stack, it drops last and restores the caller.
+        if let Some(gate) = &function.unsafe_gate {
+            let _ = writeln!(
+                out,
+                "{:indent$}let __jet_function_gate = {};",
+                "",
+                sentry_gate_scope(gate),
                 indent = body_indent
             );
         }
@@ -19713,6 +19768,16 @@ impl<'a> RustEmitter<'a> {
             .is_some_and(|candidate| allocator_view_inner(&candidate.ty).is_some())
     }
 
+    /// A local that stores a borrowed string view (`&str`): its type is the
+    /// view, or sema bound it as a `string_view` window.
+    fn local_string_view(&self, function: &MirFunction, local: MirLocalId) -> bool {
+        function
+            .locals
+            .iter()
+            .find(|candidate| candidate.id == local)
+            .is_some_and(|candidate| candidate.string_view || is_string_view_type(&candidate.ty))
+    }
+
     fn binding_uses_move_slot(&self, function: &MirFunction, value: MirValueId) -> bool {
         let access = match self.value_definition(function, value) {
             Some(MirOperation::Parameter { index, .. }) => function.params.iter()
@@ -23061,8 +23126,8 @@ impl<'a> RustEmitter<'a> {
         out
     }
 
-    /// Whether `ty` reaches a labeled tuple through tuples and lists. A Jet
-    /// tuple lowers to a plain Rust tuple, which carries no labels, so its
+    /// Whether `ty` reaches a labeled tuple through tuples, lists and maps. A
+    /// Jet tuple lowers to a plain Rust tuple, which carries no labels, so its
     /// shown text (`(idx,item) { idx: 0, item: 1 }`, the labels in their
     /// canonical order) is rendered at the use from the MIR type.
     fn shows_labeled_tuple(ty: &MirType) -> bool {
@@ -23071,14 +23136,18 @@ impl<'a> RustEmitter<'a> {
             MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
                 Self::shows_labeled_tuple(inner)
             }
+            MirTypeKind::Map { key, value } => {
+                Self::shows_labeled_tuple(key) || Self::shows_labeled_tuple(value)
+            }
             _ => false,
         }
     }
 
     /// The text `method` (`jet_show`, `jet_display` or `jet_debug`) gives the
     /// value `reference` (an expression of type `&ty`) names: a labeled tuple
-    /// renders as the canonical record of its labels, a list of them through
-    /// the list shape; any other type through its own protocol impl.
+    /// renders as the canonical record of its labels, a list or map of them
+    /// through the list or map shape; any other type through its own protocol
+    /// impl.
     fn structural_text(&self, ty: &MirType, reference: &str, method: &str, depth: usize) -> String {
         match ty.kind() {
             MirTypeKind::Tuple(fields) if !fields.is_empty() => {
@@ -23109,6 +23178,18 @@ impl<'a> RustEmitter<'a> {
                 let item_text = self.structural_text(inner, &item, method, depth + 1);
                 format!(
                     "format!(\"[{{}}]\", ({reference}).iter().map(|{item}| {item_text}).collect::<Vec<String>>().join(\", \"))"
+                )
+            }
+            MirTypeKind::Map { key, value }
+                if Self::shows_labeled_tuple(key) || Self::shows_labeled_tuple(value) =>
+            {
+                let key_item = format!("__jet_key{depth}");
+                let value_item = format!("__jet_value{depth}");
+                let key_text = self.structural_text(key, &key_item, method, depth + 1);
+                let value_text = self.structural_text(value, &value_item, method, depth + 1);
+                format!(
+                    "{}jet_debug_map(({reference}).iter().map(|({key_item}, {value_item})| ({key_text}, {value_text})))",
+                    self.config.root_prefix
                 )
             }
             _ => format!("({reference}).{method}()"),
@@ -24480,6 +24561,15 @@ impl<'a> RustEmitter<'a> {
                 self.foreign_name(id),
                 writebacks.join(" ")
             )
+        };
+        // D-MEM-SENTRY1 / I1: an audited foreign declaration is its own
+        // `#Unsafe` region; the foreign body runs inside that gate's sentry.
+        let raw_call = match &foreign.unsafe_gate {
+            Some(gate) => format!(
+                "{{ let __jet_foreign_gate = {}; {raw_call} }}",
+                sentry_gate_scope(gate)
+            ),
+            None => raw_call,
         };
         let call = if matches!(foreign.foreign_language, MirForeignLanguage::C) {
             foreign
@@ -27572,11 +27662,16 @@ impl<'a> RustEmitter<'a> {
     }
     /// The `&str` a read call argument lends when it reads a string view:
     /// a view value, or a read of a place that holds a view (a string-view
-    /// local keeps its Jet `String` type on the read).
+    /// local keeps its Jet `String` type on the read; its own row carries
+    /// the view type).
     fn string_view_argument(&self, function: &MirFunction, arg: &MirCallArg) -> Option<String> {
         let view_place = |place: MirPlaceId| {
-            self.place_row(function, place)
-                .is_some_and(|row| is_string_view_type(&row.ty))
+            self.place_row(function, place).is_some_and(|row| {
+                is_string_view_type(&row.ty)
+                    || (row.projections.is_empty()
+                        && matches!(row.base, MirPlaceBase::Local(local)
+                            if self.local_string_view(function, local)))
+            })
         };
         if let Some(place) = arg.place {
             return view_place(place).then(|| self.place_read(function, place));
@@ -32599,10 +32694,7 @@ impl<'a> RustEmitter<'a> {
                 MirConstant::Int { value, .. } => {
                     format!("jet_foundation::Numeric::JetInt::from_i64({value})")
                 }
-                MirConstant::BigInt(value) => format!(
-                    "{}jet_std::jet_int_owned_from_str({value:?}).expect(\"MIR Int\")",
-                    self.config.root_prefix
-                ),
+                MirConstant::BigInt(value) => self.bigint_constant(value),
                 _ => self.constant(constant),
             },
             MirTypeKind::InlineRange { base, .. }
@@ -32617,7 +32709,7 @@ impl<'a> RustEmitter<'a> {
                             (*value as u64).to_string()
                         }
                     }
-                    MirConstant::BigInt(value) => value.clone(),
+                    MirConstant::BigInt(value) => return self.bigint_constant_for_type(value, ty),
                     _ => return self.constant(constant),
                 };
                 format!("{value}{}{bits}", if *signed { "i" } else { "u" })
@@ -32668,6 +32760,7 @@ impl<'a> RustEmitter<'a> {
                                 },
                                 key,
                             ),
+                            MirConstKey::BigInt(decimal) => self.bigint_constant_for_type(decimal, key),
                             _ => self.const_key(entry_key),
                         };
                         format!("({key}, {})", self.constant_for_type(entry_value, value))
@@ -32775,10 +32868,7 @@ impl<'a> RustEmitter<'a> {
                     .join(", ")
             ),
             MirConstant::Unit => "()".to_string(),
-            MirConstant::BigInt(value) => format!(
-                "{}jet_std::jet_int_owned_from_str({:?}).expect(\"MIR Int\")",
-                self.config.root_prefix, value
-            ),
+            MirConstant::BigInt(value) => self.bigint_constant(value),
             MirConstant::List(values) => format!(
                 "vec![{}]",
                 values
@@ -32886,9 +32976,29 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
+    fn bigint_constant(&self, decimal: &str) -> String {
+        format!(
+            "{}jet_std::jet_int_owned_from_str({decimal:?}).expect(\"MIR Int\")",
+            self.config.root_prefix,
+        )
+    }
+
+    fn bigint_constant_for_type(&self, decimal: &str, ty: &MirType) -> String {
+        match ty.kind() {
+            MirTypeKind::IntN { signed, bits } => {
+                format!("{decimal}{}{bits}", if *signed { "i" } else { "u" })
+            }
+            MirTypeKind::InlineRange { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. }
+            | MirTypeKind::Quantity { base, .. } => self.bigint_constant_for_type(decimal, base),
+            _ => self.bigint_constant(decimal),
+        }
+    }
+
     fn const_key(&self, key: &MirConstKey) -> String {
         match key {
             MirConstKey::Int(value) => value.to_string(),
+            MirConstKey::BigInt(value) => self.bigint_constant(value),
             MirConstKey::String(value) => {
                 if self.is_core_layer() {
                     format!("{value:?}")

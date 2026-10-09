@@ -1,7 +1,8 @@
 // Unsigned fixed-word MIR and dirty System V Bool boundary fixtures.
 use jet_foundation.[
+    mir_integer_constant,
     MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRBlockID,
-    MIRCallArg, MIRCallee, MIRConstant, MIRFunction, MIRIntegerWidth,
+    MIRCallArg, MIRCallee, MIRFunction, MIRIntegerWidth,
     MIROperation, MIRProgram, MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind,
     MIRValueID, mir_copy_ownership, mir_function_id, mir_type_from_kind,
 ]
@@ -20,7 +21,7 @@ fn fx_u64() -> MIRType Never! { mir_type_from_kind(MIRTypeKind.IntN{signed: fals
 
 // Negative Int constants carry the same 64 bits as U64 high-bit literals.
 fn fx_u64_const(b: &FxBuilder, bits: Int) -> MIRValueID Never! {
-    fx_copy(&b, fx_u64(), MIROperation.Constant{value: MIRConstant.Int{value: bits, width: Val(MIRIntegerWidth{signed: false, bits: 64}), spelling: None}})
+    fx_copy(&b, fx_u64(), MIROperation.Constant{value: mir_integer_constant(bits, Val(MIRIntegerWidth{signed: false, bits: 64}), None)})
 }
 
 fn fx_u64_op(b: &FxBuilder, op: MIRBinaryOp, left: MIRValueID, right: MIRValueID) -> MIRValueID Never! {

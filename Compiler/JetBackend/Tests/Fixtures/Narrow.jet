@@ -2,8 +2,9 @@
 // canonical extended words, range-checked trapping arithmetic, re-extended
 // unchecked arithmetic and shifts, and widening conversions.
 use jet_foundation.[
+    mir_integer_constant,
     MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRCallArg,
-    MIRCallee, MIRConstant, MIRConversion, MIRFunction, MIRIntegerWidth,
+    MIRCallee, MIRConversion, MIRFunction, MIRIntegerWidth,
     MIROperation, MIRProgram, MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind,
     MIRUnaryOp, MIRValueID, mir_copy_ownership, mir_function_id, mir_type_from_kind,
 ]
@@ -11,7 +12,7 @@ use jet_foundation.[
 fn fx_narrow(signed: Bool, bits: Int) -> MIRType Never! { mir_type_from_kind(MIRTypeKind.IntN{signed: signed, bits: bits}) }
 
 fn fx_narrow_const(b: &FxBuilder, signed: Bool, bits: Int, value: Int) -> MIRValueID Never! {
-    fx_copy(&b, fx_narrow(signed, bits), MIROperation.Constant{value: MIRConstant.Int{value: value, width: Val(MIRIntegerWidth{signed: signed, bits: bits}), spelling: None}})
+    fx_copy(&b, fx_narrow(signed, bits), MIROperation.Constant{value: mir_integer_constant(value, Val(MIRIntegerWidth{signed: signed, bits: bits}), None)})
 }
 
 // fn <name>(a: T, b: T) -> T { a <op> b }

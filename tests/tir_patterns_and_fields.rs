@@ -964,6 +964,38 @@ fn run() {
     assert_eq!(stdout, "database\ndocs\nother\n");
 }
 
+/// Text/binary pattern capture tuples use the same checked tuple field IDs as
+/// ordinary projections in both compiler implementations.
+#[test]
+fn tuple_field_pattern_tests_bindings_and_dispatch_run() {
+    if !have_rustc() {
+        return;
+    }
+    let source = include_str!("../Examples/features/patterns/tuple_field_patterns.jet");
+    let (code, stdout) = build_and_run("tir_tuple_field_patterns", source);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        include_str!("../Examples/features/expected/patterns/tuple_field_patterns.out")
+    );
+}
+
+/// Indexed/optional tuple projections and guard-backed record fields resolve
+/// through the same declaration/tuple field identity as direct projections.
+#[test]
+fn field_owner_indexed_optional_and_guard_projections_run() {
+    if !have_rustc() {
+        return;
+    }
+    let source = include_str!("../Compiler/JetCodegen/Tests/FieldOwnerShapes.jet");
+    let (code, stdout) = build_and_run("tir_field_owner_shapes", source);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        include_str!("../Compiler/JetCodegen/Tests/FieldOwnerShapes.out")
+    );
+}
+
 /// c109 (B4): a user-enum variant if-let condition `if m == .Ping(n) { } else { }`
 /// routes through the TIR and binds the payload, matching the old if-let baseline.
 #[test]
@@ -1158,6 +1190,30 @@ fn run() {
 }
 "#;
     assert_tiers_agree("parameter_shadows_const", src, "7\n");
+}
+
+/// Jet's embedded CtValue.Int is exact; values beyond i64 must reach the MIR
+/// bridge as BigInt rather than an out-of-range native Int constant.
+#[test]
+fn embedded_comptime_integer_constants_keep_exact_values_on_all_tiers() {
+    let src = r#"
+MASK :: prep { 0xffffffffffffffff }
+BELOW :: prep { -9223372036854775809 }
+EDGE :: prep { 9223372036854775807 }
+fn run() {
+    print(MASK)
+    print(BELOW)
+    print(EDGE)
+    print(MASK - 1)
+    fixed :: U64{MASK}
+    print(fixed)
+}
+"#;
+    assert_tiers_agree(
+        "embedded_comptime_exact_int",
+        src,
+        "18446744073709551615\n-9223372036854775809\n9223372036854775807\n18446744073709551614\n18446744073709551615\n",
+    );
 }
 
 /// #3678: a comptime fragment lowers only the callables its constant reaches.

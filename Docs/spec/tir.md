@@ -122,9 +122,38 @@ payloads; recognizing that domain does not declare a conversion into default
 `Err`. Ordinary fallible bindings still propagate, so diagnostic-policy probes
 handle a decoder call directly instead of first binding only its success value.
 
+Synthesized integer literals use the same native-carrier boundary as parsed
+literals. `IntLit` and native `MIRConstant::Int` carry only signed 64-bit values;
+an exact `Int` outside that range uses `CtLit(BigInt)` and `MIRConstant::BigInt`
+with its exact decimal spelling and integer bounds. This includes embedded
+comptime integers, prepared facts, Fraction numerators, unit values and scales,
+and reconstructed fixed-allocation sizes. Fixed-width destinations retain the
+checked numeric conversion. The native MIR decoder rejects an out-of-range
+`Int` instead of truncating it or silently changing the constant kind.
+
 Pattern payload and field types instantiate the checked subject's owner
 parameters before binding locals; a declaration's bare `T`/`E` does not escape
 into its concrete match. Associated types in a trait declaration use `Self::X`.
+Pattern-generated structural capture tuples use the canonical tuple type
+instance and field label, exactly like ordinary tuple field reads; they do not
+require a nominal declaration. Literal-field tests, bound fields (including
+read/write windows), capture tuples, and dispatch-subject projections share
+that field-identity path in both compiler implementations.
+Indexed and optional payload projections use that same resolver. It strips
+checked tags and the single-argument `SharedGuard`, `CellReadGuard`,
+`CellEditGuard`, and `Pin` window carriers, but not arbitrary generic wrappers,
+`Shared`, `Option`, or `Result`. Tuple labels and unsigned decimal positions
+identify canonical tuple-instance fields; applied record fields identify their
+nominal declaration, not their generic instance. Named enum payloads retain
+the variant's field owner key. Numeric math-lane projections resolve only for
+`F32x4`, `F64x2`, `Vec2`, `Vec3`, and `Vec4`, preserving the stored `x/y/z/w`
+field order. Alias, distinct, and unit-family rows do not acquire stored fields.
+An unsupported checked owner reports the member, function, original owner
+kind/rendering, and normalized owner kind/rendering rather than hiding the
+missing semantic row.
+The field-position scanner parenthesizes typed byte literals in conditions
+(`digit < (U8{48})`), so both bootstrap parsers distinguish the literal braces
+from a conditional body without changing unsigned-position semantics.
 Structural Comparable/Equatable records may derive Rust `Eq`, `PartialOrd`,
 and `Ord` only when every field supports that native order. A custom capability
 implementation, floating field, unordered carrier, or native opaque carrier
