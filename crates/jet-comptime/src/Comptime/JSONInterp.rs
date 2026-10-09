@@ -2,8 +2,9 @@
 //! Parsing uses the same foundation-backed Prelude kernel as AOT and JIT.
 
 use crate::Comptime::Builtins::exact_int_value;
-use crate::AST::{CtFloat, CtKey, CtValue};
+use crate::AST::{CtFloat, CtKey, CtReport, CtValue};
 use jet_foundation::EncodingJson::{json_unsupported, EncodingError};
+use std::fmt::Write;
 
 fn from_json_int(value: crate::Numeric::JetInt) -> CtValue {
     exact_int_value(value.to_big())
@@ -130,7 +131,7 @@ pub(super) fn encoding_error_value_at_line(
 
 /// Diagnostic display is not a JSON wire projection. Float leaves use exactly
 /// the same formatter as print(Float), including NaN and infinities.
-pub(super) fn display_datatree(value: &CtValue) -> String {
+pub(super) fn display_dyn(value: &CtValue) -> String {
     display_diagnostic::<false, true>(value)
 }
 
@@ -154,7 +155,7 @@ fn display_diagnostic<const QUERY: bool, const TREE: bool>(value: &CtValue) -> S
                 type_name,
                 variant,
                 args,
-            } if TREE && type_name == "DataTree" => match (variant.as_str(), args.first()) {
+            } if TREE && type_name == "Dyn" => match (variant.as_str(), args.first()) {
                 ("Null", _) | (_, None) => out.push_str("null"),
                 ("Number", Some((_, CtValue::Str(text)))) => out.push_str(text),
                 ("Int", Some((_, CtValue::BigInt(number)))) => {
@@ -283,7 +284,7 @@ fn display_diagnostic<const QUERY: bool, const TREE: bool>(value: &CtValue) -> S
                 type_name,
                 variant,
                 args,
-            } if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") => {
+            } if matches!(type_name.as_str(), "Dyn" | "TOML" | "YAML" | "CSV") => {
                 match (variant.as_str(), args.first()) {
                     ("Null", _) | (_, None) => out.push_str("null"),
                     (_, Some((_, payload))) => append_query(out, payload),
@@ -346,10 +347,10 @@ fn display_diagnostic<const QUERY: bool, const TREE: bool>(value: &CtValue) -> S
     out
 }
 
-/// Render the ordered `DataTree` representation used by typed codecs. Dynamic
+/// Render the ordered `Dyn` representation used by typed codecs. Dynamic
 /// values use the same canonical tree; published-schema output retains the
 /// wire order stored in `JSONObject`.
-pub(super) fn render_ordered_datatree(v: &CtValue, pretty: bool, depth: usize) -> Result<String, EncodingError> {
+pub(super) fn render_ordered_dyn(v: &CtValue, pretty: bool, depth: usize) -> Result<String, EncodingError> {
     Ok(match v {
         CtValue::Enum {
             type_name,
@@ -374,7 +375,7 @@ pub(super) fn render_ordered_datatree(v: &CtValue, pretty: bool, depth: usize) -
                     .unwrap_or_else(|| "{}".to_string()),
                 _ => args
                     .first()
-                    .map(|(_, payload)| render_ordered_datatree(payload, pretty, depth)).transpose()?
+                    .map(|(_, payload)| render_ordered_dyn(payload, pretty, depth)).transpose()?
                     .unwrap_or_else(|| "null".to_string()),
             }
         }
@@ -387,7 +388,7 @@ pub(super) fn render_ordered_datatree(v: &CtValue, pretty: bool, depth: usize) -
                     "[{}]",
                     items
                         .iter()
-                        .map(|item| render_ordered_datatree(item, false, depth))
+                        .map(|item| render_ordered_dyn(item, false, depth))
                         .collect::<Result<Vec<_>, _>>()?
                         .join(",")
                 ));
@@ -396,7 +397,7 @@ pub(super) fn render_ordered_datatree(v: &CtValue, pretty: bool, depth: usize) -
             let end = "  ".repeat(depth);
             let parts = items
                 .iter()
-                .map(|item| Ok(format!("{}{}", pad, render_ordered_datatree(item, true, depth + 1)?)))
+                .map(|item| Ok(format!("{}{}", pad, render_ordered_dyn(item, true, depth + 1)?)))
                 .collect::<Result<Vec<_>, EncodingError>>()?;
             format!("[\n{}\n{}]", parts.join(",\n"), end)
         }
@@ -460,7 +461,7 @@ fn render_ordered_object(fields: &[(String, CtValue)], pretty: bool, depth: usiz
                     Ok(format!(
                         "{}:{}",
                         quote_json(key),
-                        render_ordered_datatree(value, false, depth)?
+                        render_ordered_dyn(value, false, depth)?
                     ))
                 })
                 .collect::<Result<Vec<_>, EncodingError>>()?
@@ -476,7 +477,7 @@ fn render_ordered_object(fields: &[(String, CtValue)], pretty: bool, depth: usiz
                 "{}{}: {}",
                 pad,
                 quote_json(key),
-                render_ordered_datatree(value, true, depth + 1)?
+                render_ordered_dyn(value, true, depth + 1)?
             ))
         })
         .collect::<Result<Vec<_>, EncodingError>>()?;
@@ -485,8 +486,8 @@ fn render_ordered_object(fields: &[(String, CtValue)], pretty: bool, depth: usiz
 
 pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> Result<String, EncodingError> {
     Ok(match v {
-        // D-SERDE-ACCESS=B: a `DataTree` value (from `.parse()`, or built by
-        // hand with `DataTree.Text(…)`/`DataTree.Object(…)`) — unwrap the tag
+        // D-SERDE-ACCESS=B: a `Dyn` value (from `.parse()`, or built by
+        // hand with `Dyn.Text(…)`/`Dyn.Object(…)`) — unwrap the tag
         // and render its payload the same way the untagged shapes below do.
         CtValue::Enum {
             type_name,
@@ -631,15 +632,15 @@ mod tests {
             let leaf = CtValue::Float(CtFloat::f64(number));
             let tree = json_variant("Array", Some(CtValue::List(vec![leaf.clone()])));
             for pretty in [false, true] {
-                let error = render_ordered_datatree(&tree, pretty, 0).unwrap_err();
+                let error = render_ordered_dyn(&tree, pretty, 0).unwrap_err();
                 assert_eq!(error.kind, EncodingErrorKind::Unsupported);
                 assert_eq!(error.reason, "JSON cannot encode a non-finite Float");
             }
-            assert_eq!(display_datatree(&tree), format!("[{}]", leaf.jet_show()));
+            assert_eq!(display_dyn(&tree), format!("[{}]", leaf.jet_show()));
         }
         let map = CtValue::Map([(CtKey::Int(1), CtValue::Int(2))].into_iter().collect());
         for pretty in [false, true] {
-            let error = render_ordered_datatree(&map, pretty, 0).unwrap_err();
+            let error = render_ordered_dyn(&map, pretty, 0).unwrap_err();
             assert_eq!(error.reason, "JSON cannot encode non-text map keys");
         }
         let ordered = json_object(vec![
@@ -647,17 +648,17 @@ mod tests {
             ("a".into(), CtValue::Char('\n')),
         ]);
         assert_eq!(
-            render_ordered_datatree(&ordered, false, 0).unwrap(),
+            render_ordered_dyn(&ordered, false, 0).unwrap(),
             "{\"z\":1,\"a\":\"\\n\"}"
         );
-        assert_eq!(display_datatree(&ordered), "{\"z\":1,\"a\":\"\\n\"}");
+        assert_eq!(display_dyn(&ordered), "{\"z\":1,\"a\":\"\\n\"}");
     }
 
     #[test]
-    fn parsed_datatree_display_unwraps_nested_ordered_object_carriers() {
+    fn parsed_dyn_display_unwraps_nested_ordered_object_carriers() {
         let text = "{\"z\":\"x\",\"a\":[{\"inside\":1.5},null]}";
-        let parsed = parse_json_ordered(text).unwrap();
-        assert_eq!(display_datatree(&parsed), text);
+        let parsed = parse_json(text).unwrap();
+        assert_eq!(display_dyn(&parsed), text);
         for number in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             let leaf = CtValue::Float(CtFloat::f64(number));
             let tree = json_object(vec![
@@ -677,7 +678,7 @@ mod tests {
                 ),
             ]);
             assert_eq!(
-                display_datatree(&tree),
+                display_dyn(&tree),
                 format!("{{\"z\":\"x\",\"a\":[{{\"inside\":{}}}]}}", leaf.jet_show())
             );
         }

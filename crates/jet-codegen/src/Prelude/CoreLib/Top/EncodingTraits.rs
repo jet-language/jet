@@ -667,15 +667,45 @@ fn jet_enc_json_error_text(error: &jet_std::EncodingError) -> String {
     JetShow::jet_show(error)
 }
 
+// Typed JSON wire output checks JSON's exclusions before the diagnostic Dyn
+// renderer. Exact Ints, ordered objects, Bytes, and DateTime keep Dyn policy.
+fn jet_enc_json_validate(tree: &jet_std::Dyn) -> Result<(), jet_std::EncodingError> {
+    match tree {
+        jet_std::Dyn::Float(number) if !number.is_finite() => {
+            return Err(jet_std::EncodingError::new(
+                jet_std::EncodingFormat::JSON,
+                jet_std::EncodingErrorKind::Unsupported,
+                0,
+                Err(JetAbsent),
+                Err(JetAbsent),
+                "$",
+                "JSON cannot encode a non-finite Float",
+            ));
+        }
+        jet_std::Dyn::Array(items) => {
+            for item in items {
+                jet_enc_json_validate(item)?;
+            }
+        }
+        jet_std::Dyn::Object(entries) => {
+            for (_, item) in entries {
+                jet_enc_json_validate(item)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn jet_enc_json_to_string<T: __jet_Encode>(v: &T) -> Result<String, jet_std::EncodingError> {
     let tree = v.jet_encode();
-    jet_std::validate_datatree_json(&tree)?;
-    Ok(jet_std::render_datatree_json(&tree, false, 0))
+    jet_enc_json_validate(&tree)?;
+    Ok(jet_std::render_dyn_json(&tree, false, 0))
 }
 fn jet_enc_json_to_string_pretty<T: __jet_Encode>(v: &T) -> Result<String, jet_std::EncodingError> {
     let tree = v.jet_encode();
-    jet_std::validate_datatree_json(&tree)?;
-    Ok(jet_std::render_datatree_json(&tree, true, 0))
+    jet_enc_json_validate(&tree)?;
+    Ok(jet_std::render_dyn_json(&tree, true, 0))
 }
 
 fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {

@@ -3705,11 +3705,11 @@ mod depth_tests {
             ("a = 1e400".to_string(), "{\"a\":1e400}".to_string()),
         ] {
             let value = toml_parse(&text).expect("comptime TOML number");
-            assert_eq!(super::super::JSONInterp::render_ordered_dyn(&value, false, 0), expected);
+            assert_eq!(super::super::JSONInterp::render_ordered_dyn(&value, false, 0).unwrap(), expected);
         }
         for text in [format!("a: {huge}"), "a: 1e400".to_string()] {
             let value = yaml_parse(&text).expect("comptime YAML number");
-            assert!(super::super::JSONInterp::render_ordered_dyn(&value, false, 0).contains(
+            assert!(super::super::JSONInterp::render_ordered_dyn(&value, false, 0).unwrap().contains(
                 if text.contains(huge) { huge } else { "1e400" }));
         }
     }

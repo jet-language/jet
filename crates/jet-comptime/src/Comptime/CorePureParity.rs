@@ -1027,7 +1027,7 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
         value,
         CtValue::Enum { type_name, .. } if type_name == "Dyn"
     ) {
-        return Some(crate::Comptime::JSONInterp::display_datatree(value));
+        return Some(crate::Comptime::JSONInterp::display_dyn(value));
     }
     if let Some(text) = io_error_display(value) {
         return Some(text);

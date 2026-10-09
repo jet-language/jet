@@ -141,9 +141,9 @@ pub(super) fn history_schema_field(
 pub(super) fn comptime_history_dyn_command(
     value: &jet_foundation::Dyn::Dyn,
 ) -> Result<CtValue, String> {
-    jet_foundation::EncodingJson::validate_json(value)
+    let tree = crate::Comptime::JSONInterp::from_json(value.clone());
+    let json = crate::Comptime::JSONInterp::render_ordered_dyn(&tree, false, 0)
         .map_err(|error| jet_foundation::EncodingJson::encoding_error_show(&error))?;
-    let json = jet_foundation::EncodingJson::render_json(value, false, 0);
     crate::Comptime::JSONInterp::parse_json(&json)
         .map_err(|error| format!("history command could not be encoded: {}", error.message))
 }
@@ -1521,10 +1521,10 @@ pub(crate) fn apply_testing_histories_explicit(
             let mut sample = jet_foundation::TestingComparison::ComparisonSample::new(
                 identity,
                 jet_foundation::TestingComparison::ComparisonObservation::value(
-                    crate::Comptime::JSONInterp::display_datatree(&reference_observed),
+                    crate::Comptime::JSONInterp::display_dyn(&reference_observed),
                 ),
                 jet_foundation::TestingComparison::ComparisonObservation::value(
-                    crate::Comptime::JSONInterp::display_datatree(&candidate_observed),
+                    crate::Comptime::JSONInterp::display_dyn(&candidate_observed),
                 ),
             );
             if matches!(
@@ -1532,7 +1532,7 @@ pub(crate) fn apply_testing_histories_explicit(
                 jet_foundation::TestingComparison::ObservationRelation::TypedEquality
             ) {
                 sample = sample.with_declared_equal(
-                    crate::Comptime::SyncLite::datatree_equal_unordered(
+                    crate::Comptime::SyncLite::dyn_equal_unordered(
                         &reference_observed,
                         &candidate_observed,
                     ),
@@ -1540,10 +1540,10 @@ pub(crate) fn apply_testing_histories_explicit(
             }
             let sample = sample.with_replays(
                 jet_foundation::TestingComparison::ComparisonObservation::value(
-                    crate::Comptime::JSONInterp::display_datatree(&reference_replay),
+                    crate::Comptime::JSONInterp::display_dyn(&reference_replay),
                 ),
                 jet_foundation::TestingComparison::ComparisonObservation::value(
-                    crate::Comptime::JSONInterp::display_datatree(&candidate_replay),
+                    crate::Comptime::JSONInterp::display_dyn(&candidate_replay),
                 ),
             );
             inputs.push(input.clone());
@@ -1888,10 +1888,10 @@ pub(crate) fn apply_testing_histories(
                 let mut sample = jet_foundation::TestingComparison::ComparisonSample::new(
                     identity,
                     jet_foundation::TestingComparison::ComparisonObservation::value(
-                        crate::Comptime::JSONInterp::display_datatree(&reference_observed),
+                        crate::Comptime::JSONInterp::display_dyn(&reference_observed),
                     ),
                     jet_foundation::TestingComparison::ComparisonObservation::value(
-                        crate::Comptime::JSONInterp::display_datatree(&candidate_observed),
+                        crate::Comptime::JSONInterp::display_dyn(&candidate_observed),
                     ),
                 );
                 if matches!(
@@ -1899,7 +1899,7 @@ pub(crate) fn apply_testing_histories(
                     jet_foundation::TestingComparison::ObservationRelation::TypedEquality
                 ) {
                     sample = sample.with_declared_equal(
-                        crate::Comptime::SyncLite::datatree_equal_unordered(
+                        crate::Comptime::SyncLite::dyn_equal_unordered(
                             &reference_observed,
                             &candidate_observed,
                         ),
@@ -1907,10 +1907,10 @@ pub(crate) fn apply_testing_histories(
                 }
                 let sample = sample.with_replays(
                     jet_foundation::TestingComparison::ComparisonObservation::value(
-                        crate::Comptime::JSONInterp::display_datatree(&reference_replay),
+                        crate::Comptime::JSONInterp::display_dyn(&reference_replay),
                     ),
                     jet_foundation::TestingComparison::ComparisonObservation::value(
-                        crate::Comptime::JSONInterp::display_datatree(&candidate_replay),
+                        crate::Comptime::JSONInterp::display_dyn(&candidate_replay),
                     ),
                 );
                 inputs.push(input.clone());

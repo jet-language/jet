@@ -8476,9 +8476,6 @@ fn lower_method_call_impl(
                 ) if !args.is_empty() && !(method == "header" && args.len() == 1) => {
                     Type::Named("HTTPRequest".to_string())
                 }
-                ("HTTPRequest", "json") if args.len() == 1 => {
-                    Type::Named("HTTPRequest".to_string())
-                }
                 ("HTTPRequest", "send") => Type::Result {
                     ok: Box::new(Type::Named("HTTPResponse".to_string())),
                     err: Box::new(Type::Named("HTTPError".to_string())),
@@ -11403,7 +11400,6 @@ fn lower_method_call_impl(
                             ("Body", "bytes", 1) => "from_bytes",
                             ("Body", "text", 1) => "from_text",
                             ("Body", "text", 2) => "from_text_with_mime",
-                            ("Body", "json", 1) => "from_json",
                             ("Body", "form", 1) => "from_form",
                             ("Body", "multipart", 1) => "from_multipart",
                             ("Body", "reader", 1) => "from_reader",

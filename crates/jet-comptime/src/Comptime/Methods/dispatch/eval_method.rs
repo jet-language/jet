@@ -691,7 +691,7 @@ impl<'a> Interp<'a> {
                         if !is_dynamic_dyn {
                             let tree = self.encode_value(value, span)?;
                             return Ok(crate::Comptime::json_render_result_for_tir(
-                                super::super::super::JSONInterp::render_ordered_datatree(
+                                super::super::super::JSONInterp::render_ordered_dyn(
                                     &tree, method == "to_string_pretty", 0,
                                 ),
                             ));

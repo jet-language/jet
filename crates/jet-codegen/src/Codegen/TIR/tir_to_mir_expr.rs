@@ -4559,10 +4559,6 @@ pub(super) fn lower_expr(
             if let Some(receiver) = http_text_method_receiver(&recv.ty, op) {
                 return lower_http_text_method(ctx, expr, recv, args, receiver);
             }
-            if http_json_request_builder(recv, op, args, &expr.ty) {
-                return lower_http_request_builder(ctx, expr, recv, args);
-            }
-
             if let Some(receiver) = http_json_method_receiver(&recv.ty, op) {
                 return lower_http_json_method(ctx, expr, recv, args, receiver);
             }
@@ -8901,61 +8897,6 @@ fn lower_http_text_method(
         &expr.ty,
         http_text_route(receiver, with_limit),
         operands,
-    )
-}
-
-fn http_json_request_builder(recv: &TExpr, op: &THandleOp, args: &[TExpr], result: &Type) -> bool {
-    let THandleOp::HTTPClientMethod { method, .. } = op else {
-        return false;
-    };
-    method == "json"
-        && args.len() == 1
-        && matches!(
-            recv.ty.without_user_tags(),
-            Type::Named(name) if name == "HTTPRequest"
-        )
-        && matches!(
-            result.without_user_tags(),
-            Type::Named(name) if name == "HTTPRequest"
-        )
-}
-
-fn http_request_json_builder_route() -> TPreludeRoute {
-    TPreludeRoute {
-        family: MirPreludeFamily::HandleMethod,
-        module: "core.http".to_string(),
-        member: "request_json".to_string(),
-        symbol: MirSymbol::Prelude("jet_http_client_request_json".to_string()),
-        signature: MirCallSignature {
-            arity: 2,
-            max_arity: 2,
-            borrow_mask: vec![false, false],
-        },
-        effect: None,
-        fallibility: TFailureCarrier::Infallible,
-        abi: MirPreludeAbi::Value,
-        authority: None,
-        db_metadata: None,
-    }
-}
-
-fn lower_http_request_builder(
-    ctx: &mut LowerCtx,
-    expr: &TExpr,
-    recv: &TExpr,
-    args: &[TExpr],
-) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-    let receiver = ctx.lower_child(recv)?;
-    let encoded = TExpr {
-        ty: Type::Named(crate::Syntax::TYPE_DATA.to_string()),
-        kind: args[0].kind.clone(),
-    };
-    let body = lower_serde_encode(ctx, &encoded, &args[0])?;
-    emit_static_call(
-        ctx,
-        &expr.ty,
-        http_request_json_builder_route(),
-        vec![receiver, body],
     )
 }
 

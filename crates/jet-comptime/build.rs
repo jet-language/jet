@@ -48,7 +48,7 @@ fn write_web_kernel_std(manifest: &Path) {
     let reactive_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs");
     let encoding_types_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
     let json_codec_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
-    let json_tree_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/JSONDataTree.rs");
+    let json_tree_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/JSONDyn.rs");
     let math_task_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs");
     for source in [&reactive_src, &encoding_types_src, &json_codec_src, &json_tree_src, &math_task_src] {
         println!("cargo:rerun-if-changed={}", source.display());
@@ -61,9 +61,9 @@ fn write_web_kernel_std(manifest: &Path) {
     let json_codec = unindent(
         &std::fs::read_to_string(&json_codec_src).expect("read JSONCodec.rs"),
     );
-    let json_tree = std::fs::read_to_string(&json_tree_src).expect("read JSONDataTree.rs");
-    let renderer_start = json_tree.find("    pub fn render_datatree_json(").expect("JSON renderer");
-    let renderer_end = json_tree[renderer_start..].find("    /// Parse typed wire data")
+    let json_tree = std::fs::read_to_string(&json_tree_src).expect("read JSONDyn.rs");
+    let renderer_start = json_tree.find("    pub fn render_dyn_json(").expect("JSON renderer");
+    let renderer_end = json_tree[renderer_start..].find("    /// Parse JSON into the ordered tree")
         .map(|offset| renderer_start + offset).expect("JSON renderer end");
     let json_renderer = unindent(&json_tree[renderer_start..renderer_end]);
     let native_task =

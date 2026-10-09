@@ -809,7 +809,7 @@ pub(crate) fn method_call_in_subset(
                     | ("HTTPHeaderName" | "HTTPHeaderValue", "new", 1)
                     | ("Headers", "new", 0)
                     | ("Body", "empty", 0)
-                    | ("Body", "bytes" | "json" | "form" | "multipart", 1)
+                    | ("Body", "bytes" | "form" | "multipart", 1)
                     | ("Body", "text" | "reader", 1 | 2) => {
                         return args
                             .iter()

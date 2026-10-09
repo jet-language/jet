@@ -2166,7 +2166,7 @@ fn data_snapshot_dynamic(
     } else {
         data_dynamic_canonical(&value)
     };
-    let canonical = match super::JSONInterp::render_ordered_datatree(&canonical_value, false, 0) {
+    let canonical = match super::JSONInterp::render_ordered_dyn(&canonical_value, false, 0) {
         Ok(text) => text.into_bytes(),
         Err(error) => {
             let failure = data_json_failure(error);
@@ -2650,7 +2650,7 @@ fn data_snapshot_dynamic_in_state(
     } else {
         data_dynamic_canonical(&value)
     };
-    let canonical = match super::JSONInterp::render_ordered_datatree(&canonical_value, false, 0) {
+    let canonical = match super::JSONInterp::render_ordered_dyn(&canonical_value, false, 0) {
         Ok(text) => text.into_bytes(),
         Err(error) => {
             let failure = data_json_failure(error);
@@ -3114,7 +3114,7 @@ fn data_loader_constructor_in_state(
                     .cloned()
                     .ok_or_else(|| unsupported("`data.value()` is missing value", span))?;
                 let limits = data_limits_from_value(args.get(1));
-                let text = match super::JSONInterp::render_ordered_datatree(&value, false, 0) {
+                let text = match super::JSONInterp::render_ordered_dyn(&value, false, 0) {
                     Ok(text) => text,
                     Err(error) => return Ok(data_json_failure(error)),
                 };
@@ -3483,7 +3483,7 @@ pub(super) fn eval_data_loader_call(
                                 .cloned()
                                 .ok_or_else(|| unsupported("`data.value()` is missing value", span))?;
                             let limits = data_limits_from_value(args.get(1));
-                            let text = match super::JSONInterp::render_ordered_datatree(&value, false, 0) {
+                            let text = match super::JSONInterp::render_ordered_dyn(&value, false, 0) {
                                 Ok(text) => text,
                                 Err(error) => return Ok(data_json_failure(error)),
                             };

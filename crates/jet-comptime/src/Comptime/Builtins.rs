@@ -100,8 +100,8 @@ fn dyn_payload<'a>(value: &'a CtValue, variant: &str) -> Option<&'a CtValue> {
     }
 }
 
-fn datatree_render(value: &CtValue) -> String {
-    super::JSONInterp::display_datatree(value)
+fn dyn_render(value: &CtValue) -> String {
+    super::JSONInterp::display_dyn(value)
 }
 
 fn dyn_failure(path: impl Into<String>, reason: impl Into<String>) -> CtValue {

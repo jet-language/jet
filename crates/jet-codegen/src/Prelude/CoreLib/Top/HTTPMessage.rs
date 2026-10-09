@@ -451,12 +451,6 @@ impl JetHTTPBody {
     }
 
 
-    fn from_json<T: __jet_Encode>(value: T) -> Self {
-        Self::from_bytes_with_content_type(
-            jet_enc_json_to_string(&value).into_bytes(),
-            Some("application/json".to_string()),
-        )
-    }
 
     fn from_form<I>(values: I) -> Self
     where

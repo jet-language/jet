@@ -2914,7 +2914,7 @@ fn eval_core_call_binding(
         } else {
             crate::Comptime::render_dyn_for_tir(value)
         };
-        return Ok(CtValue::Str(rendered));
+        return Ok(crate::Comptime::json_render_result_for_tir(rendered));
     }
     if let Some(state) = data_pipeline.as_deref_mut() {
         if let Some(result) = crate::Comptime::DataPipeline::eval_data_call_in_state(
@@ -17721,7 +17721,9 @@ impl<'a, 'state> Machine<'a, 'state> {
             } else {
                 crate::Comptime::render_dyn_for_tir(value)
             };
-            return Ok(RuntimeValue::Data(MirEvalValue::String(rendered)));
+            return crate::Comptime::MirBridge::ct_to_mir_value(
+                crate::Comptime::json_render_result_for_tir(rendered), span,
+            ).map(RuntimeValue::Data);
         }
         // The static formatter route has no declaration metadata at the
         // comptime boundary. Keep core-owned displays on their shared parity

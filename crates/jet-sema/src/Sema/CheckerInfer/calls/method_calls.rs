@@ -2121,10 +2121,6 @@ impl<'a> Checker<'a> {
                                 }
                                 Some(ty.clone())
                             }
-                            ("Body", "json", 1) => {
-                                self.infer(&mut args[0].expr);
-                                Some(ty.clone())
-                            }
                             ("Body", "form" | "multipart", 1) => {
                                 self.expect_core_arg(
                                     method,

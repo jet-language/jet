@@ -815,13 +815,13 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.encoding.json", "to_string" | "dumps" | "dump") => {
             let v = one(0)?;
             Ok(crate::Comptime::json_render_result_for_tir(
-                crate::Comptime::JSONInterp::render_ordered_datatree(v, false, 0),
+                crate::Comptime::JSONInterp::render_ordered_dyn(v, false, 0),
             ))
         }
         ("core.encoding.json", "to_string_pretty") => {
             let v = one(0)?;
             Ok(crate::Comptime::json_render_result_for_tir(
-                crate::Comptime::JSONInterp::render_ordered_datatree(v, true, 0),
+                crate::Comptime::JSONInterp::render_ordered_dyn(v, true, 0),
             ))
         }
         // --- card #392 pass 4 / #1394: core.encoding.json.canonical/events ---
@@ -843,12 +843,12 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                     Err(error) => Ok(CtValue::failed(Box::new(error))),
                 }
             } else {
-                let text = crate::Comptime::EncodingLite::json_canonical(v)
-                    .map_err(|error| unsupported(&error.reason, span))?;
-                Ok(CtValue::Str(text))
+                Ok(crate::Comptime::json_render_result_for_tir(
+                    crate::Comptime::EncodingLite::json_canonical(v),
+                ))
             }
         }
-        ("core.encoding.json", "events") => Ok(CtValue::Str(
+        ("core.encoding.json", "events") => Ok(crate::Comptime::json_render_result_for_tir(
             crate::Comptime::EncodingLite::json_events(one(0)?),
         )),
         // --- core.encoding.jsonl (ported verbatim, `EncodingLite.rs`) ---
@@ -871,7 +871,9 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
             };
             match crate::Comptime::EncodingLite::jsonl_render(rows) {
                 Ok(text) => Ok(CtValue::Present(Box::new(CtValue::Str(text)))),
-                Err(error) => Ok(CtValue::failed(Box::new(error))),
+                Err(error) => Ok(CtValue::failed(Box::new(
+                    crate::Comptime::JSONInterp::text_encoding_error_value(error),
+                ))),
             }
         }
         // --- core.encoding.csv (ported verbatim, `EncodingLite.rs`) ---
@@ -1280,7 +1282,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                     break;
                 }
                 let equal = if relation == "typed_equality" {
-                    crate::Comptime::SyncLite::datatree_equal_unordered(
+                    crate::Comptime::SyncLite::dyn_equal_unordered(
                         &reference_value,
                         &candidate_value,
                     )

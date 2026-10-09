@@ -159,12 +159,6 @@ fn jet_http_client_request_json_body(
     req
 }
 
-fn jet_http_client_request_json<T: __jet_Encode>(
-    req: JetHTTPRequest,
-    value: T,
-) -> JetHTTPRequest {
-    jet_http_client_request_json_body(req, JetHTTPBody::from_json(value))
-}
 
 fn jet_http_client_request_json_text(req: JetHTTPRequest, body: &str, ) -> JetHTTPRequest {
     jet_http_client_request_json_text_owned(req, body.to_owned())

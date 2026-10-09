@@ -480,7 +480,8 @@ mod encoding_json_embedding_tests {
         assert_eq!(source.matches("pub enum EncodingFormat {").count(), 1);
         assert_eq!(source.matches("pub struct EncodingError {").count(), 1);
         assert_eq!(source.matches("fn jet_encoding_error_kernel_show(").count(), 1);
-        assert!(source.contains("pub fn validate_json(tree: &DataTree)"));
+        assert!(source.contains("pub fn json_unsupported(reason: impl Into<String>)"));
+        assert!(source.contains("pub fn render_json(j: &Dyn, pretty: bool, depth: usize)"));
     }
 }
 
