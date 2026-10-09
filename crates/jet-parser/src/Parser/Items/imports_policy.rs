@@ -746,7 +746,7 @@ impl<'a> Parser<'a> {
                 },
                 TokKind::KwEffect => self.effect_decl().map(Item::EffectDecl),
                 // D-MARK-SCOPE1: file-scoped non-memory policy, parsed like
-                // `use`/`#PubFile` (not inside a module body).
+                // `use` (not inside a module body).
                 TokKind::Hash
                     if self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_POLICY)
                         && self.policy_is_file_decl()
@@ -792,25 +792,6 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                 }
-                TokKind::Hash if self.at_pub_file() && !self.file_marker_stack_starts_here() => {
-                    if pub_file {
-                        let span = self.peek().span;
-                        self.diags.push(crate::Policy::marker_repeated_error(
-                            Syntax::MARKER_PUB_FILE,
-                            "file",
-                            span,
-                        ));
-                        self.bump();
-                        self.bump();
-                        self.sync_top();
-                        continue;
-                    }
-                    self.bump(); // `#`
-                    self.bump(); // `PubFile`
-                    pub_file = true;
-                    self.pub_file_default = true;
-                    continue;
-                }
                 TokKind::Hash if self.at_no_prelude() && !self.file_marker_stack_starts_here() => {
                     if no_prelude {
                         let span = self.peek().span;
@@ -829,7 +810,13 @@ impl<'a> Parser<'a> {
                     no_prelude = true;
                     continue;
                 }
-                TokKind::Hash if self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_PUBLIC_FILE) =>
+                // D-VIS-MODULE1: `#PubFile` (and its foreign spelling
+                // `#PublicFile`) is retired; E0418 deletes it.
+                TokKind::Hash
+                    if matches!(
+                        self.unqualified_marker_name_at(self.pos),
+                        Some(Syntax::MARKER_PUB_FILE | Syntax::MARKER_PUBLIC_FILE)
+                    ) && !self.file_marker_stack_starts_here() =>
                 {
                     let span = Span::new(self.peek().span.start, self.peek2().span.end);
                     self.bump();

@@ -701,7 +701,7 @@ impl<'a> Parser<'a> {
                 ));
             }
             return Ok(crate::AST::MarkerDecl {
-                name, name_span, is_pub: self.pub_file_default, is_package_pub: false,
+                name, name_span, is_pub: true, is_package_pub: false,
                 group: Some(members), params: Vec::new(), body: None,
                 span: Span::new(start.start, end),
             });
@@ -742,7 +742,7 @@ impl<'a> Parser<'a> {
         Ok(crate::AST::MarkerDecl {
             name,
             name_span,
-            is_pub: self.pub_file_default,
+            is_pub: true,
             is_package_pub: false,
             group: None,
             params,
