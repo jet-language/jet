@@ -55,6 +55,10 @@ share one member namespace; the storage names are not a construction API.
 
 Manual Core `Debug` implementations use the Prelude's consuming `debug(^self)`
 contract; `Display` reads `self`. Neither formatting projection changes its text.
+Data errors provide their explicit `Display` and `Debug` implementations beside
+the error declaration; the `#Error` rule does not need a second formatting
+implementation. Database values and pool receipts use `Display`, not a separate
+`Show` trait.
 `WrappedVaultKey` likewise keeps encrypted bytes in private storage separate
 from `bytes()`, which still returns an owned copy.
 
@@ -63,6 +67,8 @@ boundary. Private CBOR sorting uses integral heap indexes and swaps paired
 key/value entries in place. Logical environment removal uses an explicit list
 slot; Dotenv replacement preserves sibling order and moves only the selected
 entry, rather than copying its subtree.
+The XML reader likewise binds a caller-owned byte window before handing it to
+the scanner; the read buffer is not copied into an owning slice at that boundary.
 
 Caller-owned `RNG`, `testing.RNG`, and `math.random.RNG` name one Jet nominal:
 `RNG { state: U64 }`. It is not implicitly copyable; an explicit clone creates an
