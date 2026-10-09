@@ -196,6 +196,17 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
     // Reuse an instruction's ownership-typed destination when supplied. Nested
     // values transfer to the parent's slots and are dropped only by its glue.
     dst :: result ?? lower_new_value(&f, layout, lower_drop(&m, f, repr, true), ty.identity)
+    if lower_wide_signed(p, ty) != None {
+        if constant == {
+            .Int(value, _, _) -> lower_wide_constant(p, &f, dst, ty, value)
+            .BigInt(decimal) -> lower_wide_constant_decimal(p, &f, dst, ty, decimal)
+            else -> {
+                lower_fail(&m, &f, "wide integer constant has noninteger payload")
+                return None
+            }
+        }
+        return Val(dst)
+    }
     if constant == {
         .Int(value, _, _) -> {
             if lower_is_exact_int(ty) -> lower_exact_int_constant(&m, &f, dst, value)
