@@ -2111,7 +2111,7 @@ fn chacha20_xor(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never
 
 fn poly1305(key: [U8], data: [U8]) -> [U8] Never! {
     #Unsafe("crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing") {
-        return rawcrypto.poly1305(key, data)
+        return fixedcrypto.poly1305(key, data)
     }
 }
 
@@ -2224,7 +2224,7 @@ fn xchacha_open(key: [U8], nonce24: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
 
 fn x25519_scalarmult(sk: [U8], u: [U8]) -> [U8] Never! {
     #Unsafe("crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets") {
-        return rawcrypto.x25519_scalarmult(sk, u)
+        return fixedcrypto.x25519(sk, u)
     }
 }
 
@@ -2233,13 +2233,13 @@ fn ed25519_public_raw(seed: [U8]) -> [U8] Never! { fixedcrypto.ed_public(seed) }
 
 fn ed25519_sign_raw(seed: [U8], msg: [U8]) -> [U8] Never! {
     #Unsafe("crypto expert: typed signing keys validate the Ed25519 seed width") {
-        return rawcrypto.ed25519_sign_raw(seed, msg)
+        return fixedcrypto.ed_sign(seed, msg)
     }
 }
 
 fn ed25519_verify_raw(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! {
     #Unsafe("crypto expert: typed verification validates public key and signature widths before strict verification") {
-        return rawcrypto.ed25519_verify_raw(pk, msg, sig)
+        return fixedcrypto.ed_verify(pk, msg, sig)
     }
 }
 
