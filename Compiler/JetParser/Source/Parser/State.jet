@@ -182,7 +182,14 @@ fn parser_lookahead(state: &JetParserState, offset: Int) -> Token Never! {
 }
 
 fn parser_current_kind(state: &JetParserState) -> Int Never! {
-    parser_current(&state).kind
+    if state.pending_type_gt {
+        return TOKEN_GT
+    }
+    parser_skip_trivia(&state)
+    if state.position < 0 || state.position >= state.tokens.len() {
+        return TOKEN_EOF
+    }
+    state.tokens[state.position].kind
 }
 
 fn parser_kind_at(state: &JetParserState, offset: Int) -> Int Never! {
