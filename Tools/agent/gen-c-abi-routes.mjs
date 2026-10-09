@@ -791,7 +791,14 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
     : def.sig;
   const sig = parseSignature(selfSig);
   if (!sig) { skip(`unparsed signature ${def.sig}`); continue; }
-  if (sig.generics) { skip("generic"); continue; }
+  if (sig.generics) {
+    // A generic route has no C adapter to replace. A Jet runtime #Export(c) of
+    // the same name is the native lowering's monomorphic ABI (the flattened
+    // task join, the World callback's env/invoke/out), owned by that lowering.
+    if (jetRuntimeExports.has(name)) skipped.push(`${symbol} (${label}): generic; Jet runtime #Export(c) ${name} owns the lowered ABI`);
+    else skip("generic");
+    continue;
+  }
   const params = splitTop(sig.params).map((param) => {
     const colon = param.indexOf(":");
     return colon < 0 ? null : paramCarrier(param.slice(colon + 1), path);

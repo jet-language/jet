@@ -24,12 +24,13 @@ fn restrict(request: String) {
 fn run() { restrict("Net") }
 "#).unwrap();
         let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-        let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        let (diagnostics, _facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diagnostics
             .into_iter().filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)).collect();
         assert!(errors.is_empty(), "{errors:#?}");
         let request = MirArtifactRequest::new(MirArtifactTarget::RustAot,
             MirArtifactKind::NativeExecutable, MirArtifactBuildMode::Dev);
-        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request).unwrap();
+        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, &nominals, request).unwrap();
         let mir = jet::Codegen::TIR::lower_native_tir_to_mir(tir).unwrap();
         let mut stopping = 0;
         let mut nonstopping = 0;
@@ -143,12 +144,13 @@ fn trap(n: I64) {
 fn run() { trap(I64{9223372036854775807}) }
 "#).unwrap();
         let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-        let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        let (diagnostics, _facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diagnostics
             .into_iter().filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)).collect();
         assert!(errors.is_empty(), "{errors:#?}");
         let request = MirArtifactRequest::new(MirArtifactTarget::RustAot,
             MirArtifactKind::NativeExecutable, MirArtifactBuildMode::Dev);
-        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request).unwrap();
+        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, &nominals, request).unwrap();
         let mut mir = jet::Codegen::TIR::lower_native_tir_to_mir(tir).unwrap();
         mir.validate().unwrap();
         let mut witnessed = false;
@@ -185,12 +187,13 @@ fn normal_cleanup_stop_consumes_first_and_runs_remaining_once() {
         let entry = scratch.path.join("main.jet");
         std::fs::write(&entry, include_str!("fixtures/mir_cleanup_stop.jet")).unwrap();
         let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-        let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        let (diagnostics, _facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diagnostics
             .into_iter().filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)).collect();
         assert!(errors.is_empty(), "{errors:#?}");
         let request = MirArtifactRequest::new(MirArtifactTarget::RustAot,
             MirArtifactKind::NativeExecutable, MirArtifactBuildMode::Dev);
-        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request).unwrap();
+        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, &nominals, request).unwrap();
         let mut mir = jet::Codegen::TIR::lower_native_tir_to_mir(tir).unwrap();
         mir.validate().unwrap();
         let function = mir.functions.iter_mut().find(|function|
