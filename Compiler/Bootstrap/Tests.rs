@@ -1583,7 +1583,7 @@ fn emit_stage_zero_source(
     // The compiler unit has no `fn run`: the Host/Runner splice supplies the
     // Rust `main`, so the unit lowers as a `NativeLibrary` (D4), never as an
     // executable without an entry.
-    let (bundle, _lints, reference_ffi, checked_nominals) =
+    let (bundle, _lints, reference_ffi, checked_nominals, _effect_facts) =
         crate::Driver::check_bundle_path_with_source_closure_for_artifact(
             &compiler_snapshot.entry_path,
             crate::Sema::CompileMode::Check,
