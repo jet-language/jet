@@ -341,6 +341,29 @@ fn retain(operation: IOOperation) -> IOOperation Never! { operation.copy() }
 }
 
 #[test]
+fn an_imported_returned_view_stays_borrowed_when_captured_by_a_sort_callback() {
+    let helper = "fn window(values: [(key: String, value: Int)]) -> View<(key: String, value: Int)> from values { values[0..<values.len()] }\n";
+    let source = r#"
+use helper as windows
+fn run() {
+    values := [(key: "b", value: 2), (key: "a", value: 1)]
+    entries :: windows.window(values)
+    indices := [0, 1]
+    &indices.sort_by((left: Int, right: Int) -> entries[left].key <=> entries[right].key)
+    loop index in indices {
+        print(entries[index].key)
+        print(entries[index].value)
+    }
+}
+"#;
+    let (_, diagnostics) = check_modules(&[
+        ("pkg-a/src/helper.jet", helper, &[]),
+        ("pkg-a/src/main.jet", source, &[("windows", 0)]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+}
+
+#[test]
 fn opaque_core_impl_methods_displace_only_their_builtin_names() {
     let (_, diagnostics) = check_modules(&[
         ("<corelib>/Core/tasks/tasks.jet",

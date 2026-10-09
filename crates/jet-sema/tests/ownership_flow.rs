@@ -198,3 +198,21 @@ fn run() {{
         assert!(found.iter().any(|d| d.code == "E0121"), "{found:?}");
     }
 }
+
+#[test]
+fn an_owned_value_table_does_not_return_ownership_to_its_subject() {
+    let found = errors(r#"
+enum Tree { Object([Int]) Text(String) }
+fn run() {
+    owned := Tree.Object([1])
+    result := if ^owned == {
+        .Object(pairs) -> pairs.len()
+        .Text(text) -> text.count_bytes()
+    }
+    print(result)
+    print(owned)
+}
+"#);
+    assert!(found.iter().any(|d| d.code == "E0121"), "{found:?}");
+    assert!(!found.iter().any(|d| d.code == "E0107"), "{found:?}");
+}

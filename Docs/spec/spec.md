@@ -1143,6 +1143,9 @@ slot is materialized as an owned copy, as though `.copy()` had been written. Thi
 covers bindings, returns, fields, collection elements, enum payloads, fallback
 values, and stored read-only captures. Declared `View<T>` and `ViewMut<T>`
 boundaries retain their provenance; `ViewMut<T>` is never copied implicitly.
+An imported function's declared `from` contract follows its module-alias call
+too: an eager comparator may read that returned window without taking it away
+from the caller.
 `#Policy(copies: .Explicit)` makes read-only materialization explicit. The same
 rule is shared by AOT, interpreter, comptime, and web lowering; each engine
 marshals the sema-approved result.

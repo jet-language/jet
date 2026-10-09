@@ -3245,19 +3245,37 @@ impl<'a> Checker<'a> {
             receiver,
             method,
             args,
-            recv_type: Some(recv_type),
+            recv_type,
             ..
         } = init
         {
-            let Some(map) = self
-                .registry
-                .method(recv_type, method)
-                .and_then(|sig| sig.return_view_provenance.get())
-                .or_else(|| {
-                    self.trait_reg.trait_info(recv_type)
-                        .and_then(|info| info.methods.get(method))
+            // `module.function(...)` is a MethodCall in the surface AST too.
+            // Its returned window belongs to the imported function's contract,
+            // not to an inherent method on the module alias.
+            let imported = match receiver.without_parens() {
+                Expr::Ident(alias, _) => self.imports.get(alias).and_then(|&module| {
+                    let modules = self.modules?;
+                    let target = &modules[module];
+                    let (owner, name) = target.reexports.get(method)
+                        .map(|(name, owner)| (*owner, name.as_str()))
+                        .unwrap_or_else(|| (
+                            self.name_ledger.namespace_owner(module, method).unwrap_or(module),
+                            method.as_str(),
+                        ));
+                    modules[owner].funcs.get(name)
                         .and_then(|sig| sig.return_view_provenance.get())
-                })
+                }),
+                _ => None,
+            };
+            let Some(map) = imported.or_else(|| recv_type.as_ref().and_then(|recv_type| {
+                self.registry.method(recv_type, method)
+                    .and_then(|sig| sig.return_view_provenance.get())
+                    .or_else(|| {
+                        self.trait_reg.trait_info(recv_type)
+                            .and_then(|info| info.methods.get(method))
+                            .and_then(|sig| sig.return_view_provenance.get())
+                    })
+            }))
             else {
                 return Vec::new();
             };
