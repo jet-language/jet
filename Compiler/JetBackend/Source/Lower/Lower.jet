@@ -380,10 +380,9 @@ fn lir_lower_native_imports(program: MIRProgram, roots: [MIRFunctionID], imports
 fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LIRLowering Never! {
     // The frontend may erase browser init functions before native MIR is
     // serialized. Their host requirement survives in the runtime-part facts.
+    browser_hosted := false
     loop part in program.facts.runtime_parts {
-        if part == .Browser {
-            return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}, debug: lir_module_debug_none()}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"}}, entry: None, finalizer: None, callables: [U64:LIRFunctionID]{}}
-        }
+        if part == .Browser -> browser_hosted = true
     }
     test_indices := [U64:Int]{}
     test_issues := [LIRLoweringIssue]{}
@@ -402,15 +401,11 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
             }
         }
     }
-    if test_issues.len() > 0 {
-        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}, debug: lir_module_debug_none()}, issues: ^test_issues, entry: None, finalizer: None, callables: [U64:LIRFunctionID]{}}
-    }
     all_roots := roots.copy()
     loop check in checks -> &all_roots.push(check.function)
     prepared := lower_prepare_roots(program, all_roots, shared_sites_dynamic, native_pack, imports, ^runtime_intrinsics)
-    if prepared.issues.len() > 0 {
-        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}, debug: lir_module_debug_none()}, issues: prepared.issues.copy(), entry: None, finalizer: None, callables: [U64:LIRFunctionID]{}}
-    }
+    if browser_hosted -> &prepared.issues.push(LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"})
+    loop issue in test_issues -> &prepared.issues.push(issue)
     test_harness := false
     loop artifact in program.artifacts {
         if artifact.kind == .TestExecutable || artifact.kind == .TestOverride -> test_harness = true
@@ -449,7 +444,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         glue_base: prepared.functions.len(),
         glue: [LowerGlue]{},
         glue_rows: [String:Int]{},
-        issues: [LIRLoweringIssue]{},
+        issues: prepared.issues.copy(),
         debug_files: [String]{},
         debug_file_rows: [U64:Int]{},
         debug_types: [LIRDebugType]{},
@@ -472,10 +467,20 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         &m.mir_signatures.push(signature)
     }
     functions := [LIRFunction]{}
+    failed_functions := prepared.failed_functions.copy()
     loop (index, descriptor) in prepared.functions {
         signature :: m.mir_signatures[index].copy()
         id :: LIRFunctionID{value: index}
-        function :: if descriptor.instance_row >= 0 -> lower_function(program, &m, prepared.instances[descriptor.instance_row], id, signature) else -> lower_function(program, &m, program.functions[descriptor.source_row], id, signature)
+        function :: if failed_functions.get(descriptor.id.value) != None {
+            lower_failed_function(m, id, descriptor.name, signature)
+        } else {
+            before :: m.issues.len()
+            lowered :: if descriptor.instance_row >= 0 -> lower_function(program, &m, prepared.instances[descriptor.instance_row], id, signature) else -> lower_function(program, &m, program.functions[descriptor.source_row], id, signature)
+            if m.issues.len() > before {
+                &failed_functions.add(descriptor.id.value, true).drop("a failed body has one inventory slot")
+                lower_failed_function(m, id, descriptor.name, signature)
+            } else -> lowered
+        }
         &functions.push(function)
     }
     if !shared_sites_dynamic {
@@ -497,10 +502,9 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     callables := [U64:LIRFunctionID]{}
     loop root in roots {
         if callables.get(root.value) != None -> next
-        concrete :: prepared.roots.get(root.value) ?? {
-            &m.issues.push(LIRLoweringIssue{function: "entry preparation", message: "requested root {root.value} has no concrete monomorphization"})
-            next
-        }
+        // An absent concrete root already has a preparation diagnostic.
+        concrete :: prepared.roots.get(root.value) ?? next
+        if failed_functions.get(concrete.value) != None -> next
         row :: m.mir_rows.get(concrete.value) ?? {
             &m.issues.push(LIRLoweringIssue{function: "entry preparation", message: "requested concrete root {concrete.value} is absent from the lowered inventory"})
             next
@@ -548,12 +552,8 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
             if lower_trait_dispatcher(program, glue) {
                 &dispatchers.push(cursor)
                 &glue_functions.push(None)
-            } else if glue.helper != "" {
-                &glue_functions.push(Val(lower_helper_function(program, &m, glue)))
-            } else if glue.clone {
-                &glue_functions.push(Val(lower_clone_glue_function(program, &m, glue)))
             } else {
-                &glue_functions.push(Val(lower_glue_function(program, &m, glue)))
+                &glue_functions.push(Val(lower_checked_glue_function(program, &m, glue)))
             }
             if native_pack {
                 if glue_functions[cursor] == .Val(function) -> lower_native_glue_rewrite(program, &m, function)
@@ -562,7 +562,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         }
         if emitted == dispatchers.len() -> break
         glue :: m.glue[dispatchers[emitted]].copy()
-        function :: if glue.helper != "" -> lower_helper_function(program, &m, glue) else if glue.clone -> lower_clone_glue_function(program, &m, glue) else -> lower_glue_function(program, &m, glue)
+        function :: lower_checked_glue_function(program, &m, glue)
         if native_pack -> lower_native_glue_rewrite(program, &m, function)
         glue_functions[dispatchers[emitted]] = Val(function)
         emitted += 1
@@ -580,7 +580,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         // startup. Emit it last so helper bodies have discovered every fixup.
         startup :: lower_helper_id(&m, "core.shared.init", mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}}))
         startup_glue :: m.glue[startup.value - m.glue_base].copy()
-        &functions.push(lower_helper_function(program, &m, startup_glue))
+        &functions.push(lower_checked_glue_function(program, &m, startup_glue))
         lowered_entry = Val(startup)
     }
     closures :: if !wrap_entry && m.issues.len() == 0 -> lower_closure_value_layouts(program, prepared, m) else -> [LIRClosureValueLayout]{}
@@ -1234,6 +1234,26 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
         close_identity: None,
         partial_drops: [LowerPartialDrop]{},
     }
+}
+
+// Failed bodies retain their registered ABI and inventory identity. They are
+// never callable outputs: lower_selected clears all exports on any issue.
+fn lower_failed_function(m: LowerModule, id: LIRFunctionID, name: String, signature: LIRSignatureID) -> LIRFunction Never! {
+    f := lower_new_function(id, name, signature, MIRBlockID{value: 0})
+    params := [LIRValueID]{}
+    loop layout in m.signatures[signature.value].params {
+        &params.push(lower_new_value(&f, layout, LIRDrop.Trivial, None))
+    }
+    block :: lower_new_block(&f)
+    lower_start(&f, block, params)
+    lower_seal(&f, LIRTerminator.Unreachable)
+    lir_builder_finish(f.builder)
+}
+
+fn lower_checked_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    before :: m.issues.len()
+    function :: if glue.helper != "" -> lower_helper_function(p, &m, glue) else if glue.clone -> lower_clone_glue_function(p, &m, glue) else -> lower_glue_function(p, &m, glue)
+    if m.issues.len() > before -> lower_failed_function(m, function.id, function.name, function.signature) else -> function
 }
 
 fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIRFunctionID, signature: LIRSignatureID) -> LIRFunction Never! {

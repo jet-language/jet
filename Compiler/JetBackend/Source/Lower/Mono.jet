@@ -59,7 +59,7 @@ struct LowerPreparedFunction {
     parent: Int
 }
 
-struct LowerMonoAncestor { parent: Int, label: String, depth: Int }
+struct LowerMonoAncestor { parent: Int, label: String, depth: Int, function: MIRFunctionID? }
 struct LowerMonoType { ty: MIRType, parent: Int }
 enum LowerMonoPending { Function(row: Int) Type(row: Int) Render(row: Int, show: Bool) }
 // A shared dependency list node: a function to request, or a branch into
@@ -81,7 +81,9 @@ struct LowerPrepared {
     runtime_intrinsics: [U64:LowerRuntimeIntrinsic]{[U64:LowerRuntimeIntrinsic]{}}
     shared_sites_dynamic: Bool{true}
     close_methods: [U64:[LowerCloseImpl]]
-    // Preparation failed when non-empty; `functions` is then empty.
+    // Issues retain the executable inventory for independent diagnostics.
+    // Failed concrete functions become typed traps, never executable outputs.
+    failed_functions: [U64:Bool]{[U64:Bool]{}}
     issues: [LIRLoweringIssue]
     // Instance key -> descriptor row while the queue runs.
     instance_rows: [String:Int]
@@ -661,6 +663,16 @@ fn lower_mono_issue(q: &LowerPrepared, message: String) Never! {
     &q.issues.push(LIRLoweringIssue{function: "entry preparation", message: message})
 }
 
+fn lower_mono_issue_at(q: &LowerPrepared, parent: Int, message: String) Never! {
+    if parent < 0 -> return lower_mono_issue(&q, message)
+    origin :: q.ancestors[parent]
+    owner :: origin.function ?? return lower_mono_issue(&q, message)
+    &q.failed_functions.add(owner.value, true).drop("a function may have several preparation issues")
+    row :: q.mir_rows.get(owner.value)
+    name :: if row == .Val(index) -> q.functions[index].name else -> origin.label
+    &q.issues.push(LIRLoweringIssue{function: name, message: message})
+}
+
 fn lower_mono_chain(q: LowerPrepared, parent: Int, label: String) -> String Never! {
     rows := [String]{label}
     current := parent
@@ -677,11 +689,12 @@ fn lower_mono_ancestor(q: &LowerPrepared, parent: Int, label: String, specializa
     depth :: previous + (if specialization -> 1 else -> 0)
     if depth > 128 {
         chain :: lower_mono_chain(q, parent, label)
-        lower_mono_issue(&q, "specialization depth limit 128: {chain}")
+        lower_mono_issue_at(&q, parent, "specialization depth limit 128: {chain}")
         return -1
     }
     row :: q.ancestors.len()
-    &q.ancestors.push(LowerMonoAncestor{parent: parent, label: label, depth: depth})
+    owner :: if parent < 0 -> None else -> q.ancestors[parent].function
+    &q.ancestors.push(LowerMonoAncestor{parent: parent, label: label, depth: depth, function: owner})
     row
 }
 
@@ -698,7 +711,7 @@ fn lower_mono_intern_type(q: &LowerPrepared, ty: MIRType, parent: Int) Never! {
     if ty.kind == .Apply(name, args) {
         if args.len() == 0 && q.free_binders.get(name.name) != None && q.declaration_rows.get(name.id.value) == None {
             chain :: lower_mono_chain(q, parent, mir_type_display_name(ty))
-            return lower_mono_issue(&q, "unbound type parameter {name.name} in {chain}")
+            return lower_mono_issue_at(&q, parent, "unbound type parameter {name.name} in {chain}")
         }
         specialization = args.len() > 0
     }
@@ -715,7 +728,7 @@ fn lower_mono_intern_type(q: &LowerPrepared, ty: MIRType, parent: Int) Never! {
 // the call's own type arguments. Returns its concrete ID.
 fn lower_mono_request(p: MIRProgram, q: &LowerPrepared, original: MIRFunctionID, owner: MIRType?, type_args: [MIRType], parent: Int, site: String) -> MIRFunctionID? {
     row :: q.source_rows.get(original.value) ?? {
-        lower_mono_issue(&q, "missing reachable function {original.value} at {site}")
+        lower_mono_issue_at(&q, parent, "missing reachable function {original.value} at {site}")
         return None
     }
     source :: p.functions[row]
@@ -732,23 +745,23 @@ fn lower_mono_request(p: MIRProgram, q: &LowerPrepared, original: MIRFunctionID,
             if q.declaration_rows.get(name.id.value) == .Val(declaration) {
                 parameters :: p.types[declaration].generic_params
                 if parameters.len() != owner_args.len() {
-                    lower_mono_issue(&q, "owner type argument arity mismatch for {source.key} at {site}: expected {parameters.len()}, got {owner_args.len()}")
+                    lower_mono_issue_at(&q, parent, "owner type argument arity mismatch for {source.key} at {site}: expected {parameters.len()}, got {owner_args.len()}")
                     return None
                 }
                 loop (index, parameter) in parameters -> lower_bind(&bindings, parameter.name, owner_args[index])
             } else if owner_args.len() > 0 {
-                lower_mono_issue(&q, "missing owner declaration {name.id.value} for {source.key} at {site}")
+                lower_mono_issue_at(&q, parent, "missing owner declaration {name.id.value} for {source.key} at {site}")
                 return None
             }
         }
     }
     if source.generic_params.len() != call_args.len() {
-        lower_mono_issue(&q, "function type argument arity mismatch for {source.key} at {site}: expected {source.generic_params.len()}, got {call_args.len()}")
+        lower_mono_issue_at(&q, parent, "function type argument arity mismatch for {source.key} at {site}: expected {source.generic_params.len()}, got {call_args.len()}")
         return None
     }
     loop (index, parameter) in source.generic_params {
         if lower_bound(bindings, parameter.name) != None {
-            lower_mono_issue(&q, "duplicate owner/function type parameter {parameter.name} in {source.key}")
+            lower_mono_issue_at(&q, parent, "duplicate owner/function type parameter {parameter.name} in {source.key}")
             return None
         }
         lower_bind(&bindings, parameter.name, call_args[index])
@@ -756,11 +769,11 @@ fn lower_mono_request(p: MIRProgram, q: &LowerPrepared, original: MIRFunctionID,
     specialized :: bound.len() > 0
     ancestor :: lower_mono_ancestor(&q, parent, "{source.key} at {site}", specialized)
     if ancestor < 0 -> return None
-    loop ty in bound -> lower_mono_intern_type(&q, ty, ancestor)
     id :: lower_instance_id(original, bound)
+    q.ancestors[ancestor].function = Val(id)
     if q.reserved_ids.get(id.value) == .Val(previous) {
         if specialized || previous != "original:{original.value}" {
-            lower_mono_issue(&q, "function identity collision {id.value}: {previous} versus {key}")
+            lower_mono_issue_at(&q, parent, "function identity collision {id.value}: {previous} versus {key}")
             return None
         }
     } else {
@@ -771,8 +784,10 @@ fn lower_mono_request(p: MIRProgram, q: &LowerPrepared, original: MIRFunctionID,
     if !specialized -> &q.original_descriptors.add(original.value, descriptor).drop("one descriptor per original")
     labels :: loop ty in bound -> mir_type_display_name(ty)
     base :: if source.key == "" -> source.name else -> source.key
-    name :: if specialized -> "{base}<{labels.join(", ")}>" else -> source.key
+    name :: if specialized -> "{base}<{labels.join(", ")}>" else -> base
     &q.functions.push(LowerPreparedFunction{id: id, original: original, source_row: row, instance_row: if specialized -> -2 else -> -1, key: key, name: name, bindings: bindings, parent: ancestor})
+    &q.mir_rows.add(id.value, descriptor).drop("concrete IDs are unique")
+    loop ty in bound -> lower_mono_intern_type(&q, ty, ancestor)
     &q.pending.push(LowerMonoPending.Function{row: descriptor})
     Val(id)
 }
@@ -791,11 +806,11 @@ fn lower_mono_template(p: MIRProgram, q: LowerPrepared, id: MIRFunctionID) -> Bo
 // A function a body names without a call site (closure, optimizer decision):
 // its parameters take the enclosing instance's bindings of the same names.
 fn lower_mono_dependency(p: MIRProgram, q: &LowerPrepared, id: MIRFunctionID, bindings: LowerBindings, parent: Int, site: String) Never! {
-    row :: q.source_rows.get(id.value) ?? return lower_mono_issue(&q, "missing reachable function {id.value} at {site}")
+    row :: q.source_rows.get(id.value) ?? return lower_mono_issue_at(&q, parent, "missing reachable function {id.value} at {site}")
     target :: p.functions[row]
     arguments := [MIRType]{}
     loop parameter in target.generic_params {
-        bound :: lower_bound(bindings, parameter.name) ?? return lower_mono_issue(&q, "unbound type parameter {parameter.name} for dependency {target.key} at {site}")
+        bound :: lower_bound(bindings, parameter.name) ?? return lower_mono_issue_at(&q, parent, "unbound type parameter {parameter.name} for dependency {target.key} at {site}")
         &arguments.push(bound)
     }
     owner :: if target.form == {
@@ -915,7 +930,7 @@ fn lower_mono_index(p: MIRProgram, q: &LowerPrepared) Never! {
 
 fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
     cursor := 0
-    loop cursor < q.pending.len() && q.issues.len() == 0 {
+    loop cursor < q.pending.len() {
         work :: q.pending[cursor].copy()
         cursor += 1
         if work == {
@@ -956,12 +971,6 @@ fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
     }
     q.functions = ordered
     loop (row, descriptor) in q.functions -> &q.mir_rows.add(descriptor.id.value, row).drop("concrete IDs are unique")
-    // A failed preparation has no executable inventory, never a runnable subset.
-    if q.issues.len() > 0 {
-        q.functions = [LowerPreparedFunction]{}
-        q.instances = [MIRFunction]{}
-        q.mir_rows = [U64:Int]{}
-    }
 }
 
 // All explicit roots share the dependency FIFO and monomorphization table.
@@ -976,7 +985,6 @@ fn lower_prepare_roots(program: MIRProgram, roots: [MIRFunctionID], shared_sites
     q.shared_sites_dynamic = shared_sites_dynamic
     lower_mono_index(program, &q)
     loop root in roots {
-        if q.issues.len() > 0 -> break
         if q.roots.get(root.value) != None -> next
         requested :: lower_mono_request(program, &q, root, None, [MIRType]{}, -1, if shared_sites_dynamic -> "entry" else -> "pinned Core initializer")
         if requested == .Val(concrete) {

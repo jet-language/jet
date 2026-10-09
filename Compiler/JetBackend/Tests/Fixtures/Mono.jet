@@ -576,10 +576,10 @@ fn fx_mono_specialized_call() -> Bool Never! {
     lowered.issues.len() == 0
 }
 
-// A lowering issue naming `text`; preparation failures leave no functions.
-fn fx_mono_has_issue(program: MIRProgram, text: String, prepared: Bool) -> Bool Never! {
+// Preparation/body failures retain typed inventory but expose no entry.
+fn fx_mono_has_issue(program: MIRProgram, text: String) -> Bool Never! {
     lowered :: lir_lower_entry(program, mir_function_id("run"))
-    if prepared && lowered.lir.functions.len() != 0 -> return false
+    if lowered.lir.functions.len() == 0 || lowered.entry != None || lowered.callables.len() != 0 -> return false
     loop issue in lowered.issues {
         if issue.message.contains(text) -> return true
     }
@@ -589,14 +589,14 @@ fn fx_mono_has_issue(program: MIRProgram, text: String, prepared: Bool) -> Bool 
 }
 
 fn fx_mono_rejection_checks() -> Bool Never! {
-    if !fx_mono_has_issue(fx_mono_bad_call("missing"), "missing reachable function", true) -> return false
-    if !fx_mono_has_issue(fx_mono_bad_call("arity"), "function type argument arity mismatch", true) -> return false
-    if !fx_mono_has_issue(fx_mono_bad_call("extra"), "function type argument arity mismatch", true) -> return false
-    if !fx_mono_has_issue(fx_mono_bad_owner(), "owner type argument arity mismatch", true) -> return false
-    if !fx_mono_has_issue(fx_mono_bad_call("unbound"), "unbound type parameter T", true) -> return false
+    if !fx_mono_has_issue(fx_mono_bad_call("missing"), "missing reachable function") -> return false
+    if !fx_mono_has_issue(fx_mono_bad_call("arity"), "function type argument arity mismatch") -> return false
+    if !fx_mono_has_issue(fx_mono_bad_call("extra"), "function type argument arity mismatch") -> return false
+    if !fx_mono_has_issue(fx_mono_bad_owner(), "owner type argument arity mismatch") -> return false
+    if !fx_mono_has_issue(fx_mono_bad_call("unbound"), "unbound type parameter T") -> return false
     if !fx_mono_specialized_call() -> return false
     // The resource diagnostic names the leaf request (`<key> at <site>`) first.
-    fx_mono_has_issue(fx_mono_depth(), "specialization depth limit 128: expand at expand<", true)
+    fx_mono_has_issue(fx_mono_depth(), "specialization depth limit 128: expand at expand<")
 }
 
 // fn expand<T>() { expand<List<T>>() }: no finite key graph. A same-key
@@ -796,4 +796,58 @@ fn fx_mono_structural_checks() -> Bool Never! {
     swapped :: lower_instance_id(mir_function_id("Pair.choose"), lower_call_bindings(Val(fx_mono_apply("Pair", [MIRType]{fx_string()})), [MIRType]{fx_int()}))
     if q.mir_rows.get(swapped.value) == None || swapped == choose -> return false
     true
+}
+
+// Independent preparation and body failures must survive the same invocation,
+// while a successful root after both failures still lowers with its real body.
+fn fx_mono_collect_all() -> Bool Never! {
+    bad := fx_builder()
+    missing :: mir_function_id("missing")
+    fx_do(&bad, MIROperation.Call{callee: MIRCallee.User{function: missing}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&bad, 0, MIRTerminator.Return{value: None})
+    unsupported := fx_builder()
+    width :: fx_narrow(false, 96)
+    value :: fx_owned(&unsupported, width, MIROperation.Constant{value: MIRConstant.Int{value: 1, width: None, spelling: None}})
+    fx_block(&unsupported, 0, MIRTerminator.Return{value: Val(value)})
+    good := fx_builder()
+    answer :: fx_int_const(&good, 42)
+    fx_block(&good, 0, MIRTerminator.Return{value: Val(answer)})
+    p :: fx_program([MIRFunction]{
+        fx_function("bad", bad, fx_unit()),
+        fx_function("unsupported", unsupported, width),
+        fx_function("good", good, fx_int()),
+    }, [MIRTypeDef]{})
+    roots :: [MIRFunctionID]{mir_function_id("bad"), mir_function_id("unsupported"), mir_function_id("good"), mir_function_id("absent_root")}
+    lowered :: lir_lower_callables(p, roots)
+    if lowered.entry != None || lowered.finalizer != None || lowered.callables.len() != 0 || lowered.native_exports.len() != 0 -> return false
+    prep := false
+    body := false
+    absent := false
+    loop issue in lowered.issues {
+        if issue.function == "bad" && issue.message.contains("missing reachable function") -> prep = true
+        if issue.function == "unsupported" && issue.message.contains("96-bit integers") -> body = true
+        if issue.message.contains("{mir_function_id("absent_root").value}") -> absent = true
+    }
+    if !prep || !body || !absent -> return false
+    traps := 0
+    success := false
+    loop function in lowered.lir.functions {
+        if function.name == "bad" || function.name == "unsupported" {
+            if function.blocks.len() != 1 || function.blocks[0].terminator != .Unreachable -> return false
+            traps += 1
+        }
+        if function.name == "good" {
+            if function.blocks.len() == 0 || function.blocks[0].terminator == .Unreachable -> return false
+            success = true
+        }
+    }
+    display := fx_mono_render()
+    display.impls[0].methods = [MIRFunctionID]{}
+    render :: lir_lower_entry(display, mir_function_id("run"))
+    attributed := false
+    loop issue in render.issues {
+        if issue.function == "run" && issue.message.contains("selected display implementation") -> attributed = true
+    }
+    if !attributed || render.entry != None -> return false
+    traps == 2 && success
 }
