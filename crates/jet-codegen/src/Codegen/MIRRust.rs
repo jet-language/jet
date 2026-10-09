@@ -3370,6 +3370,30 @@ fn operation_named_places(operation: &MirOperation) -> Vec<MirPlaceId> {
     }
 }
 
+/// Read arguments with no representation coercion can borrow an exact Int
+/// temporary built from a proven native local at the call itself.
+fn native_read_call_arg(arg: &MirCallArg) -> bool {
+    arg.access == MirAccess::Read
+        && arg.place.is_some()
+        && !arg.authority_boundary
+        && !arg.implicit_clone
+        && !arg.shared_auto_clone
+        && !arg.widen_fixed_to_list
+        && arg.widen_to_union.is_none()
+        && arg.box_as_trait.is_none()
+        && arg.fn_coercion.is_none()
+}
+
+fn native_read_call_args(operation: &MirOperation) -> Option<&[MirCallArg]> {
+    match operation {
+        MirOperation::Call {
+            callee: MirCallee::User(_) | MirCallee::Associated { .. } | MirCallee::Method { .. },
+            args, ..
+        } => Some(args),
+        _ => None,
+    }
+}
+
 /// Binds the return place `slot` (`__jet_l_N`) of a return-slot function to
 /// its caller's slot. `out[slots_start..]` holds the declarations and the
 /// body after `unwrap_slot_options`. A local unwrapped there (`let mut slot:
@@ -5371,6 +5395,29 @@ impl<'a> RustEmitter<'a> {
         emitter
     }
 
+    /// Scalar records larger than the register-return ABI also need a caller
+    /// destination: otherwise each recursive return copies an sret temporary.
+    /// Only generated, closed records of scalar fields have unobservable drop.
+    fn scalar_record_return_bytes(&self, ty: &MirType) -> Option<u64> {
+        let definition = self.structural_type_def_for(ty)?;
+        if !definition.generic_params.is_empty() || definition.compiler_builtin.is_some() {
+            return None;
+        }
+        let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+            return None;
+        };
+        fields.iter().filter(|field| !field.computed).try_fold(0u64, |bytes, field| {
+            if matches!(field.ty.kind(), MirTypeKind::FixedList { .. }) {
+                return None;
+            }
+            bytes.checked_add(return_slot_bytes(&field.ty)?)
+        })
+    }
+
+    fn return_slot_value_bytes(&self, ty: &MirType) -> Option<u64> {
+        return_slot_bytes(ty).or_else(|| self.scalar_record_return_bytes(ty))
+    }
+
     /// #4566 return slot (function-boundary research 4.2, form 2): the
     /// return place of a top-level Jet function whose result is an inline
     /// aggregate of at least `RETURN_SLOT_MIN_BYTES` with no observable drop
@@ -5389,7 +5436,8 @@ impl<'a> RustEmitter<'a> {
         let facts = &function.optimization;
         // The buffer helpers live in the hosted collections prelude.
         let buffer = reusable_buffer_type(&function.return_type) && !self.is_core_layer() && !self.is_no_os();
-        if (!buffer && return_slot_bytes(&function.return_type).is_none_or(|bytes| bytes < RETURN_SLOT_MIN_BYTES))
+        let scalar_record = self.scalar_record_return_bytes(&function.return_type).is_some_and(|bytes| bytes > 16);
+        if (!buffer && !scalar_record && return_slot_bytes(&function.return_type).is_none_or(|bytes| bytes < RETURN_SLOT_MIN_BYTES))
             || !matches!(function.form, MirFunctionForm::TopLevel)
             || function.kind != MirFunctionKind::Jet
             || function.failure != MirFailureCarrier::Infallible
@@ -5498,6 +5546,17 @@ impl<'a> RustEmitter<'a> {
                             exit_tail.extend([op, instruction.id]);
                             exit_values.insert(value);
                         }
+                        // A scalar-record branch may construct the result
+                        // directly instead of moving the already-identified
+                        // builder. Its whole write aliases that same slot;
+                        // no later instruction may touch the builder.
+                        None if scalar_record
+                            && source.is_some_and(|local| reaches_return(block, position, local))
+                            && matches!(&instruction.operation,
+                                MirOperation::WritePlace { value, .. }
+                                    if local_of(place).is_some_and(|(_, whole)| whole)
+                                        && matches!(self.value_definition(function, *value),
+                                            Some(MirOperation::Struct { .. }))) => {}
                         _ => through_exit = false,
                     }
                 }
@@ -5596,8 +5655,38 @@ impl<'a> RustEmitter<'a> {
         })
     }
 
+    // A local's drop-live flag can be initialized between evaluating its
+    // initializer and storing it. These infallible scalar operations need
+    // not obstruct a callee constructing directly into the destination.
+    fn call_destination_gap(&self, function: &MirFunction, instruction: &MirInstruction) -> bool {
+        match &instruction.operation {
+            MirOperation::Constant(MirConstant::Bool(_)) => true,
+            MirOperation::WritePlace { place, value } => {
+                let Some(row) = self.place_row(function, *place) else {
+                    return false;
+                };
+                let MirPlaceBase::Local(local) = row.base else {
+                    return false;
+                };
+                let Some(local_row) = function.locals.iter().find(|row| row.id == local) else {
+                    return false;
+                };
+                row.projections.is_empty()
+                    && row.persist_key.is_none()
+                    && !local_row.uninit
+                    && local_row.ty.kind() == &MirTypeKind::Bool
+                    && local_row.ownership.mode == MirOwnershipMode::Copy
+                    && !self.function_index(function).escaped_locals.contains(&local)
+                    && self.value_definition(function, *value).is_some_and(|definition| {
+                        matches!(definition, MirOperation::Constant(MirConstant::Bool(_)))
+                    })
+            }
+            _ => false,
+        }
+    }
+
     /// #4566: the calls in `function` of a return-slot function whose result
-    /// the next instruction writes, as its only read, to a whole local. The
+    /// the next non-administrative instruction writes, as its only read, to a whole local. The
     /// callee fills that local's slot in place (`f(.., &mut slot)`), which
     /// replaces the write. The local is a plain `Option` slot of the result
     /// type: not `function`'s own return place, never captured by place (so
@@ -5616,10 +5705,15 @@ impl<'a> RustEmitter<'a> {
         let mut destinations = CallDestinations::default();
         let mut refills: BTreeSet<(MirLocalId, MirBlockId)> = BTreeSet::new();
         for block in &function.blocks {
-            for pair in block.instructions.windows(2) {
-                let (call, write) = (&pair[0], &pair[1]);
+            for (position, call) in block.instructions.iter().enumerate() {
                 let (MirOperation::Call { callee: MirCallee::User(target), args, .. }, Some(result)) =
                     (&call.operation, call.result)
+                else {
+                    continue;
+                };
+                let Some(write) = block.instructions[position + 1..]
+                    .iter()
+                    .find(|instruction| !self.call_destination_gap(function, instruction))
                 else {
                     continue;
                 };
@@ -5642,7 +5736,7 @@ impl<'a> RustEmitter<'a> {
                     || !row.projections.is_empty()
                     || row.persist_key.is_some()
                     || local_row.uninit
-                    || (return_slot_bytes(&local_row.ty).is_none() && !reusable_buffer_type(&local_row.ty))
+                    || (self.return_slot_value_bytes(&local_row.ty).is_none() && !reusable_buffer_type(&local_row.ty))
                     || !local_row.ty.same_checked_type(&self.function_row(*target).return_type)
                     || own.is_some_and(|slot| slot.local == local || slot.exit == Some(local))
                     || self.value_users(function, result).len() != 1
@@ -5942,6 +6036,11 @@ impl<'a> RustEmitter<'a> {
                 let Some(local) = local_of(place) else {
                     continue;
                 };
+                if native_read_call_args(&instruction.operation).is_some_and(|args| {
+                    args.iter().filter(|arg| arg.place == Some(place)).all(native_read_call_arg)
+                }) {
+                    continue;
+                }
                 match &instruction.operation {
                     MirOperation::ReadPlace(_) => {}
                     MirOperation::WritePlace { value, .. } | MirOperation::ReplacePlace { value, .. }
@@ -6193,6 +6292,13 @@ impl<'a> RustEmitter<'a> {
             MirOperation::WritePlace { place, value: written } | MirOperation::ReplacePlace { place, value: written } => {
                 *written == value && whole_local(*place).is_some_and(|local| locals.contains(&local))
             }
+            MirOperation::Call { .. } => native_read_call_args(&instruction.operation).is_some_and(|args| {
+                let mut matching = args.iter().filter(|arg| arg.value == value).peekable();
+                matching.peek().is_some() && matching.all(|arg| {
+                    native_read_call_arg(arg)
+                        && arg.place.and_then(whole_local).is_some_and(|local| locals.contains(&local))
+                })
+            }),
             _ => false,
         };
         // A list index projection of a place that is never moved reads its
@@ -6327,7 +6433,6 @@ impl<'a> RustEmitter<'a> {
         if !matches!(function.form, MirFunctionForm::TopLevel)
             || function.kind != MirFunctionKind::Jet
             || !function.generic_params.is_empty()
-            || !function.capture_params.is_empty()
             || function.is_unsafe
             || function.memo_bound.is_some()
             || function.is_reactive
@@ -6335,12 +6440,15 @@ impl<'a> RustEmitter<'a> {
         {
             return None;
         }
-        let candidates: Vec<usize> = function
+        let mut candidates: Vec<usize> = function
             .params
             .iter()
             .filter(|param| param.access == MirAccess::Read && matches!(param.ty.kind(), MirTypeKind::Int))
             .map(|param| param.index)
             .collect();
+        candidates.extend(function.capture_params.iter().filter(|capture| {
+            capture.access == MirAccess::Read && matches!(capture.ty.kind(), MirTypeKind::Int)
+        }).map(|capture| function.params.len() + capture.slot));
         if candidates.is_empty() {
             return None;
         }
@@ -6441,14 +6549,19 @@ impl<'a> RustEmitter<'a> {
             return None;
         }
         let row = self.place_row(function, place)?;
-        let MirPlaceBase::Parameter(value) = row.base else {
-            return None;
+        let value = match row.base {
+            MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value) => value,
+            _ => return None,
         };
         if !row.projections.is_empty() {
             return None;
         }
         match self.value_definition(function, value) {
             Some(MirOperation::Parameter { index, .. }) => params.get(index).map(|range| (*index, *range)),
+            Some(MirOperation::Capture { slot }) => {
+                let index = function.params.len() + slot;
+                params.get(&index).map(|range| (index, *range))
+            }
             _ => None,
         }
     }
