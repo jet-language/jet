@@ -98,9 +98,9 @@ fn sema_copy_site_check_guard_owned(value: TExpr, environment: SemaScopeEnvironm
         facts :: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, context.generic_params, false)
         if facts.copyable -> return true
         if !exact_move && !scopes.copies_explicit && facts.complete && facts.cloneable && !facts.resource -> return true
-        diagnostic :: sema_error("E0120", value.span, "this guard lends its value, so it cannot be moved into an owning destination", "the value stays owned by the shared storage; moving it would leave the guard and the destination owning the same data", "copy the value explicitly with `~`, or pass it to a read parameter instead")
+        diagnostic :: sema_error("E0120", value.span, "this guard lends its value, so it cannot be moved into an owning destination", "the value stays owned by the shared storage; moving it would leave the guard and the destination owning the same data", "copy the value explicitly with `.copy()`, or pass it to a read parameter instead")
         if !exact_move && facts.complete && facts.cloneable && !facts.resource {
-            &diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: value.span.start, end: value.span.start}, new_text: "~"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+            &diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: value.span.end, end: value.span.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
         } else {
             &diagnostics.push(diagnostic)
         }
