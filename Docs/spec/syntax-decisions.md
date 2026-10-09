@@ -2710,6 +2710,10 @@ The Jet checker routes the zero-argument, non-generic value call through its
 copy classifier before receiver-method lookup. Its `ExplicitCopy`, `Clone`
 and materialized-view TIR products use the existing MIR copy lowering; there
 is no separate runtime `.copy()` method-dispatch path.
+Interpolation holes contain ordinary expressions, so copies inside a hole
+also use `.copy()`; literal string text remains unchanged. The compiler's
+machine-name mangler materializes its sliced byte view with `.copy()` before
+constructing the interpolated owned String.
 
 **D-SHAPE-COPY1=A — the one copy sigil, `~x`** *(ratified 2026-07-15,
 card #535)*: supersedes D-CAP2/S4's `copy x` word. `~x` is a prefix-verb
