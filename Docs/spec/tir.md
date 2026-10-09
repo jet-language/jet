@@ -46,6 +46,13 @@ Restoring a codegen function snapshot consumes its already-owned non-Copy
 fields into the builder; only scalar Copy facts are read. Saving an enclosing
 function's independent snapshot remains a distinct operation, not a borrowed
 view that could be invalidated when the builder begins a nested function.
+
+Packing a lowered function moves its row lists out of the builder through
+the compiler-internal `compiler_take_rows` (each row popped and the result
+reversed in place) instead of copying them; the next function begins from a
+reset builder. A REPL session, which keeps lowering on its builder, packs an
+independent snapshot.
+
 ## Read-only fact channel
 
 The frozen TIR exposes one typed, borrowed `TFactChannel` view. It projects facts

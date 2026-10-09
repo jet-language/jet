@@ -34,7 +34,10 @@ pub fn jet_codegen_repl_session_new(root: TFunc, functions: ^[TFunc], modules: ^
 }
 
 fn jet_codegen_repl_pack(session: &JetCodegenReplSession) -> MIRProgram {
-    lowered := jet_codegen_pack_function(session.builder, session.inputs, session.builder.function, Type.Named{name: "Unit"})
+    // Packing moves rows out of its builder; the session keeps lowering later
+    // input on its own builder, so pack a snapshot of it.
+    snapshot := session.builder
+    lowered := jet_codegen_pack_function(&snapshot, session.inputs, session.builder.function, Type.Named{name: "Unit"})
     lowered.function.id = session.root
     // The canonical open-block marker stays private to the mutable builder.
     // Its executable snapshot is a real unreachable block that the retained

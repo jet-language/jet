@@ -77,6 +77,7 @@ use jet_foundation.[
     MIRLayoutAlignmentFact,
     MIRLinkArtifact,
     MIRLinkUnit,
+    MIRLocal,
     MIRLinkUnitID,
     MIRModuleID,
     MIRNamedSpan,
@@ -87,6 +88,7 @@ use jet_foundation.[
     MIROwnershipMode,
     MIRPackageFacts,
     MIRParam,
+    MIRPlace,
     MIRPlaceID,
     MIRPreludeABI,
     MIRPreludeCall,
@@ -97,6 +99,7 @@ use jet_foundation.[
     MIRSerdeCodec,
     MIRShapeFieldNames,
     MIRSourceFile,
+    MIRScope,
     MIRStructLayout,
     MIRSymbol,
     MIRTargetApplicability,
@@ -112,6 +115,8 @@ use jet_foundation.[
     MIRTypeKind,
     MIRUnsafeGate,
     MIRValueID,
+    MIRValueFact,
+    MIRVectorFact,
     MIRVariant,
     MIRVariantPayload,
     MIRVisibility,
@@ -167,6 +172,7 @@ use jet_foundation.[
     core_call_key,
     core_call_symbol_name,
     compiler_apply_order,
+    compiler_take_rows,
     mir_empty_optimization_facts,
     mir_field_id,
     mir_module_id,
@@ -1761,12 +1767,15 @@ fn jet_codegen_lower_function(builder: &JetCodegenBuilder, program: JetCodegenPr
     }
     jet_codegen_move_last_uses(&builder, program)
     jet_codegen_resolve_drop_flags(&builder, program)
-    jet_codegen_pack_function(builder, program, function, return_source)
+    jet_codegen_pack_function(&builder, program, function, return_source)
 }
 
 // Shared checked MIR packing for complete functions and suspended REPL roots.
 // A suspended root deliberately has not run last-use/drop-finalization passes.
-fn jet_codegen_pack_function(builder: JetCodegenBuilder, program: JetCodegenProgram, function: TFunc, return_source: Type) -> JetCodegenLoweredFunction {
+// Packing moves the function's rows out of `builder` (compiler_take_rows),
+// leaving those lists empty: the next jet_codegen_begin_function resets the
+// builder anyway, and a caller that keeps lowering on the builder packs a copy.
+fn jet_codegen_pack_function(builder: &JetCodegenBuilder, program: JetCodegenProgram, function: TFunc, return_source: Type) -> JetCodegenLoweredFunction {
     optimization := mir_empty_optimization_facts()
     optimization.pure = function.is_pure
     optimization.inline = function.is_inline
@@ -1774,11 +1783,18 @@ fn jet_codegen_pack_function(builder: JetCodegenBuilder, program: JetCodegenProg
     optimization.gc_return = function.gc_return
     optimization.gc_scope = function.gc_scope
     optimization.kernel = function.kernel_proof != None
-    optimization.checked_vector_facts = builder.checked_vector_facts
-    blocks := builder.blocks
-    jet_codegen_sort_blocks(&blocks)
+    // Every builder-derived fact is read before any row list moves out.
     declared_return := MIRType?{None}
     if builder.function.ret != None -> declared_return = Val(jet_codegen_lower_type_for_function(return_source, builder, program))
+    return_type :: jet_codegen_lower_type_for_function(return_source, builder, program)
+    form :: jet_codegen_lower_function_form(function, builder, program)
+    failure :: jet_codegen_lower_failure(builder.function.failure_carrier, builder, program)
+    web_param_reconstructions :: jet_codegen_lower_web_reconstructions(builder, program, function.web_param_reconstructions)
+    entry :: builder.entry
+    captures :: builder.capture_facts
+    optimization.checked_vector_facts = compiler_take_rows<MIRVectorFact>(&builder.checked_vector_facts)
+    blocks := compiler_take_rows<MIRBasicBlock>(&builder.blocks)
+    jet_codegen_sort_blocks(&blocks)
     foreign_language := String?{None}
     if function.foreign == .Val(provenance) -> foreign_language = Val(provenance.language)
     mir_function := MIRFunction{
@@ -1790,7 +1806,7 @@ fn jet_codegen_pack_function(builder: JetCodegenBuilder, program: JetCodegenProg
         name: function.name,
         span: function.source_span,
         kind: MIRFunctionKind.Jet,
-        form: jet_codegen_lower_function_form(function, builder, program),
+        form: form,
         visibility: jet_codegen_lower_visibility(function.visibility),
         target_applicability: MIRTargetApplicability{
             rust_aot: function.target_applicability.rust_aot,
@@ -1800,11 +1816,11 @@ fn jet_codegen_pack_function(builder: JetCodegenBuilder, program: JetCodegenProg
         web_bucket: jet_codegen_lower_web_bucket(function.web_bucket),
         web_marker: jet_codegen_lower_web_marker(function.web_marker),
         generic_params: jet_codegen_lower_generic_params(function.generic_params, program.modules),
-        capture_params: builder.capture_params,
-        params: builder.params,
+        capture_params: compiler_take_rows<MIRCaptureParam>(&builder.capture_params),
+        params: compiler_take_rows<MIRParam>(&builder.params),
         declared_return: declared_return,
-        return_type: jet_codegen_lower_type_for_function(return_source, builder, program),
-        failure: jet_codegen_lower_failure(builder.function.failure_carrier, builder, program),
+        return_type: return_type,
+        failure: failure,
         effects: MIREffectFacts{
             direct: function.effects.direct,
             solved: function.effects.solved,
@@ -1812,7 +1828,7 @@ fn jet_codegen_pack_function(builder: JetCodegenBuilder, program: JetCodegenProg
             maximal: function.effects.maximal,
             direct_spans: jet_codegen_lower_effect_spans(function.effects.direct_spans),
         },
-        captures: builder.capture_facts,
+        captures: captures,
         generator: None,
         optimization: optimization,
         is_unsafe: function.is_unsafe,
@@ -1828,31 +1844,31 @@ fn jet_codegen_pack_function(builder: JetCodegenBuilder, program: JetCodegenProg
         kernel_proof: jet_codegen_lower_kernel_proof(function.kernel_proof),
         gc_return: function.gc_return,
         return_view_provenance: jet_codegen_lower_view_provenance_map(function.return_view_provenance),
-        web_param_reconstructions: jet_codegen_lower_web_reconstructions(builder, program, function.web_param_reconstructions),
+        web_param_reconstructions: web_param_reconstructions,
         blocks: blocks,
-        entry: builder.entry,
-        locals: builder.locals,
-        values: builder.values,
-        places: builder.places,
-        scopes: builder.scopes,
+        entry: entry,
+        locals: compiler_take_rows<MIRLocal>(&builder.locals),
+        values: compiler_take_rows<MIRValueFact>(&builder.values),
+        places: compiler_take_rows<MIRPlace>(&builder.places),
+        scopes: compiler_take_rows<MIRScope>(&builder.scopes),
         drops: [MIRDropAction]{},
         foreign_language: foreign_language,
     }
+    nested_functions := compiler_take_rows<MIRFunction>(&builder.nested_functions)
     fields := [MIRFieldRow]{}
     field_ids := [U64:Bool]{}
     jet_codegen_append_function_field_rows(mir_function, &fields, &field_ids)
-    loop nested in builder.nested_functions -> jet_codegen_append_function_field_rows(nested, &fields, &field_ids)
+    loop nested in nested_functions -> jet_codegen_append_function_field_rows(nested, &fields, &field_ids)
     jet_codegen_sort_field_rows(&fields)
     return JetCodegenLoweredFunction{
         function: mir_function,
-        nested_functions: builder.nested_functions,
-        callbacks: builder.callbacks,
+        nested_functions: nested_functions,
+        callbacks: compiler_take_rows<MIRCallbackAdapter>(&builder.callbacks),
         fields: fields,
-        prelude_calls: builder.prelude_calls,
-        core_calls: builder.core_calls,
-        used_core: builder.used_core,
+        prelude_calls: compiler_take_rows<MIRPreludeCall>(&builder.prelude_calls),
+        core_calls: compiler_take_rows<MIRCoreCall>(&builder.core_calls),
+        used_core: compiler_take_rows<String>(&builder.used_core),
     }
-
 }
 
 fn jet_codegen_lambda_function_type(lambda: TLambda) -> Type Never! {

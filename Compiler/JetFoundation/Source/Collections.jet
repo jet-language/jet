@@ -43,6 +43,20 @@ pub fn compiler_apply_order<T>(rows: &[T], order: [Int]) Never! {
     }
 }
 
+// Compiler-internal transfer: moves every row out of `rows` into the returned
+// list, in order, leaving `rows` empty. Each row is popped (an owned move) and
+// the result is reversed in place, so no owning payload is copied; reading a
+// list field of a borrowed owner into a binding would copy every row.
+pub fn compiler_take_rows<T>(rows: &[T]) -> [T] Never! {
+    taken := [T]{}
+    loop rows.len() > 0 {
+        row := &rows.pop() ?? panic("a nonempty compiler row list failed to pop")
+        &taken.push(^row)
+    }
+    &taken.reverse()
+    taken
+}
+
 pub enum SemaCollectionKind {
     List(element: Type)
     FixedList(element: Type)
