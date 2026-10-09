@@ -152,7 +152,7 @@ fn pool_receipt_text(receipt: DBPoolReceipt) -> String Never! {
 #[Error, Equatable]
 struct DBError { message: String }
 
-impl DBError.Display { fn display(self) -> String { ~self.message } }
+impl DBError.Display { fn display(self) -> String { self.message.copy() } }
 impl DBError.Debug { fn debug(^self) -> String { self.message } }
 impl DBError -> Err { Err(self.message) }
 impl DBValue.Display { fn display(self) -> String { render_value(self) } }
@@ -175,7 +175,7 @@ impl DBValue {
         }
     }
     fn text(self) -> String Err! {
-        if self == .Text(text) -> return Ok(~text)
+        if self == .Text(text) -> return Ok(text.copy())
         Err("expected text, got {render_value(self)}")
     }
     fn bool(self) -> Bool Err! {
@@ -190,7 +190,7 @@ impl DBValue {
         }
     }
     fn blob(self) -> [U8] Err! {
-        if self == .Blob(bytes) -> return Ok(~bytes)
+        if self == .Blob(bytes) -> return Ok(bytes.copy())
         Err("expected a blob, got {render_value(self)}")
     }
 }

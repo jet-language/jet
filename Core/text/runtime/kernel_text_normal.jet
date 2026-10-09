@@ -51,7 +51,7 @@ fn normalize(text: String, compat: Bool, recompose: Bool) -> String Never! {
             break
         }
     }
-    if !non_ascii -> return ~text
+    if !non_ascii -> return text.copy()
     // #4318: capture static-list values once, not at each lookup/recursive child;
     // current bootstrap constant emission copies a list at each mention.
     index_asset :: normal_index.UNICODE_DECOMP_INDEX
@@ -160,7 +160,7 @@ fn canon_order(cps: &[Int], ccc: View<U8>) Never! {
         }
         offset := 0
         loop class in 1..<256 {
-            count :: ~positions[class]
+            count :: positions[class].copy()
             positions[class] = offset
             offset = offset + count
         }
@@ -181,7 +181,7 @@ fn compose(cps: &[Int], ccc: View<U8>, pairs: View<U8>) -> String Never! {
     starter := 0
     last_class := 0
     loop i in 0..<cps.len() {
-        cp :: ~cps[i]
+        cp :: cps[i].copy()
         class :: normal_ccc(ccc, cp)
         if length > 0 && (last_class < class || last_class == 0) {
             if compose_pair(pairs, cps[starter], cp) == .Val(combined) {

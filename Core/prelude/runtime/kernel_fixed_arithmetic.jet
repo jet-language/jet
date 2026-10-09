@@ -159,7 +159,7 @@ fn bounds(signed: Bool, bits: Int) -> FixedBounds? Never! {
 
 // Rust jet_fixed_integer_widen (:99): unsigned means truncate to low 64 bits.
 fn jet_fixed_integer_widen(value: JetFixedWide, signed: Bool) -> JetFixedWide Never! {
-    if signed -> return ~value
+    if signed -> return value.copy()
     JetFixedWide{high: I64{0}, low: value.low}
 }
 // Rust jet_fixed_integer_narrow (:107): full64 never passes through exact Int.
@@ -188,7 +188,7 @@ fn wrapping_value(value: FixedMagnitude, signed: Bool, bits: Int) -> JetFixedAri
 fn fixed_clamp(value: FixedMagnitude, range: FixedBounds) -> FixedMagnitude Never! {
     if fixed_less(value, range.lower) -> return range.lower
     if fixed_less(range.upper, value) -> return range.upper
-    ~value
+    value.copy()
 }
 // Rust saturating_value (:146).
 fn saturating_value(value: FixedMagnitude, range: FixedBounds, signed: Bool, bits: Int) -> JetFixedArithmeticResult Never! {
@@ -216,7 +216,7 @@ fn fixed_quotient(left: FixedMagnitude, right: FixedMagnitude) -> FixedMagnitude
     fixed_small(left.low /% right.low, left.negative != right.negative)
 }
 fn fixed_remainder(left: FixedMagnitude, right: FixedMagnitude) -> FixedMagnitude Never! {
-    if (right.high != U64{0}) -> return ~left
+    if (right.high != U64{0}) -> return left.copy()
     fixed_small(left.low %% right.low, left.negative)
 }
 // Rust floor_div (:150).

@@ -50,7 +50,7 @@ fn add_sample(values: &[Centroid], value: Float) Never! {
     &values.push(Centroid{mean: value, weight: Float{1.0}})
     at := values.len() - 1
     loop at > index {
-        values[at] = ~values[at - 1]
+        values[at] = values[at - 1].copy()
         at = at - 1
     }
     values[index] = Centroid{mean: value, weight: Float{1.0}}
@@ -60,8 +60,8 @@ fn add_sample(values: &[Centroid], value: Float) Never! {
     last := 0
     cumulative := values[0].weight
     loop i in 1..<values.len() {
-        sample :: ~values[i]
-        previous :: ~values[last]
+        sample :: values[i].copy()
+        previous :: values[last].copy()
         q :: cumulative / total
         limit :: Float{4.0} * total * q * (Float{1.0} - q) / Float{100.0}
         capacity :: if limit > (Float{1.0}) -> limit else -> Float{1.0}
@@ -107,7 +107,7 @@ fn step_quantile(values: [Centroid], q: Float) -> Float Never! {
 #Test("digest clones have independent samples") {
     digest := new()
     &digest.add(Float{7.0})
-    clone := ~digest
+    clone := digest.copy()
     &clone.add(Float{1.0})
     assert_eq(digest.quantile(Float{0.5}), Float{7.0})
     assert_eq(clone.quantile(Float{0.5}), Float{1.0})

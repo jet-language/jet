@@ -113,7 +113,7 @@ fn signal<T>(store: WebStore<T>) -> Signal<T> Never! { store.state }
 fn state_signal<T>(store: WebStore<T>) -> Signal<T> Never! { signal<T>(store) }
 
 fn transaction<T>(store: &WebStore<T>, label: String, values: [String], apply: fn() Never!) -> WebStoreTransaction<T> Never! {
-    before :: value<T>(~store)
+    before :: value<T>(store.copy())
     apply()
     record<T>(&store, label, values, before)
 }
@@ -135,10 +135,10 @@ fn set<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! {
 fn set_state<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! { set<T>(&store, value) }
 
 fn optimistic<T>(store: &WebStore<T>, label: String, values: [String], apply: fn() Never!) -> WebStorePatch<T> Never! {
-    backup := value<T>(~store)
+    backup := value<T>(store.copy())
     apply()
     transaction :: record<T>(&store, label, values, backup)
-    WebStorePatch<T>{store: ~store, backup: backup, transaction: transaction, active: true}
+    WebStorePatch<T>{store: store.copy(), backup: backup, transaction: transaction, active: true}
 }
 
 fn patch<T>(store: &WebStore<T>, label: String, values: [String], apply: fn() Never!) -> WebStorePatch<T> Never! {
@@ -212,7 +212,7 @@ fn events_since<T>(store: WebStore<T>, cursor: Int) -> [WebStoreEvent] Never! {
 }
 
 fn clear_history<T>(store: &WebStore<T>) Never! {
-    store.initial = value<T>(~store)
+    store.initial = value<T>(store.copy())
     store.history = [T]{}
     store.transactions = [WebStoreTransaction<T>]{}
     store.event_log = [WebStoreEvent]{}
@@ -237,7 +237,7 @@ fn current_generation<T>(store: WebStore<T>) -> Int Never! { store.generation }
 
 fn subscribe<T>(store: &WebStore<T>, callback: fn(T)) -> WebStoreSubscription Never! {
     if store.subs >= C_MAX_STORE_SUBSCRIBERS -> return WebStoreSubscription{id: store.subs, active: false, selector: ""}
-    callback(value<T>(~store))
+    callback(value<T>(store.copy()))
     store.subs = store.subs + 1
     WebStoreSubscription{id: store.subs, active: true, selector: ""}
 }
@@ -247,7 +247,7 @@ fn subscription_active(subscription: WebStoreSubscription) -> Bool Never! { subs
 
 fn subscribe_selector<T, U, E>(store: &WebStore<T>, project: fn(T) -> U E!, callback: fn(U)) -> WebStoreSubscription E! {
     if store.subs >= C_MAX_STORE_SUBSCRIBERS -> return WebStoreSubscription{id: store.subs, active: false, selector: "derived"}
-    callback(project(value<T>(~store)))
+    callback(project(value<T>(store.copy())))
     store.subs = store.subs + 1
     WebStoreSubscription{id: store.subs, active: true, selector: "derived"}
 }
@@ -276,7 +276,7 @@ fn record<T>(store: &WebStore<T>, action: String, fields: [String], before: T) -
     changed := [String]{}
     loop field in fields -> &changed.push("\"{esc_json(field)}\"")
     diff :: "{{\"kind\":\"transaction\",\"generation\":{store.generation},\"action\":\"{esc_json(action)}\",\"changed_fields\":[{changed.join(",")}]}}"
-    transaction :: WebStoreTransaction<T>{action: action, after: value<T>(~store), generation: store.generation, changed_fields: fields, before: before, diff: diff}
+    transaction :: WebStoreTransaction<T>{action: action, after: value<T>(store.copy()), generation: store.generation, changed_fields: fields, before: before, diff: diff}
     if store.history_enabled {
         if store.cursor < store.history.len() {
             kept := [T]{}
@@ -288,7 +288,7 @@ fn record<T>(store: &WebStore<T>, action: String, fields: [String], before: T) -
             store.history = kept
             store.transactions = entries
         }
-        &store.history.push(value<T>(~store))
+        &store.history.push(value<T>(store.copy()))
         &store.transactions.push(transaction)
         store.cursor = store.history.len()
         &store.event_log.push(WebStoreEvent{kind: "commit", cursor: store.cursor, generation: store.generation, diff: diff, transaction: "{action}#{store.generation}"})

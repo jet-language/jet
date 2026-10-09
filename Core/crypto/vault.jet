@@ -106,7 +106,7 @@ impl ExpiryCloseOwner.Close {
 
 #Test("Expired storage takes its credential and closes it exactly once") {
     count :: shared ExpiryCloseCount{count: 0}
-    storage :: shared (ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: ~count})})
+    storage :: shared (ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: count.copy()})})
     if true {
         guard := storage.guard_edit()
         __take_expired(&guard)
@@ -115,7 +115,7 @@ impl ExpiryCloseOwner.Close {
     }
     // Dropping still-live storage must run the same payload Close exactly once.
     if true {
-        live :: ExpiryCloseOwner{value: shared (ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: ~count})})}
+        live :: ExpiryCloseOwner{value: shared (ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: count.copy()})})}
     }
     observed :: count.guard_read()
     assert_eq(observed.value.count, 2)

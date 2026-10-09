@@ -119,7 +119,7 @@ struct RNG {
 
     fn pick<T: Clone>(&self, items: [T]) -> T? Never! {
         if items.len() == 0 -> return None
-        Val(~items[&self.int(0, items.len() - 1)])
+        Val(items[&self.int(0, items.len() - 1)].copy())
     }
 
     fn weighted_pick<T: Clone>(&self, items: [T], weights: [Float]) -> T? Never! {
@@ -133,10 +133,10 @@ struct RNG {
         loop index in 0..<items.len() {
             weight := Float{0.0}
             if math.is_finite(weights[index]) && weights[index] > 0.0 -> weight = weights[index]
-            if needle < weight -> return Val(~items[index])
+            if needle < weight -> return Val(items[index].copy())
             needle -= weight
         }
-        Val(~items[items.len() - 1])
+        Val(items[items.len() - 1].copy())
     }
 
     fn sample<T: Clone>(&self, items: [T], count: Int) -> [T] Never! {
@@ -144,7 +144,7 @@ struct RNG {
         if want < 0 -> want = 0
         if want > items.len() -> want = items.len()
         if want == 0 -> return [T]{}
-        pool := ~items
+        pool := items.copy()
         loop index in 0..<want {
             picked :: &self.int(index, pool.len() - 1)
             &pool.__swap(index, picked)
@@ -661,7 +661,7 @@ struct RNGAnswer {
 
 #Test("caller-owned explicit copies have independent streams") {
     first := rng(42)
-    second := ~first
+    second := first.copy()
     assert_eq(&first.bool(), true)
     assert_eq(first.state, U64{11400714819323198527})
     assert_eq(second.state, U64{42})
@@ -713,7 +713,7 @@ struct RNGAnswer {
     assert_eq(stream.state, U64{15362738631823041058})
     stream = rng(42)
     loop expected in shuffles {
-        shuffled := ~items
+        shuffled := items.copy()
         &stream.shuffle(&shuffled)
         assert_eq(shuffled, expected)
     }

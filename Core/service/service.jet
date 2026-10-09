@@ -325,7 +325,7 @@ fn select_state_adapter(tree: &ServiceTree, store: ServiceStateStore, schema: St
         if !valid_service_text(schema, 256) -> return Err(ServiceError.Policy("service state schema is empty, too long, or contains control characters"))
         if version < 1 -> return Err(ServiceError.Policy("service state schema version must be positive"))
         core.service.__tree_write_state_adapter(&tree, event_log)
-        core.service.__tree_write_state_authority(&tree, ~store.path, schema, version, migration, event_log)
+        core.service.__tree_write_state_authority(&tree, store.path.copy(), schema, version, migration, event_log)
     }
 }
 
@@ -1891,9 +1891,9 @@ fn worker(tree: &ServiceTree, name: String, handler: __WorkerHandler, handler_na
                     return Err(error)
                 }
             }
-            core.service.__tree_write_authority(&tree, ~authority)
+            core.service.__tree_write_authority(&tree, authority.copy())
         }
-        unchecked :: if core.service.__endpoint_unchecked(~route.name, ~name, route.generation, authority) == {
+        unchecked :: if core.service.__endpoint_unchecked(route.name.copy(), name.copy(), route.generation, authority) == {
             .Ok(value) -> value
             .Err(error) -> {
                 return Err(error)
@@ -1905,7 +1905,7 @@ fn worker(tree: &ServiceTree, name: String, handler: __WorkerHandler, handler_na
                 return Err(error)
             }
         }
-        endpoint :: ~mailbox.endpoint
+        endpoint :: mailbox.endpoint.copy()
         // Services1519-1521: allocation precedes registry publication.
         if core.service.__authority_register(endpoint, false) == {
             .Err(error) -> return Err(error)
@@ -1919,7 +1919,7 @@ fn worker(tree: &ServiceTree, name: String, handler: __WorkerHandler, handler_na
             else -> {}
         }
         // Mailbox must move: native Mailbox::clone forks its channel.
-        core.service.__worker_push(&tree, name, handler, handler_name, ~endpoint, mailbox, [I64]{}, false, U64{0}, U64{0}, worker_task)
+        core.service.__worker_push(&tree, name, handler, handler_name, endpoint.copy(), mailbox, [I64]{}, false, U64{0}, U64{0}, worker_task)
         return endpoint
     }
 }

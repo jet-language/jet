@@ -60,7 +60,7 @@ fn id(public: [U8]) -> [U8] Never! {
     bytes(crypto.sha256(material).bytes, 0, 16)
 }
 fn nonce(prefix: [U8], index: Int) -> [U8] Never! {
-    out := ~prefix
+    out := prefix.copy()
     append(&out, little(index, 8))
     out
 }
@@ -161,13 +161,13 @@ fn writer(sorted: [Recipient], plain_length: Int,
     fixed := [U8]{74, 69, 84, 67, 2, 1, 1, 0}
     append(&fixed, little(BASE + STANZA * sorted.len() + TAG, 4))
     append(&fixed, little(body, 8))
-    header := ~file_id
+    header := file_id.copy()
     append(&header, ephemeral.bytes)
     append(&header, nonce_prefix)
     append(&header, little(CHUNK, 4))
     append(&header, little(sorted.len(), 2))
     append(&header, little(0, 4))
-    base :: ~header
+    base :: header.copy()
     loop recipient in sorted {
         shared :: if crypto.x25519(ephemeral_key, recipient.public) == {
             .Ok(value) -> ^value
@@ -188,7 +188,7 @@ fn writer(sorted: [Recipient], plain_length: Int,
     }
     auth_tag :: seal(file_key.bytes, nonce(nonce_prefix, 0), [U8]{}, header_aad(fixed, header))
     append(&header, auth_tag)
-    prefix := ~fixed
+    prefix := fixed.copy()
     append(&prefix, header)
     hash :: crypto.sha256(prefix).bytes
     Ok(Writer{prefix: prefix, header_hash: hash, key: ^file_key,
@@ -256,7 +256,7 @@ fn reader(identity: crypto.X25519SecretKey, fixed: [U8], header: [U8], total: In
     if !matched || key.bytes.len() != 32 -> return Err(.OpenFailed)
     opened :: open(key.bytes, nonce(prefix, 0), bytes(header, length - TAG, length), header_aad(fixed, bytes(header, 0, length - TAG)))
     if opened.len() != 0 -> return Err(.OpenFailed)
-    all := ~fixed
+    all := fixed.copy()
     append(&all, header)
     Ok(Reader{header_hash: crypto.sha256(all).bytes, key: key, nonce_prefix: prefix,
         remaining: integer(fixed, 12, 8), index: 1, final: false})
@@ -324,7 +324,7 @@ fn finish(state: Reader, trailing: [U8]) crypto.FileCryptoError! {
             ^file_key, ^ephemeral_secret, prefix) ?? panic("writer")
         decoded := reader(identity, bytes(state.prefix, 0, 20),
             bytes(state.prefix, 20, state.prefix.len()), state.prefix.len() + (body_length(lengths[case]) ?? -1)) ?? panic("reader")
-        container := ~state.prefix
+        container := state.prefix.copy()
         offset := 0
         loop !state.final {
             count :: if state.remaining >= CHUNK -> CHUNK else -> state.remaining

@@ -76,7 +76,7 @@ fn oct_decimal(value: String) -> String Never! {
 }
 
 fn decimal_spelling(value: String) -> Int? Never! {
-    text :: ~value.trim()
+    text :: value.trim().copy()
     negative :: text.starts_with("-")
     digits :: if negative || text.starts_with("+") -> slice(text, 1, unicode.scalar_count(text)) else -> text
     if digits == "" -> return None
@@ -151,19 +151,19 @@ fn round_ratio_even(numerator: Int, denominator: Int) -> Int Never! {
 fn pretty(value: String) -> String Never! { pretty_fragment(value, 0) }
 
 fn pretty_fragment(value: String, indent: Int) -> String Never! {
-    text :: ~value.trim()
+    text :: value.trim().copy()
     open_at :: first_structure(text) ?? return text
     raw :: text.bytes()
     open :: raw[open_at]
     close :: structure_close(open) ?? return text
     end :: matching_close(text, open, close) ?? return text
     if byte_slice(text, end + 1, raw.len()).trim() != "" -> return text
-    prefix :: ~byte_slice(text, 0, open_at).trim_end()
+    prefix :: byte_slice(text, 0, open_at).trim_end().copy()
     body :: byte_slice(text, open_at + 1, end)
-    trimmed_body :: ~body.trim()
+    trimmed_body :: body.trim().copy()
     open_text :: String.from_bytes([U8]{open}) ?? ""
     close_text :: String.from_bytes([U8]{close}) ?? ""
-    if trimmed_body == "" -> return ~"{prefix} {open_text}{close_text}".trim_start()
+    if trimmed_body == "" -> return "{prefix} {open_text}{close_text}".trim_start().copy()
     if open == (U8{91}) && (trimmed_body == ":" || trimmed_body.lower() == "redacted") -> return text
     out := if prefix == "" -> open_text else -> "{prefix} {open_text}"
     stack := [U8]{}
@@ -185,13 +185,13 @@ fn pretty_fragment(value: String, indent: Int) -> String Never! {
         } else if stack.len() > 0 && stack[stack.len() - 1] == ch {
             _ :: &stack.pop()
         } else if ch == (U8{44}) && stack.len() == 0 {
-            item :: ~byte_slice(body, start, i).trim()
+            item :: byte_slice(body, start, i).trim().copy()
             if item != "" -> out = "{out}\n{spaces(indent + 2)}{pretty_fragment(item, indent + 2)}"
             start = i + 1
         }
         i = i + 1
     }
-    item :: ~byte_slice(body, start, body_raw.len()).trim()
+    item :: byte_slice(body, start, body_raw.len()).trim().copy()
     if item != "" -> out = "{out}\n{spaces(indent + 2)}{pretty_fragment(item, indent + 2)}"
     "{out}\n{spaces(indent)}{close_text}"
 }
@@ -377,7 +377,7 @@ fn grouped_digits(text: String) -> String Never! {
 // begins its own fill cycle.
 fn pad_mode(text: String, width: Int, fill: String, mode: Int) -> String Never! {
     need :: width - unicode.scalar_count(text)
-    if need <= 0 -> return ~text
+    if need <= 0 -> return text.copy()
     units :: unicode.scalars(if fill == "" -> " " else -> fill)
     if mode == 2 {
         left :: need /% 2

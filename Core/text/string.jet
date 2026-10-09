@@ -113,15 +113,15 @@ fn partition(receiver: String, sep: String) -> (head: String, sep: String, tail:
     raw :: string_unicode.utf8_bytes(receiver)
     needle :: string_unicode.utf8_bytes(sep)
     at :: byte_find(raw, needle, false)
-    if at < 0 -> return (head: ~receiver, sep: "", tail: "")
-    (head: byte_text(raw, 0, at), sep: ~sep, tail: byte_text(raw, at + needle.len(), raw.len()))
+    if at < 0 -> return (head: receiver.copy(), sep: "", tail: "")
+    (head: byte_text(raw, 0, at), sep: sep.copy(), tail: byte_text(raw, at + needle.len(), raw.len()))
 }
 fn rpartition(receiver: String, sep: String) -> (head: String, sep: String, tail: String) {
     raw :: string_unicode.utf8_bytes(receiver)
     needle :: string_unicode.utf8_bytes(sep)
     at :: byte_find(raw, needle, true)
-    if at < 0 -> return (head: "", sep: "", tail: ~receiver)
-    (head: byte_text(raw, 0, at), sep: ~sep, tail: byte_text(raw, at + needle.len(), raw.len()))
+    if at < 0 -> return (head: "", sep: "", tail: receiver.copy())
+    (head: byte_text(raw, 0, at), sep: sep.copy(), tail: byte_text(raw, at + needle.len(), raw.len()))
 }
 
 // Rust jet_text_remove_prefix/suffix: byte-exact affix, otherwise unchanged.
@@ -132,10 +132,10 @@ fn remove_suffix(receiver: String, suffix: String) -> String { strip_affix(recei
 fn strip_affix(text: String, affix: String, front: Bool) -> String {
     raw :: string_unicode.utf8_bytes(text)
     cut :: string_unicode.utf8_bytes(affix)
-    if cut.len() > raw.len() -> return ~text
+    if cut.len() > raw.len() -> return text.copy()
     base :: if front -> 0 else -> raw.len() - cut.len()
     loop j in 0..<cut.len() {
-        if raw[base + j] != cut[j] -> return ~text
+        if raw[base + j] != cut[j] -> return text.copy()
     }
     if front -> return byte_text(raw, cut.len(), raw.len())
     byte_text(raw, 0, raw.len() - cut.len())
@@ -215,7 +215,7 @@ fn zfill(receiver: String, width: Int) -> String {
     loop b in raw {
         if (b & U8{192}) != (U8{128}) -> length = length + 1
     }
-    if width <= length -> return ~receiver
+    if width <= length -> return receiver.copy()
     out := [U8]{}
     body := 0
     if raw.len() > 0 && (raw[0] == (U8{43}) || raw[0] == (U8{45})) {

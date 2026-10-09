@@ -173,7 +173,7 @@ fn build_session_legacy_resume(session: &BuildSession, args: [BuildSessionValue]
     if declared.len() != 17 -> return build_session_fail(state, "legacy resume requires the canonical project-file argument")
     // Decode the declaration using precisely the ordinary path, transactionally.
     &declared.pop()
-    trial := ~state
+    trial := state.copy()
     reply :: build_session_add_action(&trial, "legacy", declared)
     if reply == .Failure(_) -> return reply
     action := trial.actions[trial.actions.len() - 1]

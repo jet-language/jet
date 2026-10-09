@@ -650,7 +650,7 @@ impl Vec2 {
     }
     fn splat(x: Float) -> Vec2 Never! { Vec2.new(x, x) }
     fn from_array(lanes: [Float#2]) -> Vec2 Never! { Vec2{lanes: lanes} }
-    fn to_array(self) -> [Float#2] Never! { ~self.lanes }
+    fn to_array(self) -> [Float#2] Never! { self.lanes.copy() }
     fn lane(self, index: Int) -> Float Never! {
         if index < 0 || index >= 2 -> core.math.__numeric_stop("lane index {index} out of range for Vec2 (2 lanes)")
         self.lanes[index]
@@ -661,7 +661,7 @@ impl Vec2 {
     fn length(self) -> Float Never! { sqrt(self.dot(self)) }
     fn normalize(self) -> Vec2 Never! {
         length :: self.length()
-        if length == 0.0 -> return ~self
+        if length == 0.0 -> return self.copy()
         Vec2.new(self.lanes[0] / length, self.lanes[1] / length)
     }
 }
@@ -692,7 +692,7 @@ impl Vec3 {
 impl Vec3 {
     fn splat(x: Float) -> Vec3 Never! { Vec3.new(x, x, x) }
     fn from_array(lanes: [Float#3]) -> Vec3 Never! { Vec3{lanes: lanes} }
-    fn to_array(self) -> [Float#3] Never! { ~self.lanes }
+    fn to_array(self) -> [Float#3] Never! { self.lanes.copy() }
     fn lane(self, index: Int) -> Float Never! {
         if index < 0 || index >= 3 -> core.math.__numeric_stop("lane index {index} out of range for Vec3 (3 lanes)")
         self.lanes[index]
@@ -710,7 +710,7 @@ impl Vec3 {
     fn length(self) -> Float Never! { sqrt(self.dot(self)) }
     fn normalize(self) -> Vec3 Never! {
         length :: self.length()
-        if length == 0.0 -> return ~self
+        if length == 0.0 -> return self.copy()
         Vec3.new(self.lanes[0] / length, self.lanes[1] / length, self.lanes[2] / length)
     }
 }
@@ -783,7 +783,7 @@ impl Vec4 {
     }
     fn splat(x: Float) -> Vec4 Never! { Vec4.new(x, x, x, x) }
     fn from_array(lanes: [Float#4]) -> Vec4 Never! { Vec4{lanes: lanes} }
-    fn to_array(self) -> [Float#4] Never! { ~self.lanes }
+    fn to_array(self) -> [Float#4] Never! { self.lanes.copy() }
     fn lane(self, index: Int) -> Float Never! {
         if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for Vec4 (4 lanes)")
         self.lanes[index]
@@ -796,7 +796,7 @@ impl Vec4 {
     fn length(self) -> Float Never! { sqrt(self.dot(self)) }
     fn normalize(self) -> Vec4 Never! {
         length :: self.length()
-        if length == 0.0 -> return ~self
+        if length == 0.0 -> return self.copy()
         Vec4.new(self.lanes[0] / length, self.lanes[1] / length, self.lanes[2] / length, self.lanes[3] / length)
     }
 }
@@ -834,9 +834,9 @@ impl Mat3 {
         Mat3{lanes: [Float#9]{m0, m1, m2, m3, m4, m5, m6, m7, m8}}
     }
     fn from_array(lanes: [Float#9]) -> Mat3 Never! { Mat3{lanes: lanes} }
-    fn to_array(self) -> [Float#9] Never! { ~self.lanes }
+    fn to_array(self) -> [Float#9] Never! { self.lanes.copy() }
     fn matmul(self, other: Mat3) -> Mat3 Never! {
-        result := ~self.lanes
+        result := self.lanes.copy()
         loop column in 0..<3 {
             loop row in 0..<3 {
                 total := Float{0.0}
@@ -847,7 +847,7 @@ impl Mat3 {
         Mat3{lanes: result}
     }
     fn transform(self, value: Vec3) -> Vec3 Never! {
-        result := ~value.lanes
+        result := value.lanes.copy()
         loop row in 0..<3 {
             total := Float{0.0}
             loop k in 0..<3 -> total = total + self.lanes[k * 3 + row] * value.lanes[k]
@@ -856,7 +856,7 @@ impl Mat3 {
         Vec3{lanes: result}
     }
     fn transpose(self) -> Mat3 Never! {
-        result := ~self.lanes
+        result := self.lanes.copy()
         loop column in 0..<3 {
             loop row in 0..<3 -> result[column * 3 + row] = self.lanes[row * 3 + column]
         }
@@ -865,14 +865,14 @@ impl Mat3 {
 }
 impl Mat3.Add {
     fn add(self, rhs: Mat3) -> Mat3 Never! {
-        result := ~self.lanes
+        result := self.lanes.copy()
         loop i in 0..<9 -> result[i] = self.lanes[i] + rhs.lanes[i]
         Mat3{lanes: result}
     }
 }
 impl Mat3.Sub {
     fn sub(self, rhs: Mat3) -> Mat3 Never! {
-        result := ~self.lanes
+        result := self.lanes.copy()
         loop i in 0..<9 -> result[i] = self.lanes[i] - rhs.lanes[i]
         Mat3{lanes: result}
     }
@@ -893,14 +893,14 @@ impl Mat4 {
 }
 impl Mat4.Add {
     fn add(self, rhs: Mat4) -> Mat4 Never! {
-        result := ~self.lanes
+        result := self.lanes.copy()
         loop i in 0..<16 -> result[i] = self.lanes[i] + rhs.lanes[i]
         Mat4{lanes: result}
     }
 }
 impl Mat4.Sub {
     fn sub(self, rhs: Mat4) -> Mat4 Never! {
-        result := ~self.lanes
+        result := self.lanes.copy()
         loop i in 0..<16 -> result[i] = self.lanes[i] - rhs.lanes[i]
         Mat4{lanes: result}
     }
@@ -955,8 +955,8 @@ fn __fraction_div(left: Fraction, right: Fraction) -> Fraction Never! {
     if right.num_value == 0 -> panic("divided by zero")
     __fraction_from_parts(left.num_value * right.den_value, left.den_value * right.num_value)
 }
-fn __fraction_numerator(value: Fraction) -> Int Never! { ~value.num_value }
-fn __fraction_denominator(value: Fraction) -> Int Never! { ~value.den_value }
+fn __fraction_numerator(value: Fraction) -> Int Never! { value.num_value.copy() }
+fn __fraction_denominator(value: Fraction) -> Int Never! { value.den_value.copy() }
 impl Fraction {
     fn numerator(self) -> Int Never! { __fraction_numerator(self) }
     fn denominator(self) -> Int Never! { __fraction_denominator(self) }
@@ -1022,8 +1022,8 @@ fn __decimal_try_fraction(value: Fraction) -> Decimal? Never! {
     digits :: value.num_value * exact_power(10, places) /% value.den_value
     Val(__decimal_normalized(digits, places))
 }
-fn __fraction_owned_numerator(value: Fraction) -> Int Never! { ~value.num_value }
-fn __fraction_owned_denominator(value: Fraction) -> Int Never! { ~value.den_value }
+fn __fraction_owned_numerator(value: Fraction) -> Int Never! { value.num_value.copy() }
+fn __fraction_owned_denominator(value: Fraction) -> Int Never! { value.den_value.copy() }
 fn __fraction_equal(left: Fraction, right: Fraction) -> Bool Never! {
     left.num_value == right.num_value && left.den_value == right.den_value
 }
@@ -1033,7 +1033,7 @@ fn __fraction_to_float(value: Fraction) -> Float Never! {
 }
 fn __fraction_to_int(value: Fraction) -> Int Never! {
     if value.den_value != 1 -> panic("Fraction is not an integer")
-    ~value.num_value
+    value.num_value.copy()
 }
 fn __fraction_to_decimal(value: Fraction) -> Decimal Never! {
     __decimal_try_fraction(value) ?? panic("Fraction has a repeating expansion")
@@ -1080,7 +1080,7 @@ fn __decimal_from_float(value: Float) -> Decimal Never! {
 }
 
 fn __decimal_signed(value: Decimal) -> Int Never! {
-    if value.negative -> -value.magnitude else -> ~value.magnitude
+    if value.negative -> -value.magnitude else -> value.magnitude.copy()
 }
 fn __decimal_from_str(text: String) -> Decimal Never! {
     bytes :: text.trim().bytes()
@@ -1255,7 +1255,7 @@ fn __decimal_to_float(value: Decimal) -> Float Never! {
         return infinity()
     }
     shift :: if exponent < -1022 -> 1074 else -> 52 - exponent
-    numerator := ~value.magnitude
+    numerator := value.magnitude.copy()
     divisor := denominator
     if shift >= 0 -> numerator = numerator << shift
     else -> divisor = divisor << -shift
@@ -1295,7 +1295,7 @@ impl F64x4 {
         F64x4{lanes: [F64#4]{value, value, value, value}}
     }
     fn from_array(lanes: [F64#4]) -> F64x4 Never! { F64x4{lanes: lanes} }
-    fn to_array(self) -> [F64#4] Never! { ~self.lanes }
+    fn to_array(self) -> [F64#4] Never! { self.lanes.copy() }
     fn lane(self, index: Int) -> F64 Never! {
         if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for F64x4 (4 lanes)")
         self.lanes[index]
@@ -1314,7 +1314,7 @@ impl F64x4 {
 // Mat4 uses the same column-major, left-to-right products as the Rust seed.
 impl Mat4 {
     fn from_array(lanes: [Float#16]) -> Mat4 Never! { Mat4{lanes: lanes} }
-    fn to_array(self) -> [Float#16] Never! { ~self.lanes }
+    fn to_array(self) -> [Float#16] Never! { self.lanes.copy() }
     fn matmul(self, other: Mat4) -> Mat4 Never! {
         result := [Float#16]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
         loop column in 0..<4 {
@@ -1618,7 +1618,7 @@ impl DeviceDelta.Sub {
 #Error
 struct TransformError { message: String }
 impl TransformError.Display {
-    fn display(self) -> String { ~self.message }
+    fn display(self) -> String { self.message.copy() }
 }
 // Phantom params follow existing KeyRef<T>/DataTracked<T,K> source declarations.
 // The seed erases both params and keeps f64 payloads even for F32 spellings.

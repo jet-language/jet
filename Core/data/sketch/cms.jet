@@ -50,7 +50,7 @@ fn counter_index(first: U64, second: U64, row: Int) -> Int Never! {
 
 /// Merge by adding corresponding counters, as the existing source API does.
 fn merge(a: CountMinSketch, b: CountMinSketch) -> CountMinSketch Never! {
-    counters := ~a.counters
+    counters := a.counters.copy()
     loop i in 0..<1024 -> counters[i] = counters[i] + b.counters[i]
     CountMinSketch{counters: counters}
 }
@@ -58,7 +58,7 @@ fn merge(a: CountMinSketch, b: CountMinSketch) -> CountMinSketch Never! {
 #Test("CMS retains unit counts, independent clones and additive merge") {
     cms := new()
     &cms.add("hello")
-    clone := ~cms
+    clone := cms.copy()
     &clone.add("hello")
     &clone.add("world")
     assert_eq(cms.count("hello"), 1)

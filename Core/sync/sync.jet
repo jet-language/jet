@@ -93,9 +93,9 @@ fn text_new(replica: String, value: String) -> SyncText Never! {
 // the new text is written at the start, so a replica that never saw the
 // tombstones still converges after a merge.
 fn text_set(doc: SyncText, replica: String, value: String) -> SyncText Never! {
-    if !doc.valid || !valid_token(replica) || value.len() > MAX_TEXT -> return ~doc
+    if !doc.valid || !valid_token(replica) || value.len() > MAX_TEXT -> return doc.copy()
     inserted :: unicode.scalars(value)
-    if doc.atoms.len() + inserted.len() > MAX_ATOMS || clock_exhausted(doc, inserted.len()) -> return ~doc
+    if doc.atoms.len() + inserted.len() > MAX_ATOMS || clock_exhausted(doc, inserted.len()) -> return doc.copy()
     deleted :: mark_deleted(doc, text_visible(doc))
     insert_after(deleted, replica, "", inserted)
 }
@@ -105,11 +105,11 @@ fn text_set(doc: SyncText, replica: String, value: String) -> SyncText Never! {
 // anchors to the character before the edited range, so it survives a
 // concurrent edit of that range.
 fn text_edit(doc: SyncText, replica: String, index: Int, delete_count: Int, value: String) -> SyncText Never! {
-    if !doc.valid || !valid_token(replica) || index < 0 || delete_count < 0 || value.len() > MAX_TEXT -> return ~doc
+    if !doc.valid || !valid_token(replica) || index < 0 || delete_count < 0 || value.len() > MAX_TEXT -> return doc.copy()
     inserted :: unicode.scalars(value)
-    if doc.atoms.len() + inserted.len() > MAX_ATOMS || clock_exhausted(doc, inserted.len()) -> return ~doc
+    if doc.atoms.len() + inserted.len() > MAX_ATOMS || clock_exhausted(doc, inserted.len()) -> return doc.copy()
     visible :: text_visible(doc)
-    if index > visible.len() || delete_count > visible.len() - index -> return ~doc
+    if index > visible.len() || delete_count > visible.len() - index -> return doc.copy()
     anchor := ""
     if index > 0 {
         before :: doc.atoms[visible[index - 1]]
@@ -189,7 +189,7 @@ fn counter_new(replica: String, value: Int) -> SyncCounter Never! {
 }
 
 fn counter_inc(counter: SyncCounter, replica: String, delta: Int) -> SyncCounter Never! {
-    if !counter.valid || !valid_token(replica) -> return ~counter
+    if !counter.valid || !valid_token(replica) -> return counter.copy()
     count := counter.counts.get(replica) ?? CounterCount{positive: 0, negative: 0}
     if counter.counts.get(replica) == .None && counter.counts.len() >= MAX_REPLICAS -> return invalid_counter()
     if delta >= 0 {
@@ -239,13 +239,13 @@ fn map_new() -> SyncMap Never! { SyncMap{entries: [String:LWW]{}, valid: true} }
 // A write takes the next clock past every entry the map has observed, so a
 // write after a remote observation never loses to that older value.
 fn map_set(map: SyncMap, key: String, value: String) -> SyncMap Never! {
-    if !map.valid || !valid_token(key) || value.len() > MAX_TEXT -> return ~map
+    if !map.valid || !valid_token(key) || value.len() > MAX_TEXT -> return map.copy()
     write_entry(map, key, LWW{value: value, clock: 0, writer: "local", deleted: false})
 }
 
 // Delete by writing a tombstone at the next clock.
 fn map_delete(map: SyncMap, key: String) -> SyncMap Never! {
-    if !map.valid || !valid_token(key) -> return ~map
+    if !map.valid || !valid_token(key) -> return map.copy()
     write_entry(map, key, LWW{value: "", clock: 0, writer: "local", deleted: true})
 }
 
@@ -307,9 +307,9 @@ fn map_show(map: SyncMap) -> String Never! {
 fn list_new() -> SyncList Never! { SyncList{items: [RGAItem]{}, valid: true} }
 
 fn list_push(list: SyncList, replica: String, value: String) -> SyncList Never! {
-    if !list.valid || !valid_token(replica) || value.len() > MAX_TEXT -> return ~list
+    if !list.valid || !valid_token(replica) || value.len() > MAX_TEXT -> return list.copy()
     loop item in list.items {
-        if item.replica == replica && item.value == value -> return ~list
+        if item.replica == replica && item.value == value -> return list.copy()
     }
     if list.items.len() >= MAX_ENTRIES -> return invalid_list()
     SyncList{items: insert_item(list.items, RGAItem{replica: replica, value: value}), valid: true}

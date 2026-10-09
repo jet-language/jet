@@ -116,8 +116,8 @@ fn decode_padded(text: String) -> [U8] Base64Error! { decode(text) }
 
 fn pad(text: String) -> String Never! {
     remainder :: text.bytes().len() %% 4
-    if remainder == 0 -> return ~text
-    out := ~text
+    if remainder == 0 -> return text.copy()
+    out := text.copy()
     loop _ in 0..<(4 - remainder) -> out = "{out}="
     out
 }

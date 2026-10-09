@@ -45,14 +45,14 @@ impl ReservoirSampler {
     }
 
     fn sample(self) -> [String] Never! {
-        ~self.state.items
+        self.state.items.copy()
     }
 }
 
 #Test("reservoir keeps filled slots and native minimum capacity") {
     sampler := new(3)
     &sampler.add("x")
-    clone := ~sampler
+    clone := sampler.copy()
     &clone.add("y")
     &clone.add("z")
     assert_eq(sampler.sample(), [String]{"x"})

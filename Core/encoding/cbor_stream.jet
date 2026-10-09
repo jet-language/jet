@@ -81,9 +81,9 @@ struct CBORPull {
     }
 
     fn fail(&self, ^failure: EncodingError) -> EncodingError Never! {
-        if self.terminal == .Val(first) -> return ~first
+        if self.terminal == .Val(first) -> return first.copy()
         &self.discard()
-        self.terminal = Val(~failure)
+        self.terminal = Val(failure.copy())
         failure
     }
 
@@ -347,7 +347,7 @@ struct CBORPull {
     }
 
     fn next(&self) -[IO]> DataEvent? EncodingError! {
-        if self.terminal == .Val(first) -> return Err(~first)
+        if self.terminal == .Val(first) -> return Err(first.copy())
         value :: &self.next_inner() ?? return Err(&self.fail(^err))
         if value == None && self.eof -> &self.discard()
         Ok(value)
@@ -472,9 +472,9 @@ struct CBORPush {
     }
 
     fn fail(&self, ^failure: EncodingError) -> EncodingError Never! {
-        if self.terminal == .Val(first) -> return ~first
+        if self.terminal == .Val(first) -> return first.copy()
         &self.discard()
-        self.terminal = Val(~failure)
+        self.terminal = Val(failure.copy())
         failure
     }
 
@@ -658,17 +658,17 @@ struct CBORPush {
     }
 
     fn write(&self, event: ^DataEvent) EncodingError! -[IO]> {
-        if self.terminal == .Val(first) -> return Err(~first)
+        if self.terminal == .Val(first) -> return Err(first.copy())
         &self.write_inner(event) ?? return Err(&self.fail(^err))
     }
 
     fn flush(&self) EncodingError! -[IO]> {
-        if self.terminal == .Val(first) -> return Err(~first)
+        if self.terminal == .Val(first) -> return Err(first.copy())
         encoding.__flush(&self.output) ?? return Err(&self.fail(io_error(self.total, "$", err)))
     }
 
     fn finish(&self) EncodingError! -[IO]> {
-        if self.terminal == .Val(first) -> return Err(~first)
+        if self.terminal == .Val(first) -> return Err(first.copy())
         if self.finished -> return
         if self.frames.len() != 0 || !self.root_written -> return Err(&self.fail(error(.State, self.total, "$", "finish requires one complete CBOR root")))
         &self.flush() ?? return Err(err)

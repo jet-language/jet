@@ -208,9 +208,9 @@ fn terminal_height() -[IO]> Int Never! {
 }
 
 fn style(style: String, text: String) -[IO]> String Never! {
-    if !terminal_style_enabled() -> return ~text
+    if !terminal_style_enabled() -> return text.copy()
     code :: legacy_style_code(style)
-    if code.is_empty() -> return ~text
+    if code.is_empty() -> return text.copy()
     esc :: String.from_bytes([U8]{27}) ?? ""
     "{esc}[{code}m{text}{esc}[0m"
 }
@@ -314,7 +314,7 @@ fn decode_key(raw: [U8], platform: Int) -> Key Never! {
 // Raw leaves expose host operations only. Prompt fault probes must both run
 // before the first byte is written, and each caller owns its error projection.
 fn terminal_other(operation: IOOperation, resource: String?, cause: String) -> IOError Never! {
-    IOError.Other(IOContext{operation: ~operation, resource: resource, os_code: None, cause: Val(cause)})
+    IOError.Other(IOContext{operation: operation.copy(), resource: resource, os_code: None, cause: Val(cause)})
 }
 
 fn terminal_invalid(cause: String) -> IOError Never! {
@@ -551,7 +551,7 @@ fn stdin_chomp(text: String) -> String Never! {
         if last != (U8{10}) && last != (U8{13}) -> break
         &raw.pop().drop("discard a trailing line ending")
     }
-    if raw.len() == original_len -> return ~text
+    if raw.len() == original_len -> return text.copy()
     String.from_bytes(raw) ?? panic("ASCII line endings preserve UTF-8")
 }
 
@@ -568,7 +568,7 @@ fn stdin_chomp(text: String) -> String Never! {
 
 fn stdio_error(operation: IOOperation, resource: String, cause: String) -> IOError Never! {
     IOError.Other(IOContext{
-        operation: ~operation,
+        operation: operation.copy(),
         resource: Val(resource),
         os_code: None,
         cause: Val(cause),

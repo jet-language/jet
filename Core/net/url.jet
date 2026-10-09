@@ -52,13 +52,13 @@ struct URL {
 }
 
 impl URL {
-    fn scheme(self) -> String Never! { ~self.scheme_text }
-    fn path(self) -> String Never! { ~self.path_text }
-    fn query(self) -> String Never! { ~self.query_text }
+    fn scheme(self) -> String Never! { self.scheme_text.copy() }
+    fn path(self) -> String Never! { self.path_text.copy() }
+    fn query(self) -> String Never! { self.query_text.copy() }
 
     fn host(self) -> String? Never! {
         if self.host_text.bytes().len() == 0 -> return None
-        Val(~self.host_text)
+        Val(self.host_text.copy())
     }
 
     /// Only an authority port written explicitly is present.
@@ -69,7 +69,7 @@ impl URL {
 
     fn fragment(self) -> String? Never! {
         if self.fragment_text.bytes().len() == 0 -> return None
-        Val(~self.fragment_text)
+        Val(self.fragment_text.copy())
     }
 
     /// Render the URL; an explicit authority port is kept.
@@ -278,7 +278,7 @@ fn find_text(text: String, needle: String, start: Int) -> Int Never! {
 
 fn replace_holes(text: String, marker: String, holes: [String], cursor: &URLHoleCursor) -> String Never! {
     next_marker := find_text(text, marker, 0)
-    if next_marker < 0 -> return ~text
+    if next_marker < 0 -> return text.copy()
     out := ""
     start := 0
     loop next_marker >= 0 {
@@ -645,7 +645,7 @@ fn unparse(url: URL) -> String Never! {
     authority := ""
     if url.host_text.bytes().len() > 0 {
         host :: if url.host_recipe.len() > 0 -> render_recipe(url.host_recipe, false, false) else -> render_host(url.host_text)
-        authority = ~host
+        authority = host.copy()
         if url.user_text.bytes().len() > 0 {
             authority = percent_encode(url.user_text)
             if url.password_text.bytes().len() > 0 -> authority = "{authority}:{percent_encode(url.password_text)}"

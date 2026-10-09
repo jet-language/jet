@@ -159,9 +159,9 @@ impl EncodingError {
         EncodingError{format: format, kind: kind, byte_offset: byte_offset, line: line, column: column, path: path, reason: reason, cause: None}
     }
     fn with_cause(self, cause: EncodingCause) -> EncodingError Never! {
-        EncodingError{format: self.format, kind: self.kind, byte_offset: self.byte_offset, line: self.line, column: self.column, path: ~self.path, reason: ~self.reason, cause: Val(cause)}
+        EncodingError{format: self.format, kind: self.kind, byte_offset: self.byte_offset, line: self.line, column: self.column, path: self.path.copy(), reason: self.reason.copy(), cause: Val(cause)}
     }
-    fn cause(self) -> EncodingCause? Never! { ~self.cause }
+    fn cause(self) -> EncodingCause? Never! { self.cause.copy() }
     fn display_text(self) -> String Never! {
         encoding_error_text(self.format.as_str(), encoding_kind_name(self.kind), self.byte_offset, self.line, self.column, self.path, self.reason)
     }
