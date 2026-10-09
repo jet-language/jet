@@ -422,6 +422,18 @@ does not reimplement Core policy. The shared call record names the signature,
 fallibility, effect, capability, provider route, pure/interpreter route, and
 AOT adapter facts so that a tier cannot quietly invent a second meaning.
 
+The compiler host's internal Source resource slot substrate keeps its owned
+payload in the same slot as its checked identity and semantic loan state.
+Destructive slot transfer validates scope, generation, kind, checked type and
+active loans before mutation, moves the whole owned slot once, and preserves the
+consumed capability receipt. Requesting retirement rejects new registrations and
+new retained roots, while existing retained owners remain usable until canonical
+finalization. Logical slot, loan and retained-root tickets are data, not managed
+external leases or executing-image authority. Native payloads require the actual
+registered managed owner, source/image/code holds, sole initialization cell, Meta
+lifecycle and final-alias/weak-backedge providers; the logical substrate alone
+does not establish native cleanup or executor availability.
+
 A portable fallback is valid only when it preserves the same contract. A web or
 test provider is explicit when it changes the host resource, and its typed
 availability or policy error remains visible to the caller. Cross-tier evidence
