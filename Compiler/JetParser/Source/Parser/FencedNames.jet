@@ -124,11 +124,16 @@ struct ParserFenceNumberedRange {
 // Ordinary source has no fences: keep the lexer's token list untouched, since
 // the parser skips comment trivia itself. A fenced source is expanded over its
 // comment-free tokens, so a comment never splits or joins a fence entry.
-fn parser_prepare_tokens(tokens: [Token]) -> ParserFenceExpansion {
-    has_fences :: loop token in tokens {
-        if token.kind == TOKEN_FENCE_OPEN || token.kind == TOKEN_FENCE_CLOSE -> break true
-    } ?? false
-    if !has_fences -> return ParserFenceExpansion{tokens: tokens, fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
+fn parser_prepare_tokens(tokens: ^[Token]) -> ParserFenceExpansion {
+    has_fences := false
+    loop index in 0..<tokens.len() {
+        kind :: tokens[index].kind
+        if kind == TOKEN_FENCE_OPEN || kind == TOKEN_FENCE_CLOSE {
+            has_fences = true
+            break
+        }
+    }
+    if !has_fences -> return ParserFenceExpansion{tokens: ^tokens, fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
     code := [Token]{}
     loop token in tokens {
         if !parser_is_trivia(token.kind) -> &code.push(token)

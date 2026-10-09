@@ -1166,6 +1166,16 @@ fn jet_driver_foreign_rewrite_module(load: &JetDriverLoadResult, surface: JetDri
 fn jet_driver_foreign_remove_overlay_items(load: &JetDriverLoadResult) Never! {
     loop index in 0..<load.modules.len() {
         if load.modules[index].module_name.starts_with("__c_") -> next
+        // A module without overlay items keeps its list as is (rebuilding it
+        // copied every item of every module).
+        has_overlay := false
+        loop item_index in 0..<load.modules[index].program.items.len() {
+            if load.modules[index].program.items[item_index] == .CModule(_) {
+                has_overlay = true
+                break
+            }
+        }
+        if !has_overlay -> next
         items := [Item]{ }
         loop item_index in 0..<load.modules[index].program.items.len() {
             item :: load.modules[index].program.items[item_index]
