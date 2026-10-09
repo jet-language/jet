@@ -2890,7 +2890,17 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     if binding.uninit -> return sema_stmt_check_uninit_binding(binding, environment, &scopes, &state, &diagnostics)
     if binding.arena_view -> return None
     if binding.is_comptime -> return sema_stmt_check_prepared_binding(binding, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    if binding.pattern == .Val(pattern) -> return sema_stmt_check_destructure(binding, pattern, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if binding.pattern == .Val(pattern) {
+        statement := sema_stmt_check_destructure(binding, pattern, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if statement != None {
+            loop name in sema_stmt_destructure_names(pattern) {
+                local_name := if name.rename == .Val(rename) -> rename.name else -> name.name
+                index :: sema_scope_resolve_index(scopes, local_name) ?? next
+                sema_ownership_note_frozen_binding(&state, scopes.bindings[index].symbol.id.key, binding.init, scopes)
+            }
+        }
+        return statement
+    }
     // E0804: a lambda stored in a binding can't call itself through that name.
     if binding.init == .Lambda(lambda) && sema_ownership_last_use_expr(binding.init, binding.name) {
         &diagnostics.push(sema_error("E0804", lambda.span, "a lambda can't call itself as `{binding.name}`", "short functions stored in a binding can't recurse in v1", "write a named `fn` instead of assigning the lambda to `{binding.name}`"))
@@ -2927,6 +2937,7 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
         return None
     }
     sema_ownership_declare_binding(&state, symbol, false)
+    sema_ownership_note_frozen_binding(&state, symbol.id.key, binding.init, scopes)
     sema_single_use_note_binding(&state, symbol, environment)
     if binding.name == "_" -> sema_single_use_check_discard(init.ty, binding.name_span, environment, &diagnostics)
     sema_stmt_track_origin(binding, environment, &scopes)
@@ -3149,6 +3160,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
         return None
     }
     binding :: ~scopes.bindings[index]
+    if sema_ownership_reject_frozen_write(state, Expr.Ident{name: name, span: name_span}, "be assigned", name_span, scopes, &diagnostics) -> return None
     // Rust `is_global_mutable_binding`: a module-level `name := …` is the one
     // module-level write target; it writes the binding's runtime storage cell.
     if binding.symbol.kind == SymbolKind.Constant && sema_stmt_module_storage_binding(environment, binding.symbol.id) {
@@ -3203,6 +3215,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     }
     if !sema_ownership_check_lvalue_write(&state, LValue.Local{name: name, name_span: name_span}, scopes, &diagnostics) -> return None
     if !sema_stmt_move_direct(expr, &state, scopes, "the assignment to `{name}`", &diagnostics) -> return None
+    if op == None -> sema_ownership_note_frozen_binding(&state, binding.symbol.id.key, expr, scopes)
     line :: sema_source_line_at(environment.source_segments, name_span) ?? return None
     local := tir_symbol_local(name, binding.symbol.span, binding.symbol.id)
     local.mutable = true

@@ -2285,11 +2285,21 @@ pub fn sema_registration_compiler_builtin_row(graph: SemaRegistrationGraph, name
 pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: String, canonical_effect_module_identity: String, foreign_providers: [SemaForeignProviderInput], target_machine: MIRTargetMachine, build_facts: SemaBuildFacts, counting: Bool) -> SemaRegistrationGraph {
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
+    // Rust Bundle: inject_units_prelude, then resolve_unit_dimensions, before
+    // any module is registered. The compiler-owned effect module is not a
+    // source module and takes no catalog families.
+    prepared_inputs := inputs
+    units_catalog :: sema_units_catalog(&diagnostics)
+    loop index in 0..<prepared_inputs.len() {
+        if prepared_inputs[index].module_identity == canonical_effect_module_identity -> next
+        sema_units_inject(&prepared_inputs[index], units_catalog)
+    }
+    sema_units_resolve(&prepared_inputs, edges, &diagnostics)
     // Module identity -> row; duplicates are rejected below, so the first row
     // is the only row (Rust `Bundle/ItemReuse.rs` `by_identity`).
     module_rows := [String:Int]{}
-    loop input in inputs {
-        module_row := sema_registration_prepare_module_row(input, sema_generic_modules_imported(inputs, edges, input.module_identity), &diagnostics)
+    loop input in prepared_inputs {
+        module_row := sema_registration_prepare_module_row(input, sema_generic_modules_imported(prepared_inputs, edges, input.module_identity), &diagnostics)
         duplicate :: module_rows.get(module_row.module_identity) != None
         if !duplicate -> module_rows[module_row.module_identity] = modules.len()
         if {
@@ -2389,7 +2399,7 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     graph.complete = !sema_has_error_since(graph.diagnostics, 0)
     // D-CONF-GENSPELL1=A: generic-module aliases resolve and check their
     // arguments once every import is bound (Rust's expansion pre-pass).
-    sema_generic_modules_check(&graph, inputs)
+    sema_generic_modules_check(&graph, prepared_inputs)
     graph.complete = !sema_has_error_since(graph.diagnostics, 0)
     // Rust erases templates and aliases once expanded: their symbols stay
     // registered, but no later pass sees an unexpanded body. They are removed
