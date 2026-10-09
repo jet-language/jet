@@ -14502,12 +14502,6 @@ mod jet_c_abi_routes {
 
     /// TIR/tir_to_mir_expr.rs
     #[no_mangle]
-    pub extern "C" fn jet_datatree_equal_unordered(a0: *mut crate::jet_std::DataTree, a1: *mut crate::jet_std::DataTree) -> bool {
-        guard(|| crate::jet_datatree_equal_unordered(unsafe { &*a0 }, unsafe { &*a1 }))
-    }
-
-    /// TIR/tir_to_mir_expr.rs
-    #[no_mangle]
     pub extern "C" fn jet_datatree_field(a0: *mut crate::jet_std::DataTree, a1: JetCString, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut u64, err_len: *mut i64) -> i64 {
         guard(|| match crate::jet_datatree_field(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
