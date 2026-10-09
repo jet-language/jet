@@ -4267,7 +4267,10 @@ const WEBSERVERFN_PRELUDE_RAW: &str =
 const ENCODING_TRAITS_PRELUDE_RAW: &str =
     include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
-const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
+const MEM_PRELUDE: &str = concat!(
+    include_str!("../Prelude/Core/ForeignBytes.rs"),
+    include_str!("../Prelude/Mem.rs"),
+);
 /// D-MEM-SENTRY1: the one sentry kernel is shared verbatim with foundation.
 const MEM_SENTRY_PRELUDE: &str = include_str!("../../../jet-foundation/src/MemSentry.rs");
 const UNINIT_PRELUDE: &str = include_str!("../Prelude/Uninit.rs");

@@ -3639,6 +3639,11 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
         if lower_codec_call(p, c, &m, &f, instruction, call, args, type_args) -> return
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "call names missing Prelude call {call.value}")
+        if row.module_name == "core.mem" {
+            values := [MIRValueID]{}
+            loop arg in args -> &values.push(arg.value)
+            if lower_c_mem_route(p, c, &m, &f, instruction, call, values) -> return
+        }
         symbol :: lower_runtime_symbol(row)
         if lower_typed_call(p, c, &m, &f, instruction, symbol, args) -> return
         if args.len() == 1 {

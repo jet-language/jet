@@ -704,6 +704,43 @@ and include their checked signature, target, raw body, and schema in the cache
 identity. C/C++ wrappers and asm lower only after sema proves their boundary
 contracts.
 
+The native C path consumes the same checked direct/transitive library closure
+and object/archive link units. A local `c@path` source directory is realized
+with the installed C toolchain into a content-addressed static archive; source
+and header bytes, preprocessed translation units (including system headers),
+exact compiler flags, target and tool identities determine its key. Cache hits
+check the archive digest. System V scalar calls preserve
+their declared widths and floating-point register classes, and writable scalar
+arguments use C-width temporary slots followed by native writeback.
+
+SQLite uses the sanctioned 3.45.0 amalgamation from `libsqlite3-sys` 0.28.0 in
+`Core/vendor/sqlite3`, with its license and the seed's bundled feature flags,
+never a system SQLite. The upstream `sqlite3.c` SHA-256 is
+`7956a38f236a6be6c0bb30c96ba4f85f19e5a69f6beb6d2c62c9d246972a6775`.
+Packaging ships those sources beside the runtime. User foreign
+dependencies are program link inputs; a runtime pack includes only the foreign
+closure reached by its own declared sources, keeping the shared pack independent
+of user projects.
+User C closures also link the existing toolchain's musl `libc.a` (including
+math and pthread) and C compiler builtins as program-only platform inputs.
+Packaging places them in `jet-runtime/foreign/platform`; a program with no C
+closure receives no additional link inputs. They are never runtime-pack inputs.
+
+The private `Core.mem.__string_data` / `__string_byte_len` pair lends the
+existing UTF-8 String home, not a NUL-terminated or copied carrier. The caller
+keeps that home alive and unmodified through its audited byte-span use.
+Evaluator routes walk the original frame/place and read-parameter provenance;
+comptime expression fragments borrow the original scope before snapshotting.
+Neither path keeps a second String/pointer registry. `__bytes_pack` allocates
+one packed byte buffer (empty sentinel 1), `__bytes_unpack` makes an independent
+owned copy, and `__bytes_free` releases the pack once with its original length.
+C String parameters instead use per-call NUL-terminated copies; their String
+results are copied before those temporaries are released.
+`Core/mem/mem.jet` keeps private-loan and packed-byte tests in the trusted
+embedded Core lane; ordinary source cannot spell reserved `__` identifiers.
+`Compiler/JetCli/Tests/run-c-ffi.mjs` covers declared-source scalar ABI and the
+bundled SQLite open/prepare/select/finalize path against exact tier-parity output.
+
 `jet inspect bind cpp` is owned by `CppBind.rs`: clang AST discovery produces a
 deterministic Jet module and C-linkage shim/archive under
 `.jet/bindings/cpp/`, with provenance for the declaration, toolchain, target,

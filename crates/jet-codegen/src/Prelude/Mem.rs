@@ -85,6 +85,7 @@
     }
 
 
+
     const DEFAULT_ARENA_BYTES: usize = 4096;
     const DEFAULT_BUMP_BYTES: usize = 64 * 1024;
     const DEFAULT_POOL_SLOTS: usize = 64;

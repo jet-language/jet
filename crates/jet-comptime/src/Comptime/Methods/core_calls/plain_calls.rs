@@ -185,6 +185,11 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
     resolved_ret: Option<&Type>,
     history_schema: Option<&HistoryCommandSchema>,
 ) -> Result<CtValue, Diagnostic> {
+    if module == "core.mem" {
+        if let Some(result) = crate::Comptime::ForeignMemory::bytes_call(method, &args, span) {
+            return result;
+        }
+    }
     let args = normalize_path_args(module, method, args, span)?;
     validate_core_call_projection(
         module,

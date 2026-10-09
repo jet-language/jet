@@ -53,6 +53,7 @@ use jet_foundation::MIR::{
     MirUnaryOp, MirValueId, MirVariantPayload, MirViewCopyKind, mir_view_copy_kind,
 };
 mod PureFold;
+mod StringHome;
 pub(crate) use PureFold::fold_pure_calls;
 #[allow(dead_code, unused_imports)]
 mod mir_ui_kernel {
@@ -4708,8 +4709,10 @@ impl<'a, 'state> Machine<'a, 'state> {
                     if self.frames.len() >= jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT {
                         return Err(self.runtime_stack_overflow(function_row)?);
                     }
-                    let callee =
+                    let mut callee =
                         Frame::with_capture_cells(function_row, args, captures, capture_cells)?;
+                    let caller = self.frames.len() - 1;
+                    callee.caller_site = Some((caller, self.frames[caller].block, self.frames[caller].ip - 1));
                     self.frames.push(callee);
                     self.continuations.push(Some(Continuation { result, wrap_ok }));
                 }
@@ -26291,6 +26294,8 @@ struct Frame {
     ip: usize,
     predecessor: Option<MirBlockId>,
     params: Vec<RuntimeValue>,
+    // Borrow provenance only, not a second value/string registry.
+    caller_site: Option<(usize, MirBlockId, usize)>,
     captures: Vec<RuntimeValue>,
     capture_cells: Vec<Option<Rc<RefCell<RuntimeValue>>>>,
     values: BTreeMap<MirValueId, RuntimeValue>,
@@ -26340,6 +26345,7 @@ impl Frame {
             ip: 0,
             predecessor: None,
             params,
+            caller_site: None,
             captures,
             capture_cells,
             values: BTreeMap::new(),
@@ -32940,6 +32946,7 @@ fn run() {
             .expect("SharedGuard.wait program parked forever or the interpreter panicked")
             .unwrap_or_else(|error| panic!("{error}"))
     }
+
 
     #[test]
     fn mir_shared_guard_wait_returns_result_and_checks_predicate_before_parking() {

@@ -441,6 +441,7 @@ fn jet_eval_frame(function: MIRFunctionID, entry: MIRBlockID, args: [JetEvalRunt
         ip: 0,
         predecessor: None,
         params: args,
+        caller_site: None,
         captures: captures,
         values: [U64:JetEvalRuntimeValue]{},
         borrowed_values: [U64:Bool]{},
@@ -1273,7 +1274,12 @@ fn jet_eval_invoke_with_borrowed_captures(machine: &JetEvalMachine, function_id:
         return None
     }
     depth := machine.frames.len()
-    &machine.frames.push(jet_eval_frame(function_id, machine.program.functions[function].entry, args, captures, [MIRAccess]{}, [JetEvalSharedEntryLoan]{}, captures_borrowed))
+    child := jet_eval_frame(function_id, machine.program.functions[function].entry, args, captures, [MIRAccess]{}, [JetEvalSharedEntryLoan]{}, captures_borrowed)
+    if depth > 0 {
+        caller := depth - 1
+        child.caller_site = Val(JetEvalCallerSite{frame: caller, block: machine.frames[caller].block, ip: machine.frames[caller].ip - 1})
+    }
+    &machine.frames.push(^child)
     value :: jet_eval_run(&machine, depth) ?? {
         loop machine.frames.len() > depth {
             frame_index := machine.frames.len() - 1
@@ -9892,6 +9898,10 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
             return Val(JetEvalRuntimeValue.Address{frame: frame_index, place: place, access: access})
         }
         .CoreCall(call, route, args, type_args, fallibility, _) -> {
+            row :: jet_eval_route_core_row(&machine, call, span) ?? return None
+            if row.module_name == "core.mem" && (row.member == "__string_data" || row.member == "__string_byte_len") {
+                return jet_eval_string_home_call(&machine, frame_index, call, route, args, span)
+            }
             prepared :: jet_eval_call_arguments(&machine, frame_index, args, span) ?? return None
             result := jet_eval_route_core(&machine, call, route, prepared.values, type_args, fallibility, result_ty, span)
             return jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, result, span)

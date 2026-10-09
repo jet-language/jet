@@ -20,6 +20,7 @@ pub mod AppLite;
 mod ArgsLite;
 pub mod AuthLite;
 pub mod Build;
+pub mod ForeignMemory;
 /// Host/builtin surface shared by the canonical TIR evaluator (#777) and
 /// any remaining policy wrappers (purity). Public so `jet-codegen`'s TIR
 /// eval can dispatch without a second builtin table.

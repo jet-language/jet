@@ -368,8 +368,12 @@ pub(crate) mod jet_c_abi_iter {
         guard(|| {
             let meta = Meta::copy(meta);
             let show: unsafe extern "C" fn(*const u8) -> JetCString = std::mem::transmute(meta.show);
-            let parts = (*queue).iter().map(|value| *Box::from_raw(show(value.slot()))).collect::<Vec<String>>();
-            Box::into_raw(Box::new(parts.join((*separator).as_str())))
+            let parts = (*queue).iter().map(|value| {
+                let result = show(value.slot());
+                if jet_scheduler_native_propagate() != 0 { jet_scheduler_resume_native_stop(); }
+                super::jet_c_abi::take(result)
+            }).collect::<Vec<String>>();
+            super::jet_c_abi::handle(parts.join(view(separator)))
         })
     }
 }
