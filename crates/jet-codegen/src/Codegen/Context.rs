@@ -4376,16 +4376,6 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
-            // D-CORE-SECRETS1=A: generic TTL stays distinct from secret lifecycle.
-            Type::Apply { name, args }
-                if name == Syntax::EXPIRING_VALUE_TYPE && args.len() == 1 =>
-            {
-                format!("JetExpiring<{}>", self.rust_type(&args[0]))
-            }
-            // D-TTLVAL1=A: the one secret-lifetime wrapper.
-            Type::Apply { name, args } if name == "ExpiringSecret" && args.len() == 1 => {
-                format!("JetExpiringSecret<{}>", self.rust_type(&args[0]))
-            }
             // D-COLLBREADTH1=A: Set<T> → HashSet<T>, Queue<T> → VecDeque<T>.
             Type::Apply { name, args } if name == "Set" && !args.is_empty() => {
                 format!("std::collections::HashSet<{}>", self.rust_type(&args[0]))
