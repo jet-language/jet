@@ -1,5 +1,6 @@
 // Public MIR -> Rust source boundary. Incomplete artifacts never carry source.
 use jet_foundation.[
+    name_mangle,
     CompilerTraceSink,
     MIRAccess,
     MIRBasicBlock,
@@ -184,7 +185,7 @@ fn jet_rust_emit_foreign(ctx: &JetRustEmitContext, foreign: MIRForeign) -> [Stri
     if transport == "managed" || transport == "managed-close" || transport == "emit-task" -> return lines
     params := [String]{}
     loop parameter in foreign.params {
-        name :: jet_rust_emit_mangle(parameter.name)
+        name :: name_mangle(parameter.name)
         &params.push("{name}: {jet_rust_emit_foreign_param_type(&ctx, foreign, parameter)}")
     }
     if transport == "native-start" -> &params.push("__jet_callback_ctx: *mut core::ffi::c_void")

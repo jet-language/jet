@@ -1,6 +1,7 @@
 // MIR operation printer. Every branch consumes an already checked operation and
 // either preserves its ownership/failure facts or marks the artifact incomplete.
 use jet_foundation.[
+    name_mangle,
     MIRAccess,
     MIRBinaryDispatch,
     MIRBinaryOp,
@@ -358,7 +359,7 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFun
     if arg.authority_boundary -> value = "jet_authority_to_wire(&({value}))"
     if arg.widen_fixed_to_list -> value = "({value}).to_vec()"
     if arg.widen_to_union == .Val(coercion) {
-        value = "{jet_rust_emit_type_name(&ctx, coercion.union)}::{jet_rust_emit_mangle(coercion.variant)}({value})"
+        value = "{jet_rust_emit_type_name(&ctx, coercion.union)}::{name_mangle(coercion.variant)}({value})"
     }
     if trait_box {
         trait_id :: arg.box_as_trait ?? MIRTypeID{value: 0}
@@ -995,7 +996,7 @@ fn jet_rust_emit_canonical_equality_definition(ctx: &JetRustEmitContext, definit
             arms := [String]{}
             type_name :: jet_rust_emit_type_name(&ctx, definition.id)
             loop member in members {
-                head :: "{type_name}::{jet_rust_emit_mangle(member)}"
+                head :: "{type_name}::{name_mangle(member)}"
                 &arms.push("({head}, {head}) => true")
             }
             &arms.push("_ => false")
@@ -2481,9 +2482,9 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: M
         .Foreign(id) -> jet_rust_emit_foreign_arguments(&ctx, function, id, args)
         .User(id) -> {
             index :: jet_rust_emit_function_index(ctx, id) ?? return ""
-            target :: ctx.program.functions[index]
+            is_service_worker :: ctx.program.functions[index].module_name == "core_core_service" && ctx.program.functions[index].name == "worker"
             rendered := ""
-            if target.module_name == "core_core_service" && target.name == "worker" {
+            if is_service_worker {
                 if args.len() != 5 {
                     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "checked source worker ABI", "the existing worker normalization supplies exactly five arguments", Val(function.span))
                     return ""

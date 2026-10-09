@@ -1,6 +1,7 @@
 // SSA values and MIR places. Ownership is represented by Option slots so a
 // checked Move consumes exactly one slot; borrowed places remain references.
 use jet_foundation.[
+    name_mangle,
     MIRAccess,
     MIRBinaryOp,
     MIRCallArg,
@@ -560,7 +561,7 @@ fn jet_rust_emit_is_receiver(function: MIRFunction, index: Int) -> Bool Never! {
 // MIRRust parameter names: `Names::mangle` of the checked parameter name, so a
 // Jet name that is a Rust keyword (`async`) still spells a legal identifier.
 fn jet_rust_emit_parameter_name(function: MIRFunction, index: Int) -> String Never! {
-    if jet_rust_emit_is_receiver(function, index) -> "__jet_self" else -> jet_rust_emit_mangle(jet_rust_emit_find_parameter(function, index).name)
+    if jet_rust_emit_is_receiver(function, index) -> "__jet_self" else -> name_mangle(jet_rust_emit_find_parameter(function, index).name)
 }
 
 fn jet_rust_emit_capture_name(slot: Int) -> String Never! { "__jet_capture_{slot}" }
