@@ -38,8 +38,15 @@ pub fn sema_units_inject(input: &SemaRegistrationModuleInput, catalog: [UnitFami
     loop (index, family) in catalog {
         rows[family.family] = index
         used := sema_units_identifier(mentions, family.family)
-        if !used { loop member in family.members { if sema_units_member(mentions, member.name) -> used = true } }
-        if used { selected[family.family] = true; &queue.push(index) }
+        if !used {
+            loop member in family.members {
+                if sema_units_member(mentions, member.name) -> used = true
+            }
+        }
+        if used {
+            selected[family.family] = true
+            &queue.push(index)
+        }
     }
     // Transitive dimension dependencies, visiting each selected family once.
     at := 0
@@ -69,7 +76,10 @@ pub fn sema_units_inject(input: &SemaRegistrationModuleInput, catalog: [UnitFami
         family.members = members
         anchor := Span?{None}
         loop member in family.members {
-            if sema_units_member_span(mentions, member.name) == .Val(span) { anchor = Val(span); break }
+            if sema_units_member_span(mentions, member.name) == .Val(span) {
+                anchor = Val(span)
+                break
+            }
         }
         family_anchor :: anchor ?? sema_units_identifier_span(mentions, family.family) ?? Span{start: 0, end: 0}
         loop index in 0..<family.members.len() -> family.members[index].name_span = sema_units_member_span(mentions, family.members[index].name) ?? family_anchor

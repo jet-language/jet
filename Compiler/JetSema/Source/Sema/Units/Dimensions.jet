@@ -25,7 +25,8 @@ fn sema_units_dimension_target(visible: SemaUnitDimensionVisibility, qualifier: 
     if visible.local.get(name) == .Val(index) -> return (target: Val(index), ambiguous: false)
     candidates :: visible.imported.get(name) ?? [Int]{}
     if candidates.len() > 1 -> return (target: None, ambiguous: true)
-    (target: if candidates.len() == 1 -> Val(candidates[0]) else -> None, ambiguous: false)
+    if candidates.len() == 1 -> return (target: Val(candidates[0]), ambiguous: false)
+    (target: Int?{None}, ambiguous: false)
 }
 fn sema_units_dimension_lookup(visible: SemaUnitDimensionVisibility, known: [Int:Dimension], qualifier: String?, name: String, ambiguity_only: Bool) -> SemaUnitDimensionLookup Never! {
     target :: sema_units_dimension_target(visible, qualifier, name)
@@ -64,7 +65,10 @@ fn sema_units_dimension_expression(expression: Expr, visible: SemaUnitDimensionV
 pub fn sema_units_dimension_dependencies(expression: Expr, names: &[String]) Never! {
     if expression == {
         .Ident(name, _) -> &names.push(name)
-        .Binary(_, left, right, _) -> { sema_units_dimension_dependencies(left, &names); sema_units_dimension_dependencies(right, &names) }
+        .Binary(_, left, right, _) -> {
+            sema_units_dimension_dependencies(left, &names)
+            sema_units_dimension_dependencies(right, &names)
+        }
         else -> {}
     }
 }
@@ -109,7 +113,10 @@ fn sema_units_dimension_reads(expression: Expr, visible: SemaUnitDimensionVisibi
             }
             // A field base is not an unqualified dimension read.
         }
-        .Binary(_, left, right, _) -> { sema_units_dimension_reads(left, visible, &dependencies, &aliases); sema_units_dimension_reads(right, visible, &dependencies, &aliases) }
+        .Binary(_, left, right, _) -> {
+            sema_units_dimension_reads(left, visible, &dependencies, &aliases)
+            sema_units_dimension_reads(right, visible, &dependencies, &aliases)
+        }
         else -> {}
     }
 }
@@ -135,13 +142,19 @@ pub fn sema_units_resolve_standard(prelude: &[UnitFamilyDef]) Never! {
             if known.get(index) != None -> next
             if prelude[index].dimension == .Val(claim) {
                 if claim == .Derived(expression) {
-                    if sema_units_dimension_expression(expression, visible, known, false) == .Found(value) { known[index] = value; progress = true }
+                    if sema_units_dimension_expression(expression, visible, known, false) == .Found(value) {
+                        known[index] = value
+                        progress = true
+                    }
                 }
             }
         }
         if !progress -> break
     }
-    loop index in 0..<prelude.len() { prelude[index].resolved_dimension = known.get(index); prelude[index].resolved_owner = Val("core.units") }
+    loop index in 0..<prelude.len() {
+        prelude[index].resolved_dimension = known.get(index)
+        prelude[index].resolved_owner = Val("core.units")
+    }
 }
 // Rust resolve_unit_dimensions. Visibility is built from exact resolved
 // import edges (the name-ledger import target), not guessed source paths.
@@ -212,7 +225,10 @@ pub fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRe
                 }
             }
             loop (dependency, _) in dependencies {
-                if known.get(dependency) == None { waits[index] += 1; &dependents[dependency].push(index) }
+                if known.get(dependency) == None {
+                    waits[index] += 1
+                    &dependents[dependency].push(index)
+                }
             }
             if known.get(index) == None && waits[index] == 0 -> &queue.push(index)
         }
