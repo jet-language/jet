@@ -252,6 +252,19 @@ It must not introduce a third front end, a second query verdict, or a new
 execution lens. The Rust host is a bootstrap seed: it is frozen once the Jet
 compiler ships with parity and removed once the native back end is complete
 (D-EXEC2, owner directive 19).
+
+The compiler and runtime aggregates have separate explicit source inventories:
+[`Compiler/Bootstrap/sources.list`](../../Compiler/Bootstrap/sources.list) and
+[`Compiler/JetRuntime/sources.list`](../../Compiler/JetRuntime/sources.list).
+Compiler assembly excludes runtime-only units, while a source listed in both
+(for example `OS/Linux.jet` or `ErrLayout.jet`) is deliberately shared. An
+unlisted compiler source still fails assembly. Partial compiler trees must carry
+the runtime manifest and MIR observation generator metadata as well as their
+own source manifest. The
+[`bootstrap source inventory guard`](../../Tools/agent/bootstrap-source-inventory.test.mjs)
+checks that boundary; the
+[`MIR schema grammar guard`](../../Compiler/JetBackend/Tests/mir-schema.test.mjs)
+keeps observation aligned with public-by-default declarations and private fields.
 The private startup-output factory packages supplied environment bytes and
 terminal facts as an ordinary checked Source value, retaining owned typed bytes.
 Native suppliers must match that value's checked layout and ownership.

@@ -165,6 +165,16 @@ function rungs(sourceTree, rungsDir) {
       for (const root of sourceRoots) mkdirSync(join(tree, root), { recursive: true });
       for (const path of selected) place(join(src, path), join(tree, path));
       copyFileSync(assembler, join(tree, "Compiler/Bootstrap/assemble.mjs"));
+      // Assembly checks the inventory boundary and generates MIR observation
+      // helpers even for partial trees; these files add no rung sources.
+      for (const metadata of [
+        "Compiler/JetRuntime/sources.list",
+        "Compiler/JetBackend/Tests/mir-debug.mjs",
+        "Compiler/JetBackend/Tests/front-feed-codec.mjs",
+      ]) {
+        mkdirSync(dirname(join(tree, metadata)), { recursive: true });
+        copyFileSync(join(src, metadata), join(tree, metadata));
+      }
       const anchor = [
         `// Ladder rung ${rung.name} anchor (stage1/ladder.mjs): the rung's counterpart of Host/Entry.jet.`,
         `// Packages: ${rung.packages.join(", ")}.`,

@@ -98,6 +98,12 @@ function blankPackageImports(text) {
 const manifestText = await readFile(manifestPath, "utf8").catch((error) => {
   fail(`cannot read source manifest ${relative(repoRoot, manifestPath)}: ${error.message}`);
 });
+const runtimeManifestPath = resolve(sourceRootDir, "Compiler/JetRuntime/sources.list");
+const runtimeManifestText = await readFile(runtimeManifestPath, "utf8").catch((error) => {
+  fail(`cannot read runtime source manifest ${relative(sourceRootDir, runtimeManifestPath)}: ${error.message}`);
+});
+const runtimeSources = new Set(runtimeManifestText.split(/\r?\n/)
+  .map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#")));
 
 
 const entries = [];
@@ -174,7 +180,12 @@ for (const sourceRoot of sourceRoots) {
   const paths = await jetFilesUnder(absoluteRoot).catch((error) => {
     fail(`cannot inventory ${sourceRoot}: ${error.message}`);
   });
-  for (const path of paths) inventoried.add(relative(sourceRootDir, path).split(sep).join("/"));
+  for (const path of paths) {
+    const sourcePath = relative(sourceRootDir, path).split(sep).join("/");
+    // Runtime-only ABI units belong to their own aggregate. Explicit shared
+    // sources (for example OS/Linux.jet) still join the compiler inventory.
+    if (!runtimeSources.has(sourcePath) || seen.has(sourcePath)) inventoried.add(sourcePath);
+  }
 }
 const unlisted = [...inventoried].filter((sourcePath) => !seen.has(sourcePath) && !isExcludedSourcePath(sourcePath)).sort();
 if (unlisted.length > 0) {

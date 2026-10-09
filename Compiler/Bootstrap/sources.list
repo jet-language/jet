@@ -6,6 +6,12 @@
 # Foundation diagnostics and the host trace sink
 Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet
 Compiler/JetFoundation/Source/Trace.jet
+Compiler/JetFoundation/Source/Trace/Carriers.jet
+Compiler/JetFoundation/Source/Trace/Content.jet
+Compiler/JetFoundation/Source/Trace/JetTrace.jet
+Compiler/JetFoundation/Source/Trace/Validate.jet
+Compiler/JetFoundation/Source/Trace/ValidateProfile.jet
+Compiler/JetFoundation/Source/Trace/ValidateTasks.jet
 Compiler/JetFoundation/Source/Threads.jet
 Compiler/JetFoundation/Source/AST/Names.jet
 
@@ -35,6 +41,8 @@ Compiler/JetFoundation/Source/Types/IntegerKinds.jet
 Compiler/JetFoundation/Source/Types/TupleNames.jet
 Compiler/JetFoundation/Source/DerivationTypes.jet
 Compiler/JetFoundation/Source/MIR/MIR.jet
+Compiler/JetFoundation/Source/Registry/PreludeEffects.jet
+Compiler/JetFoundation/Source/Registry/RuntimeStopExports.jet
 Compiler/JetFoundation/Source/MIR/AccelerationGate.jet
 Compiler/JetFoundation/Source/MIR/AccelerationCodec.jet
 Compiler/JetFoundation/Source/Names/Names.jet
@@ -111,6 +119,7 @@ Compiler/JetBackend/Source/LIR/Lint.jet
 Compiler/JetBackend/Source/LIR/Print.jet
 Compiler/JetBackend/Source/LIR/Sanitize.jet
 Compiler/JetBackend/Source/UiABI.jet
+Compiler/JetBackend/Source/ErrLayout.jet
 Compiler/JetBackend/Source/Lower/Constants.jet
 Compiler/JetBackend/Source/Lower/Statics.jet
 Compiler/JetBackend/Source/Lower/StructLiteral.jet
@@ -118,6 +127,13 @@ Compiler/JetBackend/Source/Lower/Convert.jet
 Compiler/JetBackend/Source/Lower/Numeric.jet
 Compiler/JetBackend/Source/Lower/Require.jet
 Compiler/JetBackend/Source/Lower/Patterns.jet
+Compiler/JetBackend/Source/Lower/CForeign.jet
+Compiler/JetBackend/Source/Lower/Dyn.jet
+Compiler/JetBackend/Source/Lower/NativeErr.jet
+Compiler/JetBackend/Source/Lower/NativeHandleGlue.jet
+Compiler/JetBackend/Source/Lower/NativeRecordGlue.jet
+Compiler/JetBackend/Source/Lower/Order.jet
+Compiler/JetBackend/Source/Lower/StaticText.jet
 Compiler/JetBackend/Source/Lower/Lower.jet
 Compiler/JetBackend/Source/Lower/Debug.jet
 Compiler/JetBackend/Source/Lower/Liveness.jet
@@ -130,7 +146,6 @@ Compiler/JetBackend/Source/Lower/Lists.jet
 Compiler/JetBackend/Source/Lower/Queues.jet
 Compiler/JetBackend/Source/Lower/Maps.jet
 Compiler/JetBackend/Source/Lower/Sets.jet
-Compiler/JetBackend/Source/Lower/Queues.jet
 Compiler/JetBackend/Source/Lower/PriorityQueues.jet
 Compiler/JetBackend/Source/Lower/Iter.jet
 Compiler/JetBackend/Source/Lower/Iterable.jet
@@ -174,6 +189,8 @@ Compiler/JetBackend/Source/X64/Select.jet
 Compiler/JetBackend/Source/Image/Link.jet
 Compiler/JetBackend/Source/Image/Runtime.jet
 Compiler/JetBackend/Source/Image/RuntimeStrings.jet
+Compiler/JetBackend/Source/Image/SourceResources.jet
+Compiler/JetBackend/Source/Image/Dwarf.jet
 Compiler/JetBackend/Source/Image/ELF.jet
 Compiler/JetBackend/Source/Image/Object.jet
 Compiler/JetBackend/Source/Image/RuntimeObject.jet
@@ -193,57 +210,6 @@ Compiler/JetBackend/Source/Image/Calls.jet
 Compiler/JetBackend/Source/Image/ComptimeValues.jet
 Compiler/JetBackend/Source/Image/ComptimeWire.jet
 Compiler/JetBackend/Source/Image/SessionHost.jet
-
-# Jet-native backend: LIR, MIR -> LIR lowering, x86-64 generator, images,
-# the Jet OS layer and the in-process loader
-Compiler/JetBackend/Source/LIR/LIR.jet
-Compiler/JetBackend/Source/LIR/Lint.jet
-Compiler/JetBackend/Source/LIR/Print.jet
-Compiler/JetBackend/Source/Lower/Lower.jet
-Compiler/JetBackend/Source/X64/Encoder.jet
-Compiler/JetBackend/Source/X64/RegAlloc.jet
-Compiler/JetBackend/Source/X64/Select.jet
-Compiler/JetBackend/Source/Image/Link.jet
-Compiler/JetBackend/Source/Image/Runtime.jet
-Compiler/JetBackend/Source/Image/ELF.jet
-Compiler/JetBackend/Source/Image/Object.jet
-Compiler/JetBackend/Source/Image/Memory.jet
-Compiler/JetBackend/Source/OS/Linux.jet
-Compiler/JetBackend/Source/Image/Loader.jet
-
-# Jet-native backend: LIR, MIR -> LIR lowering, x86-64 generator, images,
-# the Jet OS layer and the in-process loader
-Compiler/JetBackend/Source/LIR/LIR.jet
-Compiler/JetBackend/Source/LIR/Lint.jet
-Compiler/JetBackend/Source/LIR/Print.jet
-Compiler/JetBackend/Source/Lower/Lower.jet
-Compiler/JetBackend/Source/X64/Encoder.jet
-Compiler/JetBackend/Source/X64/RegAlloc.jet
-Compiler/JetBackend/Source/X64/Select.jet
-Compiler/JetBackend/Source/Image/Link.jet
-Compiler/JetBackend/Source/Image/Runtime.jet
-Compiler/JetBackend/Source/Image/ELF.jet
-Compiler/JetBackend/Source/Image/Object.jet
-Compiler/JetBackend/Source/Image/Memory.jet
-Compiler/JetBackend/Source/OS/Linux.jet
-Compiler/JetBackend/Source/Image/Loader.jet
-
-# Jet-native backend: LIR, MIR -> LIR lowering, x86-64 generator, images,
-# the Jet OS layer and the in-process loader
-Compiler/JetBackend/Source/LIR/LIR.jet
-Compiler/JetBackend/Source/LIR/Lint.jet
-Compiler/JetBackend/Source/LIR/Print.jet
-Compiler/JetBackend/Source/Lower/Lower.jet
-Compiler/JetBackend/Source/X64/Encoder.jet
-Compiler/JetBackend/Source/X64/RegAlloc.jet
-Compiler/JetBackend/Source/X64/Select.jet
-Compiler/JetBackend/Source/Image/Link.jet
-Compiler/JetBackend/Source/Image/Runtime.jet
-Compiler/JetBackend/Source/Image/ELF.jet
-Compiler/JetBackend/Source/Image/Object.jet
-Compiler/JetBackend/Source/Image/Memory.jet
-Compiler/JetBackend/Source/OS/Linux.jet
-Compiler/JetBackend/Source/Image/Loader.jet
 
 # AST and parser
 Compiler/JetFoundation/Source/AST/Expressions.jet
@@ -376,7 +342,6 @@ Compiler/JetSema/Source/Sema/FailureLaw.jet
 Compiler/JetSema/Source/Sema/FailureUnion.jet
 Compiler/JetSema/Source/Sema/CheckProgram.jet
 Compiler/JetSema/Source/Sema/CostCoverage.jet
-Compiler/JetSema/Source/Sema/Outputs.jet
 Compiler/JetSema/Source/Sema/NameDisplay.jet
 Compiler/JetSema/Source/Sema/MemoryProjection.jet
 Compiler/JetSema/Source/Sema/CheckedProjections.jet
@@ -456,6 +421,7 @@ Compiler/JetCodegen/Source/Codegen/ModuleCalls.jet
 Compiler/JetCodegen/Source/Codegen/JobTestArtifacts.jet
 Compiler/JetCodegen/Source/Codegen/Migrations.jet
 Compiler/JetCodegen/Source/Codegen/CoreReachability.jet
+Compiler/JetCodegen/Source/Codegen/RetainedRoots.jet
 Compiler/JetCodegen/Source/Codegen/CostReport.jet
 Compiler/JetCodegen/Source/Emit/Types.jet
 Compiler/JetCodegen/Source/Emit/Context.jet
@@ -466,6 +432,8 @@ Compiler/JetCodegen/Source/Emit/Semantic.jet
 Compiler/JetCodegen/Source/Emit/ControlFlow.jet
 Compiler/JetCodegen/Source/Emit/Functions.jet
 Compiler/JetCodegen/Source/Emit/Hardware.jet
+Compiler/JetCodegen/Source/Emit/CoreParentSeed.jet
+Compiler/JetCodegen/Source/Emit/CoreParentIngress.jet
 Compiler/JetCodegen/Source/Emit/Entry.jet
 Compiler/JetCodegen/Source/Emit/Harness.jet
 Compiler/JetCodegen/Source/Emit/Linkage.jet
@@ -483,6 +451,7 @@ Compiler/JetEval/Source/EvalValues.jet
 Compiler/JetEval/Source/BuildServices.jet
 Compiler/JetEval/Source/SharedRuntime.jet
 Compiler/JetEval/Source/Routes/SourcePrelude.jet
+Compiler/JetEval/Source/Routes/Errors.jet
 Compiler/JetEval/Source/Routes/Registry.jet
 Compiler/JetEval/Source/Routes/Numeric.jet
 Compiler/JetEval/Source/Routes/Prelude.jet
@@ -504,6 +473,13 @@ Compiler/JetDriver/Source/Driver/Loader.jet
 Compiler/JetDriver/Source/Driver/LoadedInputPaths.jet
 Compiler/JetDriver/Source/Driver/ForeignProviders.jet
 Compiler/JetDriver/Source/Driver/Schema.jet
+Compiler/JetDriver/Source/Driver/CanonicalPass.jet
+Compiler/JetDriver/Source/Driver/CoreLibrary.jet
+Compiler/JetDriver/Source/Driver/ForeignDeps.jet
+Compiler/JetDriver/Source/Driver/MarkerGroups.jet
+Compiler/JetDriver/Source/Driver/NativeComptime.jet
+Compiler/JetDriver/Source/Driver/NativeSharedSlot.jet
+Compiler/JetDriver/Source/Driver/SharedPayloadCodec.jet
 Compiler/JetDriver/Source/Driver/Pipeline.jet
 Compiler/JetDriver/Source/Driver/CostQueries.jet
 Compiler/JetDriver/Source/Driver/GateProjection.jet
@@ -724,7 +700,6 @@ Compiler/JetCli/Source/Cli/InspectSource.jet
 Compiler/JetCli/Source/Cli/StructureRegistry.jet
 Compiler/JetCli/Source/Cli/InspectStructure.jet
 Compiler/JetCli/Source/Cli/InspectClaims.jet
-Compiler/JetCli/Source/Cli/InspectCanonicalGaps.jet
 Compiler/JetCli/Source/Cli/EngineCommands.jet
 Compiler/JetCli/Source/Cli/Project.jet
 Compiler/JetCli/Source/Cli/Format.jet
@@ -750,6 +725,24 @@ Compiler/JetCli/Source/Cli/StructuralMerge.jet
 Compiler/JetCli/Source/Cli/Expand.jet
 Compiler/JetCli/Source/Cli/ExpandFacts.jet
 Compiler/JetCli/Source/Cli/HostStartupOutputFacts.jet
+Compiler/JetCli/Source/Cli/Commands.jet
+Compiler/JetCli/Source/Cli/Dependency.jet
+Compiler/JetCli/Source/Cli/Dev/DbOptions.jet
+Compiler/JetCli/Source/Cli/Dev/DbRows.jet
+Compiler/JetCli/Source/Cli/Dev/DbSession.jet
+Compiler/JetCli/Source/Cli/Jobs.jet
+Compiler/JetCli/Source/Cli/Package/Bundle.jet
+Compiler/JetCli/Source/Cli/Package/FlashAudit.jet
+Compiler/JetCli/Source/Cli/Package/FlashPlan.jet
+Compiler/JetCli/Source/Cli/Package/NativeBundle.jet
+Compiler/JetCli/Source/Cli/Package/NativeFlash.jet
+Compiler/JetCli/Source/Cli/Perf/BrowserCapture.jet
+Compiler/JetCli/Source/Cli/Perf/Capture.jet
+Compiler/JetCli/Source/Cli/Perf/LiveCapture.jet
+Compiler/JetCli/Source/Cli/Perf/SourceSampling.jet
+Compiler/JetCli/Source/Cli/Sandbox.jet
+Compiler/JetCli/Source/Cli/Supply.jet
+Compiler/JetCli/Source/Cli/ToolchainPin.jet
 Compiler/JetCli/Source/Cli/Host.jet
 Compiler/JetCli/Source/Cli/ForeignLink.jet
 Compiler/JetCli/Source/Cli/NativeTests.jet
