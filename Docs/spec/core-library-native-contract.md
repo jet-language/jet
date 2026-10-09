@@ -84,19 +84,20 @@ A mismatch replaces the original with `E3001` and sets unmet so no
 parent can catch the mismatch. Cancellation, deadlines, skips, unrecognized
 codes, and probes for another scope do not mutate the pending stop. Sentry
 records its raw fault detail before dropping it, never its rendered report.
-The bootstrap's opt-in `JET_FRONT_MIR_DUMP` observer writes canonical
-`mir_program_bytes` to its supplied path. It does not alter lowering mode;
-non-test regression proofs compare those bytes and their SHA-256 digests.
+The native checked-MIR transport calls the CLI's authorized compiler request
+and serializes the resulting MIR through the canonical Jet MIR writer. The
+transport records the real driver outcome and requires a fresh output stream.
 `Tests/Fixtures/ExpectFail.jet` supplies compiled native match, mismatch,
 unmet, nested, checked/unarmed R080 and deeper/own-close witnesses through the
 real Task transport. `run-expect-producer.mjs` appends a focused proof to the
 compiler aggregate: it reuses the CLI's authorized request, selects Test mode,
 checks real MIR branch/boundary/exit-poll edges, then emits and runs that checked
 test's object. `check-expect-mir-identity.mjs` compares a fixed non-test corpus
-with stop points enabled in before/after shared compilers (the baseline needs
-the observer backported, without the expectation amendment). These execution
-and byte-identity checks belong to the composed compiler-unit proof, not the
-light source-parser lane.
+through before/after checked-MIR drivers built from their respective pinned
+compiler sources. Both drivers use the same native transport and stop-point
+mode; compiling the same current frontend twice does not establish a historical
+frontend comparison. These execution and byte-identity checks belong to the
+composed compiler-unit proof, not the light source-parser lane.
 
 ## Purpose and scope
 

@@ -70,6 +70,13 @@ Trap proofs compare the native status, signal and exact stdout/stderr against
 the committed golden, not a retired MIR/Rust execution. The freestanding
 display witness links the sealed C-client object and its provenance-listed C
 platform archives, rather than the program pack's startup.
+Native fixture and registry feeds share
+[`compiler-native-transport`](../../Tools/agent/compiler-native-transport.mjs):
+the production CLI's `check FILE` library-object seam and `build FILE` program
+path. Library feeds require fresh object, export and ABI files; command
+completion alone is not a native pass. Checked-MIR observers are explicit Jet
+drivers compiled from the canonical compiler aggregate, cached per pinned
+toolchain, rather than a bootstrap factory or a retired Rust observer.
 
 The compiler frontend receipt must retain the full foreign Cargo diagnostics,
 including cached bridge fingerprint output when an inline-FFI error hides
@@ -430,6 +437,9 @@ moves the original payload-bearing tokens and formats the existing diagnostic.
 The raw scanner and parser are outside that pass. Keeping payload ownership
 on the host avoids encoding a second token model or copying compiler objects
 across a supposed stable ABI.
+The Jet lexer's terminator pass moves the `LexedTokens` payload carrier.
+`lex_with_terminators` attaches its scanner's `TokenTables` to produce `Lexed`;
+the terminator pass does not create or copy those tables.
 
 The private bootstrap adapter in
 [`selfhost_terminators`](../../tests/selfhost_terminators.rs) produces checked,

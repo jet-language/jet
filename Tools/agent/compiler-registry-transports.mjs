@@ -2,10 +2,10 @@
 // One counted test is one complete source-registry verdict, not each internal assert.
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { parseRuntimeExports, runtimeLifecycleList } from './runtime-route-abi.mjs';
+import { assembleNativeCompiler, buildNativeCheckedMirDriver, runNativeCheckedMir, runNativeLibrary, runNativeProgram, stageNativeToolchain } from './compiler-native-transport.mjs';
 import { collectGoldenEntries } from './compiler-diff.mjs';
 import { copyFeatureProject, featureProjectRoot } from './run-feature-examples.mjs';
 
@@ -13,26 +13,6 @@ const adapter = fileURLToPath(import.meta.url);
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const rt = 'Compiler/JetRuntime/Tests/';
 const be = 'Compiler/JetBackend/Tests/';
-const packageSource = 'name: "compiler_registry_transport"\nversion: "0.0.1"\nedition: "2028"\nauthority: { holds: { allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Time.Wait, FFI] } }\n';
-const mirTransportSource = `
-fn run() {
-    args :: cli_process.args()
-    if args.len() != 2 { panic("expected source and checked MIR output") }
-    compiled :: jet_cli_compile_file(args[0], false, false, None, JetDriverCompileMode.Program)
-    if compiled == {
-        .Refused(refusal) -> panic("registry MIR request refused: {refusal.stderr}")
-        .Compiled(result, _) -> {
-            if !result.complete || result.internal_problem != None { panic("registry MIR compile did not complete") }
-            program :: result.mir ?? panic("registry MIR compile omitted MIR")
-            entry :: result.entry_function ?? MIRFunctionID{value: 0}
-            stream := [String]{"{entry.value}"}
-            mirw_mir_program(program, &stream)
-            cli_files.write(args[1], stream.join("\\n")) ?? panic("cannot write checked registry MIR")
-            print("checked registry MIR: pass")
-        }
-    }
-}
-`;
 function suiteLibrary(spec, out) {
     if (spec.name === 'SharedThread') return { file: join(out, 'shared/Source/Fixture.jet'), prefix: join(out, 'shared/fixture'), lifecycle: join(out, 'shared/lifecycle.list') };
     const folder = spec.name === 'CollectionsStop' ? out : join(out, spec.runner.endsWith('run-channel-fixtures.mjs') || spec.name === 'SharedSource' ? 'fixture' : 'unit');
@@ -225,14 +205,7 @@ export async function runTransport(entry, { jet, repo, logDir, runtimePack, runt
     const evidence = [];
     // Production CLI resolves its runtime beside its executable. Stage exactly
     // the explicitly supplied pack, never use a previous installed runtime.
-    const toolchain = join(logDir, 'toolchain');
-    if (!existsSync(toolchain)) {
-        mkdirSync(toolchain, { recursive: true });
-        copyFileSync(jet, join(toolchain, 'jet')); chmodSync(join(toolchain, 'jet'), 0o755);
-        cpSync(runtimeDir, join(toolchain, 'jet-runtime'), { recursive: true, dereference: true });
-    } else if (digest(readFileSync(join(toolchain, 'jet'))) !== digest(readFileSync(jet)) ||
-        digest(readFileSync(join(toolchain, 'jet-runtime', basename(dirname(runtimePack)), 'jet_runtime.pack.o'))) !== digest(readFileSync(runtimePack))) throw Error('staged transport toolchain changed');
-    const nativeJet = join(toolchain, 'jet');
+    const nativeJet = stageNativeToolchain({ jet, runtimePack, runtimeDir, out: join(logDir, 'toolchain') });
     const env = { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_KEEP_GOING: '1', JET: nativeJet, JET_RUN: nativeJet, JET_RUNTIME_PACK: runtimePack, JET_RUNTIME_JET_OBJECT: runtimeObject, JET_RUNTIME_OBJECT: runtimeObject, JET_RUNTIME_C_LIB: runtimeObject, NO_COLOR: '1', TERM: 'dumb' };
     for (const name of Object.keys(env)) if (/^JET_(?:BOOTSTRAP_|FRONT_)/.test(name) || name === 'JET_DUMP_MIR') delete env[name];
     for (const name of ['JET_TEST_FILTER', 'JET_NATIVE_TEST_ID', 'FX_ONLY', 'FX_HEAD', 'FX_EXCLUDE', 'SELFHOST_SKIP', 'SELFHOST_ROOTS']) delete env[name];
@@ -250,36 +223,19 @@ export async function runTransport(entry, { jet, repo, logDir, runtimePack, runt
     }
     let checkedMirDriver;
     async function compile(file, root, prefix, mir = null) {
-        if (!existsSync(join(root, 'package.jet'))) writeFileSync(join(root, 'package.jet'), packageSource);
         if (mir) {
-            // A real Jet transport driver obtains checked MIR in-process through
-            // the same authorized CLI request; no Tests.rs factory protocol.
-            const transportRoot = join(out, 'mir-transport'); mkdirSync(transportRoot, { recursive: true });
-            const source = join(transportRoot, 'transport.jet');
-            if (!checkedMirDriver) {
-                writeFileSync(source, readFileSync(await aggregate(), 'utf8') + '\n' + mirTransportSource);
-                writeFileSync(join(transportRoot, 'package.jet'), packageSource);
-                checkedMirDriver = await compile(source, transportRoot, join(transportRoot, 'transport'));
-            }
-            exact(execute(checkedMirDriver, [file, mir]), 'checked registry MIR: pass\n');
+            if (!checkedMirDriver) checkedMirDriver = buildNativeCheckedMirDriver({ jet: nativeJet, repo, out: join(out, 'mir-transport'), env, execute });
+            const result = runNativeCheckedMir({ driver: checkedMirDriver, file, mir, prefix, cwd: out, env, execute });
+            if (result.problem) throw Error(result.problem.detail);
             return mir;
         }
-        const built = join(root, '.jet/build', basename(file, '.jet'));
-        rmSync(built, { force: true }); rmSync(built + '.o', { force: true });
-        execute(nativeJet, ['build', file], { cwd: root });
-        if (!existsSync(built) || !existsSync(built + '.o')) throw Error('native build did not emit fresh executable and object');
-        copyFileSync(built, prefix + '.exe'); chmodSync(prefix + '.exe', 0o755);
-        copyFileSync(built + '.o', prefix + '.o');
-        return prefix + '.exe';
+        const result = runNativeProgram({ jet: nativeJet, file, root, prefix, env, execute });
+        if (result.problem) throw Error(result.problem.detail);
+        return result.binary;
     }
     function library(file, prefix, lifecycle, exports = null) {
-        const hookEnv = { ...env, JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_LIFECYCLE: lifecycle };
-        if (!existsSync(lifecycle)) writeFileSync(lifecycle, runtimeLifecycleList(parseRuntimeExports(readFileSync(file, 'utf8'), file)));
-        if (exports) hookEnv.JET_FRONT_LIBRARY_EXPORTS = exports;
-        for (const suffix of ['.o', '.exports', '.abi.json', '.issues']) rmSync(prefix + suffix, { force: true });
-        execute(nativeJet, ['check', file], { env: hookEnv, cwd: dirname(file) });
-        if (existsSync(prefix + '.issues')) throw Error(readFileSync(prefix + '.issues', 'utf8'));
-        for (const suffix of ['.o', '.exports', '.abi.json']) if (!existsSync(prefix + suffix)) throw Error(`native library hook omitted ${suffix}`);
+        const result = runNativeLibrary({ jet: nativeJet, file, prefix, lifecycle, exports, env, execute });
+        if (result.problem) throw Error(result.problem.detail);
     }
     async function program(file, args = [], expected = '', options = {}) {
         const binary = await compile(file, dirname(file), join(dirname(file), 'registry-native'));
@@ -289,9 +245,7 @@ export async function runTransport(entry, { jet, repo, logDir, runtimePack, runt
         execute(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', source, object, ...extra, '-lpthread', '-ldl', '-lm', '-o', binary]);
     }
     async function aggregate() {
-        const home = join(out, 'assembly-home'); mkdirSync(home, { recursive: true });
-        execute(process.execPath, [join(repo, 'Compiler/Bootstrap/assemble.mjs')], { cwd: repo, env: { ...env, HOME: home, JET_BOOTSTRAP_SOURCE_ROOT: repo } });
-        return join(home, '.cache/jet-luna/compiler-bootstrap/project/src/compiler.jet');
+        return assembleNativeCompiler({ repo, out, env, execute });
     }
     try {
         if (spec.type === 'suite') {
