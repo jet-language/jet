@@ -11,9 +11,9 @@ use jet_backend.[
     LIRCondition, LIRData, LIRDataID, LIRDrop, LIRFunction, LIRFunctionID, LIRInst,
     LIRJumpTarget, LIRLayout, LIRModule, LIRSignature, LIRSignatureID,
     LIRTerminator, LIRValue, LIRValueID, X64Alu, X64CompiledFunction,
-    X64ExecutableResult, X64Reloc, X64RelocTarget, X64RuntimeExport,
+    X64ExecutableResult, X64FunctionDebug, X64Reloc, X64RelocTarget, X64RuntimeExport,
     lir_layout_bool, lir_layout_pointer, lir_layout_word, x64_alu_ri, x64_call_rel32,
-    x64_compile_module, x64_object_functions, x64_object_main, x64_mov_ri,
+    x64_compile_module, x64_object_functions, x64_object_main, x64_object_main_debug, x64_mov_ri,
     x64_mov_rr, x64_pop, x64_push, x64_ret,
 ]
 
@@ -269,7 +269,11 @@ fn fx_bool_abi_executable() -> X64ExecutableResult Never! {
     compiled :: x64_compile_module(choose_module)
     if compiled.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: compiled.errors}
     functions := [X64CompiledFunction]{x64_object_main(LIRFunctionID{value: 2})}
+    debug := [X64FunctionDebug]{x64_object_main_debug(functions[0])}
     loop function in compiled.functions -> &functions.push(function)
-    &functions.push(fx_bool_abi_driver())
-    x64_object_functions(choose_module, functions, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
+    loop row in compiled.debug -> &debug.push(row)
+    driver :: fx_bool_abi_driver()
+    &functions.push(driver)
+    &debug.push(x64_object_main_debug(driver))
+    x64_object_functions(choose_module, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
 }

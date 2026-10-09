@@ -206,6 +206,15 @@ starts after header padding to the maximum function/data alignment.
 The [ABI fixtures](../../Compiler/JetBackend/Tests/AbiFixtures.jet) exercise
 dirty upper bits and aligned data addresses, including a system-linked object.
 
+Hosted program and runtime objects share the [section-table writer](../../Compiler/JetBackend/Source/Image/Object.jet).
+Its content rows also determine section names, offsets, links and header count;
+DWARF and unwind relocations use those same indices. Each compiled function has
+one matching debug row, including handwritten entry adapters. Lifecycle exports
+append priority-named init/fini sections and their relocations, with equal
+priorities ordered by export symbol. The [object regression adapter](../../Compiler/JetBackend/Tests/test-runtime-object.mjs)
+emits current program/runtime objects and independently checks their ELF tables;
+it does not use a historical compiler as an oracle.
+
 Runtime representation is not the checked field type. In particular, default
 `Err.cause` value and place reads use the shared
 [cause projection](../../crates/jet-foundation/src/Outcome.rs) to expose

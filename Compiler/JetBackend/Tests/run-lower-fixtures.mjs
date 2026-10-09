@@ -148,6 +148,7 @@ const parts = [
   body("Compiler/JetBackend/Source/Image/RuntimeStrings.jet"),
   body("Compiler/JetBackend/Source/Image/ELF.jet"),
   body("Compiler/JetBackend/Source/Image/Object.jet"),
+  body("Compiler/JetBackend/Source/Image/Dwarf.jet"),
   body("Compiler/JetBackend/Source/Image/RuntimeObject.jet"),
   ...(!small ? [body("Compiler/JetBackend/Source/Image/RuntimeLibrary.jet")] : []),
   ...(!small ? [body("Compiler/JetBackend/Source/Image/Memory.jet")] : []),
