@@ -3300,6 +3300,48 @@ enum SemaBodyJob {
     ImplMethod(ordinal: Int, implementation_index: Int, method_index: Int)
 }
 
+fn sema_check_body_job_index(job: SemaBodyJob) -> Int Never! {
+    if job == {
+        .TopLevel(index) -> index
+        .NominalMethod(ordinal, _, _) | .ImplMethod(ordinal, _, _) -> ordinal
+    }
+}
+
+fn sema_incremental_job_queries(memo: SemaModuleMemo?, source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, jobs: [SemaBodyJob]) -> [Int:SemaBodyMemoQuery] {
+    queries := [Int:SemaBodyMemoQuery]{}
+    if memo == None -> return ^queries
+    loop job in jobs {
+        query := SemaBodyMemoQuery?{None}
+        if job == {
+            .TopLevel(index) -> {
+                if source_module.program.items[index] == .Func(function) {
+                    query = sema_incremental_body_query(memo, function, symbol_id(SymbolKind.Function, source_module.module_identity, "", function.name), TFuncKind.TopLevel, false, memory_plan, "")
+                }
+            }
+            .NominalMethod(_, nominal_index, method_index) -> {
+                nominal :: source_module.nominals[nominal_index]
+                method :: nominal.methods[method_index]
+                query = sema_incremental_body_query(memo, method.declaration, method.symbol.id, sema_comptime_method_kind(method.declaration, nominal.ty, None), method.raw_protocol_return, memory_plan, sema_type_graph_base_name(nominal.ty) ?? "")
+            }
+            .ImplMethod(_, implementation_index, method_index) -> {
+                implementation :: source_module.impls[implementation_index]
+                method :: implementation.methods[method_index]
+                query = sema_incremental_body_query(memo, method.declaration, method.symbol.id, sema_comptime_method_kind(method.declaration, implementation.target_type, implementation.trait_symbol), method.raw_protocol_return, memory_plan, sema_type_graph_base_name(implementation.target_type) ?? "")
+            }
+        }
+        if query != None -> queries[sema_check_body_job_index(job)] = ^query ?? panic("an admitted body query disappeared")
+    }
+    ^queries
+}
+
+fn sema_check_prepared_checked_count(bodies: [SemaPreparedBody]) -> Int Never! {
+    count := 0
+    loop body in bodies {
+        if body == .Checked(_) -> count += 1
+    }
+    count
+}
+
 // The body's existing shared lifecycle, absent for declaration-only checks.
 struct SemaMethodScheduling {
     shared_state: Shared<SemaCheckShared>
