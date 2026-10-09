@@ -4,7 +4,7 @@ use jet_parser.[parse_generated_source]
 // Rust Bundle/Units.rs::inject_units_prelude: the only catalog is ordinary
 // Prelude/Units.jet (generated into Registration/PreludeUnits.jet). This
 // stage changes AST items only; it never adds a physical/loaded module.
-pub fn sema_units_catalog(diagnostics: &[Diagnostic]) -> [UnitFamilyDef] {
+fn sema_units_catalog(diagnostics: &[Diagnostic]) -> [UnitFamilyDef] {
     parsed :: parse_generated_source(SEMA_PRELUDE_UNITS_SOURCE.bytes())
     loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic)
     if sema_has_error_since(parsed.diagnostics, 0) -> return [UnitFamilyDef]{}
@@ -14,7 +14,7 @@ pub fn sema_units_catalog(diagnostics: &[Diagnostic]) -> [UnitFamilyDef] {
     families
 }
 
-pub fn sema_units_inject(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDef]) Never! {
+fn sema_units_inject(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDef]) Never! {
     if input.program.no_prelude -> return
     occupied := [String:Bool]{}
     local_families := [String:Bool]{}

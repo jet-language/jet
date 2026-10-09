@@ -548,7 +548,7 @@ fn sema_type_alias_cycle_visit(graph: &SemaRegistrationGraph, rows: [SemaTypeAli
     marks[at] = 2
 }
 
-pub fn sema_type_alias_cycles_check(graph: &SemaRegistrationGraph) Never! {
+fn sema_type_alias_cycles_check(graph: &SemaRegistrationGraph) Never! {
     rows := [SemaTypeAliasCycleRow]{}
     positions := [String:Int]{}
     loop module_index in 0..<graph.modules.len() {
@@ -696,7 +696,7 @@ fn sema_type_resolve_nominal_row(graph: SemaRegistrationGraph, actual: Type, cal
 }
 
 // The ledger alone is not declaration authority: require the registered row.
-pub fn sema_type_source_owns_nominal(graph: SemaRegistrationGraph, name: String, caller_module_identity: String) -> Bool Never! {
+fn sema_type_source_owns_nominal(graph: SemaRegistrationGraph, name: String, caller_module_identity: String) -> Bool Never! {
     row :: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, caller_module_identity) ?? return false
     nominal :: graph.modules[row.module_index].nominals[row.row]
     core_source_owns_type("{nominal.symbol.module_name}::{nominal.symbol.name}")
@@ -711,7 +711,7 @@ fn sema_type_graph_trait_symbol(graph: SemaRegistrationGraph, module_identity: S
 // Rust Generics::BUILTIN_TRAITS / is_builtin_trait: a generic bound may name
 // a compiler-owned trait that no source module declares. Its identity is the
 // bare trait name with no owning module.
-pub fn sema_type_builtin_trait_symbol(name: String) -> Symbol? {
+fn sema_type_builtin_trait_symbol(name: String) -> Symbol? {
     if name == {
         "Printable" | "Equatable" | "Comparable" | "Serialize" | "Encode" | "Decode" | "Renderable" | "Close" | "Add" | "Sub" | "Mul" | "Div" | "Numeric" | "CheckedText" -> {}
         else -> return None
@@ -721,7 +721,7 @@ pub fn sema_type_builtin_trait_symbol(name: String) -> Symbol? {
 
 // A generic bound's trait: the visible declaration of that name, else the
 // builtin trait (Rust `Traits::is_trait_name`).
-pub fn sema_type_graph_bound_symbol(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
+fn sema_type_graph_bound_symbol(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
     resolved :: sema_type_graph_lookup_symbol(graph, module_identity, name)
     if resolved != None -> return resolved
     symbol :: sema_type_builtin_trait_symbol(name) ?? return None
@@ -924,7 +924,7 @@ fn sema_type_builtin_bound_satisfied(graph: SemaRegistrationGraph, actual_resolv
     Val(false)
 }
 
-pub fn sema_type_bound_satisfied_with_generics(graph: SemaRegistrationGraph, actual: Type, bound_name: String, caller_module_identity: String, generic_params: [TGenericParam]) -> Bool? {
+fn sema_type_bound_satisfied_with_generics(graph: SemaRegistrationGraph, actual: Type, bound_name: String, caller_module_identity: String, generic_params: [TGenericParam]) -> Bool? {
     actual_resolved :: sema_type_resolve_declared_with_generics(graph, actual, caller_module_identity, generic_params)
     structural :: sema_type_codec_structural_bound(graph, actual_resolved, bound_name, caller_module_identity, generic_params)
     if structural != None -> return structural

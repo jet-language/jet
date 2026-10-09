@@ -2300,10 +2300,10 @@ sites are checked at each use, and overlap with another group or a directly
 written member follows the ordinary E0999 duplicate rule. The formatter
 preserves the authored declaration and group use rather than printing expanded
 members.
-Expansion preserves ordinary file projections: a fixed `#[PubFile, NoPrelude]`
-group sets those file flags before following declarations are checked. It
-does not widen legal sites; mixing module `Policy` and file `PubFile` remains
-the same E0355 rejection as the ordinary written list.
+Expansion preserves ordinary file projections: a file-scoped member such as
+`NoPrelude` applies the same file flag as its direct spelling. Grouping does not
+widen legal sites; mixing module and file marker sites remains the same E0355
+rejection as an ordinary written list.
 
 **D-MARKER-MODULE1=A — Markers belong to modules**: marker identity is its
 declaring module and declaration, not a process-wide short name. A module may

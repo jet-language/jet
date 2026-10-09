@@ -25,42 +25,42 @@ struct HTTPCorsPolicy {
 }
 
 // The native listener accepts this same plain credential carrier.
-pub struct HTTPServerTLS {
-    pub cert_pem: String
-    pub key_pem: String
+struct HTTPServerTLS {
+    cert_pem: String
+    key_pem: String
 }
 
-pub fn mux() -[Net]> HTTPMux Never! {
+fn mux() -[Net]> HTTPMux Never! {
     provider.__mux()
 }
 
-pub fn serve_once(addr: String, mux: HTTPMux) HTTPError! -[Net, Time.Wait]> {
+fn serve_once(addr: String, mux: HTTPMux) HTTPError! -[Net, Time.Wait]> {
     provider.__serve_once(addr, mux) ?? return
 }
 
-pub fn serve_once_listener(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, Time.Wait]> {
+fn serve_once_listener(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, Time.Wait]> {
     provider.__serve_once_listener(listener, mux) ?? return
 }
 
-pub fn __serve_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) HTTPError! -[Net, Time.Wait]> {
+fn __serve_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) HTTPError! -[Net, Time.Wait]> {
     provider.__serve(addr, mux, tls, deadline)
 }
 
-pub fn __bind_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -[Net]> HTTPServer HTTPError! {
+fn __bind_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -[Net]> HTTPServer HTTPError! {
     provider.__bind(addr, mux, tls, deadline)
 }
 
-pub fn __static_files_entry(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?) Never! -[Net]> {
+fn __static_files_entry(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?) Never! -[Net]> {
     provider.__static_files(mux, prefix, root, index, dotfiles, follow_links)
 }
 
 // Preserve HTTPMux.middleware's existing checked escaping-callback
 // admission before routing its receiver+callback into this source entry.
-pub fn __middleware_entry(mux: HTTPMux, middleware: ^fn(HTTPHandler) -> HTTPHandler) Never! -[Net]> {
+fn __middleware_entry(mux: HTTPMux, middleware: ^fn(HTTPHandler) -> HTTPHandler) Never! -[Net]> {
     provider.__middleware(mux, ^middleware)
 }
 
-pub fn response(status: Int, body: String) -> HTTPResponse Never! {
+fn response(status: Int, body: String) -> HTTPResponse Never! {
     response_body(status, Body.Text(body), core.http.headers())
 }
 
@@ -81,35 +81,35 @@ fn response_body(status: Int, body: ^Body, headers: ^Headers) -> HTTPResponse Ne
     }
 }
 
-pub fn json<T: Encode>(status: Int, body: T) -> HTTPResponse Never! {
+fn json<T: Encode>(status: Int, body: T) -> HTTPResponse Never! {
     text :: core.encoding.json.to_string(body.encode())
     fields :: core.http.headers_set(core.http.headers(), "content-type", "application/json; charset=utf-8")
     response_body(status, Body.Text(text), fields)
 }
 
-pub fn static_file(path: String, content_type: String) -[Net]> HTTPResponse HTTPError! {
+fn static_file(path: String, content_type: String) -[Net]> HTTPResponse HTTPError! {
     provider.__static_file(path, content_type)
 }
 
-pub fn static_file_range(request: HTTPRequest, path: String, content_type: String) -[Net]> HTTPResponse HTTPError! {
+fn static_file_range(request: HTTPRequest, path: String, content_type: String) -[Net]> HTTPResponse HTTPError! {
     provider.__static_file_range(request, path, content_type)
 }
 
-pub fn static_files(mux: HTTPMux, prefix: String, root: String) Never! -[Net]> {
+fn static_files(mux: HTTPMux, prefix: String, root: String) Never! -[Net]> {
     provider.__static_files(mux, prefix, root, None, None, None)
 }
 
-pub fn tls(cert: String, key: String) -> HTTPServerTLS Never! {
+fn tls(cert: String, key: String) -> HTTPServerTLS Never! {
     HTTPServerTLS{cert_pem: cert, key_pem: key}
 }
 
-pub fn sse(body: String) -> HTTPResponse Never! {
+fn sse(body: String) -> HTTPResponse Never! {
     fields :: core.http.headers_set(core.http.headers(), "content-type", "text/event-stream")
     headers :: core.http.headers_set(fields, "cache-control", "no-cache")
     response_body(200, Body.Text("data: {body}\n\n"), headers)
 }
 
-pub fn cors_policy(origins: [String] | HTTPCorsOrigins, methods: [String]{[String]{}}, headers: [String]{[String]{}}, credentials: Bool{false}, max_age: Int{86400}) -> HTTPCorsPolicy HTTPError! {
+fn cors_policy(origins: [String] | HTTPCorsOrigins, methods: [String]{[String]{}}, headers: [String]{[String]{}}, credentials: Bool{false}, max_age: Int{86400}) -> HTTPCorsPolicy HTTPError! {
     selected :: if origins == {
         .M__String_(names) -> HTTPCorsOrigins.List(names)
         .HTTPCorsOrigins(value) -> value
@@ -126,11 +126,11 @@ pub fn cors_policy(origins: [String] | HTTPCorsOrigins, methods: [String]{[Strin
     }
 }
 
-pub fn cors(mux: HTTPMux, policy: HTTPCorsPolicy) Never! -[Net]> {
+fn cors(mux: HTTPMux, policy: HTTPCorsPolicy) Never! -[Net]> {
     provider.__cors(mux, policy)
 }
 
-pub fn access_log(request: HTTPRequest, status: Int) -[Net]> String Never! {
+fn access_log(request: HTTPRequest, status: Int) -[Net]> String Never! {
     template :: access_log_template(request)
     access_log_parts(request.method, request.path, template, status)
 }
@@ -154,7 +154,7 @@ fn access_log_path(path: String) -> String Never! {
     String.from_bytes(raw.slice(0, end)) ?? panic("query separator is not a UTF-8 boundary")
 }
 
-pub fn request_id(mux: HTTPMux) Never! -[Net]> {
+fn request_id(mux: HTTPMux) Never! -[Net]> {
     provider.__request_id(mux)
 }
 

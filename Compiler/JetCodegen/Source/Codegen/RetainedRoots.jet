@@ -4,21 +4,21 @@
 use jet_foundation.[MIRAccess, MIRCallArg, MIRCaptureParam, MIRInstruction, MIRPlaceBase, MIRPlaceID, MIRRetainedRootCellAction, MIRRetainedRootCellBinding, MIRRetainedRootCellGrant, MIRRetainedRootLivePlace, MIRTerminator, MIRType, MIRValueID, MIROperation, Span, SymbolID, TLocal, Type, mir_ownership_from_access, tir_symbol_local]
 
 struct JetCodegenRetainedDeferred {
-    pub thunk: MIRValueID
-    pub place: MIRPlaceID
-    pub ty: Type
+    thunk: MIRValueID
+    place: MIRPlaceID
+    ty: Type
 }
 
 struct JetCodegenRetainedCapture {
-    pub value: MIRValueID
-    pub slot: Int
+    value: MIRValueID
+    slot: Int
 }
 
 // Compiler-only annotation of a checked producer site. Native requests cannot
 // manufacture this context: the admitted entry carries the resulting op IDs.
 struct JetCodegenRetainedGrantContext {
-    pub place: MIRPlaceID
-    pub action: MIRRetainedRootCellAction
+    place: MIRPlaceID
+    action: MIRRetainedRootCellAction
 }
 
 fn jet_codegen_record_retained_instruction(builder: &JetCodegenBuilder, instruction: MIRInstruction) Never! {

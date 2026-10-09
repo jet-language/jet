@@ -1,8 +1,8 @@
 // Pure DB console helpers, Rust Source/CmdDb.rs:2688-2694,2973-3137.
 #Error
-pub struct JetCLIDBSessionError { pub message: String }
+struct JetCLIDBSessionError { message: String }
 // Rust csv_escape (2688-2694).
-pub fn jet_cli_db_csv_escape(value: String) -> String Never! {
+fn jet_cli_db_csv_escape(value: String) -> String Never! {
     raw :: value.bytes()
     if !raw.contains(U8{44}) && !raw.contains(U8{34}) && !raw.contains(U8{10}) && !raw.contains(U8{13}) -> return ~value
     out := [U8]{U8{34}}
@@ -14,7 +14,7 @@ pub fn jet_cli_db_csv_escape(value: String) -> String Never! {
     String.from_bytes(out) ?? panic("escaped CSV is UTF-8")
 }
 // Rust has_complete_sql_statement (2994-3027); ASCII delimiters, no scalar-list allocation.
-pub fn jet_cli_db_has_complete_sql_statement(text: String) -> Bool Never! {
+fn jet_cli_db_has_complete_sql_statement(text: String) -> Bool Never! {
     jet_cli_db_complete_sql_bytes(text.bytes())
 }
 // Rust has_complete_sql_statement scanner; console borrows its pending byte buffer.
@@ -51,7 +51,7 @@ fn jet_cli_db_complete_sql_bytes(raw: [U8]) -> Bool Never! {
     false
 }
 // Rust split_sql_statements (3029-3093); output slices preserve all quoted bytes.
-pub fn jet_cli_db_split_sql_statements(text: String) -> [String] JetCLIDBSessionError! {
+fn jet_cli_db_split_sql_statements(text: String) -> [String] JetCLIDBSessionError! {
     jet_cli_db_split_sql_bytes(text.bytes())
 }
 // Rust split_sql_statements scanner; allocate only each completed output statement.
@@ -103,7 +103,7 @@ fn jet_cli_db_split_sql_bytes(raw: [U8]) -> [String] JetCLIDBSessionError! {
     Ok(statements)
 }
 // Rust split_console_inputs (2973-2992): str::lines omits terminal LF and strips CRLF.
-pub fn jet_cli_db_split_console_inputs(text: String) -> [String] JetCLIDBSessionError! {
+fn jet_cli_db_split_console_inputs(text: String) -> [String] JetCLIDBSessionError! {
     inputs := [String]{}
     pending := [U8]{}
     pending_blank := true
@@ -137,7 +137,7 @@ pub fn jet_cli_db_split_console_inputs(text: String) -> [String] JetCLIDBSession
     Ok(inputs)
 }
 // Rust is_remote (3095-3097); case-sensitive, not a URL parser.
-pub fn jet_cli_db_is_remote(value: String) -> Bool Never! {
+fn jet_cli_db_is_remote(value: String) -> Bool Never! {
     value.contains("://") || value.starts_with("postgres:") || value.starts_with("mysql:")
 }
 fn jet_cli_db_ascii_alphabetic(code: Int) -> Bool Never! {
@@ -145,7 +145,7 @@ fn jet_cli_db_ascii_alphabetic(code: Int) -> Bool Never! {
 }
 fn jet_cli_db_ascii_digit(code: Int) -> Bool Never! { code >= 48 && code <= 57 }
 // Rust source_name_from_path (3099-3115), POSIX Path::file_stem on the CLI host.
-pub fn jet_cli_db_source_name_from_path(path: String) -> String Never! {
+fn jet_cli_db_source_name_from_path(path: String) -> String Never! {
     filename := ""
     loop component in path.split("/") {
         if component == "" || component == "." -> next
@@ -168,7 +168,7 @@ pub fn jet_cli_db_source_name_from_path(path: String) -> String Never! {
     name
 }
 // Rust valid_table_name (3117-3126).
-pub fn jet_cli_db_valid_table_name(value: String) -> Bool Never! {
+fn jet_cli_db_valid_table_name(value: String) -> Bool Never! {
     raw :: value.bytes()
     if raw.len() == 0 -> return false
     first :: Int.from_u8(raw[0])
@@ -180,7 +180,7 @@ pub fn jet_cli_db_valid_table_name(value: String) -> Bool Never! {
     true
 }
 // Rust valid_column_name (3128-3137).
-pub fn jet_cli_db_valid_column_name(value: String) -> Bool Never! {
+fn jet_cli_db_valid_column_name(value: String) -> Bool Never! {
     raw :: value.bytes()
     if raw.len() == 0 -> return false
     first :: Int.from_u8(raw[0])

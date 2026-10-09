@@ -132,26 +132,26 @@ struct JetRustEmitTraitMethodMetadata {
     return_type: String
 }
 
-pub struct JetRustEmitManifest {
-    pub schema_version: Int
-    pub target: String
-    pub package_identity: String
-    pub type_count: Int
-    pub function_count: Int
-    pub foreign_count: Int
-    pub source_bytes: Int
-    pub function_symbols: [U64:String]
-    pub type_symbols: [U64:String]
-    pub field_symbols: [U64:String]
-    pub variant_symbols: [String:String]
-    pub variant_source_names: [String:String]
-    pub variant_wire_names: [String:String]
-    pub type_metadata: [JetRustEmitTypeMetadata]
-    pub callable_metadata: [JetRustEmitCallableMetadata]
-    pub field_metadata: [JetRustEmitFieldMetadata]
-    pub variant_metadata: [JetRustEmitVariantMetadata]
-    pub traits: [JetRustEmitTraitMetadata]
-    pub trait_methods: [JetRustEmitTraitMethodMetadata]
+struct JetRustEmitManifest {
+    schema_version: Int
+    target: String
+    package_identity: String
+    type_count: Int
+    function_count: Int
+    foreign_count: Int
+    source_bytes: Int
+    function_symbols: [U64:String]
+    type_symbols: [U64:String]
+    field_symbols: [U64:String]
+    variant_symbols: [String:String]
+    variant_source_names: [String:String]
+    variant_wire_names: [String:String]
+    type_metadata: [JetRustEmitTypeMetadata]
+    callable_metadata: [JetRustEmitCallableMetadata]
+    field_metadata: [JetRustEmitFieldMetadata]
+    variant_metadata: [JetRustEmitVariantMetadata]
+    traits: [JetRustEmitTraitMetadata]
+    trait_methods: [JetRustEmitTraitMethodMetadata]
 }
 
 enum JetRustEmitResult {
@@ -161,27 +161,27 @@ enum JetRustEmitResult {
 
 JET_RUST_EMIT_NO_CYCLE_FLOOR :: 9223372036854775807
 
-pub struct JetRustEmitContext {
-    pub program: MIRProgram
-    pub config: JetRustEmitConfig
-    pub function_names: [U64:String]
-    pub type_names: [U64:String]
+struct JetRustEmitContext {
+    program: MIRProgram
+    config: JetRustEmitConfig
+    function_names: [U64:String]
+    type_names: [U64:String]
     // Zero-sized carriers for record parameters absent from stored fields.
-    pub record_phantoms: [U64:String]{[U64:String]{}}
-    pub type_by_name: [String:String]
-    pub trait_names: [U64:String]
+    record_phantoms: [U64:String]{[U64:String]{}}
+    type_by_name: [String:String]
+    trait_names: [U64:String]
     // Trait id values of declared (not compiler-owned) traits used as a
     // single-bound trait object `Box<dyn T>`: each gets a clone-box
     // supertrait so the boxed value is Clone (MIRRust dyn_clone_traits).
-    pub dyn_clone_traits: [U64:Bool]
-    pub field_names: [U64:String]
-    pub variant_names: [String:String]
-    pub variant_source_names: [String:String]
-    pub variant_wire_names: [String:String]
-    pub foreign_names: [U64:String]
-    pub failure: JetRustEmitFailure?
-    pub current_function: MIRFunctionID?
-    pub current_generic_params: [MIRGenericParam]
+    dyn_clone_traits: [U64:Bool]
+    field_names: [U64:String]
+    variant_names: [String:String]
+    variant_source_names: [String:String]
+    variant_wire_names: [String:String]
+    foreign_names: [U64:String]
+    failure: JetRustEmitFailure?
+    current_function: MIRFunctionID?
+    current_generic_params: [MIRGenericParam]
     // Associated type names of the trait whose declaration is being emitted;
     // inside it they spell `Self::<name>` (MIRRust trait_associated_types).
     current_associated_types: [String]
@@ -190,18 +190,18 @@ pub struct JetRustEmitContext {
     window_params: [String:Bool]
     // Line starts and bytes of every source row, built once for panic,
     // stack-frame and coverage lines (rows looked up by file id).
-    pub source_index: JetCodegenSourceIndex
+    source_index: JetCodegenSourceIndex
     // First index into program.types per id value, canonical key and leaf name.
-    pub type_index_by_id: [U64:Int]
-    pub type_index_by_key: [String:Int]
-    pub type_index_by_name: [String:Int]
+    type_index_by_id: [U64:Int]
+    type_index_by_key: [String:Int]
+    type_index_by_name: [String:Int]
     // Indexes into program.types of every row whose canonical key or leaf
     // name is the spelling, in program order (a row whose key is its name
     // appears once), so constant spellings resolve without a whole-table scan.
-    pub type_rows_by_spelling: [String:[Int]]
+    type_rows_by_spelling: [String:[Int]]
     // Indexes into program.impls of every impl with a trait, per trait id
     // value, in program order.
-    pub impls_by_trait: [U64:[Int]]
+    impls_by_trait: [U64:[Int]]
     // Indexes into program.impls of every impl with a trait, per trait name
     // (`trait_ref.name`), in program order (MIRRust user_impls_by_trait and
     // selected_trait_impl_for_type select by name).
@@ -211,19 +211,19 @@ pub struct JetRustEmitContext {
     // and trait id; first and last program.fields row per field id and the
     // rows per owner; first and last type instance per identity; and the
     // key/name spellings of columnar-layout types.
-    pub function_index_by_id: [U64:Int]
-    pub foreign_index_by_id: [U64:Int]
-    pub trait_index_by_id: [U64:Int]
-    pub field_index_by_id: [U64:Int]
-    pub field_last_index_by_id: [U64:Int]
-    pub field_rows_by_owner: [U64:[Int]]
-    pub type_instance_first: [U64:Int]
-    pub type_instance_last: [U64:Int]
-    pub columnar_type_names: [String:Bool]
+    function_index_by_id: [U64:Int]
+    foreign_index_by_id: [U64:Int]
+    trait_index_by_id: [U64:Int]
+    field_index_by_id: [U64:Int]
+    field_last_index_by_id: [U64:Int]
+    field_rows_by_owner: [U64:[Int]]
+    type_instance_first: [U64:Int]
+    type_instance_last: [U64:Int]
+    columnar_type_names: [String:Bool]
     // First Core route row per id; first and last Prelude route row per id.
-    pub core_call_index_by_id: [U64:Int]
-    pub prelude_call_first: [U64:Int]
-    pub prelude_call_last: [U64:Int]
+    core_call_index_by_id: [U64:Int]
+    prelude_call_first: [U64:Int]
+    prelude_call_last: [U64:Int]
     // Memoized derive-capability answers for closed type rows, keyed
     // "trait:type id" (MIRRust derive_capability_cache).
     derive_capability_cache: [String:Bool]
@@ -241,12 +241,12 @@ pub struct JetRustEmitContext {
     derive_capability_gates: [String:Int]
     // The `core.ui` and `core.ui.host` type exports that spell a Prelude
     // `Jet*` carrier (jet_rust_emit_core_ui_type_names).
-    pub core_ui_type_names: [String:Bool]
+    core_ui_type_names: [String:Bool]
     // Function id values of impl methods whose free function body is not
     // emitted: printed natively inside their impl (derived Equatable and
     // Comparable) or owned by an undemanded derived codec impl
     // (mir_demanded_codec_impls).
-    pub skipped_methods: [U64:Bool]
+    skipped_methods: [U64:Bool]
     // D-MEM-COPYSEM1 move facts of the function being printed
     // (jet_rust_emit_move_facts): values read once in their own block, and
     // moved enum subjects whose payload bindings take them apart once.
@@ -259,12 +259,12 @@ pub struct JetRustEmitContext {
     expected_test_exits: [U64:U64]
     // Ratio-use classification of the last queried function; rebuilt when
     // its function id changes (jet_rust_emit_is_unit_ratio_parameter).
-    pub unit_ratio_function: MIRFunctionID?
-    pub unit_ratio_parameters: [U64:Bool]
+    unit_ratio_function: MIRFunctionID?
+    unit_ratio_parameters: [U64:Bool]
     // Module id values of the selected artifact plan (MIRRust module_selected),
     // set by jet_rust_emit_program; every module is selected without a plan.
-    pub selected_modules: [U64:Bool]
-    pub all_modules_selected: Bool
+    selected_modules: [U64:Bool]
+    all_modules_selected: Bool
     // Every failure, in order, under `config.keep_going`.
     kept_failures: [JetRustEmitKeptFailure]{[JetRustEmitKeptFailure]{}}
     // D-MEM-VIEWRET1 (#4392), MIRRust view_lifetime: the lifetime a View/ViewMut
@@ -273,11 +273,11 @@ pub struct JetRustEmitContext {
     view_lifetime: String{""}
     // MIRRust view_carriers: the names and keys of declared types whose Rust
     // declaration takes the `'__jet_view` lifetime parameter.
-    pub view_carriers: [String:Bool]{[String:Bool]{}}
+    view_carriers: [String:Bool]{[String:Bool]{}}
     // MIRRust plain_drop_types: the names and keys (mapped to `true`) of rows
     // whose values own nothing but memory, so their slots may be declared at
     // their definition (jet_rust_emit_collect_plain_drop_types).
-    pub plain_drop_types: [String:Bool]{[String:Bool]{}}
+    plain_drop_types: [String:Bool]{[String:Bool]{}}
     // Generic parameter names, per function id key, whose Rust bound needs
     // `Clone` (jet_rust_emit_collect_clone_bounds).
     clone_bounds: [String:[String]]{[String:[String]]{}}
@@ -293,49 +293,49 @@ struct JetRustEmitMoveFacts {
     // Subject id key -> its payload bindings in block order.
     payload_groups: [String:[JetRustEmitPayloadMember]]
     // Payload result id key -> its group's subject id key.
-    pub payload_subjects: [String:String]
+    payload_subjects: [String:String]
     // #4566 in-place append (jet_rust_emit_plan_string_appends):
     // concatenation result id key -> the place it appends to and the
     // appended operand.
-    pub appends: [String:JetRustEmitStringAppend]
+    appends: [String:JetRustEmitStringAppend]
     // The read and concatenation result id keys those appends replace; they
     // emit nothing.
-    pub append_parts: [String:Bool]
+    append_parts: [String:Bool]
     // Literal-only strings read only as the right operand of a String
     // concatenation or append: id key -> literal text, spelled in place as
     // a static `&str`.
-    pub static_literals: [String:String]
+    static_literals: [String:String]
     // `place = ""` on an always-initialized String place (a write parameter
     // or a field of a local): empty literal id key -> the place. The write
     // empties the place and keeps its buffer.
-    pub clears: [String:MIRPlaceID]
+    clears: [String:MIRPlaceID]
     // #4566 loop capacity hints (jet_rust_emit_plan_loop_reserves):
     // "block:index" of the preheader instruction they follow -> the hints.
-    pub loop_reserves: [String:[JetRustEmitLoopReserve]]
+    loop_reserves: [String:[JetRustEmitLoopReserve]]
     // #4566 slice 8 inline storage (jet_rust_emit_plan_inline_lists): list
     // locals that never leave the function, stored as `JetInlineList<T, N>`
     // (local id value -> inline capacity N); their empty-literal writes and
     // their drops (op id value -> local); and the literals those writes
     // replace and the moves into those drops (op id values), which emit
     // nothing, with their results (value id values), which get no slot.
-    pub inline_lists: [U64:Int]
-    pub inline_writes: [U64:MIRLocalID]
-    pub inline_drops: [U64:MIRLocalID]
-    pub inline_skipped: [U64:Bool]
-    pub inline_values: [U64:Bool]
+    inline_lists: [U64:Int]
+    inline_writes: [U64:MIRLocalID]
+    inline_drops: [U64:MIRLocalID]
+    inline_skipped: [U64:Bool]
+    inline_values: [U64:Bool]
 }
 
-pub struct JetRustEmitStringAppend {
-    pub place: MIRPlaceID
-    pub text: MIRValueID
+struct JetRustEmitStringAppend {
+    place: MIRPlaceID
+    text: MIRValueID
 }
 
 // MIRRust LoopReserve: the list place and its trip count source, a range
 // cursor's remaining trips or a constant trip count.
-pub struct JetRustEmitLoopReserve {
-    pub list: MIRPlaceID
-    pub cursor: MIRValueID?
-    pub trips: Int
+struct JetRustEmitLoopReserve {
+    list: MIRPlaceID
+    cursor: MIRValueID?
+    trips: Int
 }
 
 fn jet_rust_emit_empty_move_facts() -> JetRustEmitMoveFacts Never! {
@@ -364,19 +364,19 @@ fn jet_rust_emit_empty_ref_bindings() -> JetRustEmitRefBindings Never! {
 // shadow (`__jet_vi_N`, `__jet_li_N`) that native consumers read; the exact
 // `JetInt` slot stays only for a native value some consumer reads exactly
 // (`materialized`) and a native local whose exact slot is read (`dual`).
-pub struct JetRustEmitNativeInts {
-    pub values: [U64:Bool]
-    pub materialized: [U64:Bool]
-    pub locals: [U64:Bool]
-    pub dual: [U64:Bool]
+struct JetRustEmitNativeInts {
+    values: [U64:Bool]
+    materialized: [U64:Bool]
+    locals: [U64:Bool]
+    dual: [U64:Bool]
     // Loop versioning (jet_rust_emit_plan_native_version): the Read parameters
     // (by index) the version's entry check admitted, with their ranges. Each
     // has a native shadow `__jet_pi_N` set from the parameter.
-    pub params: [Int:JetRustEmitIntRange]{[Int:JetRustEmitIntRange]{}}
+    params: [Int:JetRustEmitIntRange]{[Int:JetRustEmitIntRange]{}}
     // MIRRust native_int_inline: the native values whose every value is an
     // inline JetInt word (an element write of one into inline-word storage
     // releases nothing, jet_rust_emit_inline_int_storage).
-    pub inline_values: [U64:Bool]{[U64:Bool]{}}
+    inline_values: [U64:Bool]{[U64:Bool]{}}
 }
 
 fn jet_rust_emit_empty_native_ints() -> JetRustEmitNativeInts Never! {
@@ -412,11 +412,11 @@ struct JetRustEmitBodyIndex {
     // Position of each value's function.values row.
     value_rows: [U64:Int]
     // Position of each block, and the coverage branch ordinals before it.
-    pub block_positions: [U64:Int]
-    pub branch_bases: [U64:Int]
+    block_positions: [U64:Int]
+    branch_bases: [U64:Int]
     // FIRST Capture result per slot, and roots of actual checked Move places.
-    pub capture_values: [Int:MIRValueID]{[Int:MIRValueID]{}}
-    pub moved_captures: [U64:Bool]{[U64:Bool]{}}
+    capture_values: [Int:MIRValueID]{[Int:MIRValueID]{}}
+    moved_captures: [U64:Bool]{[U64:Bool]{}}
     // MIRRust shared_capture_locals: locals held in one shared cell because a
     // non-Send closure writes them (jet_rust_emit_shared_capture_locals).
     shared_locals: [U64:Bool]

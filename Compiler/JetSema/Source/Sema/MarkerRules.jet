@@ -1177,7 +1177,7 @@ fn sema_marker_rules_is_guest_marker(marker: Marker, site: RuleSite?) -> Bool Ne
 
 // Whether a function marker is the ratified `#Export(c)` spelling (Rust
 // `Sema::Guest::is_guest_export_marker`).
-pub fn sema_marker_is_guest_export(marker: Marker) -> Bool Never! {
+fn sema_marker_is_guest_export(marker: Marker) -> Bool Never! {
     !marker.negated && marker.name == "Export" && sema_marker_c_argument(marker)
 }
 
@@ -1408,7 +1408,7 @@ fn sema_marker_rules_validate_vocabulary(registry: SemaScopeMembersMarkerRegistr
     }
 }
 
-pub fn sema_marker_rules_validate_allow(program: Program, diagnostics: &[Diagnostic]) {
+fn sema_marker_rules_validate_allow(program: Program, diagnostics: &[Diagnostic]) {
     applications :: sema_marker_rules_applications(program)
     loop application in applications {
         if application.marker.name == "allow" {
@@ -1532,7 +1532,7 @@ fn sema_marker_rules_validate_arguments(registry: SemaScopeMembersMarkerRegistry
     }
 }
 
-pub fn sema_marker_rules_check(registry: SemaScopeMembersMarkerRegistry, source_program: Program, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, values: [SemaComptimeItemValue]) -> SemaMarkerRulesCheckResult {
+fn sema_marker_rules_check(registry: SemaScopeMembersMarkerRegistry, source_program: Program, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, values: [SemaComptimeItemValue]) -> SemaMarkerRulesCheckResult {
     result := SemaMarkerRulesCheckResult{
         diagnostics: [Diagnostic]{},
         argument_facts: [SemaMarkerRuleArgumentFact]{},
@@ -1605,7 +1605,7 @@ fn sema_marker_rules_builtin_type(name: String) -> Type? {
     None
 }
 
-pub fn sema_marker_rules_check_declared_type_argument(argument: SemaScopeMembersDeclaredTypeArgument, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaMarkerRulesDeclaredTypeCheck {
+fn sema_marker_rules_check_declared_type_argument(argument: SemaScopeMembersDeclaredTypeArgument, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaMarkerRulesDeclaredTypeCheck {
     if argument.ty != (Type.Named{name: argument.name}) {
         return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{}, complete: false}
     }
@@ -1876,7 +1876,7 @@ fn sema_marker_rules_check_inline_always(graph: SemaRegistrationGraph, modules: 
 // D-PRELUDEX1=A: `#NoPrelude` turns the curated prelude names `print` and
 // `input` off for its file (E0429) unless the file declares its own. The
 // arguments are still checked; the call reports once and yields no value.
-pub fn sema_marker_rules_no_prelude_call(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_marker_rules_no_prelude_call(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if call.name != "print" && call.name != "input" -> return false
     if !sema_module_no_prelude(environment, program) || !sema_call_gate_is_unshadowed(call.name, scopes) -> return false
     name :: call.name

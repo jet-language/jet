@@ -90,7 +90,7 @@ test("generated registry is the exact shared two-field contract and stale bytes 
 // Named-call closure from scheduler_panic_publish_record in JetRuntime/Source/*.jet.
 // Direct named calls only; foreign/dynamic callback effects are separate.
 // Both compiler halves consume these Panic stop facts, not returned Results.
-pub RUNTIME_STOP_EXPORT_ROWS :: prep { """
+RUNTIME_STOP_EXPORT_ROWS :: prep { """
 stopped Panic
 """ }
 
@@ -107,7 +107,7 @@ fn runtime_stop_export_symbols() -> [String] Never! {
 
 RUNTIME_STOP_EXPORTS :: prep { runtime_stop_export_symbols() }
 
-pub fn runtime_export_can_stop(symbol: String) -> Bool Never! {
+fn runtime_export_can_stop(symbol: String) -> Bool Never! {
     loop candidate in RUNTIME_STOP_EXPORTS {
         if candidate == symbol -> return true
     }
@@ -117,6 +117,18 @@ pub fn runtime_export_can_stop(symbol: String) -> Bool Never! {
   assert.equal(generatedRuntimeStopRegistry(symbols), expected);
   assert.doesNotThrow(() => checkRuntimeStopRegistry(expected, expected));
   assert.throws(() => checkRuntimeStopRegistry(expected.replace("stopped Panic", "ordinary Panic"), expected), /is stale/);
+});
+
+test("shift and less-or-equal operators cannot open generic call arguments", () => {
+  assert.deepEqual(closure(`
+fn rotate(word: I64, shift: I64) -> I64 {
+    ((word << shift) | (word >> (I64{32} - shift))) & I64{0xffffffff}
+}
+#Export(c) fn ordinary(word: I64) -> I64 { rotate(word, I64{7}) }
+#Export(c) fn checked(word: I64, limit: I64) {
+    if word <= (limit) -> rt_task_panic_publish(word, word, word)
+}
+`), ["checked"]);
 });
 
 test("missing publication root or malformed source fails instead of emitting incomplete facts", () => {

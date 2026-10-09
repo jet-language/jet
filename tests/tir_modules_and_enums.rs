@@ -80,7 +80,7 @@ fn user_same_leaf_enum_keeps_its_own_payload_projection() {
     let scratch = common::Scratch::new("user_encoding_enum_owner");
     tir_support::write_test_package(&scratch.path, tir_support::TIR_TEST_PACKAGE);
     let local = scratch.path.join("local.jet");
-    fs::write(&local, "pub enum DataEvent { Local(String) }\npub fn make() -> DataEvent { return DataEvent.Local(\"local\") }\n").unwrap();
+    fs::write(&local, "enum DataEvent { Local(String) }\nfn make() -> DataEvent { return DataEvent.Local(\"local\") }\n").unwrap();
     let path = scratch.path.join("main.jet");
     fs::write(&path, r#"
 use "local"
@@ -285,7 +285,7 @@ fn run() {
 }
 ";
     let adapter_src = "\
-pub fn concrete(table: ^Table<Dyn>) -> Table<Dyn> {
+fn concrete(table: ^Table<Dyn>) -> Table<Dyn> {
     return table
 }
 fn generic<T>(table: ^Table<T>) -> Table<T> {
@@ -1404,7 +1404,7 @@ fn imported_enum_groups_use_canonical_facts_and_local_values_shadow_types() {
 #NoPrelude
 use "tags"
 use tags.Choice
-struct Holder { pub Empty: Choice }
+struct Holder { Empty: Choice }
 fn run() {
     alias_empty :: tags.Choice.Empty.measure()
     imported_empty :: Choice.Empty.measure()
@@ -1417,12 +1417,12 @@ fn run() {
 "#;
     let tags = r#"
 #NoPrelude
-pub enum Choice {
+enum Choice {
     Empty
     Branch { Leaf(Int), Nested { Tip(Int) } }
 }
 impl Choice {
-    pub fn measure(self) -> Int { 7 }
+    fn measure(self) -> Int { 7 }
 }
 "#;
     let path = scratch.join("main.jet");

@@ -23,16 +23,16 @@ struct RealtimeReceipt {
     end_identity: Int
 
     // Realtime.rs:119-130: fixed JSON key order, no whitespace.
-    pub fn render_json(self) -> String Never! {
+    fn render_json(self) -> String Never! {
         "{{\"requested_rate_hz\":{self.requested_rate_hz},\"requested_frames\":{self.requested_frames},\"completed_callbacks\":{self.completed_callbacks},\"completed_frames\":{self.completed_frames},\"missed\":{self.missed},\"max_lateness_ns\":{self.max_lateness_ns},\"start_identity\":{self.start_identity},\"end_identity\":{self.end_identity}}}"
     }
 
     // Realtime.rs:133-144: preserve every label, comma and space.
-    pub fn render(self) -> String Never! {
+    fn render(self) -> String Never! {
         "RealtimeReceipt(rate_hz={self.requested_rate_hz}, frames={self.requested_frames}, callbacks={self.completed_callbacks}, completed_frames={self.completed_frames}, missed={self.missed}, max_lateness_ns={self.max_lateness_ns}, start_identity={self.start_identity}, end_identity={self.end_identity})"
     }
 
-    pub fn frames_per_buffer(self) -> Int Never! {
+    fn frames_per_buffer(self) -> Int Never! {
         self.requested_frames
     }
 }
@@ -62,7 +62,7 @@ struct RealtimeReceipt {
 
 /// Start a fixed-rate callback stream. The callback receives one reusable
 /// sample buffer per invocation and must keep its work bounded.
-pub fn callback(rate_hz: Int, frames_per_buffer: Int, callback: fn([Float])) -> RealtimeStream Never! {
+fn callback(rate_hz: Int, frames_per_buffer: Int, callback: fn([Float])) -> RealtimeStream Never! {
     if rate_hz <= 0 -> panic("real-time callback rate must be positive")
     core.rt.__callback(rate_hz, frames_per_buffer, callback)
 }
@@ -70,19 +70,19 @@ pub fn callback(rate_hz: Int, frames_per_buffer: Int, callback: fn([Float])) -> 
 // Atomic observations and cancellation joining belong to the provider stream,
 // not a source DTO: copying this handle retains the same worker.
 impl RealtimeStream {
-    pub fn next_deadline(self) -> Instant Never! {
+    fn next_deadline(self) -> Instant Never! {
         core.rt.__next_deadline(self)
     }
 
-    pub fn receipt(self) -> RealtimeReceipt Never! {
+    fn receipt(self) -> RealtimeReceipt Never! {
         core.rt.__receipt(self)
     }
 
-    pub fn cancel(&self) Never! {
+    fn cancel(&self) Never! {
         core.rt.__cancel(&self)
     }
 
-    pub fn is_cancelled(self) -> Bool Never! {
+    fn is_cancelled(self) -> Bool Never! {
         core.rt.__is_cancelled(self)
     }
 }

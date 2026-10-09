@@ -17,10 +17,10 @@ struct MIME {
 
 impl MIME {
     /// The lowercase top-level type, such as `text`.
-    pub fn media_type(self) -> String Never! { self.top.copy() }
+    fn media_type(self) -> String Never! { self.top.copy() }
 
     /// The lowercase subtype, such as `html`.
-    pub fn subtype(self) -> String Never! { self.sub.copy() }
+    fn subtype(self) -> String Never! { self.sub.copy() }
 
     /// `type/subtype` without parameters.
     fn essence(self) -> String Never! { "{self.top}/{self.sub}" }
@@ -35,10 +35,10 @@ impl MIME {
     }
 
     /// Validated `[name, value]` parameter rows in source order.
-    pub fn params(self) -> [[String]] Never! { ~self.parameters }
+    fn params(self) -> [[String]] Never! { ~self.parameters }
 
     /// Canonical essence followed by parameters in their original order.
-    pub fn to_string(self) -> String Never! {
+    fn to_string(self) -> String Never! {
         out := self.essence()
         loop row in self.parameters {
             if row.len() == 2 -> out = "{out}; {row[0]}={row[1]}"

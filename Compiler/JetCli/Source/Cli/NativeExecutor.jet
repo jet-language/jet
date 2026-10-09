@@ -7,14 +7,14 @@ use jet_codegen.JetCodegenClosureSource
 use jet_foundation.MIRFunctionID
 
 struct JetCLINativeClosureSources {
-    pub rows: [String:JetCodegenClosureSource]
+    rows: [String:JetCodegenClosureSource]
 }
 
-pub struct JetCLINativeExecutor {
-    pub host: X64ExecutionHost
+struct JetCLINativeExecutor {
+    host: X64ExecutionHost
     // Independent compiler snapshots can reuse a MIR numeric identity. Never
     // resolve an older native closure against the currently compiling source.
-    pub sources: Shared<JetCLINativeClosureSources>
+    sources: Shared<JetCLINativeClosureSources>
 }
 impl JetCLINativeExecutor.JetDriverExecutionHost {
     fn execute(self, request: X64ExecutionRequest) -> X64ExecutionResponse {
@@ -28,10 +28,10 @@ impl JetCLINativeExecutor.JetDriverExecutionHost {
         self.sources.rows.get("{snapshot}:{function.value}")
     }
 }
-pub fn jet_cli_native_executor(executable: String, runtime: String) -> JetCLINativeExecutor {
+fn jet_cli_native_executor(executable: String, runtime: String) -> JetCLINativeExecutor {
     JetCLINativeExecutor{host: x64_execution_open(executable, runtime), sources: shared JetCLINativeClosureSources{rows: [String:JetCodegenClosureSource]{}}}
 }
-pub fn jet_cli_native_executor_close(executor: JetCLINativeExecutor) {
+fn jet_cli_native_executor_close(executor: JetCLINativeExecutor) {
     x64_execution_close(executor.host)
 }
 

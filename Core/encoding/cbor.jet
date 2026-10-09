@@ -7,44 +7,44 @@ use __core_encoding_cbor_parse as parser
 use __core_encoding_cbor_stream as codec
 use core.files.[FileReader, FileWriter]
 
-pub struct CBORReader {
+struct CBORReader {
     input: codec.CBORPull
 
-    pub fn next(&self) -[IO]> DataEvent? EncodingError! { &self.input.next() }
+    fn next(&self) -[IO]> DataEvent? EncodingError! { &self.input.next() }
 }
 
-pub struct CBORWriter {
+struct CBORWriter {
     output: codec.CBORPush
 
-    pub fn write(&self, event: ^DataEvent) EncodingError! -[IO]> { &self.output.write(^event) }
-    pub fn flush(&self) EncodingError! -[IO]> { &self.output.flush() }
-    pub fn finish(&self) EncodingError! -[IO]> { &self.output.finish() }
+    fn write(&self, event: ^DataEvent) EncodingError! -[IO]> { &self.output.write(^event) }
+    fn flush(&self) EncodingError! -[IO]> { &self.output.flush() }
+    fn finish(&self) EncodingError! -[IO]> { &self.output.finish() }
 }
 
-pub fn reader(input: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORReader EncodingError! {
+fn reader(input: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORReader EncodingError! {
     source :: codec.reader(^input, limits) ?? return Err(err)
     Ok(CBORReader{input: ^source})
 }
 
-pub fn writer(output: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORWriter EncodingError! {
+fn writer(output: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORWriter EncodingError! {
     target :: codec.writer(^output, limits) ?? return Err(err)
     Ok(CBORWriter{output: ^target})
 }
 
 #Equatable
-pub struct CBOROptions {
-    pub max_depth: Int
-    pub max_items: Int
-    pub max_bytes: Int
-    pub require_canonical: Bool
+struct CBOROptions {
+    max_depth: Int
+    max_items: Int
+    max_bytes: Int
+    require_canonical: Bool
 }
 impl CBOROptions {
-    pub fn safe() -> CBOROptions Never! {
+    fn safe() -> CBOROptions Never! {
         CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}
     }
 }
 #Equatable
-pub enum CBORErrorKind {
+enum CBORErrorKind {
     Syntax
     Truncated
     Unsupported
@@ -54,11 +54,11 @@ pub enum CBORErrorKind {
     NonCanonical
 }
 #[Error, Equatable]
-pub struct CBORError {
-    pub kind: CBORErrorKind
-    pub byte_offset: Int
-    pub path: String
-    pub reason: String
+struct CBORError {
+    kind: CBORErrorKind
+    byte_offset: Int
+    path: String
+    reason: String
     impl Display {
         fn display(self) -> String Never! { self.display_text() }
     }
@@ -84,8 +84,8 @@ impl CBORError {
 }
 
 
-pub fn to_bytes<T: Encode>(value: T) -> [U8] CBORError! { encode(value.encode(), false) }
-pub fn to_bytes_canonical<T: Encode>(value: T) -> [U8] CBORError! { encode(value.encode(), true) }
+fn to_bytes<T: Encode>(value: T) -> [U8] CBORError! { encode(value.encode(), false) }
+fn to_bytes_canonical<T: Encode>(value: T) -> [U8] CBORError! { encode(value.encode(), true) }
 
 fn unsupported(path: String, reason: String) -> CBORError Never! {
     CBORError{kind: .Unsupported, byte_offset: 0, path: path, reason: reason}
@@ -222,7 +222,7 @@ fn encode_value(value: DataTree, out: &[U8], canonical: Bool) CBORError! {
     assert_eq(parser.narrow_bits(4607182418800017408, 5, 10), Val(15360))
 }
 
-pub fn parse(bytes: [U8], options: CBOROptions{CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}}) -> DataTree CBORError! {
+fn parse(bytes: [U8], options: CBOROptions{CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}}) -> DataTree CBORError! {
     parser.parse(bytes, options)
 }
 

@@ -4,7 +4,7 @@ use jet_foundation.[CanonicalPassRecord, CANONICAL_PASS_SCHEMA, CANONICAL_PASS_P
 fn jet_cli_canonical_snapshot(payload: String) -> JetCLIStatusValue {
     jet_cli_status_value_parse(payload) ?? jet_cli_status_text(payload)
 }
-pub fn jet_cli_canonical_route(record: CanonicalPassRecord, process: String) -> JetCLIStatusValue {
+fn jet_cli_canonical_route(record: CanonicalPassRecord, process: String) -> JetCLIStatusValue {
     jet_cli_status_object([
         jet_cli_status_field("schema", jet_cli_status_text(CANONICAL_PASS_SCHEMA)),
         jet_cli_status_field("protocol", jet_cli_status_text(CANONICAL_PASS_PROTOCOL)),
@@ -30,6 +30,6 @@ pub fn jet_cli_canonical_route(record: CanonicalPassRecord, process: String) -> 
         jet_cli_status_field("disposition", jet_cli_status_text(record.disposition)),
     ])
 }
-pub fn jet_cli_canonical_routes(records: [CanonicalPassRecord], process: String) -> [JetCLIStatusValue] {
+fn jet_cli_canonical_routes(records: [CanonicalPassRecord], process: String) -> [JetCLIStatusValue] {
     loop record in records -> jet_cli_canonical_route(record, process)
 }

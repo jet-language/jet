@@ -45,9 +45,9 @@ fn unsupported_error(format: EncodingFormat, offset: Int, reason: String) -> Enc
 // existing registered file leaves (D-ENCSTREAM-SURFACE1).
 // `query<T>` reads a bounded UTF-8 table, validates its header, decodes all
 // typed rows and reuses the same SQL query door as an in-memory list.
-pub struct CSVRow {
-    pub line: Int
-    pub fields: [String]
+struct CSVRow {
+    line: Int
+    fields: [String]
 }
 
 /// Physical rows (D-ROWS1). `delimiter` is one character other than a quote
@@ -69,7 +69,7 @@ fn rows(text: String, delimiter: String{","}, header: Bool{false}, skip_blank: B
 
 /// Header-named typed rows. Missing cells become empty text; extra cells are
 /// ignored, and failures from every data record are accumulated in row order.
-pub fn decode<T: Decode>(text: String) -> [T] [FieldError]! {
+fn decode<T: Decode>(text: String) -> [T] [FieldError]! {
     rows :: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err}})
     if rows.len() == 0 -> return Ok([T]{})
     header :: rows[0]
@@ -225,7 +225,7 @@ fn typed_records(text: String) -> [[String]] String! {
     Ok(^parser.rows)
 }
 
-pub fn parse(text: String) -> Dyn EncodingError! {
+fn parse(text: String) -> Dyn EncodingError! {
     physical :: parse_rows(text, true)
     items := [Dyn]{}
     loop row in physical {
@@ -236,7 +236,7 @@ pub fn parse(text: String) -> Dyn EncodingError! {
     Ok(Dyn.Array(items))
 }
 
-pub fn to_string<T: Encode>(rows: [T]) -> String Never! {
+fn to_string<T: Encode>(rows: [T]) -> String Never! {
     if rows.len() == 0 -> return ""
     first :: rows[0].encode()
     out := ""
@@ -290,7 +290,7 @@ fn csv_cell(value: DataTree) -> String Never! {
 
 
 /// Typed CSV query with the same SQL grammar and result carrier as rows.query.
-pub fn query<T: [Decode, Encode]>(path: String, sql: SQL) -[FS]> Query<T> [FieldError]! {
+fn query<T: [Decode, Encode]>(path: String, sql: SQL) -[FS]> Query<T> [FieldError]! {
     text :: query_text(path) ?? return Err(err)
     physical :: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err}})
     header :: if physical.len() == 0 -> [String]{} else -> physical[0]
@@ -532,7 +532,7 @@ fn csv_limits(limits: EncodingLimits) EncodingError! {
     }
 }
 
-pub struct CSVWriter {
+struct CSVWriter {
     output: FileWriter
     limits: EncodingLimits
     terminal: EncodingError?
@@ -616,7 +616,7 @@ pub struct CSVWriter {
         self.record_index += 1
     }
 
-    pub fn write(&self, row: ^[String]) EncodingError! -[IO]> {
+    fn write(&self, row: ^[String]) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         &self.write_inner(row) ?? {
             self.terminal = Val(err)
@@ -624,7 +624,7 @@ pub struct CSVWriter {
         }
     }
 
-    pub fn flush(&self) EncodingError! -[IO]> {
+    fn flush(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         encoding.__flush(&self.output) ?? {
             error :: self.io_error(err)
@@ -633,7 +633,7 @@ pub struct CSVWriter {
         }
     }
 
-    pub fn finish(&self) EncodingError! -[IO]> {
+    fn finish(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return
         &self.close_record() ?? {
@@ -645,12 +645,12 @@ pub struct CSVWriter {
     }
 }
 
-pub fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CSVWriter EncodingError! {
+fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CSVWriter EncodingError! {
     csv_limits(limits) ?? return Err(err)
     Ok(CSVWriter{output: ^target, limits: limits, terminal: None, total: 0, record_index: 0, finished: false, pending_crlf: false, buffer: [U8]{0, 0}})
 }
 
-pub struct CSVReader {
+struct CSVReader {
     input: FileReader
     limits: EncodingLimits
     delimiter: Int
@@ -893,7 +893,7 @@ pub struct CSVReader {
         }
     }
 
-    pub fn next(&self) -[IO]> CSVRow? EncodingError! {
+    fn next(&self) -[IO]> CSVRow? EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
         result :: &self.next_inner() ?? {
             self.terminal = Val(err)
@@ -903,7 +903,7 @@ pub struct CSVReader {
     }
 }
 
-pub fn reader(source: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}, delimiter: String{","}, header: Bool{false}, skip_blank: Bool{false}) -[FS]> CSVReader EncodingError! {
+fn reader(source: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}, delimiter: String{","}, header: Bool{false}, skip_blank: Bool{false}) -[FS]> CSVReader EncodingError! {
     csv_limits(limits) ?? return Err(err)
     raw :: delimiter.bytes()
     reason :: "E2701: CSV delimiter must be exactly one character other than quote or line ending"

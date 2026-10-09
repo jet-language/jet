@@ -53,9 +53,9 @@ fn bind_text<T>(loader: &DataLoader<T>, text: String) DataError! {
     bind<T>(&loader, text.bytes())
 }
 
-pub fn authority<T>(loader: DataLoader<T>) -> DataAuthority Never! { loader.authority.copy() }
+fn authority<T>(loader: DataLoader<T>) -> DataAuthority Never! { loader.authority.copy() }
 
-pub fn status<T>(loader: DataLoader<T>) -> DataLoaderStatus Never! { loader.status.copy() }
+fn status<T>(loader: DataLoader<T>) -> DataLoaderStatus Never! { loader.status.copy() }
 
 fn ready<T>(loader: DataLoader<T>) -> Bool Never! {
     !loader.cancelled && !loader.status.backpressure
@@ -78,7 +78,7 @@ fn snapshot_reusable(previous: DataSnapshotIdentity, current: DataSnapshotIdenti
         && previous.format == current.format
 }
 
-pub fn source_identity<T>(loader: DataLoader<T>) -> DataSourceIdentity Never! { loader.source.copy() }
+fn source_identity<T>(loader: DataLoader<T>) -> DataSourceIdentity Never! { loader.source.copy() }
 
 fn cancel<T>(loader: &DataLoader<T>) Never! {
     loader.cancelled = true
@@ -111,7 +111,7 @@ fn offline<T>(loader: &DataLoader<T>, enabled: Bool) Never! {
     }
 }
 
-pub fn invalidate<T>(loader: &DataLoader<T>, cause: DataInvalidationCause) Never! {
+fn invalidate<T>(loader: &DataLoader<T>, cause: DataInvalidationCause) Never! {
     loader.status.invalidated_by = cause.copy()
     loader.status.freshness = DataFreshness.Stale
     loader.status.error = ""

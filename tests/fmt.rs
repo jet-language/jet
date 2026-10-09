@@ -4208,8 +4208,8 @@ fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_c
     let src = r#"module ring<T>(capacity: Int, label: String) {
 #Meta(category: label)
 SIZE :: prep { capacity }
-pub struct Buffer { slots: [T#capacity] }
-module nested<U> { pub fn keep(value: U) -> U { return value.copy() } }
+struct Buffer { slots: [T#capacity] }
+module nested<U> { fn keep(value: U) -> U { return value.copy() } }
 module inner :: nested<T>
 #Meta(category: label)
 fn adjusted() -> Int { return capacity + 1 }

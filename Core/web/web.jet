@@ -74,11 +74,11 @@ struct LiveQuery {
 // registry entries but no Rust implementation in this repository; this
 // forwarding declaration is not a Rust-to-Jet implementation or cutover.
 // Native callback admission must keep the actual backend contract.
-pub fn on(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
+fn on(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
     core.web.on(path, title, handler)
 }
 
-pub fn openapi(router: HTTPRouter) -> String Never! {
+fn openapi(router: HTTPRouter) -> String Never! {
     checked :: core.web.__openapi_inputs(router)
     if checked == {
         .Ok(inputs) -> {
@@ -123,7 +123,7 @@ fn live_get(q: LiveQuery) -> String Never! { q.data }
 
 fn live_show(q: LiveQuery) -> String Never! { "{q.key}@{q.generation}" }
 
-pub fn live_stats() -> String Never! {
+fn live_stats() -> String Never! {
     facts :: core.web.__live_stats_snapshot() ?? return "LiveStats(error=live registry unavailable)"
     "LiveStats(queries={facts.queries},active={facts.active},refreshing={facts.refreshing},limit=1024,evictions={facts.evictions},invalidations={facts.invalidations},ws_pushes={facts.ws_pushes})"
 }

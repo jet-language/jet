@@ -360,7 +360,7 @@ fn sema_pattern_consumes_result_carrier(pattern: Pattern) -> Bool Never! {
 // Call checkers finish through this check. While the dispatcher has opened a
 // success view for this call, a Result result is compared by its success side;
 // `sema_expression_auto_propagate` then inserts the one `Try`.
-pub fn sema_expression_call_expected(value: TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_call_expected(value: TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if context.failure_success_view && expected != None && !sema_expression_failure_carrier_position(expected, value.ty) {
         if sema_expr_unwrap_tag(value.ty) == .Result(success, _) {
             required := sema_expr_expected_type(expected, environment, program)
@@ -1280,7 +1280,7 @@ fn sema_expression_if_chain_consumes_carrier(value: Expr, subject_span: Span) ->
 
 // Check a hoisted dispatch subject once and bind it to the compiler local
 // that the rebound chain reads. The value form and the statement form share it.
-pub fn sema_expression_if_bind_subject(subject: Expr, condition: Expr, else_value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+fn sema_expression_if_bind_subject(subject: Expr, condition: Expr, else_value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     subject_span :: expr_span(subject)
     carrier :: sema_expression_if_condition_consumes_carrier(condition) || sema_expression_if_chain_consumes_carrier(else_value, subject_span)
     checked_subject :: if carrier -> sema_check_expression_carrier(subject, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(subject, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -1538,7 +1538,7 @@ fn sema_expression_rewrite_optional_ne_none(condition: Expr, scopes: SemaScopeTa
 // `sema_expression_declare_condition_bindings`. The condition's own frame
 // (`pattern@…`) keeps chain bindings out of later arms and fixes their
 // symbol identities for the branch.
-pub fn sema_expression_check_condition(condition: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCheckedCondition? {
+fn sema_expression_check_condition(condition: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCheckedCondition? {
     rewritten :: sema_expression_rewrite_optional_ne_none(condition, scopes)
     if rewritten == .Val(presence) -> return sema_expression_check_condition(presence, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if !sema_expression_condition_binds(condition) -> return sema_expression_check_condition_inner(condition, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

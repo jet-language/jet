@@ -38,12 +38,12 @@ struct SemaComputeIndex {
     facts: [String:SemaComputePosition]
 }
 
-pub struct SemaComputeValidationWork {
-    pub counting: Bool{false}
-    pub indexed_functions: Int{0}
-    pub indexed_facts: Int{0}
-    pub function_queries: Int{0}
-    pub fact_queries: Int{0}
+struct SemaComputeValidationWork {
+    counting: Bool{false}
+    indexed_functions: Int{0}
+    indexed_facts: Int{0}
+    function_queries: Int{0}
+    fact_queries: Int{0}
 }
 
 fn sema_compute_index(modules: [SemaGraphModuleResult], work: &SemaComputeValidationWork) -> SemaComputeIndex {
@@ -181,7 +181,7 @@ fn sema_compute_effect_names(effects: [String]) -> String Never! {
 // Borrow the globally solved module products. Keys retain the same first match
 // as the old flattened lists, and diagnostics retain module/fact/obligation
 // order. The loan ends before the finalizer's next module mutation.
-pub fn sema_compute_validate_autodiff_purity(modules: [SemaGraphModuleResult], work: &SemaComputeValidationWork) -> [Diagnostic] {
+fn sema_compute_validate_autodiff_purity(modules: [SemaGraphModuleResult], work: &SemaComputeValidationWork) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     has_obligations := false
     loop module_row in modules {

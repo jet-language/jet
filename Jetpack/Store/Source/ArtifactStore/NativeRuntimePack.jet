@@ -4,7 +4,7 @@
 // that the Rust/LLVM-free toolchain cutover is complete.
 
 #Error
-pub enum NativeRuntimePackError {
+enum NativeRuntimePackError {
     Encoding(encoding.EncodingError)
     Store(ArtifactStoreError)
     IO(IOError)
@@ -16,28 +16,28 @@ impl ArtifactStoreError -> NativeRuntimePackError { NativeRuntimePackError.Store
 impl IOError -> NativeRuntimePackError { NativeRuntimePackError.IO(self) }
 
 // Roles preserve the order of the admitted composition, not filesystem order.
-pub struct NativeRuntimeRoleObject {
-    pub role: String
-    pub object: ObjectHandle
+struct NativeRuntimeRoleObject {
+    role: String
+    object: ObjectHandle
 }
 
 // The acyclic approval subject. No approval, identity or composition link is
 // allowed here. Source revision is the runtime's FINAL, never the CLI checkout.
-pub struct NativeRuntimePackSubject {
-    pub runtime_source_revision: String
-    pub runtime_source_tree: String
-    pub pack_object: ObjectHandle
-    pub jet_object: ObjectHandle
-    pub remaining_native_archive: ObjectHandle
-    pub remaining_raw_leaf_archive: ObjectHandle
-    pub runtime_sources: ObjectHandle
-    pub runtime_exports: ObjectHandle
-    pub runtime_imports: ObjectHandle
-    pub generators: [NativeRuntimeRoleObject]
-    pub abi: [NativeRuntimeRoleObject]
-    pub routes: [NativeRuntimeRoleObject]
-    pub providers: [NativeRuntimeRoleObject]
-    pub lifecycle: ObjectHandle
+struct NativeRuntimePackSubject {
+    runtime_source_revision: String
+    runtime_source_tree: String
+    pack_object: ObjectHandle
+    jet_object: ObjectHandle
+    remaining_native_archive: ObjectHandle
+    remaining_raw_leaf_archive: ObjectHandle
+    runtime_sources: ObjectHandle
+    runtime_exports: ObjectHandle
+    runtime_imports: ObjectHandle
+    generators: [NativeRuntimeRoleObject]
+    abi: [NativeRuntimeRoleObject]
+    routes: [NativeRuntimeRoleObject]
+    providers: [NativeRuntimeRoleObject]
+    lifecycle: ObjectHandle
 
     fn to_tree(self) -> DataTree Never! {
         DataTree.Object([String: DataTree]{
@@ -90,9 +90,9 @@ pub struct NativeRuntimePackSubject {
 }
 
 // One externally consumed typed identity, with no self-reference cycle.
-pub struct NativeRuntimePackIdentity {
-    pub subject: ObjectHandle
-    pub approval: ObjectHandle
+struct NativeRuntimePackIdentity {
+    subject: ObjectHandle
+    approval: ObjectHandle
 
     fn to_bytes(self) -> [U8] NativeRuntimePackError! {
         native_pack_encode(DataTree.Object([String: DataTree]{
@@ -111,13 +111,13 @@ pub struct NativeRuntimePackIdentity {
 
 // This manifest is the explicit compiler-to-runtime trust anchor. The immutable
 // existing action record binds one compiler ObjectHandle to exactly one tuple.
-pub struct NativeCandidateComposition {
-    pub compiler: ObjectHandle
-    pub expected_runtime_identity: ObjectHandle
-    pub expected_approval: ObjectHandle
-    pub compatible_abi: [NativeRuntimeRoleObject]
-    pub compatible_routes: [NativeRuntimeRoleObject]
-    pub compatible_providers: [NativeRuntimeRoleObject]
+struct NativeCandidateComposition {
+    compiler: ObjectHandle
+    expected_runtime_identity: ObjectHandle
+    expected_approval: ObjectHandle
+    compatible_abi: [NativeRuntimeRoleObject]
+    compatible_routes: [NativeRuntimeRoleObject]
+    compatible_providers: [NativeRuntimeRoleObject]
 
     fn action_key(compiler: ObjectHandle) -> String Never! {
         parts := "jet.candidate-composition/v1".bytes()
@@ -154,43 +154,43 @@ pub struct NativeCandidateComposition {
 
 // The admitted rail is the single source of step order, expected outcomes,
 // invocations and inputs. Publication does not maintain a second 36-step table.
-pub enum NativeRuntimeRailInputSource {
+enum NativeRuntimeRailInputSource {
     Known(ObjectHandle)
     Produced(step: String, output: String)
 }
 
-pub struct NativeRuntimeRailInput {
-    pub role: String
-    pub source: NativeRuntimeRailInputSource
+struct NativeRuntimeRailInput {
+    role: String
+    source: NativeRuntimeRailInputSource
 }
 
-pub struct NativeRuntimeRailStep {
-    pub id: String
-    pub expected_rc: String
-    pub invocation: ObjectHandle
-    pub inputs: [NativeRuntimeRailInput]
-    pub outputs: [String]
+struct NativeRuntimeRailStep {
+    id: String
+    expected_rc: String
+    invocation: ObjectHandle
+    inputs: [NativeRuntimeRailInput]
+    outputs: [String]
 }
 
-pub struct NativeRuntimeObservedStep {
-    pub id: String
-    pub observed_rc: String
-    pub invocation: ObjectHandle
-    pub inputs: [NativeRuntimeRoleObject]
-    pub outputs: [NativeRuntimeRoleObject]
-    pub receipt: ObjectHandle
+struct NativeRuntimeObservedStep {
+    id: String
+    observed_rc: String
+    invocation: ObjectHandle
+    inputs: [NativeRuntimeRoleObject]
+    outputs: [NativeRuntimeRoleObject]
+    receipt: ObjectHandle
 }
 
-pub struct NativeRuntimeRailContract {
-    pub job: ObjectHandle
-    pub proofq_name: String
-    pub steps: [NativeRuntimeRailStep]
-    pub artifacts: [NativeRuntimeRailInput]
-    pub evidence: [NativeRuntimeRailInput]
-    pub generators: [NativeRuntimeRailInput]
-    pub abi: [NativeRuntimeRailInput]
-    pub routes: [NativeRuntimeRailInput]
-    pub providers: [NativeRuntimeRailInput]
+struct NativeRuntimeRailContract {
+    job: ObjectHandle
+    proofq_name: String
+    steps: [NativeRuntimeRailStep]
+    artifacts: [NativeRuntimeRailInput]
+    evidence: [NativeRuntimeRailInput]
+    generators: [NativeRuntimeRailInput]
+    abi: [NativeRuntimeRailInput]
+    routes: [NativeRuntimeRailInput]
+    providers: [NativeRuntimeRailInput]
 
     fn from_tree(tree: DataTree) -> NativeRuntimeRailContract NativeRuntimePackError! {
         fields :: native_pack_fields(tree, [String]{"schema", "job", "proofq_name", "steps", "artifacts", "evidence", "generators", "abi", "routes", "providers"})
@@ -261,10 +261,10 @@ pub struct NativeRuntimeRailContract {
 
 // Authorization is supplied by the authorized LOCAL publisher, after preparing
 // the exact subject. Its bytes cannot self-authorize merely by being hashed.
-pub struct NativeRuntimePackAuthorization {
-    pub subject: ObjectHandle
-    pub rail_contract: ObjectHandle
-    pub admission: ObjectHandle
+struct NativeRuntimePackAuthorization {
+    subject: ObjectHandle
+    rail_contract: ObjectHandle
+    admission: ObjectHandle
 
     fn from_bytes(bytes: [U8]) -> NativeRuntimePackAuthorization NativeRuntimePackError! {
         fields :: native_pack_fields(native_pack_input_tree(bytes), [String]{"schema", "decision", "subject", "rail_contract", "admission"})
@@ -274,19 +274,19 @@ pub struct NativeRuntimePackAuthorization {
     }
 }
 
-pub struct NativeRuntimePackApproval {
-    pub subject: ObjectHandle
-    pub admission: ObjectHandle
-    pub publication_authorization: ObjectHandle
-    pub rail_contract: ObjectHandle
-    pub job: ObjectHandle
-    pub proof_done: ObjectHandle
-    pub proof_terminal: ObjectHandle
-    pub final_source_tree: ObjectHandle
-    pub generation: ObjectHandle
+struct NativeRuntimePackApproval {
+    subject: ObjectHandle
+    admission: ObjectHandle
+    publication_authorization: ObjectHandle
+    rail_contract: ObjectHandle
+    job: ObjectHandle
+    proof_done: ObjectHandle
+    proof_terminal: ObjectHandle
+    final_source_tree: ObjectHandle
+    generation: ObjectHandle
     // Raw frontend records retain their actual statuses, including raw 101.
-    pub raw_frontend: ObjectHandle
-    pub steps: [NativeRuntimeObservedStep]
+    raw_frontend: ObjectHandle
+    steps: [NativeRuntimeObservedStep]
 
     fn to_tree(self) -> DataTree Never! {
         rows := [DataTree]{}
@@ -347,7 +347,7 @@ fn native_pack_verify_roles(store: ArtifactStore, roles: [NativeRuntimeRoleObjec
     loop role in roles -> _ :: native_pack_blob(store, role.object, &census)
 }
 
-pub fn native_runtime_pack_verify(store: ArtifactStore, identity: NativeRuntimePackIdentity) -[FS, Env, Exec, Time, Rand]> (subject: NativeRuntimePackSubject, pack_bytes: [U8]) NativeRuntimePackError! {
+fn native_runtime_pack_verify(store: ArtifactStore, identity: NativeRuntimePackIdentity) -[FS, Env, Exec, Time, Rand]> (subject: NativeRuntimePackSubject, pack_bytes: [U8]) NativeRuntimePackError! {
     census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
     native_runtime_pack_verify_reads(store, identity, &census)
 }
@@ -395,7 +395,7 @@ fn native_runtime_pack_check_evidence(store: ArtifactStore, subject: NativeRunti
     Ok(native_pack_blob(store, subject.pack_object, &census))
 }
 
-pub fn native_runtime_pack_publish(store: ArtifactStore, subject: NativeRuntimePackSubject, approval: NativeRuntimePackApproval, compiler: ObjectHandle) -[FS, Env, Exec, Time, Rand]> StoredArtifact NativeRuntimePackError! {
+fn native_runtime_pack_publish(store: ArtifactStore, subject: NativeRuntimePackSubject, approval: NativeRuntimePackApproval, compiler: ObjectHandle) -[FS, Env, Exec, Time, Rand]> StoredArtifact NativeRuntimePackError! {
     census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
     subject_bytes :: subject.to_bytes()
     if ObjectHandle.from_bytes(subject_bytes) != approval.subject -> return Err(NativeRuntimePackError.Invalid("prepared subject changed before authorization"))
@@ -414,19 +414,19 @@ pub fn native_runtime_pack_publish(store: ArtifactStore, subject: NativeRuntimeP
     Ok(store.publish_bytes(NativeCandidateComposition.action_key(compiler), composition.to_bytes(), false))
 }
 
-pub struct VerifiedNativeRuntimePack {
-    pub composition: ObjectHandle
-    pub identity: ObjectHandle
-    pub approval: ObjectHandle
-    pub subject: NativeRuntimePackSubject
-    pub pack_bytes: [U8]
-    pub objects: [ObjectHandle]
+struct VerifiedNativeRuntimePack {
+    composition: ObjectHandle
+    identity: ObjectHandle
+    approval: ObjectHandle
+    subject: NativeRuntimePackSubject
+    pack_bytes: [U8]
+    objects: [ObjectHandle]
 }
 
 // A retained native consumer supplies its actual executable-byte ObjectHandle
 // through the genuine held-image issuer; Store data and #4896 visibility do not
 // qualify compiler Source/session or execution custody. No path/CLI HEAD authority.
-pub fn native_runtime_pack_load(store: ArtifactStore, compiler: ObjectHandle) -[FS, Env, Exec, Time, Rand]> VerifiedNativeRuntimePack NativeRuntimePackError! {
+fn native_runtime_pack_load(store: ArtifactStore, compiler: ObjectHandle) -[FS, Env, Exec, Time, Rand]> VerifiedNativeRuntimePack NativeRuntimePackError! {
     census := NativePackReadCensus{capture: true, objects: [ObjectHandle]{}}
     _ :: native_pack_blob(store, compiler, &census)
     selected :: if store.lookup_artifact(NativeCandidateComposition.action_key(compiler)) == {
@@ -737,16 +737,16 @@ fn native_pack_check_generation(bytes: [U8], subject: NativeRuntimePackSubject) 
 
 // Preparation has real evidence but no authorization link: it can publish a
 // subject, never an approval/Identity/Composition. The authorization follows.
-pub struct NativeRuntimePackEvidence {
-    pub admission: ObjectHandle
-    pub rail_contract: ObjectHandle
-    pub job: ObjectHandle
-    pub proof_done: ObjectHandle
-    pub proof_terminal: ObjectHandle
-    pub final_source_tree: ObjectHandle
-    pub generation: ObjectHandle
-    pub raw_frontend: ObjectHandle
-    pub steps: [NativeRuntimeObservedStep]
+struct NativeRuntimePackEvidence {
+    admission: ObjectHandle
+    rail_contract: ObjectHandle
+    job: ObjectHandle
+    proof_done: ObjectHandle
+    proof_terminal: ObjectHandle
+    final_source_tree: ObjectHandle
+    generation: ObjectHandle
+    raw_frontend: ObjectHandle
+    steps: [NativeRuntimeObservedStep]
 
     fn from_tree(tree: DataTree) -> NativeRuntimePackEvidence NativeRuntimePackError! {
         fields :: native_pack_fields(tree, [String]{"schema", "admission", "rail_contract", "job", "proof_done", "proof_terminal", "final_source_tree", "generation", "raw_frontend", "steps"})
@@ -784,7 +784,7 @@ pub struct NativeRuntimePackEvidence {
     }
 }
 
-pub fn native_runtime_pack_prepare(store: ArtifactStore, subject: NativeRuntimePackSubject, evidence: NativeRuntimePackEvidence) -[FS, Env, Exec, Time, Rand]> ObjectHandle NativeRuntimePackError! {
+fn native_runtime_pack_prepare(store: ArtifactStore, subject: NativeRuntimePackSubject, evidence: NativeRuntimePackEvidence) -[FS, Env, Exec, Time, Rand]> ObjectHandle NativeRuntimePackError! {
     census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
     _ :: native_runtime_pack_check_evidence(store, subject, evidence, &census)
     Ok(store.publish_blob(subject.to_bytes()))

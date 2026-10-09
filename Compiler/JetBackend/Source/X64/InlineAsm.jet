@@ -1,24 +1,24 @@
 // Strict Intel-template assembler for audited #FFI(asm) leaves. Never guess an
 // encoding: an unsupported form produces no executable bytes. Register binding
 // is fixed and the write mask rejects placeholders read after their input died.
-pub struct X64AsmResult {
-    pub code: [U8]
-    pub regs: [Int]
-    pub result: Int
-    pub error: String?
+struct X64AsmResult {
+    code: [U8]
+    regs: [Int]
+    result: Int
+    error: String?
 }
 
 struct X64AsmState {
-    pub code: [U8]
-    pub names: [String]
-    pub written: [Bool]
-    pub depth: Int
-    pub result: Int
+    code: [U8]
+    names: [String]
+    written: [Bool]
+    depth: Int
+    result: Int
 }
 
 struct X64AsmMemory {
-    pub base: Int
-    pub disp: Int
+    base: Int
+    disp: Int
 }
 
 fn x64_asm_register(text: String) -> Int Never! {
@@ -240,7 +240,7 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
     None
 }
 
-pub fn x64_assemble_template(template: String, names: [String], returns: Bool) -> X64AsmResult Never! {
+fn x64_assemble_template(template: String, names: [String], returns: Bool) -> X64AsmResult Never! {
     regs := [Int]{}
     if names.len() > LIR_ASM_INPUTS.len() {
         return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: more than seven operands")}

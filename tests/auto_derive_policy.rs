@@ -134,7 +134,7 @@ fn qualified_user_shell_name_keeps_its_declared_carrier() {
         "authority: { holds: { allow: [IO, Mem.Alloc] } }",
         r#"
 module user {
-    pub struct Sh { pub value: Int }
+    struct Sh { value: Int }
 }
 fn consume(command: user.Sh) { print(command.value) }
 fn run() { consume(user.Sh{value: 7}) }

@@ -14,14 +14,14 @@ use core.files as files
 
 // Exact ProcessSignal shape from JetStd/CommonTypes.rs. Signal arming shares
 // the one native interrupt dispatcher; source owns mask and failure policy.
-pub enum ProcessSignal {
+enum ProcessSignal {
     Term
     Hup
     Int
 }
 
 
-pub fn args() -[Exec.Args]> [String] Never! { args_from_argv(argv()) }
+fn args() -[Exec.Args]> [String] Never! { args_from_argv(argv()) }
 
 fn argv() -[Exec.Args]> [String] Never! { core.process.argv() }
 
@@ -88,7 +88,7 @@ fn args_extend(spec: ProcessSpec, extra: [String]) -> ProcessSpec Never! {
 }
 
 
-pub fn cmd(argv: [String]) -[Exec]> ProcessSpec Never! {
+fn cmd(argv: [String]) -[Exec]> ProcessSpec Never! {
     fields :: default_fields(argv)
     terminal :: fields.terminal ?? TerminalPolicy{size: TerminalSize{cols: 0, rows: 0}, mode: .Cooked}
     has_stdin :: if fields.stdin == .Val(_) -> true else -> false
@@ -122,7 +122,7 @@ fn exit(code: Int) -[Exec]> Never Never! {
     loop {}
 }
 
-pub fn on_signal(signal: ProcessSignal) Never! -[Exec]> {
+fn on_signal(signal: ProcessSignal) Never! -[Exec]> {
     mask :: if signal == {
         .Int -> 1
         .Hup -> 2
@@ -134,7 +134,7 @@ pub fn on_signal(signal: ProcessSignal) Never! -[Exec]> {
     }
 }
 
-pub fn pipeline(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt IOError! {
+fn pipeline(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     if steps.len() == 0 {
         return Err(IOError.InvalidInput(IOContext{
             operation: .Resolve, resource: None, os_code: None,
@@ -443,11 +443,11 @@ fn default_fields(argv: [String]) -> ProcessFields Never! {
 
 // Process.rs:3299-3328: shared stdout/stderr BufReader leaves retain their
 // shared position and refill buffer. There is no FS fault checkpoint here.
-pub fn __stdout_next_line(stream: ProcessStdoutStream) -[Time.Wait]> String? IOError! {
+fn __stdout_next_line(stream: ProcessStdoutStream) -[Time.Wait]> String? IOError! {
     pipe_line(core.process.__stdout_line_bytes(stream))
 }
 
-pub fn __stderr_next_line(stream: ProcessStderrStream) -[Time.Wait]> String? IOError! {
+fn __stderr_next_line(stream: ProcessStderrStream) -[Time.Wait]> String? IOError! {
     pipe_line(core.process.__stderr_line_bytes(stream))
 }
 

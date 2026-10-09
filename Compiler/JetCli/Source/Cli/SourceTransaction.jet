@@ -4,10 +4,10 @@ use core.encoding.hex as cli_transaction_hex
 
 JET_CLI_TRANSACTION_MAX_BYTES :: 67108864
 
-pub struct JetCLISourceChange {
-    pub path: String
-    pub before: [U8]
-    pub after: [U8]
+struct JetCLISourceChange {
+    path: String
+    before: [U8]
+    after: [U8]
 }
 
 struct JetCLITransactionRecord {
@@ -233,7 +233,7 @@ fn jet_cli_transaction_commit_locked(project: JetCLIRootedDirectory, journal: Je
     Ok(log_path)
 }
 
-pub fn jet_cli_commit_source_changes(root: String, changes: [JetCLISourceChange], log_name: String, log: [U8]) -[FS, Env, Time, Time.Wait]> String JetCLIReadError! {
+fn jet_cli_commit_source_changes(root: String, changes: [JetCLISourceChange], log_name: String, log: [U8]) -[FS, Env, Time, Time.Wait]> String JetCLIReadError! {
     project :: JetCLIRootedDirectory.open(root, [String]{}, false)
     journal :: project.descendant([String]{".jet", "codemods"}, true)
     lock :: journal.transaction_lock()
@@ -279,7 +279,7 @@ fn jet_cli_fix_operation_json(operation: JetCLISemOp, changes: [JetCLISourceChan
     "{{\"kind\":{kind},\"rule_id\":{rule},\"from\":{from},\"to\":{to},\"node\":{node},\"match\":{pattern},\"replace\":{replacement},\"targets\":[{target_json}],\"files\":[{file_json}]}}"
 }
 
-pub fn jet_cli_fix_log(root: String, name: String, changes: [JetCLISourceChange], operations: [JetCLISemOp]) -> [U8] Never! {
+fn jet_cli_fix_log(root: String, name: String, changes: [JetCLISourceChange], operations: [JetCLISemOp]) -> [U8] Never! {
     rows := [String]{}
     loop change in changes {
         path :: foundation_json_quote(change.path)
@@ -329,7 +329,7 @@ fn jet_cli_fix_name(stem: String) -> String Never! {
     sanitized
 }
 
-pub fn jet_cli_commit_fix(file: String, before: [U8], staged: [U8], semantic_ops: [JetCLISemOp]?) -[FS, Env, Time, Time.Wait]> String JetCLIReadError! {
+fn jet_cli_commit_fix(file: String, before: [U8], staged: [U8], semantic_ops: [JetCLISemOp]?) -[FS, Env, Time, Time.Wait]> String JetCLIReadError! {
     path :: cli_files.realpath(file) ?? return Err(jet_cli_read_error("could not canonicalize fix target `{file}`: {jet_cli_io_error_text(err)}"))
     parent :: jet_cli_parent(path) ?? return Err(jet_cli_read_error("fix target has no parent directory"))
     cache := WorkspaceDeclarationCache.new()
@@ -377,7 +377,7 @@ fn jet_cli_transaction_known_fields(value: JetCLIStatusValue, allowed: [String],
     Err(jet_cli_read_error("{label} must be an object"))
 }
 
-pub fn jet_cli_undo_source_changes(root: String, log_name: String) -[FS, Env, Time, Time.Wait]> String JetCLIReadError! {
+fn jet_cli_undo_source_changes(root: String, log_name: String) -[FS, Env, Time, Time.Wait]> String JetCLIReadError! {
     jet_cli_rooted_validate_name(log_name)
     if !log_name.ends_with(".log.json") -> return Err(jet_cli_read_error("replay log name must end in .log.json"))
     project :: JetCLIRootedDirectory.open(root, [String]{}, false)

@@ -5,14 +5,14 @@ use jet_driver.[JetDriverCompileRequest, jet_driver_query_loaded_input_paths]
 use core.files as cli_files
 use core.sys as cli_sys
 
-pub struct JetCLIWatchGraph {
-    pub entry: String
-    pub paths: [String]
+struct JetCLIWatchGraph {
+    entry: String
+    paths: [String]
 }
 #Error
-pub struct JetCLIWatchInputError {
-    pub message: String
-    pub comptime_unavailable: Bool{false}
+struct JetCLIWatchInputError {
+    message: String
+    comptime_unavailable: Bool{false}
 }
 fn jet_cli_watch_canonical(path: String) -[FS, Env]> String Never! {
     cli_files.realpath(path) ?? (if path.starts_with("/") -> path else -> jet_cli_entry_join(cli_sys.current_dir() ?? ".", path))
@@ -186,7 +186,7 @@ fn jet_cli_watch_runtime_tree(path: String, visited: &[String:Bool], paths: &[St
     loop entry in entries -> jet_cli_watch_runtime_tree(jet_cli_entry_join(canonical, entry.name), &visited, &paths)
 }
 
-pub fn jet_cli_watch_from_entry(cache: &WorkspaceDeclarationCache, entry: String, dependencies: [String], comptime_inputs: [String]?) -[FS, Env]> JetCLIWatchGraph JetCLIWatchInputError! {
+fn jet_cli_watch_from_entry(cache: &WorkspaceDeclarationCache, entry: String, dependencies: [String], comptime_inputs: [String]?) -[FS, Env]> JetCLIWatchGraph JetCLIWatchInputError! {
     // #4736: only the actual build session can certify its comptime read set.
     // None is missing coverage, not an observation of zero reads.
     observed :: comptime_inputs ?? return Err(JetCLIWatchInputError{message: "comptime inputs: #4736; canonical build session has not certified its input read closure", comptime_unavailable: true})
@@ -228,7 +228,7 @@ pub fn jet_cli_watch_from_entry(cache: &WorkspaceDeclarationCache, entry: String
     Ok(JetCLIWatchGraph{entry: canonical, paths: jet_cli_lock_canonical(paths)})
 }
 
-pub fn jet_cli_watch_discover(cache: &WorkspaceDeclarationCache, request: JetDriverCompileRequest) -[FS, Env]> JetCLIWatchGraph JetCLIWatchInputError! {
+fn jet_cli_watch_discover(cache: &WorkspaceDeclarationCache, request: JetDriverCompileRequest) -[FS, Env]> JetCLIWatchGraph JetCLIWatchInputError! {
     loaded :: jet_driver_query_loaded_input_paths(request)
     observed_comptime :: if loaded.comptime_input_coverage_complete -> Val(loaded.comptime_input_paths) else -> None
     jet_cli_watch_from_entry(&cache, request.authorized_sources.entry_path, loaded.paths, observed_comptime)

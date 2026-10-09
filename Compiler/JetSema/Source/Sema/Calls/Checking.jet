@@ -614,7 +614,7 @@ fn sema_call_pack_variadic_arguments(typed: SemaCallTypedArguments, params: [Sem
 // ownership hook may mark implicit_clone on the source arg, so lowering must
 // happen only after it accepts and completes. Return the lowered arguments
 // together with the declaration-slot temporaries placed before the call.
-pub fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> (args: [TCallArg], pins: [TStmt])? {
+fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> (args: [TCallArg], pins: [TStmt])? {
     typed :: sema_call_typecheck_bound_arguments(callee, params, abi, apply_lambda_escape_override, binding, &args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? return None
     ownership :: sema_ownership_check_call_arguments(&state, callee, params, &args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None

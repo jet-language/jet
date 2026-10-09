@@ -2,12 +2,12 @@
 // consume checked MIR facts; absent runtime observations remain absent.
 use jet_foundation.[MIRProgram, MIRArtifactID, MIRArtifactPlan, MIRArtifactTarget, MIRArtifactBuildMode, MIRRuntimePartID, MIRDecisionIdentity, MIRDecisionRow, MIRDecisionKind, MIRDecisionDisposition, MIRDerivationMethod, MIRDerivationDisposition, MIRDerivationRef, MIRDecisionEdit, MIRFunctionID, MIRVectorRule, MIROptimizationRejection, Span, DerivationRecord, DerivationIdentity, derivation_identity, derivation_record, derivation_record_reference, mir_sha256_hex, jet_ring_layer_name, foundation_json_quote, foundation_parse_protocol_json, stable_id]
 
-pub struct MIRDecisionLedger {
-    pub identity: MIRDecisionIdentity
-    pub rows: [MIRDecisionRow]
-    pub derivations: [DerivationRecord]
+struct MIRDecisionLedger {
+    identity: MIRDecisionIdentity
+    rows: [MIRDecisionRow]
+    derivations: [DerivationRecord]
 }
-#Error pub struct MIRDecisionPayloadError { pub message: String }
+#Error struct MIRDecisionPayloadError { message: String }
 fn mir_decision_frame(out: &[U8], text: String) Never! {
     length :: U64.from_int(text.bytes().len()) ?? panic("decision frame length")
     loop index in 0..<8 -> &out.push(U8.from_u64((length >> (8 * index)) & U64{255}) ?? U8{0})
@@ -64,7 +64,7 @@ fn mir_decision_mode_name(mode: MIRArtifactBuildMode) -> String Never! {
         .Coverage -> "coverage"
     }
 }
-pub fn mir_decision_identity(program: MIRProgram, artifact: MIRArtifactID?, profile: String, run: String) -> MIRDecisionIdentity Never! {
+fn mir_decision_identity(program: MIRProgram, artifact: MIRArtifactID?, profile: String, run: String) -> MIRDecisionIdentity Never! {
     plan := MIRArtifactPlan?{None}
     loop candidate in program.artifacts {
         if artifact == (Val(candidate.id)) {
@@ -106,7 +106,7 @@ fn mir_decision_derivation_identity(identity: MIRDecisionIdentity) -> Derivation
     loop value in [identity.configuration, identity.profile, identity.implementation, identity.artifact] -> mir_decision_frame(&build, value)
     derivation_identity(identity.source, mir_sha256_hex(build), identity.run, identity.target)
 }
-pub fn mir_decision_ledger_from_rows(identity: MIRDecisionIdentity, rows: [MIRDecisionRow]) -> MIRDecisionLedger Never! {
+fn mir_decision_ledger_from_rows(identity: MIRDecisionIdentity, rows: [MIRDecisionRow]) -> MIRDecisionLedger Never! {
     canonical := [MIRDecisionRow]{}
     positions := [U64:Int]{}
     loop row in rows {
@@ -165,7 +165,7 @@ fn mir_decision_rejection(reason: MIROptimizationRejection) -> String Never! {
         .UnsupportedOperation -> "unsupported-operation"
     }
 }
-pub fn mir_decision_ledger_rows(program: MIRProgram) -> [MIRDecisionRow] Never! {
+fn mir_decision_ledger_rows(program: MIRProgram) -> [MIRDecisionRow] Never! {
     rows := [MIRDecisionRow]{}
     loop function in program.functions {
         &rows.extend(function.optimization.decision_rows)
@@ -226,7 +226,7 @@ fn mir_decision_kind_order(kind: MIRDecisionKind) -> Int Never! {
         .LoopInvariant -> 8
     }
 }
-pub fn mir_decision_ledger(program: MIRProgram, artifact: MIRArtifactID?, profile: String, run: String, additional: [MIRDecisionRow]) -> MIRDecisionLedger Never! {
+fn mir_decision_ledger(program: MIRProgram, artifact: MIRArtifactID?, profile: String, run: String, additional: [MIRDecisionRow]) -> MIRDecisionLedger Never! {
     rows := mir_decision_ledger_rows(program)
     &rows.extend(additional)
     mir_decision_ledger_from_rows(mir_decision_identity(program, artifact, profile, run), rows)
@@ -266,7 +266,7 @@ fn mir_decision_row_json(row: MIRDecisionRow) -> String Never! {
     edit :: if row.edit == .Val(value) -> "{{\"replacement\":{foundation_json_quote(value.replacement)},\"span\":{mir_decision_span_json(value.span)}}}" else -> "null"
     "{{\"derivation_disposition\":{disposition},\"derivation_ref\":{reference},\"disposition\":{foundation_json_quote(mir_pass_decision_disposition_name(row.disposition))},\"edit\":{edit},\"evidence\":{foundation_json_quote(row.evidence)},\"evidence_method\":{method},\"function\":{function},\"function_id\":{function_id},\"function_name\":{foundation_json_quote(row.function_name)},\"id\":{foundation_json_quote("{row.id}")},\"identity\":{identity},\"kind\":{foundation_json_quote(mir_pass_decision_kind_name(row.kind))},\"producer\":{foundation_json_quote(row.producer)},\"reason\":{foundation_json_quote(row.reason)},\"rule\":{foundation_json_quote(row.rule)},\"span\":{mir_decision_span_json(row.span)}}}"
 }
-pub fn mir_decision_ledger_json(ledger: MIRDecisionLedger) -> String Never! {
+fn mir_decision_ledger_json(ledger: MIRDecisionLedger) -> String Never! {
     rows :: ledger.rows.map(row -> mir_decision_row_json(row))
     "{{\"identity\":{mir_decision_identity_json(ledger.identity)},\"rows\":[{rows.join(",")}],\"schema\":\"jet.mir.decisions.v1\"}}"
 }
@@ -348,7 +348,7 @@ fn mir_decision_parse_row(value: DataTree) -> MIRDecisionRow MIRDecisionPayloadE
     // reference, disposition and function projection against rematerialization.
     Ok(row)
 }
-pub fn mir_decision_ledger_read(payload: String) -> MIRDecisionLedger MIRDecisionPayloadError! {
+fn mir_decision_ledger_read(payload: String) -> MIRDecisionLedger MIRDecisionPayloadError! {
     root :: foundation_parse_protocol_json(payload) ?? return Err(mir_decision_payload_error("decision ledger payload is not valid JSON"))
     fields :: mir_decision_object(root, ["identity", "rows", "schema"], "decision ledger payload")
     if mir_decision_text(fields, "schema") != "jet.mir.decisions.v1" -> return Err(mir_decision_payload_error("decision ledger payload has an unsupported schema"))

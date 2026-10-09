@@ -5,7 +5,7 @@
 // compiler unit assembles TrustStore.jet for `jet inspect gates` alone.
 
 // Rust `record_json`.
-pub fn trust_record_json(record: TrustRecord) -> String Never! {
+fn trust_record_json(record: TrustRecord) -> String Never! {
     if record == {
         .Hash(hash) -> trust_json_object_text([TrustJSONField]{
             TrustJSONField{key: "type", value: DataTree.Text("hash")},
@@ -33,7 +33,7 @@ pub fn trust_record_json(record: TrustRecord) -> String Never! {
 }
 
 // Rust `records_json`: `{"grants":[...]}`.
-pub fn trust_records_json(records: [TrustRecord]) -> String Never! {
+fn trust_records_json(records: [TrustRecord]) -> String Never! {
     rendered := [String]{}
     loop record in records -> &rendered.push(trust_record_json(record))
     "{{\"grants\":[{rendered.join(",")}]}}"
@@ -42,7 +42,7 @@ pub fn trust_records_json(records: [TrustRecord]) -> String Never! {
 // `jet trust grant <selector> [--scope user|repo]`: an explicit
 // `authority:subject` selector, or a bare subject whose authority is
 // inferred.
-pub fn trust_parse_grant_selector(selector: String, scope: String) -> TrustGrant TrustError! {
+fn trust_parse_grant_selector(selector: String, scope: String) -> TrustGrant TrustError! {
     trimmed :: selector.trim()
     if trimmed == "" -> return Err(TrustError.Grant("grant selector is empty"))
     if trust_text_split_first(trimmed, TRUST_COLON) == {

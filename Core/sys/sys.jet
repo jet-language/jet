@@ -30,7 +30,7 @@ SYS_TARGET_USIZE_MAX :: prep {
     if size == 8 -> U64{0xffffffffffffffff} else -> (U64{1} << (8 * size)) - U64{1}
 }
 
-pub fn usize_max() -> U64 Never! { SYS_TARGET_USIZE_MAX }
+fn usize_max() -> U64 Never! { SYS_TARGET_USIZE_MAX }
 
 #Test("usize maximum follows the selected target pointer layout") {
     size :: prep { SysTargetPointer.$layout.size ?? panic("selected target pointer layout") }
@@ -42,11 +42,11 @@ pub fn usize_max() -> U64 Never! { SYS_TARGET_USIZE_MAX }
 
 // Source owns validation, Unicode policy and child overlays. The existing
 // process cell remains the sole writer until the pinned Shared root lands.
-pub fn get(name: String) -[Env]> String? Never! {
+fn get(name: String) -[Env]> String? Never! {
     decode_host_env(core.sys.__env_value(name))
 }
 
-pub fn set(name: String, value: String) Never! -[Env]> {
+fn set(name: String, value: String) Never! -[Env]> {
     if validate_env_name(name) == {
         .Err(error) -> panic("core.sys.set: {error}")
         .Ok(_) -> {}
@@ -58,26 +58,26 @@ pub fn set(name: String, value: String) Never! -[Env]> {
     }
 }
 
-pub fn unset(name: String) -[Env]> Bool EnvError! {
+fn unset(name: String) -[Env]> Bool EnvError! {
     validate_env_name(name)
     core.sys.__env_remove(name)
 }
 
-pub fn vars() -[Env]> [String] EnvError! {
+fn vars() -[Env]> [String] EnvError! {
     entry_names(__env_snapshot())
 }
 
 // Immutable host bytes are not the logical process environment.
-pub fn __startup_env() -> [(name: [U8], value: [U8])] Never! {
+fn __startup_env() -> [(name: [U8], value: [U8])] Never! {
     env_columns(core.sys.__startup_env_columns())
 }
 
 // Snapshot once, under the existing host cell's lock. No per-name rereads.
-pub fn __env_snapshot() -> [(name: [U8], value: [U8])] Never! {
+fn __env_snapshot() -> [(name: [U8], value: [U8])] Never! {
     env_columns(core.sys.__env_columns())
 }
 
-pub fn __env_present(name: String) -[Env]> Bool Never! {
+fn __env_present(name: String) -[Env]> Bool Never! {
     core.sys.__env_value(name) != None
 }
 
@@ -93,7 +93,7 @@ fn env_columns(columns: [[U8]]) -> [(name: [U8], value: [U8])] Never! {
 
 // Process.rs:237-277: prepare the child environment entirely in source.
 // Explicit sets are applied in order, then every removal.
-pub fn __env_compose(snapshot: [(name: [U8], value: [U8])], clear: Bool,
+fn __env_compose(snapshot: [(name: [U8], value: [U8])], clear: Bool,
     names: [String], values: [String], removals: [String]) -> [(name: [U8], value: [U8])] IOError! {
     assert(names.len() == values.len())
     entries := if clear -> [(name: [U8], value: [U8])]{} else -> ~snapshot
@@ -229,7 +229,7 @@ fn entry_names(entries: [(name: [U8], value: [U8])]) -> [String] EnvError! {
     assert_eq(__env_compose(snapshot, true, [String]{}, [String]{}, [String]{}) ?? panic("clear"), [(name: [U8], value: [U8])]{})
 }
 
-pub fn current_dir() -[FS, Env]> String IOError! {
+fn current_dir() -[FS, Env]> String IOError! {
     if core.sys.__current_dir() == {
         .Ok(path) -> Ok(path)
         .Err(cause) -> Err(syscall_input(.Resolve, None, cause))
@@ -244,7 +244,7 @@ fn home_dir() -[Env]> String? Never! {
 
 fn name() -[Env]> String Never! { core.sys.name() }
 
-pub fn family() -[Env]> String Never! { core.sys.__family_os() }
+fn family() -[Env]> String Never! { core.sys.__family_os() }
 
 fn arch() -[Env]> String Never! { core.sys.arch() }
 
@@ -258,9 +258,9 @@ fn temp_dir() -[Env]> String Never! {
     "/tmp"
 }
 
-pub fn executable() -[Env]> String Never! { core.sys.__executable() ?? "" }
+fn executable() -[Env]> String Never! { core.sys.__executable() ?? "" }
 
-pub fn hostname() -[Env, FS]> String Never! { net.gethostname() }
+fn hostname() -[Env, FS]> String Never! { net.gethostname() }
 
 fn username() -[Env]> String Never! {
     user :: get("USER")
@@ -272,7 +272,7 @@ fn username() -[Env]> String Never! {
     host_env("USERNAME") ?? ""
 }
 
-pub fn release() -[Env, FS, Exec, Time.Wait]> String Never! {
+fn release() -[Env, FS, Exec, Time.Wait]> String Never! {
     platform :: name()
     if platform == "linux" {
         kernel :: files.read("/proc/sys/kernel/osrelease") ?? ""
@@ -286,7 +286,7 @@ pub fn release() -[Env, FS, Exec, Time.Wait]> String Never! {
     ""
 }
 
-pub fn version() -[Env, FS, Exec, Time.Wait]> String Never! {
+fn version() -[Env, FS, Exec, Time.Wait]> String Never! {
     platform :: name()
     if platform == "linux" {
         config :: files.read("/etc/os-release") ?? ""
@@ -346,36 +346,36 @@ fn expand(value: String) -[Env]> String Never! {
     }
 }
 
-pub fn pid() -[Env]> Int Never! { getpid() }
+fn pid() -[Env]> Int Never! { getpid() }
 
-pub fn getpid() -[Env]> Int Never! { core.sys.__pid_os() }
+fn getpid() -[Env]> Int Never! { core.sys.__pid_os() }
 
-pub fn cpu_count() -[Env]> Int Never! {
+fn cpu_count() -[Env]> Int Never! {
     count :: core.sys.__cpu_count() ?? 1
     if count < 1 -> return 1
     count
 }
 
-pub fn getppid() -[Env]> Int Never! { posix_identity(core.sys.__getppid()) }
+fn getppid() -[Env]> Int Never! { posix_identity(core.sys.__getppid()) }
 
-pub fn getuid() -[Env]> Int Never! { posix_identity(core.sys.__getuid()) }
+fn getuid() -[Env]> Int Never! { posix_identity(core.sys.__getuid()) }
 
-pub fn geteuid() -[Env]> Int Never! { posix_identity(core.sys.__geteuid()) }
+fn geteuid() -[Env]> Int Never! { posix_identity(core.sys.__geteuid()) }
 
-pub fn getgid() -[Env]> Int Never! { posix_identity(core.sys.__getgid()) }
+fn getgid() -[Env]> Int Never! { posix_identity(core.sys.__getgid()) }
 
-pub fn getegid() -[Env]> Int Never! { posix_identity(core.sys.__getegid()) }
+fn getegid() -[Env]> Int Never! { posix_identity(core.sys.__getegid()) }
 
-pub fn getpgrp() -[Env]> Int Never! { posix_identity(core.sys.__getpgrp()) }
+fn getpgrp() -[Env]> Int Never! { posix_identity(core.sys.__getpgrp()) }
 
-#Unsafe("posix umask: the caller owns the process file-creation mask and restores it when other code relies on it") pub fn umask(mask: Int) -[FS, Env]> Int Never! {
+#Unsafe("posix umask: the caller owns the process file-creation mask and restores it when other code relies on it") fn umask(mask: Int) -[FS, Env]> Int Never! {
     core.sys.__umask(mask) ?? 0
 }
 fn exitcode(code: Int) -> Int Never! { code }
 
 fn success(code: Int) -> Bool Never! { code == 0 }
 
-pub fn uptime() -[Time, Env, FS]> Float Never! {
+fn uptime() -[Time, Env, FS]> Float Never! {
     if name() != "linux" -> return 0.0
     contents :: files.read("/proc/uptime") ?? return 0.0
     fields :: text.split_ws(contents)
@@ -383,7 +383,7 @@ pub fn uptime() -[Time, Env, FS]> Float Never! {
     Float.parse(fields[0]) ?? 0.0
 }
 
-pub fn getgroups() -[Env]> [Int] Never! {
+fn getgroups() -[Env]> [Int] Never! {
     count :: core.sys.__groups_count() ?? return [Int]{}
     if count < 0 || count > 2147483647 -> return [Int]{}
     row :: core.sys.__groups_fill(count)
@@ -393,7 +393,7 @@ pub fn getgroups() -[Env]> [Int] Never! {
     out
 }
 
-pub fn loadavg() -[Env]> [Float] Never! {
+fn loadavg() -[Env]> [Float] Never! {
     row :: core.sys.__loadavg()
     if !row.available || row.count < 0 -> return [Float]{0.0, 0.0, 0.0}
     out := [Float]{}
@@ -403,7 +403,7 @@ pub fn loadavg() -[Env]> [Float] Never! {
     out
 }
 
-pub fn times() -[Env]> [Float] Never! {
+fn times() -[Env]> [Float] Never! {
     row :: core.sys.__times()
     if !row.available -> return [Float]{0.0, 0.0, 0.0, 0.0, 0.0}
     ticks :: if row.ticks < 1 -> 1 else -> row.ticks
@@ -425,94 +425,94 @@ fn getsid(pid: Int) -[Env]> Int IOError! {
     }
 }
 
-#Unsafe("posix getpriority: the caller vouches that `which` names this process or one it controls") pub fn getpriority(which: Int) -[Env]> Int IOError! {
+#Unsafe("posix getpriority: the caller vouches that `which` names this process or one it controls") fn getpriority(which: Int) -[Env]> Int IOError! {
     row :: core.sys.__getpriority(which)
     if !row.available -> return Err(unsupported("getpriority"))
     if row.value == -1 && row.errno != 0 -> return Err(syscall_error(.Resolve, None, row.errno))
     Ok(row.value)
 }
 
-#Unsafe("posix setpriority: the caller owns the scheduling priority of the process it changes") pub fn setpriority(which: Int, priority: Int) IOError! -[Env]> {
+#Unsafe("posix setpriority: the caller owns the scheduling priority of the process it changes") fn setpriority(which: Int, priority: Int) IOError! -[Env]> {
     call_unit(core.sys.__setpriority(which, priority), "setpriority", .Write, None)
 }
 
-#Unsafe("posix utime: the caller owns the file whose timestamps it rewrites") pub fn utime(path: String, atime: Int, mtime: Int) IOError! -[FS, Env]> {
+#Unsafe("posix utime: the caller owns the file whose timestamps it rewrites") fn utime(path: String, atime: Int, mtime: Int) IOError! -[FS, Env]> {
     if is_unix() && has_nul(path) -> return Err(syscall_input(.Write, Val(path), "path contains NUL"))
     call_unit(core.sys.__utime(path, atime, mtime), "utime", .Write, Val(path))
 }
 
-pub fn sync() Never! -[FS, Env]> { core.sys.__sync_os() }
+fn sync() Never! -[FS, Env]> { core.sys.__sync_os() }
 
-#Unsafe("posix stop: the caller accepts that the process ends here after the shared cleanup boundary") pub fn stop(code: Int) Never! -[Env, Exec]> {
+#Unsafe("posix stop: the caller accepts that the process ends here after the shared cleanup boundary") fn stop(code: Int) Never! -[Env, Exec]> {
     process.exit(code)
 }
 
-pub fn set_current_dir(path: String) IOError! -[FS, Env]> {
+fn set_current_dir(path: String) IOError! -[FS, Env]> {
     if core.sys.__set_current_dir(path) == {
         .Ok(_) -> Ok()
         .Err(cause) -> Err(syscall_input(.Resolve, Val(path), cause))
     }
 }
-#Unsafe("posix pipe: the caller owns both returned descriptors and closes each exactly once") pub fn pipe() -[FS, Env]> [Int] IOError! {
+#Unsafe("posix pipe: the caller owns both returned descriptors and closes each exactly once") fn pipe() -[FS, Env]> [Int] IOError! {
     row :: core.sys.__pipe()
     _ :: call_value((available: row.available, value: row.value, errno: row.errno), "pipe", .Resolve, None)
     Ok([Int]{row.read_fd, row.write_fd})
 }
 
-#Unsafe("posix close_fd: the caller owns `fd` and nothing uses it after this call") pub fn close_fd(fd: Int) Never! -[FS, Env]> {
+#Unsafe("posix close_fd: the caller owns `fd` and nothing uses it after this call") fn close_fd(fd: Int) Never! -[FS, Env]> {
     core.sys.__close_fd_os(fd)
 }
 
-pub fn atexit(handler: fn()) Never! -[Env]> {
+fn atexit(handler: fn()) Never! -[Env]> {
     core.sys.__atexit_os(handler)
 }
 
-#Unsafe("posix mkfifo: the caller owns `path` and removes the named pipe it creates") pub fn mkfifo(path: String, mode: Int) IOError! -[FS, Env]> {
+#Unsafe("posix mkfifo: the caller owns `path` and removes the named pipe it creates") fn mkfifo(path: String, mode: Int) IOError! -[FS, Env]> {
     if is_unix() && has_nul(path) -> return Err(syscall_input(.Resolve, Val(path), "path contains NUL"))
     call_unit(core.sys.__mkfifo(path, mode), "mkfifo", .Resolve, Val(path))
 }
 
-#Unsafe("posix fork: the caller handles both the parent and the child return and reaps the child") pub fn fork() -[Env]> Int IOError! {
+#Unsafe("posix fork: the caller handles both the parent and the child return and reaps the child") fn fork() -[Env]> Int IOError! {
     call_value(core.sys.__fork(), "fork", .Resolve, None)
 }
 
-#Unsafe("posix setsid: the caller owns the process session topology it changes") pub fn setsid() -[Env]> Int IOError! {
+#Unsafe("posix setsid: the caller owns the process session topology it changes") fn setsid() -[Env]> Int IOError! {
     call_value(core.sys.__setsid(), "setsid", .Write, None)
 }
 
-#Unsafe("posix wait: the caller owns the child processes it reaps") pub fn wait() -[Env, Time.Wait]> Int IOError! {
+#Unsafe("posix wait: the caller owns the child processes it reaps") fn wait() -[Env, Time.Wait]> Int IOError! {
     row :: core.sys.__wait()
     _ :: call_value((available: row.available, value: row.value, errno: row.errno), "wait", .Close, None)
     Ok(row.status)
 }
 
-#Unsafe("posix waitpid: the caller owns the child process it reaps") pub fn waitpid(pid: Int, options: Int) -[Env, Time.Wait]> Int IOError! {
+#Unsafe("posix waitpid: the caller owns the child process it reaps") fn waitpid(pid: Int, options: Int) -[Env, Time.Wait]> Int IOError! {
     row :: core.sys.__waitpid(pid, options)
     _ :: call_value((available: row.available, value: row.value, errno: row.errno), "waitpid", .Close, None)
     Ok(row.status)
 }
 
-#Unsafe("posix setuid: the caller drops or changes process credentials deliberately") pub fn setuid(uid: Int) IOError! -[Env]> {
+#Unsafe("posix setuid: the caller drops or changes process credentials deliberately") fn setuid(uid: Int) IOError! -[Env]> {
     call_unit(core.sys.__setuid(uid), "setuid", .Write, None)
 }
 
-#Unsafe("posix setgid: the caller drops or changes process credentials deliberately") pub fn setgid(gid: Int) IOError! -[Env]> {
+#Unsafe("posix setgid: the caller drops or changes process credentials deliberately") fn setgid(gid: Int) IOError! -[Env]> {
     call_unit(core.sys.__setgid(gid), "setgid", .Write, None)
 }
 
-#Unsafe("posix setpgrp: the caller owns the process group topology it changes") pub fn setpgrp() IOError! -[Env]> {
+#Unsafe("posix setpgrp: the caller owns the process group topology it changes") fn setpgrp() IOError! -[Env]> {
     call_unit(core.sys.__setpgrp(), "setpgrp", .Write, None)
 }
 
-#Unsafe("posix setpgid: the caller owns the process group topology it changes") pub fn setpgid(pid: Int, pgid: Int) IOError! -[Env]> {
+#Unsafe("posix setpgid: the caller owns the process group topology it changes") fn setpgid(pid: Int, pgid: Int) IOError! -[Env]> {
     call_unit(core.sys.__setpgid(pid, pgid), "setpgid", .Write, None)
 }
 
-#Unsafe("posix kill: the caller owns or is entitled to signal the target process") pub fn kill(pid: Int, signal: Int) IOError! -[Env]> {
+#Unsafe("posix kill: the caller owns or is entitled to signal the target process") fn kill(pid: Int, signal: Int) IOError! -[Env]> {
     call_unit(core.sys.__kill(pid, signal), "kill", .Write, None)
 }
 
-#Unsafe("posix initgroups: the caller changes supplementary groups deliberately") pub fn initgroups(user: String, group: Int) IOError! -[Env]> {
+#Unsafe("posix initgroups: the caller changes supplementary groups deliberately") fn initgroups(user: String, group: Int) IOError! -[Env]> {
     if is_unix() && has_nul(user) -> return Err(syscall_input(.Write, None, "username contains NUL"))
     call_unit(core.sys.__initgroups(user, group), "initgroups", .Write, None)
 }
@@ -534,7 +534,7 @@ fn is_macos() -[Env]> Bool Never! {
     platform_name == "macos" || platform_name == "darwin" || platform_name == "osx"
 }
 
-pub fn uname() -[Env, FS, Exec, Time.Wait]> String Never! { "{name()} {release()} {version()} {arch()}" }
+fn uname() -[Env, FS, Exec, Time.Wait]> String Never! { "{name()} {release()} {version()} {arch()}" }
 
 fn sysname() -[Env]> String Never! { name() }
 
@@ -702,7 +702,7 @@ fn has_nul(value: String) -> Bool {
 // selection and the typed codec remain the compiler's established lowering.
 // Everything between metadata and codec, and error provenance afterwards,
 // is source policy rather than a second codec or host environment writer.
-pub fn __decode_tree(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS.Read, Env]> (tree: DataTree, origins: [(name: String, path: String)]) [FieldError]! {
+fn __decode_tree(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS.Read, Env]> (tree: DataTree, origins: [(name: String, path: String)]) [FieldError]! {
     platform :: if core.files.__path_windows() -> host_path.PathPlatform.Windows else -> host_path.PathPlatform.Unix
     path :: host_path.from_text(file, platform)
     if host_path.is_absolute(path) -> return Err(config_error("E2416: Dotenv.file must be project-relative"))
@@ -748,7 +748,7 @@ pub fn __decode_tree(prefix: String, file: String, allow: [String], names: [(env
     Ok((tree: config_tree(^tree), origins: origins))
 }
 
-pub fn __decode_errors(errors: [FieldError], origins: [(name: String, path: String)]) -> [FieldError] Never! {
+fn __decode_errors(errors: [FieldError], origins: [(name: String, path: String)]) -> [FieldError] Never! {
     framed := [FieldError]{}
     loop error in errors {
         reason := error.reason

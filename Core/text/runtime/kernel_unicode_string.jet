@@ -20,13 +20,13 @@ use core.text.runtime.assets.unicode_lowercase as text_unicode_lowercase
 use core.text.runtime.assets.unicode_uppercase as text_unicode_uppercase
 // END GENERATED STRING ASSETS
 
-pub UNICODE_STRING_VERSION :: "17.0.0"
+UNICODE_STRING_VERSION :: "17.0.0"
 
 // One private R0 byte-read seam for Unicode and the other text kernels.
 // #4318/#4392: the bootstrap byte builtin below still materializes a Vec.
 // Native cutover must retain String's original UTF-8 owner without copying;
 // callers do not claim allocation parity until that borrowed-result leaf lands.
-pub fn utf8_bytes(text: String) -> [U8] Never! { text.bytes() }
+fn utf8_bytes(text: String) -> [U8] Never! { text.bytes() }
 
 // Rust jet_unicode_append_mapping:42-53. One caller-owned UTF-8 output buffer.
 fn append_mapping(out: &[U8], cp: Int, index: View<U8>, pool: View<U8>) Never! {
@@ -68,7 +68,7 @@ fn final_sigma(chars: [Int], at: Int, cased: [U8], ignorable: [U8]) -> Bool Neve
 }
 
 // Decode only the current UTF-8 scalar. String's checked owner guarantees UTF-8.
-pub fn scalar_at(raw: [U8], at: Int) -> Int Never! {
+fn scalar_at(raw: [U8], at: Int) -> Int Never! {
     width :: utf8_width_at(raw, at)
     cp := Int.from_u8(raw[at])
     if width == 2 -> cp = cp & 31
@@ -79,7 +79,7 @@ pub fn scalar_at(raw: [U8], at: Int) -> Int Never! {
 }
 
 // Rust jet_unicode_lower:68-80. As in Rust, only lowercase collects scalars.
-pub fn lower(text: String) -> String Never! {
+fn lower(text: String) -> String Never! {
     lower_index :: text_unicode_lower_index.UNICODE_LOWER_INDEX
     lower_pool :: text_unicode_lower_pool.UNICODE_LOWER_POOL
     cased_asset :: text_unicode_cased.UNICODE_CASED
@@ -107,14 +107,14 @@ pub fn lower(text: String) -> String Never! {
 }
 
 // Rust jet_unicode_upper:82-89. Streaming input, full expansion into one buffer.
-pub fn upper(text: String) -> String Never! {
+fn upper(text: String) -> String Never! {
     upper_index :: text_unicode_upper_index.UNICODE_UPPER_INDEX
     upper_pool :: text_unicode_upper_pool.UNICODE_UPPER_POOL
     map_stream(text, upper_index, upper_pool)
 }
 
 // UnicodeTables.rs:17-21 default C+F fold; no locale or Final_Sigma condition.
-pub fn casefold(text: String) -> String Never! {
+fn casefold(text: String) -> String Never! {
     fold_index :: text_unicode_fold_index.UNICODE_FOLD_INDEX
     fold_pool :: text_unicode_fold_pool.UNICODE_FOLD_POOL
     map_stream(text, fold_index, fold_pool)
@@ -136,7 +136,7 @@ fn map_stream(text: String, index_asset: [U8], pool_asset: [U8]) -> String Never
 
 // Rust Text.rs:303-335. Word membership is Alphabetic OR Numeric; interior
 // lowercase is scalar-local (NOT whole-word FinalSigma), including expansions.
-pub fn title(text: String) -> String Never! {
+fn title(text: String) -> String Never! {
     title_index_asset :: text_unicode_title_index.UNICODE_TITLE_INDEX
     title_pool_asset :: text_unicode_title_pool.UNICODE_TITLE_POOL
     lower_index_asset :: text_unicode_lower_index.UNICODE_LOWER_INDEX
@@ -169,7 +169,7 @@ pub fn title(text: String) -> String Never! {
 }
 
 // Rust Text.rs:982-992. Only the suffix participates in FinalSigma context.
-pub fn capitalize(text: String) -> String Never! {
+fn capitalize(text: String) -> String Never! {
     raw :: utf8_bytes(text)
     if raw.len() == 0 -> return ""
     title_index_asset :: text_unicode_title_index.UNICODE_TITLE_INDEX
@@ -186,7 +186,7 @@ pub fn capitalize(text: String) -> String Never! {
 
 // Rust Text.rs:993-1014: uppercase wins when both mappings change (titlecase
 // digraphs). Sigma is scalar-local here, unlike lowercase's FinalSigma.
-pub fn swapcase(text: String) -> String Never! {
+fn swapcase(text: String) -> String Never! {
     cased :: text_unicode_cased.UNICODE_CASED
     upper_index_asset :: text_unicode_upper_index.UNICODE_UPPER_INDEX
     upper_pool_asset :: text_unicode_upper_pool.UNICODE_UPPER_POOL
@@ -216,12 +216,12 @@ pub fn swapcase(text: String) -> String Never! {
 // Rust Text.rs:944-981: cased + changed opposite full mapping, not the
 // Lowercase/Uppercase properties used by istitle. Public cutover is owner-gated:
 // titlecase digraph U+01C5 has BOTH predicates true in this source contract.
-pub fn is_lower(text: String) -> Bool Never! {
+fn is_lower(text: String) -> Bool Never! {
     index :: text_unicode_upper_index.UNICODE_UPPER_INDEX
     pool :: text_unicode_upper_pool.UNICODE_UPPER_POOL
     all_cased_change(text, index, pool)
 }
-pub fn is_upper(text: String) -> Bool Never! {
+fn is_upper(text: String) -> Bool Never! {
     index :: text_unicode_lower_index.UNICODE_LOWER_INDEX
     pool :: text_unicode_lower_pool.UNICODE_LOWER_POOL
     all_cased_change(text, index, pool)
@@ -248,8 +248,8 @@ fn all_cased_change(text: String, index_asset: [U8], pool_asset: [U8]) -> Bool N
 // Rust Core/Ascii.rs:5-21: the sole deliberately byte-preserving ASCII kernel.
 // Existing String.to_ascii_lower/to_ascii_upper routing is a native/tier gate;
 // these private-module policies do not add a public core.text spelling.
-pub fn ascii_lower(text: String) -> String Never! { ascii_case(text, false) }
-pub fn ascii_upper(text: String) -> String Never! { ascii_case(text, true) }
+fn ascii_lower(text: String) -> String Never! { ascii_case(text, false) }
+fn ascii_upper(text: String) -> String Never! { ascii_case(text, true) }
 fn ascii_case(text: String, upper: Bool) -> String Never! {
     raw :: utf8_bytes(text)
     out := [U8]{}
@@ -265,7 +265,7 @@ fn ascii_case(text: String, upper: Bool) -> String Never! {
 
 // Rust Text.rs:1649-1668 literal source, NOT equality with title(text).
 // Owner gate: repeated uppercase is accepted; uncased alphabetic is rejected.
-pub fn is_title(text: String) -> Bool Never! {
+fn is_title(text: String) -> Bool Never! {
     uppercase :: text_unicode_uppercase.UNICODE_UPPERCASE
     lowercase :: text_unicode_lowercase.UNICODE_LOWERCASE
     alphabetic :: text_unicode_alphabetic.UNICODE_ALPHABETIC
@@ -293,15 +293,15 @@ pub fn is_title(text: String) -> Bool Never! {
 }
 
 // Rust Text.rs:939-941,1640-1645; pinned scalar properties, no scalar list.
-pub fn is_alphabetic(text: String) -> Bool Never! {
+fn is_alphabetic(text: String) -> Bool Never! {
     asset :: text_unicode_alphabetic.UNICODE_ALPHABETIC
     all_property(text, asset)
 }
-pub fn is_numeric(text: String) -> Bool Never! {
+fn is_numeric(text: String) -> Bool Never! {
     asset :: text_unicode_numeric.UNICODE_NUMERIC
     all_property(text, asset)
 }
-pub fn is_whitespace(text: String) -> Bool Never! {
+fn is_whitespace(text: String) -> Bool Never! {
     asset :: text_unicode_white_space.UNICODE_WHITE_SPACE
     all_property(text, asset)
 }
@@ -315,7 +315,7 @@ fn all_property(text: String, asset: [U8]) -> Bool Never! {
     }
     true
 }
-pub fn is_alnum(text: String) -> Bool Never! {
+fn is_alnum(text: String) -> Bool Never! {
     alphabetic :: text_unicode_alphabetic.UNICODE_ALPHABETIC
     numeric :: text_unicode_numeric.UNICODE_NUMERIC
     raw :: utf8_bytes(text)
@@ -331,7 +331,7 @@ pub fn is_alnum(text: String) -> Bool Never! {
 
 // Rust Text.rs:1626-1636: nonempty; the first scalar is `_` or Alphabetic and
 // every later scalar is `_`, Alphabetic, or Numeric (char::is_alphanumeric).
-pub fn is_identifier(text: String) -> Bool Never! {
+fn is_identifier(text: String) -> Bool Never! {
     alphabetic :: text_unicode_alphabetic.UNICODE_ALPHABETIC
     numeric :: text_unicode_numeric.UNICODE_NUMERIC
     raw :: utf8_bytes(text)
@@ -349,7 +349,7 @@ pub fn is_identifier(text: String) -> Bool Never! {
 
 // Rust Text.rs:1669-1671: empty is printable; only General_Category Cc fails.
 // Format, separators, unassigned scalars and non-ASCII letters remain printable.
-pub fn isprintable(text: String) -> Bool Never! {
+fn isprintable(text: String) -> Bool Never! {
     category :: text_unicode_category.UNICODE_GENERAL_CATEGORY
     raw :: utf8_bytes(text)
     at := 0
@@ -389,22 +389,22 @@ fn trim_bounds(text: String, left: Bool, right: Bool) -> (start: Int, end: Int) 
 }
 
 // Rust jet_unicode_trim_start:96-98, jet_unicode_trim_end:100-102, trim:104-106.
-pub fn trim_start(text: String) -> String Never! {
+fn trim_start(text: String) -> String Never! {
     bounds :: trim_bounds(text, true, false)
     text.slice(bounds.start, bounds.end)
 }
-pub fn trim_end(text: String) -> String Never! {
+fn trim_end(text: String) -> String Never! {
     bounds :: trim_bounds(text, false, true)
     text.slice(bounds.start, bounds.end)
 }
-pub fn trim(text: String) -> String Never! {
+fn trim(text: String) -> String Never! {
     bounds :: trim_bounds(text, true, true)
     text.slice(bounds.start, bounds.end)
 }
 
 // Rust str::split_whitespace: fields separated by White_Space runs; no empty
 // fields. Field bytes are copied whole, so UTF-8 sequences stay intact.
-pub fn split_whitespace(text: String) -> [String] Never! {
+fn split_whitespace(text: String) -> [String] Never! {
     whitespace_asset :: text_unicode_white_space.UNICODE_WHITE_SPACE
     raw :: utf8_bytes(text)
     out := [String]{}
@@ -528,19 +528,19 @@ fn scalar_offset(raw: [U8], byte: Int) -> Int Never! {
 }
 
 // Rust jet_unicode_index_of:108-111, last_index_of:113-116: scalar, not byte.
-pub fn index_of(text: String, needle: String) -> Int? {
+fn index_of(text: String, needle: String) -> Int? {
     raw :: utf8_bytes(text)
     byte :: find_bytes(raw, utf8_bytes(needle), 0, false) ?? return None
     Val(scalar_offset(raw, byte))
 }
-pub fn last_index_of(text: String, needle: String) -> Int? {
+fn last_index_of(text: String, needle: String) -> Int? {
     raw :: utf8_bytes(text)
     byte :: find_bytes(raw, utf8_bytes(needle), 0, true) ?? return None
     Val(scalar_offset(raw, byte))
 }
 
 // Rust jet_unicode_count:118-129: nonoverlapping; empty needle counts zero.
-pub fn count(text: String, needle: String) -> Int Never! {
+fn count(text: String, needle: String) -> Int Never! {
     nd :: utf8_bytes(needle)
     if nd.len() == 0 -> return 0
     raw :: utf8_bytes(text)
@@ -556,10 +556,10 @@ pub fn count(text: String, needle: String) -> Int Never! {
 
 // Rust jet_unicode_split_once:131-142, cut_last:144-155: absent, never success
 // with invented empty fields. UTF-8 byte offsets are converted to scalar bounds.
-pub fn split_once(text: String, sep: String) -> (before: String, after: String)? {
+fn split_once(text: String, sep: String) -> (before: String, after: String)? {
     split_at(text, sep, false)
 }
-pub fn cut_last(text: String, sep: String) -> (before: String, after: String)? {
+fn cut_last(text: String, sep: String) -> (before: String, after: String)? {
     split_at(text, sep, true)
 }
 fn split_at(text: String, sep: String, reverse: Bool) -> (before: String, after: String)? {
@@ -571,7 +571,7 @@ fn split_at(text: String, sep: String, reverse: Bool) -> (before: String, after:
     end :: scalar_offset(raw, raw.len())
     Val((before: text.slice(0, head), after: text.slice(tail, end)))
 }
-pub fn utf8_width_at(raw: [U8], at: Int) -> Int Never! {
+fn utf8_width_at(raw: [U8], at: Int) -> Int Never! {
     if at < 0 || at >= raw.len() -> return 1
     first :: raw[at]
     if first < 128 -> return 1
@@ -609,7 +609,7 @@ pub fn utf8_width_at(raw: [U8], at: Int) -> Int Never! {
     1
 }
 // Write into the caller's UTF-8 buffer: normalization allocates no per-scalar strings.
-pub fn append_cp(out: &[U8], cp: Int) Never! {
+fn append_cp(out: &[U8], cp: Int) Never! {
     n := cp
     if n < 0 || n > 1114111 || (n >= 55296 && n <= 57343) -> n = 65533
     if n < 128 {

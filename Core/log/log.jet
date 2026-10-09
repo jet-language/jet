@@ -27,12 +27,12 @@ struct LogField {
 }
 
 // Readable but not constructible outside this module.
-pub struct LogSpan {
+struct LogSpan {
     id: Int
     name: String
 
-    pub fn id(self) -> Int Never! { self.id }
-    pub fn name(self) -> String Never! { self.name }
+    fn id(self) -> Int Never! { self.id }
+    fn name(self) -> String Never! { self.name }
 }
 
 fn debug(message: String) Never! -[Log]> { emit("debug", message, [LogField]{}) }
@@ -81,14 +81,14 @@ fn redact(key: String) -> LogField Never! {
     LogField{key: key, value: "[redacted]", kind: "redacted", redacted: true}
 }
 
-pub fn span(name: String) -[Log]> LogSpan Never! {
+fn span(name: String) -[Log]> LogSpan Never! {
     allocated :: core.log.__span_allocate(name)
     LogSpan{id: allocated.id, name: allocated.name}
 }
 
-pub fn enter(span: LogSpan) Never! -[Log]> { core.log.__span_enter(span) }
+fn enter(span: LogSpan) Never! -[Log]> { core.log.__span_enter(span) }
 
-pub fn close(span: LogSpan) Never! -[Log]> { core.log.__span_close(span) }
+fn close(span: LogSpan) Never! -[Log]> { core.log.__span_close(span) }
 
 /// Select the record sink. `stderr` (JSON lines on stderr) and the `json`,
 /// `jsonl` and `text` file sinks are supported. An unsupported kind, or a
@@ -110,19 +110,19 @@ fn set_sink(kind: String, path: String) Never! -[Log]> {
     core.log.__sink_store(path)
 }
 
-pub fn sample_every(n: Int) Never! -[Log]> {
+fn sample_every(n: Int) Never! -[Log]> {
     if n > 0 {
         core.log.__sample_store(n)
         core.log.__sample_count_store(0)
     }
 }
 
-pub fn counter(name: String, value: Int) -> LogField Never! {
+fn counter(name: String, value: Int) -> LogField Never! {
     core.log.__metric_publish(name, value)
     LogField{key: "metric.counter.{name}", value: "{value}", kind: "counter", redacted: false}
 }
 
-pub fn otlp_file(path: String) Never! -[Log, FS]> {
+fn otlp_file(path: String) Never! -[Log, FS]> {
     if trim(path).len() > 0 -> set_sink("jsonl", path)
 }
 
@@ -131,7 +131,7 @@ fn set_level(level: String) Never! -[Log]> {
     if normalized.len() > 0 -> core.log.__level_store(rank_canonical(normalized) /% 10)
 }
 
-pub fn set_trace_id(id: String) Never! -[Log]> {
+fn set_trace_id(id: String) Never! -[Log]> {
     if trim(id).len() > 0 -> core.log.__trace_store(id)
 }
 
@@ -177,9 +177,9 @@ fn reject_setting(message: String) -[Log]> {
     emit("error", message, [LogField]{})
 }
 
-pub fn disable() Never! -[Log]> { core.log.__disabled_store(true) }
+fn disable() Never! -[Log]> { core.log.__disabled_store(true) }
 
-pub fn flush() Never! -[Log]> { core.log.__flush() }
+fn flush() Never! -[Log]> { core.log.__flush() }
 
 fn enabled(level: String) -[Log]> Bool Never! {
     normalized :: canon_level(level)
@@ -513,7 +513,7 @@ fn group(event: LogRecord, prefix: String) -> LogRecord Never! {
 
 fn time(event: LogRecord, timestamp: Int) -> LogRecord Never! { add(event, int("time", timestamp)) }
 
-pub fn clear(event: LogRecord) -> LogRecord Never! { record(event.level, event.message, [LogField]{}) }
+fn clear(event: LogRecord) -> LogRecord Never! { record(event.level, event.message, [LogField]{}) }
 
 #Test("log level policy uses raw state") {
     saved_level :: core.log.__level_load()

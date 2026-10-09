@@ -27,62 +27,62 @@ fn shape_error(reason: String) -> xml.XMLFault Never! {
     xml.XMLFault{kind: .Shape, offset: 0, line: None, column: None, path: "", reason: reason}
 }
 
-pub fn parse_document(text: String) -> DataTree xml.XMLFault! {
+fn parse_document(text: String) -> DataTree xml.XMLFault! {
     parsed :: xml.parse_document(text) ?? return Err(err)
     xml.clean(parsed)
 }
 
-pub fn parse_document_with(text: String, options: xml.ParseOptions) -> DataTree xml.XMLFault! {
+fn parse_document_with(text: String, options: xml.ParseOptions) -> DataTree xml.XMLFault! {
     parsed :: xml.parse_document_with(text, options) ?? return Err(err)
     xml.clean(parsed)
 }
 
-pub fn parse_document_bytes_with(bytes: [U8], options: xml.ParseOptions) -> DataTree xml.XMLFault! {
+fn parse_document_bytes_with(bytes: [U8], options: xml.ParseOptions) -> DataTree xml.XMLFault! {
     parsed :: xml.parse_document_bytes_with(bytes, options) ?? return Err(err)
     xml.clean(parsed)
 }
 
-pub fn render_document(value: DataTree) -> String xml.XMLFault! {
+fn render_document(value: DataTree) -> String xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.render_document(tree) ?? return Err(shape_error(err))
 }
 
-pub fn render_document_bytes(value: DataTree, encoding: xml.RenderEncoding, lexical: xml.LexicalPolicy) -> [U8] xml.XMLFault! {
+fn render_document_bytes(value: DataTree, encoding: xml.RenderEncoding, lexical: xml.LexicalPolicy) -> [U8] xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.render_document_bytes(tree, encoding, lexical)
 }
 
-pub fn canonical_document(value: DataTree, options: xml.CanonicalOptions) -> String xml.XMLFault! {
+fn canonical_document(value: DataTree, options: xml.CanonicalOptions) -> String xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.canonical_document(tree, options)
 }
 
-pub fn document_root(value: DataTree) -> DataTree xml.XMLFault! {
+fn document_root(value: DataTree) -> DataTree xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.document_root(tree)
 }
 
-pub fn expanded_name_parts(value: DataTree) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) xml.XMLFault! {
+fn expanded_name_parts(value: DataTree) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.expanded_name_parts(tree)
 }
 
-pub fn lookup_attribute(value: DataTree, name: String) -> String? xml.XMLFault! {
+fn lookup_attribute(value: DataTree, name: String) -> String? xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.lookup_attribute(tree, name)
 }
 
-pub fn element_content(value: DataTree) -> [DataTree] xml.XMLFault! {
+fn element_content(value: DataTree) -> [DataTree] xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.element_content(tree)
 }
 
-pub fn project_document_for_decode(value: DataTree) -> DataTree xml.XMLFault! {
+fn project_document_for_decode(value: DataTree) -> DataTree xml.XMLFault! {
     tree :: checked(value) ?? return Err(err)
     xml.project_document_for_decode(tree)
 }
 
-pub fn public_error(error: xml.XMLFault) -> XMLError Never! {
+fn public_error(error: xml.XMLFault) -> XMLError Never! {
     kind :: if error.kind == {
         .InvalidEncoding -> XMLReason.InvalidEncoding
         .Malformed -> XMLReason.Malformed
@@ -101,7 +101,7 @@ pub fn public_error(error: xml.XMLFault) -> XMLError Never! {
         column: error.column, path: error.path, reason: error.reason}
 }
 
-pub fn parse_options(options: XMLParseOptions) -> xml.ParseOptions Never! {
+fn parse_options(options: XMLParseOptions) -> xml.ParseOptions Never! {
     entities :: if options.entities == {
         .Preserve -> xml.EntityPolicy.Preserve
         .Reject -> xml.EntityPolicy.Reject
@@ -117,7 +117,7 @@ pub fn parse_options(options: XMLParseOptions) -> xml.ParseOptions Never! {
         max_entity_replacement_bytes: limits.max_entity_replacement_bytes}}
 }
 
-pub fn render_encoding(value: XMLEncoding) -> xml.RenderEncoding Never! {
+fn render_encoding(value: XMLEncoding) -> xml.RenderEncoding Never! {
     if value == {
         .UTF8 -> xml.RenderEncoding.UTF8
         .UTF8BOM -> xml.RenderEncoding.UTF8Bom
@@ -126,14 +126,14 @@ pub fn render_encoding(value: XMLEncoding) -> xml.RenderEncoding Never! {
     }
 }
 
-pub fn lexical_policy(value: XMLLexicalPolicy) -> xml.LexicalPolicy Never! {
+fn lexical_policy(value: XMLLexicalPolicy) -> xml.LexicalPolicy Never! {
     if value == {
         .PreserveValid -> xml.LexicalPolicy.PreserveValid
         .Deterministic -> xml.LexicalPolicy.Deterministic
     }
 }
 
-pub fn canonical_options(value: XMLCanonical) -> xml.CanonicalOptions Never! {
+fn canonical_options(value: XMLCanonical) -> xml.CanonicalOptions Never! {
     mode :: if value.mode == {
         .Inclusive11 -> xml.CanonicalMode.Inclusive11
         .Exclusive10 -> xml.CanonicalMode.Exclusive10
@@ -141,7 +141,7 @@ pub fn canonical_options(value: XMLCanonical) -> xml.CanonicalOptions Never! {
     xml.CanonicalOptions{mode: mode, comments: value.comments, inclusive_prefixes: ~value.inclusive_prefixes}
 }
 
-pub fn field_error(error: XMLError) -> [FieldError] Never! {
+fn field_error(error: XMLError) -> [FieldError] Never! {
     location := " at byte {error.byte_offset ?? 0}"
     if error.line == .Val(line) {
         if error.column == .Val(column) -> location = "{location} (line {line}, column {column})"

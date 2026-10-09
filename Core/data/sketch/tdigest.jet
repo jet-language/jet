@@ -1,7 +1,7 @@
 // core.data.sketch.tdigest — the shipped unit-weight, step-quantile digest.
 // All samples, including non-finite values, follow the original insertion and
 // compression order. Cloning produces an independent centroid value.
-pub struct TDigest {
+struct TDigest {
     centroids: [Centroid]
 
     impl Display {
@@ -14,20 +14,20 @@ struct Centroid {
     weight: Float
 }
 
-pub fn new() -> TDigest Never! { TDigest.new() }
+fn new() -> TDigest Never! { TDigest.new() }
 
 impl TDigest {
-    pub fn new() -> TDigest Never! {
+    fn new() -> TDigest Never! {
         TDigest{centroids: [Centroid]{}}
     }
 
     /// Record one sample with the shipped unit weight.
-    pub fn add(&self, value: Float) Never! {
+    fn add(&self, value: Float) Never! {
         add_sample(&self.centroids, value)
     }
 
     /// Return the first centroid whose cumulative weight reaches q * total.
-    pub fn quantile(self, q: Float) -> Float Never! {
+    fn quantile(self, q: Float) -> Float Never! {
         step_quantile(self.centroids, q)
     }
 }

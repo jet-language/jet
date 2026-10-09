@@ -13,7 +13,7 @@ use core.math as math
 
 // C: the observations are private. All Float arithmetic below keeps the
 // existing measured-value constructor, operator and observation surface.
-pub struct Measurement<T> {
+struct Measurement<T> {
     value: T
     uncertainty: T
 
@@ -22,61 +22,61 @@ pub struct Measurement<T> {
     }
 }
 
-pub fn __measurement_new(value: Float, uncertainty: Float) -> Measurement<Float> Never! {
+fn __measurement_new(value: Float, uncertainty: Float) -> Measurement<Float> Never! {
     Measurement<Float>{value: value, uncertainty: math.abs_float(uncertainty)}
 }
 
-pub fn __measurement_from_relative(value: Float, relative: Float) -> Measurement<Float> Never! {
+fn __measurement_from_relative(value: Float, relative: Float) -> Measurement<Float> Never! {
     __measurement_new(value, math.abs_float(value) * math.abs_float(relative))
 }
 
-pub fn __measurement_value(value: Measurement<Float>) -> Float Never! { value.value }
+fn __measurement_value(value: Measurement<Float>) -> Float Never! { value.value }
 
-pub fn __measurement_uncertainty(value: Measurement<Float>) -> Float Never! { value.uncertainty }
+fn __measurement_uncertainty(value: Measurement<Float>) -> Float Never! { value.uncertainty }
 
-pub fn __measurement_add(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
+fn __measurement_add(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
     __measurement_new(left.value + right.value, math.sqrt(left.uncertainty * left.uncertainty + right.uncertainty * right.uncertainty))
 }
 
-pub fn __measurement_sub(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
+fn __measurement_sub(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
     __measurement_new(left.value - right.value, math.sqrt(left.uncertainty * left.uncertainty + right.uncertainty * right.uncertainty))
 }
 
-pub fn __measurement_mul(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
+fn __measurement_mul(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
     first :: right.value * left.uncertainty
     second :: left.value * right.uncertainty
     __measurement_new(left.value * right.value, math.sqrt(first * first + second * second))
 }
 
-pub fn __measurement_div(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
+fn __measurement_div(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
     first :: left.uncertainty / right.value
     second :: left.value * right.uncertainty / (right.value * right.value)
     __measurement_new(left.value / right.value, math.sqrt(first * first + second * second))
 }
 
-pub fn __measurement_sqrt(value: Measurement<Float>) -> Measurement<Float> Never! {
+fn __measurement_sqrt(value: Measurement<Float>) -> Measurement<Float> Never! {
     root :: math.sqrt(value.value)
     uncertainty :: if root == 0.0 && value.uncertainty == 0.0 -> 0.0 else -> value.uncertainty / (2.0 * root)
     __measurement_new(root, uncertainty)
 }
 
-pub fn __measurement_show(value: Measurement<Float>) -> String Never! {
+fn __measurement_show(value: Measurement<Float>) -> String Never! {
     "{value.value:Debug} ± {value.uncertainty:Debug}"
 }
 
 // Preserve the scalar conversion's checked failure before adding uncertainty.
-pub fn __measurement_optional(value: Float?, relative: Float) -> Measurement<Float>? Never! {
+fn __measurement_optional(value: Float?, relative: Float) -> Measurement<Float>? Never! {
     scalar :: value ?? return None
     Val(__measurement_from_relative(scalar, relative))
 }
 
-pub fn __measurement_result(value: Float String!, relative: Float) -> Measurement<Float> String! {
+fn __measurement_result(value: Float String!, relative: Float) -> Measurement<Float> String! {
     if value == {
         .Ok(scalar) -> Ok(__measurement_from_relative(scalar, relative))
         .Err(error) -> Err(error)
     }
 }
-pub fn from(magnitude: Float, unit: Float) -> Measurement<Float> Never! {
+fn from(magnitude: Float, unit: Float) -> Measurement<Float> Never! {
     // Measurements carry an SI value and uncertainty; the unit scale is
     // applied at construction because the carrier has no unit field.
     measurement(magnitude * unit, uncertainty: 0.0)
@@ -98,7 +98,7 @@ MEGA :: 1000000.0
 
 GIGA :: 1000000000.0
 
-pub fn scale(m: Measurement<Float>, factor: Float) -> Measurement<Float> Never! {
+fn scale(m: Measurement<Float>, factor: Float) -> Measurement<Float> Never! {
     uncertainty := m.uncertainty() * math.abs_float(factor)
     measurement(m.value() * factor, uncertainty: uncertainty)
 }
@@ -127,14 +127,14 @@ fn convert(m: Measurement<Float>, new_unit: Float) -> Measurement<Float> Never! 
     converted
 }
 
-pub fn to_si(m: Measurement<Float>) -> Float Never! { m.value() }
+fn to_si(m: Measurement<Float>) -> Float Never! { m.value() }
 
-pub fn abs(m: Measurement<Float>) -> Measurement<Float> Never! {
+fn abs(m: Measurement<Float>) -> Measurement<Float> Never! {
     if m.value() < (Float{0.0}) -> return measurement(Float{0.0} - m.value(), uncertainty: m.uncertainty())
     ~m
 }
 
-pub fn show(m: Measurement<Float>) -> String Never! { "{m.value()} ± {m.uncertainty()}" }
+fn show(m: Measurement<Float>) -> String Never! { "{m.value()} ± {m.uncertainty()}" }
 
 METER :: 1.0
 // British spellings remain source-compatible with the original Core surface.

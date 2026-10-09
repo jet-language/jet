@@ -30,7 +30,7 @@ module plot
 module sketch
 
 #[Copy, Comparable, Hashable, Equatable]
-pub enum DataFormat {
+enum DataFormat {
     CSV
     JSON
     JSONL
@@ -40,7 +40,7 @@ pub enum DataFormat {
 
 
 #Equatable
-pub enum DataErrorKind {
+enum DataErrorKind {
     Decode
     Limit
     IO
@@ -85,14 +85,14 @@ fn data_error_kind_text(kind: DataErrorKind) -> String Never! {
 }
 
 #[Equatable, Error]
-pub struct DataError {
-    pub kind: DataErrorKind
-    pub operation: String
-    pub row: Int?
-    pub column: Int?
-    pub index: Int?
-    pub reason: String
-    pub cause: EncodingError?
+struct DataError {
+    kind: DataErrorKind
+    operation: String
+    row: Int?
+    column: Int?
+    index: Int?
+    reason: String
+    cause: EncodingError?
     impl Display {
         fn display(self) -> String Never! { data_error_text(self) }
     }
@@ -165,7 +165,7 @@ struct DataLineOptions {
 
 
 #[Copy, Comparable]
-pub enum DataFreshness {
+enum DataFreshness {
     Pending
     Fresh
     Stale
@@ -174,7 +174,7 @@ pub enum DataFreshness {
     Cancelled
 }
 #[Copy, Comparable, Equatable]
-pub enum DataInvalidationCause {
+enum DataInvalidationCause {
     NoCause
     Loader
     Input
@@ -187,24 +187,24 @@ pub enum DataInvalidationCause {
 
 
 #Equatable
-pub struct DataStatus {
-    pub step: String
-    pub path: String
-    pub clone_value: String
-    pub ownership: String
-    pub trust: String
-    pub fallback: String
-    pub replacement: String
+struct DataStatus {
+    step: String
+    path: String
+    clone_value: String
+    ownership: String
+    trust: String
+    fallback: String
+    replacement: String
 }
 
 
 #Equatable
-pub struct DataLimits {
-    pub encoding: EncodingLimits
-    pub max_groups: Int
-    pub max_sort_rows: Int
-    pub max_join_rows: Int
-    pub max_output_rows: Int
+struct DataLimits {
+    encoding: EncodingLimits
+    max_groups: Int
+    max_sort_rows: Int
+    max_join_rows: Int
+    max_output_rows: Int
 }
 
 
@@ -271,31 +271,31 @@ struct DataLoader<T> {
 }
 
 #Comparable
-pub struct DataLoaderStatus {
-    pub identity: String
-    pub freshness: DataFreshness
-    pub invalidated_by: DataInvalidationCause
-    pub error: String
-    pub cleanup: String
-    pub buffered_bytes: Int
-    pub backpressure: Bool
-    pub last_good: Bool
+struct DataLoaderStatus {
+    identity: String
+    freshness: DataFreshness
+    invalidated_by: DataInvalidationCause
+    error: String
+    cleanup: String
+    buffered_bytes: Int
+    backpressure: Bool
+    last_good: Bool
 }
 
 #Equatable
-pub struct DataWatchStatus {
-    pub mode: String
-    pub revision: Int
-    pub retained_rows: Int
-    pub recomputations: Int
-    pub active: Bool
-    pub generation: Int
-    pub dirty: Bool
-    pub error: String
-    pub freshness_ms: Int
-    pub invalidation_cause: String
-    pub refreshing: Bool
-    pub cancelled: Bool
+struct DataWatchStatus {
+    mode: String
+    revision: Int
+    retained_rows: Int
+    recomputations: Int
+    active: Bool
+    generation: Int
+    dirty: Bool
+    error: String
+    freshness_ms: Int
+    invalidation_cause: String
+    refreshing: Bool
+    cancelled: Bool
     impl Display {
         fn display(self) -> String Never! { data_watch_status_text(self) }
     }
@@ -325,15 +325,15 @@ struct DataPivotCell {
     mean: Float
 }
 #Equatable
-pub struct DataSummary {
-    pub count: Int
-    pub sum: Float
-    pub mean: Float
-    pub min: Float
-    pub max: Float
-    pub median: Float
-    pub variance: Float
-    pub stddev: Float
+struct DataSummary {
+    count: Int
+    sum: Float
+    mean: Float
+    min: Float
+    max: Float
+    median: Float
+    variance: Float
+    stddev: Float
 }
 
 struct DataJoin<L, R> {
@@ -367,11 +367,11 @@ struct DataWatch<T> {
 }
 
 #[Copy, Comparable]
-pub enum JetDataPlotMark {
+enum JetDataPlotMark {
     Line
     Bar
     Point
-    pub fn as_str(self) -> String Never! {
+    fn as_str(self) -> String Never! {
         if self == {
             .Line -> "line"
             .Bar -> "bar"
@@ -381,14 +381,14 @@ pub enum JetDataPlotMark {
 }
 
 #[Copy, Comparable]
-pub enum JetDataPlotChannel {
+enum JetDataPlotChannel {
     X
     Y
     Color
     Size
     Text
     Detail
-    pub fn as_str(self) -> String Never! {
+    fn as_str(self) -> String Never! {
         if self == {
             .X -> "x"
             .Y -> "y"
@@ -409,14 +409,14 @@ enum JetDataPlotAggregate {
 }
 
 #[Copy, Comparable]
-pub enum JetDataPlotFilterOp {
+enum JetDataPlotFilterOp {
     Equal
     NotEqual
     Less
     LessEqual
     Greater
     GreaterEqual
-    pub fn as_str(self) -> String Never! {
+    fn as_str(self) -> String Never! {
         if self == {
             .Equal -> "eq"
             .NotEqual -> "ne"
@@ -441,12 +441,12 @@ enum JetDataPlotTransform {
 }
 
 #[Copy, Comparable]
-pub enum JetDataPlotScaleKind {
+enum JetDataPlotScaleKind {
     Linear
     Log
     Band
     Point
-    pub fn as_str(self) -> String Never! {
+    fn as_str(self) -> String Never! {
         if self == {
             .Linear -> "linear"
             .Log -> "log"
@@ -463,12 +463,12 @@ enum JetDataPlotDomain {
 }
 
 #[Copy, Comparable]
-pub enum JetDataPlotLegendPosition {
+enum JetDataPlotLegendPosition {
     Top
     Right
     Bottom
     Left
-    pub fn as_str(self) -> String Never! {
+    fn as_str(self) -> String Never! {
         if self == {
             .Top -> "top"
             .Right -> "right"
@@ -479,10 +479,10 @@ pub enum JetDataPlotLegendPosition {
 }
 
 #[Copy, Comparable]
-pub enum JetDataPlotFacetKind {
+enum JetDataPlotFacetKind {
     Row
     Column
-    pub fn as_str(self) -> String Never! {
+    fn as_str(self) -> String Never! {
         if self == {
             .Row -> "row"
             .Column -> "column"
@@ -491,13 +491,13 @@ pub enum JetDataPlotFacetKind {
 }
 
 #[Copy, Comparable]
-pub enum JetDataPlotInteraction {
+enum JetDataPlotInteraction {
     Hover
     Select
     Zoom
     Pan
     Brush
-    pub fn as_str(self) -> String Never! {
+    fn as_str(self) -> String Never! {
         if self == {
             .Hover -> "hover"
             .Select -> "select"
@@ -509,12 +509,12 @@ pub enum JetDataPlotInteraction {
 }
 
 #[Copy, Comparable]
-pub enum JetDataPlotBackend {
+enum JetDataPlotBackend {
     Terminal
     Browser
     Native
     Export
-    pub fn as_str(self) -> String Never! {
+    fn as_str(self) -> String Never! {
         if self == {
             .Terminal -> "terminal"
             .Browser -> "browser"
@@ -525,11 +525,11 @@ pub enum JetDataPlotBackend {
 }
 
 #[Copy, Comparable]
-pub enum JetDataPlotSupport {
+enum JetDataPlotSupport {
     Supported
     Degraded
     Unsupported
-    pub fn as_str(self) -> String Never! {
+    fn as_str(self) -> String Never! {
         if self == {
             .Supported -> "supported"
             .Degraded -> "degraded"
@@ -680,7 +680,7 @@ fn database<T>(query: String, parameters: [String], authority: String, limits: D
     make_loader<T>(DataLoaderKind.Database, query, "", parameters, "json", authority, limits)
 }
 
-pub fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
+fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
     payload := [U8]{}
     data_loader_render(&payload, value.encode())
     data_loader_check_payload(limits, payload.len(), "data.value") ?? return Err(err)
@@ -698,11 +698,11 @@ pub fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError
 
 /// Infer a core format from the final path extension, without reading the
 /// source. Query/fragment suffixes do not participate in format detection.
-pub fn load_default<T>(locator: String) -[FS, Net, DB]> DataLoader<T> DataError! {
+fn load_default<T>(locator: String) -[FS, Net, DB]> DataLoader<T> DataError! {
     load<T>(locator, DataLimits.safe())
 }
 
-pub fn load<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> DataError! {
+fn load<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> DataError! {
     format :: locator_format(locator)
     if locator.starts_with("http://") || locator.starts_with("https://") {
         if url<T>(locator, format, "network", limits) == {
@@ -764,11 +764,11 @@ fn locator_format(locator: String) -> String DataError! {
     }
 }
 
-pub fn csv<T: Decode>(text: String) -> [T] [FieldError]! {
+fn csv<T: Decode>(text: String) -> [T] [FieldError]! {
     csv_codec.decode<T>(text)
 }
 
-pub fn json<T: Decode>(text: String) -> [T] [FieldError]! {
+fn json<T: Decode>(text: String) -> [T] [FieldError]! {
     json_codec.decode<[T]>(text)
 }
 
@@ -954,7 +954,7 @@ fn rolling_mean(values: [Float], window: Int) -> [Float] DataError! {
     Ok(out)
 }
 
-pub fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U>] DataError! {
+fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U>] DataError! {
     limits := DataLimits.safe()
     left_keys := [String]{}
     right_keys := [String]{}
@@ -1112,7 +1112,7 @@ fn svg<T>(plot: JetDataPlot<T>) -> String DataError! {
     Ok(render_plot_svg(plan))
 }
 
-pub fn show<T>(plot: JetDataPlot<T>) -> JetDataPlotRender DataError! {
+fn show<T>(plot: JetDataPlot<T>) -> JetDataPlotRender DataError! {
     render<T>(plot, JetDataPlotBackend.Browser)
 }
 
@@ -1191,7 +1191,7 @@ fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> String 
 }
 
 /// Native facts and live, explicitly opted-in bridge availability.
-pub fn status() -[FS, Env]> [DataStatus] Never! {
+fn status() -[FS, Env]> [DataStatus] Never! {
     rows := [DataStatus]{}
     native_steps :: [String]{"core.data.csv", "core.data.stats", "core.data.query", "core.data.stream", "core.data.schema", "core.data.json"}
     loop step in native_steps {
@@ -1202,7 +1202,7 @@ pub fn status() -[FS, Env]> [DataStatus] Never! {
     rows
 }
 
-pub fn require_bridge(provider: String) DataError! -[FS, Env]> {
+fn require_bridge(provider: String) DataError! -[FS, Env]> {
     step :: bridge_provider(provider) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data bridge provider `{provider}`; expected py, r, or gpu", "require_bridge"))
     facts :: bridge_status(step)
     if facts.path == "available" -> return Ok(())

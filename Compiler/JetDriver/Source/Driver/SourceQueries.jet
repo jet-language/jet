@@ -3,26 +3,26 @@
 use jet_foundation.[Diagnostic, Program, NameLedger, MIRNameModule, MIRNameAlias, MIRNameVisibility, MIRStructureFact, MIRStructureFactKind, name_ledger_from_facts]
 use jet_sema.[SemaSourceOrigin, SemaRegistrationImportEdge, sema_name_loaded_facts]
 
-pub struct JetDriverSourceQueryModule {
-    pub module_identity: String
-    pub package_identity: String
-    pub path: String
-    pub physical_path: String
-    pub source: String
-    pub program: Program
+struct JetDriverSourceQueryModule {
+    module_identity: String
+    package_identity: String
+    path: String
+    physical_path: String
+    source: String
+    program: Program
 }
-pub struct JetDriverSourceQueryResult {
-    pub modules: [JetDriverSourceQueryModule]
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+struct JetDriverSourceQueryResult {
+    modules: [JetDriverSourceQueryModule]
+    diagnostics: [Diagnostic]
+    complete: Bool
     // None for a loose source or an omitted version; an explicitly empty
     // declared string remains Val(""). The CLI owns its display fallback.
-    pub entry_package_version: String?{None}
-    pub entry_module_index: Int{-1}
-    pub names: NameLedger?{None}
+    entry_package_version: String?{None}
+    entry_module_index: Int{-1}
+    names: NameLedger?{None}
 }
 
-pub fn jet_driver_source_query(request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {
+fn jet_driver_source_query(request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {
     jet_driver_source_query_loaded(jet_driver_load(request), request)
 }
 

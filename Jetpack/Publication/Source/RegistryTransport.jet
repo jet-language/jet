@@ -4,12 +4,12 @@
 // (#3595), not Core's broader is_global predicate (#4413). Full Fetch is #4262.
 use core.http.client as publication_dns
 
-pub struct PublicationRegistryConfig {
-    pub name: String
-    pub url: String
-    pub mirror: Bool
-    pub require_signed: Bool
-    pub tier: PublicationRegistryTier
+struct PublicationRegistryConfig {
+    name: String
+    url: String
+    mirror: Bool
+    require_signed: Bool
+    tier: PublicationRegistryTier
 
     fn public_default() -> PublicationRegistryConfig Never! {
         PublicationRegistryConfig{name: "jet", url: "https://github.com/jet-lang/registry", mirror: false, require_signed: false, tier: .Core}
@@ -43,7 +43,7 @@ fn publication_resolve_publish_registry() -[Env]> PublicationRegistryConfig Neve
 
 // Rust redact_registry_url (:123-143): the LAST `@` of the authority ends
 // its userinfo; query and fragment text never survives.
-pub fn publication_redact_registry_url(value: String) -> String Never! {
+fn publication_redact_registry_url(value: String) -> String Never! {
     safe := value.copy()
     loop delimiter in ([String]{"?", "#"}) {
         if safe.split_once(delimiter) == .Val(pair) -> safe = pair.before
@@ -172,7 +172,7 @@ fn publication_registry_ip(address: [U8]) -> String Never! {
     text :: publication_address_text(address)
     if address.len() == 4 -> text else -> "[{text}]"
 }
-pub fn publication_registry_remote(url: String, scheme: String, port: Int, explicit_port: Bool, address: String) -> String Never! {
+fn publication_registry_remote(url: String, scheme: String, port: Int, explicit_port: Bool, address: String) -> String Never! {
     if scheme != "git" -> return url.copy()
     pair :: url.split_once("://") ?? return url.copy()
     rest :: pair.after.bytes()

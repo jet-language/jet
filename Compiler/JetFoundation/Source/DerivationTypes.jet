@@ -1,89 +1,89 @@
 // Canonical derivation/frame resource types shared by compiler MIR and runtime
 // evidence. Declarations moved intact from MIR.jet; no parallel carrier schema.
 
-pub enum MIRResourceAccessMode { Read Write Move }
+enum MIRResourceAccessMode { Read Write Move }
 
-pub enum MIRResourceIdentity { Named(name: String) Unknown }
+enum MIRResourceIdentity { Named(name: String) Unknown }
 
-pub enum MIRResourceRegion {
+enum MIRResourceRegion {
     Whole
     Bytes(start: Int, length: Int)
     Unknown
 }
 
-pub struct MIRResourceLayout {
-    pub size: Int
-    pub align: Int
-    pub layout: String
-    pub device: String
+struct MIRResourceLayout {
+    size: Int
+    align: Int
+    layout: String
+    device: String
 }
 
-pub struct MIRResourceAccess {
-    pub resource: MIRResourceIdentity
-    pub mode: MIRResourceAccessMode
-    pub region: MIRResourceRegion
-    pub layout: MIRResourceLayout?
-    pub temporary: Bool
+struct MIRResourceAccess {
+    resource: MIRResourceIdentity
+    mode: MIRResourceAccessMode
+    region: MIRResourceRegion
+    layout: MIRResourceLayout?
+    temporary: Bool
 }
 
-pub enum MIRFrameCompletion {
+enum MIRFrameCompletion {
     Synchronous
     Pending(token: String)
     Event(token: String)
 }
 
-pub struct MIRFrameOperation {
-    pub name: String
-    pub source_index: Int
-    pub accesses: [MIRResourceAccess]
-    pub completion: MIRFrameCompletion
-    pub completion_provider: String?
-    pub external_effect: Bool
+struct MIRFrameOperation {
+    name: String
+    source_index: Int
+    accesses: [MIRResourceAccess]
+    completion: MIRFrameCompletion
+    completion_provider: String?
+    external_effect: Bool
 }
 
-pub struct MIRFrameDependency {
-    pub before: Int
-    pub after: Int
-    pub resource: String
-    pub reason: String
+struct MIRFrameDependency {
+    before: Int
+    after: Int
+    resource: String
+    reason: String
 }
 
-pub struct MIRFrameTransfer {
-    pub before: Int
-    pub after: Int
-    pub resource: String
-    pub from_device: String
-    pub to_device: String
+struct MIRFrameTransfer {
+    before: Int
+    after: Int
+    resource: String
+    from_device: String
+    to_device: String
 }
 
-pub struct MIRFrameReuse {
-    pub previous_resource: String
-    pub next_resource: String
-    pub previous_last_use: Int
-    pub next_first_use: Int
-    pub legal: Bool
-    pub reason: String
+struct MIRFrameReuse {
+    previous_resource: String
+    next_resource: String
+    previous_last_use: Int
+    next_first_use: Int
+    legal: Bool
+    reason: String
 }
 
-pub struct MIRFrameRetention {
-    pub resource: String
-    pub operation: Int
-    pub owner: String
-    pub completion_token: String?
-    pub completed: Bool
+struct MIRFrameRetention {
+    resource: String
+    operation: Int
+    owner: String
+    completion_token: String?
+    completed: Bool
 }
 
-pub struct MIRFrameSchedule {
-    pub operations: [MIRFrameOperation]
-    pub dependencies: [MIRFrameDependency]
-    pub transfers: [MIRFrameTransfer]
-    pub reuse: [MIRFrameReuse]
-    pub retentions: [MIRFrameRetention]
-    pub conservative: [String]
+struct MIRFrameSchedule {
+    operations: [MIRFrameOperation]
+    dependencies: [MIRFrameDependency]
+    transfers: [MIRFrameTransfer]
+    reuse: [MIRFrameReuse]
+    retentions: [MIRFrameRetention]
+    conservative: [String]
 }
 
-pub enum MIRDerivationMethod { StaticDerivation FormalProof RecordedExecution SampledAgreement ExternalAssumption }
+enum MIRDerivationMethod { StaticDerivation FormalProof RecordedExecution SampledAgreement ExternalAssumption }
 
-pub enum MIRDerivationDisposition { Current Stale Expired Redacted Unavailable Unsupported BudgetExhausted Unknown }
+enum MIRDerivationDisposition { Current Stale Expired Redacted Unavailable Unsupported BudgetExhausted Unknown }
 
-pub struct MIRDerivationRef { pub id: String }
+struct MIRDerivationRef { id: String }

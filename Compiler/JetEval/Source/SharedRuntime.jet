@@ -99,16 +99,16 @@ struct JetEvalSharedValue {
     metadata: Shared<JetEvalSharedValueMeta>
 }
 
-pub struct JetEvalSharedGuardLeaseMeta {
-    pub shared: Int
-    pub owner_row: MIRPreludeCall
-    pub editable: Bool
-    pub handles: Int
-    pub dirty: Bool
-    pub released: Bool
+struct JetEvalSharedGuardLeaseMeta {
+    shared: Int
+    owner_row: MIRPreludeCall
+    editable: Bool
+    handles: Int
+    dirty: Bool
+    released: Bool
     // An arena-issued capability for the actual native Guard40 lease. It is
     // not a copied permit; callback READ loans still use their scoped selector.
-    pub physical_root: JetEvalSharedHostRootCapability?
+    physical_root: JetEvalSharedHostRootCapability?
 }
 
 struct JetEvalSharedGuardLease { metadata: Shared<JetEvalSharedGuardLeaseMeta> }
@@ -955,7 +955,7 @@ fn jet_eval_shared_runtime_host_set_root_capability(carrier: JetEvalSharedHostCa
     false
 }
 
-pub fn jet_eval_shared_runtime_host_root_capability(carrier: JetEvalSharedHostCarrier) -> JetEvalSharedHostRootCapability? {
+fn jet_eval_shared_runtime_host_root_capability(carrier: JetEvalSharedHostCarrier) -> JetEvalSharedHostRootCapability? {
     if carrier.physical == {
         .Shared(entry) -> {
             permit :: entry.metadata.guard_read()
@@ -983,7 +983,7 @@ pub fn jet_eval_shared_runtime_host_root_capability(carrier: JetEvalSharedHostCa
     }
 }
 
-pub fn jet_eval_shared_runtime_host_set_owner_alias_token(carrier: JetEvalSharedHostCarrier, token_id: Int) -> Bool {
+fn jet_eval_shared_runtime_host_set_owner_alias_token(carrier: JetEvalSharedHostCarrier, token_id: Int) -> Bool {
     if carrier.kind != JetEvalSharedHostKind.Shared -> return false
     if carrier.physical == {
         .Shared(entry) -> {

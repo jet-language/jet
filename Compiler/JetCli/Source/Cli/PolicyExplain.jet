@@ -3,12 +3,12 @@
 use jet_driver.[JetDriverSourceQueryResult]
 use jet_foundation.[DiagnosticExplanation, EffectivePolicy, PolicyDeclaration, PolicyKey, PolicyScope, policy_key_name, policy_key_parse, policy_resolve, policy_scope_name, policy_value_display]
 
-pub struct JetCLIMarkerSite {
- pub file: String
- pub line: U64
+struct JetCLIMarkerSite {
+ file: String
+ line: U64
 }
 
-pub fn jet_cli_explain_marker_site(site: String) -> JetCLIMarkerSite String! {
+fn jet_cli_explain_marker_site(site: String) -> JetCLIMarkerSite String! {
  bytes :: site.bytes()
  cut := bytes.len()
  loop cut > 0 {
@@ -23,7 +23,7 @@ pub fn jet_cli_explain_marker_site(site: String) -> JetCLIMarkerSite String! {
  Err("marker site must be `<file>:<line>`")
 }
 
-pub fn jet_cli_explain_policy_render(effective: EffectivePolicy) -> String Never! {
+fn jet_cli_explain_policy_render(effective: EffectivePolicy) -> String Never! {
  text := "{policy_key_name(effective.key)} = {policy_value_display(effective.value)}"
  loop (index, declaration) in effective.provenance {
  status :: if index + 1 == effective.provenance.len() -> "effective" else -> "shadowed"
@@ -32,7 +32,7 @@ pub fn jet_cli_explain_policy_render(effective: EffectivePolicy) -> String Never
  text
 }
 
-pub fn jet_cli_explain_policy_lookup(key: PolicyKey, declarations: [PolicyDeclaration]) -> DiagnosticExplanation? Never! {
+fn jet_cli_explain_policy_lookup(key: PolicyKey, declarations: [PolicyDeclaration]) -> DiagnosticExplanation? Never! {
  resolved :: policy_resolve(key, declarations) ?? return None
  effective :: resolved ?? return None
  name :: policy_key_name(key)
@@ -45,7 +45,7 @@ pub fn jet_cli_explain_policy_lookup(key: PolicyKey, declarations: [PolicyDeclar
  })
 }
 
-pub fn jet_cli_explain_marker_offset(source: String, line: U64) -> Int Never! {
+fn jet_cli_explain_marker_offset(source: String, line: U64) -> Int Never! {
  if (line == U64{1}) -> return 0
  remaining := line - U64{1}
  loop (index, byte) in source.bytes() {
@@ -56,7 +56,7 @@ pub fn jet_cli_explain_marker_offset(source: String, line: U64) -> Int Never! {
  source.bytes().len()
 }
 
-pub fn jet_cli_explain_loaded_policy(key: PolicyKey, loaded: JetDriverSourceQueryResult, site: String?, line: U64?, color: Bool, json: Bool) -> JetCLIPlan Never! {
+fn jet_cli_explain_loaded_policy(key: PolicyKey, loaded: JetDriverSourceQueryResult, site: String?, line: U64?, color: Bool, json: Bool) -> JetCLIPlan Never! {
  if !loaded.complete {
  stderr := ""
  loop diagnostic in loaded.diagnostics -> stderr = "{stderr}{diagnostic.what}\n"

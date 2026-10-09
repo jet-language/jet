@@ -47,13 +47,13 @@ struct WebTableRow<T> {
     value: T
 }
 
-pub struct WebTablePage<T> {
-    pub rows: [T]
-    pub row_keys: [String]
-    pub total_rows: Int
-    pub page_index: Int
-    pub page_size: Int
-    pub page_count: Int
+struct WebTablePage<T> {
+    rows: [T]
+    row_keys: [String]
+    total_rows: Int
+    page_index: Int
+    page_size: Int
+    page_count: Int
 }
 
 struct WebTableState {
@@ -66,18 +66,18 @@ struct WebTableState {
     page_mode: WebTablePageMode
 }
 
-pub struct WebTable<T> {
-    pub columns: [WebTableColumn<T>]
-    pub rows: [WebTableRow<T>]
-    pub state: WebTableState
+struct WebTable<T> {
+    columns: [WebTableColumn<T>]
+    rows: [WebTableRow<T>]
+    state: WebTableState
 
-    pub fn with_column(self, col: WebTableColumn<T>) -> WebTable<T> Never! {
+    fn with_column(self, col: WebTableColumn<T>) -> WebTable<T> Never! {
         with_column<T>(&self, col)
     }
-    pub fn paginate(self, index: Int, size: Int) -> WebTable<T> Never! {
+    fn paginate(self, index: Int, size: Int) -> WebTable<T> Never! {
         paginate<T>(&self, index, size)
     }
-    pub fn page(self) -> WebTablePage<T> String! {
+    fn page(self) -> WebTablePage<T> String! {
         runtime_page<T>(self)
     }
 }
@@ -100,7 +100,7 @@ fn column<T>(name: String, label: String, project: ^fn(T) -> String Never!) -> W
     WebTableColumn<T>{name: name, label: label, project: project}
 }
 
-pub fn with_column<T>(table: &WebTable<T>, col: WebTableColumn<T>) -> WebTable<T> Never! {
+fn with_column<T>(table: &WebTable<T>, col: WebTableColumn<T>) -> WebTable<T> Never! {
     // WebTable.rs:381-385: append without validation, copying configuration
     // while retaining the shared state and callable identities.
     columns := core.web.table.__columns(table)
@@ -108,7 +108,7 @@ pub fn with_column<T>(table: &WebTable<T>, col: WebTableColumn<T>) -> WebTable<T
     core.web.table.__replace_columns(table, columns)
 }
 
-pub fn with_server_page<T>(table: &WebTable<T>, fetch: fn(WebTableState) -> WebTablePage<T> WebTableError!) -> WebTable<T> Never! {
+fn with_server_page<T>(table: &WebTable<T>, fetch: fn(WebTableState) -> WebTablePage<T> WebTableError!) -> WebTable<T> Never! {
     table.server_page = [fn(WebTableState) -> WebTablePage<T> WebTableError!]{fetch}
     table.state.page_mode = WebTablePageMode.Server
     table.copy()
@@ -211,7 +211,7 @@ fn filter_by<T>(table: &WebTable<T>, name: String, value: String) -> WebTable<T>
     table.copy()
 }
 
-pub fn paginate<T>(table: &WebTable<T>, index: Int, size: Int) -> WebTable<T> Never! {
+fn paginate<T>(table: &WebTable<T>, index: Int, size: Int) -> WebTable<T> Never! {
     // WebTable.rs:506-511: preserve all state except the clamped boundary;
     // set_state owns reactive invalidation, not the source DTO's fields.
     state := core.web.table.__state(table)

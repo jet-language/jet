@@ -177,7 +177,7 @@ fn x64_imul_rr(code: &[U8], dst: Int, src: Int) Never! {
 }
 
 // imul dst, src, imm (REX.W 6B /r ib, or REX.W 69 /r id). The immediate must fit i32.
-pub fn x64_imul_rri(code: &[U8], dst: Int, src: Int, value: Int) Never! {
+fn x64_imul_rri(code: &[U8], dst: Int, src: Int, value: Int) Never! {
     x64_rex(&code, true, dst, src)
     if x64_fits_i8(value) {
         x64_byte(&code, 0x6b)
@@ -212,20 +212,20 @@ fn x64_store(code: &[U8], base: Int, disp: Int, src: Int) Never! {
 }
 
 // mov dst32, [base + disp] (REX 8B /r): four bytes, zero-extended into dst.
-pub fn x64_load32(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
+fn x64_load32(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
     x64_rex(&code, false, dst, base)
     x64_byte(&code, 0x8b)
     x64_modrm_mem(&code, dst, base, disp)
 }
 
 // mov [base + disp], src32 (REX 89 /r): the low four bytes of src.
-pub fn x64_store32(code: &[U8], base: Int, disp: Int, src: Int) Never! {
+fn x64_store32(code: &[U8], base: Int, disp: Int, src: Int) Never! {
     x64_rex(&code, false, src, base)
     x64_byte(&code, 0x89)
     x64_modrm_mem(&code, src, base, disp)
 }
 
-pub fn x64_load_indexed(code: &[U8], dst: Int, base: Int, index: Int, scale: Int, disp: Int, size: Int) Never! {
+fn x64_load_indexed(code: &[U8], dst: Int, base: Int, index: Int, scale: Int, disp: Int, size: Int) Never! {
     wide :: size != 4
     if wide || dst >= 8 || base >= 8 || index >= 8 -> x64_rex_indexed(&code, wide, dst, base, index)
     if size == 1 -> x64_byte(&code, 0x0f)
@@ -233,14 +233,14 @@ pub fn x64_load_indexed(code: &[U8], dst: Int, base: Int, index: Int, scale: Int
     x64_modrm_indexed(&code, dst, base, index, scale, disp)
 }
 
-pub fn x64_store_indexed(code: &[U8], base: Int, index: Int, scale: Int, disp: Int, src: Int, size: Int) Never! {
+fn x64_store_indexed(code: &[U8], base: Int, index: Int, scale: Int, disp: Int, src: Int, size: Int) Never! {
     wide :: size == 8
     if wide || src >= 8 || base >= 8 || index >= 8 || (size == 1 && src >= 4) -> x64_rex_indexed(&code, wide, src, base, index)
     x64_byte(&code, if size == 1 -> 0x88 else -> 0x89)
     x64_modrm_indexed(&code, src, base, index, scale, disp)
 }
 
-pub fn x64_lea_indexed(code: &[U8], dst: Int, base: Int, index: Int, scale: Int, disp: Int) Never! {
+fn x64_lea_indexed(code: &[U8], dst: Int, base: Int, index: Int, scale: Int, disp: Int) Never! {
     x64_rex_indexed(&code, true, dst, base, index)
     x64_byte(&code, 0x8d)
     x64_modrm_indexed(&code, dst, base, index, scale, disp)
@@ -270,33 +270,33 @@ fn x64_store_u8(code: &[U8], base: Int, disp: Int, src: Int) Never! {
 
 // Fixed-integer storage loads zero-extend; lowering sign-extends signed
 // values into its word arithmetic carrier after the read.
-pub fn x64_load_u16(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
+fn x64_load_u16(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
     x64_rex(&code, true, dst, base)
     x64_byte(&code, 0x0f)
     x64_byte(&code, 0xb7)
     x64_modrm_mem(&code, dst, base, disp)
 }
 
-pub fn x64_load_u32(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
+fn x64_load_u32(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
     x64_rex(&code, false, dst, base)
     x64_byte(&code, 0x8b)
     x64_modrm_mem(&code, dst, base, disp)
 }
 
-pub fn x64_store_u16(code: &[U8], base: Int, disp: Int, src: Int) Never! {
+fn x64_store_u16(code: &[U8], base: Int, disp: Int, src: Int) Never! {
     x64_byte(&code, 0x66)
     x64_rex(&code, false, src, base)
     x64_byte(&code, 0x89)
     x64_modrm_mem(&code, src, base, disp)
 }
 
-pub fn x64_store_u32(code: &[U8], base: Int, disp: Int, src: Int) Never! {
+fn x64_store_u32(code: &[U8], base: Int, disp: Int, src: Int) Never! {
     x64_rex(&code, false, src, base)
     x64_byte(&code, 0x89)
     x64_modrm_mem(&code, src, base, disp)
 }
 
-pub fn x64_integer_width(code: &[U8], dst: Int, src: Int, bytes: Int) Never! {
+fn x64_integer_width(code: &[U8], dst: Int, src: Int, bytes: Int) Never! {
     if bytes == 8 -> return x64_mov_rr(&code, dst, src)
     if bytes == 4 {
         x64_rex(&code, false, src, dst)
@@ -485,18 +485,18 @@ fn x64_movq_to_xmm(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 0x66
 fn x64_movq_from_xmm(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0x66, true, 0x7e, xmm, dst) }
 
 // movd r32, xmm (66 0F 7E /r): the low 32 bits, zero-extended into the r64.
-pub fn x64_movd_from_xmm(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0x66, false, 0x7e, xmm, dst) }
+fn x64_movd_from_xmm(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0x66, false, 0x7e, xmm, dst) }
 
 // movd xmm, r32 (66 0F 6E /r).
-pub fn x64_movd_to_xmm(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 0x66, false, 0x6e, xmm, src) }
+fn x64_movd_to_xmm(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 0x66, false, 0x6e, xmm, src) }
 
 // movapd/movaps dst, src: copy an xmm register without a GPR round trip.
-pub fn x64_float_move(code: &[U8], single: Bool, dst: Int, src: Int) Never! {
+fn x64_float_move(code: &[U8], single: Bool, dst: Int, src: Int) Never! {
     x64_sse(&code, if single -> 0 else -> 0x66, false, 0x28, dst, src)
 }
 
 // movsd/movss xmm, [base + disp], or the reverse store (0F 10/11).
-pub fn x64_float_load(code: &[U8], single: Bool, dst: Int, base: Int, disp: Int) Never! {
+fn x64_float_load(code: &[U8], single: Bool, dst: Int, base: Int, disp: Int) Never! {
     x64_byte(&code, if single -> 0xf3 else -> 0xf2)
     if dst >= 8 || base >= 8 -> x64_rex(&code, false, dst, base)
     x64_byte(&code, 0x0f)
@@ -504,7 +504,7 @@ pub fn x64_float_load(code: &[U8], single: Bool, dst: Int, base: Int, disp: Int)
     x64_modrm_mem(&code, dst, base, disp)
 }
 
-pub fn x64_float_store(code: &[U8], single: Bool, base: Int, disp: Int, src: Int) Never! {
+fn x64_float_store(code: &[U8], single: Bool, base: Int, disp: Int, src: Int) Never! {
     x64_byte(&code, if single -> 0xf3 else -> 0xf2)
     if src >= 8 || base >= 8 -> x64_rex(&code, false, src, base)
     x64_byte(&code, 0x0f)
@@ -512,7 +512,7 @@ pub fn x64_float_store(code: &[U8], single: Bool, base: Int, disp: Int, src: Int
     x64_modrm_mem(&code, src, base, disp)
 }
 
-pub fn x64_float_load_indexed(code: &[U8], single: Bool, dst: Int, base: Int, index: Int, scale: Int, disp: Int) Never! {
+fn x64_float_load_indexed(code: &[U8], single: Bool, dst: Int, base: Int, index: Int, scale: Int, disp: Int) Never! {
     x64_byte(&code, if single -> 0xf3 else -> 0xf2)
     if dst >= 8 || base >= 8 || index >= 8 -> x64_rex_indexed(&code, false, dst, base, index)
     x64_byte(&code, 0x0f)
@@ -520,7 +520,7 @@ pub fn x64_float_load_indexed(code: &[U8], single: Bool, dst: Int, base: Int, in
     x64_modrm_indexed(&code, dst, base, index, scale, disp)
 }
 
-pub fn x64_float_store_indexed(code: &[U8], single: Bool, base: Int, index: Int, scale: Int, disp: Int, src: Int) Never! {
+fn x64_float_store_indexed(code: &[U8], single: Bool, base: Int, index: Int, scale: Int, disp: Int, src: Int) Never! {
     x64_byte(&code, if single -> 0xf3 else -> 0xf2)
     if src >= 8 || base >= 8 || index >= 8 -> x64_rex_indexed(&code, false, src, base, index)
     x64_byte(&code, 0x0f)
@@ -529,7 +529,7 @@ pub fn x64_float_store_indexed(code: &[U8], single: Bool, base: Int, index: Int,
 }
 
 // xorpd/xorps preserves the sign-mask bit operation used for negation.
-pub fn x64_float_xor(code: &[U8], single: Bool, dst: Int, src: Int) Never! {
+fn x64_float_xor(code: &[U8], single: Bool, dst: Int, src: Int) Never! {
     x64_sse(&code, if single -> 0 else -> 0x66, false, 0x57, dst, src)
 }
 
@@ -537,7 +537,7 @@ enum X64FloatOp { Add Sub Mul Div }
 
 // addsd/subsd/mulsd/divsd dst, src (F2 0F 58|5C|59|5E /r), or with `single`
 // addss/subss/mulss/divss (F3 0F 58|5C|59|5E /r).
-pub fn x64_float_op(code: &[U8], op: X64FloatOp, single: Bool, dst: Int, src: Int) Never! {
+fn x64_float_op(code: &[U8], op: X64FloatOp, single: Bool, dst: Int, src: Int) Never! {
     opcode :: if op == {
         .Add -> 0x58
         .Sub -> 0x5c
@@ -551,22 +551,22 @@ pub fn x64_float_op(code: &[U8], op: X64FloatOp, single: Bool, dst: Int, src: In
 fn x64_ucomisd(code: &[U8], left: Int, right: Int) Never! { x64_sse(&code, 0x66, false, 0x2e, left, right) }
 
 // ucomiss left, right (0F 2E /r): the single-precision ucomisd.
-pub fn x64_ucomiss(code: &[U8], left: Int, right: Int) Never! { x64_sse(&code, 0, false, 0x2e, left, right) }
+fn x64_ucomiss(code: &[U8], left: Int, right: Int) Never! { x64_sse(&code, 0, false, 0x2e, left, right) }
 
 // cvtsi2sd xmm, r64 (F2 REX.W 0F 2A /r)
 fn x64_cvtsi2sd(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 0xf2, true, 0x2a, xmm, src) }
 
 // cvtsi2ss xmm, r64 (F3 REX.W 0F 2A /r): rounds to nearest (MXCSR default).
-pub fn x64_cvtsi2ss(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 0xf3, true, 0x2a, xmm, src) }
+fn x64_cvtsi2ss(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 0xf3, true, 0x2a, xmm, src) }
 
 // cvttsd2si r64, xmm (F2 REX.W 0F 2C /r): truncates; NaN and out-of-range give the minimum.
-pub fn x64_cvttsd2si(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0xf2, true, 0x2c, dst, xmm) }
+fn x64_cvttsd2si(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0xf2, true, 0x2c, dst, xmm) }
 
 // cvttss2si r64, xmm (F3 REX.W 0F 2C /r): the single-precision cvttsd2si.
-pub fn x64_cvttss2si(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0xf3, true, 0x2c, dst, xmm) }
+fn x64_cvttss2si(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0xf3, true, 0x2c, dst, xmm) }
 
 // cvtss2sd xmm, xmm (F3 0F 5A /r): exact widening.
-pub fn x64_cvtss2sd(code: &[U8], dst: Int, src: Int) Never! { x64_sse(&code, 0xf3, false, 0x5a, dst, src) }
+fn x64_cvtss2sd(code: &[U8], dst: Int, src: Int) Never! { x64_sse(&code, 0xf3, false, 0x5a, dst, src) }
 
 // cvtsd2ss xmm, xmm (F2 0F 5A /r): rounds to nearest (MXCSR default).
-pub fn x64_cvtsd2ss(code: &[U8], dst: Int, src: Int) Never! { x64_sse(&code, 0xf2, false, 0x5a, dst, src) }
+fn x64_cvtsd2ss(code: &[U8], dst: Int, src: Int) Never! { x64_sse(&code, 0xf2, false, 0x5a, dst, src) }

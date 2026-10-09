@@ -3,7 +3,7 @@
 use jet_foundation.[JobScope, JobSkip, JobCachePolicy, JobMetadata, ParamZone, StringMapEntry]
 use jet_foundation.[Item, Program, Func, Param, Expr, type_name, ast_job_metadata]
 
-pub enum CLIValueKind {
+enum CLIValueKind {
     Bool
     Int
     Float
@@ -11,7 +11,7 @@ pub enum CLIValueKind {
     Path
 }
 impl CLIValueKind {
-    pub fn as_str(self) -> String Never! {
+    fn as_str(self) -> String Never! {
         if self == {
             .Bool -> "Bool"
             .Int -> "Int"
@@ -21,94 +21,94 @@ impl CLIValueKind {
         }
     }
 }
-pub enum CLIDefault {
+enum CLIDefault {
     TypeDefault
     Recorded(value: String)
 }
 impl CLIDefault {
-    pub fn display(self) -> String Never! {
+    fn display(self) -> String Never! {
         if self == {
             .TypeDefault -> "type default"
             .Recorded(value) -> value
         }
     }
 }
-pub enum CLIInputShape {
+enum CLIInputShape {
     Flag
     Value(kind: CLIValueKind, optional: Bool, default: CLIDefault?)
 }
-pub struct CLIInputSchema {
-    pub field: String
-    pub flag: String
-    pub short: String?
-    pub env: String?
-    pub help: String
-    pub metavar: String?
-    pub shape: CLIInputShape
-    pub positional: U16?
+struct CLIInputSchema {
+    field: String
+    flag: String
+    short: String?
+    env: String?
+    help: String
+    metavar: String?
+    shape: CLIInputShape
+    positional: U16?
 }
 impl CLIInputSchema {
-    pub fn required(self) -> Bool Never! {
+    fn required(self) -> Bool Never! {
         if self.shape == {
             .Value(_, optional, default) -> !optional && default == None
             else -> false
         }
     }
-    pub fn value_kind(self) -> CLIValueKind Never! {
+    fn value_kind(self) -> CLIValueKind Never! {
         if self.shape == {
             .Flag -> CLIValueKind.Bool
             .Value(kind, _, _) -> kind
         }
     }
-    pub fn default_display(self) -> String? Never! {
+    fn default_display(self) -> String? Never! {
         if self.shape == {
             .Flag -> Val("false")
             .Value(_, _, default) -> if default == .Val(value) -> Val(value.display()) else -> None
         }
     }
 }
-pub struct CLISubcommandSchema {
-    pub name: String
-    pub description: String?
-    pub inputs: [CLIInputSchema]
+struct CLISubcommandSchema {
+    name: String
+    description: String?
+    inputs: [CLIInputSchema]
 }
-pub struct JobArgumentSchema {
-    pub name: String
-    pub label: String
-    pub ty: String
-    pub required: Bool
-    pub default: String?
-    pub variadic: Bool
-    pub zone: ParamZone
+struct JobArgumentSchema {
+    name: String
+    label: String
+    ty: String
+    required: Bool
+    default: String?
+    variadic: Bool
+    zone: ParamZone
 
-    pub fn display(self) -> String Never! {
+    fn display(self) -> String Never! {
         "{self.label}: {if self.variadic -> "..." else -> ""}{self.ty}"
     }
 }
-pub struct JobFact {
-    pub name: String
-    pub scope: JobScope
-    pub doc: String?
-    pub arguments: [JobArgumentSchema]
-    pub after: [String]
-    pub packages: [String]
-    pub cwd: String?
-    pub inputs: [String]
-    pub outputs: [String]
-    pub skip: JobSkip?
-    pub cache: JobCachePolicy
-    pub parallel: Int
-    pub limits: [StringMapEntry]
-    pub schedule: String?
+struct JobFact {
+    name: String
+    scope: JobScope
+    doc: String?
+    arguments: [JobArgumentSchema]
+    after: [String]
+    packages: [String]
+    cwd: String?
+    inputs: [String]
+    outputs: [String]
+    skip: JobSkip?
+    cache: JobCachePolicy
+    parallel: Int
+    limits: [StringMapEntry]
+    schedule: String?
 
-    pub fn scope_name(self) -> String Never! {
+    fn scope_name(self) -> String Never! {
         if self.scope == {
             .Dev -> "dev"
             .Ship -> "ship"
             .Internal -> "internal"
         }
     }
-    pub fn metadata(self) -> JobMetadata Never! {
+    fn metadata(self) -> JobMetadata Never! {
         JobMetadata{scope: self.scope, after: self.after, packages: self.packages, cwd: self.cwd, inputs: self.inputs, outputs: self.outputs, skip: self.skip, cache: self.cache, parallel: Val(self.parallel), limits: self.limits}
     }
 }
@@ -116,10 +116,10 @@ pub struct JobFact {
 // The registry is an owned metadata projection, not evidence that a job was
 // checked or run. Driver callers must supply the actual successful entry
 // projection; importing a helper module never extends the job argv namespace.
-pub struct JobRegistry {
+struct JobRegistry {
     jobs: [JobFact]
 
-    pub fn from_items(items: [Item]) -> JobRegistry Never! {
+    fn from_items(items: [Item]) -> JobRegistry Never! {
         jobs := [JobFact]{}
         loop item in items {
             if item == .Func(function) {
@@ -128,36 +128,36 @@ pub struct JobRegistry {
         }
         JobRegistry{jobs: ^jobs}
     }
-    pub fn from_program(program: Program) -> JobRegistry Never! {
+    fn from_program(program: Program) -> JobRegistry Never! {
         JobRegistry.from_items(program.items)
     }
-    pub fn for_entry(programs: [Program], entry: Int) -> JobRegistry Never! {
+    fn for_entry(programs: [Program], entry: Int) -> JobRegistry Never! {
         if entry < 0 || entry >= programs.len() -> return JobRegistry{jobs: [JobFact]{}}
         JobRegistry.from_program(programs[entry])
     }
-    pub fn jobs(self) -> View<JobFact> Never! from self {
+    fn jobs(self) -> View<JobFact> Never! from self {
         self.jobs[0..<self.jobs.len()]
     }
-    pub fn visible_jobs(self) -> [View<JobFact>] Never! from self {
+    fn visible_jobs(self) -> [View<JobFact>] Never! from self {
         visible := [View<JobFact>]{}
         loop index in 0..<self.jobs.len() {
             if self.jobs[index].scope != .Internal -> &visible.push(self.jobs[index..<index + 1])
         }
         ^visible
     }
-    pub fn find(self, name: String) -> View<JobFact>? Never! from self {
+    fn find(self, name: String) -> View<JobFact>? Never! from self {
         loop index in 0..<self.jobs.len() {
             if self.jobs[index].name == name -> return Val(self.jobs[index..<index + 1])
         }
         None
     }
-    pub fn find_visible(self, name: String) -> View<JobFact>? Never! from self {
+    fn find_visible(self, name: String) -> View<JobFact>? Never! from self {
         loop index in 0..<self.jobs.len() {
             if self.jobs[index].name == name && self.jobs[index].scope != .Internal -> return Val(self.jobs[index..<index + 1])
         }
         None
     }
-    pub fn dependency_closure(self, root: String) -> [View<JobFact>] String! from self {
+    fn dependency_closure(self, root: String) -> [View<JobFact>] String! from self {
         index :: cli_schema_job_index(self.jobs)
         state := [Int]{}
         loop _ in 0..<self.jobs.len() -> &state.push(0)
@@ -171,7 +171,7 @@ pub struct JobRegistry {
         }
         Ok(^rows)
     }
-    pub fn validate_graph(self) String! {
+    fn validate_graph(self) String! {
         index :: cli_schema_job_index(self.jobs)
         names := index.keys().to_list()
         &names.sort()
@@ -186,7 +186,7 @@ pub struct JobRegistry {
         }
         Ok()
     }
-    pub fn completion_words(self) -> [String] Never! {
+    fn completion_words(self) -> [String] Never! {
         words := [String]{}
         seen := [String:Bool]{}
         loop job in self.jobs {
@@ -346,14 +346,14 @@ fn cli_schema_job_fact(function: Func) -> JobFact Never! {
     JobFact{name: function.name, scope: metadata.scope, doc: cli_schema_job_doc(function), arguments: ^arguments, after: metadata.after, packages: metadata.packages, cwd: metadata.cwd, inputs: metadata.inputs, outputs: metadata.outputs, skip: metadata.skip, cache: metadata.cache, parallel: metadata.parallel ?? 1, limits: metadata.limits, schedule: cli_schema_job_schedule(function)}
 }
 
-pub struct CLICommandSchema {
-    pub entry_type: String
-    pub description: String?
-    pub inputs: [CLIInputSchema]
-    pub commands: [CLISubcommandSchema]
-    pub jobs: [JobFact]
-    pub standard: Bool
-    pub version: String?
+struct CLICommandSchema {
+    entry_type: String
+    description: String?
+    inputs: [CLIInputSchema]
+    commands: [CLISubcommandSchema]
+    jobs: [JobFact]
+    standard: Bool
+    version: String?
 }
 fn cli_schema_input_words(inputs: [CLIInputSchema]) -> [String] Never! {
     positionals := [Int]{}
@@ -371,38 +371,38 @@ fn cli_schema_input_words(inputs: [CLIInputSchema]) -> [String] Never! {
     words
 }
 impl CLICommandSchema {
-    pub fn standard_completion_words(self) -> [String] Never! {
+    fn standard_completion_words(self) -> [String] Never! {
         if !self.standard -> return [String]{}
         words := [String]{"--verbose", "-v", "--quiet", "-q", "--color"}
         if self.version != None -> &words.push("--version")
         words
     }
-    pub fn command_inputs(self, command: CLISubcommandSchema) -> [CLIInputSchema] Never! { command.inputs }
-    pub fn command_completion_words(self, command: CLISubcommandSchema) -> [String] Never! {
+    fn command_inputs(self, command: CLISubcommandSchema) -> [CLIInputSchema] Never! { command.inputs }
+    fn command_completion_words(self, command: CLISubcommandSchema) -> [String] Never! {
         words := [String]{"--help"}
         &words.extend(cli_schema_input_words(command.inputs))
         words
     }
-    pub fn job_completion_words(self) -> [String] Never! {
+    fn job_completion_words(self) -> [String] Never! {
         words := [String]{}
         loop job in self.jobs {
             if job.scope != JobScope.Internal -> &words.push(job.name)
         }
         words
     }
-    pub fn job(self, name: String) -> JobFact? Never! {
+    fn job(self, name: String) -> JobFact? Never! {
         loop job in self.jobs {
             if job.name == name && job.scope != JobScope.Internal -> return Val(job)
         }
         None
     }
-    pub fn root_completion_words(self) -> [String] Never! {
+    fn root_completion_words(self) -> [String] Never! {
         words := [String]{"--help"}
         &words.extend(self.standard_completion_words())
         &words.extend(cli_schema_input_words(self.inputs))
         words
     }
-    pub fn completion_words(self) -> [String] Never! {
+    fn completion_words(self) -> [String] Never! {
         words := self.root_completion_words()
         loop command in self.commands -> &words.push(command.name)
         &words.extend(self.job_completion_words())

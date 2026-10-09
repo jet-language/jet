@@ -2,34 +2,34 @@
 // TargetMachine.rs and Driver::target_machine_for_facts.
 
 // Canonical TargetMachine.rs validation carriers restored from 45acf6f8f.
-pub enum MIRTargetCapability {
+enum MIRTargetCapability {
     Allocator Atomic64 MMIO Hardware TimeWall TimeMonotonic TimeZoneData
     TimeSleep Entropy Scheduler IORead IOWrite PanicReport Startup
 }
-pub struct MIRTargetUnsafeGate { pub reason: String }
-pub struct MIRMMIOAccess {
-    pub address: Int
-    pub size: MIRByteSize
-    pub unsafe_gate: MIRTargetUnsafeGate?
+struct MIRTargetUnsafeGate { reason: String }
+struct MIRMMIOAccess {
+    address: Int
+    size: MIRByteSize
+    unsafe_gate: MIRTargetUnsafeGate?
 }
-pub struct MIRTargetMachineUse {
-    pub stack_bytes: Int
-    pub static_ram_bytes: Int
-    pub heap_required: Bool
-    pub core_apis: [String]
-    pub mmio: [MIRMMIOAccess]
-    pub required_capabilities: [MIRTargetCapability]
+struct MIRTargetMachineUse {
+    stack_bytes: Int
+    static_ram_bytes: Int
+    heap_required: Bool
+    core_apis: [String]
+    mmio: [MIRMMIOAccess]
+    required_capabilities: [MIRTargetCapability]
 }
-pub struct MIRSizeBudgetReport {
-    pub artifact_bytes: Int
-    pub flash_bytes: Int
-    pub flash_ok: Bool
-    pub ram_bytes: Int
-    pub ram_used_bytes: Int
-    pub ram_ok: Bool
+struct MIRSizeBudgetReport {
+    artifact_bytes: Int
+    flash_bytes: Int
+    flash_ok: Bool
+    ram_bytes: Int
+    ram_used_bytes: Int
+    ram_ok: Bool
 }
 #Error
-pub enum MIRTargetMachineError {
+enum MIRTargetMachineError {
     MissingTargetTriple
     MissingMemoryKind(kind: MIRMemoryKind)
     DuplicateMemoryRegion(name: String)
@@ -418,7 +418,7 @@ fn jet_target_memory_json(regions: [MIRMemoryRegion]) -> String Never! {
     "[{rows.join(",")}]"
 }
 
-pub fn jet_target_hardware_json(facts: MIRTargetHardwareFacts) -> String Never! {
+fn jet_target_hardware_json(facts: MIRTargetHardwareFacts) -> String Never! {
     svd :: if facts.svd == {
         .Val(provenance) -> "{{\"source\":{jet_target_json_quote(provenance.source)},\"sha256\":{jet_target_json_quote(provenance.sha256)}}}"
         .None -> "null"
@@ -464,7 +464,7 @@ fn jet_target_programmers_json(programmers: [MIRTargetProgrammerFacts]) -> Strin
 }
 
 // Rust TargetProgrammerFacts::missing_fact (TargetMachine.rs:441-483).
-pub fn jet_target_programmer_missing_fact(facts: MIRTargetProgrammerFacts) -> String? Never! {
+fn jet_target_programmer_missing_fact(facts: MIRTargetProgrammerFacts) -> String? Never! {
     if facts.executable.trim().is_empty() -> return Val("executable")
     loop value in facts.config {
         if value.trim().is_empty() -> return Val("config")
@@ -520,7 +520,7 @@ fn jet_target_provider_facts_json(machine: MIRTargetMachine) -> String Never! {
     "[{facts.join(",")}]"
 }
 
-pub fn jet_target_environment_identity(machine: MIRTargetMachine) -> String Never! {
+fn jet_target_environment_identity(machine: MIRTargetMachine) -> String Never! {
     if {
         machine.no_os -> "no-os"
         machine.triple.contains("wasip") -> "wasi"
@@ -529,7 +529,7 @@ pub fn jet_target_environment_identity(machine: MIRTargetMachine) -> String Neve
     }
 }
 
-pub fn jet_target_provider_identity(machine: MIRTargetMachine) -> String Never! {
+fn jet_target_provider_identity(machine: MIRTargetMachine) -> String Never! {
     bytes := [U8]{}
     jet_target_append_frame(&bytes, "environment", jet_target_environment_identity(machine))
     jet_target_append_frame(&bytes, "linker", jet_target_linker_json(machine.linker))
@@ -601,7 +601,7 @@ fn jet_target_wasm_provider(name: String, implementation: String) -> MIRProvider
     }
 }
 
-pub fn jet_target_machine_wasm_browser(package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_wasm_browser(package_version: String) -> MIRTargetMachine Never! {
     machine := jet_target_machine_hosted("wasm32-unknown-unknown", package_version)
     machine.name = "wasm.browser"
     machine.allocator = MIRAllocatorPolicy.Provider{provider: jet_target_wasm_provider("wasm.browser.allocator", "wasm-browser-allocator")}
@@ -622,7 +622,7 @@ pub fn jet_target_machine_wasm_browser(package_version: String) -> MIRTargetMach
     machine
 }
 
-pub fn jet_target_machine_wasm_wasi(package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_wasm_wasi(package_version: String) -> MIRTargetMachine Never! {
     machine := jet_target_machine_hosted("wasm32-wasip2", package_version)
     machine.name = "wasm.wasi"
     machine.allocator = MIRAllocatorPolicy.Provider{provider: jet_target_wasm_provider("wasm.wasi.allocator", "wasm-wasi-allocator")}
@@ -685,13 +685,13 @@ fn jet_target_active_os_name(target_triple: String, host_os: String) -> String N
 }
 
 // Rust TargetMachineUse::default (TargetMachine.rs).
-pub fn jet_target_machine_use_default() -> MIRTargetMachineUse Never! {
+fn jet_target_machine_use_default() -> MIRTargetMachineUse Never! {
     MIRTargetMachineUse{stack_bytes: 0, static_ram_bytes: 0, heap_required: false,
         core_apis: [String]{}, mmio: [MIRMMIOAccess]{}, required_capabilities: [MIRTargetCapability]{}}
 }
 
 // Rust TargetCapability::as_str (TargetMachine.rs).
-pub fn jet_target_capability_name(capability: MIRTargetCapability) -> String Never! {
+fn jet_target_capability_name(capability: MIRTargetCapability) -> String Never! {
     if capability == {
         .Allocator -> "Target.Allocator"
         .Atomic64 -> "Target.Atomic64"
@@ -751,7 +751,7 @@ fn jet_target_capabilities_for_core_usage(api: String) -> [MIRTargetCapability] 
 }
 
 // Rust TargetMachineUse::from_core_apis (TargetMachine.rs).
-pub fn jet_target_machine_use_from_core_apis(apis: [String]) -> MIRTargetMachineUse Never! {
+fn jet_target_machine_use_from_core_apis(apis: [String]) -> MIRTargetMachineUse Never! {
     usage := jet_target_machine_use_default()
     sorted := ~apis
     &sorted.sort()
@@ -843,7 +843,7 @@ fn jet_target_sink_provider(policy: MIRByteSinkPolicy, capability: MIRTargetCapa
     }
 }
 // Rust TargetMachine::provides_capability (TargetMachine.rs).
-pub fn jet_target_machine_provides_capability(machine: MIRTargetMachine, capability: MIRTargetCapability) -> Bool Never! {
+fn jet_target_machine_provides_capability(machine: MIRTargetMachine, capability: MIRTargetCapability) -> Bool Never! {
     hosted :: jet_target_environment_identity(machine) == "hosted"
     if capability == {
         .Allocator -> if machine.allocator == {
@@ -1107,13 +1107,13 @@ fn jet_target_hardware_validate_into(hardware: MIRTargetHardwareFacts, memory: [
     }
 }
 // Rust TargetHardwareFacts::validate (TargetMachine.rs).
-pub fn jet_target_hardware_validate(hardware: MIRTargetHardwareFacts, memory: [MIRMemoryRegion]) -> [MIRTargetMachineError] Never! {
+fn jet_target_hardware_validate(hardware: MIRTargetHardwareFacts, memory: [MIRMemoryRegion]) -> [MIRTargetMachineError] Never! {
     errors := [MIRTargetMachineError]{}
     jet_target_hardware_validate_into(hardware, memory, &errors)
     errors
 }
 // Rust TargetMachine::validate (TargetMachine.rs:1193-1212); preserve push order.
-pub fn jet_target_machine_validate(machine: MIRTargetMachine, usage: MIRTargetMachineUse) -> [MIRTargetMachineError] Never! {
+fn jet_target_machine_validate(machine: MIRTargetMachine, usage: MIRTargetMachineUse) -> [MIRTargetMachineError] Never! {
     errors := [MIRTargetMachineError]{}
     if machine.triple.trim().is_empty() -> &errors.push(.MissingTargetTriple)
     jet_target_validate_memory_regions(machine.memory, &errors)
@@ -1131,7 +1131,7 @@ pub fn jet_target_machine_validate(machine: MIRTargetMachine, usage: MIRTargetMa
 
 // Rust derive(Debug) for TargetMachineError (TargetMachine.rs:3388-3586).
 // String :Debug delegates to Rust str Debug (Prelude/Core/Values.rs:281-284).
-pub fn jet_target_machine_error_debug(error: MIRTargetMachineError) -> String Never! {
+fn jet_target_machine_error_debug(error: MIRTargetMachineError) -> String Never! {
     if error == {
         .MissingTargetTriple -> "MissingTargetTriple"
         .MissingMemoryKind(kind) -> {
@@ -1231,17 +1231,17 @@ pub fn jet_target_machine_error_debug(error: MIRTargetMachineError) -> String Ne
     }
 }
 // Rust Vec<TargetMachineError> derive(Debug).
-pub fn jet_target_machine_errors_debug(errors: [MIRTargetMachineError]) -> String Never! {
+fn jet_target_machine_errors_debug(errors: [MIRTargetMachineError]) -> String Never! {
     rows :: loop error in errors -> jet_target_machine_error_debug(error)
     "[{rows.join(", ")}]"
 }
 
 // Rust MemoryRegion::new (TargetMachine.rs).
-pub fn jet_target_memory_region_new(name: String, origin: Int, size: MIRByteSize, kind: MIRMemoryKind, access: MIRMemoryAccess) -> MIRMemoryRegion Never! {
+fn jet_target_memory_region_new(name: String, origin: Int, size: MIRByteSize, kind: MIRMemoryKind, access: MIRMemoryAccess) -> MIRMemoryRegion Never! {
     MIRMemoryRegion{name: name, origin: origin, size: size, kind: kind, access: access}
 }
 // Rust TargetMachine::with_startup_facts (TargetMachine.rs).
-pub fn jet_target_machine_with_startup_facts(machine: MIRTargetMachine, entry: String, vectors: String, abi: MIRProviderABI, placement: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_with_startup_facts(machine: MIRTargetMachine, entry: String, vectors: String, abi: MIRProviderABI, placement: String) -> MIRTargetMachine Never! {
     result := machine
     result.startup_entry = entry
     result.startup_vectors = vectors
@@ -1258,7 +1258,7 @@ fn jet_target_builtin_provider_digest(name: String, digest: String) -> MIRProvid
         limits: MIRProviderLimits{max_request_bytes: None, max_response_bytes: None, max_calls: None}}
 }
 // Rust TargetMachine::board_sensor_v1 (TargetMachine.rs:1819-1927).
-pub fn jet_target_machine_board_sensor_v1(package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_board_sensor_v1(package_version: String) -> MIRTargetMachine Never! {
     machine := jet_target_machine_bare_metal("board.sensor_v1", "thumbv7em-none-eabihf", package_version)
     machine.memory = [MIRMemoryRegion]{
         jet_target_memory_region_new("flash", 0, MIRByteSize{bytes: 4194304}, .Flash, .Rx),
@@ -1292,7 +1292,7 @@ pub fn jet_target_machine_board_sensor_v1(package_version: String) -> MIRTargetM
     machine
 }
 // Rust TargetMachine::board_virt_aarch64 (TargetMachine.rs:1930-2000).
-pub fn jet_target_machine_board_virt_aarch64(package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_board_virt_aarch64(package_version: String) -> MIRTargetMachine Never! {
     machine := jet_target_machine_with_startup_facts(jet_target_machine_bare_metal("board.virt_aarch64", "aarch64-unknown-none", package_version), "_start", "vectors", MIRProviderABI{calling_convention: "AArch64", version: "1"}, ".vectors")
     machine.memory = [MIRMemoryRegion]{
         jet_target_memory_region_new("flash", 0x40000000, MIRByteSize{bytes: 1048576}, .Flash, .Rx),
@@ -1320,7 +1320,7 @@ pub fn jet_target_machine_board_virt_aarch64(package_version: String) -> MIRTarg
     machine
 }
 // Rust TargetMachine::wasm_no_os (TargetMachine.rs:2083-2115).
-pub fn jet_target_machine_wasm_no_os(package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_wasm_no_os(package_version: String) -> MIRTargetMachine Never! {
     machine := jet_target_machine_bare_metal("wasm.no-os", "wasm32-unknown-unknown", package_version)
     machine.memory = [MIRMemoryRegion]{
         jet_target_memory_region_new("flash", 0, MIRByteSize{bytes: 16777216}, .Flash, .Rx),

@@ -46,7 +46,7 @@ struct LIRValue {
 // as Add/Sub/Mul but use unsigned range tests in Overflows.
 // Float Add/Sub/Mul/Div are IEEE double arithmetic, or single precision on
 // Float32 operands; Xor acts on their bits.
-pub enum LIRBinaryOp { Add Sub Mul Div Rem And Or Xor Shl Shr UAdd USub UMul UDiv URem UShr }
+enum LIRBinaryOp { Add Sub Mul Div Rem And Or Xor Shl Shr UAdd USub UMul UDiv URem UShr }
 
 // Lt/Le/Gt/Ge are signed integer or ordered IEEE comparisons (NaN is false
 // except Ne). ULt/ULe/UGt/UGe compare unsigned integers only.
@@ -62,11 +62,11 @@ enum LIRCallee {
 
 LIR_ASM_INPUTS :: prep { [Int]{7, 6, 2, 1, 8, 9, 10} }
 
-pub fn lir_asm_register(reg: Int) -> Bool Never! {
+fn lir_asm_register(reg: Int) -> Bool Never! {
     reg == 0 || reg == 1 || reg == 2 || reg == 6 || reg == 7 || (reg >= 8 && reg <= 11)
 }
 
-pub enum LIRInst {
+enum LIRInst {
     Const(dst: LIRValueID, value: Int)
     Binary(dst: LIRValueID, op: LIRBinaryOp, left: LIRValueID, right: LIRValueID)
     Compare(dst: LIRValueID, condition: LIRCondition, left: LIRValueID, right: LIRValueID)
@@ -191,11 +191,11 @@ fn lir_layout_float() -> LIRLayout Never! {
 
 // An IEEE single (F32): its 32 bits, zero-extended in a word wherever it is
 // held, loaded or stored as 4 bytes.
-pub fn lir_layout_float32() -> LIRLayout Never! {
+fn lir_layout_float32() -> LIRLayout Never! {
     LIRLayout{size: 4, align: 4, class: LIRABIClass.Float}
 }
 
-pub fn lir_inst_def(inst: LIRInst) -> LIRValueID? {
+fn lir_inst_def(inst: LIRInst) -> LIRValueID? {
     if inst == {
         .Const(dst, _) -> Val(dst)
         .Binary(dst, _, _, _) -> Val(dst)

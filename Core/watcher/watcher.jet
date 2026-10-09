@@ -13,19 +13,19 @@ use core as core
 use core.files as files
 
 
-pub fn files(path: String) -[FS]> WatchHandle IOError! {
+fn files(path: String) -[FS]> WatchHandle IOError! {
     core.watcher.__files(path)
 }
 
-pub fn process_pid(pid: Int) -> WatchHandle Never! {
+fn process_pid(pid: Int) -> WatchHandle Never! {
     core.watcher.__process_pid(pid)
 }
 
-pub fn port(host: String, port: Int) -[Net]> WatchHandle Never! {
+fn port(host: String, port: Int) -[Net]> WatchHandle Never! {
     core.watcher.__port(host, port)
 }
 
-pub fn set() -> WatchSet Never! { core.watcher.__set() }
+fn set() -> WatchSet Never! { core.watcher.__set() }
 
 
 fn add(set: WatchSet, handle: WatchHandle) -[IO]> WatchSet Never! {
@@ -90,7 +90,7 @@ enum WatchEventKind {
 
 // WatchEvent.kind has always exposed WatchKind in checked programs. The
 // independently exported WatchEventKind above remains a distinct public enum.
-pub enum WatchKind {
+enum WatchKind {
     Created
     Modified
     Removed
@@ -118,20 +118,20 @@ impl WatchKind.Equatable {
     fn equal(self, other: WatchKind) -> Bool Never! { watch_kind_tag(self) == watch_kind_tag(other) }
 }
 
-pub struct WatchEvent {
-    pub domain: WatchDomain
-    pub kind: WatchKind
-    pub path: String
-    pub detail: String
-    pub pid: Int
-    pub port: Int
+struct WatchEvent {
+    domain: WatchDomain
+    kind: WatchKind
+    path: String
+    detail: String
+    pid: Int
+    port: Int
 }
 
 impl WatchEvent {
-    pub fn __show(self) -> String Never! {
+    fn __show(self) -> String Never! {
         "WatchEvent {{ domain: {watch_domain_name(self.domain)}, kind: {watch_kind_name(self.kind)}, path: {self.path}, detail: {self.detail} }}"
     }
-    pub fn __debug(self) -> String Never! {
+    fn __debug(self) -> String Never! {
         "WatchEvent {{ domain: {watch_domain_name(self.domain)}, kind: {watch_kind_name(self.kind)}, path: {self.path:Debug}, detail: {self.detail:Debug}, pid: {self.pid}, port: {self.port} }}"
     }
 }
@@ -169,7 +169,7 @@ impl WatchEvent.Equatable {
     assert(if old == { .Ready -> true; else -> false })
 }
 
-pub fn recursive(path: String) -[FS]> WatchHandle IOError! {
+fn recursive(path: String) -[FS]> WatchHandle IOError! {
     // The host file watcher already snapshots directories recursively.
     files(path)
 }

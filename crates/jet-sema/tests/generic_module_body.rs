@@ -191,7 +191,7 @@ fn core_source_mixed_operator_displaces_seed_but_duplicate_source_impl_still_fai
 fn imported_core_primitive_left_operator_uses_source_result() {
     let (_, diagnostics) = check_modules(&[
         ("<corelib>/Core/math/math.jet",
-         "pub struct Vec3 { x: Float }\nimpl Float.Div(Vec3) { fn div(self, rhs: Vec3) -> Int Never! { 17 } }\n",
+         "struct Vec3 { x: Float }\nimpl Float.Div(Vec3) { fn div(self, rhs: Vec3) -> Int Never! { 17 } }\n",
          &[]),
         ("pkg-a/src/main.jet",
          "use core.math.[Vec3]\nfn answer(left: Float, right: Vec3) -> Int Never! { left / right }\nfn dot(left: Float, right: Vec3) -> Int Never! { left.div(right) }\nfn run() {}\n",
@@ -205,7 +205,7 @@ fn imported_core_primitive_left_operator_uses_source_result() {
 fn core_rng_private_method_resolves_inside_own_impl() {
     let (_, diagnostics) = check_modules(&[
         ("<corelib>/Core/math/random.jet",
-         "pub struct RNG { state: Int }\nimpl RNG { fn float_open(self) -> Float Never! { 0.5 } pub fn sample(self) -> Float Never! { self.float_open() } }\n",
+         "struct RNG { state: Int }\nimpl RNG { fn float_open(self) -> Float Never! { 0.5 } fn sample(self) -> Float Never! { self.float_open() } }\n",
          &[]),
         ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
     ]);
@@ -229,10 +229,10 @@ fn io_operation_annotations_are_core_only() {
 fn opaque_core_impl_methods_displace_only_their_builtin_names() {
     let (_, diagnostics) = check_modules(&[
         ("<corelib>/Core/tasks/tasks.jet",
-         "impl Condition { pub fn notify_one(self) Never! {} pub fn notify_all(self) Never! {} }\nfn own(condition: Condition) Never! { condition.notify_one() }\n",
+         "impl Condition { fn notify_one(self) Never! {} fn notify_all(self) Never! {} }\nfn own(condition: Condition) Never! { condition.notify_one() }\n",
          &[]),
         ("<corelib>/Core/rt/rt.jet",
-         "impl RealtimeStream { pub fn is_cancelled(self) -> Bool Never! { true } }\n",
+         "impl RealtimeStream { fn is_cancelled(self) -> Bool Never! { true } }\n",
          &[]),
         ("pkg-a/src/main.jet",
          "use core.tasks as tasks\nuse core.rt as rt\nfn notify(condition: Condition) Never! { condition.notify_all() }\nfn observe(stream: RealtimeStream) -> Bool Never! { stream.is_cancelled() }\nfn other(text: String) -> Int Never! { text.len() }\nfn run() {}\n",
@@ -245,7 +245,7 @@ fn opaque_core_impl_methods_displace_only_their_builtin_names() {
 fn source_only_core_qualified_calls_resolve_inside_and_across_core_modules() {
     let (_, diagnostics) = check_modules(&[
         ("<corelib>/Core/sys/sys.jet",
-         "pub fn usize_max() -> U64 Never! { U64{255} }\nfn own() -> U64 Never! { core.sys.usize_max() }\n",
+         "fn usize_max() -> U64 Never! { U64{255} }\nfn own() -> U64 Never! { core.sys.usize_max() }\n",
          &[]),
         ("<corelib>/Core/tui/tui.jet",
          "fn foreign() -> U64 Never! { core.sys.usize_max() }\n",

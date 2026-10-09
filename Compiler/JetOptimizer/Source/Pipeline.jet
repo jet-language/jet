@@ -128,7 +128,7 @@ fn mir_optimizer_succeeded(report: MIROptimizationReport) -> MIROptimizationResu
 // entry check (Rust MIROptimization `validate_after`). The per-function
 // passes run in waves on up to `threads` compiler threads (mir_pass_wave);
 // the result is the same for every thread count.
-pub fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: CompilerThreads, journal: &CanonicalPassJournal) -> MIROptimizationResult {
+fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: CompilerThreads, journal: &CanonicalPassJournal) -> MIROptimizationResult {
     report := mir_optimizer_empty_report()
     pipeline_before :: mir_pass_journal_before(program, journal, "mir.optimize-pipeline")
     validation := mir_pass_check(program, .LegalityVerification, full_verification)
@@ -277,10 +277,10 @@ fn mir_pass_step_completes(step: Int) -> MIROptimizationPassID? Never! {
 // `cleanup` says the previous fixed-reduction normalization rewrote some
 // function, which a wave starting at step 7 or 8 acts on.
 struct MIRPassWaveInputs {
-    pub prelude_calls: [MIRPreludeCall]
-    pub purity: [U64:Bool]
-    pub cleanup: Bool
-    pub mark: Bool
+    prelude_calls: [MIRPreludeCall]
+    purity: [U64:Bool]
+    cleanup: Bool
+    mark: Bool
 }
 
 // What a wave's steps did, summed over functions. `first_bounds`,
@@ -427,8 +427,8 @@ fn mir_pass_wave(program: &MIRProgram, first: Int, last: Int, inputs: MIRPassWav
 // than one, the first function of each consecutive part (`bounds[p]`, with
 // `bounds[workers]` the function count). Parts are weighed by instructions.
 struct MIRPassWavePlan {
-    pub workers: Int
-    pub bounds: [Int]
+    workers: Int
+    bounds: [Int]
 }
 
 fn mir_pass_wave_plan(program: MIRProgram, threads: CompilerThreads) -> MIRPassWavePlan {
@@ -575,9 +575,9 @@ fn mir_pass_lint_slots(slots: [Shared<MIRPassWaveSlot>], from: Int, shared_index
 
 // The read-only rows every part of a legality wave checks against.
 struct MIRPassLegalityInputs {
-    pub tables: MIRPassLegalityTables
-    pub identities: [MIROptimizationError?]
-    pub pass: MIROptimizationPassID
+    tables: MIRPassLegalityTables
+    identities: [MIROptimizationError?]
+    pass: MIROptimizationPassID
 }
 
 // mir_pass_validate_program on up to `threads` threads. The schema check,
@@ -635,7 +635,7 @@ fn mir_pass_lint_error(pass: MIROptimizationPassID, failure: MIRLintError) -> MI
 // one failure per function in program order. The driver traps them all before
 // a single rerun, so reruns grow with the failing checks, not the failing
 // functions. An error naming no function is returned alone.
-pub fn mir_optimizer_function_failures(program: MIRProgram, error: MIROptimizationError) -> [MIROptimizationError] {
+fn mir_optimizer_function_failures(program: MIRProgram, error: MIROptimizationError) -> [MIROptimizationError] {
     pass :: error.pass
     lint :: error.kind == .Lint
     reported :: error.function ?? return [MIROptimizationError]{error}
@@ -698,9 +698,9 @@ fn mir_pass_step_completes(step: Int) -> MIROptimizationPassID? Never! {
 // small). `cleanup` says the previous fixed-reduction normalization rewrote
 // some function, which a wave starting at step 7 or 8 acts on.
 struct MIRPassWaveInputs {
-    pub prelude_calls: [MIRPreludeCall]
-    pub purity: [U64:Bool]
-    pub cleanup: Bool
+    prelude_calls: [MIRPreludeCall]
+    purity: [U64:Bool]
+    cleanup: Bool
 }
 
 // What a wave's steps did, summed over functions. `first_bounds`,
@@ -861,8 +861,8 @@ fn mir_pass_wave(program: &MIRProgram, first: Int, last: Int, inputs: MIRPassWav
 
 // One thread's functions after its steps, with what the steps did.
 struct MIRPassWavePart {
-    pub functions: [MIRFunction]
-    pub counts: MIRPassWaveCounts
+    functions: [MIRFunction]
+    counts: MIRPassWaveCounts
 }
 
 // One thread: its functions, held last-first, stepped and returned

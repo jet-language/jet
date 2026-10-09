@@ -1,6 +1,6 @@
 use core.text.parse as text_parse
 
-pub enum Step {
+enum Step {
     Identity
     Field(String)
     Each
@@ -81,7 +81,7 @@ fn apply_step(values: [Dyn], step: Step) -> [Dyn] {
     return output
 }
 
-pub fn run(data: Dyn, query: String) -> [Dyn]? {
+fn run(data: Dyn, query: String) -> [Dyn]? {
     steps :: parse(query) ?? return None
     values := [Dyn]{data}
     loop step in steps -> values = apply_step(values, step)

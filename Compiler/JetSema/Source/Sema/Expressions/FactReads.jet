@@ -228,7 +228,7 @@ fn sema_enum_unit_payload(display_type_name: String, variant: String, span: Span
 // D-FACT-ENUM-TIR: `EXACTNESS.kind == .Approximate` tests a compiler fact enum
 // against one binding-free variant. Codegen folds the test once the subject's
 // prepared value is known (Rust `fold_typed_fact_enum_pattern`).
-pub fn sema_fact_enum_pattern(subject_ty: Type, variant: String, slots: [PatSlot], leading_dot: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaPatternValidation? {
+fn sema_fact_enum_pattern(subject_ty: Type, variant: String, slots: [PatSlot], leading_dot: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaPatternValidation? {
     variants :: sema_fact_enum_menu(subject_ty, environment, program) ?? return None
     shape :: TPatternShape.Variant{variant: variant, bindings: [TPatternBinding]{}, leading_dot: leading_dot, span: span}
     complete := true
@@ -257,7 +257,7 @@ pub fn sema_fact_enum_pattern(subject_ty: Type, variant: String, slots: [PatSlot
 
 // A payload-free variant of a compiler fact enum (`.Approximate` where an
 // `ExactnessKind` is expected, or `ExactnessKind.Approximate`).
-pub fn sema_fact_enum_literal(enum_name: String, variant: String, args: [EnumLitArg], span: Span, variant_span: Span?, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
+fn sema_fact_enum_literal(enum_name: String, variant: String, args: [EnumLitArg], span: Span, variant_span: Span?, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
     ty :: Type.Named{name: enum_name}
     variants :: sema_fact_enum_menu(ty, environment, program) ?? return sema_fact_read_unhandled()
     compiler_enum :: sema_fact_enum_variants(enum_name) == None
@@ -704,7 +704,7 @@ fn sema_fact_build_setting_undeclared(key: String, span: Span) -> Diagnostic {
 // typed snapshot value (Rust `fold_fact_read`, which reads build paths before
 // the compile-time-only gate). The Jet loader declares no manifest settings
 // yet, so every `$build.settings.*` read is undeclared.
-pub fn sema_fact_build_read(base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
+fn sema_fact_build_read(base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
     if !sema_fact_build_rooted(base) -> return sema_fact_read_unhandled()
     path :: sema_fact_path_text(base, member) ?? return sema_fact_read_unhandled()
     if sema_fact_build_setting_key(path) == .Val(key) {
@@ -719,7 +719,7 @@ pub fn sema_fact_build_read(base: Expr, member: String, span: Span, expected: Ty
 
 // A prepared value as a checked expression: scalars keep their literal forms,
 // records and lists stay one compile-time literal.
-pub fn sema_fact_prepared_expr(value: TComptimeValue, ty: Type, span: Span, environment: SemaScopeEnvironment) -> TExpr? {
+fn sema_fact_prepared_expr(value: TComptimeValue, ty: Type, span: Span, environment: SemaScopeEnvironment) -> TExpr? {
     if value == .Int(number) {
         width := TIntegerWidth?{None}
         if sema_expr_numeric_base(ty) == .IntN(signed, bits) -> width = Val(TIntegerWidth{signed: signed, bits: bits})
@@ -948,7 +948,7 @@ fn sema_fact_read_no_value(member: String, span: Span, diagnostics: &[Diagnostic
 
 // Resolve `base.$member`. `handled: false` leaves an unregistered `$` member
 // (or a nominal fact the subject cannot answer) to the ordinary field path.
-pub fn sema_fact_read_check(base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
+fn sema_fact_read_check(base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
     read :: sema_fact_read_kind(member) ?? return sema_fact_read_unhandled()
     if scopes.comptime_execution_depth == 0 {
         fix :: if sema_fact_path_text(base, member) == .Val(path) -> "Write `FACT :: prep {{ {path} }}`, then use `FACT` in this expression" else -> "Move the read into a prepared value `NAME :: prep {{ … }}` or a `prep {{ … }}` block"

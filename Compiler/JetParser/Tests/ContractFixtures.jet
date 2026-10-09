@@ -89,9 +89,23 @@ fn pc_trait_effect_slots() {
 }
 
 fn pc_enum_methods() {
-    parsed :: parse_source("enum Choice {{\n First\n Second\n fn private_name(self) -> String {{ \"private\" }}\n pub fn label(self) -> String {{ \"public\" }}\n pub prep fn from_int(value: Int) -> Choice {{ Choice.First }}\n}}\n".bytes())
-    pc_require(parsed.diagnostics.len() == 0, "enum methods accept private, public, and public prep heads")
-    pc_require(if parsed.program.items[0] == .Enum(value) -> value.variants.len() == 2 && value.methods.len() == 3 && !value.methods[0].is_pub && value.methods[1].is_pub && value.methods[2].is_pub && value.methods[2].is_comptime else -> false, "enum method heads preserve visibility and prep facts instead of becoming variants")
+    parsed :: parse_source("enum Choice {{\n First\n Second\n fn name(self) -> String {{ \"first\" }}\n fn label(self) -> String {{ \"public\" }}\n prep fn from_int(value: Int) -> Choice {{ Choice.First }}\n}}\n".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "enum methods accept public-default and prep heads")
+    pc_require(if parsed.program.items[0] == .Enum(value) -> value.variants.len() == 2 && value.methods.len() == 3 && value.methods[0].is_pub && value.methods[1].is_pub && value.methods[2].is_pub && value.methods[2].is_comptime else -> false, "enum method heads preserve public-default visibility and prep facts")
+}
+
+fn pc_explicit_privacy() {
+    parsed :: parse_source("module visible {{\n fn value() -> Int {{ 1 }}\n}}\npriv module hidden {{\n fn value() -> Int {{ 2 }}\n}}\nstruct Gate {{\n priv key: Int\n label: Int\n}}\n".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "priv modules and fields parse without foreign-private diagnostics")
+    visible :: if parsed.program.items[0] == .CodeModule(value) -> value else -> panic("public module AST")
+    hidden :: if parsed.program.items[1] == .CodeModule(value) -> value else -> panic("private module AST")
+    pc_require(visible.is_pub && !visible.is_package_pub, "an unmarked module is public")
+    pc_require(!hidden.is_pub && !hidden.is_package_pub, "priv narrows a module")
+    public_body :: visible.body ?? panic("public module body")
+    private_body :: hidden.body ?? panic("private module body")
+    pc_require(if public_body[0] == .Func(value) -> value.is_pub else -> false, "public module members remain accessible")
+    pc_require(if private_body[0] == .Func(value) -> !value.is_pub && !value.is_package_pub else -> false, "private module members inherit explicit privacy")
+    pc_require(if parsed.program.items[2] == .Struct(value) -> value.fields.len() == 2 && !value.fields[0].is_pub && value.fields[1].is_pub else -> false, "priv fields stay private while unmarked fields are public")
 }
 
 fn pc_marker_metadata() {
@@ -474,6 +488,7 @@ fn run() {
     pc_qualified_generic_literal()
     pc_trait_effect_slots()
     pc_enum_methods()
+    pc_explicit_privacy()
     pc_qualified_generic_literal()
     print("V48 semicolon edits/recovery: passed")
     print("marker registry/parser status: passed")

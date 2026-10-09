@@ -99,7 +99,7 @@ fn sema_expression_layout_binary_axis_diagnostic(left: Type, right: Type, span: 
     ))
 }
 
-pub fn sema_expr_check_layout_binary(op: BinOp, left: TExpr, right: TExpr, span: Span, line: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaExpressionLayoutBinaryCheck {
+fn sema_expr_check_layout_binary(op: BinOp, left: TExpr, right: TExpr, span: Span, line: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaExpressionLayoutBinaryCheck {
     contract :: sema_expression_layout_binop_result(op, left.ty, right.ty)
     if contract == None -> return SemaExpressionLayoutBinaryCheck{handled: false, value: None}
     result :: contract
@@ -172,7 +172,7 @@ fn sema_expression_layout_method_params(types: [Type]) -> [SemaCallParam] Never!
     params
 }
 
-pub fn sema_call_try_layout_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_layout_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
     owner := if receiver_value.ty == {.Named(name) -> if name == "Layout" || name == "Constraint" -> name else -> "" else -> ""}
     if owner == "" -> return SemaMethodSpecialCheck{handled: false, value: None}
@@ -242,7 +242,7 @@ fn sema_expression_measurement_inner(ty: Type, environment: SemaScopeEnvironment
     None
 }
 
-pub fn sema_expression_measurement_source_call(function: String, values: [TExpr], result_type: Type, span: Span, environment: SemaScopeEnvironment) -> TExpr? {
+fn sema_expression_measurement_source_call(function: String, values: [TExpr], result_type: Type, span: Span, environment: SemaScopeEnvironment) -> TExpr? {
     source_identity :: sema_call_core_module_identity(environment, "core.units") ?? return None
     graph :: environment.registration_graph ?? return None
     source_index :: sema_registration_module_index(graph, source_identity) ?? return None
@@ -251,7 +251,7 @@ pub fn sema_expression_measurement_source_call(function: String, values: [TExpr]
     Val(sema_tir_expr(result_type, TExprKind.Call{callee: callee.symbol.id, type_args: [Type]{}, args: arguments}, span))
 }
 
-pub fn sema_call_try_measurement_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_measurement_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "value" && method != "uncertainty" -> return SemaMethodSpecialCheck{handled: false, value: None}
     _ := sema_expression_measurement_inner(receiver_value.ty, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != 0 {

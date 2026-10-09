@@ -4,7 +4,7 @@
 CLI_SCHEMA_ELF_CLASS_1 :: U8{1}
 CLI_SCHEMA_ELF_CLASS_2 :: U8{2}
 
-pub fn read_executable(bytes: View<U8>, usize_max: U64) -> CLICommandSchema MetadataError! {
+fn read_executable(bytes: View<U8>, usize_max: U64) -> CLICommandSchema MetadataError! {
     sections :: if {
         cli_schema_bytes_start(bytes, [U8]{127, 69, 76, 70}) -> cli_schema_elf_sections(bytes, usize_max)
         cli_schema_bytes_start(bytes, [U8]{77, 90}) -> cli_schema_pe_sections(bytes, usize_max)

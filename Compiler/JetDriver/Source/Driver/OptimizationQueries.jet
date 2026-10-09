@@ -5,28 +5,28 @@ use jet_foundation.[CanonicalPassRecord, MIRFunctionID, MIRSourceFileID, MIRLoop
 use jet_optimizer.[MIRDecisionLedger, mir_decision_ledger]
 use jet_foundation.[CanonicalPassOptions, CanonicalPassBoundaryGap, canonical_pass_boundary_gaps]
 
-pub struct JetDriverAccelerationFunction {
-    pub function: MIRFunctionID
-    pub key: String
-    pub name: String
-    pub source_file: MIRSourceFileID
-    pub source_path: String
-    pub loops: [MIRLoopFact]
-    pub vectors: [MIRVectorFact]
-    pub accelerations: [MIRAccelerationFact]
+struct JetDriverAccelerationFunction {
+    function: MIRFunctionID
+    key: String
+    name: String
+    source_file: MIRSourceFileID
+    source_path: String
+    loops: [MIRLoopFact]
+    vectors: [MIRVectorFact]
+    accelerations: [MIRAccelerationFact]
 }
-pub struct JetDriverOptimizationQueryResult {
-    pub compile: JetDriverCompileResult
-    pub profile: String
-    pub release_build: Bool
-    pub target_triple: String
-    pub target_layout: JetTargetLayout?
-    pub functions: [JetDriverAccelerationFunction]
-    pub decisions: MIRDecisionLedger?
-    pub canonical_routes: [CanonicalPassRecord]
-    pub canonical_route_gaps: [CanonicalPassBoundaryGap]
+struct JetDriverOptimizationQueryResult {
+    compile: JetDriverCompileResult
+    profile: String
+    release_build: Bool
+    target_triple: String
+    target_layout: JetTargetLayout?
+    functions: [JetDriverAccelerationFunction]
+    decisions: MIRDecisionLedger?
+    canonical_routes: [CanonicalPassRecord]
+    canonical_route_gaps: [CanonicalPassBoundaryGap]
 }
-pub fn jet_driver_optimization_query(request: JetDriverCompileRequest) -> JetDriverOptimizationQueryResult {
+fn jet_driver_optimization_query(request: JetDriverCompileRequest) -> JetDriverOptimizationQueryResult {
     selected := request
     selected.mode = JetDriverCompileMode.Doc
     compile :: jet_driver_compile_mir(^selected)

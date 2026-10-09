@@ -51,7 +51,7 @@ struct GlyphRun {
     approximate: Bool
 }
 
-pub fn system(style: FontStyle) -> FontFace Never! {
+fn system(style: FontStyle) -> FontFace Never! {
     if style == FontStyle.Monospace -> return FontFace{family: "monospace", size: 14.0, style: style}
     if style == FontStyle.Title -> return FontFace{family: "system-ui", size: 24.0, style: style}
     FontFace{family: "system-ui", size: 14.0, style: style}
@@ -63,7 +63,7 @@ fn shape_with(face: FontFace, text: String) -> GlyphRun Never! {
     shape_fallback(face, text)
 }
 
-pub fn shape(text: String, face: FontFace) -> GlyphRun Never! {
+fn shape(text: String, face: FontFace) -> GlyphRun Never! {
     if core.font.__shape_text(text, face) == {
         .Ok(run) -> run
         .Err(cause) -> panic("font shaping host contract failure: {cause}")

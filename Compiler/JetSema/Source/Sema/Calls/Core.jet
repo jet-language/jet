@@ -112,7 +112,7 @@ fn sema_call_source_import_target(environment: SemaScopeEnvironment, program: Se
 }
 
 // Resolve through Registration identity, not source spelling alone.
-pub fn sema_call_core_import_module(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String) -> String? {
+fn sema_call_core_import_module(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String) -> String? {
     target :: sema_call_core_import_target(environment, program, alias) ?? return None
     Val(target.module_name)
 }
@@ -128,7 +128,7 @@ fn sema_call_core_import_member(target: SemaCallImportTarget, requested_member: 
 
 // An import is usable only while its exact registered binding remains the
 // visible lexical binding for the local alias.
-pub fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, target: SemaCallImportTarget) -> Bool Never! {
+fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, target: SemaCallImportTarget) -> Bool Never! {
     graph_option :: program.registration_graph
     graph :: graph_option ?? return false
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
@@ -151,14 +151,14 @@ pub fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, pr
     false
 }
 
-pub fn sema_call_core_record_import_reference(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, target: SemaCallImportTarget, span: Span, context: &SemaCheckContext) -> Bool Never! {
+fn sema_call_core_record_import_reference(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, target: SemaCallImportTarget, span: Span, context: &SemaCheckContext) -> Bool Never! {
     if !sema_call_core_import_is_unshadowed(environment, program, scopes, target) -> return false
     index :: sema_scope_resolve_index(scopes, target.alias) ?? return false
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: scopes.bindings[index].symbol, kind: "import_alias"})
     true
 }
 
-pub fn sema_call_core_require_imported_unsafe(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, alias: String, required_module: String, operation: String, span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_call_core_require_imported_unsafe(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, alias: String, required_module: String, operation: String, span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     target :: sema_call_core_import_target(environment, program, alias)
     if target == {
         .Val(imported) -> {
@@ -233,7 +233,7 @@ fn sema_call_export_function_target(environment: SemaScopeEnvironment, program: 
 // source module calls the function that module (or, D-MOD-CYCLE1=A, its
 // package) exports, checked like a direct call. A private function is E0605
 // and any other name E0102. Core aliases keep their own route.
-pub fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     unhandled :: SemaMethodSpecialCheck{handled: false, value: None}
     imported :: sema_call_source_import_target(environment, program, alias) ?? return unhandled
     if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return unhandled
@@ -338,7 +338,7 @@ fn sema_call_core_receiver_record(receiver_type: Type, member: String, actual_ar
     Val(record)
 }
 
-pub fn sema_call_core_first_is_move(args: [CallArg]) -> Bool Never! {
+fn sema_call_core_first_is_move(args: [CallArg]) -> Bool Never! {
     args.len() > 0 && args[0].convention == AccessConvention.Move
 }
 
@@ -359,7 +359,7 @@ fn sema_call_core_has_explicit_source_target(module_name: String, member: String
 
 // Compiler-owned query contracts resolve before source facades. Other source
 // exports remain ordinary functions ahead of static Core records.
-pub fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     diagnostic_count := diagnostics.len()
     source_identity :: if sema_compiler_services_is_compiler_query(module_name, member) || sema_call_core_has_explicit_source_target(module_name, member) || sema_call_core_native_resource_consumer(module_name, member, first_is_move) -> None else -> sema_call_core_module_identity(environment, module_name)
     source :: if source_identity == {
@@ -376,7 +376,7 @@ pub fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_na
     Val(SemaCoreCallRoute.Core{record: record})
 }
 
-pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, requested_member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, requested_member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     imported :: sema_call_core_import_target(environment, alias) ?? return None
     if !sema_call_core_import_is_unshadowed(environment, scopes, imported) -> return None
     member :: sema_call_core_import_member(imported, requested_member) ?? return None
@@ -403,7 +403,7 @@ pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, sc
 // module alias's known Core submodule (`core.math.fabs(n)` under `use core as
 // core`) routes against that submodule by name, exactly as an alias of the
 // submodule itself would.
-pub fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     imported :: sema_call_core_import_target(environment, alias) ?? return None
     if imported.item != None -> return None
     if !sema_call_core_record_import_reference(environment, scopes, imported, alias_span, &context) -> return None
@@ -415,7 +415,7 @@ pub fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironmen
 // ambient variadic `print`, checked and lowered exactly like it (Rust
 // `print_values`). True when this alias call is that print; the alias
 // reference is then recorded.
-pub fn sema_call_core_variadic_print(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, alias: String, requested_member: String, actual_arity: Int, alias_span: Span, context: &SemaCheckContext) -> Bool Never! {
+fn sema_call_core_variadic_print(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, alias: String, requested_member: String, actual_arity: Int, alias_span: Span, context: &SemaCheckContext) -> Bool Never! {
     if actual_arity == 1 -> return false
     imported :: sema_call_core_import_target(environment, program, alias) ?? return false
     if imported.module_name != "core.term" -> return false
@@ -459,7 +459,7 @@ fn sema_call_core_bind_arguments(record: CoreCallRecord, signature: Type, args: 
     sema_call_bind_direct("{record.module_name}.{record.member}", signature, &local_args, span, &diagnostics)
 }
 
-pub fn sema_call_core_check_typed_argument(value: TExpr, expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_core_check_typed_argument(value: TExpr, expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: &[Diagnostic]) -> TExpr? {
     typed := value
     typed.span = span
     sema_expr_expected(typed, Val(expected), environment, program, &diagnostics)
@@ -568,7 +568,7 @@ fn sema_call_core_effect_name(effect_kind: Effect) -> String Never! {
 
 // Record known root/leaf effects (including known purity) and enforce authored
 // transaction walls before the CoreCall reaches effect-graph collection.
-pub fn sema_call_core_record_effects(record: CoreCallRecord, span: Span, type_args: [Type], result_type: Type, fallibility: TFailureCarrier, default_refs: [FunctionDefaultRef], scopes: &SemaScopeTable, context: &SemaCheckContext, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
+fn sema_call_core_record_effects(record: CoreCallRecord, span: Span, type_args: [Type], result_type: Type, fallibility: TFailureCarrier, default_refs: [FunctionDefaultRef], scopes: &SemaScopeTable, context: &SemaCheckContext, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
     effect_bound := [EffectRowEntry]{}
     leaf_name :: record.effect_leaf ?? ""
     if record.effect_kind == {
@@ -891,7 +891,7 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
 
 // Resolve source exports before building a fixed Core call. The callee's
 // canonical typed contract is discovered here; callers never supply its Type.
-pub fn sema_call_core_check_fixed(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_core_check_fixed(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     expected_type_arg_count := 0
     if core_call_typed_signature(module_name, member, args.len()) == {
         .Val(signature) -> expected_type_arg_count = signature.type_parameters.len()
@@ -905,7 +905,7 @@ pub fn sema_call_core_check_fixed(environment: SemaScopeEnvironment, program: Se
     }
 }
 
-pub fn sema_call_core_shared_diagnostic(member: String, span: Span) -> Diagnostic Never! {
+fn sema_call_core_shared_diagnostic(member: String, span: Span) -> Diagnostic Never! {
     sema_error("E0109", span, "`core.mem.{member}` needs a direct Core initializer", "a publication site requires a non-generic, zero-argument, infallible module function declared in the same Core module, returning Shared<T>; its inferred effects may contain only Mem and its publication lifetime must be consistent", "pass the name of a same-module Shared initializer with no effects except allocation")
 }
 
@@ -917,7 +917,7 @@ fn sema_call_core_shared_reject(member: String, span: Span, diagnostics: &[Diagn
 // The trusted Core body supplies a side-effect-free constructor. Ordinary
 // zero-argument call checking owns its failure/effect facts; this node only
 // changes the storage lifetime and preserves its declared Shared payload type.
-pub fn sema_call_core_global_shared(lifetime: MIRSharedLifetime, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_core_global_shared(lifetime: MIRSharedLifetime, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !environment.module_identity.starts_with("<corelib>/") {
         &diagnostics.push(sema_error("E0067", span, "`{member}` is reserved for Jet", "Double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools", "Rename it without the second leading underscore"))
         return None
@@ -958,7 +958,7 @@ pub fn sema_call_core_global_shared(lifetime: MIRSharedLifetime, member: String,
     sema_expr_expected(value, expected, environment, &diagnostics)
 }
 
-pub fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if target.symbol.name == "graph" && sema_call_core_module_identity(environment, "core.build") == (Val(target.symbol.module_name)) {
         if !sema_call_core_check_type_args("core.build", "graph", 0, false, type_args, span, &diagnostics) -> return None
         check :: sema_compiler_services_check_call("core.build", "graph", args, span, environment.function_name == "build", environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -972,7 +972,7 @@ pub fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified
 
 // `core.prelude.keep` is an erased identity: its checked argument is the call
 // result, with an optional explicit type argument constraining that value.
-pub fn sema_call_core_identity_value(value: TExpr, type_args: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_core_identity_value(value: TExpr, type_args: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     if !sema_call_core_check_type_args("core.prelude", "keep", 1, true, type_args, value.span, &diagnostics) -> return None
     result := value
     if type_args.len() == 1 {

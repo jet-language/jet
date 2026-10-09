@@ -2,7 +2,7 @@
 // iterated dominance frontier is pruned by field liveness; dead joins must not
 // require an initial value. Each slot is transactional: an undefined load on
 // any path refuses all fields, never just the offending field.
-struct OptScalarField { pub offset: Int, pub sample: LIRValue }
+struct OptScalarField { offset: Int, sample: LIRValue }
 
 fn opt_scalar_field(fields: [OptScalarField], offset: Int) -> Int Never! {
     loop (index, field) in fields { if field.offset == offset -> return index }
@@ -246,7 +246,7 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
     Val(function)
 }
 
-pub fn lir_scalar_replace_function(original: LIRFunction) -> LIRFunction Never! {
+fn lir_scalar_replace_function(original: LIRFunction) -> LIRFunction Never! {
     slots := [LIRInst]{}
     loop block in original.blocks { loop inst in block.insts { if inst == .StackSlot(_, _, _) -> &slots.push(inst) } }
     if slots.len() == 0 -> return ~original

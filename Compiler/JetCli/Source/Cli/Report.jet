@@ -37,7 +37,7 @@ fn jet_cli_report_cwd() -[FS, Env]> String? Never! {
 // stays as written; a disk path becomes absolute against `cwd` and lexically
 // normalized (`.` dropped, `..` pops a component, never above the root). No
 // filesystem lookup is involved, so the path need not exist.
-pub fn jet_cli_report_path(cwd: String?, value: String) -> String Never! {
+fn jet_cli_report_path(cwd: String?, value: String) -> String Never! {
     if value.len() == 0 || value.starts_with("<") -> return value.copy()
     absolute := value.copy()
     if !value.starts_with("/") {
@@ -266,7 +266,7 @@ fn jet_cli_report_clear_counts(diagnostics: [Diagnostic]) -> [Int] Never! {
 // one report object. `file` is the batch's report path (`jet_cli_report_path`)
 // and `source` its bytes; a diagnostic's own origin replaces both. `cwd`
 // makes origin paths absolute the way `ReportPath::from_process` does.
-pub fn jet_cli_report_json(diagnostic: Diagnostic, cwd: String?, file: String, source: String, clears: Int) -> String Never! {
+fn jet_cli_report_json(diagnostic: Diagnostic, cwd: String?, file: String, source: String, clears: Int) -> String Never! {
     report_file := file.copy()
     text := source.copy()
     if diagnostic.origin == .Val(origin) {

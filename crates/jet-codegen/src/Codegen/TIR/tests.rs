@@ -3570,7 +3570,7 @@ fn mir_lowers_user_struct_and_instance_method() {
     // the TIR local `self`. Binding it as MIR parameter 0 is what lets a
     // user struct construct, print a field, and call an instance method.
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let src = "pub struct Gauge {\n n: Int\n}\nfn Gauge.value(self) -> Int { self.n }\nfn run() {\n v :: Gauge{ n: 1 }\n print(\"{v.value()}\")\n}\n";
+        let src = "struct Gauge {\n n: Int\n}\nfn Gauge.value(self) -> Int { self.n }\nfn run() {\n v :: Gauge{ n: 1 }\n print(\"{v.value()}\")\n}\n";
         let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,

@@ -1158,7 +1158,7 @@ fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: String?
 
 // main.rs `missing_bare_entry`: a retired manifest name teaches E1226;
 // otherwise there is no file and no project (E2104).
-pub fn jet_cli_missing_bare_entry(command: String, cwd: String, color: Bool) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_missing_bare_entry(command: String, cwd: String, color: Bool) -[FS, Env]> JetCLIPlan Never! {
     cache := WorkspaceDeclarationCache.new()
     if jet_cli_find_stale_manifest(&cache, cwd) == .Val(report) -> return JetCLIPlan.Refused{report: report, color: color, exit_code: JET_DRIVER_EXIT_USAGE, notice: ""}
     jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)

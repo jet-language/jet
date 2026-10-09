@@ -225,7 +225,7 @@ fn jet_cli_remote_remove(args: [String]) String! -[FS, Env]> {
     if !removed -> return Err("remote builder `{builder}` is not bound")
 }
 
-pub fn jet_cli_remote(args: [String], json: Bool, color: Bool) -[FS, Env, Time]> JetDriverVerbOutput Never! {
+fn jet_cli_remote(args: [String], json: Bool, color: Bool) -[FS, Env, Time]> JetDriverVerbOutput Never! {
     action :: if args.len() > 1 -> args[1] else -> "help"
     if action == "help" -> return JetDriverVerbOutput{stdout: "jet remote — manage host-owned remote builders\n\n  jet remote bind <name> --root <path> --credential-file <path> --trust-domain <name> [--execute] [--cache-read] [--cache-write] [--fallback-local]\n  jet remote list\n  jet remote remove <name>\n", stderr: "", exit_code: 0}
     result :: if action == {

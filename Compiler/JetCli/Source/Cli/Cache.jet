@@ -146,7 +146,7 @@ fn jet_cli_cache_prune(report: ArtifactPruneReport, json: Bool) -> JetDriverVerb
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: 0}
 }
 
-pub fn jet_cli_cache(args: [String], json: Bool) -[FS, Env, Exec, Time, Rand]> JetDriverVerbOutput Never! {
+fn jet_cli_cache(args: [String], json: Bool) -[FS, Env, Exec, Time, Rand]> JetDriverVerbOutput Never! {
     request :: jet_cli_cache_parse(args) ?? return jet_cli_cache_usage_error(err, json)
     store :: ArtifactStore.from_env() ?? return jet_cli_cache_store_error("open the machine-wide store", err, json)
     if request == {

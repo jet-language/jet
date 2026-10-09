@@ -99,10 +99,10 @@ struct SemaCallSiteFact {
     // it projects the callee onto `T Never!` (#3708, D-DISCARD1=A).
     discarded_if_infallible: Bool{false}
     // A resolved Core lifecycle marker, retained with the checked call site.
-    pub lifecycle: CoreMarkerApplication?{None}
-    pub shared_lifetime: MIRSharedLifetime?{None}
-    pub shared_member: String{""}
-    pub shared_source: String{""}
+    lifecycle: CoreMarkerApplication?{None}
+    shared_lifetime: MIRSharedLifetime?{None}
+    shared_member: String{""}
+    shared_source: String{""}
 }
 
 struct SemaCallReturnViewFact {
@@ -249,7 +249,7 @@ fn sema_loop_value_set_collecting_type(context: &SemaCheckContext, ty: Type) Nev
     context.collect_item_types[context.collect_item_types.len() - 1] = Val(ty)
 }
 
-pub fn sema_loop_value_append_collecting_item_type(context: &SemaCheckContext, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_loop_value_append_collecting_item_type(context: &SemaCheckContext, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
     if ty == (Type.Named{name: "Unit"}) {
         &diagnostics.push(sema_error("E0073", span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` omits it", "return a value on this path, or remove `->`"))
         return false
@@ -345,43 +345,43 @@ struct SemaComptimeBodyValue {
 // Published ordered prefixes are immutable. The staging owner may append
 // future rows under its guard; contexts retain only the owner and captured
 // visible length, never a copied table or a rebuilt index.
-pub struct SemaComptimeBodyFacts {
-    pub values: [SemaComptimeBodyValue]
-    pub modules: [String:Int]
-    pub first_rows: [[String:Int]]
-    pub second_rows: [[String:Int]]
-    pub indexed_rows: Int
+struct SemaComptimeBodyFacts {
+    values: [SemaComptimeBodyValue]
+    modules: [String:Int]
+    first_rows: [[String:Int]]
+    second_rows: [[String:Int]]
+    indexed_rows: Int
 }
 
-pub struct SemaComptimeBodyValues {
-    pub facts: Shared<SemaComptimeBodyFacts>?{None}
-    pub length: Int{0}
+struct SemaComptimeBodyValues {
+    facts: Shared<SemaComptimeBodyFacts>?{None}
+    length: Int{0}
     // Only the staging producer advances this authenticated item frontier.
     // Context views retain it as metadata, never use it to publish.
-    pub item_frontier: Int{0}
+    item_frontier: Int{0}
     // Numeric diagnosis is a separate phase-owned slot, never a fact mutation
     // or a retained CompilerTraceSink. None on every ordinary/cold trace path.
-    pub work: Shared<SemaComptimeBodyWork>?{None}
+    work: Shared<SemaComptimeBodyWork>?{None}
 }
 
-pub struct SemaComptimeBodyWork {
-    pub publications: Int{0}
-    pub publication_rows: Int{0}
-    pub index_builds: Int{0}
-    pub indexed_rows: Int{0}
-    pub index_key_utf8_bytes: Int{0}
-    pub functions_started: Int{0}
-    pub check_passes_started: Int{0}
-    pub context_value_carriers_attached: Int{0}
-    pub context_value_snapshots: Int{0}
-    pub queries: Int{0}
-    pub module_probes: Int{0}
-    pub first_row_probes: Int{0}
-    pub second_row_probes: Int{0}
-    pub owned_rows_returned: Int{0}
+struct SemaComptimeBodyWork {
+    publications: Int{0}
+    publication_rows: Int{0}
+    index_builds: Int{0}
+    indexed_rows: Int{0}
+    index_key_utf8_bytes: Int{0}
+    functions_started: Int{0}
+    check_passes_started: Int{0}
+    context_value_carriers_attached: Int{0}
+    context_value_snapshots: Int{0}
+    queries: Int{0}
+    module_probes: Int{0}
+    first_row_probes: Int{0}
+    second_row_probes: Int{0}
+    owned_rows_returned: Int{0}
 }
 
-pub enum SemaComptimeBodyWorkOperation {
+enum SemaComptimeBodyWorkOperation {
     FunctionsStarted
     CheckPassStarted
     ContextAttached
@@ -396,20 +396,20 @@ pub enum SemaComptimeBodyWorkOperation {
 // The scope half of a check's environment: the module and function being
 // checked. The program half (SemaProgramTables) is passed beside it, so a
 // copied or per-thread environment never copies the graph.
-pub struct SemaScopeEnvironment {
-    pub module_identity: String
-    pub package_identity: String
-    pub module_name: String
-    pub source_file: String
-    pub source_origin: SemaSourceOrigin
-    pub source_segments: [SemaSourceSegment]
-    pub declarations: [SemaScopeDeclaration]
-    pub generic_params: [TGenericParam]
+struct SemaScopeEnvironment {
+    module_identity: String
+    package_identity: String
+    module_name: String
+    source_file: String
+    source_origin: SemaSourceOrigin
+    source_segments: [SemaSourceSegment]
+    declarations: [SemaScopeDeclaration]
+    generic_params: [TGenericParam]
     // One publication survives probe retargets. The selected view may be empty
     // for an item check; the next function restores the publication, not a
     // reconstructed/copy-indexed list. Both carriers name the same fact cell.
-    pub comptime_body_publication: SemaComptimeBodyValues{SemaComptimeBodyValues{}}
-    pub comptime_body_values: SemaComptimeBodyValues
+    comptime_body_publication: SemaComptimeBodyValues{SemaComptimeBodyValues{}}
+    comptime_body_values: SemaComptimeBodyValues
     // L0303 (#3716): the module's dispatch-table `else` arms, from the parser.
     else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
     // D-SHAPE-PLACE1=A: the module's proven length-preserving list write
@@ -438,10 +438,10 @@ struct SemaScopeProbe {
     diagnostics: [Diagnostic]
     constants: [SemaScopeProbeConstant]
     // The host callbacks the probe's checks reach (SemaHostHookAccess).
-    pub host_hooks: SemaHostHookAccess?{None}
+    host_hooks: SemaHostHookAccess?{None}
     // The graph state `constants` were last compared with: the number of
     // staged values applied to the probing graph (-1: none yet).
-    pub version: Int
+    version: Int
 }
 
 // A module-scope binding whose symbol is a constant still waiting for its
@@ -453,7 +453,7 @@ struct SemaScopeProbeConstant {
 
 // `Namespace`: a package name bound from its declaring member's symbol row
 // (D-MOD-CYCLE1=A, SemaRegistrationModule.namespace_bindings).
-pub enum SemaScopeProbeSource {
+enum SemaScopeProbeSource {
     Symbol(position: Int)
     Import(import_index: Int, binding: Int)
     Namespace(module_index: Int, position: Int)
@@ -468,43 +468,43 @@ struct SemaCheckContext {
     // is the base of a deeper place (`state` in `state.x`, `&s`, `s.x = v`)
     // whose complete place the caller checks, so a bare name read here
     // answers only for a move of the whole name.
-    pub suppress_partial_move_root_read: Bool
-    pub allow_fixed_constructor: Bool
-    pub generic_params: [TGenericParam]
-    pub lambda_escapes: Bool?
-    pub lambda_statement_tails: [SemaStatementTailFrame]
-    pub call_facts: [SemaCallSiteFact]
-    pub http_routes: [String]{[String]{}}
-    pub hardware_use: MIRTargetHardwareUse
-    pub call_return_views: [SemaCallReturnView]
-    pub local_view_provenance: [SemaLocalViewProvenance]
-    pub return_view_receiver_key: String
-    pub return_view_parameter_keys: [String]
-    pub return_view_provenance: ViewProvenanceMap?
-    pub name_references: [SemaNameReferenceFact]
-    pub comptime_requests: [SemaComptimeRequest]
-    pub comptime_body_sources: [SemaComptimeBodySource]
-    pub comptime_body_values: SemaComptimeBodyValues
+    suppress_partial_move_root_read: Bool
+    allow_fixed_constructor: Bool
+    generic_params: [TGenericParam]
+    lambda_escapes: Bool?
+    lambda_statement_tails: [SemaStatementTailFrame]
+    call_facts: [SemaCallSiteFact]
+    http_routes: [String]{[String]{}}
+    hardware_use: MIRTargetHardwareUse
+    call_return_views: [SemaCallReturnView]
+    local_view_provenance: [SemaLocalViewProvenance]
+    return_view_receiver_key: String
+    return_view_parameter_keys: [String]
+    return_view_provenance: ViewProvenanceMap?
+    name_references: [SemaNameReferenceFact]
+    comptime_requests: [SemaComptimeRequest]
+    comptime_body_sources: [SemaComptimeBodySource]
+    comptime_body_values: SemaComptimeBodyValues
     // Derived module/key indexes into the canonical ordered source rows.
-    pub comptime_body_source_modules: [String:Int]
-    pub comptime_body_source_rows: [[String:Int]]
-    pub compute_calls: [SemaComputeCallFact]
-    pub autodiff_obligations: [SemaAutodiffObligation]
-    pub autodiff_safe_panic: Bool
-    pub autodiff_unsafe_panic: Bool
-    pub autodiff_safe_panic_context: Bool
-    pub copy_events: [SemaCopyEvent]
-    pub loop_value_frames: [SemaLoopValueFrame]
-    pub loop_break_flows: [SemaLoopBreakFlows]
-    pub pending_loop_value: SemaPendingLoopValue?
-    pub collect_item_types: [Type?]
-    pub last_loop_result_type: Type?
-    pub arrow_loop_body: Bool
-    pub reactive_upgrades: [String]
-    pub reactive_upgrade_names: [String]
-    pub reactive_local_keys: [String]
-    pub reactive_shared_keys: [String]
-    pub taskgroups: SemaTaskGroupState
+    comptime_body_source_modules: [String:Int]
+    comptime_body_source_rows: [[String:Int]]
+    compute_calls: [SemaComputeCallFact]
+    autodiff_obligations: [SemaAutodiffObligation]
+    autodiff_safe_panic: Bool
+    autodiff_unsafe_panic: Bool
+    autodiff_safe_panic_context: Bool
+    copy_events: [SemaCopyEvent]
+    loop_value_frames: [SemaLoopValueFrame]
+    loop_break_flows: [SemaLoopBreakFlows]
+    pending_loop_value: SemaPendingLoopValue?
+    collect_item_types: [Type?]
+    last_loop_result_type: Type?
+    arrow_loop_body: Bool
+    reactive_upgrades: [String]
+    reactive_upgrade_names: [String]
+    reactive_local_keys: [String]
+    reactive_shared_keys: [String]
+    taskgroups: SemaTaskGroupState
     // D-FAILURE-FOUNDATION1=A: `failure_carrier_root` is the one-shot token a
     // carrier consumer (`??`, `?`, an `.Ok`/`.Err` pattern) sets so its call
     // subject keeps the Result carrier; `failure_success_view` tells the call
@@ -650,23 +650,23 @@ struct SemaScopeHardwareFacts {
 // pass driver owns it and every checker borrows it; only comptime value
 // landing writes it. The tables own the graph they are given: callers hand
 // over one graph rather than a read value the constructor would copy again.
-pub struct SemaProgramTables {
-    pub registration_graph: SemaRegistrationGraph?
-    pub checked_types: [TTypeDef]
+struct SemaProgramTables {
+    registration_graph: SemaRegistrationGraph?
+    checked_types: [TTypeDef]
     // Rust `Checker::types` (keyed registry): `checked_types` rows by
     // "{module_identity}::{name}" (first row), and every row of a bare name
     // in order (`checked_type_name_slots` -> `checked_type_name_rows`).
-    pub checked_type_rows: [String:Int]
-    pub checked_type_name_slots: [String:Int]
-    pub checked_type_name_rows: [[Int]]
+    checked_type_rows: [String:Int]
+    checked_type_name_slots: [String:Int]
+    checked_type_name_rows: [[Int]]
     // `sema_checked_program_boxed_edges(registration_graph)`: nominal SymbolId
     // key -> its boxed recursive-layout keys, computed once per tables. Staged
     // comptime values type only waiting constants, never a nominal's fields,
     // so landing values leaves these edges unchanged.
-    pub boxed_edges: [String:[String]]
+    boxed_edges: [String:[String]]
 }
 
-pub fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [TTypeDef]) -> SemaProgramTables Never! {
+fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [TTypeDef]) -> SemaProgramTables Never! {
     rows := [String:Int]{}
     name_slots := [String:Int]{}
     name_rows := [[Int]]{}
@@ -691,7 +691,7 @@ pub fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [
     }
 }
 
-pub fn sema_scope_environment_init(module_identity: String, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
+fn sema_scope_environment_init(module_identity: String, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
     SemaScopeEnvironment{
         module_identity: module_identity,
         package_identity: package_identity,
@@ -713,12 +713,12 @@ fn sema_scope_environment_boxed_edges(graph: SemaRegistrationGraph?) -> [String:
 }
 
 // The first checked declaration of `name` owned by `module_identity`.
-pub fn sema_scope_checked_type_row(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, name: String) -> Int? {
+fn sema_scope_checked_type_row(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, name: String) -> Int? {
     program.checked_type_rows.get("{module_identity}::{name}")
 }
 
 // Every checked declaration row named `name`, in declaration order.
-pub fn sema_scope_checked_type_name_rows(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> [Int] {
+fn sema_scope_checked_type_name_rows(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> [Int] {
     slot :: program.checked_type_name_slots.get(name) ?? return [Int]{}
     program.checked_type_name_rows[slot]
 }
@@ -726,7 +726,7 @@ pub fn sema_scope_checked_type_name_rows(environment: SemaScopeEnvironment, prog
 // One environment serves every module of a graph pass: the registration
 // graph, checked types and write-parameter facts stay, and the module's own
 // source facts replace the previous module's.
-pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, module_index: Int, comptime_body_values: ^SemaComptimeBodyValues) Never! {
+fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, module_index: Int, comptime_body_values: ^SemaComptimeBodyValues) Never! {
     // The graph payload loan permits only disjoint module-fact writes.
     if &environment.registration_graph == .Val(graph) {
         environment.module_identity = graph.modules[module_index].module_identity
@@ -752,7 +752,7 @@ pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, m
 // and source facts replace the previous target's; every other per-module or
 // per-function fact starts empty, as in a newly built probe environment.
 // False when the graph has no such module.
-pub fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment, module_identity: String, comptime_body_values: ^SemaComptimeBodyValues) -> Bool Never! {
+fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment, module_identity: String, comptime_body_values: ^SemaComptimeBodyValues) -> Bool Never! {
     // Pin the payload window, not an owning Option match of the whole graph.
     // Only disjoint context fields are written before this loan closes.
     if &environment.registration_graph == .Val(graph) {
@@ -774,7 +774,7 @@ pub fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironm
     false
 }
 
-pub fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: SymbolID, edge: String) -> Bool Never! {
+fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: SymbolID, edge: String) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
         row :: sema_type_graph_nominal_row(graph, owner.key) ?? return false
         module_identity :: graph.modules[row.module_index].module_identity
@@ -855,7 +855,7 @@ fn sema_check_context_init() -> SemaCheckContext Never! {
 }
  
 
-pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Never! {
+fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Never! {
     snapshot := SemaCheckContext{
         exact_int_reachable: source.exact_int_reachable,
         unsafe_depth: source.unsafe_depth,
@@ -1128,7 +1128,7 @@ fn sema_check_unsupported(context: &SemaCheckContext, reason: String) Never! {
 
 // Records why the body being checked is incomplete when no diagnostic says so.
 // Every path that marks a body incomplete without a diagnostic calls this.
-pub fn sema_check_unsupported(context: &SemaCheckContext, reason: String) Never! {
+fn sema_check_unsupported(context: &SemaCheckContext, reason: String) Never! {
     &context.incomplete_reasons.push(reason)
 }
 
@@ -1453,7 +1453,7 @@ fn sema_knowledge_gate_allows(plane: SemaKnowledgePlane, gate: SemaKnowledgeGate
     }
 }
 
-pub fn sema_scope_push_knowledge_gate(table: &SemaScopeTable, gate: SemaKnowledgeGate) -> SemaKnowledgeGate? {
+fn sema_scope_push_knowledge_gate(table: &SemaScopeTable, gate: SemaKnowledgeGate) -> SemaKnowledgeGate? {
     previous :: table.knowledge_gate.copy()
     table.knowledge_gate = Val(gate)
     previous
@@ -1670,7 +1670,7 @@ enum SemaScopeDeclarationSite {
     Local(index: Int)
 }
 
-pub fn sema_scope_declaration_site(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeDeclarationSite? {
+fn sema_scope_declaration_site(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeDeclarationSite? {
     if program.registration_graph == .Val(graph) {
         // The first function and nominal rows by key replace the module scan
         // (earlier modules first, functions before nominals in one module).
@@ -1693,7 +1693,7 @@ pub fn sema_scope_declaration_site(environment: SemaScopeEnvironment, program: S
     None
 }
 
-pub fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Item? {
+fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Item? {
     site :: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return Val(environment.declarations[index].item)
     graph_option :: program.registration_graph
@@ -1704,7 +1704,7 @@ pub fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, program
 }
 
 // The item variant of sema_scope_resolve_declaration(environment, program, id).
-pub enum SemaScopeDeclarationKind {
+enum SemaScopeDeclarationKind {
     Func
     Struct
     Enum
@@ -1722,7 +1722,7 @@ fn sema_scope_item_kind(item: Item) -> SemaScopeDeclarationKind Never! {
     }
 }
 
-pub fn sema_scope_declaration_kind(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeDeclarationKind? {
+fn sema_scope_declaration_kind(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeDeclarationKind? {
     site :: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return Val(sema_scope_item_kind(environment.declarations[index].item))
     if site == .Function(_, _) -> return Val(SemaScopeDeclarationKind.Func)
@@ -1735,7 +1735,7 @@ pub fn sema_scope_declaration_kind(environment: SemaScopeEnvironment, program: S
     None
 }
 
-pub fn sema_scope_declaration_is(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID, kind: SemaScopeDeclarationKind) -> Bool {
+fn sema_scope_declaration_is(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID, kind: SemaScopeDeclarationKind) -> Bool {
     found :: sema_scope_declaration_kind(environment, program, id) ?? return false
     found == kind
 }
@@ -1752,7 +1752,7 @@ fn sema_scope_item_struct(item: Item) -> SemaScopeStructShape? {
 }
 
 // The struct shape when sema_scope_resolve_declaration(environment, id) is a struct.
-pub fn sema_scope_declaration_struct(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeStructShape? {
+fn sema_scope_declaration_struct(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeStructShape? {
     site :: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_struct(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
@@ -1778,7 +1778,7 @@ fn sema_scope_item_enum(item: Item) -> SemaScopeEnumShape? {
 }
 
 // The enum shape when sema_scope_resolve_declaration(environment, id) is an enum.
-pub fn sema_scope_declaration_enum(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeEnumShape? {
+fn sema_scope_declaration_enum(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeEnumShape? {
     site :: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_enum(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
@@ -1800,7 +1800,7 @@ fn sema_scope_item_enum_declares(item: Item, variant: String) -> Bool Never! {
 }
 
 // sema_scope_resolve_declaration(environment, id) is an enum declaring `variant`.
-pub fn sema_scope_declaration_enum_declares(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID, variant: String) -> Bool {
+fn sema_scope_declaration_enum_declares(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID, variant: String) -> Bool {
     site :: sema_scope_declaration_site(environment, program, id) ?? return false
     if site == .Local(index) -> return sema_scope_item_enum_declares(environment.declarations[index].item, variant)
     if site == .Nominal(module_index, row) {
@@ -1819,7 +1819,7 @@ fn sema_scope_item_distinct(item: Item) -> DistinctDef? {
 
 // The declaration when sema_scope_resolve_declaration(environment, id) is a
 // distinct type; a distinct declaration has no methods to leave behind.
-pub fn sema_scope_declaration_distinct(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> DistinctDef? {
+fn sema_scope_declaration_distinct(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> DistinctDef? {
     site :: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_distinct(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
@@ -1838,7 +1838,7 @@ fn sema_scope_item_function_type_params(item: Item) -> [TypeParam] Never! {
 
 // The type parameters when sema_scope_resolve_declaration(environment, id) is
 // a function, else none; the function's body is never copied.
-pub fn sema_scope_declaration_function_type_params(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [TypeParam] {
+fn sema_scope_declaration_function_type_params(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [TypeParam] {
     site :: sema_scope_declaration_site(environment, program, id) ?? return [TypeParam]{}
     if site == .Local(index) -> return sema_scope_item_function_type_params(environment.declarations[index].item)
     graph_option :: program.registration_graph

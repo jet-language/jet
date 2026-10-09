@@ -133,7 +133,7 @@ fn sema_failure_union_probe_type(value: Expr, environment: SemaScopeEnvironment,
 // (`Err(.NotFound(n))`) becomes a case of the function's own error type with
 // the payload types of its arguments; any other value is a member, and a
 // message is the general `Err`.
-pub fn sema_failure_union_record_err(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) {
+fn sema_failure_union_record_err(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) {
     if call.args.len() != 1 || call.args[0].label != None {
         context.failure_union_general = true
         return
@@ -464,7 +464,7 @@ struct SemaFailureUnionProjected {
 // D-FAIL-INFER-UNION1=A: join the default-route rows of the unannotated
 // top-level functions, mint their own cases and project every set that holds
 // a typed member.
-pub fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic], trail: &SemaGraphTrail) -> SemaFailureUnionProjected {
+fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic], trail: &SemaGraphTrail) -> SemaFailureUnionProjected {
     projected := SemaFailureUnionProjected{keys: [String]{}, modules: [Int]{}, minted: false}
     rows := [SemaFailureUnionRow]{}
     loop module_result in modules {
@@ -547,7 +547,7 @@ pub fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGra
 // tier lowers as a plain return. A function a compile-time evaluation already
 // checked keeps its carrier, so its cached callers stay consistent. Returns
 // the projected keys. Every replaced row is recorded on `trail`.
-pub fn sema_failure_project_infallible(graph: &SemaRegistrationGraph, solved: [String], comptime_functions: [SemaComptimeFunctionResult], trail: &SemaGraphTrail) -> [String] {
+fn sema_failure_project_infallible(graph: &SemaRegistrationGraph, solved: [String], comptime_functions: [SemaComptimeFunctionResult], trail: &SemaGraphTrail) -> [String] {
     // The keys compile-time evaluation reached, collected once.
     comptime_reached := [String:Bool]{}
     loop result in comptime_functions {

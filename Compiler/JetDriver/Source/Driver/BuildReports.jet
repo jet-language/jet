@@ -3,7 +3,7 @@
 use jet_foundation.foundation_json_quote
 use core.build.BuildGraphFile
 
-pub struct JetDriverBuildExplanation { pub label: String pub provenance: [String] }
+struct JetDriverBuildExplanation { label: String provenance: [String] }
 fn jet_driver_build_strings(values: [String]) -> String Never! {
     rows :: loop value in values -> foundation_json_quote(value)
     "[{rows.join(",")}]"
@@ -29,7 +29,7 @@ fn jet_driver_build_action_provenance(state: BuildSessionState, action: BuildSes
     if action.plugin == .Val(plugin) -> &facts.push("plugin={state.plugins[plugin].name}")
     facts
 }
-pub fn jet_driver_build_explanation(plan: BuildSessionPlan, subject: String) -> JetDriverBuildExplanation Never! {
+fn jet_driver_build_explanation(plan: BuildSessionPlan, subject: String) -> JetDriverBuildExplanation Never! {
     permit :: plan.storage.guard_read()
     state :: permit.value
     loop target in state.targets {
@@ -59,7 +59,7 @@ pub fn jet_driver_build_explanation(plan: BuildSessionPlan, subject: String) -> 
     }
     {label: subject, provenance: facts}
 }
-pub fn jet_driver_build_plan_json(plan: BuildSessionPlan, vector_json: String) -> String Never! {
+fn jet_driver_build_plan_json(plan: BuildSessionPlan, vector_json: String) -> String Never! {
     permit :: plan.storage.guard_read()
     state :: permit.value
     graph :: build_session_project(state)

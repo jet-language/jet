@@ -5,59 +5,59 @@
 // Host String projection/channel writing remains a separate actual supplier.
 use jet_foundation.[foundation_append_read_bytes]
 
-pub JET_CLI_TABLE_MAX_COLUMNS :: 64
-pub JET_CLI_TABLE_MAX_ROWS :: 4096
+JET_CLI_TABLE_MAX_COLUMNS :: 64
+JET_CLI_TABLE_MAX_ROWS :: 4096
 
-pub enum JetCLITableCell {
+enum JetCLITableCell {
     Text(value: [U8])
     Integer(value: I128)
     Unsigned(value: U128)
     Boolean(value: Bool)
     Empty
 }
-pub enum JetCLITableCellKind {
+enum JetCLITableCellKind {
     Text
     Integer
     Unsigned
     Boolean
     Empty
 }
-pub enum JetCLITableAlignment {
+enum JetCLITableAlignment {
     Left
     Right
     Center
 }
-pub struct JetCLITableColumn {
-    pub name: [U8]
-    pub kind: JetCLITableCellKind
-    pub alignment: JetCLITableAlignment
+struct JetCLITableColumn {
+    name: [U8]
+    kind: JetCLITableCellKind
+    alignment: JetCLITableAlignment
 }
-pub struct JetCLITableRow { pub cells: [JetCLITableCell] }
-pub struct JetCLIAdaptiveTable {
-    pub columns: [JetCLITableColumn]
-    pub rows: [JetCLITableRow]
-    pub truncated: Bool
+struct JetCLITableRow { cells: [JetCLITableCell] }
+struct JetCLIAdaptiveTable {
+    columns: [JetCLITableColumn]
+    rows: [JetCLITableRow]
+    truncated: Bool
 }
-pub struct JetCLIStructuredTable {
-    pub columns: [JetCLITableColumn]
-    pub rows: [JetCLITableRow]
-    pub truncated: Bool
+struct JetCLIStructuredTable {
+    columns: [JetCLITableColumn]
+    rows: [JetCLITableRow]
+    truncated: Bool
 }
 // This contains no table copy or escaping borrowed carrier. Its caller keeps
 // the same table unchanged and supplies it READ to jet_cli_table_render.
-pub struct JetCLITableLayout {
-    pub widths: [Int]
-    pub width: Int
-    pub unicode: Bool
-    pub human: Bool
-    pub narrow: Bool
-    pub plain: Bool
+struct JetCLITableLayout {
+    widths: [Int]
+    width: Int
+    unicode: Bool
+    human: Bool
+    narrow: Bool
+    plain: Bool
 }
 
-pub fn jet_cli_table_cell_text(value: ^[U8]) -> JetCLITableCell Never! {
+fn jet_cli_table_cell_text(value: ^[U8]) -> JetCLITableCell Never! {
     .Text(jet_cli_table_bound_text(^value))
 }
-pub fn jet_cli_table_cell_kind(cell: JetCLITableCell) -> JetCLITableCellKind Never! {
+fn jet_cli_table_cell_kind(cell: JetCLITableCell) -> JetCLITableCellKind Never! {
     if cell == {
         .Text(_) -> .Text
         .Integer(_) -> .Integer
@@ -66,11 +66,11 @@ pub fn jet_cli_table_cell_kind(cell: JetCLITableCell) -> JetCLITableCellKind Nev
         .Empty -> .Empty
     }
 }
-pub fn jet_cli_table_column(name: ^[U8], kind: JetCLITableCellKind) -> JetCLITableColumn Never! {
+fn jet_cli_table_column(name: ^[U8], kind: JetCLITableCellKind) -> JetCLITableColumn Never! {
     alignment :: if kind == .Integer || kind == .Unsigned -> JetCLITableAlignment.Right else -> JetCLITableAlignment.Left
     JetCLITableColumn{name: jet_cli_table_bound_text(^name), kind: kind, alignment: alignment}
 }
-pub fn jet_cli_table_row(input: ^[JetCLITableCell]) -> JetCLITableRow Never! {
+fn jet_cli_table_row(input: ^[JetCLITableCell]) -> JetCLITableRow Never! {
     cells := ^input
     loop cells.len() > JET_CLI_TABLE_MAX_COLUMNS -> _ :: &cells.pop()
     JetCLITableRow{cells: ^cells}
@@ -84,7 +84,7 @@ fn jet_cli_table_normalize_cell(cell: ^JetCLITableCell) -> JetCLITableCell Never
         .Empty -> .Empty
     }
 }
-pub fn jet_cli_table(input_columns: ^[JetCLITableColumn], input_rows: ^[JetCLITableRow]) -> JetCLIAdaptiveTable Never! {
+fn jet_cli_table(input_columns: ^[JetCLITableColumn], input_rows: ^[JetCLITableRow]) -> JetCLIAdaptiveTable Never! {
     columns := ^input_columns
     rows := ^input_rows
     truncated := columns.len() > JET_CLI_TABLE_MAX_COLUMNS || rows.len() > JET_CLI_TABLE_MAX_ROWS
@@ -127,7 +127,7 @@ pub fn jet_cli_table(input_columns: ^[JetCLITableColumn], input_rows: ^[JetCLITa
     }
     JetCLIAdaptiveTable{columns: ^columns, rows: ^normalized_rows, truncated: truncated}
 }
-pub fn jet_cli_table_structured(table: JetCLIAdaptiveTable) -> JetCLIStructuredTable Never! {
+fn jet_cli_table_structured(table: JetCLIAdaptiveTable) -> JetCLIStructuredTable Never! {
     JetCLIStructuredTable{columns: ~table.columns, rows: ~table.rows, truncated: table.truncated}
 }
 
@@ -208,7 +208,7 @@ fn jet_cli_table_fit_widths(natural: [Int], width: Int) -> [Int] Never! {
     }
     widths
 }
-pub fn jet_cli_table_layout(table: JetCLIAdaptiveTable, profile: JetCLIOutputProfile) -> JetCLITableLayout Never! {
+fn jet_cli_table_layout(table: JetCLIAdaptiveTable, profile: JetCLIOutputProfile) -> JetCLITableLayout Never! {
     bounded := profile.width
     if bounded < (U64{1}) -> bounded = U64{1}
     if bounded > (U64{256}) -> bounded = U64{256}
@@ -343,7 +343,7 @@ fn jet_cli_table_narrow(table: JetCLIAdaptiveTable, width: Int) -> [U8] Never! {
     }
     out
 }
-pub fn jet_cli_table_render(table: JetCLIAdaptiveTable, layout: JetCLITableLayout) -> [U8]? Never! {
+fn jet_cli_table_render(table: JetCLIAdaptiveTable, layout: JetCLITableLayout) -> [U8]? Never! {
     if !layout.human -> return None
     Val(if layout.plain -> jet_cli_table_plain(table, layout.width) else if layout.narrow -> jet_cli_table_narrow(table, layout.width) else -> jet_cli_table_grid(table, layout))
 }

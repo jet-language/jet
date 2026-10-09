@@ -103,7 +103,7 @@ fn os_session_close(fd: Int) {
     }
 }
 
-pub fn x64_session_write_frame(fd: Int, body: String) -> Bool {
+fn x64_session_write_frame(fd: Int, body: String) -> Bool {
     bytes :: body.bytes()
     if bytes.len() > 16777216 -> return false
     x64_session_write_bytes_frame(fd, bytes)
@@ -111,7 +111,7 @@ pub fn x64_session_write_frame(fd: Int, body: String) -> Bool {
 
 // Binary image chunks use the same byte-length framing without any UTF-8
 // conversion or hex expansion. The reader supplies each frame's size limit.
-pub fn x64_session_write_bytes_frame(fd: Int, body: [U8]) -> Bool {
+fn x64_session_write_bytes_frame(fd: Int, body: [U8]) -> Bool {
     x64_session_write_bytes_range(fd, body, 0, body.len())
 }
 
@@ -179,7 +179,7 @@ fn x64_session_write_address_all(fd: Int, address: Int, count: Int) -> Bool {
 
 // Read EXACTLY one frame, leaving following frames untouched. JSON frames
 // cannot exceed the canonical parser's16MiB item limit.
-pub fn x64_session_read_frame(fd: Int) -> String? {
+fn x64_session_read_frame(fd: Int) -> String? {
     bytes :: x64_session_read_bytes_frame(fd, 16777216) ?? return None
     Val(String.from_bytes(bytes) ?? return None)
 }
@@ -188,7 +188,7 @@ pub fn x64_session_read_frame(fd: Int) -> String? {
 // oversized body, invalid digit or short body is always a protocol error.
 enum X64SessionFrame { Bytes(bytes: [U8]) EOF Malformed }
 
-pub fn x64_session_read_bytes_frame(fd: Int, max_length: Int) -> [U8]? {
+fn x64_session_read_bytes_frame(fd: Int, max_length: Int) -> [U8]? {
     frame :: x64_session_read_frame_status(fd, max_length)
     if frame == .Bytes(bytes) -> return Val(bytes)
     None

@@ -86,20 +86,20 @@ struct LIRLoweringIssue {
 // function of the entry the program was lowered from (None with issues).
 // `finalizer` is a compiler callable's zero-argument Unit static release,
 // run before its image is unmapped, after all native result owners retire.
-pub struct LIRLowering {
-    pub lir: LIRModule
-    pub issues: [LIRLoweringIssue]
-    pub entry: LIRFunctionID?
+struct LIRLowering {
+    lir: LIRModule
+    issues: [LIRLoweringIssue]
+    entry: LIRFunctionID?
     // Every requested callable's concrete native entry; empty on any issue.
-    pub callables: [U64:LIRFunctionID]
-    pub finalizer: LIRFunctionID?
+    callables: [U64:LIRFunctionID]
+    finalizer: LIRFunctionID?
     // Typed compiler boundaries write canonical storage supplied by the child.
     // The matching release borrows that storage and drops its initialized value.
-    pub value_callables: [U64:LIRFunctionID]{[U64:LIRFunctionID]{}}
-    pub value_releases: [U64:LIRFunctionID]{[U64:LIRFunctionID]{}}
-    pub closures: [LIRClosureValueLayout]{[LIRClosureValueLayout]{}}
-    pub shared_sites: [LIRSharedSiteExport]{[LIRSharedSiteExport]{}}
-    pub core_callables: [LIRCoreCallableExport]{[LIRCoreCallableExport]{}}
+    value_callables: [U64:LIRFunctionID]{[U64:LIRFunctionID]{}}
+    value_releases: [U64:LIRFunctionID]{[U64:LIRFunctionID]{}}
+    closures: [LIRClosureValueLayout]{[LIRClosureValueLayout]{}}
+    shared_sites: [LIRSharedSiteExport]{[LIRSharedSiteExport]{}}
+    core_callables: [LIRCoreCallableExport]{[LIRCoreCallableExport]{}}
 }
 
 // How one checked MIR type is carried in LIR.
@@ -177,17 +177,17 @@ enum LowerRuntimeIntrinsic {
 }
 
 struct LowerModule {
-    pub signatures: [LIRSignature]
-    pub checked_types: LowerTypeIndex
-    pub test_harness: Bool
-    pub test_rows: [Int]
-    pub test_indices: [U64:Int]
-    pub test_serial: Bool
-    pub test_checks: [MIROutputCheck]
+    signatures: [LIRSignature]
+    checked_types: LowerTypeIndex
+    test_harness: Bool
+    test_rows: [Int]
+    test_indices: [U64:Int]
+    test_serial: Bool
+    test_checks: [MIROutputCheck]
     // Empty for ordinary program and callback lowering.
-    pub runtime_intrinsics: [U64:LowerRuntimeIntrinsic]{[U64:LowerRuntimeIntrinsic]{}}
-    pub native_pack: Bool
-    pub native_exports: [String:LIRFunctionID]
+    runtime_intrinsics: [U64:LowerRuntimeIntrinsic]{[U64:LowerRuntimeIntrinsic]{}}
+    native_pack: Bool
+    native_exports: [String:LIRFunctionID]
     // Signature shape key -> its id (lower_signature_key).
     signature_rows: [String:Int]
     data: [LIRData]
@@ -195,22 +195,22 @@ struct LowerModule {
     // id, so interning and call lowering probe a map instead of scanning.
     data_rows: [String:Int]
     // MIRConstantDef key -> root LIRData of its frozen static tree (Statics.jet).
-    pub static_rows: [String:Int]
-    pub shared_sites_dynamic: Bool
-    pub shared_sites: [LIRSharedSiteExport]
+    static_rows: [String:Int]
+    shared_sites_dynamic: Bool
+    shared_sites: [LIRSharedSiteExport]
     // String slots of frozen statics the entry fills first (lower_static_entry).
-    pub static_fixups: [LowerStaticFixup]
+    static_fixups: [LowerStaticFixup]
     // Callable initialization and finalization share this filled-statics flag.
-    pub static_live: LIRDataID?
+    static_live: LIRDataID?
     // MIR source file id -> byte offsets of its line starts (Numeric.jet lower_source_line).
     line_starts: [U64:[Int]]
     // MIR source file id -> its row in program.source_files.
-    pub source_rows: [U64:Int]
+    source_rows: [U64:Int]
     // Shared stop classification indexes checked Prelude effects once.
-    pub prelude_positions: [U64:Int]
+    prelude_positions: [U64:Int]
     // Checked foreign ID -> its #FFI(asm) function, and -> its program.foreign row.
-    pub asm_foreign: [U64:MIRFunctionID]
-    pub foreign_rows: [U64:Int]
+    asm_foreign: [U64:MIRFunctionID]
+    foreign_rows: [U64:Int]
     // Concrete MIR function ID -> its LIR function row (Mono.jet's inventory
     // order), and per row the program.functions row of its original.
     mir_rows: [U64:Int]
@@ -218,35 +218,35 @@ struct LowerModule {
     mir_signatures: [LIRSignatureID]
     // Per LIR function row: the bytes of the inline aggregate it returns
     // through a hidden result pointer (its first parameter), or 0.
-    pub mir_results: [Int]
+    mir_results: [Int]
     // A compiler callable (lir_lower_callable) spends comptime fuel and depth
     // through the runtime's budget hooks (lower_comptime_site); program
     // entries never do.
-    pub comptime_budget: Bool
-    pub glue_base: Int
-    pub glue: [LowerGlue]
-    pub close_methods: [U64:[LowerCloseImpl]]
+    comptime_budget: Bool
+    glue_base: Int
+    glue: [LowerGlue]
+    close_methods: [U64:[LowerCloseImpl]]
     // Glue/helper key (lower_glue_row_key) -> its row in `glue`.
-    pub glue_rows: [String:Int]
-    pub issues: [LIRLoweringIssue]
+    glue_rows: [String:Int]
+    issues: [LIRLoweringIssue]
     // Unified host/stop contract (#4720): the reachable MIR carries stop
     // points (only native host compilations produce them). Its generated
     // glue then shields user callbacks, its OCB1 callback adapters leave a
     // stopped callback's result unwritten, and its program entry returns
     // without reading a stopped result.
-    pub stop_points: Bool
-    pub task_stop_points: Bool
+    stop_points: Bool
+    task_stop_points: Bool
 }
 
 // Read-only facts about the MIR function being lowered.
 struct LowerContext {
-    pub mir: MIRFunction
-    pub result: LowerRepr
-    pub fact_index: [U64:Int]
-    pub static_text: LowerStaticTextFacts
-    pub block_index: [U64:Int]
-    pub slots: [LowerSlot]
-    pub place_slots: [U64:Int]
+    mir: MIRFunction
+    result: LowerRepr
+    fact_index: [U64:Int]
+    static_text: LowerStaticTextFacts
+    block_index: [U64:Int]
+    slots: [LowerSlot]
+    place_slots: [U64:Int]
     // MIR local id -> its root slot (require diagnostics read current local storage).
     local_slots: [U64:Int]
     // MIR value read or moved out of a root place -> its slot.
@@ -274,7 +274,7 @@ struct LowerContext {
 // A real cleanup entry, not a Shield or an inferred task/root role. The saved
 // flags are opaque; zero is valid and leave always restores the exact token.
 struct LowerStopCleanupScope {
-    pub saved_flags: LIRValueID
+    saved_flags: LIRValueID
 }
 
 // The function being built.
@@ -282,15 +282,15 @@ struct LowerFunction {
     name: String
     builder: LIRFunctionBuilder
     // MIR value -> LIR value index; MIR values carried by no LIR value are in `absent`.
-    pub values: [U64:Int]
-    pub absent: [U64:Bool]
-    pub params: [LIRValueID?]
-    pub current: [LIRValueID?]
-    pub mir_block: MIRBlockID
-    pub cleanup_scopes: [U64:LowerStopCleanupScope]
-    pub open: LIRBlockID
-    pub open_params: [LIRValueID]
-    pub failed: Bool
+    values: [U64:Int]
+    absent: [U64:Bool]
+    params: [LIRValueID?]
+    current: [LIRValueID?]
+    mir_block: MIRBlockID
+    cleanup_scopes: [U64:LowerStopCleanupScope]
+    open: LIRBlockID
+    open_params: [LIRValueID]
+    failed: Bool
     // The hidden result pointer when the function returns an inline aggregate.
     result_storage: LIRValueID?
     // Per slot: the frame storage a back edge copies an inline aggregate
@@ -301,26 +301,26 @@ struct LowerFunction {
     // A closure body's box parameter (Closures.jet).
     env: LIRValueID?
     // Per slot: the memory cell of a cell slot (LowerSlot.cell), else None.
-    pub cells: [LIRValueID?]
+    cells: [LIRValueID?]
     // Caller-owned saves for sentry scopes and the function's unsafe gate.
-    pub sentry_scopes: [U64:Int]
-    pub sentry_function: LIRValueID?
+    sentry_scopes: [U64:Int]
+    sentry_function: LIRValueID?
     // A separate allocation lifetime token, not an unsafe-gate save.
-    pub sentry_stack_frame: LIRValueID?
+    sentry_stack_frame: LIRValueID?
     // Context deadlines use independent 16-byte caller-owned save slots.
-    pub deadline_scopes: [U64:Int]
+    deadline_scopes: [U64:Int]
 }
 
 // Lowers the functions `entry` reaches (Mono.jet: generic functions and
 // methods of generic types once per concrete instance) plus their glue.
-pub fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
+fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
     lower_selected(program, [MIRFunctionID]{entry}, true, false, ^intrinsics)
 }
 
 // Compiler and test callbacks retain return carriers; only program entries
 // consume Option/Result success and turn failure into a process exit.
-pub fn lir_lower_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
+fn lir_lower_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
     lower_selected(program, roots, false, false, ^intrinsics)
 }

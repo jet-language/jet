@@ -17,8 +17,8 @@ use core as core
 // `t + 5min` remains an Instant and `b - a` remains a Duration.
 
 /// A running stopwatch started at a host monotonic nanosecond sample.
-pub struct Stopwatch {
-    pub start_ns: Int
+struct Stopwatch {
+    start_ns: Int
 }
 
 impl Stopwatch {
@@ -28,11 +28,11 @@ impl Stopwatch {
 
 /// The offset of `zone` from UTC in seconds at the Unix epoch. Numeric and UTC
 /// zones have exactly one offset.
-pub fn utcoffset(zone: Zone) -> Int Never! {
+fn utcoffset(zone: Zone) -> Int Never! {
     zoned(from_unix_seconds(0), zone).offset_seconds()
 }
 
-pub fn gmtime(seconds: Int) -> DateTime Never! { from_unix_seconds(seconds) }
+fn gmtime(seconds: Int) -> DateTime Never! { from_unix_seconds(seconds) }
 
 fn ctime(seconds: Int) -> String Never! { asctime(gmtime(seconds)) }
 
@@ -43,12 +43,12 @@ fn asctime(dt: DateTime) -> String Never! {
     "{days[date.weekday()]} {months[date.month() - 1]} {pad2(date.day(), 2)} {pad2(dt.hour(), 2)}:{pad2(dt.minute(), 2)}:{pad2(dt.second(), 2)} {date.year()}"
 }
 
-pub fn start() -[Time]> Stopwatch Never! {
+fn start() -[Time]> Stopwatch Never! {
     core.time.__reject_uncontrolled("clock")
     Stopwatch{start_ns: core.time.__host_monotonic_ns()}
 }
 
-pub fn sleep(duration: Duration) Never! -[Time]> {
+fn sleep(duration: Duration) Never! -[Time]> {
     // Even a zero or negative delay is a deadline/cancellation wait boundary.
     // The shared scheduler clamps the delay and owns pre/post wait checks.
     core.time.__sleep_ns(duration.ns)
@@ -56,7 +56,7 @@ pub fn sleep(duration: Duration) Never! -[Time]> {
 
 /// Wall-clock time as Unix nanoseconds. `time.instant()` is the monotonic
 /// point for measuring; this is the timestamp for stamps, nonces, and expiry.
-pub fn unix_ns() -[Time]> Int Never! {
+fn unix_ns() -[Time]> Int Never! {
     now_utc().to_unix_ns() ?? panic("the wall clock is outside the Unix nanosecond range")
 }
 
@@ -67,8 +67,8 @@ enum __ClockState {
     Manual(Int)
     System(started_ns: Int, offset_ms: Int)
 }
-pub struct Clock { state: Shared<__ClockState> }
-pub struct __ClockObserver { state: Shared<__ClockState> }
+struct Clock { state: Shared<__ClockState> }
+struct __ClockObserver { state: Shared<__ClockState> }
 
 fn clock_state_now(state: __ClockState) -> Int Never! {
     if state == {
@@ -82,13 +82,13 @@ fn clock_state_now(state: __ClockState) -> Int Never! {
 }
 
 impl Clock {
-    pub fn new(seed: Int) -> Clock Never! {
+    fn new(seed: Int) -> Clock Never! {
         Clock{state: shared __ClockState.Manual(seed)}
     }
-    pub fn system() -[Time]> Clock Never! {
+    fn system() -[Time]> Clock Never! {
         Clock{state: shared __ClockState.System(core.time.__clock_mono_ns(), 0)}
     }
-    pub fn now(self) -> Int Never! {
+    fn now(self) -> Int Never! {
         guard :: self.state.guard_read()
         clock_state_now(guard.value)
     }
@@ -104,26 +104,26 @@ impl Clock {
             }
         }
     }
-    pub fn tick(&self, millis: Int) -> Int Never! {
+    fn tick(&self, millis: Int) -> Int Never! {
         next :: saturating_add_ns(self.now(), millis)
         &self.set(next)
         self.now()
     }
-    pub fn advance(&self, to_ms: Int) -> Int Never! {
+    fn advance(&self, to_ms: Int) -> Int Never! {
         &self.set(to_ms)
         self.now()
     }
-    pub fn wait(&self, duration: Duration) -> Int Never! {
+    fn wait(&self, duration: Duration) -> Int Never! {
         next :: saturating_add_ns(self.now(), duration.ns /% 1000000)
         &self.set(next)
         self.now()
     }
-    pub fn __observer(self) -> __ClockObserver Never! {
+    fn __observer(self) -> __ClockObserver Never! {
         __ClockObserver{state: ~self.state}
     }
     // Borrow, do not semantically copy, the input to its own copy route.
     // System rebase order is fresh start then original-state snapshot.
-    pub fn __fork(self) -> Clock Never! {
+    fn __fork(self) -> Clock Never! {
         guard :: self.state.guard_read()
         if guard.value == {
             .Manual(now) -> Clock.new(now)
@@ -134,10 +134,10 @@ impl Clock {
             }
         }
     }
-    pub fn __show(self) -> String Never! { "Clock {{ now: {self.now()} }}" }
+    fn __show(self) -> String Never! { "Clock {{ now: {self.now()} }}" }
 }
 impl __ClockObserver {
-    pub fn now(self) -> Int Never! {
+    fn now(self) -> Int Never! {
         guard :: self.state.guard_read()
         clock_state_now(guard.value)
     }
@@ -147,29 +147,29 @@ impl __ClockObserver {
 // Main's owner-approved private-field correction keeps deadline mutation out
 // of the public API; payload access always checks the strict expiry boundary.
 #!Debug
-pub struct ExpiringValue<T> {
+struct ExpiringValue<T> {
     value: T
     deadline_ms: Int
 }
 
 impl ExpiringValue {
-    pub fn new<T>(value: T, ttl: Duration, clock: Clock) -> ExpiringValue<T> Never! {
+    fn new<T>(value: T, ttl: Duration, clock: Clock) -> ExpiringValue<T> Never! {
         ExpiringValue<T>{value: value, deadline_ms: __expiry_deadline(clock.now(), ttl)}
     }
 
-    pub fn get(self, clock: Clock) -> T Expired! {
+    fn get(self, clock: Clock) -> T Expired! {
         if clock.now() > self.deadline_ms -> return Err(Expired{})
         Ok(~self.value)
     }
 
-    pub fn is_valid(self, clock: Clock) -> Bool Never! { clock.now() <= self.deadline_ms }
+    fn is_valid(self, clock: Clock) -> Bool Never! { clock.now() <= self.deadline_ms }
 
-    pub fn expires_at_ms(self) -> Int Never! { self.deadline_ms }
+    fn expires_at_ms(self) -> Int Never! { self.deadline_ms }
     fn __show(self) -> String Never! { "Expiring(deadline={self.deadline_ms})" }
 }
 
 // The two expiry wrappers share the same saturating millisecond policy.
-pub fn __expiry_deadline(now_ms: Int, ttl: Duration) -> Int Never! {
+fn __expiry_deadline(now_ms: Int, ttl: Duration) -> Int Never! {
     saturating_add_ns(now_ms, ttl.ns /% 1000000)
 }
 
@@ -267,13 +267,13 @@ fn saturating_scale_ns(value: Int, scale: Int) -> Int Never! {
 }
 
 /// Gregorian leap years, including year zero and negative years.
-pub fn is_leap_year(year: Int) -> Bool Never! {
+fn is_leap_year(year: Int) -> Bool Never! {
     (year %% 4 == 0 && year %% 100 != 0) || year %% 400 == 0
 }
 
 /// Number of days in a Gregorian month. Unrecognized months retain the
 /// civil carrier's 30-day result; constructors constrain months separately.
-pub fn days_in_month(year: Int, month: Int) -> Int Never! {
+fn days_in_month(year: Int, month: Int) -> Int Never! {
     if month == 1 || month == 3 || month == 5 || month == 7 || month == 8 || month == 10 || month == 12 -> return 31
     if month == 2 {
         if is_leap_year(year) -> return 29
@@ -379,7 +379,7 @@ fn duration_ns(ns: Int) -> Duration Never! { Duration.nanoseconds(ns) ?? panic("
 
 fn duration_as_seconds(d: Duration) -> Int Never! { d.ns /% 1000000000 }
 
-pub fn elapsed(watch: Stopwatch) -[Time]> Duration Never! {
+fn elapsed(watch: Stopwatch) -[Time]> Duration Never! {
     duration_ns(saturating_sub_ns(core.time.__host_monotonic_ns(), watch.start_ns))
 }
 
@@ -398,7 +398,7 @@ fn pad2(n: Int, width: Int) -> String {
     s
 }
 
-pub fn combine(date: LocalDate, t: LocalTime) -> DateTime Never! {
+fn combine(date: LocalDate, t: LocalTime) -> DateTime Never! {
     datetime(date.year(), date.month(), date.day(), t.hour(), t.minute(), t.second()).add_nanoseconds(t.nanosecond())
 }
 
@@ -432,9 +432,9 @@ fn add_minutes(dt: DateTime, minutes: Int) -> DateTime Never! { add_duration(dt,
 
 fn add_hours(dt: DateTime, hours: Int) -> DateTime Never! { add_duration(dt, duration_hours(hours)) }
 
-pub fn start_of_day(date: LocalDate) -> DateTime Never! { datetime(date.year(), date.month(), date.day(), 0, 0, 0) }
+fn start_of_day(date: LocalDate) -> DateTime Never! { datetime(date.year(), date.month(), date.day(), 0, 0, 0) }
 
-pub fn end_of_day(date: LocalDate) -> DateTime Never! {
+fn end_of_day(date: LocalDate) -> DateTime Never! {
     datetime(date.year(), date.month(), date.day(), 23, 59, 59).add_nanoseconds(999999999)
 }
 
@@ -462,12 +462,12 @@ fn duration_sub(a: Duration, b: Duration) -> Duration Never! {
     duration_ns(saturating_sub_ns(a.ns, b.ns))
 }
 
-pub fn min_date(a: LocalDate, b: LocalDate) -> LocalDate Never! {
+fn min_date(a: LocalDate, b: LocalDate) -> LocalDate Never! {
     if a <= b -> return a.copy()
     b.copy()
 }
 
-pub fn max_date(a: LocalDate, b: LocalDate) -> LocalDate Never! {
+fn max_date(a: LocalDate, b: LocalDate) -> LocalDate Never! {
     if a >= b -> return a.copy()
     b.copy()
 }
@@ -484,7 +484,7 @@ fn dayofweek(date: LocalDate) -> Int Never! { weekday(date) }
 
 fn todate(dt: DateTime) -> LocalDate Never! { date_of(dt) }
 
-pub fn totime(dt: DateTime) -> LocalTime Never! { time_of(dt) }
+fn totime(dt: DateTime) -> LocalTime Never! { time_of(dt) }
 
 #Test("Gregorian predicates preserve signed years and month defaults") {
     assert(is_leap_year(-400))
@@ -500,23 +500,23 @@ pub fn totime(dt: DateTime) -> LocalTime Never! { time_of(dt) }
 
 // Civil carriers own their validation and arithmetic here, not in an emitter.
 #Error
-pub struct TimeError { pub reason: String }
+struct TimeError { reason: String }
 impl TimeError {
-    pub fn new(reason: String) -> TimeError Never! { TimeError{reason: reason} }
+    fn new(reason: String) -> TimeError Never! { TimeError{reason: reason} }
 }
-pub struct LocalDate { date_y: Int, date_m: Int, date_d: Int }
-pub alias Date :: LocalDate
-pub struct LocalTime { hour_value: Int, minute_value: Int, second_value: Int, nanos: Int }
-pub struct DateTime { secs: Int, nanos: Int, leap_second: Bool }
-pub struct Period { years_value: Int, months_value: Int, days_value: Int }
+struct LocalDate { date_y: Int, date_m: Int, date_d: Int }
+alias Date :: LocalDate
+struct LocalTime { hour_value: Int, minute_value: Int, second_value: Int, nanos: Int }
+struct DateTime { secs: Int, nanos: Int, leap_second: Bool }
+struct Period { years_value: Int, months_value: Int, days_value: Int }
 struct ZoneInfo { offset: Int, is_dst: Bool }
 struct ZoneTransition { at: Int, info: Int }
 struct ZoneData { transitions: [ZoneTransition], infos: [ZoneInfo] }
 // Zone tables never change after construction; plain borrowed reads do not
 // acquire scheduler permits or add Time / Time.Wait to civil operations.
-pub struct Zone { name_value: String, data: ZoneData }
-pub struct ZonedDateTime { instant: DateTime, zone_value: Zone }
-pub struct Instant { start_ns: Int }
+struct Zone { name_value: String, data: ZoneData }
+struct ZonedDateTime { instant: DateTime, zone_value: Zone }
+struct Instant { start_ns: Int }
 
 fn civil_clamp(value: Int, low: Int, high: Int) -> Int Never! {
     if value < low -> return low
@@ -557,7 +557,7 @@ fn civil_signed_pad(value: Int, width: Int) -> String Never! {
     if value < 0 -> return "-{pad2(-value, width - 1)}"
     pad2(value, width)
 }
-pub fn new(year: Int, month: Int, day: Int) -> LocalDate Never! {
+fn new(year: Int, month: Int, day: Int) -> LocalDate Never! {
     m :: civil_clamp(month, 1, 12)
     LocalDate{date_y: year, date_m: m, date_d: civil_clamp(day, 1, days_in_month(year, m))}
 }
@@ -585,38 +585,38 @@ fn civil_from_day(day: Int) -> LocalDate Never! {
     new(year, month, remaining + 1)
 }
 impl LocalDate {
-    pub fn year(self) -> Int Never! { self.date_y }
-    pub fn month(self) -> Int Never! { self.date_m }
-    pub fn day(self) -> Int Never! { self.date_d }
-    pub fn to_string(self) -> String Never! { "{civil_year(self.date_y)}-{pad2(self.date_m, 2)}-{pad2(self.date_d, 2)}" }
-    pub fn weekday(self) -> Int Never! { civil_mod(civil_day(self) + 1, 7) }
-    pub fn iso_weekday(self) -> Int Never! { civil_mod(civil_day(self), 7) + 1 }
-    pub fn day_of_year(self) -> Int Never! { civil_day(self) - civil_day(new(self.date_y, 1, 1)) + 1 }
-    pub fn quarter_of_year(self) -> Int Never! { (self.date_m - 1) /% 3 + 1 }
-    pub fn days_in_month(self) -> Int Never! { days_in_month(self.date_y, self.date_m) }
-    pub fn is_leap_year(self) -> Bool Never! { is_leap_year(self.date_y) }
-    pub fn replace(self, year: Int, month: Int, day: Int) -> LocalDate Never! { new(year, month, day) }
-    pub fn add_days(self, days: Int) -> LocalDate Never! { civil_from_day(civil_day(self) + days) }
-    pub fn add_months(self, months: Int) -> LocalDate Never! {
+    fn year(self) -> Int Never! { self.date_y }
+    fn month(self) -> Int Never! { self.date_m }
+    fn day(self) -> Int Never! { self.date_d }
+    fn to_string(self) -> String Never! { "{civil_year(self.date_y)}-{pad2(self.date_m, 2)}-{pad2(self.date_d, 2)}" }
+    fn weekday(self) -> Int Never! { civil_mod(civil_day(self) + 1, 7) }
+    fn iso_weekday(self) -> Int Never! { civil_mod(civil_day(self), 7) + 1 }
+    fn day_of_year(self) -> Int Never! { civil_day(self) - civil_day(new(self.date_y, 1, 1)) + 1 }
+    fn quarter_of_year(self) -> Int Never! { (self.date_m - 1) /% 3 + 1 }
+    fn days_in_month(self) -> Int Never! { days_in_month(self.date_y, self.date_m) }
+    fn is_leap_year(self) -> Bool Never! { is_leap_year(self.date_y) }
+    fn replace(self, year: Int, month: Int, day: Int) -> LocalDate Never! { new(year, month, day) }
+    fn add_days(self, days: Int) -> LocalDate Never! { civil_from_day(civil_day(self) + days) }
+    fn add_months(self, months: Int) -> LocalDate Never! {
         total :: self.date_m - 1 + months
         new(self.date_y + civil_floor(total, 12), civil_mod(total, 12) + 1, self.date_d)
     }
-    pub fn diff_days(self, other: LocalDate) -> Int Never! { civil_day(self) - civil_day(other) }
-    pub fn add_period(self, value: Period) -> LocalDate Never! { self.add_months(saturating_add_ns(saturating_scale_ns(value.years_value, 12), value.months_value)).add_days(value.days_value) }
-    pub fn subtract_period(self, value: Period) -> LocalDate Never! { self.add_period(value.negated()) }
-    pub fn iso_week_year(self) -> Int Never! { self.add_days(4 - self.iso_weekday()).date_y }
-    pub fn iso_week(self) -> Int Never! {
+    fn diff_days(self, other: LocalDate) -> Int Never! { civil_day(self) - civil_day(other) }
+    fn add_period(self, value: Period) -> LocalDate Never! { self.add_months(saturating_add_ns(saturating_scale_ns(value.years_value, 12), value.months_value)).add_days(value.days_value) }
+    fn subtract_period(self, value: Period) -> LocalDate Never! { self.add_period(value.negated()) }
+    fn iso_week_year(self) -> Int Never! { self.add_days(4 - self.iso_weekday()).date_y }
+    fn iso_week(self) -> Int Never! {
         thursday :: self.add_days(4 - self.iso_weekday())
         january :: new(thursday.date_y, 1, 4)
         first :: january.add_days(1 - january.iso_weekday())
         civil_floor(thursday.add_days(1 - thursday.iso_weekday()).diff_days(first), 7) + 1
     }
-    pub fn truncate(self, unit: String) -> LocalDate Never! {
+    fn truncate(self, unit: String) -> LocalDate Never! {
         if unit == "year" -> return new(self.date_y, 1, 1)
         if unit == "month" -> return new(self.date_y, self.date_m, 1)
         ~self
     }
-    pub fn with(self, year: Int, month: Int, day: Int, overflow: String{"constrain"}) -> LocalDate TimeError! {
+    fn with(self, year: Int, month: Int, day: Int, overflow: String{"constrain"}) -> LocalDate TimeError! {
         if overflow == "constrain" || overflow == "clamp" -> return Ok(new(year, month, day))
         if overflow == "reject" {
             if month >= 1 && month <= 12 && day >= 1 && day <= days_in_month(year, month) -> return Ok(new(year, month, day))
@@ -624,12 +624,12 @@ impl LocalDate {
         }
         Err(TimeError.new("invalid overflow policy: {overflow}"))
     }
-    pub fn until(self, other: LocalDate, largest_unit: String{"day"}, smallest_unit: String{"day"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
+    fn until(self, other: LocalDate, largest_unit: String{"day"}, smallest_unit: String{"day"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
         duration_ns(civil_i64(civil_round(other.diff_days(self) * 86400000000000, smallest_unit, increment, rounding_mode)))
     }
-    pub fn since(self, other: LocalDate, largest_unit: String{"day"}, smallest_unit: String{"day"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
-    pub fn format(self, pattern: String) -> String Never! { civil_format(pattern, self, local_time(0, 0, 0), None) }
-    pub fn format_checked(self, pattern: String) -> String TextError! { civil_format_checked(pattern, self, local_time(0, 0, 0), None) }
+    fn since(self, other: LocalDate, largest_unit: String{"day"}, smallest_unit: String{"day"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
+    fn format(self, pattern: String) -> String Never! { civil_format(pattern, self, local_time(0, 0, 0), None) }
+    fn format_checked(self, pattern: String) -> String TextError! { civil_format_checked(pattern, self, local_time(0, 0, 0), None) }
 }
 impl LocalDate.Equatable {
     fn equal(self, rhs: LocalDate) -> Bool { self.date_y == rhs.date_y && self.date_m == rhs.date_m && self.date_d == rhs.date_d }
@@ -638,8 +638,8 @@ impl LocalDate.Comparable { fn compare(self, rhs: LocalDate) -> Ordering { civil
 impl LocalDate.Display { fn display(self) -> String { self.to_string() } }
 impl LocalDate.Debug { fn debug(^self) -> String { self.to_string() } }
 
-pub fn local_time(hour: Int, minute: Int, second: Int) -> LocalTime Never! { civil_time(hour, minute, second, 0) }
-pub fn time(hour: Int, minute: Int, second: Int) -> LocalTime Never! { local_time(hour, minute, second) }
+fn local_time(hour: Int, minute: Int, second: Int) -> LocalTime Never! { civil_time(hour, minute, second, 0) }
+fn time(hour: Int, minute: Int, second: Int) -> LocalTime Never! { local_time(hour, minute, second) }
 fn civil_time(hour: Int, minute: Int, second: Int, nanos: Int) -> LocalTime Never! {
     LocalTime{hour_value: civil_clamp(hour, 0, 23), minute_value: civil_clamp(minute, 0, 59), second_value: civil_clamp(second, 0, 59), nanos: civil_clamp(nanos, 0, 999999999)}
 }
@@ -650,51 +650,51 @@ fn civil_time_from_ns(value: Int) -> LocalTime Never! {
     civil_time(seconds /% 3600, (seconds /% 60) %% 60, seconds %% 60, total %% 1000000000)
 }
 impl LocalTime {
-    pub fn hour(self) -> Int Never! { self.hour_value }
-    pub fn minute(self) -> Int Never! { self.minute_value }
-    pub fn second(self) -> Int Never! { self.second_value }
-    pub fn millisecond(self) -> Int Never! { self.nanos /% 1000000 }
-    pub fn microsecond(self) -> Int Never! { self.nanos /% 1000 }
-    pub fn nanosecond(self) -> Int Never! { self.nanos }
-    pub fn to_string(self) -> String Never! { isoformat_time(self) }
-    pub fn add_duration(self, value: Duration) -> LocalTime Never! { civil_time_from_ns(civil_time_ns(self) + value.ns) }
-    pub fn subtract_duration(self, value: Duration) -> LocalTime Never! { civil_time_from_ns(civil_time_ns(self) + civil_negated(value.ns)) }
-    pub fn round(self, unit: String, increment: Int{1}, rounding_mode: String{"half_expand"}) -> LocalTime Never! { civil_time_from_ns(civil_round(civil_time_ns(self), unit, increment, rounding_mode)) }
-    pub fn truncate(self, unit: String, increment: Int{1}) -> LocalTime Never! { self.round(unit, increment, "trunc") }
-    pub fn floor(self, unit: String, increment: Int{1}) -> LocalTime Never! { self.round(unit, increment, "floor") }
-    pub fn ceil(self, unit: String, increment: Int{1}) -> LocalTime Never! { self.round(unit, increment, "ceil") }
-    pub fn until(self, other: LocalTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
+    fn hour(self) -> Int Never! { self.hour_value }
+    fn minute(self) -> Int Never! { self.minute_value }
+    fn second(self) -> Int Never! { self.second_value }
+    fn millisecond(self) -> Int Never! { self.nanos /% 1000000 }
+    fn microsecond(self) -> Int Never! { self.nanos /% 1000 }
+    fn nanosecond(self) -> Int Never! { self.nanos }
+    fn to_string(self) -> String Never! { isoformat_time(self) }
+    fn add_duration(self, value: Duration) -> LocalTime Never! { civil_time_from_ns(civil_time_ns(self) + value.ns) }
+    fn subtract_duration(self, value: Duration) -> LocalTime Never! { civil_time_from_ns(civil_time_ns(self) + civil_negated(value.ns)) }
+    fn round(self, unit: String, increment: Int{1}, rounding_mode: String{"half_expand"}) -> LocalTime Never! { civil_time_from_ns(civil_round(civil_time_ns(self), unit, increment, rounding_mode)) }
+    fn truncate(self, unit: String, increment: Int{1}) -> LocalTime Never! { self.round(unit, increment, "trunc") }
+    fn floor(self, unit: String, increment: Int{1}) -> LocalTime Never! { self.round(unit, increment, "floor") }
+    fn ceil(self, unit: String, increment: Int{1}) -> LocalTime Never! { self.round(unit, increment, "ceil") }
+    fn until(self, other: LocalTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
         duration_ns(civil_i64(civil_round(civil_time_ns(other) - civil_time_ns(self), smallest_unit, increment, rounding_mode)))
     }
-    pub fn since(self, other: LocalTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
-    pub fn format(self, pattern: String) -> String Never! { civil_format(pattern, new(1970, 1, 1), self, None) }
-    pub fn format_checked(self, pattern: String) -> String TextError! { civil_format_checked(pattern, new(1970, 1, 1), self, None) }
+    fn since(self, other: LocalTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
+    fn format(self, pattern: String) -> String Never! { civil_format(pattern, new(1970, 1, 1), self, None) }
+    fn format_checked(self, pattern: String) -> String TextError! { civil_format_checked(pattern, new(1970, 1, 1), self, None) }
 }
 impl LocalTime.Equatable { fn equal(self, rhs: LocalTime) -> Bool { civil_time_ns(self) == civil_time_ns(rhs) } }
 impl LocalTime.Comparable { fn compare(self, rhs: LocalTime) -> Ordering { civil_order(civil_time_ns(self), civil_time_ns(rhs)) } }
 impl LocalTime.Display { fn display(self) -> String { self.to_string() } }
 impl LocalTime.Debug { fn debug(^self) -> String { self.to_string() } }
 
-pub fn period(years: Int, months: Int, days: Int) -> Period Never! { Period{years_value: years, months_value: months, days_value: days} }
-pub fn period_days(days: Int) -> Period Never! { period(0, 0, days) }
-pub fn period_months(months: Int) -> Period Never! { period(0, months, 0) }
-pub fn period_years(years: Int) -> Period Never! { period(years, 0, 0) }
+fn period(years: Int, months: Int, days: Int) -> Period Never! { Period{years_value: years, months_value: months, days_value: days} }
+fn period_days(days: Int) -> Period Never! { period(0, 0, days) }
+fn period_months(months: Int) -> Period Never! { period(0, months, 0) }
+fn period_years(years: Int) -> Period Never! { period(years, 0, 0) }
 impl Period {
-    pub fn years(self) -> Int Never! { self.years_value }
-    pub fn months(self) -> Int Never! { self.months_value }
-    pub fn days(self) -> Int Never! { self.days_value }
-    pub fn to_string(self) -> String Never! { "P{self.years_value}Y{self.months_value}M{self.days_value}D" }
-    pub fn sign(self) -> Int Never! {
+    fn years(self) -> Int Never! { self.years_value }
+    fn months(self) -> Int Never! { self.months_value }
+    fn days(self) -> Int Never! { self.days_value }
+    fn to_string(self) -> String Never! { "P{self.years_value}Y{self.months_value}M{self.days_value}D" }
+    fn sign(self) -> Int Never! {
         if self.years_value != 0 -> return civil_sign(self.years_value)
         if self.months_value != 0 -> return civil_sign(self.months_value)
         civil_sign(self.days_value)
     }
-    pub fn is_zero(self) -> Bool Never! { self.years_value == 0 && self.months_value == 0 && self.days_value == 0 }
-    pub fn abs(self) -> Period Never! { period(civil_abs(self.years_value), civil_abs(self.months_value), civil_abs(self.days_value)) }
-    pub fn negated(self) -> Period Never! { period(civil_negated(self.years_value), civil_negated(self.months_value), civil_negated(self.days_value)) }
-    pub fn add(self, other: Period) -> Period Never! { period(saturating_add_ns(self.years_value, other.years_value), saturating_add_ns(self.months_value, other.months_value), saturating_add_ns(self.days_value, other.days_value)) }
-    pub fn sub(self, other: Period) -> Period Never! { self.add(other.negated()) }
-    pub fn total_in(self, unit: String, anchor: LocalDate | DateTime) -> Float Never! {
+    fn is_zero(self) -> Bool Never! { self.years_value == 0 && self.months_value == 0 && self.days_value == 0 }
+    fn abs(self) -> Period Never! { period(civil_abs(self.years_value), civil_abs(self.months_value), civil_abs(self.days_value)) }
+    fn negated(self) -> Period Never! { period(civil_negated(self.years_value), civil_negated(self.months_value), civil_negated(self.days_value)) }
+    fn add(self, other: Period) -> Period Never! { period(saturating_add_ns(self.years_value, other.years_value), saturating_add_ns(self.months_value, other.months_value), saturating_add_ns(self.days_value, other.days_value)) }
+    fn sub(self, other: Period) -> Period Never! { self.add(other.negated()) }
+    fn total_in(self, unit: String, anchor: LocalDate | DateTime) -> Float Never! {
         if anchor == {
             .LocalDate(date) -> date.period_total(self, unit)
             .DateTime(datetime) -> datetime.period_total(self, unit)
@@ -762,15 +762,15 @@ fn civil_round(value: Int, unit: String, increment: Int, mode: String) -> Int Ne
     if half_floor -> return floor * quantum
     away * quantum
 }
-pub fn __datetime_literal(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, nanosecond: Int) -> DateTime Never! {
+fn __datetime_literal(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, nanosecond: Int) -> DateTime Never! {
     civil_timestamp(civil_utc(new(year, month, day), local_time(hour, minute, second)), nanosecond, hour == 23 && minute == 59 && second == 60)
 }
-pub fn datetime(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> DateTime Never! { __datetime_literal(year, month, day, hour, minute, second, 0) }
-pub fn from_timestamp(seconds: Int) -> DateTime Never! { civil_timestamp(seconds, 0, false) }
-pub fn from_unix_seconds(seconds: Int) -> DateTime Never! { civil_unix_parts(seconds, 0) }
-pub fn from_unix_ms(value: Int) -> DateTime Never! { civil_unix_parts(civil_floor(value, 1000), civil_mod(value, 1000) * 1000000) }
-pub fn from_unix_microseconds(value: Int) -> DateTime Never! { civil_unix_parts(civil_floor(value, 1000000), civil_mod(value, 1000000) * 1000) }
-pub fn from_unix_nanoseconds(value: Int) -> DateTime Never! { civil_unix_parts(civil_floor(value, 1000000000), civil_mod(value, 1000000000)) }
+fn datetime(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> DateTime Never! { __datetime_literal(year, month, day, hour, minute, second, 0) }
+fn from_timestamp(seconds: Int) -> DateTime Never! { civil_timestamp(seconds, 0, false) }
+fn from_unix_seconds(seconds: Int) -> DateTime Never! { civil_unix_parts(seconds, 0) }
+fn from_unix_ms(value: Int) -> DateTime Never! { civil_unix_parts(civil_floor(value, 1000), civil_mod(value, 1000) * 1000000) }
+fn from_unix_microseconds(value: Int) -> DateTime Never! { civil_unix_parts(civil_floor(value, 1000000), civil_mod(value, 1000000) * 1000) }
+fn from_unix_nanoseconds(value: Int) -> DateTime Never! { civil_unix_parts(civil_floor(value, 1000000000), civil_mod(value, 1000000000)) }
 fn civil_timestamp(seconds: Int, nanos: Int, leap: Bool) -> DateTime Never! {
     DateTime{secs: civil_i64(seconds + civil_floor(nanos, 1000000000)), nanos: civil_mod(nanos, 1000000000), leap_second: leap}
 }
@@ -796,65 +796,65 @@ fn civil_checked_epoch(value: Int, unit: String) -> Int RangeError! {
     Ok(value)
 }
 impl DateTime {
-    pub fn date(self) -> LocalDate Never! { civil_from_day(719162 + civil_floor(self.secs, 86400)) }
-    pub fn time(self) -> LocalTime Never! {
+    fn date(self) -> LocalDate Never! { civil_from_day(719162 + civil_floor(self.secs, 86400)) }
+    fn time(self) -> LocalTime Never! {
         seconds :: civil_mod(self.secs, 86400)
         t := civil_time(seconds /% 3600, (seconds /% 60) %% 60, seconds %% 60, self.nanos)
         if self.leap_second -> t.second_value = 60
         t
     }
-    pub fn hour(self) -> Int Never! { civil_mod(self.secs, 86400) /% 3600 }
-    pub fn minute(self) -> Int Never! { civil_mod(civil_floor(self.secs, 60), 60) }
-    pub fn second(self) -> Int Never! {
+    fn hour(self) -> Int Never! { civil_mod(self.secs, 86400) /% 3600 }
+    fn minute(self) -> Int Never! { civil_mod(civil_floor(self.secs, 60), 60) }
+    fn second(self) -> Int Never! {
         if self.leap_second -> return 60
         civil_mod(self.secs, 60)
     }
-    pub fn millisecond(self) -> Int Never! { self.nanos /% 1000000 }
-    pub fn microsecond(self) -> Int Never! { self.nanos /% 1000 }
-    pub fn nanosecond(self) -> Int Never! { self.nanos }
-    pub fn to_timestamp(self) -> Int Never! {
+    fn millisecond(self) -> Int Never! { self.nanos /% 1000000 }
+    fn microsecond(self) -> Int Never! { self.nanos /% 1000 }
+    fn nanosecond(self) -> Int Never! { self.nanos }
+    fn to_timestamp(self) -> Int Never! {
         if self.leap_second -> return civil_i64(self.secs + 1)
         self.secs
     }
-    pub fn to_unix_s(self) -> Int Never! { civil_i64(civil_floor(civil_datetime_ns(self), 1000000000)) }
-    pub fn to_unix_ms(self) -> Int Never! { civil_i64(civil_floor(civil_datetime_ns(self), 1000000)) }
-    pub fn to_unix_us(self) -> Int RangeError! { civil_checked_epoch(civil_floor(civil_datetime_ns(self), 1000), "microseconds") }
-    pub fn to_unix_ns(self) -> Int RangeError! { civil_checked_epoch(civil_datetime_ns(self), "nanoseconds") }
-    pub fn to_string(self) -> String Never! { "{self.date().to_string()} {pad2(self.hour(), 2)}:{pad2(self.minute(), 2)}:{pad2(self.second(), 2)} UTC" }
-    pub fn format_rfc3339(self) -> String Never! { "{self.date().to_string()}T{self.time().to_string()}Z" }
-    pub fn format(self, pattern: String) -> String Never! { civil_format(pattern, self.date(), self.time(), None) }
-    pub fn format_checked(self, pattern: String) -> String TextError! { civil_format_checked(pattern, self.date(), self.time(), None) }
-    pub fn add_nanoseconds(self, value: Int) -> DateTime Never! {
+    fn to_unix_s(self) -> Int Never! { civil_i64(civil_floor(civil_datetime_ns(self), 1000000000)) }
+    fn to_unix_ms(self) -> Int Never! { civil_i64(civil_floor(civil_datetime_ns(self), 1000000)) }
+    fn to_unix_us(self) -> Int RangeError! { civil_checked_epoch(civil_floor(civil_datetime_ns(self), 1000), "microseconds") }
+    fn to_unix_ns(self) -> Int RangeError! { civil_checked_epoch(civil_datetime_ns(self), "nanoseconds") }
+    fn to_string(self) -> String Never! { "{self.date().to_string()} {pad2(self.hour(), 2)}:{pad2(self.minute(), 2)}:{pad2(self.second(), 2)} UTC" }
+    fn format_rfc3339(self) -> String Never! { "{self.date().to_string()}T{self.time().to_string()}Z" }
+    fn format(self, pattern: String) -> String Never! { civil_format(pattern, self.date(), self.time(), None) }
+    fn format_checked(self, pattern: String) -> String TextError! { civil_format_checked(pattern, self.date(), self.time(), None) }
+    fn add_nanoseconds(self, value: Int) -> DateTime Never! {
         if value == 0 -> return ~self
         civil_datetime_from_ns(civil_datetime_ns(self) + value)
     }
-    pub fn plus_duration(self, value: Duration) -> DateTime Never! { self.add_nanoseconds(value.ns) }
-    pub fn subtract_duration(self, value: Duration) -> DateTime Never! { self.add_nanoseconds(civil_negated(value.ns)) }
-    pub fn difference(self, other: DateTime) -> Duration Never! { duration_ns(civil_i64(civil_datetime_ns(self) - civil_datetime_ns(other))) }
-    pub fn add_period(self, value: Period) -> DateTime Never! {
+    fn plus_duration(self, value: Duration) -> DateTime Never! { self.add_nanoseconds(value.ns) }
+    fn subtract_duration(self, value: Duration) -> DateTime Never! { self.add_nanoseconds(civil_negated(value.ns)) }
+    fn difference(self, other: DateTime) -> Duration Never! { duration_ns(civil_i64(civil_datetime_ns(self) - civil_datetime_ns(other))) }
+    fn add_period(self, value: Period) -> DateTime Never! {
         d :: self.date().add_period(value)
         __datetime_literal(d.date_y, d.date_m, d.date_d, self.hour(), self.minute(), self.second(), self.nanos)
     }
-    pub fn subtract_period(self, value: Period) -> DateTime Never! { self.add_period(value.negated()) }
-    pub fn round(self, unit: String, increment: Int{1}, rounding_mode: String{"half_expand"}) -> DateTime Never! {
+    fn subtract_period(self, value: Period) -> DateTime Never! { self.add_period(value.negated()) }
+    fn round(self, unit: String, increment: Int{1}, rounding_mode: String{"half_expand"}) -> DateTime Never! {
         total :: civil_round(civil_datetime_ns(self), unit, increment, rounding_mode)
         civil_timestamp(civil_i64(civil_floor(total, 1000000000)), civil_mod(total, 1000000000), false)
     }
-    pub fn truncate(self, unit: String, increment: Int{1}) -> DateTime Never! { self.round(unit, increment, "trunc") }
-    pub fn floor(self, unit: String, increment: Int{1}) -> DateTime Never! { self.round(unit, increment, "floor") }
-    pub fn ceil(self, unit: String, increment: Int{1}) -> DateTime Never! { self.round(unit, increment, "ceil") }
-    pub fn until(self, other: DateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
+    fn truncate(self, unit: String, increment: Int{1}) -> DateTime Never! { self.round(unit, increment, "trunc") }
+    fn floor(self, unit: String, increment: Int{1}) -> DateTime Never! { self.round(unit, increment, "floor") }
+    fn ceil(self, unit: String, increment: Int{1}) -> DateTime Never! { self.round(unit, increment, "ceil") }
+    fn until(self, other: DateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! {
         duration_ns(civil_i64(civil_round(civil_datetime_ns(other) - civil_datetime_ns(self), smallest_unit, increment, rounding_mode)))
     }
-    pub fn since(self, other: DateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
-    pub fn replace(self, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> DateTime Never! { __datetime_literal(year, month, day, hour, minute, second, self.nanos) }
-    pub fn with(self, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, overflow: String{"constrain"}) -> DateTime TimeError! {
+    fn since(self, other: DateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
+    fn replace(self, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> DateTime Never! { __datetime_literal(year, month, day, hour, minute, second, self.nanos) }
+    fn with(self, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, overflow: String{"constrain"}) -> DateTime TimeError! {
         date :: self.date().with(year, month, day, overflow)
         valid_second :: (second >= 0 && second <= 59) || (hour == 23 && minute == 59 && second == 60)
         if overflow == "reject" && (hour < 0 || hour > 23 || minute < 0 || minute > 59 || !valid_second) -> return Err(TimeError.new("time fields are outside the valid range: {civil_signed_pad(hour, 2)}:{civil_signed_pad(minute, 2)}:{civil_signed_pad(second, 2)}"))
         Ok(__datetime_literal(date.date_y, date.date_m, date.date_d, hour, minute, second, self.nanos))
     }
-    pub fn in_zone(self, value: Zone) -> ZonedDateTime Never! { ZonedDateTime{instant: self, zone_value: value} }
+    fn in_zone(self, value: Zone) -> ZonedDateTime Never! { ZonedDateTime{instant: self, zone_value: value} }
 }
 impl DateTime.Equatable { fn equal(self, rhs: DateTime) -> Bool { self.secs == rhs.secs && self.nanos == rhs.nanos && self.leap_second == rhs.leap_second } }
 impl DateTime.Comparable {
@@ -925,7 +925,7 @@ fn civil_split(value: String, separator: String) -> (head: String, tail: String)
     pair :: value.split_once(separator) ?? return None
     Val((head: pair.before, tail: pair.after))
 }
-pub fn parse(value: String) -> LocalDate TimeError! { civil_parse_date(value, true, true) }
+fn parse(value: String) -> LocalDate TimeError! { civil_parse_date(value, true, true) }
 fn civil_parse_date(value: String, signed_year: Bool, require_fields: Bool) -> LocalDate TimeError! {
     raw :: value.bytes()
     start := 0
@@ -951,11 +951,11 @@ fn civil_iso_week(year: Int, week: Int, weekday: Int) -> LocalDate? Never! {
     if date.iso_week_year() == year && date.iso_week() == week -> return Val(date)
     None
 }
-pub fn from_iso_week(year: Int, week: Int, weekday: Int) -> LocalDate TimeError! {
+fn from_iso_week(year: Int, week: Int, weekday: Int) -> LocalDate TimeError! {
     date :: civil_iso_week(year, week, weekday) ?? return Err(TimeError{reason: "ISO week date out of range: {year}-W{civil_signed_pad(week, 2)}-{weekday}"})
     Ok(date)
 }
-pub fn parse_iso_week_date(value: String) -> LocalDate TimeError! {
+fn parse_iso_week_date(value: String) -> LocalDate TimeError! {
     parts :: civil_split(value, "-W") ?? return Err(TimeError{reason: "invalid ISO week date: {value}"})
     rest :: civil_split(parts.tail, "-") ?? return Err(TimeError{reason: "invalid ISO week date: {value}"})
     if parts.head.len() == 0 || rest.head.bytes().len() != 2 || rest.tail.bytes().len() != 1 || !civil_digits(rest.head) || !civil_digits(rest.tail) -> return Err(TimeError{reason: "invalid ISO week date: {value}"})
@@ -988,7 +988,7 @@ fn civil_time_parts(value: String, fractions: Bool) -> CivilTimeParts TimeError!
     second :: civil_integer(seconds, "second")
     Ok(CivilTimeParts{hour: hour, minute: minute, second: second, nanos: nanos})
 }
-pub fn parse_time(value: String) -> LocalTime TimeError! {
+fn parse_time(value: String) -> LocalTime TimeError! {
     parts :: civil_time_parts(value, true)
     if parts.hour < 0 || parts.hour > 23 || parts.minute < 0 || parts.minute > 59 || parts.second < 0 || parts.second > 59 -> return Err(TimeError{reason: "time out of range: {value}"})
     Ok(civil_time(parts.hour, parts.minute, parts.second, parts.nanos))
@@ -998,7 +998,7 @@ fn civil_rfc_time(value: String) -> (time: LocalTime, leap: Bool) TimeError! {
     if parts.hour < 0 || parts.hour > 23 || parts.minute < 0 || parts.minute > 59 || parts.second < 0 || parts.second > 60 || (parts.second == 60 && (parts.hour != 23 || parts.minute != 59)) -> return Err(TimeError{reason: "time out of range: {value}"})
     Ok((time: civil_time(parts.hour, parts.minute, parts.second, parts.nanos), leap: parts.second == 60))
 }
-pub fn parse_rfc3339(value: String) -> DateTime TimeError! {
+fn parse_rfc3339(value: String) -> DateTime TimeError! {
     parts :: civil_split(value, "T") ?? return Err(TimeError{reason: "invalid RFC3339 datetime: {value}"})
     if !civil_ascii(parts.tail) -> return Err(TimeError{reason: "invalid RFC3339 datetime: {value}"})
     date :: parse(parts.head)
@@ -1031,11 +1031,11 @@ fn civil_parse_offset(value: String) -> Int TimeError! {
     Ok(offset)
 }
 
-pub fn utc() -> Zone Never! {
+fn utc() -> Zone Never! {
     data :: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: 0, is_dst: false}}}
     Zone{name_value: "UTC", data: data}
 }
-pub fn zone(name: String) -[Env, FS.Read]> Zone TimeError! {
+fn zone(name: String) -[Env, FS.Read]> Zone TimeError! {
     if name == "UTC" || name == "Etc/UTC" || name == "Z" -> return Ok(utc())
     if name.contains("..") || name.starts_with("/") || name.starts_with("\\") -> return Err(TimeError{reason: "invalid time zone name: {name}"})
     rel := ~name
@@ -1178,17 +1178,17 @@ fn civil_local_compatible(value: Zone, date: LocalDate, t: LocalTime) -> Int Nev
     civil_local_utc(value, date, t, "compatible") ?? saturating_sub_ns(civil_utc(date, t), civil_zone_info(value, civil_utc(date, t)).offset)
 }
 impl Zone {
-    pub fn name(self) -> String Never! {
+    fn name(self) -> String Never! {
         ~self.name_value
     }
-    pub fn to_string(self) -> String Never! { self.name() }
-    pub fn next_transition(self, utc_seconds: Int) -> Int? Never! {
+    fn to_string(self) -> String Never! { self.name() }
+    fn next_transition(self, utc_seconds: Int) -> Int? Never! {
         loop transition in self.data.transitions {
             if transition.at > utc_seconds -> return Val(transition.at)
         }
         None
     }
-    pub fn previous_transition(self, utc_seconds: Int) -> Int? Never! {
+    fn previous_transition(self, utc_seconds: Int) -> Int? Never! {
         i := self.data.transitions.len()
         loop i > 0 {
             i = i - 1
@@ -1196,8 +1196,8 @@ impl Zone {
         }
         None
     }
-    pub fn start_of_day(self, date: LocalDate) -> ZonedDateTime Never! { zoned(from_timestamp(civil_local_compatible(self, date, local_time(0, 0, 0))), self) }
-    pub fn hours_in_day(self, date: LocalDate) -> Int Never! {
+    fn start_of_day(self, date: LocalDate) -> ZonedDateTime Never! { zoned(from_timestamp(civil_local_compatible(self, date, local_time(0, 0, 0))), self) }
+    fn hours_in_day(self, date: LocalDate) -> Int Never! {
         first :: civil_local_compatible(self, date, local_time(0, 0, 0))
         last :: civil_local_compatible(self, date.add_days(1), local_time(0, 0, 0))
         saturating_sub_ns(last, first) /% 3600
@@ -1205,8 +1205,8 @@ impl Zone {
 }
 impl Zone.Display { fn display(self) -> String { self.to_string() } }
 impl Zone.Debug { fn debug(^self) -> String { self.to_string() } }
-pub fn zoned(value: DateTime, zone: Zone) -> ZonedDateTime Never! { ZonedDateTime{instant: value, zone_value: zone} }
-pub fn zoned_local(date: LocalDate, t: LocalTime, zone: Zone, disambiguation: String{"compatible"}) -> ZonedDateTime TimeError! {
+fn zoned(value: DateTime, zone: Zone) -> ZonedDateTime Never! { ZonedDateTime{instant: value, zone_value: zone} }
+fn zoned_local(date: LocalDate, t: LocalTime, zone: Zone, disambiguation: String{"compatible"}) -> ZonedDateTime TimeError! {
     seconds :: civil_local_utc(zone, date, t, disambiguation)
     Ok(zoned(civil_timestamp(seconds, t.nanos, false), zone))
 }
@@ -1215,34 +1215,34 @@ fn civil_zoned_parts(value: ZonedDateTime) -> (date: LocalDate, time: LocalTime,
     civil_local_parts(value.zone_value, value.instant.to_timestamp())
 }
 impl ZonedDateTime {
-    pub fn date(self) -> LocalDate Never! { civil_zoned_parts(self).date }
-    pub fn time(self) -> LocalTime Never! { civil_zoned_parts(self).time }
-    pub fn offset_seconds(self) -> Int Never! { civil_zoned_parts(self).offset }
-    pub fn is_dst(self) -> Bool Never! { civil_zone_info(self.zone_value, self.instant.to_timestamp()).is_dst }
-    pub fn to_datetime(self) -> DateTime Never! { self.instant }
-    pub fn zone(self) -> Zone Never! { self.zone_value }
-    pub fn add_duration(self, value: Duration) -> ZonedDateTime Never! { zoned(self.instant.plus_duration(value), self.zone_value) }
-    pub fn subtract_duration(self, value: Duration) -> ZonedDateTime Never! { zoned(self.instant.subtract_duration(value), self.zone_value) }
-    pub fn add_period(self, value: Period) -> ZonedDateTime Never! {
+    fn date(self) -> LocalDate Never! { civil_zoned_parts(self).date }
+    fn time(self) -> LocalTime Never! { civil_zoned_parts(self).time }
+    fn offset_seconds(self) -> Int Never! { civil_zoned_parts(self).offset }
+    fn is_dst(self) -> Bool Never! { civil_zone_info(self.zone_value, self.instant.to_timestamp()).is_dst }
+    fn to_datetime(self) -> DateTime Never! { self.instant }
+    fn zone(self) -> Zone Never! { self.zone_value }
+    fn add_duration(self, value: Duration) -> ZonedDateTime Never! { zoned(self.instant.plus_duration(value), self.zone_value) }
+    fn subtract_duration(self, value: Duration) -> ZonedDateTime Never! { zoned(self.instant.subtract_duration(value), self.zone_value) }
+    fn add_period(self, value: Period) -> ZonedDateTime Never! {
         date :: self.date().add_period(value)
         t :: self.time()
         zoned_local(date, t, self.zone_value, "compatible") ?? zoned(from_timestamp(civil_local_compatible(self.zone_value, date, t)), self.zone_value)
     }
-    pub fn subtract_period(self, value: Period) -> ZonedDateTime Never! { self.add_period(value.negated()) }
-    pub fn with_time(self, t: LocalTime, disambiguation: String{"compatible"}) -> ZonedDateTime TimeError! {
+    fn subtract_period(self, value: Period) -> ZonedDateTime Never! { self.add_period(value.negated()) }
+    fn with_time(self, t: LocalTime, disambiguation: String{"compatible"}) -> ZonedDateTime TimeError! {
         zoned_local(self.date(), t, self.zone_value, disambiguation)
     }
-    pub fn with_zone(self, zone: Zone) -> ZonedDateTime Never! { zoned(self.instant, zone) }
-    pub fn until(self, other: ZonedDateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { self.instant.until(other.instant, largest_unit, smallest_unit, rounding_mode, increment) }
-    pub fn since(self, other: ZonedDateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
-    pub fn next_transition(self) -> Int? Never! { self.zone_value.next_transition(self.instant.to_timestamp()) }
-    pub fn previous_transition(self) -> Int? Never! { self.zone_value.previous_transition(self.instant.to_timestamp()) }
-    pub fn start_of_day(self) -> ZonedDateTime Never! { self.zone_value.start_of_day(self.date()) }
-    pub fn hours_in_day(self) -> Int Never! { self.zone_value.hours_in_day(self.date()) }
-    pub fn format(self, pattern: String) -> String Never! { civil_format(pattern, self.date(), self.time(), Val((name: self.zone_value.name(), offset: self.offset_seconds()))) }
-    pub fn format_checked(self, pattern: String) -> String TextError! { civil_format_checked(pattern, self.date(), self.time(), Val((name: self.zone_value.name(), offset: self.offset_seconds()))) }
-    pub fn to_string(self) -> String Never! { "{self.date().to_string()} {self.time().to_string()} {self.zone_value.name()} ({civil_offset(self.offset_seconds())})" }
-    pub fn format_rfc9557(self) -> String Never! {
+    fn with_zone(self, zone: Zone) -> ZonedDateTime Never! { zoned(self.instant, zone) }
+    fn until(self, other: ZonedDateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { self.instant.until(other.instant, largest_unit, smallest_unit, rounding_mode, increment) }
+    fn since(self, other: ZonedDateTime, largest_unit: String{"second"}, smallest_unit: String{"nanosecond"}, rounding_mode: String{"trunc"}, increment: Int{1}) -> Duration Never! { other.until(self, largest_unit, smallest_unit, rounding_mode, increment) }
+    fn next_transition(self) -> Int? Never! { self.zone_value.next_transition(self.instant.to_timestamp()) }
+    fn previous_transition(self) -> Int? Never! { self.zone_value.previous_transition(self.instant.to_timestamp()) }
+    fn start_of_day(self) -> ZonedDateTime Never! { self.zone_value.start_of_day(self.date()) }
+    fn hours_in_day(self) -> Int Never! { self.zone_value.hours_in_day(self.date()) }
+    fn format(self, pattern: String) -> String Never! { civil_format(pattern, self.date(), self.time(), Val((name: self.zone_value.name(), offset: self.offset_seconds()))) }
+    fn format_checked(self, pattern: String) -> String TextError! { civil_format_checked(pattern, self.date(), self.time(), Val((name: self.zone_value.name(), offset: self.offset_seconds()))) }
+    fn to_string(self) -> String Never! { "{self.date().to_string()} {self.time().to_string()} {self.zone_value.name()} ({civil_offset(self.offset_seconds())})" }
+    fn format_rfc9557(self) -> String Never! {
         parts :: civil_zoned_parts(self)
         fraction := ""
         if self.instant.nanos != 0 -> fraction = ".{pad2(self.instant.nanos, 9)}"
@@ -1258,7 +1258,7 @@ impl ZonedDateTime.Equatable {
 impl ZonedDateTime.Comparable { fn compare(self, rhs: ZonedDateTime) -> Ordering { self.instant.compare(rhs.instant) } }
 impl ZonedDateTime.Display { fn display(self) -> String { self.to_string() } }
 impl ZonedDateTime.Debug { fn debug(^self) -> String { self.to_string() } }
-pub fn parse_zoned(value: String) -[Env, FS.Read]> ZonedDateTime TimeError! {
+fn parse_zoned(value: String) -[Env, FS.Read]> ZonedDateTime TimeError! {
     raw :: value.bytes()
     if raw.len() == 0 || raw[raw.len() - 1] != (U8{93}) -> return Err(TimeError{reason: "RFC9557 datetime needs a [zone]: {value}"})
     split := raw.len() - 1
@@ -1413,32 +1413,32 @@ fn civil_format_checked(pattern: String, date: LocalDate, t: LocalTime, zone: (n
 }
 
 // Clock selection belongs beside the civil values; providers expose samples.
-pub fn now_utc() -[Time]> DateTime Never! {
+fn now_utc() -[Time]> DateTime Never! {
     if core.time.__world_wall_ms() == .Val(millis) -> return civil_timestamp(civil_floor(millis, 1000), civil_mod(millis, 1000) * 1000000, false)
     if core.time.__wall_override_ms() == .Val(millis) -> return civil_timestamp(civil_floor(millis, 1000), civil_mod(millis, 1000) * 1000000, false)
     sample :: core.time.__wall_sample()
     if sample.before_epoch -> return from_timestamp(0)
     civil_timestamp(sample.seconds, sample.nanoseconds, false)
 }
-pub fn now() -[Time]> DateTime Never! { now_utc() }
-pub fn today() -[Time]> LocalDate Never! { now_utc().date() }
+fn now() -[Time]> DateTime Never! { now_utc() }
+fn today() -[Time]> LocalDate Never! { now_utc().date() }
 fn civil_monotonic_ns() -[Time]> Int Never! {
     if core.time.__controlled_monotonic_ns() == .Val(value) -> return value
     if core.time.__world_monotonic_ns() == .Val(value) -> return value
     civil_i64(core.time.__host_monotonic_ns())
 }
-pub fn instant() -[Time]> Instant Never! { Instant{start_ns: civil_monotonic_ns()} }
-pub fn sleep_until(deadline: Instant) Never! -[Time]> {
+fn instant() -[Time]> Instant Never! { Instant{start_ns: civil_monotonic_ns()} }
+fn sleep_until(deadline: Instant) Never! -[Time]> {
     remaining :: saturating_sub_ns(deadline.start_ns, civil_monotonic_ns())
     sleep(duration_ns(remaining))
 }
 impl Instant {
-    pub fn elapsed(self) -[Time]> Duration Never! { duration_ns(saturating_sub_ns(civil_monotonic_ns(), self.start_ns)) }
-    pub fn elapsed_millis(self) -[Time]> Int Never! { self.elapsed().ns /% 1000000 }
-    pub fn plus_duration(self, value: Duration) -> Instant Never! { Instant{start_ns: saturating_add_ns(self.start_ns, value.ns)} }
-    pub fn minus_duration(self, value: Duration) -> Instant Never! { Instant{start_ns: saturating_sub_ns(self.start_ns, value.ns)} }
-    pub fn difference(self, other: Instant) -> Duration Never! { duration_ns(saturating_sub_ns(self.start_ns, other.start_ns)) }
-    pub fn to_string(self) -> String Never! { "Instant" }
+    fn elapsed(self) -[Time]> Duration Never! { duration_ns(saturating_sub_ns(civil_monotonic_ns(), self.start_ns)) }
+    fn elapsed_millis(self) -[Time]> Int Never! { self.elapsed().ns /% 1000000 }
+    fn plus_duration(self, value: Duration) -> Instant Never! { Instant{start_ns: saturating_add_ns(self.start_ns, value.ns)} }
+    fn minus_duration(self, value: Duration) -> Instant Never! { Instant{start_ns: saturating_sub_ns(self.start_ns, value.ns)} }
+    fn difference(self, other: Instant) -> Duration Never! { duration_ns(saturating_sub_ns(self.start_ns, other.start_ns)) }
+    fn to_string(self) -> String Never! { "Instant" }
 }
 impl Instant.Equatable { fn equal(self, rhs: Instant) -> Bool { self.start_ns == rhs.start_ns } }
 impl Instant.Comparable { fn compare(self, rhs: Instant) -> Ordering { civil_order(self.start_ns, rhs.start_ns) } }
@@ -1566,20 +1566,20 @@ impl DateTime.Decode {
 impl DateTime {
     // Sema has already validated the complete literal. Ordinary source dispatch
     // keeps the runtime construction on the same parser as runtime strings.
-    pub fn __literal(text: String) -> DateTime Never! {
+    fn __literal(text: String) -> DateTime Never! {
         parse_rfc3339(text) ?? panic("a checked DateTime literal became invalid")
     }
 }
 
 impl LocalDate {
-    pub fn today() -[Time]> LocalDate Never! { today() }
+    fn today() -[Time]> LocalDate Never! { today() }
 }
 impl Instant {
-    pub fn __now() -[Time]> Instant Never! { instant() }
-    pub fn __add(left: Instant, right: Duration) -> Instant Never! { left.plus_duration(right) }
-    pub fn __delta_add(left: Duration, right: Instant) -> Instant Never! { right.plus_duration(left) }
-    pub fn __subtract(left: Instant, right: Duration) -> Instant Never! { left.minus_duration(right) }
-    pub fn __difference(left: Instant, right: Instant) -> Duration Never! { left.difference(right) }
+    fn __now() -[Time]> Instant Never! { instant() }
+    fn __add(left: Instant, right: Duration) -> Instant Never! { left.plus_duration(right) }
+    fn __delta_add(left: Duration, right: Instant) -> Instant Never! { right.plus_duration(left) }
+    fn __subtract(left: Instant, right: Duration) -> Instant Never! { left.minus_duration(right) }
+    fn __difference(left: Instant, right: Instant) -> Duration Never! { left.difference(right) }
 }
 
 #Test("Civil dates preserve Gregorian arithmetic and TimeError overflow reasons") {

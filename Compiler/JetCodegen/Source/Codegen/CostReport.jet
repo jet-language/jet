@@ -1,14 +1,14 @@
 // Read-only projection of frozen typed evidence. No adapter text is inspected.
 use jet_foundation.[Span, TExpr, TExprKind, TStmt, TFunc, TLambda, TIfCond, TPattern, TPatternShape, TCostKind, TCostState, TCoreClosureKind, tir_cost_fact, tir_stmt_cost_fact]
 
-pub struct TCostSite {
-    pub function: String
-    pub span: Span
-    pub loop_depth: Int
-    pub kind: TCostKind
-    pub state: TCostState
+struct TCostSite {
+    function: String
+    span: Span
+    loop_depth: Int
+    kind: TCostKind
+    state: TCostState
 }
-pub struct TCostReport { pub sites: [TCostSite]{[]} }
+struct TCostReport { sites: [TCostSite]{[]} }
 
 fn jet_codegen_cost_lambda(value: TLambda, function: String, depth: Int, sites: &[TCostSite]) {
     if value.executable == {
@@ -452,7 +452,7 @@ fn jet_codegen_cost_pattern_shape(shape: TPatternShape, function: String, depth:
         else -> {}
     }
 }
-pub fn jet_codegen_cost_report(functions: [TFunc]) -> TCostReport {
+fn jet_codegen_cost_report(functions: [TFunc]) -> TCostReport {
     report := TCostReport{}
     loop function in functions {
         if function.synthetic -> next

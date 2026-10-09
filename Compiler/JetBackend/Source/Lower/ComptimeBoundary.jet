@@ -1,45 +1,45 @@
 // Compiler-owned native layouts. This is boundary metadata, not a second
 // codec policy: every size/offset comes from the ordinary lowering layout.
 use jet_foundation.[MIRFunctionID, MIRProgram, MIRType, MIRTypeKind, mir_nominal_ref, mir_type_display_name, mir_type_from_kind]
-pub struct X64ValueMember {
-    pub name: String
-    pub offset: Int
-    pub descriptor: Int
-    pub boxed: Bool
+struct X64ValueMember {
+    name: String
+    offset: Int
+    descriptor: Int
+    boxed: Bool
 }
-pub struct X64ValueVariant {
-    pub name: String
-    pub selector: Int
-    pub members: [X64ValueMember]
-    pub named: Bool{true}
+struct X64ValueVariant {
+    name: String
+    selector: Int
+    members: [X64ValueMember]
+    named: Bool{true}
 }
-pub struct X64ValueDescriptor {
-    pub kind: String
-    pub name: String
-    pub size: Int
-    pub align: Int
-    pub stride: Int{0}
-    pub children: [Int]{[Int]{}}
-    pub members: [X64ValueMember]{[X64ValueMember]{}}
-    pub variants: [X64ValueVariant]{[X64ValueVariant]{}}
+struct X64ValueDescriptor {
+    kind: String
+    name: String
+    size: Int
+    align: Int
+    stride: Int{0}
+    children: [Int]{[Int]{}}
+    members: [X64ValueMember]{[X64ValueMember]{}}
+    variants: [X64ValueVariant]{[X64ValueVariant]{}}
 }
-pub struct X64ValueBoundary {
-    pub root: Int
-    pub descriptors: [X64ValueDescriptor]
-    pub errors: [String]
+struct X64ValueBoundary {
+    root: Int
+    descriptors: [X64ValueDescriptor]
+    errors: [String]
 }
-pub struct LIRClosureValueLayout {
-    pub code: LIRFunctionID
-    pub release: LIRFunctionID?
-    pub function: MIRFunctionID
-    pub boundary: X64ValueBoundary
-    pub captures: [X64ValueMember]
+struct LIRClosureValueLayout {
+    code: LIRFunctionID
+    release: LIRFunctionID?
+    function: MIRFunctionID
+    boundary: X64ValueBoundary
+    captures: [X64ValueMember]
 }
 
 struct LowerValueBoundary {
-    pub rows: [String:Int]
-    pub descriptors: [X64ValueDescriptor]
-    pub errors: [String]
+    rows: [String:Int]
+    descriptors: [X64ValueDescriptor]
+    errors: [String]
 }
 
 fn lower_value_members(p: MIRProgram, state: &LowerValueBoundary, members: [LowerMember]) -> [X64ValueMember] Never! {
@@ -148,7 +148,7 @@ fn lower_value_descriptor(p: MIRProgram, state: &LowerValueBoundary, ty: MIRType
     row
 }
 
-pub fn x64_value_boundary(program: MIRProgram, ty: MIRType) -> X64ValueBoundary Never! {
+fn x64_value_boundary(program: MIRProgram, ty: MIRType) -> X64ValueBoundary Never! {
     state := LowerValueBoundary{rows: [String:Int]{}, descriptors: [X64ValueDescriptor]{}, errors: [String]{}}
     root :: lower_value_descriptor(program, &state, ty)
     X64ValueBoundary{root: root, descriptors: state.descriptors, errors: state.errors}

@@ -199,7 +199,7 @@ fn env_discovery_load(project_dir: String) -[FS]> PackageIndex? ProviderReason! 
 }
 
 // Replace the project index under the project lock.
-pub fn env_discovery_write(project_dir: String, index: PackageIndex) ProviderReason! -[FS, Env, Time]> {
+fn env_discovery_write(project_dir: String, index: PackageIndex) ProviderReason! -[FS, Env, Time]> {
     path :: env_discovery_index_path(project_dir)
     project_lock :: env_runtime_project_lock(project_dir, "discovery-index") ?? return Err(ProviderReason{message: "{err}"})
     files.create_dir_all(files.dirname(path)) ?? return Err(ProviderReason{message: "{err}"})
@@ -322,7 +322,7 @@ fn env_discovery_service_option_fields() -> [PackageOptionField] Never! {
     }
 }
 
-pub fn env_discovery_search_json(records: [PackageIndexEntry]) -> String Never! {
+fn env_discovery_search_json(records: [PackageIndexEntry]) -> String Never! {
     items := [Dyn]{}
     loop record in records -> &items.push(env_discovery_record_tree(record))
     pkg_json_render(Dyn.Object(["packages": Dyn.Array(items)]))

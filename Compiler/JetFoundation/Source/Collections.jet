@@ -16,7 +16,7 @@
 // order, then pop them back in canonical order into the original receiver
 // (whose allocation and capacity pop retains). No row is read out of
 // a borrowed indexed place and no owning payload is copied.
-pub fn compiler_apply_order<T>(rows: &[T], order: [Int]) Never! {
+fn compiler_apply_order<T>(rows: &[T], order: [Int]) Never! {
     count :: rows.len()
     if count < 2 -> return
     changed := false
@@ -43,7 +43,7 @@ pub fn compiler_apply_order<T>(rows: &[T], order: [Int]) Never! {
     }
 }
 
-pub enum SemaCollectionKind {
+enum SemaCollectionKind {
     List(element: Type)
     FixedList(element: Type)
     Iter(element: Type)
@@ -621,7 +621,7 @@ fn collection_arg_is_callback(arg: CollectionArg) -> Bool Never! {
 // Source: crates/jet-foundation/src/Collections.rs; regenerate with gen-core-tables.mjs --write
 SEMA_RESERVED_TYPES :: [String]{"HashMap", "BTreeMap", "Map", "Char", "Bits", "Bytes", "Set", "Rank", "PriorityQueue", "Cache", "Iter", "ViewIter", "MemoStats", "RemoveBy", "Ordering", "Range", "SharedGuard", "Shared.Weak", "Condition", "Tally", "Queue", "Decimal", "Duration", "DurationUnit", "RangeError", "ExpiringValue", "Authority", "Validate", "BuildContext", "BuildPlan", "BuildAction", "BuildTarget", "BuildToolchain", "BuildProbe", "BuildSigningIdentity", "BuildError", "ProgramInfo", "Cell", "CellReadGuard", "CellEditGuard", "Unit"}
 // END GENERATED RESERVED TYPES
-pub fn sema_reserved_type_name(name: String) -> Bool Never! {
+fn sema_reserved_type_name(name: String) -> Bool Never! {
     SEMA_RESERVED_TYPES.contains(name)
 }
 

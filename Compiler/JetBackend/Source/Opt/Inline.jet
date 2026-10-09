@@ -4,13 +4,13 @@
 // The Simplify renumbering helpers preserve every instruction's full metadata.
 
 struct InlineGraph {
-    pub edges: [[Int]]
-    pub index: [Int]
-    pub low: [Int]
-    pub active: [Bool]
-    pub stack: [Int]
-    pub recursive: [Bool]
-    pub counter: Int
+    edges: [[Int]]
+    index: [Int]
+    low: [Int]
+    active: [Bool]
+    stack: [Int]
+    recursive: [Bool]
+    counter: Int
 }
 
 fn inline_direct(program: LIRModule, original: LIRFunction) -> LIRFunction Never! {
@@ -225,7 +225,7 @@ fn inline_caller(program: LIRModule, original: LIRFunction, recursive: [Bool], s
     opt_compact(function)
 }
 
-pub fn lir_inline_module(program: LIRModule) -> LIRModule Never! {
+fn lir_inline_module(program: LIRModule) -> LIRModule Never! {
     direct := [LIRFunction]{}
     loop function in program.functions -> &direct.push(inline_direct(program, function))
     exposed :: LIRModule{signatures: program.signatures, functions: direct, data: program.data}

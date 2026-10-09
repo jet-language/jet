@@ -39,7 +39,7 @@ struct SemaPolicyUses {
 
 // Registration runs this after inline-module lifting, before signature and
 // body passes, so generated wrappers receive exactly the ordinary checks.
-pub fn sema_policy_materialize(program: &Program, declarations: [UserPolicyDecl], module_identity: String, source_file: String, origin: SemaSourceOrigin, segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) {
+fn sema_policy_materialize(program: &Program, declarations: [UserPolicyDecl], module_identity: String, source_file: String, origin: SemaSourceOrigin, segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) {
     uses := [String:[String]]{}
     loop item in program.items {
         if item == .Func(function) {
@@ -64,7 +64,7 @@ pub fn sema_policy_materialize(program: &Program, declarations: [UserPolicyDecl]
                     if candidate.name == name { declaration = Val(candidate); break }
                 }
                 policy :: declaration ?? {
-                    &diagnostics.push(sema_error("E0355", target.name_span, "unknown callable policy setting `{name}`", "a callable policy name must be a compiler-owned setting or a public policy declared in this package", "declare `pub policy {name}(...) {{ wrap(call) {{ … }} }}"))
+                    &diagnostics.push(sema_error("E0355", target.name_span, "unknown callable policy setting `{name}`", "a callable policy name must be a compiler-owned setting or a public policy declared in this package", "declare `policy {name}(...) {{ wrap(call) {{ … }} }}"))
                     next
                 }
                 wrapper := ast_func(sema_policy_wrapper_name(name, target.name), policy.name_span, policy.span)
@@ -88,16 +88,12 @@ pub fn sema_policy_materialize(program: &Program, declarations: [UserPolicyDecl]
     loop item in generated -> &program.items.push(item)
 }
 
-pub fn sema_policy_declarations_checked(input: [UserPolicyDecl], diagnostics: &[Diagnostic]) -> [UserPolicyDecl] {
+fn sema_policy_declarations_checked(input: [UserPolicyDecl], diagnostics: &[Diagnostic]) -> [UserPolicyDecl] {
     declarations := [UserPolicyDecl]{}
     names := [String:Bool]{}
     loop declaration in input {
         if sema_policy_builtin(declaration.name) {
             &diagnostics.push(sema_error("E0105", declaration.name_span, "policy setting `{declaration.name}` redeclares a compiler-owned setting", "built-in callable policies and package settings share one nominal vocabulary", "choose a different policy setting name"))
-            next
-        }
-        if !declaration.is_pub {
-            &diagnostics.push(sema_error("E0003", declaration.span, "a user policy declaration must be public", "Policy settings are nominal package vocabulary and their users must resolve one package-owned name", "Write `pub policy name(...) {{ wrap(call) {{ … }} }}`"))
             next
         }
         if names.get(declaration.name) != None {
@@ -110,7 +106,7 @@ pub fn sema_policy_declarations_checked(input: [UserPolicyDecl], diagnostics: &[
     declarations
 }
 
-pub fn sema_policy_package_declarations(inputs: [SemaRegistrationModuleInput], package: String, diagnostics: &[Diagnostic]) -> [UserPolicyDecl] {
+fn sema_policy_package_declarations(inputs: [SemaRegistrationModuleInput], package: String, diagnostics: &[Diagnostic]) -> [UserPolicyDecl] {
     declarations := [UserPolicyDecl]{}
     loop input in inputs {
         if input.package_identity == package {
@@ -143,7 +139,7 @@ fn sema_policy_wrap(callee: TExpr, target: SemaCallDirectTarget, policy: Call, e
     Val(sema_call_with_binder_pins(^pins, value, policy.name_span))
 }
 
-pub fn sema_policy_direct_value(target: SemaCallDirectTarget, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_policy_direct_value(target: SemaCallDirectTarget, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     declaration :: if environment.registration_graph == .Val(graph) -> sema_registration_callable_declaration(graph, target.symbol.id) ?? return None else -> {
         item :: sema_scope_resolve_declaration(environment, target.symbol.id) ?? return None
         if item == .Func(function) -> function else -> return None
@@ -159,7 +155,7 @@ pub fn sema_policy_direct_value(target: SemaCallDirectTarget, span: Span, enviro
     Val(callee)
 }
 
-pub fn sema_policy_try_apply(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_policy_try_apply(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.name != "apply" || !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.args.len() == 0 {
         &diagnostics.push(sema_error("E0104", call.name_span, "`apply` needs a callable value", "a callable policy is applied to one function value; an empty chain is written `apply(fn)`", "write `apply(load_user)` or `apply(retry(3), load_user)`"))

@@ -83,14 +83,14 @@ fn safe_limits() -> EncodingLimits Never! {
     }
 }
 /// Strict JSON → `Dyn`.
-pub fn parse(text: String) -> Dyn EncodingError! { parse_json(text, false) }
+fn parse(text: String) -> Dyn EncodingError! { parse_json(text, false) }
 
 /// Strict JSON → `Dyn`, except that a repeated object name keeps the later
 /// value at the first name's position.
-pub fn parse_allow_duplicates(text: String) -> Dyn EncodingError! { parse_json(text, true) }
+fn parse_allow_duplicates(text: String) -> Dyn EncodingError! { parse_json(text, true) }
 
 /// D-JSON3: coerce strings that are exactly booleans or finite numbers.
-pub fn decode(text: String) -> DataTree EncodingError! {
+fn decode(text: String) -> DataTree EncodingError! {
     tree :: parse(text) ?? {
         return Err(EncodingError.new(.JSON, .Syntax, 0, err.line, None, "", err.reason))
     }
@@ -157,26 +157,26 @@ fn coerce_tree(value: DataTree, path: String, emit: fn(String)) -> DataTree Neve
 }
 
 /// Python-compatible spelling for JSON parsing.
-pub fn loads(text: String) -> Dyn EncodingError! { parse(text) }
+fn loads(text: String) -> Dyn EncodingError! { parse(text) }
 
 /// Python-compatible file-shaped spelling for JSON parsing.
-pub fn load(text: String) -> Dyn EncodingError! { parse(text) }
+fn load(text: String) -> Dyn EncodingError! { parse(text) }
 /// Compact JSON text. Object keys keep insertion order.
-pub fn to_string<T: Encode>(value: T) -> String EncodingError! { render_json(value.encode(), false) }
+fn to_string<T: Encode>(value: T) -> String EncodingError! { render_json(value.encode(), false) }
 /// Python-compatible spelling for compact JSON serialization.
-pub fn dumps(value: DataTree) -> String EncodingError! { render_json(value, false) }
+fn dumps(value: DataTree) -> String EncodingError! { render_json(value, false) }
 /// Python-compatible file-shaped spelling for JSON serialization.
-pub fn dump(value: DataTree) -> String EncodingError! { render_json(value, false) }
+fn dump(value: DataTree) -> String EncodingError! { render_json(value, false) }
 
 /// Two-space indented JSON text.
-pub fn to_string_pretty<T: Encode>(value: T) -> String EncodingError! { render_json(value.encode(), true) }
+fn to_string_pretty<T: Encode>(value: T) -> String EncodingError! { render_json(value.encode(), true) }
 
 /// RFC 8785 JSON Canonicalization Scheme bytes (D-JSONCANON1=A): compact,
 /// object keys sorted by unsigned UTF-16 code units, ECMAScript `Number`
 /// spelling, `-0.0` as `0`. Rejects NaN and infinities, an `Int` that binary64
 /// cannot hold exactly, and repeated keys, naming the failing value's JSON
 /// Pointer. Nesting is bounded by `EncodingLimits.safe().max_depth`.
-pub fn canonical(value: Dyn) -> String EncodingError! {
+fn canonical(value: Dyn) -> String EncodingError! {
     out := [U8]{}
     path := [String]{}
     write_canonical(&out, value, &path, 1) ?? return Err(err)
@@ -185,32 +185,32 @@ pub fn canonical(value: Dyn) -> String EncodingError! {
 
 /// A pull reader over text already held by the caller. File readers use the
 /// bounded native stream contract and consume a `^FileReader`.
-pub fn reader(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), false, false)} }
+fn reader(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), false, false)} }
 
 /// Report each occurrence of a duplicate key as an event.
-pub fn reader_allow_duplicates(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), true, true)} }
+fn reader_allow_duplicates(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), true, true)} }
 
-pub struct JSONReader {
+struct JSONReader {
     parser: Parser
 
-    pub fn next(&self) -> DataEvent EncodingError! { &self.parser.next_event() }
+    fn next(&self) -> DataEvent EncodingError! { &self.parser.next_event() }
 }
 
 /// Bounded event output. The source push engine owns framing, canonicalization,
 /// limits and sticky errors; its registered leaves perform only file operations.
-pub struct JSONWriter {
+struct JSONWriter {
     output: stream.JSONPush
 
-    pub fn write(&self, event: ^DataEvent) EncodingError! -[IO]> {
+    fn write(&self, event: ^DataEvent) EncodingError! -[IO]> {
         &self.output.write(^event)
     }
 
-    pub fn flush(&self) EncodingError! -[IO]> { &self.output.flush() }
+    fn flush(&self) EncodingError! -[IO]> { &self.output.flush() }
 
-    pub fn finish(&self) EncodingError! -[IO]> { &self.output.finish() }
+    fn finish(&self) EncodingError! -[IO]> { &self.output.finish() }
 }
 
-pub fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}, canonical: Bool{false}) -[FS]> JSONWriter EncodingError! {
+fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}, canonical: Bool{false}) -[FS]> JSONWriter EncodingError! {
     output :: stream.json_writer(^target, limits, canonical) ?? return Err(err)
     Ok(JSONWriter{output: ^output})
 }
@@ -222,7 +222,7 @@ pub fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}
 /// fails with the pointer prefix through the failing step. The walk borrows
 /// each ancestor; only the selected subtree is returned as an owned value.
 /// A pointer may have at most `EncodingLimits.safe().max_depth` steps.
-pub fn pointer(tree: Dyn, path: String) -> Dyn EncodingError! {
+fn pointer(tree: Dyn, path: String) -> Dyn EncodingError! {
     segments :: pointer_segments(path)
     if segments.len() > safe_limits().max_depth {
         return Err(value_error(EncodingErrorKind.Limit, "", "JSON Pointer has more than max_depth {safe_limits().max_depth} steps"))
@@ -232,7 +232,7 @@ pub fn pointer(tree: Dyn, path: String) -> Dyn EncodingError! {
 
 /// RFC 6902 JSON Patch (D-CORE-JSON-PATCH1=A) under `EncodingLimits.safe()`.
 /// See `patch_with_limits`.
-pub fn patch(doc: Dyn, ops: Dyn) -> Dyn EncodingError! { patch_with_limits(doc, ops, safe_limits()) }
+fn patch(doc: Dyn, ops: Dyn) -> Dyn EncodingError! { patch_with_limits(doc, ops, safe_limits()) }
 
 /// Apply an RFC 6902 operation array (`add`, `remove`, `replace`, `move`,
 /// `copy`, `test`) and return the patched value. The whole array is validated
@@ -244,7 +244,7 @@ pub fn patch(doc: Dyn, ops: Dyn) -> Dyn EncodingError! { patch_with_limits(doc, 
 /// path and the result's nesting, `max_expansion_bytes` bounds the bytes that
 /// `copy` duplicates across the patch, and `max_total_bytes` (when set) bounds
 /// the compact size of the result.
-pub fn patch_with_limits(doc: Dyn, ops: Dyn, limits: EncodingLimits) -> Dyn EncodingError! {
+fn patch_with_limits(doc: Dyn, ops: Dyn, limits: EncodingLimits) -> Dyn EncodingError! {
     if limits.max_depth < 1 || limits.max_item_bytes < 1 || limits.max_expansion_bytes < 0 {
         return Err(value_error(EncodingErrorKind.Limit, "", "EncodingLimits.max_depth and max_item_bytes must be positive and max_expansion_bytes nonnegative"))
     }
@@ -283,7 +283,7 @@ pub fn patch_with_limits(doc: Dyn, ops: Dyn, limits: EncodingLimits) -> Dyn Enco
 }
 
 /// Convert a parsed tree to the canonical streaming event sequence.
-pub fn events(value: Dyn) -> [DataEvent] Never! { append_events(value) }
+fn events(value: Dyn) -> [DataEvent] Never! { append_events(value) }
 
 
 struct Parser {

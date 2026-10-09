@@ -17,7 +17,7 @@ enum SemaNumericUnitConversionProof {
 // wanted them in the shared `wanted` row, and its function is checked again on
 // the owning thread. A check with no access at all (no registration graph) has
 // no callbacks.
-pub enum SemaHostHookAccess {
+enum SemaHostHookAccess {
     Callbacks(hooks: Shared<SemaRegistrationHostHooks>, observed: Shared<SemaBodyCheckReach>?)
     Withheld(wanted: Shared<SemaHostHookWanted>, observed: Shared<SemaBodyCheckReach>?)
 }
@@ -28,12 +28,12 @@ struct SemaHostHookWanted {
 
 // Sticky for one accepted logical body query, including share-site passes and
 // the owning thread's retry. A cold check has no observer and allocates none.
-pub struct SemaBodyCheckReach {
-    pub host: Bool
-    pub foreign_raw_body: Bool
+struct SemaBodyCheckReach {
+    host: Bool
+    foreign_raw_body: Bool
 }
 
-pub fn sema_host_hook_access(hooks: Shared<SemaRegistrationHostHooks>) -> SemaHostHookAccess? {
+fn sema_host_hook_access(hooks: Shared<SemaRegistrationHostHooks>) -> SemaHostHookAccess? {
     Val(SemaHostHookAccess.Callbacks{hooks: hooks, observed: None})
 }
 
@@ -65,7 +65,7 @@ fn sema_host_hooks_withheld(access: SemaHostHookAccess?) -> Bool {
     }
 }
 
-pub fn sema_body_check_observe(access: SemaHostHookAccess?, observed: Shared<SemaBodyCheckReach>?) -> SemaHostHookAccess? {
+fn sema_body_check_observe(access: SemaHostHookAccess?, observed: Shared<SemaBodyCheckReach>?) -> SemaHostHookAccess? {
     if observed == None -> return ~access
     row :: access ?? return None
     Val(if row == {
@@ -80,7 +80,7 @@ fn sema_body_check_mark_host(observed: Shared<SemaBodyCheckReach>?) {
     permit.value.host = true
 }
 
-pub fn sema_body_check_mark_foreign_raw_body(access: SemaHostHookAccess?) {
+fn sema_body_check_mark_foreign_raw_body(access: SemaHostHookAccess?) {
     row :: access ?? return
     observed :: if row == {
         .Callbacks(_, observer) -> observer
@@ -91,7 +91,7 @@ pub fn sema_body_check_mark_foreign_raw_body(access: SemaHostHookAccess?) {
     permit.value.foreign_raw_body = true
 }
 
-pub fn sema_numeric_unit_conversion_exact(access: SemaHostHookAccess?, value: Float, scale: UnitRatio, offset: UnitRatio) -> SemaNumericUnitConversionProof {
+fn sema_numeric_unit_conversion_exact(access: SemaHostHookAccess?, value: Float, scale: UnitRatio, offset: UnitRatio) -> SemaNumericUnitConversionProof {
     hooks :: sema_host_hook_callbacks(access) ?? return SemaNumericUnitConversionProof.Unavailable
     callback_option :: hooks.numeric_unit_conversion_exact
     callback :: callback_option ?? return SemaNumericUnitConversionProof.Unavailable

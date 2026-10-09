@@ -9,8 +9,8 @@
 use core as core
 
 #Error
-pub struct Base32Error {
-    pub reason: String
+struct Base32Error {
+    reason: String
     impl Display {
         fn display(self) -> String Never! { self.reason }
     }
@@ -23,10 +23,10 @@ impl Base32Error {
     fn new(reason: String) -> Base32Error Never! { Base32Error{reason: reason} }
 }
 
-pub fn encode(data: [U8]) -> String Never! { encode_alphabet(data, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567") }
+fn encode(data: [U8]) -> String Never! { encode_alphabet(data, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567") }
 
 /// Decode the canonical padded RFC 4648 alphabet.
-pub fn decode(text: String) -> [U8] Base32Error! {
+fn decode(text: String) -> [U8] Base32Error! {
     decode_for_edition(text, core.encoding.__edition())
 }
 
@@ -37,9 +37,9 @@ fn is_base32(text: String) -> Bool Never! {
 fn b32encode(data: [U8]) -> String Never! { encode(data) }
 fn b32decode(text: String) -> [U8] Base32Error! { decode(text) }
 
-pub fn b32hexencode(data: [U8]) -> String Never! { encode_alphabet(data, "0123456789ABCDEFGHIJKLMNOPQRSTUV") }
+fn b32hexencode(data: [U8]) -> String Never! { encode_alphabet(data, "0123456789ABCDEFGHIJKLMNOPQRSTUV") }
 
-pub fn b32hexdecode(text: String) -> [U8] Base32Error! {
+fn b32hexdecode(text: String) -> [U8] Base32Error! {
     standard :: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".bytes()
     canonical := [U8]{}
     loop b in text.bytes() {

@@ -48,7 +48,7 @@ fn seeded_bounded(state: &U64, bound: U64) -> U64 Never! {
 
 // The public capability checks its endpoints at the signed-64 boundary.
 // This kernel preserves that domain, including its wrapped inclusive width.
-pub fn __seeded_int(state: &U64, low: Int, high: Int) -> Int? Never! {
+fn __seeded_int(state: &U64, low: Int, high: Int) -> Int? Never! {
     if high < low -> return None
     if high == low -> return Val(low)
     width :: U64{(high - low + 1) & 18446744073709551615}
@@ -64,28 +64,28 @@ fn seeded_unit(state: &U64) -> Float Never! {
 
 /// Deterministic caller-owned capability. Drawing edits this owner's one word;
 /// an explicit clone duplicates its state, never a process-global stream.
-pub struct RNG {
+struct RNG {
     state: U64
 
-    pub fn int(&self, low: Int, high: Int) -> Int Never! {
+    fn int(&self, low: Int, high: Int) -> Int Never! {
         lower :: Int{I64{low}}
         upper :: Int{I64{high}}
         if upper < lower -> core.math.__numeric_stop("RNG.int requires low <= high")
         __seeded_int(&self.state, lower, upper) ?? core.math.__numeric_stop("RNG.int requires low <= high")
     }
 
-    pub fn float(&self) -> Float Never! { seeded_unit(&self.state) }
+    fn float(&self) -> Float Never! { seeded_unit(&self.state) }
 
-    pub fn float_range(&self, low: Float, high: Float) -> Float Never! {
+    fn float_range(&self, low: Float, high: Float) -> Float Never! {
         if !(high > low) -> return low
         low + (high - low) * &self.float()
     }
 
-    pub fn bool(&self) -> Bool Never! { (seeded_next(&self.state) & U64{1}) == U64{1} }
+    fn bool(&self) -> Bool Never! { (seeded_next(&self.state) & U64{1}) == U64{1} }
 
     // D-CAP10: public bool(p)'s existing arity-1 row targets this reserved
     // method; the zero-argument coin draw uses bool(), not a default p=0.5.
-    pub fn __bool_p(&self, probability: Float) -> Bool Never! {
+    fn __bool_p(&self, probability: Float) -> Bool Never! {
         if probability <= 0.0 || math.is_nan(probability) -> return false
         if probability >= 1.0 -> return true
         &self.float() < probability
@@ -95,34 +95,34 @@ pub struct RNG {
         math.max_float(&self.float(), 2.2250738585072014e-308)
     }
 
-    pub fn normal(&self, mean: Float, stddev: Float) -> Float Never! {
+    fn normal(&self, mean: Float, stddev: Float) -> Float Never! {
         first :: &self.float_open()
         second :: &self.float()
         sample :: math.sqrt((Float{-2.0}) * math.ln(first)) * math.cos(math.tau() * second)
         mean + sample * math.max_float(stddev, 0.0)
     }
 
-    pub fn exponential(&self, lambda: Float) -> Float Never! {
+    fn exponential(&self, lambda: Float) -> Float Never! {
         if lambda <= 0.0 || math.is_nan(lambda) -> return 0.0
         sample :: &self.float_open()
         return -math.ln(sample) / lambda
     }
 
-    pub fn bytes(&self, count: Int) -> [U8] Never! {
+    fn bytes(&self, count: Int) -> [U8] Never! {
         length :: Int{I64{count}}
         out := [U8]{}
         loop _ in 0..<length -> &out.push(U8{seeded_next(&self.state) & U64{255}})
         out
     }
 
-    pub fn split(&self) -> RNG Never! { RNG{state: seeded_next(&self.state)} }
+    fn split(&self) -> RNG Never! { RNG{state: seeded_next(&self.state)} }
 
-    pub fn pick<T: Clone>(&self, items: [T]) -> T? Never! {
+    fn pick<T: Clone>(&self, items: [T]) -> T? Never! {
         if items.len() == 0 -> return None
         Val(~items[&self.int(0, items.len() - 1)])
     }
 
-    pub fn weighted_pick<T: Clone>(&self, items: [T], weights: [Float]) -> T? Never! {
+    fn weighted_pick<T: Clone>(&self, items: [T], weights: [Float]) -> T? Never! {
         if items.len() == 0 || items.len() != weights.len() -> return None
         total := Float{0.0}
         loop weight in weights {
@@ -139,7 +139,7 @@ pub struct RNG {
         Val(~items[items.len() - 1])
     }
 
-    pub fn sample<T: Clone>(&self, items: [T], count: Int) -> [T] Never! {
+    fn sample<T: Clone>(&self, items: [T], count: Int) -> [T] Never! {
         want := Int{I64{count}}
         if want < 0 -> want = 0
         if want > items.len() -> want = items.len()
@@ -155,7 +155,7 @@ pub struct RNG {
         pool
     }
 
-    pub fn shuffle<T>(&self, items: &[T]) Never! {
+    fn shuffle<T>(&self, items: &[T]) Never! {
         index := items.len() - 1
         loop index > 0 {
             picked :: &self.int(0, index)
@@ -170,7 +170,7 @@ pub struct RNG {
 }
 // The world owns synchronization and journaling. Jet owns the transition;
 // compare/exchange keeps concurrent draws on that same serialized stream.
-pub fn __word() -[Rand]> Int Never! {
+fn __word() -[Rand]> Int Never! {
     loop {
         previous :: core.math.random.__rng_state()
         word := Int{previous}
@@ -239,13 +239,13 @@ fn seed(value: Int) Never! -[Rand]> {
 }
 
 /// Construct a deterministic, caller-owned RNG capability.
-pub fn rng(seed_value: Int) -> RNG Never! {
+fn rng(seed_value: Int) -> RNG Never! {
     RNG{state: U64{Int{I64{seed_value}} & 18446744073709551615}}
 }
 
 /// Construct a deterministic child capability from `seed_value` while mixing
 /// one word from the ambient stream. The explicit effect documents that mix.
-pub fn split(seed_value: Int) -[Rand]> RNG Never! {
+fn split(seed_value: Int) -[Rand]> RNG Never! {
     word :: __word()
     rotated :: ((word << 17) | (word >> 47)) & 18446744073709551615
     mixed :: (seed_value & 18446744073709551615) ~| rotated

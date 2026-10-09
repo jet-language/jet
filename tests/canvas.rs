@@ -2761,8 +2761,8 @@ fn canvas_project_rename_preview_and_atomic_commit_use_semantic_sites() {
         "\"source_id\":\"other.jet\"",
         "\"source_id\":\"unrelated.jet\"",
         "\"files\"",
-        "-pub fn helper()",
-        "+pub fn compute()",
+        "-fn helper()",
+        "+fn compute()",
     ] {
         assert!(
             preview.contains(field),

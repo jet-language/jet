@@ -48,46 +48,46 @@ fn client(host: String, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
 
 // Existing checked Core call rows retain their moved-stream and labelled
 // handshake forms; source targets must select by the original convention.
-pub fn __client_stream_entry(stream: ^TCPStream, server_name: String) -[Net, Time.Wait]> TLSStream IOError! {
+fn __client_stream_entry(stream: ^TCPStream, server_name: String) -[Net, Time.Wait]> TLSStream IOError! {
     core.net.tls.__client_stream(^stream, server_name)
 }
 
-pub fn __client_deadline_entry(stream: ^TCPStream, server_name: String, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+fn __client_deadline_entry(stream: ^TCPStream, server_name: String, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
     core.net.tls.__client_deadline(^stream, server_name, deadline)
 }
 
-pub fn __client_config_deadline_entry(stream: ^TCPStream, server_name: String, config: TLSClientConfig, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+fn __client_config_deadline_entry(stream: ^TCPStream, server_name: String, config: TLSClientConfig, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
     core.net.tls.__client_config_deadline(^stream, server_name, config, deadline)
 }
 
-pub fn read(&stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] IOError! {
+fn read(&stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] IOError! {
     if n <= 0 -> return Err(tls_error("read", "", "read limit must be positive"))
     core.net.tls.__read(&stream, n)
 }
 
-pub fn read_text(&stream: TLSStream, n: Int) -[Net, Time.Wait]> String IOError! {
+fn read_text(&stream: TLSStream, n: Int) -[Net, Time.Wait]> String IOError! {
     if n <= 0 -> return Err(tls_error("read_text", "", "read limit must be positive"))
     bytes :: read(&stream, n)
     Ok(String.from_bytes(bytes) ?? return Err(tls_error("read_text", "", "read bytes are not UTF-8")))
 }
 
-pub fn write(&stream: TLSStream, bytes: [U8]) -[Net, Time.Wait]> Int IOError! {
+fn write(&stream: TLSStream, bytes: [U8]) -[Net, Time.Wait]> Int IOError! {
     core.net.tls.__write(&stream, bytes)
 }
 
-pub fn write_all(&stream: TLSStream, bytes: [U8]) IOError! -[Net, Time.Wait]> {
+fn write_all(&stream: TLSStream, bytes: [U8]) IOError! -[Net, Time.Wait]> {
     core.net.tls.__write_all(&stream, bytes)
 }
 
-pub fn write_text(&stream: TLSStream, text: String) IOError! -[Net, Time.Wait]> {
+fn write_text(&stream: TLSStream, text: String) IOError! -[Net, Time.Wait]> {
     write_all(&stream, text.bytes())
 }
 
-pub fn close(stream: TLSStream) IOError! -[Net, Time.Wait]> {
+fn close(stream: TLSStream) IOError! -[Net, Time.Wait]> {
     stream.close()
 }
 
-pub fn sni(&stream: TLSStream) -[Net]> String Never! {
+fn sni(&stream: TLSStream) -[Net]> String Never! {
     peer :: stream.peer_identity()
     peer.verified_server_name
 }
@@ -95,13 +95,13 @@ pub fn sni(&stream: TLSStream) -[Net]> String Never! {
 // TLSStream deliberately does not expose a transport socket address. Keeping
 // a source-level port field would be an invalid nominal identity for the native
 // provider, so report the missing capability instead of fabricating a value.
-pub fn peer_port(&stream: TLSStream) -[Net]> Int IOError! {
+fn peer_port(&stream: TLSStream) -[Net]> Int IOError! {
     Err(tls_error("peer_port", "", "TLS provider does not expose the peer port"))
 }
 
 // A TLS stream deliberately cannot be downgraded: doing so would make the
 // caller believe plaintext bytes are protected by the old connection state.
-pub fn unwrap(&stream: TLSStream) -[Net]> TCPStream IOError! {
+fn unwrap(&stream: TLSStream) -[Net]> TCPStream IOError! {
     Err(tls_error("unwrap", "", "TLS stream cannot be downgraded"))
 }
 fn version_name(v: TLSVersion) -> String Never! {

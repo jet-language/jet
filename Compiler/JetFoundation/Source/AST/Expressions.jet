@@ -313,37 +313,37 @@ struct NamedSpan {
     span: Span
 }
 
-pub struct LambdaMeta {
-    pub escapes: Bool
-    pub runtime_erased: Bool
-    pub http_route_source: String?{None}
-    pub needs_fn_mut: Bool
-    pub mut_captures: [String]
-    pub cloned_captures: [String]
-    pub effect_direct: [String]
-    pub effect_solved: [String]
-    pub effect_call_edges: [String]
-    pub effect_maximal: Bool
-    pub effect_direct_spans: [EffectRowEntry]
-    pub frozen_captures: [String]
-    pub materialized_captures: [String]
-    pub moved_captures: [String]
-    pub collecting_loop: Bool
-    pub collect_item_type: Type?
-    pub result_loop: Bool
-    pub requires_exhaustion_route: Bool
-    pub exhaustion_span: Span?
-    pub exhaustion_route_attached: Bool
-    pub loop_result_type: Type?
-    pub loop_label: NamedSpan?
-    pub guard_projection: [String]?
-    pub return_view_provenance: ViewProvenanceMap?
-    pub cell_projection_path: [String]?
-    pub fallible_propagation: Bool
-    pub fallible_carrier: Type?
-    pub frame_schedule_explanation: String?
-    pub frame_schedule: FrameSchedule?
-    pub frame_schedule_derivation: DerivationRef?
+struct LambdaMeta {
+    escapes: Bool
+    runtime_erased: Bool
+    http_route_source: String?{None}
+    needs_fn_mut: Bool
+    mut_captures: [String]
+    cloned_captures: [String]
+    effect_direct: [String]
+    effect_solved: [String]
+    effect_call_edges: [String]
+    effect_maximal: Bool
+    effect_direct_spans: [EffectRowEntry]
+    frozen_captures: [String]
+    materialized_captures: [String]
+    moved_captures: [String]
+    collecting_loop: Bool
+    collect_item_type: Type?
+    result_loop: Bool
+    requires_exhaustion_route: Bool
+    exhaustion_span: Span?
+    exhaustion_route_attached: Bool
+    loop_result_type: Type?
+    loop_label: NamedSpan?
+    guard_projection: [String]?
+    return_view_provenance: ViewProvenanceMap?
+    cell_projection_path: [String]?
+    fallible_propagation: Bool
+    fallible_carrier: Type?
+    frame_schedule_explanation: String?
+    frame_schedule: FrameSchedule?
+    frame_schedule_derivation: DerivationRef?
 }
 
 enum TypedLitBody {
@@ -474,7 +474,7 @@ struct DerivationRef {
 }
 // S71 / D-SUGAR6: the ordinary call that `receiver?.method(args)` runs on the
 // present payload. Syntax walkers reuse their `MethodCall` facts through it.
-pub fn expr_optional_method_call_as_call(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr Never! {
+fn expr_optional_method_call_as_call(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr Never! {
     Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None}
 }
 

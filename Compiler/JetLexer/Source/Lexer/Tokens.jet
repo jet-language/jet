@@ -12,30 +12,30 @@ use jet_foundation.[
     name_text,
 ]
 
-pub struct Token {
-    pub kind: Int
-    pub span: Span
-    pub text: Name
-    pub decoded: Name
+struct Token {
+    kind: Int
+    span: Span
+    text: Name
+    decoded: Name
     // Row in `TokenTables.literals`, or -1 when the token has no literal facts.
-    pub literal: Int
+    literal: Int
 }
 
 // Number and string facts of one literal token.
-pub struct TokenLiteral {
-    pub integer: Int?
-    pub decimal: Float?
-    pub suffix: Name
-    pub interpolations: Int
-    pub string_parts: [StringPart]
+struct TokenLiteral {
+    integer: Int?
+    decimal: Float?
+    suffix: Name
+    interpolations: Int
+    string_parts: [StringPart]
 }
 
-pub struct StringPart {
-    pub kind: Int
-    pub span: Span
-    pub text: Name
-    pub byte: Int
-    pub tokens: [Token]
+struct StringPart {
+    kind: Int
+    span: Span
+    text: Name
+    byte: Int
+    tokens: [Token]
 }
 
 STRING_PART_TEXT :: 1
@@ -44,67 +44,67 @@ STRING_PART_BYTE :: 3
 
 // The spellings and literal facts a lexed source's tokens refer to,
 // interpolated tokens included.
-pub struct TokenTables {
-    pub names: NameTable
-    pub literals: [TokenLiteral]
+struct TokenTables {
+    names: NameTable
+    literals: [TokenLiteral]
 }
 
 // The spellings and literal facts a lexed source's tokens refer to,
 // interpolated tokens included.
-pub struct TokenTables {
-    pub names: NameTable
-    pub literals: [TokenLiteral]
+struct TokenTables {
+    names: NameTable
+    literals: [TokenLiteral]
 }
 
-pub struct Lexed {
-    pub tokens: [Token]
-    pub tables: TokenTables
-    pub diagnostics: [Diagnostic]
+struct Lexed {
+    tokens: [Token]
+    tables: TokenTables
+    diagnostics: [Diagnostic]
 }
 
-pub fn token_tables() -> TokenTables Never! {
+fn token_tables() -> TokenTables Never! {
     TokenTables{names: name_table(), literals: [TokenLiteral]{}}
 }
 
 // A token with no spelling and no literal facts.
-pub fn token_synthetic(kind: Int, span: Span) -> Token Never! {
+fn token_synthetic(kind: Int, span: Span) -> Token Never! {
     Token{kind: kind, span: span, text: name_empty(), decoded: name_empty(), literal: -1}
 }
 
-pub fn token_text(tables: TokenTables, token: Token) -> String Never! {
+fn token_text(tables: TokenTables, token: Token) -> String Never! {
     name_text(tables.names, token.text)
 }
 
-pub fn token_decoded(tables: TokenTables, token: Token) -> String Never! {
+fn token_decoded(tables: TokenTables, token: Token) -> String Never! {
     name_text(tables.names, token.decoded)
 }
 
-pub fn token_integer(tables: TokenTables, token: Token) -> Int? Never! {
+fn token_integer(tables: TokenTables, token: Token) -> Int? Never! {
     if token.literal < 0 -> return None
     tables.literals[token.literal].integer
 }
 
-pub fn token_decimal(tables: TokenTables, token: Token) -> Float? Never! {
+fn token_decimal(tables: TokenTables, token: Token) -> Float? Never! {
     if token.literal < 0 -> return None
     tables.literals[token.literal].decimal
 }
 
-pub fn token_suffix(tables: TokenTables, token: Token) -> String Never! {
+fn token_suffix(tables: TokenTables, token: Token) -> String Never! {
     if token.literal < 0 -> return ""
     name_text(tables.names, tables.literals[token.literal].suffix)
 }
 
-pub fn token_interpolations(tables: TokenTables, token: Token) -> Int Never! {
+fn token_interpolations(tables: TokenTables, token: Token) -> Int Never! {
     if token.literal < 0 -> return 0
     tables.literals[token.literal].interpolations
 }
 
-pub fn token_string_part_count(tables: TokenTables, token: Token) -> Int Never! {
+fn token_string_part_count(tables: TokenTables, token: Token) -> Int Never! {
     if token.literal < 0 -> return 0
     tables.literals[token.literal].string_parts.len()
 }
 
-pub fn token_string_parts(tables: TokenTables, token: Token) -> [StringPart] Never! {
+fn token_string_parts(tables: TokenTables, token: Token) -> [StringPart] Never! {
     if token.literal < 0 -> return [StringPart]{}
     tables.literals[token.literal].string_parts
 }
@@ -114,7 +114,7 @@ fn shifted_token_span(span: Span, offset: Int) -> Span Never! {
 }
 
 // Moves a token, its literal's string parts and their tokens by `offset`.
-pub fn token_shift_spans(token: &Token, offset: Int, literals: &[TokenLiteral]) Never! {
+fn token_shift_spans(token: &Token, offset: Int, literals: &[TokenLiteral]) Never! {
     token.span = shifted_token_span(token.span, offset)
     if token.literal < 0 -> return
     row :: token.literal

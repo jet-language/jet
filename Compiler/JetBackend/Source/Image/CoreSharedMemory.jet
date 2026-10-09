@@ -5,7 +5,7 @@ use jet_foundation.mir_shared_site_getter_symbol
 // Only lir_lower_core_shared supplies this inventory and its explicit
 // no-argument Unit startup. Startup initializes static fixups, not user roots;
 // the host invokes it once before publishing this permanently pinned image.
-pub fn x64_memory_core_shared_image(lowered: LIRLowering) -> X64MemoryImage Never! {
+fn x64_memory_core_shared_image(lowered: LIRLowering) -> X64MemoryImage Never! {
     if lowered.issues.len() > 0 {
         errors :: loop issue in lowered.issues -> "pinned Core lowering: {issue.message}"
         return x64_memory_image_failure(errors)

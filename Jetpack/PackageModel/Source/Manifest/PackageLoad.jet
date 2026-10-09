@@ -25,7 +25,7 @@ fn pkg_has_both_manifests(dir: String) -[FS, Env]> Bool Never! {
 }
 
 // Load and parse the package manifest in a directory; None when absent.
-pub fn pkg_manifest_load(dir: String) -[FS, Env]> Manifest? ManifestError! {
+fn pkg_manifest_load(dir: String) -[FS, Env]> Manifest? ManifestError! {
     resolver :: AuthorityResolver.open(dir) ?? {
         if err.is_missing() -> return Ok(None)
         return Err(ManifestError{diagnostic: err.diagnostic()})

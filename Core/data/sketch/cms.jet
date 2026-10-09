@@ -2,7 +2,7 @@
 // unit increments live in Jet; cloning copies the counter value independently.
 use core.data.sketch as sketch
 
-pub struct CountMinSketch {
+struct CountMinSketch {
     counters: [Int]
 
     impl Display {
@@ -10,16 +10,16 @@ pub struct CountMinSketch {
     }
 }
 
-pub fn new() -> CountMinSketch Never! { CountMinSketch.new() }
+fn new() -> CountMinSketch Never! { CountMinSketch.new() }
 
 impl CountMinSketch {
-    pub fn new() -> CountMinSketch Never! {
+    fn new() -> CountMinSketch Never! {
         counters := [Int]{}
         loop _ in 0..<1024 -> &counters.push(0)
         CountMinSketch{counters: counters}
     }
 
-    pub fn add(&self, key: String) Never! {
+    fn add(&self, key: String) Never! {
         (first, second) :: hashes(key)
         loop row in 0..<4 {
             index :: counter_index(first, second, row)
@@ -27,7 +27,7 @@ impl CountMinSketch {
         }
     }
 
-    pub fn count(self, key: String) -> Int Never! {
+    fn count(self, key: String) -> Int Never! {
         (first, second) :: hashes(key)
         count := self.counters[counter_index(first, second, 0)]
         loop row in 1..<4 {
@@ -49,7 +49,7 @@ fn counter_index(first: U64, second: U64, row: Int) -> Int Never! {
 }
 
 /// Merge by adding corresponding counters, as the existing source API does.
-pub fn merge(a: CountMinSketch, b: CountMinSketch) -> CountMinSketch Never! {
+fn merge(a: CountMinSketch, b: CountMinSketch) -> CountMinSketch Never! {
     counters := ~a.counters
     loop i in 0..<1024 -> counters[i] = counters[i] + b.counters[i]
     CountMinSketch{counters: counters}

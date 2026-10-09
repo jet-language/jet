@@ -184,7 +184,7 @@ fn sema_call_value_is_inline_loop(callee: Expr, args: [CallArg]) -> Bool Never! 
     }
 }
 
-pub fn sema_call_check_value_owned(state: &SemaOwnershipState, callee: Expr, args: [CallArg], span: Span, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+fn sema_call_check_value_owned(state: &SemaOwnershipState, callee: Expr, args: [CallArg], span: Span, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     if sema_call_value_is_inline_loop(callee, args) {
         if callee == .Lambda(lambda) -> return sema_call_value_inline_loop(lambda, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
@@ -197,7 +197,7 @@ pub fn sema_call_check_value_owned(state: &SemaOwnershipState, callee: Expr, arg
     sema_call_value_checked_from_type(&state, callee, callee_value, signature, args, span, defaults, expected, environment, program, &scopes, &tail_store, &context, &diagnostics)
 }
 
-pub fn sema_call_check_value(state: &SemaOwnershipState, callee: Expr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_check_value(state: &SemaOwnershipState, callee: Expr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked :: sema_call_check_value_owned(&state, callee, args, span, [SemaCallDefaultValue]{}, expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return None
     Val(checked.value)
 }

@@ -2,7 +2,7 @@
 // corpus-truth rows. Syntax/policy/build-writer queries keep their own order.
 use jet_foundation.[DiagnosticExplanation, RegistrationFactTarget, REGISTRATION_FACT_ROWS, REGISTRATION_TRUTH_ROWS]
 
-pub fn jet_cli_registration_fact_explanation(index: Int) -> DiagnosticExplanation Never! {
+fn jet_cli_registration_fact_explanation(index: Int) -> DiagnosticExplanation Never! {
     row :: REGISTRATION_FACT_ROWS[index]
     target :: if row.target == {
         .Value -> "a value"
@@ -20,7 +20,7 @@ pub fn jet_cli_registration_fact_explanation(index: Int) -> DiagnosticExplanatio
     DiagnosticExplanation{code: row.name, stage: "registration table", meaning: "`{row.name}` — a registered {kind} on {target} ({row.decision})", what: Val(what), why: Val(why), fix: Val(fix), example: None, retired: false}
 }
 
-pub fn jet_cli_registration_truth_explanation(index: Int) -> DiagnosticExplanation Never! {
+fn jet_cli_registration_truth_explanation(index: Int) -> DiagnosticExplanation Never! {
     row :: REGISTRATION_TRUTH_ROWS[index]
     DiagnosticExplanation{
         code: row.name,
@@ -34,7 +34,7 @@ pub fn jet_cli_registration_truth_explanation(index: Int) -> DiagnosticExplanati
     }
 }
 
-pub fn jet_cli_explain_registration(query: String, color: Bool, json: Bool) -> JetCLIPlan? Never! {
+fn jet_cli_explain_registration(query: String, color: Bool, json: Bool) -> JetCLIPlan? Never! {
     name :: query.trim()
     loop index in 0..<REGISTRATION_FACT_ROWS.len() {
         if REGISTRATION_FACT_ROWS[index].name == name -> return Val(jet_cli_explanation_output(jet_cli_registration_fact_explanation(index), color, json))

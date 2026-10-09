@@ -87,7 +87,7 @@ module gui {
         index
     }
 
-    pub fn selection(anchor: Int, active: Int) -> TextSelection {
+    fn selection(anchor: Int, active: Int) -> TextSelection {
         TextSelection{anchor: anchor, active: active}
     }
 
@@ -163,21 +163,21 @@ module gui {
         }
     }
 
-    pub fn body_of(state: EditorState) -> String { state.body.copy() }
+    fn body_of(state: EditorState) -> String { state.body.copy() }
 
-    pub fn title_of(state: EditorState) -> String { state.title.copy() }
+    fn title_of(state: EditorState) -> String { state.title.copy() }
 
-    pub fn theme_of(state: EditorState) -> String { state.theme.copy() }
+    fn theme_of(state: EditorState) -> String { state.theme.copy() }
 
     fn settings_open_of(state: EditorState) -> Bool { state.settings_open }
 
-    pub fn selection_of(state: EditorState) -> TextSelection { state.selection.copy() }
+    fn selection_of(state: EditorState) -> TextSelection { state.selection.copy() }
 
-    pub fn composition_of(state: EditorState) -> String { state.composition.copy() }
+    fn composition_of(state: EditorState) -> String { state.composition.copy() }
 
     fn revision_of(state: EditorState) -> Int { state.revision }
 
-    pub fn status_of(state: EditorState) -> String { state.status.copy() }
+    fn status_of(state: EditorState) -> String { state.status.copy() }
 
     fn commit_edit(state: EditorState, next: String, next_selection: TextSelection, status: String) -> EditorState {
         if state.body == next -> return state
@@ -248,7 +248,7 @@ module gui {
         }
     }
 
-    pub fn commit_composition(state: EditorState, composition: String) -> EditorState {
+    fn commit_composition(state: EditorState, composition: String) -> EditorState {
         committed :: if composition == "" -> state.composition.copy() else -> composition.copy()
         apply_text(state, committed.copy())
     }
@@ -374,7 +374,7 @@ module gui {
 
     // Keep body and UI settings as separate records. This lets a reload recover
     // the Unicode document even when a host cancels its settings transaction.
-    pub fn persisted_body(state: EditorState) -> String { state.body.copy() }
+    fn persisted_body(state: EditorState) -> String { state.body.copy() }
 
     fn persisted_session(state: EditorState) -> String {
         mode :: if state.settings_open -> "open" else -> "closed"
@@ -423,7 +423,7 @@ module gui {
         ])
     }
 
-    pub fn command_bar() -> UiNode {
+    fn command_bar() -> UiNode {
         ui.box([
         ui.node_shortcut(ui.button("Save"), .cmd("s")),
         ui.node_shortcut(ui.button("Undo"), .cmd("z")),
@@ -433,7 +433,7 @@ module gui {
     ])
     }
 
-    pub fn menu_view() -> UiNode {
+    fn menu_view() -> UiNode {
         ui.box([
         ui.text("FILE"),
         ui.text("Open   Save   Quit"),

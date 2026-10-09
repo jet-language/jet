@@ -90,14 +90,14 @@ enum JetEvalRuntimeValue {
 
 // Projection operands are frozen at acquisition, not read from a returned
 // callee frame. The path still uses the ordinary MIR projection semantics.
-pub struct JetEvalWindowPath {
-    pub projections: [MIRProjection]
-    pub operands: [U64:JetEvalRuntimeValue]
+struct JetEvalWindowPath {
+    projections: [MIRProjection]
+    operands: [U64:JetEvalRuntimeValue]
 }
-pub struct JetEvalCallbackRoot {
-    pub value: JetEvalRuntimeValue
-    pub reusable: Bool
-    pub invoked: Bool
+struct JetEvalCallbackRoot {
+    value: JetEvalRuntimeValue
+    reusable: Bool
+    invoked: Bool
 }
 
 // One owned logical reference per registry-naming runtime value. Each
@@ -136,28 +136,28 @@ struct JetEvalOutputContext {
 // (root, deopt resume, child tasks, native callbacks) shares this physical
 // storage; no machine sweeps it. Index and token allocation happens under one
 // registry edit permit so concurrent machines never collide.
-pub struct JetEvalRegistryData {
-    pub shared_cells: [JetEvalSharedCell]
-    pub foreign_tokens: [Int:JetEvalForeignToken]
-    pub next_foreign_token: Int
-    pub next_callback_lease: Int
-    pub next_machine_identity: Int
+struct JetEvalRegistryData {
+    shared_cells: [JetEvalSharedCell]
+    foreign_tokens: [Int:JetEvalForeignToken]
+    next_foreign_token: Int
+    next_callback_lease: Int
+    next_machine_identity: Int
     // Fresh local evaluation cache only; runtime publication belongs to pinned Core.
-    pub comptime_shared_sites: [JetEvalComptimeSharedSiteEntry]{[JetEvalComptimeSharedSiteEntry]{}}
+    comptime_shared_sites: [JetEvalComptimeSharedSiteEntry]{[JetEvalComptimeSharedSiteEntry]{}}
 }
 struct JetEvalRegistry {
     storage: Shared<JetEvalRegistryData>
     shared_runtime: JetEvalSharedRuntime
 }
 
-pub struct JetEvalComptimeSharedSiteEntry {
-    pub site: MIRSharedSite
-    pub value: JetEvalRuntimeValue
+struct JetEvalComptimeSharedSiteEntry {
+    site: MIRSharedSite
+    value: JetEvalRuntimeValue
 }
 
-pub struct JetEvalComptimeSharedSiteEntry {
-    pub site: MIRSharedSite
-    pub value: JetEvalRuntimeValue
+struct JetEvalComptimeSharedSiteEntry {
+    site: MIRSharedSite
+    value: JetEvalRuntimeValue
 }
 // Transport-only Source task root. Native scheduling owns task control and
 // ambient context; this carrier owns exactly the callback root moved (FnOnce)
@@ -561,17 +561,17 @@ trait JetEvalBuildHostAdapter {
     fn build_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: ^[JetEvalHostArgument], span: Span) -[FS.Read, Net, Time.Wait]> JetEvalHostResult?
 }
 
-pub struct JetEvalConfig {
+struct JetEvalConfig {
     // Step budget for compile-time evaluation. Runtime execution (a program
     // run) has no step limit, like a built binary (D-INTERP-BUDGET1).
-    pub fuel: Int
-    pub max_call_depth: Int
-    pub max_collection_len: Int
-    pub globals: [String:TComptimeValue]
-    pub runtime_execution: Bool
-    pub host_adapter: JetEvalHostAdapter?
-    pub build_host_adapter: JetEvalBuildHostAdapter?{None}
-    pub output_context: JetEvalOutputContext?
+    fuel: Int
+    max_call_depth: Int
+    max_collection_len: Int
+    globals: [String:TComptimeValue]
+    runtime_execution: Bool
+    host_adapter: JetEvalHostAdapter?
+    build_host_adapter: JetEvalBuildHostAdapter?{None}
+    output_context: JetEvalOutputContext?
     // Compiler-service callbacks live behind one Shared cell: a config copy
     // shares the hooks instead of copying function values.
     host_hooks: Shared<SemaRegistrationHostHooks>
@@ -596,22 +596,22 @@ struct JetEvalOwnedRootDropResult {
 
 struct JetEvalCallerSite { frame: Int, block: MIRBlockID, ip: Int }
 
-pub struct JetEvalFrame {
-    pub function: MIRFunctionID
-    pub block: MIRBlockID
-    pub ip: Int
-    pub predecessor: MIRBlockID?
-    pub params: [JetEvalRuntimeValue]
+struct JetEvalFrame {
+    function: MIRFunctionID
+    block: MIRBlockID
+    ip: Int
+    predecessor: MIRBlockID?
+    params: [JetEvalRuntimeValue]
     // Call-site provenance, never copied String storage.
     caller_site: JetEvalCallerSite?
-    pub captures: [JetEvalRuntimeValue]
-    pub values: [U64:JetEvalRuntimeValue]
-    pub borrowed_values: [U64:Bool]
-    pub locals: [U64:JetEvalRuntimeValue]
-    pub scopes: [MIRScopeID]
-    pub entry_accesses: [MIRAccess]
-    pub entry_shared_loans: [JetEvalSharedEntryLoan]
-    pub captures_borrowed: Bool
+    captures: [JetEvalRuntimeValue]
+    values: [U64:JetEvalRuntimeValue]
+    borrowed_values: [U64:Bool]
+    locals: [U64:JetEvalRuntimeValue]
+    scopes: [MIRScopeID]
+    entry_accesses: [MIRAccess]
+    entry_shared_loans: [JetEvalSharedEntryLoan]
+    captures_borrowed: Bool
 }
 struct JetEvalResumeRequest {
     program: MIRProgram
@@ -694,8 +694,8 @@ struct JetEvalResult {
 
 struct JetEvalRuntimeSession {
     machine: JetEvalMachine
-    pub retired: Bool
-    pub shared_site_attempt: Bool{false}
+    retired: Bool
+    shared_site_attempt: Bool{false}
 }
 
 struct JetEvalMachine {
@@ -748,10 +748,10 @@ struct JetEvalProgramRows {
     core_owners_by_id: [U64:[Int]]
     // Per-function id rows, parallel to program.functions; each entry is
     // filled on the function's first lookup (jet_eval_function_rows_ready).
-    pub function_rows: [JetEvalFunctionRows]
-    pub source_clone_hooks: [U64:MIRFunctionID]
-    pub source_show_hooks: [U64:MIRFunctionID]
-    pub source_debug_hooks: [U64:MIRFunctionID]
+    function_rows: [JetEvalFunctionRows]
+    source_clone_hooks: [U64:MIRFunctionID]
+    source_show_hooks: [U64:MIRFunctionID]
+    source_debug_hooks: [U64:MIRFunctionID]
 }
 
 // Row positions in one function's id tables, so evaluator lookups for a
@@ -931,24 +931,24 @@ fn jet_eval_program_shape_rows(program: MIRProgram) -> JetEvalProgramRows Never!
 // the row instead of scanning, and copying, whole program tables. Id maps keep
 // the first row per id value; list maps keep every row in program order.
 struct JetEvalProgramRows {
-    pub functions: [Int:Int]
-    pub fields: [Int:Int]
-    pub types: [Int:Int]
-    pub traits: [Int:Int]
-    pub handles: [Int:Int]
-    pub foreign: [Int:Int]
-    pub modules: [Int:Int]
-    pub source_files: [Int:Int]
-    pub core_calls: [Int:Int]
-    pub prelude_calls: [Int:Int]
-    pub constants: [String:Int]
+    functions: [Int:Int]
+    fields: [Int:Int]
+    types: [Int:Int]
+    traits: [Int:Int]
+    handles: [Int:Int]
+    foreign: [Int:Int]
+    modules: [Int:Int]
+    source_files: [Int:Int]
+    core_calls: [Int:Int]
+    prelude_calls: [Int:Int]
+    constants: [String:Int]
     // Rows of program.type_instances per identity value.
-    pub type_instances: [Int:[Int]]
+    type_instances: [Int:[Int]]
     // Rows of program.impls per implemented trait id value.
-    pub impls_by_trait: [Int:[Int]]
+    impls_by_trait: [Int:[Int]]
     // Rows of program.core_owners per nominal id value and per owner id value.
-    pub core_owners_by_nominal: [Int:[Int]]
-    pub core_owners_by_id: [Int:[Int]]
+    core_owners_by_nominal: [Int:[Int]]
+    core_owners_by_id: [Int:[Int]]
 }
 
 fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {

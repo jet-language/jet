@@ -33,7 +33,7 @@ fn sema_http_mount_arg(expression: Expr, span: Span) -> CallArg Never! {
         flags: ast_empty_call_arg_flags(), label: None, spread: false}
 }
 
-pub fn sema_call_http_mount(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_http_mount(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() != 1 {
         &diagnostics.push(sema_call_arity_diagnostic("mount", 1, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -117,7 +117,7 @@ fn sema_http_collect_mounted(expression: TExpr, graph: SemaRegistrationGraph, mo
     loop child in tir_expr_children(expression) -> sema_http_collect_mounted(child, graph, module_identity, &mounted)
 }
 
-pub fn sema_http_unmounted_warnings(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
+fn sema_http_unmounted_warnings(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
     mounted := [String]{}
     loop module_row in modules {
         loop function in module_row.functions {

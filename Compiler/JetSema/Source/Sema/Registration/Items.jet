@@ -305,15 +305,15 @@ struct SemaRegistrationFunction {
     raw_protocol_return: Bool
 }
 
-pub struct SemaRegistrationField {
-    pub symbol: Symbol
-    pub ty: Type
-    pub identity: TypeIdentity
-    pub identity_key: String
-    pub default: Expr?
+struct SemaRegistrationField {
+    symbol: Symbol
+    ty: Type
+    identity: TypeIdentity
+    identity_key: String
+    default: Expr?
     // The authenticated original default inferred in its declaration owner.
-    pub checked_default: TExpr?{None}
-    pub computed: Bool
+    checked_default: TExpr?{None}
+    computed: Bool
 }
 
 struct SemaRegistrationVariant {
@@ -401,16 +401,16 @@ struct SemaRegistrationExport {
     visibility: Int
 }
 
-pub struct SemaRegistrationImportBinding {
-    pub original: String
-    pub local: String
-    pub symbol: Symbol
-    pub declaration: Item?
-    pub target_module_identity: String
+struct SemaRegistrationImportBinding {
+    original: String
+    local: String
+    symbol: Symbol
+    declaration: Item?
+    target_module_identity: String
     // Resolved against this graph's fixed module order during registration;
     // Core namespace bindings may name a module that was not loaded.
-    pub target_module_index: Int?
-    pub visibility: Int
+    target_module_index: Int?
+    visibility: Int
 }
 
 struct SemaRegistrationImport {
@@ -423,23 +423,23 @@ struct SemaRegistrationImport {
     bindings: [SemaRegistrationImportBinding]
 }
 
-pub struct SemaRegistrationModuleInput {
-    pub package_identity: String
-    pub module_identity: String
-    pub module_name: String
-    pub core_source_alias: String
-    pub module_path: String
-    pub source_file: String
-    pub source_segments: [SemaSourceSegment]
-    pub source_origin: SemaSourceOrigin
-    pub program: Program
-    pub foreign_handles: [SemaRegistrationForeignHandleFacts]
+struct SemaRegistrationModuleInput {
+    package_identity: String
+    module_identity: String
+    module_name: String
+    core_source_alias: String
+    module_path: String
+    source_file: String
+    source_segments: [SemaSourceSegment]
+    source_origin: SemaSourceOrigin
+    program: Program
+    foreign_handles: [SemaRegistrationForeignHandleFacts]
     // D-MOD-CYCLE1=A, filled by the loader: the package namespace of a member
     // file ("" outside one), the names it contributes in declaration order,
     // and the names of other members its source can reach.
-    pub namespace: String{""}
-    pub namespace_names: [String]{[String]{}}
-    pub namespace_refs: [String]{[String]{}}
+    namespace: String{""}
+    namespace_names: [String]{[String]{}}
+    namespace_refs: [String]{[String]{}}
     // The module's source text (Rust `Module::source`). A declared text block
     // (D-META-DSL1=A) hands the text inside its braces to its rule.
     source: String{""}
@@ -450,37 +450,37 @@ struct SemaForeignImportBinding {
     alias: String
 }
 
-pub struct SemaRegistrationImportEdge {
-    pub source_module_identity: String
-    pub source_scope: String{""}
-    pub source_scope_exported: Bool{false}
-    pub target_module_identity: String
-    pub target_package_identity: String
-    pub foreign_binding: SemaForeignImportBinding?
-    pub declaration: ImportDecl
+struct SemaRegistrationImportEdge {
+    source_module_identity: String
+    source_scope: String{""}
+    source_scope_exported: Bool{false}
+    target_module_identity: String
+    target_package_identity: String
+    foreign_binding: SemaForeignImportBinding?
+    declaration: ImportDecl
 }
 
-pub struct SemaRegistrationModule {
-    pub package_identity: String
-    pub module_identity: String
-    pub module_name: String
-    pub core_source_alias: String
-    pub module_path: String
-    pub source_file: String
-    pub source_segments: [SemaSourceSegment]
-    pub source_origin: SemaSourceOrigin
-    pub program: Program
-    pub inline_bindings: SemaInlinePreparedBindings{SemaInlinePreparedBindings{imports: [String:SemaInlineFunctionBinding]{}, modules: [SemaInlineModuleSurface]{}}}
-    pub source: String{""}
-    pub declarations: [Item]
-    pub symbols: [Symbol]
-    pub symbol_positions: [String:Int]
-    pub declaration_positions: [String:Int]
-    pub impls: [SemaRegistrationImpl]
-    pub functions: [SemaRegistrationFunction]
-    pub foreign_functions: [SemaRegistrationForeignFunction]
-    pub nominals: [SemaRegistrationNominal]
-    pub constants: [SemaRegistrationConstant]
+struct SemaRegistrationModule {
+    package_identity: String
+    module_identity: String
+    module_name: String
+    core_source_alias: String
+    module_path: String
+    source_file: String
+    source_segments: [SemaSourceSegment]
+    source_origin: SemaSourceOrigin
+    program: Program
+    inline_bindings: SemaInlinePreparedBindings{SemaInlinePreparedBindings{imports: [String:SemaInlineFunctionBinding]{}, modules: [SemaInlineModuleSurface]{}}}
+    source: String{""}
+    declarations: [Item]
+    symbols: [Symbol]
+    symbol_positions: [String:Int]
+    declaration_positions: [String:Int]
+    impls: [SemaRegistrationImpl]
+    functions: [SemaRegistrationFunction]
+    foreign_functions: [SemaRegistrationForeignFunction]
+    nominals: [SemaRegistrationNominal]
+    constants: [SemaRegistrationConstant]
     // Symbol keys of the `#Persist`, mutable, and `#Static` constants
     // (sema_ownership_is_static_root), collected once at registration so a
     // function check reads them without walking the constant ASTs.
@@ -492,7 +492,7 @@ pub struct SemaRegistrationModule {
     import_binding_rows: [String:SemaRegistrationImportBindingRef]{[String:SemaRegistrationImportBindingRef]{}}
     // `{type}:{trait}` for every trait impl among `declarations`, so auto-derive
     // metadata asks once per query instead of rescanning the declarations.
-    pub declared_trait_impls: [String:Bool]
+    declared_trait_impls: [String:Bool]
     // D-MOD-CYCLE1=A: the module's package namespace (loader key, "" outside
     // one) and its `namespace_tables` slot (-1 outside one), what the loader
     // recorded for it, the position in `imports` where the package names
@@ -500,13 +500,13 @@ pub struct SemaRegistrationModule {
     // after every import), whether every namespace name binds (items from a
     // template declared elsewhere), and the sibling declarations its scope
     // binds: (owner module, symbol row).
-    pub namespace: String{""}
-    pub namespace_slot: Int{-1}
-    pub namespace_names: [String]{[String]{}}
-    pub namespace_refs: [String]{[String]{}}
-    pub namespace_import_split: Int{-1}
-    pub namespace_full: Bool{false}
-    pub namespace_bindings: [SemaRegistrationRowRef]{[SemaRegistrationRowRef]{}}
+    namespace: String{""}
+    namespace_slot: Int{-1}
+    namespace_names: [String]{[String]{}}
+    namespace_refs: [String]{[String]{}}
+    namespace_import_split: Int{-1}
+    namespace_full: Bool{false}
+    namespace_bindings: [SemaRegistrationRowRef]{[SemaRegistrationRowRef]{}}
 }
 
 struct SemaRegistrationImportBindingRef {
@@ -514,9 +514,9 @@ struct SemaRegistrationImportBindingRef {
     binding: Int
 }
 
-pub struct SemaRegistrationImportBindingRef {
-    pub import_index: Int
-    pub binding: Int
+struct SemaRegistrationImportBindingRef {
+    import_index: Int
+    binding: Int
 }
 
 struct SemaRegistrationImportBindingRef {
@@ -573,29 +573,29 @@ struct SemaLookupCounters {
     name_lookups: Int
 }
 
-pub struct SemaRegistrationGraph {
-    pub package_identity: String
-    pub entry_module_identity: String
-    pub canonical_effect_module_identity: String
-    pub target_machine: MIRTargetMachine
-    pub build_facts: SemaBuildFacts
-    pub modules: [SemaRegistrationModule]
-    pub output_rows: [SemaResolvedOutputRow]{[SemaResolvedOutputRow]{}}
+struct SemaRegistrationGraph {
+    package_identity: String
+    entry_module_identity: String
+    canonical_effect_module_identity: String
+    target_machine: MIRTargetMachine
+    build_facts: SemaBuildFacts
+    modules: [SemaRegistrationModule]
+    output_rows: [SemaResolvedOutputRow]{[SemaResolvedOutputRow]{}}
     // Module identity -> position in `modules`; fixed at graph construction.
-    pub module_rows: [String:Int]
-    pub edges: [SemaRegistrationImportEdge]
-    pub foreign_providers: [SemaForeignProviderInput]
-    pub core_builtin_owner_facts: [SemaRegistrationCoreBuiltinOwnerFact]
-    pub imports: [SemaRegistrationImport]
-    pub unit_facts: [SemaRegistrationUnitFact]
+    module_rows: [String:Int]
+    edges: [SemaRegistrationImportEdge]
+    foreign_providers: [SemaForeignProviderInput]
+    core_builtin_owner_facts: [SemaRegistrationCoreBuiltinOwnerFact]
+    imports: [SemaRegistrationImport]
+    unit_facts: [SemaRegistrationUnitFact]
     // Output alias and callable references come from the same checked graph
     // resolution as their facts; finalization publishes them with body refs.
-    pub output_name_references: [SemaNameReferenceFact]{[SemaNameReferenceFact]{}}
-    pub lookup_counters: Shared<SemaLookupCounters>
-    pub counting: Bool
-    pub internal_problem: String?
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+    output_name_references: [SemaNameReferenceFact]{[SemaNameReferenceFact]{}}
+    lookup_counters: Shared<SemaLookupCounters>
+    counting: Bool
+    internal_problem: String?
+    diagnostics: [Diagnostic]
+    complete: Bool
     // Canonical callable SymbolId key -> first registered row, in the order
     // `sema_registration_callable_abi` searched before it was indexed.
     callable_rows: [String:SemaRegistrationCallableRow]
@@ -627,16 +627,16 @@ pub struct SemaRegistrationGraph {
     keep_going: Bool{false}
     // Test mode (Rust `CompileMode::Test`/`TestOverride`), set by the driver:
     // named `#Test` bodies are checked and lowered as synthetic functions.
-    pub test_mode: Bool{false}
+    test_mode: Bool{false}
     // D-MOD-CYCLE1=A: one table per package namespace (Rust
     // `NameLedger::namespace_owner`): namespace -> slot, and per slot name ->
     // entry; entry -> declaring module and name. Entries are numbered in
     // module order, then declaration order.
-    pub namespace_slots: [String:Int]{[String:Int]{}}
-    pub namespace_tables: [[String:Int]]{[[String:Int]]{}}
-    pub namespace_entries: [[Int]]{[[Int]]{}}
-    pub namespace_entry_modules: [Int]{[Int]{}}
-    pub namespace_entry_names: [String]{[String]{}}
+    namespace_slots: [String:Int]{[String:Int]{}}
+    namespace_tables: [[String:Int]]{[[String:Int]]{}}
+    namespace_entries: [[Int]]{[[Int]]{}}
+    namespace_entry_modules: [Int]{[Int]{}}
+    namespace_entry_names: [String]{[String]{}}
     // `jet doc` (driver `JetDriverCompileMode.Doc`): finalization keeps each
     // module's settled program (derived impls, inferred failure contracts) in
     // `SemaGraphResult.programs`.
@@ -1350,7 +1350,7 @@ fn sema_registration_nominal(item: Item, module_identity: String, fallback_sourc
     }
 }
 
-pub fn sema_registration_original_error_module(diagnostics: &[Diagnostic]) -> SemaRegistrationModuleInput? {
+fn sema_registration_original_error_module(diagnostics: &[Diagnostic]) -> SemaRegistrationModuleInput? {
     // Only this exact embedded original parse can mint the DefaultErr marker.
     parsed := parse_generated_source(SEMA_PRELUDE_ERROR_SOURCE.bytes())
     loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic)
@@ -1448,7 +1448,7 @@ fn sema_registration_is_compiler_owned(nominal: SemaRegistrationNominal) -> Bool
 // Runtime enums (`Ordering`, `RemoveBy`, `TaskFailure`) and artifact-declared
 // reflection enums share this checked nominal path; runtime ownership is
 // decided independently by the emitter's native carrier registry.
-pub fn sema_registration_is_compiler_owned_enum(nominal: SemaRegistrationNominal) -> Bool Never! {
+fn sema_registration_is_compiler_owned_enum(nominal: SemaRegistrationNominal) -> Bool Never! {
     nominal.compiler_owned && nominal.generated_provenance == (Val(sema_registration_compiler_owned_enum_provenance()))
 }
 
@@ -1848,7 +1848,7 @@ fn sema_registration_unknown_impl_target(definition: ImplDef) -> Diagnostic {
 }
 
 // Opaque impl ownership is metadata, not a nominal declaration or public export.
-pub fn sema_registration_source_owns_impl(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
+fn sema_registration_source_owns_impl(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
     if !module_row.module_identity.starts_with("<corelib>/") -> return false
     loop row in CORE_SOURCE_OWNED_ROWS {
         if row.module_name != module_row.module_name || row.alias != module_row.core_source_alias || module_row.source_file != "<corelib>/{row.path}" -> next
@@ -2267,7 +2267,7 @@ fn sema_registration_add_import(graph: &SemaRegistrationGraph, registered: &Sema
 // Resolve each exact identity once per pass, including known absences (-1).
 // The cache belongs to one graph with a fixed module order; import bindings
 // retain their answer through graph clones and staged value application.
-pub fn sema_registration_cached_module_index(graph: SemaRegistrationGraph, identity: String, indices: &[String:Int]) -> Int? {
+fn sema_registration_cached_module_index(graph: SemaRegistrationGraph, identity: String, indices: &[String:Int]) -> Int? {
     if indices.get(identity) == .Val(index) -> return if index < 0 -> None else -> Val(index)
     index :: sema_registration_module_index(graph, identity)
     indices[identity] = index ?? -1
@@ -2450,13 +2450,13 @@ fn sema_registration_inject_compiler_builtins(graph: &SemaRegistrationGraph) {
 
 // Compiler names resolve to ordinary original Prelude declarations or the
 // existing runtime enum rows. The DefaultErr role comes only from its marker.
-pub fn sema_registration_compiler_builtin_row(graph: SemaRegistrationGraph, name: String) -> SemaRegistrationRowRef? {
+fn sema_registration_compiler_builtin_row(graph: SemaRegistrationGraph, name: String) -> SemaRegistrationRowRef? {
     graph.compiler_builtin_rows.get(name)
 }
 
 // `counting` sets the graph's `counting` (#4319 lookup counters). The inputs
 // are consumed: each program moves into its module row.
-pub fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: String, canonical_effect_module_identity: String, foreign_providers: [SemaForeignProviderInput], target_machine: MIRTargetMachine, build_facts: SemaBuildFacts, counting: Bool) -> SemaRegistrationGraph {
+fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: String, canonical_effect_module_identity: String, foreign_providers: [SemaForeignProviderInput], target_machine: MIRTargetMachine, build_facts: SemaBuildFacts, counting: Bool) -> SemaRegistrationGraph {
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
     // Rust Bundle: inject_units_prelude, then resolve_unit_dimensions, before
@@ -2639,7 +2639,7 @@ fn sema_registration_item_is_expanded_template(item: Item) -> Bool Never! {
 // letters, digits and `_`, and of non-ASCII bytes, so a multi-byte letter
 // stays inside its word. Comments and strings count too, so the words are a
 // superset of the names the range spells (D-MOD-CYCLE1=A namespace reach).
-pub fn sema_source_words(bytes: [U8], start: Int, end: Int, seen: &[String:Bool], words: &[String]) Never! {
+fn sema_source_words(bytes: [U8], start: Int, end: Int, seen: &[String:Bool], words: &[String]) Never! {
     stop :: if end < bytes.len() -> end else -> bytes.len()
     cursor := if start > 0 -> start else -> 0
     loop cursor < stop {
@@ -2746,7 +2746,7 @@ fn sema_registration_bind_namespaces(graph: &SemaRegistrationGraph, own_symbols:
     }
 }
 
-pub fn sema_registration_lookup_name(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
+fn sema_registration_lookup_name(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
     if graph.counting {
         counters := graph.lookup_counters
         permit :: counters.guard_edit()
@@ -2831,7 +2831,7 @@ fn sema_registration_apply_graph_module(graph: SemaRegistrationGraph, module_ide
 // names (`namespace_bindings`) bind after its own declarations and the
 // imports before `namespace_import_split`, as Rust consults
 // `namespace_owner` after locals and imports.
-pub fn sema_registration_apply_graph_module_rows(graph: SemaRegistrationGraph, module_identity: String, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], waiting: &[SemaScopeProbeConstant]) -> Bool {
+fn sema_registration_apply_graph_module_rows(graph: SemaRegistrationGraph, module_identity: String, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], waiting: &[SemaScopeProbeConstant]) -> Bool {
     module_index :: sema_registration_module_index(graph, module_identity) ?? return false
     module_row :: graph.modules[module_index]
     complete := true

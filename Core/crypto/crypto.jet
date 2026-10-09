@@ -164,8 +164,8 @@ fn update(hasher: &Hasher, bytes: [U8]) Never! { &hasher.update(bytes) }
 fn digest(hasher: ^Hasher) -> String Never! { hasher.digest() }
 
 #!Encode
-pub struct Secret {
-    pub bytes: [U8]
+struct Secret {
+    bytes: [U8]
 
     /// The UTF-8 bytes of `text` as secret material.
     fn from_text(text: String) -> Secret Never! { Secret{bytes: text.bytes()} }
@@ -197,7 +197,7 @@ struct SigningKey {
     bytes: [U8]
 
     /// A fresh Ed25519 seed from the OS CSPRNG. There is no fallback generator.
-    pub fn new_random() -[Rand]> SigningKey CryptoError! {
+    fn new_random() -[Rand]> SigningKey CryptoError! {
         seed :: random.bytes(32) ?? return Err(CryptoError.Unavailable)
         Ok(SigningKey{bytes: seed})
     }
@@ -234,7 +234,7 @@ struct X25519SecretKey {
     bytes: [U8]
 
     /// A fresh X25519 private key from the OS CSPRNG.
-    pub fn new_random() -[Rand]> X25519SecretKey CryptoError! {
+    fn new_random() -[Rand]> X25519SecretKey CryptoError! {
         key :: random.bytes(32) ?? return Err(CryptoError.Unavailable)
         Ok(X25519SecretKey{bytes: key})
     }
@@ -311,15 +311,15 @@ struct WrappedKey {
 }
 
 // Vault key-wrap carriers have one canonical source owner in core.crypto.vault.
-pub fn __vault_wrapped_from_bytes(bytes: ^[U8]) -> WrappedVaultKey KeyWrapError! {
+fn __vault_wrapped_from_bytes(bytes: ^[U8]) -> WrappedVaultKey KeyWrapError! {
     wrapped :: core.crypto.vault.__wrapped_from_bytes(^bytes) ?? return Err(KeyWrapError{reason: err.reason})
     Ok(wrapped)
 }
-pub fn __vault_wrapped_bytes(wrapped: WrappedVaultKey) -> [U8] Never! { core.crypto.vault.__wrapped_bytes(wrapped) }
-pub fn __vault_unlock_recipient(identity: X25519SecretKey) -> KeyUnlock Never! {
+fn __vault_wrapped_bytes(wrapped: WrappedVaultKey) -> [U8] Never! { core.crypto.vault.__wrapped_bytes(wrapped) }
+fn __vault_unlock_recipient(identity: X25519SecretKey) -> KeyUnlock Never! {
     core.crypto.vault.__key_unlock_recipient(identity)
 }
-pub fn __vault_unlock_passphrase(passphrase: Secret) -> KeyUnlock Never! {
+fn __vault_unlock_passphrase(passphrase: Secret) -> KeyUnlock Never! {
     core.crypto.vault.__key_unlock_passphrase(passphrase)
 }
 
@@ -607,7 +607,7 @@ fn open(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] CryptoError! 
     open_sealed(identity, box, aad)
 }
 
-pub fn file_seal(recipients: [X25519PublicKey], source: Path, destination: Path) FileCryptoError! -[FS, Rand]> {
+fn file_seal(recipients: [X25519PublicKey], source: Path, destination: Path) FileCryptoError! -[FS, Rand]> {
     canonical :: jetc.canonical(recipients)
     parent :: jetc_parent(destination.to_string())
     // The portable oracle deliberately has no race-safe source snapshot.
@@ -644,7 +644,7 @@ pub fn file_seal(recipients: [X25519PublicKey], source: Path, destination: Path)
     Ok()
 }
 
-pub fn file_open(identity: X25519SecretKey, source: Path, destination: Path) FileCryptoError! -[FS]> {
+fn file_open(identity: X25519SecretKey, source: Path, destination: Path) FileCryptoError! -[FS]> {
     input :: jetc_source(source.to_string(), .OpenFailed)
     metadata :: jetc_stat(input, .OpenFailed)
     fixed :: jetc_read_exact(input, 20, "open-input-read", .OpenFailed)
@@ -1291,7 +1291,7 @@ fn jetc_verify_output(input: JetcFd, writer: jetc.Writer, length: Int) FileCrypt
     Ok()
 }
 
-pub fn sign(signing_key: SigningKey, bytes: [U8]) -> Signature CryptoError! {
+fn sign(signing_key: SigningKey, bytes: [U8]) -> Signature CryptoError! {
     if signing_key.bytes.len() != 32 -> return Err(CryptoError.KeyRejected)
     Ok(Signature{bytes: ed25519_sign_raw(signing_key.bytes, bytes)})
 }
@@ -1430,7 +1430,7 @@ fn x25519_shared(secret_key: X25519SecretKey, public_key: X25519PublicKey) -> Sh
 }
 
 /// Generate a fresh X25519 private key for the beginner envelope helpers.
-pub fn generatekey() -[Rand]> X25519SecretKey CryptoError! {
+fn generatekey() -[Rand]> X25519SecretKey CryptoError! {
     bytes :: random.bytes(32) ?? return Err(CryptoError.Unavailable)
     Ok(X25519SecretKey{bytes: bytes})
 }
@@ -2527,9 +2527,9 @@ fn ed25519_sign_raw(seed: [U8], msg: [U8]) -> [U8] Never! { rawcrypto.ed25519_si
 fn ed25519_verify_raw(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! { rawcrypto.ed25519_verify_raw(pk, msg, sig) }
 
 // Existing public coordinate carrier. Secret arithmetic uses private fixed limbs.
-pub struct EdPoint {
-    pub x: Int
-    pub y: Int
+struct EdPoint {
+    x: Int
+    y: Int
 }
 
 

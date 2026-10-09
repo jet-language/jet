@@ -9,8 +9,8 @@ use core as core
 use core.encoding.hex as hex
 use core.encoding.base32 as base32
 #Error
-pub struct Base64Error {
-    pub reason: String
+struct Base64Error {
+    reason: String
     impl Display {
         fn display(self) -> String Never! { self.reason }
     }
@@ -28,19 +28,19 @@ fn rewrap(reason: String) -> Base64Error Never! { Base64Error{reason: reason} }
 
 fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
 
-pub fn encode(data: [U8]) -> String Never! {
+fn encode(data: [U8]) -> String Never! {
     encode_alphabet(data, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", true)
 }
 
-pub fn encode_url(data: [U8]) -> String Never! {
+fn encode_url(data: [U8]) -> String Never! {
     encode_alphabet(data, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", false)
 }
 
-pub fn decode(text: String) -> [U8] Base64Error! {
+fn decode(text: String) -> [U8] Base64Error! {
     decode_for_edition(text, core.encoding.__edition(), false, false, false)
 }
 
-pub fn decode_url(text: String) -> [U8] Base64Error! {
+fn decode_url(text: String) -> [U8] Base64Error! {
     decode_for_edition(text, core.encoding.__edition(), true, false, false)
 }
 
@@ -71,7 +71,7 @@ fn b85decode(text: String) -> [U8] Base64Error! { base85_decode(text, C_B85_ALPH
 fn z85encode(data: [U8]) -> String Base64Error! { base85_encode(data, C_Z85_ALPHABET, true) }
 fn z85decode(text: String) -> [U8] Base64Error! { base85_decode(text, C_Z85_ALPHABET, true) }
 
-pub fn encodebytes(data: [U8]) -> String Never! {
+fn encodebytes(data: [U8]) -> String Never! {
     encoded :: encode(data).bytes()
     out := [U8]{}
     loop i in 0..<encoded.len() {
@@ -81,7 +81,7 @@ pub fn encodebytes(data: [U8]) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-pub fn decodebytes(text: String) -> [U8] Base64Error! {
+fn decodebytes(text: String) -> [U8] Base64Error! {
     decode_for_edition(text, core.encoding.__edition(), false, true, false)
 }
 
@@ -108,13 +108,13 @@ fn decode_base32hex(text: String) -> [U8] Base64Error! {
     }
 }
 
-pub fn encode_url_padded(data: [U8]) -> String Never! {
+fn encode_url_padded(data: [U8]) -> String Never! {
     encode_alphabet(data, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", true)
 }
 
 fn decode_padded(text: String) -> [U8] Base64Error! { decode(text) }
 
-pub fn pad(text: String) -> String Never! {
+fn pad(text: String) -> String Never! {
     remainder :: text.bytes().len() %% 4
     if remainder == 0 -> return ~text
     out := ~text
@@ -122,7 +122,7 @@ pub fn pad(text: String) -> String Never! {
     out
 }
 
-pub fn unpad(text: String) -> String Never! {
+fn unpad(text: String) -> String Never! {
     raw :: text.bytes()
     end := raw.len()
     loop end > 0 && raw[end - 1] == (U8{61}) -> end -= 1

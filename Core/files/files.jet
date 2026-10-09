@@ -41,22 +41,22 @@ use __core_files_path_components as host_path
 // symlink and other special entries are never dereferenced.
 
 
-pub struct DirEntry {
-    pub name: String
-    pub path: String
-    pub is_dir: Bool
+struct DirEntry {
+    name: String
+    path: String
+    is_dir: Bool
 }
 
 /// D-CORE-FILEDIR1=A: one entry of `Directory.list`. `raw_name` is the exact
 /// name the system stores; `name_is_unicode` is false when those bytes are not
 /// valid UTF-8, and then `name` and `path` show each non-ASCII byte as U+FFFD,
 /// so only `raw_name` identifies the entry exactly.
-pub struct DirectoryEntry {
-    pub name: String
-    pub path: String
-    pub is_dir: Bool
-    pub raw_name: [U8]
-    pub name_is_unicode: Bool
+struct DirectoryEntry {
+    name: String
+    path: String
+    is_dir: Bool
+    raw_name: [U8]
+    name_is_unicode: Bool
 }
 
 /// The shown form of a name that is not valid UTF-8: ASCII bytes stay, every
@@ -91,14 +91,14 @@ fn raw_name_order(left: [U8], right: [U8]) -> Ordering Never! {
 
 /// D-CORE-FILEOPEN1=A: whether `create` may replace an existing file.
 /// `Refuse` creates exclusively and reports `IOError.AlreadyExists`.
-pub enum CreateIfExists {
+enum CreateIfExists {
     Replace
     Refuse
 }
 
 /// D-CORE-FILEOPEN1=A: whether a call follows a final symbolic link. `Refuse`
 /// reports `IOError.InvalidInput` when the path ends in a link.
-pub enum LinkPolicy {
+enum LinkPolicy {
     Follow
     Refuse
 }
@@ -106,7 +106,7 @@ pub enum LinkPolicy {
 /// D-CORE-FILERENAME1=A: what `rename` does when the target name exists.
 /// `Refuse` reports `IOError.AlreadyExists`; `Swap` exchanges both names in
 /// one step and reports `IOError.Unsupported` where the system cannot.
-pub enum RenameIfExists {
+enum RenameIfExists {
     Replace
     Refuse
     Swap
@@ -114,9 +114,9 @@ pub enum RenameIfExists {
 
 /// D-CORE-FILESTAT1=A: a file's identity, its device plus its file number.
 /// Two paths name the same file exactly when their ids are equal.
-pub struct FileID {
-    pub device: Int
-    pub inode: Int
+struct FileID {
+    device: Int
+    inode: Int
 }
 
 /// What `stat` reports about one directory entry. A final link is described
@@ -124,60 +124,22 @@ pub struct FileID {
 /// owner (Windows), and `created` is None where the file system keeps no
 /// birth time. Times are wall-clock `DateTime` values with nanosecond
 /// precision.
-pub struct Stat {
-    pub size: Int
-    pub kind: String
-    pub mode: Int
-    pub readonly: Bool
-    pub is_file: Bool
-    pub is_dir: Bool
-    pub is_symlink: Bool
-    pub id: FileID
-    pub links: Int
-    pub owner: Int?
-    /// Unix reports allocated 512-byte blocks multiplied by 512 with signed saturation; Windows and other non-Unix platforms report logical file length in bytes, not allocated space.
-    pub size_on_disk: Int
-    pub modified: DateTime
-    pub changed: DateTime
-    pub created: DateTime?
-}
-
-pub struct WalkEntry {
-    pub path: String
-    pub relative: String
-    pub is_dir: Bool
-    pub depth: Int
-}
-
-pub struct FileScope {
-    pub authority: Authority
-
-    /// Read only through the authority's descriptor-relative no-follow roots.
-    pub fn read(self, path: String) -[FS.Read]> String IOError! {
-        scoped_read(self, path)
-    }
-}
-
-pub struct MappedFile {
-    pub path: String
-    pub bytes: [U8]
-}
-
-pub struct TempDir {
-    path: String
-    is_dir: Bool
-}
-
 struct Stat {
     size: Int
-    modified_ms: Int
-    created_ms: Int
+    kind: String
+    mode: Int
     readonly: Bool
     is_file: Bool
     is_dir: Bool
     is_symlink: Bool
-    kind: String
-    mode: Int
+    id: FileID
+    links: Int
+    owner: Int?
+    /// Unix reports allocated 512-byte blocks multiplied by 512 with signed saturation; Windows and other non-Unix platforms report logical file length in bytes, not allocated space.
+    size_on_disk: Int
+    modified: DateTime
+    changed: DateTime
+    created: DateTime?
 }
 
 struct WalkEntry {
@@ -189,12 +151,31 @@ struct WalkEntry {
 
 struct FileScope {
     authority: Authority
+
+    /// Read only through the authority's descriptor-relative no-follow roots.
+    fn read(self, path: String) -[FS.Read]> String IOError! {
+        scoped_read(self, path)
+    }
 }
 
 struct MappedFile {
     path: String
     bytes: [U8]
 }
+
+struct TempDir {
+    path: String
+    is_dir: Bool
+}
+
+struct TempFile {
+    priv path: String
+}
+
+struct FileLock {
+    priv path: String
+}
+
 
 // The fd is guarded before it becomes the native FileLock carrier. Failed
 // opens, waits and identity checks therefore close without unlinking a name.
@@ -226,7 +207,7 @@ struct __LockWait {
 
 /// An exclusive advisory lock on a held directory. Closing this owner releases
 /// the OS lock without removing any filesystem name.
-pub struct AdvisoryLock {
+struct AdvisoryLock {
     handle: Int
 }
 
@@ -240,35 +221,35 @@ impl AdvisoryLock.Close {
 /// An open file for reading. `read_line`, `lines`, and `read(max)` advance
 /// one shared position; `read` returns up to `max` bytes and an empty list
 /// at end of file.
-pub struct FileReader {
+struct FileReader {
     path: String
 
     /// D-CORE-FILESTAT1=A: what the open file is now (fstat). Comparing
     /// `id` with a later `files.stat(path).id` shows whether the path was
     /// replaced after the open.
-    pub fn stat(self) -[FS.Read]> Stat IOError! {
+    fn stat(self) -[FS.Read]> Stat IOError! {
         stat_from_row(core.files.__reader_stat(self))
     }
 
-    pub fn read_line(&self) -[FS.Read]> String? IOError! {
+    fn read_line(&self) -[FS.Read]> String? IOError! {
         __reader_read_line(&self)
     }
 }
 
 /// An open file for writing. `write_line` and `write_all` are buffered;
 /// `flush` hands the bytes to the system and `fsync` also makes them durable.
-pub struct FileWriter {
+struct FileWriter {
     path: String
 
     /// D-CORE-FILESTAT1=A: what the open file is now (fstat). Bytes still
     /// buffered are not counted until `flush` or `fsync`.
-    pub fn stat(self) -[FS.Read]> Stat IOError! {
+    fn stat(self) -[FS.Read]> Stat IOError! {
         stat_from_row(core.files.__writer_stat(self))
     }
 
     /// Set the open file's permission bits (0o0..0o7777) without naming its
     /// path again. Windows keeps only the read-only flag.
-    pub fn set_mode(self, mode: Int) IOError! -[FS.Write]> {
+    fn set_mode(self, mode: Int) IOError! -[FS.Write]> {
         core.files.__writer_set_mode(self, mode)
     }
 }
@@ -279,7 +260,7 @@ fn scope(authority: Authority) -[FS]> FileScope Never! { {authority: authority} 
 
 /// D-CORE-FILEOPEN1=A: open `path` for reading. `links: .Refuse` refuses a
 /// path that ends in a symbolic link. Every handle is close-on-exec.
-pub fn open(path: String | Path, links: LinkPolicy{.Follow}) -[FS.Read]> FileReader IOError! {
+fn open(path: String | Path, links: LinkPolicy{.Follow}) -[FS.Read]> FileReader IOError! {
     core.files.__open_reader(-1, path_text(path), link_code(links))
 }
 
@@ -287,13 +268,13 @@ pub fn open(path: String | Path, links: LinkPolicy{.Follow}) -[FS.Read]> FileRea
 /// D-CORE-FILEOPEN1=A: open `path` for writing from empty. `if_exists:
 /// .Refuse` creates exclusively; `mode` sets a new file's permission bits
 /// before the process umask and leaves an existing file's bits alone.
-pub fn create(path: String | Path, if_exists: CreateIfExists{.Replace}, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
+fn create(path: String | Path, if_exists: CreateIfExists{.Replace}, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
     core.files.__open_writer(-1, path_text(path), false, create_code(if_exists), mode ?? -1, link_code(links))
 }
 
 
 /// D-CORE-FILEOPEN1=A: open `path` for appending, creating it when missing.
-pub fn append(path: String | Path, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
+fn append(path: String | Path, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
     core.files.__open_writer(-1, path_text(path), true, 0, mode ?? -1, link_code(links))
 }
 
@@ -333,24 +314,24 @@ fn rename_code(if_exists: RenameIfExists) -> Int Never! {
 /// `..`, `.`, empty parts, and absolute names are refused with
 /// `IOError.InvalidInput`. The handle is close-on-exec and closes when it
 /// leaves scope or at `close(^directory)`.
-pub struct Directory {
-    pub path: String
+struct Directory {
+    path: String
     handle: Int
 
     /// Open the regular file `name` for reading.
-    pub fn open(self, name: String) -[FS.Read]> FileReader IOError! {
+    fn open(self, name: String) -[FS.Read]> FileReader IOError! {
         held_name(self.path, name, false)
         core.files.__open_reader(self.handle, name, 1)
     }
 
     /// Create the file `name`, with the same labels as `files.create`.
-    pub fn create(self, name: String, if_exists: CreateIfExists{.Replace}, mode: Int?{None}) -[FS.Write]> FileWriter IOError! {
+    fn create(self, name: String, if_exists: CreateIfExists{.Replace}, mode: Int?{None}) -[FS.Write]> FileWriter IOError! {
         held_name(self.path, name, true)
         core.files.__open_writer(self.handle, name, false, create_code(if_exists), mode ?? -1, 1)
     }
 
     /// Hold the directory `name` inside this one.
-    pub fn open_directory(self, name: String) -[FS.Read]> Directory IOError! {
+    fn open_directory(self, name: String) -[FS.Read]> Directory IOError! {
         held_name(self.path, name, false)
         key :: core.files.__open_directory(self.handle, name)
         Ok(Directory{path: join(self.path, name), handle: key})
@@ -358,7 +339,7 @@ pub struct Directory {
 
     /// Create the directory `name` and hold it. An existing name reports
     /// `IOError.AlreadyExists`.
-    pub fn create_directory(self, name: String, mode: Int?{None}) -[FS.Read, FS.Write]> Directory IOError! {
+    fn create_directory(self, name: String, mode: Int?{None}) -[FS.Read, FS.Write]> Directory IOError! {
         held_name(self.path, name, true)
         core.files.__create_directory(self.handle, name, mode ?? -1)
         key :: core.files.__open_directory(self.handle, name)
@@ -369,7 +350,7 @@ pub struct Directory {
     /// `is_dir: false`. `raw_name` holds the entry's exact name bytes and
     /// `name_is_unicode` says whether they are valid UTF-8; when they are not,
     /// `name` (and `path`) show each non-ASCII byte as U+FFFD.
-    pub fn list(self) -[FS.Read]> [DirectoryEntry] IOError! {
+    fn list(self) -[FS.Read]> [DirectoryEntry] IOError! {
         rows :: core.files.__list_directory(self.handle)
         out := [DirectoryEntry]{}
         loop row in rows {
@@ -395,27 +376,27 @@ pub struct Directory {
     }
 
     /// Describe the held directory itself.
-    pub fn stat(self) -[FS.Read]> Stat IOError! {
+    fn stat(self) -[FS.Read]> Stat IOError! {
         row :: core.files.__stat_at(self.handle, "", false)
         Ok(stat_from_row(row))
     }
 
     /// Describe the entry `name` without following a final link.
-    pub fn entry_stat(self, name: String) -[FS.Read]> Stat IOError! {
+    fn entry_stat(self, name: String) -[FS.Read]> Stat IOError! {
         held_name(self.path, name, false)
         row :: core.files.__stat_at(self.handle, name, false)
         Ok(stat_from_row(row))
     }
 
     /// The text stored in the link `name`, exactly as stored (D-CORE-HANDLEFD1=A).
-    pub fn read_link(self, name: String) -[FS.Read]> String IOError! {
+    fn read_link(self, name: String) -[FS.Read]> String IOError! {
         held_name(self.path, name, false)
         core.files.__read_link_at(self.handle, name)
     }
 
     /// Rename `from` to `to`, both inside this directory unless `into` names
     /// the directory that receives `to`. `if_exists` follows `files.rename`.
-    pub fn rename(self, from: String, to: String, into: Directory?{None}, if_exists: RenameIfExists{.Replace}) IOError! -[FS.Write]> {
+    fn rename(self, from: String, to: String, into: Directory?{None}, if_exists: RenameIfExists{.Replace}) IOError! -[FS.Write]> {
         held_name(self.path, from, true)
         target := self.handle
         target_path := self.path
@@ -431,24 +412,24 @@ pub struct Directory {
     }
 
     /// Remove the non-directory entry `name`; a link is removed, not followed.
-    pub fn remove(self, name: String) IOError! -[FS.Write]> {
+    fn remove(self, name: String) IOError! -[FS.Write]> {
         held_name(self.path, name, true)
         core.files.__remove_at(self.handle, name, false)
     }
 
     /// Remove the empty directory `name`.
-    pub fn remove_directory(self, name: String) IOError! -[FS.Write]> {
+    fn remove_directory(self, name: String) IOError! -[FS.Write]> {
         held_name(self.path, name, true)
         core.files.__remove_at(self.handle, name, true)
     }
 
     /// Flush the held directory so earlier renames inside it are durable.
-    pub fn fsync(self) IOError! -[FS.Write]> { core.files.__fsync_directory(self.handle) }
+    fn fsync(self) IOError! -[FS.Write]> { core.files.__fsync_directory(self.handle) }
 
     /// Acquire an exclusive, nonblocking flock on this directory's identity.
     /// An independent descriptor owns the lock until the returned owner closes,
     /// even if the directory is renamed or this Directory is closed.
-    pub fn lock(self) -[FS.Read, FS.Write]> AdvisoryLock IOError! {
+    fn lock(self) -[FS.Read, FS.Write]> AdvisoryLock IOError! {
         key :: core.files.__open_directory(self.handle, ".")
         if core.files.__flock(key, 6) == {
             .Ok(_) -> Ok(AdvisoryLock{handle: key})
@@ -462,13 +443,13 @@ pub struct Directory {
 
 // Compiler-private store bridge, not a public filesystem API. The store
 // validates the plain destination name and interprets errno (including EXDEV).
-#Unsafe("the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened") pub fn compiler_link_held(source: FileReader, into: Directory, name: String) -[FS.Write]> (available: Bool, held: Bool, value: Int, errno: Int) Never! {
+#Unsafe("the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened") fn compiler_link_held(source: FileReader, into: Directory, name: String) -[FS.Write]> (available: Bool, held: Bool, value: Int, errno: Int) Never! {
     core.files.jet_files_link_reader_at_raw(source, into.handle, name)
 }
 
 // Compiler-private process bridge. The borrowed Directory stays live through
 // the raw fd duplication; only the duplicate enters the ProcessSpec carrier.
-#Unsafe("compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor") pub fn __with_process_directory(spec: ProcessSpec, directory: Directory, child_fd: Int, as_cwd: Bool) -[FS, Exec, Env]> ProcessSpec IOError! {
+#Unsafe("compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor") fn __with_process_directory(spec: ProcessSpec, directory: Directory, child_fd: Int, as_cwd: Bool) -[FS, Exec, Env]> ProcessSpec IOError! {
     context :: IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None, cause: None}
     if child_fd < 3 || child_fd > 2147483646 {
         return Err(IOError.InvalidInput(IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None,
@@ -532,7 +513,7 @@ impl Directory.Close {
 
 /// D-CORE-FILEDIR1=A: hold the directory at `path`. The last part must be a
 /// real directory, not a link.
-pub fn open_directory(path: String) -[FS.Read]> Directory IOError! {
+fn open_directory(path: String) -[FS.Read]> Directory IOError! {
     key :: core.files.__open_directory(-1, path)
     Ok(Directory{path: ~path, handle: key})
 }
@@ -614,18 +595,18 @@ fn stat_from_row(row: [Int]) -> Stat Never! {
 /// D-CORE-FILEXATTR1=A: the extended-attribute names on `path` itself, in
 /// sorted order. A final link is never followed. Windows and file systems
 /// without attributes report none.
-pub fn extended_attribute_names(path: String) -[FS.Read]> [String] IOError! { core.files.__xattr_names(path) }
+fn extended_attribute_names(path: String) -[FS.Read]> [String] IOError! { core.files.__xattr_names(path) }
 
 
 /// D-CORE-FILEXATTR1=A: one extended-attribute value, or None when absent.
-pub fn extended_attribute(path: String, name: String) -[FS.Read]> [U8]? IOError! {
+fn extended_attribute(path: String, name: String) -[FS.Read]> [U8]? IOError! {
     core.files.__xattr_get(path, name)
 }
 
 
 /// D-CORE-FILEXATTR1=A: write one extended-attribute value on `path` itself.
 /// Windows and file systems without attributes report `IOError.Unsupported`.
-pub fn set_extended_attribute(path: String, name: String, value: [U8]) IOError! -[FS.Write]> {
+fn set_extended_attribute(path: String, name: String, value: [U8]) IOError! -[FS.Write]> {
     core.files.__xattr_set(path, name, value)
 }
 
@@ -675,7 +656,7 @@ fn file_writer_refusal(path: String) IOError! -[FS.Write]> {
     }
 }
 
-pub fn read_bytes(path: String) -[FS.Read]> [U8] IOError! {
+fn read_bytes(path: String) -[FS.Read]> [U8] IOError! {
     file_fault("FS.Read", .Read, path)
     core.files.__read_bytes_os(path)
 }
@@ -687,33 +668,33 @@ fn read(path: String) -[FS.Read]> String IOError! {
 }
 
 
-pub fn map(path: String | Path) -[FS.Read]> MappedFile IOError! {
+fn map(path: String | Path) -[FS.Read]> MappedFile IOError! {
     text :: path_text(path)
     files8_preflight("FS.Read", .Read, text)
     core.files.__map_raw(text)
 }
 
 
-pub fn write(path: String, text: String) IOError! -[FS.Write]> {
+fn write(path: String, text: String) IOError! -[FS.Write]> {
     file_fault("FS.Write", .Write, path)
     core.files.__write_bytes_os(path, text.bytes())
 }
 
 
-pub fn write_bytes(path: String, bytes: [U8]) IOError! -[FS.Write]> {
+fn write_bytes(path: String, bytes: [U8]) IOError! -[FS.Write]> {
     file_writer_refusal(path)
     file_fault("FS.Write", .Write, path)
     core.files.__write_bytes_os(path, bytes)
 }
 
 
-pub fn append_all(path: String, text: String) IOError! -[FS.Write]> {
+fn append_all(path: String, text: String) IOError! -[FS.Write]> {
     file_fault("FS.Write", .Write, path)
     core.files.__append_bytes_os(path, text.bytes())
 }
 
 
-pub fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
+fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
     file_writer_refusal(path)
     file_fault("FS.Write", .Write, path)
     platform :: file_path_platform()
@@ -762,20 +743,20 @@ pub fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
 }
 
 
-pub fn read_at(path: String, offset: Int, count: Int) -[FS.Read]> [U8] IOError! {
+fn read_at(path: String, offset: Int, count: Int) -[FS.Read]> [U8] IOError! {
     file_fault("FS.Read", .Read, path)
     core.files.__read_at_os(path, if offset < 0 -> 0 else -> offset, if count < 0 -> 0 else -> count)
 }
 
 
-pub fn write_at(path: String, offset: Int, bytes: [U8]) IOError! -[FS.Write]> {
+fn write_at(path: String, offset: Int, bytes: [U8]) IOError! -[FS.Write]> {
     file_writer_refusal(path)
     file_fault("FS.Write", .Write, path)
     core.files.__write_at_os(path, if offset < 0 -> 0 else -> offset, bytes)
 }
 
 
-pub fn fsync(path: String | Path) IOError! -[FS.Write]> {
+fn fsync(path: String | Path) IOError! -[FS.Write]> {
     text :: path_text(path)
     files8_preflight("FS.Write", .Flush, text)
     core.files.__fsync_raw(text)
@@ -793,7 +774,7 @@ fn exists_impl(path: String) -> Bool Never! {
 fn exists(path: String) -[FS]> Bool Never! { exists_impl(path) }
 
 
-pub fn is_dir(path: String) -[FS.Read]> Bool Never! {
+fn is_dir(path: String) -[FS.Read]> Bool Never! {
     if core.files.__metadata_directory(path) == {
         .Ok(directory) -> directory
         .Err(_) -> false
@@ -802,17 +783,17 @@ pub fn is_dir(path: String) -[FS.Read]> Bool Never! {
 
 
 /// D-CORE-FILESTAT1=A: describe `path` without following a final link.
-pub fn stat(path: String | Path) -[FS.Read]> Stat IOError! {
+fn stat(path: String | Path) -[FS.Read]> Stat IOError! {
     row :: core.files.__stat_at(-1, path_text(path), false)
     Ok(stat_from_row(row))
 }
 
 
 /// The same description as `stat`; neither follows a final link.
-pub fn lstat(path: String | Path) -[FS.Read]> Stat IOError! { stat(path) }
+fn lstat(path: String | Path) -[FS.Read]> Stat IOError! { stat(path) }
 
 
-pub fn set_mode(path: String | Path, mode: Int) IOError! -[FS.Write]> {
+fn set_mode(path: String | Path, mode: Int) IOError! -[FS.Write]> {
     text :: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     if core.files.__os_family() == "unix" {
@@ -823,7 +804,7 @@ pub fn set_mode(path: String | Path, mode: Int) IOError! -[FS.Write]> {
     core.files.__set_mode_raw(text, mode)
 }
 
-pub fn chown(path: String | Path, owner: Int, group: Int) IOError! -[FS.Write]> {
+fn chown(path: String | Path, owner: Int, group: Int) IOError! -[FS.Write]> {
     text :: path_text(path)
     if core.files.__os_family() != "unix" -> return Err(files8_other(.Write, None, "chown is unavailable on this platform"))
     if owner != -1 && !files8_u32(owner) -> return Err(files8_other(.Write, Val(text), "owner must be -1 or a non-negative u32"))
@@ -834,7 +815,7 @@ pub fn chown(path: String | Path, owner: Int, group: Int) IOError! -[FS.Write]> 
     core.files.__chown_raw(text, owner, group)
 }
 
-pub fn is_fifo(path: String | Path) -[FS.Read]> Bool IOError! {
+fn is_fifo(path: String | Path) -[FS.Read]> Bool IOError! {
     text :: path_text(path)
     files8_preflight("FS.Read", .Read, text)
     mode :: core.files.__stat_mode_raw(text)
@@ -998,7 +979,7 @@ fn join_impl(a: String, b: String) -> String Never! {
 fn join(a: String, b: String) -> String Never! { join_impl(a, b) }
 
 
-pub fn absolute(path: String | Path) -[FS, Env]> String IOError! {
+fn absolute(path: String | Path) -[FS, Env]> String IOError! {
     text :: path_text(path)
     if core.files.__host_path_is_absolute(~text) -> return Ok(text)
     cwd :: sys.current_dir()
@@ -1018,7 +999,7 @@ fn temp_prefix(prefix: String) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-pub fn mktemp(prefix: String) -[FS, Env, Time]> String Never! {
+fn mktemp(prefix: String) -[FS, Env, Time]> String Never! {
     clean :: temp_prefix(prefix)
     row :: core.files.__temp_path_sample()
     nanos :: if row.clock_available -> row.nanos else -> "0"
@@ -1032,21 +1013,21 @@ pub fn mktemp(prefix: String) -[FS, Env, Time]> String Never! {
 }
 
 
-pub fn canonicalize(path: String | Path) -[FS.Read]> String IOError! {
+fn canonicalize(path: String | Path) -[FS.Read]> String IOError! {
     text :: path_text(path)
     files8_preflight("FS.Read", .Read, text)
     core.files.__canonicalize_raw(text)
 }
 
 
-pub fn list_dir(path: String | Path) -[FS.Read]> [DirEntry] IOError! {
+fn list_dir(path: String | Path) -[FS.Read]> [DirEntry] IOError! {
     text :: path_text(path)
     files8_preflight("FS.Read", .Read, text)
     core.files.__list_dir_raw(text)
 }
 
 
-pub fn create_dir(path: String) IOError! -[FS.Write]> {
+fn create_dir(path: String) IOError! -[FS.Write]> {
     file_fault("FS.Write", .Write, path)
     core.files.__create_dirs_os(path)
 }
@@ -1079,34 +1060,34 @@ fn dirname_impl(path: String) -> String Never! {
 fn dirname(path: String) -> String Never! { dirname_impl(path) }
 
 
-pub fn create_dir_all(path: String) IOError! -[FS]> {
+fn create_dir_all(path: String) IOError! -[FS]> {
     file_fault("FS.Write", .Write, path)
     core.files.__create_dirs_os(path)
 }
 
 
-pub fn remove(path: String | Path) IOError! -[FS.Write]> {
+fn remove(path: String | Path) IOError! -[FS.Write]> {
     text :: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     core.files.__remove_raw(text)
 }
 
 
-pub fn remove_dir(path: String | Path) IOError! -[FS.Write]> {
+fn remove_dir(path: String | Path) IOError! -[FS.Write]> {
     text :: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     core.files.__remove_dir_raw(text)
 }
 
 
-pub fn remove_all(path: String | Path) IOError! -[FS]> {
+fn remove_all(path: String | Path) IOError! -[FS]> {
     text :: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     directory :: core.files.__metadata_directory(text) ?? false
     core.files.__remove_all_raw(text, directory)
 }
 
-pub fn copy(from: String | Path, to: String | Path) IOError! -[FS]> {
+fn copy(from: String | Path, to: String | Path) IOError! -[FS]> {
     source :: path_text(from)
     target :: path_text(to)
     files8_preflight("FS.Read", .Read, source)
@@ -1123,7 +1104,7 @@ fn copy_file_impl(from: String, to: String) IOError! -[FS]> {
 }
 
 
-pub fn copy_dir(from: String | Path, to: String | Path) IOError! -[FS]> {
+fn copy_dir(from: String | Path, to: String | Path) IOError! -[FS]> {
     source :: path_text(from)
     destination :: path_text(to)
     files8_preflight("FS.Read", .Read, source)
@@ -1160,7 +1141,7 @@ fn entries_copy_tree(context: Int, directory: Int, resource: String) IOError! -[
 /// replaces an existing target, `.Refuse` reports `IOError.AlreadyExists`,
 /// and `.Swap` exchanges the two names in one step (both must exist).
 /// Follow with `fsync(dirname(to))` to make the rename durable.
-pub fn rename(from: String | Path, to: String | Path, if_exists: RenameIfExists{.Replace}) IOError! -[FS.Write]> {
+fn rename(from: String | Path, to: String | Path, if_exists: RenameIfExists{.Replace}) IOError! -[FS.Write]> {
     core.files.__rename_at(-1, path_text(from), -1, path_text(to), rename_code(if_exists))
 }
 
@@ -1169,7 +1150,7 @@ pub fn rename(from: String | Path, to: String | Path, if_exists: RenameIfExists{
 /// as given and is not resolved; later path operations follow it, so lexical
 /// `Path.is_within` cannot see an escape through a link — compare
 /// `canonicalize` results instead.
-pub fn symlink(original: String | Path, link: String | Path) IOError! -[FS.Write]> {
+fn symlink(original: String | Path, link: String | Path) IOError! -[FS.Write]> {
     source :: path_text(original)
     target :: path_text(link)
     files8_preflight("FS.Write", .Write, target)
@@ -1181,14 +1162,14 @@ pub fn symlink(original: String | Path, link: String | Path) IOError! -[FS.Write
 }
 
 
-pub fn hard_link(original: String | Path, link: String | Path) IOError! -[FS.Write]> {
+fn hard_link(original: String | Path, link: String | Path) IOError! -[FS.Write]> {
     source :: path_text(original)
     target :: path_text(link)
     files8_preflight("FS.Write", .Write, target)
     core.files.__hard_link_raw(source, target)
 }
  
-pub fn is_socket(path: String | Path) -[FS.Read]> Bool IOError! {
+fn is_socket(path: String | Path) -[FS.Read]> Bool IOError! {
     text :: path_text(path)
     files8_preflight("FS.Read", .Read, text)
     mode :: core.files.__stat_mode_raw(text)
@@ -1196,7 +1177,7 @@ pub fn is_socket(path: String | Path) -[FS.Read]> Bool IOError! {
 }
 
 
-pub fn read_link(path: String) -[FS.Read]> String IOError! {
+fn read_link(path: String) -[FS.Read]> String IOError! {
     file_fault("FS.Read", .Read, path)
     core.files.__read_link_os(path)
 }
@@ -1487,17 +1468,17 @@ fn walk_impl(root: String, ignore: String?, files_only: Bool) -[FS]> [WalkEntry]
 }
 
 
-pub fn walk(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
+fn walk(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
     walk_impl(path_text(root), ignore, false)
 }
 
 
-pub fn walk_parallel(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
+fn walk_parallel(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
     walk_impl(path_text(root), ignore, false)
 }
 
 
-pub fn walk_files(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
+fn walk_files(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
     walk_impl(path_text(root), ignore, true)
 }
 
@@ -1565,7 +1546,7 @@ fn entries_glob_tree(context: Int, directory: Int, resource: String, output: &[S
     Ok()
 }
 
-pub fn glob(pattern: String | Path) -[FS]> [String] IOError! {
+fn glob(pattern: String | Path) -[FS]> [String] IOError! {
     resource :: path_text(pattern)
     files8_preflight("FS.Read", .Read, resource)
     separator :: if core.files.__os_family() == "windows" -> U8{92} else -> U8{47}
@@ -1582,13 +1563,13 @@ pub fn glob(pattern: String | Path) -[FS]> [String] IOError! {
 }
 
 
-pub fn temp_dir(prefix: String) -[FS]> TempDir IOError! {
+fn temp_dir(prefix: String) -[FS]> TempDir IOError! {
     path :: files_temp_path(prefix)
     files8_preflight("FS.Write", .Write, path)
     core.files.__temp_dir_raw(^path)
 }
 
-pub fn mkdtemp(prefix: String) -[FS]> String IOError! {
+fn mkdtemp(prefix: String) -[FS]> String IOError! {
     path :: files_temp_path(prefix)
     files8_preflight("FS.Write", .Write, path)
     core.files.__mkdtemp_raw(^path)
@@ -1603,7 +1584,7 @@ fn files_temp_path(prefix: String) -[FS]> String Never! {
 }
 
 
-pub fn temp_file(prefix: String) -[FS]> TempFile IOError! {
+fn temp_file(prefix: String) -[FS]> TempFile IOError! {
     path :: files_temp_path(prefix)
     files8_preflight("FS.Write", .Write, path)
     core.files.__temp_file_raw(^path)
@@ -1614,7 +1595,7 @@ pub fn temp_file(prefix: String) -[FS]> TempFile IOError! {
 /// lock file is created owner-only; a final symbolic link is refused. Closing
 /// the returned owner releases the lock but never removes the lock file.
 /// `timeout` bounds acquisition; omitting it waits without limit.
-pub fn lock(path: String | Path, timeout: Duration?{None}) -[FS]> FileLock IOError! {
+fn lock(path: String | Path, timeout: Duration?{None}) -[FS]> FileLock IOError! {
     text :: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     lock_path(text)
@@ -1636,7 +1617,7 @@ pub fn lock(path: String | Path, timeout: Duration?{None}) -[FS]> FileLock IOErr
 
 /// Return None only when another owner holds the exclusive system lock.
 /// Missing paths are created as with `lock`; other failures remain errors.
-pub fn try_lock(path: String | Path) -[FS]> FileLock? IOError! {
+fn try_lock(path: String | Path) -[FS]> FileLock? IOError! {
     text :: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     lock_path(text)
@@ -1799,7 +1780,7 @@ fn is_file_impl(path: String) -> Bool Never! {
 fn is_file(path: String) -[FS]> Bool Never! { is_file_impl(path) }
 
 
-pub fn is_symlink(path: String) -[FS]> Bool Never! {
+fn is_symlink(path: String) -[FS]> Bool Never! {
     row :: core.files.__stat_at(-1, path, false) ?? return false
     row[0] == 2
 }
@@ -1834,7 +1815,7 @@ fn touch(path: String) IOError! -[FS]> {
 }
 
 
-pub fn relocate(from: String, to: String) IOError! -[FS]> { rename(from, to) }
+fn relocate(from: String, to: String) IOError! -[FS]> { rename(from, to) }
 
 
 /// Python-compatible spelling for an atomic replacement rename.
@@ -2004,13 +1985,13 @@ fn split(path: String) -> (dir: String, name: String) Never! {
 fn normpath(path: String) -> String Never! { collapse(path) }
 
 
-pub fn getsize(path: String) -[FS]> Int IOError! {
+fn getsize(path: String) -[FS]> Int IOError! {
     s :: stat(path)
     Ok(s.size)
 }
 
 
-pub fn getmtime(path: String) -[FS]> Int IOError! {
+fn getmtime(path: String) -[FS]> Int IOError! {
     row :: core.files.__stat_at(-1, path, false)
     Ok(row[9] /% 1000000)
 }
@@ -2020,7 +2001,7 @@ fn lexists(path: String) -[FS]> Bool Never! { exists_impl(path) || is_symlink(pa
 
 
 /// D-CORE-FILESTAT1=A: whether `a` and `b` name the same file (equal ids).
-pub fn samefile(a: String, b: String) -[FS]> Bool IOError! {
+fn samefile(a: String, b: String) -[FS]> Bool IOError! {
     left :: stat(a)
     right :: stat(b)
     Ok(left.id.device == right.id.device && left.id.inode == right.id.inode)
@@ -2077,7 +2058,7 @@ fn expandvars(path: String) -[Env]> String IOError! {
 }
 
 
-pub fn move(from: String, to: String) IOError! -[FS]> { rename(from, to) }
+fn move(from: String, to: String) IOError! -[FS]> { rename(from, to) }
 
 
 fn rmtree(path: String) IOError! -[FS]> { core.files.remove_all(path) }
@@ -2106,7 +2087,7 @@ fn fnmatch_filter(names: [String], pattern: String) -> [String] Never! {
 }
 
 
-pub fn is_mount(path: String) -[FS]> Bool Never! {
+fn is_mount(path: String) -[FS]> Bool Never! {
     if !core.files.is_dir(path.copy()) -> return false
     parent :: dirname(path)
     if parent == path -> return true
@@ -2150,7 +2131,7 @@ fn truncate(path: String, size: Int) IOError! -[FS]> {
 fn createdirectory(path: String) IOError! -[FS]> { core.files.create_dir(path) }
 
 
-pub fn filesize(path: String) -[FS]> Int IOError! {
+fn filesize(path: String) -[FS]> Int IOError! {
     info :: stat(path)
     Ok(info.size)
 }
@@ -2233,7 +2214,7 @@ fn scope_relative(path: host_path.OSPath, requested: String) -> String IOError! 
     Ok(String.from_bytes(normalized) ?? panic("UTF-8 relative path components"))
 }
 
-pub fn scoped_read(scope: FileScope, path: String) -[FS.Read]> String IOError! {
+fn scoped_read(scope: FileScope, path: String) -[FS.Read]> String IOError! {
     file_fault("FS.Read", .Read, path)
     platform :: file_path_platform()
     requested :: host_path.from_text(path, platform)
@@ -2313,7 +2294,7 @@ fn file_utf8_error(bytes: [U8]) -> String Never! {
 // FileStream.rs:91-118 is the exact contract. The existing BufReader owns
 // refill/position and retries Interrupted reads; the source owns the public
 // fault checkpoint, EOF, UTF-8 error and file-specific terminator trimming.
-pub fn __reader_read_line(reader: &FileReader) -[FS.Read]> String? IOError! {
+fn __reader_read_line(reader: &FileReader) -[FS.Read]> String? IOError! {
     if core.testing.__fault_should_fail("FS.Read") {
         return Err(IOError.Other(IOContext{
             operation: .Read, resource: Val(core.files.__reader_path(reader)),

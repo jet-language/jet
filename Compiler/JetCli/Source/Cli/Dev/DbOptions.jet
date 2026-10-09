@@ -2,48 +2,48 @@
 // OutputMode is the shared Adapter projection; color overrides are resolved Bool.
 use jet_foundation.[foundation_embedded_core]
 
-pub enum JetCLIDBOutput {
+enum JetCLIDBOutput {
     Human
     JSON
     JSONL
     CSV
 }
-pub struct JetCLIDBOptions {
-    pub source_path: String?
-    pub source_name: String?
-    pub query: String?
-    pub script: String?
-    pub output: JetCLIDBOutput
-    pub machine_override: Bool?
-    pub color_override: Bool?
-    pub max_input_bytes: Int
-    pub max_rows: Int
-    pub max_output_bytes: Int
-    pub allow_rights: [String]
-    pub deny_rights: [String]
-    pub allow_fs: Bool
-    pub deny_fs: Bool
-    pub allow_write: Bool
-    pub deny_write: Bool
-    pub allow_db: Bool
-    pub deny_db: Bool
-    pub browser: Bool
-    pub help: Bool
+struct JetCLIDBOptions {
+    source_path: String?
+    source_name: String?
+    query: String?
+    script: String?
+    output: JetCLIDBOutput
+    machine_override: Bool?
+    color_override: Bool?
+    max_input_bytes: Int
+    max_rows: Int
+    max_output_bytes: Int
+    allow_rights: [String]
+    deny_rights: [String]
+    allow_fs: Bool
+    deny_fs: Bool
+    allow_write: Bool
+    deny_write: Bool
+    allow_db: Bool
+    deny_db: Bool
+    browser: Bool
+    help: Bool
 }
 #Error
-pub struct JetCLIDBError {
-    pub code: String
-    pub operation: String
-    pub source: String
-    pub message: String
-    pub hint: String
+struct JetCLIDBError {
+    code: String
+    operation: String
+    source: String
+    message: String
+    hint: String
 }
 // Rust DbError::new (78-93).
-pub fn jet_cli_db_error_new(code: String, operation: String, source: String, message: String, hint: String) -> JetCLIDBError Never! {
+fn jet_cli_db_error_new(code: String, operation: String, source: String, message: String, hint: String) -> JetCLIDBError Never! {
     JetCLIDBError{code: code, operation: operation, source: source, message: message, hint: hint}
 }
 // Rust DbError::diagnostics (95-112).
-pub fn jet_cli_db_error_diagnostics(operation: String, source: String, diagnostics: [Diagnostic]) -> JetCLIDBError Never! {
+fn jet_cli_db_error_diagnostics(operation: String, source: String, diagnostics: [Diagnostic]) -> JetCLIDBError Never! {
     if diagnostics.len() == 0 -> return jet_cli_db_error_new("E2600", operation, source, "the SQL evaluator returned no diagnostic details", "retry the statement after correcting its source or SQL")
     first :: diagnostics[0]
     jet_cli_db_error_new(first.code, operation, source, first.what, first.fix)
@@ -52,7 +52,7 @@ fn jet_cli_db_argument_error(message: String, hint: String) -> JetCLIDBError Nev
     jet_cli_db_error_new("E2104", "arguments", "", message, hint)
 }
 // Rust parse_options initializer (756-777).
-pub fn jet_cli_db_options_default() -> JetCLIDBOptions Never! {
+fn jet_cli_db_options_default() -> JetCLIDBOptions Never! {
     JetCLIDBOptions{source_path: None, source_name: None, query: None, script: None,
         output: JetCLIDBOutput.Human, machine_override: None, color_override: None,
         max_input_bytes: 33554432, max_rows: 100000, max_output_bytes: 4194304,
@@ -61,7 +61,7 @@ pub fn jet_cli_db_options_default() -> JetCLIDBOptions Never! {
         browser: false, help: false}
 }
 // Rust parse_output_format (687-701).
-pub fn jet_cli_db_parse_output_format(value: String) -> JetCLIDBOutput JetCLIDBError! {
+fn jet_cli_db_parse_output_format(value: String) -> JetCLIDBOutput JetCLIDBError! {
     if value == {
         "human" | "text" -> Ok(JetCLIDBOutput.Human)
         "json" -> Ok(JetCLIDBOutput.JSON)
@@ -85,7 +85,7 @@ fn jet_cli_db_equal_folded(left: String, right: String) -> Bool Never! {
 }
 // Rust effect_declarations() generated projection (Effects.rs:19-47).
 // The canonical embedded Core accessor owns declaration discovery.
-pub fn jet_cli_db_declared_effect_names() -> [String] Never! {
+fn jet_cli_db_declared_effect_names() -> [String] Never! {
     names := [String]{}
     core :: foundation_embedded_core()
     loop declaration in core.effect_declarations() {
@@ -96,7 +96,7 @@ pub fn jet_cli_db_declared_effect_names() -> [String] Never! {
 // Rust effect_declarations() is a generated LazyLock: project once, not per right.
 JET_CLI_DB_DECLARED_EFFECT_NAMES :: prep { jet_cli_db_declared_effect_names() }
 // Rust canonical_cli_right (703-717).
-pub fn jet_cli_db_canonical_cli_right(right: String) -> String? Never! {
+fn jet_cli_db_canonical_cli_right(right: String) -> String? Never! {
     canonical :: authority_parse_right(right) ?? return None
     operation :: canonical.split(":").to_list()[0]
     if !operation.contains(".") -> return Val(canonical)
@@ -109,12 +109,12 @@ pub fn jet_cli_db_canonical_cli_right(right: String) -> String? Never! {
     None
 }
 // Rust has_exact_right (751-753); deliberately no ancestor or resource matching.
-pub fn jet_cli_db_has_exact_right(rights: [String], expected: String) -> Bool Never! {
+fn jet_cli_db_has_exact_right(rights: [String], expected: String) -> Bool Never! {
     loop right in rights { if jet_cli_db_equal_folded(right, expected) -> return true }
     false
 }
 // Rust parse_rights_value (719-749); append only after the entire value succeeds.
-pub fn jet_cli_db_parse_rights_value(value: String, option: String, rights: &[String]) JetCLIDBError! {
+fn jet_cli_db_parse_rights_value(value: String, option: String, rights: &[String]) JetCLIDBError! {
     parsed := [String]{}
     loop raw in value.split(",") {
         right :: raw.trim()
@@ -126,7 +126,7 @@ pub fn jet_cli_db_parse_rights_value(value: String, option: String, rights: &[St
 }
 // Rust parse_positive_limit (1065-1085): usize bounds on the CLI's 64-bit host.
 // Int arithmetic stays exact and checks before multiplication, never Float.
-pub fn jet_cli_db_parse_positive_limit(value: String, option: String) -> Int JetCLIDBError! {
+fn jet_cli_db_parse_positive_limit(value: String, option: String) -> Int JetCLIDBError! {
     raw :: value.bytes()
     start :: if raw.len() > 0 && raw[0] == (U8{43}) -> 1 else -> 0
     valid := start < raw.len()
@@ -167,7 +167,7 @@ fn jet_cli_db_assignment(value: String) -> [String]? Never! {
     None
 }
 // Rust parse_options (755-1063); sequential flags, including last-wins output overrides.
-pub fn jet_cli_db_parse_options(args: [String]) -> JetCLIDBOptions JetCLIDBError! {
+fn jet_cli_db_parse_options(args: [String]) -> JetCLIDBOptions JetCLIDBError! {
     options := jet_cli_db_options_default()
     index := if args.len() > 0 && args[0] == "db" -> 1 else -> 0
     valued :: [String]{"--format", "--allow", "--deny", "--query", "--script", "--table", "--max-rows", "--max-bytes", "--max-output-bytes"}
@@ -292,18 +292,18 @@ pub fn jet_cli_db_parse_options(args: [String]) -> JetCLIDBOptions JetCLIDBError
     Ok(options)
 }
 // Rust effective_mode (1087-1097).
-pub fn jet_cli_db_effective_mode(mode: JetCLIOutputMode, output: JetCLIDBOutput) -> JetCLIOutputMode Never! {
+fn jet_cli_db_effective_mode(mode: JetCLIOutputMode, output: JetCLIDBOutput) -> JetCLIOutputMode Never! {
     JetCLIOutputMode{json: mode.json || output == JetCLIDBOutput.JSON || output == JetCLIDBOutput.JSONL, color: mode.color, quiet: mode.quiet}
 }
 // Rust resolved_mode (1098-1107).
-pub fn jet_cli_db_resolved_mode(mode: JetCLIOutputMode, options: JetCLIDBOptions) -> JetCLIOutputMode Never! {
+fn jet_cli_db_resolved_mode(mode: JetCLIOutputMode, options: JetCLIDBOptions) -> JetCLIOutputMode Never! {
     resolved := jet_cli_db_effective_mode(mode, options.output)
     if options.machine_override == .Val(machine) -> resolved.json = machine
     if options.color_override == .Val(color) -> resolved.color = color
     resolved
 }
 // Rust usage (1140-1142).
-pub fn jet_cli_db_usage() -> String Never! {
+fn jet_cli_db_usage() -> String Never! {
     "jet db [PATH] [--query SQL | --script PATH]\n\n  --table NAME=PATH       preserve an explicit typed source identity\n  --allow=RIGHTS          authorize comma-separated canonical rights\n  --deny=RIGHTS           deny comma-separated canonical rights\n  --machine | --human     override the output channel\n  --color=MODE            choose auto, always, or never color\n  --browser               serve a loopback-only inspector for this session\n  --max-rows N            bound decoded input rows\n  --max-bytes N           bound source/script bytes\n  --max-output-bytes N    bound one rendered result\n  --json | --jsonl | --csv deterministic output modes\n  .tables .schema .plan .stats .export PATH [json|csv] .help .quit\n"
 }
 // Rust char::is_whitespace, decoded at one UTF-8 scalar boundary without allocation.
@@ -314,7 +314,7 @@ fn jet_cli_db_space_at(raw: [U8], at: Int, width: Int) -> Bool Never! {
     point == 32 || (point >= 9 && point <= 13) || point == 133 || point == 160 || point == 5760 || (point >= 8192 && point <= 8202) || point == 8232 || point == 8233 || point == 8239 || point == 8287 || point == 12288
 }
 // Rust enforce_json_row_bound (1144-1219); bound scanner, not JSON validation.
-pub fn jet_cli_db_enforce_json_row_bound(text: String, max_rows: Int, path: String) JetCLIDBError! {
+fn jet_cli_db_enforce_json_row_bound(text: String, max_rows: Int, path: String) JetCLIDBError! {
     started := false
     quote := false
     escaped := false

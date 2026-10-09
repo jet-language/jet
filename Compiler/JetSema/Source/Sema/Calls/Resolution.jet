@@ -235,7 +235,7 @@ fn sema_call_declared_function_index(scopes: SemaScopeTable, name: String) -> In
     found
 }
 
-pub fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
+fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
     nearest :: sema_scope_resolve_index(scopes, name) ?? {
         &diagnostics.push(sema_call_unknown_function(name, span))
         return None
@@ -314,7 +314,7 @@ fn sema_call_direct_target_with_inference(target: SemaCallDirectTarget, result: 
     Val(specialized)
 }
 
-pub fn sema_call_infer_direct_target_from_types(target: SemaCallDirectTarget, parameter_types: [Type], arg_types: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
+fn sema_call_infer_direct_target_from_types(target: SemaCallDirectTarget, parameter_types: [Type], arg_types: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
     if target.generic_params.len() == 0 -> return Val(target)
     return_type :: sema_call_signature_return(target.signature) ?? return None
     caller_module :: if scopes.frames.len() > 0 -> scopes.frames[0].owner else -> ""
@@ -414,7 +414,7 @@ fn sema_call_retired_raw_directory_error(receiver_type: Type, method: String, sp
     Val(sema_error("E0340", span, row.what, row.why, row.fix))
 }
 
-pub fn sema_call_resolve_method(receiver_type: Type, method: String, args: [CallArg], span: Span, candidates: [SemaCallMethodCandidate], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
+fn sema_call_resolve_method(receiver_type: Type, method: String, args: [CallArg], span: Span, candidates: [SemaCallMethodCandidate], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
     receiver_matches := [SemaCallMethodCandidate]{}
     loop candidate in candidates {
         if candidate.method.name == method {

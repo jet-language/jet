@@ -101,7 +101,7 @@ fn nix_make_store_path(store_dir: String, type_text: String, hash_with_algo: Str
 }
 
 // `drvName`, or `drvName-output` when the output is not `out`.
-pub fn nix_output_path_name(drv_name: String, output_name: String) -> String Never! {
+fn nix_output_path_name(drv_name: String, output_name: String) -> String Never! {
     if output_name == "out" -> return drv_name.copy()
     "{drv_name}-{output_name}"
 }
@@ -122,7 +122,7 @@ fn nix_make_fixed_output_path(store_dir: String, name: String, method_algo: Stri
 
 // Text-method content-addressed path (derivations): type `text{:ref}*` over
 // the sorted references.
-pub fn nix_make_text_path(store_dir: String, name: String, contents: [U8], references: [String]) -> String Never! {
+fn nix_make_text_path(store_dir: String, name: String, contents: [U8], references: [String]) -> String Never! {
     sorted := references.copy()
     &sorted.sort()
     type_text := "text"

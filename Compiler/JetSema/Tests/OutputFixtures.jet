@@ -148,19 +148,23 @@ fn output_fixture_visibility(label: String, main_source: String, bank_source: St
 fn output_fixture_visibility_cases(effects_source: String, failures: &[String]) {
     direct :: "use \"bank.jet\" as bank\nAPP :: Output.Executable{{name: \"app\", entry: bank.launch}}\n"
     forwarded :: "use \"bridge.jet\" as bridge\nAPP :: Output.Executable{{name: \"app\", entry: bridge.bank.launch}}\n"
-    public :: "pub fn launch() {{}}\n"
-    package_only :: "pub(package) fn launch() {{}}\n"
+    public :: "fn launch() {{}}\n"
+    package_only :: "priv(package) module package_scope {{\n fn launch() {{}}\n}}\n"
     public_bridge :: Val("pub use \"bank.jet\" as bank\n")
+    package_direct :: "use \"bank.jet\" as bank\nAPP :: Output.Executable{{name: \"app\", entry: bank.package_scope.launch}}\n"
+    package_forwarded :: "use \"bridge.jet\" as bridge\nAPP :: Output.Executable{{name: \"app\", entry: bridge.bank.package_scope.launch}}\n"
+    private_direct :: "use \"bank.jet\" as bank\nAPP :: Output.Executable{{name: \"app\", entry: bank.api.internal.launch}}\n"
+    private_source :: "module api {{\n priv module internal {{\n fn launch() {{}}\n }}\n}}\n"
     output_fixture_visibility("public file entry", direct, public, None, "bank-package", "main-package", effects_source, true, &failures)
-    output_fixture_visibility("private file entry", direct, "fn launch() {{}}\n", None, "same", "same", effects_source, false, &failures)
-    output_fixture_visibility("same-package entry", direct, package_only, None, "same", "same", effects_source, true, &failures)
-    output_fixture_visibility("different-package entry", direct, package_only, None, "bank-package", "main-package", effects_source, false, &failures)
+    output_fixture_visibility("private file entry", private_direct, private_source, None, "same", "same", effects_source, false, &failures)
+    output_fixture_visibility("same-package entry", package_direct, package_only, None, "same", "same", effects_source, true, &failures)
+    output_fixture_visibility("different-package entry", package_direct, package_only, None, "bank-package", "main-package", effects_source, false, &failures)
     output_fixture_visibility("public namespace re-export", forwarded, public, public_bridge, "bank-package", "main-package", effects_source, true, &failures)
-    output_fixture_visibility("re-export retains original requester package", forwarded, package_only, public_bridge, "bank-package", "main-package", effects_source, false, &failures)
+    output_fixture_visibility("re-export retains original requester package", package_forwarded, package_only, public_bridge, "bank-package", "main-package", effects_source, false, &failures)
     output_fixture_visibility("private namespace does not export public member", forwarded, public, Val("use \"bank.jet\" as bank\n"), "bank-package", "main-package", effects_source, false, &failures)
 }
 
-pub fn output_fixture_run(effects_source: String) Never! {
+fn output_fixture_run(effects_source: String) Never! {
     failures := [String]{}
     nine :: "LIB :: Output.Library{{name: \"lib\"}}\nAPP :: Output.Executable{{name: \"app\", entry: launch}}\nRPC :: Output.Service{{name: \"rpc\", entry: launch}}\nCHECK :: Output.Check{{name: \"check\", entry: launch}}\nENV :: Output.Environment{{name: \"env\"}}\nIMAGE :: Output.Image{{name: \"image\"}}\nBUNDLE :: Output.Bundle{{name: \"bundle\"}}\nSYSTEM :: Output.System{{name: \"system\"}}\nFLEET :: Output.Fleet{{name: \"fleet\"}}\nfn launch() {{}}\n"
     output_fixture_case("nine closed kinds/check projection", nine, effects_source, SemaOutputIntent.Check, None, [String]{}, [String]{}, &failures)
@@ -189,11 +193,11 @@ pub fn output_fixture_run(effects_source: String) Never! {
     output_fixture_case("wrong return", "APP :: Output.Executable{{name: \"a\", entry: launch}}\nfn launch() -> Bool Never! {{ true }}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
     output_fixture_case("unsafe entry rejected", "APP :: Output.Executable{{name: \"a\", entry: launch}}\n#Unsafe(\"fixture boundary\")\nfn launch() {{}}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
     output_fixture_case("typed CLI entry", "APP :: Output.Executable{{name: \"a\", entry: launch}}\n#CLI\nstruct Args {{verbose: Bool}}\nfn launch(args: Args) {{}}\n", effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"APP"}, &failures)
-    output_fixture_case("inline qualified entry", "APP :: Output.Executable{{name: \"a\", entry: bank.launch}}\nmodule bank {{ pub fn launch() {{}} }}\n", effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"APP"}, &failures)
-    output_fixture_case("inline aliased entry", "use bank.[launch as start]\nAPP :: Output.Executable{{name: \"a\", entry: start}}\nmodule bank {{ pub fn launch() {{}} }}\n", effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"APP"}, &failures)
-    output_fixture_case("missing inline member", "APP :: Output.Executable{{name: \"a\", entry: bank.missing}}\nmodule bank {{ pub fn launch() {{}} }}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
-    output_fixture_case("private inline entry", "APP :: Output.Executable{{name: \"a\", entry: bank.launch}}\nmodule bank {{ fn launch() {{}} }}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
-    output_fixture_case("inline authenticated re-export", "APP :: Output.Executable{{name: \"a\", entry: bridge.start}}\nmodule bank {{ pub fn launch() {{}} }}\nmodule bridge {{ pub use bank.[launch as start] }}\n", effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"APP"}, &failures)
+    output_fixture_case("inline qualified entry", "APP :: Output.Executable{{name: \"a\", entry: bank.launch}}\nmodule bank {{ fn launch() {{}} }}\n", effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"APP"}, &failures)
+    output_fixture_case("inline aliased entry", "use bank.[launch as start]\nAPP :: Output.Executable{{name: \"a\", entry: start}}\nmodule bank {{ fn launch() {{}} }}\n", effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"APP"}, &failures)
+    output_fixture_case("missing inline member", "APP :: Output.Executable{{name: \"a\", entry: bank.missing}}\nmodule bank {{ fn launch() {{}} }}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
+    output_fixture_case("private inline entry", "APP :: Output.Executable{{name: \"a\", entry: bank.internal.launch}}\nmodule bank {{ priv module internal {{ fn launch() {{}} }} }}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
+    output_fixture_case("inline authenticated re-export", "APP :: Output.Executable{{name: \"a\", entry: bridge.start}}\nmodule bank {{ fn launch() {{}} }}\nmodule bridge {{ pub use bank.[launch as start] }}\n", effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"APP"}, &failures)
     empty := output_fixture_graph("no-inline early return", "fn helper() {{}}\n", effects_source, &failures)
     if empty == .Val(graph) {
         if graph.modules[0].inline_bindings.imports.len() != 0 || graph.modules[0].inline_bindings.modules.len() != 0 -> &failures.push("no-inline early return retains empty binder products")

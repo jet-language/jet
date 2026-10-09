@@ -22,14 +22,14 @@ struct WebVirtualWindow {
 }
 
 impl WebVirtualWindow {
-    pub fn visible_count(self) -> Int Never! { sat_sub(self.end, self.start) }
-    pub fn is_empty(self) -> Bool Never! { self.start >= self.end }
-    pub fn contains(self, index: Int) -> Bool Never! { index >= self.start && index < self.end }
-    pub fn range(self) -> (start: Int, end: Int) Never! { (start: self.start, end: self.end) }
-    pub fn within_frame_budget(self, maximum: Int) -> Bool Never! {
+    fn visible_count(self) -> Int Never! { sat_sub(self.end, self.start) }
+    fn is_empty(self) -> Bool Never! { self.start >= self.end }
+    fn contains(self, index: Int) -> Bool Never! { index >= self.start && index < self.end }
+    fn range(self) -> (start: Int, end: Int) Never! { (start: self.start, end: self.end) }
+    fn within_frame_budget(self, maximum: Int) -> Bool Never! {
         self.visible_count() <= if maximum < 0 -> 0 else -> maximum
     }
-    pub fn with_measurement(self, index: Int, size: Int) -> WebVirtualWindow Never! {
+    fn with_measurement(self, index: Int, size: Int) -> WebVirtualWindow Never! {
         if index < 0 || index >= self.total_count || size <= 0 -> return self
         count :: sat_add(self.measured_count, 1)
         total :: sat_add(sat_mul(self.estimated_item_size, self.measured_count), size)
@@ -39,7 +39,7 @@ impl WebVirtualWindow {
         updated.measured_count = if count < 0 -> 0 else -> count
         updated
     }
-    pub fn facts_json(self) -> String Never! {
+    fn facts_json(self) -> String Never! {
         "{{\"total_count\":{self.total_count},\"scroll_offset\":{self.scroll_offset},\"viewport_size\":{self.viewport_size},\"estimated_item_size\":{self.estimated_item_size},\"overscan\":{self.overscan},\"start\":{self.start},\"end\":{self.end},\"total_size\":{self.total_size},\"measured_count\":{self.measured_count}}}"
     }
 }
@@ -194,7 +194,7 @@ fn plan_indices(p: WebVirtualPlan) -> [Int] Never! {
 
 fn plan_viewport(p: WebVirtualPlan) -> WebVirtualPlanViewport Never! { {plan: p} }
 
-pub fn plan_measure(p: WebVirtualPlan, index: Int, size: Int) -> WebVirtualPlan Never! {
+fn plan_measure(p: WebVirtualPlan, index: Int, size: Int) -> WebVirtualPlan Never! {
     if index < 0 || index >= p.total_count || size <= 0 || size > C_MAX_VIRTUAL_EXTENT -> return p.copy()
     if p.measured_count >= C_MAX_MEASURE -> return p.copy()
     count := p.measured_count + 1

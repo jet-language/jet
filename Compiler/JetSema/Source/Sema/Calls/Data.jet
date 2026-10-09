@@ -295,7 +295,7 @@ fn sema_data_try_dbvalue_accessor(receiver: Expr, receiver_value: TExpr, method:
 }
 
 
-pub fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     resolved_ty := sema_call_resolved_type(receiver_value.ty, environment, program)
     if resolved_ty == .Apply(name, parameters) {
         if sema_data_nominal_is(name, "Query") && parameters.len() == 1 && method == "collect" {
@@ -454,7 +454,7 @@ fn sema_data_literal_expected(ty: Type, variant: String) -> Type? {
 // `[(key: String, value: DataTree)]`. A list literal or a local of that type is
 // handed over in list order; anything else is a `[String: DataTree]` Map, which
 // hands over its sorted order.
-pub fn sema_data_object_pairs_type() -> Type Never! {
+fn sema_data_object_pairs_type() -> Type Never! {
     Type.List{element: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: sema_data_tree_type()}}}}
 }
 
@@ -510,7 +510,7 @@ fn sema_data_dbvalue_payload_live_after(ty: Type, argument: Expr, tail_store: &S
 // D-TYPEDTEXT1=D: `HTML.raw("…")` is the audited escape from a runtime
 // String into checked HTML. `HTML` names the type here; the caller routes
 // only an owner no local value shadows (the Rust reference's typed-text raw).
-pub fn sema_call_try_html_raw(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_html_raw(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if owner != "HTML" || method != "raw" -> return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != 1 {
         &diagnostics.push(sema_error("E0103", span, "`HTML.raw()` takes exactly one argument", "`.raw()` wraps one already-audited `String` as the escape hatch", "write `HTML.raw(text)`"))
@@ -522,7 +522,7 @@ pub fn sema_call_try_html_raw(owner: String, method: String, args: [CallArg], sp
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
-pub fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     known_type :: sema_data_type_name(ty) ?? ""
     if ty != (Type.Named{name: "DBValue"}) && !sema_data_is_json_name(known_type) -> return SemaMethodSpecialCheck{handled: false, value: None}
     private_number :: sema_data_is_json_name(known_type) && variant == "Number" && context.unsafe_depth > 0 && environment.module_name == "__core_encoding_stream"
@@ -560,7 +560,7 @@ pub fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], sp
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
-pub fn sema_call_try_data_stream_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_try_data_stream_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     updated_args := args
     if module_name != "core.data.stream" || (member != "from_items" && member != "next" && member != "collect" && member != "cancel" && member != "skip" && member != "take_n" && member != "len" && member != "is_empty") -> return SemaDirectSpecialCheck{handled: false, value: None}
     expected_count := if member == "skip" || member == "take_n" -> 2 else -> 1
@@ -1029,7 +1029,7 @@ fn sema_data_check_analytics_sql_schema(row: Type, query: Expr, span: Span, envi
     }
 }
 
-pub fn sema_call_try_data_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_try_data_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name == "core.data.stream" -> return sema_call_try_data_stream_core_call(module_name, member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     reader_writer :: sema_data_core_try_reader_writer(module_name, member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if reader_writer == .Val(result) -> return result

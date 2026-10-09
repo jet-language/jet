@@ -33,7 +33,7 @@ fn trust_gate_with_environment_and_snapshot(theme: Theme, store: String, project
 // recipe, platform, and declared capabilities). A package or environment
 // grant cannot authorize a different build graph; CI accepts only an exact
 // repository-scoped build grant and cannot bypass.
-pub fn trust_gate_build_identity(theme: Theme, store: String, project_dir: String, identity: String, bypass: Bool) -[IO, FS, Env, Time.Wait]> Int? {
+fn trust_gate_build_identity(theme: Theme, store: String, project_dir: String, identity: String, bypass: Bool) -[IO, FS, Env, Time.Wait]> Int? {
     if bypass {
         pkg_check_project_gate(project_dir, PolicyKey.SessionFlag, "--trust") ?? return Val(trust_report_gate_failure(theme, err))
     }
@@ -125,7 +125,7 @@ fn trust_project_policy_decision(project_dir: String) -[FS, Env]> TrustDecision?
 
 // The trust gate for a foreign flake/devenv file (U16), keyed on the file's
 // content. Ad-hoc `-p` packages are ordinary refs in the normal gate.
-pub fn trust_gate_flake(theme: Theme, store: String, project_dir: String, flake_path: String, bypass: Bool) -[IO, FS, Env, Time.Wait]> Int? {
+fn trust_gate_flake(theme: Theme, store: String, project_dir: String, flake_path: String, bypass: Bool) -[IO, FS, Env, Time.Wait]> Int? {
     // Trust.rs:1174: refuse the bypass before reading foreign source.
     if bypass {
         pkg_check_project_gate(project_dir, PolicyKey.SessionFlag, "--trust") ?? return Val(trust_report_gate_failure(theme, err))

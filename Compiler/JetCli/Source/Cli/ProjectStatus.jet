@@ -116,7 +116,7 @@ fn jet_cli_project_status_render(target: String, rows: [JetCLIProjectClaim], err
 
 // The host supplies the normal default project entry and ReceiptStore's
 // selected root for the parsed target, exactly as run_status does in Rust.
-pub fn jet_cli_project_status_at(root: String, cwd: String, target: String, json: Bool) -[FS, Time.Wait]> JetCLIPlan Never! {
+fn jet_cli_project_status_at(root: String, cwd: String, target: String, json: Bool) -[FS, Time.Wait]> JetCLIPlan Never! {
     receipts :: jet_cli_receipt_list(root) ?? return jet_cli_project_status_render(target, [JetCLIProjectClaim]{}, "receipt store is unreadable: {err}", json)
     absolute :: if target.starts_with("/") -> target else -> jet_cli_entry_join(cwd, target)
     canonical :: cli_files.realpath(absolute) ?? absolute

@@ -6186,15 +6186,15 @@ mod stale_manifest_name_tests {
             .map(|row| format!("\"{}\"", row.name))
             .collect::<Vec<_>>()
             .join(", ");
-        let source = format!("pub fn run() {{\n    names :: [String]{{{names}}}\n    print(names.len())\n}}\n");
+        let source = format!("fn run() {{\n    names :: [String]{{{names}}}\n    print(names.len())\n}}\n");
         fs::write(&entry, &source).unwrap();
         let data = load_entry(entry.to_str().unwrap()).expect("literal metadata source loads");
         assert!(data.modules.iter().all(|module| !module.is_core_source()));
         assert!(data.modules.iter().all(|module| module.core_identifier_demand.prelude_modules.is_empty()));
 
-        fs::write(&entry, "pub fn run(value: URL) {}\n").unwrap();
+        fs::write(&entry, "fn run(value: URL) {}\n").unwrap();
         let real = load_entry(entry.to_str().unwrap()).expect("real URL owner loads");
-        fs::write(&entry, "use core.net.url as imported_url\npub fn run() {}\n").unwrap();
+        fs::write(&entry, "use core.net.url as imported_url\nfn run() {}\n").unwrap();
         let imported = load_entry(entry.to_str().unwrap()).expect("explicit URL owner loads");
         let core_paths = |bundle: &ProgramBundle| {
             bundle.modules.iter().filter(|module| module.is_core_source())

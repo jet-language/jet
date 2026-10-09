@@ -303,7 +303,7 @@ fn jet_cli_try_output(plan: JetCLITryPlan, verdict: JetCLITryVerdict, receipt: S
     kept :: if keep -> "  kept: working tree now contains the staged bytes\n" else -> "  rolled back (default): working tree is byte-identical\n"
     JetDriverVerbOutput{stdout: "try `{plan.name}`: verdict clean\n  claims re-checked: {verdict.claims_rechecked} · claims reused: {verdict.claims_reused}\n  receipt: {receipt}\n{kept}", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
-pub fn jet_cli_try_run(raw: String, keep: Bool, json: Bool) -> JetDriverVerbOutput {
+fn jet_cli_try_run(raw: String, keep: Bool, json: Bool) -> JetDriverVerbOutput {
     path :: jet_cli_try_absolute(raw) ?? return jet_cli_try_fail(err.message)
     plan :: jet_cli_try_read_plan(path) ?? return jet_cli_try_fail(err.message)
     queries := jet_driver_compiler_queries_new()

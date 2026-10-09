@@ -15,7 +15,7 @@ C_MAX_SOURCE_BYTES :: 1048576
 C_MAX_SOURCE_NAME :: 256
 
 #Error
-pub struct BrowserError {
+struct BrowserError {
     kind: String
 
     impl Display {
@@ -48,11 +48,11 @@ enum BrowserProtocol {
     WebDriver
 }
 
-pub struct BrowserTimeout {
+struct BrowserTimeout {
     milliseconds: Int
 }
 
-pub struct BrowserProfile {
+struct BrowserProfile {
     name: String
     version: String
 }
@@ -91,7 +91,7 @@ struct BrowserLocator {
     page_id: Int
 }
 
-pub struct BrowserLocked {
+struct BrowserLocked {
     engine: String
     version: String
     binary: String
@@ -99,11 +99,11 @@ pub struct BrowserLocked {
     size: Int
     output_hash: String
 
-    pub fn engine(self) -> String Never! { self.engine }
-    pub fn version(self) -> String Never! { self.version }
-    pub fn binary(self) -> String Never! { self.binary }
-    pub fn protocol(self) -> String Never! { self.protocol }
-    pub fn verify(self) BrowserError! -[FS]> {
+    fn engine(self) -> String Never! { self.engine }
+    fn version(self) -> String Never! { self.version }
+    fn binary(self) -> String Never! { self.binary }
+    fn protocol(self) -> String Never! { self.protocol }
+    fn verify(self) BrowserError! -[FS]> {
         if !core.web.browser.__is_file(self.binary) -> return Err(BrowserError{kind: "missing binary"})
         size :: core.web.browser.__file_size(self.binary) ?? return Err(BrowserError{kind: "missing binary"})
         if size != self.size -> return Err(BrowserError{kind: "size mismatch"})
@@ -130,7 +130,7 @@ struct BrowserTrace {
     events: [String]
 }
 
-pub struct BrowserTestConfig {
+struct BrowserTestConfig {
     engines: [String]
     retries: Int
     timeout: BrowserTimeout
@@ -149,16 +149,16 @@ pub struct BrowserTestConfig {
     report_path: String
     source_root: String
 
-    pub fn engines(self) -> [String] Never! { self.engines }
-    pub fn retries(self) -> Int Never! { self.retries }
-    pub fn filter(self) -> String Never! { self.filter }
-    pub fn reporter(self) -> String Never! { self.reporter }
-    pub fn ui(self) -> Bool Never! { self.ui }
-    pub fn visual(self) -> Bool Never! { self.visual }
-    pub fn watch(self) -> Bool Never! { self.watch }
-    pub fn server_url(self) -> String Never! { self.server_url }
-    pub fn artifact_dir(self) -> String Never! { self.artifact_dir }
-    pub fn report_path(self) -> String Never! { self.report_path }
+    fn engines(self) -> [String] Never! { self.engines }
+    fn retries(self) -> Int Never! { self.retries }
+    fn filter(self) -> String Never! { self.filter }
+    fn reporter(self) -> String Never! { self.reporter }
+    fn ui(self) -> Bool Never! { self.ui }
+    fn visual(self) -> Bool Never! { self.visual }
+    fn watch(self) -> Bool Never! { self.watch }
+    fn server_url(self) -> String Never! { self.server_url }
+    fn artifact_dir(self) -> String Never! { self.artifact_dir }
+    fn report_path(self) -> String Never! { self.report_path }
 }
 
 struct BrowserTestCase {
@@ -174,19 +174,19 @@ struct BrowserReport {
 
 // The retained child and pipe capture are the canonical host carrier, not a DTO.
 
-pub fn config() -> BrowserTestConfig BrowserError! { config_from_env() }
+fn config() -> BrowserTestConfig BrowserError! { config_from_env() }
 
-pub fn config_from_env() -[Env, FS]> BrowserTestConfig BrowserError! {
+fn config_from_env() -[Env, FS]> BrowserTestConfig BrowserError! {
     env :: core.sys.__startup_env()
     root :: env_value(env, "JET_PROJECT_ROOT") ?? "."
     config_from_snapshot(root, env)
 }
 
 
-pub fn make_profile(name: String) -> BrowserProfile BrowserError! { profile(name) }
+fn make_profile(name: String) -> BrowserProfile BrowserError! { profile(name) }
 
 // Browser.rs:578-594: no trimming, case folding, timeout clamping, or fallback.
-pub fn profile(name: String) -> BrowserProfile BrowserError! {
+fn profile(name: String) -> BrowserProfile BrowserError! {
     version :: if name == {
         "bidi-2025.5" -> "2025.5"
         "bidi-2024.11" -> "2024.11"
@@ -195,27 +195,27 @@ pub fn profile(name: String) -> BrowserProfile BrowserError! {
     Ok(BrowserProfile{name: name, version: version})
 }
 
-pub fn profile(name: String) -> BrowserProfile BrowserError! {
+fn profile(name: String) -> BrowserProfile BrowserError! {
     if name != "bidi-2024.11" && name != "bidi-2025.5" -> return Err(BrowserError.Protocol)
     Ok(make_profile(name))
 }
 
-pub fn profile(name: String) -> BrowserProfile BrowserError! {
+fn profile(name: String) -> BrowserProfile BrowserError! {
     if name != "bidi-2024.11" && name != "bidi-2025.5" -> return Err(BrowserError.Protocol)
     Ok(make_profile(name))
 }
 
-pub fn profile(name: String) -> BrowserProfile BrowserError! {
+fn profile(name: String) -> BrowserProfile BrowserError! {
     if name != "bidi-2024.11" && name != "bidi-2025.5" -> return Err(BrowserError.Protocol)
     Ok(make_profile(name))
 }
 
-pub fn timeout(ms: Int) -> BrowserTimeout BrowserError! {
+fn timeout(ms: Int) -> BrowserTimeout BrowserError! {
     if ms < 1 || ms > 600000 -> return Err(BrowserError{kind: "invalid timeout"})
     Ok(BrowserTimeout{milliseconds: ms})
 }
 
-pub fn locked(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
+fn locked(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
     if engine != "chromium" && engine != "firefox" && engine != "webkit" -> return Err(BrowserError{kind: "unknown engine"})
     env :: core.sys.__startup_env()
     root :: env_value(env, "JET_PROJECT_ROOT") ?? "."
@@ -228,11 +228,11 @@ pub fn locked(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
     Ok(entry)
 }
 
-pub fn connect(endpoint: String) -[Net]> Browser BrowserError! {
+fn connect(endpoint: String) -[Net]> Browser BrowserError! {
     connect_profile(endpoint, profile("bidi-2025.5"), BrowserTimeout{milliseconds: 30000})
 }
 
-pub fn connect_profile(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser BrowserError! {
+fn connect_profile(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser BrowserError! {
     conn :: core.net.ws.__connect(endpoint) ? value -> value ! error -> return Err(browser_ws_error(error))
     core.web.browser.__ws_set_timeout(conn, t.milliseconds) ? unit -> unit ! error -> return Err(browser_ws_error(error))
     browser :: core.web.browser.__from_connection(^conn, p, t)
@@ -292,7 +292,7 @@ fn browser_session_cdp(session: DataTree) -> Bool BrowserError! {
     Err(BrowserError{kind: "protocol"})
 }
 
-pub fn connect_browser_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser BrowserError! {
+fn connect_browser_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser BrowserError! {
     connect_profile(p.name, p, t)
 }
 
@@ -301,7 +301,7 @@ pub fn connect_browser_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Bro
 fn selected(page: BrowserPage, selector: String) -> BrowserLocator Never! {
     BrowserLocator{selector: selector, page_id: page.id}
 }
-pub fn begin_named(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source_path: String, line: Int, column: Int) -[Net]> BrowserTestFixture BrowserError! {
+fn begin_named(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source_path: String, line: Int, column: Int) -[Net]> BrowserTestFixture BrowserError! {
     // Source positions clamp to u32 exactly; the retained fixture owns actions,
     // subscriptions and cleanup when context/page creation fails.
     core.web.browser.__begin_fixture(config, test, engine, attempt, source_path, source_position(line), source_position(column))
@@ -379,7 +379,7 @@ fn report_exit_code(report: BrowserReport) -> Int Never! {
     0
 }
 
-pub fn write_report(report: BrowserTestReport, path: String) BrowserError! {
+fn write_report(report: BrowserTestReport, path: String) BrowserError! {
     // BrowserTest.rs:1136-1155: report choice precedes the first write; the
     // HTML companion is written afterwards, including when target is HTML.
     options :: core.web.browser.__report_options(report)
@@ -396,23 +396,23 @@ pub fn write_report(report: BrowserTestReport, path: String) BrowserError! {
     Ok()
 }
 
-pub fn server_start(config: BrowserTestConfig) -[Net]> BrowserTestServer BrowserError! {
+fn server_start(config: BrowserTestConfig) -[Net]> BrowserTestServer BrowserError! {
     core.web.browser.__server_start(config)
 }
 
-pub fn watch_changed(path: String, last_modified_ms: Int) -[FS, Net]> Bool BrowserError! {
+fn watch_changed(path: String, last_modified_ms: Int) -[FS, Net]> Bool BrowserError! {
     fact :: core.web.browser.__modified_ms(path)
     if fact == None -> return Ok(last_modified_ms >= 0)
     Ok((fact ?? 0) > last_modified_ms)
 }
 
-pub fn server_stop(server: BrowserTestServer) Never! {
+fn server_stop(server: BrowserTestServer) Never! {
     core.web.browser.__server_stop(&server)
 }
 
-pub fn server_url(server: BrowserTestServer) -> String Never! { server.url() }
+fn server_url(server: BrowserTestServer) -> String Never! { server.url() }
 
-pub fn server_logs(server: BrowserTestServer) -> String Never! { server.logs() }
+fn server_logs(server: BrowserTestServer) -> String Never! { server.logs() }
 
 
 

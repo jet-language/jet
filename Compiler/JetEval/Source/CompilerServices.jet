@@ -690,7 +690,7 @@ fn jet_eval_compiler_services_checked(input: JetCompilerServicesCheckedInput) ->
 // The build context reads this immutable, fully checked whole-program view.
 // Reuse the same TypeInfo, FunctionInfo and semantic-index producers as the
 // compiler API; a missing producer fact refuses the snapshot.
-pub fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> TComptimeValue? {
+fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> TComptimeValue? {
     if !registration.complete || !graph.complete -> return None
     index :: sema_compiler_semantic_index_from_checked(registration, graph, source, module_sources)
     if !index.complete -> return None

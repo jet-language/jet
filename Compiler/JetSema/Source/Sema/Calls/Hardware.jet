@@ -99,7 +99,7 @@ fn sema_hardware_place_frame(expression: Expr, scopes: SemaScopeTable) -> Int? {
     Val(scopes.bindings[index].frame)
 }
 
-pub fn sema_hardware_transfer_fact_for_expr(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> SemaHardwareDMATransferFact? {
+fn sema_hardware_transfer_fact_for_expr(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> SemaHardwareDMATransferFact? {
     // The place key only selects among the definite transfers; with none
     // there is nothing to find (the common case: no DMA in scope).
     if scopes.hardware_definite_transfers.len() == 0 -> return None
@@ -110,7 +110,7 @@ pub fn sema_hardware_transfer_fact_for_expr(expression: Expr, scopes: SemaScopeT
     None
 }
 
-pub fn sema_hardware_note_cpu_use(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_hardware_note_cpu_use(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     // Every identifier read lands here; the place key only matters against
     // an open or pending DMA transfer, so without one there is nothing to
     // resolve.
@@ -238,7 +238,7 @@ fn sema_hardware_import_module(graph: SemaRegistrationGraph, binding: SemaRegist
 
 // Resolve only an active, unshadowed module import whose canonical target is a
 // board profile. An arbitrary same-spelled local name is not a hardware path.
-pub fn sema_hardware_board_path(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaHardwareBoardPath? {
+fn sema_hardware_board_path(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaHardwareBoardPath? {
     path :: sema_hardware_expr_path(expression) ?? return None
     if path.len() < 1 -> return None
     graph_option :: program.registration_graph
@@ -444,7 +444,7 @@ fn sema_hardware_method_receiver_name(ty: Type) -> String Never! {
 
 // Explicit DMA transfer metadata is an input because the opaque language-level
 // `__JetDmaTransfer` type alone cannot prove profile/channel/buffer ownership.
-pub fn sema_call_try_hardware_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], transfer_fact: SemaHardwareDMATransferFact?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaHardwareMethodCheck? {
+fn sema_call_try_hardware_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], transfer_fact: SemaHardwareDMATransferFact?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaHardwareMethodCheck? {
     is_dma_receiver := if receiver == {
         .Ident(name, _) -> name == "dma"
         else -> false
@@ -456,7 +456,7 @@ pub fn sema_call_try_hardware_method(receiver: Expr, receiver_value: TExpr, meth
     sema_hardware_register_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-pub fn sema_call_try_hardware_pre_receiver(receiver: Expr, method: String, args: [CallArg], transfer_fact: SemaHardwareDMATransferFact?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaHardwareMethodCheck? {
+fn sema_call_try_hardware_pre_receiver(receiver: Expr, method: String, args: [CallArg], transfer_fact: SemaHardwareDMATransferFact?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaHardwareMethodCheck? {
     is_dma_receiver := if receiver == {
         .Ident(name, _) -> name == "dma"
         else -> false

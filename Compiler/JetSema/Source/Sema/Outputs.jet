@@ -3,7 +3,7 @@
 // collect owned facts before publishing so no graph read survives a write.
 use jet_foundation.[ConstDef, Diagnostic, EnumLitArg, Expr, ExprMember, FailureContract, Item, OutputCallableAuthority, OutputKind, OutputParam, ResolvedOutput, Span, StrPart, Symbol, SymbolKind, TGenericParam, Type, expr_span, failure_contract_of_function, name_mangle, symbol_id]
 
-pub enum SemaOutputIntent {
+enum SemaOutputIntent {
     Check
     Run
     Test
@@ -11,7 +11,7 @@ pub enum SemaOutputIntent {
 
 // Rust Registration/Items.rs: metadata bindings are not runtime constants.
 // Explicit comptime bindings still use the normal evaluator.
-pub fn sema_output_metadata_binding(definition: ConstDef) -> Bool {
+fn sema_output_metadata_binding(definition: ConstDef) -> Bool {
     if definition.is_comptime -> return false
     ty :: definition.ty ?? return false
     if ty == .Named(name) -> name == "Output" || name == "__OutputDefaults" else -> false
@@ -353,7 +353,7 @@ fn sema_output_entry_span(graph: SemaRegistrationGraph, entry_index: Int) -> Spa
 
 // All modules/Outputs are diagnosed independently. Selection is an entry-file
 // projection of these same checked facts, never another load/check/resolver.
-pub fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, explicit_address: String?) -> [Diagnostic] Never! {
+fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, explicit_address: String?) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     rows := [SemaOutputRow]{}
     loop (module_index, module_row) in graph.modules {

@@ -1,7 +1,7 @@
 // Adapter realization needs the same canonical recipe graph admission and
 // fingerprint seam as ordinary recipes. Refuse before staging source, opening
 // an attempt, sealing output or publishing producer facts.
-pub fn provider_realize_adapter(_plan: AdapterPlan, _ctx: ProviderCtx, _expected: CacheExpectation, _tools: [String: String], _table: SourceTable) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+fn provider_realize_adapter(_plan: AdapterPlan, _ctx: ProviderCtx, _expected: CacheExpectation, _tools: [String: String], _table: SourceTable) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
     refusal :: recipe_plan_refusal()
     Err(ProviderError.Adapter("{refusal.what}: {refusal.why}"))
 }

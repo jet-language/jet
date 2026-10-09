@@ -95,19 +95,19 @@ enum Body {
 
 // Shared router/request carriers keep their native callback/body ownership.
 // Public operations enter source before crossing the reserved host boundary.
-pub fn router() -> HTTPRouter Never! {
+fn router() -> HTTPRouter Never! {
     core.http.__router()
 }
 
-pub fn parse(raw: String) -> HTTPRequest Never! {
+fn parse(raw: String) -> HTTPRequest Never! {
     core.http.__parse(raw)
 }
 
-pub fn dispatch(router: HTTPRouter, request: HTTPRequest) -> HTTPResponse HTTPError! {
+fn dispatch(router: HTTPRouter, request: HTTPRequest) -> HTTPResponse HTTPError! {
     core.http.__dispatch(router, request)
 }
 
-pub fn method_parse(token: String) -> Method Never! {
+fn method_parse(token: String) -> Method Never! {
     u :: ascii_upper(token)
     if u == {
         "GET" -> Method.Get
@@ -235,7 +235,7 @@ fn headers_all(h: Headers, name: String) -> [String] Never! {
     out
 }
 
-pub fn headers_set(h: Headers, name: String, value: String) -> Headers Never! {
+fn headers_set(h: Headers, name: String, value: String) -> Headers Never! {
     if !valid_header_name(name) || has_ctl(value.bytes()) -> return h.copy()
     want :: ascii_lower(name)
     fields := [Header]{}
@@ -254,7 +254,7 @@ pub fn headers_set(h: Headers, name: String, value: String) -> Headers Never! {
     Headers{fields: fields}
 }
 
-pub fn headers_append(h: Headers, name: String, value: String) -> Headers Never! {
+fn headers_append(h: Headers, name: String, value: String) -> Headers Never! {
     if !valid_header_name(name) || has_ctl(value.bytes()) -> return h.copy()
     fields := [Header]{}
     loop f in h.fields -> &fields.push(f)
@@ -833,8 +833,8 @@ fn basic_auth(user: String, password: String) -> String Never! {
     "Basic {base64_encode(credentials.bytes())}"
 }
 
-pub fn bearer_auth(token: String) -> String Never! { "Bearer {token}" }
-pub fn with_header(req: HTTPRequest, name: String, value: String) -> HTTPRequest Never! {
+fn bearer_auth(token: String) -> String Never! { "Bearer {token}" }
+fn with_header(req: HTTPRequest, name: String, value: String) -> HTTPRequest Never! {
     if !valid_header_name(name) || has_ctl(value.bytes()) -> return req.copy()
     &req.header(name, value)
 }

@@ -319,7 +319,7 @@ fn jet_cli_inspect_word(command: String) -> Bool Never! {
 // Route one inspect-group command: `argv` is the normalized argv (the
 // `--` tail included), `jet_argv` the words before `--`, and `args` their
 // positional words; `args[0]` is the command word.
-pub fn jet_cli_inspect(argv: [String], jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
+fn jet_cli_inspect(argv: [String], jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
     command :: args[0]
     inspect_env :: command == "inspect" && args.len() > 1 && args[1] == "env"
     if command == "inspect" && !inspect_env -> return jet_cli_inspect_plane(argv, color, json, threads)
@@ -358,14 +358,14 @@ fn jet_cli_inspect_impact(argv: [String], color: Bool, json: Bool, threads: Int?
 // (CmdInspect.rs `run_types`/`run_shapes`, CmdCompile.rs `run_build_query`):
 // `action` is `types`, `shapes`, `graph`, `query`, or `explain-build`, and
 // `subject` the explain-build subject.
-pub struct JetCLIInspectJob {
-    pub action: String
-    pub file: String
-    pub subject: String?
-    pub json: Bool
-    pub verbose: Bool{false}
-    pub color: Bool
-    pub threads: Int?
+struct JetCLIInspectJob {
+    action: String
+    file: String
+    subject: String?
+    json: Bool
+    verbose: Bool{false}
+    color: Bool
+    threads: Int?
     // The stderr notices entry resolution wrote, which go out first.
     notice: String
     // A bare or directory scope (a project check, CmdInspect.rs
@@ -374,12 +374,12 @@ pub struct JetCLIInspectJob {
     // The `jet inspect impact` transitive walk limit (`--depth=N`).
     depth: Int{3}
     // `provenance`: the manifest root whose `.jet/lock` the report reads.
-    pub root: String{""}
+    root: String{""}
     // `accel`/`decisions`: the profile name, whether accel lowers the release
     // artifact, and the scope name (`subject` is the named target).
-    pub profile: String{"debug"}
-    pub release_build: Bool{false}
-    pub scope: String{""}
+    profile: String{"debug"}
+    release_build: Bool{false}
+    scope: String{""}
 }
 
 // The entry an inspect scope names, and the stderr notices project entry

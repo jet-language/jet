@@ -9,7 +9,7 @@
 // `.jet/` when absent and keeping every unrelated lock record. A failed write
 // is returned to the caller.
 // Reuse the command's declaration cache when checking the plan's authority.
-pub fn env_workspace_lock_write(cache: &WorkspaceDeclarationCache, workspace_root: String, plan: WorkspacePlan) EnvironmentError! -[FS, Env, Exec, Time, Time.Wait]> {
+fn env_workspace_lock_write(cache: &WorkspaceDeclarationCache, workspace_root: String, plan: WorkspacePlan) EnvironmentError! -[FS, Env, Exec, Time, Time.Wait]> {
     // crates/jetpack/src/WorkspaceLock.rs:25-49: refusal precedes the
     // process lock too, whose acquisition can create filesystem state.
     pkg_check_workspace_overlay_gates(&cache, workspace_root, plan.overlay_policy) ?? return Err(EnvironmentError.Gate(err))

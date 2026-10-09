@@ -3,67 +3,67 @@
 use core.crypto as core_shared_crypto
 use jet_foundation.[MIRFunctionID, MIRProgram, MIRSharedLifetime, MIRType, MIRTypeKind, foundation_json_quote, mir_program_digest, mir_shared_site_getter_symbol, mir_type_display_name, mir_type_from_kind]
 
-pub struct CoreSharedSource {
-    pub module_owner_key: String
-    pub path: String
-    pub source: String
-    pub owned_members: [String]
+struct CoreSharedSource {
+    module_owner_key: String
+    path: String
+    source: String
+    owned_members: [String]
 }
-pub struct CoreSharedSiteSchema {
-    pub canonical_site_key: String
-    pub initializer_semantic_id: MIRFunctionID
-    pub getter_canonical_symbol: String
-    pub lifetime: MIRSharedLifetime
-    pub payload_layout_key: String
+struct CoreSharedSiteSchema {
+    canonical_site_key: String
+    initializer_semantic_id: MIRFunctionID
+    getter_canonical_symbol: String
+    lifetime: MIRSharedLifetime
+    payload_layout_key: String
 }
-pub struct CoreSharedLayoutMember {
-    pub name: String
-    pub offset: Int
-    pub boxed: Bool
-    pub type_key: String
-    pub storage_type_key: String
+struct CoreSharedLayoutMember {
+    name: String
+    offset: Int
+    boxed: Bool
+    type_key: String
+    storage_type_key: String
 }
-pub struct CoreSharedLayoutVariant {
-    pub name: String
-    pub selector: Int
-    pub box_size: Int
-    pub named: Bool
-    pub members: [CoreSharedLayoutMember]
+struct CoreSharedLayoutVariant {
+    name: String
+    selector: Int
+    box_size: Int
+    named: Bool
+    members: [CoreSharedLayoutMember]
 }
-pub struct CoreSharedNativeLayout {
-    pub type_key: String
-    pub nominal_key: String
-    pub display_name: String
-    pub representation: String
-    pub kind: Int
-    pub stride: Int
-    pub payload_size: Int
-    pub align: Int
-    pub box_size: Int
-    pub clone_identity: String
-    pub drop_identity: String
-    pub child_keys: [String]
-    pub members: [CoreSharedLayoutMember]
-    pub variants: [CoreSharedLayoutVariant]
+struct CoreSharedNativeLayout {
+    type_key: String
+    nominal_key: String
+    display_name: String
+    representation: String
+    kind: Int
+    stride: Int
+    payload_size: Int
+    align: Int
+    box_size: Int
+    clone_identity: String
+    drop_identity: String
+    child_keys: [String]
+    members: [CoreSharedLayoutMember]
+    variants: [CoreSharedLayoutVariant]
 }
-pub struct CoreSharedManifest {
-    pub namespace_owner_key: String
-    pub seal: String
-    pub sorted_sites: [CoreSharedSiteSchema]
-    pub keyed_native_layout_inventory: [CoreSharedNativeLayout]
-    pub digest: String
-    pub errors: [String]
+struct CoreSharedManifest {
+    namespace_owner_key: String
+    seal: String
+    sorted_sites: [CoreSharedSiteSchema]
+    keyed_native_layout_inventory: [CoreSharedNativeLayout]
+    digest: String
+    errors: [String]
 }
 struct CoreSharedLayoutBuilder {
-    pub rows: [String:Int]
-    pub layouts: [CoreSharedNativeLayout]
-    pub errors: [String]
-    pub close_methods: [U64:[LowerCloseImpl]]
+    rows: [String:Int]
+    layouts: [CoreSharedNativeLayout]
+    errors: [String]
+    close_methods: [U64:[LowerCloseImpl]]
 }
 
 // Sort a local receipt copy; neither installed source order nor the caller's
 // owned-member lists are changed. Length-framed JSON prevents delimiter aliases.
-pub fn core_shared_source_seal(sources: [CoreSharedSource]) -> String Never! {
+fn core_shared_source_seal(sources: [CoreSharedSource]) -> String Never! {
     ordered := ~sources
     &ordered.sort_by((a: CoreSharedSource, b: CoreSharedSource) -> (a.module_owner_key <=> b.module_owner_key).then(a.path <=> b.path))
     rows := [String]{}
@@ -178,7 +178,7 @@ fn core_shared_layout_json(row: CoreSharedNativeLayout) -> String Never! {
     }
     "[{foundation_json_quote(row.type_key)},{foundation_json_quote(row.nominal_key)},{foundation_json_quote(row.display_name)},{foundation_json_quote(row.representation)},{row.kind},{row.stride},{row.payload_size},{row.align},{row.box_size},{foundation_json_quote(row.clone_identity)},{foundation_json_quote(row.drop_identity)},[{children.join(",")}],[{members.join(",")}],[{variants.join(",")}]]"
 }
-pub fn core_shared_manifest_body(manifest: CoreSharedManifest) -> String Never! {
+fn core_shared_manifest_body(manifest: CoreSharedManifest) -> String Never! {
     sites := [String]{}
     loop site in manifest.sorted_sites {
         &sites.push("[{foundation_json_quote(site.canonical_site_key)},{foundation_json_quote("{site.initializer_semantic_id.value}")},{foundation_json_quote(site.getter_canonical_symbol)},{foundation_json_quote(core_shared_lifetime_key(site.lifetime))},{foundation_json_quote(site.payload_layout_key)}]")
@@ -220,7 +220,7 @@ fn core_shared_source_inventory_errors(program: MIRProgram, sources: [CoreShared
 
 // This schema walk never lowers an image, maps code, or calls a getter. A new
 // compiler factory can compare checked semantic/physical facts before admission.
-pub fn core_shared_expected_manifest(program: MIRProgram, sources: [CoreSharedSource]) -> CoreSharedManifest Never! {
+fn core_shared_expected_manifest(program: MIRProgram, sources: [CoreSharedSource]) -> CoreSharedManifest Never! {
     functions := [U64:Int]{}
     loop (row, function) in program.functions -> &functions.add(function.id.value, row).drop("checked function identity")
     state := CoreSharedLayoutBuilder{rows: [String:Int]{}, layouts: [CoreSharedNativeLayout]{}, errors: [String]{}, close_methods: lower_close_index(program, functions)}
@@ -257,7 +257,7 @@ pub fn core_shared_expected_manifest(program: MIRProgram, sources: [CoreSharedSo
 
 // A producing LIR must export exactly the schema computed from checked Core
 // declarations. LIR IDs, offsets and pointers cannot influence that schema.
-pub fn core_shared_manifest(program: MIRProgram, lowered: LIRLowering, sources: [CoreSharedSource]) -> CoreSharedManifest Never! {
+fn core_shared_manifest(program: MIRProgram, lowered: LIRLowering, sources: [CoreSharedSource]) -> CoreSharedManifest Never! {
     manifest := core_shared_expected_manifest(program, sources)
     loop issue in lowered.issues -> &manifest.errors.push("CoreSharedLoweringFailed: {issue.message}")
     seen := [String:Bool]{}
@@ -284,35 +284,35 @@ pub fn core_shared_manifest(program: MIRProgram, lowered: LIRLowering, sources: 
     manifest
 }
 
-pub struct CoreSharedGetterBinding {
-    pub canonical_site_key: String
-    pub getter_canonical_symbol: String
-    pub function: LIRFunctionID
-    pub linked_offset: Int
+struct CoreSharedGetterBinding {
+    canonical_site_key: String
+    getter_canonical_symbol: String
+    function: LIRFunctionID
+    linked_offset: Int
 }
-pub struct CoreSharedCallableBinding {
-    pub semantic_identity: String
-    pub role: String
-    pub type_key: String
-    pub symbol: String
-    pub function: LIRFunctionID
-    pub signature: LIRSignature
-    pub linked_offset: Int
+struct CoreSharedCallableBinding {
+    semantic_identity: String
+    role: String
+    type_key: String
+    symbol: String
+    function: LIRFunctionID
+    signature: LIRSignature
+    linked_offset: Int
 }
 
-pub struct CoreSharedBinding {
-    pub manifest_digest: String
-    pub source_seal: String
-    pub producing_program: MIRProgram
-    pub original_sources: [CoreSharedSource]
-    pub producing_program_digest: String
-    pub producer_identity: String
-    pub compiled_image_sha: String
-    pub image: X64MemoryImage
-    pub getters: [CoreSharedGetterBinding]
-    pub callables: [CoreSharedCallableBinding]
-    pub callable_digest: String
-    pub errors: [String]
+struct CoreSharedBinding {
+    manifest_digest: String
+    source_seal: String
+    producing_program: MIRProgram
+    original_sources: [CoreSharedSource]
+    producing_program_digest: String
+    producer_identity: String
+    compiled_image_sha: String
+    image: X64MemoryImage
+    getters: [CoreSharedGetterBinding]
+    callables: [CoreSharedCallableBinding]
+    callable_digest: String
+    errors: [String]
 }
 
 fn core_shared_callable_rows_digest(rows: [CoreSharedCallableBinding]) -> String Never! {
@@ -328,12 +328,12 @@ fn core_shared_callable_rows_digest(rows: [CoreSharedCallableBinding]) -> String
 fn core_shared_callable_digest_error(rows: [CoreSharedCallableBinding], digest: String) -> String Never! {
     if digest != core_shared_callable_rows_digest(rows) -> "CoreSharedCallableBindingIdentityMismatch" else -> ""
 }
-pub fn core_shared_callable_required_error(rows: [CoreSharedCallableBinding], identity: String) -> String Never! {
+fn core_shared_callable_required_error(rows: [CoreSharedCallableBinding], identity: String) -> String Never! {
     loop row in rows { if row.semantic_identity == identity -> return "" }
     "CoreSharedCallableBindingMissing: {identity}"
 }
 
-pub fn core_shared_callable_inventory_error(binding: CoreSharedBinding) -> String Never! {
+fn core_shared_callable_inventory_error(binding: CoreSharedBinding) -> String Never! {
     digest_error :: core_shared_callable_digest_error(binding.callables, binding.callable_digest)
     if digest_error != "" -> return digest_error
     seen := [String:Bool]{}
@@ -361,12 +361,12 @@ pub fn core_shared_callable_inventory_error(binding: CoreSharedBinding) -> Strin
 
 // Caller has already admitted/validated this binding; lookup never rehashes
 // a complete compiler image while a physical payload permit is held.
-pub fn core_shared_callable_binding(binding: CoreSharedBinding, identity: String) -> CoreSharedCallableBinding? Never! {
+fn core_shared_callable_binding(binding: CoreSharedBinding, identity: String) -> CoreSharedCallableBinding? Never! {
     loop row in binding.callables { if row.semantic_identity == identity -> return Val(row) }
     None
 }
 
-pub fn core_shared_binding(program: MIRProgram, lowered: LIRLowering, manifest: CoreSharedManifest, sources: [CoreSharedSource], producer_identity: String) -> CoreSharedBinding Never! {
+fn core_shared_binding(program: MIRProgram, lowered: LIRLowering, manifest: CoreSharedManifest, sources: [CoreSharedSource], producer_identity: String) -> CoreSharedBinding Never! {
     image :: x64_memory_core_shared_image(lowered)
     binding := CoreSharedBinding{manifest_digest: manifest.digest, source_seal: core_shared_source_seal(sources), producing_program: program, original_sources: sources, producing_program_digest: mir_program_digest(program), producer_identity: producer_identity, compiled_image_sha: core_shared_crypto.sha256(image.text).hex(), image: image, getters: [CoreSharedGetterBinding]{}, callables: [CoreSharedCallableBinding]{}, callable_digest: "", errors: manifest.errors}
     loop error in image.errors -> &binding.errors.push(error)

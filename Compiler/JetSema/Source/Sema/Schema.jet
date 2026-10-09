@@ -1,28 +1,28 @@
 // D-MIGRATE1/2: canonical published-schema wire snapshot (Rust Schema.rs).
 use jet_foundation.[StructDef, type_name]
 
-pub SNAPSHOT_VERSION :: U32{1}
-pub struct SnapshotField {
-    pub name: String
-    pub ty: String
+SNAPSHOT_VERSION :: U32{1}
+struct SnapshotField {
+    name: String
+    ty: String
 }
 #Error
-pub struct SchemaSnapshotError { pub message: String }
-pub struct SchemaSnapshot {
-    pub schema_version: U32
-    pub type_name: String
-    pub published_version: String
-    pub squashed_before: String?
-    pub fields: [SnapshotField]
+struct SchemaSnapshotError { message: String }
+struct SchemaSnapshot {
+    schema_version: U32
+    type_name: String
+    published_version: String
+    squashed_before: String?
+    fields: [SnapshotField]
 
-    pub fn write(self) -> String Never! {
+    fn write(self) -> String Never! {
         fragments := [String]{"schema_version = {self.schema_version}\ntype = {self.type_name}\npublished_version = {self.published_version}\n"}
         if self.squashed_before == .Val(before) -> &fragments.push("squashed_before = {before}\n")
         loop field in self.fields -> &fragments.push("field {field.name}: {field.ty}\n")
         fragments.join("")
     }
 
-    pub fn parse(raw: String) -> SchemaSnapshot SchemaSnapshotError! {
+    fn parse(raw: String) -> SchemaSnapshot SchemaSnapshotError! {
         schema_version := U32?{None}
         name := String?{None}
         published := String?{None}
@@ -65,7 +65,7 @@ pub struct SchemaSnapshot {
     }
 }
 
-pub fn snapshot_from_struct(definition: StructDef, version: String) -> SchemaSnapshot Never! {
+fn snapshot_from_struct(definition: StructDef, version: String) -> SchemaSnapshot Never! {
     fields :: loop field in definition.fields -> SnapshotField{name: field.name, ty: type_name(field.ty)}
     SchemaSnapshot{schema_version: SNAPSHOT_VERSION, type_name: definition.name, published_version: version, squashed_before: None, fields: fields}
 }

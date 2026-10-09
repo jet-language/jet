@@ -67,7 +67,7 @@ impl ConfigFacts {
 
 // The retired `.{` record heads: each `.` token directly before `{`, outside
 // strings and comments. A text that does not lex has none.
-pub fn pkg_retired_record_head_spans(text: String) -> [Span] Never! {
+fn pkg_retired_record_head_spans(text: String) -> [Span] Never! {
     lexed :: pkg_manifest_lexed(text) ?? return [Span]{}
     tokens :: lexed.tokens
     spans := [Span]{}
@@ -79,7 +79,7 @@ pub fn pkg_retired_record_head_spans(text: String) -> [Span] Never! {
 
 // The compiler lexer's token stream without comments and EOF, retaining
 // its spelling/literal tables; None when the text has lexer diagnostics.
-pub fn pkg_manifest_lexed(text: String) -> Lexed? Never! {
+fn pkg_manifest_lexed(text: String) -> Lexed? Never! {
     lexed := lex(text.bytes())
     if lexed.diagnostics.len() > 0 -> return None
     tokens := [Token]{}

@@ -117,7 +117,7 @@ fn evidence_encode_record_body(record: EvidenceRecord, out: &[U8]) EvidenceCodec
     return
 }
 
-pub fn evidence_encode_record(record: EvidenceRecord, out: &[U8]) EvidenceCodecError! {
+fn evidence_encode_record(record: EvidenceRecord, out: &[U8]) EvidenceCodecError! {
     if record.derivation != None {
         return Err(evidence_codec_error("evidence record has a derivation; encode with its canonical definition"))
     }
@@ -126,7 +126,7 @@ pub fn evidence_encode_record(record: EvidenceRecord, out: &[U8]) EvidenceCodecE
     return
 }
 
-pub fn evidence_encode_record_with_derivation(record: EvidenceRecord, derivation: DerivationRecord, out: &[U8]) EvidenceCodecError! {
+fn evidence_encode_record_with_derivation(record: EvidenceRecord, derivation: DerivationRecord, out: &[U8]) EvidenceCodecError! {
     if evidence_record_validate(record) == {
         .Err(error) -> return Err(evidence_codec_error(evidence_expectation_error_text(error)))
         .Ok(_) -> {}
@@ -176,7 +176,7 @@ fn evidence_encode_derivation(value: DerivationRecord, out: &[U8]) EvidenceCodec
     return
 }
 
-pub fn evidence_report_encode(report: EvidenceReport) -> [U8] EvidenceCodecError! {
+fn evidence_report_encode(report: EvidenceReport) -> [U8] EvidenceCodecError! {
     out := EVIDENCE_REPORT_MAGIC.bytes()
     evidence_put_number(&out, U64.from_u16(EVIDENCE_REPORT_VERSION), 2)
     loop record in report.records {

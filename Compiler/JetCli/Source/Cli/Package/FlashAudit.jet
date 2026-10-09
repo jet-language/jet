@@ -3,10 +3,10 @@
 // Only the flash plan builder uses the private scan/identity verification.
 use core.files as flash_files
 
-pub struct JetCLIFlashOptions { pub target: String?, pub image: Path?, pub audit: Path?, pub adapter: JetCLIFlashAdapter? }
-pub enum JetCLIFlashParse { Help Options(JetCLIFlashOptions) }
+struct JetCLIFlashOptions { target: String?, image: Path?, audit: Path?, adapter: JetCLIFlashAdapter? }
+enum JetCLIFlashParse { Help Options(JetCLIFlashOptions) }
 // Rust parse_flash_args (CmdFlash.rs:881-924).
-pub fn jet_cli_flash_parse_args(args: [String]) -> JetCLIFlashParse JetCLIFlashError! {
+fn jet_cli_flash_parse_args(args: [String]) -> JetCLIFlashParse JetCLIFlashError! {
     options := JetCLIFlashOptions{target: None, image: None, audit: None, adapter: None}
     index := if args.len() > 0 && args[0] == "flash" -> 1 else -> 0
     loop index < args.len() {
@@ -50,14 +50,14 @@ pub fn jet_cli_flash_parse_args(args: [String]) -> JetCLIFlashParse JetCLIFlashE
     Ok(JetCLIFlashParse.Options(options))
 }
 // Rust canonical_flash_args (CmdFlash.rs:926-934).
-pub fn jet_cli_flash_canonical_args(args: [String]) -> [String] Never! {
+fn jet_cli_flash_canonical_args(args: [String]) -> [String] Never! {
     if args.len() > 0 && args[0] == "flash" -> return ~args
     result := [String]{"flash"}
     loop word in args -> &result.push(~word)
     result
 }
 // Rust flash_help (CmdFlash.rs:1379-1381).
-pub fn jet_cli_flash_help() -> String Never! {
+fn jet_cli_flash_help() -> String Never! {
     "jet flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>]"
 }
 // Rust resolve_declared_tool/resolve_audit_path skip ordinary inspect errors;
@@ -281,9 +281,9 @@ fn jet_cli_flash_json_string_token(value: String) -> String Never! {
     bytes :: canonical_json_bytes(CanonicalJSON.String(value))
     String.from_bytes(~bytes[1..<bytes.len() - 2]) ?? panic("canonical JSON string is UTF-8")
 }
-pub struct JetCLIFlashCapture { pub bytes: [U8], pub truncated: Bool }
+struct JetCLIFlashCapture { bytes: [U8], truncated: Bool }
 // Rust bound_capture (CmdFlash.rs:1233-1242).
-pub fn jet_cli_flash_bound_capture(bytes: [U8]) -> JetCLIFlashCapture Never! {
+fn jet_cli_flash_bound_capture(bytes: [U8]) -> JetCLIFlashCapture Never! {
     if bytes.len() <= JET_CLI_FLASH_MAX_CAPTURE_BYTES -> return JetCLIFlashCapture{bytes: ~bytes, truncated: false}
     marker :: "\n<output truncated>\n".bytes()
     bounded := ~bytes[0..<JET_CLI_FLASH_MAX_CAPTURE_BYTES - marker.len()]
@@ -292,7 +292,7 @@ pub fn jet_cli_flash_bound_capture(bytes: [U8]) -> JetCLIFlashCapture Never! {
 }
 fn jet_cli_flash_ascii_alnum(code: Int) -> Bool Never! { (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) }
 // Rust safe_openocd_image_name (CmdFlash.rs:1244-1251).
-pub fn jet_cli_flash_safe_openocd_image_name(name: String) -> Bool Never! {
+fn jet_cli_flash_safe_openocd_image_name(name: String) -> Bool Never! {
     if name.is_empty() || name == "." || name == ".." -> return false
     loop byte in name.bytes() {
         code :: Int.from_u8(byte)
@@ -301,7 +301,7 @@ pub fn jet_cli_flash_safe_openocd_image_name(name: String) -> Bool Never! {
     true
 }
 // Rust status_value (CmdFlash.rs:1253-1272); Report uses Core DataTree.
-pub fn jet_cli_flash_status_value(value: CanonicalJSON) -> DataTree Never! {
+fn jet_cli_flash_status_value(value: CanonicalJSON) -> DataTree Never! {
     if value == {
         .Null -> DataTree.Null
         .Bool(flag) -> DataTree.Bool(flag)
@@ -320,7 +320,7 @@ pub fn jet_cli_flash_status_value(value: CanonicalJSON) -> DataTree Never! {
     }
 }
 // Rust programmer_json (CmdFlash.rs:1338-1377).
-pub fn jet_cli_flash_programmer_json(facts: MIRTargetProgrammerFacts) -> CanonicalJSON Never! {
+fn jet_cli_flash_programmer_json(facts: MIRTargetProgrammerFacts) -> CanonicalJSON Never! {
     config := [CanonicalJSON]{}
     loop value in facts.config -> &config.push(CanonicalJSON.String(~value))
     CanonicalJSON.Object([CanonicalJSONField]{
@@ -337,6 +337,6 @@ pub fn jet_cli_flash_programmer_json(facts: MIRTargetProgrammerFacts) -> Canonic
 }
 fn jet_cli_flash_optional_json(value: String?) -> CanonicalJSON Never! { if value == .Val(text) -> CanonicalJSON.String(~text) else -> CanonicalJSON.Null }
 // Rust programmer_value (CmdFlash.rs:1303-1336).
-pub fn jet_cli_flash_programmer_value(facts: MIRTargetProgrammerFacts) -> DataTree Never! { jet_cli_flash_status_value(jet_cli_flash_programmer_json(facts)) }
+fn jet_cli_flash_programmer_value(facts: MIRTargetProgrammerFacts) -> DataTree Never! { jet_cli_flash_status_value(jet_cli_flash_programmer_json(facts)) }
 // Rust plan_value (CmdFlash.rs:1274-1301).
-pub fn jet_cli_flash_plan_value(plan: JetCLIFlashPlan) -> DataTree Never! { jet_cli_flash_status_value(jet_cli_flash_plan_json(plan)) }
+fn jet_cli_flash_plan_value(plan: JetCLIFlashPlan) -> DataTree Never! { jet_cli_flash_status_value(jet_cli_flash_plan_json(plan)) }

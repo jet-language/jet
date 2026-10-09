@@ -10,11 +10,11 @@ fn jet_cli_maintenance_error(code: String, what: String, fix: String?, color: Bo
     JetDriverVerbOutput{stdout: if json -> jet_cli_fail_json(code, what, diagnostic_copy.why, repair) else -> "", stderr: if json -> "" else -> jet_cli_report(code, what, diagnostic_copy.why, repair, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 
-pub fn jet_cli_new_ui_source() -> String Never! {
+fn jet_cli_new_ui_source() -> String Never! {
     "// TODO: describe what this diagnostic demonstrates.\nfn run() {{\n    print(definitely_undefined_scaffold_symbol)\n}}\n"
 }
 
-pub fn jet_cli_devtools_new_ui(args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
+fn jet_cli_devtools_new_ui(args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
     if args.len() == 0 -> return JetDriverVerbOutput{stdout: "", stderr: "usage: jet devtools new-ui <name>\n", exit_code: JET_DRIVER_EXIT_USAGE}
     name :: args[0]
     if name == "" || name.contains("/") || name.contains(".") -> return jet_cli_maintenance_error("E2104", "`new-ui` takes a bare fixture name, no path or extension: got `{name}`", None, color, json)
@@ -48,7 +48,7 @@ fn jet_cli_fixture_literal(text: String) -> Bool Never! {
 
 // Byte scanner, not a Rust parser: escaped quote bytes skip the next byte;
 // display-label exclusions examine the same forty-byte preceding window.
-pub fn jet_cli_extract_fixture_paths(text: String) -> [String] Never! {
+fn jet_cli_extract_fixture_paths(text: String) -> [String] Never! {
     bytes :: text.bytes()
     paths := [String]{}
     index := 0
@@ -92,7 +92,7 @@ fn jet_cli_collect_fixture_rs(directory: String, files: &[String]) Never! -[FS]>
     }
 }
 
-pub fn jet_cli_devtools_fixture_paths(color: Bool, json: Bool) -> JetDriverVerbOutput {
+fn jet_cli_devtools_fixture_paths(color: Bool, json: Bool) -> JetDriverVerbOutput {
     if !cli_files.is_dir("tests") -> return jet_cli_maintenance_error("E2104", "no `tests/` directory here", Val("run from the repo root"), color, json)
     files := [String]{}
     jet_cli_collect_fixture_rs("tests", &files)

@@ -99,9 +99,9 @@ struct WebFormTyped {
 }
 
 #Error
-pub struct WebFormActionError {
-    pub field_errors: [String:[String]]
-    pub form_errors: [String]
+struct WebFormActionError {
+    field_errors: [String:[String]]
+    form_errors: [String]
 }
 
 struct WebFormDecodedInput {
@@ -199,7 +199,7 @@ fn validate(form: &WebForm) WebFormError! {
     return Ok()
 }
 
-pub fn validate_async(form: WebForm) -> WebForm Never! {
+fn validate_async(form: WebForm) -> WebForm Never! {
     out := form.copy()
     out.status = WebFormStatus.Validating
     out
@@ -294,7 +294,7 @@ fn typed_set(form: &WebFormTyped, name: String, value: String) WebFormError! {
     set(&form.form, name, value)
 }
 
-pub fn typed_set_async_validator(form: &WebFormTyped, name: String, timing: WebFormValidationTiming, delay_ms: Int, validator: fn(String)) WebFormError! {
+fn typed_set_async_validator(form: &WebFormTyped, name: String, timing: WebFormValidationTiming, delay_ms: Int, validator: fn(String)) WebFormError! {
     _ :: timing.copy()
     _ :: delay_ms
     if name.len() == 0 -> return Err(WebFormError.Missing)
@@ -318,8 +318,8 @@ fn typed_set_action<E>(form: WebFormTyped, handler: fn(WebFormDecodedInput) -> S
     _ :: handler(decoded)
 }
 
-pub fn action_error() -> WebFormActionError Never! { WebFormActionError{field_errors: [String:[String]]{}, form_errors: [String]{}} }
-pub fn action_field_error(error: WebFormActionError, field: String, message: String) -> WebFormActionError Never! {
+fn action_error() -> WebFormActionError Never! { WebFormActionError{field_errors: [String:[String]]{}, form_errors: [String]{}} }
+fn action_field_error(error: WebFormActionError, field: String, message: String) -> WebFormActionError Never! {
     if field.len() == 0 || field.len() > 128 || message.len() == 0 || message.len() > C_MAX_FORM_TEXT -> return error.copy()
     out := error.copy()
     existing :: out.field_errors.get(field)
@@ -334,7 +334,7 @@ pub fn action_field_error(error: WebFormActionError, field: String, message: Str
     out
 }
 
-pub fn action_form_error(error: WebFormActionError, message: String) -> WebFormActionError Never! {
+fn action_form_error(error: WebFormActionError, message: String) -> WebFormActionError Never! {
     if message.len() == 0 || message.len() > C_MAX_FORM_TEXT -> return error.copy()
     out := error.copy()
     if out.form_errors.len() < C_MAX_FORM_FIELDS -> &out.form_errors.push(message.copy())
@@ -342,15 +342,15 @@ pub fn action_form_error(error: WebFormActionError, message: String) -> WebFormA
 }
 
 
-pub fn typed_blur(form: &WebFormTyped, name: String) WebFormError! { blur(&form.form, name) }
-pub fn typed_validate(form: &WebFormTyped) WebFormError! { validate(&form.form) }
-pub fn typed_validate_async(form: WebFormTyped) -> WebFormValidation Never! {
+fn typed_blur(form: &WebFormTyped, name: String) WebFormError! { blur(&form.form, name) }
+fn typed_validate(form: &WebFormTyped) WebFormError! { validate(&form.form) }
+fn typed_validate_async(form: WebFormTyped) -> WebFormValidation Never! {
     out := form.copy()
     out.form.status = WebFormStatus.Validating
     WebFormValidation{form: out, pending: true}
 }
 
-pub fn typed_validate_field(form: WebFormTyped, name: String, timing: WebFormValidationTiming, validator: fn(String)) -> WebFormValidationChain Never! {
+fn typed_validate_field(form: WebFormTyped, name: String, timing: WebFormValidationTiming, validator: fn(String)) -> WebFormValidationChain Never! {
     _ :: timing.copy()
     out := form.copy()
     valid := false
@@ -378,8 +378,8 @@ fn typed_submit(form: &WebFormTyped) -> String WebFormError! {
     form.form.status = WebFormStatus.Submitted
     typed_html(form)
 }
-pub fn typed_no_script(form: &WebFormTyped) -> String WebFormError! { typed_html(form) }
-pub fn typed_submit_async(form: WebFormTyped) -> WebFormTypedSubmission Never! {
+fn typed_no_script(form: &WebFormTyped) -> String WebFormError! { typed_html(form) }
+fn typed_submit_async(form: WebFormTyped) -> WebFormTypedSubmission Never! {
     out := form.copy()
     out.form.status = WebFormStatus.Submitting
     WebFormTypedSubmission{form: out, pending: true}

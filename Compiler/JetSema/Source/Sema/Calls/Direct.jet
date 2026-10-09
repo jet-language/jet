@@ -251,7 +251,7 @@ fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaS
     SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_expr(checked.ty, TExprKind.InlineBlock{body: body}, call.name_span))}
 }
 
-pub fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.name == {
         "wrapping" | "saturating" | "checked" -> sema_call_check_special_overflow(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -267,7 +267,7 @@ pub fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment:
 // (CheckerInfer/calls/direct_calls.rs, CheckerItems.rs check_*_call). A user
 // function or local of the same name shadows every row. `#NoPrelude`
 // print/input refusal (E0429) runs before this dispatcher.
-pub fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.name == {
         "freeze" -> sema_call_check_freeze(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -744,7 +744,7 @@ fn sema_call_check_ambient_assert_eq(call: Call, environment: SemaScopeEnvironme
 // Core registry rows are selected by the caller's canonical route.  These
 // source-owned projections run before the generic fixed-row producer; an
 // unhandled projection deliberately leaves the row for that producer.
-pub fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
+fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     // Both compiler facts and active build-plan graphs use the checked
     // compile-time service path. Receipt diff remains ordinary Core source.
     if (record.module_name == "core.compiler" || (record.module_name == "core.build" && record.member == "graph")) && sema_compiler_services_call_contract(record.module_name, record.member) != None {
@@ -779,7 +779,7 @@ pub fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg],
 
     SemaDirectSpecialCheck{handled: false, value: None}
 }
-pub fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
+fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     if !call.name.contains(".") -> return SemaDirectSpecialCheck{handled: false, value: None}
     parts := call.name.split(".").to_list()
     if parts.len() != 2 -> return SemaDirectSpecialCheck{handled: false, value: None}
@@ -955,7 +955,7 @@ fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: B
     }
 }
 
-pub fn sema_call_check_default_err(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_check_default_err(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     result :: sema_call_default_err_result(expected)
     if result == .Val(result_value) {
         // #3708: an `Err(...)` that builds a carrier is a failure source of
@@ -1182,16 +1182,16 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
 }
 
-pub fn sema_call_check_direct_target_owned(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+fn sema_call_check_direct_target_owned(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     sema_call_direct_checked_from_target(&state, target, call, defaults, expected, environment, program, &scopes, &tail_store, &context, &diagnostics)
 }
 
-pub fn sema_call_check_direct_target(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_check_direct_target(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked :: sema_call_direct_checked_from_target(&state, target, call, defaults, expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return None
     Val(checked.value)
 }
 
-pub fn sema_call_check_direct(state: &SemaOwnershipState, call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_check_direct(state: &SemaOwnershipState, call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if call.name == "measurement" && sema_scope_resolve_index(scopes, call.name) == None {
         labeled :: call.args.len() == 2 && call.args[0].label == None && (if call.args[1].label == { .Val(label) -> label.name == "uncertainty" else -> false })
         if !labeled {

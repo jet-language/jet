@@ -4,32 +4,32 @@ use core as core
 use core.crypto as crypto
 use core.crypto.expert as expert
 
-pub CHUNK :: 1048576
-pub MAX_PLAIN :: 1099511627776
+CHUNK :: 1048576
+MAX_PLAIN :: 1099511627776
 MAX_RECORDS :: 1048577
 BASE :: 74
 STANZA :: 96
-pub TAG :: 16
+TAG :: 16
 
 
-pub struct Writer {
-    pub prefix: [U8]
-    pub header_hash: [U8]
-    pub key: crypto.Secret
-    pub nonce_prefix: [U8]
-    pub remaining: Int
+struct Writer {
+    prefix: [U8]
+    header_hash: [U8]
+    key: crypto.Secret
+    nonce_prefix: [U8]
+    remaining: Int
     index: Int
     final: Bool
 }
-pub struct Reader {
-    pub header_hash: [U8]
-    pub key: crypto.Secret
-    pub nonce_prefix: [U8]
-    pub remaining: Int
-    pub index: Int
-    pub final: Bool
+struct Reader {
+    header_hash: [U8]
+    key: crypto.Secret
+    nonce_prefix: [U8]
+    remaining: Int
+    index: Int
+    final: Bool
 }
-pub struct Recipient { id: [U8], public: crypto.X25519PublicKey }
+struct Recipient { id: [U8], public: crypto.X25519PublicKey }
 
 fn append(out: &[U8], bytes: [U8]) Never! { loop byte in bytes -> &out.push(byte) }
 fn bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
@@ -42,7 +42,7 @@ fn little(value: Int, width: Int) -> [U8] Never! {
     loop i in 0..<width -> &out.push(U8{(value >> (i * 8)) & 255})
     out
 }
-pub fn integer(raw: [U8], start: Int, width: Int) -> Int Never! {
+fn integer(raw: [U8], start: Int, width: Int) -> Int Never! {
     value := 0
     loop i in 0..<width -> value = value | (Int.from_u8(raw[start + i]) << (i * 8))
     value
@@ -105,7 +105,7 @@ fn open(key: [U8], nonce: [U8], cipher: [U8], aad: [U8]) -> [U8] crypto.FileCryp
         expert.xchacha20poly1305_open(key, nonce, cipher, aad) ?? return Err(.OpenFailed)
     }
 }
-pub fn body_length(plain: Int) -> Int? Never! {
+fn body_length(plain: Int) -> Int? Never! {
     if plain < 0 || plain > MAX_PLAIN -> return None
     Val(plain + 21 * (plain /% CHUNK + 1))
 }
@@ -117,12 +117,12 @@ fn plain_length(body: Int) -> Int? Never! {
     if plain > MAX_PLAIN -> return None
     Val(plain)
 }
-pub fn record_shape(length: Int, flags: U8) -> Bool Never! {
+fn record_shape(length: Int, flags: U8) -> Bool Never! {
     if flags == (U8{0}) -> return length == CHUNK
     flags == (U8{1}) && length >= 0 && length < CHUNK
 }
 
-pub fn canonical(recipients: [crypto.X25519PublicKey]) -> [Recipient] crypto.FileCryptoError! {
+fn canonical(recipients: [crypto.X25519PublicKey]) -> [Recipient] crypto.FileCryptoError! {
     if recipients.len() < 1 || recipients.len() > 256 -> return Err(.SealFailed(.Length))
     sorted := [Recipient]{}
     loop public in recipients {
@@ -148,7 +148,7 @@ pub fn canonical(recipients: [crypto.X25519PublicKey]) -> [Recipient] crypto.Fil
 
 // Exactly four independent draws, supplied after source snapshot/revalidation:
 // file id 16, key 32, ephemeral secret 32, nonce prefix 16.
-pub fn writer(sorted: [Recipient], plain_length: Int,
+fn writer(sorted: [Recipient], plain_length: Int,
     file_id: [U8], file_key: ^crypto.Secret, ephemeral_secret: ^crypto.Secret,
     nonce_prefix: [U8]) -> Writer crypto.FileCryptoError! {
     body :: body_length(plain_length) ?? return Err(.SourceIO)
@@ -195,8 +195,8 @@ pub fn writer(sorted: [Recipient], plain_length: Int,
         nonce_prefix: nonce_prefix, remaining: plain_length, index: 1, final: false})
 }
 
-pub struct Record { pub framing: [U8], pub cipher: [U8] }
-pub fn seal_chunk(state: &Writer, plain: [U8]) -> Record crypto.FileCryptoError! {
+struct Record { framing: [U8], cipher: [U8] }
+fn seal_chunk(state: &Writer, plain: [U8]) -> Record crypto.FileCryptoError! {
     if state.final || state.index > MAX_RECORDS -> return Err(.SourceIO)
     expected :: if state.remaining >= CHUNK -> CHUNK else -> state.remaining
     if plain.len() != expected -> return Err(.SourceIO)
@@ -212,14 +212,14 @@ pub fn seal_chunk(state: &Writer, plain: [U8]) -> Record crypto.FileCryptoError!
 }
 
 // Validate the fixed prefix before the coordinator allocates/reads a header.
-pub fn header_length(fixed: [U8], total: Int) -> Int crypto.FileCryptoError! {
+fn header_length(fixed: [U8], total: Int) -> Int crypto.FileCryptoError! {
     if fixed.len() != 20 || bytes(fixed, 0, 8) != ([U8]{74, 69, 84, 67, 2, 1, 1, 0}) -> return Err(.OpenFailed)
     length :: integer(fixed, 8, 4)
     body :: integer(fixed, 12, 8)
     if length < BASE + STANZA + TAG || length > 33554432 || plain_length(body) == None || 20 + length + body != total -> return Err(.OpenFailed)
     Ok(length)
 }
-pub fn reader(identity: crypto.X25519SecretKey, fixed: [U8], header: [U8], total: Int) -> Reader crypto.FileCryptoError! {
+fn reader(identity: crypto.X25519SecretKey, fixed: [U8], header: [U8], total: Int) -> Reader crypto.FileCryptoError! {
     length :: header_length(fixed, total)
     if header.len() != length || identity.bytes.len() != 32 -> return Err(.OpenFailed)
     count :: integer(header, 68, 2)
@@ -261,7 +261,7 @@ pub fn reader(identity: crypto.X25519SecretKey, fixed: [U8], header: [U8], total
     Ok(Reader{header_hash: crypto.sha256(all).bytes, key: key, nonce_prefix: prefix,
         remaining: integer(fixed, 12, 8), index: 1, final: false})
 }
-pub fn open_chunk(state: &Reader, framing: [U8], encrypted: [U8]) -> crypto.Secret crypto.FileCryptoError! {
+fn open_chunk(state: &Reader, framing: [U8], encrypted: [U8]) -> crypto.Secret crypto.FileCryptoError! {
     if state.final || state.index > MAX_RECORDS || framing.len() != 5 -> return Err(.OpenFailed)
     length :: integer(framing, 0, 4)
     flags :: framing[4]
@@ -274,7 +274,7 @@ pub fn open_chunk(state: &Reader, framing: [U8], encrypted: [U8]) -> crypto.Secr
     state.final = flags == (U8{1})
     Ok(^clear)
 }
-pub fn finish(state: Reader, trailing: [U8]) crypto.FileCryptoError! {
+fn finish(state: Reader, trailing: [U8]) crypto.FileCryptoError! {
     if !state.final || state.remaining != 0 || trailing.len() != 0 -> return Err(.OpenFailed)
     Ok()
 }

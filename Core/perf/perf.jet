@@ -13,8 +13,8 @@ use core as core
 // core.perf — a process-global 0.0..=1.0 fidelity knob for adaptive work.
 // Values outside the unit interval are rejected with `PerfError.OutOfRange`.
 // The host stores one atomic word; validation, defaults and encoding are Jet.
-pub struct Perf {
-    pub fidelity: Float
+struct Perf {
+    fidelity: Float
 }
 
 /// D-PERF-ERR1=A: the one way to set fidelity wrongly is a number outside
@@ -24,7 +24,7 @@ enum PerfError {
     OutOfRange(Float)
 }
 
-pub fn fidelity() -[Env]> Float Never! {
+fn fidelity() -[Env]> Float Never! {
     encoded :: core.perf.__read_bits()
     if encoded == 0 -> return default_fidelity()
     core.math.from_bits(encoded - 1)
@@ -39,7 +39,7 @@ fn override_fidelity(value: Float) PerfError! -[Env]> {
     core.perf.__write_bits(core.math.to_bits(rounded) + 1)
 }
 
-pub fn reset_fidelity() Never! -[Env]> { core.perf.__write_bits(0) }
+fn reset_fidelity() Never! -[Env]> { core.perf.__write_bits(0) }
 
 fn of(fidelity: Float) -> Perf Never! {
     v := fidelity
@@ -53,7 +53,7 @@ fn is_full(perf: Perf) -> Bool Never! { perf.fidelity >= 1.0 }
 
 fn is_low(perf: Perf) -> Bool Never! { perf.fidelity < 0.25 }
 
-pub fn scale(perf: Perf, work: Int) -> Int Never! {
+fn scale(perf: Perf, work: Int) -> Int Never! {
     n :: Int.from_float((Float{work}) * perf.fidelity) ?? panic("scaled work must be finite")
     if n < 0 -> return 0
     n

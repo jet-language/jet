@@ -203,20 +203,20 @@ use jet_sema.[
     SemaGraphModuleResult,
 ]
 
-pub struct JetCodegenFunctions {
-    pub functions: [MIRFunction]
-    pub nested_functions: [MIRFunction]
-    pub callbacks: [MIRCallbackAdapter]
-    pub closure_sources: [JetCodegenClosureSource]
-    pub types: [MIRTypeDef]
-    pub core_owners: [MIRCoreOwner]
-    pub traits: [MIRTraitDef]
-    pub impls: [MIRImplDef]
-    pub constants: [MIRConstantDef]
-    pub fields: [MIRFieldRow]
-    pub core_calls: [MIRCoreCall]
-    pub prelude_calls: [MIRPreludeCall]
-    pub used_core: [String]
+struct JetCodegenFunctions {
+    functions: [MIRFunction]
+    nested_functions: [MIRFunction]
+    callbacks: [MIRCallbackAdapter]
+    closure_sources: [JetCodegenClosureSource]
+    types: [MIRTypeDef]
+    core_owners: [MIRCoreOwner]
+    traits: [MIRTraitDef]
+    impls: [MIRImplDef]
+    constants: [MIRConstantDef]
+    fields: [MIRFieldRow]
+    core_calls: [MIRCoreCall]
+    prelude_calls: [MIRPreludeCall]
+    used_core: [String]
 }
 struct JetCodegenForeignArtifacts {
     foreign: [MIRForeign]
@@ -2354,7 +2354,7 @@ struct JetCodegenComptimeSession {
     row_keys: [String:Bool]
 }
 
-pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_files: [MIRSourceFile], stop_points: Bool) -> JetCodegenComptimeSession {
+fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_files: [MIRSourceFile], stop_points: Bool) -> JetCodegenComptimeSession {
     field_symbols := jet_codegen_field_symbol_index(modules)
     source_index := jet_codegen_source_index(source_files)
     function_index := jet_codegen_function_index([TFunc]{})
@@ -2417,7 +2417,7 @@ pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_fi
 // a comptime run: as given, with the constant rows of the values that landed
 // since joined (jet_codegen_comptime_session_add_constants changes nothing
 // else in them).
-pub fn jet_codegen_comptime_session_modules(session: ^JetCodegenComptimeSession) -> [SemaGraphModuleResult] {
+fn jet_codegen_comptime_session_modules(session: ^JetCodegenComptimeSession) -> [SemaGraphModuleResult] {
     owned := ^session
     modules := ^owned.program.modules
     modules
@@ -3426,7 +3426,7 @@ fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module_info: S
 // keeps them and the checked program is never resident twice. With more than
 // one admitted thread (jet_codegen_lower_threads) the program moves into the
 // threads' shared slot for the lowering and back out after it.
-pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], threads: CompilerThreads, trace_sink: CompilerTraceSink?, native_stop_points: Bool) -> JetCodegenFunctions {
+fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], threads: CompilerThreads, trace_sink: CompilerTraceSink?, native_stop_points: Bool) -> JetCodegenFunctions {
     if functions.len() == 0 {
         constants := jet_codegen_lower_constant_rows(modules)
         empty_index := jet_codegen_function_index([TFunc]{})

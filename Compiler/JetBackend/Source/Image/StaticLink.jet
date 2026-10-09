@@ -1749,22 +1749,22 @@ LINK_DEBUG :: prep { -3 }
 // Output `.debug_*` sections: names in first-seen order, and per name the
 // rows of its input sections in input order and its size.
 struct LinkDebug {
-    pub names: [String]
-    pub rows: [[Int]]
-    pub sizes: [Int]
+    names: [String]
+    rows: [[Int]]
+    sizes: [Int]
 }
 
 struct LinkSectionHeader {
-    pub name: String
-    pub kind: Int
-    pub flags: Int
-    pub addr: Int
-    pub offset: Int
-    pub size: Int
-    pub link: Int
-    pub info: Int
-    pub align: Int
-    pub entry_size: Int
+    name: String
+    kind: Int
+    flags: Int
+    addr: Int
+    offset: Int
+    size: Int
+    link: Int
+    info: Int
+    align: Int
+    entry_size: Int
 }
 
 // Give every unloaded, uncompressed `.debug_*` section of a directly linked
@@ -2007,43 +2007,43 @@ fn link_has_startup(c: LinkContext) -> Bool Never! {
 
 // Descriptive canonical linker facts only. The verified held-output producer
 // must bind them to the SAME approved runtime pack before issuing a lease.
-pub struct X64ResidentLinkRequest {
-    pub runtime_input: Int
-    pub callable_exports: [String]
+struct X64ResidentLinkRequest {
+    runtime_input: Int
+    callable_exports: [String]
 }
-pub struct X64ResidentSymbol {
-    pub symbol: String
-    pub defining_symbol: String
-    pub input: Int
-    pub object_offset: Int
-    pub address: Int
+struct X64ResidentSymbol {
+    symbol: String
+    defining_symbol: String
+    input: Int
+    object_offset: Int
+    address: Int
     // Zero is preserved when the ELF producer does not give a symbol size.
-    pub size: Int
-    pub section_end: Int
+    size: Int
+    section_end: Int
 }
-pub struct X64ResidentSegment {
-    pub address: Int
-    pub file_size: Int
-    pub memory_size: Int
-    pub align: Int
-    pub flags: Int
+struct X64ResidentSegment {
+    address: Int
+    file_size: Int
+    memory_size: Int
+    align: Int
+    flags: Int
 }
-pub struct X64ResidentLinkFacts {
-    pub base: Int
-    pub entry: Int
-    pub segments: [X64ResidentSegment]
-    pub tls: X64ResidentSegment?
-    pub preinit_start: Int
-    pub preinit_end: Int
-    pub init_start: Int
-    pub init_end: Int
-    pub fini_start: Int
-    pub fini_end: Int
-    pub symbols: [X64ResidentSymbol]
+struct X64ResidentLinkFacts {
+    base: Int
+    entry: Int
+    segments: [X64ResidentSegment]
+    tls: X64ResidentSegment?
+    preinit_start: Int
+    preinit_end: Int
+    init_start: Int
+    init_end: Int
+    fini_start: Int
+    fini_end: Int
+    symbols: [X64ResidentSymbol]
 }
-pub struct X64ResidentLinkResult {
-    pub image: X64ExecutableResult
-    pub facts: X64ResidentLinkFacts?
+struct X64ResidentLinkResult {
+    image: X64ExecutableResult
+    facts: X64ResidentLinkFacts?
 }
 fn link_resident_failure(errors: ^[String]) -> X64ResidentLinkResult Never! {
     X64ResidentLinkResult{image: X64ExecutableResult{bytes: [U8]{}, errors: ^errors}, facts: None}
@@ -2055,7 +2055,7 @@ fn link_resident_failure(errors: ^[String]) -> X64ResidentLinkResult Never! {
 // as resolution needs them. The image starts at `_start`: the linker's own
 // startup object when the archives provide musl's `__libc_start_main` and
 // no object defines `_start`, else the objects' `_start`.
-pub fn x64_link_executable(names: [String], bufs: ^[[U8]]) -> X64ExecutableResult Never! {
+fn x64_link_executable(names: [String], bufs: ^[[U8]]) -> X64ExecutableResult Never! {
     linked := link_executable_image(names, ^bufs, None)
     ^linked.image
 }
@@ -2142,6 +2142,6 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], request: ^X64ResidentLi
 
 // This result is NOT runtime authority. Only the actual held-output admission
 // producer may bind these facts to verified pack/provider/lifecycle artifacts.
-pub fn x64_link_resident_child(names: [String], bufs: ^[[U8]], request: ^X64ResidentLinkRequest) -> X64ResidentLinkResult Never! {
+fn x64_link_resident_child(names: [String], bufs: ^[[U8]], request: ^X64ResidentLinkRequest) -> X64ResidentLinkResult Never! {
     link_executable_image(names, ^bufs, Val(^request))
 }

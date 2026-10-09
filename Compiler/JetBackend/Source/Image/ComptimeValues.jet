@@ -176,7 +176,7 @@ fn x64_comptime_decode_scalar(runtime: X64Runtime, ty: MIRType, word: Int) -> X6
 // Decode (detach) first, then consume each native scalar owner exactly once.
 // Exact-Int words have trivial drop at O0, including big-integer handles;
 // only String carries the runtime drop selected by Lower.
-pub fn x64_comptime_drop_scalar(runtime: X64Runtime, ty: MIRType, word: Int) -> [String] {
+fn x64_comptime_drop_scalar(runtime: X64Runtime, ty: MIRType, word: Int) -> [String] {
     if ty.kind == .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return x64_comptime_drop_scalar(runtime, inner, word)
     if !x64_comptime_scalar_supported(ty) -> return [String]{"cannot release unsupported native compiler scalar"}
     if ty.kind != .String -> return [String]{}

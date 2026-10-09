@@ -11,7 +11,7 @@ package {
 
 // `keep` is the compiler's identity/use-site barrier. The other helpers,
 // including the optional-to-failure view, are ordinary reachable Jet bodies.
-pub fn keep<T>(value: T) -> T Never! { value }
+fn keep<T>(value: T) -> T Never! { value }
 
 fn identity(value: ^String) -> String Never! { value }
 
@@ -51,7 +51,7 @@ fn max_int(a: Int, b: Int) -> Int Never! {
 // D-FAIL-CARRIER1=A: the caller materializes the receiver and then `why`,
 // even when the payload is present. Own those evaluated values, not a later
 // read of the caller's optional. Construct an Err only for clean absence.
-pub fn option_or_err<T>(value: ^T?, why: ^String) -> T Err! {
+fn option_or_err<T>(value: ^T?, why: ^String) -> T Err! {
     return if value == {
         .Val(payload) -> Ok(payload)
         .None -> Err(why)

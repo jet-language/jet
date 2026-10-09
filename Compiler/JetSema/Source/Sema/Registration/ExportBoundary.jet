@@ -15,17 +15,17 @@ use jet_foundation.[
 // The API snapshot schema shared with ordinary library freezes.
 SEMA_API_SNAPSHOT_VERSION :: 3
 
-pub enum SemaExportBoundary {
-    // A `target: sandbox` package's entry-module `pub fn` rows.
+enum SemaExportBoundary {
+    // A `target: sandbox` package's entry-module `fn` rows.
     Sandbox
     // A native Library artifact's `#Export(c)` rows.
     C
 }
 
 // E1260: one registered code, worded for the boundary the export crosses.
-pub fn sema_export_unsupported_diagnostic(boundary: SemaExportBoundary, name: String, span: Span) -> Diagnostic {
+fn sema_export_unsupported_diagnostic(boundary: SemaExportBoundary, name: String, span: Span) -> Diagnostic {
     if boundary == {
-        .Sandbox -> sema_error("E1260", span, "a sandbox's exported function has an unsupported signature", "`pub fn {name}` crosses the sandbox's Component boundary: each parameter and the result must be `Int`, `Float`, `Bool`, `String`, or a recursively closed `#Codable` record/list/Option/Result shape, and the function must return one", "change each unsupported parameter or result to one of those shapes, or drop `pub` if this function isn't meant to be called across the sandbox boundary")
+        .Sandbox -> sema_error("E1260", span, "a sandbox's exported function has an unsupported signature", "`fn {name}` crosses the sandbox's Component boundary: each parameter and the result must be `Int`, `Float`, `Bool`, `String`, or a recursively closed `#Codable` record/list/Option/Result shape, and the function must return one", "change each unsupported parameter or result to one of those shapes, or mark it `priv` if this function isn't meant to be called across the sandbox boundary")
         .C -> sema_error("E1260", span, "a native Library's exported function has an unsupported signature", "`#Export(c) fn {name}` crosses the C boundary: each parameter and the result must be one C primitive (`Int`, `Float`, `Bool`, `String`, or a fixed width such as `U8` or `F32`), independently per position", "change each unsupported parameter or result to a C primitive, or drop `#Export(c)` if this function isn't meant to be called from C")
     }
 }
@@ -33,7 +33,7 @@ pub fn sema_export_unsupported_diagnostic(boundary: SemaExportBoundary, name: St
 // The functions a sandbox exports: every top-level `pub` (not
 // `pub(package)`) function of its entry module, in declaration order. There
 // is no separate export marker (D-PLUGIN-EXPORT1=A).
-pub fn sema_sandbox_export_functions(graph: SemaRegistrationGraph) -> [Func] Never! {
+fn sema_sandbox_export_functions(graph: SemaRegistrationGraph) -> [Func] Never! {
     functions := [Func]{}
     module_index :: sema_registration_module_index(graph, graph.entry_module_identity) ?? return functions
     loop item in graph.modules[module_index].program.items {
@@ -49,7 +49,7 @@ pub fn sema_sandbox_export_functions(graph: SemaRegistrationGraph) -> [Func] Nev
 
 // The frozen-snapshot package key of sandbox `export_name`, namespaced so it
 // never collides with an ordinary library package's frozen API.
-pub fn sema_sandbox_snapshot_package(export_name: String) -> String Never! {
+fn sema_sandbox_snapshot_package(export_name: String) -> String Never! {
     "plugin__{export_name}"
 }
 
@@ -61,7 +61,7 @@ fn sema_sandbox_frozen_after(left: SemaPluginFrozenExportInput, right: SemaPlugi
 // The current interface of sandbox `export_name`: the canonical signature of
 // each exported function in `exported` (the names the checked artifact plan
 // exports), sorted by name.
-pub fn sema_sandbox_interface_snapshot(graph: SemaRegistrationGraph, export_name: String, exported: [String]) -> SemaPluginFrozenSnapshotInput {
+fn sema_sandbox_interface_snapshot(graph: SemaRegistrationGraph, export_name: String, exported: [String]) -> SemaPluginFrozenSnapshotInput {
     dimensions := [SemaPluginUnitDimension]{}
     module_index :: sema_registration_module_index(graph, graph.entry_module_identity)
     if module_index == .Val(index) -> sema_plugin_unit_dimensions_in_items(graph.modules[index].program.items, export_name, &dimensions)
@@ -83,7 +83,7 @@ pub fn sema_sandbox_interface_snapshot(graph: SemaRegistrationGraph, export_name
 }
 
 // The `.api` snapshot text: a header, then one canonical signature per line.
-pub fn sema_sandbox_snapshot_text(snapshot: SemaPluginFrozenSnapshotInput, published_version: String) -> String Never! {
+fn sema_sandbox_snapshot_text(snapshot: SemaPluginFrozenSnapshotInput, published_version: String) -> String Never! {
     version :: if published_version == "" -> "0.0.0" else -> published_version
     lines := [String]{"api_version = {SEMA_API_SNAPSHOT_VERSION}", "package = {snapshot.package}", "published_version = {version}"}
     loop frozen in snapshot.funcs -> &lines.push(frozen.signature)
@@ -91,7 +91,7 @@ pub fn sema_sandbox_snapshot_text(snapshot: SemaPluginFrozenSnapshotInput, publi
 }
 
 // Decode `.api` snapshot text; None when it is not a version-3 snapshot.
-pub fn sema_sandbox_parse_snapshot(text: String) -> SemaPluginFrozenSnapshotInput? {
+fn sema_sandbox_parse_snapshot(text: String) -> SemaPluginFrozenSnapshotInput? {
     api_version := ""
     package := ""
     funcs := [SemaPluginFrozenExportInput]{}
@@ -119,7 +119,7 @@ pub fn sema_sandbox_parse_snapshot(text: String) -> SemaPluginFrozenSnapshotInpu
 // D-PLUGIN-VERSION1=A: E1257 for each export the prior frozen interface
 // names that is now removed or has a changed signature. Adding an export is
 // always compatible, and no prior snapshot freezes the current interface.
-pub fn sema_sandbox_freeze_diagnostics(current: SemaPluginFrozenSnapshotInput, prior: SemaPluginFrozenSnapshotInput?) -> [Diagnostic] Never! {
+fn sema_sandbox_freeze_diagnostics(current: SemaPluginFrozenSnapshotInput, prior: SemaPluginFrozenSnapshotInput?) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     frozen :: prior ?? return diagnostics
     loop old in frozen.funcs {

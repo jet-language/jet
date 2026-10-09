@@ -11,7 +11,7 @@ fn jet_cli_comparison_evidence_outcome(status: ComparisonStatus) -> EvidenceOutc
     }
 }
 
-pub fn jet_cli_comparison_evidence(run: JetCLIComparisonRun, target: String, artifact_id: String) -> EvidenceReport String! {
+fn jet_cli_comparison_evidence(run: JetCLIComparisonRun, target: String, artifact_id: String) -> EvidenceReport String! {
     record :: run.record
     source := "jet.test-compare"
     tool := "jet"
@@ -57,7 +57,7 @@ fn jet_cli_comparison_index_entry(index: JetCLIRecordIndex, identity: JetCLIReco
 
 // Evidence is rooted from cwd, whereas the receipt is rooted from its target.
 // These roots deliberately need not coincide for an external corpus.
-pub fn jet_cli_comparison_persist(run: JetCLIComparisonRun, target: String, argv: [String], terminal: [U8]) String! -[FS, Env, Time]> {
+fn jet_cli_comparison_persist(run: JetCLIComparisonRun, target: String, argv: [String], terminal: [U8]) String! -[FS, Env, Time]> {
     payload :: comparison_record_to_json(run.record) ?? return Err(err.message)
     bytes :: canonical_json_bytes(payload)
     artifact_id :: receipt_crypto.sha256(bytes).hex()
@@ -100,7 +100,7 @@ pub fn jet_cli_comparison_persist(run: JetCLIComparisonRun, target: String, argv
     jet_cli_record_index_upsert_many_and_store(&index, receipt_root, [JetCLIRecordIndexEntry]{comparison_entry, receipt_entry})
 }
 
-pub fn jet_cli_comparison_history_notice(error: String) -> String Never! {
+fn jet_cli_comparison_history_notice(error: String) -> String Never! {
     lower :: error.to_lower()
     fix :: if {
         lower.contains("permission") || lower.contains("access denied") -> "check `.jet` history permissions"

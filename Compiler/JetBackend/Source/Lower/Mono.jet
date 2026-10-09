@@ -66,8 +66,8 @@ enum LowerMonoPending { Function(row: Int) Type(row: Int) Render(row: Int, show:
 // another list (close adapters shared by several handle types).
 struct LowerMonoEdge { function: MIRFunctionID?, branch: Int, next: Int }
 
-pub struct LowerPrepared {
-    pub native_pack: Bool
+struct LowerPrepared {
+    native_pack: Bool
     // Final order: reached originals in declaration order, then instances in
     // first-request order.
     functions: [LowerPreparedFunction]
@@ -75,12 +75,12 @@ pub struct LowerPrepared {
     // Original MIR function ID -> its row in program.functions.
     source_rows: [U64:Int]
     // Concrete MIR function ID -> its row in `functions`.
-    pub mir_rows: [U64:Int]
-    pub entry: MIRFunctionID?
-    pub roots: [U64:MIRFunctionID]
-    pub runtime_intrinsics: [U64:LowerRuntimeIntrinsic]{[U64:LowerRuntimeIntrinsic]{}}
-    pub shared_sites_dynamic: Bool{true}
-    pub close_methods: [U64:[LowerCloseImpl]]
+    mir_rows: [U64:Int]
+    entry: MIRFunctionID?
+    roots: [U64:MIRFunctionID]
+    runtime_intrinsics: [U64:LowerRuntimeIntrinsic]{[U64:LowerRuntimeIntrinsic]{}}
+    shared_sites_dynamic: Bool{true}
+    close_methods: [U64:[LowerCloseImpl]]
     // Preparation failed when non-empty; `functions` is then empty.
     issues: [LIRLoweringIssue]
     // Instance key -> descriptor row while the queue runs.
@@ -97,14 +97,14 @@ pub struct LowerPrepared {
     render_seen: [String:Bool]
     free_binders: [String:Bool]
     // "key:<function key>" / "name:<function name>" -> MIR function ID value.
-    pub function_names: [String:U64]
-    pub callbacks: [U64:Int]
-    pub callbacks_seen: [U64:Bool]
-    pub foreign_rows: [U64:Int]
-    pub asm_foreign: [U64:MIRFunctionID]
-    pub foreign_seen: [U64:Bool]
-    pub constant_rows: [String:Int]
-    pub constants_seen: [Int:Bool]
+    function_names: [String:U64]
+    callbacks: [U64:Int]
+    callbacks_seen: [U64:Bool]
+    foreign_rows: [U64:Int]
+    asm_foreign: [U64:MIRFunctionID]
+    foreign_seen: [U64:Bool]
+    constant_rows: [String:Int]
+    constants_seen: [Int:Bool]
     // Handle type fingerprint -> first lifecycle edge.
     lifecycle: [String:Int]
     // Trait method ID -> first edge to its default body and implementations.
@@ -145,7 +145,7 @@ fn lower_instance_key(original: MIRFunctionID, bound: [MIRType]) -> String Never
 
 // The concrete MIR function a direct call of `original` binding `bound`
 // runs: the original itself when nothing binds.
-pub fn lower_instance_id(original: MIRFunctionID, bound: [MIRType]) -> MIRFunctionID Never! {
+fn lower_instance_id(original: MIRFunctionID, bound: [MIRType]) -> MIRFunctionID Never! {
     if bound.len() == 0 -> return original.copy()
     MIRFunctionID{value: stable_id("mir-function-instance", lower_instance_key(original, bound))}
 }
@@ -965,7 +965,7 @@ fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
 }
 
 // All explicit roots share the dependency FIFO and monomorphization table.
-pub fn lower_prepare_callables(program: MIRProgram, roots: [MIRFunctionID], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LowerPrepared Never! {
+fn lower_prepare_callables(program: MIRProgram, roots: [MIRFunctionID], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LowerPrepared Never! {
     lower_prepare_roots(program, roots, true, ^runtime_intrinsics)
 }
 
@@ -1019,7 +1019,7 @@ fn lower_prepare_roots(program: MIRProgram, roots: [MIRFunctionID], shared_sites
     q
 }
 
-pub fn lower_prepare_entry(program: MIRProgram, entry: MIRFunctionID) -> LowerPrepared Never! {
+fn lower_prepare_entry(program: MIRProgram, entry: MIRFunctionID) -> LowerPrepared Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
     lower_prepare_callables(program, [MIRFunctionID]{entry}, ^intrinsics)
 }

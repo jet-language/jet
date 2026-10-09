@@ -1,48 +1,48 @@
 // Opt-in, invocation-owned pass-boundary evidence. No process-global journal.
-pub CANONICAL_PASS_SCHEMA :: "jet.canonical-pass-record.v1"
-pub CANONICAL_PASS_PROTOCOL :: "jet.canonical-pass.v1"
+CANONICAL_PASS_SCHEMA :: "jet.canonical-pass-record.v1"
+CANONICAL_PASS_PROTOCOL :: "jet.canonical-pass.v1"
 
-pub struct CanonicalPassRecord {
-    pub stage: String
-    pub operation_id: String
-    pub occurrence: Int
-    pub order: Int
-    pub source: String
-    pub input_representation: String
-    pub input_payload: String
-    pub input_identity: String
-    pub output_representation: String
-    pub output_payload: String
-    pub output_identity: String
-    pub premises: [String]
-    pub disposition: String
+struct CanonicalPassRecord {
+    stage: String
+    operation_id: String
+    occurrence: Int
+    order: Int
+    source: String
+    input_representation: String
+    input_payload: String
+    input_identity: String
+    output_representation: String
+    output_payload: String
+    output_identity: String
+    premises: [String]
+    disposition: String
 }
-pub struct CanonicalPassOptions {
-    pub adapter_mode: String{""}
-    pub operation_ids: [String]{[String]{}}
+struct CanonicalPassOptions {
+    adapter_mode: String{""}
+    operation_ids: [String]{[String]{}}
 }
-pub struct CanonicalPassJournal {
-    pub options: CanonicalPassOptions
-    pub records: [CanonicalPassRecord]
+struct CanonicalPassJournal {
+    options: CanonicalPassOptions
+    records: [CanonicalPassRecord]
     occurrences: [String:Int]
 }
-pub struct CanonicalPassSnapshot {
-    pub representation: String
-    pub payload: String
-    pub identity: String
+struct CanonicalPassSnapshot {
+    representation: String
+    payload: String
+    identity: String
 }
-pub fn canonical_pass_journal(options: CanonicalPassOptions) -> CanonicalPassJournal Never! {
+fn canonical_pass_journal(options: CanonicalPassOptions) -> CanonicalPassJournal Never! {
     CanonicalPassJournal{options: options, records: [], occurrences: [String:Int]{}}
 }
-pub fn canonical_pass_enabled(options: CanonicalPassOptions) -> Bool Never! {
+fn canonical_pass_enabled(options: CanonicalPassOptions) -> Bool Never! {
     options.adapter_mode.len() > 0 && options.operation_ids.len() > 0
 }
-pub fn canonical_pass_requested(journal: CanonicalPassJournal, operation_id: String) -> Bool Never! {
+fn canonical_pass_requested(journal: CanonicalPassJournal, operation_id: String) -> Bool Never! {
     if !canonical_pass_enabled(journal.options) -> return false
     loop candidate in journal.options.operation_ids { if candidate == operation_id -> return true }
     false
 }
-pub fn canonical_pass_record(journal: &CanonicalPassJournal, stage: String, operation_id: String, source: String, input: CanonicalPassSnapshot, output: CanonicalPassSnapshot, disposition: String) Never! {
+fn canonical_pass_record(journal: &CanonicalPassJournal, stage: String, operation_id: String, source: String, input: CanonicalPassSnapshot, output: CanonicalPassSnapshot, disposition: String) Never! {
     if !canonical_pass_requested(journal, operation_id) -> return
     occurrence :: (journal.occurrences.get(operation_id) ?? 0) + 1
     journal.occurrences[operation_id] = occurrence
@@ -55,7 +55,7 @@ pub fn canonical_pass_record(journal: &CanonicalPassJournal, stage: String, oper
         disposition: disposition,
     })
 }
-pub fn canonical_pass_take(journal: &CanonicalPassJournal) -> [CanonicalPassRecord] Never! {
+fn canonical_pass_take(journal: &CanonicalPassJournal) -> [CanonicalPassRecord] Never! {
     rows := ^journal.records
     journal.records = [CanonicalPassRecord]{}
     journal.occurrences = [String:Int]{}
@@ -64,7 +64,7 @@ pub fn canonical_pass_take(journal: &CanonicalPassJournal) -> [CanonicalPassReco
 
 // Join a nested pass owner's captured rows in execution order. Transport is
 // by value; record numbering belongs to the enclosing compiler invocation.
-pub fn canonical_pass_merge(journal: &CanonicalPassJournal, child: &CanonicalPassJournal) Never! {
+fn canonical_pass_merge(journal: &CanonicalPassJournal, child: &CanonicalPassJournal) Never! {
     rows := canonical_pass_take(&child)
     &rows.reverse()
     loop rows.len() > 0 {
@@ -80,11 +80,11 @@ pub fn canonical_pass_merge(journal: &CanonicalPassJournal, child: &CanonicalPas
 // Availability is not evidence: these rows never enter the pass journal.
 // Normalization availability is distinct from source-language behavior.
 // Only an exercised feature probe can establish folded versus missing meaning.
-pub struct CanonicalPassBoundaryGap {
-    pub operation_id: String
-    pub status: String
+struct CanonicalPassBoundaryGap {
+    operation_id: String
+    status: String
 }
-pub fn canonical_pass_boundary_gaps(options: CanonicalPassOptions) -> [CanonicalPassBoundaryGap] Never! {
+fn canonical_pass_boundary_gaps(options: CanonicalPassOptions) -> [CanonicalPassBoundaryGap] Never! {
     rows := [CanonicalPassBoundaryGap]{}
     if !canonical_pass_enabled(options) -> return rows
     absent :: [String]{"sema.desugar-os-switches", "sema.desugar-migrations", "sema.desugar-member-spreads", "sema.desugar-multi-head-functions", "sema.normalize-operator-rhs", "tir.optimize-program", "tir.canonicalize-loop-forms"}

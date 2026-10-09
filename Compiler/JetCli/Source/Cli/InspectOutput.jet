@@ -17,7 +17,7 @@ fn jet_cli_output_kind(kind: OutputKind) -> String Never! {
 fn jet_cli_output_effects_text(effects: [String]) -> String Never! {
     if effects.len() == 0 -> "none" else -> effects.join(", ")
 }
-pub fn jet_cli_output_report(query: JetDriverOutputQueryResult, output: ResolvedOutput, json: Bool) -> String Never! {
+fn jet_cli_output_report(query: JetDriverOutputQueryResult, output: ResolvedOutput, json: Bool) -> String Never! {
     // Doc projection can omit synthetic modules. Resolve the retained graph
     // index, not its position in the filtered array or a source-path basename.
     module_index :: loop (index, projection) in query.compile.doc_modules {
@@ -45,7 +45,7 @@ pub fn jet_cli_output_report(query: JetDriverOutputQueryResult, output: Resolved
     ])
     "{jet_cli_status_render("inspect.output", true, [jet_cli_status_field("output", value)])}\n"
 }
-pub fn jet_cli_output_host(request: JetDriverCompileRequest, address: String?, file: String, json: Bool) -> JetDriverVerbOutput {
+fn jet_cli_output_host(request: JetDriverCompileRequest, address: String?, file: String, json: Bool) -> JetDriverVerbOutput {
     query :: jet_driver_output_query(request, address)
     if !query.compile.complete || query.compile.internal_problem != None {
         diagnostics :: jet_driver_present_diagnostics(query.compile.diagnostics, request.authorized_sources, [])

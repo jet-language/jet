@@ -13,31 +13,31 @@ package {
 
 // Public policy/effects are ordinary Core source. These reserved leaves keep
 // the existing SQLite bridge while the same-engine native driver is admitted.
-pub fn open(path: String) -[DB]> DBConnection Never! {
+fn open(path: String) -[DB]> DBConnection Never! {
     core.db.__open(path)
 }
-pub fn open_memory() -[DB]> DBConnection Never! {
+fn open_memory() -[DB]> DBConnection Never! {
     core.db.__open_memory()
 }
-pub fn pool(url: String, *, max: Int) -[DB]> DBPool DBError! {
+fn pool(url: String, *, max: Int) -[DB]> DBPool DBError! {
     core.db.__pool(url, max)
 }
-pub fn policy(table: String, expression: String) -[DB]> RowPolicy DBError! {
+fn policy(table: String, expression: String) -[DB]> RowPolicy DBError! {
     core.db.__policy(table, expression)
 }
-pub fn policy_audit(scope: DBScope) -[DB]> String Never! {
+fn policy_audit(scope: DBScope) -[DB]> String Never! {
     core.db.__policy_audit(scope)
 }
-pub fn transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
+fn transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
     core.db.__transaction(scope, name, steps)
 }
-pub fn migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
+fn migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
     core.db.__migrate(scope, name, steps)
 }
 
 // Core-private queue storage carrier. The existing SQLite bridge remains the
 // raw host leaf until cutover; no public connection gains raw-SQL authority.
-pub struct __QueueDb { raw: U64 }
+struct __QueueDb { raw: U64 }
 impl __QueueDb.Close {
     fn close(^self) {
         #Unsafe("consume the unique SQLite queue handle through its existing host close leaf") {
@@ -45,28 +45,28 @@ impl __QueueDb.Close {
         }
     }
 }
-pub fn __queue_open(path: String) -[DB]> __QueueDb? Never! {
+fn __queue_open(path: String) -[DB]> __QueueDb? Never! {
     #Unsafe("open the existing SQLite bridge and immediately adopt its handle into a consuming Core resource") {
         raw :: core.db.__queue_raw_open(path)
         if raw == (U64{0}) -> return None
         return Val(__QueueDb{raw: raw})
     }
 }
-pub fn __queue_begin(driver: __QueueDb) -[DB]> Bool Never! {
+fn __queue_begin(driver: __QueueDb) -[DB]> Bool Never! {
     #Unsafe("borrow the live unique queue handle for BEGIN") { return core.db.__queue_raw_begin(driver.raw) }
 }
-pub fn __queue_commit(driver: __QueueDb) -[DB]> Bool Never! {
+fn __queue_commit(driver: __QueueDb) -[DB]> Bool Never! {
     #Unsafe("borrow the live unique queue handle for COMMIT") { return core.db.__queue_raw_commit(driver.raw) }
 }
-pub fn __queue_rollback(driver: __QueueDb) -[DB]> Bool Never! {
+fn __queue_rollback(driver: __QueueDb) -[DB]> Bool Never! {
     #Unsafe("borrow the live unique queue handle for ROLLBACK") { return core.db.__queue_raw_rollback(driver.raw) }
 }
-pub fn __queue_execute(driver: &__QueueDb, sql: String, params: [DBValue]) -[DB]> Int DBError! {
+fn __queue_execute(driver: &__QueueDb, sql: String, params: [DBValue]) -[DB]> Int DBError! {
     #Unsafe("execute bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire") {
         return core.db.__queue_raw_execute(driver.raw, sql, params)
     }
 }
-pub fn __queue_query(driver: &__QueueDb, sql: String, params: [DBValue]) -[DB]> [[String: DBValue]] DBError! {
+fn __queue_query(driver: &__QueueDb, sql: String, params: [DBValue]) -[DB]> [[String: DBValue]] DBError! {
     #Unsafe("query bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire") {
         return core.db.__queue_raw_query(driver.raw, sql, params)
     }
@@ -87,7 +87,7 @@ pub fn __queue_query(driver: &__QueueDb, sql: String, params: [DBValue]) -[DB]> 
 // SQLite adapter alone holds engine pointers; fallible row reads use DBError.
 
 #Equatable
-pub enum DBValue {
+enum DBValue {
     Null
     Int(Int)
     Float(Float)
@@ -97,7 +97,7 @@ pub enum DBValue {
 }
 
 #Equatable
-pub enum __PoolLifecycle {
+enum __PoolLifecycle {
     Open
     Draining
     Drained
@@ -106,7 +106,7 @@ pub enum __PoolLifecycle {
 // Receipts have always been opaque public values: the pool produces them;
 // source owns their exact counters, equality and textual projection.
 #Equatable
-pub struct DBPoolReceipt {
+struct DBPoolReceipt {
     lifecycle: __PoolLifecycle
     max: Int
     available: Int
@@ -150,7 +150,7 @@ fn pool_receipt_text(receipt: DBPoolReceipt) -> String Never! {
 }
 
 #[Error, Equatable]
-pub struct DBError { pub message: String }
+struct DBError { message: String }
 
 impl DBError.Display { fn display(self) -> String { ~self.message } }
 impl DBError.Debug { fn debug(^self) -> String { self.message } }
@@ -159,26 +159,26 @@ impl DBValue.Display { fn display(self) -> String { render_value(self) } }
 impl DBValue.Show { fn show(self) -> String { render_value(self) } }
 
 impl DBValue {
-    pub fn is_null(self) -> Bool Never! {
+    fn is_null(self) -> Bool Never! {
         if self == .Null -> return true
         false
     }
-    pub fn int(self) -> Int Err! {
+    fn int(self) -> Int Err! {
         if self == .Int(number) -> return Ok(number)
         Err("expected an int, got {render_value(self)}")
     }
-    pub fn float(self) -> Float Err! {
+    fn float(self) -> Float Err! {
         if self == {
             .Float(number) -> Ok(number)
             .Int(number) -> Ok(Float{number})
             else -> Err("expected a float, got {render_value(self)}")
         }
     }
-    pub fn text(self) -> String Err! {
+    fn text(self) -> String Err! {
         if self == .Text(text) -> return Ok(~text)
         Err("expected text, got {render_value(self)}")
     }
-    pub fn bool(self) -> Bool Err! {
+    fn bool(self) -> Bool Err! {
         if self == {
             .Bool(value) -> Ok(value)
             .Int(number) -> {
@@ -189,18 +189,18 @@ impl DBValue {
             else -> Err("expected a bool, got {render_value(self)}")
         }
     }
-    pub fn blob(self) -> [U8] Err! {
+    fn blob(self) -> [U8] Err! {
         if self == .Blob(bytes) -> return Ok(~bytes)
         Err("expected a blob, got {render_value(self)}")
     }
 }
 
-pub fn row_value(row: [String: DBValue], column: String) -> DBValue DBError! {
+fn row_value(row: [String: DBValue], column: String) -> DBValue DBError! {
     value :: row.get(column) ?? return Err(DBError{message: "missing column `{column}`"})
     Ok(value)
 }
 
-pub fn row_int(row: [String: DBValue], column: String) -> Int DBError! {
+fn row_int(row: [String: DBValue], column: String) -> Int DBError! {
     value :: row_value(row, column)
     if value == {
         .Int(number) -> Ok(number)
@@ -208,7 +208,7 @@ pub fn row_int(row: [String: DBValue], column: String) -> Int DBError! {
     }
 }
 
-pub fn row_float(row: [String: DBValue], column: String) -> Float DBError! {
+fn row_float(row: [String: DBValue], column: String) -> Float DBError! {
     value :: row_value(row, column)
     if value == {
         .Float(number) -> Ok(number)
@@ -217,7 +217,7 @@ pub fn row_float(row: [String: DBValue], column: String) -> Float DBError! {
     }
 }
 
-pub fn row_text(row: [String: DBValue], column: String) -> String DBError! {
+fn row_text(row: [String: DBValue], column: String) -> String DBError! {
     value :: row_value(row, column)
     if value == {
         .Text(text) -> Ok(text)
@@ -225,7 +225,7 @@ pub fn row_text(row: [String: DBValue], column: String) -> String DBError! {
     }
 }
 
-pub fn row_bool(row: [String: DBValue], column: String) -> Bool DBError! {
+fn row_bool(row: [String: DBValue], column: String) -> Bool DBError! {
     value :: row_value(row, column)
     if value == {
         .Bool(boolean) -> Ok(boolean)

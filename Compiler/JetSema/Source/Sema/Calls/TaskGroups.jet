@@ -322,7 +322,7 @@ fn sema_taskgroup_rewrite_anonymous_spawn(statement: Stmt, context: &SemaCheckCo
     return Val(Stmt.Val{binding: init})
 }
 
-pub fn sema_taskgroup_check_statement(name: String, name_span: Span, limit: Expr?, body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> TStmt? {
+fn sema_taskgroup_check_statement(name: String, name_span: Span, limit: Expr?, body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> TStmt? {
     checked_limit := TExpr?{None}
     valid := true
     if limit == .Val(expression) {
@@ -718,7 +718,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     return SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
-pub fn sema_taskgroup_check_surface_method(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_taskgroup_check_surface_method(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if !sema_taskgroup_is_internal_receiver(receiver) -> return SemaMethodSpecialCheck{handled: false, value: None}
     if method == sema_taskgroup_internal_spawn_method() -> return sema_taskgroup_check_spawn(args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if method == sema_taskgroup_internal_timeout_method() {
@@ -748,7 +748,7 @@ pub fn sema_taskgroup_check_surface_method(receiver: Expr, method: String, args:
     SemaMethodSpecialCheck{handled: false, value: None}
 }
 
-pub fn sema_taskgroup_check_group_method(receiver: Expr, receiver_ty: Type, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_taskgroup_check_group_method(receiver: Expr, receiver_ty: Type, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_ty != (Type.Named{name: "Group"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_taskgroup_receiver_ok(receiver, span, scopes, context, &diagnostics) {
         sema_taskgroup_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -783,7 +783,7 @@ fn sema_taskgroup_is_canonical_task(ty: Type, environment: SemaScopeEnvironment,
 // join returns `T !TaskFailure` and blocks (`Time.Wait`). The element T is
 // retained even when it is itself an outcome; only the task's wait failure
 // occupies the outer rail. D-DETACH1: a detach returns nothing.
-pub fn sema_taskgroup_check_task_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_taskgroup_check_task_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if (method != "join" && method != "detach") || args.len() != 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
     payload :: sema_taskgroup_task_payload(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_taskgroup_is_canonical_task(receiver_value.ty, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
@@ -813,7 +813,7 @@ fn sema_channel_capacity_literal(expr: Expr) -> Int? Never! {
     }
 }
 
-pub fn sema_call_check_channel(call: jet_foundation.Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_check_channel(call: jet_foundation.Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() > 1 {
         sema_stream_handle_infer_args(call.args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         &diagnostics.push(sema_call_arity_diagnostic("channel", 1, call.args.len(), false, call.name_span))

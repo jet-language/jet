@@ -346,13 +346,13 @@ fn all_zero(bytes: [U8]) -> Bool Never! {
     diff == U8{0}
 }
 
-pub fn secret_bytes(secret: Secret) -> [U8] Never! { secret.bytes.copy() }
+fn secret_bytes(secret: Secret) -> [U8] Never! { secret.bytes.copy() }
 
-pub fn shared_secret_bytes(secret: SharedSecret) -> [U8] Never! { secret.bytes.copy() }
+fn shared_secret_bytes(secret: SharedSecret) -> [U8] Never! { secret.bytes.copy() }
 
-pub fn signing_key_bytes(key: SigningKey) -> [U8] Never! { key.bytes.copy() }
+fn signing_key_bytes(key: SigningKey) -> [U8] Never! { key.bytes.copy() }
 
-pub fn x25519_secret_bytes(key: X25519SecretKey) -> [U8] Never! { key.bytes.copy() }
+fn x25519_secret_bytes(key: X25519SecretKey) -> [U8] Never! { key.bytes.copy() }
 
 fn open_v1_body(key: [U8], mode: U8, nonce: [U8], body: [U8]) -> [U8]? {
     if mode == (U8{1}) -> return chacha_poly_open(key, nonce, [U8]{}, body)
@@ -360,7 +360,7 @@ fn open_v1_body(key: [U8], mode: U8, nonce: [U8], body: [U8]) -> [U8]? {
     None
 }
 
-pub fn open_v1(key: [U8], envelope: [U8]) -> [U8] CryptoError! {
+fn open_v1(key: [U8], envelope: [U8]) -> [U8] CryptoError! {
     if key.len() != 32 || envelope.len() < 34 || envelope.len() > 1073741858 {
         return Err(.OpenFailed)
     }
@@ -374,7 +374,7 @@ pub fn open_v1(key: [U8], envelope: [U8]) -> [U8] CryptoError! {
     Ok(opened_bytes)
 }
 
-pub fn migrate_v1(key: [U8], source: Path, recipients: [X25519PublicKey], destination: Path) -[FS, Rand]> Bool FileCryptoError! {
+fn migrate_v1(key: [U8], source: Path, recipients: [X25519PublicKey], destination: Path) -[FS, Rand]> Bool FileCryptoError! {
     crypto.__migrate_v1(key, source, recipients, destination)
 }
 

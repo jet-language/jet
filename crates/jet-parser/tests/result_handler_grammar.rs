@@ -143,7 +143,7 @@ fn either(value: *Node | Label) {}
 
 #[test]
 fn copy_callable_declaration_matches_contextual_member_name() {
-    let source = "pub fn copy(value: Float) -> Float Never! { value }\nfn run() { math.copy(Float{1.0}) }\n";
+    let source = "fn copy(value: Float) -> Float Never! { value }\nfn run() { math.copy(Float{1.0}) }\n";
     let (tokens, diagnostics) = Lexer::lex(source);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let program = Parser::parse(&tokens).expect("copy callable should parse");

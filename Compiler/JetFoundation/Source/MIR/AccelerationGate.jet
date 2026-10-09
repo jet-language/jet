@@ -1,74 +1,74 @@
 // crates/jet-foundation/src/MIROptimization/Acceleration.rs: the backend-neutral
 // D-ACCEL1 gate. All observations are supplied; this code never measures them.
-pub MIR_ACCEL_STATIC_FLOOR_ITEMS :: 1024
-pub MIR_ACCEL_CACHE_BLOCK_BYTES :: 65536
-pub MIR_ACCEL_REQUIRED_GAIN_NUMERATOR :: U64{2}
-pub MIR_ACCEL_REQUIRED_GAIN_DENOMINATOR :: U64{1}
-pub enum MIRAccelerationPin { Scalar Local }
-pub enum MIRAccelerationGateStatus {
+MIR_ACCEL_STATIC_FLOOR_ITEMS :: 1024
+MIR_ACCEL_CACHE_BLOCK_BYTES :: 65536
+MIR_ACCEL_REQUIRED_GAIN_NUMERATOR :: U64{2}
+MIR_ACCEL_REQUIRED_GAIN_DENOMINATOR :: U64{1}
+enum MIRAccelerationPin { Scalar Local }
+enum MIRAccelerationGateStatus {
     BelowStaticFloor Pinned(pin: MIRAccelerationPin) NotReleaseBuild
     CrossModeParityMissing ColumnCopyNotApplicable ProofIncomplete SampleNotTimed
     SpawnCostNotMeasured BandwidthFloorNotMeasured InvalidMeasurement
     ProjectedGainBelowThreshold Selected
 }
-pub struct MIRAccelerationMeasurement {
-    pub items: U64
-    pub sample_items: U64
-    pub sample_nanos: U64
-    pub spawn_nanos: U64
-    pub bandwidth_floor_nanos: U64
-    pub floor_nanos: U64
-    pub projected_serial_nanos: U64?
-    pub required_serial_nanos: U64?
+struct MIRAccelerationMeasurement {
+    items: U64
+    sample_items: U64
+    sample_nanos: U64
+    spawn_nanos: U64
+    bandwidth_floor_nanos: U64
+    floor_nanos: U64
+    projected_serial_nanos: U64?
+    required_serial_nanos: U64?
 }
-pub struct MIRAccelerationDecision {
-    pub transform: MIRAccelerationTransform
-    pub status: MIRAccelerationGateStatus
-    pub measurement: MIRAccelerationMeasurement
+struct MIRAccelerationDecision {
+    transform: MIRAccelerationTransform
+    status: MIRAccelerationGateStatus
+    measurement: MIRAccelerationMeasurement
 }
-pub struct MIRAccelerationGateInput {
-    pub items: U64
-    pub sample_items: U64
-    pub sample_nanos: U64
-    pub spawn_nanos: U64
-    pub bandwidth_floor_nanos: U64
-    pub first_chunk_serial_timed: Bool
-    pub spawn_cost_once_per_process: Bool
-    pub bandwidth_floor_measured: Bool
-    pub release_build: Bool
-    pub cross_mode_parity_proven: Bool
-    pub pin: MIRAccelerationPin?
-    pub workload: MIRAccelerationWorkloadFacts
-    pub proof: MIRAccelerationProof
+struct MIRAccelerationGateInput {
+    items: U64
+    sample_items: U64
+    sample_nanos: U64
+    spawn_nanos: U64
+    bandwidth_floor_nanos: U64
+    first_chunk_serial_timed: Bool
+    spawn_cost_once_per_process: Bool
+    bandwidth_floor_measured: Bool
+    release_build: Bool
+    cross_mode_parity_proven: Bool
+    pin: MIRAccelerationPin?
+    workload: MIRAccelerationWorkloadFacts
+    proof: MIRAccelerationProof
 }
-pub struct MIRAccelerationGate {
-    pub static_floor_items: U64
-    pub cache_block_bytes: U64
-    pub required_gain_numerator: U64
-    pub required_gain_denominator: U64
+struct MIRAccelerationGate {
+    static_floor_items: U64
+    cache_block_bytes: U64
+    required_gain_numerator: U64
+    required_gain_denominator: U64
 }
-pub fn mir_acceleration_gate() -> MIRAccelerationGate Never! {
+fn mir_acceleration_gate() -> MIRAccelerationGate Never! {
     MIRAccelerationGate{static_floor_items: U64{1024}, cache_block_bytes: U64{65536}, required_gain_numerator: MIR_ACCEL_REQUIRED_GAIN_NUMERATOR, required_gain_denominator: MIR_ACCEL_REQUIRED_GAIN_DENOMINATOR}
 }
-pub fn mir_acceleration_deferred(fact: MIRAccelerationFact, items: U64, release_build: Bool, parity: Bool) -> MIRAccelerationGateInput Never! {
+fn mir_acceleration_deferred(fact: MIRAccelerationFact, items: U64, release_build: Bool, parity: Bool) -> MIRAccelerationGateInput Never! {
     MIRAccelerationGateInput{items: items, sample_items: U64{0}, sample_nanos: U64{0}, spawn_nanos: U64{0}, bandwidth_floor_nanos: U64{0}, first_chunk_serial_timed: false, spawn_cost_once_per_process: false, bandwidth_floor_measured: false, release_build: release_build, cross_mode_parity_proven: parity, pin: None, workload: fact.workload, proof: fact.proof}
 }
-pub fn mir_acceleration_proves(proof: MIRAccelerationProof, transform: MIRAccelerationTransform) -> Bool Never! {
+fn mir_acceleration_proves(proof: MIRAccelerationProof, transform: MIRAccelerationTransform) -> Bool Never! {
     proof.source_proven && proof.independent_iterations && proof.no_aliasing && proof.no_cross_iteration_dependencies && proof.no_early_exit && proof.effect_free_body && proof.ownership_safe && proof.failure_order_preserved
 }
-pub fn mir_acceleration_transform_name(transform: MIRAccelerationTransform) -> String Never! {
+fn mir_acceleration_transform_name(transform: MIRAccelerationTransform) -> String Never! {
     if transform == {
         .TransientColumnCopy -> "column-copy"
         .PooledParallelChunks -> "parallel"
     }
 }
-pub fn mir_acceleration_pin_name(pin: MIRAccelerationPin) -> String Never! {
+fn mir_acceleration_pin_name(pin: MIRAccelerationPin) -> String Never! {
     if pin == {
         .Scalar -> "#Scalar"
         .Local -> "#Local"
     }
 }
-pub fn mir_acceleration_status_name(status: MIRAccelerationGateStatus) -> String Never! {
+fn mir_acceleration_status_name(status: MIRAccelerationGateStatus) -> String Never! {
     if status == {
         .BelowStaticFloor -> "below-static-floor"
         .Pinned(_) -> "pinned"
@@ -93,7 +93,7 @@ fn mir_acceleration_ceil_product(a: U64, b: U64, divisor: U64) -> U64? Never! {
     if product > maximum - extra -> return None
     Val((product + extra) / divisor)
 }
-pub fn mir_acceleration_evaluate(gate: MIRAccelerationGate, transform: MIRAccelerationTransform, input: MIRAccelerationGateInput) -> MIRAccelerationDecision Never! {
+fn mir_acceleration_evaluate(gate: MIRAccelerationGate, transform: MIRAccelerationTransform, input: MIRAccelerationGateInput) -> MIRAccelerationDecision Never! {
     floor :: if input.spawn_nanos > input.bandwidth_floor_nanos -> input.spawn_nanos else -> input.bandwidth_floor_nanos
     projected :: mir_acceleration_ceil_product(input.sample_nanos, input.items, input.sample_items)
     required :: mir_acceleration_ceil_product(floor, gate.required_gain_numerator, gate.required_gain_denominator)

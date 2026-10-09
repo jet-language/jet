@@ -11,13 +11,13 @@
 
 // The runtime whose C-ABI exports bind an image's imports: the compiled
 // runtime's shared library, opened through the dynamic linker.
-pub struct X64Runtime {
-    pub library: Int
-    pub errors: [String]
+struct X64Runtime {
+    library: Int
+    errors: [String]
     // Compiler-owned exports of the single process-pinned Core image.
     // Ordinary runtime symbols still resolve through the admitted library;
     // Shared getters MUST resolve here, never to an independent runtime cell.
-    pub core_exports: [String:Int]{[String:Int]{}}
+    core_exports: [String:Int]{[String:Int]{}}
 }
 
 // A loaded image: `base` is the mapping, `entry` the absolute entry address,
@@ -26,12 +26,12 @@ struct X64LoadedImage {
     base: Int
     size: Int
     // Only [base, base + code_size) is executable. Data is never executable.
-    pub code_size: Int
-    pub entry: Int
-    pub finalizer: Int?
-    pub imports: [String]
-    pub slots: [Int]
-    pub errors: [String]
+    code_size: Int
+    entry: Int
+    finalizer: Int?
+    imports: [String]
+    slots: [Int]
+    errors: [String]
 }
 
 fn x64_loaded_failure(errors: [String]) -> X64LoadedImage Never! {
@@ -112,7 +112,7 @@ fn x64_load_image(image: X64MemoryImage, runtime: X64Runtime) -> X64LoadedImage 
 // Parent admission resolves imports through its receipt-checked RuntimeLibrary
 // inventory before entering this same mapper. No dynamic-linker lookup, Core
 // getter lookup, startup, or publication happens inside the mapping operation.
-pub fn x64_load_image_bound(image: X64MemoryImage, addresses: [Int]) -> X64LoadedImage {
+fn x64_load_image_bound(image: X64MemoryImage, addresses: [Int]) -> X64LoadedImage {
     if image.errors.len() > 0 -> return x64_loaded_failure(image.errors)
     size :: image.text.len()
     if size == 0 -> return x64_loaded_failure([String]{"the image is empty"})
@@ -221,7 +221,7 @@ fn x64_rebind_slot(loaded: X64LoadedImage, slot: Int, address: Int) -> Bool {
 // Release the mapping exactly once. No frame may return into it, and every
 // native input/result owner must already be detached or released: the
 // image's finalizer (a callable's static release) runs first.
-pub fn x64_unload_image(loaded: X64LoadedImage) -> Bool {
+fn x64_unload_image(loaded: X64LoadedImage) -> Bool {
     if loaded.errors.len() > 0 || loaded.base == 0 || loaded.size <= 0 -> return false
     if loaded.finalizer == .Val(address) {
         if address < loaded.base || address >= loaded.base + loaded.code_size -> return false

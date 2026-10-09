@@ -349,8 +349,8 @@ pub(crate) fn check_marker_namespaces(bundle: &ProgramBundle) -> Vec<Diagnostic>
                     MarkerResolution::Found(_) => None,
                     MarkerResolution::Unknown => Some(crate::Policy::marker_unknown_error(&marker.name, &vocabulary.names(), marker.name_span)),
                     MarkerResolution::Private => Some(Diagnostic::error("E0605", format!("marker `#{}` is private to its declaring module", marker.name),
-                        "a library exports a marker with `pub`, just like a function".into(),
-                        "export the marker with `pub marker`, or remove this use".into(), Some(marker.name_span))),
+                        "a library marker is public unless it is marked `priv`".into(),
+                        "remove `priv` from the marker, or remove this use".into(), Some(marker.name_span))),
                     MarkerResolution::Ambiguous => Some(Diagnostic::from_row("E0086", &[], Some(marker.name_span))),
                 }
             } else if crate::Policy::applied_rule(&marker.name).is_none() && !vocabulary.knows(&marker.name)
@@ -379,7 +379,7 @@ pub(crate) fn check_marker_namespaces(bundle: &ProgramBundle) -> Vec<Diagnostic>
                 if private {
                     diagnostics.push(Diagnostic::error("E0605", format!("public marker group `{}` contains private marker `#{}`", declaration.name, member.name),
                         "a public group cannot publish a module-private marker through expansion".into(),
-                        "make the member public with `pub marker`, or make the group private".into(), Some(member.span)));
+                        "make the member public by removing `priv`, or make the group private".into(), Some(member.span)));
                     continue;
                 }
                 let forbidden = crate::Policy::marker_group_member_forbidden(&member.name, member.negated)

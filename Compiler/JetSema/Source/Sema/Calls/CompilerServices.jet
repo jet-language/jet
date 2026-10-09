@@ -44,11 +44,11 @@ fn sema_compiler_services_result(value_name: String, error_name: String) -> Type
 
 // Routing needs only membership, not an allocated typed argument contract.
 // This same predicate guards construction of the compiler query contract.
-pub fn sema_compiler_services_is_compiler_query(module_name: String, member: String) -> Bool Never! {
+fn sema_compiler_services_is_compiler_query(module_name: String, member: String) -> Bool Never! {
     module_name == "core.compiler" && (member == "lex" || member == "parse" || member == "check" || member == "source_map" || member == "manifest" || member == "package" || member == "lock" || member == "profiles")
 }
 
-pub fn sema_compiler_services_call_contract(module_name: String, member: String) -> SemaCompilerServicesCallContract? {
+fn sema_compiler_services_call_contract(module_name: String, member: String) -> SemaCompilerServicesCallContract? {
     if sema_compiler_services_is_compiler_query(module_name, member) {
         value_name := if {
             member == "lex" -> "CompilerLexed"
@@ -117,7 +117,7 @@ fn sema_compiler_services_compile_time_gate(module_name: String, member: String,
 // compiler-approved regions; SemaScopeTable separately records comptime depth.
 // The result/failure carrier remains available for recovery after diagnostics;
 // `arguments_complete` describes only whether every supplied argument checked.
-pub fn sema_compiler_services_check_call(module_name: String, member: String, args: [CallArg], span: Span, compiler_api_allowed: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCompilerServicesCallCheck {
+fn sema_compiler_services_check_call(module_name: String, member: String, args: [CallArg], span: Span, compiler_api_allowed: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCompilerServicesCallCheck {
     contract := sema_compiler_services_call_contract(module_name, member)
     if contract == None {
         &diagnostics.push(sema_call_core_unknown(module_name, member, span))
@@ -165,7 +165,7 @@ pub fn sema_compiler_services_check_call(module_name: String, member: String, ar
     SemaCompilerServicesCallCheck{recognized: true, arguments_complete: arguments_complete, module_name: module_name, member: member, arguments: values, result_type: selected.result_type, failure_carrier: selected.failure_carrier}
 }
 
-pub fn sema_compiler_services_lower_core_call(check: SemaCompilerServicesCallCheck, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_compiler_services_lower_core_call(check: SemaCompilerServicesCallCheck, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !check.recognized || !check.arguments_complete -> return None
     if check.module_name == "core.build" && check.member == "graph" {
         if check.arguments.len() != 1 -> return None

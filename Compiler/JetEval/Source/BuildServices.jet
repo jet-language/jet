@@ -12,21 +12,21 @@ fn jet_eval_build_field(data: TComptimeValue, name: String) -> TComptimeValue? N
     None
 }
 
-pub fn jet_eval_build_context_value(session: Int, program: TComptimeValue) -> TComptimeValue Never! {
+fn jet_eval_build_context_value(session: Int, program: TComptimeValue) -> TComptimeValue Never! {
     TComptimeValue.Struct{type_name: "BuildContext", fields: [TComptimeField]{
         {name: "__session", value: TComptimeValue.Int{value: session}},
         {name: "program", value: program},
     }}
 }
 
-pub fn jet_eval_build_context_id(data: TComptimeValue) -> Int? Never! {
+fn jet_eval_build_context_id(data: TComptimeValue) -> Int? Never! {
     if data == .Struct(name, _) {
         if name == "BuildContext" && jet_eval_build_field(data, "__session") == .Val(.Int(id)) -> return Val(id)
     }
     None
 }
 
-pub fn jet_eval_build_session_input(data: TComptimeValue) -> BuildSessionValue? {
+fn jet_eval_build_session_input(data: TComptimeValue) -> BuildSessionValue? {
     if data == {
         .Unit -> return Val(BuildSessionValue.Unit)
         .String(value) -> return Val(BuildSessionValue.Text{value: value})
@@ -88,15 +88,15 @@ fn jet_eval_build_host_data(value: JetEvalHostValue) -> TComptimeValue? {
     }
 }
 
-pub fn jet_eval_build_session_host_input(value: JetEvalHostValue) -> BuildSessionValue? {
+fn jet_eval_build_session_host_input(value: JetEvalHostValue) -> BuildSessionValue? {
     jet_eval_build_session_input(jet_eval_build_host_data(value) ?? return None)
 }
 
-pub fn jet_eval_build_context_host_id(value: JetEvalHostValue) -> Int? {
+fn jet_eval_build_context_host_id(value: JetEvalHostValue) -> Int? {
     jet_eval_build_context_id(jet_eval_build_host_data(value) ?? return None)
 }
 
-pub fn jet_eval_build_session_output(value: BuildSessionValue) -> TComptimeValue {
+fn jet_eval_build_session_output(value: BuildSessionValue) -> TComptimeValue {
     if value == {
         .Unit -> TComptimeValue.Unit
         .Text(text) -> TComptimeValue.String{value: text}
@@ -116,7 +116,7 @@ pub fn jet_eval_build_session_output(value: BuildSessionValue) -> TComptimeValue
     }
 }
 
-pub fn jet_eval_build_session_diagnostic(error: BuildSessionDiagnostic) -> Diagnostic {
+fn jet_eval_build_session_diagnostic(error: BuildSessionDiagnostic) -> Diagnostic {
     diagnostic := diagnostic_from_registry(error.code, Val(Span{start: error.start, end: error.end}), error.what, error.why, error.fix)
     if error.error == .Val(typed) {
         projection :: build_session_error_projection(typed)
@@ -130,7 +130,7 @@ pub fn jet_eval_build_session_diagnostic(error: BuildSessionDiagnostic) -> Diagn
 
 // Lossless CtValue::from_jet_err adapter shape. Semantic identity and fields
 // come from the typed Core error, never its human-readable diagnostic.
-pub fn jet_eval_build_failed_value(error: BuildSessionDiagnostic) -> TComptimeValue? Never! {
+fn jet_eval_build_failed_value(error: BuildSessionDiagnostic) -> TComptimeValue? Never! {
     typed :: error.error ?? return None
     projection :: build_session_error_projection(typed)
     fields :: loop field in projection.fields -> TComptimeValue.Struct{type_name: "__jet_ErrorField", fields: [TComptimeField]{
@@ -179,7 +179,7 @@ fn jet_eval_build_field_present(data: TComptimeValue, name: String) -> TComptime
     None
 }
 
-pub fn jet_eval_build_failed_diagnostic(value: TComptimeValue, fallback: Span) -> Diagnostic? Never! {
+fn jet_eval_build_failed_diagnostic(value: TComptimeValue, fallback: Span) -> Diagnostic? Never! {
     if value == .Failed(.Told(error)) {
         if error == .Struct(name, _) {
             if name != "Err" -> return None
@@ -261,7 +261,7 @@ fn jet_eval_build_graph_file(value: BuildGraphFile) -> TComptimeValue Never! {
     }}
 }
 
-pub fn jet_eval_build_graph_value(graph: BuildGraph) -> TComptimeValue Never! {
+fn jet_eval_build_graph_value(graph: BuildGraph) -> TComptimeValue Never! {
     targets := [TComptimeValue]{}
     loop row in graph.targets -> &targets.push(TComptimeValue.Struct{type_name: "BuildGraphTarget", fields: [TComptimeField]{
         {name: "id", value: jet_eval_build_graph_int(row.id)},

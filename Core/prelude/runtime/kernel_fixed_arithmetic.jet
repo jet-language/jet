@@ -21,7 +21,7 @@
 // this kernel again. Provider identity and shared-symbol binding are R0 facts.
 
 #[Equatable, Error]
-pub enum JetFixedArithmeticError {
+enum JetFixedArithmeticError {
     AddOverflow
     SubOverflow
     MulOverflow
@@ -36,7 +36,7 @@ pub enum JetFixedArithmeticError {
 }
 
 // Rust JetFixedArithmeticError::fmt (:27).
-pub fn jet_fixed_arithmetic_error_message(error: JetFixedArithmeticError) -> String Never! {
+fn jet_fixed_arithmetic_error_message(error: JetFixedArithmeticError) -> String Never! {
     if error == {
         .AddOverflow -> "This addition overflows the value's type (the result is outside its range)"
         .SubOverflow -> "This subtraction overflows the value's type (the result is outside its range)"
@@ -54,38 +54,38 @@ pub fn jet_fixed_arithmetic_error_message(error: JetFixedArithmeticError) -> Str
 
 // Rust JetFixedArithmeticResult (:57): Value is an I64 BIT carrier even for U64.
 #Equatable
-pub enum JetFixedArithmeticResult {
+enum JetFixedArithmeticResult {
     Value(I64)
     Absent
     Trap(JetFixedArithmeticError)
 }
 
 #Equatable
-pub struct JetFixedWide { pub high: I64, pub low: U64 }
+struct JetFixedWide { high: I64, low: U64 }
 struct FixedMagnitude { negative: Bool, high: U64, low: U64 }
 struct FixedBounds { lower: FixedMagnitude, upper: FixedMagnitude }
 
 // Rust operation/mode constants (:65–85), unchanged resident numbers.
-pub JET_FIXED_OP_ADD :: 0
-pub JET_FIXED_OP_SUB :: 1
-pub JET_FIXED_OP_MUL :: 2
-pub JET_FIXED_OP_DIV :: 3
-pub JET_FIXED_OP_REM :: 4
-pub JET_FIXED_OP_BIT_AND :: 5
-pub JET_FIXED_OP_BIT_OR :: 6
-pub JET_FIXED_OP_BIT_XOR :: 7
-pub JET_FIXED_OP_SHL :: 8
-pub JET_FIXED_OP_SHR :: 9
-pub JET_FIXED_OP_POW :: 10
-pub JET_FIXED_OP_FLOOR_DIV :: 11
-pub JET_FIXED_OP_MOD :: 12
-pub JET_FIXED_OP_ROTATE_LEFT :: 13
-pub JET_FIXED_OP_ROTATE_RIGHT :: 14
-pub JET_FIXED_OP_NEG :: 15
-pub JET_FIXED_MODE_TRAP :: 0
-pub JET_FIXED_MODE_WRAPPING :: 1
-pub JET_FIXED_MODE_SATURATING :: 2
-pub JET_FIXED_MODE_CHECKED :: 3
+JET_FIXED_OP_ADD :: 0
+JET_FIXED_OP_SUB :: 1
+JET_FIXED_OP_MUL :: 2
+JET_FIXED_OP_DIV :: 3
+JET_FIXED_OP_REM :: 4
+JET_FIXED_OP_BIT_AND :: 5
+JET_FIXED_OP_BIT_OR :: 6
+JET_FIXED_OP_BIT_XOR :: 7
+JET_FIXED_OP_SHL :: 8
+JET_FIXED_OP_SHR :: 9
+JET_FIXED_OP_POW :: 10
+JET_FIXED_OP_FLOOR_DIV :: 11
+JET_FIXED_OP_MOD :: 12
+JET_FIXED_OP_ROTATE_LEFT :: 13
+JET_FIXED_OP_ROTATE_RIGHT :: 14
+JET_FIXED_OP_NEG :: 15
+JET_FIXED_MODE_TRAP :: 0
+JET_FIXED_MODE_WRAPPING :: 1
+JET_FIXED_MODE_SATURATING :: 2
+JET_FIXED_MODE_CHECKED :: 3
 
 fn fixed_zero() -> FixedMagnitude Never! { FixedMagnitude{negative: false, high: U64{0}, low: U64{0}} }
 fn fixed_small(value: U64, negative: Bool) -> FixedMagnitude Never! {
@@ -158,12 +158,12 @@ fn bounds(signed: Bool, bits: Int) -> FixedBounds? Never! {
 }
 
 // Rust jet_fixed_integer_widen (:99): unsigned means truncate to low 64 bits.
-pub fn jet_fixed_integer_widen(value: JetFixedWide, signed: Bool) -> JetFixedWide Never! {
+fn jet_fixed_integer_widen(value: JetFixedWide, signed: Bool) -> JetFixedWide Never! {
     if signed -> return ~value
     JetFixedWide{high: I64{0}, low: value.low}
 }
 // Rust jet_fixed_integer_narrow (:107): full64 never passes through exact Int.
-pub fn jet_fixed_integer_narrow(value: JetFixedWide, signed: Bool, bits: Int) -> I64 Never! {
+fn jet_fixed_integer_narrow(value: JetFixedWide, signed: Bool, bits: Int) -> I64 Never! {
     low := value.low & fixed_mask(bits)
     if (signed && bits < 64 && (low & (U64{1} << (bits - 1))) != U64{0}) -> low |= U64{18446744073709551615} ~| fixed_mask(bits)
     fixed_word_signed(low)
@@ -282,7 +282,7 @@ fn power(left: FixedMagnitude, right: FixedMagnitude, mode: Int, range: FixedBou
 
 // Rust jet_fixed_arithmetic (:254). Scalar leaf operations below must never
 // dispatch recursively through this policy owner in the compiled runtime.
-pub fn jet_fixed_arithmetic(left: I64, right: JetFixedWide, op: Int, mode: Int, signed: Bool, bits: Int, right_signed: Bool) -> JetFixedArithmeticResult Never! {
+fn jet_fixed_arithmetic(left: I64, right: JetFixedWide, op: Int, mode: Int, signed: Bool, bits: Int, right_signed: Bool) -> JetFixedArithmeticResult Never! {
     range :: bounds(signed, bits) ?? return JetFixedArithmeticResult.Trap(JetFixedArithmeticError.UnknownOperation)
     left_word :: JetFixedWide{high: if (signed && left < I64{0}) -> I64{-1} else -> I64{0}, low: fixed_word_bits(left)}
     a :: fixed_magnitude(left_word)

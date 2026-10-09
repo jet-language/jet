@@ -9,11 +9,11 @@ JET_CLI_FLASH_AUTHORITY :: "Build.native_sandboxed"
 JET_CLI_FLASH_MAX_AUDIT_BYTES :: 1048576
 JET_CLI_FLASH_MAX_CAPTURE_BYTES :: 65536
 #Error
-pub struct JetCLIFlashError { pub message: String, pub byte_offset: Int? }
+struct JetCLIFlashError { message: String, byte_offset: Int? }
 fn jet_cli_flash_error(message: String) -> JetCLIFlashError Never! { JetCLIFlashError{message: message, byte_offset: None} }
 // #4378: until Core owns raw OS bytes, the native seam refuses non-UTF-8
 // addresses (including PATH entries and parent directories), never lossy text.
-pub fn jet_cli_flash_non_utf8_error(byte_offset: Int) -> JetCLIFlashError Never! {
+fn jet_cli_flash_non_utf8_error(byte_offset: Int) -> JetCLIFlashError Never! {
     JetCLIFlashError{message: "flash path is not UTF-8 at byte {byte_offset}", byte_offset: Val(byte_offset)}
 }
 fn jet_cli_flash_context_error(message: String, cause: JetCLIFlashError) -> JetCLIFlashError Never! {
@@ -22,8 +22,8 @@ fn jet_cli_flash_context_error(message: String, cause: JetCLIFlashError) -> JetC
 }
 // One C-FS seam, using Core's canonical Path address. The host preserves
 // no-follow semantics, exact u64 metadata sizes and one captured PATH.
-pub struct JetCLIFlashMetadata { pub symlink: Bool, pub regular: Bool, pub bytes: Int }
-pub trait JetCLIFlashHost {
+struct JetCLIFlashMetadata { symlink: Bool, regular: Bool, bytes: Int }
+trait JetCLIFlashHost {
     fn symlink_metadata(&self, path: Path) -> JetCLIFlashMetadata JetCLIFlashError!
     fn canonicalize(&self, path: Path) -> Path JetCLIFlashError!
     fn metadata(&self, path: Path) -> JetCLIFlashMetadata JetCLIFlashError!
@@ -33,9 +33,9 @@ pub trait JetCLIFlashHost {
     fn utf8_filename(&self, path: Path) -> String? JetCLIFlashError!
 }
 // Rust FlashAdapter (CmdFlash.rs:32-55).
-pub enum JetCLIFlashAdapter { Emulator ProbeRs OpenOcd }
+enum JetCLIFlashAdapter { Emulator ProbeRs OpenOcd }
 // Rust FlashAdapter::as_str (CmdFlash.rs:39-45).
-pub fn jet_cli_flash_adapter_name(adapter: JetCLIFlashAdapter) -> String Never! {
+fn jet_cli_flash_adapter_name(adapter: JetCLIFlashAdapter) -> String Never! {
     if adapter == {
         .Emulator -> "emulator"
         .ProbeRs -> "probe-rs"
@@ -43,7 +43,7 @@ pub fn jet_cli_flash_adapter_name(adapter: JetCLIFlashAdapter) -> String Never! 
     }
 }
 // Rust FlashAdapter::parse (CmdFlash.rs:47-55).
-pub fn jet_cli_flash_adapter_parse(value: String) -> JetCLIFlashAdapter? Never! {
+fn jet_cli_flash_adapter_parse(value: String) -> JetCLIFlashAdapter? Never! {
     if value == {
         "emulator" -> Val(JetCLIFlashAdapter.Emulator)
         "probe-rs" -> Val(JetCLIFlashAdapter.ProbeRs)
@@ -52,10 +52,10 @@ pub fn jet_cli_flash_adapter_parse(value: String) -> JetCLIFlashAdapter? Never! 
     }
 }
 // Rust FlashArgument/FlashToolDeclaration (CmdFlash.rs:60-76).
-pub enum JetCLIFlashArgument { Literal(String) ImageName Dynamic(String) OpenOcdProgram(Bool) }
-pub struct JetCLIFlashToolDeclaration { pub adapter: JetCLIFlashAdapter, pub executable: String, pub arguments: [JetCLIFlashArgument], pub programmer: MIRTargetProgrammerFacts }
+enum JetCLIFlashArgument { Literal(String) ImageName Dynamic(String) OpenOcdProgram(Bool) }
+struct JetCLIFlashToolDeclaration { adapter: JetCLIFlashAdapter, executable: String, arguments: [JetCLIFlashArgument], programmer: MIRTargetProgrammerFacts }
 // Rust FlashToolDeclaration::from_facts (CmdFlash.rs:79-144).
-pub fn jet_cli_flash_tool_from_facts(facts: MIRTargetProgrammerFacts) -> JetCLIFlashToolDeclaration Never! {
+fn jet_cli_flash_tool_from_facts(facts: MIRTargetProgrammerFacts) -> JetCLIFlashToolDeclaration Never! {
     adapter :: if facts.adapter == {
         .Emulator -> JetCLIFlashAdapter.Emulator
         .ProbeRs -> JetCLIFlashAdapter.ProbeRs
@@ -109,7 +109,7 @@ pub fn jet_cli_flash_tool_from_facts(facts: MIRTargetProgrammerFacts) -> JetCLIF
     JetCLIFlashToolDeclaration{adapter: adapter, executable: ~facts.executable, arguments: arguments, programmer: ~facts}
 }
 // Rust FlashToolDeclaration::argv (CmdFlash.rs:146-172).
-pub fn jet_cli_flash_tool_argv(tool: JetCLIFlashToolDeclaration, image_name: String) -> [String] JetCLIFlashError! {
+fn jet_cli_flash_tool_argv(tool: JetCLIFlashToolDeclaration, image_name: String) -> [String] JetCLIFlashError! {
     name :: jet_cli_flash_adapter_name(tool.adapter)
     if jet_target_programmer_missing_fact(tool.programmer) == .Val(missing) -> return Err(jet_cli_flash_error("target programmer `{name}` is missing explicit `{missing}` fact"))
     if tool.adapter == JetCLIFlashAdapter.OpenOcd && !jet_cli_flash_safe_openocd_image_name(image_name) -> return Err(jet_cli_flash_error("image filename `{image_name}` cannot be passed to OpenOCD safely"))
@@ -126,16 +126,16 @@ pub fn jet_cli_flash_tool_argv(tool: JetCLIFlashToolDeclaration, image_name: Str
     Ok(result)
 }
 // Rust FlashProfile (CmdFlash.rs:176-182).
-pub struct JetCLIFlashProfile { pub target: String, pub target_triple: String, pub target_identity: String, pub hardware_identity: String, pub tools: [JetCLIFlashToolDeclaration] }
+struct JetCLIFlashProfile { target: String, target_triple: String, target_identity: String, hardware_identity: String, tools: [JetCLIFlashToolDeclaration] }
 // Rust FlashProfile::from_machine (CmdFlash.rs:187-206).
-pub fn jet_cli_flash_profile_from_machine(machine: MIRTargetMachine) -> JetCLIFlashProfile JetCLIFlashError! {
+fn jet_cli_flash_profile_from_machine(machine: MIRTargetMachine) -> JetCLIFlashProfile JetCLIFlashError! {
     tools := [JetCLIFlashToolDeclaration]{}
     loop facts in machine.programmers -> &tools.push(jet_cli_flash_tool_from_facts(facts))
     if tools.is_empty() -> return Err(jet_cli_flash_error("target `{machine.name}` has no owner-approved programmer facts; declare an adapter plus chip for probe-rs, interface/config for OpenOCD, or machine/cpu for an emulator"))
     Ok(JetCLIFlashProfile{target: ~machine.name, target_triple: ~machine.triple, target_identity: jet_target_provider_identity(machine), hardware_identity: mir_sha256_hex(jet_target_hardware_json(machine.hardware)), tools: tools})
 }
 // Rust FlashProfile::select (CmdFlash.rs:208-246). Return an index, not a copied tool.
-pub fn jet_cli_flash_profile_select(profile: JetCLIFlashProfile, requested: JetCLIFlashAdapter?) -> Int JetCLIFlashError! {
+fn jet_cli_flash_profile_select(profile: JetCLIFlashProfile, requested: JetCLIFlashAdapter?) -> Int JetCLIFlashError! {
     loop (index, tool) in profile.tools {
         matches :: if requested == .Val(adapter) -> tool.adapter == adapter else -> true
         if matches && jet_target_programmer_missing_fact(tool.programmer) == None -> return Ok(index)
@@ -153,19 +153,19 @@ pub fn jet_cli_flash_profile_select(profile: JetCLIFlashProfile, requested: JetC
     Err(jet_cli_flash_error("target `{profile.target}` declares no usable programmer ({available})"))
 }
 // Rust FlashPlan record (CmdFlash.rs:251-271).
-pub struct JetCLIFlashPlan {
-    pub schema: String, pub target: String, pub target_triple: String, pub target_identity: String, pub hardware_identity: String
-    pub adapter: JetCLIFlashAdapter, pub programmer: MIRTargetProgrammerFacts
-    pub tool: String, pub tool_identity: String, pub executable: Path, pub image: Path, pub audit: Path
-    pub audit_sha256: String, pub image_bytes: Int, pub image_sha256: String, pub argv: [String], pub authority: String
+struct JetCLIFlashPlan {
+    schema: String, target: String, target_triple: String, target_identity: String, hardware_identity: String
+    adapter: JetCLIFlashAdapter, programmer: MIRTargetProgrammerFacts
+    tool: String, tool_identity: String, executable: Path, image: Path, audit: Path
+    audit_sha256: String, image_bytes: Int, image_sha256: String, argv: [String], authority: String
 }
 // Rust FlashPlan::from_target_and_image (CmdFlash.rs:277-286).
-pub fn jet_cli_flash_plan_from_target_and_image<H: JetCLIFlashHost>(host: &H, target: String, image: Path, audit: Path?, adapter: JetCLIFlashAdapter?, package_version: String) -> JetCLIFlashPlan JetCLIFlashError! {
+fn jet_cli_flash_plan_from_target_and_image<H: JetCLIFlashHost>(host: &H, target: String, image: Path, audit: Path?, adapter: JetCLIFlashAdapter?, package_version: String) -> JetCLIFlashPlan JetCLIFlashError! {
     machine :: jet_driver_target_machine_by_name(target, package_version) ?? return Err(jet_cli_flash_error("unknown target machine `{target}`"))
     jet_cli_flash_plan_from_machine<H>(&host, machine, image, audit, adapter)
 }
 // Rust FlashPlan::from_machine (CmdFlash.rs:289-376), same validation order.
-pub fn jet_cli_flash_plan_from_machine<H: JetCLIFlashHost>(host: &H, machine: MIRTargetMachine, image: Path, audit: Path?, adapter: JetCLIFlashAdapter?) -> JetCLIFlashPlan JetCLIFlashError! {
+fn jet_cli_flash_plan_from_machine<H: JetCLIFlashHost>(host: &H, machine: MIRTargetMachine, image: Path, audit: Path?, adapter: JetCLIFlashAdapter?) -> JetCLIFlashPlan JetCLIFlashError! {
     if !machine.no_os -> return Err(jet_cli_flash_error("target `{machine.name}` is hosted; flashing requires a no-OS board or emulator profile"))
     validation :: jet_target_machine_validate(machine, jet_target_machine_use_default())
     if !validation.is_empty() -> return Err(jet_cli_flash_error("target `{machine.name}` failed canonical profile validation: {jet_target_machine_errors_debug(validation)}"))
@@ -200,7 +200,7 @@ pub fn jet_cli_flash_plan_from_machine<H: JetCLIFlashHost>(host: &H, machine: MI
     Ok(JetCLIFlashPlan{schema: JET_CLI_FLASH_PLAN_SCHEMA, target: ~machine.name, target_triple: ~machine.triple, target_identity: ~profile.target_identity, hardware_identity: ~profile.hardware_identity, adapter: declaration.adapter, programmer: ~declaration.programmer, tool: ~declaration.executable, tool_identity: tool_digest, executable: executable, image: canonical_image, audit: canonical_audit, audit_sha256: audit_digest, image_bytes: metadata.bytes, image_sha256: image_digest, argv: argv, authority: JET_CLI_FLASH_AUTHORITY})
 }
 // Rust default_flash_image (CmdFlash.rs:935-943).
-pub fn jet_cli_flash_default_image(target: String, package_version: String) -> Path Never! {
+fn jet_cli_flash_default_image(target: String, package_version: String) -> Path Never! {
     machine :: jet_driver_target_machine_by_name(target, package_version)
     canonical :: if machine == .Val(value) -> ~value.name else -> ~target
     flash_paths.join(flash_paths.join(flash_paths.of(".jet/target"), canonical), "firmware.elf")
@@ -240,26 +240,26 @@ fn jet_cli_flash_plan_json(plan: JetCLIFlashPlan) -> CanonicalJSON Never! {
     })
 }
 // Rust FlashPlan::identity (CmdFlash.rs:378-436): JSON text, NOT its digest.
-pub fn jet_cli_flash_plan_identity(plan: JetCLIFlashPlan) -> String Never! {
+fn jet_cli_flash_plan_identity(plan: JetCLIFlashPlan) -> String Never! {
     bytes :: canonical_json_bytes(jet_cli_flash_plan_json(plan))
     String.from_bytes(~bytes[0..<bytes.len() - 1]) ?? panic("flash plan identity JSON is UTF-8")
 }
 // Rust FlashFailure, FlashExecution records (CmdFlash.rs:472-475,626-633).
-pub struct JetCLIFlashFailure { pub kind: String, pub detail: String }
-pub struct JetCLIFlashExecution { pub status: Int?, pub stdout: [U8], pub stderr: [U8], pub mechanism: String, pub policy: String, pub failure: JetCLIFlashFailure? }
+struct JetCLIFlashFailure { kind: String, detail: String }
+struct JetCLIFlashExecution { status: Int?, stdout: [U8], stderr: [U8], mechanism: String, policy: String, failure: JetCLIFlashFailure? }
 // Rust FlashExecution::failed (CmdFlash.rs:636-646).
-pub fn jet_cli_flash_execution_failed(kind: String, detail: String, mechanism: String, policy: String) -> JetCLIFlashExecution Never! {
+fn jet_cli_flash_execution_failed(kind: String, detail: String, mechanism: String, policy: String) -> JetCLIFlashExecution Never! {
     JetCLIFlashExecution{status: None, stdout: [U8]{}, stderr: [U8]{}, mechanism: mechanism, policy: policy, failure: Val(JetCLIFlashFailure{kind: kind, detail: detail})}
 }
 // Rust FlashReceipt (CmdFlash.rs:441-469); plan carries the shared immutable fields.
-pub struct JetCLIFlashReceipt {
-    pub schema: String, pub plan: JetCLIFlashPlan, pub plan_identity: String
-    pub mechanism: String, pub policy: String, pub status: Int?, pub success: Bool
-    pub stdout: [U8], pub stderr: [U8], pub stdout_truncated: Bool, pub stderr_truncated: Bool
-    pub failure: JetCLIFlashFailure?, pub result_identity: String
+struct JetCLIFlashReceipt {
+    schema: String, plan: JetCLIFlashPlan, plan_identity: String
+    mechanism: String, policy: String, status: Int?, success: Bool
+    stdout: [U8], stderr: [U8], stdout_truncated: Bool, stderr_truncated: Bool
+    failure: JetCLIFlashFailure?, result_identity: String
 }
 // Rust FlashReceipt::from_execution (CmdFlash.rs:478-512).
-pub fn jet_cli_flash_receipt_from_execution(plan: JetCLIFlashPlan, execution: ^JetCLIFlashExecution) -> JetCLIFlashReceipt Never! {
+fn jet_cli_flash_receipt_from_execution(plan: JetCLIFlashPlan, execution: ^JetCLIFlashExecution) -> JetCLIFlashReceipt Never! {
     stdout := jet_cli_flash_bound_capture(execution.stdout)
     stderr := jet_cli_flash_bound_capture(execution.stderr)
     success :: execution.failure == None
@@ -320,7 +320,7 @@ fn jet_cli_flash_utf8_lossy(bytes: [U8]) -> String Never! {
     String.from_bytes(out) ?? panic("lossy UTF-8 is valid")
 }
 // Rust FlashReceipt::result_json (CmdFlash.rs:514-554).
-pub fn jet_cli_flash_receipt_result_json(receipt: JetCLIFlashReceipt) -> CanonicalJSON Never! {
+fn jet_cli_flash_receipt_result_json(receipt: JetCLIFlashReceipt) -> CanonicalJSON Never! {
     plan :: receipt.plan
     CanonicalJSON.Object([CanonicalJSONField]{
         CanonicalJSONField{key: "adapter", value: CanonicalJSON.String(jet_cli_flash_adapter_name(plan.adapter))},
@@ -343,7 +343,7 @@ pub fn jet_cli_flash_receipt_result_json(receipt: JetCLIFlashReceipt) -> Canonic
     })
 }
 // Rust FlashReceipt::to_json (CmdFlash.rs:566-619).
-pub fn jet_cli_flash_receipt_to_json(receipt: JetCLIFlashReceipt) -> CanonicalJSON Never! {
+fn jet_cli_flash_receipt_to_json(receipt: JetCLIFlashReceipt) -> CanonicalJSON Never! {
     plan :: receipt.plan
     fields := [CanonicalJSONField]{}
     if jet_cli_flash_plan_json(plan) == .Object(plan_fields) {
@@ -369,6 +369,6 @@ pub fn jet_cli_flash_receipt_to_json(receipt: JetCLIFlashReceipt) -> CanonicalJS
     canonical_json_object(fields) ?? panic("flash receipt JSON keys are unique")
 }
 // Rust FlashReceipt::section (CmdFlash.rs:621-624).
-pub fn jet_cli_flash_receipt_section(receipt: JetCLIFlashReceipt) -> JetCLIReceiptSection String! {
+fn jet_cli_flash_receipt_section(receipt: JetCLIFlashReceipt) -> JetCLIReceiptSection String! {
     jet_cli_receipt_section_new("flash", "FlashReceipt", canonical_json_bytes(jet_cli_flash_receipt_to_json(receipt)))
 }

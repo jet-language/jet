@@ -12,7 +12,7 @@ DIAGNOSTIC_THEME_ERROR :: "31"
 DIAGNOSTIC_THEME_BOLD :: "1"
 
 // One `Theme` role: `ESC [ sgr m text ESC [ 0 m` when color is on.
-pub fn diagnostic_theme_paint(color: Bool, sgr: String, text: String) -> String Never! {
+fn diagnostic_theme_paint(color: Bool, sgr: String, text: String) -> String Never! {
     if !color -> return text.copy()
     escape :: String.from_bytes([U8]{"\x1b"}) ?? ""
     "{escape}[{sgr}m{text}{escape}[0m"

@@ -29,7 +29,7 @@ fn tir_cost_type_bounds(ty: Type) -> TIntegerBounds? Never! {
 fn tir_cost_min(left: Int, right: Int) -> Int Never! { if left < right -> left else -> right }
 fn tir_cost_max(left: Int, right: Int) -> Int Never! { if left > right -> left else -> right }
 
-pub fn tir_cost_combine_bounds(op: TBinaryOp, left: TIntegerBounds, right: TIntegerBounds) -> TIntegerBounds? Never! {
+fn tir_cost_combine_bounds(op: TBinaryOp, left: TIntegerBounds, right: TIntegerBounds) -> TIntegerBounds? Never! {
     if op == {
         .Add -> return tir_cost_bounded(tir_cost_min(left.lo + right.lo, 0), tir_cost_max(left.hi + right.hi, 0))
         .Sub -> return tir_cost_bounded(tir_cost_min(left.lo - right.hi, 0), tir_cost_max(left.hi - right.lo, 0))
@@ -63,7 +63,7 @@ pub fn tir_cost_combine_bounds(op: TBinaryOp, left: TIntegerBounds, right: TInte
     }
 }
 
-pub fn tir_cost_integer_bounds(expression: TExpr) -> TIntegerBounds? Never! {
+fn tir_cost_integer_bounds(expression: TExpr) -> TIntegerBounds? Never! {
     if expression.integer_bounds != None -> return expression.integer_bounds
     bounds := TIntegerBounds?{None}
     if expression.kind == {
@@ -112,11 +112,11 @@ pub fn tir_cost_integer_bounds(expression: TExpr) -> TIntegerBounds? Never! {
     if bounds != None -> bounds else -> tir_cost_type_bounds(expression.ty)
 }
 
-pub fn tir_cost_bounds_fit_inline(bounds: TIntegerBounds) -> Bool Never! {
+fn tir_cost_bounds_fit_inline(bounds: TIntegerBounds) -> Bool Never! {
     bounds.lo >= TCOST_INLINE_MIN && bounds.hi <= TCOST_INLINE_MAX
 }
 
-pub fn tir_cost_fact(expression: TExpr) -> TCostFact? Never! {
+fn tir_cost_fact(expression: TExpr) -> TCostFact? Never! {
     if expression.cost != None -> return expression.cost
     if expression.kind == {
         .MaterializeView(_) -> return Val(TCostFact{kind: TCostKind.ViewMaterialization, state: TCostState.SemanticRemainder})
@@ -164,7 +164,7 @@ pub fn tir_cost_fact(expression: TExpr) -> TCostFact? Never! {
     if construction -> Val(TCostFact{kind: TCostKind.OutcomeConstruction, state: TCostState.SemanticRemainder}) else -> None
 }
 
-pub fn tir_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool Never! {
+fn tir_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool Never! {
     if operation == {
         .Push | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .Pop
         | .InsertMap | .AddNewMap | .MapSetDefault | .MapUpdate | .InsertList | .RemoveMap
@@ -181,7 +181,7 @@ pub fn tir_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool Never! {
     }
 }
 
-pub fn tir_cost_operation(kind: TCostKind) -> String Never! {
+fn tir_cost_operation(kind: TCostKind) -> String Never! {
     if kind == {
         .ViewMaterialization -> "materializing a read-only view"
         .CollectionCopyOnWrite -> "editing a shared map backing store"
@@ -190,7 +190,7 @@ pub fn tir_cost_operation(kind: TCostKind) -> String Never! {
         .RepresentationFallback -> "using a generic collection representation"
     }
 }
-pub fn tir_cost_fix(kind: TCostKind) -> String Never! {
+fn tir_cost_fix(kind: TCostKind) -> String Never! {
     if kind == {
         .ViewMaterialization -> "keep the value in its view form, or make the copy explicit outside the loop"
         .CollectionCopyOnWrite -> "mutate an exclusive map place, or move the edit outside the loop"
@@ -200,7 +200,7 @@ pub fn tir_cost_fix(kind: TCostKind) -> String Never! {
     }
 }
 
-pub fn tir_stmt_cost_fact(statement: TStmt) -> TCostFact? Never! {
+fn tir_stmt_cost_fact(statement: TStmt) -> TCostFact? Never! {
     map_edit :: if statement == {
         .IndexAssign(_, _, _, is_map, _, _) -> is_map
         .IndexFieldAssign(value, _) -> value.is_map

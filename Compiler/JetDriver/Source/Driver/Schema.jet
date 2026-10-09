@@ -6,33 +6,33 @@ use jet_foundation.Diagnostic
 
 // Only the schema inputs the populated checker actually reads. An absent,
 // unreadable or malformed snapshot is still an input; it is not an empty cache.
-pub enum JetDriverSchemaReadOutcome {
+enum JetDriverSchemaReadOutcome {
     Missing(error: IOError)
     IO(error: IOError, bytes: [U8]?)
     Invalid(raw: String, error: SchemaSnapshotError)
     Parsed(raw: String, snapshot: SchemaSnapshot)
 }
-pub struct JetDriverSchemaRead {
-    pub name: String
-    pub cache_dir: String
-    pub path: String
-    pub outcome: JetDriverSchemaReadOutcome
+struct JetDriverSchemaRead {
+    name: String
+    cache_dir: String
+    path: String
+    outcome: JetDriverSchemaReadOutcome
 }
-pub enum JetDriverSchemaIngress {
+enum JetDriverSchemaIngress {
     Supplied(snapshots: [String:SchemaSnapshot])
     Cache(root: String, reads: [JetDriverSchemaRead])
 }
-pub struct JetDriverSchemaCheckResult {
-    pub registration: SemaRegistrationGraph
-    pub diagnostics: [Diagnostic]
-    pub ingress: JetDriverSchemaIngress?
+struct JetDriverSchemaCheckResult {
+    registration: SemaRegistrationGraph
+    diagnostics: [Diagnostic]
+    ingress: JetDriverSchemaIngress?
 }
 
-pub fn schema_cache_dir(root: String) -[Env]> String {
+fn schema_cache_dir(root: String) -[Env]> String {
     schema_sys.get("JET_SCHEMA_CACHE_DIR") ?? schema_files.join(root, ".jet/cache/schema")
 }
 
-pub fn jet_driver_read_schema_dependency(root: String, type_name: String) -[Env, FS]> JetDriverSchemaRead {
+fn jet_driver_read_schema_dependency(root: String, type_name: String) -[Env, FS]> JetDriverSchemaRead {
     cache :: schema_cache_dir(root)
     path :: schema_files.join(cache, "{type_name}.snapshot")
     bytes :: if schema_files.read_bytes(path) == {
@@ -55,13 +55,13 @@ pub fn jet_driver_read_schema_dependency(root: String, type_name: String) -[Env,
     JetDriverSchemaRead{name: type_name, cache_dir: cache, path: path, outcome: outcome}
 }
 
-pub fn load_snapshot(root: String, type_name: String) -[Env, FS]> SchemaSnapshot? {
+fn load_snapshot(root: String, type_name: String) -[Env, FS]> SchemaSnapshot? {
     read :: jet_driver_read_schema_dependency(root, type_name)
     if read.outcome == .Parsed(_, snapshot) -> return Val(snapshot)
     None
 }
 
-pub fn jet_driver_check_schema_migrations(request: JetDriverCompileRequest, registration: ^SemaRegistrationGraph, checked: SemaGraphResult, retain_inputs: Bool) -[Env, FS]> JetDriverSchemaCheckResult {
+fn jet_driver_check_schema_migrations(request: JetDriverCompileRequest, registration: ^SemaRegistrationGraph, checked: SemaGraphResult, retain_inputs: Bool) -[Env, FS]> JetDriverSchemaCheckResult {
     if request.schema_snapshots == .Val(snapshots) {
         ingress :: if retain_inputs -> Val(JetDriverSchemaIngress.Supplied{snapshots: snapshots}) else -> None
         checked_schema := sema_check_schema_migration_graph(^registration, checked, snapshots)

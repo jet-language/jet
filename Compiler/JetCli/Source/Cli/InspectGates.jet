@@ -3,7 +3,7 @@
 use jet_driver.[JetDriverCompileRequest, JetDriverAuthorizedSourceSnapshot, JetDriverGateQueryResult, JetDriverSourceQueryModule, JetDriverVerbOutput, jet_driver_gate_query, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
 use jet_foundation.[GateEntry, GateKind, GateLedger, Span, Diagnostic, gate_kind_name, gate_kind_parse, gate_kind_is_security, gate_ledger_push, diagnostic_line_at, diagnostic_column_at, diagnostic_render_all, diagnostic_from_registry]
 
-pub fn jet_cli_gates_entry(args: [String]) -> String? Never! {
+fn jet_cli_gates_entry(args: [String]) -> String? Never! {
     skip := false
     loop argument in args {
         if skip {
@@ -20,13 +20,13 @@ pub fn jet_cli_gates_entry(args: [String]) -> String? Never! {
     None
 }
 
-pub fn jet_cli_gate_external(kind: GateKind, scope: String, source: String, subject: String, detail: String, provenance: [String]) -> GateEntry Never! {
+fn jet_cli_gate_external(kind: GateKind, scope: String, source: String, subject: String, detail: String, provenance: [String]) -> GateEntry Never! {
     GateEntry{kind: kind, domain: "security", scope: scope, source: source, span: None, subject: subject, reason: None, status: Val("recorded"), detail: detail, provenance: provenance, operations: []}
 }
 
 // Host reads the actual canonical TrustStore once; only typed projection lives
 // here. Unknown authorities/raw records survive exactly as the store parsed them.
-pub fn jet_cli_gate_trust_entries(path: String, records: [TrustRecord]) -> [GateEntry] Never! {
+fn jet_cli_gate_trust_entries(path: String, records: [TrustRecord]) -> [GateEntry] Never! {
     rows := [GateEntry]{}
     loop record in records {
         if record == {
@@ -47,7 +47,7 @@ fn jet_cli_gate_invocation_kind(argument: String) -> GateKind? Never! {
 }
 
 // Call before gate_query so policy diagnostics see these same real writers.
-pub fn jet_cli_gate_append_invocation(ledger: &GateLedger, args: [String]) Never! {
+fn jet_cli_gate_append_invocation(ledger: &GateLedger, args: [String]) Never! {
     loop (index, argument) in args {
         kind :: jet_cli_gate_invocation_kind(argument) ?? next
         subject := argument
@@ -117,7 +117,7 @@ fn jet_cli_gates_matches(entry: GateEntry, kind: GateKind?, scope: String?) -> B
 }
 
 // Index selection borrows canonical rows instead of copying GateEntry payloads.
-pub fn jet_cli_gates_report(ledger: GateLedger, modules: [JetDriverSourceQueryModule], kind: GateKind?, scope: String?, json: Bool) -> String Never! {
+fn jet_cli_gates_report(ledger: GateLedger, modules: [JetDriverSourceQueryModule], kind: GateKind?, scope: String?, json: Bool) -> String Never! {
     selected :: loop (index, entry) in ledger.rows if jet_cli_gates_matches(entry, kind, scope) -> index
     if json {
         names := [String]{}
@@ -187,7 +187,7 @@ fn jet_cli_gates_diagnostics(result: JetDriverGateQueryResult, snapshot: JetDriv
 
 // Host prepares the authorized load-only request, including canonical package,
 // lock/trust and invocation writers. Preserve raw argv after `inspect gates`.
-pub fn jet_cli_gates_host(request: JetDriverCompileRequest, args: [String], file: String, color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput {
+fn jet_cli_gates_host(request: JetDriverCompileRequest, args: [String], file: String, color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput {
     result :: jet_driver_gate_query(request)
     if !result.source.complete -> return jet_cli_gates_diagnostics(result, request.authorized_sources, file, color, json)
     kind := GateKind?{None}
@@ -200,7 +200,7 @@ pub fn jet_cli_gates_host(request: JetDriverCompileRequest, args: [String], file
     JetDriverVerbOutput{stdout: jet_cli_gates_report(result.ledger, result.source.modules, kind, scope, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-pub fn jet_cli_gates_usage(what: String, fix: String, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
+fn jet_cli_gates_usage(what: String, fix: String, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
     diagnostic :: diagnostic_from_registry("E2104", None, what, jet_cli_why("E2104"), fix)
     JetDriverVerbOutput{stdout: if json -> jet_cli_report_status_json(diagnostic) else -> "", stderr: if json -> "" else -> diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color), exit_code: JET_DRIVER_EXIT_USAGE}
 }

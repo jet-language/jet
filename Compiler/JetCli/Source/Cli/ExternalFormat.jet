@@ -6,14 +6,14 @@ use jet_parser.jet_format_unified_diff
 
 // Decode only when a diff was selected. External formatters operate on bytes;
 // invalid UTF-8 is displayed with replacement characters, never as empty text.
-pub fn jet_cli_external_fmt_diff(path: String, before: [U8], after: [U8]) -> String Never! {
+fn jet_cli_external_fmt_diff(path: String, before: [U8], after: [U8]) -> String Never! {
     jet_format_unified_diff(path, String.from_bytes_lossy(before), String.from_bytes_lossy(after))
 }
 
 // Collect every staged output before publishing anything. Check/diff never
 // writes originals; ordinary mode publishes changed bytes in input order and
 // retains preceding writes if a subsequent write fails, like the Rust contract.
-pub fn jet_cli_external_fmt_finish(project_dir: String, files: [String], staged: [String], befores: [[U8]], check_only: Bool, show_diff: Bool, json: Bool, color: Bool) -> JetDriverVerbOutput {
+fn jet_cli_external_fmt_finish(project_dir: String, files: [String], staged: [String], befores: [[U8]], check_only: Bool, show_diff: Bool, json: Bool, color: Bool) -> JetDriverVerbOutput {
     changed := [Int]{}
     afters := [[U8]]{}
     loop index in 0..<files.len() {

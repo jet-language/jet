@@ -242,7 +242,7 @@ fn jet_eval_owned_root_drop_value(root: JetEvalOwnedRoot, value: JetEvalRuntimeV
 }
 
 
-pub fn jet_eval_owned_root_drop_values(root: &JetEvalOwnedRoot, values: ^[JetEvalRuntimeValue], adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
+fn jet_eval_owned_root_drop_values(root: &JetEvalOwnedRoot, values: ^[JetEvalRuntimeValue], adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
     machine := jet_eval_owned_root_machine(root, adapter)
     cleaned := true
     loop value in values {
@@ -742,7 +742,7 @@ fn jet_eval_is_unit_attempt(program: MIRProgram, function_id: MIRFunctionID, run
 // plus `added`; `config`'s own are dropped. That equals a fresh machine with
 // the union as `config.globals` (the evaluator only reads globals), without
 // copying every global of a long comptime run once per evaluation.
-pub fn jet_eval_session_function(session: ^JetEvalRuntimeSession, function_id: MIRFunctionID, args: [TComptimeValue], config: ^JetEvalConfig, added: [String:TComptimeValue]) -> JetEvalResult {
+fn jet_eval_session_function(session: ^JetEvalRuntimeSession, function_id: MIRFunctionID, args: [TComptimeValue], config: ^JetEvalConfig, added: [String:TComptimeValue]) -> JetEvalResult {
     reused := ^session
     globals := ^reused.machine.config.globals
     reused.machine.config.globals = [String:TComptimeValue]{}
@@ -931,7 +931,7 @@ fn jet_eval_pure_session_value(machine: &JetEvalMachine, function_id: MIRFunctio
 // resource that did not retire cleanly. A machine per function copied the
 // whole program twice per evaluation (a field move clones), and the caller's
 // recursion retained one copy per evaluation.
-pub fn jet_eval_pure_functions(program: ^MIRProgram, function_ids: [MIRFunctionID], config: JetEvalConfig) -> (program: MIRProgram, values: [TComptimeValue?]) {
+fn jet_eval_pure_functions(program: ^MIRProgram, function_ids: [MIRFunctionID], config: JetEvalConfig) -> (program: MIRProgram, values: [TComptimeValue?]) {
     values := [TComptimeValue?]{}
     span := jet_eval_empty_span()
     first_config := config
@@ -982,9 +982,9 @@ fn jet_eval_pure_session_value(machine: &JetEvalMachine, function_id: MIRFunctio
 }
 
 // A pure evaluation's data value and the program its machine ran on.
-pub struct JetEvalProgramData {
-    pub program: MIRProgram
-    pub value: TComptimeValue?
+struct JetEvalProgramData {
+    program: MIRProgram
+    value: TComptimeValue?
 }
 
 fn jet_eval_program_data(program: ^MIRProgram, value: TComptimeValue?) -> JetEvalProgramData Never! {
@@ -997,7 +997,7 @@ fn jet_eval_program_data(program: ^MIRProgram, value: TComptimeValue?) -> JetEva
 // program through every evaluation instead of copying it per call. The value
 // is None when the evaluation failed, stopped, printed, or left a resource
 // that did not retire cleanly.
-pub fn jet_eval_pure_function(program: ^MIRProgram, function_id: MIRFunctionID, config: ^JetEvalConfig) -> JetEvalProgramData {
+fn jet_eval_pure_function(program: ^MIRProgram, function_id: MIRFunctionID, config: ^JetEvalConfig) -> JetEvalProgramData {
     span := jet_eval_empty_span()
     machine := jet_eval_machine(^program, ^config)
     data := TComptimeValue?{None}
@@ -3454,7 +3454,7 @@ fn jet_eval_host_shape_node(machine: &JetEvalMachine, ty: MIRType, nodes: &[JetE
 }
 
 // The native host supplies one shape-only index for all its ABI queries.
-pub fn jet_eval_host_type_shape_from_program(program: &MIRProgram, rows: &JetEvalProgramRows, checked_type: MIRType, span: Span) -> JetEvalHostTypeShape? {
+fn jet_eval_host_type_shape_from_program(program: &MIRProgram, rows: &JetEvalProgramRows, checked_type: MIRType, span: Span) -> JetEvalHostTypeShape? {
     jet_eval_host_type_shape_from_rows(program, rows, checked_type)
 }
 

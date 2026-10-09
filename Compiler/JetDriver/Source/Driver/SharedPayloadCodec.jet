@@ -5,30 +5,30 @@ use jet_backend.[CoreSharedManifest, CoreSharedNativeLayout, CoreSharedLayoutMem
 use jet_eval.[JetEvalHostTypeShape, JetEvalHostTypeNode]
 use jet_foundation.[MIRType, TComptimeValue, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeField, TComptimeEnumArg, TComptimeReport, Type]
 
-pub struct JetDriverNativePayloadCodec {
-    pub host: JetDriverCoreSourceParentHost
-    pub manifest: CoreSharedManifest
-    pub shape: JetEvalHostTypeShape
-    pub type_key: String
+struct JetDriverNativePayloadCodec {
+    host: JetDriverCoreSourceParentHost
+    manifest: CoreSharedManifest
+    shape: JetEvalHostTypeShape
+    type_key: String
 }
 enum JetDriverNativePayloadOwner {
     Allocation(receipt: X64NativeAllocation)
     Value(slot: Int, drop_address: Int)
 }
-pub struct JetDriverNativePayloadStage {
-    pub pointer: Int
-    pub type_key: String
-    pub initialized: Bool
-    pub refusal_key: String
+struct JetDriverNativePayloadStage {
+    pointer: Int
+    type_key: String
+    initialized: Bool
+    refusal_key: String
     owners: [JetDriverNativePayloadOwner]
 }
-pub struct JetDriverNativePayloadDecoded {
-    pub value: TComptimeValue?
-    pub refusal_key: String
+struct JetDriverNativePayloadDecoded {
+    value: TComptimeValue?
+    refusal_key: String
 }
 // The factory obtains this manifest ONCE for its admitted attachment; each
 // type-specific codec borrows that immutable receipt rather than fetching it.
-pub fn jet_driver_native_payload_codec(host: JetDriverCoreSourceParentHost, manifest: CoreSharedManifest, shape: JetEvalHostTypeShape, type_key: String) -> JetDriverNativePayloadCodec? Never! {
+fn jet_driver_native_payload_codec(host: JetDriverCoreSourceParentHost, manifest: CoreSharedManifest, shape: JetEvalHostTypeShape, type_key: String) -> JetDriverNativePayloadCodec? Never! {
     guard :: host.attachment.guard_read()
     attachment :: guard.value ?? return None
     if attachment.manifest_digest != manifest.digest -> return None
@@ -61,7 +61,7 @@ fn jet_driver_payload_complete(stage: &JetDriverNativePayloadStage, mark: Int, s
     loop stage.owners.len() > mark -> &stage.owners.pop().drop("child ownership moved into the completed native parent")
     if drop_address != 0 -> &stage.owners.push(JetDriverNativePayloadOwner.Value{slot: slot, drop_address: drop_address})
 }
-pub fn jet_driver_native_payload_release(stage: &JetDriverNativePayloadStage) -> String {
+fn jet_driver_native_payload_release(stage: &JetDriverNativePayloadStage) -> String {
     error := ""
     loop stage.owners.len() > 0 {
         owner :: &stage.owners.pop() ?? panic("native ownership journal changed during release")
@@ -459,7 +459,7 @@ fn jet_driver_payload_encode_node(codec: JetDriverNativePayloadCodec, stage: &Je
     jet_driver_payload_complete(&stage, mark, target, drop_address)
     ""
 }
-pub fn jet_driver_native_payload_stage(codec: JetDriverNativePayloadCodec, value: TComptimeValue) -> JetDriverNativePayloadStage {
+fn jet_driver_native_payload_stage(codec: JetDriverNativePayloadCodec, value: TComptimeValue) -> JetDriverNativePayloadStage {
     stage := JetDriverNativePayloadStage{pointer: 0, type_key: codec.type_key, initialized: false, refusal_key: "", owners: [JetDriverNativePayloadOwner]{}}
     row :: jet_driver_payload_layout(codec, codec.type_key) ?? return JetDriverNativePayloadStage{pointer: 0, type_key: codec.type_key, initialized: false, refusal_key: "CoreSharedPayloadLayoutMissing: {codec.type_key}", owners: [JetDriverNativePayloadOwner]{}}
     stage.pointer = jet_driver_payload_allocate(codec, &stage, row.payload_size, row.align)
@@ -666,7 +666,7 @@ fn jet_driver_payload_decode_node(codec: JetDriverNativePayloadCodec, key: Strin
         .Handle(_, _) -> return JetDriverNativePayloadDecoded{value: None, refusal_key: "CoreSharedPayloadPhysicalBindingMissing: {key}"}
     }
 }
-pub fn jet_driver_native_payload_decode(codec: JetDriverNativePayloadCodec, source: Int) -> JetDriverNativePayloadDecoded {
+fn jet_driver_native_payload_decode(codec: JetDriverNativePayloadCodec, source: Int) -> JetDriverNativePayloadDecoded {
     jet_driver_payload_decode_node(codec, codec.type_key, codec.shape.root, source)
 }
 
@@ -684,7 +684,7 @@ fn jet_driver_payload_copy(source: Int, target: Int, size: Int) -> String {
 }
 // The native consumer has moved the payload's initialized bytes. Drop only the
 // temporary root allocation, never the owners now held by that native consumer.
-pub fn jet_driver_native_payload_disown(stage: &JetDriverNativePayloadStage) -> String {
+fn jet_driver_native_payload_disown(stage: &JetDriverNativePayloadStage) -> String {
     if !stage.initialized -> return "CoreSharedPayloadStageNotInitialized: {stage.type_key}"
     if stage.owners.len() > 1 {
         owner :: &stage.owners.pop() ?? panic("initialized payload journal lost its root owner")
@@ -695,7 +695,7 @@ pub fn jet_driver_native_payload_disown(stage: &JetDriverNativePayloadStage) -> 
 // Caller retains the original physical guard. Old typed ownership is moved to
 // the returned journal and must be released only AFTER publish/release, because
 // its drop glue can reenter this same Shared cell.
-pub fn jet_driver_native_payload_swap(codec: JetDriverNativePayloadCodec, stage: &JetDriverNativePayloadStage, guard: Int) -> JetDriverNativePayloadStage {
+fn jet_driver_native_payload_swap(codec: JetDriverNativePayloadCodec, stage: &JetDriverNativePayloadStage, guard: Int) -> JetDriverNativePayloadStage {
     retired := JetDriverNativePayloadStage{pointer: 0, type_key: codec.type_key, initialized: false, refusal_key: "", owners: [JetDriverNativePayloadOwner]{}}
     if !stage.initialized || stage.type_key != codec.type_key {
         retired.refusal_key = "CoreSharedPayloadStageNotInitialized: {codec.type_key}"

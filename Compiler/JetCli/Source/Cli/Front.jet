@@ -151,12 +151,12 @@ struct JetCLIFmtRequest {
     check: Bool
     diff: Bool
     // `--changed`: only the VCS-changed `.jet` files (git).
-    pub changed: Bool
+    changed: Bool
     // `--explicit-copies`: write `.copy()` at each implicit copy site sema reports.
-    pub explicit_copies: Bool
-    pub simplify: Bool
-    pub color: Bool
-    pub quiet: Bool
+    explicit_copies: Bool
+    simplify: Bool
+    color: Bool
+    quiet: Bool
     // `--json`: the Rust status envelopes (`--check` clean/dirty/diff, preflight errors).
     json: Bool{false}
 }
@@ -164,16 +164,16 @@ struct JetCLIFmtRequest {
 // The `jet test` options the Jet host carries out (Source/CmdCompile.rs
 // `TestRunOpts`). `capture` is `failed`, `all`, or `none`; `status` is the
 // stderr status text the Rust host writes before the compile.
-pub struct JetCLITestOptions {
-    pub release: Bool
-    pub capture: String
-    pub filter: String?
-    pub shuffle_seed: String?
-    pub serial: Bool
-    pub trace_tiers: Bool
-    pub update_snapshots: Bool
-    pub project_root: String?
-    pub status: String
+struct JetCLITestOptions {
+    release: Bool
+    capture: String
+    filter: String?
+    shuffle_seed: String?
+    serial: Bool
+    trace_tiers: Bool
+    update_snapshots: Bool
+    project_root: String?
+    status: String
 }
 
 // Commands that validate their own flags (CLI.rs `owns_flag_vocabulary`).
@@ -1208,7 +1208,7 @@ fn jet_cli_wants_json(owned: [String]) -> Bool Never! {
 // Plan one `jet` invocation; `raw` is argv without the program name. Under
 // `--json` a refusal is the `cli` status envelope on stdout (main.rs
 // `emit_cli_report`).
-pub fn jet_cli_front(raw: [String]) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
+fn jet_cli_front(raw: [String]) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
     plan :: jet_cli_plan(raw)
     if plan == {
         .Refused(report, _, exit_code, notice) -> {

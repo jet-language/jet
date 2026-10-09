@@ -1,11 +1,11 @@
 // MIROptimization/Acceleration.rs runtime receipt contract. This decodes facts;
 // it never recomputes the recorded gate decision from current measurements.
 use jet_foundation.[CanonicalJSON, CanonicalJSONField, MIRAccelerationDecision, MIRAccelerationTransform, MIRAccelerationPin, MIRAccelerationGateStatus, MIRAccelerationMeasurement]
-pub MIR_ACCELERATION_RECEIPT_TYPE_NAME :: "AccelerationDecision"
-pub MIR_ACCELERATION_RECEIPT_SECTION_PREFIX :: "jet.acceleration."
-pub MIR_ACCELERATION_RECEIPT_SCHEMA_DIGEST :: "20e12f682eae102174b015d816a7170a9c6042b87ec67722cbee3bf3f0eae388"
+MIR_ACCELERATION_RECEIPT_TYPE_NAME :: "AccelerationDecision"
+MIR_ACCELERATION_RECEIPT_SECTION_PREFIX :: "jet.acceleration."
+MIR_ACCELERATION_RECEIPT_SCHEMA_DIGEST :: "20e12f682eae102174b015d816a7170a9c6042b87ec67722cbee3bf3f0eae388"
 
-pub fn mir_acceleration_json_object(value: CanonicalJSON, label: String, keys: [String]) -> [CanonicalJSONField] String! {
+fn mir_acceleration_json_object(value: CanonicalJSON, label: String, keys: [String]) -> [CanonicalJSONField] String! {
     fields :: if value == .Object(found) -> found else -> { return Err("{label} must be a canonical object") }
     if fields.len() != keys.len() -> return Err("{label} has missing or unknown fields")
     loop key in keys {
@@ -20,16 +20,16 @@ pub fn mir_acceleration_json_object(value: CanonicalJSON, label: String, keys: [
     }
     Ok(fields)
 }
-pub fn mir_acceleration_json_field(fields: [CanonicalJSONField], key: String) -> CanonicalJSON String! {
+fn mir_acceleration_json_field(fields: [CanonicalJSONField], key: String) -> CanonicalJSON String! {
     loop field in fields { if field.key == key -> return Ok(field.value) }
     Err("acceleration field `{key}` is missing")
 }
-pub fn mir_acceleration_json_string(fields: [CanonicalJSONField], key: String) -> String String! {
+fn mir_acceleration_json_string(fields: [CanonicalJSONField], key: String) -> String String! {
     value :: mir_acceleration_json_field(fields, key)
     if value == .String(text) -> return Ok(text)
     Err("acceleration field `{key}` must be a string")
 }
-pub fn mir_acceleration_json_u64(fields: [CanonicalJSONField], key: String) -> U64 String! {
+fn mir_acceleration_json_u64(fields: [CanonicalJSONField], key: String) -> U64 String! {
     value :: mir_acceleration_json_field(fields, key)
     if value == .Integer(text) -> return Ok(U64.parse(text) ?? return Err("acceleration field `{key}` is out of range"))
     Err("acceleration field `{key}` must be an integer")
@@ -40,13 +40,13 @@ fn mir_acceleration_json_optional_u64(fields: [CanonicalJSONField], key: String)
     if value == .Integer(text) -> return Ok(Val(U64.parse(text) ?? return Err("acceleration field `{key}` is out of range")))
     Err("acceleration field `{key}` must be an integer or null")
 }
-pub fn mir_acceleration_json_usize(fields: [CanonicalJSONField], key: String, usize_max: U64) -> U64 String! {
+fn mir_acceleration_json_usize(fields: [CanonicalJSONField], key: String, usize_max: U64) -> U64 String! {
     value :: mir_acceleration_json_u64(fields, key)
     if value > usize_max -> return Err("acceleration field `{key}` is out of range")
     Ok(value)
 }
 
-pub fn mir_acceleration_decision_read(value: CanonicalJSON, usize_max: U64) -> MIRAccelerationDecision String! {
+fn mir_acceleration_decision_read(value: CanonicalJSON, usize_max: U64) -> MIRAccelerationDecision String! {
     fields :: mir_acceleration_json_object(value, "acceleration decision", [String]{"measurement", "pin", "status", "transform"})
     name :: mir_acceleration_json_string(fields, "transform")
     transform :: if name == {

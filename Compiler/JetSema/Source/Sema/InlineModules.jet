@@ -80,33 +80,33 @@ use jet_foundation.[
 
 // A member reached through a `use` inside a module: an inline module member
 // function, or (qualified) a member of a file module imported by this file.
-pub struct SemaInlineTarget {
-    pub module_alias: String
-    pub member: String
-    pub qualified: Bool
+struct SemaInlineTarget {
+    module_alias: String
+    member: String
+    qualified: Bool
 }
 
-pub struct SemaInlineModuleSurface {
-    pub name: String
+struct SemaInlineModuleSurface {
+    name: String
     // Member function name -> written `pub`.
-    pub functions: [String:Bool]
+    functions: [String:Bool]
     // `pub use` inside the module: re-exported local name -> its owner.
-    pub reexports: [String:SemaInlineTarget]
+    reexports: [String:SemaInlineTarget]
 }
 
-pub struct SemaInlineFunctionBinding {
-    pub semantic_name: String
-    pub module_alias: String
-    pub source_name: String
-    pub span: Span
-    pub visibility: Int
+struct SemaInlineFunctionBinding {
+    semantic_name: String
+    module_alias: String
+    source_name: String
+    span: Span
+    visibility: Int
 }
 
 // The existing binder's products, retained after body rewriting for checked
 // metadata references. These contain names/spans only, never function ASTs.
-pub struct SemaInlinePreparedBindings {
-    pub imports: [String:SemaInlineFunctionBinding]
-    pub modules: [SemaInlineModuleSurface]
+struct SemaInlinePreparedBindings {
+    imports: [String:SemaInlineFunctionBinding]
+    modules: [SemaInlineModuleSurface]
 }
 
 struct SemaInlineRewrite {
@@ -218,7 +218,7 @@ fn sema_inline_decode_generated_suffix(suffix: String) -> String? Never! {
     Val(String.from_bytes(out) ?? return None)
 }
 
-pub fn sema_inline_member_name(module_path: String, name: String) -> String Never! {
+fn sema_inline_member_name(module_path: String, name: String) -> String Never! {
     stripped :: if module_path.starts_with("__jet_") -> String.from_bytes(module_path.bytes()[6..<module_path.bytes().len()]) ?? module_path.copy() else -> module_path.copy()
     decoded :: sema_inline_decode_generated_suffix(stripped) ?? stripped
     sema_inline_generated_path("{decoded}.{name}")
@@ -227,7 +227,7 @@ pub fn sema_inline_member_name(module_path: String, name: String) -> String Neve
 // The source name of a lifted member function (`__jet_bank_dopen` -> `open`),
 // so its own body diagnostics name it as written. Any other name is returned
 // unchanged.
-pub fn sema_inline_member_source_name(name: String) -> String Never! {
+fn sema_inline_member_source_name(name: String) -> String Never! {
     if !name.starts_with("__jet_") -> return name.copy()
     decoded :: sema_inline_decode_generated_suffix(String.from_bytes(name.bytes()[6..<name.bytes().len()]) ?? "") ?? return name.copy()
     if !decoded.contains(".") || sema_inline_generated_path(decoded) != name -> return name.copy()
@@ -1314,7 +1314,7 @@ fn sema_program_with_items(program: Program, items: ^[Item]) -> Program Never! {
 
 // Lowers `program`'s inline modules in place; a program without one is left
 // untouched (not copied).
-pub fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> SemaInlinePreparedBindings {
+fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> SemaInlinePreparedBindings {
     has_module := false
     loop item in program.items {
         if item == .CodeModule(definition) {

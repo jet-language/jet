@@ -28,7 +28,7 @@ use core.time as time
 
 /// Verification failure. Every variant and payload is part of the contract.
 #Error
-pub enum AuthError {
+enum AuthError {
     MalformedToken(String)
     UnsupportedToken(String)
     InvalidSignature
@@ -42,22 +42,22 @@ pub enum AuthError {
 }
 
 /// Verified token claims. `audience` is the expected audience the token named.
-pub struct Claims {
-    pub subject: String?
-    pub audience: String
-    pub issuer: String?
-    pub expires_at: Int
-    pub not_before: Int?
-    pub issued_at: Int?
+struct Claims {
+    subject: String?
+    audience: String
+    issuer: String?
+    expires_at: Int
+    not_before: Int?
+    issued_at: Int?
 }
 
 /// A validated session. Neither its display nor its debug view prints the id
 /// or cookie bytes.
-pub struct Session {
-    #Redact pub id: String
-    pub user_id: String
-    #Redact pub cookie: String
-    pub expires_at: Int
+struct Session {
+    #Redact id: String
+    user_id: String
+    #Redact cookie: String
+    expires_at: Int
 
     impl Display {
         fn display(self) -> String { session_show(self) }
@@ -71,7 +71,7 @@ pub struct Session {
 // signed nanoseconds and widens both the expiry and the not-before bound.
 
 /// Verify a three-part HS256 JWT (key at least 32 bytes).
-pub fn verify_jwt(token: String, /, *, key: [U8], audience: String, issuer: String?{None}, clock_skew: Duration{0ms}) -[Time]> Claims AuthError! {
+fn verify_jwt(token: String, /, *, key: [U8], audience: String, issuer: String?{None}, clock_skew: Duration{0ms}) -[Time]> Claims AuthError! {
     if key.len() < 32 -> return Err(AuthError.WeakKey)
     parts :: split_dot(token)
     if parts.len() != 3 || parts[0].len() == 0 || parts[1].len() == 0 || parts[2].len() == 0 {
@@ -91,7 +91,7 @@ pub fn verify_jwt(token: String, /, *, key: [U8], audience: String, issuer: Stri
 
 /// Verify a `v4.public` PASETO with a 32-byte Ed25519 public key. `footer`
 /// must equal the token footer; `implicit` is the implicit assertion.
-pub fn verify_paseto(token: String, /, *, key: [U8], audience: String, issuer: String?{None}, clock_skew: Duration{0ms}, footer: [U8]{[U8]{}}, implicit: [U8]{[U8]{}}) -[Time]> Claims AuthError! {
+fn verify_paseto(token: String, /, *, key: [U8], audience: String, issuer: String?{None}, clock_skew: Duration{0ms}, footer: [U8]{[U8]{}}, implicit: [U8]{[U8]{}}) -[Time]> Claims AuthError! {
     if key.len() != 32 -> return Err(AuthError.WeakKey)
     parts :: split_dot(token)
     if parts.len() < 3 || parts.len() > 4 || parts[0] != "v4" || parts[1] != "public" {
@@ -318,16 +318,16 @@ fn b64url_value(b: U8) -> Int Never! {
 // Until the world Shared root/reset seam lands, only the byte-cell operation
 // remains in the existing host. The source CAS replacement is preserved in
 // commit 82149c775 and must land with that seam, never as a parallel store.
-pub fn __store_load() -[DB]> [U8] Never! {
+fn __store_load() -[DB]> [U8] Never! {
     core.auth.__state_load()
 }
 
-pub fn __store_replace(expected: [U8], next: [U8]) -[DB]> Bool Never! {
+fn __store_replace(expected: [U8], next: [U8]) -[DB]> Bool Never! {
     core.auth.__state_replace(expected, next)
 }
 
 /// Register an identity with an already-computed password hash.
-pub fn register_user(user_id: String, password_hash: String) Err! -[DB]> {
+fn register_user(user_id: String, password_hash: String) Err! -[DB]> {
     if !valid_identifier(user_id, 512) -> return Err("user id is invalid")
     if password_hash.trim().len() == 0 || password_hash.len() > 4096 -> return Err("password hash is invalid")
     delivery :: delivery_capability(user_id)
@@ -343,7 +343,7 @@ pub fn register_user(user_id: String, password_hash: String) Err! -[DB]> {
 }
 
 /// Check the credentials and issue a session valid until `now_ms + ttl_ms`.
-pub fn password_login(user_id: String, password_hash: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Session Err! {
+fn password_login(user_id: String, password_hash: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Session Err! {
     session :: new_session(user_id, now_ms, ttl_ms)
     loop {
         seen :: core.auth.__store_load()
@@ -359,7 +359,7 @@ pub fn password_login(user_id: String, password_hash: String, now_ms: Int, ttl_m
 }
 
 /// The live session named by `session_id` at `now_ms`.
-pub fn session_validate(session_id: String, now_ms: Int) -[DB]> Session Err! {
+fn session_validate(session_id: String, now_ms: Int) -[DB]> Session Err! {
     if !valid_session_id(session_id) -> return Err("missing: session")
     records :: decode_store(core.auth.__store_load()) ?? return Err("auth store is unavailable")
     loop record in records {
@@ -372,7 +372,7 @@ pub fn session_validate(session_id: String, now_ms: Int) -[DB]> Session Err! {
 }
 
 /// Issue a single-use magic-link token for a registered delivery identity.
-pub fn magic_link_issue(user_id: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> String Err! {
+fn magic_link_issue(user_id: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> String Err! {
     expires_at :: expiry(now_ms, ttl_ms)
     if !valid_identifier(user_id, 512) -> return Err("user id is invalid")
     delivery :: delivery_capability(user_id) ?? return Err("magic link requires a delivery-capable identity")
@@ -391,7 +391,7 @@ pub fn magic_link_issue(user_id: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> 
 }
 
 /// Consume a live magic-link token once and issue its session.
-pub fn magic_link_consume(token: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Session Err! {
+fn magic_link_consume(token: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Session Err! {
     _ :: expiry(now_ms, ttl_ms)
     if !valid_identifier(token, 256) -> return Err("token expired")
     loop {
@@ -416,7 +416,7 @@ pub fn magic_link_consume(token: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> 
 
 /// Start a provider-backed OAuth flow. The returned opaque state is also the
 /// OIDC nonce the provider assertion must carry.
-pub fn oauth_begin(provider: String) -[DB, Env, Time, Rand]> String Err! {
+fn oauth_begin(provider: String) -[DB, Env, Time, Rand]> String Err! {
     _ :: oauth_config(provider)
     now_ms :: time.unix_ns() /% 1000000
     expires_at :: checked_i64(now_ms + 600000) ?? return Err("OAuth state lifetime is out of range")
@@ -448,7 +448,7 @@ pub fn oauth_begin(provider: String) -[DB, Env, Time, Rand]> String Err! {
 }
 
 /// Finish an OAuth flow with the provider's HS256 assertion.
-pub fn oauth_finish(state: String, assertion: String, now_ms: Int, ttl_ms: Int) -[DB, Env, Rand]> Session Err! {
+fn oauth_finish(state: String, assertion: String, now_ms: Int, ttl_ms: Int) -[DB, Env, Rand]> Session Err! {
     if !valid_identifier(state, 256) || assertion.len() == 0 -> return Err("OAuth completion is invalid")
     loop {
         seen :: core.auth.__store_load()
@@ -469,10 +469,10 @@ fn session_user(session: Session) -> String Never! { session.user_id }
 
 fn session_cookie(session: Session) -> String Never! { session.cookie }
 
-pub fn session_id(session: Session) -> String Never! { session.id }
+fn session_id(session: Session) -> String Never! { session.id }
 
 /// A redacted summary: the id and cookie bytes are never printed.
-pub fn session_show(session: Session) -> String Never! {
+fn session_show(session: Session) -> String Never! {
     "Session(id=<redacted>, user={session.user_id}, exp={session.expires_at}, cookie_len={session.cookie.bytes().len()})"
 }
 

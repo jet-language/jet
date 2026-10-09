@@ -4,28 +4,28 @@
 // their real projection. Width is the canonical x64 usize domain (U64).
 use jet_foundation.[foundation_read_bytes_scalar_at]
 
-pub enum JetCLIColorRequest {
+enum JetCLIColorRequest {
     Auto
     Always
     Never
 }
-pub struct JetCLIOutputFacts {
-    pub tty: Bool
-    pub term: [U8]?
-    pub no_color: Bool
-    pub force_color: Bool
-    pub requested_color: JetCLIColorRequest
-    pub json: Bool
-    pub width: U64?
-    pub unicode: Bool
+struct JetCLIOutputFacts {
+    tty: Bool
+    term: [U8]?
+    no_color: Bool
+    force_color: Bool
+    requested_color: JetCLIColorRequest
+    json: Bool
+    width: U64?
+    unicode: Bool
 }
-pub enum JetCLIOutputChannel {
+enum JetCLIOutputChannel {
     HumanStdout
     HumanStderr
     MachineStdout
     Hidden
 }
-pub enum JetCLIOutputKind {
+enum JetCLIOutputKind {
     Renderable
     Status
     Log
@@ -33,18 +33,18 @@ pub enum JetCLIOutputKind {
     Machine
 }
 #Error
-pub enum JetCLIOutputProfileError {
+enum JetCLIOutputProfileError {
     InvalidColorRequest(value: [U8])
     InvalidTerm(value: [U8])
     InvalidWidth(value: U64)
 }
-pub struct JetCLIOutputProfile {
-    pub width: U64
-    pub ansi_enabled: Bool
-    pub unicode_enabled: Bool
-    pub progress_enabled: Bool
-    pub human_enabled: Bool
-    pub machine_enabled: Bool
+struct JetCLIOutputProfile {
+    width: U64
+    ansi_enabled: Bool
+    unicode_enabled: Bool
+    progress_enabled: Bool
+    human_enabled: Bool
+    machine_enabled: Bool
 }
 
 JET_CLI_COLOR_AUTO_BYTES :: prep { [U8]{97, 117, 116, 111} }
@@ -52,7 +52,7 @@ JET_CLI_COLOR_ALWAYS_BYTES :: prep { [U8]{97, 108, 119, 97, 121, 115} }
 JET_CLI_COLOR_NEVER_BYTES :: prep { [U8]{110, 101, 118, 101, 114} }
 JET_CLI_TERM_DUMB_BYTES :: prep { [U8]{100, 117, 109, 98} }
 
-pub fn jet_cli_color_request(value: [U8]) -> JetCLIColorRequest JetCLIOutputProfileError! {
+fn jet_cli_color_request(value: [U8]) -> JetCLIColorRequest JetCLIOutputProfileError! {
     if value == JET_CLI_COLOR_AUTO_BYTES -> return Ok(.Auto)
     if value == JET_CLI_COLOR_ALWAYS_BYTES -> return Ok(.Always)
     if value == JET_CLI_COLOR_NEVER_BYTES -> return Ok(.Never)
@@ -72,7 +72,7 @@ fn jet_cli_output_term_control(term: [U8]) -> Bool Never! {
     false
 }
 
-pub fn jet_cli_output_profile(facts: JetCLIOutputFacts) -> JetCLIOutputProfile JetCLIOutputProfileError! {
+fn jet_cli_output_profile(facts: JetCLIOutputFacts) -> JetCLIOutputProfile JetCLIOutputProfileError! {
     dumb := false
     if facts.term == .Val(term) {
         if term.len() == 0 || jet_cli_output_term_control(term) -> return Err(.InvalidTerm(~term))
@@ -96,7 +96,7 @@ pub fn jet_cli_output_profile(facts: JetCLIOutputFacts) -> JetCLIOutputProfile J
     })
 }
 
-pub fn jet_cli_output_channel(profile: JetCLIOutputProfile, kind: JetCLIOutputKind) -> JetCLIOutputChannel Never! {
+fn jet_cli_output_channel(profile: JetCLIOutputProfile, kind: JetCLIOutputKind) -> JetCLIOutputChannel Never! {
     if profile.machine_enabled {
         if kind == .Machine -> return .MachineStdout
         return .Hidden

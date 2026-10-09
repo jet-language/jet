@@ -329,7 +329,7 @@ fn sema_shared_access_project_place(value: Expr, environment: SemaScopeEnvironme
     }
 }
 
-pub fn sema_shared_access_write_place(target: LValue, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> (handle: Expr, target: LValue, span: Span)? {
+fn sema_shared_access_write_place(target: LValue, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> (handle: Expr, target: LValue, span: Span)? {
     if target == {
         .Field(base, field, span) -> {
             projected :: sema_shared_access_project_place(base, environment, &scopes) ?? return None
@@ -343,7 +343,7 @@ pub fn sema_shared_access_write_place(target: LValue, environment: SemaScopeEnvi
     }
 }
 
-pub fn sema_shared_access_desugar_place_write(handle: Expr, target: LValue, op: BinOp?, op_span: Span, value: Expr, span: Span) -> Expr Never! {
+fn sema_shared_access_desugar_place_write(handle: Expr, target: LValue, op: BinOp?, op_span: Span, value: Expr, span: Span) -> Expr Never! {
     assignment :: Stmt.Assign{target: target, op: op, op_span: op_span, value: value}
     sema_shared_access_call(handle, "edit", LambdaBody.Block{body: [Stmt]{assignment}}, span)
 }

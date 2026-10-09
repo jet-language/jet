@@ -14,7 +14,7 @@ use core as core
 // Ordinary source values: construction, matching, equality and ownership use
 // the compiler's existing record/enum rails, not service-specific handles.
 #Error
-pub enum ServiceError {
+enum ServiceError {
     Full(String)
     Ambiguous(String)
     Unknown(String)
@@ -55,7 +55,7 @@ enum DeliveryState {
     Cancelled
 }
 
-pub fn delivery_state_show(state: DeliveryState) -> String Never! {
+fn delivery_state_show(state: DeliveryState) -> String Never! {
     if state == {
         .Pending -> "Pending"
         .Accepted -> "Accepted"
@@ -127,7 +127,7 @@ fn task_outcome_show(outcome: TaskOutcome) -> String Never! {
 
 // Byte-exact current token-derived key. This intentionally does not introduce
 // a signing-key registry or strengthen the existing authority proof.
-pub fn __authority_signing_key(authority: String) -> [U8] ServiceError! {
+fn __authority_signing_key(authority: String) -> [U8] ServiceError! {
     raw :: authority.bytes()
     if raw.len() != 67 || raw[0] != (U8{115}) || raw[1] != (U8{97}) || raw[2] != (U8{45}) {
         return Err(ServiceError.Revoked("service authority proof is malformed"))
@@ -150,7 +150,7 @@ fn authority_hex_digit(value: Int) -> Int? Never! {
 
 // ServiceAuthority::service_authority_validate_endpoint / authority_validate:
 // keep input checks and all authoritative fallback/status decisions in source.
-pub fn __authority_validate(endpoint: ServiceEndpoint) ServiceError! {
+fn __authority_validate(endpoint: ServiceEndpoint) ServiceError! {
     #Unsafe("one existing registry read snapshots exact and candidate facts; no second authority or resource carrier") {
         identity :: core.service.__endpoint_identity_parts(endpoint)
         if validate_endpoint_identity(identity.authority, identity.tree, identity.worker, identity.generation) == {
@@ -260,21 +260,21 @@ fn valid_authority_token(authority: String) -> Bool Never! {
     assert(if validate_endpoint_identity(token, "tree", "worker", 0) == {.Err(.Policy(message)) -> message == "service endpoint generation must be positive" else -> false})
 }
 
-pub fn endpoint_show(endpoint: ServiceEndpoint) -> String Never! {
+fn endpoint_show(endpoint: ServiceEndpoint) -> String Never! {
     #Unsafe("read the existing endpoint's tree, worker and generation fields") {
         parts :: core.service.__endpoint_parts(endpoint)
         return "Endpoint({parts.tree}/{parts.worker}@g{parts.generation})"
     }
 }
 
-pub fn set_delivery(tree: &ServiceTree, delivery: ServiceDelivery) ServiceError! {
+fn set_delivery(tree: &ServiceTree, delivery: ServiceDelivery) ServiceError! {
     #Unsafe("Services3081: check started before the single delivery-field write") {
         if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change delivery after start"))
         core.service.__tree_write_delivery(&tree, delivery)
     }
 }
 
-pub fn set_restart(tree: &ServiceTree, restart: ServiceRestart) ServiceError! {
+fn set_restart(tree: &ServiceTree, restart: ServiceRestart) ServiceError! {
     #Unsafe("Services1415: root policy write precedes each declared group policy write") {
         if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change restart policy after start"))
         core.service.__tree_write_restart(&tree, restart)
@@ -283,7 +283,7 @@ pub fn set_restart(tree: &ServiceTree, restart: ServiceRestart) ServiceError! {
     }
 }
 
-pub fn drain_dead_letters(tree: &ServiceTree) -> Int ServiceError! {
+fn drain_dead_letters(tree: &ServiceTree) -> Int ServiceError! {
     #Unsafe("Services3220: tree's exclusive write borrow covers count then clear") {
         if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
         count :: core.service.__tree_dead_letter_count(tree)
@@ -292,7 +292,7 @@ pub fn drain_dead_letters(tree: &ServiceTree) -> Int ServiceError! {
     }
 }
 
-pub fn set_state_empty(tree: &ServiceTree) ServiceError! {
+fn set_state_empty(tree: &ServiceTree) ServiceError! {
     #Unsafe("Services3231: started and record checks precede adapter then authority writes") {
         if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change state adapter after start"))
         if core.service.__tree_has_snapshot(tree) || core.service.__tree_event_count(tree) != 0 {
@@ -304,11 +304,11 @@ pub fn set_state_empty(tree: &ServiceTree) ServiceError! {
 }
 
 // Services3247/3274: identical checks, then adapter followed by authority.
-pub fn set_state_snapshot(tree: &ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! {
+fn set_state_snapshot(tree: &ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! {
     select_state_adapter(&tree, store, schema, version, migration, false)
 }
 
-pub fn set_state_event_log(tree: &ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! {
+fn set_state_event_log(tree: &ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! {
     select_state_adapter(&tree, store, schema, version, migration, true)
 }
 
@@ -343,7 +343,7 @@ fn valid_service_text(text: String, limit: Int) -> Bool Never! {
     true
 }
 
-pub fn restore_snapshot(tree: ServiceTree) -> String ServiceError! {
+fn restore_snapshot(tree: ServiceTree) -> String ServiceError! {
     #Unsafe("Services4437: authority lookup, durable load, first record, then checked framing") {
         authority :: core.service.__tree_state_authority(tree) ?? return Err(ServiceError.Policy("Snapshot state has no injected authority"))
         records :: if core.service.__state_load(tree, false) == {
@@ -357,7 +357,7 @@ pub fn restore_snapshot(tree: ServiceTree) -> String ServiceError! {
     }
 }
 
-pub fn replay_events(tree: ServiceTree) -> String Never! {
+fn replay_events(tree: ServiceTree) -> String Never! {
     #Unsafe("Services4493: replay existing in-memory records without issuing a store read") {
         authority :: core.service.__tree_state_authority(tree)
         version :: if authority == {.Val(value) -> value.version else -> 1}
@@ -392,13 +392,13 @@ fn read_state_record(prefix: String, record: String) -> String ServiceError! {
     String.from_bytes(raw.slice(separator + 1, raw.len())) ?? return Err(ServiceError.Policy("state record length does not match payload"))
 }
 
-pub fn upgrade_receipt(tree: ServiceTree) -> ServiceUpgradeReceipt ServiceError! {
+fn upgrade_receipt(tree: ServiceTree) -> ServiceUpgradeReceipt ServiceError! {
     #Unsafe("Services6729: copy the existing optional last-upgrade field") {
         return core.service.__tree_upgrade_receipt(tree) ?? return Err(ServiceError.Policy("service tree has no completed generation handoff"))
     }
 }
 
-pub fn __upgrade_receipt_display(receipt: ServiceUpgradeReceipt) -> String Never! {
+fn __upgrade_receipt_display(receipt: ServiceUpgradeReceipt) -> String Never! {
     #Unsafe("Services1153: plain field projection; rollback store remains omitted from all text views") {
         parts :: core.service.__upgrade_receipt_parts(receipt)
         pinned :: parts.pinned_shards.join(",")
@@ -406,7 +406,7 @@ pub fn __upgrade_receipt_display(receipt: ServiceUpgradeReceipt) -> String Never
     }
 }
 
-pub fn tree_show(tree: ServiceTree) -> String Never! {
+fn tree_show(tree: ServiceTree) -> String Never! {
     #Unsafe("Services1265: read the existing topology fields, preserve handler insertion order") {
         parts :: core.service.__tree_display_parts(tree)
         handlers := [String]{}
@@ -424,7 +424,7 @@ pub fn tree_show(tree: ServiceTree) -> String Never! {
     }
 }
 
-pub fn workflow_history(tree: ServiceTree, run_id: Int) -> String ServiceError! {
+fn workflow_history(tree: ServiceTree, run_id: Int) -> String ServiceError! {
     #Unsafe("Services5867: durable replay before lookup; first matching run wins") {
         workflows :: if core.service.__workflow_replay_parts(tree) == {
             .Ok(value) -> value
@@ -439,7 +439,7 @@ pub fn workflow_history(tree: ServiceTree, run_id: Int) -> String ServiceError! 
     }
 }
 
-pub fn workflow_outcome(tree: ServiceTree, run_id: Int) -> TaskOutcome ServiceError! {
+fn workflow_outcome(tree: ServiceTree, run_id: Int) -> TaskOutcome ServiceError! {
     #Unsafe("Services5879: durable replay before lookup; missing or nonterminal run is Policy") {
         workflows :: if core.service.__workflow_replay_parts(tree) == {
             .Ok(value) -> value
@@ -456,7 +456,7 @@ pub fn workflow_outcome(tree: ServiceTree, run_id: Int) -> TaskOutcome ServiceEr
     }
 }
 
-pub fn observe(tree: ServiceTree) -> String Never! {
+fn observe(tree: ServiceTree) -> String Never! {
     #Unsafe("Services6978: project existing runtime facts; source owns counts and text") {
         parts :: core.service.__tree_observation_parts(tree)
         running := 0
@@ -537,7 +537,7 @@ struct ServiceStateStore {
     path: String
 }
 
-pub fn tree(name: String) -> ServiceTree Never! {
+fn tree(name: String) -> ServiceTree Never! {
     #Unsafe("Allocation only: source supplies every Services.rs initializer field at 2d9953adf:1293-1319, in native evaluation order") {
         return core.service.__tree_allocate(
             "", // native 1295: authority
@@ -577,11 +577,11 @@ pub fn tree(name: String) -> ServiceTree Never! {
     assert(dead_letter_count(fresh) == 0)
 }
 
-pub fn runtime(store: String, retention: Duration) -> ServiceRuntime Never! {
+fn runtime(store: String, retention: Duration) -> ServiceRuntime Never! {
     ServiceRuntime{store: store, retention_ms: retention.ns /% 1000000}
 }
 
-pub fn state_store(path: String) -[FS.Read]> ServiceStateStore ServiceError! {
+fn state_store(path: String) -[FS.Read]> ServiceStateStore ServiceError! {
     if !valid_store_text(path) {
         return Err(ServiceError.Policy("service state store is empty, too long, or contains control characters"))
     }
@@ -618,39 +618,39 @@ fn state_path_kind(path: String) -[FS.Read]> Int IOError! {
     }
 }
 
-pub fn restart_one_for_one() -> ServiceRestart Never! {
+fn restart_one_for_one() -> ServiceRestart Never! {
     ServiceRestart.OneForOne
 }
 
-pub fn restart_one_for_all() -> ServiceRestart Never! {
+fn restart_one_for_all() -> ServiceRestart Never! {
     ServiceRestart.OneForAll
 }
 
-pub fn restart_rest_for_one() -> ServiceRestart Never! {
+fn restart_rest_for_one() -> ServiceRestart Never! {
     ServiceRestart.RestForOne
 }
 
-pub fn delivery_at_most_once() -> ServiceDelivery Never! {
+fn delivery_at_most_once() -> ServiceDelivery Never! {
     ServiceDelivery.AtMostOnce
 }
 
-pub fn delivery_durable() -> ServiceDelivery Never! {
+fn delivery_durable() -> ServiceDelivery Never! {
     ServiceDelivery.DurableAtLeastOnce
 }
 
-pub fn directory_generation(tree: ServiceTree) -> Int Never! {
+fn directory_generation(tree: ServiceTree) -> Int Never! {
     #Unsafe("read the checked service tree's generation field without mutating or copying its scheduler carrier") {
         return core.service.__tree_generation(tree)
     }
 }
 
-pub fn event_count(tree: ServiceTree) -> Int Never! {
+fn event_count(tree: ServiceTree) -> Int Never! {
     #Unsafe("read event-log storage length on the checked service tree") {
         return core.service.__tree_event_count(tree)
     }
 }
 
-pub fn dead_letter_count(tree: ServiceTree) -> Int Never! {
+fn dead_letter_count(tree: ServiceTree) -> Int Never! {
     #Unsafe("read dead-letter storage length on the checked service tree") {
         return core.service.__tree_dead_letter_count(tree)
     }
@@ -852,7 +852,7 @@ fn state_prefix(raw: [U8], windows: Bool) -> StatePathPrefix Never! {
 
 // Workflow tree operations preserve the Rust exclusive borrow over every
 // decision and cursor write. Handle-only wait points retain their mutex leaf.
-pub fn workflow_start(tree: &ServiceTree, id: String, version: Int) -> ServiceWorkflow ServiceError! {
+fn workflow_start(tree: &ServiceTree, id: String, version: Int) -> ServiceWorkflow ServiceError! {
     #Unsafe("Services5439-5507: synchronize before validation; exact version replay precedes active-version rejection") {
         if workflow_prepare(&tree) == {
             .Err(error) -> return Err(error)
@@ -889,7 +889,7 @@ pub fn workflow_start(tree: &ServiceTree, id: String, version: Int) -> ServiceWo
     }
 }
 
-pub fn workflow_step(tree: &ServiceTree, run_id: Int, step: String) ServiceError! {
+fn workflow_step(tree: &ServiceTree, run_id: Int, step: String) ServiceError! {
     #Unsafe("Services5656-5705: exclusive tree borrow keeps replay and append cursor decisions indivisible") {
         if workflow_prepare(&tree) == {
             .Err(error) -> return Err(error)
@@ -920,7 +920,7 @@ pub fn workflow_step(tree: &ServiceTree, run_id: Int, step: String) ServiceError
     }
 }
 
-pub fn workflow_activity(tree: &ServiceTree, run_id: Int, activity: String, key: String, max_attempts: Int) -> TaskStatus ServiceError! {
+fn workflow_activity(tree: &ServiceTree, run_id: Int, activity: String, key: String, max_attempts: Int) -> TaskStatus ServiceError! {
     #Unsafe("Services5708-5789: first recorded definition wins; replay precedes terminal checks") {
         if workflow_prepare(&tree) == {
             .Err(error) -> return Err(error)
@@ -973,7 +973,7 @@ pub fn workflow_activity(tree: &ServiceTree, run_id: Int, activity: String, key:
     }
 }
 
-pub fn workflow_activity_retry(tree: &ServiceTree, run_id: Int, key: String, outcome: TaskOutcome) -> TaskStatus ServiceError! {
+fn workflow_activity_retry(tree: &ServiceTree, run_id: Int, key: String, outcome: TaskOutcome) -> TaskStatus ServiceError! {
     #Unsafe("Services5792-5867: replay consumes recorded attempts, never derives another attempt from replayed state") {
         if workflow_prepare(&tree) == {
             .Err(error) -> return Err(error)
@@ -1008,7 +1008,7 @@ pub fn workflow_activity_retry(tree: &ServiceTree, run_id: Int, key: String, out
     }
 }
 
-pub fn workflow_activity_complete(tree: &ServiceTree, run_id: Int, key: String, outcome: TaskOutcome) -> TaskOutcome ServiceError! {
+fn workflow_activity_complete(tree: &ServiceTree, run_id: Int, key: String, outcome: TaskOutcome) -> TaskOutcome ServiceError! {
     #Unsafe("Services5870-5950: two replay entries advance together; identical terminal completions are idempotent") {
         if workflow_prepare(&tree) == {
             .Err(error) -> return Err(error)
@@ -1184,7 +1184,7 @@ fn workflow_replay_retry(tree: &ServiceTree, index: Int, key: String, maximum: I
     assert(workflow_outcome_wire(TaskOutcome.Panicked("λ")) == "Panicked:2:λ")
 }
 
-pub fn group(tree: ServiceTree, name: String, workers: [String]) ServiceError! {
+fn group(tree: ServiceTree, name: String, workers: [String]) ServiceError! {
     #Unsafe("Services1546: exclusive tree write borrow preserves validation, reparent, append ordering") {
         if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot add groups after start"))
         facts :: core.service.__group_parts(tree)
@@ -1230,7 +1230,7 @@ fn validate_group(name: String, workers: [String], known: [String], groups: [(na
     }
 }
 
-pub fn chaos_fail(tree: ServiceTree) -> Int ServiceError! {
+fn chaos_fail(tree: ServiceTree) -> Int ServiceError! {
     #Unsafe("Services7044: counter write precedes reachable-worker selection and canonical failure policy") {
         if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
         counter :: core.service.__tree_chaos_count(tree)
@@ -1246,7 +1246,7 @@ pub fn chaos_fail(tree: ServiceTree) -> Int ServiceError! {
     }
 }
 
-pub fn append_event(tree: ServiceTree, event: String) ServiceError! {
+fn append_event(tree: ServiceTree, event: String) ServiceError! {
     #Unsafe("Services4575: source owns adapter/authority/payload/count checks and record framing; store append before field push") {
         if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
         // CoreEnumRows registers Empty, Snapshot, EventLog; only EventLog permits append.
@@ -1266,7 +1266,7 @@ pub fn append_event(tree: ServiceTree, event: String) ServiceError! {
     }
 }
 
-pub fn commit_snapshot(tree: ServiceTree, payload: String) ServiceError! {
+fn commit_snapshot(tree: ServiceTree, payload: String) ServiceError! {
     #Unsafe("Services4525: host record-write leaf retains existing mutex through store write and field assignment; no guard exposed") {
         if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
         // CoreEnumRows registers Empty, Snapshot, EventLog; only Snapshot permits commit.
@@ -1324,7 +1324,7 @@ fn route_generation_allowed(generation: Int, upgrade: (from_generation: Int, to_
     false
 }
 
-pub fn directory_resolve(tree: ServiceTree, name: String) -> ServiceEndpoint ServiceError! {
+fn directory_resolve(tree: ServiceTree, name: String) -> ServiceEndpoint ServiceError! {
     #Unsafe("Services6081: exact directory lookup, generation, proof, authority, running, draining order") {
         entry :: core.service.__directory_entry(tree, name) ?? return Err(ServiceError.Unknown("directory has no entry `{name}`"))
         parts :: core.service.__tree_route_parts(tree)
@@ -1348,7 +1348,7 @@ pub fn directory_resolve(tree: ServiceTree, name: String) -> ServiceEndpoint Ser
     }
 }
 
-pub fn send(tree: ServiceTree, endpoint: ServiceEndpoint, message: String) ServiceError! {
+fn send(tree: ServiceTree, endpoint: ServiceEndpoint, message: String) ServiceError! {
     #Unsafe("Services2558: source owns routing, message checks, worker gate, capacity error text, post-send ordering") {
         if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
         if validate_tree_endpoint(tree, endpoint) == {
@@ -1439,15 +1439,15 @@ struct __MailboxRead {
     message: String
 }
 
-pub struct DeliveryEvent {
-    pub sequence: Int
-    pub state: DeliveryState
-    pub attempts: Int
-    pub timestamp: Int
-    pub signature: String
+struct DeliveryEvent {
+    sequence: Int
+    state: DeliveryState
+    attempts: Int
+    timestamp: Int
+    signature: String
 }
 
-pub fn delivery_status(delivery: Delivery) -> DeliveryState ServiceError! {
+fn delivery_status(delivery: Delivery) -> DeliveryState ServiceError! {
     #Unsafe("ServiceAuthority2504: one existing locked durable read, then the owned entry's state") {
         facts :: if core.service.__delivery_read(delivery, false) == {
             .Ok(value) -> value
@@ -1457,12 +1457,12 @@ pub fn delivery_status(delivery: Delivery) -> DeliveryState ServiceError! {
     }
 }
 
-pub fn delivery_wait(delivery: Delivery) -> DeliveryState ServiceError! {
+fn delivery_wait(delivery: Delivery) -> DeliveryState ServiceError! {
     // Native wait is a single status sample, not polling or a scheduler wait.
     delivery_status(delivery)
 }
 
-pub fn delivery_receipt(delivery: Delivery) -> DeliveryReceipt ServiceError! {
+fn delivery_receipt(delivery: Delivery) -> DeliveryReceipt ServiceError! {
     #Unsafe("ServiceAuthority2517: same locked read; receipt fields and signature are source policy") {
         facts :: if core.service.__delivery_read(delivery, false) == {
             .Ok(value) -> value
@@ -1476,7 +1476,7 @@ pub fn delivery_receipt(delivery: Delivery) -> DeliveryReceipt ServiceError! {
     }
 }
 
-pub fn delivery_events(delivery: Delivery) -> [DeliveryEvent] ServiceError! {
+fn delivery_events(delivery: Delivery) -> [DeliveryEvent] ServiceError! {
     #Unsafe("ServiceAuthority2535-2647: one locked read, then exact record filtering, error order and signature validation") {
         facts :: if core.service.__delivery_read(delivery, true) == {
             .Ok(value) -> value
@@ -1525,7 +1525,7 @@ pub fn delivery_events(delivery: Delivery) -> [DeliveryEvent] ServiceError! {
     }
 }
 
-pub fn delivery_retry(delivery: Delivery) -> Delivery ServiceError! {
+fn delivery_retry(delivery: Delivery) -> Delivery ServiceError! {
     #Unsafe("ServiceAuthority2650: validate/read first, then an exact zero-retention runtime and existing retry operation") {
         if core.service.__delivery_probe(delivery) == {
             .Err(error) -> return Err(error)
@@ -1536,7 +1536,7 @@ pub fn delivery_retry(delivery: Delivery) -> Delivery ServiceError! {
     }
 }
 
-pub fn endpoint_receive(endpoint: ServiceEndpoint) -> String ServiceError! {
+fn endpoint_receive(endpoint: ServiceEndpoint) -> String ServiceError! {
     #Unsafe("ServiceAuthority1297: identity checks, existing two registry reads/captured Arc, conditional depth check, one receive") {
         identity :: core.service.__endpoint_identity_parts(endpoint)
         if validate_endpoint_identity(identity.authority, identity.tree, identity.worker, identity.generation) == {
@@ -1645,7 +1645,7 @@ fn local_delivery_ids(tree: ServiceTree, endpoint: ServiceEndpoint, store: Strin
     }
 }
 
-pub fn send_durable(tree: ServiceTree, endpoint: ServiceEndpoint, message: String, idempotency_key: String) -> Delivery ServiceError! {
+fn send_durable(tree: ServiceTree, endpoint: ServiceEndpoint, message: String, idempotency_key: String) -> Delivery ServiceError! {
     #Unsafe("Services3127: no enclosing lock; source owns local deduplication/admission/rollback orchestration") {
         if core.service.__tree_delivery(tree) != ServiceDelivery.DurableAtLeastOnce -> return Err(ServiceError.Policy("send_durable requires DurableAtLeastOnce delivery"))
         authority :: core.service.__tree_state_authority(tree) ?? return Err(ServiceError.Policy("durable service delivery needs its injected authority"))
@@ -1718,7 +1718,7 @@ pub fn send_durable(tree: ServiceTree, endpoint: ServiceEndpoint, message: Strin
     }
 }
 
-pub fn receive(tree: ServiceTree, endpoint: ServiceEndpoint) -> String ServiceError! {
+fn receive(tree: ServiceTree, endpoint: ServiceEndpoint) -> String ServiceError! {
     #Unsafe("Services2629: no enclosing guard; existing atomic authority operations retain their locks") {
         if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
         if validate_tree_endpoint(tree, endpoint) == {
@@ -1871,7 +1871,7 @@ enum __WorkerTopologyKind { Supervisor Task }
 enum __WorkerTopologyState { Starting Running Failed Restarting Stopping Stopped Escalated }
 enum __WorkerRestartReason { Failed Exited HealthCheck Manual Policy }
 
-pub fn worker(tree: &ServiceTree, name: String, handler: __WorkerHandler, handler_name: String, capacity: Int) -> ServiceEndpoint ServiceError! {
+fn worker(tree: &ServiceTree, name: String, handler: __WorkerHandler, handler_name: String, capacity: Int) -> ServiceEndpoint ServiceError! {
     #Unsafe("Services1464-1544: checked function item is passed through; source owns validation and every seed") {
         if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot add workers after start"))
         if capacity <= 0 || capacity > 1000000 -> return Err(ServiceError.Policy("mailbox capacity must be positive and bounded"))
@@ -2013,7 +2013,7 @@ fn worker_pruned(restarts: [I64], now: I64, per: I64) -> [I64] Never! {
     out
 }
 
-pub fn fail_worker(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
+fn fail_worker(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
     #Unsafe("Services2917-3078: exclusive tree borrow; each write follows the native order") {
         if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
         if validate_tree_endpoint(tree, endpoint) == {
@@ -2128,7 +2128,7 @@ pub fn fail_worker(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! 
     }
 }
 
-pub fn restarts(tree: ServiceTree, endpoint: ServiceEndpoint) -> Int ServiceError! {
+fn restarts(tree: ServiceTree, endpoint: ServiceEndpoint) -> Int ServiceError! {
     #Unsafe("Services3080-3100: pinned validation, group policy, one now, then weak name/tree match") {
         if validate_tree_endpoint(tree, endpoint) == {
             .Err(error) -> return Err(error)
@@ -2149,7 +2149,7 @@ pub fn restarts(tree: ServiceTree, endpoint: ServiceEndpoint) -> Int ServiceErro
     }
 }
 
-pub fn mailbox_depth(tree: ServiceTree, endpoint: ServiceEndpoint) -> Int ServiceError! {
+fn mailbox_depth(tree: ServiceTree, endpoint: ServiceEndpoint) -> Int ServiceError! {
     #Unsafe("Services2847-2862: validated endpoint, then deliberately weak name/tree match, channel depth") {
         if validate_tree_endpoint(tree, endpoint) == {
             .Err(error) -> return Err(error)

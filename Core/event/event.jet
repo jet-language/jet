@@ -16,31 +16,31 @@ use core as core
 // Source owns constructor composition and rejects invalid async capacities
 // before allocating provider state. Private leaves reuse existing host calls.
 
-pub fn scope() -> EventScope Never! {
+fn scope() -> EventScope Never! {
     core.event.__scope_new()
 }
 
-pub fn new<T>() -> Event<T> Never! {
+fn new<T>() -> Event<T> Never! {
     with_policy<T>(policy_sync())
 }
 
-pub fn with_policy<T>(policy: EventPolicy) -> Event<T> Never! {
+fn with_policy<T>(policy: EventPolicy) -> Event<T> Never! {
     core.event.__event_with_policy<T>(policy)
 }
 
-pub fn hook<T, R>(fallback: R) -> Hook<T, R> Never! {
+fn hook<T, R>(fallback: R) -> Hook<T, R> Never! {
     core.event.__hook_new<T, R>(fallback)
 }
 
-pub fn decision_hook<T, E>(policy: HookPolicy) -> DecisionHook<T, E> Never! {
+fn decision_hook<T, E>(policy: HookPolicy) -> DecisionHook<T, E> Never! {
     core.event.__decision_hook_new<T, E>(policy)
 }
 
-pub fn policy_sync() -> EventPolicy Never! {
+fn policy_sync() -> EventPolicy Never! {
     core.event.__policy_sync()
 }
 
-pub fn async_result<T, E>(policy: AsyncPolicy, failures: FailurePolicy) -> AsyncEvent<T, E> EventConfigError! {
+fn async_result<T, E>(policy: AsyncPolicy, failures: FailurePolicy) -> AsyncEvent<T, E> EventConfigError! {
     if policy.capacity <= 0 -> return Err(EventConfigError.InvalidCapacity)
     core.event.__async_new<T, E>(policy, failures)
 }

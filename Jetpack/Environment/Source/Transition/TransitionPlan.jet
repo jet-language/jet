@@ -174,7 +174,7 @@ struct TransitionSnapshot {
 }
 
 // Plan and apply one of the ratified `jet split` transitions.
-pub fn env_transition_split(root: String, target: SplitTarget, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
+fn env_transition_split(root: String, target: SplitTarget, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
     plan :: env_transition_split_plan(root, target)
     plan.finish(check_only)
 }
@@ -182,7 +182,7 @@ pub fn env_transition_split(root: String, target: SplitTarget, check_only: Bool)
 // Plan and apply the reverse of a recorded transition. `path` is the
 // generated file named by `jet fold`, relative to the Package root or an
 // absolute path inside it.
-pub fn env_transition_fold(root: String, path: String, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
+fn env_transition_fold(root: String, path: String, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
     plan :: env_transition_fold_plan(root, path)
     plan.finish(check_only)
 }
@@ -191,14 +191,14 @@ pub fn env_transition_fold(root: String, path: String, check_only: Bool) -[FS, E
 // closed, typed role files convert; a file with an open or unknown field is
 // rejected before any file changes, because copying it into `package.jet`
 // would create a second interpretation of the graph.
-pub fn env_transition_init(root: String, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
+fn env_transition_init(root: String, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
     plan :: env_transition_legacy_plan(root)
     plan.finish(check_only)
 }
 
 // Restore the last successful role-file migration: the explicit
 // migration-epoch escape hatch of `jet init --restore-role-files`.
-pub fn env_transition_restore_role_files(root: String, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
+fn env_transition_restore_role_files(root: String, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
     canonical :: env_transition_canonical_root(root)
     journal_path :: env_transition_latest_legacy_journal(canonical)
     journal :: env_transition_read_journal(journal_path)

@@ -158,8 +158,8 @@ fn lower_option_box_size(p: MIRProgram, inner: MIRType) -> Int Never! {
 }
 
 // Ordinary Result construction and payload transport share this one layout.
-pub fn lower_result_selector(ok: Bool) -> Int Never! { if ok -> 1 else -> 0 }
-pub fn lower_result_payload_offset() -> Int Never! { 8 }
+fn lower_result_selector(ok: Bool) -> Int Never! { if ok -> 1 else -> 0 }
+fn lower_result_payload_offset() -> Int Never! { 8 }
 
 fn lower_result_box_size(p: MIRProgram, ok: MIRType, err: MIRType) -> Int Never! {
     ok_size :: lower_size(p, ok).size
@@ -326,8 +326,8 @@ fn lower_alloc_bytes(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, size: 
 // glue takes (source, target) and fills the target with a deep copy.
 
 struct LowerCloseImpl {
-    pub self_type: MIRType
-    pub method: MIRFunctionID
+    self_type: MIRType
+    method: MIRFunctionID
 }
 
 // Indexed once during preparation; hot layout/drop queries probe only the

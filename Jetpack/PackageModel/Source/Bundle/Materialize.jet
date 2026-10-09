@@ -1,10 +1,10 @@
 // Source/CmdPackage.rs:415-1204. Native transport of the checked BundlePlan.
 // Never replace a failed native adapter with the logical artifact digest.
-pub struct BundleNativeFacts {
-    pub sha256: String
-    pub bytes: Int
-    pub materializer: BundleMaterializerFact
-    pub signing: BundleSigningFact?
+struct BundleNativeFacts {
+    sha256: String
+    bytes: Int
+    materializer: BundleMaterializerFact
+    signing: BundleSigningFact?
 }
 struct BundleSigningRun { requested: Bool, verified: Bool, programs: [String], identities: [String] }
 
@@ -152,7 +152,7 @@ fn pkg_bundle_native_builtin(plan: &BundlePlan, compiler_version: String) -[FS, 
             tool_version: compiler_version, executable: executable, authority: "in-process", mechanism: "filesystem-staging", policy: "checked-plan-only"}, signing: None})
 }
 // Cleanup is attempted after both successful publication and all failure rails.
-pub fn pkg_bundle_materialize(plan: &BundlePlan, output: String, compiler_version: String) -[FS, Env, Exec, Time, Time.Wait]> BundleNativeFacts String! {
+fn pkg_bundle_materialize(plan: &BundlePlan, output: String, compiler_version: String) -[FS, Env, Exec, Time, Time.Wait]> BundleNativeFacts String! {
     parent :: files.dirname(output)
     files.create_dir_all(parent) ?? return Err("could not create package output directory `{parent}`: {err}")
     pkg_bundle_native_free(output)

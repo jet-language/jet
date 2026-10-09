@@ -2,7 +2,7 @@
 // places, calls, functions and control flow; target adapters consume these facts
 // rather than recreating source-level policy.
 
-pub MIR_SCHEMA_VERSION :: prep { 7 }
+MIR_SCHEMA_VERSION :: prep { 7 }
 
 // Every MIR identity is a fixed 64-bit word, as in the Rust reference
 // (`mir_id!` newtypes over `u64`): a stable FNV-1a hash or, in fixtures, a
@@ -109,7 +109,7 @@ enum MIRSerdeCodec { Encode Decode }
 
 enum MIROperatorMarker { Commutative }
 
-pub enum MIRScopeKind { Unsafe Impure Reactive Shield StopCleanup Region Policy TaskGroup Layout Authority Context Live AssumeDeterministic Transaction ScopeMember DebugOnly }
+enum MIRScopeKind { Unsafe Impure Reactive Shield StopCleanup Region Policy TaskGroup Layout Authority Context Live AssumeDeterministic Transaction ScopeMember DebugOnly }
 
 enum MIRIndexKind { List FixedListProof Map Lane Pool }
 
@@ -149,15 +149,15 @@ fn mir_copy_ownership() -> MIROwnership Never! {
 }
 
 // A copyable immutable value whose physical carrier owns a resource (Int).
-pub fn mir_copy_value_ownership() -> MIROwnership Never! {
+fn mir_copy_value_ownership() -> MIROwnership Never! {
     MIROwnership{mode: MIROwnershipMode.Copy, drop: MIRDropKind.Value, moved: false, last_use: false, gc_root: false}
 }
 
-pub fn mir_runtime_owned_ownership(ownership: MIROwnership) -> Bool Never! {
+fn mir_runtime_owned_ownership(ownership: MIROwnership) -> Bool Never! {
     ownership.drop != MIRDropKind.NoDrop && ownership.mode != MIROwnershipMode.ReadBorrow && ownership.mode != MIROwnershipMode.WriteBorrow
 }
 
-pub fn mir_owned_ownership() -> MIROwnership Never! {
+fn mir_owned_ownership() -> MIROwnership Never! {
     MIROwnership{mode: MIROwnershipMode.Owned, drop: MIRDropKind.Value, moved: false, last_use: false, gc_root: false}
 }
 
@@ -355,28 +355,28 @@ fn mir_trait_ref(name: String) -> MIRTraitRef Never! {
 }
 
 // The registered native Codec definitions, shared by checking and lowering.
-pub fn mir_builtin_codec_trait_name(codec: MIRSerdeCodec) -> String Never! {
+fn mir_builtin_codec_trait_name(codec: MIRSerdeCodec) -> String Never! {
     if codec == {
         .Encode -> "Encode"
         .Decode -> "Decode"
     }
 }
 
-pub fn mir_builtin_codec_trait_id(codec: MIRSerdeCodec) -> MIRTraitID Never! {
+fn mir_builtin_codec_trait_id(codec: MIRSerdeCodec) -> MIRTraitID Never! {
     mir_trait_id(mir_builtin_codec_trait_name(codec))
 }
 
-pub fn mir_builtin_codec_trait_ref(codec: MIRSerdeCodec) -> MIRTraitRef Never! {
+fn mir_builtin_codec_trait_ref(codec: MIRSerdeCodec) -> MIRTraitRef Never! {
     mir_trait_ref(mir_builtin_codec_trait_name(codec))
 }
 
-pub struct MIRFunctionSignature {
-    pub params: [MIRType]
-    pub ret: MIRType?
-    pub effect_bound: [String]?
-    pub param_contract: [MIRCallContractRow]?
-    pub call_metadata: MIRCallMetadata?
-    pub return_view_provenance: [MIRViewProvenanceEntry]?
+struct MIRFunctionSignature {
+    params: [MIRType]
+    ret: MIRType?
+    effect_bound: [String]?
+    param_contract: [MIRCallContractRow]?
+    call_metadata: MIRCallMetadata?
+    return_view_provenance: [MIRViewProvenanceEntry]?
 }
 
 enum MIRScalarKind { Int Float Float32 Bool Char Pointer }
@@ -1021,59 +1021,59 @@ struct MIRParam {
 
 // A place-only capture lends an address, never an eagerly loaded SSA value.
 // Its Capture result may anchor MIRPlaceBase.Capture only.
-pub struct MIRCaptureParam { pub slot: Int, pub name: String, pub span: Span, pub ty: MIRType, pub access: MIRAccess, pub ownership: MIROwnership, pub place_only: Bool }
+struct MIRCaptureParam { slot: Int, name: String, span: Span, ty: MIRType, access: MIRAccess, ownership: MIROwnership, place_only: Bool }
 
 enum MIRCaptureOperand { Value(value: MIRValueID) Place(place: MIRPlaceID) }
 
 // Retained native roots borrow storage, not the source value's ownership.
 // The producer records the exact checked operation granting access to that
 // owned place; a caller cannot turn a borrowed address into a Move permission.
-pub enum MIRRetainedRootCellAction { Read Write Move Initialize Replace Cleanup }
+enum MIRRetainedRootCellAction { Read Write Move Initialize Replace Cleanup }
 
-pub struct MIRRetainedRootCellGrant {
-    pub function: MIRFunctionID
-    pub operation: MIROpID
-    pub place: MIRPlaceID
-    pub action: MIRRetainedRootCellAction
+struct MIRRetainedRootCellGrant {
+    function: MIRFunctionID
+    operation: MIROpID
+    place: MIRPlaceID
+    action: MIRRetainedRootCellAction
 }
 
-pub struct MIRRetainedRootLivePlace {
-    pub place: MIRPlaceID
-    pub live: MIRPlaceID
-    pub value_type: MIRType
-    pub drop_kind: MIRDropKind
+struct MIRRetainedRootLivePlace {
+    place: MIRPlaceID
+    live: MIRPlaceID
+    value_type: MIRType
+    drop_kind: MIRDropKind
 }
 
-pub struct MIRRetainedRootCellBinding {
-    pub declaration: SymbolID
-    pub ty: MIRType
-    pub place: MIRPlaceID
-    pub capture_value: MIRValueID
-    pub capture_slot: Int
-    pub access: MIRAccess
-    pub ownership: MIROwnership
+struct MIRRetainedRootCellBinding {
+    declaration: SymbolID
+    ty: MIRType
+    place: MIRPlaceID
+    capture_value: MIRValueID
+    capture_slot: Int
+    access: MIRAccess
+    ownership: MIROwnership
     // Root and required projection flags are the original MIR Bool places.
     // Copy/NoDrop values still have a presence flag, but no destructor action.
-    pub live_places: [MIRRetainedRootLivePlace]
-    pub grants: [MIRRetainedRootCellGrant]
-    pub cleanup_identity: String
+    live_places: [MIRRetainedRootLivePlace]
+    grants: [MIRRetainedRootCellGrant]
+    cleanup_identity: String
 }
 
-pub struct MIRLocal {
-    pub id: MIRLocalID
-    pub name: String
-    pub span: Span
-    pub ty: MIRType
-    pub place: MIRPlaceID
+struct MIRLocal {
+    id: MIRLocalID
+    name: String
+    span: Span
+    ty: MIRType
+    place: MIRPlaceID
     // The SSA definition writes this same owning cell; never a second copy.
-    pub ssa_value: MIRValueID?
-    pub mutable: Bool
-    pub ownership: MIROwnership
-    pub is_comptime: Bool
-    pub uninit: Bool
-    pub arena_view: Bool
-    pub string_view: Bool
-    pub gc_root: Bool
+    ssa_value: MIRValueID?
+    mutable: Bool
+    ownership: MIROwnership
+    is_comptime: Bool
+    uninit: Bool
+    arena_view: Bool
+    string_view: Bool
+    gc_root: Bool
 }
 
 enum MIRPlaceBase { Local(local: MIRLocalID) Parameter(value: MIRValueID) Capture(value: MIRValueID) Temporary(value: MIRValueID) Static(name: String) }
@@ -1412,8 +1412,8 @@ enum MIRConstReport { Clean(ty: MIRType) Told(value: MIRConstant) }
 
 // Core publication sites use the same Global path as module storage. The
 // initializer declaration, not a callsite, supplies their identity.
-pub enum MIRSharedLifetime { Process World Thread Attempt }
-pub fn mir_shared_lifetime_core_member(name: String) -> MIRSharedLifetime? Never! {
+enum MIRSharedLifetime { Process World Thread Attempt }
+fn mir_shared_lifetime_core_member(name: String) -> MIRSharedLifetime? Never! {
     if name == {
         "__process_shared" -> Val(MIRSharedLifetime.Process)
         "__world_shared" -> Val(MIRSharedLifetime.World)
@@ -1422,10 +1422,10 @@ pub fn mir_shared_lifetime_core_member(name: String) -> MIRSharedLifetime? Never
         else -> None
     }
 }
-pub struct MIRSharedSite { pub initializer: MIRFunctionID, pub lifetime: MIRSharedLifetime }
+struct MIRSharedSite { initializer: MIRFunctionID, lifetime: MIRSharedLifetime }
 
 // The pinned Core image and every dynamic importer use this exact link name.
-pub fn mir_shared_site_getter_symbol(initializer: MIRFunctionID) -> String Never! {
+fn mir_shared_site_getter_symbol(initializer: MIRFunctionID) -> String Never! {
     prefix :: "jet_core_shared_".bytes()
     digits :: "0123456789abcdef".bytes()
     bytes :: loop index in 0..<32 -> if index < 16 -> prefix[index] else -> digits[Int.from_u64((initializer.value >> ((31 - index) * 4)) & U64{15})]
@@ -1455,7 +1455,7 @@ struct MIRIntegerWidth { signed: Bool, bits: Int }
 // Native MIR Int carries an i64. Keep an unbounded value outside that range in
 // BigInt; a checked U64 literal instead keeps the seed's signed-bit i64 payload
 // and its width. Both emitters recover the same unsigned value from that pair.
-pub fn mir_integer_constant(number: Int, width: MIRIntegerWidth?, spelling: String?) -> MIRConstant Never! {
+fn mir_integer_constant(number: Int, width: MIRIntegerWidth?, spelling: String?) -> MIRConstant Never! {
     payload := number
     if width == Val(word) {
         if !word.signed && word.bits == 64 && number > 9223372036854775807 {
@@ -1466,7 +1466,7 @@ pub fn mir_integer_constant(number: Int, width: MIRIntegerWidth?, spelling: Stri
     MIRConstant.Int{value: payload, width: width, spelling: spelling}
 }
 
-pub fn mir_integer_key(number: Int) -> MIRConstKey Never! {
+fn mir_integer_key(number: Int) -> MIRConstKey Never! {
     if mir_integer_constant(number, None, None) == {
         .Int(value, _, _) -> MIRConstKey.Int{value: value}
         .BigInt(decimal) -> MIRConstKey.BigInt{decimal: decimal}
@@ -1476,7 +1476,7 @@ pub fn mir_integer_key(number: Int) -> MIRConstKey Never! {
 
 // Both decimals are canonical BigInt keys, so sign, digit count, then lexical
 // order compare their exact numeric values without parsing or allocating limbs.
-pub fn mir_big_integer_key_compare(left: String, right: String) -> Int Never! {
+fn mir_big_integer_key_compare(left: String, right: String) -> Int Never! {
     left_negative :: left.starts_with("-")
     right_negative :: right.starts_with("-")
     if left_negative != right_negative -> return if left_negative -> -1 else -> 1
@@ -1486,7 +1486,7 @@ pub fn mir_big_integer_key_compare(left: String, right: String) -> Int Never! {
 
 // Decode the i64 payload only for readers doing mathematical comparisons or
 // arithmetic. Machine-word lowering and canonical digesting keep the raw bits.
-pub fn mir_integer_value(payload: Int, width: MIRIntegerWidth?) -> Int Never! {
+fn mir_integer_value(payload: Int, width: MIRIntegerWidth?) -> Int Never! {
     if width == Val(word) {
         if !word.signed && word.bits == 64 && payload < 0 -> return payload + 18446744073709551616
     }
@@ -1644,7 +1644,7 @@ enum MIRGCEditKind { Clear Pop RemoveIndex InsertIndex Prepend Additive Plain Ed
 enum MIRTypedHeadKind { SQL HTML Sh URL Path DateTime }
 
 // The shared boundary-head classification, mirrored by Syntax::typed_head_kind.
-pub fn mir_typed_head_kind(head: Type) -> MIRTypedHeadKind? {
+fn mir_typed_head_kind(head: Type) -> MIRTypedHeadKind? {
     if head == {
         .Named(name) -> {
             if name == "SQL" -> return Val(MIRTypedHeadKind.SQL)
@@ -1671,7 +1671,7 @@ fn mir_boundary_head_owner_module(name: String) -> String? {
 // The Core module whose same-named record is the built-in value. URL and
 // DateTime use their checked source carriers; Path stays the native boundary
 // carrier, distinct from core.files.path's record.
-pub fn mir_boundary_head_carrier_module(name: String) -> String? {
+fn mir_boundary_head_carrier_module(name: String) -> String? {
     if name == "URL" -> return Val("core.net.url")
     if name == "DateTime" -> return Val("core.time")
     None
@@ -1709,7 +1709,7 @@ enum MIRBinaryDispatch { Primitive Prelude(call: MIRPreludeCallID, location: MIR
 enum MIRBinaryOverflow { Unchecked Trap }
 
 // Trap is the checked policy fact; sema never puts it on a proven-total op.
-pub fn mir_binary_can_trap(op: MIRBinaryOp, overflow: MIRBinaryOverflow) -> Bool Never! {
+fn mir_binary_can_trap(op: MIRBinaryOp, overflow: MIRBinaryOverflow) -> Bool Never! {
     if overflow != .Trap -> return false
     if op == {
         .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .Shl | .Shr -> true
@@ -1721,7 +1721,7 @@ enum MIRConversion { Transparent NumericCast SendFn Prelude(call: MIRPreludeCall
 
 struct MIREnumArg { field: MIRFieldID?, value: MIRValueID, boxed: Bool }
 
-pub enum MIRSemanticOp {
+enum MIRSemanticOp {
     MathBuiltin(type_id: MIRTypeID, call: MIRPreludeCallID, args: [MIRValueID])
     PreciseBuiltin(type_id: MIRTypeID, call: MIRPreludeCallID, args: [MIRValueID])
     Print(call: MIRPreludeCallID, value: MIRValueID)
@@ -1871,7 +1871,7 @@ fn mir_copy_fact_name(fact: MIRCopyFact) -> String Never! {
 
 // Only a NoDrop Copy-ABI value can strip an implicit physical clone.
 // The user's `~` and view materialization keep their fact.
-pub fn mir_copy_fact_for_ownership(fact: MIRCopyFact, ownership: MIROwnership) -> MIRCopyFact Never! {
+fn mir_copy_fact_for_ownership(fact: MIRCopyFact, ownership: MIROwnership) -> MIRCopyFact Never! {
     if ownership.mode == MIROwnershipMode.Copy && ownership.drop == MIRDropKind.NoDrop && (fact == MIRCopyFact.Materialize || fact == MIRCopyFact.Share) -> return MIRCopyFact.Scalar
     ~fact
 }
@@ -1945,13 +1945,13 @@ enum MIROperation {
 // One physical-consumption mechanism for verification, last-use selection and
 // SSA retirement. Through preserves prospective last-use traversal; its bit
 // distinguishes a carrier transfer from a projection/implicit clone.
-pub enum MIRValueConsumption {
+enum MIRValueConsumption {
     Yes(requires_owner: Bool)
     Through(transfers: Bool)
     No
 }
 
-pub fn mir_value_consumption_transfers(consumption: MIRValueConsumption) -> Bool Never! {
+fn mir_value_consumption_transfers(consumption: MIRValueConsumption) -> Bool Never! {
     if consumption == {
         .Yes(_) -> true
         .Through(transfers) -> transfers
@@ -1959,7 +1959,7 @@ pub fn mir_value_consumption_transfers(consumption: MIRValueConsumption) -> Bool
     }
 }
 
-pub fn mir_call_arg_consumes(arg: MIRCallArg) -> Bool Never! {
+fn mir_call_arg_consumes(arg: MIRCallArg) -> Bool Never! {
     !(arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list) && (arg.access == .Move || arg.owned_last_use)
 }
 
@@ -1973,7 +1973,7 @@ fn mir_call_value_consumption(args: [MIRCallArg], value: MIRValueID) -> MIRValue
 // `borrow_mask` is the checked route's receiver-first borrow mask;
 // callers resolve it once per instruction, never invent access from a name.
 // Only these operation shapes use checked positional masks for consumption.
-pub fn mir_operation_consumption_route(operation: MIROperation) -> MIRPreludeCallID? Never! {
+fn mir_operation_consumption_route(operation: MIROperation) -> MIRPreludeCallID? Never! {
     if operation == .Semantic(semantic) {
         if semantic == {
             .BuiltinMethod(call, _, _, _, _) | .HandleMethod(call, _, _, _, _) -> return Val(call)
@@ -1983,7 +1983,7 @@ pub fn mir_operation_consumption_route(operation: MIROperation) -> MIRPreludeCal
     None
 }
 
-pub fn mir_operation_value_consumption(operation: MIROperation, value: MIRValueID, borrow_mask: [Bool]) -> MIRValueConsumption Never! {
+fn mir_operation_value_consumption(operation: MIROperation, value: MIRValueID, borrow_mask: [Bool]) -> MIRValueConsumption Never! {
     if operation == {
         .Move(taken) | .TraitBox(taken, _) -> if taken == value -> MIRValueConsumption.Yes{requires_owner: true} else -> MIRValueConsumption.No
         .Drop(taken, kind) -> if taken == value && kind != .NoDrop -> MIRValueConsumption.Yes{requires_owner: true} else -> MIRValueConsumption.No
@@ -2070,7 +2070,7 @@ pub fn mir_operation_value_consumption(operation: MIROperation, value: MIRValueI
     }
 }
 
-pub fn mir_terminator_value_consumption(terminator: MIRTerminator, value: MIRValueID) -> MIRValueConsumption Never! {
+fn mir_terminator_value_consumption(terminator: MIRTerminator, value: MIRValueID) -> MIRValueConsumption Never! {
     if terminator == {
         .Return(returned) -> if returned == .Val(value) -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
         // Break's value is transferred by its destination phi, not twice.
@@ -2081,7 +2081,7 @@ pub fn mir_terminator_value_consumption(terminator: MIRTerminator, value: MIRVal
 }
 
 // Checked access metadata, not a second ownership-consumption convention.
-pub fn mir_operation_call_args(operation: MIROperation) -> [MIRCallArg] Never! {
+fn mir_operation_call_args(operation: MIROperation) -> [MIRCallArg] Never! {
     if operation == {
         .Call(_, args, _) | .IndirectCall(_, args, _) | .CoreCall(_, _, args, _, _, _) -> args
         .Semantic(semantic) -> if semantic == {
@@ -2092,7 +2092,7 @@ pub fn mir_operation_call_args(operation: MIROperation) -> [MIRCallArg] Never! {
     }
 }
 
-pub fn mir_operation_mutated_places(operation: MIROperation) -> [MIRPlaceID] Never! {
+fn mir_operation_mutated_places(operation: MIROperation) -> [MIRPlaceID] Never! {
     places := [MIRPlaceID]{}
     if operation == {
         .WritePlace(place, _) | .ReplacePlace(place, _) | .MovePlace(place) | .InitializeUninit(place) -> &places.push(place)
@@ -2114,7 +2114,7 @@ pub fn mir_operation_mutated_places(operation: MIROperation) -> [MIRPlaceID] Nev
 
 // Parameter, capture and temporary spellings of one SSA value name the same
 // storage. Projections conservatively share their root for snapshot stability.
-pub fn mir_place_storage_root(place: MIRPlace) -> String Never! {
+fn mir_place_storage_root(place: MIRPlace) -> String Never! {
     if place.base == {
         .Local(local) -> "l{local.value}"
         .Parameter(value) | .Capture(value) | .Temporary(value) -> "v{value.value}"
@@ -2412,7 +2412,7 @@ fn mir_read_snapshot_unstable(function: MIRFunction, candidates: [U64:Bool], rou
 
 // Post-last-use facts shared by every backend. A borrowed read must neither
 // transfer ownership nor observe an owner mutation before its last dependent use.
-pub fn mir_refine_function_ownership(function: &MIRFunction, prelude: [MIRPreludeCall]) -> Int Never! {
+fn mir_refine_function_ownership(function: &MIRFunction, prelude: [MIRPreludeCall]) -> Int Never! {
     candidates := [U64:Bool]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
@@ -2456,7 +2456,7 @@ pub fn mir_refine_function_ownership(function: &MIRFunction, prelude: [MIRPrelud
 }
 
 
-pub struct MIRFieldValue { pub field: MIRFieldID, pub value: MIRValueID }
+struct MIRFieldValue { field: MIRFieldID, value: MIRValueID }
 
 struct MIRCaptureFacts { escapes: Bool, needs_fn_mut: Bool, mutable: [String], cloned: [String], frozen: [String], materialized: [String], moved: [String] }
 
@@ -2501,7 +2501,7 @@ struct MIRSwitchArm { condition: MIRValueID, target: MIRBlockID, span: Span }
 // reads only a stop that operation already delivered. `resume` continues;
 // `stop` runs canonical cleanup and ends in `Stopped`, which leaves the
 // function with the stop still delivered and no result written.
-pub enum MIRPollKind { Check Propagate }
+enum MIRPollKind { Check Propagate }
 
 enum MIRTerminator {
     Jump(target: MIRBlockID)
@@ -2823,19 +2823,19 @@ fn mir_terminator_value_uses(terminator: MIRTerminator) -> [MIRValueID] Never! {
 
 // These selectors name only facts the operation actually evaluates. Merely
 // registering a projected place or a drop flag does not check its bounds.
-pub fn mir_operation_stop_operand(operation: MIROperation) -> MIRValueID? Never! {
+fn mir_operation_stop_operand(operation: MIROperation) -> MIRValueID? Never! {
     if operation == .Unary(.Neg, value) -> return Val(value)
     None
 }
 
-pub fn mir_operation_stop_place(operation: MIROperation) -> MIRPlaceID? Never! {
+fn mir_operation_stop_place(operation: MIROperation) -> MIRPlaceID? Never! {
     if operation == {
         .ReadPlace(place) | .MovePlace(place) | .WritePlace(place, _) | .ReplacePlace(place, _) -> Val(place)
         else -> None
     }
 }
 
-pub fn mir_fixed_neg_can_trap(ty: MIRType) -> Bool Never! {
+fn mir_fixed_neg_can_trap(ty: MIRType) -> Bool Never! {
     if ty.kind == {
         .IntN(_, bits) -> bits > 0 && bits <= 64
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> mir_fixed_neg_can_trap(base)
@@ -2845,7 +2845,7 @@ pub fn mir_fixed_neg_can_trap(ty: MIRType) -> Bool Never! {
 
 // User/callback/wait operations can deliver stops. For Prelude routes, Panic
 // is a checked registry fact, independent of a returned failure carrier.
-pub fn mir_operation_can_stop(operation: MIROperation, operand_type: MIRType?, accessed_place: MIRPlace?, prelude_calls: [MIRPreludeCall], prelude_positions: [U64:Int]) -> Bool Never! {
+fn mir_operation_can_stop(operation: MIROperation, operand_type: MIRType?, accessed_place: MIRPlace?, prelude_calls: [MIRPreludeCall], prelude_positions: [U64:Int]) -> Bool Never! {
     if operation == .Binary(op, _, overflow, _, _) {
         if mir_binary_can_trap(op, overflow) -> return true
     }
@@ -2883,12 +2883,12 @@ pub fn mir_operation_can_stop(operation: MIROperation, operand_type: MIRType?, a
 
 // Existing user/callback/Core operations can panic through the code they invoke.
 // ScopeExit alone only forwards an already-delivered stop.
-pub fn mir_operation_can_panic(operation: MIROperation, operand_type: MIRType?, accessed_place: MIRPlace?, prelude_calls: [MIRPreludeCall], prelude_positions: [U64:Int]) -> Bool Never! {
+fn mir_operation_can_panic(operation: MIROperation, operand_type: MIRType?, accessed_place: MIRPlace?, prelude_calls: [MIRPreludeCall], prelude_positions: [U64:Int]) -> Bool Never! {
     if operation == .ScopeExit(_) -> return false
     mir_operation_can_stop(operation, operand_type, accessed_place, prelude_calls, prelude_positions)
 }
 
-pub enum MIROperationUseKind { Value Place }
+enum MIROperationUseKind { Value Place }
 
 fn mir_operation_value_uses(operation: MIROperation) -> [MIRValueID] Never! {
     uses := [MIRValueID]{}
@@ -3617,35 +3617,35 @@ struct MIRHandleLifecycle {
     thread_safety: MIRFFIThreadSafety?
 }
 
-pub struct MIRForeign {
-    pub id: MIRForeignID
-    pub module_id: MIRModuleID
-    pub key: String
-    pub module_name: String
-    pub name: String
-    pub span: Span
-    pub symbol: String
-    pub path: String
-    pub params: [MIRParam]
-    pub raw_scalar_abi: Bool
-    pub bridge_eligible: Bool
-    pub return_type: MIRType?
-    pub foreign_abi: MIRForeignABI
-    pub foreign_language: MIRForeignLanguage
-    pub target_applicability: MIRTargetApplicability
-    pub effects: MIREffectFacts
-    pub callback_transport: String?
-    pub callback_plan_digest: String?
-    pub callback_identity: String?
-    pub link: MIRLinkUnitID?
-    pub callback: MIRCallbackID?
-    pub handle: MIRHandleID?
-    pub close_function: MIRFunctionID?
-    pub close_foreign: MIRForeignID?
-    pub undo_function: MIRFunctionID?
+struct MIRForeign {
+    id: MIRForeignID
+    module_id: MIRModuleID
+    key: String
+    module_name: String
+    name: String
+    span: Span
+    symbol: String
+    path: String
+    params: [MIRParam]
+    raw_scalar_abi: Bool
+    bridge_eligible: Bool
+    return_type: MIRType?
+    foreign_abi: MIRForeignABI
+    foreign_language: MIRForeignLanguage
+    target_applicability: MIRTargetApplicability
+    effects: MIREffectFacts
+    callback_transport: String?
+    callback_plan_digest: String?
+    callback_identity: String?
+    link: MIRLinkUnitID?
+    callback: MIRCallbackID?
+    handle: MIRHandleID?
+    close_function: MIRFunctionID?
+    close_foreign: MIRForeignID?
+    undo_function: MIRFunctionID?
     // D-MEM-SENTRY1: the declaration's own `#Unsafe("reason")` gate for an
     // audited inline foreign function. Every call runs inside its sentry scope.
-    pub unsafe_gate: MIRUnsafeGate?
+    unsafe_gate: MIRUnsafeGate?
 }
 
 enum MIRJobScope { Dev Ship Internal }
@@ -3817,9 +3817,9 @@ struct MIRExport { symbol: String, function: MIRFunctionID, abi: MIRForeignABI }
 // `int64_t`, `Float` is `double`, `String` is the JetText pointer/length pair.
 // The frozen Rust compiler keeps its older homogeneous Library scalar rule;
 // this law is Jet-only.
-pub enum MIRCPrimitive { Int Float Bool Text I8 I16 I32 I64 U8 U16 U32 U64 F32 }
+enum MIRCPrimitive { Int Float Bool Text I8 I16 I32 I64 U8 U16 U32 U64 F32 }
 
-pub fn mir_c_primitive(ty: MIRType) -> MIRCPrimitive? {
+fn mir_c_primitive(ty: MIRType) -> MIRCPrimitive? {
     if ty.kind == {
         .Int -> Val(MIRCPrimitive.Int)
         .Float -> Val(MIRCPrimitive.Float)
@@ -3838,7 +3838,7 @@ pub fn mir_c_primitive(ty: MIRType) -> MIRCPrimitive? {
 }
 
 // A C `void` result: the checked unit value.
-pub fn mir_c_void(ty: MIRType) -> Bool Never! {
+fn mir_c_void(ty: MIRType) -> Bool Never! {
     if ty.kind == {
         .Tuple(fields) -> fields.len() == 0
         .Apply(name, args) -> args.len() == 0 && name.name == "Unit"
@@ -3849,7 +3849,7 @@ pub fn mir_c_void(ty: MIRType) -> Bool Never! {
 // The value an export publishes: the success value of a Result carrier (the
 // generated boundary exits on failure) or the plain return. Optional and
 // diverging carriers have no C result.
-pub fn mir_c_export_result(function: MIRFunction) -> MIRType? {
+fn mir_c_export_result(function: MIRFunction) -> MIRType? {
     if function.failure == {
         .Infallible -> Val(function.return_type)
         .Result(success, _) -> Val(success)
@@ -3858,7 +3858,7 @@ pub fn mir_c_export_result(function: MIRFunction) -> MIRType? {
 }
 
 // Whether a checked top-level function satisfies the C export law.
-pub fn mir_c_export_signature(function: MIRFunction) -> Bool Never! {
+fn mir_c_export_signature(function: MIRFunction) -> Bool Never! {
     if function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 -> return false
     loop param in function.params {
         if mir_c_primitive(param.ty) == None -> return false
@@ -3877,7 +3877,7 @@ pub fn mir_c_export_signature(function: MIRFunction) -> Bool Never! {
 // boundary never invents a record layout from a spelling. Fixed widths,
 // maps, tuples, unions, handles and generic applications have no Component
 // shape here.
-pub fn mir_component_type_descriptor(types: [MIRTypeDef], codable_keys: [String], ty: MIRType, seen: [MIRTypeID]) -> MIRComponentTypeDescriptor? {
+fn mir_component_type_descriptor(types: [MIRTypeDef], codable_keys: [String], ty: MIRType, seen: [MIRTypeID]) -> MIRComponentTypeDescriptor? {
     if ty.kind == {
         .Int -> return Val(MIRComponentTypeDescriptor.Int)
         .Float -> return Val(MIRComponentTypeDescriptor.Float)
@@ -3924,7 +3924,7 @@ pub fn mir_component_type_descriptor(types: [MIRTypeDef], codable_keys: [String]
 
 // Whether a checked top-level function satisfies the sandbox Component export
 // law, and its canonical Component signature when it does.
-pub fn mir_component_export_signature(types: [MIRTypeDef], codable_keys: [String], function: MIRFunction) -> MIRComponentSignatureDescriptor? {
+fn mir_component_export_signature(types: [MIRTypeDef], codable_keys: [String], function: MIRFunction) -> MIRComponentSignatureDescriptor? {
     if function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 -> return None
     params := [MIRComponentTypeDescriptor]{}
     loop param in function.params {
@@ -4365,25 +4365,25 @@ struct MIRAppGraph {
     shared_tir: Bool
 }
 
-pub struct MIRPackageFacts {
-    pub project_root: String
-    pub edition: String
-    pub runtime_parts: [MIRRuntimePartID]
-    pub uses_arrow: Bool
-    pub active_os: String
-    pub inferred_layer: String
-    pub allocator: String
-    pub program_allocator: MIRAllocatorPolicy
-    pub package_version: String
-    pub artifact_target: MIRArtifactTarget?
-    pub target_dossier: MIRTargetDossier
-    pub web_app: MIRAppGraph?
-    pub authority_needs: [String]
-    pub hardware_use: MIRTargetHardwareUse
-    pub hardware_profile: MIRTargetHardwareFacts?
-    pub hardware_profile_id: String
-    pub hardware_capabilities: [String]
-    pub hardware_setups: [MIRHardwareSetup]
+struct MIRPackageFacts {
+    project_root: String
+    edition: String
+    runtime_parts: [MIRRuntimePartID]
+    uses_arrow: Bool
+    active_os: String
+    inferred_layer: String
+    allocator: String
+    program_allocator: MIRAllocatorPolicy
+    package_version: String
+    artifact_target: MIRArtifactTarget?
+    target_dossier: MIRTargetDossier
+    web_app: MIRAppGraph?
+    authority_needs: [String]
+    hardware_use: MIRTargetHardwareUse
+    hardware_profile: MIRTargetHardwareFacts?
+    hardware_profile_id: String
+    hardware_capabilities: [String]
+    hardware_setups: [MIRHardwareSetup]
 }
 
 enum MIRHardwareSetup {
@@ -4422,41 +4422,41 @@ struct MIRUnreachable { construct: String, span: Span, reason: MIRErasureReason 
 // Backend-neutral semantic graph used by lowering and all MIR consumers.
 // native_pack is set only at the explicit native-runtime ABI lowering boundary;
 // it is not the stop-point/native-program fact or a host-provider activation.
-pub struct MIRProgram {
-    pub cffi: MIRCffiFacts
-    pub native_pack: Bool
-    pub schema_version: Int
-    pub package_identity: String
-    pub facts: MIRPackageFacts
-    pub names: MIRNameFacts
-    pub modules: [MIRModule]
-    pub imports: [MIRImport]
-    pub types: [MIRTypeDef]
-    pub traits: [MIRTraitDef]
-    pub core_owners: [MIRCoreOwner]
-    pub impls: [MIRImplDef]
-    pub constants: [MIRConstantDef]
-    pub fields: [MIRFieldRow]
-    pub source_files: [MIRSourceFile]
-    pub functions: [MIRFunction]
-    pub foreign: [MIRForeign]
-    pub links: [MIRLinkUnit]
-    pub callbacks: [MIRCallbackAdapter]
-    pub handles: [MIRHandleLifecycle]
-    pub jobs: [MIRJob]
-    pub tests: [MIRTestCase]
-    pub harnesses: [MIRHarnessPlan]
-    pub artifacts: [MIRArtifactPlan]
-    pub core_calls: [MIRCoreCall]
-    pub prelude_calls: [MIRPreludeCall]
-    pub type_instances: [MIRType]
-    pub codec_migrations: [String:MIRSchemaMigrationPlan]
-    pub unreachable: [MIRUnreachable]
+struct MIRProgram {
+    cffi: MIRCffiFacts
+    native_pack: Bool
+    schema_version: Int
+    package_identity: String
+    facts: MIRPackageFacts
+    names: MIRNameFacts
+    modules: [MIRModule]
+    imports: [MIRImport]
+    types: [MIRTypeDef]
+    traits: [MIRTraitDef]
+    core_owners: [MIRCoreOwner]
+    impls: [MIRImplDef]
+    constants: [MIRConstantDef]
+    fields: [MIRFieldRow]
+    source_files: [MIRSourceFile]
+    functions: [MIRFunction]
+    foreign: [MIRForeign]
+    links: [MIRLinkUnit]
+    callbacks: [MIRCallbackAdapter]
+    handles: [MIRHandleLifecycle]
+    jobs: [MIRJob]
+    tests: [MIRTestCase]
+    harnesses: [MIRHarnessPlan]
+    artifacts: [MIRArtifactPlan]
+    core_calls: [MIRCoreCall]
+    prelude_calls: [MIRPreludeCall]
+    type_instances: [MIRType]
+    codec_migrations: [String:MIRSchemaMigrationPlan]
+    unreachable: [MIRUnreachable]
 }
 
 // Resolve a private Core value hook through checked nominal and function
 // identities. Consumers prepare this once; a short user type name never wins.
-pub fn mir_source_value_hook(program: MIRProgram, ty: MIRType, operation: String) -> MIRFunctionID? Never! {
+fn mir_source_value_hook(program: MIRProgram, ty: MIRType, operation: String) -> MIRFunctionID? Never! {
     if ty.kind == .Tagged(_, inner) -> return mir_source_value_hook(program, inner, operation)
     if ty.kind == .Apply(owner, _) {
         hook :: core_source_value_hook(owner.name, operation) ?? return None

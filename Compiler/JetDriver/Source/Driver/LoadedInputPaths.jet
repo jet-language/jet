@@ -3,16 +3,16 @@
 use jet_foundation.Diagnostic
 use jet_sema.SemaSourceOrigin
 
-pub struct JetDriverLoadedInputPaths {
-    pub paths: [String]
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+struct JetDriverLoadedInputPaths {
+    paths: [String]
+    diagnostics: [Diagnostic]
+    complete: Bool
     // A loader-only query has not executed comptime and cannot certify its reads.
-    pub comptime_input_paths: [String]
-    pub comptime_input_coverage_complete: Bool
+    comptime_input_paths: [String]
+    comptime_input_coverage_complete: Bool
 }
 
-pub fn jet_driver_query_loaded_input_paths(request: JetDriverCompileRequest) -> JetDriverLoadedInputPaths {
+fn jet_driver_query_loaded_input_paths(request: JetDriverCompileRequest) -> JetDriverLoadedInputPaths {
     loaded := jet_driver_load(request)
     paths := [String]{}
     seen := [String:Bool]{}

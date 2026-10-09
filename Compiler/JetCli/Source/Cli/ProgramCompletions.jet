@@ -43,7 +43,7 @@ fn jet_cli_program_zsh_inputs(inputs: [CLIInputSchema]) -> [String] Never! {
     specs
 }
 
-pub fn jet_cli_program_completions(shell: String, name: String, schema: CLICommandSchema) -> String? Never! {
+fn jet_cli_program_completions(shell: String, name: String, schema: CLICommandSchema) -> String? Never! {
     root_words :: schema.completion_words()
     root_inputs :: schema.root_completion_words()
     if shell == {
@@ -112,7 +112,7 @@ pub fn jet_cli_program_completions(shell: String, name: String, schema: CLIComma
 
 // Unix Path::file_name components: trailing slash/dot disappear, while a
 // trailing parent component has no filename. Backslash is a filename byte.
-pub fn jet_cli_program_completion_name(program: String) -> String? Never! {
+fn jet_cli_program_completion_name(program: String) -> String? Never! {
     name := ""
     loop component in program.split("/") {
         if component == "" || component == "." -> next
@@ -122,12 +122,12 @@ pub fn jet_cli_program_completion_name(program: String) -> String? Never! {
     Val(name)
 }
 
-pub fn jet_cli_program_completion_name_control(name: String) -> Bool Never! {
+fn jet_cli_program_completion_name_control(name: String) -> Bool Never! {
     cli_completion_text.has_control(name)
 }
 
 // This diagnostic is direct stderr even under --json, like run_completions.
-pub fn jet_cli_program_completion_error(program: String, why: String) -> JetCLIPlan Never! {
+fn jet_cli_program_completion_error(program: String, why: String) -> JetCLIPlan Never! {
     escaped := ""
     bytes :: program.bytes()
     index := 0
@@ -153,7 +153,7 @@ pub fn jet_cli_program_completion_error(program: String, why: String) -> JetCLIP
 
 // Called only after the host's single nonblocking open, opened-file metadata
 // check, and bounded read. No pathname re-stat or application execution here.
-pub fn jet_cli_program_completion_metadata(shell: String, command_name: String, program: String, bytes: [U8], usize_max: U64) -> JetCLIPlan Never! {
+fn jet_cli_program_completion_metadata(shell: String, command_name: String, program: String, bytes: [U8], usize_max: U64) -> JetCLIPlan Never! {
     schema :: read_executable(bytes.view(0..<bytes.len()), usize_max) ?? return jet_cli_program_completion_error(program, err.display())
     script :: jet_cli_program_completions(shell, command_name, schema) ?? panic("completion shell was validated before reading metadata")
     jet_cli_done(script, "", JET_DRIVER_EXIT_OK)

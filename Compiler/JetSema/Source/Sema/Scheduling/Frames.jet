@@ -189,7 +189,7 @@ struct SemaFrameHardwareCall {
 }
 
 // Only selected target-machine register facts can create an MMIO resource.
-pub fn sema_frame_hardware_register_operation(receiver: Expr, method: String, source_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> FrameOperation? {
+fn sema_frame_hardware_register_operation(receiver: Expr, method: String, source_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> FrameOperation? {
     if method != "read" && method != "write" && method != "set" && method != "clear" -> return None
     path :: sema_hardware_board_path(receiver, environment, program, scopes) ?? return None
     if path.segments.len() < 3 -> return None
@@ -215,7 +215,7 @@ fn sema_frame_hardware_dma_bind_start(start: SemaFrameDMABinding, transfer_name:
     result
 }
 
-pub fn sema_frame_hardware_dma_start(receiver: Expr, args: [CallArg], source_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameHardwareCall Never! {
+fn sema_frame_hardware_dma_start(receiver: Expr, args: [CallArg], source_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameHardwareCall Never! {
     is_dma_receiver := if receiver == {
         .Ident(name, _) -> name == "dma"
         else -> false
@@ -315,7 +315,7 @@ fn sema_frame_schedule_build(operations: [FrameOperation]) -> SemaFrameScheduleB
     }
 }
 
-pub fn sema_frame_schedule_produce(operations: [FrameOperation], environment: SemaScopeEnvironment, program: SemaProgramTables, source_bytes: String, lambda_start: Int) -> SemaFrameScheduleFacts {
+fn sema_frame_schedule_produce(operations: [FrameOperation], environment: SemaScopeEnvironment, program: SemaProgramTables, source_bytes: String, lambda_start: Int) -> SemaFrameScheduleFacts {
     if operations.len() == 0 -> return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: None}
     built := sema_frame_schedule_build(operations)
     if built.schedule == None -> return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: built.error}

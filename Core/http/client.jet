@@ -43,22 +43,22 @@ struct Session {
 
 // Keep the transport constructors on the existing native request/body
 // carriers; public convenience names now enter Jet before the raw leaf.
-pub fn get(url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+fn get(url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     provider.__get(url)
 }
 
-pub fn post(url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+fn post(url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     provider.__post(url, body)
 }
 
-pub fn request(method: String, url: String) -[Net, Time.Wait]> HTTPRequest Never! {
+fn request(method: String, url: String) -[Net, Time.Wait]> HTTPRequest Never! {
     provider.__request(method, url)
 }
-pub fn send(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+fn send(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     req.send()
 }
 
-pub fn header(client: Client, line: String) -> Client Never! {
+fn header(client: Client, line: String) -> Client Never! {
     _ :: header_name(line) ?? return client.copy()
     _ :: header_value(line) ?? return client.copy()
     Client{
@@ -79,7 +79,7 @@ fn set_header(client: Client, name: String, value: String) -> Client Never! {
         proxy: client.proxy.copy(),
     }
 }
-pub fn with_proxy(client: Client, proxy: Proxy) -> Client Never! {
+fn with_proxy(client: Client, proxy: Proxy) -> Client Never! {
     Client{method: client.method.copy(), url: client.url.copy(), headers: client.headers.copy(), redirects: client.redirects, proxy: proxy.url.copy()}
 }
 
@@ -137,15 +137,15 @@ fn session_redirects(s: Session, n: Int) -> Session Never! {
     Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: s.timeout_ms, retries: s.retries, redirects: r, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
 }
 
-pub fn session_auth(s: Session, user: String, password: String) -> Session Never! {
+fn session_auth(s: Session, user: String, password: String) -> Session Never! {
     Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: user, password: password, proxy: s.proxy.copy()}
 }
 
-pub fn session_proxy(s: Session, url: String) -> Session Never! {
+fn session_proxy(s: Session, url: String) -> Session Never! {
     Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: url}
 }
 
-pub fn session_cookie(s: Session, cookie: String) -> Session Never! {
+fn session_cookie(s: Session, cookie: String) -> Session Never! {
     if !valid_cookie_pair(cookie) -> return s.copy()
     cookies := [String]{}
     name :: cookie_name(cookie) ?? return s.copy()

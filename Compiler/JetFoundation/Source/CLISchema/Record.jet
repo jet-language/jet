@@ -2,11 +2,11 @@
 // Readers own decoded fields, while executable section slices remain borrowed.
 use jet_foundation.[mir_sha256_bytes, JobScope, JobSkip, JobCachePolicy, ParamZone, StringMapEntry]
 
-pub RECORD_VERSION :: U16{8}
-pub ELF_SECTION :: ".jet_command"
-pub PE_SECTION :: ".jetcmd"
-pub MACH_SECTION :: "__jetcmd"
-pub WASM_SECTION :: "jet.command"
+RECORD_VERSION :: U16{8}
+ELF_SECTION :: ".jet_command"
+PE_SECTION :: ".jetcmd"
+MACH_SECTION :: "__jetcmd"
+WASM_SECTION :: "jet.command"
 CLI_SCHEMA_MAGIC :: prep { [U8]{74, 69, 84, 67, 77, 68, 0, 0} }
 CLI_SCHEMA_MAX_RECORD_BYTES :: 1048576
 CLI_SCHEMA_MAX_INPUTS :: 4096
@@ -19,9 +19,9 @@ CLI_SCHEMA_BYTE_3 :: U8{3}
 CLI_SCHEMA_BYTE_4 :: U8{4}
 
 #Error
-pub enum MetadataError { UnknownFormat Missing Duplicate Malformed(why: String) UnsupportedVersion(version: U16) }
+enum MetadataError { UnknownFormat Missing Duplicate Malformed(why: String) UnsupportedVersion(version: U16) }
 impl MetadataError {
-    pub fn display(self) -> String Never! {
+    fn display(self) -> String Never! {
         if self == {
             .UnknownFormat -> "the file is not an ELF, PE, Mach-O, or Wasm executable"
             .Missing -> "the executable has no JetCommandSchema metadata"
@@ -70,7 +70,7 @@ fn cli_schema_bytes_start(bytes: View<U8>, prefix: [U8]) -> Bool Never! {
     }
     true
 }
-pub fn decode_record(record: View<U8>) -> CLICommandSchema MetadataError! {
+fn decode_record(record: View<U8>) -> CLICommandSchema MetadataError! {
     if record.len() < 46 || !cli_schema_bytes_start(record, CLI_SCHEMA_MAGIC) -> return Err(MetadataError.Malformed{why: "bad record header"})
     version :: U16{Int.from_u8(record[8]) | (Int.from_u8(record[9]) << 8)}
     if version != RECORD_VERSION -> return Err(MetadataError.UnsupportedVersion{version: version})
@@ -343,7 +343,7 @@ fn cli_schema_encode_job(out: &[U8], job: JobFact) Never! {
         cli_schema_put_string(&out, job.limits[index].value)
     }
 }
-pub fn encode_record(schema: CLICommandSchema) -> [U8] Never! {
+fn encode_record(schema: CLICommandSchema) -> [U8] Never! {
     payload := [U8]{}
     cli_schema_put_string(&payload, schema.entry_type)
     cli_schema_put_optional_string(&payload, schema.description)

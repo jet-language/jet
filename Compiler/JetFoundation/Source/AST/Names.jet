@@ -7,26 +7,26 @@
 // Lookup is an open-addressing hash over the spelling bytes (FNV-1a), so a
 // source range interns without building a String first.
 
-pub struct Name {
-    pub id: U32
+struct Name {
+    id: U32
 }
 
-pub struct NameTable {
+struct NameTable {
     // The spelling of each id, resolved without decoding bytes again.
-    pub texts: [String]
+    texts: [String]
     // Every spelling's bytes, back to back; id `n` ends at `ends[n]` and
     // starts where id `n - 1` ends.
-    pub bytes: [U8]
-    pub ends: [Int]
+    bytes: [U8]
+    ends: [Int]
     // Open-addressing slots: 0 is empty, otherwise the id plus one.
-    pub slots: [Int]
-    pub mask: Int
+    slots: [Int]
+    mask: Int
 }
 
 NAME_TABLE_INITIAL_SLOTS :: 1024
 
 // A table whose id 0 is the empty spelling (`name_empty`).
-pub fn name_table() -> NameTable Never! {
+fn name_table() -> NameTable Never! {
     slots := [Int]{}
     loop _ in 0..<NAME_TABLE_INITIAL_SLOTS -> &slots.push(0)
     table := NameTable{texts: [String]{}, bytes: [U8]{}, ends: [Int]{}, slots: slots, mask: NAME_TABLE_INITIAL_SLOTS - 1}
@@ -35,19 +35,19 @@ pub fn name_table() -> NameTable Never! {
 }
 
 // The empty spelling; every `name_table()` interns it first.
-pub fn name_empty() -> Name Never! {
+fn name_empty() -> Name Never! {
     Name{id: U32{0}}
 }
 
-pub fn name_index(name: Name) -> Int Never! {
+fn name_index(name: Name) -> Int Never! {
     Int.from_u32(name.id)
 }
 
-pub fn name_text(table: NameTable, name: Name) -> String Never! {
+fn name_text(table: NameTable, name: Name) -> String Never! {
     table.texts[Int.from_u32(name.id)]
 }
 
-pub fn name_count(table: NameTable) -> Int Never! {
+fn name_count(table: NameTable) -> Int Never! {
     table.texts.len()
 }
 
@@ -72,7 +72,7 @@ fn name_bytes_equal(table: NameTable, id: Int, bytes: [U8], start: Int, end: Int
 
 // The id of `bytes[start..<end]`, interning it when it is new. A spelling
 // that is not UTF-8 resolves to "" but keeps its own id.
-pub fn name_intern_bytes(table: &NameTable, bytes: [U8], start: Int, end: Int) -> Name Never! {
+fn name_intern_bytes(table: &NameTable, bytes: [U8], start: Int, end: Int) -> Name Never! {
     slot := name_hash(bytes, start, end) & table.mask
     loop table.slots[slot] != 0 {
         id :: table.slots[slot] - 1
@@ -89,7 +89,7 @@ pub fn name_intern_bytes(table: &NameTable, bytes: [U8], start: Int, end: Int) -
 }
 
 // The id of `text` when the table holds it; never interns.
-pub fn name_find(table: NameTable, text: String) -> Name? Never! {
+fn name_find(table: NameTable, text: String) -> Name? Never! {
     bytes :: text.bytes()
     slot := name_hash(bytes, 0, bytes.len()) & table.mask
     loop table.slots[slot] != 0 {
@@ -100,7 +100,7 @@ pub fn name_find(table: NameTable, text: String) -> Name? Never! {
     None
 }
 
-pub fn name_intern(table: &NameTable, text: String) -> Name Never! {
+fn name_intern(table: &NameTable, text: String) -> Name Never! {
     bytes :: text.bytes()
     name_intern_bytes(&table, bytes, 0, bytes.len())
 }

@@ -10,25 +10,25 @@ use core.compute as compute
 
 // The finite constraint counter is separate from the tensor LU solver.
 // This is the exact three-field Solver kernel formerly owned by the Prelude.
-pub struct Solver {
-    pub seed: Int
-    pub checked: Int
-    pub failures: Int
+struct Solver {
+    seed: Int
+    checked: Int
+    failures: Int
 }
 
 impl Solver {
-    pub fn new(seed: Int) -> Solver Never! {
+    fn new(seed: Int) -> Solver Never! {
         Solver{seed: seed, checked: 0, failures: 0}
     }
 
-    pub fn require(&self, ok: Bool) Never! {
+    fn require(&self, ok: Bool) Never! {
         self.checked += 1
         if !ok -> self.failures += 1
     }
 
-    pub fn failure_count(self) -> Int Never! { self.failures }
+    fn failure_count(self) -> Int Never! { self.failures }
 
-    pub fn status(self) -> String Never! {
+    fn status(self) -> String Never! {
         if self.failures == 0 -> return "ok"
         "failed"
     }
@@ -71,11 +71,11 @@ struct LinearSolver {
     device: String
 }
 
-pub fn dense(a: Tensor, b: Tensor) -> Tensor ComputeError! {
+fn dense(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     compute.solve(a, b)
 }
 
-pub fn lu(a: Tensor) -> LinearSolver ComputeError! {
+fn lu(a: Tensor) -> LinearSolver ComputeError! {
     shape :: compute.shape(a)
     data :: compute.to_list(a)
     profile :: tensor_profile(a)

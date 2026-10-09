@@ -335,7 +335,7 @@ fn sema_network_handle_finish(receiver: TExpr, operation: THandleOp, args: [TExp
 
 // Called before ordinary method candidate lookup with the already checked
 // receiver. A route is claimed only for the exact registered Core owner.
-pub fn sema_call_try_network_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_network_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner :: sema_network_handle_nominal_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_network_handle_is_canonical(receiver_value.ty, owner, environment, program) || !sema_network_handle_known_method(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
     spec := sema_network_handle_spec_for(owner, method, args.len())
@@ -367,7 +367,7 @@ fn sema_network_tls_static_target(receiver: Expr, method: String, environment: S
     None
 }
 
-pub fn sema_call_try_network_tls_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_network_tls_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     target :: sema_network_tls_static_target(receiver, method, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     result_type := Type.Named{name: "TLSClientConfig"}
     operation := THandleOp.TLSClientConfigDefault

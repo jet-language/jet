@@ -32,7 +32,7 @@ struct Session {
 }
 
 use app.[LiveQuery]
-pub fn auth(users_table: String) -> Auth Never! {
+fn auth(users_table: String) -> Auth Never! {
     Auth{users_table: canonical_table(users_table), providers: [String]{}}
 }
 
@@ -85,23 +85,23 @@ fn canonical_providers(values: [String]) -> [String] {
     providers
 }
 
-pub fn live(key: String, data: String) -> LiveQuery Never! { provider.live(key, data) }
+fn live(key: String, data: String) -> LiveQuery Never! { provider.live(key, data) }
 
-pub fn live_get(q: LiveQuery) -> String Never! { provider.live_get(q) }
+fn live_get(q: LiveQuery) -> String Never! { provider.live_get(q) }
 
-pub fn live_show(q: LiveQuery) -> String Never! { provider.live_show(q) }
+fn live_show(q: LiveQuery) -> String Never! { provider.live_show(q) }
 
-pub fn live_stats() -> String Never! { provider.live_stats() }
+fn live_stats() -> String Never! { provider.live_stats() }
 
-pub fn subscribe(source: String) -> LiveQuery Never! { provider.subscribe(source) }
+fn subscribe(source: String) -> LiveQuery Never! { provider.subscribe(source) }
 
-pub fn invalidate(footprint: String) -> Int Never! { provider.invalidate(footprint) }
+fn invalidate(footprint: String) -> Int Never! { provider.invalidate(footprint) }
 
-pub fn transact_invalidate(write_set: String) -> Int Never! { provider.transact_invalidate(write_set) }
+fn transact_invalidate(write_set: String) -> Int Never! { provider.transact_invalidate(write_set) }
 
-pub fn signal_push(q: LiveQuery, payload: String) -> LiveQuery Never! { provider.signal_push(q, payload) }
+fn signal_push(q: LiveQuery, payload: String) -> LiveQuery Never! { provider.signal_push(q, payload) }
 
-pub fn sync(doc_show: String, over: String) -> String Never! { provider.sync(doc_show, over) }
+fn sync(doc_show: String, over: String) -> String Never! { provider.sync(doc_show, over) }
 
 fn valid_provider(value: String) -> Bool {
     if value == "" || value.len() > 64 -> return false

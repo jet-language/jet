@@ -944,7 +944,7 @@ mod tests {
     /// without a written span; the sandbox boundary still publishes `String`.
     #[test]
     fn sandbox_export_publishes_success_of_solved_failure_carrier() {
-        let written = parsed_function("pub fn probe(path: String) -> String { ~path }\n");
+        let written = parsed_function("fn probe(path: String) -> String { ~path }\n");
         let mut solved = written.clone();
         solved.return_type = Some(Type::Result {
             ok: Box::new(Type::String),

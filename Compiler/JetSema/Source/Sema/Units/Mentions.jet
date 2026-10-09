@@ -3,15 +3,15 @@ use jet_foundation.[Span]
 
 // Rust Bundle/Units.rs::SourceMentions. Offsets are UTF-8 bytes, never
 // String scalar indices. The source is indexed once, not once per catalog member.
-pub struct SemaUnitSuffixMention {
-    pub text: String
-    pub from_span: Span?
-    pub digit_span: Span?
+struct SemaUnitSuffixMention {
+    text: String
+    from_span: Span?
+    digit_span: Span?
 }
-pub struct SemaUnitSourceMentions {
-    pub identifiers: [String:Span]
-    pub unqualified: [String:Bool]
-    pub suffixes: [SemaUnitSuffixMention]
+struct SemaUnitSourceMentions {
+    identifiers: [String:Span]
+    unqualified: [String:Bool]
+    suffixes: [SemaUnitSuffixMention]
 }
 // Rust `is_alphanumeric() || == '_'` on the scalar bytes[at..<end]; ASCII
 // scalars are decided from the byte without building a String.
@@ -38,7 +38,7 @@ fn sema_units_mention_suffix(rows: &[String:SemaUnitSuffixMention], bytes: [U8],
     if !from && row.digit_span == None -> row.digit_span = Val(Span{start: start, end: end})
     rows[text] = row
 }
-pub fn sema_units_source_mentions(source: String) -> SemaUnitSourceMentions Never! {
+fn sema_units_source_mentions(source: String) -> SemaUnitSourceMentions Never! {
     bytes :: source.bytes()
     identifiers := [String:Span]{}
     unqualified := [String:Bool]{}
@@ -71,7 +71,7 @@ pub fn sema_units_source_mentions(source: String) -> SemaUnitSourceMentions Neve
     &sorted.sort_by((left: SemaUnitSuffixMention, right: SemaUnitSuffixMention) -> left.text <=> right.text)
     SemaUnitSourceMentions{identifiers: identifiers, unqualified: unqualified, suffixes: sorted}
 }
-pub fn sema_units_identifier(mentions: SemaUnitSourceMentions, name: String) -> Bool Never! {
+fn sema_units_identifier(mentions: SemaUnitSourceMentions, name: String) -> Bool Never! {
     mentions.identifiers.get(name) != None
 }
 // Rust partition_point: the first suffix not less than the member.
@@ -88,17 +88,17 @@ fn sema_units_suffix_start(mentions: SemaUnitSourceMentions, member: String) -> 
     }
     low
 }
-pub fn sema_units_member(mentions: SemaUnitSourceMentions, member: String) -> Bool Never! {
+fn sema_units_member(mentions: SemaUnitSourceMentions, member: String) -> Bool Never! {
     if mentions.unqualified.get(sema_registration_unit_type_name(member)) != None -> return true
     at :: sema_units_suffix_start(mentions, member)
     at < mentions.suffixes.len() && mentions.suffixes[at].text.starts_with(member)
 }
-pub fn sema_units_identifier_span(mentions: SemaUnitSourceMentions, name: String) -> Span? {
+fn sema_units_identifier_span(mentions: SemaUnitSourceMentions, name: String) -> Span? {
     mentions.identifiers.get(name)
 }
 // Rust source_unit_member_span: whole type name, then earliest from_, then
 // earliest digit suffix. Prefix suffix matches deliberately need no end boundary.
-pub fn sema_units_member_span(mentions: SemaUnitSourceMentions, member: String) -> Span? {
+fn sema_units_member_span(mentions: SemaUnitSourceMentions, member: String) -> Span? {
     if mentions.identifiers.get(sema_registration_unit_type_name(member)) == .Val(span) -> return Val(span)
     from := Span?{None}
     digit := Span?{None}

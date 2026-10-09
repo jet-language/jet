@@ -91,12 +91,12 @@ fn nfd(text: String) -> String Never! { encode_cps(decompose(text, false)) }
 fn nfkc(text: String) -> String Never! { compose(decompose(text, true)) }
 fn nfkd(text: String) -> String Never! { encode_cps(decompose(text, true)) }
 
-pub fn graphemes(text: String) -> [String] Never! { split_graphemes(text) }
-pub fn words(text: String) -> [String] Never! { split_words(text) }
-pub fn sentences(text: String) -> [String] Never! { split_sentences(text) }
+fn graphemes(text: String) -> [String] Never! { split_graphemes(text) }
+fn words(text: String) -> [String] Never! { split_words(text) }
+fn sentences(text: String) -> [String] Never! { split_sentences(text) }
 /// Unicode 17.0.0 scalar labels: `U+XXXX NAME`, with legacy control names.
 /// Scalars absent from the pinned name index are labeled `UNASSIGNED`.
-pub fn inspect(text: String) -> [String] Never! {
+fn inspect(text: String) -> [String] Never! {
     out := [String]{}
     loop cp in decode_scalars(text) -> &out.push("{hex_cp(cp)} {unicode_name(cp)}")
     out
@@ -124,7 +124,7 @@ fn byte_views(text: String) -> [String] Never! {
     out
 }
 
-pub fn is_alphabetic(text: String) -> Bool Never! {
+fn is_alphabetic(text: String) -> Bool Never! {
     raw :: text.bytes()
     if raw.len() == 0 -> return false
     bytes :: raw[0..<raw.len()]
@@ -139,7 +139,7 @@ pub fn is_alphabetic(text: String) -> Bool Never! {
     alphabetic_suffix(bytes, at, segment_tables.UNICODE_ALPHABETIC)
 }
 
-pub fn is_numeric(text: String) -> Bool Never! {
+fn is_numeric(text: String) -> Bool Never! {
     raw :: text.bytes()
     if raw.len() == 0 -> return false
     bytes :: raw[0..<raw.len()]

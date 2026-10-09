@@ -891,7 +891,7 @@ fn sema_call_http_router_effect(result_type: Type, span: Span, environment: Sema
     sema_call_http_record_effect("Net", "HTTPRouter.register", result_type, span, environment, program, &scopes, &context, &diagnostics)
 }
 
-pub fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
     receiver_name := sema_call_http_nominal_leaf(receiver_value.ty)
     if receiver_name != "HTTPRouter" && receiver_name != "HTTPMux" -> return SemaMethodSpecialCheck{handled: false, value: None}

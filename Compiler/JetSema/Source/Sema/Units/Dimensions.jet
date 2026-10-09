@@ -1,7 +1,7 @@
 use jet_foundation.[BinOp, Diagnostic, Dimension, Expr, Item, Span, UnitDimensionDecl, UnitFamilyDef, dimension_base, dimension_divide, dimension_multiply]
 
 // Rust Bundle/Units.rs::DimensionLookup and resolve_dimension_expression.
-pub enum SemaUnitDimensionLookup {
+enum SemaUnitDimensionLookup {
     Found(value: Dimension)
     Missing
     Ambiguous(name: String)
@@ -62,7 +62,7 @@ fn sema_units_dimension_expression(expression: Expr, visible: SemaUnitDimensionV
 }
 // Rust dimension_dependencies includes identifiers on either side of any
 // binary operator; the resolver itself admits only multiplication/division.
-pub fn sema_units_dimension_dependencies(expression: Expr, names: &[String]) Never! {
+fn sema_units_dimension_dependencies(expression: Expr, names: &[String]) Never! {
     if expression == {
         .Ident(name, _) -> &names.push(name)
         .Binary(_, left, right, _) -> {
@@ -126,7 +126,7 @@ fn sema_units_dimension_reads(expression: Expr, visible: SemaUnitDimensionVisibi
 fn sema_units_owner(input: SemaRegistrationModuleInput) -> (package: String, module: String) Never! {
     (package: input.package_identity, module: "{input.package_identity}::{input.module_path}")
 }
-pub fn sema_units_resolve_standard(prelude: &[UnitFamilyDef]) Never! {
+fn sema_units_resolve_standard(prelude: &[UnitFamilyDef]) Never! {
     local := [String:Int]{}
     known := [Int:Dimension]{}
     loop (index, family) in prelude {
@@ -160,7 +160,7 @@ pub fn sema_units_resolve_standard(prelude: &[UnitFamilyDef]) Never! {
 // import edges (the name-ledger import target), not guessed source paths.
 // Reverse edges wake only affected claims; forward references and cycles do
 // not incur a declarations × pending-claims scan each iteration.
-pub fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], diagnostics: &[Diagnostic]) Never! {
+fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], diagnostics: &[Diagnostic]) Never! {
     declarations := [SemaUnitDimensionDeclaration]{}
     module_rows := [String:Int]{}
     locals := [[String:Int]]{}

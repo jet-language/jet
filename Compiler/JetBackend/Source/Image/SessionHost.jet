@@ -8,74 +8,74 @@ use core.files as execution_files
 use core.crypto as execution_crypto
 use jet_foundation.[foundation_json_quote]
 
-pub struct X64ExecutionScalar {
-    pub kind: String
-    pub value: String
+struct X64ExecutionScalar {
+    kind: String
+    value: String
     // The checked callable consumes an owning carrier at its entry, including
     // on Stopped. Borrowed inputs remain ours and are released after the call.
-    pub consumed: Bool{true}
+    consumed: Bool{true}
 }
-pub enum X64ExecutionMode { Comptime Turn }
-pub struct X64ExecutionRequest {
-    pub image: X64MemoryImage
-    pub mode: X64ExecutionMode
-    pub args: [X64ExecutionScalar]
-    pub result_kind: String
-    pub fuel: Int
-    pub depth: Int
+enum X64ExecutionMode { Comptime Turn }
+struct X64ExecutionRequest {
+    image: X64MemoryImage
+    mode: X64ExecutionMode
+    args: [X64ExecutionScalar]
+    result_kind: String
+    fuel: Int
+    depth: Int
     // Logical retained scopes share one child but never share session slots.
-    pub session: Int{0}
-    pub boundary: X64ValueBoundary?{None}
-    pub release: Int?{None}
-    pub closures: [X64ClosureRegistration]{[X64ClosureRegistration]{}}
+    session: Int{0}
+    boundary: X64ValueBoundary?{None}
+    release: Int?{None}
+    closures: [X64ClosureRegistration]{[X64ClosureRegistration]{}}
     // The compiler's canonical Core producer supplies this image. It is
     // admitted once per child generation, independent of logical session close.
-    pub core: X64MemoryImage?{None}
+    core: X64MemoryImage?{None}
 }
-pub struct X64ExecutionResponse {
+struct X64ExecutionResponse {
     // Exactly one response body: tagged lossless value JSON or the canonical
     // shared JetStopRecord JSON (all optional site fields preserved).
-    pub body: String
-    pub stopped: Bool
-    pub invalidated: Bool
-    pub generation: Int
-    pub stdout: [U8]{[U8]{}}
-    pub stderr: [U8]{[U8]{}}
-    pub errors: [String]
-    pub value: X64NativeValue?{None}
+    body: String
+    stopped: Bool
+    invalidated: Bool
+    generation: Int
+    stdout: [U8]{[U8]{}}
+    stderr: [U8]{[U8]{}}
+    errors: [String]
+    value: X64NativeValue?{None}
 }
 struct X64ExecutionScopes {
-    pub closed: [Int:Bool]
-    pub core_identity: String{""}
-    pub core_generation: Int{0}
+    closed: [Int:Bool]
+    core_identity: String{""}
+    core_generation: Int{0}
 }
-pub struct X64ExecutionHost {
-    pub executable: String
-    pub runtime: String
-    pub runtime_identity: String
-    pub runtime_identity_words: [Int]
+struct X64ExecutionHost {
+    executable: String
+    runtime: String
+    runtime_identity: String
+    runtime_identity_words: [Int]
     // [pid, fd, generation, stdout, stderr, SHA-256 as 8 u32s, next session].
     // Copying this descriptor never copies live bindings.
-    pub state: Int
+    state: Int
     // Descriptor copies share retirement metadata across child generations.
     // A fatal reset may not silently recreate an explicitly closed scope.
-    pub scopes: Shared<X64ExecutionScopes>
-    pub errors: [String]
+    scopes: Shared<X64ExecutionScopes>
+    errors: [String]
 }
 
 struct X64PinnedExecutionImage {
-    pub session: Int
-    pub image: X64LoadedImage
-    pub codes: [Int]
+    session: Int
+    image: X64LoadedImage
+    codes: [Int]
 }
 struct X64ExecutionProtocolError {
-    pub message: String
-    pub restart: Bool
+    message: String
+    restart: Bool
 }
 
 struct X64ExecutionEnvelope {
-    pub request: X64ExecutionRequest
-    pub image_bytes: Int
+    request: X64ExecutionRequest
+    image_bytes: Int
 }
 
 fn x64_execution_send_image(fd: Int, request: X64ExecutionRequest, runtime_identity: String) -> Bool {
@@ -227,14 +227,14 @@ fn x64_execution_runtime_identity(runtime: String) -> String? {
     }
     Val(digest)
 }
-pub fn x64_execution_open(executable: String, runtime: String) -> X64ExecutionHost {
+fn x64_execution_open(executable: String, runtime: String) -> X64ExecutionHost {
     state := 0
     #Unsafe("the raw host leaf returns the compiler-process-lifetime resource words; requests serialize access") { state = os_session_state() }
     identity :: x64_execution_runtime_identity(runtime)
     digest :: identity ?? ""
     X64ExecutionHost{executable: executable, runtime: runtime, runtime_identity: digest, runtime_identity_words: x64_execution_identity_words(digest), state: state, scopes: shared X64ExecutionScopes{closed: [Int:Bool]{}}, errors: if identity == None -> [String]{"native runtime lacks its admitted SHA-256 manifest: {runtime}.sha256"} else -> [String]{}}
 }
-pub fn x64_execution_session_new(host: X64ExecutionHost) -> Int {
+fn x64_execution_session_new(host: X64ExecutionHost) -> Int {
     #Unsafe("logical identities share the process-owned execution counter and mutex") { os_session_lock() }
     identity :: x64_execution_word(host.state, 13) + 1
     x64_execution_set(host.state, 13, identity)
@@ -257,7 +257,7 @@ fn x64_execution_reap(host: X64ExecutionHost) -> Int {
     x64_execution_set(host.state, 1, -1)
     result
 }
-pub fn x64_execution_close(host: X64ExecutionHost) {
+fn x64_execution_close(host: X64ExecutionHost) {
     if host.state == 0 -> return
     #Unsafe("close is serialized with every request on this process-owned host") { os_session_lock() }
     if x64_execution_word(host.state, 0) != 0 {
@@ -267,7 +267,7 @@ pub fn x64_execution_close(host: X64ExecutionHost) {
     #Unsafe("release the private execution mutex acquired above") { os_session_unlock() }
 }
 
-pub fn x64_execution_session_close(host: X64ExecutionHost, identity: Int) -> [String] {
+fn x64_execution_session_close(host: X64ExecutionHost, identity: Int) -> [String] {
     if host.state == 0 -> return [String]{"native execution host is not open"}
     #Unsafe("logical close serializes with turns and shared-child teardown") { os_session_lock() }
     errors :: x64_execution_session_close_locked(host, identity)
@@ -314,7 +314,7 @@ fn x64_execution_stop_kind(body: String) -> String? {
     }
     None
 }
-pub fn x64_execution_request(host: X64ExecutionHost, request: X64ExecutionRequest) -> X64ExecutionResponse {
+fn x64_execution_request(host: X64ExecutionHost, request: X64ExecutionRequest) -> X64ExecutionResponse {
     #Unsafe("all compiler threads share this one process-owned execution resource") { os_session_lock() }
     response :: x64_execution_request_locked(host, request)
     #Unsafe("release the private execution mutex acquired above") { os_session_unlock() }
@@ -557,7 +557,7 @@ fn x64_execution_result(runtime: X64Runtime, kind: String, word: Int) -> String?
 // Invoked by the private CLI entry. One thread owns all code and bindings.
 // Retain even images with no newly published slot: live closures may point
 // into any earlier image. Destroy slots BEFORE unmapping their original glue.
-pub fn x64_execution_service(runtime_path: String, runtime_identity: String) -> Int {
+fn x64_execution_service(runtime_path: String, runtime_identity: String) -> Int {
     bytes :: execution_files.read_bytes(runtime_path) ?? return 101
     if execution_crypto.sha256(bytes).hex() != runtime_identity -> return 101
     runtime := x64_runtime_open(runtime_path)

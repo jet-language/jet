@@ -236,20 +236,20 @@ enum TPatternField {
     Nested(field: String, pattern: TNestedPattern, span: Span)
 }
 
-pub struct TListPatternRest {
-    pub name: String?
-    pub span: Span
+struct TListPatternRest {
+    name: String?
+    span: Span
 }
 
-pub struct TMapPatternEntry {
-    pub key: TExpr
-    pub optional: Bool
-    pub slot: TPatternBinding
-    pub span: Span
+struct TMapPatternEntry {
+    key: TExpr
+    optional: Bool
+    slot: TPatternBinding
+    span: Span
 }
 
 // Logical key identity ignores source spelling and resolved constant aliases.
-pub fn tir_pattern_key_identity(key: TExpr) -> String? Never! {
+fn tir_pattern_key_identity(key: TExpr) -> String? Never! {
     if key.kind == {
         .IntLit(value, _) -> Val("int:{value}")
         .StrLit(value) -> Val("text:{value}")
@@ -468,7 +468,7 @@ enum TComptimeKey {
     Enum(type_name: String, variant: String)
 }
 
-pub fn tir_comptime_integer_key(number: Int) -> TComptimeKey Never! {
+fn tir_comptime_integer_key(number: Int) -> TComptimeKey Never! {
     if mir_integer_constant(number, None, None) == {
         .Int(value, _, _) -> TComptimeKey.Int{value: value}
         .BigInt(decimal) -> TComptimeKey.BigInt{decimal: decimal}
@@ -476,9 +476,9 @@ pub fn tir_comptime_integer_key(number: Int) -> TComptimeKey Never! {
     }
 }
 
-pub struct TComptimeKeyField {
-    pub name: String
-    pub key: TComptimeKey
+struct TComptimeKeyField {
+    name: String
+    key: TComptimeKey
 }
 
 struct TComptimeField {
@@ -785,7 +785,7 @@ enum TGCEditKind {
     EdgeSlot
 }
 
-pub enum THostCall {
+enum THostCall {
     Method(receiver: TExpr, method: String, args: [TExpr])
     CarrierFact(receiver: TExpr, field: String, notes: Bool)
     CellGuardProject(receiver: TExpr, paths: [[String]], result_type: Type, editable: Bool, edit_paths_disjoint: Bool)
@@ -2048,7 +2048,7 @@ struct TFactChannel {
     cost: TCostFact?
 }
 
-pub fn tir_expr_facts(expression: TExpr) -> TFactChannel Never! {
+fn tir_expr_facts(expression: TExpr) -> TFactChannel Never! {
     facts := TFactChannel{ty: Val(expression.ty), integer_bounds: tir_cost_integer_bounds(expression), exclusivity: TFactExclusivity.Unknown, purity: TFactPurity.Unknown, no_cross_iteration_deps: false, comptime_value: None, cost: tir_cost_fact(expression)}
     facts.exclusivity = if expression.kind == {
         .Borrow(_, access) | .AddressOf(_, access, _) -> if {
@@ -2149,7 +2149,7 @@ fn tir_pattern_slot_children(slot: TPatternBinding) -> [TExpr] Never! {
     }
 }
 
-pub fn tir_if_cond_children(condition: TIfCond) -> [TExpr] Never! {
+fn tir_if_cond_children(condition: TIfCond) -> [TExpr] Never! {
     children := [TExpr]{}
     if condition == {
         .Plain(value) -> &children.push(value)

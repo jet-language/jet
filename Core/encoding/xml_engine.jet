@@ -483,7 +483,7 @@ fn lexical_semantic(value: DataTree, key: String) -> DataTree? Never! {
     Val(object(^out))
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:740
-pub fn clean(value: DataTree) -> DataTree Never! {
+fn clean(value: DataTree) -> DataTree Never! {
     if value == {
         .Array(values) -> {
             out := [DataTree]{}
@@ -584,7 +584,7 @@ fn lexical_value_to_wire(value: ^DataTree, encoding: WireEncoding) -> DataTree N
     object(^output)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:888
-pub fn stream_event_value(item: StreamEvent) -> DataTree Never! {
+fn stream_event_value(item: StreamEvent) -> DataTree Never! {
     encoding :: item.encoding
     if item.event == {
         .DocumentStart -> {
@@ -662,9 +662,9 @@ fn finish_byte_element(frame: ^ByteElementFrame, close_lexical: ^DataTree) -> Da
     object([(key: "$xml", value: text("element")), (key: "name", value: ^frame.name), (key: "namespaces", value: ^frame.namespaces), (key: "attributes", value: ^frame.attributes), (key: "children", value: DataTree.Array(^frame.children)), (key: "empty_style", value: ^frame.empty_style), (key: "open_lexical", value: ^frame.open_lexical), (key: "close_lexical", value: ^close_lexical)])
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1095
-pub fn parse_document(source: String) -> DataTree XMLFault! { parse_document_with(source, ParseOptions.safe()) }
+fn parse_document(source: String) -> DataTree XMLFault! { parse_document_with(source, ParseOptions.safe()) }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1100
-pub fn parse_document_with(source: String, options: ParseOptions) -> DataTree XMLFault! {
+fn parse_document_with(source: String, options: ParseOptions) -> DataTree XMLFault! {
     options.limits.validate() ?? return Err(err)
     scanner := Scanner.with_options(source.bytes(), options) ?? return Err(err)
     document_children := [DataTree]{}
@@ -714,7 +714,7 @@ pub fn parse_document_with(source: String, options: ParseOptions) -> DataTree XM
 // Rust: crates/jet-foundation/src/XmlPull.rs:1214
  fn parse_document_bytes(bytes: [U8]) -> DataTree XMLFault! { parse_document_bytes_with(bytes, ParseOptions.safe()) }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1218
-pub fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XMLFault! {
+fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> DataTree XMLFault! {
     options.limits.validate() ?? return Err(err)
     scanner := StreamScanner.new(bytes.len().max(4), options) ?? return Err(err)
     &scanner.push(bytes[0..<bytes.len()]) ?? return Err(err)
@@ -1040,15 +1040,15 @@ fn render_element_open(value: DataTree, output: &String) String! {
         }
     }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1701
-pub fn render_document(value: DataTree) -> String String! {
+fn render_document(value: DataTree) -> String String! {
     output := ""
     render_node(value, &output) ?? return Err(err)
     ^output
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1782
-pub enum RenderEncoding { UTF8 UTF8Bom Utf16Le Utf16Be }
+enum RenderEncoding { UTF8 UTF8Bom Utf16Le Utf16Be }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1790
-pub enum LexicalPolicy { PreserveValid Deterministic }
+enum LexicalPolicy { PreserveValid Deterministic }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1795
 
 // Rust: crates/jet-foundation/src/XmlPull.rs:1796
@@ -1185,7 +1185,7 @@ impl StreamWriter {
 }
 
 // Rust: crates/jet-foundation/src/XmlPull.rs:2042
-pub fn render_document_bytes(value: DataTree, encoding: RenderEncoding, lexical: LexicalPolicy) -> [U8] XMLFault! {
+fn render_document_bytes(value: DataTree, encoding: RenderEncoding, lexical: LexicalPolicy) -> [U8] XMLFault! {
     events :: unfold_events(value) ?? return Err(err)
     writer := StreamWriter.new(encoding, lexical)
     output := [U8]{}
@@ -1394,11 +1394,11 @@ fn ascii_equal(left: String, right: String) -> Bool Never! {
     true
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2402
-pub enum CanonicalMode { Inclusive11 Exclusive10 }
+enum CanonicalMode { Inclusive11 Exclusive10 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2408
-pub struct CanonicalOptions { pub mode: CanonicalMode, pub comments: Bool, pub inclusive_prefixes: [String] }
+struct CanonicalOptions { mode: CanonicalMode, comments: Bool, inclusive_prefixes: [String] }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2416
-pub fn canonical_document(value: DataTree, options: CanonicalOptions) -> String XMLFault! {
+fn canonical_document(value: DataTree, options: CanonicalOptions) -> String XMLFault! {
     if options.mode == CanonicalMode.Inclusive11 && !options.inclusive_prefixes.is_empty() -> return Err(XMLFault.shape("inclusive_prefixes is legal only for Exclusive10"))
     kind :: required_text(value, "$xml") ?? return Err(XMLFault.shape(err))
     if kind != "document" -> return Err(XMLFault.shape("XML canonical input must be a document"))
@@ -1608,7 +1608,7 @@ fn is_simple_content(children: [DataTree]) -> Bool Never! {
     true
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2808
-pub fn document_root(document: DataTree) -> DataTree XMLFault! {
+fn document_root(document: DataTree) -> DataTree XMLFault! {
     if xml_tag_of(document) != Val("document") -> return Err(projection_err("$", "XML root expects a document node"))
     content :: field(document, "children") ?? return Err(projection_err("$", "XML document children missing"))
     children :: if content == {
@@ -1625,7 +1625,7 @@ pub fn document_root(document: DataTree) -> DataTree XMLFault! {
     root ?? return Err(projection_err("$", "XML document must contain exactly one root element"))
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2836
-pub fn expanded_name_parts(node: DataTree) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) XMLFault! {
+fn expanded_name_parts(node: DataTree) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) XMLFault! {
     kind :: xml_tag_of(node) ?? return Err(projection_err("$", "expanded_name requires a tagged XML node"))
     if kind == {
         "element" | "attribute" | "namespace" -> {}
@@ -1636,7 +1636,7 @@ pub fn expanded_name_parts(node: DataTree) -> (raw: String, prefix: String?, loc
     (raw: ^parts.raw, prefix: ^parts.prefix, local: ^parts.local, namespace_uri: ^parts.namespace_uri)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2856
-pub fn lookup_attribute(element: DataTree, name: String) -> String? XMLFault! {
+fn lookup_attribute(element: DataTree, name: String) -> String? XMLFault! {
     if xml_tag_of(element) != Val("element") -> return Err(projection_err("$", "attribute helper requires an element node"))
     content :: field(element, "attributes") ?? return Err(projection_err("$", "XML element attributes missing"))
     attributes :: if content == {
@@ -1655,7 +1655,7 @@ pub fn lookup_attribute(element: DataTree, name: String) -> String? XMLFault! {
     None
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:2900
-pub fn element_content(element: DataTree) -> [DataTree] XMLFault! {
+fn element_content(element: DataTree) -> [DataTree] XMLFault! {
     if xml_tag_of(element) != Val("element") -> return Err(projection_err("$", "content helper requires an element node"))
     content :: field(element, "children") ?? return Err(projection_err("$", "XML element children missing"))
     if content == {
@@ -1725,7 +1725,7 @@ fn project_element_value(element: DataTree, path: String) -> DataTree XMLFault! 
     object(^entries)
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:3030
-pub fn project_document_for_decode(document: DataTree) -> DataTree XMLFault! {
+fn project_document_for_decode(document: DataTree) -> DataTree XMLFault! {
     root :: document_root(document) ?? return Err(err)
     project_element_value(root, "$") ?? return Err(err)
 }
@@ -1733,13 +1733,13 @@ pub fn project_document_for_decode(document: DataTree) -> DataTree XMLFault! {
 
 // Rust: crates/jet-foundation/src/XmlPull.rs:4709
 #Error
-pub struct XMLFault {
-    pub kind: Reason
-    pub offset: Int
-    pub line: Int?
-    pub column: Int?
-    pub path: String
-    pub reason: String
+struct XMLFault {
+    kind: Reason
+    offset: Int
+    line: Int?
+    column: Int?
+    path: String
+    reason: String
 }
 impl XMLFault {
     // Rust: crates/jet-foundation/src/XmlPull.rs:4718
@@ -1775,17 +1775,17 @@ impl XMLFault {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:4759
-pub enum Reason { InvalidEncoding Malformed MismatchedTag InvalidName Namespace DuplicateAttribute Entity EntityCycle Limit Canonicalization Shape Unsupported }
+enum Reason { InvalidEncoding Malformed MismatchedTag InvalidName Namespace DuplicateAttribute Entity EntityCycle Limit Canonicalization Shape Unsupported }
 // Rust: crates/jet-foundation/src/XmlPull.rs:4775
-pub struct Limits {
-    pub max_depth: Int
-    pub max_nodes: Int
-    pub max_attributes_per_element: Int
-    pub max_name_bytes: Int
-    pub max_text_bytes: Int
-    pub max_entity_declarations: Int
-    pub max_entity_depth: Int
-    pub max_entity_replacement_bytes: Int
+struct Limits {
+    max_depth: Int
+    max_nodes: Int
+    max_attributes_per_element: Int
+    max_name_bytes: Int
+    max_text_bytes: Int
+    max_entity_declarations: Int
+    max_entity_depth: Int
+    max_entity_replacement_bytes: Int
 }
 impl Limits {
     // Rust: crates/jet-foundation/src/XmlPull.rs:4787
@@ -1793,7 +1793,7 @@ impl Limits {
         Limits{max_depth: 256, max_nodes: 1_000_000, max_attributes_per_element: 1024, max_name_bytes: 4096, max_text_bytes: 16_777_216, max_entity_declarations: 1024, max_entity_depth: 32, max_entity_replacement_bytes: 8_388_608}
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4800
-    pub fn validate(self: Limits) XMLFault! {
+    fn validate(self: Limits) XMLFault! {
         checks :: [LimitCheck]{
             LimitCheck{name: "max_depth", value: self.max_depth, minimum: 1, maximum: 4096}, LimitCheck{name: "max_nodes", value: self.max_nodes, minimum: 1, maximum: 1_000_000_000},
             LimitCheck{name: "max_attributes_per_element", value: self.max_attributes_per_element, minimum: 0, maximum: 1_000_000},
@@ -1809,9 +1809,9 @@ impl Limits {
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:4848
-pub enum EntityPolicy { Preserve Reject Resolve([String:String]) }
+enum EntityPolicy { Preserve Reject Resolve([String:String]) }
 // Rust: crates/jet-foundation/src/XmlPull.rs:4855
-pub struct ParseOptions { pub entities: EntityPolicy, pub limits: Limits }
+struct ParseOptions { entities: EntityPolicy, limits: Limits }
 impl ParseOptions {
     // Rust: crates/jet-foundation/src/XmlPull.rs:4861
      fn safe() -> ParseOptions Never! { ParseOptions{entities: EntityPolicy.Preserve, limits: Limits.safe()} }
@@ -2034,9 +2034,9 @@ fn unit_prefix(units: View<DecodedUnit>, start: Int, needle: String) -> Bool Nev
     true
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:5180
-pub struct StreamEvent { event: Event, pub raw_bytes: [U8], encoding: WireEncoding, pub bom: [U8] }
+struct StreamEvent { event: Event, raw_bytes: [U8], encoding: WireEncoding, bom: [U8] }
 // Rust: crates/jet-foundation/src/XmlPull.rs:5190
-pub struct StreamScanner {
+struct StreamScanner {
     lexer: ByteLexer
     options: ParseOptions
     started: Bool
@@ -2057,12 +2057,12 @@ pub struct StreamScanner {
 }
 impl StreamScanner {
     // Rust: crates/jet-foundation/src/XmlPull.rs:5211
-    pub fn new(max_item_bytes: Int, options: ParseOptions) -> StreamScanner XMLFault! {
+    fn new(max_item_bytes: Int, options: ParseOptions) -> StreamScanner XMLFault! {
         options.limits.validate() ?? return Err(err)
         StreamScanner{lexer: ByteLexer.new(max_item_bytes), options: ^options, started: false, ended: false, root_seen: false, root_closed: false, declaration_seen: false, doctype_seen: false, declared_entities: [String:DeclaredEntityKind]{}, stack: [], nodes: 0, text_bytes: 0, entity_replacement_bytes: 0, wire_consumed: 0, line: 1, column: 1, terminal: None}
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5233
-    pub fn push(self: &StreamScanner, bytes: View<U8>) XMLFault! {
+    fn push(self: &StreamScanner, bytes: View<U8>) XMLFault! {
         if self.terminal == .Val(error) -> return Err(~error)
         &self.lexer.push(bytes) ?? {
             self.terminal = Val(~err)
@@ -2070,7 +2070,7 @@ impl StreamScanner {
         }
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5242
-    pub fn finish_input(self: &StreamScanner) XMLFault! {
+    fn finish_input(self: &StreamScanner) XMLFault! {
         if self.terminal == .Val(error) -> return Err(~error)
         &self.lexer.finish_input() ?? {
             self.terminal = Val(~err)
@@ -2087,7 +2087,7 @@ impl StreamScanner {
         Err(^error)
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:5259
-    pub fn next(self: &StreamScanner) -> StreamEvent? XMLFault! {
+    fn next(self: &StreamScanner) -> StreamEvent? XMLFault! {
         if self.terminal == .Val(error) -> return Err(~error)
         encoding :: self.lexer.encoding() ?? return None
         if !self.started {

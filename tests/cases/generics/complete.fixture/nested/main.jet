@@ -2,15 +2,15 @@
 module outer<T>(count: Int) {
     module plain {
         module inner<U> {
-            pub fn total(value: U) -> Int { return count }
+            fn total(value: U) -> Int { return count }
         }
         module closed :: inner<T>
         module forwarded :: closed
-        pub fn result(value: T) -> Int {
+        fn result(value: T) -> Int {
             return closed.total(value) + forwarded.total(value)
         }
     }
-    pub fn result(value: T) -> Int {
+    fn result(value: T) -> Int {
         return plain.result(value)
     }
 }

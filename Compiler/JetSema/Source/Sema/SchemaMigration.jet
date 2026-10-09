@@ -3,7 +3,7 @@
 // supply the canonical populated scope environment after type registration.
 use jet_foundation.[Diagnostic, Item, MigrationOp, Span, StructDef, Type, type_name]
 
-pub fn sema_schema_published(definition: StructDef) -> Bool Never! {
+fn sema_schema_published(definition: StructDef) -> Bool Never! {
     if definition.is_published_schema -> return true
     loop derivation in definition.derives { if derivation.name == "PublishedSchema" -> return true }
     false
@@ -36,7 +36,7 @@ fn sema_schema_decodable(ty: Type, environment: SemaScopeEnvironment?) -> Bool N
     }
 }
 
-pub fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], environment: SemaScopeEnvironment?) -> [Diagnostic] Never! {
+fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], environment: SemaScopeEnvironment?) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     migrations := [String:[MigrationOp]]{}
     conversions := [(from_ty: String, to_ty: String)]{}
@@ -223,7 +223,7 @@ fn sema_schema_check_registered_module(environment: SemaScopeEnvironment?, modul
 
 // The populated schema pass temporarily owns the same actual registered graph
 // through the existing scope corridor, then returns it to its genuine caller.
-pub fn sema_check_schema_migration_graph(registration: ^SemaRegistrationGraph, checked: SemaGraphResult, snapshots: [String:SchemaSnapshot]) -> (registration: SemaRegistrationGraph, diagnostics: [Diagnostic]) Never! {
+fn sema_check_schema_migration_graph(registration: ^SemaRegistrationGraph, checked: SemaGraphResult, snapshots: [String:SchemaSnapshot]) -> (registration: SemaRegistrationGraph, diagnostics: [Diagnostic]) Never! {
     if snapshots.len() == 0 -> return (registration: ^registration, diagnostics: [Diagnostic]{})
     module_count :: registration.modules.len()
     types := [jet_foundation.TTypeDef]{}

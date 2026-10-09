@@ -6,10 +6,10 @@
 // keeps `name`, `version`, and `jet` at top level; migration-era `pkg.jet`
 // keeps them inside `payload`. `jet` is the raw channel ref; None is
 // unpinned (the running `jet` is used with no fetch).
-pub struct JetPinIdentity {
-    pub payload_name: String
-    pub payload_version: String
-    pub jet: String?
+struct JetPinIdentity {
+    payload_name: String
+    payload_version: String
+    jet: String?
 
     fn empty() -> JetPinIdentity Never! {
         JetPinIdentity{payload_name: "", payload_version: "", jet: None}
@@ -19,7 +19,7 @@ pub struct JetPinIdentity {
 // Frozen-forward identity pre-parse. Reads only the Package identity
 // fields and tolerates any other key, block, or syntax around them. This
 // grammar is CONTRACT-FROZEN (Docs/spec/spec.md) and must never narrow.
-pub fn trust_pin_identity_preparse(text: String) -> JetPinIdentity Never! {
+fn trust_pin_identity_preparse(text: String) -> JetPinIdentity Never! {
     stripped :: trust_pin_strip_line_comments(text)
     if trust_pin_top_block_body(stripped, "payload") == .Val(body) {
         return JetPinIdentity{
@@ -264,7 +264,7 @@ fn trust_pin_unquote(value: String) -> String Never! {
 
 // The locked compiler pin: the `[[toolchain]]` whose object id starts with
 // `jet-`, never a co-located bridge build toolchain (`toolchain-<v>`).
-pub fn trust_pin_locked_toolchain(root: String) -[FS]> LockedToolchain? {
+fn trust_pin_locked_toolchain(root: String) -[FS]> LockedToolchain? {
     lock :: pkg_lock_load(root) ?? return None
     loop toolchain in lock.toolchains {
         if toolchain.id.starts_with("jet-") -> return Val(toolchain)
@@ -296,7 +296,7 @@ fn trust_pin_is_executable(path: String) -[FS, Env]> Bool {
 // ── T4: verbs ──
 
 // `jet self toolchain`: a read-only pin, lock, and realization report.
-pub fn trust_pin_report(root: String) -[FS, Env]> String {
+fn trust_pin_report(root: String) -[FS, Env]> String {
     manifest :: trust_pin_read_manifest(root)
     identity :: if manifest == {
         .Val(text) -> trust_pin_identity_preparse(text)

@@ -80,7 +80,7 @@ fn sema_call_reflection_named_displayable(name: String, ty: Type, environment: S
     sema_call_reflection_bound(ty, "Display", environment, program) || sema_call_reflection_bound(ty, "Printable", environment, program)
 }
 
-pub fn sema_call_reflection_is_displayable(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+fn sema_call_reflection_is_displayable(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if sema_call_reflection_secret_bearing(ty) || sema_call_reflection_one_pass(ty) -> return false
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> return true
@@ -128,7 +128,7 @@ fn sema_call_reflection_has_name(names: [String], wanted: String) -> Bool Never!
 // Apply the runtime reflection gate after the normal Core argument checker has
 // inferred the value. This keeps argument evaluation and ownership in the
 // ordinary call path while centralizing secret/display diagnostics.
-pub fn sema_call_reflection_validate_value(value: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_call_reflection_validate_value(value: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
     if sema_call_reflection_is_displayable(value.ty, environment, program) -> return true
     if value.ty == .Named(name) && sema_call_reflection_leaf_name(name) == "Unit" -> return true
     if {

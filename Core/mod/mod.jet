@@ -39,7 +39,7 @@ impl __LoadContext.Close {
     }
 }
 
-pub fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
+fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
     if !core.mod.__supported() ->
         return Err(ModError.Unsupported("Mod.load is not supported on target `" + core.mod.__os() + "`"))
     handle :: core.mod.__read_context(path, grant) ? value -> value ! reason -> return Err(mod_error(reason))
@@ -65,9 +65,9 @@ pub fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
     // Finish consumes the raw owner; the lexical Close sees an empty slot.
     Ok(core.mod.__finish_context(handle))
 }
-pub struct CompiledModule {
-    pub path: String
-    pub handle: Int
+struct CompiledModule {
+    path: String
+    handle: Int
 }
 
 // The provider exposes no `jet_mod_unload` operation.  `Mod` owns its native

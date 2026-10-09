@@ -2,16 +2,16 @@
 // cache or logs. Without canonical graph admission there are no admitted
 // steps to execute or fingerprint.
 
-pub fn recipe_run(_recipe: BuildRecipe, _ctx: RecipeBuildContext, _transport: RecipeTransport?) -[FS, Env, Exec, Net, Rand, Time.Wait]> RunReport RecipeDiagnostic! {
+fn recipe_run(_recipe: BuildRecipe, _ctx: RecipeBuildContext, _transport: RecipeTransport?) -[FS, Env, Exec, Net, Rand, Time.Wait]> RunReport RecipeDiagnostic! {
     Err(recipe_plan_refusal())
 }
 
-pub fn recipe_run_logged(_recipe: BuildRecipe, _ctx: RecipeBuildContext, _transport: RecipeTransport?, _attempt: &BuildAttempt) -[FS, Env, Exec, Net, Rand, Time.Wait]> RunReport RecipeDiagnostic! {
+fn recipe_run_logged(_recipe: BuildRecipe, _ctx: RecipeBuildContext, _transport: RecipeTransport?, _attempt: &BuildAttempt) -[FS, Env, Exec, Net, Rand, Time.Wait]> RunReport RecipeDiagnostic! {
     Err(recipe_plan_refusal())
 }
 
 // U19 trust gate: record trust for a recipe hash in the canonical trust
 // store. True when the hash is new, false when it was already granted.
-pub fn recipe_trust_first_build(recipe_hash: String, trust_store: String, project_dir: String) -[FS, Env]> Bool PackageGateError! {
+fn recipe_trust_first_build(recipe_hash: String, trust_store: String, project_dir: String) -[FS, Env]> Bool PackageGateError! {
     trust_grant_hash(trust_store, project_dir, recipe_hash)
 }

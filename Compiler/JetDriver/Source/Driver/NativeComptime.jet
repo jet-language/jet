@@ -57,7 +57,7 @@ fn jet_driver_native_float32_bits(bits: Int) -> Int Never! {
 
 // Decode each counted native node once. Closure identity resolves against the
 // producing snapshot, never the newest program with the same numeric MIR ID.
-pub fn jet_driver_native_value(value: X64NativeValue, host: JetDriverExecutionHost) -> TComptimeValue? {
+fn jet_driver_native_value(value: X64NativeValue, host: JetDriverExecutionHost) -> TComptimeValue? {
     kind :: value.kind
     if kind == "Unit" && value.children.len() == 0 -> return Val(TComptimeValue.Unit)
     if kind == "String" -> return Val(TComptimeValue.String{value: value.text})
@@ -193,7 +193,7 @@ fn jet_driver_native_comptime_stop(program: MIRProgram, graph: SemaRegistrationG
     }
     jet_driver_native_comptime_failure(span, "E0953", JetEvalErrorKind.ComptimePanic, "your comptime code stopped the build", "native comptime stopped with {kind}: {message}", location)
 }
-pub fn jet_driver_native_comptime_eval(program: MIRProgram, graph: SemaRegistrationGraph, function_id: MIRFunctionID, config: JetEvalConfig, host: JetDriverExecutionHost?, sources: [JetCodegenClosureSource]) -> JetEvalResult {
+fn jet_driver_native_comptime_eval(program: MIRProgram, graph: SemaRegistrationGraph, function_id: MIRFunctionID, config: JetEvalConfig, host: JetDriverExecutionHost?, sources: [JetCodegenClosureSource]) -> JetEvalResult {
     row := -1
     loop (index, function) in program.functions { if function.id == function_id -> row = index }
     if row < 0 -> return jet_driver_native_comptime_failure(Span{start: 0, end: 0}, "E0956", JetEvalErrorKind.Compiler, "native comptime selected a missing function", "the checked MIR function identity must remain in its program")

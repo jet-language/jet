@@ -187,24 +187,24 @@ struct JetDriverCoreSource {
 
 // Selected build output is compiler-produced source, never a fabricated
 // authorized disk file. The loader keeps its exact bytes and virtual origin.
-pub struct JetDriverGeneratedModule {
-    pub package_identity: String
-    pub name: String
-    pub relative_path: String
-    pub source: String
+struct JetDriverGeneratedModule {
+    package_identity: String
+    name: String
+    relative_path: String
+    source: String
 }
 
-pub struct JetDriverCompileRequest {
-    pub authorized_sources: JetDriverAuthorizedSourceSnapshot
-    pub canonical_effect_source: String
-    pub core_sources: [JetDriverCoreSource]
-    pub host_facts: JetDriverHostFacts
-    pub eval_config: JetEvalConfig
-    pub target: JetDriverCompileTarget
-    pub record_store: JetDriverRecordStore?
+struct JetDriverCompileRequest {
+    authorized_sources: JetDriverAuthorizedSourceSnapshot
+    canonical_effect_source: String
+    core_sources: [JetDriverCoreSource]
+    host_facts: JetDriverHostFacts
+    eval_config: JetEvalConfig
+    target: JetDriverCompileTarget
+    record_store: JetDriverRecordStore?
     // Captured snapshots override the canonical project schema cache; absence
     // reads that cache once through the same ordinary populated checker.
-    pub schema_snapshots: [String:SchemaSnapshot]?{None}
+    schema_snapshots: [String:SchemaSnapshot]?{None}
     // The host's streaming trace (`JET_TRACE_FILE`); `None` traces nothing.
     trace_sink: CompilerTraceSink?
     // Full verification: the optimizer re-verifies legality and runs MIR
@@ -215,27 +215,27 @@ pub struct JetDriverCompileRequest {
     // The compiler threads this compile may use (D-JOBS1=A `--threads N`;
     // automatic, memory-aware admission without it). Every thread count gives
     // the same diagnostics and output bytes.
-    pub compiler_threads: CompilerThreads
-    pub mode: JetDriverCompileMode{JetDriverCompileMode.Program}
+    compiler_threads: CompilerThreads
+    mode: JetDriverCompileMode{JetDriverCompileMode.Program}
     // Selection is separate from compilation/lowering mode: checking validates
     // all links/defaults; running selects one address; testing selects Checks.
-    pub output_intent: SemaOutputIntent{SemaOutputIntent.Check}
-    pub output_address: String?{None}
-    pub gate_set: GateSet{GateSet{}}
-    pub gate_policies: [JetDriverGatePolicy]{[JetDriverGatePolicy]{}}
+    output_intent: SemaOutputIntent{SemaOutputIntent.Check}
+    output_address: String?{None}
+    gate_set: GateSet{GateSet{}}
+    gate_policies: [JetDriverGatePolicy]{[JetDriverGatePolicy]{}}
     // External lock/trust/forced-build writers use the canonical gate row.
-    pub external_gate_entries: [GateEntry]{[GateEntry]{}}
-    pub evaluation_entry: String?{None}
+    external_gate_entries: [GateEntry]{[GateEntry]{}}
+    evaluation_entry: String?{None}
     // Unified host/stop contract (#4720): the comptime lowering session
     // produces MIR stop points (Poll/Stopped and the budget can-stop rows)
     // for the native execution host. Only the native comptime selection sets
     // it; the evaluator refuses stop points, so every other compile leaves it
     // off.
-    pub comptime_stop_points: Bool{false}
+    comptime_stop_points: Bool{false}
     // Ordinary native Program/Test/Doc artifacts use returning-stop MIR.
     // This is independent of the native comptime session selection above;
     // evaluator, Rust emission and library assembly leave it disabled.
-    pub native_stop_points: Bool{false}
+    native_stop_points: Bool{false}
 }
 
 struct JetDriverGatePolicy {
@@ -267,7 +267,7 @@ trait JetDriverRecordStore {
 // that refuses a final link. Path law, glob matching, pin checks, decoding
 // and every diagnostic stay in the build adapter; an error is the host's
 // own text for the failed operation.
-pub trait JetDriverBuildInputs {
+trait JetDriverBuildInputs {
     fn resolve(self, path: String) -[FS.Read]> JetDriverBuildPath String!
     fn entries(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] String!
     fn read(self, path: String, limit: Int) -[FS.Read]> [U8] String!
@@ -291,18 +291,18 @@ struct JetDriverBuildHTTPResponse {
 
 // Where an absolute path resolves with every link followed (`exists` false
 // when it names nothing), and what it is there.
-pub struct JetDriverBuildPath {
-    pub exists: Bool
-    pub path: String
-    pub file: Bool
-    pub links: Int
+struct JetDriverBuildPath {
+    exists: Bool
+    path: String
+    file: Bool
+    links: Int
 }
 
 // One directory entry, described without following a link.
-pub struct JetDriverBuildEntry {
-    pub name: String
-    pub directory: Bool
-    pub file: Bool
+struct JetDriverBuildEntry {
+    name: String
+    directory: Bool
+    file: Bool
 }
 
 struct JetDriverSourceUnit {
@@ -507,17 +507,17 @@ struct JetDriverCompileResult {
     // stage produced, constants included. Empty in the other modes.
     comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
     // A Repl compile retains its checked scope and canonical MIR machine.
-    pub repl_session: ReplSession?{None}
+    repl_session: ReplSession?{None}
     // A complete `Sandbox` compile: the guest artifacts plus the interface
     // snapshot the host stores as the new frozen baseline.
-    pub sandbox: JetDriverSandboxOutput?{None}
+    sandbox: JetDriverSandboxOutput?{None}
 }
 
-pub struct JetDriverSandboxOutput {
-    pub artifacts: JetPluginArtifacts
+struct JetDriverSandboxOutput {
+    artifacts: JetPluginArtifacts
     // `plugin__<export name>`: the `.jet/cache/api/<package>.api` file stem.
-    pub snapshot_package: String
-    pub snapshot_text: String
+    snapshot_package: String
+    snapshot_text: String
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read
@@ -738,7 +738,7 @@ fn jet_driver_package_manifest_source(package: JetDriverPackageInfo, snapshot: J
 
 // The package's exact loaded source bytes, including selected generated
 // modules, and its authorized package.jet manifest.
-pub fn jet_driver_package_source_digest(package: JetDriverPackageInfo, request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit]) -> String? Never! {
+fn jet_driver_package_source_digest(package: JetDriverPackageInfo, request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit]) -> String? Never! {
     files := [PackageKeySourceFile]{}
     loop unit in source_units {
         if unit.package_identity != package.identity -> next

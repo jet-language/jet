@@ -536,7 +536,7 @@ fn member_namespaces_keep_generic_trait_default_and_operator_routes() {
 fn member_namespaces_private_method_never_calls_public_field() {
     let dir = common::unique_tmp("namespace_private_method");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("worker.jet"), "pub struct Worker { pub step: fn(Int) -> Int fn step(self, amount: Int) -> Int Never! { amount } }\n").unwrap();
+    std::fs::write(dir.join("worker.jet"), "struct Worker { step: fn(Int) -> Int fn step(self, amount: Int) -> Int Never! { amount } }\n").unwrap();
     let entry = dir.join("run.jet");
     std::fs::write(&entry, "use worker.[Worker]\nfn run() { worker :: Worker{step: n -> n}\nprint(worker.step(1)) }\n").unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();

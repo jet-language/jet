@@ -4,15 +4,15 @@ use core as core
 use core.sys as sys
 use core.crypto.[Secret]
 
-pub struct Limits {
-    pub max_reply_line_bytes: Int
-    pub max_reply_lines: Int
-    pub max_capabilities: Int
-    pub max_recipients: Int
-    pub max_message_bytes: Int
-    pub max_auth_challenge_bytes: Int
+struct Limits {
+    max_reply_line_bytes: Int
+    max_reply_lines: Int
+    max_capabilities: Int
+    max_recipients: Int
+    max_message_bytes: Int
+    max_auth_challenge_bytes: Int
 
-    pub fn safe() -> Limits Never! { limits_safe() }
+    fn safe() -> Limits Never! { limits_safe() }
 }
 
 fn limits_safe() -> Limits Never! {
@@ -109,7 +109,7 @@ fn decode_dkim(text: Secret) -> Secret EmailError! {
     }
 }
 
-pub fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
+fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
     host :: sys.get("SMTP_HOST") ?? return Err(configuration_error("SMTP_HOST is required"))
     security_text :: ascii_lower(sys.get("SMTP_SECURITY") ?? "starttls")
     security :: if security_text == {
@@ -581,7 +581,7 @@ fn validate_mailbox(mailbox: String) EmailError! {
     Ok()
 }
 
-pub fn address(input: String) -> Address EmailError! {
+fn address(input: String) -> Address EmailError! {
     reject_controls(input, "email address") ? unit -> unit ! error -> return Err(error)
     value :: input.trim()
     bytes :: value.bytes()
@@ -641,7 +641,7 @@ fn valid_mime(value: String) -> Bool Never! {
     true
 }
 
-pub fn attachment(filename: String, mime: String, bytes: [U8]) -> Attachment EmailError! {
+fn attachment(filename: String, mime: String, bytes: [U8]) -> Attachment EmailError! {
     reject_controls(filename, "attachment filename") ? unit -> unit ! error -> return Err(error)
     reject_controls(mime, "attachment content type") ? unit -> unit ! error -> return Err(error)
     if filename.trim().bytes().len() == 0 || filename.contains("/") || filename.contains("\\") ->
@@ -655,7 +655,7 @@ pub fn attachment(filename: String, mime: String, bytes: [U8]) -> Attachment Ema
     Ok(core.email.__attachment_parts(filename, ascii_lower(mime), bytes))
 }
 
-pub fn envelope(from: Address, recipients: [Address]) -> Envelope EmailError! {
+fn envelope(from: Address, recipients: [Address]) -> Envelope EmailError! {
     if recipients.len() == 0 ->
         return Err(construction_error("envelope", "email envelope needs at least one recipient"))
     if recipients.len() > 100 ->
@@ -842,7 +842,7 @@ fn rendered_address_size(address: Address) -> Int Never! {
     parts.mailbox.bytes().len()
 }
 
-pub fn message(from: Address, to: [Address], bcc: [Address], subject: String, text: String, html: String, attachments: [Attachment]) -> Message EmailError! {
+fn message(from: Address, to: [Address], bcc: [Address], subject: String, text: String, html: String, attachments: [Attachment]) -> Message EmailError! {
     reject_controls(subject, "subject") ? unit -> unit ! error -> return Err(error)
     if subject.bytes().len() > 65536 -> return Err(construction_error("LimitExceeded", "subject exceeds 65536 bytes"))
     if to.len() == 0 -> return Err(construction_error("InvalidMessage", "message needs at least one visible recipient"))
@@ -949,7 +949,7 @@ fn mime_body(message: __EmailMessageView, alternative: String) -> String EmailEr
     Ok(first + crlf() + "--" + alternative + crlf() + plain + crlf() + "--" + alternative + crlf() + html + crlf() + "--" + alternative + "--" + crlf())
 }
 
-pub fn serialize(message: Message) -> [U8] EmailError! {
+fn serialize(message: Message) -> [U8] EmailError! {
     parts :: core.email.__message_view(message)
     mixed :: mime_boundary(parts, "mixed")
     alternative :: mime_boundary(parts, "alternative")

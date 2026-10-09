@@ -1381,10 +1381,10 @@ fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRe
 }
 
 // Rust TARGET_MACHINE_NAMES and target_machine_by_name; restored45acf6f8f.
-pub JET_DRIVER_TARGET_MACHINE_NAMES :: [String]{
+JET_DRIVER_TARGET_MACHINE_NAMES :: [String]{
     "board.sensor_v1", "board.virt_aarch64", "wasm.browser", "wasm.wasi", "wasm.no-os", "hosted",
 }
-pub fn jet_driver_target_machine_by_name(name: String, package_version: String) -> MIRTargetMachine? Never! {
+fn jet_driver_target_machine_by_name(name: String, package_version: String) -> MIRTargetMachine? Never! {
     if name == {
         "board.sensor_v1" | "firmware" | "sensor" -> Val(jet_target_machine_board_sensor_v1(package_version))
         "board.virt_aarch64" | "virt" -> Val(jet_target_machine_board_virt_aarch64(package_version))
@@ -4647,11 +4647,11 @@ fn jet_driver_native_emit_config(threads: CompilerThreads, mode: MIRArtifactBuil
 // This retained input is not a RootMemo cache-eligibility proof. All checked
 // rows remain in compile.doc_modules; source_modules selects real loaded
 // sources and excludes only Loader's explicit ABI-only Core fallback.
-pub struct JetDriverCheckedProjectionResult {
-    pub compile: JetDriverCompileResult
-    pub source_modules: [Int]
-    pub entry_module: Int?
-    pub schema_ingress: JetDriverSchemaIngress?
+struct JetDriverCheckedProjectionResult {
+    compile: JetDriverCompileResult
+    source_modules: [Int]
+    entry_module: Int?
+    schema_ingress: JetDriverSchemaIngress?
 }
 struct JetDriverCheckedProjectionCapture {
     source_modules: [Int]{[Int]{}}
@@ -4701,7 +4701,7 @@ fn jet_driver_registration_module_inputs(
 // Compiler-internal finalizer over the original completed check. Service
 // callers retain these typed inputs before publishing opaque compiler values;
 // this path never loads, finalizes, or checks a source for a second time.
-pub fn jet_driver_project_completed_check(
+fn jet_driver_project_completed_check(
     request: JetDriverCompileRequest,
     load: ^JetDriverLoadResult,
     registration: SemaRegistrationGraph,
@@ -4733,7 +4733,7 @@ pub fn jet_driver_project_completed_check(
     JetDriverCheckedProjectionResult{compile: ^compile, source_modules: capture.source_modules, entry_module: capture.entry_module, schema_ingress: capture.schema_ingress}
 }
 
-pub fn jet_driver_checked_projection(request: ^JetDriverCompileRequest) -> JetDriverCheckedProjectionResult {
+fn jet_driver_checked_projection(request: ^JetDriverCompileRequest) -> JetDriverCheckedProjectionResult {
     capture := JetDriverCheckedProjectionCapture{}
     kg := jet_driver_keep_going_log(None)
     compile := jet_driver_compile_stages(^request, &kg, false, true, &capture)
@@ -4744,7 +4744,7 @@ pub fn jet_driver_checked_projection(request: ^JetDriverCompileRequest) -> JetDr
     JetDriverCheckedProjectionResult{compile: ^compile, source_modules: capture.source_modules, entry_module: capture.entry_module, schema_ingress: capture.schema_ingress}
 }
 
-pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
+fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(None)
     capture := JetDriverCheckedProjectionCapture{}
     jet_driver_compile_stages(^request, &kg, true, false, &capture)
@@ -4762,7 +4762,7 @@ fn jet_driver_compile_mir(request: ^JetDriverCompileRequest) -> JetDriverCompile
 // Produce the complete installed Core library through the same checked
 // registration/comptime/TIR/MIR pipeline. The caller's user source snapshot is
 // not loaded; the graph anchor is a real catalog module, never a synthetic run.
-pub fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
+fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     request.mode = JetDriverCompileMode.Program
     request.target = JetDriverCompileTarget.Native
     request.evaluation_entry = None
@@ -4777,7 +4777,7 @@ pub fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) ->
 // Produce the complete installed Core library through the same checked
 // registration/comptime/TIR/MIR pipeline. The caller's user source snapshot is
 // not loaded; the graph anchor is a real catalog module, never a synthetic run.
-pub fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
+fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     request.mode = JetDriverCompileMode.Program
     request.target = JetDriverCompileTarget.Native
     request.evaluation_entry = None
@@ -4792,7 +4792,7 @@ pub fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) ->
 // Produce the complete installed Core library through the same checked
 // registration/comptime/TIR/MIR pipeline. The caller's user source snapshot is
 // not loaded; the graph anchor is a real catalog module, never a synthetic run.
-pub fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
+fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     request.mode = JetDriverCompileMode.Program
     request.target = JetDriverCompileTarget.Native
     request.evaluation_entry = None
@@ -4807,7 +4807,7 @@ pub fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) ->
 // Produce the complete installed Core library through the same checked
 // registration/comptime/TIR/MIR pipeline. The caller's user source snapshot is
 // not loaded; the graph anchor is a real catalog module, never a synthetic run.
-pub fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
+fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     request.mode = JetDriverCompileMode.Program
     request.target = JetDriverCompileTarget.Native
     request.evaluation_entry = None
@@ -4822,7 +4822,7 @@ pub fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) ->
 // Produce the complete installed Core library through the same checked
 // registration/comptime/TIR/MIR pipeline. The caller's user source snapshot is
 // not loaded; the graph anchor is a real catalog module, never a synthetic run.
-pub fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
+fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     request.mode = JetDriverCompileMode.Program
     request.target = JetDriverCompileTarget.Native
     request.evaluation_entry = None

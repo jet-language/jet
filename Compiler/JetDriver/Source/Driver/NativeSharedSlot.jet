@@ -3,32 +3,32 @@
 use jet_backend.[X64NativeAllocation, core_shared_runtime_call, core_shared_runtime_call_error, core_shared_runtime_allocate, x64_execution_free, x64_value_word]
 use jet_eval.JetEvalHostTypeShape
 
-pub enum JetDriverNativeSharedOwnedSlot {
+enum JetDriverNativeSharedOwnedSlot {
     PassivePin(address: Int)
     Alias(storage: X64NativeAllocation)
     Guard(address: Int)
     Weak(address: Int)
     Condition(address: Int)
 }
-pub struct JetDriverNativeSharedRoot {
-    pub codec: JetDriverNativePayloadCodec
-    pub physical_identity: Int
-    pub passive_pin: JetDriverNativeSharedOwnedSlot
+struct JetDriverNativeSharedRoot {
+    codec: JetDriverNativePayloadCodec
+    physical_identity: Int
+    passive_pin: JetDriverNativeSharedOwnedSlot
 }
-pub struct JetDriverNativeSharedAlias {
-    pub physical_identity: Int
-    pub token: Int
-    pub owned: JetDriverNativeSharedOwnedSlot
+struct JetDriverNativeSharedAlias {
+    physical_identity: Int
+    token: Int
+    owned: JetDriverNativeSharedOwnedSlot
 }
-pub struct JetDriverNativeSharedIngress {
-    pub root: JetDriverNativeSharedRoot?
-    pub alias: JetDriverNativeSharedAlias?
-    pub refusal_key: String
+struct JetDriverNativeSharedIngress {
+    root: JetDriverNativeSharedRoot?
+    alias: JetDriverNativeSharedAlias?
+    refusal_key: String
 }
 
 // The generated hook retains only the canonical parent and this plain owned
 // slot. It never captures a codec, factory, evaluator, callback or projector.
-pub fn jet_driver_native_shared_owned_release(host: JetDriverCoreSourceParentHost, owned: JetDriverNativeSharedOwnedSlot) -> String {
+fn jet_driver_native_shared_owned_release(host: JetDriverCoreSourceParentHost, owned: JetDriverNativeSharedOwnedSlot) -> String {
     if owned == {
         .PassivePin(address) -> core_shared_runtime_call(host.runtime, "jet_rt_shared_pin_drop", 1, address, 0, 0).refusal_key
         .Alias(storage) -> {
@@ -49,7 +49,7 @@ fn jet_driver_native_shared_ingress_refused(key: String) -> JetDriverNativeShare
 // Getter ownership, Source-carrier alias ownership, and passive pin ownership
 // are distinct. Reserve both retained owners before releasing the getter's
 // logical owner; a passive pin alone may never resurrect a retired payload.
-pub fn jet_driver_native_shared_slot_ingress(host: JetDriverCoreSourceParentHost, site_key: String, payload_shape: JetEvalHostTypeShape) -> JetDriverNativeSharedIngress {
+fn jet_driver_native_shared_slot_ingress(host: JetDriverCoreSourceParentHost, site_key: String, payload_shape: JetEvalHostTypeShape) -> JetDriverNativeSharedIngress {
     manifest :: jet_driver_core_source_payload_manifest(host) ?? return jet_driver_native_shared_ingress_refused("CoreSharedNotAdmitted")
     type_key := String?{None}
     loop site in manifest.sorted_sites {

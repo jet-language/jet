@@ -302,7 +302,7 @@ fn cli_profile_string_array_line(out: &[String], key: String, values: [String], 
 // ── Shared bounded JSON field readers (CLI profile, tool manifest, package generations) ──
 
 // One JSON string literal.
-pub fn cli_json_quote(value: String) -> String Never! {
+fn cli_json_quote(value: String) -> String Never! {
     pkg_json_render(Dyn.Text(value))
 }
 
@@ -313,14 +313,14 @@ fn cli_json_quote_list(values: [String]) -> String Never! {
     quoted.join(",")
 }
 
-pub fn cli_json_parse(text: String) -> Dyn CLIError! {
+fn cli_json_parse(text: String) -> Dyn CLIError! {
     if json.parse(text) == {
         .Ok(tree) -> Ok(tree)
         .Err(error) -> Err(CLIError.InvalidData(error.reason))
     }
 }
 
-pub fn cli_json_expect_exact_keys(object: [String: Dyn], expected: [String], label: String) CLIError! {
+fn cli_json_expect_exact_keys(object: [String: Dyn], expected: [String], label: String) CLIError! {
     actual := object.keys().to_list()
     &actual.sort()
     wanted := expected
@@ -328,7 +328,7 @@ pub fn cli_json_expect_exact_keys(object: [String: Dyn], expected: [String], lab
     if actual != wanted -> return Err(CLIError.InvalidData("{label} has unknown or missing fields"))
 }
 
-pub fn cli_json_string_field(object: [String: Dyn], key: String) -> String CLIError! {
+fn cli_json_string_field(object: [String: Dyn], key: String) -> String CLIError! {
     value :: object.get(key) ?? return Err(CLIError.InvalidData("missing key `{key}`"))
     text :: pkg_json_text(value) ?? return Err(CLIError.InvalidData("expected a Dyn string"))
     Ok(text)
@@ -336,7 +336,7 @@ pub fn cli_json_string_field(object: [String: Dyn], key: String) -> String CLIEr
 
 // A non-negative exact integer; a float counts only when it is integral and
 // no larger than 2^53 - 1.
-pub fn cli_json_integer_field(object: [String: Dyn], key: String) -> Int CLIError! {
+fn cli_json_integer_field(object: [String: Dyn], key: String) -> Int CLIError! {
     value :: object.get(key) ?? return Err(CLIError.InvalidData("profile field `{key}` is not a number"))
     exact :: if value == {
         .Int(number) -> if number >= 0 -> Val(number) else -> None
@@ -349,7 +349,7 @@ pub fn cli_json_integer_field(object: [String: Dyn], key: String) -> Int CLIErro
 
 // A string array whose members are at most `max_len` bytes; `forbid_nul`
 // additionally refuses a NUL byte (the manifest readers).
-pub fn cli_json_string_array(object: [String: Dyn], key: String, max_len: Int, forbid_nul: Bool) -> [String] CLIError! {
+fn cli_json_string_array(object: [String: Dyn], key: String, max_len: Int, forbid_nul: Bool) -> [String] CLIError! {
     values :: pkg_json_array(object.get(key) ?? Dyn.Null) ?? return Err(CLIError.InvalidData("profile field `{key}` is not an array"))
     out := [String]{}
     loop value in values {

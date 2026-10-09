@@ -56,7 +56,7 @@ module binary
 module ini
 
 /// Handle-free streaming events. Number is public; writers reject it as Unsupported.
-pub enum DataEvent {
+enum DataEvent {
     Null
     Bool(Bool)
     Int(Int)
@@ -72,7 +72,7 @@ pub enum DataEvent {
 }
 
 #Equatable
-pub enum EncodingFormat {
+enum EncodingFormat {
     JSON
     JSONL
     CSV
@@ -82,7 +82,7 @@ pub enum EncodingFormat {
     CBOR
 }
 impl EncodingFormat {
-    pub fn as_str(self) -> String Never! {
+    fn as_str(self) -> String Never! {
         if self == {
             .JSON -> "JSON"
             .JSONL -> "JSONL"
@@ -96,7 +96,7 @@ impl EncodingFormat {
 }
 
 #Equatable
-pub enum EncodingErrorKind {
+enum EncodingErrorKind {
     Syntax
     Truncated
     Unsupported
@@ -116,10 +116,10 @@ fn encoding_kind_name(kind: EncodingErrorKind) -> String Never! {
 }
 
 #Equatable
-pub struct EncodingCause {
-    pub kind: String
-    pub os_code: Int?
-    pub message: String
+struct EncodingCause {
+    kind: String
+    os_code: Int?
+    message: String
 }
 
 /// The same location ladder used by the seed encoding error kernel.
@@ -138,15 +138,15 @@ fn encoding_error_text(format: String, kind: String, byte_offset: Int, line: Int
 }
 
 #[Error, Equatable]
-pub struct EncodingError {
-    pub format: EncodingFormat
-    pub kind: EncodingErrorKind
-    pub byte_offset: Int
-    pub line: Int?
-    pub column: Int?
-    pub path: String
-    pub reason: String
-    pub cause: EncodingCause?
+struct EncodingError {
+    format: EncodingFormat
+    kind: EncodingErrorKind
+    byte_offset: Int
+    line: Int?
+    column: Int?
+    path: String
+    reason: String
+    cause: EncodingCause?
     impl Display {
         fn display(self) -> String { self.display_text() }
     }
@@ -155,37 +155,37 @@ pub struct EncodingError {
     }
 }
 impl EncodingError {
-    pub fn new(format: EncodingFormat, kind: EncodingErrorKind, byte_offset: Int, line: Int?, column: Int?, path: String, reason: String) -> EncodingError Never! {
+    fn new(format: EncodingFormat, kind: EncodingErrorKind, byte_offset: Int, line: Int?, column: Int?, path: String, reason: String) -> EncodingError Never! {
         EncodingError{format: format, kind: kind, byte_offset: byte_offset, line: line, column: column, path: path, reason: reason, cause: None}
     }
-    pub fn with_cause(self, cause: EncodingCause) -> EncodingError Never! {
+    fn with_cause(self, cause: EncodingCause) -> EncodingError Never! {
         EncodingError{format: self.format, kind: self.kind, byte_offset: self.byte_offset, line: self.line, column: self.column, path: ~self.path, reason: ~self.reason, cause: Val(cause)}
     }
-    pub fn cause(self) -> EncodingCause? Never! { ~self.cause }
+    fn cause(self) -> EncodingCause? Never! { ~self.cause }
     fn display_text(self) -> String Never! {
         encoding_error_text(self.format.as_str(), encoding_kind_name(self.kind), self.byte_offset, self.line, self.column, self.path, self.reason)
     }
 }
 
 #Equatable
-pub struct EncodingLimits {
-    pub buffer_bytes: Int
-    pub max_depth: Int
-    pub max_item_bytes: Int
-    pub max_total_bytes: Int?
-    pub max_expansion_depth: Int
-    pub max_expansion_bytes: Int
+struct EncodingLimits {
+    buffer_bytes: Int
+    max_depth: Int
+    max_item_bytes: Int
+    max_total_bytes: Int?
+    max_expansion_depth: Int
+    max_expansion_bytes: Int
 }
 impl EncodingLimits {
-    pub fn safe() -> EncodingLimits Never! {
+    fn safe() -> EncodingLimits Never! {
         EncodingLimits{buffer_bytes: 65536, max_depth: 256, max_item_bytes: 16777216, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608}
     }
 }
 
 /// Error returned by the root hexadecimal decoder.
 #Error
-pub struct HexError {
-    pub reason: String
+struct HexError {
+    reason: String
     impl Display {
         fn display(self) -> String { self.reason }
     }
@@ -194,7 +194,7 @@ pub struct HexError {
     }
 }
 impl HexError {
-    pub fn new(reason: String) -> HexError Never! { HexError{reason: reason} }
+    fn new(reason: String) -> HexError Never! { HexError{reason: reason} }
 }
 /// Convert one nibble to lowercase ASCII. Callers must pass `0..15`.
 fn hex_nibble(n: Int) -> U8 Never! {

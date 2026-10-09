@@ -38,15 +38,15 @@ struct NetReady {
 
 
 // NetHTTP.rs JetNetErrorDetail: public construction is already supported.
-pub struct NetErrorDetail {
-    pub operation: String
-    pub address: String?
-    pub name: String?
-    pub message: String
-    pub os_code: Int?
+struct NetErrorDetail {
+    operation: String
+    address: String?
+    name: String?
+    message: String
+    os_code: Int?
 }
 
-pub enum NetDNSError {
+enum NetDNSError {
     NotFound(String)
     Failure(String)
 }
@@ -54,7 +54,7 @@ pub enum NetDNSError {
 // Preserve checked surface ordinals (jet_net_error_surface_parts), not Rust
 // declaration order: TLS=11, Protocol=12, Other=13, DNS=14.
 #Error
-pub enum NetError {
+enum NetError {
     InvalidInput(NetErrorDetail)
     PermissionDenied(NetErrorDetail)
     AddressInUse(NetErrorDetail)
@@ -108,12 +108,12 @@ struct __ResolveError {
     message: String
 }
 
-pub struct UDPPacket {
-    pub data: [U8]
-    pub host: String
-    pub port: Int
-    pub original_len: Int
-    pub truncated: Bool
+struct UDPPacket {
+    data: [U8]
+    host: String
+    port: Int
+    original_len: Int
+    truncated: Bool
 }
 
 
@@ -124,14 +124,14 @@ struct SRVRecord {
     weight: Int
 }
 
-pub fn gethostname() -[Env]> String Never! {
+fn gethostname() -[Env]> String Never! {
     environment :: core.sys.get("HOSTNAME") ?? ""
     if environment.len() > 0 -> return environment
     contents :: core.files.read("/etc/hostname") ?? return "localhost"
     core.text.trim(contents)
 }
 
-pub fn ip_addr(text: String) -> IPAddr NetError! {
+fn ip_addr(text: String) -> IPAddr NetError! {
     if !valid_text(text) -> return Err(net_err("ip_addr", text, "IP address is empty or contains control bytes"))
     bytes :: parse_ip_bytes(text) ?? return Err(net_err("parse IP address", text, "invalid IP address `{text}`: invalid IP address syntax"))
     #Unsafe("checked IPv4/IPv6 octets transferred into the native address carrier") {
@@ -144,12 +144,12 @@ fn ip_to_string_impl(addr: IPAddr) -> String Never! {
         return format_ip_bytes(core.net.__ip_bytes(addr))
     }
 }
-pub fn ip_to_string(addr: IPAddr) -> String Never! { ip_to_string_impl(addr) }
-pub fn ip_is_ipv4(addr: IPAddr) -> Bool Never! {
+fn ip_to_string(addr: IPAddr) -> String Never! { ip_to_string_impl(addr) }
+fn ip_is_ipv4(addr: IPAddr) -> Bool Never! {
     #Unsafe("read the native IP address discriminant") { return core.net.__ip_is_v4(addr) }
 }
 
-pub fn socket_addr(host: String, port: Int) -[Net]> SocketAddr NetError! {
+fn socket_addr(host: String, port: Int) -[Net]> SocketAddr NetError! {
     if !valid_host_text(host) -> return Err(net_err("socket_addr", host, "socket host is empty or contains invalid bytes"))
     if !valid_port(port) -> return Err(net_err("socket_addr", host, "port must be in 0..=65535"))
     host_text := host
@@ -162,7 +162,7 @@ pub fn socket_addr(host: String, port: Int) -[Net]> SocketAddr NetError! {
     }
 }
 
-pub fn socket_addr_parse(text: String) -> SocketAddr NetError! {
+fn socket_addr_parse(text: String) -> SocketAddr NetError! {
     if !valid_text(text) -> return Err(net_err("socket_addr_parse", text, "socket address is empty or contains control bytes"))
     raw :: text.bytes()
     host := ""
@@ -195,10 +195,10 @@ pub fn socket_addr_parse(text: String) -> SocketAddr NetError! {
     }
 }
 
-pub fn socket_host(addr: SocketAddr) -> String Never! {
+fn socket_host(addr: SocketAddr) -> String Never! {
     #Unsafe("read socket IP representation; formatting stays in Jet") { return ip_to_string_impl(core.net.__socket_ip(addr)) }
 }
-pub fn socket_port(addr: SocketAddr) -> Int Never! {
+fn socket_port(addr: SocketAddr) -> Int Never! {
     #Unsafe("read native socket port") { return core.net.__socket_port(addr) }
 }
 fn socket_to_string_impl(addr: SocketAddr) -> String Never! {
@@ -208,25 +208,25 @@ fn socket_to_string_impl(addr: SocketAddr) -> String Never! {
     scope :: socket_scope(addr)
     if scope == 0 -> "[{host}]:{port}" else -> "[{host}%{scope}]:{port}"
 }
-pub fn socket_to_string(addr: SocketAddr) -> String Never! { socket_to_string_impl(addr) }
+fn socket_to_string(addr: SocketAddr) -> String Never! { socket_to_string_impl(addr) }
 
 fn socket_scope(addr: SocketAddr) -> Int Never! {
     #Unsafe("read native IPv6 socket scope identifier") {
         return core.net.__socket_scope(addr) ?? 0
     }
 }
-pub fn socket_type(stream: TCPStream) -> String Never! { "stream" }
+fn socket_type(stream: TCPStream) -> String Never! { "stream" }
 
-pub fn tcp_listen(addr: String) -[Net]> TCPListener NetError! {
+fn tcp_listen(addr: String) -[Net]> TCPListener NetError! {
     if !valid_text(addr) -> return Err(net_err("tcp_listen", addr, "listen address is empty or contains control bytes"))
     core.net.__tcp_listen(addr)
 }
 
-pub fn tcp_listen_addr(addr: SocketAddr) -[Net]> TCPListener NetError! {
+fn tcp_listen_addr(addr: SocketAddr) -[Net]> TCPListener NetError! {
     core.net.__tcp_listen_addr(addr)
 }
 
-pub fn tcp_accept(listener: TCPListener) -[Net, Time.Wait]> TCPStream NetError! {
+fn tcp_accept(listener: TCPListener) -[Net, Time.Wait]> TCPStream NetError! {
     core.net.__tcp_accept(listener)
 }
 
@@ -235,7 +235,7 @@ fn tcp_connect(addr: String) -[Net, Time.Wait]> TCPStream NetError! {
     core.net.__tcp_connect(addr)
 }
 
-pub fn tcp_connect_addr(addr: SocketAddr) -[Net, Time.Wait]> TCPStream NetError! {
+fn tcp_connect_addr(addr: SocketAddr) -[Net, Time.Wait]> TCPStream NetError! {
     core.net.__tcp_connect_addr(addr)
 }
 
@@ -257,77 +257,77 @@ fn create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream NetEr
     tcp_connect(format_host_port(host, port))
 }
 
-pub fn create_server(host: String, port: Int) -[Net]> TCPListener NetError! {
+fn create_server(host: String, port: Int) -[Net]> TCPListener NetError! {
     if !valid_host_text(host) -> return Err(net_err("create_server", host, "listen host is empty or contains invalid bytes"))
     if !valid_port(port) -> return Err(net_err("create_server", host, "port must be in 0..=65535"))
     tcp_listen(format_host_port(host, port))
 }
-pub fn send(&stream: TCPStream, text: String) -[Net, Time.Wait]> Int NetError! {
+fn send(&stream: TCPStream, text: String) -[Net, Time.Wait]> Int NetError! {
     &stream.write(text)
 }
 
-pub fn tcp_read(&stream: TCPStream) -[Net, Time.Wait]> String NetError! {
+fn tcp_read(&stream: TCPStream) -[Net, Time.Wait]> String NetError! {
     &stream.read_text(8192)
 }
 
-pub fn tcp_write(&stream: TCPStream, text: String) NetError! -[Net, Time.Wait]> {
+fn tcp_write(&stream: TCPStream, text: String) NetError! -[Net, Time.Wait]> {
     return &stream.write_text(text)
 }
-pub fn tcp_read_bytes(&stream: TCPStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
+fn tcp_read_bytes(&stream: TCPStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
     if n < 0 -> return Err(net_err("tcp_read_bytes", "", "read limit must be non-negative"))
     &stream.read(n)
 }
 
-pub fn tcp_read_text(&stream: TCPStream, n: Int) -[Net, Time.Wait]> String NetError! {
+fn tcp_read_text(&stream: TCPStream, n: Int) -[Net, Time.Wait]> String NetError! {
     if n < 0 -> return Err(net_err("tcp_read_text", "", "read limit must be non-negative"))
     &stream.read_text(n)
 }
 
-pub fn tcp_write_bytes(&stream: TCPStream, bytes: [U8]) -[Net, Time.Wait]> Int NetError! {
+fn tcp_write_bytes(&stream: TCPStream, bytes: [U8]) -[Net, Time.Wait]> Int NetError! {
     &stream.write(bytes)
 }
 
-pub fn tcp_write_all_bytes(&stream: TCPStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
+fn tcp_write_all_bytes(&stream: TCPStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
     return &stream.write_all(bytes)
 }
 
-pub fn tcp_write_text(&stream: TCPStream, text: String) NetError! -[Net, Time.Wait]> {
+fn tcp_write_text(&stream: TCPStream, text: String) NetError! -[Net, Time.Wait]> {
     return &stream.write_text(text)
 }
 
-pub fn tcp_shutdown(&stream: TCPStream, how: NetShutdown) NetError! -[Net]> {
+fn tcp_shutdown(&stream: TCPStream, how: NetShutdown) NetError! -[Net]> {
     return &stream.shutdown(how)
 }
 
-pub fn tcp_close(&stream: TCPStream) NetError! -[Net]> {
+fn tcp_close(&stream: TCPStream) NetError! -[Net]> {
     return &stream.close()
 }
-pub fn tcp_ready(&stream: TCPStream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady NetError! {
+fn tcp_ready(&stream: TCPStream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady NetError! {
     if !valid_timeout(deadline_ms) -> return Err(net_err("tcp_ready", "", "deadline must be non-negative"))
     deadline :: Duration.milliseconds(deadline_ms) ?? return Err(net_err("tcp_ready", "", "deadline is too large"))
     &stream.ready(interest, deadline: deadline)
 }
 
-pub fn ready_readable(ready: NetReady) -> Bool Never! { ready.readable }
-pub fn ready_writable(ready: NetReady) -> Bool Never! { ready.writable }
+fn ready_readable(ready: NetReady) -> Bool Never! { ready.readable }
+fn ready_writable(ready: NetReady) -> Bool Never! { ready.writable }
 
-pub fn tcp_local_addr(stream: TCPStream) -[Net]> String NetError! {
+fn tcp_local_addr(stream: TCPStream) -[Net]> String NetError! {
     stream.local_addr()
 }
 
-pub fn tcp_peer_addr(stream: TCPStream) -[Net]> String NetError! {
+fn tcp_peer_addr(stream: TCPStream) -[Net]> String NetError! {
     stream.peer_addr()
 }
 
-pub fn tcp_local_socket_addr(stream: TCPStream) -[Net]> SocketAddr NetError! {
+fn tcp_local_socket_addr(stream: TCPStream) -[Net]> SocketAddr NetError! {
     core.net.__tcp_local_socket_addr(stream)
 }
 
-pub fn tcp_peer_socket_addr(stream: TCPStream) -[Net]> SocketAddr NetError! {
+fn tcp_peer_socket_addr(stream: TCPStream) -[Net]> SocketAddr NetError! {
     core.net.__tcp_peer_socket_addr(stream)
 }
 
-pub fn listener_local_socket_addr(listener: TCPListener) -[Net]> SocketAddr NetError! {
+fn listener_local_socket_addr(listener: TCPListener) -[Net]> SocketAddr NetError! {
     core.net.__listener_local_socket_addr(listener)
 }
 
@@ -336,61 +336,61 @@ fn tcp_reply(stream: ^TCPStream, status: String, body: String) NetError! -[Net, 
     core.net.__tcp_reply(^stream, status, body)
 }
 
-pub fn set_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {
+fn set_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("set_timeout", "", "timeout must be non-negative"))
     core.net.__set_timeout(&stream, timeout_ms)
 }
 
-pub fn set_read_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {
+fn set_read_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("set_read_timeout", "", "timeout must be non-negative"))
     core.net.__set_read_timeout(&stream, timeout_ms)
 }
 
-pub fn set_write_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {
+fn set_write_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("set_write_timeout", "", "timeout must be non-negative"))
     core.net.__set_write_timeout(&stream, timeout_ms)
 }
 
-pub fn nodelay(stream: TCPStream) -[Net]> Bool NetError! {
+fn nodelay(stream: TCPStream) -[Net]> Bool NetError! {
     core.net.__nodelay(stream)
 }
 
-pub fn set_nodelay(&stream: TCPStream, on: Bool) NetError! -[Net]> {
+fn set_nodelay(&stream: TCPStream, on: Bool) NetError! -[Net]> {
     core.net.__set_nodelay(&stream, on)
 }
 
-pub fn ttl(stream: TCPStream) -[Net]> Int NetError! {
+fn ttl(stream: TCPStream) -[Net]> Int NetError! {
     core.net.__ttl(stream)
 }
-pub fn set_ttl(&stream: TCPStream, hops: Int) NetError! -[Net]> {
+fn set_ttl(&stream: TCPStream, hops: Int) NetError! -[Net]> {
     if hops < 0 || hops > 4294967295 -> return Err(net_err("set_ttl", "", "ttl must fit u32"))
     core.net.__set_ttl(&stream, hops)
 }
 
-pub fn sendfile(&stream: TCPStream, path: String) -[Net, Time.Wait]> Int NetError! {
+fn sendfile(&stream: TCPStream, path: String) -[Net, Time.Wait]> Int NetError! {
     if !valid_text(path) -> return Err(net_err("sendfile", path, "path is empty or contains control bytes"))
     core.net.sendfile(&stream, path)
 }
 
-pub fn udp_bind(addr: String) -[Net]> UDPSocket NetError! {
+fn udp_bind(addr: String) -[Net]> UDPSocket NetError! {
     if !valid_text(addr) -> return Err(net_err("udp_bind", addr, "bind address is empty or contains control bytes"))
     core.net.__udp_bind(addr)
 }
 
-pub fn udp_bind_addr(addr: SocketAddr) -[Net]> UDPSocket NetError! {
+fn udp_bind_addr(addr: SocketAddr) -[Net]> UDPSocket NetError! {
     core.net.__udp_bind_addr(addr)
 }
 
-pub fn udp_local_addr(socket: UDPSocket) -[Net]> SocketAddr NetError! {
+fn udp_local_addr(socket: UDPSocket) -[Net]> SocketAddr NetError! {
     core.net.__udp_local_addr(socket)
 }
 
-pub fn udp_set_timeout(socket: UDPSocket, timeout_ms: Int) NetError! -[Net]> {
+fn udp_set_timeout(socket: UDPSocket, timeout_ms: Int) NetError! -[Net]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("udp_set_timeout", "", "timeout must be non-negative"))
     core.net.__udp_set_timeout(socket, timeout_ms)
 }
 
-pub fn udp_send_to(socket: UDPSocket, text: String, addr: SocketAddr) -[Net, Time.Wait]> Int NetError! {
+fn udp_send_to(socket: UDPSocket, text: String, addr: SocketAddr) -[Net, Time.Wait]> Int NetError! {
     core.net.__udp_send_to(socket, text, addr)
 }
 
@@ -399,7 +399,7 @@ fn udp_recv_from(socket: UDPSocket, limit: Int) -[Net, Time.Wait]> UDPPacket Net
     core.net.__udp_recv_from(socket, limit)
 }
 
-pub fn udp_send_bytes_to(socket: UDPSocket, bytes: [U8], addr: SocketAddr) -[Net, Time.Wait]> Int NetError! {
+fn udp_send_bytes_to(socket: UDPSocket, bytes: [U8], addr: SocketAddr) -[Net, Time.Wait]> Int NetError! {
     core.net.__udp_send_bytes_to(socket, bytes, addr)
 }
 
@@ -408,55 +408,55 @@ fn udp_receive(socket: UDPSocket, limit: Int) -[Net, Time.Wait]> UDPPacket NetEr
     core.net.__udp_receive(socket, limit)
 }
 
-pub fn udp_packet_data(packet: UDPPacket) -> String Never! { decode_utf8_lossy(packet.data) }
-pub fn udp_packet_addr(packet: UDPPacket) -> SocketAddr Never! {
+fn udp_packet_data(packet: UDPPacket) -> String Never! { decode_utf8_lossy(packet.data) }
+fn udp_packet_addr(packet: UDPPacket) -> SocketAddr Never! {
     #Unsafe("read the native UDP packet's socket-address carrier") { return core.net.__udp_packet_addr(packet) }
 }
-pub fn udp_packet_bytes(packet: UDPPacket) -> [U8] Never! { packet.data }
-pub fn udp_packet_original_len(packet: UDPPacket) -> Int Never! { packet.original_len }
-pub fn udp_packet_truncated(packet: UDPPacket) -> Bool Never! { packet.truncated }
+fn udp_packet_bytes(packet: UDPPacket) -> [U8] Never! { packet.data }
+fn udp_packet_original_len(packet: UDPPacket) -> Int Never! { packet.original_len }
+fn udp_packet_truncated(packet: UDPPacket) -> Bool Never! { packet.truncated }
 
-pub fn unix_listen(path: String) -[Net]> UnixListener NetError! {
+fn unix_listen(path: String) -[Net]> UnixListener NetError! {
     if !valid_text(path) -> return Err(net_err("unix_listen", path, "socket path is empty or contains control bytes"))
     core.net.__unix_listen(path)
 }
 
-pub fn unix_accept(listener: UnixListener) -[Net, Time.Wait]> UnixStream NetError! {
+fn unix_accept(listener: UnixListener) -[Net, Time.Wait]> UnixStream NetError! {
     core.net.__unix_accept(listener)
 }
 
 // Existing Core arity rows retain the public `deadline:` label and target
 // these ordinary source entry points without changing user call syntax.
-pub fn __unix_connect_entry(path: String) -[Net, Time.Wait]> UnixStream NetError! {
+fn __unix_connect_entry(path: String) -[Net, Time.Wait]> UnixStream NetError! {
     core.net.__unix_connect_host(path)
 }
 
-pub fn __unix_connect_deadline_entry(path: String, deadline: Duration) -[Net, Time.Wait]> UnixStream NetError! {
+fn __unix_connect_deadline_entry(path: String, deadline: Duration) -[Net, Time.Wait]> UnixStream NetError! {
     core.net.__unix_connect_deadline_host(path, deadline)
 }
 
-pub fn unix_read(&stream: UnixStream) -[Net, Time.Wait]> String NetError! {
+fn unix_read(&stream: UnixStream) -[Net, Time.Wait]> String NetError! {
     core.net.__unix_read(&stream)
 }
 
-pub fn unix_write(&stream: UnixStream, text: String) NetError! -[Net, Time.Wait]> {
+fn unix_write(&stream: UnixStream, text: String) NetError! -[Net, Time.Wait]> {
     core.net.unix_write(&stream, text)
 }
 
-pub fn unix_read_bytes(&stream: UnixStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
+fn unix_read_bytes(&stream: UnixStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
     if n <= 0 -> return Err(net_err("unix_read_bytes", "", "read limit must be positive"))
     core.net.unix_read_bytes(&stream, n)
 }
 
-pub fn unix_write_all_bytes(&stream: UnixStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
+fn unix_write_all_bytes(&stream: UnixStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
     core.net.__unix_write_all_bytes(&stream, bytes)
 }
 
-pub fn unix_shutdown(&stream: UnixStream, how: NetShutdown) NetError! -[Net]> {
+fn unix_shutdown(&stream: UnixStream, how: NetShutdown) NetError! -[Net]> {
     core.net.__unix_shutdown(&stream, how)
 }
 
-pub fn unix_close(&stream: UnixStream) NetError! -[Net]> {
+fn unix_close(&stream: UnixStream) NetError! -[Net]> {
     core.net.__unix_close(&stream)
 }
 
@@ -526,7 +526,7 @@ fn dns_ptr(addr: String, ms: Int) -[Net, Time.Wait]> [String] NetError! {
     }
 }
 
-pub fn dns_srv(name: String, ms: Int) -[Net, Time.Wait]> [SRVRecord] NetError! {
+fn dns_srv(name: String, ms: Int) -[Net, Time.Wait]> [SRVRecord] NetError! {
     if !valid_text(name) -> return Err(net_err("dns_srv", name, "DNS name is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_srv", name, "DNS timeout must be non-negative"))
     if core.net.__dns_srv_lookup(name, ms) == {
@@ -535,7 +535,7 @@ pub fn dns_srv(name: String, ms: Int) -[Net, Time.Wait]> [SRVRecord] NetError! {
     }
 }
 
-pub fn dns_srv_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [SRVRecord] NetError! {
+fn dns_srv_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [SRVRecord] NetError! {
     if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_srv_at", name, "DNS server/name is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_srv_at", name, "DNS timeout must be non-negative"))
     _ :: socket_addr_parse(server) ?? return Err(net_err("dns_srv_at", server, "DNS server must be an IP socket address"))
@@ -612,10 +612,10 @@ fn gethostbyaddr(addr: String) -[Net, Time.Wait]> String NetError! {
     names[0]
 }
 
-pub fn dns_srv_target(record: SRVRecord) -> String Never! { ~record.target }
-pub fn dns_srv_port(record: SRVRecord) -> Int Never! { record.port }
-pub fn dns_srv_priority(record: SRVRecord) -> Int Never! { record.priority }
-pub fn dns_srv_weight(record: SRVRecord) -> Int Never! { record.weight }
+fn dns_srv_target(record: SRVRecord) -> String Never! { ~record.target }
+fn dns_srv_port(record: SRVRecord) -> Int Never! { record.port }
+fn dns_srv_priority(record: SRVRecord) -> Int Never! { record.priority }
+fn dns_srv_weight(record: SRVRecord) -> Int Never! { record.weight }
 
 fn getservbyname(name: String) -[Net, Time.Wait]> Int NetError! {
     if !valid_text(name) -> return Err(net_err("getservbyname", name, "service name is empty or contains control bytes"))
@@ -670,16 +670,16 @@ fn service_error(operation: String, message: String) -> NetError Never! {
 
 // Error accessors inspect the checked nominal payload; no transport call is
 // involved and DNS errors keep their distinct name/message meaning.
-pub fn error_operation(err: NetError) -> String Never! {
+fn error_operation(err: NetError) -> String Never! {
     detail :: error_detail(err) ?? return "dns"
     detail.operation
 }
-pub fn error_message(err: NetError) -> String Never! { "{err}" }
-pub fn error_address(err: NetError) -> String? Never! {
+fn error_message(err: NetError) -> String Never! { "{err}" }
+fn error_address(err: NetError) -> String? Never! {
     detail :: error_detail(err) ?? return None
     detail.address
 }
-pub fn error_name(err: NetError) -> String? Never! {
+fn error_name(err: NetError) -> String? Never! {
     if err == .DNS(dns) {
         if dns == .NotFound(name) -> return Val(name)
         return None
@@ -687,7 +687,7 @@ pub fn error_name(err: NetError) -> String? Never! {
     detail :: error_detail(err) ?? return None
     detail.name
 }
-pub fn error_os_code(err: NetError) -> Int? Never! {
+fn error_os_code(err: NetError) -> Int? Never! {
     detail :: error_detail(err) ?? return None
     detail.os_code
 }

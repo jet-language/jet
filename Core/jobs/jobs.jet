@@ -21,7 +21,7 @@ use core.files as files
 // Payloads and outcomes retain their declared identity and bytes, with
 // publication explicitly opted in.
 
-pub enum JobQueueDeliveryPolicy { AtLeastOnce }
+enum JobQueueDeliveryPolicy { AtLeastOnce }
 
 enum JobQueueState {
     Queued
@@ -33,94 +33,94 @@ enum JobQueueState {
     Cancelled
 }
 
-pub struct JobPayload {
-    pub type_id: String
-    pub bytes: [U8]
-    pub publish: Bool
+struct JobPayload {
+    type_id: String
+    bytes: [U8]
+    publish: Bool
 }
 
-pub struct JobResult {
-    pub type_id: String
-    pub bytes: [U8]
-    pub publish: Bool
+struct JobResult {
+    type_id: String
+    bytes: [U8]
+    publish: Bool
 }
 
-pub struct JobError {
-    pub type_id: String
-    pub reason: String
-    pub detail: String?
+struct JobError {
+    type_id: String
+    reason: String
+    detail: String?
 }
 
-pub struct JobQueueReceipt {
-    pub id: String
-    pub authority: String
-    pub queue: String
-    pub job_type: String
-    pub state: JobQueueState
-    pub sequence: Int
-    pub attempts: Int
-    pub due_at_ms: Int
-    pub accepted_at_ms: Int
-    pub request_id: String?
-    pub idempotency_key: String?
-    pub lease_until_ms: Int?
-    pub duration_ms: Int?
-    pub error_reason: String?
-    pub delivery: JobQueueDeliveryPolicy
-    pub duplicate: Bool
-    pub signature: String
+struct JobQueueReceipt {
+    id: String
+    authority: String
+    queue: String
+    job_type: String
+    state: JobQueueState
+    sequence: Int
+    attempts: Int
+    due_at_ms: Int
+    accepted_at_ms: Int
+    request_id: String?
+    idempotency_key: String?
+    lease_until_ms: Int?
+    duration_ms: Int?
+    error_reason: String?
+    delivery: JobQueueDeliveryPolicy
+    duplicate: Bool
+    signature: String
 }
 
-pub struct JobQueueClaim {
-    pub receipt: JobQueueReceipt
-    pub payload: JobPayload
-    pub worker: String
-    pub lease_token: String
-    pub lease_until_ms: Int
+struct JobQueueClaim {
+    receipt: JobQueueReceipt
+    payload: JobPayload
+    worker: String
+    lease_token: String
+    lease_until_ms: Int
 }
 
-pub struct JobQueueEvent {
-    pub sequence: Int
-    pub state: JobQueueState
-    pub attempts: Int
-    pub timestamp_ms: Int
-    pub reason: String?
-    pub duration_ms: Int?
-    pub worker: String?
+struct JobQueueEvent {
+    sequence: Int
+    state: JobQueueState
+    attempts: Int
+    timestamp_ms: Int
+    reason: String?
+    duration_ms: Int?
+    worker: String?
 }
 
-pub struct JobQueueRecord {
-    pub receipt: JobQueueReceipt
-    pub payload: JobPayload?
-    pub result: JobResult?
-    pub error: JobError?
-    pub started_at_ms: Int?
-    pub finished_at_ms: Int?
+struct JobQueueRecord {
+    receipt: JobQueueReceipt
+    payload: JobPayload?
+    result: JobResult?
+    error: JobError?
+    started_at_ms: Int?
+    finished_at_ms: Int?
 }
 
-pub struct JobQueueStatus {
-    pub queue: String
-    pub authority: String
-    pub queued: Int
-    pub running: Int
-    pub retrying: Int
-    pub completed: Int
-    pub failed: Int
-    pub dead_lettered: Int
-    pub cancelled: Int
-    pub depth: Int
-    pub wait_ms: Int
-    pub throughput: Int
-    pub capacity: Int
-    pub paused: Bool
-    pub freshness_ms: Int
+struct JobQueueStatus {
+    queue: String
+    authority: String
+    queued: Int
+    running: Int
+    retrying: Int
+    completed: Int
+    failed: Int
+    dead_lettered: Int
+    cancelled: Int
+    depth: Int
+    wait_ms: Int
+    throughput: Int
+    capacity: Int
+    paused: Bool
+    freshness_ms: Int
 }
 
 // Opening validates the package authority and selected provider. The handle's
 // enqueue/delay/receipt/inspect/events/claim/heartbeat/acknowledge/fail/cancel/
 // dead_letter/recover_expired/status/pause/resume/wait/prune methods retain
 // ServiceError failures; mutation is committed by the provider before return.
-pub fn queue() -[DB, FS.Read, FS.Write, Time]> JobQueue ServiceError! {
+fn queue() -[DB, FS.Read, FS.Write, Time]> JobQueue ServiceError! {
     endpoint :: core.service.__active_endpoint() ?? return Err(err)
     service.__authority_validate(endpoint) ?? return Err(err)
     parts :: core.service.__endpoint_authority_parts(endpoint) ?? return Err(err)
@@ -148,7 +148,7 @@ pub fn queue() -[DB, FS.Read, FS.Write, Time]> JobQueue ServiceError! {
 }
 
 struct QueueData { driver: db.__QueueDb }
-pub struct JobQueue {
+struct JobQueue {
     data: Shared<QueueData>
     endpoint: ServiceEndpoint
     authority: String
@@ -247,11 +247,11 @@ fn queue_encoded_payload<T: Encode>(job_type: String, payload: T) -> JobPayload 
 }
 // Checked #Job receiver normalization forwards here, after its payload schema
 // and declared job identity have been checked (no string-selected public job).
-pub fn __enqueue<T: Encode>(queue: JobQueue, job_type: String, payload: T, key: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
+fn __enqueue<T: Encode>(queue: JobQueue, job_type: String, payload: T, key: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
     encoded :: queue_encoded_payload(job_type, payload) ?? return Err(err)
     queue_enqueue_request(queue, EnqueueRequest{job_type: job_type, payload: encoded, idempotency_key: key, request_id: None, delay_ms: 0})
 }
-pub fn __delay<T: Encode>(queue: JobQueue, job_type: String, payload: T, duration: Duration) -[DB, Time]> JobQueueReceipt ServiceError! {
+fn __delay<T: Encode>(queue: JobQueue, job_type: String, payload: T, duration: Duration) -[DB, Time]> JobQueueReceipt ServiceError! {
     encoded :: queue_encoded_payload(job_type, payload) ?? return Err(err)
     millis :: duration.ns /% 1000000
     if millis < 0 || millis > 9223372036854775807 -> return Err(queue_unavailable("queue delay duration is outside the supported range"))
@@ -273,27 +273,27 @@ fn queue_enqueue_request(queue: JobQueue, request: EnqueueRequest) -[DB, Time]> 
 }
 
 impl JobQueue {
-    pub fn receipt(self, id: String) -[DB]> JobQueueReceipt ServiceError! {
+    fn receipt(self, id: String) -[DB]> JobQueueReceipt ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
         queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
         guard := self.data.guard_edit()
         record :: queue_find(&guard.value.driver, self.authority, self.name, id) ?? return Err(err)
         Ok(queue_receipt(record, false))
     }
-    pub fn inspect(self, limit: Int, include_payload: Bool) -[DB]> [JobQueueRecord] ServiceError! {
+    fn inspect(self, limit: Int, include_payload: Bool) -[DB]> [JobQueueRecord] ServiceError! {
         queue_validate_nonnegative_limit(limit, "inspection limit") ?? return Err(err)
         service.__authority_validate(self.endpoint) ?? return Err(err)
         if limit <= 0 || limit > 1024 -> return Err(ServiceError.Policy("queue inspection limit must be positive and bounded"))
         guard := self.data.guard_edit()
         queue_inspect_on_driver(&guard.value.driver, self.authority, self.name, limit, include_payload && false)
     }
-    pub fn events(self, id: String) -[DB]> [JobQueueEvent] ServiceError! {
+    fn events(self, id: String) -[DB]> [JobQueueEvent] ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
         queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
         guard := self.data.guard_edit()
         queue_events_on_driver(&guard.value.driver, self.authority, self.name, id)
     }
-    pub fn claim(self, worker: String, limit: Int) -[DB, Rand, Time]> [JobQueueClaim] ServiceError! {
+    fn claim(self, worker: String, limit: Int) -[DB, Rand, Time]> [JobQueueClaim] ServiceError! {
         queue_validate_nonnegative_limit(limit, "claim limit") ?? return Err(err)
         queue_validate_text(worker, "queue worker", 256, false) ?? return Err(err)
         if limit <= 0 || limit > 1024 -> return Err(ServiceError.Policy("queue claim limit must be positive and within capacity"))
@@ -306,7 +306,7 @@ impl JobQueue {
         queue_publish_transitions(committed.observations)
         Ok(committed.claims)
     }
-    pub fn heartbeat(self, claim: JobQueueClaim) -[DB, Time]> JobQueueReceipt ServiceError! {
+    fn heartbeat(self, claim: JobQueueClaim) -[DB, Time]> JobQueueReceipt ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
         guard := self.data.guard_edit()
         queue_begin(guard.value.driver) ?? return Err(err)
@@ -316,7 +316,7 @@ impl JobQueue {
         queue_publish_optional_transition(committed.observation)
         Ok(committed.receipt)
     }
-    pub fn acknowledge(self, claim: JobQueueClaim, result: JobResult) -[DB, Time]> JobQueueReceipt ServiceError! {
+    fn acknowledge(self, claim: JobQueueClaim, result: JobResult) -[DB, Time]> JobQueueReceipt ServiceError! {
         queue_validate_result(result) ?? return Err(err)
         service.__authority_validate(self.endpoint) ?? return Err(err)
         guard := self.data.guard_edit()
@@ -327,7 +327,7 @@ impl JobQueue {
         queue_publish_optional_transition(committed.observation)
         Ok(committed.receipt)
     }
-    pub fn fail(self, claim: JobQueueClaim, failure: JobError) -[DB, Time]> JobQueueReceipt ServiceError! {
+    fn fail(self, claim: JobQueueClaim, failure: JobError) -[DB, Time]> JobQueueReceipt ServiceError! {
         queue_validate_error(failure) ?? return Err(err)
         service.__authority_validate(self.endpoint) ?? return Err(err)
         guard := self.data.guard_edit()
@@ -338,7 +338,7 @@ impl JobQueue {
         queue_publish_optional_transition(committed.observation)
         Ok(committed.receipt)
     }
-    pub fn cancel(self, id: String, reason: String, lease_token: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
+    fn cancel(self, id: String, reason: String, lease_token: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
         queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
         queue_validate_text(reason, "queue cancellation reason", 1024, false) ?? return Err(err)
         service.__authority_validate(self.endpoint) ?? return Err(err)
@@ -350,7 +350,7 @@ impl JobQueue {
         queue_publish_optional_transition(committed.observation)
         Ok(committed.receipt)
     }
-    pub fn dead_letter(self, id: String, reason: String, lease_token: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
+    fn dead_letter(self, id: String, reason: String, lease_token: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
         queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
         queue_validate_text(reason, "queue dead-letter reason", 1024, false) ?? return Err(err)
         service.__authority_validate(self.endpoint) ?? return Err(err)
@@ -362,7 +362,7 @@ impl JobQueue {
         queue_publish_optional_transition(committed.observation)
         Ok(committed.receipt)
     }
-    pub fn recover_expired(self) ServiceError! -[DB, Time]> {
+    fn recover_expired(self) ServiceError! -[DB, Time]> {
         service.__authority_validate(self.endpoint) ?? return Err(err)
         guard := self.data.guard_edit()
         queue_begin(guard.value.driver) ?? return Err(err)
@@ -372,7 +372,7 @@ impl JobQueue {
         queue_publish_transitions(committed)
         Ok(())
     }
-    pub fn status(self) -[DB, Time]> JobQueueStatus ServiceError! {
+    fn status(self) -[DB, Time]> JobQueueStatus ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
         guard := self.data.guard_edit()
         status :: queue_status_on_driver(&guard.value.driver, self.authority, self.name) ?? return Err(err)
@@ -380,9 +380,9 @@ impl JobQueue {
         queue_publish_status(status)
         Ok(status)
     }
-    pub fn pause(self) -[DB, Time]> JobQueueStatus ServiceError! { queue_set_paused(self, true) }
-    pub fn resume(self) -[DB, Time]> JobQueueStatus ServiceError! { queue_set_paused(self, false) }
-    pub fn wait(self, timeout: Duration) -[DB, Time, Time.Wait]> JobQueueStatus ServiceError! {
+    fn pause(self) -[DB, Time]> JobQueueStatus ServiceError! { queue_set_paused(self, true) }
+    fn resume(self) -[DB, Time]> JobQueueStatus ServiceError! { queue_set_paused(self, false) }
+    fn wait(self, timeout: Duration) -[DB, Time, Time.Wait]> JobQueueStatus ServiceError! {
         millis :: timeout.ns /% 1000000
         if millis < 0 || millis > 31536000000 -> return Err(ServiceError.Policy("queue wait timeout is outside the supported range"))
         deadline :: queue_saturating_add(queue_now(), millis)
@@ -396,7 +396,7 @@ impl JobQueue {
             }
         }
     }
-    pub fn prune(self) -[DB, Time]> Int ServiceError! {
+    fn prune(self) -[DB, Time]> Int ServiceError! {
         now :: queue_now()
         service.__authority_validate(self.endpoint) ?? return Err(err)
         guard := self.data.guard_edit()
@@ -526,7 +526,7 @@ fn queue_publish_status(status: JobQueueStatus) Never! -[Time]> {
 
 // Pure state policy belongs in Jet. The provider owns atomic transitions, not
 // an independently mutable copy of a queue's records.
-pub fn is_terminal(state: JobQueueState) -> Bool Never! {
+fn is_terminal(state: JobQueueState) -> Bool Never! {
     state == JobQueueState.Completed
         || state == JobQueueState.Failed
         || state == JobQueueState.DeadLettered

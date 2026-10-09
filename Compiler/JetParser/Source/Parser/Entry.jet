@@ -76,73 +76,73 @@ fn parse_generated_source(source: [U8]) -> ParseResult {
     parser_parse_lexed_lines(lex_generated(source), source, parser_line_starts(source), false)
 }
 
-pub fn parse_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+fn parse_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
     lexed := lex(source)
     lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source), false)
 }
 
-pub fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
     lexed := lex_generated(source)
     lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source), false)
 }
 
-pub fn parse_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+fn parse_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
     lexed := lex(source)
     lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
 }
 
-pub fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
     lexed := lex_generated(source)
     lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
 }
 
-pub fn parse_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+fn parse_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
     lexed := lex(source)
     lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
 }
 
-pub fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
     lexed := lex_generated(source)
     lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
 }
 
-pub fn parse_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+fn parse_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
     lexed := lex(source)
     lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
 }
 
-pub fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
     lexed := lex_generated(source)
     lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
 }
 
-pub fn parse_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+fn parse_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
     lexed := lex(source)
     lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
 }
 
-pub fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
     lexed := lex_generated(source)
     lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
 }
 
-pub fn parse_lexed(lexed: Lexed) -> ParseResult {
+fn parse_lexed(lexed: Lexed) -> ParseResult {
     parser_parse_lexed_lines(~lexed, [U8]{}, [Int]{}, false)
 }
 
 // Parse just the supplied token slice with its aggregate source available for
 // canonical source-dependent diagnostics. REPL turns never reparse old tokens.
-pub fn parse_lexed_with_source(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
+fn parse_lexed_with_source(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
     parser_parse_lexed_lines(~lexed, source, line_starts, false)
 }
 
@@ -150,7 +150,7 @@ pub fn parse_lexed_with_source(lexed: Lexed, source: [U8], line_starts: [Int]) -
 // config lexer keeps `$NAME` as one identifier token, which this parser reads
 // as the typed environment read (D-ONCE-DOLLAR1=B); `source` stays available
 // for config values whose spelling is not a general Jet expression.
-pub fn parse_config_with_source(lexed: Lexed, source: [U8]) -> ParseResult {
+fn parse_config_with_source(lexed: Lexed, source: [U8]) -> ParseResult {
     parser_parse_lexed_lines(~lexed, source, parser_line_starts(source), true)
 }
 
@@ -164,7 +164,7 @@ fn parser_parse_lexed_lines(input: ^Lexed, source: [U8], line_starts: [Int], all
     parser_parse_prepared(parser_prepare_tokens(^tokens), lexed.diagnostics, source_end, line_starts, source, allow_environment_reads)
 }
 
-pub fn parser_line_starts(source: [U8]) -> [Int] Never! {
+fn parser_line_starts(source: [U8]) -> [Int] Never! {
     starts := [Int]{0}
     loop index in 0..<source.len() {
         if source[index] == (U8{10}) -> &starts.push(index + 1)

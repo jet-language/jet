@@ -107,9 +107,9 @@ fn jet_driver_build_declared_network(declared: [EffectRowEntry]?) -> Bool Never!
 
 // One command owns this scope across all of its package queries. IDs are
 // invocation-local authority, not cache keys or a process-global counter.
-pub struct JetDriverBuildQueryScope {
-    pub next_session_id: Int{1}
-    pub policy: BuildSessionPolicy{BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}}
+struct JetDriverBuildQueryScope {
+    next_session_id: Int{1}
+    policy: BuildSessionPolicy{BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}}
 }
 fn jet_driver_build_next_session_id(scope: &JetDriverBuildQueryScope) -> Int? Never! {
     id :: scope.next_session_id
@@ -118,19 +118,19 @@ fn jet_driver_build_next_session_id(scope: &JetDriverBuildQueryScope) -> Int? Ne
     Val(id)
 }
 
-pub struct JetDriverBuildQueryResult {
-    pub plan: BuildSessionPlan?
-    pub graph: BuildGraph?
-    pub generated: [BuildSessionGeneratedModule]
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
-    pub internal_problem: String?
-    pub nodes: [BuildGraphNode]{[BuildGraphNode]{}}
+struct JetDriverBuildQueryResult {
+    plan: BuildSessionPlan?
+    graph: BuildGraph?
+    generated: [BuildSessionGeneratedModule]
+    diagnostics: [Diagnostic]
+    complete: Bool
+    internal_problem: String?
+    nodes: [BuildGraphNode]{[BuildGraphNode]{}}
 }
 fn jet_driver_build_query_empty(diagnostics: [Diagnostic], complete: Bool, problem: String?) -> JetDriverBuildQueryResult Never! {
     {plan: None, graph: None, generated: [], diagnostics: diagnostics, complete: complete, internal_problem: problem}
 }
-pub fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResult {
+fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResult {
     sources :: jet_driver_source_query(request)
     if !sources.complete -> return jet_driver_build_query_empty(sources.diagnostics, false, None)
     if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() -> return jet_driver_build_query_empty(sources.diagnostics, false, Val("loaded build query has no exact entry module"))
@@ -228,7 +228,7 @@ pub fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &Jet
     jet_driver_build_install_nodes(plan, nodes)
     return JetDriverBuildQueryResult{plan: Val(plan), graph: Val(build_plan_graph(plan)), generated: generated, nodes: nodes, diagnostics: errors, complete: true, internal_problem: None}
 }
-pub fn jet_driver_query_build_nodes(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResult {
+fn jet_driver_query_build_nodes(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResult {
     // Nodes are the checked graph's exact compiler facts, never a projection
     // reconstructed from emitted source, action names or a receipt.
     jet_driver_query_build_plan(request, &scope)

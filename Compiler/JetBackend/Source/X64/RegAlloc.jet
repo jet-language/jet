@@ -37,8 +37,8 @@ struct X64Allocation {
     locations: [X64Loc]
     spill_slots: Int
     // Callee-saved registers the function writes, in push order.
-    pub callee_saved: [Int]
-    pub folds: X64AddressFolds
+    callee_saved: [Int]
+    folds: X64AddressFolds
 }
 
 X64_CALLER_SAVED_POOL :: prep { [Int]{1, 2, 6, 7, 8, 9} }
@@ -50,17 +50,17 @@ X64_FLOAT_POOL :: prep { [Int]{18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3
 // A selector address, expressed in SSA values before allocation. One plan
 // drives both liveness and emission; eliminated definitions never hide the
 // actual base/index uses of a later memory instruction.
-pub struct X64Address {
-    pub base: LIRValueID
-    pub index: LIRValueID?
-    pub scale: Int
-    pub disp: Int
+struct X64Address {
+    base: LIRValueID
+    index: LIRValueID?
+    scale: Int
+    disp: Int
 }
 
-pub struct X64AddressFolds {
-    pub addresses: [X64Address?]
-    pub skipped: [Bool]
-    pub uses: [Int]
+struct X64AddressFolds {
+    addresses: [X64Address?]
+    skipped: [Bool]
+    uses: [Int]
 }
 
 // Store only the facts addressing needs, never whole instructions/call args.
@@ -90,7 +90,7 @@ fn x64_address_parts(base: LIRValueID, off: LIRValueID, definitions: [X64Address
     address
 }
 
-pub fn x64_address_folds(function: LIRFunction) -> X64AddressFolds Never! {
+fn x64_address_folds(function: LIRFunction) -> X64AddressFolds Never! {
     count :: function.values.len()
     definitions := [X64AddressDef]{}
     def_blocks := [Int]{}
@@ -409,7 +409,7 @@ fn x64_hint_arguments(function: LIRFunction, values: [LIRValueID], hint_regs: &[
     }
 }
 
-pub fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
+fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
     folds :: x64_address_folds(function)
     count :: function.values.len()
     liveness :: x64_liveness(function, folds)

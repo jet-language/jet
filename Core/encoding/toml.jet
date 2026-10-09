@@ -23,13 +23,13 @@ fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, pat
         cause: None,
     }
 }
-pub fn parse(text: String) -> Dyn EncodingError! { parse_toml(text) }
+fn parse(text: String) -> Dyn EncodingError! { parse_toml(text) }
 
-pub fn decode(text: String) -> Dyn EncodingError! { parse_toml(text) }
-pub fn loads(text: String) -> Dyn EncodingError! { parse(text) }
-pub fn load(text: String) -> Dyn EncodingError! { parse(text) }
+fn decode(text: String) -> Dyn EncodingError! { parse_toml(text) }
+fn loads(text: String) -> Dyn EncodingError! { parse(text) }
+fn load(text: String) -> Dyn EncodingError! { parse(text) }
 
-pub fn to_string<T: Encode>(value: T) -> String Never! { render_toml(value.encode()) }
+fn to_string<T: Encode>(value: T) -> String Never! { render_toml(value.encode()) }
 
 fn parse_toml(text: String) -> DataTree EncodingError! {
     p := TOMLParser{bytes: text.bytes(), index: 0, line: 1, column: 1, root: [(key: String, value: DataTree)]{}}

@@ -196,41 +196,41 @@ fn mir_lint_class_name(class: MIRLintClass) -> String Never! {
 
 // The callee row a call is checked against, copied out of the program once.
 struct MIRLintSignature {
-    pub key: String
-    pub params: [MIRParam]
-    pub return_type: MIRType
-    pub solved_effects: [String]
-    pub capture_count: Int
-    pub captures: [MIRCaptureParam]
-    pub return_view_provenance: [MIRViewProvenanceEntry]?
+    key: String
+    params: [MIRParam]
+    return_type: MIRType
+    solved_effects: [String]
+    capture_count: Int
+    captures: [MIRCaptureParam]
+    return_view_provenance: [MIRViewProvenanceEntry]?
 }
 
 // The declaration shape a literal, variant, or payload read is checked
 // against: a struct's fields or an enum's variants.
 struct MIRLintTypeRow {
-    pub name: String
-    pub fields: [MIRField]?
-    pub variants: [MIRVariant]?
-    pub target: MIRType?
+    name: String
+    fields: [MIRField]?
+    variants: [MIRVariant]?
+    target: MIRType?
 }
 
 struct MIRLintIndex {
     // Function ID -> row in `signatures`.
-    pub functions: [U64:Int]
-    pub signatures: [MIRLintSignature]
+    functions: [U64:Int]
+    signatures: [MIRLintSignature]
     // Type ID -> row in `type_rows`.
-    pub types: [U64:Int]
-    pub type_rows: [MIRLintTypeRow]
-    pub fields: [U64:MIRField]
+    types: [U64:Int]
+    type_rows: [MIRLintTypeRow]
+    fields: [U64:MIRField]
     // Generic parameter and associated-type names declared anywhere.
     type_vars: [String:Bool]
     // Names of `Alias`, `Distinct`, and unit-family declarations.
-    pub transparent: [String:Bool]
+    transparent: [String:Bool]
     // Prelude route IDs of the boundary operations the safety families
     // recognise: `para_*` worker adapters, channel sends, and task joins.
-    pub parallel_routes: [String:Bool]
-    pub channel_sends: [String:Bool]
-    pub task_joins: [String:Bool]
+    parallel_routes: [String:Bool]
+    channel_sends: [String:Bool]
+    task_joins: [String:Bool]
 }
 
 // Rust: none (Jet-only pass)
@@ -537,11 +537,11 @@ struct MIRLintContext {
     index: MIRLintIndex
     function: MIRFunction
     // Value ID -> row in `function.values`.
-    pub values: [U64:Int]
+    values: [U64:Int]
     // Place ID -> row in `function.places`.
-    pub places: [U64:Int]
+    places: [U64:Int]
     // Block ID -> position in `function.blocks`.
-    pub blocks: [U64:Int]
+    blocks: [U64:Int]
     // Block position -> predecessor block IDs.
     predecessors: [[MIRBlockID]]
 }
@@ -1508,9 +1508,9 @@ fn mir_lint_path_prefix(prefix: String, path: String) -> Bool Never! {
 // Bit identities for sparse ownership states: consumed values, moved paths,
 // then known-true and known-false guards and edge-crossing values.
 struct MIRLintOwnership {
-    pub value_bits: [U64:Int]
-    pub value_count: Int
-    pub path_count: Int
+    value_bits: [U64:Int]
+    value_count: Int
+    path_count: Int
     // Per place row: moved-path bits overlapping the place (a read, borrow,
     // or move is invalid while one is set), strict-prefix bits (a write is
     // invalid while one is set), bits the place's write reinitializes, and
@@ -1520,14 +1520,14 @@ struct MIRLintOwnership {
     reinitialized: [[Int]]
     moved: [Int]
     // Per place row: the Bool guard slot of an unborrowed whole local, or -1.
-    pub slots: [Int]
-    pub slot_count: Int
-    pub crossing: [U64:Int]
-    pub crossing_count: Int
+    slots: [Int]
+    slot_count: Int
+    crossing: [U64:Int]
+    crossing_count: Int
     // The safety families' bits start at `safety_base`.
-    pub safety: MIRLintSafety
-    pub safety_base: Int
-    pub defs: MIRLintDefs
+    safety: MIRLintSafety
+    safety_base: Int
+    defs: MIRLintDefs
 }
 
 fn mir_lint_slot_bit(layout: MIRLintOwnership, slot: Int, truth: Bool) -> Int Never! {
@@ -2027,10 +2027,10 @@ fn mir_lint_transfer(ctx: MIRLintContext, layout: MIRLintOwnership, block: MIRBa
 // The instruction that defines each value, and each Int constant. Index
 // projections that name two distinct constants are disjoint.
 struct MIRLintDefs {
-    pub rows: [String:Int]
-    pub blocks: [Int]
-    pub positions: [Int]
-    pub constants: [String:Int]
+    rows: [String:Int]
+    blocks: [Int]
+    positions: [Int]
+    constants: [String:Int]
 }
 
 // Rust: none (Jet-only pass)
@@ -2478,29 +2478,29 @@ fn mir_lint_crossing(ctx: MIRLintContext, defs: MIRLintDefs, consumers: [String:
 // is a local that stores an origin. A loan is a place lent to a task-group
 // child until the group's scope exits or the child's handle is joined.
 struct MIRLintSafety {
-    pub active: Bool
+    active: Bool
     // Value -> SSA-generation/root association rows, propagated to a fixed
     // point over Move/Phi and borrowed carriers. No move-depth cutoff.
-    pub origins: [String:[Int]]
-    pub origin_values: [String]
-    pub origin_roots: [Int]
-    pub root_values: [String]
-    pub origin_places: [[MIRPlaceID]]
-    pub origin_exclusive: [Bool]
-    pub owner_origins: [String:[Int]]
+    origins: [String:[Int]]
+    origin_values: [String]
+    origin_roots: [Int]
+    root_values: [String]
+    origin_places: [[MIRPlaceID]]
+    origin_exclusive: [Bool]
+    owner_origins: [String:[Int]]
     // Local key -> holder rows; a holder pairs a local with an origin.
-    pub holders: [String:[Int]]
-    pub holder_origins: [Int]
-    pub origin_holders: [[Int]]
+    holders: [String:[Int]]
+    holder_origins: [Int]
+    origin_holders: [[Int]]
     // Spawn result value -> loan rows, and local key -> the loan rows of
     // the task handles it stores.
-    pub loans: [String:[Int]]
-    pub loan_places: [MIRPlaceID]
-    pub loan_writes: [Bool]
-    pub loan_scopes: [String]
-    pub loan_tasks: [String]
-    pub task_holders: [String:[Int]]
-    pub task_holder_loans: [Int]
+    loans: [String:[Int]]
+    loan_places: [MIRPlaceID]
+    loan_writes: [Bool]
+    loan_scopes: [String]
+    loan_tasks: [String]
+    task_holders: [String:[Int]]
+    task_holder_loans: [Int]
 }
 
 
@@ -2995,7 +2995,7 @@ fn mir_lint_stale_failure(ctx: MIRLintContext, safety: MIRLintSafety, origin: In
     mir_lint_fail(ctx, .ViewValid, span, "{what} is a view into place {place.value}, used after that owner was moved, written, or resized")
 }
 
-struct MIRLintBorrowState { pub active: Bool, pub stale: Bool }
+struct MIRLintBorrowState { active: Bool, stale: Bool }
 
 fn mir_lint_carried_origin(ctx: MIRLintContext, layout: MIRLintOwnership, state: MIRLintState, root: Int, uses: [MIRValueID], places: [MIRPlaceID]) -> MIRLintBorrowState Never! {
     active := false

@@ -5,15 +5,15 @@ use core as core
 // Window, input, drawing, and texture operations use the existing registered
 // raw host bindings. The descriptor-backed Jet FFI rail replaces those leaves
 // at native cutover; display availability is never fabricated by source.
-pub struct RaylibWindow {
-    pub width: Int
-    pub height: Int
-    pub title: String
-    pub open: Bool
-    pub drawing: Bool
-    pub should_close: Bool
-    pub fps: Int
-    pub commands: [String]
+struct RaylibWindow {
+    width: Int
+    height: Int
+    title: String
+    open: Bool
+    drawing: Bool
+    should_close: Bool
+    fps: Int
+    commands: [String]
 }
 
 struct RaylibColor {
@@ -35,76 +35,76 @@ fn color(r: Int, g: Int, b: Int, a: Int) -> RaylibColor Never! {
     RaylibColor{r: clamp8(r), g: clamp8(g), b: clamp8(b), a: clamp8(a)}
 }
 
-pub fn window_open(width: Int, height: Int, title: String) -[GPU]> RaylibWindow Never! {
+fn window_open(width: Int, height: Int, title: String) -[GPU]> RaylibWindow Never! {
     core.game.raylib.__window_open(width, height, title)
 }
 
-pub fn window_should_close(window: RaylibWindow) -[GPU]> Bool Never! {
+fn window_should_close(window: RaylibWindow) -[GPU]> Bool Never! {
     core.game.raylib.__window_should_close(window)
 }
 
-pub fn window_ready(window: RaylibWindow) -[GPU]> Bool Never! {
+fn window_ready(window: RaylibWindow) -[GPU]> Bool Never! {
     core.game.raylib.__window_ready(window)
 }
 
-pub fn close_window(window: RaylibWindow) Never! -[GPU]> {
+fn close_window(window: RaylibWindow) Never! -[GPU]> {
     core.game.raylib.__close_window(window)
 }
 
-pub fn begin_drawing(window: RaylibWindow) Never! -[GPU]> {
+fn begin_drawing(window: RaylibWindow) Never! -[GPU]> {
     core.game.raylib.__begin_drawing(window)
 }
 
-pub fn end_drawing() Never! -[GPU]> {
+fn end_drawing() Never! -[GPU]> {
     core.game.raylib.__end_drawing()
 }
 
-pub fn clear_background(color: RaylibColor) Never! -[GPU]> {
+fn clear_background(color: RaylibColor) Never! -[GPU]> {
     core.game.raylib.__clear_background(color)
 }
 
-pub fn draw_rectangle(x: Int, y: Int, width: Int, height: Int, color: RaylibColor) Never! -[GPU]> {
+fn draw_rectangle(x: Int, y: Int, width: Int, height: Int, color: RaylibColor) Never! -[GPU]> {
     core.game.raylib.__draw_rectangle(x, y, width, height, color)
 }
 
-pub fn draw_text(text: String, x: Int, y: Int, size: Int, color: RaylibColor) Never! -[GPU]> {
+fn draw_text(text: String, x: Int, y: Int, size: Int, color: RaylibColor) Never! -[GPU]> {
     core.game.raylib.__draw_text(text, x, y, size, color)
 }
 
-pub fn draw_sprite(atlas: RaylibTextureAtlas, source: String, x: Int, y: Int) Never! -[GPU]> {
+fn draw_sprite(atlas: RaylibTextureAtlas, source: String, x: Int, y: Int) Never! -[GPU]> {
     core.game.raylib.__draw_sprite(atlas, source, x, y)
 }
 
-pub fn set_target_fps(fps: Int) Never! -[GPU]> {
+fn set_target_fps(fps: Int) Never! -[GPU]> {
     core.game.raylib.__set_target_fps(clamp_fps(fps))
 }
 
-pub fn key_down(key: String) -[GPU]> Bool Never! {
+fn key_down(key: String) -[GPU]> Bool Never! {
     if key_code(key) < 0 -> return false
     core.game.raylib.__key_down(key)
 }
 
-pub fn gamepad_down(gamepad: Int, button: String) -[GPU]> Bool Never! {
+fn gamepad_down(gamepad: Int, button: String) -[GPU]> Bool Never! {
     if gamepad < 0 || gamepad > 2147483647 || button_code(button) < 0 -> return false
     core.game.raylib.__gamepad_down(gamepad, button)
 }
 
-pub fn gamepad_axis(gamepad: Int, axis: String) -[GPU]> Float Never! {
+fn gamepad_axis(gamepad: Int, axis: String) -[GPU]> Float Never! {
     if gamepad < 0 || gamepad > 2147483647 || axis_code(axis) < 0 -> return 0.0
     core.game.raylib.__gamepad_axis(gamepad, axis)
 }
 
-pub fn load_texture_atlas(path: String) -[FS, GPU]> RaylibTextureAtlas Never! {
+fn load_texture_atlas(path: String) -[FS, GPU]> RaylibTextureAtlas Never! {
     core.game.raylib.__load_texture_atlas(path)
 }
 
 // Sound handles retain the supplied path. Acceptance is the existing non-empty
 // path contract; it does not claim that native audio was submitted.
-pub fn load_sound(path: String) -[FS, GPU]> RaylibSound Never! {
+fn load_sound(path: String) -[FS, GPU]> RaylibSound Never! {
     RaylibSound{path: ~path}
 }
 
-pub fn play_sound(sound: RaylibSound) -[GPU]> Bool Never! {
+fn play_sound(sound: RaylibSound) -[GPU]> Bool Never! {
     !sound.path.is_empty()
 }
 

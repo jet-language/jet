@@ -78,10 +78,10 @@ struct SemaEffectFxRegion {
 
 // One checked module's effect inputs. The module's functions and call facts
 // are read in place from `modules[module_index]` (sema_effects_check_modules).
-pub struct SemaEffectModuleInput {
-    pub module_index: Int
-    pub sources: [SemaEffectFunctionSource]
-    pub source_segments: [SemaSourceSegment]
+struct SemaEffectModuleInput {
+    module_index: Int
+    sources: [SemaEffectFunctionSource]
+    source_segments: [SemaSourceSegment]
     // D-EFF3 trait-method effect ceilings this module declares (E0742).
     trait_bounds: [SemaEffectTraitBound]{[SemaEffectTraitBound]{}}
 }
@@ -99,11 +99,11 @@ struct SemaEffectTraitBound {
     bound: [String]
 }
 
-pub struct SemaEffectGraphResult {
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
-    pub memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}}
-    pub memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}}
+struct SemaEffectGraphResult {
+    diagnostics: [Diagnostic]
+    complete: Bool
+    memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}}
+    memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}}
 }
 
 // One memory operation a body performs directly (Rust `MemoryEvent`): `kind`
@@ -501,7 +501,7 @@ fn sema_effect_canonical_irreversible_fact(environment: SemaScopeEnvironment, pr
     sema_effect_declarations_irreversible_fact(graph.modules[module_index].program.items, effect_name)
 }
 
-pub fn sema_effect_root_is_irreversible(environment: SemaScopeEnvironment, program: SemaProgramTables, effect_name: String) -> Bool? {
+fn sema_effect_root_is_irreversible(environment: SemaScopeEnvironment, program: SemaProgramTables, effect_name: String) -> Bool? {
     sema_effect_canonical_irreversible_fact(environment, program, effect_name)
 }
 
@@ -514,7 +514,7 @@ fn sema_effect_transaction_wall_diagnostic(api: String, effect_name: String, spa
 // Check a call's declared effect row at the authored-transaction wall. The
 // caller supplies the canonical API spelling because TIR call nodes may no
 // longer retain the registration module/member pair.
-pub fn sema_effect_check_transaction_wall(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, effect_row: [EffectRowEntry]?, api: String, span: Span, diagnostics: &[Diagnostic]) -> Bool? {
+fn sema_effect_check_transaction_wall(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, effect_row: [EffectRowEntry]?, api: String, span: Span, diagnostics: &[Diagnostic]) -> Bool? {
     if scopes.transaction_wall_depth <= 0 -> return Val(true)
     row :: effect_row ?? return Val(true)
     loop entry in row {
@@ -788,7 +788,7 @@ fn sema_effect_node_from_source(function: TFunc, source: SemaEffectFunctionSourc
 // Intrinsic producers use the same fact carrier as checked calls. The effect
 // row is authoritative producer input: an empty present row means known-pure,
 // while an absent row remains unknown and is conservatively maximal downstream.
-pub fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, facts: SemaCallFacts, diagnostics: &[Diagnostic]) -> Bool Never! {
+fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, facts: SemaCallFacts, diagnostics: &[Diagnostic]) -> Bool Never! {
     wall := sema_effect_check_transaction_wall(environment, program, scopes, facts.effect_bound, api, span, &diagnostics)
     allowed :: wall ?? return false
     if !allowed -> return false
@@ -807,7 +807,7 @@ pub fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, prog
 
 // Convenience entry point for intrinsic operations whose only call metadata
 // is their canonical effect row. Use an empty row to record a known-pure site.
-pub fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, effect_row: [EffectRowEntry], diagnostics: &[Diagnostic]) -> Bool Never! {
+fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, effect_row: [EffectRowEntry], diagnostics: &[Diagnostic]) -> Bool Never! {
     sema_effect_record_intrinsic_fact(
         environment, program,
         &scopes,
@@ -1855,7 +1855,7 @@ fn sema_effect_region_inferred(nodes: [SemaEffectNode], solved: [[String]], owne
 // `modules` are the checked modules; each input names its module, whose
 // functions and call facts are read in place. The solved effect row of every
 // input module's function is stamped onto `modules` at the end.
-pub fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], package_memory_denials: [String]) -> SemaEffectGraphResult {
+fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], package_memory_denials: [String]) -> SemaEffectGraphResult {
     diagnostics := [Diagnostic]{}
     nodes := [SemaEffectNode]{}
     memory_facts := SemaMemoryProjectionFacts{declarations: [], projections: []}

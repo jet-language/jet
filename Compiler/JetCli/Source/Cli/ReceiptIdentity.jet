@@ -10,7 +10,7 @@ fn jet_cli_receipt_secret_component(component: String) -> Bool Never! {
     [String]{"secret", "token", "password", "passwd", "credential", "key"}.contains(name)
 }
 
-pub fn jet_cli_receipt_secret_name(name: String) -> Bool Never! {
+fn jet_cli_receipt_secret_name(name: String) -> Bool Never! {
     bytes :: name.bytes()
     component := ""
     loop (index, byte) in bytes {
@@ -46,7 +46,7 @@ fn jet_cli_receipt_secret_environment(name: String) -> Bool Never! {
     false
 }
 
-pub fn jet_cli_receipt_argv_identity(argv: [String]) -> [U8] Never! {
+fn jet_cli_receipt_argv_identity(argv: [String]) -> [U8] Never! {
     out := [U8]{}
     redact_next := false
     loop arg in argv {
@@ -67,7 +67,7 @@ pub fn jet_cli_receipt_argv_identity(argv: [String]) -> [U8] Never! {
     out
 }
 
-pub fn jet_cli_receipt_environment_identity(names: [String]) -[Env]> [U8] Never! {
+fn jet_cli_receipt_environment_identity(names: [String]) -[Env]> [U8] Never! {
     sorted := names
     &sorted.sort()
     out := [U8]{}
@@ -98,7 +98,7 @@ fn jet_cli_receipt_tool_path(name: String) -[FS, Env]> String? Never! {
     None
 }
 
-pub fn jet_cli_receipt_context_identity(verb: String, argv: [String], terminal: [U8]) -[FS, Env]> [U8] String! {
+fn jet_cli_receipt_context_identity(verb: String, argv: [String], terminal: [U8]) -[FS, Env]> [U8] String! {
     if verb == "" -> return Err("receipt verb is empty")
     if terminal.len() != 3 -> return Err("receipt terminal identity requires three host bits")
     loop bit in terminal {
@@ -182,7 +182,7 @@ fn jet_cli_receipt_generated_paths(path: String, strict: Bool, paths: &[String])
     }
 }
 
-pub fn jet_cli_comparison_input_paths(cache: &WorkspaceDeclarationCache, target: String) -[FS, Env]> [String] String! {
+fn jet_cli_comparison_input_paths(cache: &WorkspaceDeclarationCache, target: String) -[FS, Env]> [String] String! {
     absolute :: cli_files.realpath(target) ?? return Err("could not canonicalize input {target}: {jet_cli_io_error_text(err)}")
     if !jet_cli_receipt_regular(target) -> return Err("receipt input is not a regular file: {target}")
     directory :: AuthorityResolver.authority_walk_root(absolute) ?? return Err("could not resolve comparison corpus directory")
@@ -197,7 +197,7 @@ pub fn jet_cli_comparison_input_paths(cache: &WorkspaceDeclarationCache, target:
     Ok(jet_cli_lock_canonical(paths))
 }
 
-pub fn jet_cli_receipt_claim(verb: String, paths: [String], argv: [String], terminal: [U8]) -[FS, Env, Time.Wait]> JetCLIReceiptClaim String! {
+fn jet_cli_receipt_claim(verb: String, paths: [String], argv: [String], terminal: [U8]) -[FS, Env, Time.Wait]> JetCLIReceiptClaim String! {
     identity := jet_cli_receipt_context_identity(verb, argv, terminal)
     inputs := [JetCLIReceiptInput]{}
     loop path in paths {
@@ -234,11 +234,11 @@ fn jet_cli_receipt_canonical_member(input: JetCLIReceiptInput, cwd: String, memb
     &members.push(JetCLIReceiptInput{path: path, digest: input.digest})
 }
 
-pub struct JetCLICanonicalTargetIdentity {
-    pub input_sha256: String
-    pub authority_root: String
+struct JetCLICanonicalTargetIdentity {
+    input_sha256: String
+    authority_root: String
 }
-pub fn jet_cli_receipt_target_identity(cache: &WorkspaceDeclarationCache, target: String, inputs: [JetCLIReceiptInput]) -[FS, Env, Time.Wait]> JetCLICanonicalTargetIdentity String! {
+fn jet_cli_receipt_target_identity(cache: &WorkspaceDeclarationCache, target: String, inputs: [JetCLIReceiptInput]) -[FS, Env, Time.Wait]> JetCLICanonicalTargetIdentity String! {
     info :: cli_files.stat(target) ?? return Err("couldn't inspect canonical target `{target}`: {jet_cli_io_error_text(err)}")
     if info.is_symlink -> return Err("canonical target `{target}` must not be a symlink")
     start :: AuthorityResolver.authority_walk_root(target) ?? return Err("couldn't resolve canonical target directory")

@@ -15,8 +15,8 @@ JET_CLI_ROOTED_READ_CHUNK :: 65536
 
 // One directory held below a canonical store root. `path` is display text;
 // every operation goes through the held handle.
-pub struct JetCLIRootedDirectory {
-    pub path: String
+struct JetCLIRootedDirectory {
+    path: String
     handle: cli_files.Directory
 
     // Hold `parts` below the canonical absolute `root`, one part at a time,
@@ -315,12 +315,12 @@ pub struct JetCLIRootedDirectory {
 }
 
 // One listed entry, described without following a link.
-pub struct JetCLIRootedEntry {
-    pub name: String
-    pub is_file: Bool
-    pub is_dir: Bool
-    pub is_symlink: Bool
-    pub size: Int
+struct JetCLIRootedEntry {
+    name: String
+    is_file: Bool
+    is_dir: Bool
+    is_symlink: Bool
+    size: Int
 }
 
 fn jet_cli_rooted_fill(writer: &cli_files.FileWriter, bytes: [U8], mode: Int?) IOError! -[FS, Time.Wait]> {
@@ -375,7 +375,7 @@ fn jet_cli_rooted_join(base: String, name: String) -> String Never! {
 // Source/CmdCompile.rs::build_record_program: the invocation's selected entry,
 // made absolute/canonical when possible and root-relative only on a complete
 // path-component prefix. This identity is shared by the writer and reader.
-pub fn jet_cli_build_record_program_at(file: String, workspace_root: String, cwd: String) -[FS, Env]> String Never! {
+fn jet_cli_build_record_program_at(file: String, workspace_root: String, cwd: String) -[FS, Env]> String Never! {
     joined :: if cli_files.is_absolute(file) -> file else -> jet_cli_entry_join(cwd, file)
     input :: (cli_files.realpath(joined) ?? joined).replace("\\", "/")
     root :: (cli_files.realpath(workspace_root) ?? workspace_root).replace("\\", "/")

@@ -65,11 +65,11 @@ struct Rect {
     height: Float
 }
 
-pub struct SizeConstraint {
-    pub min_width: Float
-    pub min_height: Float
-    pub max_width: Float
-    pub max_height: Float
+struct SizeConstraint {
+    min_width: Float
+    min_height: Float
+    max_width: Float
+    max_height: Float
 }
 
 
@@ -81,22 +81,22 @@ enum InputEvent {
 
 
 
-pub fn point(x: Float, y: Float) -> Point Never! { Point{x: x, y: y} }
-pub fn size(width: Float, height: Float) -> Size Never! {
+fn point(x: Float, y: Float) -> Point Never! { Point{x: x, y: y} }
+fn size(width: Float, height: Float) -> Size Never! {
     Size{width: width, height: height}
 }
-pub fn rect(x: Float, y: Float, width: Float, height: Float) -> Rect Never! {
+fn rect(x: Float, y: Float, width: Float, height: Float) -> Rect Never! {
     Rect{x: x, y: y, width: width, height: height}
 }
-pub fn constraint(min_width: Float, min_height: Float, max_width: Float, max_height: Float) -> SizeConstraint Never! {
+fn constraint(min_width: Float, min_height: Float, max_width: Float, max_height: Float) -> SizeConstraint Never! {
     SizeConstraint{min_width: min_width, min_height: min_height, max_width: max_width, max_height: max_height}
 }
 
-pub fn node(label: String, width: Float, height: Float) -> UINode Never! {
+fn node(label: String, width: Float, height: Float) -> UINode Never! {
     transfer_node(label, width, height, None, UINodeKind.Custom, [UINode]{}, None)
 }
 
-pub fn box(children: [UINode]) -> UINode Never! {
+fn box(children: [UINode]) -> UINode Never! {
     width := Float{0.0}
     height := Float{0.0}
     loop child in children {
@@ -107,60 +107,60 @@ pub fn box(children: [UINode]) -> UINode Never! {
     transfer_node("", width, height, Val(UIAriaRole.Container), UINodeKind.Box, children, None)
 }
 
-pub fn text(value: String) -> UINode Never! {
+fn text(value: String) -> UINode Never! {
     width :: Float{core.tui.display_width(value)}
     transfer_node(value, width, 1.0, Val(UIAriaRole.Label), UINodeKind.Text, [UINode]{}, None)
 }
 
-pub fn desktop() -> UIPreviewViewport Never! { transfer_viewport(2, 1280, 800, 1) }
-pub fn phone() -> UIPreviewViewport Never! { transfer_viewport(0, 390, 844, 2) }
-pub fn tablet() -> UIPreviewViewport Never! { transfer_viewport(1, 834, 1119, 2) }
+fn desktop() -> UIPreviewViewport Never! { transfer_viewport(2, 1280, 800, 1) }
+fn phone() -> UIPreviewViewport Never! { transfer_viewport(0, 390, 844, 2) }
+fn tablet() -> UIPreviewViewport Never! { transfer_viewport(1, 834, 1119, 2) }
 
-pub fn key_event(code: String) -> InputEvent Never! { InputEvent.Key{code: code} }
-pub fn resize_event(width: Float, height: Float) -> InputEvent Never! {
+fn key_event(code: String) -> InputEvent Never! { InputEvent.Key{code: code} }
+fn resize_event(width: Float, height: Float) -> InputEvent Never! {
     InputEvent.Resize{size: size(width, height)}
 }
 
 
-pub fn gtk_backend() -[Browser]> GtkBackend Never! {
+fn gtk_backend() -[Browser]> GtkBackend Never! {
     #Unsafe("Core creates the real retained GTK renderer through the registered host allocation boundary") {
         return core.ui.__gtk_backend()
     }
 }
-pub fn tui_backend() -[Browser]> TUIBackend Never! {
+fn tui_backend() -[Browser]> TUIBackend Never! {
     #Unsafe("Core creates the real retained terminal renderer through the registered host allocation boundary") {
         return core.ui.__tui_backend()
     }
 }
-pub fn null_backend() -[Browser]> NullBackend Never! {
+fn null_backend() -[Browser]> NullBackend Never! {
     #Unsafe("Core creates the real retained null renderer through the registered host allocation boundary") {
         return core.ui.__null_backend()
     }
 }
 
-pub fn aria_role_button() -> UIAriaRole Never! { UIAriaRole.Button }
-pub fn aria_role_container() -> UIAriaRole Never! { UIAriaRole.Container }
-pub fn aria_role_label() -> UIAriaRole Never! { UIAriaRole.Label }
-pub fn aria_role_text_input() -> UIAriaRole Never! { UIAriaRole.TextInput }
+fn aria_role_button() -> UIAriaRole Never! { UIAriaRole.Button }
+fn aria_role_container() -> UIAriaRole Never! { UIAriaRole.Container }
+fn aria_role_label() -> UIAriaRole Never! { UIAriaRole.Label }
+fn aria_role_text_input() -> UIAriaRole Never! { UIAriaRole.TextInput }
 
-pub fn node_accessibility(n: UINode, metadata: UIAccessibility) -> UINode Never! {
+fn node_accessibility(n: UINode, metadata: UIAccessibility) -> UINode Never! {
     #Unsafe("Core UI accessibility slot transfer: explicitly present validated metadata") {
         return core.ui.__accessibility_transfer(n, metadata, true)
     }
 }
 
-pub fn node_color(label: String, width: Float, height: Float, color: String) -> UINode Never! {
+fn node_color(label: String, width: Float, height: Float, color: String) -> UINode Never! {
     transfer_node(label, width, height, Val(UIAriaRole.Label), UINodeKind.Custom, [UINode]{}, Val(color))
 }
 
-pub fn node_role(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode Never! {
+fn node_role(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode Never! {
     kind := UINodeKind.Custom
     if role == .Button -> kind = UINodeKind.Button
     if role == .TextInput -> kind = UINodeKind.TextInput
     transfer_node(label, width, height, Val(role), kind, [UINode]{}, None)
 }
 
-pub fn node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode Never! {
+fn node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode Never! {
     #Unsafe("Core UI shortcut slot transfer: explicitly present validated shortcut") {
         return core.ui.__shortcut_transfer(n, shortcut, true)
     }

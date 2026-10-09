@@ -13,11 +13,11 @@ use core.time as time
 
 // Timer creation and scheduler identity are host cells. Channels and task
 // groups use the language primitives; sleeping uses core.time.sleep.
-pub fn after(delay: time.Duration, value: Int{0}) -[Time]> Receiver<Int> Never! {
+fn after(delay: time.Duration, value: Int{0}) -[Time]> Receiver<Int> Never! {
     core.tasks.after(delay, value)
 }
 
-pub fn interval(period: time.Duration) -[Time]> Receiver<Int> Never! {
+fn interval(period: time.Duration) -[Time]> Receiver<Int> Never! {
     core.tasks.__interval_ms(interval_milliseconds(period))
 }
 
@@ -58,8 +58,8 @@ module scheduler {
 }
 
 impl Condition {
-    pub fn notify_one(self) Never! { core.tasks.__condition_notify_one(self) }
-    pub fn notify_all(self) Never! { core.tasks.__condition_notify_all(self) }
+    fn notify_one(self) Never! { core.tasks.__condition_notify_one(self) }
+    fn notify_all(self) Never! { core.tasks.__condition_notify_all(self) }
 }
 
 fn yield_now() Never! -[Time.Wait]> { host_yield() }
@@ -79,6 +79,20 @@ fn get(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
 fn result(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
 
 fn wait(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
+
+fn waitall(receivers: [Receiver<Int>]) -[Time.Wait]> [Int] Never! {
+    out := [Int]{}
+    loop rx in receivers -> &out.push(wait(rx))
+    out
+}
+
+fn waitany(receivers: [Receiver<Int>]) -[Time.Wait]> Int Never! {
+    if receivers.len() == 0 -> return -1
+    // Receiver readiness is owned by the scheduler's opaque handle. This
+    // convenience rail keeps the deterministic first-arm selection; callers
+    // needing a true race should use the host select surface.
+    wait(receivers[0])
+}
 
 
 fn host_sleep_ms(ms: Int) -[Time]> {
@@ -128,13 +142,21 @@ fn cancel(rx: Receiver<Int>) -[Time]> Receiver<Int> Never! {
     rx.copy()
 }
 
+struct TaskState {
+    values: [Int]
+    capacity: Int
+    closed: Bool
+    locked: Bool
+    generation: Int
+}
+
 fn is_closed(state: TaskState) -> Bool Never! { state.closed }
 fn is_locked(state: TaskState) -> Bool Never! { state.locked }
 fn size(state: TaskState) -> Int Never! { state.values.len() }
 fn capacity(state: TaskState) -> Int Never! { state.capacity }
 fn generation(state: TaskState) -> Int Never! { state.generation }
 
-pub fn spawn_name(name: String) -> String Never! {
+fn spawn_name(name: String) -> String Never! {
     name.copy()
 }
 

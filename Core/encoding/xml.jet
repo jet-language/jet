@@ -18,7 +18,7 @@ struct XMLError {
     reason: String
 }
 
-pub enum XMLReason {
+enum XMLReason {
     InvalidEncoding
     Malformed
     MismatchedTag
@@ -33,120 +33,120 @@ pub enum XMLReason {
     Unsupported
 }
 
-pub struct XMLLimits {
-    pub max_depth: Int
-    pub max_nodes: Int
-    pub max_attributes_per_element: Int
-    pub max_name_bytes: Int
-    pub max_text_bytes: Int
-    pub max_entity_declarations: Int
-    pub max_entity_depth: Int
-    pub max_entity_replacement_bytes: Int
+struct XMLLimits {
+    max_depth: Int
+    max_nodes: Int
+    max_attributes_per_element: Int
+    max_name_bytes: Int
+    max_text_bytes: Int
+    max_entity_declarations: Int
+    max_entity_depth: Int
+    max_entity_replacement_bytes: Int
 
-    pub fn safe() -> XMLLimits Never! {
+    fn safe() -> XMLLimits Never! {
         XMLLimits{max_depth: 256, max_nodes: 1000000, max_attributes_per_element: 1024,
             max_name_bytes: 4096, max_text_bytes: 16777216, max_entity_declarations: 1024,
             max_entity_depth: 32, max_entity_replacement_bytes: 8388608}
     }
 }
 
-pub enum XMLEntityPolicy {
+enum XMLEntityPolicy {
     Preserve
     Reject
     Resolve([String:String])
 }
 
-pub struct XMLParseOptions {
-    pub entities: XMLEntityPolicy
-    pub limits: XMLLimits
+struct XMLParseOptions {
+    entities: XMLEntityPolicy
+    limits: XMLLimits
 
-    pub fn safe() -> XMLParseOptions Never! {
+    fn safe() -> XMLParseOptions Never! {
         XMLParseOptions{entities: .Preserve, limits: XMLLimits.safe()}
     }
 }
 
-pub enum XMLEncoding { UTF8 UTF8BOM UTF16LE UTF16BE }
-pub enum XMLLexicalPolicy { PreserveValid Deterministic }
+enum XMLEncoding { UTF8 UTF8BOM UTF16LE UTF16BE }
+enum XMLLexicalPolicy { PreserveValid Deterministic }
 
-pub struct XMLRenderOptions {
-    pub encoding: XMLEncoding
-    pub lexical: XMLLexicalPolicy
+struct XMLRenderOptions {
+    encoding: XMLEncoding
+    lexical: XMLLexicalPolicy
 
-    pub fn safe() -> XMLRenderOptions Never! {
+    fn safe() -> XMLRenderOptions Never! {
         XMLRenderOptions{encoding: .UTF8, lexical: .PreserveValid}
     }
 }
 
-pub enum XMLCanonicalMode { Inclusive11 Exclusive10 }
+enum XMLCanonicalMode { Inclusive11 Exclusive10 }
 
-pub struct XMLCanonical {
-    pub mode: XMLCanonicalMode
-    pub comments: Bool
-    pub inclusive_prefixes: [String]
+struct XMLCanonical {
+    mode: XMLCanonicalMode
+    comments: Bool
+    inclusive_prefixes: [String]
 
-    pub fn inclusive11() -> XMLCanonical Never! {
+    fn inclusive11() -> XMLCanonical Never! {
         XMLCanonical{mode: .Inclusive11, comments: false, inclusive_prefixes: [String]{}}
     }
 
-    pub fn exclusive10() -> XMLCanonical Never! {
+    fn exclusive10() -> XMLCanonical Never! {
         XMLCanonical{mode: .Exclusive10, comments: false, inclusive_prefixes: [String]{}}
     }
 }
 
-pub fn parse(text: String) -> DataTree XMLError! {
+fn parse(text: String) -> DataTree XMLError! {
     kernel.parse_document(text) ?? return Err(kernel.public_error(err))
 }
 
-pub fn parse_with(text: String, options: XMLParseOptions) -> DataTree XMLError! {
+fn parse_with(text: String, options: XMLParseOptions) -> DataTree XMLError! {
     kernel.parse_document_with(text, kernel.parse_options(options)) ?? return Err(kernel.public_error(err))
 }
 
-pub fn parse_bytes(bytes: [U8], options: XMLParseOptions{.safe()}) -> DataTree XMLError! {
+fn parse_bytes(bytes: [U8], options: XMLParseOptions{.safe()}) -> DataTree XMLError! {
     kernel.parse_document_bytes_with(bytes, kernel.parse_options(options)) ?? return Err(kernel.public_error(err))
 }
 
-pub fn to_string(tree: DataTree) -> String XMLError! {
+fn to_string(tree: DataTree) -> String XMLError! {
     kernel.render_document(tree) ?? return Err(kernel.public_error(err))
 }
 
-pub fn to_bytes(tree: DataTree, options: XMLRenderOptions{.safe()}) -> [U8] XMLError! {
+fn to_bytes(tree: DataTree, options: XMLRenderOptions{.safe()}) -> [U8] XMLError! {
     kernel.render_document_bytes(tree, kernel.render_encoding(options.encoding), kernel.lexical_policy(options.lexical)) ?? return Err(kernel.public_error(err))
 }
 
-pub fn canonical(tree: DataTree, options: XMLCanonical) -> String XMLError! {
+fn canonical(tree: DataTree, options: XMLCanonical) -> String XMLError! {
     kernel.canonical_document(tree, kernel.canonical_options(options)) ?? return Err(kernel.public_error(err))
 }
 
-pub fn root(tree: DataTree) -> DataTree XMLError! {
+fn root(tree: DataTree) -> DataTree XMLError! {
     kernel.document_root(tree) ?? return Err(kernel.public_error(err))
 }
 
-pub fn expanded_name(node: DataTree) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) XMLError! {
+fn expanded_name(node: DataTree) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) XMLError! {
     kernel.expanded_name_parts(node) ?? return Err(kernel.public_error(err))
 }
 
-pub fn attribute(element: DataTree, selector: String) -> String? XMLError! {
+fn attribute(element: DataTree, selector: String) -> String? XMLError! {
     kernel.lookup_attribute(element, selector) ?? return Err(kernel.public_error(err))
 }
 
-pub fn content(element: DataTree) -> [DataTree] XMLError! {
+fn content(element: DataTree) -> [DataTree] XMLError! {
     kernel.element_content(element) ?? return Err(kernel.public_error(err))
 }
 
-pub fn decode<T: Decode>(text: String, options: XMLParseOptions{.safe()}) -> T [FieldError]! {
+fn decode<T: Decode>(text: String, options: XMLParseOptions{.safe()}) -> T [FieldError]! {
     document :: parse_with(text, options) ?? return Err(kernel.field_error(err))
     projected :: kernel.project_document_for_decode(document) ?? return Err(kernel.field_error(kernel.public_error(err)))
     projected.decode<T>()
 }
 
-pub fn decode_bytes<T: Decode>(bytes: [U8], options: XMLParseOptions{.safe()}) -> T [FieldError]! {
+fn decode_bytes<T: Decode>(bytes: [U8], options: XMLParseOptions{.safe()}) -> T [FieldError]! {
     document :: parse_bytes(bytes, options) ?? return Err(kernel.field_error(err))
     projected :: kernel.project_document_for_decode(document) ?? return Err(kernel.field_error(kernel.public_error(err)))
     projected.decode<T>()
 }
 
 /// Bounded XML events retain lexical bytes and latch the first stream error.
-pub struct XMLReader {
+struct XMLReader {
     input: FileReader
     limits: EncodingLimits
     scanner: engine.StreamScanner
@@ -160,7 +160,7 @@ pub struct XMLReader {
         Err(error)
     }
 
-    pub fn next(&self) -[IO, Time.Wait]> DataTree? EncodingError! {
+    fn next(&self) -[IO, Time.Wait]> DataTree? EncodingError! {
         if self.terminal == .Val(error) -> return Err(~error)
         loop {
             candidate :: &self.scanner.next() ?? return &self.fail(stream_error(err))
@@ -213,7 +213,7 @@ pub struct XMLReader {
     }
 }
 
-pub fn reader(input: ^FileReader, limits: EncodingLimits, xml: XMLParseOptions{.safe()}) -> XMLReader EncodingError! {
+fn reader(input: ^FileReader, limits: EncodingLimits, xml: XMLParseOptions{.safe()}) -> XMLReader EncodingError! {
     stream.validate_limits(limits) ?? {
         error := err
         error.format = .XML

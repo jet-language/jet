@@ -130,63 +130,63 @@ use jet_eval.[
 // Exactly one requested checked product; failed ingress has no manufactured
 // projection or opaque value. Ordinary compiler consumers request the value,
 // while the invocation service retains the original checked projection.
-pub enum JetDriverCompilerCheckProduct {
+enum JetDriverCompilerCheckProduct {
     CheckedCompilerValue(checked: JetCompilerServicesCheckedFacts)
     RetainedCheckedProjection(projection: JetDriverCheckedProjectionResult)
     Failed
 }
 
-pub struct JetDriverCompilerCheckInput {
-    pub parsed: JetCompilerServicesParseFacts
-    pub request: JetDriverCompileRequest
-    pub sema_session: SemaIncrementalCache?
-    pub retain_projection: Bool
+struct JetDriverCompilerCheckInput {
+    parsed: JetCompilerServicesParseFacts
+    request: JetDriverCompileRequest
+    sema_session: SemaIncrementalCache?
+    retain_projection: Bool
 }
 
-pub struct JetDriverCompilerCheckResult {
-    pub product: JetDriverCompilerCheckProduct
-    pub diagnostics: [Diagnostic]
-    pub failed_stage: JetDriverStage?
-    pub complete: Bool
-    pub internal_problem: String?
+struct JetDriverCompilerCheckResult {
+    product: JetDriverCompilerCheckProduct
+    diagnostics: [Diagnostic]
+    failed_stage: JetDriverStage?
+    complete: Bool
+    internal_problem: String?
 }
 
 // Invocation-owned documents use paths already resolved by the CLI's retained
 // authority adapter. This service never reopens or canonicalizes a display path.
-pub struct JetDriverCompilerQueryDocument {
-    pub path: String
-    pub source: String
+struct JetDriverCompilerQueryDocument {
+    path: String
+    source: String
 }
 
-pub struct JetDriverCompilerQueryStats {
-    pub item_hits: Int
-    pub item_recomputes: Int
-    pub live_items: Int
-    pub live_item_bytes: Int
-    pub recomputed_items: [String]
+struct JetDriverCompilerQueryStats {
+    item_hits: Int
+    item_recomputes: Int
+    live_items: Int
+    live_item_bytes: Int
+    recomputed_items: [String]
 }
 
-pub struct JetDriverCompilerQueries {
+struct JetDriverCompilerQueries {
     documents: [String:String]
     roots: [String:SemaIncrementalCache]
 }
 
-pub fn jet_driver_compiler_queries_new() -> JetDriverCompilerQueries Never! {
+fn jet_driver_compiler_queries_new() -> JetDriverCompilerQueries Never! {
     JetDriverCompilerQueries{documents: [String:String]{}, roots: [String:SemaIncrementalCache]{}}
 }
 
-pub fn jet_driver_compiler_queries_set_document(queries: &JetDriverCompilerQueries, path: String, source: String) Never! {
+fn jet_driver_compiler_queries_set_document(queries: &JetDriverCompilerQueries, path: String, source: String) Never! {
     queries.documents[path] = source
 }
 
-pub fn jet_driver_compiler_queries_documents(queries: &JetDriverCompilerQueries) -> [JetDriverCompilerQueryDocument] Never! {
+fn jet_driver_compiler_queries_documents(queries: &JetDriverCompilerQueries) -> [JetDriverCompilerQueryDocument] Never! {
     documents := [JetDriverCompilerQueryDocument]{}
     loop (path, source) in queries.documents -> &documents.push(JetDriverCompilerQueryDocument{path: path, source: source})
     &documents.sort_by((a, b) -> a.path <=> b.path)
     documents
 }
 
-pub fn jet_driver_compiler_queries_stats(queries: &JetDriverCompilerQueries) -> JetDriverCompilerQueryStats {
+fn jet_driver_compiler_queries_stats(queries: &JetDriverCompilerQueries) -> JetDriverCompilerQueryStats {
     total := JetDriverCompilerQueryStats{item_hits: 0, item_recomputes: 0, live_items: 0, live_item_bytes: 0, recomputed_items: [String]{}}
     loop (_, cache) in queries.roots {
         stats :: sema_incremental_cache_stats(cache)
@@ -199,16 +199,16 @@ pub fn jet_driver_compiler_queries_stats(queries: &JetDriverCompilerQueries) -> 
     total
 }
 
-pub fn jet_driver_compiler_queries_clear_measurement(queries: &JetDriverCompilerQueries) {
+fn jet_driver_compiler_queries_clear_measurement(queries: &JetDriverCompilerQueries) {
     loop (_, cache) in queries.roots -> sema_incremental_cache_clear_measurement(cache)
 }
 
-pub fn jet_driver_compiler_queries_check_disk(queries: &JetDriverCompilerQueries, parsed: JetCompilerServicesParseFacts, request: ^JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
+fn jet_driver_compiler_queries_check_disk(queries: &JetDriverCompilerQueries, parsed: JetCompilerServicesParseFacts, request: ^JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
     // Disk and text ingress differ only at the existing authorized CLI adapter.
     jet_driver_compiler_queries_check_text(&queries, parsed, ^request)
 }
 
-pub fn jet_driver_compiler_queries_check_text(queries: &JetDriverCompilerQueries, parsed: JetCompilerServicesParseFacts, request: ^JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
+fn jet_driver_compiler_queries_check_text(queries: &JetDriverCompilerQueries, parsed: JetCompilerServicesParseFacts, request: ^JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
     root :: request.authorized_sources.entry_path
     jet_driver_compiler_queries_set_document(&queries, root, parsed.source)
     cache :: if queries.roots.get(root) == {

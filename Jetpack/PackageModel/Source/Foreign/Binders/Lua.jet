@@ -286,7 +286,7 @@ PKG_LUA_JET_FUNCTION :: prep { ```pub fn @@name@@(session: Session, input: DataT
     return decode_response(raw, code)
 }
 
-pub fn @@name@@_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
+fn @@name@@_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
     input_json :: json.to_string(input) ?? return Err(LuaError.Protocol)
     tree := json.parse(input_json) ?? return Err(LuaError.Protocol)
     value := @@name@@(session, tree, deadline_ms)

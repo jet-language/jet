@@ -188,11 +188,7 @@ fn parser_parse_user_policy(state: &JetParserState) -> ParsedUserPolicy {
     parser_skip_semicolons(&state)
     close :: parser_expect(&state, TOKEN_RBRACE, "after the policy wrapper body")
     parser_finish_statement(&state)
-    if !is_pub {
-        parser_add_error(&state, start.span, "a user policy setting must be public", "policy settings are package vocabulary and their users resolve a package-owned name", "make this a public policy declaration with a `wrap(call)` body")
-        valid = false
-    }
-    value := UserPolicyDecl{is_pub: is_pub, name: parser_value(state, name), name_span: name.span, params: params, body: body.statements, span: parser_cover(start.span, close.span)}
+    value := UserPolicyDecl{is_pub: true, name: parser_value(state, name), name_span: name.span, params: params, body: body.statements, span: parser_cover(start.span, close.span)}
     ParsedUserPolicy{value: value, valid: valid}
 }
 
@@ -399,7 +395,7 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
             next
         }
         foreign_private :: item_visibility && kind == TOKEN_IDENT && parser_value_at(&state, 0) == "private" && parser_foreign_private_ahead(&state)
-        if kind == TOKEN_KW_PRIV || foreign_private {
+        if foreign_private {
             word :: parser_bump(&state)
             parser_add_error_code_edit(&state, "E0412", word.span, "Jet has no `private`", "declarations are public by default; privacy belongs to a `priv module` or a `priv` field", "delete `private`; move the declaration into a `priv module` if it must stay internal", parser_deletion_edit(state, word.span))
             next

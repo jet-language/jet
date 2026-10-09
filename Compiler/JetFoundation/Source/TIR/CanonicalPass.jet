@@ -1,7 +1,7 @@
 // Structured source-backed snapshots for the checked-program boundary.
 use jet_foundation.[CanonicalPassSnapshot, Item, TFunc, AccessConvention, foundation_json_quote, type_name]
 
-pub fn canonical_pass_tir_snapshot(package: String, source_file: String, edition: String, functions: [TFunc]) -> CanonicalPassSnapshot Never! {
+fn canonical_pass_tir_snapshot(package: String, source_file: String, edition: String, functions: [TFunc]) -> CanonicalPassSnapshot Never! {
     rows := [String]{}
     identities := [String]{}
     loop (index, function) in functions {
@@ -25,12 +25,12 @@ pub fn canonical_pass_tir_snapshot(package: String, source_file: String, edition
         identity: "{{\"representation\":\"tir\",\"package\":{foundation_json_quote(package)},\"functions\":[{identities.join(",")}]}}",
     }
 }
-pub fn canonical_pass_ast_items_snapshot(items: [Item]) -> CanonicalPassSnapshot Never! {
+fn canonical_pass_ast_items_snapshot(items: [Item]) -> CanonicalPassSnapshot Never! {
     rows := [String]{}
     loop (index, item) in items -> &rows.push("{{\"index\":{index},\"kind\":{foundation_json_quote(canonical_pass_ast_item_kind(item))}}}")
     CanonicalPassSnapshot{representation: "ast", payload: "{{\"representation\":\"ast\",\"items\":[{rows.join(",")}]}}", identity: "{{\"representation\":\"ast\",\"item_count\":{items.len()}}}"}
 }
-pub fn canonical_pass_ast_item_kind(item: Item) -> String Never! {
+fn canonical_pass_ast_item_kind(item: Item) -> String Never! {
     if item == {
         .Func(_) -> "Func"
         .Struct(_) -> "Struct"
@@ -59,7 +59,7 @@ pub fn canonical_pass_ast_item_kind(item: Item) -> String Never! {
         .FactDecl(_) -> "FactDecl"
     }
 }
-pub fn canonical_pass_debug_snapshot(representation: String, operation_id: String, debug: String) -> CanonicalPassSnapshot Never! {
+fn canonical_pass_debug_snapshot(representation: String, operation_id: String, debug: String) -> CanonicalPassSnapshot Never! {
     prefix :: "{{\"representation\":{foundation_json_quote(representation)},\"operation_id\":{foundation_json_quote(operation_id)}"
     CanonicalPassSnapshot{representation: representation, payload: "{prefix},\"debug\":{foundation_json_quote(debug)}}}", identity: "{prefix},\"identity\":{foundation_json_quote(debug)}}}"}
 }

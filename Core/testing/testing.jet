@@ -14,7 +14,7 @@ use core.sys as sys
 use core.math.random as random
 
 // D-VIS-REEXPORT1 / D-ALIAS-BIND2: a second spelling, never a second owner.
-pub alias RNG :: random.RNG
+alias RNG :: random.RNG
 
 // core.testing — deterministic tests and comparison records.
 //
@@ -29,7 +29,7 @@ fn assert_equal(comparison: TestComparison) -> Bool Never! {
 
 /// D-CALLBACK-ERR1=A: both callbacks share one failure type `E`, which the
 /// comparison passes up; two callbacks that cannot fail make it `Never`.
-pub fn compare<E>(cases: [Dyn], reference: fn(Dyn) -> Dyn E!, candidate: fn(Dyn) -> Dyn E!, relation: String) -> TestComparison E! {
+fn compare<E>(cases: [Dyn], reference: fn(Dyn) -> Dyn E!, candidate: fn(Dyn) -> Dyn E!, relation: String) -> TestComparison E! {
     normalized := relation
     if normalized.len() == 0 -> normalized = "typed_equality"
     if normalized == "ordered_effects" || normalized == "typed_failure" {
@@ -94,7 +94,7 @@ fn terminal_comparison(relation: String, reason: String) -> TestComparison {
 
 /// Compare or create a snapshot. Updating observes JET_UPDATE_SNAPSHOTS,
 /// so the environment read is part of the declared effect row.
-pub fn snap(name: String, value: String) -[FS, Env]> Bool Never! {
+fn snap(name: String, value: String) -[FS, Env]> Bool Never! {
     path :: "__snapshots__/{snapshot_name(name)}.snap"
     update :: (sys.get("JET_UPDATE_SNAPSHOTS") ?? "") == "1"
     if update || !files.is_file(path) {
@@ -109,7 +109,7 @@ pub fn snap(name: String, value: String) -[FS, Env]> Bool Never! {
     expected == value
 }
 
-pub fn golden(name: String, value: String) -[FS]> Bool Never! {
+fn golden(name: String, value: String) -[FS]> Bool Never! {
     read :: core.testing.__evidence_read(name)
     if !read.ok {
         reason :: if read.missing -> "golden file is missing: {name}" else -> "golden file cannot be read: {name}"
@@ -125,7 +125,7 @@ pub fn golden(name: String, value: String) -[FS]> Bool Never! {
     false
 }
 
-pub fn fixture(name: String) -[FS]> String Never! {
+fn fixture(name: String) -[FS]> String Never! {
     read :: core.testing.__evidence_read(name)
     if read.ok {
         core.testing.__clear_failure()
@@ -136,7 +136,7 @@ pub fn fixture(name: String) -[FS]> String Never! {
     ""
 }
 
-pub fn temp_dir(prefix: String) -[FS]> String Never! {
+fn temp_dir(prefix: String) -[FS]> String Never! {
     facts :: core.testing.__temp_facts()
     safe :: testing_ascii_name(prefix, false)
     thread :: testing_ascii_name(facts.thread, true)
@@ -155,7 +155,7 @@ pub fn temp_dir(prefix: String) -[FS]> String Never! {
 
 /// Read each readable regular file in a directory, ordered by its full path.
 /// The parameter retains the historical spelling `glob`; it names a directory.
-pub fn corpus(glob: String) -[FS]> [String] Never! {
+fn corpus(glob: String) -[FS]> [String] Never! {
     entries :: files.list_dir(glob) ?? return [String]{}
     paths := [String]{}
     loop entry in entries -> &paths.push(entry.path)
@@ -173,14 +173,14 @@ pub fn corpus(glob: String) -[FS]> [String] Never! {
 fn fake_clock(unix_ms: Int) -> Clock Never! { Clock.new(unix_ms) }
 
 /// A caller-owned deterministic RNG seeded by the ordinary source constructor.
-pub fn fake_rng(seed: Int) -> random.RNG Never! { random.rng(seed) }
+fn fake_rng(seed: Int) -> random.RNG Never! { random.rng(seed) }
 
 /// Deterministic fake data uses the same source SplitMix64 stream as RNG.
-pub fn fake_data(seed: Int) -> Fake Never! {
+fn fake_data(seed: Int) -> Fake Never! {
     Fake{state: U64{Int{I64{seed}} & 18446744073709551615}, locale_code: 0}
 }
 
-pub struct Fake {
+struct Fake {
     state: U64
     locale_code: Int
 
@@ -197,30 +197,30 @@ pub struct Fake {
         }
     }
 
-    pub fn locale(self, locale: String) -> Fake Never! {
+    fn locale(self, locale: String) -> Fake Never! {
         code :: if locale == "en" -> 0 else if locale == "de" -> 1 else -> panic("unsupported fake-data locale `{locale}`; supported locales: en, de")
         Fake{state: self.state ~| (U64{code}.wrapping_mul(U64{15111065706836454659})), locale_code: code}
     }
 
-    pub fn name(&self) -> String Never! {
+    fn name(&self) -> String Never! {
         first :: fake_first(&self.state, self.locale_code)
         last :: fake_last(&self.state, self.locale_code)
         "{first} {last}"
     }
 
-    pub fn email(&self) -> String Never! {
+    fn email(&self) -> String Never! {
         first :: core.text.parse.lower(fake_first(&self.state, self.locale_code))
         last :: core.text.parse.lower(fake_last(&self.state, self.locale_code))
         host :: fake_host(&self.state, self.locale_code)
         "{first}.{last}@{host}"
     }
 
-    pub fn host(&self) -> String Never! {
+    fn host(&self) -> String Never! {
         name :: fake_host(&self.state, self.locale_code)
         "www.{name}"
     }
 
-    pub fn address(&self) -> String Never! {
+    fn address(&self) -> String Never! {
         number :: core.math.random.__seeded_int(&self.state, 1, 999) ?? panic("fake address has a valid range")
         street :: fake_street(&self.state, self.locale_code)
         city :: fake_city(&self.state, self.locale_code)
@@ -298,9 +298,9 @@ fn fake_city(state: &U64, locale: Int) -> String Never! {
 }
 
 /// The Prelude `TestSuite` carrying the current harness iteration and result.
-pub fn test_suite() -> TestSuite Never! { core.testing.__suite_snapshot() }
+fn test_suite() -> TestSuite Never! { core.testing.__suite_snapshot() }
 
-pub fn histories<T>(
+fn histories<T>(
     seed: Int,
     cases: Int,
     strategy: HistoryStrategy<T>?{None},
@@ -318,7 +318,7 @@ pub fn histories<T>(
 
 // I9: exact interpreter DiagnosticErr cleanup needs an error-capture rail.
 // Preserve the existing native lifecycle rather than changing Err-path order.
-pub fn world(body: fn(DeterministicWorld)) Never! { core.testing.world(body) }
+fn world(body: fn(DeterministicWorld)) Never! { core.testing.world(body) }
 
 fn status(comparison: TestComparison) -> String Never! { comparison.status }
 

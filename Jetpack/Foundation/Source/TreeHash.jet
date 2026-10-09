@@ -334,15 +334,15 @@ struct FoundationPublicationPolicy {
 
 // Phase is recorded at the producing operation, never guessed from IO text.
 // All callers share this one publisher; callers needing only IO project error.
-pub enum FoundationPublicationPhase {
+enum FoundationPublicationPhase {
     PreparePath OpenRoot OpenParent InspectDestination CreateStage
     WriteStage SetMode SyncStage InspectStage ValidateSource
     ValidateAuthority Rename SyncParent ValidatePublished
 }
 #Error
-pub struct FoundationPublicationError {
-    pub phase: FoundationPublicationPhase
-    pub error: IOError
+struct FoundationPublicationError {
+    phase: FoundationPublicationPhase
+    error: IOError
 }
 
 // Rust SHA256::rooted_authority::write, with CmdPkg::write_package_source's
@@ -352,7 +352,7 @@ pub struct FoundationPublicationError {
 // after write/fsync, before the final authority checks and descriptor-relative
 // rename; failure removes the stage. None uses the same mechanism without
 // source validation (e.g. a new lock).
-pub fn foundation_write_file_nofollow_at_root(root: String, relative: String, contents: [U8], before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) FoundationPublicationError! -[FS, Env, Time]> {
+fn foundation_write_file_nofollow_at_root(root: String, relative: String, contents: [U8], before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) FoundationPublicationError! -[FS, Env, Time]> {
     components :: foundation_normal_components(.Write, relative) ?? return Err(FoundationPublicationError{phase: .PreparePath, error: err})
     if components.len() == 0 -> return Err(FoundationPublicationError{phase: .PreparePath, error: foundation_io_error(.Write, relative, "file authority publication path is empty")})
     directories := foundation_open_root_directories(root, policy.create_root) ?? return Err(FoundationPublicationError{phase: .OpenRoot, error: err})
@@ -477,13 +477,13 @@ struct FoundationDirectoryAuthority {
         foundation_ensure_directories_current(self.directories)
     }
     // RuntimePolicy's domain is this ORIGINAL root inode, not a marker file.
-    pub fn identity(self) -[FS]> FileID IOError! {
+    fn identity(self) -[FS]> FileID IOError! {
         self.revalidate()
         info :: self.directories[self.directories.len() - 1].handle.stat()
         self.revalidate()
         Ok(info.id)
     }
-    pub fn lock(self) -[FS]> AdvisoryLock IOError! {
+    fn lock(self) -[FS]> AdvisoryLock IOError! {
         self.revalidate()
         owner :: self.directories[self.directories.len() - 1].handle.lock()
         self.revalidate()
@@ -491,14 +491,14 @@ struct FoundationDirectoryAuthority {
     }
     // Markers are opened relative to the retained parent, never a pathname.
     // The RuntimePolicy caller validates regular-file kind and marker identity.
-    pub fn open_file(self, name: String) -[FS]> FileReader IOError! {
+    fn open_file(self, name: String) -[FS]> FileReader IOError! {
         foundation_directory_authority_name(name)
         self.revalidate()
         reader :: self.directories[self.directories.len() - 1].handle.open(name)
         self.revalidate()
         Ok(reader)
     }
-    pub fn create_exclusive(self, name: String, mode: Int) -[FS]> FileWriter IOError! {
+    fn create_exclusive(self, name: String, mode: Int) -[FS]> FileWriter IOError! {
         foundation_directory_authority_name(name)
         self.revalidate()
         self.directories[self.directories.len() - 1].handle.create(name, if_exists: .Refuse, mode: Val(mode))
@@ -537,10 +537,10 @@ struct FoundationDirectoryAuthority {
         self.revalidate()
     }
 
-    pub fn path(self) -> String Never! {
+    fn path(self) -> String Never! {
         self.directories[self.directories.len() - 1].path
     }
-    pub fn fsync(self) IOError! -[FS]> {
+    fn fsync(self) IOError! -[FS]> {
         self.revalidate()
         self.directories[self.directories.len() - 1].handle.fsync()
         self.revalidate()
@@ -551,7 +551,7 @@ struct FoundationDirectoryAuthority {
         self.revalidate()
         files.__with_process_directory(spec, self.directories[self.directories.len() - 1].handle, child_fd, as_cwd)
     }
-    pub fn child(self, name: String, create: Bool{false}) -[FS]> FoundationDirectoryAuthority IOError! {
+    fn child(self, name: String, create: Bool{false}) -[FS]> FoundationDirectoryAuthority IOError! {
         foundation_directory_authority_name(name)
         self.revalidate()
         parent :: self.directories[self.directories.len() - 1]
@@ -561,7 +561,7 @@ struct FoundationDirectoryAuthority {
         foundation_ensure_directories_current(directories)
         Ok(FoundationDirectoryAuthority{directories: directories})
     }
-    pub fn private_child(self, prefix: String) -[FS, Env, Time]> FoundationDirectoryAuthority IOError! {
+    fn private_child(self, prefix: String) -[FS, Env, Time]> FoundationDirectoryAuthority IOError! {
         foundation_directory_authority_name(prefix)
         self.revalidate()
         parent :: self.directories[self.directories.len() - 1].handle
@@ -580,7 +580,7 @@ struct FoundationDirectoryAuthority {
     }
     // Source/Store.rs: traverse and read only the retained directory handles.
     // Files are kept open through hashing; a rebound path cannot redirect bytes.
-    pub fn tree_hash(self, reject_hardlinks: Bool{false}) -[FS]> String IOError! {
+    fn tree_hash(self, reject_hardlinks: Bool{false}) -[FS]> String IOError! {
         self.revalidate()
         rows := [FoundationHeldTreeFile]{}
         root :: self.directories[self.directories.len() - 1].handle
@@ -610,7 +610,7 @@ struct FoundationDirectoryAuthority {
         digest :: hasher.finalize_hex()
         Ok("sha256-{digest}")
     }
-    pub fn copy_tree_from(self, source: FoundationDirectoryAuthority, reject_hardlinks: Bool{true}) IOError! -[FS]> {
+    fn copy_tree_from(self, source: FoundationDirectoryAuthority, reject_hardlinks: Bool{true}) IOError! -[FS]> {
         source.revalidate()
         self.revalidate()
         source_root :: source.directories[source.directories.len() - 1].handle
@@ -619,7 +619,7 @@ struct FoundationDirectoryAuthority {
         source.revalidate()
         self.revalidate()
     }
-    pub fn link_tree_from(self, source: FoundationDirectoryAuthority) IOError! -[FS, Env]> {
+    fn link_tree_from(self, source: FoundationDirectoryAuthority) IOError! -[FS, Env]> {
         source.revalidate()
         self.revalidate()
         source_root :: source.directories[source.directories.len() - 1].handle
@@ -776,7 +776,7 @@ fn foundation_link_held_tree(source: Directory, destination: Directory, relative
 // foundation_open_file_authority; strict callers keep their no-follow root walk.
 // `create` makes missing ancestors (0700, held no-follow) as create_dir_all
 // would, never the final component.
-pub fn foundation_resolve_path_ancestors(path: String, create: Bool{false}) -[FS, Env]> String IOError! {
+fn foundation_resolve_path_ancestors(path: String, create: Bool{false}) -[FS, Env]> String IOError! {
     trimmed := path.copy()
     loop trimmed.len() > 1 && (trimmed.ends_with("/") || trimmed.ends_with("/.")) {
         trimmed = if trimmed.ends_with("/") -> trimmed.removesuffix("/") else -> trimmed.removesuffix("/.")

@@ -580,7 +580,7 @@ application :: Config{                 // NEW: D-ECO-SLICENAME1
 Resulting `package/env.jet`:
 
 ```jet
-pub development :: Config{             // NEW: D-ECO-SLICENAME1
+development :: Config{             // NEW: D-ECO-SLICENAME1
     environments: .{
         dev: Environment{              // NEW: D-ECO-OUTPUT-KINDS1
             name: "dev"
@@ -988,7 +988,7 @@ checks: .{
 `system/options.jet`:
 
 ```jet
-pub laptop_options :: OptionSet{    // NEW: D-ECO-JETOS2
+laptop_options :: OptionSet{    // NEW: D-ECO-JETOS2
     declarations: .{
         desktop: .{
             path: "services.desktop.environment"
@@ -1008,7 +1008,7 @@ pub laptop_options :: OptionSet{    // NEW: D-ECO-JETOS2
 `system/theme.jet`:
 
 ```jet
-pub halcyon_theme :: Theme{             // D-JOS-THEME1; unified placement: D-ECO-JETOS2
+halcyon_theme :: Theme{             // D-JOS-THEME1; unified placement: D-ECO-JETOS2
     polarity: .Dark
     wallpaper: "wallpapers/forest.png"
     fonts: .{ ui: "Inter", monospace: "JetBrains Mono" }
@@ -1019,7 +1019,7 @@ pub halcyon_theme :: Theme{             // D-JOS-THEME1; unified placement: D-EC
 `system/hardware.jet`:
 
 ```jet
-pub halcyon_hardware :: Config{         // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
+halcyon_hardware :: Config{         // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
     hardware: .{
         halcyon: .{
             cpu: .Amd64
@@ -1042,20 +1042,20 @@ fn workstation() -> Config {                    // NEW: D-ECO-SLICENAME1
     }
 }
 
-pub workstation_packages: Config :: workstation() // NEW: D-ECO-SLICENAME1
+workstation_packages: Config :: workstation() // NEW: D-ECO-SLICENAME1
 ```
 
 `system/files.jet`:
 
 ```jet
-pub generated_sysctl :: File{           // NEW: D-ECO-JETOS2
+generated_sysctl :: File{           // NEW: D-ECO-JETOS2
     path: "/etc/sysctl.d/90-jetos.conf"
     text: "vm.swappiness=10\n"
     mode: 0o644
     replace: .Force
 }
 
-pub ghostty_config :: File{             // NEW: D-ECO-JETOS2
+ghostty_config :: File{             // NEW: D-ECO-JETOS2
     path: "/home/nate/.config/ghostty/config"
     source: path("home/ghostty/config")
     mode: 0o644
@@ -1066,7 +1066,7 @@ pub ghostty_config :: File{             // NEW: D-ECO-JETOS2
 `system/laptop.jet` contributes one closed feature across system and user scope:
 
 ```jet
-pub laptop :: Config{                   // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
+laptop :: Config{                   // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
     systems: .{
         halcyon: .{ services: .{ power: .{ profile: .Balanced } } }
     }
@@ -1095,7 +1095,7 @@ fn verify_halcyon_vm() ? {
 `system/_nvidia.jet` is discovered but disabled by its one-character `_` prefix (`NEW: D-ECO-FILEROOT1`):
 
 ```jet
-pub nvidia :: Config{                   // NEW: D-ECO-SLICENAME1; NEW: D-ECO-FILEROOT1
+nvidia :: Config{                   // NEW: D-ECO-SLICENAME1; NEW: D-ECO-FILEROOT1
     systems: .{ halcyon: .{ kernel: .{ drivers: [nvidia] } } }
 }
 ```
@@ -1201,7 +1201,7 @@ System graph unchanged: sha256:7780…
 Generated `package/fleet.jet`:
 
 ```jet
-pub home :: Config{                     // NEW: D-ECO-SLICENAME1
+home :: Config{                     // NEW: D-ECO-SLICENAME1
     outputs: .{
         home: Fleet{                    // NEW: D-ECO-OUTPUT-KINDS1
             name: "home"
@@ -1236,7 +1236,7 @@ fn api_can_serve() ? {
     assert(response.status() == 200, "api could not serve a request")
 }
 
-pub web_base :: Config{
+web_base :: Config{
     source: "Source/api"
     outputs: .{ api: Service{ name: "api", entry: run_api } }
     systems: .{
@@ -1249,7 +1249,7 @@ pub web_base :: Config{
     }
 }
 
-pub production :: Config{
+production :: Config{
     systems: .{
         web1: web_base.systems.web.with(.{ network: .{ hostName: "web1" }, region: "us-east" })
         web2: web_base.systems.web.with(.{ network: .{ hostName: "web2" }, region: "eu-west" })

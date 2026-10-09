@@ -4,16 +4,16 @@ use jet_foundation.[AccessConvention, CallArg, Diagnostic, Expr, NamedCtValue, P
 use jet_parser.jfmt_format_program_with_tokens
 use jet_foundation.Token
 
-pub struct SemaBuildContextMethodContract {
-    pub parameters: [Type]
-    pub result: Type
+struct SemaBuildContextMethodContract {
+    parameters: [Type]
+    result: Type
 }
 
 fn sema_build_result(name: String) -> Type Never! {
     Type.Result{ok: Type.Named{name: name}, err: Type.Named{name: "BuildError"}}
 }
 
-pub fn sema_build_context_method_contract(method: String, arity: Int) -> SemaBuildContextMethodContract? {
+fn sema_build_context_method_contract(method: String, arity: Int) -> SemaBuildContextMethodContract? {
     strings :: Type.List{element: Type.String}
     action :: Type.Named{name: "BuildAction"}
     target :: Type.Named{name: "BuildTarget"}
@@ -100,7 +100,7 @@ fn sema_build_context_arity_description(method: String) -> String Never! {
     "2"
 }
 
-pub fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "BuildContext"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
     contract :: sema_build_context_method_contract(method, args.len()) ?? {

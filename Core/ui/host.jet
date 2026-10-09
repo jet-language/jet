@@ -58,7 +58,7 @@ struct UICapabilityFacts {
     facts: [UICapabilityFact]
 }
 
-pub struct UIFSRights {
+struct UIFSRights {
     bits: U8
 }
 
@@ -127,7 +127,7 @@ struct UIShortcutBinding {
     node: UINodeID?
 }
 
-pub enum UIAccessibilityState {
+enum UIAccessibilityState {
     Disabled
     Busy
     Expanded(Bool)
@@ -137,9 +137,9 @@ pub enum UIAccessibilityState {
     Value(String)
 }
 
-pub struct UIAccessibility {
-    pub name: String?
-    pub description: String?
+struct UIAccessibility {
+    name: String?
+    description: String?
     states: [UIAccessibilityState]
 }
 
@@ -150,29 +150,29 @@ enum UIShortcutDispatch {
 
 
 
-pub fn capabilities() -> UICapabilityFacts Never! {
+fn capabilities() -> UICapabilityFacts Never! {
     #Unsafe("Core UI capability facts come from the current retained provider, not a fabricated default") {
         core.ui.host.__capabilities()
     }
 }
 
-pub fn open_file(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHostError! {
+fn open_file(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHostError! {
     #Unsafe("Core UI dialog crosses the current provider boundary; its typed cancellation and denial are preserved") {
         core.ui.host.__open_file(request)
     }
 }
 
-pub fn save_file(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHostError! {
+fn save_file(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHostError! {
     #Unsafe("Core UI save dialog crosses the current provider boundary with the original typed request") {
         core.ui.host.__save_file(request)
     }
 }
 
-pub fn open_request(grant: UIFSGrant) -> UIFileDialogRequest Never! {
+fn open_request(grant: UIFSGrant) -> UIFileDialogRequest Never! {
     transfer_request(0, "Open File", grant, true, [UIFileFilter]{}, false)
 }
 
-pub fn save_request(grant: UIFSGrant) -> UIFileDialogRequest Never! {
+fn save_request(grant: UIFSGrant) -> UIFileDialogRequest Never! {
     transfer_request(1, "Save File", grant, true, [UIFileFilter]{}, false)
 }
 
@@ -182,7 +182,7 @@ fn transfer_request(kind: Int, title: String, grant: UIFSGrant, directory_absent
     }
 }
 
-pub fn file_filter(label: String, extensions: [String], mime_types: [String]) -> UIFileFilter UIHostError! {
+fn file_filter(label: String, extensions: [String], mime_types: [String]) -> UIFileFilter UIHostError! {
     if label.len() == 0 && extensions.len() == 0 && mime_types.len() == 0 -> return Err(UIHostError.InvalidRequest("file filter must name an extension, media type, or label"))
     loop extension in extensions {
         if extension.len() == 0 -> return Err(UIHostError.InvalidRequest("file filter extensions must not be empty"))
@@ -193,13 +193,13 @@ pub fn file_filter(label: String, extensions: [String], mime_types: [String]) ->
     Ok(UIFileFilter{label: label, extensions: extensions, mime_types: mime_types})
 }
 
-pub fn file_filter_text() -> UIFileFilter Never! {
+fn file_filter_text() -> UIFileFilter Never! {
     UIFileFilter{label: "Text", extensions: [String]{"txt"}, mime_types: [String]{"text/plain"}}
 }
 
 /// Normalize selected-platform lexical components without file I/O or symlink
 /// resolution. Empty rights are valid; crossing the lexical root is denied.
-pub fn fs_grant(path: String, rights: UIFSRights) -> UIFSGrant UIHostError! {
+fn fs_grant(path: String, rights: UIFSRights) -> UIFSGrant UIHostError! {
     if core.text.trim(path).len() == 0 -> return Err(UIHostError.InvalidRequest("filesystem grant path must not be empty"))
     platform :: if core.files.__path_windows() -> host_path.PathPlatform.Windows else -> host_path.PathPlatform.Unix
     input :: host_path.from_text(path, platform)
@@ -231,11 +231,11 @@ pub fn fs_grant(path: String, rights: UIFSRights) -> UIFSGrant UIHostError! {
     Ok(UIFSGrant{root: root, rights: rights})
 }
 
-pub fn fs_rights_read() -> UIFSRights Never! { UIFSRights{bits: U8{1}} }
-pub fn fs_rights_write() -> UIFSRights Never! { UIFSRights{bits: U8{2}} }
-pub fn fs_rights_read_write() -> UIFSRights Never! { UIFSRights{bits: U8{3}} }
+fn fs_rights_read() -> UIFSRights Never! { UIFSRights{bits: U8{1}} }
+fn fs_rights_write() -> UIFSRights Never! { UIFSRights{bits: U8{2}} }
+fn fs_rights_read_write() -> UIFSRights Never! { UIFSRights{bits: U8{3}} }
 
-pub fn shortcut(key: String, modifiers: UIShortcutModifiers) -[IO]> UIShortcut UIHostError! {
+fn shortcut(key: String, modifiers: UIShortcutModifiers) -[IO]> UIShortcut UIHostError! {
     normalized :: core.text.lower(core.text.trim(key))
     if normalized.len() == 0 -> return Err(UIHostError.InvalidRequest("shortcut key must not be empty"))
     Ok(UIShortcut{key: normalized, modifiers: modifiers})
@@ -243,7 +243,7 @@ pub fn shortcut(key: String, modifiers: UIShortcutModifiers) -[IO]> UIShortcut U
 
 /// The existing two-string API always names the node; an empty description
 /// is absent. Whitespace remains data and initial accessibility states are empty.
-pub fn accessibility(name: String, description: String) -[IO]> UIAccessibility UIHostError! {
+fn accessibility(name: String, description: String) -[IO]> UIAccessibility UIHostError! {
     if name.len() == 0 -> return Err(UIHostError.InvalidRequest("accessibility name and description must not be empty"))
     detail :: if description.len() == 0 -> None else -> Val(description)
     Ok(UIAccessibility{name: Val(name), description: detail, states: [UIAccessibilityState]{}})

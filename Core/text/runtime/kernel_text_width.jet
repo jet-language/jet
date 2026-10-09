@@ -14,7 +14,7 @@ use core.text.runtime.assets.unicode_emoji_presentation as width_emoji_presentat
 use core.text.runtime.assets.unicode_incb as width_incb
 
 // UTF-8 scalars; an invalid sequence decodes one byte as U+FFFD.
-pub fn decode_scalars(text: String) -> [Int] Never! {
+fn decode_scalars(text: String) -> [Int] Never! {
     raw :: width_string.utf8_bytes(text)
     out := [Int]{}
     i := 0
@@ -61,7 +61,7 @@ fn encode_cps(cps: [Int]) -> String Never! {
 // Rust Text.rs:429-466 jet_text_graphemes: GB11 keeps the Extended_Pictographic
 // state through Extend/ZWJ, GB12/13 use RI parity, and GB9c tracks InCB
 // Consonant [Extend|Linker]* Linker [Extend|Linker]* × Consonant.
-pub fn graphemes(text: String) -> [String] Never! {
+fn graphemes(text: String) -> [String] Never! {
     cps :: decode_scalars(text)
     if cps.len() == 0 -> return [String]{}
     out := [String]{}
@@ -132,7 +132,7 @@ fn is_extended_pictographic(cp: Int) -> Bool {
 
 // Rust Text.rs:887-914 portable-default grapheme width. Emoji is not the
 // Extended_Pictographic property used by GB11, and VS16 alone is not wide.
-pub fn cluster_width(cps: [Int]) -> Int Never! {
+fn cluster_width(cps: [Int]) -> Int Never! {
     if cps.len() == 0 -> return 0
     category_asset :: width_category.UNICODE_GENERAL_CATEGORY
     if width_assets.asset_tag(category_asset, cps[0], 8) == 0 -> return 0
@@ -163,7 +163,7 @@ pub fn cluster_width(cps: [Int]) -> Int Never! {
 }
 
 // Rust jet_text_display_width_default: summed default cluster widths.
-pub fn display_width(text: String) -> Int Never! {
+fn display_width(text: String) -> Int Never! {
     total := 0
     loop cluster in graphemes(text) -> total = total + cluster_width(decode_scalars(cluster))
     total
@@ -172,7 +172,7 @@ pub fn display_width(text: String) -> Int Never! {
 // Rust Text.rs jet_text_fill_columns: `columns` display columns of the first
 // grapheme of `fill`, repeated whole, then spaces for the remainder. An empty
 // fill, or a zero-width or too-wide unit, fills with spaces.
-pub fn fill_columns(fill: String, columns: Int) -> String Never! {
+fn fill_columns(fill: String, columns: Int) -> String Never! {
     n :: if columns < 0 -> 0 else -> columns
     units :: graphemes(fill)
     if units.len() == 0 -> return spaces(n)
@@ -192,7 +192,7 @@ pub fn fill_columns(fill: String, columns: Int) -> String Never! {
 // (`right`) or split floor-left (both). The one padding owner for
 // core.text.pad_start/pad_end/center, core.text.parse.ljust/rjust/center and
 // the String methods.
-pub fn pad(text: String, width: Int, fill: String, left: Bool, right: Bool) -> String Never! {
+fn pad(text: String, width: Int, fill: String, left: Bool, right: Bool) -> String Never! {
     gap := width - display_width(text)
     if gap < 0 -> gap = 0
     before :: if left && right -> gap /% 2 else -> if left -> gap else -> 0

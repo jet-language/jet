@@ -73,7 +73,8 @@ function codeOnly(source) {
 // Foreign/member calls and named address-call transports are not semantic
 // callback edges; their stop facts belong to the compiler's callback analysis.
 function rejectUnsupportedCalls(code, path) {
-  for (const match of code.matchAll(/\b([A-Za-z_]\w*)\s*</g)) {
+  // Type arguments start with a standalone '<', not shift/comparison tokens.
+  for (const match of code.matchAll(/\b([A-Za-z_]\w*)\s*<(?![<=])/g)) {
     let at = match.index + match[0].length, depth = 1;
     while (at < code.length && depth && !/[{};]/.test(code[at])) {
       if (code[at] === "<") ++depth;
@@ -164,7 +165,7 @@ export function generatedRuntimeStopRegistry(symbols) {
 // Named-call closure from scheduler_panic_publish_record in JetRuntime/Source/*.jet.
 // Direct named calls only; foreign/dynamic callback effects are separate.
 // Both compiler halves consume these Panic stop facts, not returned Results.
-pub RUNTIME_STOP_EXPORT_ROWS :: prep { """
+RUNTIME_STOP_EXPORT_ROWS :: prep { """
 ${symbols.map((symbol) => `${symbol} Panic`).join("\n")}
 """ }
 
@@ -181,7 +182,7 @@ fn runtime_stop_export_symbols() -> [String] Never! {
 
 RUNTIME_STOP_EXPORTS :: prep { runtime_stop_export_symbols() }
 
-pub fn runtime_export_can_stop(symbol: String) -> Bool Never! {
+fn runtime_export_can_stop(symbol: String) -> Bool Never! {
     loop candidate in RUNTIME_STOP_EXPORTS {
         if candidate == symbol -> return true
     }

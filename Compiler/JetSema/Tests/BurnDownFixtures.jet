@@ -11,7 +11,7 @@ fn bd_returned(function: TFunc) -> TExpr Never! {
 }
 
 fn bd_policy() Never! {
-    source :: "pub policy audit(topic: String{{\"users\"}}) {{ wrap(call) {{ return call() }} }}\n#Policy(audit()) fn value() -> Int {{ 7 }}\nfn direct() -> Int {{ value() }}\nfn selected() -> Int {{ chosen :: apply(audit(), value)\n chosen() }}\nfn bare() -> Int {{ chosen :: apply(value)\n chosen() }}\n"
+    source :: "policy audit(topic: String{{\"users\"}}) {{ wrap(call) {{ return call() }} }}\n#Policy(audit()) fn value() -> Int {{ 7 }}\nfn direct() -> Int {{ value() }}\nfn selected() -> Int {{ chosen :: apply(audit(), value)\n chosen() }}\nfn bare() -> Int {{ chosen :: apply(value)\n chosen() }}\n"
     parsed :: parse_source(source.bytes())
     bd_require(parsed.diagnostics.len() == 0, "policy parses")
     checked :: check_program(parsed.program, "policy_fixture", "policy.jet", [SemaSourceSegment]{})

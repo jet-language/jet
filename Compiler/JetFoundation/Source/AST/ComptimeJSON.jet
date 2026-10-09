@@ -15,7 +15,7 @@ fn ast_comptime_json_unsupported(reason: String) -> comptime_encoding.EncodingEr
     }
 }
 
-pub fn ast_comptime_float_json(number: CtFloat) -> String comptime_encoding.EncodingError! {
+fn ast_comptime_float_json(number: CtFloat) -> String comptime_encoding.EncodingError! {
     finite :: if number == {
         .F32(value) -> value.is_finite()
         .F64(value) -> value.is_finite()
@@ -25,7 +25,7 @@ pub fn ast_comptime_float_json(number: CtFloat) -> String comptime_encoding.Enco
     Ok(if rendered.contains(".") || rendered.contains("e") || rendered.contains("E") -> rendered else -> "{rendered}.0")
 }
 
-pub fn ast_comptime_value_json(value: CtValue) -> String comptime_encoding.EncodingError! {
+fn ast_comptime_value_json(value: CtValue) -> String comptime_encoding.EncodingError! {
     rendered :: if value == {
         .Int(number) -> "{number}"
         .Float(number) -> ast_comptime_float_json(number) ?? return Err(err)

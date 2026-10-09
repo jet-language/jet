@@ -1,22 +1,22 @@
 // JetTrace.rs:13-44,1258-1314,2579-2592. Artifact wire; not CompilerTraceSink.
-pub TRACE_SCHEMA :: prep { "jet.trace" }
-pub TRACE_VERSION :: prep { U32{1} }
-pub CAPTURE_POLICY_SCHEMA :: prep { "5" }
-pub TRACE_GAME_FRAME_ROW_LIMIT :: prep { 4096 }
-pub TRACE_GAME_DRAW_EVENT_ROW_LIMIT :: prep { 4096 }
-pub TRACE_BROWSER_ROW_LIMIT :: prep { U64{4096} }
-pub TRACE_TASK_ROW_LIMIT :: prep { U64{4096} }
-pub TRACE_IO_ROW_LIMIT :: prep { U64{4096} }
-pub TRACE_NATIVE_ROW_LIMIT :: prep { U64{4096} }
-pub TRACE_SPAN_ROW_LIMIT :: prep { U64{4096} }
-pub TRACE_PROFILE_ROW_LIMIT :: prep { 4096 }
-pub TRACE_PROFILE_SAMPLE_LIMIT :: prep { U64{4096} }
+TRACE_SCHEMA :: prep { "jet.trace" }
+TRACE_VERSION :: prep { U32{1} }
+CAPTURE_POLICY_SCHEMA :: prep { "5" }
+TRACE_GAME_FRAME_ROW_LIMIT :: prep { 4096 }
+TRACE_GAME_DRAW_EVENT_ROW_LIMIT :: prep { 4096 }
+TRACE_BROWSER_ROW_LIMIT :: prep { U64{4096} }
+TRACE_TASK_ROW_LIMIT :: prep { U64{4096} }
+TRACE_IO_ROW_LIMIT :: prep { U64{4096} }
+TRACE_NATIVE_ROW_LIMIT :: prep { U64{4096} }
+TRACE_SPAN_ROW_LIMIT :: prep { U64{4096} }
+TRACE_PROFILE_ROW_LIMIT :: prep { 4096 }
+TRACE_PROFILE_SAMPLE_LIMIT :: prep { U64{4096} }
 TRACE_RECEIPT_SECTION_NAME_BYTES :: prep { 128 }
 TRACE_RECEIPT_SECTION_TYPE_BYTES :: prep { 256 }
-pub DEFAULT_EXCLUSIONS :: prep { [String]{"arguments", "credentials", "environment", "request_bodies", "response_bodies", "secret_types", "sql", "urls", "values"} }
+DEFAULT_EXCLUSIONS :: prep { [String]{"arguments", "credentials", "environment", "request_bodies", "response_bodies", "secret_types", "sql", "urls", "values"} }
 
 #Error
-pub struct JetTraceError { pub message: String }
+struct JetTraceError { message: String }
 fn jettrace_error(message: String) -> JetTraceError Never! { JetTraceError{message: message} }
 fn jettrace_field(key: String, ^value: CanonicalJSON) -> CanonicalJSONField Never! { CanonicalJSONField{key: key, value: ^value} }
 fn jettrace_object(fields: [CanonicalJSONField]) -> CanonicalJSON JetTraceError! {
@@ -27,7 +27,7 @@ fn jettrace_object(fields: [CanonicalJSONField]) -> CanonicalJSON JetTraceError!
 }
 
 // Fixed wrapper keys are unique; content's canonical LF participates in SHA256.
-pub fn jettrace_artifact(^content: CanonicalJSON) -> CanonicalJSON JetTraceError! {
+fn jettrace_artifact(^content: CanonicalJSON) -> CanonicalJSON JetTraceError! {
     id :: canonical_json_sha256(content)
     jettrace_object([CanonicalJSONField]{
         jettrace_field("content", ^content),
@@ -36,10 +36,10 @@ pub fn jettrace_artifact(^content: CanonicalJSON) -> CanonicalJSON JetTraceError
         jettrace_field("version", CanonicalJSON.Integer("{TRACE_VERSION}"))
     })
 }
-pub fn build_skeleton_bytes(skeleton: TraceSkeleton) -> [U8] JetTraceError! {
+fn build_skeleton_bytes(skeleton: TraceSkeleton) -> [U8] JetTraceError! {
     Ok(canonical_json_bytes(jettrace_artifact(trace_skeleton_content_json(skeleton))))
 }
-pub fn verify_jettrace(bytes: [U8]) -> CanonicalJSON JetTraceError! {
+fn verify_jettrace(bytes: [U8]) -> CanonicalJSON JetTraceError! {
     report :: canonical_json_parse(bytes) ?? return Err(jettrace_error(err.message))
     fields :: jettrace_wrapper_fields(report)
     expected :: [String]{"content", "schema", "trace_id", "version"}

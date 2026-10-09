@@ -107,7 +107,7 @@ fn sema_window_positions(rows: [SemaWindowFunctionRow]) -> [String:[Int]] Never!
 
 // `items` holds every module of the bundle, so the fact covers calls into
 // other modules, inline or file, exactly like the Rust bundle-wide fact.
-pub fn sema_fixed_length_write_params(items: [Item]) -> [String] Never! {
+fn sema_fixed_length_write_params(items: [Item]) -> [String] Never! {
     rows := [SemaWindowFunctionRow]{}
     sema_window_collect_rows(items, &rows)
     positions :: sema_window_positions(rows)
@@ -119,7 +119,7 @@ pub fn sema_fixed_length_write_params(items: [Item]) -> [String] Never! {
 // The same bundle-wide fact over every module of `graph`, in module order:
 // each module's items are read in place rather than first copied into one
 // bundle list.
-pub fn sema_fixed_length_write_params_in_graph(graph: SemaRegistrationGraph) -> [String] Never! {
+fn sema_fixed_length_write_params_in_graph(graph: SemaRegistrationGraph) -> [String] Never! {
     rows := [SemaWindowFunctionRow]{}
     loop module_index in 0..<graph.modules.len() -> sema_window_collect_rows(graph.modules[module_index].program.items, &rows)
     positions :: sema_window_positions(rows)

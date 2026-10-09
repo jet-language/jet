@@ -5,19 +5,19 @@ use jet_foundation.[Span, diagnostic_render_all, MIRVectorFact, MIRVectorRule, M
 use jet_optimizer.MIRDecisionLedger
 use jet_foundation.[CanonicalPassBoundaryGap]
 
-pub struct JetCLIAccelerationSpan {
-    pub start: U64
-    pub end: U64
+struct JetCLIAccelerationSpan {
+    start: U64
+    end: U64
 }
-pub struct JetCLIAccelerationRuntime {
-    pub receipt_digest: String
-    pub receipt_verb: String
-    pub record_sequence: U64
-    pub sequence: U64
-    pub function: String
-    pub loop_header: U64
-    pub source: JetCLIAccelerationSpan
-    pub decision: MIRAccelerationDecision
+struct JetCLIAccelerationRuntime {
+    receipt_digest: String
+    receipt_verb: String
+    record_sequence: U64
+    sequence: U64
+    function: String
+    loop_header: U64
+    source: JetCLIAccelerationSpan
+    decision: MIRAccelerationDecision
 }
 fn jet_cli_optimization_span(span: Span) -> JetCLIStatusValue Never! {
     jet_cli_status_object([jet_cli_status_field("start", jet_cli_status_int(span.start)), jet_cli_status_field("end", jet_cli_status_int(span.end))])
@@ -163,7 +163,7 @@ fn jet_cli_optimization_proof(proof: MIRAccelerationProof) -> JetCLIStatusValue 
 }
 // Query functions already have canonical key ordering. Runtime order is the
 // authenticated receipt's order (never sorted/replaced by inferred source facts).
-pub fn jet_cli_acceleration_report(query: JetDriverOptimizationQueryResult, scope: String, file: String, runtime: [JetCLIAccelerationRuntime], json: Bool) -> String Never! {
+fn jet_cli_acceleration_report(query: JetDriverOptimizationQueryResult, scope: String, file: String, runtime: [JetCLIAccelerationRuntime], json: Bool) -> String Never! {
     published :: runtime.len() > 0
     runtime_profile :: if published -> "receipt" else -> "not-published"
     measurement_source :: if published -> "receipt" else -> "none"
@@ -333,7 +333,7 @@ fn jet_cli_optimization_decision(row: MIRDecisionRow) -> JetCLIStatusValue Never
         jet_cli_status_field("identity", identity), jet_cli_status_field("edit", edit),
     ])
 }
-pub fn jet_cli_decisions_report(ledger: MIRDecisionLedger, scope: String, file: String, profile: String, canonical_routes: [JetCLIStatusValue], canonical_route_gaps: [CanonicalPassBoundaryGap], json: Bool) -> String Never! {
+fn jet_cli_decisions_report(ledger: MIRDecisionLedger, scope: String, file: String, profile: String, canonical_routes: [JetCLIStatusValue], canonical_route_gaps: [CanonicalPassBoundaryGap], json: Bool) -> String Never! {
     text := if json -> "" else -> "decisions: scope={scope} source={file} profile={profile} record_status=current retention=bounded redaction=none\n"
     values := [JetCLIStatusValue]{}
     counts := [String:Int]{}
@@ -375,7 +375,7 @@ pub fn jet_cli_decisions_report(ledger: MIRDecisionLedger, scope: String, file: 
 // Accel uses its resolved release mode; decisions retains Dev even for --profile release.
 // Query first, then collect its canonical journal and held-store receipt rows,
 // then present. This ordering preserves the journal of this actual invocation.
-pub fn jet_cli_optimization_host(request: JetDriverCompileRequest, query: JetDriverOptimizationQueryResult, plane: String, scope: String, file: String, runtime: [JetCLIAccelerationRuntime], canonical_routes: [JetCLIStatusValue], color: Bool, json: Bool) -> JetDriverVerbOutput {
+fn jet_cli_optimization_host(request: JetDriverCompileRequest, query: JetDriverOptimizationQueryResult, plane: String, scope: String, file: String, runtime: [JetCLIAccelerationRuntime], canonical_routes: [JetCLIStatusValue], color: Bool, json: Bool) -> JetDriverVerbOutput {
     if !query.compile.complete || query.compile.internal_problem != None {
         diagnostics :: jet_driver_present_diagnostics(query.compile.diagnostics, request.authorized_sources, [])
         report :: if json -> jet_cli_reports_status_json("inspect", false, jet_cli_report_cwd(), file, "", diagnostics) else -> diagnostic_render_all(file, "", diagnostics, color)

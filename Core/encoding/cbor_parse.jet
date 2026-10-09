@@ -7,7 +7,7 @@ use core.math as math
 use core.mem as mem
 // Exact representability, rather than a rounded conversion, selects the RFC
 // preferred float width. Inexact values retain all their original f64 bits.
-pub fn narrow_bits(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Int? Never! {
+fn narrow_bits(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Int? Never! {
     negative :: bits < 0
     sign :: if negative -> 1 << (exponent_bits + fraction_bits) else -> 0
     exponent :: (bits >> 52) & 2047
@@ -42,7 +42,7 @@ fn failure(kind: CBORErrorKind, offset: Int, path: String, reason: String) -> CB
     CBORError{kind: kind, byte_offset: offset, path: path, reason: reason}
 }
 
-pub fn parse(bytes: [U8], options: CBOROptions) -> DataTree CBORError! {
+fn parse(bytes: [U8], options: CBOROptions) -> DataTree CBORError! {
     if options.max_depth < 1 || options.max_depth > 4096 -> return Err(failure(.Limit, 0, "$", "max_depth must be in 1..4096"))
     if options.max_items < 1 || options.max_items > 1000000000 -> return Err(failure(.Limit, 0, "$", "max_items must be in 1..1000000000"))
     if options.max_bytes < 0 || options.max_bytes > 1073741824 -> return Err(failure(.Limit, 0, "$", "max_bytes must be in 0..1073741824"))
@@ -308,7 +308,7 @@ fn bytewise_before(bytes: [U8], a: Int, a_end: Int, b: Int, b_end: Int) -> Bool 
     a_end - a < b_end - b
 }
 
-pub fn widen_float(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Float Never! {
+fn widen_float(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Float Never! {
     sign :: if (bits >> (exponent_bits + fraction_bits)) != 0 -> (-9223372036854775807 - 1) else -> 0
     maximum :: (1 << exponent_bits) - 1
     exponent :: (bits >> fraction_bits) & maximum

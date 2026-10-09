@@ -28,7 +28,7 @@ enum Type {
 }
 
 // Shared primitive spelling authority for parsed types and Core call contracts.
-pub fn foundation_named_type(name: String) -> Type Never! {
+fn foundation_named_type(name: String) -> Type Never! {
     if name == {
         "Int" -> Type.Int
         "Float" | "F64" -> Type.Float
@@ -49,9 +49,9 @@ pub fn foundation_named_type(name: String) -> Type Never! {
     }
 }
 
-pub struct TypeTupleField {
-    pub name: String
-    pub ty: Type
+struct TypeTupleField {
+    name: String
+    ty: Type
 }
 
 // S73: named tuple fields sorted by name, so type identity ignores source
@@ -204,15 +204,15 @@ struct Dimension {
 // Rust AST/types.rs Dimension::base/multiply/divide/combine. Axes stay sorted
 // by base identity with zero exponents removed (Rust BTreeMap), so equality is
 // stable; an exponent outside i32 makes the combination unrepresentable.
-pub fn dimension_base(identity: String) -> Dimension Never! {
+fn dimension_base(identity: String) -> Dimension Never! {
     Dimension{axes: [DimensionAxis]{DimensionAxis{name: identity, exponent: Measure.SignedLiteral{kind: "dimension", value: 1}}}}
 }
 
-pub fn dimension_multiply(left: Dimension, right: Dimension) -> Dimension? {
+fn dimension_multiply(left: Dimension, right: Dimension) -> Dimension? {
     dimension_combine(left, right, false)
 }
 
-pub fn dimension_divide(left: Dimension, right: Dimension) -> Dimension? {
+fn dimension_divide(left: Dimension, right: Dimension) -> Dimension? {
     dimension_combine(left, right, true)
 }
 

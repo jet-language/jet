@@ -16,9 +16,9 @@ OPT_I64_MAX :: prep { 9223372036854775807 }
 // Per-value facts of one sweep: `alias[v]` is the value v was replaced by
 // (-1 for none); `known[v]` marks a value defined by Const with `consts[v]`.
 struct OptFacts {
-    pub alias: [Int]
-    pub known: [Bool]
-    pub consts: [Int]
+    alias: [Int]
+    known: [Bool]
+    consts: [Int]
 }
 
 fn opt_facts(count: Int) -> OptFacts Never! {
@@ -214,8 +214,8 @@ fn opt_bool(flag: Bool) -> Int Never! { if flag -> 1 else -> 0 }
 // What one instruction becomes after folding: the instruction to keep (None to
 // drop it) plus, when dropped, the value its result is replaced by.
 struct OptRewrite {
-    pub inst: LIRInst?
-    pub replaced_by: Int
+    inst: LIRInst?
+    replaced_by: Int
 }
 
 fn opt_keep(inst: LIRInst) -> OptRewrite Never! { OptRewrite{inst: Val(inst), replaced_by: -1} }
@@ -262,7 +262,7 @@ fn opt_identity(facts: OptFacts, dst: LIRValueID, op: LIRBinaryOp, left: LIRValu
 
 // The defining instruction of every value (block index and instruction index; -1 for parameters).
 struct OptDefs {
-    pub insts: [LIRInst?]
+    insts: [LIRInst?]
 }
 
 fn opt_defs(function: LIRFunction) -> OptDefs Never! {
@@ -751,7 +751,7 @@ fn opt_renumber_terminator(map: [Int], terminator: LIRTerminator) -> LIRTerminat
 OPT_SIMPLIFY_ROUNDS :: prep { 8 }
 
 // Simplify one function to a fixed point (at most OPT_SIMPLIFY_ROUNDS rounds).
-pub fn lir_simplify_function(original: LIRFunction) -> LIRFunction Never! {
+fn lir_simplify_function(original: LIRFunction) -> LIRFunction Never! {
     function := original
     facts := opt_facts(function.values.len())
     loop _ in 0..<OPT_SIMPLIFY_ROUNDS {

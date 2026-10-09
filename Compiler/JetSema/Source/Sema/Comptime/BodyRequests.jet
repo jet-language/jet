@@ -177,7 +177,7 @@ fn sema_comptime_body_work_snapshot(cell: Shared<SemaComptimeBodyWork>) -> SemaC
 
 // Called after tasks join, by the existing phase owner holding the real sink.
 // One aggregate event per numeric field, never one filesystem write per query.
-pub fn sema_comptime_body_work_flush(values: SemaComptimeBodyValues, trace_sink: CompilerTraceSink?, phase: String) {
+fn sema_comptime_body_work_flush(values: SemaComptimeBodyValues, trace_sink: CompilerTraceSink?, phase: String) {
     cell :: values.work ?? return
     if trace_sink == .Val(sink) {
         totals :: sema_comptime_body_work_snapshot(cell)
@@ -213,7 +213,7 @@ fn sema_comptime_body_values_debug(values: SemaComptimeBodyValues) -> String {
     "{permit.value.values:Debug}"
 }
 
-pub fn sema_comptime_body_capture(
+fn sema_comptime_body_capture(
     context: &SemaCheckContext,
     environment: SemaScopeEnvironment, program: SemaProgramTables,
     scopes: SemaScopeTable,
@@ -248,7 +248,7 @@ pub fn sema_comptime_body_capture(
     source
 }
 
-pub fn sema_comptime_body_value_find(
+fn sema_comptime_body_value_find(
     context: SemaCheckContext,
     module_identity: String,
     function_key: String,

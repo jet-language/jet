@@ -288,7 +288,7 @@ fn sema_prelude_error_conversion(source: Type, diagnostics: &[Diagnostic]) -> Fu
     }
 }
 
-pub fn sema_module_no_prelude(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+fn sema_module_no_prelude(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     graph_option :: program.registration_graph
     graph :: graph_option ?? return false
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
@@ -298,7 +298,7 @@ pub fn sema_module_no_prelude(environment: SemaScopeEnvironment, program: SemaPr
 // The D-FAIL-CONV2 route of one propagation site: a family member reaching the
 // default `Err` with no module-declared conversion. The routine key is the one
 // `sema_inject_prelude_error_conversions` checks after the module's bodies.
-pub fn sema_prelude_error_conversion_key(error: Type, target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
+fn sema_prelude_error_conversion_key(error: Type, target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     if target != (Type.Named{name: "Err"}) -> return None
     if !sema_core_error_family_member(type_name(error)) || sema_module_no_prelude(environment, program) -> return None
     Val(symbol_id(SymbolKind.Function, environment.module_identity, "", sema_failure_conversion_function_name(error, target)).key)
@@ -360,7 +360,7 @@ fn sema_prelude_demand_walk_take(state: Shared<SemaPreludeDemandWalk>) -> [SemaP
 // declares its own conversion for a pair keeps it. Every conversion that cannot
 // be injected names its cause in `reasons`; with `keep_going` (JET_KEEP_GOING)
 // a conversion whose body fails to check is kept as its typed trap.
-pub fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, functions: &[TFunc], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String], keep_going: Bool) -> Bool {
+fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, functions: &[TFunc], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String], keep_going: Bool) -> Bool {
     // Every function's propagation sites, walked in place in function and
     // body order (the walk copies no subtree).
     walk_state :: shared SemaPreludeDemandWalk{module_identity: module_identity, demands: [SemaPreludeConversionDemand]{}}
@@ -493,7 +493,7 @@ fn sema_failure_domain_is_error(ty: Type, seen: [String], environment: SemaScope
 // The Rust reference's declared-type walk for failure contracts: E2417 for a
 // non-error `!` domain and E2422 for `Never` in a value position. `in_return`
 // admits `Never` as a callable's success slot.
-pub fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, generic_names: [String], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, generic_names: [String], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     if ty == {
         .Named(name) -> {
             if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
@@ -595,7 +595,7 @@ fn sema_union_member_open(ty: Type, generic_names: [String]) -> Bool Never! {
 }
 
 // Checks one named callable's declared signature (E2417/E2422).
-pub fn sema_check_function_failure_contracts(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_names: [String], diagnostics: &[Diagnostic]) -> Bool {
+fn sema_check_function_failure_contracts(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_names: [String], diagnostics: &[Diagnostic]) -> Bool {
     before :: diagnostics.len()
     loop param in func.params -> sema_check_failure_contract_type(param.ty, param.ty_span, false, generic_names, environment, program, &diagnostics)
     if func.return_type == .Val(return_type) -> sema_check_failure_contract_type(return_type, func.return_type_span ?? func.name_span, true, generic_names, environment, program, &diagnostics)
@@ -610,7 +610,7 @@ struct SemaDropStatement {
     value: TStmt?
 }
 
-pub fn sema_stmt_check_drop(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDropStatement {
+fn sema_stmt_check_drop(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDropStatement {
     if expr == {
         .MethodCall(receiver, method, method_span, _, _, args, _, _, _, _, _) -> {
             if method != "drop" -> return SemaDropStatement{handled: false, value: None}

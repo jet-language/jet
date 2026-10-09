@@ -10,25 +10,25 @@ fn init_local_storage() -> Shared<LocalStorage> Never! {
     shared LocalStorage{entries: [String:String]{}}
 }
 
-pub fn get(key: String) -[Browser]> String? Never! {
+fn get(key: String) -[Browser]> String? Never! {
     state :: core.mem.__process_shared(init_local_storage)
     guard :: state.guard_read()
     guard.value.entries.get(key)
 }
 
-pub fn set(key: String, value: String) Never! -[Browser]> {
+fn set(key: String, value: String) Never! -[Browser]> {
     state :: core.mem.__process_shared(init_local_storage)
     guard := state.guard_edit()
     _ :: &guard.value.entries.add(key, value)
 }
 
-pub fn remove(key: String) Never! -[Browser]> {
+fn remove(key: String) Never! -[Browser]> {
     state :: core.mem.__process_shared(init_local_storage)
     guard := state.guard_edit()
     _ :: &guard.value.entries.remove(key)
 }
 
-pub fn clear() Never! -[Browser]> {
+fn clear() Never! -[Browser]> {
     state :: core.mem.__process_shared(init_local_storage)
     guard := state.guard_edit()
     &guard.value.entries.clear()

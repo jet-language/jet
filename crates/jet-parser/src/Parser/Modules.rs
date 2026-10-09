@@ -867,7 +867,7 @@ impl<'a> Parser<'a> {
                 ),
                 "write `module name;` to load a file, or `module name { … }` for an inline module"
                     .to_string(),
-                "example: `module math;` or `module math { pub fn double(n: Int) -> Int { … } }`"
+                "example: `module math;` or `module math { fn double(n: Int) -> Int { … } }`"
                     .to_string(),
                 Some(self.peek().span),
             )),

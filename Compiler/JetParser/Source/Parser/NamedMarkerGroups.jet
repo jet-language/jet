@@ -3,26 +3,26 @@
 use jet_foundation.[Span]
 use jet_lexer.[Token, TOKEN_IDENT, TOKEN_DOT, TOKEN_EQ, TOKEN_HASH, TOKEN_BANG, TOKEN_KW_MODULE, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_EOF, TOKEN_SEMI, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT]
 
-pub struct NamedMarkerGroupTokens {
-    pub name: String
-    pub name_span: Span
-    pub members: [Token]
-    pub required_scope: String?{None}
+struct NamedMarkerGroupTokens {
+    name: String
+    name_span: Span
+    members: [Token]
+    required_scope: String?{None}
 }
 
-pub struct ExpandedMarkerGroupUse {
-    pub name: String
-    pub span: Span
+struct ExpandedMarkerGroupUse {
+    name: String
+    span: Span
 }
 
-pub struct ExpandedMarkerGroups {
-    pub tokens: [Token]
-    pub uses: [ExpandedMarkerGroupUse]
+struct ExpandedMarkerGroups {
+    tokens: [Token]
+    uses: [ExpandedMarkerGroupUse]
 }
 
-pub struct MarkerTokenPath {
-    pub name: String
-    pub end: Int
+struct MarkerTokenPath {
+    name: String
+    end: Int
 }
 
 struct MarkerGroupTokenRange {
@@ -44,7 +44,7 @@ fn marker_group_code(tokens: [Token]) -> [Token] Never! {
     code
 }
 
-pub fn marker_token_path(tokens: [Token], start: Int) -> MarkerTokenPath? {
+fn marker_token_path(tokens: [Token], start: Int) -> MarkerTokenPath? {
     if start < 0 || start >= tokens.len() || tokens[start].kind != TOKEN_IDENT -> return None
     name := tokens[start].payload.decoded
     end := start + 1
@@ -88,7 +88,7 @@ fn marker_group_namespace_advance(scope: &MarkerGroupNamespace, tokens: [Token],
     }
 }
 
-pub fn named_marker_groups(tokens: [Token]) -> [NamedMarkerGroupTokens] Never! {
+fn named_marker_groups(tokens: [Token]) -> [NamedMarkerGroupTokens] Never! {
     code :: marker_group_code(tokens)
     groups := [NamedMarkerGroupTokens]{}
     index := 0
@@ -162,11 +162,11 @@ fn marker_group_push_members(output: &[Token], group: NamedMarkerGroupTokens, sp
     }
 }
 
-pub fn expand_named_marker_groups(tokens: [Token], imported: [NamedMarkerGroupTokens]) -> [Token] {
+fn expand_named_marker_groups(tokens: [Token], imported: [NamedMarkerGroupTokens]) -> [Token] {
     expand_named_marker_groups_with_uses(tokens, imported).tokens
 }
 
-pub fn expand_named_marker_groups_with_uses(tokens: [Token], imported: [NamedMarkerGroupTokens]) -> ExpandedMarkerGroups {
+fn expand_named_marker_groups_with_uses(tokens: [Token], imported: [NamedMarkerGroupTokens]) -> ExpandedMarkerGroups {
     local :: named_marker_groups(tokens)
     if local.len() == 0 && imported.len() == 0 -> return ExpandedMarkerGroups{tokens: tokens, uses: [ExpandedMarkerGroupUse]{}}
     code :: marker_group_code(tokens)

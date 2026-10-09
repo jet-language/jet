@@ -233,7 +233,7 @@ fn trust_flake_query_value(fields: [FlakeQueryField], key: String) -> String? Ne
 
 // The exact revision a flake URL pins: a `rev=` query field, else a
 // hex-looking last path segment, else "".
-pub fn trust_flake_revision(url: String) -> String Never! {
+fn trust_flake_revision(url: String) -> String Never! {
     base := url.copy()
     if trust_text_split_first(url, TRUST_QUESTION) == {
         .Val(parts) -> {
@@ -260,7 +260,7 @@ pub fn trust_flake_revision(url: String) -> String Never! {
 
 // Rust `flake_source_identity`: the typed source a flake URL names, or None
 // for URL forms that only compare textually.
-pub fn trust_flake_source_identity(url: String) -> FlakeSourceIdentity? Never! {
+fn trust_flake_source_identity(url: String) -> FlakeSourceIdentity? Never! {
     base := url.copy()
     query_text := ""
     if trust_text_split_first(url, TRUST_QUESTION) == {

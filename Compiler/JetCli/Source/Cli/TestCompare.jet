@@ -287,7 +287,7 @@ fn jet_cli_comparison_output(run: JetCLIComparisonRun, json: Bool) -> JetDriverV
     JetDriverVerbOutput{stdout: jet_cli_comparison_render(run.record, json), stderr: "", exit_code: if run.record.status == ComparisonStatus.Matched -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR}
 }
 
-pub fn jet_cli_comparison_run(target: String, argv: [String], json: Bool, terminal: [U8]) -[FS, Env, Time]> JetDriverVerbOutput Never! {
+fn jet_cli_comparison_run(target: String, argv: [String], json: Bool, terminal: [U8]) -[FS, Env, Time]> JetDriverVerbOutput Never! {
     if jet_cli_comparison_read(target, argv, json) == {
         .Failed(output) -> output
         .Ready(run) -> {

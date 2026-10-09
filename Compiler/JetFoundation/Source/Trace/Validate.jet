@@ -384,7 +384,7 @@ fn jettrace_validate_content(value: CanonicalJSON) JetTraceError! {
     jettrace_validate_toolchain(fields[jettrace_get(fields, "toolchain")].value)
     return
 }
-pub fn trace_id(value: CanonicalJSON) -> String JetTraceError! {
+fn trace_id(value: CanonicalJSON) -> String JetTraceError! {
     fields :: jettrace_wrapper_fields(value)
     loop field in fields { if field.key == "trace_id" -> return jettrace_text(field.value, "trace_id") }
     Err(jettrace_error("jettrace missing trace_id"))

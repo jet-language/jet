@@ -21,14 +21,14 @@ use __core_encoding_stream as stream
 use core.files.[FileWriter]
 
 /// Bounded JSONL output uses the native-shipped delayed-LF policy in Jet.
-pub struct JSONLWriter {
+struct JSONLWriter {
     output: stream.JSONLinesPush
-    pub fn write(&self, value: ^DataTree) EncodingError! -[IO]> { &self.output.write(^value) }
-    pub fn flush(&self) EncodingError! -[IO]> { &self.output.flush() }
-    pub fn finish(&self) EncodingError! -[IO]> { &self.output.finish() }
+    fn write(&self, value: ^DataTree) EncodingError! -[IO]> { &self.output.write(^value) }
+    fn flush(&self) EncodingError! -[IO]> { &self.output.flush() }
+    fn finish(&self) EncodingError! -[IO]> { &self.output.finish() }
 }
 
-pub fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONLWriter EncodingError! {
+fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONLWriter EncodingError! {
     output :: stream.jsonl_writer(^target, limits) ?? return Err(err)
     Ok(JSONLWriter{output: ^output})
 }
@@ -46,7 +46,7 @@ fn parse(text: String) -> [DataTree] EncodingError! {
 }
 
 /// Compact JSONL text. Always ends with a newline when `rows` is non-empty.
-pub fn to_string(rows: [DataTree]) -> String EncodingError! {
+fn to_string(rows: [DataTree]) -> String EncodingError! {
     out := [U8]{}
     record_index := 0
     loop row in rows {
@@ -59,13 +59,13 @@ pub fn to_string(rows: [DataTree]) -> String EncodingError! {
     Ok(text)
 }
 
-pub struct JSONLReader {
+struct JSONLReader {
     text: String
     offset: Int
     line: Int
     records_read: Int
 
-    pub fn next(&self) -> DataTree? EncodingError! {
+    fn next(&self) -> DataTree? EncodingError! {
         loop {
             record :: &self.next_record() ?? return Ok(None)
             if is_blank(record.text) -> next
@@ -98,14 +98,14 @@ impl JSONLReader {
     }
 }
 
-pub fn reader(text: String) -> JSONLReader Never! {
+fn reader(text: String) -> JSONLReader Never! {
     JSONLReader{text: text, offset: 0, line: 1, records_read: 0}
 }
 
 
-pub fn loads(text: String) -> [Dyn] EncodingError! { parse(text) }
+fn loads(text: String) -> [Dyn] EncodingError! { parse(text) }
 
-pub fn dumps(rows: [DataTree]) -> String EncodingError! { to_string(rows) }
+fn dumps(rows: [DataTree]) -> String EncodingError! { to_string(rows) }
 
 fn count_rows(text: String) -> Int Never! {
     n := 0
@@ -124,7 +124,7 @@ fn count_rows(text: String) -> Int Never! {
     n
 }
 
-pub fn append_line(text: String, value: DataTree) -> String EncodingError! {
+fn append_line(text: String, value: DataTree) -> String EncodingError! {
     needs_lf :: text.count_bytes() > 0 && stream.byte_at(text, text.count_bytes() - 1) != (U8{10})
     encoded :: json.to_string(value) ?? {
         offset := text.count_bytes()
@@ -143,7 +143,7 @@ pub fn append_line(text: String, value: DataTree) -> String EncodingError! {
     Ok("{text}\n{encoded}\n")
 }
 
-pub fn first(text: String) -> DataTree? EncodingError! {
+fn first(text: String) -> DataTree? EncodingError! {
     cursor := reader(text)
     &cursor.next()
 }

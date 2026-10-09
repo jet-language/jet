@@ -2,7 +2,7 @@ use core.service as service
 
 fn checked_worker() {}
 
-pub fn run() {
+fn run() {
     tree := service.tree("workers")
     endpoint :: tree.worker("worker", checked_worker, capacity: 2) ?? panic("worker")
     tree.group("supervisor", ["worker"]) ?? panic("group")

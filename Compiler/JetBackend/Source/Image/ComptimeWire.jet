@@ -2,15 +2,15 @@
 // may reach these readers; addresses are child-local borrowed storage.
 use jet_foundation.foundation_json_quote
 
-pub struct X64ClosureValueLayout {
-    pub snapshot: String
-    pub function: String
-    pub boundary: X64ValueBoundary
-    pub captures: [X64ValueMember]
+struct X64ClosureValueLayout {
+    snapshot: String
+    function: String
+    boundary: X64ValueBoundary
+    captures: [X64ValueMember]
 }
-pub struct X64ClosureRegistration {
-    pub offset: Int
-    pub layout: X64ClosureValueLayout
+struct X64ClosureRegistration {
+    offset: Int
+    layout: X64ClosureValueLayout
 }
 
 fn x64_closure_registration_json(row: X64ClosureRegistration) -> String Never! {
@@ -31,11 +31,11 @@ fn x64_closure_registration_decode(tree: DataTree, code_size: Int) -> X64Closure
     Val(X64ClosureRegistration{offset: offset, layout: X64ClosureValueLayout{snapshot: snapshot, function: function, boundary: boundary, captures: captures}})
 }
 
-pub struct X64NativeValue {
-    pub kind: String
-    pub attributes: [String]
-    pub text: String
-    pub children: [X64NativeValue]
+struct X64NativeValue {
+    kind: String
+    attributes: [String]
+    text: String
+    children: [X64NativeValue]
 }
 
 fn x64_value_node(fd: Int, kind: String, attributes: [String], children: Int, bytes: Int) -> Bool {
@@ -68,7 +68,7 @@ fn x64_value_stream_member(runtime: X64Runtime, fd: Int, boundary: X64ValueBound
 
 // Preorder, counted nodes with small JSON headers and borrowed raw text chunks.
 // There is no nested JSON value or joined JSON body, including for large lists.
-pub fn x64_value_native_stream(runtime: X64Runtime, fd: Int, boundary: X64ValueBoundary, row: Int, address: Int, closures: [Int:X64ClosureValueLayout], header: Int) -> Bool {
+fn x64_value_native_stream(runtime: X64Runtime, fd: Int, boundary: X64ValueBoundary, row: Int, address: Int, closures: [Int:X64ClosureValueLayout], header: Int) -> Bool {
     if row < 0 || row >= boundary.descriptors.len() -> return false
     descriptor :: boundary.descriptors[row]
     kind :: descriptor.kind
@@ -164,7 +164,7 @@ pub fn x64_value_native_stream(runtime: X64Runtime, fd: Int, boundary: X64ValueB
     false
 }
 
-pub fn x64_value_receive(fd: Int, first: String) -> X64NativeValue? {
+fn x64_value_receive(fd: Int, first: String) -> X64NativeValue? {
     tree :: execution_json.parse(first) ?? return None
     rows :: x64_execution_array(tree) ?? return None
     if rows.len() != 5 || x64_execution_string(rows[0]) != (Val("Node")) -> return None
@@ -194,7 +194,7 @@ pub fn x64_value_receive(fd: Int, first: String) -> X64NativeValue? {
 fn x64_value_member_json(member: X64ValueMember) -> String Never! {
     "[{foundation_json_quote(member.name)},{member.offset},{member.descriptor},{member.boxed}]"
 }
-pub fn x64_value_boundary_json(boundary: X64ValueBoundary) -> String Never! {
+fn x64_value_boundary_json(boundary: X64ValueBoundary) -> String Never! {
     rows := [String]{}
     loop descriptor in boundary.descriptors {
         children :: loop child in descriptor.children -> "{child}"
@@ -218,7 +218,7 @@ fn x64_value_member_decode(tree: DataTree, count: Int) -> X64ValueMember? Never!
     if offset < 0 || descriptor < 0 || descriptor >= count -> return None
     Val(X64ValueMember{name: name, offset: offset, descriptor: descriptor, boxed: boxed})
 }
-pub fn x64_value_boundary_decode(tree: DataTree) -> X64ValueBoundary? Never! {
+fn x64_value_boundary_decode(tree: DataTree) -> X64ValueBoundary? Never! {
     fields :: x64_execution_array(tree) ?? return None
     if fields.len() != 2 -> return None
     root :: x64_execution_int(fields[0]) ?? return None

@@ -217,7 +217,7 @@ fn jet_cli_gc_fail(error: JetCLIGcError, color: Bool, json: Bool) -> JetCLIPlan 
     if json -> return jet_cli_done(jet_cli_status_render_with_reports("gc.report", false, jet_cli_reports_json(None, "", "", [Diagnostic]{diagnostic}), [JetCLIStatusField]{}), "", JET_DRIVER_EXIT_USER_ERROR)
     jet_cli_done("", diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color), JET_DRIVER_EXIT_USER_ERROR)
 }
-pub fn jet_cli_gc_report_at(root: String, args: [String], color: Bool, json: Bool) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
+fn jet_cli_gc_report_at(root: String, args: [String], color: Bool, json: Bool) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
     loop argument in args {
         if !argument.starts_with("-") -> return jet_cli_gc_fail(jet_cli_gc_error("malformed", "unexpected gc report argument `{argument}`"), color, json)
     }

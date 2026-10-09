@@ -191,7 +191,7 @@ use core.data as core_data
     }
 
     // PNG compression preserves the archive codec's typed failure contract.
-    pub fn plot_png(groups: [Group<String, Int>]) -> [U8] archive.ArchiveError! {
+    fn plot_png(groups: [Group<String, Int>]) -> [U8] archive.ArchiveError! {
         ihdr := Bytes.new()
         ihdr.write_u32_be(U32{64})
         ihdr.write_u32_be(U32{32})
@@ -218,10 +218,10 @@ use core.data as core_data
 
     // Native and bridge facts remain authoritative; unavailable bridges are
     // represented by core_data.status and never replaced with made-up values.
-    pub fn bridge_status() -[FS, Env]> [DataStatus] {
+    fn bridge_status() -[FS, Env]> [DataStatus] {
         return core_data.status()
     }
 
-    pub fn require_python_bridge() DataError! -[FS, Env]> {
+    fn require_python_bridge() DataError! -[FS, Env]> {
         return core_data.require_bridge("py")
     }

@@ -1688,13 +1688,13 @@ fn dimension_exponent_limit_is_a_sema_error_not_a_panic() {
 fn imported_same_leaf_units_keep_distinct_dimensions() {
     let length = r#"
 #UnitFamily(Length, dimension) { unit }
-pub fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
-pub fn first(groups: [[String: [Unit]]]) -> Unit { return groups[0]["values"][0].copy() }
+fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
+fn first(groups: [[String: [Unit]]]) -> Unit { return groups[0]["values"][0].copy() }
 "#;
     let time = r#"
 #UnitFamily(Clock, dimension) { unit }
-pub fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
-pub fn first(groups: [[String: [Unit]]]) -> Unit { return groups[0]["values"][0].copy() }
+fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
+fn first(groups: [[String: [Unit]]]) -> Unit { return groups[0]["values"][0].copy() }
 "#;
     let good = r#"
 use "length" as length
@@ -1933,12 +1933,12 @@ fn qualified_imported_dimensions_resolve_by_alias_and_unqualified_collisions_fai
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(
         root.join("stock.jet"),
-        "pub #UnitFamily(Inventory, dimension, base: item) { item }\n",
+        "#UnitFamily(Inventory, dimension, base: item) { item }\n",
     )
     .unwrap();
     std::fs::write(
         root.join("other.jet"),
-        "pub #UnitFamily(Inventory, dimension, base: widget) { widget }\n",
+        "#UnitFamily(Inventory, dimension, base: widget) { widget }\n",
     )
     .unwrap();
     let qualified = root.join("qualified.jet");

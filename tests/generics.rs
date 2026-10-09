@@ -328,8 +328,8 @@ module complete<T>(count: Int, label: String) {
     impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
     #Target(OS.Linux)
     impl Wrapped { fn linux_value(self) -> T { return self.value } }
-    module plain { pub fn value() -> Int { return count } }
-    module nested<U> { pub fn keep(value: U) -> U { return value.copy() } }
+    module plain { fn value() -> Int { return count } }
+    module nested<U> { fn keep(value: U) -> U { return value.copy() } }
     module nested_use :: nested<T>
     #Meta(category: label)
     fn marked(value: ^#Marked T) -> #Marked T {

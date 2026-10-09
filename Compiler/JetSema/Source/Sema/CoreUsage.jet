@@ -92,7 +92,7 @@ fn sema_core_string_insert_sorted(values: &[String], value: String) Never! {
     values[index] = value
 }
 
-pub fn sema_core_type_uses_default_int(ty: Type) -> Bool Never! {
+fn sema_core_type_uses_default_int(ty: Type) -> Bool Never! {
     if ty == {
         .Int -> true
         .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) |
@@ -1223,7 +1223,7 @@ fn sema_core_switch_has_readiness(arms: [SwitchArm]) -> Bool Never! {
 // set holds the module's nominal names and its generated-context markers, so
 // the generated roots (`core.args::spec`, `core.mem::pool_shared`, ...) are
 // noted by the same walk that notes every other usage.
-pub fn sema_core_module_usage_from_registration(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, unshared_functions: [String], exact_int_reachable: Bool) -> SemaCoreModuleUsageResult {
+fn sema_core_module_usage_from_registration(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, unshared_functions: [String], exact_int_reachable: Bool) -> SemaCoreModuleUsageResult {
     registered := sema_core_registration_type_names(registration_module)
     sema_core_generated_context_markers(graph, registration_module, &registered)
     imports :: sema_core_registration_imports(registration_module)

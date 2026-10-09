@@ -59,8 +59,8 @@ fn custom_marker<'a>(markers: &'a [Marker], name: &str) -> &'a Marker {
 #[test]
 fn same_module_marker_is_bare_and_imports_use_the_local_alias() {
     let bundle = clean(&[
-        ("main.jet", "use library as lib\nmarker LocalNote($sites: [.Function])\n#[LocalNote, lib.LibraryNote(\"direct\")] pub fn helper() {}\nfn run() {}\n"),
-        ("library.jet", "pub marker LibraryNote(label: String, $sites: [.Function])\n"),
+        ("main.jet", "use library as lib\nmarker LocalNote($sites: [.Function])\n#[LocalNote, lib.LibraryNote(\"direct\")] fn helper() {}\nfn run() {}\n"),
+        ("library.jet", "marker LibraryNote(label: String, $sites: [.Function])\n"),
     ]);
     let helper = function(&bundle.modules[bundle.entry].items, "helper");
     let local = custom_marker(&helper.markers, "LocalNote");
@@ -77,7 +77,7 @@ fn same_module_marker_is_bare_and_imports_use_the_local_alias() {
 
 #[test]
 fn bare_imported_unknown_private_and_ambiguous_names_have_distinct_errors() {
-    let library = "pub marker LibraryNote($sites: [.Function])\nmarker Hidden($sites: [.Function])\n";
+    let library = "marker LibraryNote($sites: [.Function])\nmarker Hidden($sites: [.Function])\n";
     for (application, code) in [
         ("#LibraryNote", "E0085"),
         ("#lib.Missing", "E0927"),
@@ -92,7 +92,7 @@ fn bare_imported_unknown_private_and_ambiguous_names_have_distinct_errors() {
         ("library.jet", include_str!("ui/marker_module_bare/library.jet")),
     ], "E0085");
     rejects(&[
-        ("main.jet", "use first as lib\nuse second as lib\n#lib.LibraryNote pub fn helper() {}\nfn run() {}\n"),
+        ("main.jet", "use first as lib\nuse second as lib\n#lib.LibraryNote fn helper() {}\nfn run() {}\n"),
         ("first.jet", library),
         ("second.jet", library),
     ], "E0086");
@@ -105,8 +105,8 @@ fn bare_imported_unknown_private_and_ambiguous_names_have_distinct_errors() {
 #[test]
 fn exported_nested_marker_and_group_keep_their_declaration_identity() {
     let bundle = clean(&[
-        ("main.jet", "use library as lib\n#lib.inner.Fast pub fn helper(value: Int) -> Int { value + 1 }\nfn run() {}\n"),
-        ("library.jet", "pub module inner {\npub marker LibraryNote($sites: [.Function])\npub marker Fast = #[LibraryNote, Inline]\n}\n"),
+        ("main.jet", "use library as lib\n#lib.inner.Fast fn helper(value: Int) -> Int { value + 1 }\nfn run() {}\n"),
+        ("library.jet", "module inner {\nmarker LibraryNote($sites: [.Function])\nmarker Fast = #[LibraryNote, Inline]\n}\n"),
     ]);
     let helper = function(&bundle.modules[bundle.entry].items, "helper");
     assert!(helper.is_inline);
@@ -122,10 +122,10 @@ fn exported_nested_marker_and_group_keep_their_declaration_identity() {
 #[test]
 fn imported_group_binds_members_and_fixed_arguments_in_the_declaring_module() {
     let bundle = clean(&[
-        ("main.jet", "use library as lib\nuse other as rules\nmarker LibraryNote(label: Int, $sites: [.Function])\n#rules.LibraryNote(7) pub fn direct() {}\n#lib.Fast pub fn helper() {}\nfn run() {}\n"),
-        ("library.jet", "use rules\npub marker Fast = #[rules.LibraryNote(\"fixed\"), Inline]\n"),
-        ("rules.jet", "pub marker LibraryNote(label: String, $sites: [.Function])\n"),
-        ("other.jet", "pub marker LibraryNote(label: Int, $sites: [.Function])\n"),
+        ("main.jet", "use library as lib\nuse other as rules\nmarker LibraryNote(label: Int, $sites: [.Function])\n#rules.LibraryNote(7) fn direct() {}\n#lib.Fast fn helper() {}\nfn run() {}\n"),
+        ("library.jet", "use rules\nmarker Fast = #[rules.LibraryNote(\"fixed\"), Inline]\n"),
+        ("rules.jet", "marker LibraryNote(label: String, $sites: [.Function])\n"),
+        ("other.jet", "marker LibraryNote(label: Int, $sites: [.Function])\n"),
     ]);
     let helper = function(&bundle.modules[bundle.entry].items, "helper");
     assert!(helper.is_inline);
@@ -138,7 +138,7 @@ fn imported_group_binds_members_and_fixed_arguments_in_the_declaring_module() {
 
 #[test]
 fn local_group_expands_before_ordinary_applicability_and_argument_checks() {
-    let bundle = clean(&[("main.jet", "marker Fast = #[Inline(.Always), Scalar]\n#Fast pub fn helper(value: Int) -> Int { value + 1 }\nfn run() {}\n")]);
+    let bundle = clean(&[("main.jet", "marker Fast = #[Inline(.Always), Scalar]\n#Fast fn helper(value: Int) -> Int { value + 1 }\nfn run() {}\n")]);
     let helper = function(&bundle.modules[bundle.entry].items, "helper");
     assert!(helper.is_inline_always);
     assert!(!helper.is_inline);
@@ -162,8 +162,8 @@ fn overlapping_groups_and_direct_members_share_the_duplicate_check() {
             "each repeated application reports once: {diagnostics:?}");
     }
     rejects(&[
-        ("main.jet", "use library as lib\n#[lib.Fast, lib.LibraryNote] pub fn helper() {}\nfn run() {}\n"),
-        ("library.jet", "pub marker LibraryNote($sites: [.Function])\npub marker Fast = #[LibraryNote, Inline]\n"),
+        ("main.jet", "use library as lib\n#[lib.Fast, lib.LibraryNote] fn helper() {}\nfn run() {}\n"),
+        ("library.jet", "marker LibraryNote($sites: [.Function])\nmarker Fast = #[LibraryNote, Inline]\n"),
     ], "E0999");
 }
 
@@ -182,7 +182,7 @@ fn groups_require_two_members_no_parameters_and_no_hidden_forbidden_kinds() {
     rejects(&[("main.jet", "marker First = #[Inline, Scalar]\nmarker Second = #[First, MustUse]\nfn run() {}\n")], "E0400");
     rejects(&[
         ("main.jet", "use library as lib\nmarker Second = #[lib.First, MustUse]\nfn run() {}\n"),
-        ("library.jet", "pub marker First = #[Inline, Scalar]\n"),
+        ("library.jet", "marker First = #[Inline, Scalar]\n"),
     ], "E0400");
     let (_, diagnostics) = checked(&[("main.jet", "marker Bad(value: Int) = #[Inline, Scalar]\nfn run() {}\n")]);
     assert!(!diagnostics.is_empty(), "a named group must not accept a signature");
@@ -198,12 +198,12 @@ fn public_groups_cannot_publish_private_members() {
         ("library.jet", "use rules\npub marker Public = #[rules.Hidden, Inline]\n"),
         ("rules.jet", "marker Hidden($sites: [.Function])\n"),
     ], "E0605");
-    clean(&[("main.jet", "marker Hidden($sites: [.Function])\nmarker Private = #[Hidden, Inline]\n#Private pub fn helper() {}\nfn run() {}\n")]);
+    clean(&[("main.jet", "marker Hidden($sites: [.Function])\nmarker Private = #[Hidden, Inline]\n#Private fn helper() {}\nfn run() {}\n")]);
 }
 
 #[test]
 fn formatter_preserves_authored_groups_and_qualified_names() {
-    let source = "use library as lib\nmarker Fast = #[Inline(.Always), Scalar]\n#Fast pub fn helper() {}\n#lib.LibraryNote(\"fixed\") pub fn imported() {}\nfn run() {}\n";
+    let source = "use library as lib\nmarker Fast = #[Inline(.Always), Scalar]\n#Fast fn helper() {}\n#lib.LibraryNote(\"fixed\") fn imported() {}\nfn run() {}\n";
     let formatted = jet::format_source(source).expect("groups and qualified markers format");
     assert!(formatted.contains("marker Fast = #[Inline(.Always), Scalar]"), "{formatted}");
     assert!(formatted.contains("#Fast"), "{formatted}");
@@ -220,7 +220,7 @@ fn codegen_controls_are_four_separate_registry_rows_and_projections() {
     assert!(applied_rule("Static").unwrap().sites.contains(&RuleSite::Constant));
     assert!(!applied_rule("Static").unwrap().sites.contains(&RuleSite::Function));
     assert!(!applied_rule("Kernel").unwrap().sites.contains(&RuleSite::Constant));
-    let bundle = clean(&[("main.jet", "#Inline pub fn hint(value: Int) -> Int { value + 1 }\n#Inline(.Always) pub fn promise(value: Int) -> Int { value + 1 }\n#Scalar pub fn scalar(value: Int) -> Int { value + 1 }\n#Kernel(.parallel) pub fn kernel(value: Int) -> Int { value + 1 }\n#Static TABLE :: prep { 7 }\nfn run() { print(TABLE) }\n")]);
+    let bundle = clean(&[("main.jet", "#Inline fn hint(value: Int) -> Int { value + 1 }\n#Inline(.Always) fn promise(value: Int) -> Int { value + 1 }\n#Scalar fn scalar(value: Int) -> Int { value + 1 }\n#Kernel(.parallel) fn kernel(value: Int) -> Int { value + 1 }\n#Static TABLE :: prep { 7 }\nfn run() { print(TABLE) }\n")]);
     let items = &bundle.modules[bundle.entry].items;
     assert!(function(items, "hint").is_inline);
     assert!(!function(items, "hint").is_inline_always);
@@ -245,7 +245,7 @@ fn core_import_alias_resolves_a_loader_materialized_marker_declaration() {
     let core = jet_foundation::CoreModuleExports::core_source_module("core.compiler.lang").unwrap();
     let module = bundle.modules.iter().position(|module| module.alias == core.alias)
         .expect("Core import materializes its canonical source module");
-    let (tokens, diagnostics) = jet::Lexer::lex("pub marker Fixture($sites: [.Function])");
+    let (tokens, diagnostics) = jet::Lexer::lex("marker Fixture($sites: [.Function])");
     assert!(diagnostics.is_empty());
     let mut declaration = jet::Parser::parse(&tokens).unwrap().items;
     bundle.modules[module].items.append(&mut declaration);
@@ -262,9 +262,9 @@ fn core_import_alias_resolves_a_loader_materialized_marker_declaration() {
 #[test]
 fn imported_group_replay_preserves_loader_synthesized_module_imports() {
     let bundle = clean(&[
-        ("main.jet", "module helper\nuse library as lib\n#lib.Fast pub fn work() {}\nfn run() { print(helper.value()) }\n"),
-        ("helper.jet", "pub fn value() -> Int { 7 }\n"),
-        ("library.jet", "pub marker Fast = #[Inline, Scalar]\n"),
+        ("main.jet", "module helper\nuse library as lib\n#lib.Fast fn work() {}\nfn run() { print(helper.value()) }\n"),
+        ("helper.jet", "fn value() -> Int { 7 }\n"),
+        ("library.jet", "marker Fast = #[Inline, Scalar]\n"),
     ]);
     let main = &bundle.modules[bundle.entry];
     assert!(main.imports.iter().any(|import| import.import_alias() == "helper"),

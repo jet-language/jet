@@ -4,35 +4,35 @@ use core.crypto as core_parent_crypto
 use core.encoding.json as core_parent_json
 use jet_foundation.[MIRFunctionID, MIRProgram, MIRSharedLifetime, mir_program_digest]
 
-pub enum CoreSharedParentAdmission {
+enum CoreSharedParentAdmission {
     Attached(attachment: CoreSharedParentAttachment)
     Refused(code: String, key: String)
 }
-pub struct CoreSharedParentAttachment { pub manifest_digest: String }
-pub struct CoreSharedParent {
+struct CoreSharedParentAttachment { manifest_digest: String }
+struct CoreSharedParent {
     state: Shared<CoreSharedParentState>
 }
 struct CoreSharedParentState {
-    pub manifest: CoreSharedManifest?
-    pub binding: CoreSharedBinding?
-    pub loaded: X64LoadedImage?
-    pub getters: [String:Int]
-    pub ready: Bool
-    pub poisoned: Bool
-    pub failure: String
-    pub runtime_receipt_identity: String
-    pub runtime_library_identity: String
-    pub begin: Int
-    pub status: Int
-    pub end: Int
+    manifest: CoreSharedManifest?
+    binding: CoreSharedBinding?
+    loaded: X64LoadedImage?
+    getters: [String:Int]
+    ready: Bool
+    poisoned: Bool
+    failure: String
+    runtime_receipt_identity: String
+    runtime_library_identity: String
+    begin: Int
+    status: Int
+    end: Int
 }
 // The private admitted host builds this inventory from RuntimeLibrary.symbol;
 // addresses are not selected by flags, a receipt sidecar, or RTLD_DEFAULT.
-pub struct CoreSharedParentRuntime {
-    pub receipt_identity: String
-    pub library_identity: String
-    pub symbols: [String:Int]
-    pub export_abis: [String:CoreSharedRuntimeExportABI]
+struct CoreSharedParentRuntime {
+    receipt_identity: String
+    library_identity: String
+    symbols: [String:Int]
+    export_abis: [String:CoreSharedRuntimeExportABI]
 }
 // These are actual library-feed layouts sealed in the embedded receipt, not
 // signatures inferred from a symbol name or rebuilt by the receiving factory.
@@ -63,7 +63,7 @@ fn core_shared_runtime_layout_decode(tree: DataTree) -> LIRLayout? Never! {
     }
     Val(LIRLayout{size: size, align: align, class: class})
 }
-pub fn core_shared_runtime_export_abis_decode(tree: DataTree) -> [String:CoreSharedRuntimeExportABI]? Never! {
+fn core_shared_runtime_export_abis_decode(tree: DataTree) -> [String:CoreSharedRuntimeExportABI]? Never! {
     rows :: x64_execution_array(tree) ?? return None
     result := [String:CoreSharedRuntimeExportABI]{}
     previous := ""
@@ -91,16 +91,16 @@ fn core_shared_runtime_abi_inventory_valid(runtime: CoreSharedParentRuntime) -> 
     true
 }
 
-pub struct CoreSharedRuntimeCallResult {
-    pub word: Int
-    pub refusal_key: String
+struct CoreSharedRuntimeCallResult {
+    word: Int
+    refusal_key: String
 }
 fn core_shared_runtime_word_layout(layout: LIRLayout) -> Bool Never! {
     (layout.class == LIRABIClass.Integer || layout.class == LIRABIClass.Pointer)
         && (layout.size == 1 || layout.size == 2 || layout.size == 4 || layout.size == 8)
         && layout.align > 0 && layout.align <= 8 && (layout.align & (layout.align - 1)) == 0
 }
-pub fn core_shared_runtime_call_error(runtime: CoreSharedParentRuntime, symbol: String, arity: Int) -> String Never! {
+fn core_shared_runtime_call_error(runtime: CoreSharedParentRuntime, symbol: String, arity: Int) -> String Never! {
     if runtime.receipt_identity == "" || runtime.library_identity == "" -> return "RuntimeLibraryMissingAdmission: {symbol}"
     row :: runtime.export_abis.get(symbol) ?? return "RuntimeLibraryExportABIInvalid: {symbol}"
     if row.symbol != symbol || (runtime.symbols.get(symbol) ?? 0) == 0 -> return "RuntimeLibraryExportSealMismatch: {symbol}"
@@ -119,7 +119,7 @@ pub fn core_shared_runtime_call_error(runtime: CoreSharedParentRuntime, symbol: 
     ""
 }
 // Fixed arguments avoid allocating/copying an argument list on this hot path.
-pub fn core_shared_runtime_call(runtime: CoreSharedParentRuntime, symbol: String, arity: Int, first: Int, second: Int, third: Int) -> CoreSharedRuntimeCallResult {
+fn core_shared_runtime_call(runtime: CoreSharedParentRuntime, symbol: String, arity: Int, first: Int, second: Int, third: Int) -> CoreSharedRuntimeCallResult {
     error :: core_shared_runtime_call_error(runtime, symbol, arity)
     if error != "" -> return CoreSharedRuntimeCallResult{word: 0, refusal_key: error}
     row :: runtime.export_abis.get(symbol) ?? panic("validated runtime ABI disappeared")
@@ -134,7 +134,7 @@ pub fn core_shared_runtime_call(runtime: CoreSharedParentRuntime, symbol: String
     } else { word = 0 }
     CoreSharedRuntimeCallResult{word: word, refusal_key: ""}
 }
-pub fn core_shared_runtime_allocate(runtime: CoreSharedParentRuntime, size: Int, align: Int) -> X64NativeAllocation {
+fn core_shared_runtime_allocate(runtime: CoreSharedParentRuntime, size: Int, align: Int) -> X64NativeAllocation {
     error := x64_native_allocation_error(size, align)
     if error == "" -> error = core_shared_runtime_call_error(runtime, "jet_rt_alloc", 2)
     if error == "" -> error = core_shared_runtime_call_error(runtime, "jet_rt_free", 3)
@@ -150,13 +150,13 @@ pub fn core_shared_runtime_allocate(runtime: CoreSharedParentRuntime, size: Int,
     x64_execution_alloc(runtime.symbols.get("jet_rt_alloc") ?? 0, runtime.symbols.get("jet_rt_free") ?? 0, size, align)
 }
 
-pub trait CoreSharedParentProducer {
+trait CoreSharedParentProducer {
     fn produce(self) -> CoreSharedBinding Never!
 }
-pub struct CoreSharedCanonicalProducer {
-    pub program: MIRProgram
-    pub sources: [CoreSharedSource]
-    pub producer_identity: String
+struct CoreSharedCanonicalProducer {
+    program: MIRProgram
+    sources: [CoreSharedSource]
+    producer_identity: String
 }
 impl CoreSharedCanonicalProducer.CoreSharedParentProducer {
     fn produce(self) -> CoreSharedBinding Never! {
@@ -169,7 +169,7 @@ impl CoreSharedCanonicalProducer.CoreSharedParentProducer {
         core_shared_binding(self.program, lowered, manifest, self.sources, self.producer_identity)
     }
 }
-pub fn core_shared_parent_new() -> CoreSharedParent Never! {
+fn core_shared_parent_new() -> CoreSharedParent Never! {
     CoreSharedParent{state: shared CoreSharedParentState{manifest: None, binding: None, loaded: None, getters: [String:Int]{}, ready: false, poisoned: false, failure: "", runtime_receipt_identity: "", runtime_library_identity: "", begin: 0, status: 0, end: 0}}
 }
 fn core_shared_parent_refusal(key: String) -> CoreSharedParentAdmission Never! {
@@ -193,7 +193,7 @@ fn core_shared_parent_warm_admission(state: CoreSharedParentState, expected: Cor
 
 // The producer runs only on the cold path while this host's admission is held.
 // A mapped/stopped startup is permanently retained and poisoned, never replayed.
-pub fn core_shared_parent_admit(parent: &CoreSharedParent, expected: CoreSharedManifest, runtime: CoreSharedParentRuntime, producer: CoreSharedParentProducer) -> CoreSharedParentAdmission Never! {
+fn core_shared_parent_admit(parent: &CoreSharedParent, expected: CoreSharedManifest, runtime: CoreSharedParentRuntime, producer: CoreSharedParentProducer) -> CoreSharedParentAdmission Never! {
     if !core_shared_parent_manifest_valid(expected) -> return core_shared_parent_refusal("CoreSharedManifestInvalid")
     if !core_shared_runtime_abi_inventory_valid(runtime) -> return core_shared_parent_refusal("RuntimeLibraryExportABIInvalid")
     guard := parent.state.guard_edit()
@@ -248,12 +248,12 @@ pub fn core_shared_parent_admit(parent: &CoreSharedParent, expected: CoreSharedM
     CoreSharedParentAdmission.Attached{attachment: CoreSharedParentAttachment{manifest_digest: expected.digest}}
 }
 
-pub struct CoreSharedParentGetterResult {
-    pub shared: Int
-    pub code: String
-    pub refusal_key: String
+struct CoreSharedParentGetterResult {
+    shared: Int
+    code: String
+    refusal_key: String
 }
-pub fn core_shared_parent_getter(parent: &CoreSharedParent, attachment: CoreSharedParentAttachment, site_key: String) -> CoreSharedParentGetterResult Never! {
+fn core_shared_parent_getter(parent: &CoreSharedParent, attachment: CoreSharedParentAttachment, site_key: String) -> CoreSharedParentGetterResult Never! {
     guard :: parent.state.guard_read()
     manifest :: guard.value.manifest ?? return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedNotAdmitted"}
     if !guard.value.ready || guard.value.poisoned || attachment.manifest_digest != manifest.digest -> return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedSchemaMismatch"}
@@ -301,14 +301,14 @@ pub fn core_shared_parent_getter(parent: &CoreSharedParent, attachment: CoreShar
 
 // Callable lookup uses the same pinned image and digest as the admitted getter.
 // The factory receives only an address for this invocation, never binding state.
-pub struct CoreSharedParentCallableResult {
-    pub address: Int
-    pub refusal_key: String
+struct CoreSharedParentCallableResult {
+    address: Int
+    refusal_key: String
 }
 struct CoreSharedParentCallableLookup {
-    pub row: CoreSharedCallableBinding?
-    pub base: Int
-    pub refusal_key: String
+    row: CoreSharedCallableBinding?
+    base: Int
+    refusal_key: String
 }
 fn core_shared_parent_callable_lookup(parent: &CoreSharedParent, attachment: CoreSharedParentAttachment, identity: String) -> CoreSharedParentCallableLookup Never! {
     guard :: parent.state.guard_read()
@@ -321,7 +321,7 @@ fn core_shared_parent_callable_lookup(parent: &CoreSharedParent, attachment: Cor
     loaded :: guard.value.loaded ?? return CoreSharedParentCallableLookup{row: None, base: 0, refusal_key: "CoreSharedNotAdmitted"}
     CoreSharedParentCallableLookup{row: Val(row), base: loaded.base, refusal_key: ""}
 }
-pub fn core_shared_parent_callable(parent: &CoreSharedParent, attachment: CoreSharedParentAttachment, identity: String) -> CoreSharedParentCallableResult Never! {
+fn core_shared_parent_callable(parent: &CoreSharedParent, attachment: CoreSharedParentAttachment, identity: String) -> CoreSharedParentCallableResult Never! {
     lookup :: core_shared_parent_callable_lookup(&parent, attachment, identity)
     row :: lookup.row ?? return CoreSharedParentCallableResult{address: 0, refusal_key: lookup.refusal_key}
     CoreSharedParentCallableResult{address: lookup.base + row.linked_offset, refusal_key: ""}
@@ -330,13 +330,13 @@ pub fn core_shared_parent_callable(parent: &CoreSharedParent, attachment: CoreSh
 // Return the admitted canonical inventory, not a factory-derived layout table.
 // Fetch once per admitted attachment and retain that immutable inventory in
 // the factory codec context; this returns a manifest value, not a live view.
-pub fn core_shared_parent_payload_manifest(parent: CoreSharedParent, attachment: CoreSharedParentAttachment) -> CoreSharedManifest? Never! {
+fn core_shared_parent_payload_manifest(parent: CoreSharedParent, attachment: CoreSharedParentAttachment) -> CoreSharedManifest? Never! {
     guard :: parent.state.guard_read()
     manifest :: guard.value.manifest ?? return None
     if !guard.value.ready || guard.value.poisoned || attachment.manifest_digest != manifest.digest -> return None
     Val(manifest)
 }
-pub fn core_shared_payload_callable_error(row: CoreSharedCallableBinding, type_key: String, clone: Bool) -> String Never! {
+fn core_shared_payload_callable_error(row: CoreSharedCallableBinding, type_key: String, clone: Bool) -> String Never! {
     role :: if clone -> "lazy.clone" else -> "lazy.drop"
     if row.role != role || row.type_key != type_key || row.semantic_identity != "{role}:{type_key}" -> return "CoreSharedPayloadCallableRoleMismatch: {row.semantic_identity}"
     if row.signature.convention != .SystemV || row.signature.result != None || row.signature.params.len() != (if clone -> 2 else -> 1) -> return "CoreSharedPayloadCallableSignatureMismatch: {row.semantic_identity}"
@@ -345,7 +345,7 @@ pub fn core_shared_payload_callable_error(row: CoreSharedCallableBinding, type_k
     }
     ""
 }
-pub fn core_shared_parent_payload_callable(parent: CoreSharedParent, attachment: CoreSharedParentAttachment, type_key: String, clone: Bool) -> CoreSharedParentCallableResult Never! {
+fn core_shared_parent_payload_callable(parent: CoreSharedParent, attachment: CoreSharedParentAttachment, type_key: String, clone: Bool) -> CoreSharedParentCallableResult Never! {
     role :: if clone -> "lazy.clone" else -> "lazy.drop"
     lookup :: core_shared_parent_callable_lookup(&parent, attachment, "{role}:{type_key}")
     row :: lookup.row ?? return CoreSharedParentCallableResult{address: 0, refusal_key: lookup.refusal_key}

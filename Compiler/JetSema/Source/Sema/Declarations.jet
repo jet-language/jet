@@ -24,7 +24,7 @@ use jet_foundation.[
     type_with_effective_fn_returns,
 ]
 
-pub fn sema_effective_return_type(return_type: Type?) -> Type Never! {
+fn sema_effective_return_type(return_type: Type?) -> Type Never! {
     // Imported declarations and local calls use the same canonical failure
     // projection; a written success type is not the callable's Result type.
     failure_contract_effective_type(failure_contract_from_return_type(return_type))
@@ -82,14 +82,14 @@ fn sema_checked_return_type(return_type: Type?, raw_protocol_return: Bool) -> Ty
 // Ordering, Dyn, and same-type arithmetic), never the implicit failure
 // carrier, for user and derived impls alike (the Rust reference's
 // `uses_raw_protocol_return`).
-pub fn sema_raw_protocol_trait(trait_name: String?) -> Bool Never! {
+fn sema_raw_protocol_trait(trait_name: String?) -> Bool Never! {
     name :: trait_name ?? return false
     name == "Display" || name == "Debug" || name == "Encode" || name == "Decode" || name == "Equatable" || name == "Comparable" || name == "Add" || name == "Sub" || name == "Mul" || name == "Div"
 }
 
 // Whether a trait-impl method keeps its declared return raw (the Rust
 // reference's `uses_raw_protocol_function_return`).
-pub fn sema_raw_protocol_function_return(trait_name: String?, implementation_generated: Bool, func: Func) -> Bool Never! {
+fn sema_raw_protocol_function_return(trait_name: String?, implementation_generated: Bool, func: Func) -> Bool Never! {
     if sema_raw_protocol_trait(trait_name) -> return true
     func.compiler_generated && (implementation_generated || func.state_transition != None)
 }
@@ -97,7 +97,7 @@ pub fn sema_raw_protocol_function_return(trait_name: String?, implementation_gen
 // A callable's checked return: a raw protocol return keeps its declared type
 // (Unit when omitted); every other return projects through the failure rail
 // (the Rust reference's `checked_return_types`).
-pub fn sema_checked_return_type(return_type: Type?, raw_protocol_return: Bool) -> Type Never! {
+fn sema_checked_return_type(return_type: Type?, raw_protocol_return: Bool) -> Type Never! {
     if raw_protocol_return -> return return_type ?? Type.Named{name: "Unit"}
     sema_effective_return_type(return_type)
 }
@@ -110,7 +110,7 @@ fn sema_failure_contract_source(return_type: Type?) -> String Never! {
 }
 // Guest.rs `export_signature`: failure inference's infallible rail is not
 // a second Component value. Keep genuinely fallible and diverging returns.
-pub fn sema_guest_export_value_type(return_type: Type?) -> Type? Never! {
+fn sema_guest_export_value_type(return_type: Type?) -> Type? Never! {
     value :: return_type ?? return None
     if value == .Result(ok, err) && err == .Named(name) && name == "Never" {
         if ok == .Named(success_name) && success_name == "Never" -> return Val(value)

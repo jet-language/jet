@@ -949,7 +949,7 @@ fn sema_stmt_check_range_stride(expr: Expr, environment: SemaScopeEnvironment, p
 
 // D-RANGE-BACKWARD1=A: a number written in the source, with an optional
 // leading minus (Rust `written_range_int`).
-pub fn sema_range_written_int(expr: Expr) -> Int? {
+fn sema_range_written_int(expr: Expr) -> Int? {
     if expr == {
         .Int(value, _, _, _) -> Val(value)
         .Paren(inner, _) -> sema_range_written_int(inner)
@@ -965,7 +965,7 @@ pub fn sema_range_written_int(expr: Expr) -> Int? {
 // D-RANGE-BACKWARD1=A: written ends and step that count in opposite
 // directions are E0170 (Rust `backward_range_diagnostic`). A loop range gets
 // a fix edit for its step; a range value is taught to write its ends in order.
-pub fn sema_range_backward_diagnostic(start: Expr, end: Expr, step: Expr?, exclusive: Bool, loop_range: Bool) -> Diagnostic? {
+fn sema_range_backward_diagnostic(start: Expr, end: Expr, step: Expr?, exclusive: Bool, loop_range: Bool) -> Diagnostic? {
     s :: sema_range_written_int(start) ?? return None
     e :: sema_range_written_int(end) ?? return None
     op :: if exclusive -> "..<" else -> ".."
@@ -1498,7 +1498,7 @@ fn sema_stmt_index_write_is_collection(ty: Type) -> Bool Never! {
 
 // D-SOA1 (E1108): the element name of a `[S]` whose struct is
 // `#Layout(columnar)`; v1 supports only the core read surface on it.
-pub fn sema_columnar_list_element(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> String? {
+fn sema_columnar_list_element(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> String? {
     if sema_expr_unwrap_tag(ty) == .List(inner) {
         if inner == .Named(element) && sema_stmt_for_in_columnar(environment, program, inner) -> return Val(element)
     }
@@ -3481,7 +3481,7 @@ fn sema_stmt_numeric_slot_self_typed(expr: Expr, required: Type) -> Bool Never! 
 // A self-typed value in a numeric slot: widened (Rust `widen_numeric_expr`)
 // when its numeric type widens into the slot, else the ordinary expected-type
 // check.
-pub fn sema_stmt_numeric_slot_value(value: TExpr, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_stmt_numeric_slot_value(value: TExpr, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     if sema_expr_is_numeric(value.ty) && sema_stmt_compound_widens(value.ty, required) {
         line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
         return sema_expr_numeric_literal_conversion(value, required, value.span, line, &diagnostics)
@@ -4788,7 +4788,7 @@ fn sema_stmt_check_dead_value_tail(tail: Expr, return_type: Type?, environment: 
     sema_check_expression(tail, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) != None
 }
 
-pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> SemaStatementResult {
+fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> SemaStatementResult {
     // D-COMPILE-STACK1=A (E1403): a statement list is one source nesting level
     // below its owner, as each of its statements is in the Rust checker.
     entered_nesting := false

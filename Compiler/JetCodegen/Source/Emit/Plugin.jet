@@ -23,21 +23,21 @@ use jet_foundation.[
 ]
 
 // The guest-side artifacts of a `target: sandbox` build.
-pub struct JetPluginArtifacts {
+struct JetPluginArtifacts {
     // The full `.wit` world text (`package jet:<name>@0.1.0; world jetplugin { … }`).
-    pub wit: String
+    wit: String
     // The whole-program Rust plus the canonical-ABI export wrappers, ready for
     // `rustc --target wasm32-unknown-unknown --crate-type cdylib`.
-    pub guest_rust: String
+    guest_rust: String
     // The fixed `.wit` world name.
-    pub world_name: String
+    world_name: String
     // The sanitized artifact-plan name used as the WIT package identity.
-    pub export_name: String
+    export_name: String
     // The Jet names of every exported function, in export-row order.
-    pub exported_fns: [String]
+    exported_fns: [String]
 }
 
-pub enum JetPluginEmitResult {
+enum JetPluginEmitResult {
     Complete(artifacts: JetPluginArtifacts)
     Incomplete(failure: JetRustEmitFailure)
 }
@@ -992,7 +992,7 @@ fn jet_plugin_time_zones(timezone_data: [JetWebTimezoneAsset]) -> String Never! 
 
 // Build the guest artifacts of the checked `SandboxPlugin` artifact `artifact_id`
 // around `whole_program_rust`, the emitter's own output for that program.
-pub fn jet_rust_emit_plugin(program: MIRProgram, config: JetRustEmitConfig, artifact_id: MIRArtifactID, codable_keys: [String], whole_program_rust: String, timezone_data: [JetWebTimezoneAsset]) -> JetPluginEmitResult Never! {
+fn jet_rust_emit_plugin(program: MIRProgram, config: JetRustEmitConfig, artifact_id: MIRArtifactID, codable_keys: [String], whole_program_rust: String, timezone_data: [JetWebTimezoneAsset]) -> JetPluginEmitResult Never! {
     ctx := jet_rust_emit_context(program, config)
     selected := MIRArtifactPlan?{None}
     loop artifact in ctx.program.artifacts {

@@ -3,6 +3,6 @@
 use core.sys as compiler_target_sys
 
 TARGET_POINTER_SIZE :: prep { JetCompilerMetadataPointer.$layout.size ?? panic("compiler target has no concrete pointer layout") }
-pub JET_COMPILER_TARGET_USIZE_MAX :: prep {
+JET_COMPILER_TARGET_USIZE_MAX :: prep {
     (if TARGET_POINTER_SIZE <= 0 || TARGET_POINTER_SIZE > 8 -> panic("compiler target pointer width does not fit the U64 metadata carrier") else if TARGET_POINTER_SIZE == 8 -> U64{0xffffffffffffffff} else -> (U64{1} << (8 * TARGET_POINTER_SIZE)) - U64{1})
 }

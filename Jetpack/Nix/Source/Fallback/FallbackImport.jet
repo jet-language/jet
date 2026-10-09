@@ -146,7 +146,7 @@ struct NixImportedState {
 
 // Import a rich fallback record. None means the record is the old pinned
 // `nix build --json` shape with no fallback projections to retain.
-pub fn nix_fallback_import_record(record: Dyn) -> NixImportedState? NixError! {
+fn nix_fallback_import_record(record: Dyn) -> NixImportedState? NixError! {
     root :: nix_fallback_object(record)
     import :: nix_fallback_import_object(root)
     if !nix_fallback_detect(root.keys().to_list(), import.keys().to_list()) -> return Ok(None)

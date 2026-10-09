@@ -650,7 +650,7 @@ fn sema_contract_result_binding_symbol(environment: SemaScopeEnvironment, progra
     Symbol{id: id, kind: SymbolKind.Local, name: "result", module_name: environment.module_identity, owner: Val(result_owner), span: span, ty: Val(ty), visibility: 0}
 }
 
-pub fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractDeclaration {
+fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractDeclaration {
     declared_return := func.return_type
     if program.registration_graph == .Val(graph) && declared_return == .Val(declared) {
         declared_return = Val(sema_type_resolve_declared_with_generics(graph, declared, environment.module_identity, environment.generic_params))
@@ -715,7 +715,7 @@ fn sema_contract_method_function_for_item(item: Item, target: SymbolID, module_i
     None
 }
 
-pub fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> Func? {
+fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> Func? {
     if program.registration_graph == .Val(graph) {
         declaration :: sema_registration_callable_declaration(graph, target)
         if declaration != None -> return declaration
@@ -776,7 +776,7 @@ fn sema_contract_method_facts_for_item(item: Item, target: SymbolID, module_iden
 
 // The facts of the declaration `sema_contract_function_for_symbol` resolves
 // `target` to (same lookup order), without copying it.
-pub fn sema_contract_function_facts(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> SemaContractCalleeFacts? {
+fn sema_contract_function_facts(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> SemaContractCalleeFacts? {
     if program.registration_graph == .Val(graph) {
         registered :: sema_contract_registered_facts(graph, target)
         if registered != None -> return registered
@@ -792,7 +792,7 @@ pub fn sema_contract_function_facts(environment: SemaScopeEnvironment, program: 
 }
 
 // True when a call to `target` has `pre` clauses to check.
-pub fn sema_contract_function_has_pre(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> Bool Never! {
+fn sema_contract_function_has_pre(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> Bool Never! {
     facts :: sema_contract_function_facts(environment, program, target) ?? return false
     facts.pre_count > 0
 }
@@ -833,7 +833,7 @@ fn sema_contract_pin_argument(environment: SemaScopeEnvironment, program: SemaPr
     local
 }
 
-pub fn sema_contract_check_call(func: Func, args: &[TCallArg], slots: [Int], call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractCall? {
+fn sema_contract_check_call(func: Func, args: &[TCallArg], slots: [Int], call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractCall? {
     if func.pre.len() == 0 -> return Val(SemaContractCall{bindings: [TStmt]{}, contracts: [TContract]{}})
     if args.len() != slots.len() -> return None
     if func.params.len() == 0 && args.len() > 0 -> return None

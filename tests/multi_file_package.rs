@@ -65,13 +65,13 @@ fn sibling_calls_keep_private_generic_functions_live() {
 // function-typed argument whose nominal crosses the same file boundary.
 const CALLABLE_FILES: &[(&str, &str)] = &[
     ("package.jet", "name: \"orphan_callable\"\nversion: \"0.1.0\"\n"),
-    ("values.jet", "pub struct Item { weight: Int }\npub struct Pool<T> { items: [T] }\npub BASE :: 4\n"),
+    ("values.jet", "struct Item { weight: Int }\nstruct Pool<T> { items: [T] }\nBASE :: 4\n"),
     ("functions.jet", r#"
 use values.[Item, Pool]
-pub fn apply<T>(value: T, transform: fn(T) -> T) -> T { transform(value) }
-pub fn duplicate<T>(value: T) -> T { ~value }
-pub fn pool_copy<T>(pool: Pool<T>) -> Pool<T> { ~pool }
-pub fn total(pool: Pool<Item>) -> Int { pool.items[0].weight }
+fn apply<T>(value: T, transform: fn(T) -> T) -> T { transform(value) }
+fn duplicate<T>(value: T) -> T { ~value }
+fn pool_copy<T>(pool: Pool<T>) -> Pool<T> { ~pool }
+fn total(pool: Pool<Item>) -> Int { pool.items[0].weight }
 "#),
     ("run.jet", r#"
 use values.[Item as Weight, Pool as Store, BASE as OFFSET]

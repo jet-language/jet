@@ -957,7 +957,7 @@ fn sema_call_http_transport(record: CoreCallRecord, args: [CallArg], type_args: 
     SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, context, &diagnostics)}
 }
 
-pub fn sema_call_try_http_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
+fn sema_call_try_http_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     if record.module_name == "core.http.client" && (record.member == "get" || record.member == "post" || record.member == "request") -> return sema_call_http_transport(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if (record.module_name == "app" || record.module_name == "core.web") && record.member == "sync" -> return sema_call_http_sync(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if record.module_name == "core.web" && record.member == "form" -> return sema_call_http_web_form(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -994,7 +994,7 @@ fn sema_web_form_method_member(method: String, arity: Int) -> String? Never! {
 
 // Only the native typed-model identity is routed here. Canonical source
 // forms records continue through ordinary source method/function checking.
-pub fn sema_call_try_web_form_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_web_form_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "WebFormTyped"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     member :: sema_web_form_method_member(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     record :: sema_call_core_record("core.web.forms", member, args.len() + 1, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}

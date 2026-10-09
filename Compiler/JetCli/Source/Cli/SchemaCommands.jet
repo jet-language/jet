@@ -3,7 +3,7 @@
 use jet_driver.[JetDriverCompileRequest, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_source_query, jet_driver_load_schema_snapshots, jet_driver_schema_pending_breaks, load_all_snapshots, save_snapshot]
 use jet_sema.[SchemaSnapshot, snapshot_from_struct]
 
-pub fn jet_cli_schema_status_text(snapshots: [SchemaSnapshot], pending: [String]) -> String Never! {
+fn jet_cli_schema_status_text(snapshots: [SchemaSnapshot], pending: [String]) -> String Never! {
     if snapshots.len() == 0 -> return "no published schemas yet.\nnote: a `#PublishedSchema` struct is snapshotted into .jet/cache/schema/ on `jet registry publish`.\n"
     out := "published schemas in this project:\n\n"
     loop snapshot in snapshots {
@@ -20,7 +20,7 @@ pub fn jet_cli_schema_status_text(snapshots: [SchemaSnapshot], pending: [String]
 // The host supplies the same authorized load-only request used by source
 // explain. None means no readable entry/request: status intentionally ignores
 // that advisory failure, but still lists valid canonical snapshots.
-pub fn jet_cli_schema_status_host(root: String, request: JetDriverCompileRequest?) -> JetDriverVerbOutput {
+fn jet_cli_schema_status_host(root: String, request: JetDriverCompileRequest?) -> JetDriverVerbOutput {
     snapshots :: load_all_snapshots(root)
     pending := [String]{}
     if snapshots.len() > 0 && request == .Val(prepared) {
@@ -33,12 +33,12 @@ pub fn jet_cli_schema_status_host(root: String, request: JetDriverCompileRequest
     JetDriverVerbOutput{stdout: jet_cli_schema_status_text(snapshots, pending), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-pub fn jet_cli_schema_squash_summary(count: Int, before: String) -> String Never! {
+fn jet_cli_schema_squash_summary(count: Int, before: String) -> String Never! {
     if count == 0 -> return "no `#PublishedSchema` structs found — nothing to squash.\n"
     "\nok: {count} snapshot(s) re-baselined. Migration blocks for versions before {before} are no longer required.\nnote: this rewrote .jet/cache/schema/ only — your source is unchanged. Commit the updated snapshots.\n"
 }
 
-pub fn jet_cli_schema_squash_host(root: String, request: JetDriverCompileRequest?, before: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
+fn jet_cli_schema_squash_host(root: String, request: JetDriverCompileRequest?, before: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
     prepared :: request ?? return jet_cli_maintenance_error("E2105", "couldn't load the project to read its current schema shape", None, color, json)
     loaded :: jet_driver_source_query(prepared)
     if !loaded.complete -> return jet_cli_maintenance_error("E2105", "couldn't load the project to read its current schema shape", None, color, json)

@@ -1024,7 +1024,7 @@ fn jet_cli_insert_source(files: [JetDriverAuthorizedSourceFile], added: JetDrive
 
 // A prepared compile: the authorized request and the snapshot it holds, or
 // the refusal that stopped preparing it.
-pub enum JetCLIPrepared {
+enum JetCLIPrepared {
     Prepared(request: JetDriverCompileRequest, snapshot: JetDriverAuthorizedSourceSnapshot)
     Refused(output: JetDriverVerbOutput)
 }
@@ -1041,7 +1041,7 @@ fn jet_cli_prepare_refused(what: String, fix: String, color: Bool) -> JetCLIPrep
 // them, compiled with `entry` as the entry. An overlay replaces the bytes of a
 // walked file, or adds an absent `.jet` file the walk would have read; the
 // source loader and its authorization stay the one in this file.
-pub fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
+fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
     if jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode) == {
         .Refused(output) -> return JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -1054,7 +1054,7 @@ pub fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLI
 // The authorized request `jet_cli_compile_overlays` compiles, without
 // compiling it: load-only queries (schema, source explain, gates) run the
 // driver's source query over exactly the sources a compile would see.
-pub fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLIPrepared {
+fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLIPrepared {
     anchor_path :: cli_files.realpath(anchor) ?? return jet_cli_prepare_refused("can't securely read the file `{anchor}`", "check the spelling, or run jet from the folder that contains it", color)
     root :: jet_cli_source_root(anchor_path)
     root_stat :: cli_files.stat(root) ?? return jet_cli_prepare_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)

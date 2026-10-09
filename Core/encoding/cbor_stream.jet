@@ -59,7 +59,7 @@ struct ReadFrame {
     keys_heap: U64
 }
 
-pub struct CBORPull {
+struct CBORPull {
     input: FileReader
     limits: EncodingLimits
     total: Int
@@ -346,7 +346,7 @@ pub struct CBORPull {
         Ok(Val(event))
     }
 
-    pub fn next(&self) -[IO]> DataEvent? EncodingError! {
+    fn next(&self) -[IO]> DataEvent? EncodingError! {
         if self.terminal == .Val(first) -> return Err(~first)
         value :: &self.next_inner() ?? return Err(&self.fail(^err))
         if value == None && self.eof -> &self.discard()
@@ -354,7 +354,7 @@ pub struct CBORPull {
     }
 }
 
-pub fn reader(input: ^FileReader, limits: EncodingLimits) -[FS]> CBORPull EncodingError! {
+fn reader(input: ^FileReader, limits: EncodingLimits) -[FS]> CBORPull EncodingError! {
     limits_checked(limits) ?? return Err(err)
     Ok(CBORPull{input: ^input, limits: limits, total: 0, terminal: None, eof: false, root_done: false, lookahead: None, frames: [ReadFrame]{}, retained: 0, allocation: stream.budget(limits)})
 }
@@ -451,7 +451,7 @@ fn frame_heap(frame: WriteFrame) -> Int Never! {
     total
 }
 
-pub struct CBORPush {
+struct CBORPush {
     output: FileWriter
     limits: EncodingLimits
     terminal: EncodingError?
@@ -657,17 +657,17 @@ pub struct CBORPush {
         }
     }
 
-    pub fn write(&self, event: ^DataEvent) EncodingError! -[IO]> {
+    fn write(&self, event: ^DataEvent) EncodingError! -[IO]> {
         if self.terminal == .Val(first) -> return Err(~first)
         &self.write_inner(event) ?? return Err(&self.fail(^err))
     }
 
-    pub fn flush(&self) EncodingError! -[IO]> {
+    fn flush(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(first) -> return Err(~first)
         encoding.__flush(&self.output) ?? return Err(&self.fail(io_error(self.total, "$", err)))
     }
 
-    pub fn finish(&self) EncodingError! -[IO]> {
+    fn finish(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(first) -> return Err(~first)
         if self.finished -> return
         if self.frames.len() != 0 || !self.root_written -> return Err(&self.fail(error(.State, self.total, "$", "finish requires one complete CBOR root")))
@@ -676,7 +676,7 @@ pub struct CBORPush {
     }
 }
 
-pub fn writer(output: ^FileWriter, limits: EncodingLimits) -[FS]> CBORPush EncodingError! {
+fn writer(output: ^FileWriter, limits: EncodingLimits) -[FS]> CBORPush EncodingError! {
     limits_checked(limits) ?? return Err(err)
     Ok(CBORPush{output: ^output, limits: limits, terminal: None, total: 0, frames: [WriteFrame]{}, root_written: false, finished: false, retained: 0, allocation: stream.budget(limits)})
 }

@@ -7,7 +7,7 @@ use core.mem as mem
 use core.math as math
 
 // #4737: preserve insertion order without materializing a map or cloning a tree.
-pub fn object_entries(value: DataTree) -> View<(key: String, value: DataTree)> from value {
+fn object_entries(value: DataTree) -> View<(key: String, value: DataTree)> from value {
     if value == .Object(_) {
         #Unsafe("the Object variant was checked immediately before borrowing its ordered backing") {
             return encoding.__object_entries_view(value)
@@ -16,26 +16,26 @@ pub fn object_entries(value: DataTree) -> View<(key: String, value: DataTree)> f
     panic("Object entry view requires an Object")
 }
 
-pub fn object_from_entries(entries: ^[(key: String, value: DataTree)]) -> DataTree Never! {
+fn object_from_entries(entries: ^[(key: String, value: DataTree)]) -> DataTree Never! {
     #Unsafe("transfer the owned ordered entries allocation into the native Object carrier") {
         return encoding.__object_from_entries(^entries)
     }
 }
 
-pub fn bytes_payload(value: DataTree) -> View<U8> from value {
+fn bytes_payload(value: DataTree) -> View<U8> from value {
     #Unsafe("check the private Bytes variant immediately before borrowing its backing") {
         if value == .Bytes(_) -> return encoding.__bytes_view(value)
     }
     panic("byte payload requires a Bytes carrier")
 }
 
-pub fn typed_number(text: ^String) -> DataTree Never! {
+fn typed_number(text: ^String) -> DataTree Never! {
     #Unsafe("the shared parser validated this exact numeric lexeme") {
         return DataTree.Number(text)
     }
 }
 
-pub fn typed_string(text: ^String) -> DataTree Never! {
+fn typed_string(text: ^String) -> DataTree Never! {
     #Unsafe("retain decoded JSON text until the target Decode contract is known") {
         return encoding.__typed_text(^text)
     }
@@ -46,10 +46,10 @@ struct AllocationState {
     limit: Int
 }
 
-pub struct AllocationBudget {
+struct AllocationBudget {
     state: Shared<AllocationState>
 
-    pub fn charge(self, bytes: Int) -> Bool Never! {
+    fn charge(self, bytes: Int) -> Bool Never! {
         guard := self.state.guard_edit()
         updated :: guard.value.used + bytes
         if updated > guard.value.limit -> return false
@@ -57,7 +57,7 @@ pub struct AllocationBudget {
         true
     }
 
-    pub fn release(self, bytes: Int) Never! {
+    fn release(self, bytes: Int) Never! {
         guard := self.state.guard_edit()
         updated :: guard.value.used - bytes
         guard.value.used = if updated < 0 -> 0 else -> updated
@@ -68,22 +68,22 @@ fn heap_ceiling(limits: EncodingLimits) -> Int Never! {
     limits.buffer_bytes + limits.max_item_bytes + limits.max_expansion_bytes + limits.max_depth * 256 + 65536
 }
 
-pub fn budget(limits: EncodingLimits) -> AllocationBudget Never! {
+fn budget(limits: EncodingLimits) -> AllocationBudget Never! {
     AllocationBudget{state: shared AllocationState{used: 0, limit: heap_ceiling(limits)}}
 }
 
 #Error
-pub enum __ReserveFailure {
+enum __ReserveFailure {
     Heap
     Allocation
 }
 
-pub fn reserve<T>(allocation: AllocationBudget, values: &[T], additional: Int) -> Bool Never! {
+fn reserve<T>(allocation: AllocationBudget, values: &[T], additional: Int) -> Bool Never! {
     __reserve_checked<T>(allocation, &values, additional) ?? return false
     true
 }
 
-pub fn __reserve_checked<T>(allocation: AllocationBudget, values: &[T], additional: Int) __ReserveFailure! {
+fn __reserve_checked<T>(allocation: AllocationBudget, values: &[T], additional: Int) __ReserveFailure! {
     old :: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     requested :: (values.len() + additional) * mem.__type_size<T>()
     if additional == 0 || requested <= old -> return
@@ -114,7 +114,7 @@ struct FoldBudget {
     tracked: Int
 }
 
-pub fn validate_limits(limits: EncodingLimits) EncodingError! {
+fn validate_limits(limits: EncodingLimits) EncodingError! {
     reason := ""
     if limits.buffer_bytes < 4096 || limits.buffer_bytes > 16777216 -> reason = "buffer_bytes {limits.buffer_bytes} is outside 4096..16777216"
     else if limits.max_depth < 1 || limits.max_depth > 4096 -> reason = "max_depth {limits.max_depth} is outside 1..4096"
@@ -146,7 +146,7 @@ enum ReadFrame {
     ObjectCommaOrEnd(key: String, key_heap: U64)
 }
 
-pub struct JSONPull {
+struct JSONPull {
     input: FileReader
     limits: EncodingLimits
     total: Int
@@ -163,7 +163,7 @@ pub struct JSONPull {
     allocation: AllocationBudget
     output_heap: Int
 
-    pub fn next(&self) -[IO, Time.Wait]> DataEvent? EncodingError! {
+    fn next(&self) -[IO, Time.Wait]> DataEvent? EncodingError! {
         if self.terminal == .Val(first) -> return Err(first)
         result :: if &self.next_inner() == {
             .Ok(value) -> value
@@ -623,7 +623,7 @@ fn fold_reserve<T>(parser: JSONPull, values: &[T], heap: &FoldBudget) EncodingEr
     heap.tracked += mem.__list_capacity<T>(values) * mem.__type_size<T>() - old
 }
 
-pub fn json_reader(input: ^FileReader, limits: EncodingLimits) -> JSONPull EncodingError! {
+fn json_reader(input: ^FileReader, limits: EncodingLimits) -> JSONPull EncodingError! {
     validate_limits(limits)
     Ok(JSONPull{input: input, limits: limits, total: 0, offset: 0, line: 1, column: 1, lookahead: None, frames: [ReadFrame]{}, root_started: false, eof: false, record_mode: false, typed_numbers: false, terminal: None, allocation: budget(limits), output_heap: 0})
 }
@@ -670,7 +670,7 @@ fn debug_byte(byte: U8) -> String Never! {
 fn quote_path(text: String) -> String Never! { text.debug() }
 // RFC 8785 admits an Int only when binary64 holds it exactly: its odd part
 // must fit in the 53-bit significand.
-pub fn int_is_binary64(n: Int) -> Bool Never! {
+fn int_is_binary64(n: Int) -> Bool Never! {
     odd := n
     loop odd != 0 && odd %% 2 == 0 {
         odd = odd /% 2
@@ -683,7 +683,7 @@ pub fn int_is_binary64(n: Int) -> Bool Never! {
 // RFC 8785 requires. `"{value}"` supplies the shortest round-trip digits; this
 // function only re-spells them: exponent form below 1e-6 and from 1e21,
 // positional otherwise, `e+`/`e-` exponents, and `-0` as `0`.
-pub fn jcs_number(value: Float) -> String Never! {
+fn jcs_number(value: Float) -> String Never! {
     if value == (Float{0.0}) -> return "0"
     negative :: value < (Float{0.0})
     magnitude := value
@@ -753,7 +753,7 @@ pub fn jcs_number(value: Float) -> String Never! {
 }
 
 // UTF-16 code units of a key, the RFC 8785 sort order.
-pub fn utf16_units(text: String) -> [Int] Never! {
+fn utf16_units(text: String) -> [Int] Never! {
     units := [Int]{}
     bytes :: text.bytes()
     length :: bytes.len()
@@ -785,7 +785,7 @@ pub fn utf16_units(text: String) -> [Int] Never! {
     units
 }
 
-pub fn compare_units(left: [Int], right: [Int]) -> Int Never! {
+fn compare_units(left: [Int], right: [Int]) -> Int Never! {
     n := left.len()
     if right.len() < n -> n = right.len()
     loop i in 0..<n {
@@ -798,7 +798,7 @@ pub fn compare_units(left: [Int], right: [Int]) -> Int Never! {
 }
 
 // Stable bottom-up merge sort of key indices: O(n log n) comparisons.
-pub fn sort_by_units(units: [[Int]]) -> [Int] Never! {
+fn sort_by_units(units: [[Int]]) -> [Int] Never! {
     order := [Int]{}
     loop i in 0..<units.len() -> &order.push(i)
     width := 1
@@ -831,14 +831,14 @@ pub fn sort_by_units(units: [[Int]]) -> [Int] Never! {
     order
 }
 
-pub fn text_from_bytes(bytes: ^[U8]) -> String EncodingError! {
+fn text_from_bytes(bytes: ^[U8]) -> String EncodingError! {
     encoding.__utf8_validate(bytes) ?? return Err(stream_error(.Syntax, 0, 1, 1, err))
     #Unsafe("the shared UTF-8 validator just accepted this owned allocation") {
         return Ok(encoding.__bytes_into_text(^bytes))
     }
 }
 
-pub fn byte_at(text: String, index: Int) -> U8 Never! {
+fn byte_at(text: String, index: Int) -> U8 Never! {
     length :: text.count_bytes()
     if index < 0 || index >= length -> panic("the list has {length} items, so position {index} doesn't exist")
     result := U8{0}
@@ -867,7 +867,7 @@ struct CanonicalFrame {
     retained: U64
 }
 
-pub struct JSONPush {
+struct JSONPush {
     output: FileWriter
     limits: EncodingLimits
     frames: [WriteFrame]
@@ -991,7 +991,7 @@ pub struct JSONPush {
         }
     }
 
-    pub fn write(&self, event: ^DataEvent) EncodingError! -[IO]> {
+    fn write(&self, event: ^DataEvent) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         if self.canonical {
             &self.write_canonical(^event) ?? {
@@ -1273,7 +1273,7 @@ pub struct JSONPush {
         }
     }
 
-    pub fn flush(&self) EncodingError! -[IO]> {
+    fn flush(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         encoding.__flush(&self.output) ?? {
             error :: io_error(self.total, 1, self.total + 1, err)
@@ -1283,7 +1283,7 @@ pub struct JSONPush {
         }
     }
 
-    pub fn finish(&self) EncodingError! -[IO]> {
+    fn finish(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return
         open :: if self.canonical -> self.canonical_frames.len() != 0 else -> self.frames.len() != 0
@@ -1324,7 +1324,7 @@ fn escaped_unit(text: String, at: Int, out: &[U8#6]) -> Int Never! {
     width
 }
 
-pub fn json_writer(output: ^FileWriter, limits: EncodingLimits, canonical: Bool) -> JSONPush EncodingError! {
+fn json_writer(output: ^FileWriter, limits: EncodingLimits, canonical: Bool) -> JSONPush EncodingError! {
     validate_limits(limits)
     Ok(JSONPush{output: output, limits: limits, frames: [WriteFrame]{}, root_written: false, finished: false, terminal: None, total: 0, canonical: canonical, canonical_frames: [CanonicalFrame]{}, canonical_retained: 0})
 }
@@ -1656,14 +1656,14 @@ fn jsonl_wire_size(writer: JSONPush, value: DataTree) -> Int EncodingError! {
 
 // Native JSONL policy: close the prior LF before validating the next record,
 // reserve this record plus LF, and leave its LF pending across flush/drop.
-pub struct JSONLinesPush {
+struct JSONLinesPush {
     writer: JSONPush
     finished: Bool
     terminal: EncodingError?
     record_index: Int
     pending_lf: Bool
 
-    pub fn write(&self, value: ^DataTree) EncodingError! -[IO]> {
+    fn write(&self, value: ^DataTree) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return &self.fail(self.writer.state_error("write called after finish"))
         if self.pending_lf {
@@ -1699,12 +1699,12 @@ pub struct JSONLinesPush {
         return Err(first)
     }
 
-    pub fn flush(&self) EncodingError! -[IO]> {
+    fn flush(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         &self.writer.flush() ?? return &self.fail(err)
     }
 
-    pub fn finish(&self) EncodingError! -[IO]> {
+    fn finish(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return
         if self.pending_lf {
@@ -1717,7 +1717,7 @@ pub struct JSONLinesPush {
     }
 }
 
-pub fn jsonl_writer(output: ^FileWriter, limits: EncodingLimits) -> JSONLinesPush EncodingError! {
+fn jsonl_writer(output: ^FileWriter, limits: EncodingLimits) -> JSONLinesPush EncodingError! {
     writer :: json_writer(^output, limits, false) ?? {
         error := err
         error.format = .JSONL

@@ -27,51 +27,51 @@ MAX_INT :: 9223372036854775807
 // One character of a SyncText. `(replica, counter)` is its identity; `after`
 // is the identity of the character it was inserted after ("" = document
 // start). A deleted character stays as a tombstone so later merges agree.
-pub struct SyncTextAtom {
-    pub replica: String
-    pub counter: Int
-    pub after: String
-    pub scalar: String
-    pub deleted: Bool
+struct SyncTextAtom {
+    replica: String
+    counter: Int
+    after: String
+    scalar: String
+    deleted: Bool
 }
 
-pub struct SyncText {
-    pub atoms: [SyncTextAtom]
-    pub valid: Bool
+struct SyncText {
+    atoms: [SyncTextAtom]
+    valid: Bool
 }
 
-pub struct CounterCount {
-    pub positive: Int
-    pub negative: Int
+struct CounterCount {
+    positive: Int
+    negative: Int
 }
 
-pub struct SyncCounter {
-    pub counts: [String:CounterCount]
-    pub valid: Bool
+struct SyncCounter {
+    counts: [String:CounterCount]
+    valid: Bool
 }
 
 // One register of a SyncMap. A deleted entry stays as a tombstone so a merge
 // with a replica that still holds the old value cannot bring it back.
-pub struct LWW {
-    pub value: String
-    pub clock: Int
-    pub writer: String
-    pub deleted: Bool
+struct LWW {
+    value: String
+    clock: Int
+    writer: String
+    deleted: Bool
 }
 
-pub struct SyncMap {
-    pub entries: [String:LWW]
-    pub valid: Bool
+struct SyncMap {
+    entries: [String:LWW]
+    valid: Bool
 }
 
-pub struct RGAItem {
-    pub replica: String
-    pub value: String
+struct RGAItem {
+    replica: String
+    value: String
 }
 
-pub struct SyncList {
-    pub items: [RGAItem]
-    pub valid: Bool
+struct SyncList {
+    items: [RGAItem]
+    valid: Bool
 }
 
 struct RowPolicy {
@@ -81,7 +81,7 @@ struct RowPolicy {
 
 // ---- SyncText: an RGA sequence of single-scalar atoms --------------------
 
-pub fn text_new(replica: String, value: String) -> SyncText Never! {
+fn text_new(replica: String, value: String) -> SyncText Never! {
     doc :: SyncText{atoms: [SyncTextAtom]{}, valid: true}
     if !valid_token(replica) || value.len() > MAX_TEXT -> return invalid_text()
     inserted :: unicode.scalars(value)
@@ -92,7 +92,7 @@ pub fn text_new(replica: String, value: String) -> SyncText Never! {
 // Replace the whole document: every visible character becomes a tombstone and
 // the new text is written at the start, so a replica that never saw the
 // tombstones still converges after a merge.
-pub fn text_set(doc: SyncText, replica: String, value: String) -> SyncText Never! {
+fn text_set(doc: SyncText, replica: String, value: String) -> SyncText Never! {
     if !doc.valid || !valid_token(replica) || value.len() > MAX_TEXT -> return ~doc
     inserted :: unicode.scalars(value)
     if doc.atoms.len() + inserted.len() > MAX_ATOMS || clock_exhausted(doc, inserted.len()) -> return ~doc
@@ -104,7 +104,7 @@ pub fn text_set(doc: SyncText, replica: String, value: String) -> SyncText Never
 // at `index` (Unicode scalar positions), then insert `value` there. The insert
 // anchors to the character before the edited range, so it survives a
 // concurrent edit of that range.
-pub fn text_edit(doc: SyncText, replica: String, index: Int, delete_count: Int, value: String) -> SyncText Never! {
+fn text_edit(doc: SyncText, replica: String, index: Int, delete_count: Int, value: String) -> SyncText Never! {
     if !doc.valid || !valid_token(replica) || index < 0 || delete_count < 0 || value.len() > MAX_TEXT -> return ~doc
     inserted :: unicode.scalars(value)
     if doc.atoms.len() + inserted.len() > MAX_ATOMS || clock_exhausted(doc, inserted.len()) -> return ~doc
@@ -124,7 +124,7 @@ pub fn text_edit(doc: SyncText, replica: String, index: Int, delete_count: Int, 
 // Union of both atom sets. Nothing is dropped; a deletion seen by either side
 // stays. One identity with two readings (a replica name reused by two
 // writers) or an atom whose anchor is missing makes the merge invalid.
-pub fn text_merge(left: SyncText, right: SyncText) -> SyncText Never! {
+fn text_merge(left: SyncText, right: SyncText) -> SyncText Never! {
     if !left.valid || !right.valid -> return invalid_text()
     merged := [String:SyncTextAtom]{}
     sides :: [[SyncTextAtom]]{left.atoms, right.atoms}
@@ -153,7 +153,7 @@ pub fn text_merge(left: SyncText, right: SyncText) -> SyncText Never! {
     doc
 }
 
-pub fn text_show(doc: SyncText) -> String Never! {
+fn text_show(doc: SyncText) -> String Never! {
     if !doc.valid -> return "SyncError(invalid SyncText)"
     out := ""
     loop index in text_visible(doc) -> out = "{out}{doc.atoms[index].scalar}"
@@ -162,7 +162,7 @@ pub fn text_show(doc: SyncText) -> String Never! {
 
 // The highest counter each replica has written. This is a Lamport clock, not
 // a vector clock: it orders writes but cannot decide causality.
-pub fn text_metadata(doc: SyncText) -> String Never! {
+fn text_metadata(doc: SyncText) -> String Never! {
     if !doc.valid -> return "SyncError(invalid SyncText)"
     clocks := [String:Int]{}
     loop atom in doc.atoms {
@@ -182,13 +182,13 @@ pub fn text_metadata(doc: SyncText) -> String Never! {
 
 // ---- SyncCounter: per-replica positive/negative maxima (PN-counter) -------
 
-pub fn counter_new(replica: String, value: Int) -> SyncCounter Never! {
+fn counter_new(replica: String, value: Int) -> SyncCounter Never! {
     if !valid_token(replica) -> return invalid_counter()
     counter :: SyncCounter{counts: [String:CounterCount]{}, valid: true}
     counter_inc(counter, replica, value)
 }
 
-pub fn counter_inc(counter: SyncCounter, replica: String, delta: Int) -> SyncCounter Never! {
+fn counter_inc(counter: SyncCounter, replica: String, delta: Int) -> SyncCounter Never! {
     if !counter.valid || !valid_token(replica) -> return ~counter
     count := counter.counts.get(replica) ?? CounterCount{positive: 0, negative: 0}
     if counter.counts.get(replica) == .None && counter.counts.len() >= MAX_REPLICAS -> return invalid_counter()
@@ -207,7 +207,7 @@ pub fn counter_inc(counter: SyncCounter, replica: String, delta: Int) -> SyncCou
     updated
 }
 
-pub fn counter_merge(left: SyncCounter, right: SyncCounter) -> SyncCounter Never! {
+fn counter_merge(left: SyncCounter, right: SyncCounter) -> SyncCounter Never! {
     if !left.valid || !right.valid -> return invalid_counter()
     counts := [String:CounterCount]{}
     sides :: [[String:CounterCount]]{left.counts, right.counts}
@@ -227,30 +227,30 @@ pub fn counter_merge(left: SyncCounter, right: SyncCounter) -> SyncCounter Never
     merged
 }
 
-pub fn counter_value(counter: SyncCounter) -> Int Never! {
+fn counter_value(counter: SyncCounter) -> Int Never! {
     if !counter.valid -> return 0
     counter_total(counter) ?? 0
 }
 
 // ---- SyncMap: last-writer-wins registers under a map-wide Lamport clock ---
 
-pub fn map_new() -> SyncMap Never! { SyncMap{entries: [String:LWW]{}, valid: true} }
+fn map_new() -> SyncMap Never! { SyncMap{entries: [String:LWW]{}, valid: true} }
 
 // A write takes the next clock past every entry the map has observed, so a
 // write after a remote observation never loses to that older value.
-pub fn map_set(map: SyncMap, key: String, value: String) -> SyncMap Never! {
+fn map_set(map: SyncMap, key: String, value: String) -> SyncMap Never! {
     if !map.valid || !valid_token(key) || value.len() > MAX_TEXT -> return ~map
     write_entry(map, key, LWW{value: value, clock: 0, writer: "local", deleted: false})
 }
 
 // Delete by writing a tombstone at the next clock.
-pub fn map_delete(map: SyncMap, key: String) -> SyncMap Never! {
+fn map_delete(map: SyncMap, key: String) -> SyncMap Never! {
     if !map.valid || !valid_token(key) -> return ~map
     write_entry(map, key, LWW{value: "", clock: 0, writer: "local", deleted: true})
 }
 
 // An invalid map answers nothing, like its show; a deleted key is absent.
-pub fn map_get(map: SyncMap, key: String) -> String? Never! {
+fn map_get(map: SyncMap, key: String) -> String? Never! {
     if !map.valid -> return None
     entry :: map.entries.get(key) ?? return None
     if entry.deleted -> return None
@@ -259,7 +259,7 @@ pub fn map_get(map: SyncMap, key: String) -> String? Never! {
 
 // Per key the larger clock wins. Equal clocks order by writer; one writer's
 // fork lets a deletion win, then orders by value.
-pub fn map_merge(left: SyncMap, right: SyncMap) -> SyncMap Never! {
+fn map_merge(left: SyncMap, right: SyncMap) -> SyncMap Never! {
     if !left.valid || !right.valid -> return invalid_map()
     entries := [String:LWW]{}
     sides :: [[String:LWW]]{left.entries, right.entries}
@@ -287,7 +287,7 @@ pub fn map_merge(left: SyncMap, right: SyncMap) -> SyncMap Never! {
     SyncMap{entries: entries, valid: true}
 }
 
-pub fn map_show(map: SyncMap) -> String Never! {
+fn map_show(map: SyncMap) -> String Never! {
     if !map.valid -> return "SyncError(invalid SyncMap)"
     keys := [String]{}
     loop key in map.entries.keys() -> &keys.push(key)
@@ -304,9 +304,9 @@ pub fn map_show(map: SyncMap) -> String Never! {
 
 // ---- SyncList: an add-wins set of (replica, value) items in one order -----
 
-pub fn list_new() -> SyncList Never! { SyncList{items: [RGAItem]{}, valid: true} }
+fn list_new() -> SyncList Never! { SyncList{items: [RGAItem]{}, valid: true} }
 
-pub fn list_push(list: SyncList, replica: String, value: String) -> SyncList Never! {
+fn list_push(list: SyncList, replica: String, value: String) -> SyncList Never! {
     if !list.valid || !valid_token(replica) || value.len() > MAX_TEXT -> return ~list
     loop item in list.items {
         if item.replica == replica && item.value == value -> return ~list
@@ -315,7 +315,7 @@ pub fn list_push(list: SyncList, replica: String, value: String) -> SyncList Nev
     SyncList{items: insert_item(list.items, RGAItem{replica: replica, value: value}), valid: true}
 }
 
-pub fn list_merge(left: SyncList, right: SyncList) -> SyncList Never! {
+fn list_merge(left: SyncList, right: SyncList) -> SyncList Never! {
     if !left.valid || !right.valid -> return invalid_list()
     items := [RGAItem]{}
     sides :: [[RGAItem]]{left.items, right.items}
@@ -333,7 +333,7 @@ pub fn list_merge(left: SyncList, right: SyncList) -> SyncList Never! {
     SyncList{items: items, valid: true}
 }
 
-pub fn list_show(list: SyncList) -> String Never! {
+fn list_show(list: SyncList) -> String Never! {
     if !list.valid -> return "SyncError(invalid SyncList)"
     out := ""
     loop item in list.items {
@@ -345,16 +345,16 @@ pub fn list_show(list: SyncList) -> String Never! {
 
 // ---- RowPolicy: closed allow/deny action list ------------------------------
 
-pub fn policy_new() -> RowPolicy Never! { RowPolicy{allow: [String]{}, deny: [String]{}} }
+fn policy_new() -> RowPolicy Never! { RowPolicy{allow: [String]{}, deny: [String]{}} }
 
-pub fn policy_grant(policy: RowPolicy, action: String) -> RowPolicy Never! {
+fn policy_grant(policy: RowPolicy, action: String) -> RowPolicy Never! {
     if action.len() == 0 || contains(policy.allow, action) -> return policy.copy()
     allow := policy.allow.copy()
     &allow.push(action)
     RowPolicy{allow: allow, deny: policy.deny.copy()}
 }
 
-pub fn policy_deny(policy: RowPolicy, action: String) -> RowPolicy Never! {
+fn policy_deny(policy: RowPolicy, action: String) -> RowPolicy Never! {
     if action.len() == 0 || contains(policy.deny, action) -> return policy.copy()
     deny := policy.deny.copy()
     &deny.push(action)
@@ -373,7 +373,7 @@ fn policy_revoke(policy: RowPolicy, action: String) -> RowPolicy Never! {
     RowPolicy{allow: allow, deny: deny}
 }
 
-pub fn policy_allows(policy: RowPolicy, action: String) -> Bool Never! {
+fn policy_allows(policy: RowPolicy, action: String) -> Bool Never! {
     loop d in policy.deny {
         if d == action || d == "*" -> return false
     }

@@ -4,46 +4,46 @@
 use core.files.path as bundle_paths
 
 #Error
-pub struct JetCLIBundleError { pub message: String }
+struct JetCLIBundleError { message: String }
 fn jet_cli_bundle_error(message: String) -> JetCLIBundleError Never! { JetCLIBundleError{message: message} }
 
 // Rust PackageOptions (CmdPackage.rs:31-63); the parser is shared with game.
-pub struct JetCLIBundleOptions {
-    pub target: BundleTarget?
-    pub kind: BundleKind
-    pub package: String?
-    pub name: String?
-    pub version: String?
-    pub executable: bundle_paths.Path?
-    pub output: bundle_paths.Path?
-    pub icon: bundle_paths.Path?
-    pub icon_format: IconFormat?
-    pub icon_size: Int
-    pub publisher: String
-    pub description: String
-    pub update_channel: String?
-    pub update_url: String?
-    pub source: bundle_paths.Path?
-    pub profile: String?
-    pub phase: String?
-    pub backend: String?
-    pub renderer: String?
-    pub cook_mode: String?
-    pub export_preset: String?
-    pub deploy_to: bundle_paths.Path?
-    pub crash_reporter: String?
-    pub crash_consent: String?
-    pub dry_run: Bool
-    pub explain: Bool
-    pub cancel: Bool
-    pub resume: Bool
-    pub force_clean: Bool
-    pub scripts_only: Bool
-    pub run_now: Bool
+struct JetCLIBundleOptions {
+    target: BundleTarget?
+    kind: BundleKind
+    package: String?
+    name: String?
+    version: String?
+    executable: bundle_paths.Path?
+    output: bundle_paths.Path?
+    icon: bundle_paths.Path?
+    icon_format: IconFormat?
+    icon_size: Int
+    publisher: String
+    description: String
+    update_channel: String?
+    update_url: String?
+    source: bundle_paths.Path?
+    profile: String?
+    phase: String?
+    backend: String?
+    renderer: String?
+    cook_mode: String?
+    export_preset: String?
+    deploy_to: bundle_paths.Path?
+    crash_reporter: String?
+    crash_consent: String?
+    dry_run: Bool
+    explain: Bool
+    cancel: Bool
+    resume: Bool
+    force_clean: Bool
+    scripts_only: Bool
+    run_now: Bool
 }
 
 // Rust PackageOptions::default plus parse_package_args' icon_size override.
-pub fn jet_cli_bundle_options_default() -> JetCLIBundleOptions Never! {
+fn jet_cli_bundle_options_default() -> JetCLIBundleOptions Never! {
     JetCLIBundleOptions{target: None, kind: BundleKind.Desktop, package: None,
         name: None, version: None, executable: None, output: None, icon: None,
         icon_format: None, icon_size: 256, publisher: "", description: "",
@@ -54,31 +54,31 @@ pub fn jet_cli_bundle_options_default() -> JetCLIBundleOptions Never! {
         resume: false, force_clean: false, scripts_only: false, run_now: false}
 }
 
-pub struct JetCLIBundleMetadata { pub symlink: Bool, pub regular: Bool }
+struct JetCLIBundleMetadata { symlink: Bool, regular: Bool }
 // Rust MaterializedFacts (CmdPackage.rs:73-78). Facts must describe the actual
 // published native output, not BundlePlan.logical_artifact_sha256().
-pub struct JetCLIBundleMaterializedFacts {
-    pub sha256: String
-    pub bytes: Int
-    pub materializer: BundleMaterializerFact
-    pub signing: BundleSigningFact?
+struct JetCLIBundleMaterializedFacts {
+    sha256: String
+    bytes: Int
+    materializer: BundleMaterializerFact
+    signing: BundleSigningFact?
 }
 // Rust record_package_receipt (CmdPackage.rs:1206-1222). The host selects the
 // receipt root for command/argv/cwd, records exit 0, stdout=receipt.json bytes,
 // stderr=[], and section ("package", "PackageBundleReceipt", receipt tree).
 // Return only the digest of the store's completed durable record.
-pub struct JetCLIBundleStoreRequest {
-    pub command: String
-    pub args: [String]
-    pub cwd: bundle_paths.Path
-    pub input_paths: [bundle_paths.Path]
-    pub receipt: BundleReceipt
+struct JetCLIBundleStoreRequest {
+    command: String
+    args: [String]
+    cwd: bundle_paths.Path
+    input_paths: [bundle_paths.Path]
+    receipt: BundleReceipt
 }
 // C-FS: metadata_no_follow must inspect the actual entry without following a
 // symlink; preserve inspected/read diagnostics. Materialize requires checked
 // Build.native_sandboxed authority and target-native output publication.
 // Native materializer policy (CmdPackage.rs:415-1204) is a separate packet.
-pub trait JetCLIBundleHost {
+trait JetCLIBundleHost {
     fn current_dir(&self) -> bundle_paths.Path JetCLIBundleError!
     fn metadata_no_follow(&self, path: bundle_paths.Path) -> JetCLIBundleMetadata JetCLIBundleError!
     fn read_bytes(&self, path: bundle_paths.Path) -> [U8] JetCLIBundleError!
@@ -120,7 +120,7 @@ fn jet_cli_bundle_append_phase(previous: String?, phase: String) -> String Never
 
 // Rust parse_package_args (CmdPackage.rs:236-383). Sequential, last wins;
 // presence flags deliberately ignore '=value', exactly as the Rust match.
-pub fn jet_cli_bundle_parse_args(args: [String]) -> JetCLIBundleOptions JetCLIBundleError! {
+fn jet_cli_bundle_parse_args(args: [String]) -> JetCLIBundleOptions JetCLIBundleError! {
     options := jet_cli_bundle_options_default()
     index := 0
     loop index < args.len() {
@@ -203,7 +203,7 @@ pub fn jet_cli_bundle_parse_args(args: [String]) -> JetCLIBundleOptions JetCLIBu
 }
 
 // Rust package_help (CmdPackage.rs:1319-1321).
-pub fn jet_cli_bundle_help() -> String Never! {
+fn jet_cli_bundle_help() -> String Never! {
     "jet package --kind <desktop|game> --target <linux-appimage|macos-app|windows-msix> [--executable <path>] [<source.jet>] [--output <path>] [--profile <dev|release|name>] [--phase <build,cook,stage,package,export,deploy,run>] [--renderer <headless|raylib>] [--backend <aot>] [--cook-mode <fast|reproducible|scripts-only>] [--export-preset <default|store|headless>] [--deploy-to <path>] [--crash-reporter <off|on|opt-in>] [--crash-consent <not-requested|granted|denied>] [--dry-run] [--explain] [--resume|--cancel] [--clean|--scripts-only] [--run-now] [--package <id>] [--name <name>] [--version <version>] [--icon <path>] [--icon-format <png|icns|ico|svg>] [--icon-size <size>] [--publisher <name>] [--description <text>] [--update-channel <channel> --update-url <url>]"
 }
 
@@ -215,7 +215,7 @@ fn jet_cli_bundle_read_regular<H: JetCLIBundleHost>(host: &H, path: bundle_paths
 }
 // Rust resolve_output_path (CmdPackage.rs:385-413). No path canonicalization:
 // output spelling and unresolved '..' remain observable in the report.
-pub fn jet_cli_bundle_resolve_output(output: bundle_paths.Path?, artifact_name: String, cwd: bundle_paths.Path) -> bundle_paths.Path JetCLIBundleError! {
+fn jet_cli_bundle_resolve_output(output: bundle_paths.Path?, artifact_name: String, cwd: bundle_paths.Path) -> bundle_paths.Path JetCLIBundleError! {
     requested :: output ?? bundle_paths.of(artifact_name)
     path :: if bundle_paths.is_absolute(requested) -> requested else -> bundle_paths.join_path(cwd, requested)
     // Rust Path::file_name ignores trailing separators and current-directory
@@ -239,14 +239,14 @@ pub fn jet_cli_bundle_resolve_output(output: bundle_paths.Path?, artifact_name: 
 }
 
 // Rust BuiltPackage (CmdPackage.rs:65-70).
-pub struct JetCLIBuiltBundle {
-    pub artifact: BundleArtifact
-    pub plan: BundlePlan
-    pub input_paths: [bundle_paths.Path]
-    pub output: bundle_paths.Path
+struct JetCLIBuiltBundle {
+    artifact: BundleArtifact
+    plan: BundlePlan
+    input_paths: [bundle_paths.Path]
+    output: bundle_paths.Path
 }
 // Rust build_package (CmdPackage.rs:143-235), desktop-only caller contract.
-pub fn jet_cli_bundle_build<H: JetCLIBundleHost>(options: JetCLIBundleOptions, host: &H) -> JetCLIBuiltBundle JetCLIBundleError! {
+fn jet_cli_bundle_build<H: JetCLIBundleHost>(options: JetCLIBundleOptions, host: &H) -> JetCLIBuiltBundle JetCLIBundleError! {
     if options.source != None || options.profile != None || options.phase != None || options.backend != None || options.renderer != None || options.cook_mode != None || options.export_preset != None || options.deploy_to != None || options.crash_reporter != None || options.crash_consent != None || options.dry_run || options.explain || options.cancel || options.resume || options.force_clean || options.scripts_only || options.run_now {
         return Err(jet_cli_bundle_error("game package options require `--kind game`"))
     }
@@ -316,7 +316,7 @@ fn jet_cli_bundle_status(value: &CanonicalJSON) -> JetCLIStatusValue Never! {
         }
     }
 }
-pub fn jet_cli_bundle_report(artifact: &BundleArtifact, plan: &BundlePlan, output: bundle_paths.Path, receipt_digest: String, explain: Bool, machine: Bool) -> String Never! {
+fn jet_cli_bundle_report(artifact: &BundleArtifact, plan: &BundlePlan, output: bundle_paths.Path, receipt_digest: String, explain: Bool, machine: Bool) -> String Never! {
     materialized :: artifact.receipt.materializer != None
     execution :: if materialized -> "materialized" else -> "planned"
     if machine {
@@ -364,7 +364,7 @@ pub fn jet_cli_bundle_report(artifact: &BundleArtifact, plan: &BundlePlan, outpu
     lines.join("")
 }
 // Rust run_package's parse/build/store error branches (CmdPackage.rs:87-142).
-pub fn jet_cli_bundle_error_output(message: String, machine: Bool) -> JetDriverVerbOutput Never! {
+fn jet_cli_bundle_error_output(message: String, machine: Bool) -> JetDriverVerbOutput Never! {
     if machine -> return JetDriverVerbOutput{stdout: "{jet_cli_status_render("package", false, [JetCLIStatusField]{jet_cli_status_field("error", jet_cli_status_text(~message))})}\n", stderr: "", exit_code: 1}
     JetDriverVerbOutput{stdout: "", stderr: "jet package: {message}\n", exit_code: 1}
 }
@@ -372,7 +372,7 @@ pub fn jet_cli_bundle_error_output(message: String, machine: Bool) -> JetDriverV
 // elsewhere. A completed materializer precedes a durable receipt; no success
 // report is rendered if either producer fails. Quiet does not suppress Rust's
 // package report and is intentionally handled only as a parser-global flag.
-pub fn jet_cli_bundle_run_desktop<H: JetCLIBundleHost>(args: [String], options: JetCLIBundleOptions, machine: Bool, host: &H) -> JetDriverVerbOutput Never! {
+fn jet_cli_bundle_run_desktop<H: JetCLIBundleHost>(args: [String], options: JetCLIBundleOptions, machine: Bool, host: &H) -> JetDriverVerbOutput Never! {
     explain :: options.explain
     built := jet_cli_bundle_build<H>(options, &host) ?? return jet_cli_bundle_error_output(err.message, machine)
     cwd :: &host.current_dir() ?? return jet_cli_bundle_error_output("could not read current directory: {err.message}", machine)

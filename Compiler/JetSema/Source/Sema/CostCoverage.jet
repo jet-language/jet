@@ -1,9 +1,9 @@
 // Reachability belongs to sema: canonical identities, not source spellings.
 use jet_foundation.[Span, SymbolID, SymbolKind, WebPartitionMarker]
 
-pub struct SemaCostCoverage {
-    pub gaps: [String]
-    pub has_roots: Bool
+struct SemaCostCoverage {
+    gaps: [String]
+    has_roots: Bool
 }
 
 struct SemaCostCallable {
@@ -29,7 +29,7 @@ fn sema_cost_edge(edges: &[String:[String]], caller: String, callee: String) Nev
 }
 // Returns every reachable non-foreign declaration lacking a complete checked
 // body/specialization. Unreachable templates are not grounds for refusal.
-pub fn sema_cost_coverage(registration: SemaRegistrationGraph, checked: SemaGraphResult, selected: String?) -> SemaCostCoverage {
+fn sema_cost_coverage(registration: SemaRegistrationGraph, checked: SemaGraphResult, selected: String?) -> SemaCostCoverage {
     callables := [SemaCostCallable]{}
     positions := [String:Int]{}
     module_rows := [String:[Int]]{}

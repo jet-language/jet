@@ -2310,7 +2310,7 @@ fn jet_driver_unit_module_identity(unit: JetDriverSourceUnit) -> String Never! {
     jet_driver_core_source_owner_key(unit.relative_path)
 }
 
-pub fn jet_driver_core_source_owner_key(relative_path: String) -> String Never! {
+fn jet_driver_core_source_owner_key(relative_path: String) -> String Never! {
     parts := relative_path.split("/").to_list()
     _ := &parts.pop()
     "{JET_DRIVER_CORE_SOURCE_ROOT}/{parts.join("/")}::{relative_path}"
@@ -2595,7 +2595,7 @@ fn jet_driver_blank_source_range(source: String, start: Int, end: Int) -> String
 
 // The source an ordinary parse reads: the inline carrier masked away (Rust
 // `Package::mask_inline_package_source`).
-pub fn jet_driver_mask_inline_package(source: String, carrier: JetDriverInlinePackage) -> String {
+fn jet_driver_mask_inline_package(source: String, carrier: JetDriverInlinePackage) -> String {
     if !carrier.found -> return source.copy()
     jet_driver_blank_source_range(source, carrier.start, carrier.end)
 }
@@ -2657,7 +2657,7 @@ fn jet_driver_parse_user_unit(text: String, retain_demand: Bool) -> JetDriverPar
 
 // A user source parse: the inline carrier is masked; a structure failure
 // replaces the parse (Rust Loader `prepare_frontend_module`).
-pub fn jet_driver_parse_user_source(text: String) -> ParseResult {
+fn jet_driver_parse_user_source(text: String) -> ParseResult {
     unit := jet_driver_parse_user_unit(text, false)
     ^unit.parsed
 }
@@ -3124,14 +3124,14 @@ fn jet_driver_loaded_module(source_unit_index: Int, unit: JetDriverSourceUnit, m
     }
 }
 
-pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
+fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
     jet_driver_load_graph(request, JetDriverLoadMode.Program)
 }
 
 // Unlike a program's lazy Core import closure, this graph roots every row of
 // the installed catalog, including private parts, under the compiler-owned
 // library identity. It never borrows a user's authority root or invents run.
-pub fn jet_driver_load_core_library(request: JetDriverCompileRequest) -> JetDriverLoadResult {
+fn jet_driver_load_core_library(request: JetDriverCompileRequest) -> JetDriverLoadResult {
     jet_driver_load_graph(request, JetDriverLoadMode.CoreLibrary)
 }
 

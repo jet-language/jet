@@ -27,14 +27,14 @@ struct SemaCallGeometryTransformParts {
 }
 
 // Same declaration-identity predicate as Rust's geometry_nominal_leaf.
-pub fn sema_geometry_nominal_leaf(name: String) -> String Never! {
+fn sema_geometry_nominal_leaf(name: String) -> String Never! {
     if !core_source_owns_type(name) -> return ~name
     parts :: name.split("::").to_list()
     if parts.len() >= 2 && parts[parts.len() - 2] == "Core/math/math.jet" -> return ~parts[parts.len() - 1]
     ~name
 }
 
-pub fn sema_geometry_restore_owner(ty: Type, source: Type) -> Type Never! {
+fn sema_geometry_restore_owner(ty: Type, source: Type) -> Type Never! {
     name :: if source == { .Named(owner) | .Apply(owner, _) -> owner else -> { return ~ty } }
     leaf :: sema_geometry_nominal_leaf(name)
     if leaf == name -> return ~ty
@@ -63,7 +63,7 @@ fn sema_call_geometry_intrinsic_type(ty: Type, environment: SemaScopeEnvironment
     sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == None
 }
 
-pub fn sema_call_geometry_transform_parts(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaCallGeometryTransformParts? {
+fn sema_call_geometry_transform_parts(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaCallGeometryTransformParts? {
     resolved :: sema_call_resolved_type(ty, environment, program)
     matches := if resolved == {
         .Apply(name, args) -> (sema_geometry_nominal_leaf(name) == "Transform" && args.len() == 2) || (sema_geometry_nominal_leaf(name) == "Transform2" && args.len() == 3)
@@ -137,7 +137,7 @@ fn sema_call_geometry_transform_type(parts: SemaCallGeometryTransformParts, from
     }
 }
 
-pub fn sema_call_geometry_transform_method_return(receiver_type: Type, method: String, args: [Type], environment: SemaScopeEnvironment) -> Type? {
+fn sema_call_geometry_transform_method_return(receiver_type: Type, method: String, args: [Type], environment: SemaScopeEnvironment) -> Type? {
     result :: sema_call_geometry_transform_method_return_inner(receiver_type, method, args, environment) ?? return None
     Val(sema_geometry_restore_owner(result, sema_call_resolved_type(receiver_type, environment)))
 }
@@ -238,7 +238,7 @@ fn sema_call_geometry_method_params(types: [Type]) -> [SemaCallParam] Never! {
     params
 }
 
-pub fn sema_call_try_geometry(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_geometry(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
     parts :: sema_call_geometry_transform_parts(receiver_value.ty, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     expected_count :: sema_call_geometry_method_arg_count(method)

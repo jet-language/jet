@@ -428,7 +428,7 @@ fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclaratio
 
 // `owner` is the owning type of a method (any spelling; its leaf name is
 // used), or "" for a free function.
-pub fn sema_function_memory_position(plan: SemaFunctionMemoryPlan, module_identity: String, owner: String, span: Span) -> Int? {
+fn sema_function_memory_position(plan: SemaFunctionMemoryPlan, module_identity: String, owner: String, span: Span) -> Int? {
     plan.positions.get(sema_function_memory_key(module_identity, sema_serde_named_leaf(owner), span))
 }
 
@@ -444,7 +444,7 @@ fn sema_function_memory_owner(kind: TFuncKind) -> String Never! {
 
 // The owner name a method's memory row is found by: the base name of its
 // owning type, "" for a free function.
-pub fn sema_function_memory_owner(kind: TFuncKind) -> String Never! {
+fn sema_function_memory_owner(kind: TFuncKind) -> String Never! {
     if kind == {
         .Method(_, owner_type) -> sema_type_graph_base_name(owner_type) ?? ""
         .TraitMethod(_, _, owner_type, _, _) -> sema_type_graph_base_name(owner_type) ?? ""

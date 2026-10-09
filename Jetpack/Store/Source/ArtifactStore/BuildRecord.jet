@@ -136,7 +136,7 @@ fn store_build_record_number(value: Dyn) -> Float? Never! {
 STORE_LAST_RUN_SCHEMA :: "jet.last-run/v1"
 STORE_LAST_RUN_MAX_BYTES :: 1048576
 
-pub fn store_build_last_run_encode(program: String, key: String) -> [U8] ArtifactStoreError! {
+fn store_build_last_run_encode(program: String, key: String) -> [U8] ArtifactStoreError! {
     entry :: RecordValue.Map{fields: [RecordField]{
         RecordField{name: "program", value: RecordValue.Str{value: program}},
         RecordField{name: "record", value: RecordValue.Str{value: key}},
@@ -145,7 +145,7 @@ pub fn store_build_last_run_encode(program: String, key: String) -> [U8] Artifac
     Ok(encoded.bytes ?? return Err(ArtifactStoreError.Config(encoded.problem ?? "last-run record encoding failed")))
 }
 
-pub fn store_build_last_run_decode(bytes: [U8], program: String) -> String? Never! {
+fn store_build_last_run_decode(bytes: [U8], program: String) -> String? Never! {
     decoded :: record_decode(bytes)
     record :: decoded.record ?? return None
     if record.schema != STORE_LAST_RUN_SCHEMA -> return None

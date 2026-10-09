@@ -21,7 +21,7 @@ struct URLPart {
     hole: Bool
 }
 
-pub struct URL {
+struct URL {
     scheme_text: String
     user_text: String
     password_text: String
@@ -31,7 +31,7 @@ pub struct URL {
     path_text: String
     query_text: String
     fragment_text: String
-    pub raw: String
+    raw: String
     host_recipe: [URLPart]
     path_recipe: [URLPart]
     impl Display {
@@ -52,22 +52,22 @@ pub struct URL {
 }
 
 impl URL {
-    pub fn scheme(self) -> String Never! { ~self.scheme_text }
-    pub fn path(self) -> String Never! { ~self.path_text }
-    pub fn query(self) -> String Never! { ~self.query_text }
+    fn scheme(self) -> String Never! { ~self.scheme_text }
+    fn path(self) -> String Never! { ~self.path_text }
+    fn query(self) -> String Never! { ~self.query_text }
 
-    pub fn host(self) -> String? Never! {
+    fn host(self) -> String? Never! {
         if self.host_text.bytes().len() == 0 -> return None
         Val(~self.host_text)
     }
 
     /// Only an authority port written explicitly is present.
-    pub fn port(self) -> Int? Never! {
+    fn port(self) -> Int? Never! {
         if !self.port_explicit || self.port_value < 0 -> return None
         Val(self.port_value)
     }
 
-    pub fn fragment(self) -> String? Never! {
+    fn fragment(self) -> String? Never! {
         if self.fragment_text.bytes().len() == 0 -> return None
         Val(~self.fragment_text)
     }
@@ -76,16 +76,16 @@ impl URL {
     fn to_string(self) -> String Never! { unparse(self) }
 
     /// The decoded user name, or empty when absent.
-    pub fn username(self) -> String Never! { self.user_text.copy() }
+    fn username(self) -> String Never! { self.user_text.copy() }
 
     /// The decoded password, or empty when absent.
-    pub fn password(self) -> String Never! { self.password_text.copy() }
+    fn password(self) -> String Never! { self.password_text.copy() }
 
     /// `user:password`, `user`, or empty.
     fn userinfo(self) -> String Never! { userinfo_text(self) }
 
     /// `userinfo@host:port` with the port only when it was written explicitly.
-    pub fn authority(self) -> String Never! {
+    fn authority(self) -> String Never! {
         if self.host_text.bytes().len() == 0 -> return ""
         out := ""
         info :: userinfo_text(self)
@@ -96,14 +96,14 @@ impl URL {
     }
 
     /// The registered default port for the scheme, when it has one.
-    pub fn default_port(self) -> Int? Never! {
+    fn default_port(self) -> Int? Never! {
         port :: scheme_default_port(self.scheme_text)
         if port < 0 -> return None
         Val(port)
     }
 
     /// Decoded, non-empty path segments.
-    pub fn path_segments(self) -> [String] Never! {
+    fn path_segments(self) -> [String] Never! {
         if self.path_recipe.len() > 0 -> return recipe_segments(self.path_recipe)
         raw :: self.path_text.bytes()
         out := [String]{}
@@ -118,10 +118,10 @@ impl URL {
     }
 
     /// Decoded repeated query pairs, in order.
-    pub fn query_pairs(self) -> [[String]] Never! { parse_qsl(self.query_text) ?? [[String]]{} }
+    fn query_pairs(self) -> [[String]] Never! { parse_qsl(self.query_text) ?? [[String]]{} }
 
     /// A copy with a lowercase scheme, ASCII host, and dot segments removed.
-    pub fn normalize(self) -> URL Never! {
+    fn normalize(self) -> URL Never! {
         scheme :: ascii_lower(self.scheme_text)
         path := self.path_text
         if scheme != "data" && self.path_recipe.len() == 0 -> path = normalize_path(self.path_text, self.host_text.bytes().len() > 0 || starts(self.path_text, "/"))
@@ -142,10 +142,10 @@ impl URL {
     }
 
     /// Resolve a relative reference against this URL.
-    pub fn join(self, relative: String) -> URL URLError! { join_url(self, relative) }
+    fn join(self, relative: String) -> URL URLError! { join_url(self, relative) }
 
     /// Replace every occurrence of a decoded query key, appending its value.
-    pub fn set_query(self, key: String, value: String) -> URL Never! {
+    fn set_query(self, key: String, value: String) -> URL Never! {
         rows := [[String]]{}
         loop row in self.query_pairs() {
             if row[0] != key -> &rows.push(row)
@@ -155,7 +155,7 @@ impl URL {
     }
 
     /// Append a pair without changing previous occurrences or their order.
-    pub fn add_query(self, key: String, value: String) -> URL Never! {
+    fn add_query(self, key: String, value: String) -> URL Never! {
         rows := self.query_pairs()
         &rows.push([String]{key, value})
         with_query(self, rows)
@@ -187,7 +187,7 @@ fn userinfo_text(url: URL) -> String Never! {
 
 // The compiler validates the skeleton before lowering. Holes remain opaque:
 // their slashes and dot segments never become URL grammar.
-pub fn literal(literals: [String], holes: [String]) -> URL Never! {
+fn literal(literals: [String], holes: [String]) -> URL Never! {
     if literals.len() != holes.len() + 1 -> panic("typed URL literal and hole counts do not match")
     nonce := 0
     marker := ""
@@ -445,7 +445,7 @@ fn render_data_mime(text: String) -> String Never! {
     out
 }
 
-pub fn parse(text: String) -> URL URLError! { parse_recipe(text, true) }
+fn parse(text: String) -> URL URLError! { parse_recipe(text, true) }
 
 fn parse_recipe(text: String, normalize: Bool) -> URL URLError! {
     input :: trim_ascii(text)
@@ -640,7 +640,7 @@ fn percent_decode(text: String) -> String URLError! {
 
 fn geturl(url: URL) -> String Never! { unparse(url) }
 
-pub fn unparse(url: URL) -> String Never! {
+fn unparse(url: URL) -> String Never! {
     scheme :: ascii_lower(url.scheme_text)
     authority := ""
     if url.host_text.bytes().len() > 0 {

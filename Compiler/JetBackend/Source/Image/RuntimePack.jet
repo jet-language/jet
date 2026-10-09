@@ -442,7 +442,7 @@ fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
 // Audited Jet exports are defined public globals in standalone objects;
 // private functions and imported symbols are not exports. The roots are
 // those object exports, the first archive's C ABI, and `extra_roots`.
-pub fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) -> X64ExecutableResult Never! {
+fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) -> X64ExecutableResult Never! {
     c := link_context(^bufs)
     link_load_inputs(&c, names)
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}

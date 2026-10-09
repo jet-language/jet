@@ -247,7 +247,7 @@ fn trust_sorted_keys(object: [String: Dyn]) -> [String] Never! {
 }
 
 // Rust `lock_node_name`: the node a `flake.lock` input reference names.
-pub fn trust_flake_lock_node_name(reference: Dyn?, nodes: [String: Dyn], start_node: String) -> String? TrustError! {
+fn trust_flake_lock_node_name(reference: Dyn?, nodes: [String: Dyn], start_node: String) -> String? TrustError! {
     value :: reference ?? return Ok(None)
     trust_flake_resolve_reference(value, nodes, [FlakeFollowStep]{}, start_node)
 }
