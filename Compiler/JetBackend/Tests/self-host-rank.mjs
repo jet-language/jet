@@ -172,6 +172,21 @@ const tsv = (path, rows) => writeFileSync(join(output, path), rows.map((row) => 
 tsv("RANKED.tsv", [...preamble, "step\tblocker\tgates_functions\tunlocks\tcumulative_clean\tcumulative_pct\tclass\tgolden_cases\tpackages\tsample_functions", ...curve]);
 tsv("PACKAGES.tsv", ["package\tfunctions_reached\tlowered_clean\tpct_clean", ...packageRows]);
 tsv("SLICES.tsv", ["probe\tfunctions_started\tlocally_clean\tfunctions_with_evidence\tstatus", ...sliceRows]);
+// Per package: every blocker gating its functions, and how many functions it alone holds back (the order a
+// package-first milestone such as JetLexer then JetParser native fixes them in).
+const packageBlockers = [];
+for (const [blocker, fns] of gates) {
+  const counts = new Map();
+  for (const fn of fns) {
+    const pkg = lookup(fn).pkg;
+    if (!counts.has(pkg)) counts.set(pkg, [0, 0]);
+    counts.get(pkg)[0]++;
+    if (universe.get(fn).size === 1) counts.get(pkg)[1]++;
+  }
+  for (const [pkg, [gated, only]] of counts) packageBlockers.push([pkg, blocker, gated, only, classification(blocker), goldenCounts.get(blocker) ?? 0]);
+}
+packageBlockers.sort((a, b) => a[0].localeCompare(b[0]) || b[2] - a[2] || a[1].localeCompare(b[1]));
+tsv("PACKAGE-BLOCKERS.tsv", ["package\tblocker\tgates_functions\tsole_blocker_functions\tclass\tgolden_cases", ...packageBlockers]);
 const overlap = [...gates].map(([blocker, fns]) => [blocker, fns.size, goldenCounts.get(blocker) ?? 0, classification(blocker), "lower"]);
 for (const [blocker, probes] of preparation) overlap.push([blocker, "global", goldenCounts.get(blocker) ?? 0, classification(blocker), `prepare:${probes.size} slices`]);
 overlap.sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0) || a[0].localeCompare(b[0]));
