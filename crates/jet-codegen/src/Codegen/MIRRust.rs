@@ -9552,6 +9552,13 @@ impl<'a> RustEmitter<'a> {
         access == MirAccess::Read && matches!(ty.kind(), MirTypeKind::String) && !self.is_core_layer()
     }
 
+    /// A read-only text parameter borrows the contents, not the allocation.
+    /// Core-layer text already has its static borrowed scalar carrier.
+    fn read_text_parameter(&self, ty: &MirType, access: MirAccess) -> bool {
+        let ty = if ty.identity.is_some() { self.canonical_type(ty) } else { ty };
+        access == MirAccess::Read && matches!(ty.kind(), MirTypeKind::String) && !self.is_core_layer()
+    }
+
     fn callable_parameter_mode(&self, ty: &MirType, access: MirAccess) -> char {
         if access == MirAccess::Write {
             'W'

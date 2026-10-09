@@ -137,8 +137,11 @@ impl<K: PartialEq + Clone, V: Clone> JetMemo<K, V> {
             state.misses += 1;
             return None;
         };
+        let (stored, value) = state.cache.entries.remove(index);
+        let out = value.clone();
+        state.cache.entries.insert(0, (stored, value));
         state.hits += 1;
-        Some(value)
+        Some(out)
     }
 
     pub fn put(&self, key: K, value: V) {
