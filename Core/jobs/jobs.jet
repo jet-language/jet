@@ -14,6 +14,7 @@ use core.db as db
 use core.text as text
 use core.crypto as crypto
 use core.service as service
+use core.service.[ServiceError, ServiceEndpoint]
 use core.files as files
 
 // One durable queue. Source owns the storage/lease/receipt transactions;
@@ -137,8 +138,11 @@ fn queue() -[DB, FS.Read, FS.Write, Time]> JobQueue ServiceError! {
     }
     driver := db.__queue_open(path) ?? return Err(queue_unavailable("queue SQLite open failed"))
     queue_begin(driver) ?? return Err(err)
-    initialized :: queue_initialize_on_driver(&driver, parts.authority, name, 1024)
-    queue_finish(driver, initialized) ?? return Err(err)
+    initialized :: queue_initialize_on_driver(&driver, parts.authority, name, 1024) ?? {
+        _ :: db.__queue_rollback(driver)
+        return Err(err)
+    }
+    queue_finish(driver, ^initialized) ?? return Err(err)
     queue := JobQueue{
         data: shared QueueData{driver: ^driver}, endpoint: endpoint,
         authority: parts.authority, name: name,
@@ -223,18 +227,12 @@ fn queue_begin(driver: db.__QueueDb) ServiceError! -[DB]> {
     if !db.__queue_begin(driver) -> return Err(queue_sql_error("begin", queue_unavailable("queue SQLite begin failed")))
     Ok(())
 }
-fn queue_finish<T>(driver: db.__QueueDb, result: T ServiceError!) -[DB]> T ServiceError! {
-    if result == {
-        .Ok(value) -> {
-            if db.__queue_commit(driver) -> return Ok(value)
-            _ :: db.__queue_rollback(driver)
-            Err(queue_sql_error("commit", queue_unavailable("queue SQLite commit failed")))
-        }
-        .Err(failure) -> {
-            _ :: db.__queue_rollback(driver)
-            Err(failure)
-        }
-    }
+// Operations unwrap inside the guarded transaction and roll back there on
+// failure. Only a successful value reaches commit; failed commits roll back.
+fn queue_finish<T>(driver: db.__QueueDb, value: ^T) -[DB]> T ServiceError! {
+    if db.__queue_commit(driver) -> return Ok(^value)
+    _ :: db.__queue_rollback(driver)
+    Err(queue_sql_error("commit", queue_unavailable("queue SQLite commit failed")))
 }
 fn queue_encoded_payload<T: Encode>(job_type: String, payload: T) -> JobPayload ServiceError! {
     if core.encoding.cbor.to_bytes_canonical<T>(payload) == {
@@ -262,11 +260,7 @@ fn queue_enqueue_request(queue: JobQueue, request: EnqueueRequest) -[DB, Time]> 
     queue_validate_bulk(requests) ?? return Err(err)
     now :: queue_now()
     service.__authority_validate(queue.endpoint) ?? return Err(err)
-    guard := queue.data.guard_edit()
-    queue_begin(guard.value.driver) ?? return Err(err)
-    result :: queue_enqueue_on_driver(&guard.value.driver, queue.authority, queue.name, 1024, false, requests, now)
-    committed :: queue_finish(guard.value.driver, result) ?? return Err(err)
-    close(^guard)
+    committed :: queue_enqueue_transaction(queue, requests, now) ?? return Err(err)
     queue_publish_transitions(committed.observations)
     if committed.receipts.len() == 0 -> return Err(queue_unavailable("queue enqueue returned no receipt"))
     Ok(committed.receipts[0])
@@ -298,43 +292,27 @@ impl JobQueue {
         queue_validate_text(worker, "queue worker", 256, false) ?? return Err(err)
         if limit <= 0 || limit > 1024 -> return Err(ServiceError.Policy("queue claim limit must be positive and within capacity"))
         service.__authority_validate(self.endpoint) ?? return Err(err)
-        guard := self.data.guard_edit()
-        queue_begin(guard.value.driver) ?? return Err(err)
-        result :: queue_claim_on_driver(&guard.value.driver, self.authority, self.name, worker, limit, 3, 30000, queue_now())
-        committed :: queue_finish(guard.value.driver, result) ?? return Err(err)
-        close(^guard)
+        committed :: queue_claim_transaction(self, worker, limit) ?? return Err(err)
         queue_publish_transitions(committed.observations)
         Ok(committed.claims)
     }
     fn heartbeat(self, claim: JobQueueClaim) -[DB, Time]> JobQueueReceipt ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
-        guard := self.data.guard_edit()
-        queue_begin(guard.value.driver) ?? return Err(err)
-        result :: queue_heartbeat_on_driver(&guard.value.driver, self.authority, self.name, 30000, claim)
-        committed :: queue_finish(guard.value.driver, result) ?? return Err(err)
-        close(^guard)
+        committed :: queue_heartbeat_transaction(self, claim) ?? return Err(err)
         queue_publish_optional_transition(committed.observation)
         Ok(committed.receipt)
     }
     fn acknowledge(self, claim: JobQueueClaim, result: JobResult) -[DB, Time]> JobQueueReceipt ServiceError! {
         queue_validate_result(result) ?? return Err(err)
         service.__authority_validate(self.endpoint) ?? return Err(err)
-        guard := self.data.guard_edit()
-        queue_begin(guard.value.driver) ?? return Err(err)
-        outcome :: queue_acknowledge_on_driver(&guard.value.driver, self.authority, self.name, claim, result)
-        committed :: queue_finish(guard.value.driver, outcome) ?? return Err(err)
-        close(^guard)
+        committed :: queue_acknowledge_transaction(self, claim, result) ?? return Err(err)
         queue_publish_optional_transition(committed.observation)
         Ok(committed.receipt)
     }
     fn fail(self, claim: JobQueueClaim, failure: JobError) -[DB, Time]> JobQueueReceipt ServiceError! {
         queue_validate_error(failure) ?? return Err(err)
         service.__authority_validate(self.endpoint) ?? return Err(err)
-        guard := self.data.guard_edit()
-        queue_begin(guard.value.driver) ?? return Err(err)
-        result :: queue_fail_on_driver(&guard.value.driver, self.authority, self.name, 3, 1000, 60000, claim, failure)
-        committed :: queue_finish(guard.value.driver, result) ?? return Err(err)
-        close(^guard)
+        committed :: queue_fail_transaction(self, claim, failure) ?? return Err(err)
         queue_publish_optional_transition(committed.observation)
         Ok(committed.receipt)
     }
@@ -342,11 +320,7 @@ impl JobQueue {
         queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
         queue_validate_text(reason, "queue cancellation reason", 1024, false) ?? return Err(err)
         service.__authority_validate(self.endpoint) ?? return Err(err)
-        guard := self.data.guard_edit()
-        queue_begin(guard.value.driver) ?? return Err(err)
-        result :: queue_cancel_on_driver(&guard.value.driver, self.authority, self.name, id, reason, lease_token)
-        committed :: queue_finish(guard.value.driver, result) ?? return Err(err)
-        close(^guard)
+        committed :: queue_cancel_transaction(self, id, reason, lease_token) ?? return Err(err)
         queue_publish_optional_transition(committed.observation)
         Ok(committed.receipt)
     }
@@ -354,29 +328,19 @@ impl JobQueue {
         queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
         queue_validate_text(reason, "queue dead-letter reason", 1024, false) ?? return Err(err)
         service.__authority_validate(self.endpoint) ?? return Err(err)
-        guard := self.data.guard_edit()
-        queue_begin(guard.value.driver) ?? return Err(err)
-        result :: queue_dead_letter_on_driver(&guard.value.driver, self.authority, self.name, id, reason, lease_token)
-        committed :: queue_finish(guard.value.driver, result) ?? return Err(err)
-        close(^guard)
+        committed :: queue_dead_letter_transaction(self, id, reason, lease_token) ?? return Err(err)
         queue_publish_optional_transition(committed.observation)
         Ok(committed.receipt)
     }
     fn recover_expired(self) ServiceError! -[DB, Time]> {
         service.__authority_validate(self.endpoint) ?? return Err(err)
-        guard := self.data.guard_edit()
-        queue_begin(guard.value.driver) ?? return Err(err)
-        result :: queue_recover_on_driver(&guard.value.driver, self.authority, self.name, 3, queue_now())
-        committed :: queue_finish(guard.value.driver, result) ?? return Err(err)
-        close(^guard)
+        committed :: queue_recover_transaction(self) ?? return Err(err)
         queue_publish_transitions(committed)
         Ok(())
     }
     fn status(self) -[DB, Time]> JobQueueStatus ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
-        guard := self.data.guard_edit()
-        status :: queue_status_on_driver(&guard.value.driver, self.authority, self.name) ?? return Err(err)
-        close(^guard)
+        status :: queue_read_status(self) ?? return Err(err)
         queue_publish_status(status)
         Ok(status)
     }
@@ -401,19 +365,106 @@ impl JobQueue {
         service.__authority_validate(self.endpoint) ?? return Err(err)
         guard := self.data.guard_edit()
         queue_begin(guard.value.driver) ?? return Err(err)
-        result :: queue_prune_on_driver(&guard.value.driver, self.authority, self.name, 604800000, now)
-        queue_finish(guard.value.driver, result)
+        result :: queue_prune_on_driver(&guard.value.driver, self.authority, self.name, 604800000, now) ?? {
+            _ :: db.__queue_rollback(guard.value.driver)
+            return Err(err)
+        }
+        queue_finish(guard.value.driver, ^result)
     }
 }
 fn queue_set_paused(queue: JobQueue, paused: Bool) -[DB, Time]> JobQueueStatus ServiceError! {
     now :: queue_now()
     service.__authority_validate(queue.endpoint) ?? return Err(err)
+    queue_pause_transaction(queue, paused, now) ?? return Err(err)
+    queue.status()
+}
+
+// Returning from these helpers releases the lexical SharedGuard before any
+// publication or subsequent acquisition of the same queue lock.
+fn queue_enqueue_transaction(queue: JobQueue, requests: [EnqueueRequest], now: Int) -[DB]> (receipts: [JobQueueReceipt], observations: [QueueTransition]) ServiceError! {
     guard := queue.data.guard_edit()
     queue_begin(guard.value.driver) ?? return Err(err)
-    result :: queue_pause_on_driver(&guard.value.driver, queue.authority, queue.name, paused, now)
-    queue_finish(guard.value.driver, result) ?? return Err(err)
-    close(^guard)
-    queue.status()
+    result :: queue_enqueue_on_driver(&guard.value.driver, queue.authority, queue.name, 1024, false, requests, now) ?? {
+        _ :: db.__queue_rollback(guard.value.driver)
+        return Err(err)
+    }
+    queue_finish(guard.value.driver, ^result)
+}
+fn queue_claim_transaction(queue: JobQueue, worker: String, limit: Int) -[DB, Rand, Time]> (claims: [JobQueueClaim], observations: [QueueTransition]) ServiceError! {
+    guard := queue.data.guard_edit()
+    queue_begin(guard.value.driver) ?? return Err(err)
+    result :: queue_claim_on_driver(&guard.value.driver, queue.authority, queue.name, worker, limit, 3, 30000, queue_now()) ?? {
+        _ :: db.__queue_rollback(guard.value.driver)
+        return Err(err)
+    }
+    queue_finish(guard.value.driver, ^result)
+}
+fn queue_heartbeat_transaction(queue: JobQueue, claim: JobQueueClaim) -[DB, Time]> (receipt: JobQueueReceipt, observation: QueueTransition?) ServiceError! {
+    guard := queue.data.guard_edit()
+    queue_begin(guard.value.driver) ?? return Err(err)
+    result :: queue_heartbeat_on_driver(&guard.value.driver, queue.authority, queue.name, 30000, claim) ?? {
+        _ :: db.__queue_rollback(guard.value.driver)
+        return Err(err)
+    }
+    queue_finish(guard.value.driver, ^result)
+}
+fn queue_acknowledge_transaction(queue: JobQueue, claim: JobQueueClaim, result: JobResult) -[DB, Time]> (receipt: JobQueueReceipt, observation: QueueTransition?) ServiceError! {
+    guard := queue.data.guard_edit()
+    queue_begin(guard.value.driver) ?? return Err(err)
+    outcome :: queue_acknowledge_on_driver(&guard.value.driver, queue.authority, queue.name, claim, result) ?? {
+        _ :: db.__queue_rollback(guard.value.driver)
+        return Err(err)
+    }
+    queue_finish(guard.value.driver, ^outcome)
+}
+fn queue_fail_transaction(queue: JobQueue, claim: JobQueueClaim, failure: JobError) -[DB, Time]> (receipt: JobQueueReceipt, observation: QueueTransition?) ServiceError! {
+    guard := queue.data.guard_edit()
+    queue_begin(guard.value.driver) ?? return Err(err)
+    result :: queue_fail_on_driver(&guard.value.driver, queue.authority, queue.name, 3, 1000, 60000, claim, failure) ?? {
+        _ :: db.__queue_rollback(guard.value.driver)
+        return Err(err)
+    }
+    queue_finish(guard.value.driver, ^result)
+}
+fn queue_cancel_transaction(queue: JobQueue, id: String, reason: String, lease_token: String?) -[DB, Time]> (receipt: JobQueueReceipt, observation: QueueTransition?) ServiceError! {
+    guard := queue.data.guard_edit()
+    queue_begin(guard.value.driver) ?? return Err(err)
+    result :: queue_cancel_on_driver(&guard.value.driver, queue.authority, queue.name, id, reason, lease_token) ?? {
+        _ :: db.__queue_rollback(guard.value.driver)
+        return Err(err)
+    }
+    queue_finish(guard.value.driver, ^result)
+}
+fn queue_dead_letter_transaction(queue: JobQueue, id: String, reason: String, lease_token: String?) -[DB, Time]> (receipt: JobQueueReceipt, observation: QueueTransition?) ServiceError! {
+    guard := queue.data.guard_edit()
+    queue_begin(guard.value.driver) ?? return Err(err)
+    result :: queue_dead_letter_on_driver(&guard.value.driver, queue.authority, queue.name, id, reason, lease_token) ?? {
+        _ :: db.__queue_rollback(guard.value.driver)
+        return Err(err)
+    }
+    queue_finish(guard.value.driver, ^result)
+}
+fn queue_recover_transaction(queue: JobQueue) -[DB, Time]> [QueueTransition] ServiceError! {
+    guard := queue.data.guard_edit()
+    queue_begin(guard.value.driver) ?? return Err(err)
+    result :: queue_recover_on_driver(&guard.value.driver, queue.authority, queue.name, 3, queue_now()) ?? {
+        _ :: db.__queue_rollback(guard.value.driver)
+        return Err(err)
+    }
+    queue_finish(guard.value.driver, ^result)
+}
+fn queue_read_status(queue: JobQueue) -[DB, Time]> JobQueueStatus ServiceError! {
+    guard := queue.data.guard_edit()
+    queue_status_on_driver(&guard.value.driver, queue.authority, queue.name)
+}
+fn queue_pause_transaction(queue: JobQueue, paused: Bool, now: Int) ServiceError! -[DB]> {
+    guard := queue.data.guard_edit()
+    queue_begin(guard.value.driver) ?? return Err(err)
+    result :: queue_pause_on_driver(&guard.value.driver, queue.authority, queue.name, paused, now) ?? {
+        _ :: db.__queue_rollback(guard.value.driver)
+        return Err(err)
+    }
+    queue_finish(guard.value.driver, ^result)
 }
 
 fn queue_json_text(value: String) -> String Never! {
