@@ -17,6 +17,30 @@ fn named_methods_cover_exact_and_fixed_integer_widths() {
 }
 
 #[test]
+fn named_bit_methods_emit_and_run_on_u8_i64_u64() {
+    let source = r#"fn run() {
+    u :: U8{12}
+    i :: I64{12}
+    w :: U64{12}
+    print("{u.bit_and(U8{10})},{u.bit_or(U8{10})},{u.bit_xor(U8{10})},{u.bit_not()},{U8{2}.pow(U8{3})},{u << 1},{u >> 1}")
+    print("{i.bit_and(I64{10})},{i.bit_or(I64{10})},{i.bit_xor(I64{10})},{i.bit_not()},{I64{2}.pow(I64{3})},{i << 1},{i >> 1}")
+    print("{w.bit_and(U64{10})},{w.bit_or(U64{10})},{w.bit_xor(U64{10})},{w.bit_not()},{U64{2}.pow(U64{3})},{w << 1},{w >> 1}")
+}
+"#;
+    let expected = "8,14,6,243,8,24,6\n8,14,6,-13,8,24,6\n8,14,6,18446744073709551603,8,24,6\n";
+    let rust = tir_support::compile("named_bit_methods_emit", source);
+    assert!(!rust.is_empty());
+    if have_rustc() {
+        let (code, output) = build_and_run("named_bit_methods_aot", source);
+        assert_eq!(code, 0, "{output}");
+        assert_eq!(output, expected);
+        let (code, output, errors) = tir_support::default_run("named_bit_methods_run", source);
+        assert_eq!(code, 0, "{errors}");
+        assert_eq!(output, expected);
+    }
+}
+
+#[test]
 fn core_sign_uses_the_source_int_contract() {
     let source = "use core.math as math\nfn run() {\n    print(math.sign(-9))\n    print(math.sign(0))\n    print(math.sign(9))\n}\n";
     let expected = "-1\n0\n1\n";

@@ -641,6 +641,10 @@ fn lower_builtin_binary_method(
         "div" => crate::AST::BinOp::Div,
         "equal" => crate::AST::BinOp::Eq,
         "compare" => crate::AST::BinOp::Compare,
+        "bit_and" => crate::AST::BinOp::BitAnd,
+        "bit_or" => crate::AST::BinOp::BitOr,
+        "bit_xor" => crate::AST::BinOp::BitXor,
+        "pow" => crate::AST::BinOp::Pow,
         _ => unreachable!("checked builtin binary method"),
     };
     let distinct = match recv.ty.without_user_tags() {
@@ -4049,6 +4053,48 @@ fn lower_method_call_impl(
     lowered_receiver: Option<TExpr>,
     instantiated_sig: Option<&[(AccessConvention, Type)]>,
 ) -> TExpr {
+    // D-SIGIL-ALGEBRA1=B: these are intrinsic numeric operations, not
+    // checked function targets. Use the same Binary/Unary nodes as operators
+    // so width and Prelude dispatch stay shared with every MIR backend.
+    let mut lowered_receiver = lowered_receiver;
+    if matches!(
+        (method, args.len()),
+        ("bit_not", 0) | ("bit_and" | "bit_or" | "bit_xor" | "pow", 1)
+    ) {
+        let mut recv = lowered_receiver
+            .take()
+            .unwrap_or_else(|| lower_expr(receiver, cx, env));
+        if let Some(ty) = recv_type.as_deref().and_then(crate::AST::numeric_type_from_name) {
+            recv.ty = ty;
+        }
+        if recv.ty.is_integer() || (method == "pow" && recv.ty.is_float()) {
+            return in_own_frame(|| {
+                let result = resolved_ret
+                    .cloned()
+                    .unwrap_or_else(|| recv.ty.erased_inline_ranges());
+                if method == "bit_not" {
+                    return TExpr {
+                        ty: result,
+                        kind: TExprKind::Unary {
+                            op: crate::AST::UnOp::Not,
+                            operand: Box::new(recv),
+                        },
+                    };
+                }
+                if method == "pow" && recv.ty == Type::Int {
+                    if let Some(exponent) =
+                        super::expressions::lower_negative_power_exponent(&args[0].expr, cx, env)
+                    {
+                        let line = cx.src_line_col(method_span.start).0 as u32;
+                        return super::expressions::lower_reciprocal_power(recv, exponent, line);
+                    }
+                }
+                let rhs = lower_expr(&args[0].expr, cx, env);
+                lower_builtin_binary_method(method, recv, rhs, result, method_span, cx)
+            });
+        }
+        lowered_receiver = Some(recv);
+    }
     // A declared nominal owns the methods the checker resolved on it, even when
     // its leaf spells a builtin handle carrier (Core's `URL` or `MIME`, or a
     // user type named the same). Only such collisions are re-keyed: route the

@@ -778,20 +778,6 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         else {
             unreachable!("method chain contains only method calls")
         };
-        if method == "bit_not" && recv_type.as_deref() == Some(Syntax::TYPE_INT) {
-            let operand = lowered_receiver
-                .take()
-                .unwrap_or_else(|| lower_expr(receiver, cx, env));
-            let ty = operand.ty.erased_inline_ranges();
-            lowered_receiver = Some(TExpr {
-                ty,
-                kind: TExprKind::Unary {
-                    op: crate::AST::UnOp::Not,
-                    operand: Box::new(operand),
-                },
-            });
-            continue;
-        }
         let resolved_ret = resolved_ret.clone().or_else(|| {
             fallback_checked_method_return(method, recv_type.as_deref(), cx)
         });
@@ -4434,7 +4420,7 @@ fn integer_literal_is_zero(expr: &Expr) -> bool {
     }
 }
 
-fn lower_negative_power_exponent(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
+pub(super) fn lower_negative_power_exponent(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
     match expr {
         Expr::Paren(inner, _) => lower_negative_power_exponent(inner, cx, env),
         Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
@@ -4454,6 +4440,33 @@ fn lower_negative_power_exponent(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Op
             })
         }
         _ => None,
+    }
+}
+
+pub(super) fn lower_reciprocal_power(base: TExpr, exponent: TExpr, line: u32) -> TExpr {
+    let powered = TExpr {
+        ty: Type::Int,
+        kind: TExprKind::Binary {
+            op: BinOp::Pow,
+            overflow: true,
+            line,
+            lhs: Box::new(base),
+            rhs: Box::new(exponent),
+        },
+    };
+    TExpr {
+        ty: Type::Named(Syntax::TYPE_FRACTION.to_string()),
+        kind: TExprKind::PreciseBuiltin {
+            type_name: Syntax::TYPE_FRACTION.to_string(),
+            func: "from_parts".to_string(),
+            args: vec![
+                TExpr {
+                    ty: Type::Int,
+                    kind: TExprKind::IntLit(1, None),
+                },
+                powered,
+            ],
+        },
     }
 }
 
@@ -5428,30 +5441,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 if *op == BinOp::Pow && lhs.ty == Type::Int && rhs.ty == Type::Int {
                     if let Some(exponent) = lower_negative_power_exponent(r, cx, env) {
                         let line = cx.src_line_col(span.start).0 as u32;
-                        let powered = TExpr {
-                            ty: Type::Int,
-                            kind: TExprKind::Binary {
-                                op: BinOp::Pow,
-                                overflow: true,
-                                line,
-                                lhs: Box::new(lhs),
-                                rhs: Box::new(exponent),
-                            },
-                        };
-                        return TExpr {
-                            ty: fraction_ty.clone(),
-                            kind: TExprKind::PreciseBuiltin {
-                                type_name: Syntax::TYPE_FRACTION.to_string(),
-                                func: "from_parts".to_string(),
-                                args: vec![
-                                    TExpr {
-                                        ty: Type::Int,
-                                        kind: TExprKind::IntLit(1, None),
-                                    },
-                                    powered,
-                                ],
-                            },
-                        };
+                        return lower_reciprocal_power(lhs, exponent, line);
                     }
                 }
                 if matches!(

@@ -863,6 +863,10 @@ pub(crate) fn parse_int_name_tir(name: &str) -> Option<(bool, u8)> {
 /// `recv_type.is_none()` gate — it must be covered here as a distinct op.
 pub(crate) fn is_covered_numeric_method(method: &str, nargs: usize) -> bool {
     crate::Collections::numeric_overflow_method(method, nargs).is_some()
+        || matches!(
+            (method, nargs),
+            ("bit_not", 0) | ("bit_and" | "bit_or" | "bit_xor" | "pow", 1)
+        )
         || (nargs == 1
             && matches!(
                 method,
