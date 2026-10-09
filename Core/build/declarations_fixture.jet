@@ -1,7 +1,7 @@
 // Same-unit source fixture: real declarations go through the private service,
 // not through manufactured graph rows. The integration harness invokes this
 // symbol after embedding the Core source kernel with the compiler unit.
-priv fn build_session_declarations_fixture() -> Bool Never! {
+fn build_session_declarations_fixture() -> Bool Never! {
     policy :: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
     session :: build_session_new(71, "fixture", "fixture-compiler", policy)
     other :: build_session_new(72, "other", "fixture-compiler", policy)
@@ -11,11 +11,11 @@ priv fn build_session_declarations_fixture() -> Bool Never! {
     argv :: BuildSessionValue.List{values: [BuildSessionValue]{.Text("schema-compiler"), .Text("schema.txt")}}
     action_args :: [BuildSessionValue]{.Text("schema"), inputs, outputs, argv, empty}
     action_reply :: build_session_call(&session, "action", action_args, None, false, 10, 20)
-    action :: if action_reply == {.Value(value) -> value else -> return false}
+    action :: if action_reply == {.Value(value) -> value else -> { return false }}
     foreign :: build_session_call(&other, "add_library", [BuildSessionValue]{.Text("foreign"), empty, .List([BuildSessionValue]{action})}, None, false, 21, 30)
     if foreign == {.Failure(_) -> {} else -> return false}
     target_reply :: build_session_call(&session, "add_library", [BuildSessionValue]{.Text("schema"), .List([BuildSessionValue]{.Text(".jet/generated/fixture/schema.jet")}), .List([BuildSessionValue]{action})}, None, false, 31, 40)
-    target :: if target_reply == {.Value(value) -> value else -> return false}
+    target :: if target_reply == {.Value(value) -> value else -> { return false }}
     source :: "package {{ name: \"fixture.schema\" }}\nVALUE :: 7\n"
     generated :: build_session_call(&session, "generate", [BuildSessionValue]{.Text("schema")}, Val(source), false, 41, 50)
     if generated != .Value(.Unit) -> return false
@@ -30,13 +30,7 @@ priv fn build_session_declarations_fixture() -> Bool Never! {
     if plan != .Value(.Handle("BuildPlan", 71, 0)) -> return false
     // Source is retained in memory; its digest is content-derived, and no
     // generated file or declared command has been materialized or executed.
-    {
-        permit :: session.storage.guard_read()
-        if permit.value.actions.len() != 1 || permit.value.targets.len() != 1 || permit.value.generated.len() != 1 -> return false
-        module :: permit.value.generated[0]
-        if module.source != source || module.source_digest != "sha256:{build_crypto.sha256(source.bytes()).hex()}" -> return false
-        if permit.value.contributions[0].key != "Build.Settings.cache_slots" -> return false
-    }
+    if !build_session_fixture_storage_matches(session, source) -> return false
     queried :: build_session_graph(session, .Handle("BuildPlan", 71, 0))
     graph :: queried.graph ?? return false
     if queried.diagnostic != None || graph.targets.len() != 1 || graph.actions.len() != 1 -> return false
@@ -46,7 +40,7 @@ priv fn build_session_declarations_fixture() -> Bool Never! {
     if graph.action_keys[0].key != graph.actions[0].key || graph.files.len() != 3 -> return false
     first :: build_session_compiler_node("check", "fixture", [BuildGraphInputDigest]{{name: "b", digest: "two"}, {name: "a", digest: "one"}, {name: "a", digest: "one"}})
     second :: build_session_compiler_node("check", "fixture", [BuildGraphInputDigest]{{name: "a", digest: "one"}, {name: "b", digest: "two"}})
-    if first.key != second.key || first.inputs != [String]{"a", "b"} || first.input_digests.len() != 2 -> return false
+    if first.key != second.key || first.inputs != ([String]{"a", "b"}) || first.input_digests.len() != 2 -> return false
     finished :: build_session_finish(&session, .Handle("BuildPlan", 71, 0))
     selected :: finished.plan ?? return false
     if finished.diagnostics.len() != 0 || build_plan_graph(selected).actions[0].key != graph.actions[0].key -> return false
@@ -55,4 +49,12 @@ priv fn build_session_declarations_fixture() -> Bool Never! {
     if build_session_graph(session, .Handle("BuildPlan", 71, 0)).diagnostic == None -> return false
     if build_session_call(&session, "plan", [BuildSessionValue]{}, None, false, 91, 100) == {.Failure(_) -> {} else -> return false}
     true
+}
+
+fn build_session_fixture_storage_matches(session: BuildSession, source: String) -> Bool Never! {
+    permit :: session.storage.guard_read()
+    if permit.value.actions.len() != 1 || permit.value.targets.len() != 1 || permit.value.generated.len() != 1 -> return false
+    generated_module :: permit.value.generated[0]
+    if generated_module.source != source || generated_module.source_digest != "sha256:{build_crypto.sha256(source.bytes()).hex()}" -> return false
+    permit.value.contributions[0].key == "Build.Settings.cache_slots"
 }

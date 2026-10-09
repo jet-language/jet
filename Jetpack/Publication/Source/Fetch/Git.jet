@@ -48,7 +48,7 @@ fn pkg_fetch_git_transport(root: String, url: String) -[FS, Env, Net, Time.Wait]
         scheme = "ssh"
         authority = parts.before
     }
-    if ![String]{"git", "http", "https", "ssh"}.contains(scheme) -> return Err(pkg_fetch_git_bad("the `{scheme}` transport is not allowed"))
+    if !([String]{"git", "http", "https", "ssh"}.contains(scheme)) -> return Err(pkg_fetch_git_bad("the `{scheme}` transport is not allowed"))
     if authority.cut_last("@") == .Val(parts) {
         user :: parts.before
         if scheme != "ssh" || user == "" || user.starts_with("-") -> return Err(pkg_fetch_git_bad("SSH user-info must be a safe username"))
@@ -105,7 +105,10 @@ fn pkg_fetch_git_snapshot(transport: PackageFetchGitTransport, url: String, revi
         return Err(PackageFetchError{diagnostic: err.diagnostic})
     }
     if parent.rename(stage_name, prefix) == {
-        .Ok(_) -> { parent.fsync() ?? return Err(pkg_fetch_git_bad("couldn't flush git cache: {err}")); Ok(snapshot) }
+        .Ok(_) -> {
+            parent.fsync() ?? return Err(pkg_fetch_git_bad("couldn't flush git cache: {err}"))
+            Ok(snapshot)
+        }
         .Err(error) -> {
             close(^snapshot)
             parent.remove_tree(stage_name).drop("remove losing owned Git staging directory")
@@ -128,10 +131,16 @@ fn pkg_fetch_git_node(verification: &StoreVerification, roots: HangarRoots, cont
     transport :: pkg_fetch_git_transport(resolver.root, url)
     if !provider_git_available() -> return Err(pkg_fetch_git_bad("git is not installed or is not on PATH"))
     revision := String?{None}
-    if selector == .Rev(value) { pkg_fetch_git_revision(value, true); revision = Val(value) }
+    if selector == .Rev(value) {
+        pkg_fetch_git_revision(value, true)
+        revision = Val(value)
+    }
     if revision == None && !pkg_fetch_update_requested(resolver, name) {
         if pkg_fetch_previous_package(resolver, name) == .Val(package) {
-            if package.locked == .Val(locked) { pkg_fetch_git_revision(locked.rev, true); revision = Val(locked.rev) }
+            if package.locked == .Val(locked) {
+                pkg_fetch_git_revision(locked.rev, true)
+                revision = Val(locked.rev)
+            }
         }
     }
     if revision == None {

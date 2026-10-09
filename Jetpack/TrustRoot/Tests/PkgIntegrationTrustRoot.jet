@@ -59,7 +59,10 @@
     &eng.verify_targets(signed_t, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) ?? panic("verify targets")
     assert(if &eng.verify_targets(signed_t, Val("other/pkg"), TrustedClock.Fixed(now)) == {
         .Ok(_) -> false
-        .Err(error) -> if error == { .DelegationDenied(_, _) -> true; else -> false }
+        .Err(error) -> if error == {
+            .DelegationDenied(_, _) -> true
+            else -> false
+        }
     })
     t_canon :: trust_canonical_targets(targets)
     t_hashes := [String: String]{}
@@ -81,7 +84,10 @@
     assert_eq((eng.identities.get(IdentityKind.Publisher.label()) ?? panic("publisher identity")).name, "pub.alice")
     assert(if &eng.bind_identity(BoundIdentity.registry("other.registry")) == {
         .Ok(_) -> false
-        .Err(error) -> if error == { .IdentityKindMismatch(_, _) -> true; else -> false }
+        .Err(error) -> if error == {
+            .IdentityKindMismatch(_, _) -> true
+            else -> false
+        }
     })
 }
 
@@ -112,7 +118,10 @@ fn pkg_integration_trust_boot(fixture: TrustFixtureRoot, signed_root: SignedMeta
     replacement_root :: trust_sign_root(replacement, [TrustKey]{keys[0], keys[1]}) ?? panic("sign replacement root")
     assert(if TrustEngine.bootstrap(replacement_root, fixture.keyring, TrustRootPolicy.default(), Val(pin), TrustedClock.Fixed(now), None) == {
         .Ok(_) -> false
-        .Err(error) -> if error == { .BootstrapPinMismatch(_, _) -> true; else -> false }
+        .Err(error) -> if error == {
+            .BootstrapPinMismatch(_, _) -> true
+            else -> false
+        }
     })
     hashes := [String: String]{}
     hashes["sha256"] = crypto.sha256("pkg".bytes()).hex()
@@ -130,7 +139,10 @@ fn pkg_integration_trust_boot(fixture: TrustFixtureRoot, signed_root: SignedMeta
     signed_old :: trust_sign_targets(old, [TrustKey]{keys[3]}) ?? panic("sign older targets")
     assert(if &engine.verify_targets(signed_old, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) == {
         .Ok(_) -> false
-        .Err(error) -> if error == { .Rollback(role, _, _) -> role == MetadataRole.Targets; else -> false }
+        .Err(error) -> if error == {
+            .Rollback(role, _, _) -> role == MetadataRole.Targets
+            else -> false
+        }
     })
     frozen := targets
     frozen.version = 3
@@ -138,7 +150,10 @@ fn pkg_integration_trust_boot(fixture: TrustFixtureRoot, signed_root: SignedMeta
     frozen_engine := pkg_integration_trust_boot(fixture, signed_root, pin, now)
     assert(if &frozen_engine.verify_targets(trust_sign_targets(frozen, [TrustKey]{keys[3]}) ?? panic("sign frozen targets"), Val("jetsrc/pkg"), TrustedClock.Fixed(now)) == {
         .Ok(_) -> false
-        .Err(error) -> if error == { .Expired(role, _, _) -> role == MetadataRole.Targets; else -> false }
+        .Err(error) -> if error == {
+            .Expired(role, _, _) -> role == MetadataRole.Targets
+            else -> false
+        }
     })
     changed_custom := signed_targets
     custom_target := changed_custom.signed.targets.get("jetsrc/pkg") ?? panic("target")
@@ -149,7 +164,10 @@ fn pkg_integration_trust_boot(fixture: TrustFixtureRoot, signed_root: SignedMeta
     &custom_engine.verify_targets(signed_targets, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) ?? panic("verify before custom mutation")
     assert(if &custom_engine.verify_targets(changed_custom, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) == {
         .Ok(_) -> false
-        .Err(error) -> if error == { .ConsistentSnapshotMismatch(_, _) -> true; else -> false }
+        .Err(error) -> if error == {
+            .ConsistentSnapshotMismatch(_, _) -> true
+            else -> false
+        }
     })
     chain := pkg_integration_trust_boot(fixture, signed_root, pin, now)
     &chain.verify_targets(signed_targets, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) ?? panic("verify chain targets")
@@ -167,7 +185,10 @@ fn pkg_integration_trust_boot(fixture: TrustFixtureRoot, signed_root: SignedMeta
     timestamp :: TimestampMetadata{version: 1, expires_unix: now + 3600, snapshot: SnapshotMetaEntry{version: 1, length: snapshot_canonical.bytes().len() + 1, hashes: s_hashes}}
     assert(if &chain.verify_timestamp(trust_sign_timestamp(timestamp, [TrustKey]{keys[5]}) ?? panic("sign bad-length timestamp"), snapshot_canonical, 1, TrustedClock.Fixed(now)) == {
         .Ok(_) -> false
-        .Err(error) -> if error == { .ConsistentSnapshotMismatch(_, _) -> true; else -> false }
+        .Err(error) -> if error == {
+            .ConsistentSnapshotMismatch(_, _) -> true
+            else -> false
+        }
     })
     cache_key :: TrustKey.generate("cache-receipt")
     provenance :: CacheProvenance{reference: "jetsrc/pkg", source: "git:source", builder: "cache-builder:trusted", action: "sha256:action", output: "sha256:output", platform: "linux.x86_64", sandbox: "sandbox:policy-bound", policy: "sha256:policy"}
@@ -182,17 +203,26 @@ fn pkg_integration_trust_boot(fixture: TrustFixtureRoot, signed_root: SignedMeta
     tampered_witness.witness = untrusted_witness
     assert(if tampered_witness.verify(cache_key, TrustedClock.Fixed(now)) == {
         .Ok(_) -> false
-        .Err(error) -> if error == { .CacheReceiptInvalid(_) -> true; else -> false }
+        .Err(error) -> if error == {
+            .CacheReceiptInvalid(_) -> true
+            else -> false
+        }
     })
     tampered_receipt := receipt
     tampered_receipt.provenance.output = "sha256:attacker"
     assert(if tampered_receipt.verify(cache_key, TrustedClock.Fixed(now)) == {
         .Ok(_) -> false
-        .Err(error) -> if error == { .CacheReceiptInvalid(_) -> true; else -> false }
+        .Err(error) -> if error == {
+            .CacheReceiptInvalid(_) -> true
+            else -> false
+        }
     })
     assert(if receipt.verify(cache_key, TrustedClock.Fixed(now + 60)) == {
         .Ok(_) -> false
-        .Err(error) -> if error == { .CacheReceiptExpired(_, _) -> true; else -> false }
+        .Err(error) -> if error == {
+            .CacheReceiptExpired(_, _) -> true
+            else -> false
+        }
     })
 }
 

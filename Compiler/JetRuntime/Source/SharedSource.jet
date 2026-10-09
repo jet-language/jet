@@ -103,7 +103,7 @@ fn source_payload_size(schema: I64) -> I64 {
         return
     }
     if (kind == I64{1}) {
-        if (size == I64{8}) { trap_store(target, jet_rt_string_clone(trap_word(source))) } else -> rt_e4_slot_clone(source, target)
+        if (size == I64{8}) { trap_store(target, jet_rt_string_clone(trap_word(source))) } else { rt_e4_slot_clone(source, target) }
         return
     }
     if (kind == I64{3}) {
@@ -160,7 +160,7 @@ fn source_payload_size(schema: I64) -> I64 {
     kind :: trap_word(schema + I64{32})
     if (kind == I64{0}) -> return
     if (kind == I64{1}) {
-        if (trap_word(schema + I64{16}) == I64{8}) { jet_rt_string_drop(trap_word(slot)) } else -> rt_e4_slot_drop(slot)
+        if (trap_word(schema + I64{16}) == I64{8}) { jet_rt_string_drop(trap_word(slot)) } else { rt_e4_slot_drop(slot) }
         return
     }
     if (kind == I64{3}) {
