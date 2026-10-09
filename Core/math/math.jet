@@ -167,9 +167,9 @@ fn truncate(n: Float) -> Float Never! { trunc(n) }
 
 fn cot(n: Float) -> Float Never! { 1.0 / tan(n) }
 fn copysign(value: Float, sign_value: Float) -> Float Never! {
-    magnitude :: to_bits(value) & 9223372036854775807
-    sign :: to_bits(sign_value) & (-9223372036854775807 - 1)
-    from_bits(magnitude | sign)
+    magnitude :: to_bits(value).bit_and(9223372036854775807)
+    sign :: to_bits(sign_value).bit_and((-9223372036854775807 - 1))
+    from_bits(magnitude.bit_or(sign))
 }
 fn fma(a: Float, b: Float, c: Float) -> Float Never! { core.math.fma(a, b, c) }
 fn muladd(a: Float, b: Float, c: Float) -> Float Never! { fma(a, b, c) }
@@ -184,7 +184,7 @@ fn radians(n: Float) -> Float Never! { n * 0.017453292519943295 }
 fn lerp(a: Float, b: Float, t: Float) -> Float Never! { a + (b - a) * t }
 fn float32(n: Float) -> Float Never! { n }
 fn float64(n: Float) -> Float Never! { n }
-fn fabs(n: Float) -> Float Never! { from_bits(to_bits(n) & 9223372036854775807) }
+fn fabs(n: Float) -> Float Never! { from_bits(to_bits(n).bit_and(9223372036854775807)) }
 fn real(n: Float) -> Float Never! { n }
 fn imag(n: Float) -> Float Never! { Float{0.0} }
 fn conj(n: Float) -> Float Never! { n }
@@ -234,13 +234,13 @@ fn nextafter(n: Float, toward: Float) -> Float Never! { next_after(n, toward) }
 fn significand(n: Float) -> Float Never! {
     if n == 0.0 || !is_finite(n) -> return n
     bits :: to_bits(n)
-    exponent :: (bits >> 52) & 2047
+    exponent :: (bits >> 52).bit_and(2047)
     if exponent == 0 {
         value := fabs(n)
         loop value < 1.0 -> value = value * 2.0
         return copysign(value, n)
     }
-    copysign(from_bits((1023 << 52) | (bits & 4503599627370495)), n)
+    copysign(from_bits((1023 << 52).bit_or((bits.bit_and(4503599627370495)))), n)
 }
 fn ulp(n: Float) -> Float Never! {
     if is_nan(n) -> return nan()
@@ -333,7 +333,7 @@ fn checked_pow(base: Int, exponent: Int) -> Int? Never! {
 }
 
 // Integer power has the same exact arithmetic and negative-exponent stop as `^`.
-fn int_pow(base: Int, exponent: Int) -> Int Never! { base ^ exponent }
+fn int_pow(base: Int, exponent: Int) -> Int Never! { base.pow(exponent) }
 
 fn saturating_add(a: Int, b: Int) -> Int Never! { a + b }
 
@@ -441,7 +441,7 @@ fn digits(n: Int) -> Int Never! {
 fn leading_ones(n: Int) -> Int Never! {
     count := 0
     loop count < 64 {
-        if ((n >> (63 - count)) & 1) == 0 -> return count
+        if ((n >> (63 - count)).bit_and(1)) == 0 -> return count
         count = count + 1
     }
     count
@@ -449,7 +449,7 @@ fn leading_ones(n: Int) -> Int Never! {
 fn trailing_ones(n: Int) -> Int Never! {
     count := 0
     loop count < 64 {
-        if ((n >> count) & 1) == 0 -> return count
+        if ((n >> count).bit_and(1)) == 0 -> return count
         count = count + 1
     }
     count
@@ -470,7 +470,7 @@ fn abs_diff(a: Int, b: Int) -> Int Never! {
 
 fn even(n: Int) -> Bool Never! { is_even(n) }
 fn odd(n: Int) -> Bool Never! { is_odd(n) }
-fn xor(a: Int, b: Int) -> Int Never! { a ~| b }
+fn xor(a: Int, b: Int) -> Int Never! { a.bit_xor(b) }
 fn in_range(value: Int, low: Int, high: Int) -> Bool Never! {
     value >= low && value < high
 }
@@ -1042,11 +1042,11 @@ fn __fraction_from_float(value: Float) -> Fraction Never! {
     if !is_finite(value) -> panic("Float has no word-sized exact Fraction")
     if value == 0.0 -> return __fraction_from_int(0)
     bits :: to_bits(value)
-    exponent :: (bits >> 52) & 2047
-    significand := bits & 4503599627370495
+    exponent :: (bits >> 52).bit_and(2047)
+    significand := bits.bit_and(4503599627370495)
     power := -1074
     if exponent != 0 {
-        significand = significand | 4503599627370496
+        significand = significand.bit_or(4503599627370496)
         power = exponent - 1023 - 52
     }
     top := significand

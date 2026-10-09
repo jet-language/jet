@@ -1915,7 +1915,7 @@ impl ByteLexer {
                 .UTF8 -> {
                     if self.pending.is_empty() -> break
                     first :: Int{self.pending[0]}
-                    width :: if first < 0x80 -> 1 else if (first & 0xe0) == 0xc0 -> 2 else if (first & 0xf0) == 0xe0 -> 3 else if (first & 0xf8) == 0xf0 -> 4 else -> { return &self.fail(Reason.InvalidEncoding, "invalid UTF-8 leading byte") }
+                    width :: if first < 0x80 -> 1 else if (first.bit_and(0xe0)) == 0xc0 -> 2 else if (first.bit_and(0xf0)) == 0xe0 -> 3 else if (first.bit_and(0xf8)) == 0xf0 -> 4 else -> { return &self.fail(Reason.InvalidEncoding, "invalid UTF-8 leading byte") }
                     if self.pending.len() < width -> break
                     scalar :: wire_utf8_scalar(self.pending[0..<width], width) ?? return &self.fail(Reason.InvalidEncoding, "invalid UTF-8 sequence")
                     raw :: take_bytes(&self.pending, width)
@@ -2285,7 +2285,7 @@ fn trim_byte_end(bytes: View<U8>, start: Int, end: Int) -> Int Never! {
     cursor := end
     loop cursor > start {
         previous := cursor - 1
-        loop previous > start && (Int{bytes[previous]} & 0xc0) == 0x80 -> previous -= 1
+        loop previous > start && (Int{bytes[previous]}.bit_and(0xc0)) == 0x80 -> previous -= 1
         if !scalar_space(utf8_scalar(bytes, previous).value) -> break
         cursor = previous
     }

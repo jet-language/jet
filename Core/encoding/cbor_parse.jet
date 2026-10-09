@@ -10,12 +10,12 @@ use core.mem as mem
 fn narrow_bits(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Int? Never! {
     negative :: bits < 0
     sign :: if negative -> 1 << (exponent_bits + fraction_bits) else -> 0
-    exponent :: (bits >> 52) & 2047
-    fraction :: bits & 4503599627370495
+    exponent :: (bits >> 52).bit_and(2047)
+    fraction :: bits.bit_and(4503599627370495)
     max_exponent :: (1 << exponent_bits) - 1
     if exponent == 2047 {
-        if fraction != 0 -> return Val((max_exponent << fraction_bits) | (1 << (fraction_bits - 1)))
-        return Val(sign | (max_exponent << fraction_bits))
+        if fraction != 0 -> return Val((max_exponent << fraction_bits).bit_or((1 << (fraction_bits - 1))))
+        return Val(sign.bit_or((max_exponent << fraction_bits)))
     }
     if exponent == 0 {
         if fraction == 0 -> return Val(sign)
@@ -29,13 +29,13 @@ fn narrow_bits(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Int? Never!
     if target_exponent <= 0 {
         shift += 1 - target_exponent
         if shift > 52 + fraction_bits -> return None
-        significand = significand | 4503599627370496
+        significand = significand.bit_or(4503599627370496)
     }
     if shift >= 63 -> return None
-    if (significand & ((1 << shift) - 1)) != 0 -> return None
+    if (significand.bit_and(((1 << shift) - 1))) != 0 -> return None
     mantissa :: significand >> shift
-    if target_exponent <= 0 -> return Val(sign | mantissa)
-    Val(sign | (target_exponent << fraction_bits) | mantissa)
+    if target_exponent <= 0 -> return Val(sign.bit_or(mantissa))
+    Val(sign.bit_or((target_exponent << fraction_bits)).bit_or(mantissa))
 }
 
 fn failure(kind: CBORErrorKind, offset: Int, path: String, reason: String) -> CBORError Never! {
@@ -104,7 +104,7 @@ impl Parser {
         outside :: width == 8 && input[self.cursor] >= (U8{128})
         number := 0
         loop _ in 0..<width {
-            if !outside -> number = (number << 8) | Int.from_u8(input[self.cursor])
+            if !outside -> number = (number << 8).bit_or(Int.from_u8(input[self.cursor]))
             self.cursor += 1
         }
         if outside -> number = 9223372036854775807
@@ -130,8 +130,8 @@ impl Parser {
                 head :: Int.from_u8(input[self.cursor])
                 self.cursor += 1
                 &self.count(chunk, path) ?? return Err(err)
-                if (head >> 5) != major || (head & 31) == 31 -> return Err(failure(.Syntax, chunk, path, "indefinite CBOR string contains a wrong or indefinite chunk"))
-                length :: &self.argument(input, head & 31, chunk, path) ?? return Err(err)
+                if (head >> 5) != major || (head.bit_and(31)) == 31 -> return Err(failure(.Syntax, chunk, path, "indefinite CBOR string contains a wrong or indefinite chunk"))
+                length :: &self.argument(input, head.bit_and(31), chunk, path) ?? return Err(err)
                 if length.value > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR byte/text string chunk is truncated"))
                 encoding.__utf8_validate(input[self.cursor..<(self.cursor + length.value)]) ?? return Err(failure(.Syntax, chunk, path, "CBOR text chunk is not UTF-8"))
                 &self.reserve<U8>(&bytes, length.value, 1, chunk, path, "CBOR text string") ?? return Err(err)
@@ -259,7 +259,7 @@ impl Parser {
         loop i in 0..<width {
             byte :: Int.from_u8(input[self.cursor])
             if width == 8 && i == 0 && byte >= 128 -> bits = byte - 256
-            else -> bits = (bits << 8) | byte
+            else -> bits = (bits << 8).bit_or(byte)
             self.cursor += 1
         }
         value :: if width == 2 -> widen_float(bits, 5, 10) else if width == 4 -> widen_float(bits, 8, 23) else -> math.from_bits(bits)
@@ -280,7 +280,7 @@ impl Parser {
         self.cursor += 1
         &self.count(start, path) ?? return Err(err)
         major :: head >> 5
-        additional :: head & 31
+        additional :: head.bit_and(31)
         if major == 0 || major == 1 {
             number :: &self.argument(input, additional, start, path) ?? return Err(err)
             if number.outside_int -> return Err(failure(.Unsupported, start, path, "CBOR integer is outside Jet Int"))
@@ -311,19 +311,19 @@ fn bytewise_before(bytes: [U8], a: Int, a_end: Int, b: Int, b_end: Int) -> Bool 
 fn widen_float(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Float Never! {
     sign :: if (bits >> (exponent_bits + fraction_bits)) != 0 -> (-9223372036854775807 - 1) else -> 0
     maximum :: (1 << exponent_bits) - 1
-    exponent :: (bits >> fraction_bits) & maximum
-    fraction :: bits & ((1 << fraction_bits) - 1)
-    if exponent == maximum -> return math.from_bits(sign | (2047 << 52) | (fraction << (52 - fraction_bits)))
+    exponent :: (bits >> fraction_bits).bit_and(maximum)
+    fraction :: bits.bit_and(((1 << fraction_bits) - 1))
+    if exponent == maximum -> return math.from_bits(sign.bit_or((2047 << 52)).bit_or((fraction << (52 - fraction_bits))))
     bias :: (1 << (exponent_bits - 1)) - 1
     if exponent == 0 {
         if fraction == 0 -> return math.from_bits(sign)
         lead := fraction_bits - 1
-        loop 0 == (fraction & (1 << lead)) -> lead -= 1
+        loop 0 == (fraction.bit_and((1 << lead))) -> lead -= 1
         normal_exponent :: 1 - bias - fraction_bits + lead
         mantissa :: (fraction - (1 << lead)) << (52 - lead)
-        return math.from_bits(sign | ((normal_exponent + 1023) << 52) | mantissa)
+        return math.from_bits(sign.bit_or(((normal_exponent + 1023) << 52)).bit_or(mantissa))
     }
-    math.from_bits(sign | ((exponent - bias + 1023) << 52) | (fraction << (52 - fraction_bits)))
+    math.from_bits(sign.bit_or(((exponent - bias + 1023) << 52)).bit_or((fraction << (52 - fraction_bits))))
 }
 
 // D-BYTESDECODE1: the adapter and String.from_bytes share the validator,

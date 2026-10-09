@@ -14,13 +14,13 @@ fn arena(words: Int) -> [I64] Never! {
 fn word(w: [I64], at: Int) -> I64 Never! { w[at /% 8] }
 fn store(w: &[I64], at: Int, value: I64) Never! { w[at /% 8] = value }
 fn byte(w: [I64], at: Int) -> I64 Never! {
-    (w[at /% 8] >> ((at %% 8) * 8)) & I64{255}
+    (w[at /% 8] >> ((at %% 8) * 8)).bit_and(I64{255})
 }
 #Arithmetic(.Wrapping)
 fn put(w: &[I64], at: Int, value: I64) Never! {
     shift :: (at %% 8) * 8
     mask :: I64{255} << shift
-    w[at /% 8] = (w[at /% 8] & (mask ~| I64{-1})) | ((value & I64{255}) << shift)
+    w[at /% 8] = (w[at /% 8].bit_and((mask.bit_xor(I64{-1})))).bit_or(((value.bit_and(I64{255})) << shift))
 }
 fn wipe(w: &[I64]) Never! { loop i in 0..<w.len() -> w[i] = I64{0} }
 fn clear(w: &[I64], at: Int, count: Int) Never! {
@@ -37,7 +37,7 @@ fn extract(w: [I64], at: Int, count: Int) -> [U8] Never! {
 }
 fn equal(w: [I64], a: Int, b: Int, count: Int) -> Bool Never! {
     diff := I64{0}
-    loop i in 0..<count -> diff = diff | (byte(w, a + i) ~| byte(w, b + i))
+    loop i in 0..<count -> diff = diff.bit_or((byte(w, a + i).bit_xor(byte(w, b + i))))
     diff == I64{0}
 }
 fn copy_field(w: &[I64], out: Int, input: Int) Never! {
@@ -59,9 +59,9 @@ fn swap(w: &[I64], a: Int, b: Int, bit: I64) Never! {
     loop i in 0..<16 {
         x :: word(w, a + i * 8)
         y :: word(w, b + i * 8)
-        delta :: mask & (x ~| y)
-        store(&w, a + i * 8, x ~| delta)
-        store(&w, b + i * 8, y ~| delta)
+        delta :: mask.bit_and((x.bit_xor(y)))
+        store(&w, a + i * 8, x.bit_xor(delta))
+        store(&w, b + i * 8, y.bit_xor(delta))
     }
 }
 #Arithmetic(.Wrapping)
@@ -95,19 +95,19 @@ fn pack(w: &[I64], out: Int, value: Int, reduced: Int) Never! {
         store(&w, reduced, word(w, value) - I64{65517})
         loop i in 1..<15 {
             previous :: word(w, reduced + (i - 1) * 8)
-            store(&w, reduced + i * 8, word(w, value + i * 8) - I64{65535} - ((previous >> 16) & I64{1}))
-            store(&w, reduced + (i - 1) * 8, previous & I64{65535})
+            store(&w, reduced + i * 8, word(w, value + i * 8) - I64{65535} - ((previous >> 16).bit_and(I64{1})))
+            store(&w, reduced + (i - 1) * 8, previous.bit_and(I64{65535}))
         }
         previous :: word(w, reduced + 112)
-        top :: word(w, value + 120) - I64{32767} - ((previous >> 16) & I64{1})
+        top :: word(w, value + 120) - I64{32767} - ((previous >> 16).bit_and(I64{1}))
         store(&w, reduced + 120, top)
-        store(&w, reduced + 112, previous & I64{65535})
-        swap(&w, value, reduced, I64{1} - ((top >> 16) & I64{1}))
+        store(&w, reduced + 112, previous.bit_and(I64{65535}))
+        swap(&w, value, reduced, I64{1} - ((top >> 16).bit_and(I64{1})))
     }
     loop i in 0..<16 {
         v :: word(w, value + i * 8)
-        put(&w, out + i * 2, v & I64{255})
-        put(&w, out + i * 2 + 1, (v >> 8) & I64{255})
+        put(&w, out + i * 2, v.bit_and(I64{255}))
+        put(&w, out + i * 2 + 1, (v >> 8).bit_and(I64{255}))
     }
 }
 fn inverse(w: &[I64], out: Int, input: Int, work: Int) Never! {
@@ -126,10 +126,10 @@ fn x25519(sk: [U8], point: [U8]) -> [U8] Never! {
     w := arena(204)
     load(&w, 1536, sk)
     load(&w, 1568, point)
-    put(&w, 1536, byte(w, 1536) & I64{248})
-    put(&w, 1567, (byte(w, 1567) & I64{127}) | I64{64})
-    loop i in 0..<16 -> store(&w, i * 8, byte(w, 1568 + i * 2) | (byte(w, 1569 + i * 2) << 8))
-    store(&w, 120, word(w, 120) & I64{32767})
+    put(&w, 1536, byte(w, 1536).bit_and(I64{248}))
+    put(&w, 1567, (byte(w, 1567).bit_and(I64{127})).bit_or(I64{64}))
+    loop i in 0..<16 -> store(&w, i * 8, byte(w, 1568 + i * 2).bit_or((byte(w, 1569 + i * 2) << 8)))
+    store(&w, 120, word(w, 120).bit_and(I64{32767}))
     copy_field(&w, 256, 0)
     store(&w, 128, I64{1})
     store(&w, 512, I64{1})
@@ -138,7 +138,7 @@ fn x25519(sk: [U8], point: [U8]) -> [U8] Never! {
     i := 254
     loop {
         if i < 0 -> break
-        bit :: (byte(w, 1536 + i /% 8) >> (i %% 8)) & I64{1}
+        bit :: (byte(w, 1536 + i /% 8) >> (i %% 8)).bit_and(I64{1})
         swap(&w, 128, 256, bit)
         swap(&w, 384, 512, bit)
         add(&w, 640, 128, 384)
@@ -223,7 +223,7 @@ fn point_mul(w: &[I64], p: Int, q: Int, scalar: Int) Never! {
     i := 255
     loop {
         if i < 0 -> break
-        bit :: (byte(w, scalar + i /% 8) >> (i %% 8)) & I64{1}
+        bit :: (byte(w, scalar + i /% 8) >> (i %% 8)).bit_and(I64{1})
         point_swap(&w, p, q, bit)
         point_add(&w, q, p)
         point_add(&w, p, p)
@@ -237,7 +237,7 @@ fn point_pack(w: &[I64], out: Int, p: Int) Never! {
     mul(&w, p + 128, p + 128, 1792, 2816)
     pack(&w, 3328, p, 3200)
     pack(&w, out, p + 128, 3200)
-    put(&w, out + 31, byte(w, out + 31) | ((byte(w, 3328) & I64{1}) << 7))
+    put(&w, out + 31, byte(w, out + 31).bit_or(((byte(w, 3328).bit_and(I64{1})) << 7)))
 }
 #Arithmetic(.Wrapping)
 fn mod_l(w: &[I64], out: Int, x: Int) Never! {
@@ -264,13 +264,13 @@ fn mod_l(w: &[I64], out: Int, x: Int) Never! {
     loop j in 0..<32 {
         v :: word(w, x + j * 8) + c - top * C_L[j]
         c = v >> 8
-        store(&w, x + j * 8, v & I64{255})
+        store(&w, x + j * 8, v.bit_and(I64{255}))
     }
     loop j in 0..<32 -> store(&w, x + j * 8, word(w, x + j * 8) - c * C_L[j])
     loop j in 0..<32 {
         v :: word(w, x + j * 8)
         store(&w, x + (j + 1) * 8, word(w, x + (j + 1) * 8) + (v >> 8))
-        put(&w, out + j, v & I64{255})
+        put(&w, out + j, v.bit_and(I64{255}))
     }
 }
 fn reduce(w: &[I64], hash: Int) Never! {
@@ -293,8 +293,8 @@ fn expand(w: &[I64], seed: [U8]) Never! {
     digest := crypto.sha512(seed).bytes
     load(&w, 4096, digest)
     crypto.__zeroize(&digest)
-    put(&w, 4096, byte(w, 4096) & I64{248})
-    put(&w, 4127, (byte(w, 4127) & I64{63}) | I64{64})
+    put(&w, 4096, byte(w, 4096).bit_and(I64{248}))
+    put(&w, 4127, (byte(w, 4127).bit_and(I64{63})).bit_or(I64{64}))
     constants(&w)
 }
 fn ed_public(seed: [U8]) -> [U8] Never! {
@@ -342,7 +342,7 @@ fn canonical_y(w: [I64], bytes: Int) -> Bool Never! {
     i := 31
     loop {
         if i < 0 -> return false
-        v :: if i == 31 -> byte(w, bytes + i) & I64{127} else -> byte(w, bytes + i)
+        v :: if i == 31 -> byte(w, bytes + i).bit_and(I64{127}) else -> byte(w, bytes + i)
         limit :: if i == 31 -> I64{127} else -> if i == 0 -> I64{237} else -> I64{255}
         if v < limit -> return true
         if v > limit -> return false
@@ -369,8 +369,8 @@ fn decode(w: &[I64], p: Int, bytes: Int) -> Bool Never! {
     if !canonical_y(w, bytes) -> return false
     clear(&w, p, 512)
     store(&w, p + 256, I64{1})
-    loop i in 0..<16 -> store(&w, p + 128 + i * 8, byte(w, bytes + i * 2) | (byte(w, bytes + i * 2 + 1) << 8))
-    store(&w, p + 248, word(w, p + 248) & I64{32767})
+    loop i in 0..<16 -> store(&w, p + 128 + i * 8, byte(w, bytes + i * 2).bit_or((byte(w, bytes + i * 2 + 1) << 8)))
+    store(&w, p + 248, word(w, p + 248).bit_and(I64{32767}))
     mul(&w, 1920, p + 128, p + 128, 2816)
     mul(&w, 2048, 1920, 4608, 2816)
     sub(&w, 1920, 1920, p + 256)
@@ -401,7 +401,7 @@ fn decode(w: &[I64], p: Int, bytes: Int) -> Bool Never! {
     if !field_equal(&w, 2560, 1920) -> return false
     pack(&w, 3328, p, 3200)
     // Return -P, as in the held port. Inputs are public.
-    if (byte(w, 3328) & I64{1}) == (byte(w, bytes + 31) >> 7) {
+    if (byte(w, 3328).bit_and(I64{1})) == (byte(w, bytes + 31) >> 7) {
         loop j in 0..<16 -> store(&w, p + j * 8, I64{0} - word(w, p + j * 8))
     }
     mul(&w, p + 384, p, p + 128, 2816)
@@ -411,17 +411,17 @@ fn small_order(w: &[I64], p: Int) -> Bool Never! {
     loop i in 0..<64 -> store(&w, 4096 + i * 8, word(w, p + i * 8))
     loop _ in 0..<3 -> point_add(&w, 4096, 4096)
     point_pack(&w, 4928, 4096)
-    diff := byte(w, 4928) ~| I64{1}
-    loop i in 1..<32 -> diff = diff | byte(w, 4928 + i)
+    diff := byte(w, 4928).bit_xor(I64{1})
+    loop i in 1..<32 -> diff = diff.bit_or(byte(w, 4928 + i))
     diff == I64{0}
 }
 fn canonical_point(w: &[I64], p: Int, encoded: Int) -> Bool Never! {
     // decode returns -P; invert the sign bit of its encoding unless x=0.
     point_pack(&w, 4928, p)
     diff := I64{0}
-    loop i in 0..<32 -> diff = diff | byte(w, 3328 + i)
+    loop i in 0..<32 -> diff = diff.bit_or(byte(w, 3328 + i))
     sign :: if diff == (I64{0}) -> I64{0} else -> I64{128}
-    put(&w, 4959, byte(w, 4959) ~| sign)
+    put(&w, 4959, byte(w, 4959).bit_xor(sign))
     equal(w, 4928, encoded, 32)
 }
 fn verify_equation(w: &[I64], msg: [U8]) -> Bool Never! {
@@ -482,7 +482,7 @@ fn ed_verify_strict(pk: [U8], msg: [U8], sig: [U8]) -> Int Never! {
 }
 
 fn le32(w: [I64], at: Int) -> I64 Never! {
-    byte(w, at) | (byte(w, at + 1) << 8) | (byte(w, at + 2) << 16) | (byte(w, at + 3) << 24)
+    byte(w, at).bit_or((byte(w, at + 1) << 8)).bit_or((byte(w, at + 2) << 16)).bit_or((byte(w, at + 3) << 24))
 }
 #Arithmetic(.Wrapping)
 fn poly_block(w: &[I64], length: Int) Never! {
@@ -491,10 +491,10 @@ fn poly_block(w: &[I64], length: Int) Never! {
     t1 :: le32(w, 100)
     t2 :: le32(w, 104)
     t3 :: le32(w, 108)
-    store(&w, 40, word(w, 40) + (t0 & I64{0x3ffffff}))
-    store(&w, 48, word(w, 48) + (((t0 >> 26) | (t1 << 6)) & I64{0x3ffffff}))
-    store(&w, 56, word(w, 56) + (((t1 >> 20) | (t2 << 12)) & I64{0x3ffffff}))
-    store(&w, 64, word(w, 64) + (((t2 >> 14) | (t3 << 18)) & I64{0x3ffffff}))
+    store(&w, 40, word(w, 40) + (t0.bit_and(I64{0x3ffffff})))
+    store(&w, 48, word(w, 48) + (((t0 >> 26).bit_or((t1 << 6))).bit_and(I64{0x3ffffff})))
+    store(&w, 56, word(w, 56) + (((t1 >> 20).bit_or((t2 << 12))).bit_and(I64{0x3ffffff})))
+    store(&w, 64, word(w, 64) + (((t2 >> 14).bit_or((t3 << 18))).bit_and(I64{0x3ffffff})))
     store(&w, 72, word(w, 72) + (t3 >> 8) + (byte(w, 112) << 24))
     loop i in 0..<5 -> store(&w, 120 + i * 8, I64{0})
     loop i in 0..<5 {
@@ -508,11 +508,11 @@ fn poly_block(w: &[I64], length: Int) Never! {
     c := I64{0}
     loop i in 0..<5 {
         v :: word(w, 120 + i * 8) + c
-        store(&w, 40 + i * 8, v & I64{0x3ffffff})
+        store(&w, 40 + i * 8, v.bit_and(I64{0x3ffffff}))
         c = v >> 26
     }
     first :: word(w, 40) + c * I64{5}
-    store(&w, 40, first & I64{0x3ffffff})
+    store(&w, 40, first.bit_and(I64{0x3ffffff}))
     store(&w, 48, word(w, 48) + (first >> 26))
 }
 #Arithmetic(.Wrapping)
@@ -520,34 +520,34 @@ fn poly_finish(w: &[I64]) Never! {
     c := I64{0}
     loop i in 1..<5 {
         v :: word(w, 40 + i * 8) + c
-        store(&w, 40 + i * 8, v & I64{0x3ffffff})
+        store(&w, 40 + i * 8, v.bit_and(I64{0x3ffffff}))
         c = v >> 26
     }
     first :: word(w, 40) + c * I64{5}
-    store(&w, 40, first & I64{0x3ffffff})
+    store(&w, 40, first.bit_and(I64{0x3ffffff}))
     store(&w, 48, word(w, 48) + (first >> 26))
     c = I64{5}
     loop i in 0..<5 {
         v :: word(w, 40 + i * 8) + c
-        store(&w, 120 + i * 8, v & I64{0x3ffffff})
+        store(&w, 120 + i * 8, v.bit_and(I64{0x3ffffff}))
         c = v >> 26
     }
     mask :: I64{0} - c
-    loop i in 0..<5 -> store(&w, 40 + i * 8, (word(w, 120 + i * 8) & mask) | (word(w, 40 + i * 8) & (mask ~| I64{-1})))
+    loop i in 0..<5 -> store(&w, 40 + i * 8, (word(w, 120 + i * 8).bit_and(mask)).bit_or((word(w, 40 + i * 8).bit_and((mask.bit_xor(I64{-1}))))))
     h0 :: word(w, 40)
     h1 :: word(w, 48)
     h2 :: word(w, 56)
     h3 :: word(w, 64)
     h4 :: word(w, 72)
-    v0 :: ((h0 | (h1 << 26)) & I64{0xffffffff}) + le32(w, 80)
-    v1 :: (((h1 >> 6) | (h2 << 20)) & I64{0xffffffff}) + le32(w, 84) + (v0 >> 32)
-    v2 :: (((h2 >> 12) | (h3 << 14)) & I64{0xffffffff}) + le32(w, 88) + (v1 >> 32)
-    v3 :: (((h3 >> 18) | (h4 << 8)) & I64{0xffffffff}) + le32(w, 92) + (v2 >> 32)
+    v0 :: ((h0.bit_or((h1 << 26))).bit_and(I64{0xffffffff})) + le32(w, 80)
+    v1 :: (((h1 >> 6).bit_or((h2 << 20))).bit_and(I64{0xffffffff})) + le32(w, 84) + (v0 >> 32)
+    v2 :: (((h2 >> 12).bit_or((h3 << 14))).bit_and(I64{0xffffffff})) + le32(w, 88) + (v1 >> 32)
+    v3 :: (((h3 >> 18).bit_or((h4 << 8))).bit_and(I64{0xffffffff})) + le32(w, 92) + (v2 >> 32)
     loop i in 0..<4 {
-        put(&w, 160 + i, (v0 >> (i * 8)) & I64{255})
-        put(&w, 164 + i, (v1 >> (i * 8)) & I64{255})
-        put(&w, 168 + i, (v2 >> (i * 8)) & I64{255})
-        put(&w, 172 + i, (v3 >> (i * 8)) & I64{255})
+        put(&w, 160 + i, (v0 >> (i * 8)).bit_and(I64{255}))
+        put(&w, 164 + i, (v1 >> (i * 8)).bit_and(I64{255}))
+        put(&w, 168 + i, (v2 >> (i * 8)).bit_and(I64{255}))
+        put(&w, 172 + i, (v3 >> (i * 8)).bit_and(I64{255}))
     }
 }
 fn poly1305(key: [U8], data: [U8]) -> [U8] Never! {
@@ -557,11 +557,11 @@ fn poly1305(key: [U8], data: [U8]) -> [U8] Never! {
     t1 :: le32(w, 180)
     t2 :: le32(w, 184)
     t3 :: le32(w, 188)
-    store(&w, 0, t0 & I64{0x3ffffff})
-    store(&w, 8, ((t0 >> 26) | (t1 << 6)) & I64{0x3ffff03})
-    store(&w, 16, ((t1 >> 20) | (t2 << 12)) & I64{0x3ffc0ff})
-    store(&w, 24, ((t2 >> 14) | (t3 << 18)) & I64{0x3f03fff})
-    store(&w, 32, (t3 >> 8) & I64{0xfffff})
+    store(&w, 0, t0.bit_and(I64{0x3ffffff}))
+    store(&w, 8, ((t0 >> 26).bit_or((t1 << 6))).bit_and(I64{0x3ffff03}))
+    store(&w, 16, ((t1 >> 20).bit_or((t2 << 12))).bit_and(I64{0x3ffc0ff}))
+    store(&w, 24, ((t2 >> 14).bit_or((t3 << 18))).bit_and(I64{0x3f03fff}))
+    store(&w, 32, (t3 >> 8).bit_and(I64{0xfffff}))
     loop i in 0..<16 -> put(&w, 80 + i, byte(w, 192 + i))
     at := 0
     loop at < data.len() {
@@ -604,10 +604,10 @@ fn poly1305(key: [U8], data: [U8]) -> [U8] Never! {
         [U8]{72,240,172,234,52,158,42,246,151,174,1,71,39,75,130,204},
         [U8]{31,120,88,67,252,201,126,243,60,63,185,145,185,19,183,119}}
     key := [U8]{}
-    loop i in 0..<32 -> &key.push(U8{(i * 197 + 23) & 255})
+    loop i in 0..<32 -> &key.push(U8{(i * 197 + 23).bit_and(255)})
     loop i in 0..<sizes.len() {
         data := [U8]{}
-        loop j in 0..<sizes[i] -> &data.push(U8{(j * 29 + 7) & 255})
+        loop j in 0..<sizes[i] -> &data.push(U8{(j * 29 + 7).bit_and(255)})
         assert(poly1305(key, data) == tags[i])
     }
     random_tags :: [[U8]]{[U8]{32,215,147,223,246,5,227,120,174,157,69,41,194,206,246,66},
@@ -647,11 +647,11 @@ fn poly1305(key: [U8], data: [U8]) -> [U8] Never! {
         random_key := [U8]{}
         data := [U8]{}
         loop j in 0..<(32 + sizes[i %% sizes.len()]) {
-            state = state ~| (state << 13)
-            state = state ~| (state >> 17)
-            state = state ~| (state << 5)
-            if j < 32 -> &random_key.push(U8{state & U32{255}})
-            else -> &data.push(U8{state & U32{255}})
+            state = state.bit_xor((state << 13))
+            state = state.bit_xor((state >> 17))
+            state = state.bit_xor((state << 5))
+            if j < 32 -> &random_key.push(U8{state.bit_and(U32{255})})
+            else -> &data.push(U8{state.bit_and(U32{255})})
         }
         assert(poly1305(random_key, data) == random_tags[i])
     }

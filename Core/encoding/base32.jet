@@ -58,15 +58,15 @@ fn encode_alphabet(data: [U8], alphabet: String) -> String Never! {
     buffer := 0
     bits := 0
     loop b in data {
-        buffer = (buffer << 8) | Int.from_u8(b)
+        buffer = (buffer << 8).bit_or(Int.from_u8(b))
         bits += 8
         loop bits >= 5 {
             bits -= 5
-            &out.push(chars[(buffer >> bits) & 31])
+            &out.push(chars[(buffer >> bits).bit_and(31)])
         }
-        buffer = buffer & ((1 << bits) - 1)
+        buffer = buffer.bit_and(((1 << bits) - 1))
     }
-    if bits > 0 -> &out.push(chars[(buffer << (5 - bits)) & 31])
+    if bits > 0 -> &out.push(chars[(buffer << (5 - bits)).bit_and(31)])
     loop out.len() %% 8 != 0 -> &out.push(U8{61})
     String.from_bytes(out) ?? ""
 }
@@ -116,18 +116,18 @@ fn decode_for_edition(text: String, edition: Int) -> [U8] Base32Error! {
         else if n >= 50 && n <= 55 -> value = n - 50 + 26
         if value < 0 {
             digits :: "0123456789ABCDEF".bytes()
-            pair :: String.from_bytes([U8]{digits[n >> 4], digits[n & 15]}) ?? ""
+            pair :: String.from_bytes([U8]{digits[n >> 4], digits[n.bit_and(15)]}) ?? ""
             return Err(decode_error(i, "byte 0x{pair} is not in the base32 alphabet"))
         }
         last = i
         count += 1
-        buffer = (buffer << 5) | value
+        buffer = (buffer << 5).bit_or(value)
         bits += 5
         if bits >= 8 {
             bits -= 8
-            &out.push(U8{(buffer >> bits) & 255})
+            &out.push(U8{(buffer >> bits).bit_and(255)})
         }
-        buffer = buffer & ((1 << bits) - 1)
+        buffer = buffer.bit_and(((1 << bits) - 1))
     }
     if !strict || (count == 0 && padding == 0) -> return Ok(out)
     eof :: if pad_start >= 0 -> pad_start else -> last + 1

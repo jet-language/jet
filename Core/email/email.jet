@@ -92,15 +92,15 @@ fn decode_dkim(text: Secret) -> Secret EmailError! {
             b :: base64_value(text.bytes[offset + 1]) ?? return Err(configuration_error(invalid))
             c :: if pad2 -> 0 else -> base64_value(text.bytes[offset + 2]) ?? return Err(configuration_error(invalid))
             d :: if pad3 -> 0 else -> base64_value(text.bytes[offset + 3]) ?? return Err(configuration_error(invalid))
-            if (pads == 2 && (b & 15) != 0) || (pads == 1 && (c & 3) != 0) -> return Err(configuration_error(invalid))
-            if written < 32 -> output.bytes[written] = U8{((a << 2) | (b >> 4)) & 255}
+            if (pads == 2 && (b.bit_and(15)) != 0) || (pads == 1 && (c.bit_and(3)) != 0) -> return Err(configuration_error(invalid))
+            if written < 32 -> output.bytes[written] = U8{((a << 2).bit_or((b >> 4))).bit_and(255)}
             written += 1
             if pads < 2 {
-                if written < 32 -> output.bytes[written] = U8{((b << 4) | (c >> 2)) & 255}
+                if written < 32 -> output.bytes[written] = U8{((b << 4).bit_or((c >> 2))).bit_and(255)}
                 written += 1
             }
             if pads == 0 {
-                if written < 32 -> output.bytes[written] = U8{((c << 6) | d) & 255}
+                if written < 32 -> output.bytes[written] = U8{((c << 6).bit_or(d)).bit_and(255)}
                 written += 1
             }
         }
@@ -333,9 +333,9 @@ fn decode_ca_base64(text: String) -> [U8] EmailError! {
                 }
             }
             if pads > 2 -> return Err(construction_error("smtp", "custom CA PEM has invalid base64 padding"))
-            &out.push(U8{((values[0] << 2) | (values[1] >> 4)) & 255})
-            if pads < 2 -> &out.push(U8{((values[1] << 4) | (values[2] >> 2)) & 255})
-            if pads == 0 -> &out.push(U8{((values[2] << 6) | values[3]) & 255})
+            &out.push(U8{((values[0] << 2).bit_or((values[1] >> 4))).bit_and(255)})
+            if pads < 2 -> &out.push(U8{((values[1] << 4).bit_or((values[2] >> 2))).bit_and(255)})
+            if pads == 0 -> &out.push(U8{((values[2] << 6).bit_or(values[3])).bit_and(255)})
             padded = pads != 0
             used = 0
         }
@@ -701,9 +701,9 @@ fn mime_base64(bytes: [U8]) -> String Never! {
         b :: if remaining > 1 -> Int.from_u8(bytes[offset + 1]) else -> 0
         c :: if remaining > 2 -> Int.from_u8(bytes[offset + 2]) else -> 0
         &out.push(alphabet[a >> 2])
-        &out.push(alphabet[((a & 3) << 4) | (b >> 4)])
-        &out.push(if remaining > 1 -> alphabet[((b & 15) << 2) | (c >> 6)] else -> U8{61})
-        &out.push(if remaining > 2 -> alphabet[c & 63] else -> U8{61})
+        &out.push(alphabet[((a.bit_and(3)) << 4).bit_or((b >> 4))])
+        &out.push(if remaining > 1 -> alphabet[((b.bit_and(15)) << 2).bit_or((c >> 6))] else -> U8{61})
+        &out.push(if remaining > 2 -> alphabet[c.bit_and(63)] else -> U8{61})
         offset += 3
     }
     byte_text(out)
@@ -892,7 +892,7 @@ fn percent_encode(value: String) -> String Never! {
             &out.push(byte)
         } else {
             value :: Int.from_u8(byte)
-            &out.push(U8{37}); &out.push(hex[value >> 4]); &out.push(hex[value & 15])
+            &out.push(U8{37}); &out.push(hex[value >> 4]); &out.push(hex[value.bit_and(15)])
         }
     }
     byte_text(out)
@@ -908,28 +908,28 @@ fn mime_boundary(message: __EmailMessageView, label: String) -> String Never! {
     loop input in inputs {
         digest :: core.crypto.sha256(input.bytes()).bytes
         loop slot in 0..<32 {
-            sum :: (Int.from_u8(state[slot]) + Int.from_u8(digest[(slot + index) %% 32])) & 255
+            sum :: (Int.from_u8(state[slot]) + Int.from_u8(digest[(slot + index) %% 32])).bit_and(255)
             shift :: index %% 7
-            rotated :: ((sum << shift) | (sum >> (8 - shift))) & 255
-            state[slot] = U8{rotated ~| index}
+            rotated :: ((sum << shift).bit_or((sum >> (8 - shift)))).bit_and(255)
+            state[slot] = U8{rotated.bit_xor(index)}
         }
-        index = (index + 1) & 255
+        index = (index + 1).bit_and(255)
     }
     loop attachment in message.attachments {
         digest :: core.crypto.sha256(core.email.__attachment_view(attachment).bytes).bytes
         loop slot in 0..<32 {
-            sum :: (Int.from_u8(state[slot]) + Int.from_u8(digest[(slot + index) %% 32])) & 255
+            sum :: (Int.from_u8(state[slot]) + Int.from_u8(digest[(slot + index) %% 32])).bit_and(255)
             shift :: index %% 7
-            state[slot] = U8{(((sum << shift) | (sum >> (8 - shift))) & 255) ~| index}
+            state[slot] = U8{(((sum << shift).bit_or((sum >> (8 - shift)))).bit_and(255)).bit_xor(index)}
         }
-        index = (index + 1) & 255
+        index = (index + 1).bit_and(255)
     }
     digest :: core.crypto.sha256(state).bytes
     hex :: "0123456789abcdef".bytes()
     suffix := [U8]{}
     loop slot in 0..<24 {
         byte :: Int.from_u8(digest[slot])
-        &suffix.push(hex[byte >> 4]); &suffix.push(hex[byte & 15])
+        &suffix.push(hex[byte >> 4]); &suffix.push(hex[byte.bit_and(15)])
     }
     "jet-" + label + "-" + byte_text(suffix)
 }

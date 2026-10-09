@@ -38,7 +38,7 @@ fn encode_upper(data: [U8]) -> String Never! {
     loop b in data {
         n :: u8_int(b)
         &out.push(nibble_upper(n >> 4))
-        &out.push(nibble_upper(n & 15))
+        &out.push(nibble_upper(n.bit_and(15)))
     }
     String.from_bytes(out) ?? ""
 }
@@ -81,12 +81,12 @@ fn a2b_base64(text: String) -> [U8] HexError! {
 
 /// Python `binascii.crc_hqx` (CRC-CCITT).
 fn crc_hqx(data: [U8], value: Int) -> Int Never! {
-    crc := value & 65535
+    crc := value.bit_and(65535)
     loop b in data {
-        crc = crc ~| (u8_int(b) << 8)
+        crc = crc.bit_xor((u8_int(b) << 8))
         loop _ in 0..<8 {
-            if crc & 32768 != 0 -> crc = ((crc << 1) ~| 4129) & 65535 else {
-                crc = (crc << 1) & 65535
+            if crc.bit_and(32768) != 0 -> crc = ((crc << 1).bit_xor(4129)).bit_and(65535) else {
+                crc = (crc << 1).bit_and(65535)
             }
         }
     }
@@ -224,7 +224,7 @@ fn encode_sep(data: [U8], sep: String) -> String Never! {
         }
         n :: u8_int(data[i])
         &out.push(encoding.hex_nibble(n >> 4))
-        &out.push(encoding.hex_nibble(n & 15))
+        &out.push(encoding.hex_nibble(n.bit_and(15)))
     }
     String.from_bytes(out) ?? ""
 }
@@ -236,7 +236,7 @@ fn dump(data: [U8]) -> String Never! {
     shifts :: [Int]{28, 24, 20, 16, 12, 8, 4, 0}
     loop offset < data.len() {
         loop shift in shifts {
-            &out.push(encoding.hex_nibble((offset >> shift) & 15))
+            &out.push(encoding.hex_nibble((offset >> shift).bit_and(15)))
         }
         &out.push(U8{32})
         &out.push(U8{32})
@@ -245,7 +245,7 @@ fn dump(data: [U8]) -> String Never! {
             if offset + i < data.len() {
                 n :: u8_int(data[offset + i])
                 &out.push(encoding.hex_nibble(n >> 4))
-                &out.push(encoding.hex_nibble(n & 15))
+                &out.push(encoding.hex_nibble(n.bit_and(15)))
             } else {
                 &out.push(U8{32})
                 &out.push(U8{32})

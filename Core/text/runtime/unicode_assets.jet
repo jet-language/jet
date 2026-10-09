@@ -9,7 +9,7 @@
 fn uint(bytes: View<U8>, at: Int, width: Int) -> Int Never! {
     assert(at >= 0 && width >= 1 && width <= 4 && at + width <= bytes.len())
     value := 0
-    loop i in 0..<width -> value = value | (Int.from_u8(bytes[at + i]) << (i * 8))
+    loop i in 0..<width -> value = value.bit_or((Int.from_u8(bytes[at + i]) << (i * 8)))
     value
 }
 

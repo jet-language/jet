@@ -115,15 +115,15 @@ fn encode(value: Dyn, canonical: Bool) -> [U8] CBORError! {
 }
 
 fn append_uint(out: &[U8], value: Int, width: Int) Never! {
-    loop i in 0..<width -> &out.push(U8{(value >> ((width - i - 1) * 8)) & 255})
+    loop i in 0..<width -> &out.push(U8{(value >> ((width - i - 1) * 8)).bit_and(255)})
 }
 
 fn append_length(out: &[U8], major: Int, value: Int) Never! {
-    if value < 24 -> &out.push(U8{(major << 5) | value})
+    if value < 24 -> &out.push(U8{(major << 5).bit_or(value)})
     else {
         width :: if value <= 255 -> 1 else if value <= 65535 -> 2 else if value <= 4294967295 -> 4 else -> 8
         additional :: if width == 1 -> 24 else if width == 2 -> 25 else if width == 4 -> 26 else -> 27
-        &out.push(U8{(major << 5) | additional})
+        &out.push(U8{(major << 5).bit_or(additional)})
         append_uint(&out, value, width)
     }
 }

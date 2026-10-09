@@ -36,7 +36,7 @@ fn usize_max() -> U64 Never! { SYS_TARGET_USIZE_MAX }
     size :: prep { SysTargetPointer.$layout.size ?? panic("selected target pointer layout") }
     maximum :: usize_max()
     assert((maximum >> (8 * (size - 1))) == U64{255})
-    assert((maximum & U64{255}) == U64{255})
+    assert((maximum.bit_and(U64{255})) == U64{255})
 }
 
 
@@ -338,8 +338,8 @@ fn expand(value: String) -[Env]> String Never! {
             n :: Int.from_u8(byte)
             if n < 128 -> &out.push(byte)
             else {
-                &out.push(U8{192 | (n >> 6)})
-                &out.push(U8{128 | (n & 63)})
+                &out.push(U8{(192).bit_or((n >> 6))})
+                &out.push(U8{(128).bit_or((n.bit_and(63)))})
             }
             i = i + 1
         }

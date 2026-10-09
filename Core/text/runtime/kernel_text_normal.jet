@@ -72,10 +72,10 @@ fn normalize(text: String, compat: Bool, recompose: Bool) -> String Never! {
     loop at < bytes.len() {
         width :: normal_string.utf8_width_at(bytes, at)
         cp := Int.from_u8(bytes[at])
-        if width == 2 -> cp = cp & 31
-        if width == 3 -> cp = cp & 15
-        if width == 4 -> cp = cp & 7
-        loop k in 1..<width -> cp = (cp << 6) | (Int.from_u8(bytes[at + k]) & 63)
+        if width == 2 -> cp = cp.bit_and(31)
+        if width == 3 -> cp = cp.bit_and(15)
+        if width == 4 -> cp = cp.bit_and(7)
+        loop k in 1..<width -> cp = (cp << 6).bit_or((Int.from_u8(bytes[at + k]).bit_and(63)))
         decompose_cp(&out, cp, compat, index, pool)
         at = at + width
     }

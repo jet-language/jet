@@ -177,7 +177,7 @@ fn fake_rng(seed: Int) -> random.RNG Never! { random.rng(seed) }
 
 /// Deterministic fake data uses the same source SplitMix64 stream as RNG.
 fn fake_data(seed: Int) -> Fake Never! {
-    Fake{state: U64{Int{I64{seed}} & 18446744073709551615}, locale_code: 0}
+    Fake{state: U64{Int{I64{seed}}.bit_and(18446744073709551615)}, locale_code: 0}
 }
 
 struct Fake {

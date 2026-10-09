@@ -108,7 +108,7 @@ fn fixed_magnitude(value: JetFixedWide) -> FixedMagnitude Never! {
     if (value.high >= I64{0}) -> return FixedMagnitude{negative: false, high: high, low: value.low}
     low :: U64{0}.wrapping_sub(value.low)
     carry :: if (value.low == U64{0}) -> U64{1} else -> U64{0}
-    FixedMagnitude{negative: true, high: (high ~| U64{18446744073709551615}).wrapping_add(carry), low: low}
+    FixedMagnitude{negative: true, high: (high.bit_xor(U64{18446744073709551615})).wrapping_add(carry), low: low}
 }
 fn fixed_wide_display(value: JetFixedWide) -> Int Never! {
     // Formatting alone uses the canonical exact-number owner; never the value path.
@@ -164,8 +164,8 @@ fn jet_fixed_integer_widen(value: JetFixedWide, signed: Bool) -> JetFixedWide Ne
 }
 // Rust jet_fixed_integer_narrow (:107): full64 never passes through exact Int.
 fn jet_fixed_integer_narrow(value: JetFixedWide, signed: Bool, bits: Int) -> I64 Never! {
-    low := value.low & fixed_mask(bits)
-    if (signed && bits < 64 && (low & (U64{1} << (bits - 1))) != U64{0}) -> low |= U64{18446744073709551615} ~| fixed_mask(bits)
+    low := value.low.bit_and(fixed_mask(bits))
+    if (signed && bits < 64 && (low.bit_and((U64{1} << (bits - 1)))) != U64{0}) -> low = low.bit_or(U64{18446744073709551615}.bit_xor(fixed_mask(bits)))
     fixed_word_signed(low)
 }
 fn fixed_narrow(value: FixedMagnitude, signed: Bool, bits: Int) -> I64 Never! {
@@ -234,13 +234,13 @@ fn floored_mod(left: FixedMagnitude, right: FixedMagnitude) -> FixedMagnitude Ne
 }
 // Rust wrapping_pow (:172).
 fn wrapping_pow(left: FixedMagnitude, exponent: U64, bits: Int, signed: Bool) -> I64 Never! {
-    base := fixed_low_bits(left) & fixed_mask(bits)
-    result := U64{1} & fixed_mask(bits)
+    base := fixed_low_bits(left).bit_and(fixed_mask(bits))
+    result := U64{1}.bit_and(fixed_mask(bits))
     remaining := exponent
     loop remaining != (U64{0}) {
-        if ((remaining & U64{1}) != U64{0}) -> result = result.wrapping_mul(base) & fixed_mask(bits)
+        if ((remaining.bit_and(U64{1})) != U64{0}) -> result = result.wrapping_mul(base).bit_and(fixed_mask(bits))
         remaining >>= 1
-        if (remaining != U64{0}) -> base = base.wrapping_mul(base) & fixed_mask(bits)
+        if (remaining != U64{0}) -> base = base.wrapping_mul(base).bit_and(fixed_mask(bits))
     }
     jet_fixed_integer_narrow(JetFixedWide{high: I64{0}, low: result}, signed, bits)
 }
@@ -250,7 +250,7 @@ fn saturating_pow(left: FixedMagnitude, exponent: U64, range: FixedBounds, signe
     result := fixed_clamp(fixed_small(U64{1}, false), range)
     remaining := exponent
     loop remaining != (U64{0}) {
-        if ((remaining & U64{1}) != U64{0}) -> result = fixed_clamp(fixed_product(result, base), range)
+        if ((remaining.bit_and(U64{1})) != U64{0}) -> result = fixed_clamp(fixed_product(result, base), range)
         remaining >>= 1
         if (remaining != U64{0}) -> base = fixed_clamp(fixed_product(base, base), range)
     }
@@ -267,7 +267,7 @@ fn power(left: FixedMagnitude, right: FixedMagnitude, mode: Int, range: FixedBou
     result := fixed_small(U64{1}, false)
     remaining := right.low
     loop remaining != (U64{0}) {
-        if ((remaining & U64{1}) != U64{0}) {
+        if ((remaining.bit_and(U64{1})) != U64{0}) {
             result = fixed_product(result, base)
             if (result.high != U64{0}) -> return failure(mode, JetFixedArithmeticError.PowerOverflow)
         }
@@ -305,9 +305,9 @@ fn jet_fixed_arithmetic(left: I64, right: JetFixedWide, op: Int, mode: Int, sign
             if op == 11 -> return checked_value(mode, floor_div(a, b), range, JetFixedArithmeticError.DivisionOverflow, signed, bits)
             return checked_value(mode, floored_mod(a, b), range, JetFixedArithmeticError.DivisionOverflow, signed, bits)
         }
-        5 -> return wrapping_value(fixed_small(left_word.low & widened.low, false), signed, bits)
-        6 -> return wrapping_value(fixed_small(left_word.low | widened.low, false), signed, bits)
-        7 -> return wrapping_value(fixed_small(left_word.low ~| widened.low, false), signed, bits)
+        5 -> return wrapping_value(fixed_small(left_word.low.bit_and(widened.low), false), signed, bits)
+        6 -> return wrapping_value(fixed_small(left_word.low.bit_or(widened.low), false), signed, bits)
+        7 -> return wrapping_value(fixed_small(left_word.low.bit_xor(widened.low), false), signed, bits)
         8 | 9 -> {
             if (b.negative || b.high != U64{0} || b.low >= U64{bits}) {
                 direction :: if op == 8 -> "left" else -> "right"
@@ -327,9 +327,9 @@ fn jet_fixed_arithmetic(left: I64, right: JetFixedWide, op: Int, mode: Int, sign
             width :: U64{bits}
             two64_mod :: ((U64{18446744073709551615} %% width) + U64{1}) %% width
             count :: Int.from_u64(((b.high %% width) * two64_mod + b.low %% width) %% width)
-            value :: left_word.low & fixed_mask(bits)
+            value :: left_word.low.bit_and(fixed_mask(bits))
             if count == 0 -> return wrapping_value(fixed_small(value, false), signed, bits)
-            rotated :: if op == 13 -> (value << count) | (value >> (bits - count)) else -> (value >> count) | (value << (bits - count))
+            rotated :: if op == 13 -> (value << count).bit_or((value >> (bits - count))) else -> (value >> count).bit_or((value << (bits - count)))
             return wrapping_value(fixed_small(rotated, false), signed, bits)
         }
         else -> return JetFixedArithmeticResult.Trap(JetFixedArithmeticError.UnknownOperation)

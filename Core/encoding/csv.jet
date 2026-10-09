@@ -739,8 +739,8 @@ struct CSVReader {
         }
         second :: Int.from_u8(self.char1)
         if (n == 224 && second < 160) || (n == 237 && second > 159) || (n == 240 && second < 144) || (n == 244 && second > 143) -> return Err(self.utf8_error(self.offset - width))
-        value := n & (if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7)
-        loop i in 1..<width -> value = (value << 6) | (Int.from_u8(self.character_byte(i)) & 63)
+        value := n.bit_and((if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7))
+        loop i in 1..<width -> value = (value << 6).bit_or((Int.from_u8(self.character_byte(i)).bit_and(63)))
         Ok(Val(value))
     }
 
@@ -911,8 +911,8 @@ fn reader(source: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}, de
     n :: Int.from_u8(raw[0])
     width :: if n < 128 -> 1 else if n < 224 -> 2 else if n < 240 -> 3 else -> 4
     if raw.len() != width || n == 34 || n == 13 || n == 10 -> return Err(codec_error(.Syntax, 0, 1, 1, "", reason))
-    code := n & (if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7)
-    loop i in 1..<width -> code = (code << 6) | (Int.from_u8(raw[i]) & 63)
+    code := n.bit_and((if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7))
+    loop i in 1..<width -> code = (code << 6).bit_or((Int.from_u8(raw[i]).bit_and(63)))
     Ok(CSVReader{input: ^source, limits: limits, delimiter: code, header: header, skip_blank: skip_blank, field: [U8]{}, fields: [String]{}, fields_heap: 0, allocation: stream.budget(limits), quoted: false, after_quote: false, pending_cr: false, pending_cr_line: 1, pending_cr_column: 1, record: 1, parser_line: 1, parser_column: 0, record_line: 1, record_has_content: false, ended_record: false, saw_input: false, total: 0, offset: 0, line: 1, column: 1, eof: false, terminal: None, char0: U8{0}, char1: U8{0}, char2: U8{0}, char3: U8{0}, char_width: 0})
 }
 

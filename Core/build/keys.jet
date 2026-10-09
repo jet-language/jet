@@ -110,17 +110,17 @@ fn build_key_debug_text(value: String) -> String Never! {
         scalar := first
         remaining := 0
         if first >= 240 {
-            scalar = first & 7
+            scalar = first.bit_and(7)
             remaining = 3
         } else if first >= 224 {
-            scalar = first & 15
+            scalar = first.bit_and(15)
             remaining = 2
         } else if first >= 192 {
-            scalar = first & 31
+            scalar = first.bit_and(31)
             remaining = 1
         }
         loop remaining > 0 {
-            scalar = scalar * 64 + (Int.from_u8(raw[position]) & 63)
+            scalar = scalar * 64 + (Int.from_u8(raw[position]).bit_and(63))
             position += 1
             remaining -= 1
         }

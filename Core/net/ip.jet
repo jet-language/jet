@@ -205,7 +205,7 @@ fn ipv6_is_unspecified(addr: IPv6) -> Bool Never! {
 }
 
 fn ipv6_is_link_local(addr: IPv6) -> Bool Never! {
-    addr.words.len() == 8 && addr.words[0] & 65472 == 65152
+    addr.words.len() == 8 && addr.words[0].bit_and(65472) == 65152
 }
 
 fn prefix_mask(prefix: Int) -> Int Never! {
@@ -458,7 +458,7 @@ fn is_documentation(addr: IPv4) -> Bool Never! {
 fn is_shared(addr: IPv4) -> Bool Never! { is_carrier_grade_nat(addr) }
 
 fn ipv6_is_multicast(addr: IPv6) -> Bool Never! {
-    addr.words.len() == 8 && addr.words[0] & 65280 == 65280
+    addr.words.len() == 8 && addr.words[0].bit_and(65280) == 65280
 }
 
 fn ipv6_is_private(addr: IPv6) -> Bool Never! {

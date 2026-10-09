@@ -289,14 +289,14 @@ fn b64url_decode(text: String) -> [U8] AuthError! {
     acc := 0
     bits := 0
     loop b in raw {
-        acc = ((acc << 6) | b64url_value(b)) & 16777215
+        acc = ((acc << 6).bit_or(b64url_value(b))).bit_and(16777215)
         bits = bits + 6
         if bits >= 8 {
             bits = bits - 8
             &out.push(to_u8(acc >> bits))
         }
     }
-    if bits != 0 && (acc & ((1 << bits) - 1)) != 0 -> return Err(AuthError.DecodeError("non-canonical base64 trailing bits"))
+    if bits != 0 && (acc.bit_and(((1 << bits) - 1))) != 0 -> return Err(AuthError.DecodeError("non-canonical base64 trailing bits"))
     Ok(out)
 }
 
@@ -578,7 +578,7 @@ fn decode_store(raw: [U8]) -> [AuthRecord]? {
         fields := [String]{}
         loop _ in 0..<4 {
             if pos + 4 > raw.len() -> return None
-            n :: Int.from_u8(raw[pos]) | (Int.from_u8(raw[pos + 1]) << 8) | (Int.from_u8(raw[pos + 2]) << 16) | (Int.from_u8(raw[pos + 3]) << 24)
+            n :: Int.from_u8(raw[pos]).bit_or((Int.from_u8(raw[pos + 1]) << 8)).bit_or((Int.from_u8(raw[pos + 2]) << 16)).bit_or((Int.from_u8(raw[pos + 3]) << 24))
             pos = pos + 4
             if pos + n > raw.len() -> return None
             text :: slice_bytes(raw, pos, pos + n) ?? return None
@@ -725,14 +725,14 @@ fn oauth_b64(text: String) -> [U8] {
     loop b in raw {
         v :: b64url_value(b)
         if v < 0 -> return Err("OAuth assertion encoding is invalid")
-        acc = ((acc << 6) | v) & 16777215
+        acc = ((acc << 6).bit_or(v)).bit_and(16777215)
         bits = bits + 6
         if bits >= 8 {
             bits = bits - 8
             &out.push(to_u8(acc >> bits))
         }
     }
-    if bits != 0 && (acc & ((1 << bits) - 1)) != 0 -> return Err("OAuth assertion encoding is non-canonical")
+    if bits != 0 && (acc.bit_and(((1 << bits) - 1))) != 0 -> return Err("OAuth assertion encoding is non-canonical")
     Ok(out)
 }
 
@@ -858,17 +858,17 @@ fn push_scalar(out: &[U8], cp: Int) Never! {
     if cp < 128 {
         &out.push(to_u8(cp))
     } else if cp < 2048 {
-        &out.push(to_u8(192 | (cp >> 6)))
-        &out.push(to_u8(128 | (cp & 63)))
+        &out.push(to_u8((192).bit_or((cp >> 6))))
+        &out.push(to_u8((128).bit_or((cp.bit_and(63)))))
     } else if cp < 65536 {
-        &out.push(to_u8(224 | (cp >> 12)))
-        &out.push(to_u8(128 | ((cp >> 6) & 63)))
-        &out.push(to_u8(128 | (cp & 63)))
+        &out.push(to_u8((224).bit_or((cp >> 12))))
+        &out.push(to_u8((128).bit_or(((cp >> 6).bit_and(63)))))
+        &out.push(to_u8((128).bit_or((cp.bit_and(63)))))
     } else {
-        &out.push(to_u8(240 | (cp >> 18)))
-        &out.push(to_u8(128 | ((cp >> 12) & 63)))
-        &out.push(to_u8(128 | ((cp >> 6) & 63)))
-        &out.push(to_u8(128 | (cp & 63)))
+        &out.push(to_u8((240).bit_or((cp >> 18))))
+        &out.push(to_u8((128).bit_or(((cp >> 12).bit_and(63)))))
+        &out.push(to_u8((128).bit_or(((cp >> 6).bit_and(63)))))
+        &out.push(to_u8((128).bit_or((cp.bit_and(63)))))
     }
 }
 
@@ -1053,9 +1053,9 @@ fn b64url_for_test(bytes: [U8]) -> String Never! {
         second :: if i + 1 < bytes.len() -> Int.from_u8(bytes[i + 1]) else -> 0
         third :: if i + 2 < bytes.len() -> Int.from_u8(bytes[i + 2]) else -> 0
         &out.push(alphabet[first >> 2])
-        &out.push(alphabet[((first & 3) << 4) | (second >> 4)])
-        if i + 1 < bytes.len() -> &out.push(alphabet[((second & 15) << 2) | (third >> 6)])
-        if i + 2 < bytes.len() -> &out.push(alphabet[third & 63])
+        &out.push(alphabet[((first.bit_and(3)) << 4).bit_or((second >> 4))])
+        if i + 1 < bytes.len() -> &out.push(alphabet[((second.bit_and(15)) << 2).bit_or((third >> 6))])
+        if i + 2 < bytes.len() -> &out.push(alphabet[third.bit_and(63)])
         i = i + 3
     }
     String.from_bytes(out) ?? ""

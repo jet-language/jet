@@ -445,16 +445,16 @@ fn unicode_scalar_at(raw: View<U8>, at: Int) -> (cp: Int, end: Int) Never! {
     first :: Int.from_u8(raw[at])
     if first < 128 -> return (cp: first, end: at + 1)
     width := 2
-    cp := first & 31
+    cp := first.bit_and(31)
     if first >= 240 {
         width = 4
-        cp = first & 7
+        cp = first.bit_and(7)
     } else if first >= 224 {
         width = 3
-        cp = first & 15
+        cp = first.bit_and(15)
     }
     loop offset in 1..<width {
-        cp = (cp << 6) | (Int.from_u8(raw[at + offset]) & 63)
+        cp = (cp << 6).bit_or((Int.from_u8(raw[at + offset]).bit_and(63)))
     }
     (cp: cp, end: at + width)
 }
@@ -827,7 +827,7 @@ SB_CLOSE :: 14
 // Tables are checksum-verified and round-tripped by the generator, not decoded
 // into another allocation at startup. Header size is 40 bytes.
 fn segment_uint(table: View<U8>, at: Int) -> Int Never! {
-    Int.from_u8(table[at]) | (Int.from_u8(table[at + 1]) << 8) | (Int.from_u8(table[at + 2]) << 16)
+    Int.from_u8(table[at]).bit_or((Int.from_u8(table[at + 1]) << 8)).bit_or((Int.from_u8(table[at + 2]) << 16))
 }
 fn segment_row(table: View<U8>, cp: Int, stride: Int) -> Int Never! {
     low := 0

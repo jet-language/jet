@@ -28,9 +28,9 @@ C_BASE53_FLOAT :: 9007199254740992.0
 fn seeded_next(state: &U64) -> U64 Never! {
     state = state.wrapping_add(U64{11400714819323198485})
     word := U64{state}
-    word = (word ~| (word >> 30)).wrapping_mul(U64{13787848793156543929})
-    word = (word ~| (word >> 27)).wrapping_mul(U64{10723151780598845931})
-    word ~| (word >> 31)
+    word = (word.bit_xor((word >> 30))).wrapping_mul(U64{13787848793156543929})
+    word = (word.bit_xor((word >> 27))).wrapping_mul(U64{10723151780598845931})
+    word.bit_xor((word >> 31))
 }
 
 // A zero bound denotes the full 2^64 domain. Lemire rejection retains the
@@ -41,7 +41,7 @@ fn seeded_bounded(state: &U64, bound: U64) -> U64 Never! {
     threshold :: U64{0}.wrapping_sub(bound) %% bound
     loop {
         product :: Int{seeded_next(&state)} * Int{bound}
-        low :: U64{product & 18446744073709551615}
+        low :: U64{product.bit_and(18446744073709551615)}
         if low >= threshold -> return U64{product >> 64}
     }
 }
@@ -51,9 +51,9 @@ fn seeded_bounded(state: &U64, bound: U64) -> U64 Never! {
 fn __seeded_int(state: &U64, low: Int, high: Int) -> Int? Never! {
     if high < low -> return None
     if high == low -> return Val(low)
-    width :: U64{(high - low + 1) & 18446744073709551615}
+    width :: U64{(high - low + 1).bit_and(18446744073709551615)}
     offset :: Int{seeded_bounded(&state, width)}
-    value := (low + offset) & 18446744073709551615
+    value := (low + offset).bit_and(18446744073709551615)
     if value > C_MASK63 -> value = value - 18446744073709551616
     Val(value)
 }
@@ -81,7 +81,7 @@ struct RNG {
         low + (high - low) * &self.float()
     }
 
-    fn bool(&self) -> Bool Never! { (seeded_next(&self.state) & U64{1}) == U64{1} }
+    fn bool(&self) -> Bool Never! { (seeded_next(&self.state).bit_and(U64{1})) == U64{1} }
 
     // D-CAP10: public bool(p)'s existing arity-1 row targets this reserved
     // method; the zero-argument coin draw uses bool(), not a default p=0.5.
@@ -174,9 +174,9 @@ fn __word() -[Rand]> Int Never! {
     loop {
         previous :: core.math.random.__rng_state()
         word := Int{previous}
-        word = (word ~| (word << 7)) & 18446744073709551615
-        word = word ~| (word >> 9)
-        word = (word * 11400714819323198485) & 18446744073709551615
+        word = (word.bit_xor((word << 7))).bit_and(18446744073709551615)
+        word = word.bit_xor((word >> 9))
+        word = (word * 11400714819323198485).bit_and(18446744073709551615)
         if core.math.random.__rng_try_update(previous, U64{word}) -> return word
     }
 }
@@ -240,15 +240,15 @@ fn seed(value: Int) Never! -[Rand]> {
 
 /// Construct a deterministic, caller-owned RNG capability.
 fn rng(seed_value: Int) -> RNG Never! {
-    RNG{state: U64{Int{I64{seed_value}} & 18446744073709551615}}
+    RNG{state: U64{Int{I64{seed_value}}.bit_and(18446744073709551615)}}
 }
 
 /// Construct a deterministic child capability from `seed_value` while mixing
 /// one word from the ambient stream. The explicit effect documents that mix.
 fn split(seed_value: Int) -[Rand]> RNG Never! {
     word :: __word()
-    rotated :: ((word << 17) | (word >> 47)) & 18446744073709551615
-    mixed :: (seed_value & 18446744073709551615) ~| rotated
+    rotated :: ((word << 17).bit_or((word >> 47))).bit_and(18446744073709551615)
+    mixed :: (seed_value.bit_and(18446744073709551615)).bit_xor(rotated)
     signed := mixed
     if signed > C_MASK63 -> signed = signed - 18446744073709551616
     rng(signed)

@@ -293,7 +293,7 @@ struct CBORPull {
         head :: Int.from_u8(next ?? panic("checked CBOR byte"))
         if head == 255 -> return Err(error(.Syntax, start, self.path(), "CBOR break outside an indefinite container"))
         major :: head >> 5
-        additional :: head & 31
+        additional :: head.bit_and(31)
         key_expected :: self.frames.len() > 0 && self.frames[self.frames.len() - 1].object && self.frames[self.frames.len() - 1].expecting_key
         if key_expected && major != 3 -> return Err(error(.Unsupported, start, self.path(), "CBOR map key must be text"))
         event := DataEvent.Null
@@ -371,14 +371,14 @@ fn length_size(n: Int) -> Int Never! {
 }
 
 fn uint(out: &[U8], value: Int, width: Int) Never! {
-    loop i in 0..<width -> &out.push(U8{(value >> ((width - i - 1) * 8)) & 255})
+    loop i in 0..<width -> &out.push(U8{(value >> ((width - i - 1) * 8)).bit_and(255)})
 }
 
 fn length(out: &[U8], major: Int, n: Int) Never! {
     size :: length_size(n)
-    if size == 1 -> &out.push(U8{(major << 5) | n})
+    if size == 1 -> &out.push(U8{(major << 5).bit_or(n)})
     else {
-        &out.push(U8{(major << 5) | (if size == 2 -> 24 else if size == 3 -> 25 else if size == 5 -> 26 else -> 27)})
+        &out.push(U8{(major << 5).bit_or((if size == 2 -> 24 else if size == 3 -> 25 else if size == 5 -> 26 else -> 27))})
         uint(&out, n, size - 1)
     }
 }

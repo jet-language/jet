@@ -201,7 +201,7 @@ fn reverse(receiver: String) -> String {
     end := raw.len()
     loop end > 0 {
         start := end - 1
-        loop start > 0 && (raw[start] & U8{192}) == (U8{128}) -> start = start - 1
+        loop start > 0 && (raw[start].bit_and(U8{192})) == (U8{128}) -> start = start - 1
         loop i in start..<end -> &out.push(raw[i])
         end = start
     }
@@ -213,7 +213,7 @@ fn zfill(receiver: String, width: Int) -> String {
     raw :: string_unicode.utf8_bytes(receiver)
     length := 0
     loop b in raw {
-        if (b & U8{192}) != (U8{128}) -> length = length + 1
+        if (b.bit_and(U8{192})) != (U8{128}) -> length = length + 1
     }
     if width <= length -> return receiver.copy()
     out := [U8]{}

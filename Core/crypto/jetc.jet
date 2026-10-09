@@ -39,12 +39,12 @@ fn bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 }
 fn little(value: Int, width: Int) -> [U8] Never! {
     out := [U8]{}
-    loop i in 0..<width -> &out.push(U8{(value >> (i * 8)) & 255})
+    loop i in 0..<width -> &out.push(U8{(value >> (i * 8)).bit_and(255)})
     out
 }
 fn integer(raw: [U8], start: Int, width: Int) -> Int Never! {
     value := 0
-    loop i in 0..<width -> value = value | (Int.from_u8(raw[start + i]) << (i * 8))
+    loop i in 0..<width -> value = value.bit_or((Int.from_u8(raw[start + i]) << (i * 8)))
     value
 }
 fn order(left: [U8], right: [U8]) -> Int Never! {

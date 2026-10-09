@@ -44,7 +44,7 @@ fn hashes(key: String) -> (first: U64, second: U64) Never! {
 }
 
 fn counter_index(first: U64, second: U64, row: Int) -> Int Never! {
-    column :: first.wrapping_add(second.wrapping_mul(U64{row + 1})) & U64{255}
+    column :: first.wrapping_add(second.wrapping_mul(U64{row + 1})).bit_and(U64{255})
     row * 256 + Int.from_u64(column)
 }
 

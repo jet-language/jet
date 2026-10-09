@@ -71,10 +71,10 @@ fn final_sigma(chars: [Int], at: Int, cased: [U8], ignorable: [U8]) -> Bool Neve
 fn scalar_at(raw: [U8], at: Int) -> Int Never! {
     width :: utf8_width_at(raw, at)
     cp := Int.from_u8(raw[at])
-    if width == 2 -> cp = cp & 31
-    if width == 3 -> cp = cp & 15
-    if width == 4 -> cp = cp & 7
-    loop k in 1..<width -> cp = (cp << 6) | (Int.from_u8(raw[at + k]) & 63)
+    if width == 2 -> cp = cp.bit_and(31)
+    if width == 3 -> cp = cp.bit_and(15)
+    if width == 4 -> cp = cp.bit_and(7)
+    loop k in 1..<width -> cp = (cp << 6).bit_or((Int.from_u8(raw[at + k]).bit_and(63)))
     cp
 }
 
@@ -615,16 +615,16 @@ fn append_cp(out: &[U8], cp: Int) Never! {
     if n < 128 {
         &out.push(U8{n})
     } else if n < 2048 {
-        &out.push(U8{Int{192} | (n >> 6)})
-        &out.push(U8{Int{128} | (n & Int{63})})
+        &out.push(U8{Int{192}.bit_or((n >> 6))})
+        &out.push(U8{Int{128}.bit_or((n.bit_and(Int{63})))})
     } else if n < 65536 {
-        &out.push(U8{Int{224} | (n >> 12)})
-        &out.push(U8{Int{128} | ((n >> 6) & Int{63})})
-        &out.push(U8{Int{128} | (n & Int{63})})
+        &out.push(U8{Int{224}.bit_or((n >> 12))})
+        &out.push(U8{Int{128}.bit_or(((n >> 6).bit_and(Int{63})))})
+        &out.push(U8{Int{128}.bit_or((n.bit_and(Int{63})))})
     } else {
-        &out.push(U8{Int{240} | (n >> 18)})
-        &out.push(U8{Int{128} | ((n >> 12) & Int{63})})
-        &out.push(U8{Int{128} | ((n >> 6) & Int{63})})
-        &out.push(U8{Int{128} | (n & Int{63})})
+        &out.push(U8{Int{240}.bit_or((n >> 18))})
+        &out.push(U8{Int{128}.bit_or(((n >> 12).bit_and(Int{63})))})
+        &out.push(U8{Int{128}.bit_or(((n >> 6).bit_and(Int{63})))})
+        &out.push(U8{Int{128}.bit_or((n.bit_and(Int{63})))})
     }
 }

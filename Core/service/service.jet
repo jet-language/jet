@@ -1588,7 +1588,7 @@ fn delivery_signature_payload(fields: [String]) -> [U8] Never! {
     loop field in fields {
         bytes :: field.bytes()
         length :: bytes.len()
-        loop byte in 0..<8 -> &payload.push(U8{(length >> ((7 - byte) * 8)) & 255})
+        loop byte in 0..<8 -> &payload.push(U8{(length >> ((7 - byte) * 8)).bit_and(255)})
         loop value in bytes -> &payload.push(value)
     }
     payload
