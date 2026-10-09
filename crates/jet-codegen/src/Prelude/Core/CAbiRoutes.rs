@@ -17878,6 +17878,18 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_plugin_load(unsafe { &*a0 }, unsafe { &*a1 }))))
     }
 
+    /// TIR/routes.rs
+    #[no_mangle]
+    pub extern "C" fn jet_plugin_call(a0: i64, a1: JetCString, a2: JetCString) -> JetCString {
+        guard(|| handle(crate::jet_plugin_call(fixed::<u64>(a0), view(a1), view(a2))))
+    }
+
+    /// core.plugin.load
+    #[no_mangle]
+    pub extern "C" fn jet_plugin_load(a0: JetCString, a1: JetCString) -> *mut crate::JetPlugin {
+        guard(|| Box::into_raw(Box::new(crate::jet_plugin_load(&borrowed(a0), &borrowed(a1)))))
+    }
+
     /// core.handle.process.child.exited
     #[no_mangle]
     pub extern "C" fn jet_process_child_exited(a0: *mut crate::jet_std::ProcessChild, ok: *mut bool, err: *mut *mut crate::jet_std::IOError) -> i64 {
