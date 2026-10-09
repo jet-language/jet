@@ -5067,7 +5067,7 @@ impl<'a> Checker<'a> {
                         Type::Apply { name, args } if cell_guard && args.len() == 1 => {
                             format!("{name}<{}>", args[0].name())
                         }
-                        _ => inner_t.show(),
+                        _ => inner_t.name(),
                     };
                     let (why, fix) = if cell_guard {
                         (
