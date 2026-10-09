@@ -126,7 +126,7 @@ fn pc_output_provider() {
             pc_require(if value.ty == .Val(annotation) && annotation == .Named(type_name) -> type_name == "Output" else -> false, "{kind} carries the canonical Output type")
             if value.value == .EnumLit(type_name, variant_name, variant_site, args, leading_dot, span) {
                 pc_require(type_name == "Output" && variant_name == kind && !leading_dot, "{kind} keeps its qualified closed-sum constructor")
-                pc_require(span == Span{start: 7, end: source.len() - 1} && variant_site == Val(Span{start: 14, end: 14 + kind.len()}), "{kind} keeps constructor and variant byte spans")
+                pc_require(span == Span{start: 7, end: source.len() - 1} && variant_site == (Val(Span{start: 14, end: 14 + kind.len()})), "{kind} keeps constructor and variant byte spans")
                 pc_require(args.len() == 2, "{kind} retains both named fields")
                 pc_require(if args[0] == .Named(label, _) -> label == "name" else -> false, "{kind} retains first field label")
                 pc_require(if args[1] == .Named(label, argument) && argument == .Ident(name, _) -> label == "entry" && name == "run" else -> false, "{kind} retains the bare callable address")
