@@ -193,7 +193,7 @@ fn value_match_braced_error_arm_keeps_optional_sibling_context() {
 fn source_core_enum_and_struct_keep_their_declaration_identity() {
     let errors = check_sources(&[
         ("<corelib>/Core/service/service.jet", "core_core_service", "#Error enum ServiceError { Full(String) }\n", &[]),
-        ("<corelib>/Core/jobs/jobs.jet", "core_core_jobs", "use core.service.[ServiceError]\nuse core.service as service\nstruct Wrapped { error: service.ServiceError }\nfn wrap(error: ServiceError) -> Wrapped Never! { Wrapped{error: error} }\n", &[]),
+        ("<corelib>/Core/jobs/jobs.jet", "core_core_jobs", "use core as core\nuse core.service.[ServiceError]\nuse core.service as service\nstruct Wrapped { error: service.ServiceError }\nfn wrap(error: ServiceError) -> Wrapped Never! { Wrapped{error: error} }\nfn forward() ServiceError! {\n endpoint :: core.service.__active_endpoint() ?? return Err(err)\n parts :: core.service.__endpoint_authority_parts(endpoint) ?? return Err(err)\n Ok(())\n}\n", &[]),
         ("<corelib>/Core/crypto/crypto.jet", "core_core_crypto", "use bridge as jetc\nstruct Secret { bytes: [U8] }\nfn wrap() -> jetc.Wrapped Never! { jetc.Wrapped{key: Secret{bytes: [U8]{}}} }\n", &[("jetc", 3)]),
         ("pkg/bridge.jet", "bridge", "use core.crypto as crypto\nstruct Wrapped { key: crypto.Secret }\n", &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),

@@ -205,8 +205,9 @@ impl<'a> Checker<'a> {
                     &Type::Named(Syntax::TYPE_ERR.to_string()),
                 )?;
             }
-            let ok_payload = payload == err_ty
-                || matches!(&err_ty, Type::Union(members) if members.iter().any(|m| m == &payload));
+            let ok_payload = self.nominal_type_identity(&payload, &err_ty)
+                || matches!(&err_ty, Type::Union(members) if members.iter()
+                    .any(|member| self.nominal_type_identity(member, &payload)));
             if !ok_payload {
                 self.diags.push(Diagnostic::error(
                     "E0108",

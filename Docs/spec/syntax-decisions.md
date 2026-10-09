@@ -190,6 +190,9 @@ Core source parts; qualification does not turn a type into a runtime field.
 Declared field types resolve qualified and grouped-import names in their
 declarer's scope before generic substitution. A bare value and a qualified
 field spelling for the same declaration share one nominal identity.
+Explicit `Err(payload)` checks that same declaration identity against its
+failure slot, including native Core results whose error type uses the leaf
+spelling; qualification alone cannot make a forwarded failure incompatible.
 Source-owned Core enum unit and payload cases resolve the enum's declaring
 registry before module-item lookup. Native Core enums use their canonical
 variant tables as well: grouped `EnvError.InvalidValue` and qualified
