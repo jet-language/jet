@@ -761,14 +761,14 @@ fn toml_leaf(value: Dyn) -> String Never! {
 }
 
 #Test("TOML inline tables and canonical Dyn scalars round trip") {
-    tree :: parse("value = { first = 1, second = 2 }\nnumber = 1.25") ?? panic("inline TOML table")
+    tree :: parse("value = {{ first = 1, second = 2 }}\nnumber = 1.25") ?? panic("inline TOML table")
     inline :: tree.get("value") ?? panic("inline table")
     assert_eq(inline.keys(), [String]{"first", "second"})
     assert_eq(toml_leaf(tree.get("number") ?? panic("number")), "1.25")
     assert_eq(toml_leaf(Dyn.Bytes([U8]{1, 2, 3})), "\"AQID\"")
     stamp :: parse("stamp = 2024-01-02T03:04:05Z") ?? panic("TOML date-time")
     assert_eq(toml_leaf(stamp.get("stamp") ?? panic("date-time")), "2024-01-02T03:04:05Z")
-    if parse("value = { duplicate = 1, duplicate = 2 }") == {
+    if parse("value = {{ duplicate = 1, duplicate = 2 }}") == {
         .Err(_) -> {}
         else -> panic("duplicate inline key accepted")
     }

@@ -339,7 +339,7 @@ struct CBORPull {
                 number :: &self.float(additional, start) ?? return Err(err)
                 event = DataEvent.Float(number)
             }
-            else -> return Err(error(.Unsupported, start, self.path(), "unsupported CBOR simple value {additional}"))
+            else { return Err(error(.Unsupported, start, self.path(), "unsupported CBOR simple value {additional}")) }
         }
         &self.complete_parent()
         if self.frames.len() == 0 -> self.root_done = true

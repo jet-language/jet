@@ -566,6 +566,8 @@ effect `if`, `else`, and `loop` body a visible parse boundary. A legal one-line
 effect body uses `->` followed by one statement. Arrow arm bodies remain
 expressions. Braces do not determine whether a construct returns a value.
 A final `else` after a braced statement `if` also has a braced body.
+Core's CBOR decoder keeps its final unsupported-simple-value `else`
+braced after the multi-statement floating-point branch.
 An `else if` link can use either body shape; expression arm bodies are separate.
 
 **S19 — Loops** *(D-LOOP-HEADER2=A, D-LOOP-ADVANCE2=A,
@@ -1556,6 +1558,8 @@ are aliases over it. **Declined**: `[..]T` spelling — zero-copy comes as
 D-ONCE-HASH1=B).
 
 **S20 — Escapes**: `\n` `\t` `\"` `\\`; literal braces `{{` `}}`.
+TOML inline-table fixtures escape their data braces this way, so the
+contents are parsed as TOML rather than Jet interpolation expressions.
 
 **S41 — Char & string length**: `Char` built-in, `'a'` literals; `s.len()`
 counts Unicode scalars; `loop c in s.chars()`; no `s[i]` (E0503).
