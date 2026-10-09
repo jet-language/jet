@@ -4270,7 +4270,9 @@ impl<'a> Checker<'a> {
                                         crate::AST::StrFormat::Pretty => pretty_selector,
                                         _ => unreachable!("debug selector family"),
                                     };
-                                    if !is_debuggable(&t, self.registry, self.trait_reg) {
+                                    if !is_debuggable(&t, self.registry, self.trait_reg)
+                                        && !self.type_param_has_bound(&t, crate::Generics::DEBUG)
+                                    {
                                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(
                                             &t,
                                         ) {
