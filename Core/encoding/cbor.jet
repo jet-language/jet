@@ -10,15 +10,15 @@ use core.files.[FileReader, FileWriter]
 struct CBORReader {
     input: codec.CBORPull
 
-    fn next(&self) -[IO]> DataEvent? EncodingError! { &self.input.next() }
+    fn next(&self) -[IO, Time.Wait]> DataEvent? EncodingError! { &self.input.next() }
 }
 
 struct CBORWriter {
     output: codec.CBORPush
 
-    fn write(&self, event: ^DataEvent) EncodingError! -[IO]> { &self.output.write(^event) }
-    fn flush(&self) EncodingError! -[IO]> { &self.output.flush() }
-    fn finish(&self) EncodingError! -[IO]> { &self.output.finish() }
+    fn write(&self, event: ^DataEvent) -[IO, Time.Wait]> () EncodingError! { &self.output.write(^event) }
+    fn flush(&self) -[IO, Time.Wait]> () EncodingError! { &self.output.flush() }
+    fn finish(&self) -[IO, Time.Wait]> () EncodingError! { &self.output.finish() }
 }
 
 fn reader(input: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORReader EncodingError! {
@@ -60,10 +60,10 @@ struct CBORError {
     path: String
     reason: String
     impl Display {
-        fn display(self) -> String Never! { self.display_text() }
+        fn display(self) -> String { self.display_text() }
     }
     impl Debug {
-        fn debug(^self) -> String Never! { self.display_text() }
+        fn debug(^self) -> String { self.display_text() }
     }
 }
 impl CBORError {
@@ -241,9 +241,9 @@ fn parse(bytes: [U8], options: CBOROptions{CBOROptions{max_depth: 256, max_items
     input :: core.files.open(path) ?? panic("open")
     source := reader(^input) ?? panic("reader")
     expected :: [DataEvent]{.ArrayStart, .ArrayStart, .Int(1), .Int(2), .ArrayEnd, .ObjectStart, .Key("k"), .Text("ab"), .ObjectEnd, .ArrayEnd}
-    loop event in expected -> assert_eq(&source.next() ?? panic("next"), Val(event))
-    assert_eq(&source.next() ?? panic("eof"), None)
-    assert_eq(&source.next() ?? panic("repeat eof"), None)
+    loop event in expected -> assert_eq(&source.next(), Ok(Val(event)))
+    assert_eq(&source.next(), Ok(None))
+    assert_eq(&source.next(), Ok(None))
 }
 
 #Test("CBOR stream reads all float widths and sticky item limit") {
@@ -252,12 +252,12 @@ fn parse(bytes: [U8], options: CBOROptions{CBOROptions{max_depth: 256, max_items
     core.files.write_bytes(path, [U8]{131, 249, 62, 0, 250, 71, 195, 80, 0, 251, 63, 241, 153, 153, 153, 153, 153, 154}) ?? panic("fixture")
     input :: core.files.open(path) ?? panic("open")
     source := reader(^input) ?? panic("reader")
-    assert_eq(&source.next() ?? panic("start"), Val(DataEvent.ArrayStart))
-    assert_eq(&source.next() ?? panic("half"), Val(DataEvent.Float(Float{1.5})))
-    assert_eq(&source.next() ?? panic("single"), Val(DataEvent.Float(Float{100000.0})))
-    assert_eq(&source.next() ?? panic("double"), Val(DataEvent.Float(Float{1.1})))
-    assert_eq(&source.next() ?? panic("end"), Val(DataEvent.ArrayEnd))
-    assert_eq(&source.next() ?? panic("eof"), None)
+    assert_eq(&source.next(), Ok(Val(DataEvent.ArrayStart)))
+    assert_eq(&source.next(), Ok(Val(DataEvent.Float(Float{1.5}))))
+    assert_eq(&source.next(), Ok(Val(DataEvent.Float(Float{100000.0}))))
+    assert_eq(&source.next(), Ok(Val(DataEvent.Float(Float{1.1}))))
+    assert_eq(&source.next(), Ok(Val(DataEvent.ArrayEnd)))
+    assert_eq(&source.next(), Ok(None))
     core.files.write_bytes(path, [U8]{98, 97, 98}) ?? panic("fixture")
     limited_input :: core.files.open(path) ?? panic("open")
     limits := EncodingLimits.safe()
