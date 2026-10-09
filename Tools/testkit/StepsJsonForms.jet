@@ -1,13 +1,8 @@
-use core.encoding.[DataTree]
 use core.encoding.json as json
 use core.files as files
 
-fn kit_steps_json_number(value: DataTree) -> Float? {
-    if value == {
-        .Int(number) -> Val(Float{number})
-        .Float(number) -> Val(number)
-        else -> None
-    }
+fn kit_steps_json_number(value: Dyn) -> Float? {
+    Val(value.float() ?? return None)
 }
 
 fn kit_steps_json_canonical(text: String) -> String? {
@@ -21,7 +16,7 @@ fn kit_steps_json_canonical(text: String) -> String? {
 
 fn kit_steps_json_files(directory: String, canonical: Bool) -> String Err! {
     entries :: files.list_dir(directory) ?? return Err("JSON files directory: {err}")
-    documents := [DataTree]{}
+    documents := [Dyn]{}
     loop entry in entries {
         text :: files.read(entry.path) ?? return Err("JSON files read: {err}")
         if canonical {
@@ -33,29 +28,29 @@ fn kit_steps_json_files(directory: String, canonical: Bool) -> String Err! {
         }
         &documents.push(json.parse(text) ?? return Err("JSON files parse: {err}"))
     }
-    Ok(json.to_string(DataTree.Array(documents)))
+    Ok(json.to_string(Dyn.Array(documents)))
 }
 
-fn kit_steps_json_zero(tree: DataTree, key: String) -> DataTree {
+fn kit_steps_json_zero(tree: Dyn, key: String) -> Dyn {
     if tree == {
         .Object(fields) -> {
-            result := [String: DataTree]{}
+            result := [String: Dyn]{}
             loop pair in fields {
-                _ :: &result.add(pair.key, if pair.key == key -> DataTree.Int(0) else -> kit_steps_json_zero(pair.value, key))
+                _ :: &result.add(pair.key, if pair.key == key -> Dyn.Int(0) else -> kit_steps_json_zero(pair.value, key))
             }
-            return DataTree.Object(result)
+            return Dyn.Object(result)
         }
         .Array(items) -> {
-            result := [DataTree]{}
+            result := [Dyn]{}
             loop item in items -> &result.push(kit_steps_json_zero(item, key))
-            return DataTree.Array(result)
+            return Dyn.Array(result)
         }
         else -> return ~tree
     }
 }
 
-fn kit_steps_json_distinct(values: [DataTree]) -> Int {
-    unique := [DataTree]{}
+fn kit_steps_json_distinct(values: [Dyn]) -> Int {
+    unique := [Dyn]{}
     loop value in values {
         present := false
         loop other in unique {

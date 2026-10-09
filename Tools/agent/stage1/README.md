@@ -101,6 +101,10 @@ testkit discovery and the manifest's `retiredWithRust` section read those exact
 IDs and reasons.
 Retirement changes the active corpus; the runner uses no CLI filter or shard,
 and accepts no skipped outcome among the remaining cases.
+Testkit consumes Prelude `Dyn` directly: JSON `Number` tokens retain their
+spelling, numeric assertions preserve integer precision and accept equivalent
+fraction/exponent spellings, and diagnostic edit offsets use strict integer
+accessors.
 Backend/runtime transports reuse the existing Node assemblers and verdict
 checkers, with production native Jet CLI compilation and permitted system C
 drivers. `run --runtime DIR` explicitly names the admitted runtime directory;

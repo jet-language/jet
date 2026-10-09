@@ -1,4 +1,3 @@
-use core.encoding.[DataTree]
 use core.encoding.json as json
 use core.encoding.toml as toml
 
@@ -51,7 +50,7 @@ fn kit_steps_json_filter(part: String) -> KitJSONFilter? {
         key :: ~kit_steps_byte_slice(part, 1, index).trim()
         if kit_steps_json_path("$.{key}") == None -> return None
         literal :: ~kit_steps_byte_slice(rest, width, rest.count_bytes()).trim()
-        if literal.starts_with("@.") -> return Val(KitJSONFilter{key: key, op: operator, expected: DataTree.Null, reference: kit_steps_byte_slice(literal, 1, literal.count_bytes())})
+        if literal.starts_with("@.") -> return Val(KitJSONFilter{key: key, op: operator, expected: Dyn.Null, reference: kit_steps_byte_slice(literal, 1, literal.count_bytes())})
         expected :: json.parse(literal) ?? return None
         if operator == "in" && kit_steps_json_type(expected) != "array" -> return None
         return Val(KitJSONFilter{key: key, op: operator, expected: expected})
@@ -59,7 +58,7 @@ fn kit_steps_json_filter(part: String) -> KitJSONFilter? {
     None
 }
 
-fn kit_steps_json_filter_matches(value: DataTree, filter: KitJSONFilter) -> Bool {
+fn kit_steps_json_filter_matches(value: Dyn, filter: KitJSONFilter) -> Bool {
     parts :: kit_steps_json_path("$.{filter.key}") ?? return false
     values :: kit_steps_json_select(value, parts, 0) ?? return filter.op == "!=" || filter.op == "!~" || filter.op == "!~="
     expected := filter.expected
@@ -76,7 +75,7 @@ fn kit_steps_json_filter_matches(value: DataTree, filter: KitJSONFilter) -> Bool
     false
 }
 
-fn kit_steps_json_select(value: DataTree, parts: [String], depth: Int) -> [DataTree]? {
+fn kit_steps_json_select(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
     if depth == parts.len() -> return Val([value])
     part :: parts[depth]
     if part.starts_with(".") || part.starts_with("\"") {
@@ -96,13 +95,13 @@ fn kit_steps_json_select(value: DataTree, parts: [String], depth: Int) -> [DataT
     if part.starts_with("{{") {
         if value == {
             .Object(fields) -> {
-                projected := [String: DataTree]{}
+                projected := [String: Dyn]{}
                 loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
                     name :: ~raw.trim()
                     child :: fields.get(name) ?? return None
                     _ :: &projected.add(name, child)
                 }
-                return kit_steps_json_select(DataTree.Object(projected), parts, depth + 1)
+                return kit_steps_json_select(Dyn.Object(projected), parts, depth + 1)
             }
             else -> return None
         }
@@ -111,16 +110,16 @@ fn kit_steps_json_select(value: DataTree, parts: [String], depth: Int) -> [DataT
         .Array(items) -> {
             if part.starts_with("?") {
                 filter :: kit_steps_json_filter(part) ?? return None
-                selected := [DataTree]{}
+                selected := [Dyn]{}
                 loop item in items {
                     if kit_steps_json_filter_matches(item, filter) -> &selected.push(item)
                 }
-                if selected.len() == 0 -> return Val([DataTree]{})
-                return kit_steps_json_select(DataTree.Array(selected), parts, depth + 1)
+                if selected.len() == 0 -> return Val([Dyn]{})
+                return kit_steps_json_select(Dyn.Array(selected), parts, depth + 1)
             }
             if part == "*" {
-                if items.len() == 0 -> return Val([DataTree]{})
-                selected := [DataTree]{}
+                if items.len() == 0 -> return Val([Dyn]{})
+                selected := [Dyn]{}
                 loop item in items {
                     values :: kit_steps_json_select(item, parts, depth + 1) ?? return None
                     loop child in values -> &selected.push(child)
@@ -136,13 +135,13 @@ fn kit_steps_json_select(value: DataTree, parts: [String], depth: Int) -> [DataT
     }
 }
 
-fn kit_steps_json_values(text: String, mode: String, path: String) -> [DataTree]? {
+fn kit_steps_json_values(text: String, mode: String, path: String) -> [Dyn]? {
     parts :: kit_steps_json_path(path) ?? return None
-    tree := DataTree.Null
+    tree := Dyn.Null
     if mode == "doc" || mode.starts_with("doc[zero ") -> tree = json.parse(text) ?? return None
     else if mode == "toml" -> tree = toml.parse(text) ?? return None
     else if mode == "ndjson" {
-        records := [DataTree]{}
+        records := [Dyn]{}
         loop raw in text.split("\n") {
             line :: ~raw.trim()
             if line == "" -> next
@@ -150,7 +149,7 @@ fn kit_steps_json_values(text: String, mode: String, path: String) -> [DataTree]
             if kit_steps_json_type(record) != "object" -> return None
             &records.push(record)
         }
-        tree = DataTree.Array(records)
+        tree = Dyn.Array(records)
     } else -> return None
     if mode.starts_with("doc[zero ") {
         if !mode.ends_with("]") -> return None
@@ -159,7 +158,7 @@ fn kit_steps_json_values(text: String, mode: String, path: String) -> [DataTree]
     kit_steps_json_select(tree, parts, 0)
 }
 
-fn kit_steps_json_size(value: DataTree) -> Int? {
+fn kit_steps_json_size(value: Dyn) -> Int? {
     if value == {
         .Array(items) -> Val(items.len())
         .Object(fields) -> Val(fields.len())
@@ -205,7 +204,7 @@ fn kit_steps_json_scalar(text: String, mode: String, path: String) -> String? {
     value :: values[0]
     if value == {
         .Text(scalar) -> Val(scalar)
-        .Null | .Bool(_) | .Int(_) | .Float(_) -> Val(json.to_string(value))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) -> Val(json.to_string(value))
         else -> None
     }
 }

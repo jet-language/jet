@@ -4,6 +4,16 @@
     assert(kit_steps_json_test("[1,2]", "doc", "$", "=", "[2,1]") != None)
     assert_eq(kit_steps_json_test("{{\"a\":\"quoted text\"}}", "doc", "$.a", "=", "\"quoted text\""), None)
     assert(kit_steps_json_test("{{\"a\":null}}", "doc", "$.a", "=", "false") != None)
+    assert_eq(kit_steps_json_test("1", "doc", "$", "=", "1.0"), None)
+    assert_eq(kit_steps_json_test("1e0", "doc", "$", "=", "1"), None)
+    assert_eq(kit_steps_json_test("9007199254740993", "doc", "$", "=", "9007199254740993"), None)
+    assert(kit_steps_json_test("9007199254740992", "doc", "$", "=", "9007199254740993") != None)
+    assert(kit_steps_json_test("18446744073709551614", "doc", "$", "=", "18446744073709551615") != None)
+    assert_eq(kit_steps_json_scalar("{{\"count\":9007199254740993}}", "doc", "$.count"), Val("9007199254740993"))
+    assert_eq(kit_steps_json_number(json.parse("1.25e2") ?? panic("numeric token")), Val(125.0))
+    edit :: kit_steps_edit(json.parse("{{\"file\":\"main.jet\",\"span\":{{\"start\":1,\"end\":3}},\"new_text\":\"fixed\"}}") ?? panic("edit numeric tokens")) ?? panic("Number offsets must decode as Int")
+    assert_eq(edit.start, 1)
+    assert_eq(edit.end, 3)
 }
 
 #Test("JSON assertions pin types and array or object cardinality") {

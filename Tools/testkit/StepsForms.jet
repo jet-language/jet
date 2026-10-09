@@ -1,5 +1,4 @@
 use core.files as files
-use core.encoding.[DataTree]
 use core.encoding.json as json
 
 fn kit_steps_numeric(text: String) -> Int? {
@@ -187,11 +186,8 @@ fn kit_steps_batch_test(actual: String, assertion: KitAssertion, value: String, 
             if tree == {
                 .Array(items) -> {
                     loop item in items {
-                        if item == {
-                            .Int(number) -> &right.push(Float{number})
-                            .Float(number) -> &right.push(number)
-                            else -> return Val(kit_expect_verdict("ERROR", "expected numeric list"))
-                        }
+                        number :: kit_steps_json_number(item) ?? return Val(kit_expect_verdict("ERROR", "expected numeric list"))
+                        &right.push(number)
                     }
                 }
                 else -> return Val(kit_expect_verdict("ERROR", "expected numeric list"))

@@ -1,5 +1,4 @@
 use core.files as files
-use core.encoding.[DataTree]
 
 struct KitSourceEdit {
     file: String
@@ -17,19 +16,19 @@ fn kit_steps_edits_valid(words: [String]) -> Bool {
     kit_steps_json_path(kit_steps_json_preview(words[2 + offset])) != None
 }
 
-fn kit_steps_edit_field(tree: DataTree, key: String) -> DataTree? {
+fn kit_steps_edit_field(tree: Dyn, key: String) -> Dyn? {
     if tree == { .Object(fields) -> fields.get(key) else -> None }
 }
 
-fn kit_steps_edit(tree: DataTree) -> KitSourceEdit? {
+fn kit_steps_edit(tree: Dyn) -> KitSourceEdit? {
     file :: kit_steps_edit_field(tree, "file") ?? return None
     span :: kit_steps_edit_field(tree, "span") ?? return None
     start :: kit_steps_edit_field(span, "start") ?? return None
     end :: kit_steps_edit_field(span, "end") ?? return None
     text :: kit_steps_edit_field(tree, "new_text") ?? return None
     file_name :: if file == { .Text(value) -> value else -> { return None } }
-    start_byte :: if start == { .Int(value) -> value else -> { return None } }
-    end_byte :: if end == { .Int(value) -> value else -> { return None } }
+    start_byte :: start.int() ?? return None
+    end_byte :: end.int() ?? return None
     new_text :: if text == { .Text(value) -> value else -> { return None } }
     if start_byte < 0 || end_byte < start_byte -> return None
     Val(KitSourceEdit{file: file_name, start: start_byte, end: end_byte, text: new_text})

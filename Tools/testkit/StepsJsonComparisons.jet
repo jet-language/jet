@@ -1,6 +1,5 @@
-use core.encoding.[DataTree]
 
-fn kit_steps_json_any_contains(value: DataTree, needle: String) -> String? {
+fn kit_steps_json_any_contains(value: Dyn, needle: String) -> String? {
     if value == {
         .Array(items) -> {
             loop item in items {
@@ -28,6 +27,6 @@ fn kit_steps_json_same_document(text: String, mode: String, path: String, op: St
         }
         return None
     }
-    equal :: kit_steps_json_equal(DataTree.Array(left), DataTree.Array(right))
+    equal :: kit_steps_json_equal(Dyn.Array(left), Dyn.Array(right))
     if equal == (op == "==") -> None else -> Val("JSON same-document deep comparison failed: {op}")
 }

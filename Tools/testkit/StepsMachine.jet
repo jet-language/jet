@@ -1,16 +1,15 @@
-use core.encoding.[DataTree]
 use core.encoding.json as json
 
 // Port of crates/jet-foundation/src/MachineOutput.rs:13-141. Do not replace
 // validation with a schema-only check: nested reports and edit reasons matter.
-fn kit_steps_machine_object(value: DataTree) -> [String: DataTree]? {
+fn kit_steps_machine_object(value: Dyn) -> [String: Dyn]? {
     if value == {
         .Object(fields) -> Val(fields)
         else -> None
     }
 }
 
-fn kit_steps_machine_string(fields: [String: DataTree], key: String) -> String? {
+fn kit_steps_machine_string(fields: [String: Dyn], key: String) -> String? {
     child :: fields.get(key) ?? return None
     if child == {
         .Text(text) -> Val(text)
@@ -18,7 +17,7 @@ fn kit_steps_machine_string(fields: [String: DataTree], key: String) -> String? 
     }
 }
 
-fn kit_steps_machine_has(fields: [String: DataTree], key: String) -> Bool {
+fn kit_steps_machine_has(fields: [String: Dyn], key: String) -> Bool {
     if fields.get(key) == {
         .Val(_) -> true
         .None -> false
@@ -37,7 +36,7 @@ fn kit_steps_machine_control(text: String) -> Bool {
     false
 }
 
-fn kit_steps_machine_report(object: [String: DataTree]) -> String? {
+fn kit_steps_machine_report(object: [String: Dyn]) -> String? {
     loop key in ["moment", "severity", "code", "what", "why", "fix"] {
         _ :: kit_steps_machine_string(object, key) ?? return Val("report record is missing string `{key}`")
     }
@@ -78,7 +77,7 @@ fn kit_steps_machine_report(object: [String: DataTree]) -> String? {
     None
 }
 
-fn kit_steps_machine_status(object: [String: DataTree]) -> String? {
+fn kit_steps_machine_status(object: [String: Dyn]) -> String? {
     action :: kit_steps_machine_string(object, "action") ?? return Val("status record is missing string `action`")
     if action == "" || kit_steps_machine_control(action) -> return Val("status record `action` must be a non-empty printable string")
     if kit_steps_machine_has(object, "status") -> return Val("status record must not contain the legacy `status` key")
