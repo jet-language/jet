@@ -441,6 +441,168 @@ fn bootstrap_mir_calls_target(
             _ => false,
         })
 }
+/// Size-class allocator for the compiler process. Blocks up to 32 KiB with
+/// alignment up to 16 come from per-thread free lists refilled by bumping
+/// through 1 MiB chunks; everything else goes to the system allocator.
+/// A freed block joins the freeing thread's list for its class, so the hot
+/// path is a thread-local pop or push with no locking and no headers.
+/// Chunks are never returned to the system: the compiler is a run-to-exit
+/// process, and reuse within a class bounds the retained memory.
+mod jet_class_allocator {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::UnsafeCell;
+    use std::ptr::null_mut;
+
+    const CLASS_COUNT: usize = 44;
+    const MAX_SMALL: usize = 32 * 1024;
+    const MAX_ALIGN: usize = 16;
+    const CHUNK_BYTES: usize = 1 << 20;
+
+    const fn class_size(class: usize) -> usize {
+        if class < 16 {
+            (class + 1) * 16
+        } else {
+            let step = class - 16;
+            let lg = 8 + step / 4;
+            (5 + step % 4) << (lg - 2)
+        }
+    }
+
+    const CLASS_SIZES: [usize; CLASS_COUNT] = {
+        let mut sizes = [0; CLASS_COUNT];
+        let mut class = 0;
+        while class < CLASS_COUNT {
+            sizes[class] = class_size(class);
+            class += 1;
+        }
+        sizes
+    };
+
+    #[inline(always)]
+    fn class_of(size: usize) -> usize {
+        if size <= 256 {
+            (size.max(1) + 15) / 16 - 1
+        } else {
+            let s = size - 1;
+            let lg = (usize::BITS - 1 - s.leading_zeros()) as usize;
+            16 + (lg - 8) * 4 + ((s >> (lg - 2)) & 3)
+        }
+    }
+
+    #[inline(always)]
+    fn is_small(size: usize, align: usize) -> bool {
+        size <= MAX_SMALL && align <= MAX_ALIGN
+    }
+
+    struct Cache {
+        heads: [*mut u8; CLASS_COUNT],
+        bump: *mut u8,
+        end: *mut u8,
+    }
+
+    thread_local! {
+        static CACHE: UnsafeCell<Cache> = const {
+            UnsafeCell::new(Cache { heads: [null_mut(); CLASS_COUNT], bump: null_mut(), end: null_mut() })
+        };
+    }
+
+    #[cold]
+    #[inline(never)]
+    unsafe fn refill(cache: &mut Cache, size: usize) -> *mut u8 {
+        if (cache.end as usize) - (cache.bump as usize) < size {
+            let chunk = unsafe { System.alloc(Layout::from_size_align_unchecked(CHUNK_BYTES, 4096)) };
+            if chunk.is_null() {
+                return null_mut();
+            }
+            cache.bump = chunk;
+            cache.end = unsafe { chunk.add(CHUNK_BYTES) };
+        }
+        let block = cache.bump;
+        cache.bump = unsafe { block.add(size) };
+        block
+    }
+
+    #[inline(always)]
+    unsafe fn take(class: usize) -> *mut u8 {
+        CACHE.with(|cell| {
+            let cache = unsafe { &mut *cell.get() };
+            let head = cache.heads[class];
+            if !head.is_null() {
+                cache.heads[class] = unsafe { *(head as *mut *mut u8) };
+                return head;
+            }
+            unsafe { refill(cache, CLASS_SIZES[class]) }
+        })
+    }
+
+    #[inline(always)]
+    unsafe fn give(ptr: *mut u8, class: usize) {
+        CACHE.with(|cell| {
+            let cache = unsafe { &mut *cell.get() };
+            unsafe { *(ptr as *mut *mut u8) = cache.heads[class] };
+            cache.heads[class] = ptr;
+        })
+    }
+
+    pub struct JetClassAllocator;
+
+    unsafe impl GlobalAlloc for JetClassAllocator {
+        #[inline]
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            if is_small(layout.size(), layout.align()) {
+                unsafe { take(class_of(layout.size())) }
+            } else {
+                unsafe { System.alloc(layout) }
+            }
+        }
+
+        #[inline]
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            if is_small(layout.size(), layout.align()) {
+                let ptr = unsafe { take(class_of(layout.size())) };
+                if !ptr.is_null() {
+                    unsafe { ptr.write_bytes(0, layout.size()) };
+                }
+                ptr
+            } else {
+                unsafe { System.alloc_zeroed(layout) }
+            }
+        }
+
+        #[inline]
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            if is_small(layout.size(), layout.align()) {
+                unsafe { give(ptr, class_of(layout.size())) }
+            } else {
+                unsafe { System.dealloc(ptr, layout) }
+            }
+        }
+
+        #[inline]
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            let align = layout.align();
+            let old_small = is_small(layout.size(), align);
+            let new_small = is_small(new_size, align);
+            if !old_small && !new_small {
+                return unsafe { System.realloc(ptr, layout, new_size) };
+            }
+            if old_small && new_small && class_of(layout.size()) == class_of(new_size) {
+                return ptr;
+            }
+            let new_layout = unsafe { Layout::from_size_align_unchecked(new_size, align) };
+            let fresh = unsafe { self.alloc(new_layout) };
+            if !fresh.is_null() {
+                unsafe { std::ptr::copy_nonoverlapping(ptr, fresh, layout.size().min(new_size)) };
+                unsafe { self.dealloc(ptr, layout) };
+            }
+            fresh
+        }
+    }
+}
+
+#[global_allocator]
+static JET_COMPILER_ALLOCATOR: jet_class_allocator::JetClassAllocator = jet_class_allocator::JetClassAllocator;
+
 /// The generated compiler recurses over a whole compiler unit (parser, sema,
 /// lowering, emission). The process main thread only has the `ulimit -s`
 /// stack, so the harness runs on its own thread with a large reserved stack
