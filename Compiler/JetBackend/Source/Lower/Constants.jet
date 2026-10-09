@@ -5,6 +5,9 @@ use jet_foundation.[
     MIRConstantDef,
     MIRConstEnumArg,
     MIRConstField,
+    MIRConstKey,
+    MIRConstMapEntry,
+    mir_integer_constant,
     MIRInstruction,
     MIRProgram,
     MIRType,
@@ -45,21 +48,9 @@ fn lower_constant_owner(definition: MIRTypeDef, ty: MIRType, name: String) -> Bo
 
 // Unit has no machine value, including inside an allocated aggregate. An
 // inline member's bytes are copied into the parent, just as lower_store_value.
-fn lower_constant_store(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, offset: Int, ty: MIRType, constant: MIRConstant) Never! {
-    value :: lower_constant_tree(p, c, &m, &f, ty, constant) ?? return
+fn lower_constant_store(p: MIRProgram, m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, offset: Int, ty: MIRType, constant: MIRConstant) Never! {
+    value :: lower_constant_tree(p, &m, &f, ty, constant) ?? return
     lower_write_at(p, &f, boxed, offset, value, ty)
-}
-
-// Used before lower_result too: unsupported collection layouts must not hide
-// which constant form was rejected.
-fn lower_constant_reject(m: &LowerModule, f: &LowerFunction, constant: MIRConstant) -> Bool Never! {
-    name :: if constant == {
-        .Map(_) -> "Map"
-        else -> ""
-    }
-    if name == "" -> return false
-    lower_fail(&m, &f, "{name} constants are not lowered at O0 yet")
-    true
 }
 
 // Bytes is the compact MIR spelling of a packed U8 List, not a String.
@@ -68,6 +59,47 @@ fn lower_constant_bytes_type(p: MIRProgram, ty: MIRType) -> Bool Never! {
     if aggregate.kind != .List(_) && aggregate.kind != .FixedList(_, _) -> return false
     elem :: lower_list_element(aggregate) ?? return false
     lower_narrow_bits(elem) == 8 && !lower_narrow_signed(elem)
+}
+
+// Keys share the typed constant constructors used for ordinary values.
+fn lower_constant_key(key: MIRConstKey) -> MIRConstant Never! {
+    if key == {
+        .Int(value) -> mir_integer_constant(value, None, None)
+        .BigInt(decimal) -> MIRConstant.BigInt{decimal: decimal}
+        .String(value) -> MIRConstant.String{value: value}
+        .Bool(value) -> MIRConstant.Bool{value: value}
+        .Char(value) -> MIRConstant.Char{value: value}
+        .Tuple(fields) -> {
+            values := [MIRConstField]{}
+            loop field in fields -> &values.push(MIRConstField{name: field.name, value: lower_constant_key(field.key)})
+            MIRConstant.Struct{type_name: "Tuple", fields: values}
+        }
+        .Struct(name, fields) -> {
+            values := [MIRConstField]{}
+            loop field in fields -> &values.push(MIRConstField{name: field.name, value: lower_constant_key(field.key)})
+            MIRConstant.Struct{type_name: name, fields: values}
+        }
+        .Enum(name, variant) -> MIRConstant.Enum{type_name: name, variant: variant, args: [MIRConstEnumArg]{}}
+    }
+}
+
+// The same insertion ABI as BuildMap orders keys and retires duplicates.
+// A constant knows its maximum count, so its buffer is allocated only once.
+fn lower_constant_map_fill(p: MIRProgram, m: &LowerModule, f: &LowerFunction, dst: LIRValueID, ty: MIRType, entries: [MIRConstMapEntry]) Never! {
+    shape :: lower_map_shape(p, ty) ?? return lower_fail(&m, &f, "Map constant without a Map type is not lowered at O0 yet")
+    zero :: lower_const(&f, 0)
+    cap :: lower_const(&f, entries.len())
+    data :: lower_pointer(&f)
+    if entries.len() == 0 -> lower_emit(&f, LIRInst.Const{dst: data, value: 0})
+    else -> lower_alloc(&m, &f, data, shape.stride * entries.len())
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: zero})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: cap})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: data})
+    loop entry in entries {
+        key :: lower_constant_tree(p, &m, &f, shape.key, lower_constant_key(entry.key)) ?? return
+        value :: lower_constant_tree(p, &m, &f, shape.value, entry.value) ?? return
+        lower_call_helper(&m, &f, "map.set", ty, [LIRValueID]{dst, key, value}, None)
+    }
 }
 
 // An exact Int constant: an inline word, or beyond the inline range a runtime
@@ -117,21 +149,20 @@ fn lower_float_constant_bits(value: Float, f32: Bool) -> Int Never! {
     sign | ((power + 127) << 23) | (rounded & 8388607)
 }
 
-fn lower_constant_tree(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, ty: MIRType, constant: MIRConstant) -> LIRValueID? {
-    lower_constant_tree_value(p, c, &m, &f, ty, constant, None)
+fn lower_constant_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, constant: MIRConstant) -> LIRValueID? {
+    lower_constant_tree_value(p, &m, &f, ty, constant, None)
 }
 
-fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, ty: MIRType, constant: MIRConstant, result: LIRValueID?) -> LIRValueID? {
-    if lower_constant_reject(&m, &f, constant) -> return None
+fn lower_constant_tree_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, constant: MIRConstant, result: LIRValueID?) -> LIRValueID? {
     if ty.kind == {
-        .Tagged(_, inner) -> return lower_constant_tree_value(p, c, &m, &f, inner, constant, result)
-        .InlineRange(base, _, _) -> return lower_constant_tree_value(p, c, &m, &f, base, constant, result)
-        .Quantity(base, _) -> return lower_constant_tree_value(p, c, &m, &f, base, constant, result)
+        .Tagged(_, inner) -> return lower_constant_tree_value(p, &m, &f, inner, constant, result)
+        .InlineRange(base, _, _) -> return lower_constant_tree_value(p, &m, &f, base, constant, result)
+        .Quantity(base, _) -> return lower_constant_tree_value(p, &m, &f, base, constant, result)
         .Apply(_, _) -> {
             if lower_type_def(p, ty) == .Val(definition) {
                 if definition.kind == {
-                    .Alias(target) -> return lower_constant_tree_value(p, c, &m, &f, target, constant, result)
-                    .Distinct(base, _) -> return lower_constant_tree_value(p, c, &m, &f, base, constant, result)
+                    .Alias(target) -> return lower_constant_tree_value(p, &m, &f, target, constant, result)
+                    .Distinct(base, _) -> return lower_constant_tree_value(p, &m, &f, base, constant, result)
                     else -> {}
                 }
             }
@@ -147,7 +178,7 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
     layout :: lower_repr_layout(repr) ?? return None
     // Reuse an instruction's ownership-typed destination when supplied. Nested
     // values transfer to the parent's slots and are dropped only by its glue.
-    dst :: result ?? lower_new_value(&f, layout, lower_drop(&m, f, repr, true), ty.identity)
+    dst :: result ?? lower_new_value(&f, layout, lower_drop(&m, repr, true), ty.identity)
     if lower_wide_signed(p, ty) != None {
         if constant == {
             .Int(value, _, _) -> lower_wide_constant(p, &f, dst, ty, value)
@@ -179,6 +210,18 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
             lower_call_runtime(&m, &f, "jet_rt_string_from_static", args, Val(dst))
         }
         .Struct(name, fields) -> {
+            if ty.kind == .Tuple(_) {
+                lower_storage_into(p, &f, dst, ty)
+                loop member in lower_inline_members(p, ty) {
+                    value :: lower_constant_field(fields, member.name) ?? {
+                        lower_fail(&m, &f, "Tuple constant without field {member.name} is not lowered at O0 yet")
+                        return None
+                    }
+                    lower_constant_store(p, &m, &f, dst, member.offset, member.ty, value)
+                    if f.failed -> return None
+                }
+                return Val(dst)
+            }
             definition :: lower_type_def(p, ty) ?? {
                 lower_fail(&m, &f, "Struct constant {name} without a definition is not lowered at O0 yet")
                 return None
@@ -208,7 +251,7 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
                     return None
                 }
                 found :: lower_struct_field(p, ty, field.id) ?? return None
-                lower_constant_store(p, c, &m, &f, dst, found.offset, found.ty, value)
+                lower_constant_store(p, &m, &f, dst, found.offset, found.ty, value)
                 if f.failed -> return None
             }
         }
@@ -239,7 +282,7 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
                             return None
                         }
                         info :: lower_enum_payload_info(p, definition, found.variant, 0) ?? return None
-                        lower_constant_payload(p, c, &m, &f, dst, info, args[0].value)
+                        lower_constant_payload(p, &m, &f, dst, info, args[0].value)
                     }
                     .Named(fields) -> {
                         // MIRRust.rs:typed_enum_constant (:29425): named
@@ -251,7 +294,7 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
                                 return None
                             }
                             info :: lower_enum_payload_info(p, definition, found.variant, index) ?? return None
-                            lower_constant_payload(p, c, &m, &f, dst, info, value)
+                            lower_constant_payload(p, &m, &f, dst, info, value)
                             if f.failed -> return None
                         }
                     }
@@ -264,12 +307,12 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
             if ty.kind == {
                 .Option(inner) -> {
                     lower_alloc(&m, &f, dst, lower_option_box_size(p, inner))
-                    lower_constant_store(p, c, &m, &f, dst, 0, inner, value)
+                    lower_constant_store(p, &m, &f, dst, 0, inner, value)
                 }
                 .Result(ok, err) -> {
                     lower_alloc(&m, &f, dst, lower_result_box_size(p, ok, err))
                     lower_store_word(&f, dst, 0, lower_result_selector(true))
-                    lower_constant_store(p, c, &m, &f, dst, lower_result_payload_offset(), ok, value)
+                    lower_constant_store(p, &m, &f, dst, lower_result_payload_offset(), ok, value)
                 }
                 else -> {
                     lower_fail(&m, &f, "Present constant without an Option or Result type is not lowered at O0 yet")
@@ -296,9 +339,14 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
             }
             lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: data})
             loop (index, value) in values {
-                lower_constant_store(p, c, &m, &f, data, stride * index, elem, value)
+                lower_constant_store(p, &m, &f, data, stride * index, elem, value)
                 if f.failed -> return None
             }
+        }
+        .Map(entries) -> {
+            lower_storage_into(p, &f, dst, ty)
+            lower_constant_map_fill(p, &m, &f, dst, ty, entries)
+            if f.failed -> return None
         }
         .Bytes(values) -> {
             if !lower_constant_bytes_type(p, ty) {
@@ -323,7 +371,7 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
             if ty.kind == .Result(ok, err) && report == .Told(value) {
                 lower_alloc(&m, &f, dst, lower_result_box_size(p, ok, err))
                 lower_store_word(&f, dst, 0, lower_result_selector(false))
-                lower_constant_store(p, c, &m, &f, dst, lower_result_payload_offset(), err, value)
+                lower_constant_store(p, &m, &f, dst, lower_result_payload_offset(), err, value)
             } else if lower_option_inner(ty) != None && report == .Clean(_) {
                 // A clean failure of an Option is None (MIRRust.rs constant_for_type).
                 lower_emit(&f, LIRInst.Const{dst: dst, value: 0})
@@ -343,7 +391,7 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
 
 fn lower_constant_into(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, constant: MIRConstant, dst: LIRValueID) Never! {
     ty :: lower_checked_type(c, instruction) ?? return
-    _ := lower_constant_tree_value(p, c, &m, &f, ty, constant, Val(dst))
+    _ := lower_constant_tree_value(p, &m, &f, ty, constant, Val(dst))
 }
 
 fn lower_global_definition(p: MIRProgram, name: String) -> MIRConstantDef? Never! {
@@ -359,14 +407,14 @@ fn lower_global_definition(p: MIRProgram, name: String) -> MIRConstantDef? Never
 
 // MIRRust.rs:typed_enum_constant (:29399, :29430): a declared recursive
 // edge adds a wrapper allocation, distinct from the child's own value.
-fn lower_constant_payload(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, dst: LIRValueID, info: LowerPayloadInfo, constant: MIRConstant) Never! {
+fn lower_constant_payload(p: MIRProgram, m: &LowerModule, f: &LowerFunction, dst: LIRValueID, info: LowerPayloadInfo, constant: MIRConstant) Never! {
     if info.boxed {
         wrapper :: lower_pointer(&f)
         lower_alloc(&m, &f, wrapper, lower_option_box_size(p, info.ty))
-        lower_constant_store(p, c, &m, &f, wrapper, 0, info.ty, constant)
+        lower_constant_store(p, &m, &f, wrapper, 0, info.ty, constant)
         if f.failed -> return
         lower_emit(&f, LIRInst.Store{base: dst, offset: info.offset, value: wrapper})
     } else {
-        lower_constant_store(p, c, &m, &f, dst, info.offset, info.ty, constant)
+        lower_constant_store(p, &m, &f, dst, info.offset, info.ty, constant)
     }
 }

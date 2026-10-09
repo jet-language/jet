@@ -8,12 +8,14 @@ use jet_foundation.[
     mir_field_id, mir_function_id, mir_owned_ownership, mir_type_id,
     MIRSharedSite, MIRSharedLifetime, MIRTypeKind, MIRPreludeFamily, MIRPreludeABI, MIRSemanticOp, MIRPreludeTypeArg,
     mir_shared_site_getter_symbol, mir_type_from_kind,
+    MIRPlace, MIRPlaceID, MIRProjection, MIRIndexKind, MIRConstMapEntry, MIRPanicLoc,
 ]
 use jet_backend.[
-    LIRCallee, LIRCondition, LIRDataID, LIRDrop, LIRFunction, LIRInst,
-    LIRLayout, LIRModule, LIRSignature, LIRSignatureID, LIRValue, LIRValueID,
-    lir_layout_bool, lir_layout_pointer, lir_lower_entry,
+    LIRBlockID, LIRCallConv, LIRCallee, LIRCondition, LIRDataID, LIRDrop, LIRFunction, LIRFunctionID, LIRInst,
+    LIRLayout, LIRModule, LIRSignature, LIRSignatureID, LIRTerminator, LIRValue, LIRValueID,
+    lir_layout_bool, lir_layout_pointer, lir_lower_entry, lir_lower_callables,
     lir_lower_core_shared, lir_print_module,
+    lir_builder, lir_builder_push, lir_builder_seal, lir_builder_finish,
 ]
 
 fn fx_static_types() -> [MIRTypeDef] Never! {
@@ -322,10 +324,10 @@ fn fx_shared_site_checks() -> Bool Never! {
         entry :: pinned.entry ?? return false
         startup :: pinned.lir.functions[entry.value]
         if !startup.name.contains("core.shared.init") -> return false
-        startup_text :: lir_print_module(LIRModule{signatures: pinned.lir.signatures, functions: [LIRFunction]{startup}, data: pinned.lir.data})
+        startup_text :: lir_print_module(LIRModule{signatures: pinned.lir.signatures, functions: [LIRFunction]{startup}, data: pinned.lir.data, debug: pinned.lir.debug})
         if !startup_text.contains("jet_rt_string_from_static") || startup_text.contains("jet_rt_native_shared_new") -> return false
         finalizer :: pinned.finalizer ?? return false
-        release :: lir_print_module(LIRModule{signatures: pinned.lir.signatures, functions: [LIRFunction]{pinned.lir.functions[finalizer.value]}, data: pinned.lir.data})
+        release :: lir_print_module(LIRModule{signatures: pinned.lir.signatures, functions: [LIRFunction]{pinned.lir.functions[finalizer.value]}, data: pinned.lir.data, debug: pinned.lir.debug})
         if !release.contains("jet_rt_string_drop") || release.contains("jet_rt_native_shared_drop") -> return false
         getter_text :: lir_print_module(pinned.lir)
         if !getter_text.contains("jet_rt_native_shared_clone") -> return false
@@ -344,7 +346,85 @@ fn fx_shared_site_checks() -> Bool Never! {
     pinned :: lir_lower_core_shared(exact, [MIRFunctionID]{root.id})
     if pinned.issues.len() != 0 -> return false
     finalizer :: pinned.finalizer ?? return false
-    release :: lir_print_module(LIRModule{signatures: pinned.lir.signatures, functions: [LIRFunction]{pinned.lir.functions[finalizer.value]}, data: pinned.lir.data})
+    release :: lir_print_module(LIRModule{signatures: pinned.lir.signatures, functions: [LIRFunction]{pinned.lir.functions[finalizer.value]}, data: pinned.lir.data, debug: pinned.lir.debug})
     if !release.contains("jet_rt_int_drop") || release.contains("jet_rt_string_drop") -> return false
     true
+}
+
+// expect-stdout statics-map: "3\nPASS\nEDIT\nFAIL\n0\nFAIL\n"
+// expect-static-only statics-map
+fn fx_statics_map() -> MIRProgram Never! {
+    b := fx_builder()
+    map_ty :: fx_constant_marker_type()
+    borrowed :: fx_value(&b, map_ty, fx_borrow(), MIROperation.Global{name: "fixture.status"})
+    fx_print(&b, fx_list_method(&b, "len", borrowed, None, [MIRValueID]{}, fx_int(), false))
+    fx_constant_map_read(&b, borrowed, "a.jet")
+    root :: fx_local(&b, "owned_status", map_ty, mir_owned_ownership())
+    owned :: fx_owned(&b, map_ty, MIROperation.Global{name: "status"})
+    fx_do(&b, MIROperation.WritePlace{place: root, value: owned})
+    key :: fx_strings_literal(&b, "z.jet")
+    base := b.places[0].base
+    loop row in b.places {
+        if row.id == root -> base = row.base
+    }
+    slot :: MIRPlaceID{value: fx_word(U64{500}, b.places.len())}
+    &b.places.push(MIRPlace{id: slot, span: fx_span(), ty: fx_string(), base: base,
+        projections: [MIRProjection]{MIRProjection.Index{kind: MIRIndexKind.Map, index: key,
+            call: fx_prelude_id("core.list", "get"), write_call: None,
+            location: MIRPanicLoc{file: fx_source_file(), line: 1, column: 0}, context: None, span: fx_span()}},
+        access: MIRAccess.Write, persist_key: None})
+    replacement :: fx_strings_literal(&b, "EDIT")
+    fx_do(&b, MIROperation.ReplacePlace{place: slot, value: replacement})
+    fx_do(&b, MIROperation.Drop{value: key, kind: MIRDropKind.Value})
+    fx_constant_map_read(&b, owned, "z.jet")
+    fx_do(&b, MIROperation.Drop{value: owned, kind: MIRDropKind.Value})
+    fx_constant_map_read(&b, borrowed, "z.jet")
+    empty :: fx_owned(&b, map_ty, MIROperation.Global{name: "fixture.empty_status"})
+    fx_print(&b, fx_list_method(&b, "len", empty, None, [MIRValueID]{}, fx_int(), false))
+    fx_do(&b, MIROperation.Drop{value: empty, kind: MIRDropKind.Value})
+    nested_ty :: fx_list_type(map_ty)
+    nested :: fx_owned(&b, nested_ty, MIROperation.Global{name: "fixture.nested_status"})
+    zero :: fx_int_const(&b, 0)
+    inner :: fx_list_index(&b, nested, zero, map_ty, false)
+    fx_constant_map_read(&b, inner, "z.jet")
+    fx_do(&b, MIROperation.Drop{value: nested, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_constant_map_program(b)
+    p.constants = [MIRConstantDef]{
+        fx_static_definition("status", map_ty, fx_constant_marker_status()),
+        fx_static_definition("empty_status", map_ty, MIRConstant.Map{entries: [MIRConstMapEntry]{}}),
+        fx_static_definition("nested_status", nested_ty, MIRConstant.List{values: [MIRConstant]{fx_constant_marker_status()}}),
+    }
+    p
+}
+
+// Repeated callable initialization/finalization builds fresh frozen owners,
+// retires them exactly once and permits a new invocation in the same image.
+// expect-stdout statics-map-lifetime: "FAIL\nFAIL\n"
+// expect-static-only statics-map-lifetime
+fn fx_statics_map_lifetime() -> LIRModule Never! {
+    b := fx_builder()
+    map :: fx_value(&b, fx_constant_marker_type(), fx_borrow(), MIROperation.Global{name: "fixture.status"})
+    fx_constant_map_read(&b, map, "z.jet")
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_constant_map_program(b)
+    p.constants = [MIRConstantDef]{fx_static_definition("status", fx_constant_marker_type(), fx_constant_marker_status())}
+    lowered :: lir_lower_callables(p, [MIRFunctionID]{mir_function_id("run")})
+    if lowered.issues.len() > 0 -> panic("Map lifetime fixture lowering failed")
+    entry :: lowered.entry ?? panic("Map lifetime fixture has no callable")
+    finalizer :: lowered.finalizer ?? panic("Map lifetime fixture has no finalizer")
+    module_value := lowered.lir
+    loop (index, function) in module_value.functions {
+        if function.name == "run" -> module_value.functions[index].name = "read_status"
+    }
+    signature :: LIRSignatureID{value: module_value.signatures.len()}
+    &module_value.signatures.push(LIRSignature{id: signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None})
+    builder := lir_builder(LIRFunctionID{value: module_value.functions.len()}, "run", signature)
+    loop _ in 0..<2 {
+        lir_builder_push(&builder, LIRInst.Call{dst: None, signature: module_value.functions[entry.value].signature, callee: LIRCallee.Function{id: entry}, args: [LIRValueID]{}})
+        loop _ in 0..<2 -> lir_builder_push(&builder, LIRInst.Call{dst: None, signature: module_value.functions[finalizer.value].signature, callee: LIRCallee.Function{id: finalizer}, args: [LIRValueID]{}})
+    }
+    lir_builder_seal(&builder, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: None})
+    &module_value.functions.push(lir_builder_finish(builder))
+    module_value
 }

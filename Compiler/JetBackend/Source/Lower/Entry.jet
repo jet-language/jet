@@ -26,7 +26,7 @@ fn lower_entry_id(p: MIRProgram, m: &LowerModule, row: Int) -> LIRFunctionID Nev
 
 fn lower_entry_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{}, None)
-    lower_static_fixups(&m, &f)
+    lower_static_fixups(p, &m, &f)
     signature :: m.mir_signatures[glue.function].copy()
     target :: m.signatures[signature.value].copy()
     entry :: LIRFunctionID{value: glue.function}
@@ -41,7 +41,7 @@ fn lower_entry_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
         lower_seal(&f, LIRTerminator.Unreachable)
         return lir_builder_finish(f.builder)
     }
-    result :: lower_new_value(&f, layout, lower_drop(&m, f, lower_repr(p, ty), true), ty.identity)
+    result :: lower_new_value(&f, layout, lower_drop(&m, lower_repr(p, ty), true), ty.identity)
     lower_emit(&f, LIRInst.Call{dst: Val(result), signature: signature, callee: LIRCallee.Function{id: entry}, args: [LIRValueID]{}})
     if m.stop_points {
         status :: lower_word(&f)

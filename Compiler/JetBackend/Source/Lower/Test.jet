@@ -6,7 +6,7 @@ use jet_foundation.[MIRProgram, MIRFunctionID, MIROutputCheck, MIRType, MIRTypeK
 
 fn lir_lower_tests(program: MIRProgram, roots: [MIRFunctionID], checks: [MIROutputCheck], serial: Bool) -> LIRLowering Never! {
     intrinsics := [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, roots, false, true, Val(serial), checks, ^intrinsics)
+    lower_selected(program, roots, false, true, program.native_pack, [String]{}, false, Val(serial), checks, ^intrinsics)
 }
 
 fn lower_test_unit_type() -> MIRType Never! {
@@ -61,7 +61,7 @@ fn lower_test_invoke(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunc
         lower_seal(&f, LIRTerminator.Unreachable)
         return lir_builder_finish(f.builder)
     }
-    result :: lower_new_value(&f, return_layout, lower_drop(&m, f, lower_repr(p, ty), true), ty.identity)
+    result :: lower_new_value(&f, return_layout, lower_drop(&m, lower_repr(p, ty), true), ty.identity)
     lower_emit(&f, LIRInst.Call{dst: Val(result), signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: glue.function}}, args: [LIRValueID]{}})
     failed :: lower_flag(&f)
     if ty.kind == {
@@ -195,12 +195,12 @@ fn lower_test_checks(p: MIRProgram, m: &LowerModule, f: &LowerFunction) Never! {
         result := LIRValueID?{None}
         args := [LIRValueID]{}
         if m.mir_results[row] > 0 {
-            storage :: lower_new_value(&f, lir_layout_pointer(), lower_drop(&m, f, lower_repr(p, source.return_type), true), source.return_type.identity)
+            storage :: lower_new_value(&f, lir_layout_pointer(), lower_drop(&m, lower_repr(p, source.return_type), true), source.return_type.identity)
             lower_emit(&f, LIRInst.StackSlot{dst: storage, size: m.mir_results[row], align: 8})
             &args.push(storage)
             result = Val(storage)
         } else if return_layout == .Val(layout) {
-            result = Val(lower_new_value(&f, layout, lower_drop(&m, f, lower_repr(p, source.return_type), true), source.return_type.identity))
+            result = Val(lower_new_value(&f, layout, lower_drop(&m, lower_repr(p, source.return_type), true), source.return_type.identity))
         }
         lower_emit(&f, LIRInst.Call{dst: if m.mir_results[row] > 0 -> None else -> result, signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: row}}, args: args})
         if source.return_type.kind == .Bool {
@@ -270,7 +270,7 @@ fn lower_test_main(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFuncti
     lower_start(&f, reporter, [LIRValueID]{})
     lower_test_report(p, &m, &f, report_path)
     lower_start(&f, runner, [LIRValueID]{})
-    lower_static_fixups(&m, &f)
+    lower_static_fixups(p, &m, &f)
     records_path :: lower_test_env(&m, &f, "JET_NATIVE_TEST_RECORDS_PATH")
     present :: lower_test_present(&f, records_path)
     admitted :: lower_new_block(&f)

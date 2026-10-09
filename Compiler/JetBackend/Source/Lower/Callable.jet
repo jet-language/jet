@@ -3,7 +3,7 @@
 // pointers are forwarded unchanged. Each compiler image is invoked serially.
 use jet_foundation.[MIRFunction, MIRProgram]
 
-fn lower_callable_init(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+fn lower_callable_init(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     signature_id :: m.mir_signatures[glue.function].copy()
     signature :: m.signatures[signature_id.value].copy()
     f := lower_helper_start(&m, glue, signature.params, signature.result)
@@ -20,7 +20,7 @@ fn lower_callable_init(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     invoke :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: initialized, then_target: lower_target(invoke, [LIRValueID]{}), else_target: lower_target(initialize, [LIRValueID]{})})
     lower_start(&f, initialize, [LIRValueID]{})
-    lower_static_fixups(&m, &f)
+    lower_static_fixups(p, &m, &f)
     ready :: lower_flag(&f)
     lower_emit(&f, LIRInst.Const{dst: ready, value: 1})
     lower_emit(&f, LIRInst.Store{base: flag_address, offset: 0, value: ready})
@@ -30,6 +30,28 @@ fn lower_callable_init(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     if signature.result == .Val(layout) -> result = Val(lower_new_value(&f, layout, LIRDrop.Trivial, None))
     lower_emit(&f, LIRInst.Call{dst: result, signature: signature_id, callee: LIRCallee.Function{id: LIRFunctionID{value: glue.function}}, args: params})
     lower_seal(&f, LIRTerminator.Return{value: result})
+    lir_builder_finish(f.builder)
+}
+
+// Image lifetime owns runtime-built frozen trees; finalization is idempotent.
+fn lower_callable_fini(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{}, None)
+    flag_data :: m.static_live ?? panic("callable finalization has no static-live cell")
+    flag_address :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.DataAddress{dst: flag_address, data: flag_data})
+    initialized :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Load{dst: initialized, base: flag_address, offset: 0})
+    release :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: initialized, then_target: lower_target(release, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, release, [LIRValueID]{})
+    cleared :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Const{dst: cleared, value: 0})
+    lower_emit(&f, LIRInst.Store{base: flag_address, offset: 0, value: cleared})
+    lower_static_release(p, &m, &f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
     lir_builder_finish(f.builder)
 }
 
