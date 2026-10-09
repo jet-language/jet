@@ -19,7 +19,7 @@ use super::Output::Theme;
 use super::Provider::ProviderError;
 use super::SemanticLock::FlakeGraph;
 use super::JSON;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
 use std::collections::BTreeSet;
@@ -832,17 +832,17 @@ fn add_catalog_json(path: &Path, names: &mut BTreeSet<String>) {
     add_catalog_value(&value, names);
 }
 
-fn add_catalog_value(value: &DataTree, names: &mut BTreeSet<String>) {
+fn add_catalog_value(value: &Dyn, names: &mut BTreeSet<String>) {
     match value {
-        DataTree::Text(name) | DataTree::TypedText(name) if is_catalog_name(name) => {
+        Dyn::Text(name) if is_catalog_name(name) => {
             names.insert(name.clone());
         }
-        DataTree::Array(values) => {
+        Dyn::Array(values) => {
             for value in values {
                 add_catalog_value(value, names);
             }
         }
-        DataTree::Object(fields) => {
+        Dyn::Object(fields) => {
             if let Some(name) = fields
                 .iter()
                 .find_map(|(key, value)| (key == "name").then_some(value))

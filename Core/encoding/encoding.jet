@@ -2,7 +2,7 @@ package {
     name: "core.encoding"
     version: "0.0.1"
     edition: "2026"
-    description: "Codecs and the shared DataTree interchange model."
+    description: "Codecs and the shared Dyn interchange model."
     license: "MIT"
     outputs: {
         encoding: .Library{ entry: encoding }
@@ -11,10 +11,10 @@ package {
 // core.encoding — interchange codecs and the one dynamic value tree.
 //
 // Every format in this package speaks the same two verbs: `parse` (text or
-// bytes → `DataTree`) and `to_string` / `to_bytes` (value → wire). JSON, JSONL
+// bytes → `Dyn`) and `to_string` / `to_bytes` (value → wire). JSON, JSONL
 // CSV, TOML, YAML, XML, and CBOR are nested modules so a program pays only for
 // the format it imports. Hex, Base32, and Base64 are byte alphabets, not
-// DataTree adapters; they live beside the formats because they are the usual
+// Dyn adapters; they live beside the formats because they are the usual
 // way to carry those bytes through text.
 //
 // This is compiler-owned Core source and is loaded as the `core.encoding`
@@ -24,8 +24,12 @@ package {
 // Portable codecs below are written in Jet.
 //
 // Invariants:
-// - `DataTree` is the only user-facing dynamic tree. There is no `Data` alias.
+// - `Dyn` is the only user-facing dynamic tree. There is no `Data` alias.
 // - Objects keep insertion order. Integers and floats stay distinct variants.
+// - The closed cases are Null, Bool, Int, Float, Text, Bytes, DateTime, Array,
+//   and Object. Bytes text is padded RFC 4648 base64; DateTime text is canonical
+//   RFC 3339 with a fixed offset. TOML/YAML/CBOR retain their native kinds;
+//   JSON/JSONL/CSV render them as text. XML retains its separate node schema.
 // - No codec fabricates a value for malformed input. Syntax problems are
 //   `EncodingError`; alphabet helpers use their local typed errors.
 // - Whole-value codecs are pure (`->`) and callers pass text or bytes directly.

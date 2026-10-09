@@ -2538,7 +2538,7 @@ pub struct Field {
     pub default_ct: Option<CtValue>,
 }
 
-/// DataTree variant a derived decoder accepts at its outer wire boundary.
+/// Dyn variant a derived decoder accepts at its outer wire boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SerdeWireShape {
     Null,
@@ -2548,7 +2548,7 @@ pub enum SerdeWireShape {
     Text,
     Array,
     Object,
-    /// Typed JSON keeps numeric lexemes in the internal `DataTree::Number`
+    /// Typed JSON keeps numeric lexemes in the internal `Dyn::Number`
     /// carrier so fixed-width decoders can validate without rounding.
     Number,
 }

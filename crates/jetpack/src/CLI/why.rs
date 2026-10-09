@@ -75,7 +75,7 @@ fn why_error(
 
 #[cfg(test)]
 mod tests {
-    use jet_foundation::DataTree::DataTree;
+    use jet_foundation::Dyn::Dyn;
     use crate::Store::{PackageWhy, WhyDisk, WhyLocation, WhyOrigin, WhyRequesting, WhyTrust};
 
     fn sample() -> PackageWhy {
@@ -116,7 +116,7 @@ mod tests {
         }
     }
 
-    fn field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    fn field<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
         object
             .iter()
             .find_map(|(name, value)| (name == key).then_some(value))
@@ -182,7 +182,7 @@ mod tests {
             .iter()
             .find_map(|(name, value)| (name == "line").then_some(value))
             .unwrap(),
-            &DataTree::Int(12)
+            &Dyn::Int(12.into())
         );
         assert_eq!(
             field(field(&object, "trust").unwrap().as_object().unwrap(), "grade")
@@ -233,7 +233,7 @@ mod tests {
                 .iter()
                 .find_map(|(name, value)| (name == "bytes").then_some(value))
                 .unwrap(),
-            &DataTree::Int(4096)
+            &Dyn::Int(4096.into())
         );
     }
 }

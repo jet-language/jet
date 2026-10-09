@@ -48,7 +48,7 @@ pub fn parse(source: String) -> [Step]? {
     return Val(steps)
 }
 
-fn field(value: DataTree, name: String) -> DataTree? {
+fn field(value: Dyn, name: String) -> Dyn? {
     if value == .Object(entries) {
         loop pair in entries {
             if pair.key == name -> return Val(pair.value)
@@ -57,8 +57,8 @@ fn field(value: DataTree, name: String) -> DataTree? {
     return None
 }
 
-fn apply_step(values: [DataTree], step: Step) -> [DataTree] {
-    output := [DataTree]{}
+fn apply_step(values: [Dyn], step: Step) -> [Dyn] {
+    output := [Dyn]{}
     loop value in values {
         if step == {
             .Identity -> { &output.push(value) }
@@ -81,9 +81,9 @@ fn apply_step(values: [DataTree], step: Step) -> [DataTree] {
     return output
 }
 
-pub fn run(data: DataTree, query: String) -> [DataTree]? {
+pub fn run(data: Dyn, query: String) -> [Dyn]? {
     steps :: parse(query) ?? return None
-    values := [DataTree]{data}
+    values := [Dyn]{data}
     loop step in steps -> values = apply_step(values, step)
     return Val(values)
 }

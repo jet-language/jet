@@ -43,7 +43,7 @@ function jet_testing_history_web_float_bits(value) {
   return bytes.getBigUint64(0, false).toString(16).padStart(16, "0");
 }
 
-// The outer type and each nested value remain ordinary lossless DataTree JSON.
+// The outer type and each nested value remain ordinary lossless Dyn JSON.
 // Rust canonicalizes these bytes and hashes them; JS never makes fingerprints.
 function jet_testing_history_web_capture(value, key, types, active) {
   const schema = types.get(key);
@@ -139,19 +139,19 @@ function jet_testing_history_web_capture_data(value, active) {
           return { type: "array", value: value.map((item) => jet_testing_history_web_capture_data(item, active)) };
         }
         if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) {
-          throw new TypeError("history DataTree capture contains an opaque object");
+          throw new TypeError("history Dyn capture contains an opaque object");
         }
         return {
           type: "object",
           value: Object.keys(value).sort().map((key) => {
             const field = Object.getOwnPropertyDescriptor(value, key);
-            if (!Object.hasOwn(field, "value")) throw new TypeError("history DataTree capture contains an accessor");
+            if (!Object.hasOwn(field, "value")) throw new TypeError("history Dyn capture contains an accessor");
             return [key, jet_testing_history_web_capture_data(field.value, active)];
           }),
         };
       });
     default:
-      throw new TypeError("history DataTree capture contains an unsupported value");
+      throw new TypeError("history Dyn capture contains an unsupported value");
   }
 }
 

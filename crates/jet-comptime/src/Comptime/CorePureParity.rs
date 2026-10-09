@@ -1020,12 +1020,12 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
     if let Some(text) = plugin_error_display(value) {
         return Some(text);
     }
-    // DataTree values use the ordered JSON projection on every tier. The
+    // Dyn values use the ordered JSON projection on every tier. The
     // generic enum renderer below is for nominal enums and would expose the
     // erased `Object(JSONObject { ... })` carrier instead.
     if matches!(
         value,
-        CtValue::Enum { type_name, .. } if type_name == "DataTree"
+        CtValue::Enum { type_name, .. } if type_name == "Dyn"
     ) {
         return Some(crate::Comptime::JSONInterp::display_datatree(value));
     }
@@ -3248,6 +3248,22 @@ fn datetime_value(seconds: i64, nanos: u32, leap_second: bool) -> CtValue {
     )
 }
 
+pub fn dyn_datetime_value(value: jet_foundation::Dyn::DynDateTime) -> CtValue {
+    structure(
+        "ZonedDateTime",
+        vec![
+            ("instant", datetime_value(value.unix_seconds, value.nanos, value.leap_second)),
+            ("zone", structure(
+                "Zone",
+                vec![
+                    ("name", CtValue::Str(value.offset_text())),
+                    ("offset", CtValue::Int(i64::from(value.offset_seconds))),
+                ],
+            )),
+        ],
+    )
+}
+
 fn instant_start_ns(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
     int_field(value, "Instant", "start_ns", span)
 }
@@ -3515,7 +3531,7 @@ mod tests {
             ],
         );
         let actual = xml_canonical(&[CtValue::Bytes(vec![1, 2, 3]), options], Span::new(0, 0))
-            .expect("invalid DataTree is a user Result error");
+            .expect("invalid Dyn is a user Result error");
         assert_eq!(
             actual,
             CtValue::failed(Box::new(xml_shape_error(

@@ -38,7 +38,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::JSON;
 use crate::SHA256;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 
 const ARCHITECTURE: &str = "amd64";
 const OS: &str = "linux";
@@ -1332,7 +1332,7 @@ fn load_base(root: &Path) -> io::Result<BaseLayout> {
     let mut diff_ids = array(field(rootfs, "diff_ids"), "OCI config diff_ids")?
         .iter()
         .map(|value| match value {
-            DataTree::Text(digest) => {
+            Dyn::Text(digest) => {
                 digest_hex(digest)?;
                 Ok(digest.clone())
             }
@@ -1428,45 +1428,45 @@ fn read_blob(root: &Path, digest: &str) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn object<'a>(value: &'a DataTree, label: &str) -> io::Result<&'a [(String, DataTree)]> {
+fn object<'a>(value: &'a Dyn, label: &str) -> io::Result<&'a [(String, Dyn)]> {
     match value {
-        DataTree::Object(object) => Ok(object),
+        Dyn::Object(object) => Ok(object),
         _ => Err(invalid(&format!("{label} is not an object"))),
     }
 }
 
 fn field<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     key: &str,
-) -> Option<&'a DataTree> {
+) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
 }
 
-fn array<'a>(value: Option<&'a DataTree>, label: &str) -> io::Result<&'a [DataTree]> {
+fn array<'a>(value: Option<&'a Dyn>, label: &str) -> io::Result<&'a [Dyn]> {
     match value {
-        Some(DataTree::Array(values)) => Ok(values),
+        Some(Dyn::Array(values)) => Ok(values),
         _ => Err(invalid(&format!("{label} is not an array"))),
     }
 }
 
 fn string_field<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     field_name: &str,
 ) -> io::Result<&'a str> {
     match field(object, field_name) {
-        Some(DataTree::Text(value)) if !value.is_empty() => Ok(value),
+        Some(Dyn::Text(value)) if !value.is_empty() => Ok(value),
         _ => Err(invalid(&format!(
             "OCI object field `{field_name}` is not a string"
         ))),
     }
 }
 
-fn number_field(object: &[(String, DataTree)], field_name: &str) -> io::Result<u64> {
+fn number_field(object: &[(String, Dyn)], field_name: &str) -> io::Result<u64> {
     match field(object, field_name) {
-        Some(DataTree::Int(value)) if *value >= 0 => Ok(*value as u64),
-        Some(DataTree::Float(value))
+        Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| invalid(&format!("OCI object field `{field_name}` is not a non-negative integer"))),
+        Some(Dyn::Float(value))
             if value.is_finite()
                 && *value >= 0.0
                 && *value <= u64::MAX as f64

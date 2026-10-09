@@ -7,7 +7,7 @@
 use super::{entry_action_key, ClosureGraph, Lifecycle, ProducerRecord, Roots, StoreEntry};
 use crate::{BuildDebug, ProviderFacts, SemanticLock, Syntax, JSON};
 use jet_foundation::Report::{ReportEnvelope, StatusEnvelope, StatusValue};
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -729,7 +729,7 @@ fn catalog_origin(
     }
 }
 
-fn object_field<'a>(object: &'a [(String, DataTree)], field: &str) -> Option<&'a DataTree> {
+fn object_field<'a>(object: &'a [(String, Dyn)], field: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == field).then_some(value))
@@ -1514,7 +1514,7 @@ fn profile_provider_facts(
                 });
                 continue;
             }
-            let Some(DataTree::Array(packages)) = object_field(object, "packages") else {
+            let Some(Dyn::Array(packages)) = object_field(object, "packages") else {
                 reports.push(ExplainReport {
                     kind: "loss".to_string(),
                     message: format!(

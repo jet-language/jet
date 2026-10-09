@@ -1,6 +1,6 @@
 //! The single reader for Jet's JSON machine-output door.
 
-use crate::DataTree::DataTree;
+use crate::Dyn::Dyn;
 use crate::Report::{NoFixReasonKind, REPORT_SCHEMA, STATUS_SCHEMA};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,12 +38,12 @@ pub fn read_machine_line(text: &str) -> Result<MachineRecord, String> {
     }
 }
 
-fn field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn field<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
 }
-fn validate_report(object: &[(String, DataTree)]) -> Result<(), String> {
+fn validate_report(object: &[(String, Dyn)]) -> Result<(), String> {
     for key in ["moment", "severity", "code", "what", "why", "fix"] {
         field(object, key)
             .ok_or_else(|| format!("report record is missing `{key}`"))?
@@ -92,7 +92,7 @@ fn validate_report(object: &[(String, DataTree)]) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_status(object: &[(String, DataTree)]) -> Result<(), String> {
+fn validate_status(object: &[(String, Dyn)]) -> Result<(), String> {
     let action = field(object, "action")
         .ok_or_else(|| "status record is missing `action`".to_owned())?
         .as_str()?;
@@ -103,7 +103,7 @@ fn validate_status(object: &[(String, DataTree)]) -> Result<(), String> {
         return Err("status record must not contain the legacy `status` key".to_owned());
     }
     match field(object, "ok") {
-        Some(DataTree::Bool(_)) => {}
+        Some(Dyn::Bool(_)) => {}
         Some(_) => return Err("status record field `ok` is not boolean".to_owned()),
         None => return Err("status record is missing `ok`".to_owned()),
     }

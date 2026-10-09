@@ -38,16 +38,16 @@ pub fn publication_index_parse_line(line: String) -> PublicationIndexEntry? Neve
         signature: publication_index_optional_string(fields, "signature") ?? return None
     })
 }
-fn publication_index_required_string(fields: [String: DataTree], key: String) -> String? Never! {
+fn publication_index_required_string(fields: [String: Dyn], key: String) -> String? Never! {
     text :: pkg_json_text(fields.get(key) ?? return None) ?? return None
     if text == "" -> return None
     Val(text)
 }
-fn publication_index_optional_string(fields: [String: DataTree], key: String) -> String? Never! {
+fn publication_index_optional_string(fields: [String: Dyn], key: String) -> String? Never! {
     value :: fields.get(key) ?? return Val("")
     pkg_json_text(value)
 }
-fn publication_index_optional_bool(fields: [String: DataTree], key: String) -> Bool? Never! {
+fn publication_index_optional_bool(fields: [String: Dyn], key: String) -> Bool? Never! {
     value :: fields.get(key) ?? return Val(false)
     pkg_json_bool(value)
 }

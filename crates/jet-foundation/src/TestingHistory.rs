@@ -851,9 +851,9 @@ pub trait HistoryCommand: Clone + fmt::Debug + 'static {
     }
 
     /// Compiler-supplied lossless command codec used by host bridges.
-    fn history_commands_to_data_tree(
+    fn history_commands_to_dyn(
         _commands: &[Self],
-    ) -> Option<crate::DataTree::DataTree> {
+    ) -> Option<crate::Dyn::Dyn> {
         None
     }
 
@@ -935,11 +935,11 @@ pub trait HistoryStrategyBehavior<Command: HistoryCommand> {
     /// Project generated typed commands into the portable callback carrier.
     /// Tiers that execute callbacks natively can keep the commands typed; a
     /// host bridge uses this only at its boundary.
-    fn commands_to_data_tree(
+    fn commands_to_dyn(
         &self,
         commands: &[Command],
-    ) -> Option<crate::DataTree::DataTree> {
-        Command::history_commands_to_data_tree(commands)
+    ) -> Option<crate::Dyn::Dyn> {
+        Command::history_commands_to_dyn(commands)
     }
 }
 
@@ -1001,7 +1001,7 @@ pub struct HistoryGeneratedVariant<Command> {
 pub struct HistoryGeneratedStrategy<Command: 'static> {
     command_type: &'static str,
     variants: &'static [HistoryGeneratedVariant<Command>],
-    commands_to_data_tree: fn(&[Command]) -> crate::DataTree::DataTree,
+    commands_to_dyn: fn(&[Command]) -> crate::Dyn::Dyn,
     unsupported_reason: Option<&'static str>,
 }
 
@@ -1009,12 +1009,12 @@ impl<Command: 'static> HistoryGeneratedStrategy<Command> {
     pub const fn new(
         command_type: &'static str,
         variants: &'static [HistoryGeneratedVariant<Command>],
-        commands_to_data_tree: fn(&[Command]) -> crate::DataTree::DataTree,
+        commands_to_dyn: fn(&[Command]) -> crate::Dyn::Dyn,
     ) -> Self {
         Self {
             command_type,
             variants,
-            commands_to_data_tree,
+            commands_to_dyn,
             unsupported_reason: None,
         }
     }
@@ -1024,13 +1024,13 @@ impl<Command: 'static> HistoryGeneratedStrategy<Command> {
     pub const fn new_with_unsupported(
         command_type: &'static str,
         variants: &'static [HistoryGeneratedVariant<Command>],
-        commands_to_data_tree: fn(&[Command]) -> crate::DataTree::DataTree,
+        commands_to_dyn: fn(&[Command]) -> crate::Dyn::Dyn,
         unsupported_reason: &'static str,
     ) -> Self {
         Self {
             command_type,
             variants,
-            commands_to_data_tree,
+            commands_to_dyn,
             unsupported_reason: Some(unsupported_reason),
         }
     }
@@ -1146,11 +1146,11 @@ where
                 })
     }
 
-    fn commands_to_data_tree(
+    fn commands_to_dyn(
         &self,
         commands: &[Command],
-    ) -> Option<crate::DataTree::DataTree> {
-        Some((self.commands_to_data_tree)(commands))
+    ) -> Option<crate::Dyn::Dyn> {
+        Some((self.commands_to_dyn)(commands))
     }
 }
 
@@ -1749,71 +1749,71 @@ impl HistoryStrategyBehavior<HistorySchemaCommand> for HistorySchemaStrategy {
     }
 }
 
-fn history_value_data_tree(value: &HistoryValue) -> crate::DataTree::DataTree {
+fn history_value_dyn(value: &HistoryValue) -> crate::Dyn::Dyn {
     match value {
-        HistoryValue::Integer(value) => crate::DataTree::DataTree::Int(*value),
-        HistoryValue::Boolean(value) => crate::DataTree::DataTree::Bool(*value),
-        HistoryValue::Text(value) => crate::DataTree::DataTree::Text(value.clone()),
-        HistoryValue::Handle(handle) => crate::DataTree::DataTree::Int(handle.value as i64),
-        HistoryValue::Redacted(label) => crate::DataTree::DataTree::Object(vec![
+        HistoryValue::Integer(value) => crate::Dyn::Dyn::Int((*value).into()),
+        HistoryValue::Boolean(value) => crate::Dyn::Dyn::Bool(*value),
+        HistoryValue::Text(value) => crate::Dyn::Dyn::Text(value.clone()),
+        HistoryValue::Handle(handle) => crate::Dyn::Dyn::Int((handle.value as i64).into()),
+        HistoryValue::Redacted(label) => crate::Dyn::Dyn::Object(vec![
             (
                 "redacted".to_string(),
-                crate::DataTree::DataTree::Text(label.clone()),
+                crate::Dyn::Dyn::Text(label.clone()),
             ),
         ]),
     }
 }
 
-fn history_schema_command_data_tree(
+fn history_schema_command_dyn(
     command: &HistorySchemaCommand,
-) -> crate::DataTree::DataTree {
-    crate::DataTree::DataTree::Object(vec![
+) -> crate::Dyn::Dyn {
+    crate::Dyn::Dyn::Object(vec![
         (
             "operation".to_string(),
-            crate::DataTree::DataTree::Text(command.operation.clone()),
+            crate::Dyn::Dyn::Text(command.operation.clone()),
         ),
         (
             "arguments".to_string(),
-            crate::DataTree::DataTree::Array(
+            crate::Dyn::Dyn::Array(
                 command
                     .arguments
                     .iter()
-                    .map(history_value_data_tree)
+                    .map(history_value_dyn)
                     .collect(),
             ),
         ),
         (
             "creates".to_string(),
-            crate::DataTree::DataTree::Array(
+            crate::Dyn::Dyn::Array(
                 command
                     .creates
                     .iter()
-                    .map(|handle| crate::DataTree::DataTree::Int(handle.value as i64))
+                    .map(|handle| crate::Dyn::Dyn::Int((handle.value as i64).into()))
                     .collect(),
             ),
         ),
         (
             "consumes".to_string(),
-            crate::DataTree::DataTree::Array(
+            crate::Dyn::Dyn::Array(
                 command
                     .consumes
                     .iter()
-                    .map(|handle| crate::DataTree::DataTree::Int(handle.value as i64))
+                    .map(|handle| crate::Dyn::Dyn::Int((handle.value as i64).into()))
                     .collect(),
             ),
         ),
     ])
 }
 
-impl HistoryCommand for crate::DataTree::DataTree {
+impl HistoryCommand for crate::Dyn::Dyn {
     type Strategy = HistorySchemaStrategy;
 
     fn history_strategy() -> Self::Strategy {
-        HistorySchemaStrategy::new("DataTree")
+        HistorySchemaStrategy::new("Dyn")
     }
 }
 
-impl HistoryStrategyBehavior<crate::DataTree::DataTree> for HistorySchemaStrategy {
+impl HistoryStrategyBehavior<crate::Dyn::Dyn> for HistorySchemaStrategy {
     fn command_type(&self) -> &str {
         &self.command_type
     }
@@ -1827,7 +1827,7 @@ impl HistoryStrategyBehavior<crate::DataTree::DataTree> for HistorySchemaStrateg
         rng: &mut HistoryRng,
         case_index: usize,
         max_steps: usize,
-    ) -> Option<TypedHistoryCase<crate::DataTree::DataTree>> {
+    ) -> Option<TypedHistoryCase<crate::Dyn::Dyn>> {
         let generated =
             <Self as HistoryStrategyBehavior<HistorySchemaCommand>>::generate(
                 self,
@@ -1840,7 +1840,7 @@ impl HistoryStrategyBehavior<crate::DataTree::DataTree> for HistorySchemaStrateg
             .operations
             .iter()
             .map(|operation| {
-                history_schema_command_data_tree(&Self::command_for(operation))
+                history_schema_command_dyn(&Self::command_for(operation))
             })
             .collect();
         TypedHistoryCase::new(generated.case, commands)
@@ -1849,26 +1849,26 @@ impl HistoryStrategyBehavior<crate::DataTree::DataTree> for HistorySchemaStrateg
     fn rebuild(
         &self,
         case: &HistoryCase,
-    ) -> Option<TypedHistoryCase<crate::DataTree::DataTree>> {
+    ) -> Option<TypedHistoryCase<crate::Dyn::Dyn>> {
         let commands = case
             .operations
             .iter()
             .map(|operation| {
-                history_schema_command_data_tree(&Self::command_for(operation))
+                history_schema_command_dyn(&Self::command_for(operation))
             })
             .collect();
         TypedHistoryCase::new(case.clone(), commands)
     }
 
-    fn valid(&self, case: &TypedHistoryCase<crate::DataTree::DataTree>) -> bool {
+    fn valid(&self, case: &TypedHistoryCase<crate::Dyn::Dyn>) -> bool {
         case.case.validate().is_ok() && case.commands.len() == case.case.operations.len()
     }
 
-    fn commands_to_data_tree(
+    fn commands_to_dyn(
         &self,
-        commands: &[crate::DataTree::DataTree],
-    ) -> Option<crate::DataTree::DataTree> {
-        Some(crate::DataTree::DataTree::Array(commands.to_vec()))
+        commands: &[crate::Dyn::Dyn],
+    ) -> Option<crate::Dyn::Dyn> {
+        Some(crate::Dyn::Dyn::Array(commands.to_vec()))
     }
 }
 

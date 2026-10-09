@@ -4,7 +4,7 @@
 
 use jet_foundation::Devtools::{JetDevtoolsEnvelope, JET_DEVTOOLS_MAX_ENVELOPE_BYTES};
 use jet_foundation::DevtoolsControl::JetDevtoolsDecodedEnvelope;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_get, json_int, json_str, parse_json};
 use jet_foundation::MIR::MirDecisionLedger;
 use std::collections::BTreeMap;
@@ -122,15 +122,15 @@ struct LiveSnapshot {
 }
 
 fn checked_object(
-    value: &DataTree,
+    value: &Dyn,
     required: &[&str],
     optional: &[&str],
     label: &str,
-) -> Result<BTreeMap<String, DataTree>, String> {
-    let DataTree::Object(fields) = value else {
+) -> Result<BTreeMap<String, Dyn>, String> {
+    let Dyn::Object(fields) = value else {
         return Err(format!("{label} must be an object"));
     };
-    let fields: BTreeMap<String, DataTree> = fields.iter().cloned().collect();
+    let fields: BTreeMap<String, Dyn> = fields.iter().cloned().collect();
     if fields
         .keys()
         .any(|key| !required.contains(&key.as_str()) && !optional.contains(&key.as_str()))
@@ -141,7 +141,7 @@ fn checked_object(
     Ok(fields)
 }
 
-fn int_field(object: &DataTree, key: &str, label: &str, nonnegative: bool) -> Result<i64, String> {
+fn int_field(object: &Dyn, key: &str, label: &str, nonnegative: bool) -> Result<i64, String> {
     let value = json_get(object, key)
         .and_then(json_int)
         .ok_or_else(|| format!("{label} has invalid `{key}`"))?;
@@ -152,19 +152,19 @@ fn int_field(object: &DataTree, key: &str, label: &str, nonnegative: bool) -> Re
 }
 
 fn optional_int_field(
-    object: &DataTree,
+    object: &Dyn,
     key: &str,
     label: &str,
 ) -> Result<Option<i64>, String> {
     match json_get(object, key) {
-        None | Some(DataTree::Null) => Ok(None),
+        None | Some(Dyn::Null) => Ok(None),
         Some(value) => json_int(value)
             .map(Some)
             .ok_or_else(|| format!("{label} has invalid `{key}`")),
     }
 }
 
-fn string_field(object: &DataTree, key: &str, label: &str) -> Result<String, String> {
+fn string_field(object: &Dyn, key: &str, label: &str) -> Result<String, String> {
     let value = json_get(object, key)
         .and_then(json_str)
         .ok_or_else(|| format!("{label} has invalid `{key}`"))?;
@@ -174,33 +174,27 @@ fn string_field(object: &DataTree, key: &str, label: &str) -> Result<String, Str
     Ok(value.to_string())
 }
 
-fn bool_field(object: &DataTree, key: &str, label: &str) -> Result<bool, String> {
+fn bool_field(object: &Dyn, key: &str, label: &str) -> Result<bool, String> {
     match json_get(object, key) {
-        Some(DataTree::Bool(value)) => Ok(*value),
+        Some(Dyn::Bool(value)) => Ok(*value),
         _ => Err(format!("{label} has invalid `{key}`")),
     }
 }
 
-fn canonical_json_value(value: &DataTree) -> Result<String, String> {
+fn canonical_json_value(value: &Dyn) -> Result<String, String> {
     match value {
-        DataTree::Null => Ok("null".to_string()),
-        DataTree::Bool(value) => Ok(value.to_string()),
-        DataTree::Int(value) => Ok(value.to_string()),
-        DataTree::Float(value) if value.is_finite() => Ok(value.to_string()),
-        DataTree::Float(_) => Err("decision ledger contains a non-finite number".to_string()),
-        DataTree::Number(value) => Ok(value.clone()),
-        DataTree::TypedText(value) | DataTree::Text(value) => {
+        Dyn::Null => Ok("null".to_string()),
+        Dyn::Bool(value) => Ok(value.to_string()),
+        Dyn::Int(value) => Ok(value.to_string()),
+        Dyn::Float(value) if value.is_finite() => Ok(value.to_string()),
+        Dyn::Float(_) => Err("decision ledger contains a non-finite number".to_string()),
+        Dyn::Number(value) => Ok(value.clone()),
+        Dyn::Text(value) => {
             Ok(jet_foundation::JSON::quote(value))
         }
-        DataTree::Bytes(values) => Ok(format!(
-            "[{}]",
-            values
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        )),
-        DataTree::Array(values) => Ok(format!(
+        Dyn::Bytes(values) => Ok(jet_foundation::JSON::quote(&Dyn::bytes_text(values))),
+        Dyn::DateTime(value) => Ok(jet_foundation::JSON::quote(&value.to_rfc3339())),
+        Dyn::Array(values) => Ok(format!(
             "[{}]",
             values
                 .iter()
@@ -208,7 +202,7 @@ fn canonical_json_value(value: &DataTree) -> Result<String, String> {
                 .collect::<Result<Vec<_>, _>>()?
                 .join(",")
         )),
-        DataTree::Object(fields) => {
+        Dyn::Object(fields) => {
             let mut fields = fields.iter().collect::<Vec<_>>();
             fields.sort_by(|left, right| left.0.cmp(&right.0));
             let rendered = fields
@@ -226,11 +220,11 @@ fn canonical_json_value(value: &DataTree) -> Result<String, String> {
     }
 }
 
-fn parse_decision_ledger(value: Option<&DataTree>) -> Result<Option<MirDecisionLedger>, String> {
+fn parse_decision_ledger(value: Option<&Dyn>) -> Result<Option<MirDecisionLedger>, String> {
     let Some(value) = value else {
         return Ok(None);
     };
-    if matches!(value, DataTree::Null) {
+    if matches!(value, Dyn::Null) {
         return Ok(None);
     }
     let payload = canonical_json_value(value)?;
@@ -288,7 +282,7 @@ fn parse_live_snapshot(snapshot: &str) -> Result<LiveSnapshot, String> {
     let values_value = root_fields
         .get("values")
         .ok_or_else(|| "live runtime snapshot has no values".to_string())?;
-    let DataTree::Array(value_values) = values_value else {
+    let Dyn::Array(value_values) = values_value else {
         return Err("live runtime snapshot values are not an array".to_string());
     };
     if value_values.len() > MAX_SNAPSHOT_ITEMS {
@@ -307,8 +301,8 @@ fn parse_live_snapshot(snapshot: &str) -> Result<LiveSnapshot, String> {
             return Err("live value has an unsupported disposition".to_string());
         }
         let rendered_value = match json_get(value, "rendered_value") {
-            None | Some(DataTree::Null) => None,
-            Some(DataTree::Text(rendered)) => {
+            None | Some(Dyn::Null) => None,
+            Some(Dyn::Text(rendered)) => {
                 if rendered.len() > 16 * 1024 {
                     return Err("live value `rendered_value` exceeds the Prelude limit".to_string());
                 }
@@ -330,7 +324,7 @@ fn parse_live_snapshot(snapshot: &str) -> Result<LiveSnapshot, String> {
     let tasks_value = root_fields
         .get("tasks")
         .ok_or_else(|| "live runtime snapshot has no tasks".to_string())?;
-    let DataTree::Array(task_values) = tasks_value else {
+    let Dyn::Array(task_values) = tasks_value else {
         return Err("live runtime snapshot tasks are not an array".to_string());
     };
     if task_values.len() > MAX_SNAPSHOT_ITEMS {
@@ -357,7 +351,7 @@ fn parse_live_snapshot(snapshot: &str) -> Result<LiveSnapshot, String> {
     let channels_value = root_fields
         .get("channels")
         .ok_or_else(|| "live runtime snapshot has no channels".to_string())?;
-    let DataTree::Array(channel_values) = channels_value else {
+    let Dyn::Array(channel_values) = channels_value else {
         return Err("live runtime snapshot channels are not an array".to_string());
     };
     if channel_values.len() > MAX_SNAPSHOT_ITEMS {

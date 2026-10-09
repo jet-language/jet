@@ -15,7 +15,7 @@ use jetpack::Discovery::Index as DiscoveryIndex;
 
 use super::Position::{byte_span_to_range, range_json};
 use super::SymbolDB::{SymKind, SymbolDB};
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_escape, json_str};
 
 /// LSP completion item kinds (standard integers).
@@ -821,7 +821,7 @@ pub(crate) fn compute_completions(
 /// run; once `jetCompletion` is present, all failures are returned to the
 /// caller rather than silently falling back to a second candidate engine.
 pub(crate) fn dynamic_completion_json(
-    params: &DataTree,
+    params: &Dyn,
     doc_text: &str,
     offset: usize,
     revision: u64,
@@ -932,13 +932,13 @@ pub(crate) fn dynamic_completion_json(
         result.truncated, items
     )))
 }
-fn object_get<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn object_get<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
 
 }
-fn dynamic_options(params: &DataTree) -> Result<Option<&DataTree>, String> {
+fn dynamic_options(params: &Dyn) -> Result<Option<&Dyn>, String> {
     let object = params
         .as_object()
         .map_err(|_| "completion params must be an object".to_string())?;
@@ -951,13 +951,13 @@ fn dynamic_options(params: &DataTree) -> Result<Option<&DataTree>, String> {
 }
 
 fn option_string(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     keys: &[&str],
 ) -> Result<Option<String>, String> {
     for key in keys {
         if let Some(value) = object_get(object, *key) {
             return match value {
-                DataTree::Null => Ok(None),
+                Dyn::Null => Ok(None),
                 _ => json_str(value)
                     .map(str::to_string)
                     .map(Some)
@@ -969,14 +969,15 @@ fn option_string(
 }
 
 fn option_u64(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     keys: &[&str],
 ) -> Result<Option<u64>, String> {
     for key in keys {
         if let Some(value) = object_get(object, *key) {
             return match value {
-                DataTree::Null => Ok(None),
-                DataTree::Int(number) if *number >= 0 => Ok(Some(*number as u64)),
+                Dyn::Null => Ok(None),
+                Dyn::Int(number) => number.to_u64().map(Some).ok_or_else(|| format!(
+                    "jetCompletion.{key} must be a nonnegative integer or null")),
                 _ => Err(format!(
                     "jetCompletion.{key} must be a nonnegative integer or null"
                 )),

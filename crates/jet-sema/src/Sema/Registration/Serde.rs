@@ -595,7 +595,7 @@ fn struct_codec_items(s: &crate::AST::StructDef, items: &[Item]) -> Vec<Item> {
                 "encode",
                 params,
                 vec![self_param(span)],
-                Some(data_tree_type()),
+                Some(dyn_type()),
                 struct_encode_body(s, span),
                 span,
             ),
@@ -624,7 +624,7 @@ fn struct_codec_items(s: &crate::AST::StructDef, items: &[Item]) -> Vec<Item> {
             serde_method(
                 "decode",
                 params,
-                vec![named_param("tree", data_tree_type(), span)],
+                vec![named_param("tree", dyn_type(), span)],
                 Some(result_type(target_type(&s.name, &s.type_params), span)),
                 body,
                 span,
@@ -982,7 +982,7 @@ fn enum_codec_items(e: &crate::AST::EnumDef) -> Vec<Item> {
                 "encode",
                 params.clone(),
                 vec![self_param(span)],
-                Some(data_tree_type()),
+                Some(dyn_type()),
                 enum_encode_body(e, span),
                 span,
             ),
@@ -996,7 +996,7 @@ fn enum_codec_items(e: &crate::AST::EnumDef) -> Vec<Item> {
             serde_method(
                 "decode",
                 params,
-                vec![named_param("tree", data_tree_type(), span)],
+                vec![named_param("tree", dyn_type(), span)],
                 Some(result_type(target_type(&e.name, &e.type_params), span)),
                 enum_decode_body(e, span),
                 span,
@@ -1030,7 +1030,7 @@ fn union_codec_items(e: &crate::AST::EnumDef, items: &[Item]) -> Vec<Item> {
                 "encode",
                 Vec::new(),
                 vec![self_param(span)],
-                Some(data_tree_type()),
+                Some(dyn_type()),
                 union_encode_body(e, span),
                 span,
             ),
@@ -1044,7 +1044,7 @@ fn union_codec_items(e: &crate::AST::EnumDef, items: &[Item]) -> Vec<Item> {
             serde_method(
                 "decode",
                 Vec::new(),
-                vec![named_param("tree", data_tree_type(), span)],
+                vec![named_param("tree", dyn_type(), span)],
                 Some(result_type(target_type(&e.name, &e.type_params), span)),
                 union_decode_body(e, items, span),
                 span,
@@ -1088,9 +1088,9 @@ fn union_decode_body(e: &crate::AST::EnumDef, items: &[Item], span: Span) -> Vec
         let Some(shapes) = crate::AST::resolved_decode_wire_shapes(items, member) else {
             continue;
         };
-        // Typed JSON keeps numeric lexemes in DataTree::Number so fixed-width
+        // Typed JSON keeps numeric lexemes in Dyn::Number so fixed-width
         // decoders can validate them without a lossy float round-trip. A
-        // numeric member therefore accepts its native DataTree variant and
+        // numeric member therefore accepts its native Dyn variant and
         // the compiler-only Number carrier; keep each runtime variant once.
         let mut wire_variants = Vec::new();
         for shape in shapes {
@@ -1213,7 +1213,7 @@ fn struct_encode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
 
     let mut body = vec![binding(
         "out",
-        Some(map_type(data_tree_type(), span)),
+        Some(map_type(dyn_type(), span)),
         map_literal(Vec::new(), span),
         true,
         span,
@@ -1263,12 +1263,12 @@ fn struct_encode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
             ));
         }
     }
-    body.push(ret(data_tree_object_expr(ident("out", span), span), span));
+    body.push(ret(dyn_object_expr(ident("out", span), span), span));
     body
 }
 
 /// Append one `(key, value)` row per emitted field to the ordered Object
-/// payload, in declaration order, and hand the list to `DataTree.Object`.
+/// payload, in declaration order, and hand the list to `Dyn.Object`.
 /// Absent optional fields append nothing, so they stay off the wire. Each field
 /// contributes one statement: the body is linear in the field count (a
 /// literal per present/absent combination would be exponential in the number
@@ -1279,7 +1279,7 @@ fn ordered_encode_fields(
     span: Span,
 ) -> Vec<Stmt> {
     const PAIRS: &str = "jet_serde_pairs";
-    let pairs_ty = crate::Sema::data_tree_object_pairs_ty();
+    let pairs_ty = crate::Sema::dyn_object_pairs_ty();
     let Type::List(pair_ty) = &pairs_ty else {
         unreachable!("the ordered Object payload is a list");
     };
@@ -1327,7 +1327,7 @@ fn ordered_encode_fields(
             ));
         }
     }
-    body.push(ret(data_tree_object_expr(ident(PAIRS, span), span), span));
+    body.push(ret(dyn_object_expr(ident(PAIRS, span), span), span));
     body
 }
 
@@ -1603,7 +1603,7 @@ fn struct_decode_body(s: &crate::AST::StructDef, items: &[Item], span: Span) -> 
                         vec![string_expr(&key, span)],
                         span,
                     ),
-                    data_tree_null(span),
+                    dyn_null(span),
                     span,
                 )
             } else if let Some(default) = serde_default_expr(field) {
@@ -1625,7 +1625,7 @@ fn struct_decode_body(s: &crate::AST::StructDef, items: &[Item], span: Span) -> 
                         vec![string_expr(&key, span)],
                         span,
                     ),
-                    data_tree_null(span),
+                    dyn_null(span),
                     span,
                 )
             };
@@ -1773,7 +1773,7 @@ fn enum_wire_value(
         if let VariantPayload::Named(fields) = &variant.payload {
             let mut entries = vec![(
                 string_expr(tag.expect("tag"), span),
-                data_tree_text(&wire, span),
+                dyn_text(&wire, span),
             )];
             entries.extend(fields.iter().enumerate().map(|(index, field)| {
                 (
@@ -1786,13 +1786,13 @@ fn enum_wire_value(
                     ),
                 )
             }));
-            return data_tree_object(entries, span);
+            return dyn_object(entries, span);
         }
     }
     let payload = match &variant.payload {
-        VariantPayload::Unit => data_tree_null(span),
+        VariantPayload::Unit => dyn_null(span),
         VariantPayload::Single(..) => method(ident("v0", span), "encode", Vec::new(), span),
-        VariantPayload::Named(fields) => data_tree_object(
+        VariantPayload::Named(fields) => dyn_object(
             fields
                 .iter()
                 .enumerate()
@@ -1815,7 +1815,7 @@ fn enum_wire_value(
         return payload;
     }
     if let Some(tag) = tag {
-        let mut entries = vec![(string_expr(tag, span), data_tree_text(&wire, span))];
+        let mut entries = vec![(string_expr(tag, span), dyn_text(&wire, span))];
         if !matches!(variant.payload, VariantPayload::Unit) {
             if matches!(variant.payload, VariantPayload::Single(..)) {
                 entries.push((string_expr("value", span), payload));
@@ -1829,12 +1829,12 @@ fn enum_wire_value(
                 }
             }
         }
-        return data_tree_object(entries, span);
+        return dyn_object(entries, span);
     }
     if matches!(variant.payload, VariantPayload::Unit) {
-        data_tree_text(&wire, span)
+        dyn_text(&wire, span)
     } else {
-        data_tree_object(vec![(string_expr(&wire, span), payload)], span)
+        dyn_object(vec![(string_expr(&wire, span), payload)], span)
     }
 }
 
@@ -1879,7 +1879,7 @@ fn enum_decode_body(e: &crate::AST::EnumDef, span: Span) -> Vec<Stmt> {
                         vec![string_expr(&tag, span)],
                         span,
                     ),
-                    data_tree_null(span),
+                    dyn_null(span),
                     span,
                 ),
                 "decode",
@@ -1968,7 +1968,7 @@ fn enum_decode_body(e: &crate::AST::EnumDef, span: Span) -> Vec<Stmt> {
                     vec![string_expr(&wire, span)],
                     span,
                 ),
-                data_tree_null(span),
+                dyn_null(span),
                 span,
             );
             attempt.push(binding(&candidate, None, candidate_expr, false, span));
@@ -2073,7 +2073,7 @@ fn enum_decode_value(
                 vec![string_expr(&field.name, span)],
                 span,
             ),
-            data_tree_null(span),
+            dyn_null(span),
             span,
         );
         body.push(binding(

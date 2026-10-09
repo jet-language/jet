@@ -1,4 +1,4 @@
-use super::core_types::{data_tree_object_pairs_ty, json_ty, u8_ty};
+use super::core_types::{dyn_object_pairs_ty, json_ty, u8_ty};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::suggest_field;
@@ -12,6 +12,31 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Option<Type> {
         let json = json_ty();
+        if variant == "object" && args.is_empty() {
+            return Some(json);
+        }
+        if variant == "from" {
+            if args.len() != 1 {
+                self.diags.push(Diagnostic::error("E0306",
+                    format!("Dyn.from expects one value, got {}", args.len()),
+                    "Dyn.from calls one value's Encode contract".to_string(),
+                    "pass one value".to_string(), Some(span)));
+            }
+            for arg in args.iter_mut() {
+                let saved = self.expected_type.take();
+                let ty = self.infer(&mut arg.expr);
+                self.expected_type = saved;
+                if let Some(ty) = ty {
+                    if !self.is_encodable(&ty) {
+                        self.diags.push(Diagnostic::error("E0905",
+                            format!("`{}` does not implement `Encode`", ty.show()),
+                            "`Dyn.from` calls the value's Encode contract".to_string(),
+                            "derive or implement `Encode` on this type".to_string(), Some(arg.span)));
+                    }
+                }
+            }
+            return Some(json);
+        }
         let expected = match variant {
             "Null" => Vec::new(),
             "Bool" => vec![Type::Bool],
@@ -36,7 +61,7 @@ impl<'a> Checker<'a> {
                 // No typed edit here: this dynamic enum literal exposes
                 // only the whole literal span, so replacement would erase
                 // its type and payload.
-                let candidates = ["Null", "Bool", "Int", "Float", "Text", "Array", "Object"]
+                let candidates = ["Null", "Bool", "Int", "Float", "Text", "Bytes", "DateTime", "Array", "Object"]
                     .iter()
                     .map(|s| s.to_string())
                     .collect::<Vec<_>>();
@@ -47,7 +72,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0304",
                     format!("`{}` has no variant `{}`", Syntax::TYPE_DATA, variant),
-                    "the dynamic `DataTree` value exposes Null/Bool/Int/Float/Text/Array/Object"
+                    "the dynamic `Dyn` value exposes Null/Bool/Int/Float/Text/Bytes/DateTime/Array/Object"
                         .to_string(),
                     fix,
                     Some(span),

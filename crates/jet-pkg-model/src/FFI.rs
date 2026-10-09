@@ -2396,7 +2396,7 @@ const CRYPTO_RUNTIME: &str = include_str!("Prelude/Crypto.rs");
 const OUTCOME_RUNTIME: &str = include_str!("../../jet-foundation/src/Outcome.rs");
 const RUNTIME_DIAGNOSTIC_CORE: &str = include_str!("../../jet-foundation/src/RuntimeDiagnosticCore.rs");
 const ENCODING_ERRORS_RUNTIME: &str = include_str!("../../jet-foundation/src/EncodingErrors.rs");
-const DATATREE_RUNTIME: &str = include_str!("../../jet-foundation/src/DataTree.rs");
+const DYN_RUNTIME: &str = include_str!("../../jet-foundation/src/Dyn.rs");
 const ENCODING_JSON_RUNTIME: &str = include_str!("../../jet-foundation/src/EncodingJson.rs");
 const JSON_NUMBER_RUNTIME: &str = include_str!("../../jet-foundation/src/JSONNumber.rs");
 const HOST_RUNTIME_STOP_BEGIN: &str = "// JET_HOST_RUNTIME_STOP_BEGIN";
@@ -2440,11 +2440,11 @@ fn standalone_outcome_runtime() -> String {
 /// through `crate::`/`super::`, so they stay at the bridge crate root.
 #[doc(hidden)]
 pub fn crypto_bridge_root_modules() -> String {
-    let mut out = String::new();
+    let mut out = "use jet_foundation::Numeric;\n".to_string();
     for (name, source) in [
         ("jet_encoding_errors", ENCODING_ERRORS_RUNTIME),
         ("jet_json_number", JSON_NUMBER_RUNTIME),
-        ("DataTree", DATATREE_RUNTIME),
+        ("Dyn", DYN_RUNTIME),
         ("EncodingJson", ENCODING_JSON_RUNTIME),
         ("RuntimeDiagnosticCore", RUNTIME_DIAGNOSTIC_CORE),
     ] {
@@ -2950,6 +2950,7 @@ fn build_bridge_full(
         );
     }
     if needs_crypto {
+        deps.insert("jet-foundation".to_string(), JET_FOUNDATION_CRATE_PATH.to_string());
         deps.insert(
             AES_GCM_CRATE_SPEC.0.to_string(),
             AES_GCM_CRATE_SPEC.1.to_string(),
@@ -2997,7 +2998,7 @@ fn build_bridge_full(
             JET_FOUNDATION_CRATE_PATH.to_string(),
         );
     }
-    let foundation_sources = if needs_parquet || needs_plugin {
+    let foundation_sources = if needs_parquet || needs_plugin || needs_crypto {
         Some(jet_foundation_sources().map_err(|error| tool_error(&error))?)
     } else {
         None
@@ -3987,7 +3988,7 @@ fn cache_key_full(
             "encoding_errors_runtime",
             ENCODING_ERRORS_RUNTIME.as_bytes(),
         );
-        identity.field("datatree_runtime", DATATREE_RUNTIME.as_bytes());
+        identity.field("dyn_runtime", DYN_RUNTIME.as_bytes());
         identity.field("encoding_json_runtime", ENCODING_JSON_RUNTIME.as_bytes());
         identity.field("json_number_runtime", JSON_NUMBER_RUNTIME.as_bytes());
         identity.field("runtime_diagnostic_core", RUNTIME_DIAGNOSTIC_CORE.as_bytes());

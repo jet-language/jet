@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet_foundation::JetTrace::TRACE_VERSION;
 use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::parse_json;
 
 use crate::OutputMode;
@@ -408,11 +408,11 @@ fn parse_trace(raw: &str, expected_project: &str, now: u64) -> Result<Trace, Tra
     })
 }
 fn object<'a>(
-    value: &'a DataTree,
+    value: &'a Dyn,
     name: &str,
-) -> Result<&'a [(String, DataTree)], TraceError> {
+) -> Result<&'a [(String, Dyn)], TraceError> {
     match value {
-        DataTree::Object(object) => Ok(object),
+        Dyn::Object(object) => Ok(object),
         _ => Err(TraceError::new(
             ErrorKind::Malformed,
             format!("{name} is not an object"),
@@ -421,9 +421,9 @@ fn object<'a>(
 }
 
 fn field<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     name: &str,
-) -> Result<&'a DataTree, TraceError> {
+) -> Result<&'a Dyn, TraceError> {
     object
         .iter()
         .find_map(|(key, value)| (key == name).then_some(value))
@@ -436,11 +436,11 @@ fn field<'a>(
 }
 
 fn string_field<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     name: &str,
 ) -> Result<&'a str, TraceError> {
     match field(object, name)? {
-        DataTree::Text(value) | DataTree::TypedText(value) => Ok(value),
+        Dyn::Text(value) => Ok(value),
         _ => Err(TraceError::new(
             ErrorKind::Malformed,
             format!("GC trace `{name}` is not text"),
@@ -449,7 +449,7 @@ fn string_field<'a>(
 }
 
 fn safe_string(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     name: &str,
 ) -> Result<String, TraceError> {
     let value = string_field(object, name)?;
@@ -466,11 +466,12 @@ fn safe_string(
 }
 
 fn uint_field(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     name: &str,
 ) -> Result<u64, TraceError> {
     match field(object, name)? {
-        DataTree::Int(value) if *value >= 0 => Ok(*value as u64),
+        Dyn::Int(value) => value.to_u64().ok_or_else(|| TraceError::new(ErrorKind::Malformed,
+            format!("GC trace `{name}` is not a non-negative integer"))),
         _ => Err(TraceError::new(
             ErrorKind::Malformed,
             format!("GC trace `{name}` is not a non-negative integer"),
@@ -479,11 +480,11 @@ fn uint_field(
 }
 
 fn bool_field(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     name: &str,
 ) -> Result<bool, TraceError> {
     match field(object, name)? {
-        DataTree::Bool(value) => Ok(*value),
+        Dyn::Bool(value) => Ok(*value),
         _ => Err(TraceError::new(
             ErrorKind::Malformed,
             format!("GC trace `{name}` is not Bool"),
@@ -492,11 +493,11 @@ fn bool_field(
 }
 
 fn array_field<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     name: &str,
-) -> Result<&'a [DataTree], TraceError> {
+) -> Result<&'a [Dyn], TraceError> {
     match field(object, name)? {
-        DataTree::Array(values) => Ok(values),
+        Dyn::Array(values) => Ok(values),
         _ => Err(TraceError::new(
             ErrorKind::Malformed,
             format!("GC trace `{name}` is not a list"),

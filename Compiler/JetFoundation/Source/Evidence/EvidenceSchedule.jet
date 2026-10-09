@@ -2,10 +2,10 @@
 // Parsing remains the canonical Core JSON implementation, never a second parser.
 use core.encoding.json as evidence_payload_json
 
-fn evidence_schedule_object(value: DataTree, what: String) -> [String:DataTree] EvidenceCodecError! {
+fn evidence_schedule_object(value: Dyn, what: String) -> [String:Dyn] EvidenceCodecError! {
     if value == {
         .Object(fields) -> {
-            values := [String:DataTree]{}
+            values := [String:Dyn]{}
             loop field in fields {
                 if values.get(field.key) == .Val(_) {
                     return Err(evidence_codec_error("duplicate {what} field `{field.key}`"))
@@ -18,32 +18,32 @@ fn evidence_schedule_object(value: DataTree, what: String) -> [String:DataTree] 
     }
 }
 
-fn evidence_schedule_field(fields: [String:DataTree], name: String) -> DataTree EvidenceCodecError! {
+fn evidence_schedule_field(fields: [String:Dyn], name: String) -> Dyn EvidenceCodecError! {
     Ok(fields.get(name) ?? return Err(evidence_codec_error("frame schedule is missing `{name}`")))
 }
 
-fn evidence_schedule_array(value: DataTree, what: String) -> [DataTree] EvidenceCodecError! {
+fn evidence_schedule_array(value: Dyn, what: String) -> [Dyn] EvidenceCodecError! {
     if value == {
         .Array(values) -> Ok(values)
         else -> Err(evidence_codec_error("expected {what} array"))
     }
 }
 
-fn evidence_schedule_text(value: DataTree, what: String) -> String EvidenceCodecError! {
+fn evidence_schedule_text(value: Dyn, what: String) -> String EvidenceCodecError! {
     if value == {
         .Text(text) -> Ok(text)
         else -> Err(evidence_codec_error("expected {what} text"))
     }
 }
 
-fn evidence_schedule_bool(value: DataTree, what: String) -> Bool EvidenceCodecError! {
+fn evidence_schedule_bool(value: Dyn, what: String) -> Bool EvidenceCodecError! {
     if value == {
         .Bool(flag) -> Ok(flag)
         else -> Err(evidence_codec_error("expected {what} boolean"))
     }
 }
 
-fn evidence_schedule_unsigned(value: DataTree, what: String) -> Int EvidenceCodecError! {
+fn evidence_schedule_unsigned(value: Dyn, what: String) -> Int EvidenceCodecError! {
     text :: if value == {
         .Int(number) -> {
             if number < 0 -> return Err(evidence_codec_error("expected {what} unsigned integer"))
@@ -72,14 +72,14 @@ fn evidence_schedule_unsigned(value: DataTree, what: String) -> Int EvidenceCode
     Ok(number)
 }
 
-fn evidence_schedule_optional(value: DataTree, what: String) -> String? EvidenceCodecError! {
+fn evidence_schedule_optional(value: Dyn, what: String) -> String? EvidenceCodecError! {
     if value == {
         .Null -> Ok(None)
         else -> Ok(Val(evidence_schedule_text(value, what)))
     }
 }
 
-fn evidence_schedule_identity(value: DataTree) -> MIRResourceIdentity EvidenceCodecError! {
+fn evidence_schedule_identity(value: Dyn) -> MIRResourceIdentity EvidenceCodecError! {
     fields :: evidence_schedule_object(value, "resource identity")
     kind :: evidence_schedule_text(evidence_schedule_field(fields, "kind"), "resource identity kind")
     if kind == {
@@ -89,7 +89,7 @@ fn evidence_schedule_identity(value: DataTree) -> MIRResourceIdentity EvidenceCo
     }
 }
 
-fn evidence_schedule_region(value: DataTree) -> MIRResourceRegion EvidenceCodecError! {
+fn evidence_schedule_region(value: Dyn) -> MIRResourceRegion EvidenceCodecError! {
     fields :: evidence_schedule_object(value, "resource region")
     kind :: evidence_schedule_text(evidence_schedule_field(fields, "kind"), "resource region kind")
     if kind == {
@@ -100,7 +100,7 @@ fn evidence_schedule_region(value: DataTree) -> MIRResourceRegion EvidenceCodecE
     }
 }
 
-fn evidence_schedule_layout(value: DataTree) -> MIRResourceLayout? EvidenceCodecError! {
+fn evidence_schedule_layout(value: Dyn) -> MIRResourceLayout? EvidenceCodecError! {
     if value == {
         .Null -> return Ok(None)
         else -> {}
@@ -109,7 +109,7 @@ fn evidence_schedule_layout(value: DataTree) -> MIRResourceLayout? EvidenceCodec
     Ok(Val(MIRResourceLayout{size: evidence_schedule_unsigned(evidence_schedule_field(fields, "size"), "layout size"), align: evidence_schedule_unsigned(evidence_schedule_field(fields, "align"), "layout alignment"), layout: evidence_schedule_text(evidence_schedule_field(fields, "layout"), "layout identity"), device: evidence_schedule_text(evidence_schedule_field(fields, "device"), "layout device")}))
 }
 
-fn evidence_schedule_access(value: DataTree) -> MIRResourceAccess EvidenceCodecError! {
+fn evidence_schedule_access(value: Dyn) -> MIRResourceAccess EvidenceCodecError! {
     fields :: evidence_schedule_object(value, "resource access")
     mode_text :: evidence_schedule_text(evidence_schedule_field(fields, "mode"), "resource access mode")
     mode :: if mode_text == {
@@ -124,7 +124,7 @@ fn evidence_schedule_access(value: DataTree) -> MIRResourceAccess EvidenceCodecE
     Ok(MIRResourceAccess{resource: evidence_schedule_identity(evidence_schedule_field(fields, "resource")), mode: mode, region: evidence_schedule_region(evidence_schedule_field(fields, "region")), layout: evidence_schedule_layout(evidence_schedule_field(fields, "layout")), temporary: evidence_schedule_bool(evidence_schedule_field(fields, "temporary"), "temporary")})
 }
 
-fn evidence_schedule_completion(value: DataTree) -> MIRFrameCompletion EvidenceCodecError! {
+fn evidence_schedule_completion(value: Dyn) -> MIRFrameCompletion EvidenceCodecError! {
     fields :: evidence_schedule_object(value, "completion")
     kind :: evidence_schedule_text(evidence_schedule_field(fields, "kind"), "completion kind")
     if kind == {
@@ -135,7 +135,7 @@ fn evidence_schedule_completion(value: DataTree) -> MIRFrameCompletion EvidenceC
     }
 }
 
-fn evidence_schedule_operation(value: DataTree) -> MIRFrameOperation EvidenceCodecError! {
+fn evidence_schedule_operation(value: Dyn) -> MIRFrameOperation EvidenceCodecError! {
     fields :: evidence_schedule_object(value, "frame operation")
     accesses := [MIRResourceAccess]{}
     loop access in evidence_schedule_array(evidence_schedule_field(fields, "accesses"), "operation accesses") {

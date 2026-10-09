@@ -4,14 +4,14 @@
 // foundation_parse_protocol_json_with_limit, without a second parser.
 use core.encoding.json as protocol_json
 
-pub fn foundation_parse_protocol_json(text: String) -> DataTree? Never! {
+pub fn foundation_parse_protocol_json(text: String) -> Dyn? Never! {
     if text.bytes().len() > 1048576 -> return None
     value :: protocol_json.parse(text) ?? return None
     if !foundation_protocol_json_valid(value, 0) -> return None
     Val(value)
 }
 
-fn foundation_protocol_json_valid(value: DataTree, depth: Int) -> Bool Never! {
+fn foundation_protocol_json_valid(value: Dyn, depth: Int) -> Bool Never! {
     if value == {
         .Int(number) -> number >= -9223372036854775808 && number <= 9223372036854775807
         .Array(values) -> {

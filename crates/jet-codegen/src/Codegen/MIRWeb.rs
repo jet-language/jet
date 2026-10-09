@@ -4096,11 +4096,11 @@ fn js_semantic_expression(
                     expression
                 }
             } else if route.family == MirPreludeFamily::HandleMethod
-                && route.module == "core.encoding.datatree"
+                && route.module == "core.encoding.dyn"
             {
                 let mut rendered = vec![value(*receiver)];
                 rendered.extend(values(args));
-                js_datatree_handle_expression(route, &rendered)?
+                js_dyn_handle_expression(route, &rendered)?
             } else if route.family == MirPreludeFamily::HandleMethod
                 && route.module == "core.handle"
                 && route.member == "duration.ns_value"
@@ -4393,22 +4393,22 @@ fn js_codec_prelude_expression(
     }
 }
 
-fn js_datatree_handle_expression(
+fn js_dyn_handle_expression(
     route: &jet_foundation::MIR::MirPreludeCall,
     rendered: &[String],
 ) -> Result<String, MirWebError> {
     let (symbol, arity, borrow_mask) = match route.member.as_str() {
-        "field" => ("jet_datatree_field", 2, &[true, true][..]),
-        "at" => ("jet_datatree_at", 2, &[true, false][..]),
-        "int" => ("jet_datatree_int", 1, &[true][..]),
-        "text" => ("jet_datatree_text", 1, &[true][..]),
-        "bool" => ("jet_datatree_bool", 1, &[true][..]),
-        "float" => ("jet_datatree_float", 1, &[true][..]),
-        "to_text" => ("jet_datatree_to_text", 1, &[true][..]),
-        "equal_unordered" => ("jet_datatree_equal_unordered", 2, &[true, true][..]),
+        "field" => ("jet_dyn_field", 2, &[true, true][..]),
+        "at" => ("jet_dyn_at", 2, &[true, false][..]),
+        "int" => ("jet_dyn_int", 1, &[true][..]),
+        "text" => ("jet_dyn_text", 1, &[true][..]),
+        "bool" => ("jet_dyn_bool", 1, &[true][..]),
+        "float" => ("jet_dyn_float", 1, &[true][..]),
+        "to_text" => ("jet_dyn_to_text", 1, &[true][..]),
+        "equal_unordered" => ("jet_dyn_equal_unordered", 2, &[true, true][..]),
         other => {
             return Err(MirWebError::InvalidMir {
-                message: format!("unsupported DataTree Prelude member {other:?}"),
+                message: format!("unsupported Dyn Prelude member {other:?}"),
             });
         }
     };
@@ -4418,7 +4418,7 @@ fn js_datatree_handle_expression(
     {
         return Err(MirWebError::InvalidMir {
             message: format!(
-                "MIR DataTree Prelude call {:?} has an invalid signature",
+                "MIR Dyn Prelude call {:?} has an invalid signature",
                 route.member
             ),
         });
@@ -4428,7 +4428,7 @@ fn js_datatree_handle_expression(
         _ => {
             return Err(MirWebError::InvalidMir {
                 message: format!(
-                    "MIR DataTree Prelude member {:?} has symbol {:?}, expected {:?}",
+                    "MIR Dyn Prelude member {:?} has symbol {:?}, expected {:?}",
                     route.member, route.symbol, symbol
                 ),
             });
@@ -4437,7 +4437,7 @@ fn js_datatree_handle_expression(
     if rendered.len() != arity {
         return Err(MirWebError::InvalidMir {
             message: format!(
-                "MIR DataTree Prelude call {:?} has {} arguments, expected {}",
+                "MIR Dyn Prelude call {:?} has {} arguments, expected {}",
                 route.member,
                 rendered.len(),
                 arity
@@ -4570,7 +4570,7 @@ fn js_codec_type_descriptor(
             js_codec_type_descriptor(program, inner)
         }
         MirTypeKind::Apply { name, .. } => match name.name.as_str() {
-            "Data" | "DataTree" => Ok("{ kind: \"datatree\" }".to_string()),
+            "Dyn" => Ok("{ kind: \"dyn\" }".to_string()),
             "Date" => Ok("{ kind: \"date\" }".to_string()),
             "LocalDate" => Ok("{ kind: \"local_date\" }".to_string()),
             "LocalTime" => Ok("{ kind: \"local_time\" }".to_string()),
@@ -4609,10 +4609,7 @@ fn js_codec_type_descriptor(
 fn js_codec_tree_text_expression(tree: &str) -> String {
     format!(
         "(() => {{ const __jet_tree = {tree}; switch (__jet_tree?.tag) {{ \
-         case \"Text\": case \"TypedText\": return String(__jet_tree.values?.[0]); \
-         case \"Int\": return BigInt(__jet_tree.values?.[0]).toString(); \
-         case \"Float\": return String(__jet_tree.values?.[0]); \
-         case \"Bool\": return __jet_tree.values?.[0] ? \"true\" : \"false\"; \
+         case \"Text\": return String(__jet_tree.values?.[0]); \
          case \"Number\": throw new Error(\"expected Text, found number \" + String(__jet_tree.values?.[0])); \
          default: throw new Error(\"expected Text, found \" + String(__jet_tree?.tag ?? \"value\")); \
          }} }})()"
@@ -4623,10 +4620,15 @@ fn js_codec_tree_integer_expression(tree: &str) -> String {
     format!(
         "(() => {{ const __jet_tree = {tree}; switch (__jet_tree?.tag) {{ \
          case \"Int\": return BigInt(__jet_tree.values?.[0]); \
-         case \"Number\": case \"Text\": {{ \
+         case \"Number\": {{ \
+           const __jet_value = jet_codec_json_exact_integer(String(__jet_tree.values?.[0])); \
+           if (__jet_value == null) throw new Error(\"expected Int, found number \" + String(__jet_tree.values?.[0])); \
+           return __jet_value; \
+         }} \
+         case \"Text\": {{ \
            const __jet_text = String(__jet_tree.values?.[0]).trim(); \
-           try {{ return BigInt(__jet_text); }} \
-           catch (_) {{ throw new Error(\"expected Int, found text \" + JSON.stringify(__jet_text)); }} \
+           if (jet_text_cells_depth > 0 && /^[+-]?\\d+$/.test(__jet_text)) return BigInt(__jet_text); \
+           throw new Error(\"expected Int, found text \" + JSON.stringify(String(__jet_tree.values?.[0]))); \
          }} \
          case \"Float\": {{ \
            const __jet_number = Number(__jet_tree.values?.[0]); \
@@ -4647,8 +4649,6 @@ fn js_codec_tree_decimal_expression(tree: &str) -> String {
            return jet_decimal_from_str(String(__jet_tree.values?.[0])); \
          case \"Int\": \
            return jet_decimal_from_str(BigInt(__jet_tree.values?.[0]).toString()); \
-         case \"TypedText\": \
-           throw new Error(\"expected Decimal, found text \" + JSON.stringify(__jet_tree.values?.[0])); \
          default: throw new Error(\"expected Decimal, found \" + String(__jet_tree?.tag ?? \"value\")); \
          }} }})()"
     )
@@ -5845,7 +5845,7 @@ fn js_history_capture_schema(
                     "Secret" | "ExpiringSecret" | "HistoryRNG" | "Ptr" => "kind: \"opaque\"".to_string(),
                     "Bytes" => "kind: \"bytes\"".to_string(),
                     "BigInt" => "kind: \"integer\"".to_string(),
-                    "DataTree" => "kind: \"data\"".to_string(),
+                    "Dyn" => "kind: \"data\"".to_string(),
                     _ => {
                         let definition = program.types.iter().find(|row| Some(row.id) == ty.identity)
                             .or_else(|| nominal.and_then(|name| program.types.iter().find(|row| row.id == name.id)));

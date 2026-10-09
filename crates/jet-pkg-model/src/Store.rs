@@ -11,7 +11,7 @@
 //! Jetpack's realization engine.
 
 use crate::JSON;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read};
@@ -539,7 +539,7 @@ pub fn parse_meta(text: &str) -> Option<ParsedMeta> {
     let j = JSON::parse(text).ok()?;
     let get = |k: &str| {
         j.get(k)
-            .and_then(DataTree::as_str)
+            .and_then(Dyn::as_str)
             .map(str::to_string)
             .ok()
     };

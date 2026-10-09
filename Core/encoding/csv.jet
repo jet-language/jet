@@ -37,7 +37,7 @@ fn unsupported_error(format: EncodingFormat, offset: Int, reason: String) -> Enc
 //
 // `rows` is the physical codec: it does not guess types. Every cell stays
 // text. Quotes wrap a field; `""` is a literal quote. `parse` / `to_string`
-// lift those rows into `DataTree` arrays so CSV participates in the shared
+// lift those rows into `Dyn` arrays so CSV participates in the shared
 // tree without a second table type.
 //
 // Typed `decode<T>` owns native header-to-record and row-error policy here.
@@ -225,15 +225,15 @@ fn typed_records(text: String) -> [[String]] String! {
     Ok(^parser.rows)
 }
 
-pub fn parse(text: String) -> DataTree EncodingError! {
+pub fn parse(text: String) -> Dyn EncodingError! {
     physical :: parse_rows(text, true)
-    items := [DataTree]{}
+    items := [Dyn]{}
     loop row in physical {
-        fields := [DataTree]{}
-        loop field in row.fields -> &fields.push(DataTree.Text(field))
-        &items.push(DataTree.Array(fields))
+        fields := [Dyn]{}
+        loop field in row.fields -> &fields.push(Dyn.Text(field))
+        &items.push(Dyn.Array(fields))
     }
-    Ok(DataTree.Array(items))
+    Ok(Dyn.Array(items))
 }
 
 pub fn to_string<T: Encode>(rows: [T]) -> String Never! {

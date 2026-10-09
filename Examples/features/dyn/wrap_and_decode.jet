@@ -1,0 +1,33 @@
+// D-INFER-PRIVATE1=A: plain values go into a Dyn without wrappers, typed
+// structs go in with Dyn.from, and decode<T> brings typed values back out.
+use core.encoding.json as json
+
+#Codable
+struct Point {
+    x: Int
+    y: Int
+}
+
+fn run() [FieldError]! {
+    row := Dyn.object()
+    row.tags = ["a", "b"]
+    // A map literal keeps its written order inside a Dyn.
+    row.scores = ["math": 90, "art": 75]
+    row.origin = Dyn.from(Point{x: 1, y: 2})
+    print(json.to_string(row))
+
+    // A map value has key order, so it keeps key order.
+    counts :: [String:Int]{"z": 1, "a": 2}
+    row.counts = counts
+    print(row.counts)
+
+    p :: row.origin.decode<Point>()
+    print(p.x + p.y)
+    tags :: row.tags.decode<[String]>()
+    print(tags.len())
+    _bad :: row.tags.decode<Int>() ?? {
+        print("tags are not an Int")
+        return
+    }
+    print("unreachable")
+}

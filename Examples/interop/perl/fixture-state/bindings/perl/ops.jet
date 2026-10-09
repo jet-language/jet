@@ -39,16 +39,16 @@ pub fn open() -> Session PerlError! {
 
 pub fn cancel(session: Session) { abi.cancel(session.value) }
 
-fn decode_response(raw: String, code: Int) -> DataTree PerlError! {
+fn decode_response(raw: String, code: Int) -> Dyn PerlError! {
     if code == 1 -> return Err(PerlError.NotRunning)
     if code == 2 -> return Err(PerlError.Timeout)
     if code == 3 -> return Err(PerlError.Cancelled)
     if code == 5 -> return Err(PerlError.Limit)
     if code != 0 -> return Err(PerlError.Protocol)
     response := json.parse(raw) ?? return Err(PerlError.Protocol)
-    succeeded := (&response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    succeeded := (&response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
     if !succeeded -> return Err(PerlError.CommandFailed)
-    return Ok(&response.field("value") ?? DataTree.Null)
+    return Ok(&response.field("value") ?? Dyn.Null)
 }
 
 pub fn fail(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PerlError! {

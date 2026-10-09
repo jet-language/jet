@@ -1040,15 +1040,15 @@ fn parse_cargo_import(
     Ok(())
 }
 
-use jet_foundation::DataTree::DataTree;
-fn json_string(value: Option<&DataTree>) -> Option<String> {
+use jet_foundation::Dyn::Dyn;
+fn json_string(value: Option<&Dyn>) -> Option<String> {
     match value {
-        Some(DataTree::Text(value) | DataTree::TypedText(value)) => Some(value.clone()),
+        Some(Dyn::Text(value)) => Some(value.clone()),
         _ => None,
     }
 }
 
-fn json_object_field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn json_object_field<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
@@ -1062,7 +1062,7 @@ fn parse_npm_import(
     let value = jet_foundation::JSON::parse_json(source).map_err(|_| {
         legacy_import_error(LegacyWrapperKind::Npm, "package.json is not valid JSON")
     })?;
-    let DataTree::Object(object) = &value else {
+    let Dyn::Object(object) = &value else {
         return Err(legacy_import_error(
             LegacyWrapperKind::Npm,
             "package.json root must be an object",
@@ -1115,7 +1115,7 @@ fn parse_npm_import(
     }
     let scripts = json_object_field(object, "scripts")
         .and_then(|value| match value {
-            DataTree::Object(value) => Some(value),
+            Dyn::Object(value) => Some(value),
             _ => None,
         })
         .ok_or_else(|| {
@@ -1157,7 +1157,7 @@ fn parse_npm_import(
     let mut has_dependencies = false;
     for section in dependency_sections {
         if let Some(value) = json_object_field(object, section) {
-            let DataTree::Object(values) = value else {
+            let Dyn::Object(values) = value else {
                 return Err(legacy_import_error(
                     LegacyWrapperKind::Npm,
                     format!("package {section} must be an object"),
@@ -1219,15 +1219,15 @@ fn parse_npm_import(
     } else if let Some(value) = json_object_field(object, "module") {
         import.outputs_explicit = true;
         match value {
-            DataTree::Text(path) | DataTree::TypedText(path) => path.clone(),
-            DataTree::Array(values) => {
+            Dyn::Text(path) => path.clone(),
+            Dyn::Array(values) => {
                 if values.len() != 1 {
                     return Err(legacy_import_error(
                         LegacyWrapperKind::Npm,
                         "package module must contain exactly one string path",
                     ));
                 }
-                let Some(DataTree::Text(path) | DataTree::TypedText(path)) = values.first() else {
+                let Some(Dyn::Text(path)) = values.first() else {
                     return Err(legacy_import_error(
                         LegacyWrapperKind::Npm,
                         "package module must contain one string path",

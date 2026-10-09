@@ -8,7 +8,7 @@
 use crate::TrustRoot::PublicTrustKey;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use jet_foundation::base_encoding_strict::decode_base64;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::EncodingJson::parse_json_exact_numbers;
 use std::io::{Read, Write};
 use std::fs;
@@ -492,7 +492,7 @@ fn parse_manifest(bytes: &[u8], expected_channel: &str) -> Result<ChannelManifes
     Ok(manifest)
 }
 
-fn parse_artifact(value: &DataTree) -> Result<Artifact, UpdateError> {
+fn parse_artifact(value: &Dyn) -> Result<Artifact, UpdateError> {
     let fields = object(value, "toolchain artifact")?;
     reject_unknown(fields, &["target", "path", "sha256", "size", "signature"])?;
     Ok(Artifact {
@@ -1318,21 +1318,21 @@ fn validate_digest(value: &str, label: &str) -> Result<(), UpdateError> {
     Ok(())
 }
 
-fn object<'a>(value: &'a DataTree, label: &str) -> Result<&'a [(String, DataTree)], UpdateError> {
+fn object<'a>(value: &'a Dyn, label: &str) -> Result<&'a [(String, Dyn)], UpdateError> {
     match value {
-        DataTree::Object(fields) => Ok(fields),
+        Dyn::Object(fields) => Ok(fields),
         _ => Err(UpdateError::new(format!("{label} must be an object"))),
     }
 }
 
-fn array<'a>(value: &'a DataTree, label: &str) -> Result<&'a [DataTree], UpdateError> {
+fn array<'a>(value: &'a Dyn, label: &str) -> Result<&'a [Dyn], UpdateError> {
     match value {
-        DataTree::Array(values) => Ok(values),
+        Dyn::Array(values) => Ok(values),
         _ => Err(UpdateError::new(format!("{label} must be an array"))),
     }
 }
 
-fn field<'a>(fields: &'a [(String, DataTree)], name: &str) -> Result<&'a DataTree, UpdateError> {
+fn field<'a>(fields: &'a [(String, Dyn)], name: &str) -> Result<&'a Dyn, UpdateError> {
     fields
         .iter()
         .find(|(key, _)| key == name)
@@ -1340,7 +1340,7 @@ fn field<'a>(fields: &'a [(String, DataTree)], name: &str) -> Result<&'a DataTre
         .ok_or_else(|| UpdateError::new(format!("missing toolchain field {name}")))
 }
 
-fn reject_unknown(fields: &[(String, DataTree)], allowed: &[&str]) -> Result<(), UpdateError> {
+fn reject_unknown(fields: &[(String, Dyn)], allowed: &[&str]) -> Result<(), UpdateError> {
     if let Some((name, _)) = fields
         .iter()
         .find(|(name, _)| !allowed.iter().any(|allowed| *allowed == name))
@@ -1350,18 +1350,18 @@ fn reject_unknown(fields: &[(String, DataTree)], allowed: &[&str]) -> Result<(),
     Ok(())
 }
 
-fn text_field<'a>(value: &'a DataTree, label: &str) -> Result<&'a str, UpdateError> {
+fn text_field<'a>(value: &'a Dyn, label: &str) -> Result<&'a str, UpdateError> {
     match value {
-        DataTree::Text(value) => Ok(value),
+        Dyn::Text(value) => Ok(value),
         _ => Err(UpdateError::new(format!("{label} must be text"))),
     }
 }
 
-fn integer(value: &DataTree, label: &str) -> Result<u64, UpdateError> {
+fn integer(value: &Dyn, label: &str) -> Result<u64, UpdateError> {
     let value = match value {
-        DataTree::Number(value) => value,
-        DataTree::Int(value) => {
-            return u64::try_from(*value).map_err(|_| {
+        Dyn::Number(value) => value,
+        Dyn::Int(value) => {
+            return value.to_u64().ok_or_else(|| {
                 UpdateError::new(format!("{label} must be a non-negative integer"))
             })
         }

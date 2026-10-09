@@ -913,8 +913,8 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
         (
             "xml/float-shape-error",
             parity_source(
-                "xml_shape_reason(DataTree.Float(1.5))",
-                "use core.encoding.xml as xml\nfn xml_shape_reason(tree: DataTree) -> String {\n    if xml.canonical(tree, xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) == {\n        Ok(_) -> return \"unexpected success\"\n        Err(error) -> return error.reason\n    }\n    return \"unreachable\"\n}",
+                "xml_shape_reason(Dyn.Float(1.5))",
+                "use core.encoding.xml as xml\nfn xml_shape_reason(tree: Dyn) -> String {\n    if xml.canonical(tree, xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) == {\n        Ok(_) -> return \"unexpected success\"\n        Err(error) -> return error.reason\n    }\n    return \"unreachable\"\n}",
             ),
         ),
         (

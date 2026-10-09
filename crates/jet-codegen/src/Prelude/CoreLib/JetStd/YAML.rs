@@ -1,11 +1,11 @@
-    // ── core.encoding.yaml: full std-only YAML 1.2 core → DataTree (c152) ─────────
+    // ── core.encoding.yaml: full std-only YAML 1.2 core → Dyn (c152) ─────────
     // D-ENC-YAML1 = A: block mappings + sequences (indentation-driven), flow `{}`/`[]`,
     // core-schema typed scalars (null/~, bool, int, float, str), single/double-quoted
     // + plain + block scalars (`|` literal, `>` folded with chomping), comments,
-    // `---`/`...` document markers, and anchors/aliases (`&a`/`*a`). Explicit/custom
-    // tags (`!!str`, `!MyType`) are deferred to c153 (frozen). No external crates (I6).
+    // `---`/`...` document markers, anchors/aliases (`&a`/`*a`), binary and
+    // timestamp tags. No external crates (I6).
     pub mod yaml {
-        use super::DataTree;
+        use super::Dyn;
 
         const MAX_YAML_DEPTH: usize = 64;
         const MAX_YAML_NODES: usize = 64 * 1024;
@@ -17,6 +17,7 @@
         pub struct ParseError {
             pub line: usize,
             pub message: String,
+            pub unsupported: bool,
         }
 
         #[derive(Default)]
@@ -51,44 +52,63 @@
         enum FlowError {
             Depth,
             Budget,
+            Syntax(String),
+            Unsupported(String),
         }
 
-        fn yaml_null(budget: &mut YamlBudget) -> Result<DataTree, ()> {
+        fn yaml_null(budget: &mut YamlBudget) -> Result<Dyn, ()> {
             budget.node(0)?;
-            Ok(DataTree::Null)
+            Ok(Dyn::Null)
         }
 
-        fn yaml_scalar(s: &str, budget: &mut YamlBudget) -> Result<DataTree, ()> {
-            let value = scalar_value(s);
+        fn yaml_scalar(s: &str, budget: &mut YamlBudget) -> Result<Dyn, FlowError> {
+            let s = s.trim();
+            let value = if let Some(text) = s.strip_prefix("!!binary ") {
+                let text = match scalar_value(text) {
+                    Dyn::Text(text) => text, _ => text.to_owned(),
+                };
+                Dyn::Bytes(jet_foundation::base_encoding_strict::decode_base64(&text, true, false)
+                    .map_err(FlowError::Unsupported)?)
+            } else if let Some(text) = s.strip_prefix("!!timestamp ") {
+                let text = match scalar_value(text) {
+                    Dyn::Text(text) => text, Dyn::DateTime(value) => value.to_rfc3339(),
+                    _ => text.to_owned(),
+                };
+                Dyn::parse_datetime(&text).map_err(FlowError::Unsupported)?
+            } else if s.is_ascii() && !s.starts_with(['\'', '"']) && s.len() >= 20
+                && matches!(s.as_bytes().get(10), Some(b'T' | b't' | b' '))
+                && (s.ends_with(['Z', 'z']) || s[19..].contains(['+', '-'])) {
+                Dyn::parse_datetime(s).map_err(FlowError::Unsupported)?
+            } else { scalar_value(s) };
             let payload = match &value {
-                DataTree::Number(text) | DataTree::TypedText(text) | DataTree::Text(text) => {
+                Dyn::Number(text) | Dyn::Text(text) => {
                     text.len()
                 }
-                DataTree::Bytes(bytes) => bytes.len(),
+                Dyn::Bytes(bytes) => bytes.len(),
                 _ => 0,
             };
-            budget.node(payload)?;
+            budget.node(payload).map_err(|_| FlowError::Budget)?;
             Ok(value)
         }
 
-        fn yaml_clone(value: &DataTree, budget: &mut YamlBudget) -> Result<DataTree, ()> {
+        fn yaml_clone(value: &Dyn, budget: &mut YamlBudget) -> Result<Dyn, ()> {
             match value {
-                DataTree::Null | DataTree::Bool(_) | DataTree::Int(_) | DataTree::Float(_) => {
+                Dyn::Null | Dyn::Bool(_) | Dyn::Int(_) | Dyn::Float(_) | Dyn::DateTime(_) => {
                     budget.node(0)?;
                 }
-                DataTree::Number(text) | DataTree::TypedText(text) | DataTree::Text(text) => {
+                Dyn::Number(text) | Dyn::Text(text) => {
                     budget.node(text.len())?;
                 }
-                DataTree::Bytes(bytes) => {
+                Dyn::Bytes(bytes) => {
                     budget.node(bytes.len())?;
                 }
-                DataTree::Array(items) => {
+                Dyn::Array(items) => {
                     budget.node(0)?;
                     for item in items {
                         yaml_clone(item, budget)?;
                     }
                 }
-                DataTree::Object(entries) => {
+                Dyn::Object(entries) => {
                     budget.node(0)?;
                     for (key, item) in entries {
                         budget.bytes(key.len())?;
@@ -99,14 +119,15 @@
             Ok(value.clone())
         }
 
-        fn yaml_flow_message(error: FlowError) -> &'static str {
+        fn yaml_flow_message(error: FlowError) -> String {
             match error {
-                FlowError::Depth => "YAML value is nested too deeply",
-                FlowError::Budget => "YAML value exceeds its node or byte budget",
+                FlowError::Depth => "YAML value is nested too deeply".to_owned(),
+                FlowError::Budget => "YAML value exceeds its node or byte budget".to_owned(),
+                FlowError::Unsupported(message) | FlowError::Syntax(message) => message,
             }
         }
 
-        pub fn parse_to_tree(raw: &str) -> Result<DataTree, ParseError> {
+        pub fn parse_to_tree(raw: &str) -> Result<Dyn, ParseError> {
             let line_count = raw
                 .as_bytes()
                 .iter()
@@ -119,6 +140,7 @@
                 return Err(ParseError {
                     line: 1,
                     message: "YAML input exceeds its byte or line budget".to_string(),
+                    unsupported: false,
                 });
             }
             let lines: Vec<String> = raw
@@ -147,6 +169,7 @@
                 return Err(ParseError {
                     line: p.pos.saturating_add(1),
                     message: crate::jet_encoding_errors::YAML_EXPECTED_KEY_VALUE.into(),
+                    unsupported: false,
                 });
             }
             Ok(value)
@@ -155,7 +178,7 @@
         struct Parser {
             lines: Vec<String>,
             pos: usize,
-            anchors: BTreeMap<String, DataTree>,
+            anchors: BTreeMap<String, Dyn>,
             budget: YamlBudget,
         }
 
@@ -189,31 +212,36 @@
                 ParseError {
                     line: self.pos.saturating_add(1),
                     message: "YAML value exceeds its node or byte budget".to_string(),
+                    unsupported: false,
                 }
             }
 
-            fn null(&mut self) -> Result<DataTree, ParseError> {
+            fn null(&mut self) -> Result<Dyn, ParseError> {
                 yaml_null(&mut self.budget).map_err(|_| self.limit_error())
             }
 
-            fn scalar(&mut self, value: &str) -> Result<DataTree, ParseError> {
-                yaml_scalar(value, &mut self.budget).map_err(|_| self.limit_error())
+            fn scalar(&mut self, value: &str) -> Result<Dyn, ParseError> {
+                yaml_scalar(value, &mut self.budget).map_err(|error| ParseError {
+                    line: self.pos.saturating_add(1),
+                    unsupported: matches!(&error, FlowError::Unsupported(_)),
+                    message: yaml_flow_message(error),
+                })
             }
 
-            fn array(&mut self, items: Vec<DataTree>) -> Result<DataTree, ParseError> {
+            fn array(&mut self, items: Vec<Dyn>) -> Result<Dyn, ParseError> {
                 self.budget.node(0).map_err(|_| self.limit_error())?;
-                Ok(DataTree::Array(items))
+                Ok(Dyn::Array(items))
             }
 
             fn object(
                 &mut self,
-                entries: Vec<(String, DataTree)>,
-            ) -> Result<DataTree, ParseError> {
+                entries: Vec<(String, Dyn)>,
+            ) -> Result<Dyn, ParseError> {
                 for (key, _) in &entries {
                     self.budget.bytes(key.len()).map_err(|_| self.limit_error())?;
                 }
                 self.budget.node(0).map_err(|_| self.limit_error())?;
-                Ok(DataTree::Object(entries))
+                Ok(Dyn::Object(entries))
             }
 
             fn next_depth(&self, depth: usize) -> Result<usize, ParseError> {
@@ -224,7 +252,7 @@
                 indent.checked_add(1).ok_or_else(|| self.limit_error())
             }
 
-            fn parse_node(&mut self, min_indent: usize, depth: usize) -> Result<DataTree, ParseError> {
+            fn parse_node(&mut self, min_indent: usize, depth: usize) -> Result<Dyn, ParseError> {
                 self.skip_ignorable();
                 if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() {
                     return self.null();
@@ -233,6 +261,7 @@
                     return Err(ParseError {
                         line: self.pos.saturating_add(1),
                         message: "YAML value is nested too deeply".to_string(),
+                        unsupported: false,
                     });
                 }
                 let ind = self.indent(self.pos);
@@ -247,11 +276,15 @@
                 } else {
                     // A bare scalar node (possibly anchored/aliased/flow/quoted).
                     self.pos = self.pos.saturating_add(1);
-                    self.parse_inline_value(&content, depth)
+                    if content.starts_with("!!binary |") || content.starts_with("!!binary >") {
+                        self.parse_block_scalar(ind, &content)
+                    } else {
+                        self.parse_inline_value(&content, depth)
+                    }
                 }
             }
 
-            fn parse_block_seq(&mut self, indent: usize, depth: usize) -> Result<DataTree, ParseError> {
+            fn parse_block_seq(&mut self, indent: usize, depth: usize) -> Result<Dyn, ParseError> {
                 let mut items = Vec::new();
                 loop {
                     self.skip_ignorable();
@@ -287,8 +320,8 @@
                 self.array(items)
             }
 
-            fn parse_block_map(&mut self, indent: usize, depth: usize) -> Result<DataTree, ParseError> {
-                let mut entries: Vec<(String, DataTree)> = Vec::new();
+            fn parse_block_map(&mut self, indent: usize, depth: usize) -> Result<Dyn, ParseError> {
+                let mut entries: Vec<(String, Dyn)> = Vec::new();
                 loop {
                     self.skip_ignorable();
                     if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() {
@@ -306,6 +339,7 @@
                     let (key, rest) = split_key(&content).ok_or_else(|| ParseError {
                         line: line_no,
                         message: crate::jet_encoding_errors::YAML_EXPECTED_KEY_VALUE.into(),
+                        unsupported: false,
                     })?;
                     self.pos = self.pos.saturating_add(1);
                     let rest = rest.trim();
@@ -321,11 +355,15 @@
                         } else {
                             self.null()?
                         }
-                    } else if rest.starts_with('|') || rest.starts_with('>') {
+                    } else if rest.starts_with('|') || rest.starts_with('>')
+                        || rest.starts_with("!!binary |") || rest.starts_with("!!binary >") {
                         self.parse_block_scalar(indent, rest)?
                     } else {
                         self.parse_inline_value(rest, self.next_depth(depth)?)?
                     };
+                    if entries.iter().any(|(name, _)| name == &key) {
+                        return Err(ParseError { line: line_no, message: format!("duplicate key `{key}`"), unsupported: false });
+                    }
                     entries.push((key, value));
                 }
                 self.object(entries)
@@ -337,7 +375,9 @@
                 &mut self,
                 parent_indent: usize,
                 header: &str,
-            ) -> Result<DataTree, ParseError> {
+            ) -> Result<Dyn, ParseError> {
+                let binary = header.starts_with("!!binary ");
+                let header = header.strip_prefix("!!binary ").unwrap_or(header);
                 let folded = header.starts_with('>');
                 let chomp = if header.contains('-') {
                     'S'
@@ -381,10 +421,14 @@
                 self.budget
                     .node(text.len())
                     .map_err(|_| self.limit_error())?;
-                Ok(DataTree::Text(text))
+                if binary {
+                    let bytes = jet_foundation::base_encoding_strict::decode_base64(&text, true, false)
+                        .map_err(|message| ParseError { line: self.pos.saturating_add(1), message, unsupported: true })?;
+                    Ok(Dyn::Bytes(bytes))
+                } else { Ok(Dyn::Text(text)) }
             }
 
-            fn parse_inline_value(&mut self, s: &str, depth: usize) -> Result<DataTree, ParseError> {
+            fn parse_inline_value(&mut self, s: &str, depth: usize) -> Result<Dyn, ParseError> {
                 let s = s.trim();
                 // Anchor: `&name <value?>` — register the parsed value under `name`.
                 if let Some(rest) = s.strip_prefix('&') {
@@ -418,7 +462,8 @@
                         .map(|(value, _)| value)
                         .map_err(|error| ParseError {
                             line: self.pos.saturating_add(1),
-                            message: yaml_flow_message(error).to_string(),
+                            unsupported: matches!(&error, FlowError::Unsupported(_)),
+                            message: yaml_flow_message(error),
                         });
                 }
                 if s.starts_with('{') {
@@ -426,7 +471,8 @@
                         .map(|(value, _)| value)
                         .map_err(|error| ParseError {
                             line: self.pos.saturating_add(1),
-                            message: yaml_flow_message(error).to_string(),
+                            unsupported: matches!(&error, FlowError::Unsupported(_)),
+                            message: yaml_flow_message(error),
                         });
                 }
                 self.scalar(s)
@@ -438,7 +484,7 @@
             s: &str,
             depth: usize,
             budget: &mut YamlBudget,
-        ) -> Result<(DataTree, usize), FlowError> {
+        ) -> Result<(Dyn, usize), FlowError> {
             let chars: Vec<char> = s.chars().collect();
             parse_flow_at(&chars, 0, depth, budget)
         }
@@ -447,7 +493,7 @@
             mut i: usize,
             depth: usize,
             budget: &mut YamlBudget,
-        ) -> Result<(DataTree, usize), FlowError> {
+        ) -> Result<(Dyn, usize), FlowError> {
             while i < chars.len() && chars[i].is_whitespace() {
                 i = i.saturating_add(1);
             }
@@ -484,7 +530,7 @@
                         }
                     }
                     budget.node(0).map_err(|_| FlowError::Budget)?;
-                    Ok((DataTree::Array(items), i))
+                    Ok((Dyn::Array(items), i))
                 }
                 '{' => {
                     if depth >= MAX_YAML_DEPTH {
@@ -512,7 +558,10 @@
                         let next_depth = depth.checked_add(1).ok_or(FlowError::Depth)?;
                         let (v, nj) = parse_flow_at(chars, i, next_depth, budget)?;
                         i = nj;
-                        let key = key.trim().to_string();
+                        let key = unquote_key(key.trim());
+                        if entries.iter().any(|(name, _)| name == &key) {
+                            return Err(FlowError::Syntax(format!("duplicate key `{key}`")));
+                        }
                         budget
                             .bytes(key.len())
                             .map_err(|_| FlowError::Budget)?;
@@ -528,11 +577,11 @@
                         }
                     }
                     budget.node(0).map_err(|_| FlowError::Budget)?;
-                    Ok((DataTree::Object(entries), i))
+                    Ok((Dyn::Object(entries), i))
                 }
                 _ => {
                     let (raw, ni) = scan_flow_scalar(chars, i, false);
-                    Ok((yaml_scalar(raw.trim(), budget).map_err(|_| FlowError::Budget)?, ni))
+                    Ok((yaml_scalar(raw.trim(), budget)?, ni))
                 }
             }
         }
@@ -694,10 +743,10 @@
         }
 
         // Type a plain/quoted scalar by the YAML core schema.
-        fn scalar_value(s: &str) -> DataTree {
+        fn scalar_value(s: &str) -> Dyn {
             let s = s.trim();
             if s.is_empty() {
-                return DataTree::Null;
+                return Dyn::Null;
             }
             // Quoted strings are always text.
             if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
@@ -713,38 +762,32 @@
                         out.push(c);
                     }
                 }
-                return DataTree::Text(out);
+                return Dyn::Text(out);
             }
             if s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2 {
-                return DataTree::Text(s[1..s.len() - 1].replace("''", "'"));
+                return Dyn::Text(s[1..s.len() - 1].replace("''", "'"));
             }
+            if let Ok(value) = Dyn::parse_datetime(s) { return value; }
             match s {
-                "null" | "Null" | "NULL" | "~" => return DataTree::Null,
-                "true" | "True" | "TRUE" => return DataTree::Bool(true),
-                "false" | "False" | "FALSE" => return DataTree::Bool(false),
-                ".inf" | ".Inf" | ".INF" => return DataTree::Float(f64::INFINITY),
-                "-.inf" | "-.Inf" => return DataTree::Float(f64::NEG_INFINITY),
-                ".nan" | ".NaN" | ".NAN" => return DataTree::Float(f64::NAN),
+                "null" | "Null" | "NULL" | "~" => return Dyn::Null,
+                "true" | "True" | "TRUE" => return Dyn::Bool(true),
+                "false" | "False" | "FALSE" => return Dyn::Bool(false),
+                ".inf" | ".Inf" | ".INF" => return Dyn::Float(f64::INFINITY),
+                "-.inf" | "-.Inf" => return Dyn::Float(f64::NEG_INFINITY),
+                ".nan" | ".NaN" | ".NAN" => return Dyn::Float(f64::NAN),
                 _ => {}
             }
-            // Integer (decimal, with optional sign).
-            if let Ok(n) = s.parse::<i64>() {
-                return DataTree::Int(n);
-            }
-            // Float: must contain a `.`, `e`/`E` and parse cleanly.
-            if (s.contains('.') || s.contains('e') || s.contains('E'))
-                && s.chars()
-                    .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'))
-            {
-                if let Ok(f) = s.parse::<f64>() {
-                    return DataTree::Float(f);
+            // #4602: a core-schema number keeps its exact lexeme as `Number`.
+            if s.starts_with(|ch: char| ch.is_ascii_digit() || matches!(ch, '-' | '+' | '.')) {
+                if let Some(lexeme) = crate::jet_json_number::number_lexeme(s) {
+                    return Dyn::Number(lexeme);
                 }
             }
-            DataTree::Text(s.to_string())
+            Dyn::Text(s.to_string())
         }
 
-        // ── Render: a `DataTree` → block YAML text ───────────────────────────────
-        pub fn render(t: &DataTree) -> String {
+        // ── Render: a `Dyn` → block YAML text ───────────────────────────────
+        pub fn render(t: &Dyn) -> String {
             let mut out = String::new();
             render_node(t, 0, &mut out);
             let s = out.trim_end().to_string();
@@ -754,21 +797,21 @@
                 s
             }
         }
-        fn render_node(t: &DataTree, indent: usize, out: &mut String) {
+        fn render_node(t: &Dyn, indent: usize, out: &mut String) {
             let pad = " ".repeat(indent);
             match t {
-                DataTree::Object(entries) => {
+                Dyn::Object(entries) => {
                     if entries.is_empty() {
                         out.push_str(&format!("{}{{}}\n", pad));
                         return;
                     }
                     for (k, v) in entries {
                         match v {
-                            DataTree::Object(e) if !e.is_empty() => {
+                            Dyn::Object(e) if !e.is_empty() => {
                                 out.push_str(&format!("{}{}:\n", pad, render_key(k)));
                                 render_node(v, indent + 2, out);
                             }
-                            DataTree::Array(a) if !a.is_empty() => {
+                            Dyn::Array(a) if !a.is_empty() => {
                                 out.push_str(&format!("{}{}:\n", pad, render_key(k)));
                                 render_seq(a, indent, out);
                             }
@@ -783,19 +826,19 @@
                         }
                     }
                 }
-                DataTree::Array(items) => render_seq(items, indent, out),
+                Dyn::Array(items) => render_seq(items, indent, out),
                 _ => out.push_str(&format!("{}{}\n", pad, render_scalar(t))),
             }
         }
-        fn render_seq(items: &[DataTree], indent: usize, out: &mut String) {
+        fn render_seq(items: &[Dyn], indent: usize, out: &mut String) {
             let pad = " ".repeat(indent);
             for item in items {
                 match item {
-                    DataTree::Object(e) if !e.is_empty() => {
+                    Dyn::Object(e) if !e.is_empty() => {
                         out.push_str(&format!("{}-\n", pad));
                         render_node(item, indent + 2, out);
                     }
-                    DataTree::Array(a) if !a.is_empty() => {
+                    Dyn::Array(a) if !a.is_empty() => {
                         out.push_str(&format!("{}-\n", pad));
                         render_seq(a, indent + 2, out);
                     }
@@ -810,37 +853,52 @@
                 k.to_string()
             }
         }
-        fn render_scalar(v: &DataTree) -> String {
+        fn render_scalar(v: &Dyn) -> String {
             match v {
-                DataTree::Null => "null".to_string(),
-                DataTree::Bool(b) => b.to_string(),
-                DataTree::Int(n) => n.to_string(),
-                DataTree::Float(f) => format!("{:?}", f),
-                DataTree::Number(_) | DataTree::TypedText(_) => {
-                    unreachable!("internal JSON carrier escaped typed decode")
-                }
-                DataTree::Text(s) => {
+                Dyn::Null => "null".to_string(),
+                Dyn::Bool(b) => b.to_string(),
+                Dyn::Int(n) => n.to_string(),
+                Dyn::Float(f) => format!("{:?}", f),
+                Dyn::Number(text) => text.clone(),
+                Dyn::Text(s) => {
                     if needs_quote(s) {
                         format!("{:?}", s)
                     } else {
                         s.clone()
                     }
                 }
-                DataTree::Bytes(bs) => {
-                    let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
-                    format!("[{}]", parts.join(", "))
-                }
+                Dyn::Bytes(bs) => format!("!!binary {}", Dyn::bytes_text(bs)),
+                Dyn::DateTime(value) => value.to_rfc3339(),
                 // An inline collection value renders in flow form.
-                DataTree::Array(items) => {
+                Dyn::Array(items) => {
                     let parts: Vec<String> = items.iter().map(render_scalar).collect();
                     format!("[{}]", parts.join(", "))
                 }
-                DataTree::Object(entries) => {
+                Dyn::Object(entries) => {
                     let parts: Vec<String> = entries
                         .iter()
                         .map(|(k, val)| format!("{}: {}", render_key(k), render_scalar(val)))
                         .collect();
                     format!("{{{}}}", parts.join(", "))
+                }
+            }
+        }
+
+        #[cfg(test)]
+        mod tests {
+            #[test]
+            fn dyn_rules_reject_duplicate_keys_in_every_map_form() {
+                for text in ["a: 1\na: 2", "{a: 1, a: 2}", "outer: {x: 1, x: 2}"] {
+                    assert!(super::parse_to_tree(text).is_err(), "host YAML accepted {text}");
+                }
+            }
+
+            #[test]
+            fn dyn_rules_preserve_huge_number_lexemes() {
+                let huge = "12345678901234567890123456789012345678901234567890";
+                for token in [huge, "1e400"] {
+                    let tree = super::parse_to_tree(&format!("a: {token}")).expect("host YAML number");
+                    assert!(matches!(&tree, super::Dyn::Object(fields) if fields.iter().any(|(key, value)| key == "a" && matches!(value, super::Dyn::Number(text) if text == token))));
                 }
             }
         }
@@ -862,6 +920,9 @@
                     | "FALSE"
             ) || s.parse::<i64>().is_ok()
                 || s.parse::<f64>().is_ok()
+                || (s.is_ascii() && s.len() >= 20
+                    && matches!(s.as_bytes().get(10), Some(b'T' | b't' | b' '))
+                    && (s.ends_with(['Z', 'z']) || s[19..].contains(['+', '-'])))
                 || s.starts_with(' ')
                 || s.ends_with(' ')
                 || s.starts_with([

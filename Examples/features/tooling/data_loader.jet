@@ -42,31 +42,31 @@ fn run() {
     parquet_path :: "tests/fixtures/parquet_reader/int32_with_null_pages.parquet"
     parquet_url :: "https://raw.githubusercontent.com/apache/parquet-testing/4b1ce4502afff8d20c9b4bb08d07e04e21cdeff3/data/int32_with_null_pages.parquet"
     parquet_bytes :: files.read_bytes(parquet_path) ?? panic("read parquet fixture")
-    url_loader := data.url<[DataTree]>(parquet_url, "parquet", "network", limits) ?? panic("url loader")
+    url_loader := data.url<[Dyn]>(parquet_url, "parquet", "network", limits) ?? panic("url loader")
     data_loader.bind(&url_loader, parquet_bytes) ?? panic("bind parquet")
-    url_snapshot :: snapshot<[DataTree]>(&url_loader) ?? panic("url snapshot")
+    url_snapshot :: snapshot<[Dyn]>(&url_loader) ?? panic("url snapshot")
     print("url:bound:{url_snapshot.value.len()}")
 
     // A file-member loader reports its typed provider boundary without fake archive IO.
-    member_loader :: data.file_member<[DataTree]>(
+    member_loader :: data.file_member<[Dyn]>(
         parquet_path,
         "int32_with_null_pages.parquet",
         "parquet",
         limits
     ) ?? panic("file member loader")
-    if snapshot<[DataTree]>(&member_loader) == {
+    if snapshot<[Dyn]>(&member_loader) == {
         .Ok(_) -> { print("file_member:unexpected") }
         .Err(err) -> { print("file_member:{err.kind:Debug} {err.operation}") }
     }
 
     // Database construction is real; absent provider payload is an explicit typed outcome.
-    database_loader :: data.database<[DataTree]>(
+    database_loader :: data.database<[Dyn]>(
         "SELECT service, latency_ms FROM events WHERE service = ?",
         [String]{"api"},
         "local",
         limits
     ) ?? panic("database loader")
-    if snapshot<[DataTree]>(&database_loader) == {
+    if snapshot<[Dyn]>(&database_loader) == {
         .Ok(_) -> { print("database:unexpected") }
         .Err(err) -> { print("database:{err.kind:Debug} {err.operation}") }
     }

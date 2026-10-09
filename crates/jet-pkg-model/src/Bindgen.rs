@@ -30,7 +30,7 @@ pub(crate) enum DecoderProtocol {
 pub(crate) fn render_decode_response(error: &str, protocol: DecoderProtocol) -> String {
     match protocol {
         DecoderProtocol::StandardEnvelope => format!(
-            r#"fn decode_response(raw: String, code: Int) -> DataTree !{error} {{
+            r#"fn decode_response(raw: String, code: Int) -> Dyn !{error} {{
     if code == {{
         1 -> {{ return Err({error}.NotRunning) }}
         2 -> {{ return Err({error}.Timeout) }}
@@ -40,15 +40,15 @@ pub(crate) fn render_decode_response(error: &str, protocol: DecoderProtocol) -> 
         else -> {{ return Err({error}.Protocol) }}
     }}
     response := json.parse(raw) ?? return Err({error}.Protocol)
-    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    succeeded := (response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
     if !succeeded -> return Err({error}.CommandFailed)
-    return Ok(response.field("value") ?? DataTree.Null)
+    return Ok(response.field("value") ?? Dyn.Null)
 }}
 
 "#,
         ),
         DecoderProtocol::LuaRawJson => format!(
-            r#"fn decode_response(raw: String, code: Int) -> DataTree !{error} {{
+            r#"fn decode_response(raw: String, code: Int) -> Dyn !{error} {{
     decode_status(code)
     value := json.parse(raw) ?? return Err({error}.Protocol)
     return Ok(value)

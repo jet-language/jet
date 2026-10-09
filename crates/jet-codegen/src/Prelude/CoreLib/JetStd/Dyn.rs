@@ -1,8 +1,38 @@
 // ── core.encoding: format-agnostic value tree (D-SERDE2 = A) ───────────────
-// The shared Foundation DataTree carrier is embedded by Codegen before this
+// The shared Foundation Dyn carrier is embedded by Codegen before this
 // runtime extension. The built-in `#[Codable]` derive (D-ENC1) lowers
 // `encode`/`decode` to walks over the carrier; adapters turn it into wire data.
-// The carrier preserves field order (ordered `Object`) and keeps Int vs Float.
+// The carrier preserves field order (ordered `Object`), keeps Int vs Float, and
+// keeps a parsed number's exact lexeme as `Number` until a typed read (#4602).
+
+// #4602: decoding is strict. A `Text` leaf never becomes an Int, Float, or
+// Bool, so JSON `"42"` does not decode into an `Int` field. The one exception
+// is a text-native source (environment variables, CSV cells, route and query
+// parameters), where every scalar is text by construction: its adapter runs
+// the decode inside `jet_decode_text_cells`, and only there a `Text` leaf
+// parses into a scalar target.
+std::thread_local! {
+    static JET_TEXT_CELLS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+struct JetTextCellsScope(bool);
+
+impl Drop for JetTextCellsScope {
+    fn drop(&mut self) {
+        let previous = self.0;
+        JET_TEXT_CELLS.with(|cell| cell.set(previous));
+    }
+}
+
+/// Run a text-native source's decode with scalar parsing of `Text` leaves.
+pub fn jet_decode_text_cells<R>(decode: impl FnOnce() -> R) -> R {
+    let _scope = JetTextCellsScope(JET_TEXT_CELLS.with(|cell| cell.replace(true)));
+    decode()
+}
+
+pub fn jet_text_cells_active() -> bool {
+    JET_TEXT_CELLS.with(|cell| cell.get())
+}
 
 // D-VALIDATE-DECODE1=B (ratified 2026-08-03): every typed decoder returns
 // the same accumulated field-error list. Structural failures use the empty
@@ -46,66 +76,44 @@ impl FieldError {
     }
 }
 
-impl super::JetShow for DataTree {
+impl super::JetShow for Dyn {
     fn jet_show(&self) -> String {
-        render_datatree_json(self, false, 0)
+        self.to_text().unwrap_or_else(|| render_dyn_json(self, false, 0))
     }
 }
 
-impl super::JetDisplay for DataTree {
+impl super::JetDisplay for Dyn {
     fn jet_display(&self) -> String {
         <Self as super::JetShow>::jet_show(self)
     }
 }
 
-impl super::JetDebug for DataTree {
+impl super::JetDebug for Dyn {
     fn jet_debug(&self) -> String {
-        <Self as super::JetShow>::jet_show(self)
+        render_dyn_json(self, false, 0)
     }
 }
-/// Preserve exact integer semantics at the DataTree boundary. The Int variant
-/// carries only the inline JetInt payload; larger values stay lexical Numbers
-/// so a tagged owner word is never mistaken for a host integer.
-pub(crate) fn jet_datatree_encode_i64(value: i64) -> DataTree {
-    if (jet_foundation::Numeric::JetInt::inline_min()
-        ..=jet_foundation::Numeric::JetInt::inline_max())
-        .contains(&value)
-    {
-        DataTree::Int(value)
-    } else {
-        DataTree::Number(value.to_string())
-    }
+/// Native integer encoders construct an owned exact Int, never a Number token.
+pub(crate) fn jet_dyn_encode_i64(value: i64) -> Dyn {
+    Dyn::Int(value.into())
 }
 
-pub(crate) fn jet_datatree_encode_u64(value: u64) -> DataTree {
-    if value <= jet_foundation::Numeric::JetInt::inline_max() as u64 {
-        DataTree::Int(value as i64)
-    } else {
-        DataTree::Number(value.to_string())
-    }
+pub(crate) fn jet_dyn_encode_u64(value: u64) -> Dyn {
+    Dyn::Int(value.into())
 }
 
-/// Jet's `DataTree.Int` holds an exact `Int`. The native carrier keeps a value
-/// that does not fit the inline slot as its decimal `Number` lexeme (the rule
-/// `jet_encode` uses), and these three functions are the one crossing of the
-/// Jet variant over that carrier: construct, test, and read the payload.
-pub fn jet_datatree_int(value: jet_foundation::Numeric::JetInt) -> DataTree {
-    value
-        .to_i64()
-        .map(jet_datatree_encode_i64)
-        .unwrap_or_else(|| DataTree::Number(value.to_string_rep()))
+/// Construct the canonical owned payload. Parsed Number tokens stay distinct.
+pub fn jet_dyn_int(value: jet_foundation::Numeric::JetInt) -> Dyn {
+    Dyn::Int(value)
 }
 
-pub fn jet_datatree_is_int(tree: &DataTree) -> bool {
-    jet_datatree_int_payload(tree).is_some()
+pub fn jet_dyn_is_int(tree: &Dyn) -> bool {
+    matches!(tree, Dyn::Int(_))
 }
 
-pub fn jet_datatree_int_payload(tree: &DataTree) -> Option<jet_foundation::Numeric::JetInt> {
+pub fn jet_dyn_int_payload(tree: &Dyn) -> Option<jet_foundation::Numeric::JetInt> {
     match tree {
-        DataTree::Int(value) => Some(jet_foundation::Numeric::JetInt::from(*value)),
-        DataTree::Number(text) => jet_foundation::Numeric::CtBigInt::from_str(text)
-            .map(jet_foundation::Numeric::JetInt::from_big)
-            .ok(),
+        Dyn::Int(value) => Some(value.clone()),
         _ => None,
     }
 }
@@ -115,12 +123,12 @@ pub fn jet_datatree_int_payload(tree: &DataTree) -> Option<jet_foundation::Numer
 // tries the current shape first, then walks a matching historical shape
 // forward before returning the value. No second result envelope exists.
 
-/// D-MIGRATE4: the sorted set of top-level object keys of a `DataTree`, used
+/// D-MIGRATE4: the sorted set of top-level object keys of a `Dyn`, used
 /// by a `#PublishedSchema` type's migration chain-walker to detect which
 /// historical shape a decoded record matches. A non-object tree has no keys.
-pub fn jet_datatree_key_set(t: &DataTree) -> std::collections::BTreeSet<String> {
+pub fn jet_dyn_key_set(t: &Dyn) -> std::collections::BTreeSet<String> {
     match t {
-        DataTree::Object(pairs) => pairs.iter().map(|(k, _)| k.clone()).collect(),
+        Dyn::Object(pairs) => pairs.iter().map(|(k, _)| k.clone()).collect(),
         _ => std::collections::BTreeSet::new(),
     }
 }
@@ -128,23 +136,23 @@ pub fn jet_datatree_key_set(t: &DataTree) -> std::collections::BTreeSet<String> 
 /// D-BOUND-EVOLVE1=A: replace known values in the original wire order and
 /// append newly-created known fields in schema order. Unknown entries stay
 /// byte-for-byte in their original position relative to the known fields.
-pub fn jet_datatree_merge_wire_order(known: &DataTree, original: &DataTree) -> DataTree {
-    let (DataTree::Object(known), DataTree::Object(original)) = (known, original) else {
+pub fn jet_dyn_merge_wire_order(known: &Dyn, original: &Dyn) -> Dyn {
+    let (Dyn::Object(known), Dyn::Object(original)) = (known, original) else {
         return known.clone();
     };
-    DataTree::Object(jet_wire_order_merge(known, original))
+    Dyn::Object(jet_wire_order_merge(known, original))
 }
 
 /// D-SHAPE-ONE1=A: apply one already-resolved shape projection to a
-/// `DataTree`. The front end selects each `ShapeProjectedField::name` for its
+/// `Dyn`. The front end selects each `ShapeProjectedField::name` for its
 /// consumer (including per-format Rename); codec adapters only render the
 /// resulting ordered tree and never rediscover field names.
-pub fn jet_datatree_project(
-    tree: &DataTree,
+pub fn jet_dyn_project(
+    tree: &Dyn,
     projection: &ShapeProjection,
-) -> Result<DataTree, Vec<FieldError>> {
-    let project_object = |value: &DataTree| {
-        let DataTree::Object(entries) = value else {
+) -> Result<Dyn, Vec<FieldError>> {
+    let project_object = |value: &Dyn| {
+        let Dyn::Object(entries) = value else {
             return Err(FieldError::one("shape projection needs object values"));
         };
         let mut projected = Vec::with_capacity(projection.fields.len());
@@ -157,16 +165,16 @@ pub fn jet_datatree_project(
             };
             projected.push((field.name.clone(), value.clone()));
         }
-        Ok(DataTree::Object(projected))
+        Ok(Dyn::Object(projected))
     };
 
     match tree {
-        DataTree::Object(_) => project_object(tree),
-        DataTree::Array(values) => values
+        Dyn::Object(_) => project_object(tree),
+        Dyn::Array(values) => values
             .iter()
             .map(project_object)
             .collect::<Result<Vec<_>, _>>()
-            .map(DataTree::Array),
+            .map(Dyn::Array),
         _ => Err(FieldError::one("shape projection needs object values")),
     }
 }
@@ -174,22 +182,22 @@ pub fn jet_datatree_project(
 
 // Engine adapters reduce their resident value to this tag before calling
 // the Prelude-owned diagnostic vocabulary.
-pub fn datatree_kind_for(t: &DataTree) -> &'static str {
+pub fn dyn_kind_for(t: &Dyn) -> &'static str {
     let tag = match t {
-        DataTree::Null => "Null",
-        DataTree::Bool(_) => "Bool",
-        DataTree::Int(_) => "Int",
-        DataTree::Float(_) => "Float",
-        DataTree::Number(_) => "Number",
-        DataTree::TypedText(_) => "Text",
-        DataTree::Text(_) => "Text",
-        DataTree::Bytes(_) => "Bytes",
-        DataTree::Array(_) => "Array",
-        DataTree::Object(_) => "Object",
+        Dyn::Null => "Null",
+        Dyn::Bool(_) => "Bool",
+        Dyn::Int(_) => "Int",
+        Dyn::Float(_) => "Float",
+        Dyn::Number(_) => "Number",
+        Dyn::Text(_) => "Text",
+        Dyn::Bytes(_) => "Bytes",
+        Dyn::DateTime(_) => "DateTime",
+        Dyn::Array(_) => "Array",
+        Dyn::Object(_) => "Object",
     };
-    datatree_kind(tag)
+    dyn_kind(tag)
 }
-// D-SERDE-ACCESS=B + D-SERDE14=A: dynamic accessor methods on DataTree. Each
+// D-SERDE-ACCESS=B + D-SERDE14=A: dynamic accessor methods on Dyn. Each
 // read returns `Result<T, [FieldError]>` so a `?` chain composes cleanly
 // inside a hand `decode`. `.field`/`.at` auto-fill the path with the
 // segment they read; scalar readers leave it empty, so a containing
@@ -199,9 +207,9 @@ pub fn datatree_kind_for(t: &DataTree) -> &'static str {
 // trait because Rust only admits inherent impls in the defining crate, and the
 // accessors read the tier's `jet_int_*` marshalling (D-INTBIG1). AOT, the
 // Cranelift host, and the TIR evaluator each include this one file.
-pub trait JetDataTreeAccess {
-    fn field(&self, name: &str) -> Result<DataTree, Vec<FieldError>>;
-    fn at(&self, i: i64) -> Result<DataTree, Vec<FieldError>>;
+pub trait JetDynAccess {
+    fn field(&self, name: &str) -> Result<Dyn, Vec<FieldError>>;
+    fn at(&self, i: i64) -> Result<Dyn, Vec<FieldError>>;
     fn int(&self) -> Result<i64, Vec<FieldError>>;
     fn text(&self) -> Result<String, Vec<FieldError>>;
     fn bool(&self) -> Result<bool, Vec<FieldError>>;
@@ -213,13 +221,13 @@ pub trait JetDataTreeAccess {
     /// D-DATATREE-ERGO1=A: compare trees while ignoring object insertion
     /// order. Arrays stay ordered, numeric variants stay distinct, and NaN is
     /// never equal to anything, including another NaN.
-    fn equal_unordered(&self, other: &DataTree) -> bool;
+    fn equal_unordered(&self, other: &Dyn) -> bool;
 }
 
-impl JetDataTreeAccess for DataTree {
-    fn field(&self, name: &str) -> Result<DataTree, Vec<FieldError>> {
+impl JetDynAccess for Dyn {
+    fn field(&self, name: &str) -> Result<Dyn, Vec<FieldError>> {
         match self {
-            DataTree::Object(pairs) => pairs
+            Dyn::Object(pairs) => pairs
                 .iter()
                 .find(|(k, _)| k == name)
                 .map(|(_, v)| v.clone())
@@ -228,14 +236,14 @@ impl JetDataTreeAccess for DataTree {
                 name,
                 format!(
                     "expected object, got {}",
-                    render_datatree_json(self, false, 0)
+                    render_dyn_json(self, false, 0)
                 ),
             )),
         }
     }
-    fn at(&self, i: i64) -> Result<DataTree, Vec<FieldError>> {
+    fn at(&self, i: i64) -> Result<Dyn, Vec<FieldError>> {
         match self {
-            DataTree::Array(items) => {
+            Dyn::Array(items) => {
                 let idx = if i < 0 {
                     i.checked_neg()
                         .and_then(|value| usize::try_from(value).ok())
@@ -260,63 +268,62 @@ impl JetDataTreeAccess for DataTree {
                 format!("[{}]", i),
                 format!(
                     "expected array, got {}",
-                    render_datatree_json(self, false, 0)
+                    render_dyn_json(self, false, 0)
                 ),
             )),
         }
     }
     fn int(&self) -> Result<i64, Vec<FieldError>> {
         match self {
-            DataTree::Int(n) => Ok(*n),
-            // D-SERDE2: a hand `decode` runs inside the typed walk, so the
-            // lexical `Number`/`TypedText` carriers reach these accessors.
-            // Project them here exactly as the `decode_*` helpers do for
-            // derived codecs — one protocol for hand and derived codecs.
-            DataTree::Number(text) => crate::jet_json_number::json_exact_integer_text(text)
+            Dyn::Int(n) => Ok(n.clone().into_raw()),
+            // #4602: a parsed number keeps its lexeme as `Number`; reading it
+            // as an Int range-checks it exactly as the `decode_*` helpers do
+            // for derived codecs — one protocol for hand and derived codecs.
+            Dyn::Number(text) => crate::jet_json_number::json_exact_integer_text(text)
                 .ok()
                 .and_then(|digits| jet_int_from_str(&digits).ok())
                 .ok_or_else(|| {
                     FieldError::one(format!(
                         "expected int, got {}",
-                        render_datatree_json(self, false, 0)
+                        render_dyn_json(self, false, 0)
                     ))
                 }),
             _ => Err(FieldError::one(format!(
                 "expected int, got {}",
-                render_datatree_json(self, false, 0)
+                render_dyn_json(self, false, 0)
             ))),
         }
     }
     fn text(&self) -> Result<String, Vec<FieldError>> {
         match self {
-            DataTree::Text(s) | DataTree::TypedText(s) => Ok(s.clone()),
+            Dyn::Text(s) => Ok(s.clone()),
             _ => Err(FieldError::one(format!(
                 "expected text, got {}",
-                render_datatree_json(self, false, 0)
+                render_dyn_json(self, false, 0)
             ))),
         }
     }
     fn bool(&self) -> Result<bool, Vec<FieldError>> {
         match self {
-            DataTree::Bool(b) => Ok(*b),
+            Dyn::Bool(b) => Ok(*b),
             _ => Err(FieldError::one(format!(
                 "expected bool, got {}",
-                render_datatree_json(self, false, 0)
+                render_dyn_json(self, false, 0)
             ))),
         }
     }
     fn float(&self) -> Result<f64, Vec<FieldError>> {
         match self {
-            DataTree::Float(f) => Ok(*f),
-            DataTree::Int(n) => {
-                let value = jet_int_to_f64(*n);
+            Dyn::Float(f) => Ok(*f),
+            Dyn::Int(n) => {
+                let value = n.to_f64();
                 if value.is_finite() {
                     Ok(value)
                 } else {
                     Err(FieldError::one("expected float, got out-of-range Int"))
                 }
             }
-            DataTree::Number(text) => text
+            Dyn::Number(text) => text
                 .trim()
                 .parse::<f64>()
                 .ok()
@@ -324,47 +331,49 @@ impl JetDataTreeAccess for DataTree {
                 .ok_or_else(|| {
                     FieldError::one(format!(
                         "expected float, got {}",
-                        render_datatree_json(self, false, 0)
+                        render_dyn_json(self, false, 0)
                     ))
                 }),
             _ => Err(FieldError::one(format!(
                 "expected float, got {}",
-                render_datatree_json(self, false, 0)
+                render_dyn_json(self, false, 0)
             ))),
         }
     }
 
     fn to_text(&self) -> Option<String> {
         match self {
-            DataTree::Text(text) | DataTree::TypedText(text) => Some(text.clone()),
-            DataTree::Int(value) => Some(jet_int_to_string(*value)),
-            DataTree::Float(value) => Some(format!("{:?}", value)),
-            DataTree::Bool(value) => Some(value.to_string()),
-            DataTree::Number(text) => Some(text.clone()),
-            DataTree::Null | DataTree::Bytes(_) | DataTree::Array(_) | DataTree::Object(_) => None,
+            Dyn::Text(text) => Some(text.clone()),
+            Dyn::Int(value) => Some(value.to_string_rep()),
+            Dyn::Float(value) => Some(format!("{:?}", value)),
+            Dyn::Bool(value) => Some(value.to_string()),
+            Dyn::Number(text) => Some(text.clone()),
+            Dyn::Bytes(bytes) => Some(Dyn::bytes_text(bytes)),
+            Dyn::DateTime(value) => Some(value.to_rfc3339()),
+            Dyn::Null | Dyn::Array(_) | Dyn::Object(_) => None,
         }
     }
 
-    fn equal_unordered(&self, other: &DataTree) -> bool {
+    fn equal_unordered(&self, other: &Dyn) -> bool {
         match (self, other) {
-            (DataTree::Null, DataTree::Null) => true,
-            (DataTree::Bool(left), DataTree::Bool(right)) => left == right,
-            (DataTree::Int(left), DataTree::Int(right)) => left == right,
-            (DataTree::Float(left), DataTree::Float(right)) => {
+            (Dyn::Null, Dyn::Null) => true,
+            (Dyn::Bool(left), Dyn::Bool(right)) => left == right,
+            (Dyn::Int(left), Dyn::Int(right)) => left == right,
+            (Dyn::Float(left), Dyn::Float(right)) => {
                 !left.is_nan() && !right.is_nan() && left == right
             }
-            (DataTree::Number(left), DataTree::Number(right)) => left == right,
-            (DataTree::TypedText(left), DataTree::TypedText(right)) => left == right,
-            (DataTree::Text(left), DataTree::Text(right)) => left == right,
-            (DataTree::Bytes(left), DataTree::Bytes(right)) => left == right,
-            (DataTree::Array(left), DataTree::Array(right)) => {
+            (Dyn::Number(left), Dyn::Number(right)) => left == right,
+            (Dyn::Text(left), Dyn::Text(right)) => left == right,
+            (Dyn::Bytes(left), Dyn::Bytes(right)) => left == right,
+            (Dyn::DateTime(left), Dyn::DateTime(right)) => left == right,
+            (Dyn::Array(left), Dyn::Array(right)) => {
                 left.len() == right.len()
                     && left
                         .iter()
                         .zip(right)
                         .all(|(left, right)| left.equal_unordered(right))
             }
-            (DataTree::Object(left), DataTree::Object(right)) => {
+            (Dyn::Object(left), Dyn::Object(right)) => {
                 // ponytail: keep the list-backed duplicate-key semantics; add
                 // indexed matching only if large dynamic objects need it.
                 if left.len() != right.len() {
@@ -394,13 +403,14 @@ impl JetDataTreeAccess for DataTree {
     }
 }
 
-/// Decode one fixed-width integer from the exact DataTree number carrier.
+/// Decode one fixed-width integer from the exact Dyn number carrier.
 ///
 /// The result is an exact `i128` after the shared numeric kernel has checked
-/// the destination width. `TypedText` never reaches `decode_int_with`, so JSON
-/// quoted numerals remain rejected; callers perform the final native cast.
-pub(crate) fn jet_datatree_decode_fixed_integer(
-    t: &DataTree,
+/// the destination width. A `Text` leaf decodes only inside a text-native
+/// source, so JSON quoted numerals stay rejected; callers perform the final
+/// native cast.
+pub(crate) fn jet_dyn_decode_fixed_integer(
+    t: &Dyn,
     signed: bool,
     bits: u8,
     type_name: &str,
@@ -423,6 +433,7 @@ pub(crate) fn jet_datatree_decode_fixed_integer(
     let value = decode_int_with(
         t,
         i128::from,
+        |value| value.to_i128().ok_or_else(|| "exact Int is outside i128".to_string()),
         |text| {
             text.parse::<i128>()
                 .map_err(|_| "exact Int is outside i128".to_string())
@@ -437,7 +448,7 @@ pub(crate) fn jet_datatree_decode_fixed_integer(
     }
 }
 
-macro_rules! jet_datatree_decode_helpers {
+macro_rules! jet_dyn_decode_helpers {
     () => {
         // Primitive typed-decode rules live beside the tree and are shared by the
         // AOT Prelude and the JIT's handle marshalling adapter. The engines only
@@ -449,13 +460,14 @@ macro_rules! jet_datatree_decode_helpers {
         /// exponents are normalized here, and all coercion diagnostics stay on
         /// this one Prelude path.
         pub fn decode_int_with<T>(
-            t: &DataTree,
+            t: &Dyn,
             from_i64: impl Fn(i64) -> T,
+            from_exact: impl Fn(&jet_foundation::Numeric::JetInt) -> Result<T, String>,
             parse_exact: impl Fn(&str) -> Result<T, String>,
         ) -> Result<T, Vec<FieldError>> {
             match t {
-                DataTree::Int(n) => Ok(from_i64(*n)),
-                DataTree::Float(f)
+                Dyn::Int(n) => from_exact(n).map_err(FieldError::one),
+                Dyn::Float(f)
                     if f.is_finite()
                         && f.fract() == 0.0
                         && *f >= i64::MIN as f64
@@ -463,70 +475,65 @@ macro_rules! jet_datatree_decode_helpers {
                 {
                     Ok(from_i64(*f as i64))
                 }
-                DataTree::Number(text) => {
+                Dyn::Number(text) => {
                     let integer = crate::jet_json_number::json_exact_integer_text(text)
                         .map_err(FieldError::one)?;
                     parse_exact(&integer)
                         .map_err(|_| FieldError::one(format!("expected Int, found number {text}")))
                 }
-                DataTree::TypedText(text) => Err(FieldError::one(format!(
+                Dyn::Text(text) if jet_text_cells_active() => parse_exact(text.trim())
+                    .map_err(|_| FieldError::one(format!("expected Int, found text {:?}", text))),
+                Dyn::Text(text) => Err(FieldError::one(format!(
                     "expected Int, found text {:?}",
                     text
                 ))),
-                DataTree::Text(text) => parse_exact(text.trim())
-                    .map_err(|_| FieldError::one(format!("expected Int, found text {:?}", text))),
                 other => Err(FieldError::one(format!(
                     "expected Int, found {}",
-                    datatree_kind_for(other)
+                    dyn_kind_for(other)
                 ))),
             }
         }
 
         /// Resident raw exact-Int wrapper. Every successful result is a
-        /// managed carrier, including a large `DataTree::Int`.
-        pub fn decode_int(t: &DataTree) -> Result<i64, Vec<FieldError>> {
-            decode_int_with(t, jet_int_from_i64, |text| jet_int_from_str(text))
+        /// managed carrier, including a large `Dyn::Int`.
+        pub fn decode_int(t: &Dyn) -> Result<i64, Vec<FieldError>> {
+            decode_int_with(t, jet_int_from_i64, |value| Ok(value.clone().into_raw()), |text| jet_int_from_str(text))
         }
-        pub fn decode_float(t: &DataTree) -> Result<f64, Vec<FieldError>> {
+        pub fn decode_float(t: &Dyn) -> Result<f64, Vec<FieldError>> {
             match t {
-                DataTree::Float(f) => Ok(*f),
-                DataTree::Int(n) => {
-                    let value = jet_int_to_f64(*n);
+                Dyn::Float(f) => Ok(*f),
+                Dyn::Int(n) => {
+                    let value = n.to_f64();
                     if value.is_finite() {
                         Ok(value)
                     } else {
                         Err(FieldError::one("expected float, got out-of-range Int"))
                     }
                 }
-                DataTree::Number(text) | DataTree::Text(text) => {
-                    let value = text.trim().parse::<f64>().map_err(|_| {
+                Dyn::Number(text) => decode_finite_lexeme(text, "Float"),
+                Dyn::Text(text) if jet_text_cells_active() => text
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|value| value.is_finite())
+                    .ok_or_else(|| {
                         FieldError::one(format!("expected Float, found text {:?}", text))
-                    })?;
-                    if value.is_finite() {
-                        Ok(value)
-                    } else {
-                        Err(FieldError::one("expected Float, found out-of-range Float"))
-                    }
-                }
-                DataTree::TypedText(text) => Err(FieldError::one(format!(
+                    }),
+                Dyn::Text(text) => Err(FieldError::one(format!(
                     "expected Float, found text {:?}",
                     text
                 ))),
                 other => Err(FieldError::one(format!(
                     "expected Float, found {}",
-                    datatree_kind_for(other)
+                    dyn_kind_for(other)
                 ))),
             }
         }
 
-        pub fn decode_bool(t: &DataTree) -> Result<bool, Vec<FieldError>> {
+        pub fn decode_bool(t: &Dyn) -> Result<bool, Vec<FieldError>> {
             match t {
-                DataTree::Bool(value) => Ok(*value),
-                DataTree::TypedText(text) => Err(FieldError::one(format!(
-                    "expected Bool, found text {:?}",
-                    text
-                ))),
-                DataTree::Text(text) => match text.trim() {
+                Dyn::Bool(value) => Ok(*value),
+                Dyn::Text(text) if jet_text_cells_active() => match text.trim() {
                     "true" => Ok(true),
                     "false" => Ok(false),
                     _ => Err(FieldError::one(format!(
@@ -534,38 +541,54 @@ macro_rules! jet_datatree_decode_helpers {
                         text
                     ))),
                 },
+                Dyn::Text(text) => Err(FieldError::one(format!(
+                    "expected Bool, found text {:?}",
+                    text
+                ))),
                 other => Err(FieldError::one(format!(
                     "expected Bool, found {}",
-                    datatree_kind_for(other)
+                    dyn_kind_for(other)
                 ))),
             }
         }
 
-        pub fn decode_string(t: &DataTree) -> Result<String, Vec<FieldError>> {
+        pub fn decode_string(t: &Dyn) -> Result<String, Vec<FieldError>> {
             match t {
-                DataTree::Text(text) | DataTree::TypedText(text) => Ok(text.clone()),
-                DataTree::Number(text) => Err(FieldError::one(format!(
+                Dyn::Text(text) => Ok(text.clone()),
+                Dyn::Number(text) => Err(FieldError::one(format!(
                     "expected Text, found number {text}"
                 ))),
-                DataTree::Int(n) => Ok(jet_int_to_string(*n)),
-                DataTree::Float(f) => Ok(format!("{:?}", f)),
-                DataTree::Bool(value) => Ok(value.to_string()),
                 other => Err(FieldError::one(format!(
                     "expected Text, found {}",
-                    datatree_kind_for(other)
+                    dyn_kind_for(other)
                 ))),
             }
         }
 
-        pub fn decode_f32(t: &DataTree) -> Result<f32, Vec<FieldError>> {
+        /// Range-check a `Number` lexeme read as a binary64 value: `1e400`
+        /// keeps its exact text in the tree and fails only here.
+        pub fn decode_finite_lexeme(text: &str, target: &str) -> Result<f64, Vec<FieldError>> {
+            match text.parse::<f64>() {
+                Ok(value) if value.is_finite() => Ok(value),
+                Ok(_) => Err(FieldError::one(format!(
+                    "expected {target}, found out-of-range number {text}"
+                ))),
+                Err(_) => Err(FieldError::one(format!(
+                    "expected {target}, found number {text}"
+                ))),
+            }
+        }
+
+        pub fn decode_f32(t: &Dyn) -> Result<f32, Vec<FieldError>> {
             let value = match t {
-                DataTree::Float(value) => *value,
-                DataTree::Int(value) => jet_int_to_f64(*value),
-                DataTree::Number(text) | DataTree::Text(text) => text
+                Dyn::Float(value) => *value,
+                Dyn::Int(value) => value.to_f64(),
+                Dyn::Number(text) => decode_finite_lexeme(text, "F32")?,
+                Dyn::Text(text) if jet_text_cells_active() => text
                     .trim()
                     .parse::<f64>()
                     .map_err(|_| FieldError::one(format!("expected F32, found text {:?}", text)))?,
-                DataTree::TypedText(text) => {
+                Dyn::Text(text) => {
                     return Err(FieldError::one(format!(
                         "expected F32, found text {:?}",
                         text
@@ -574,7 +597,7 @@ macro_rules! jet_datatree_decode_helpers {
                 other => {
                     return Err(FieldError::one(format!(
                         "expected F32, found {}",
-                        datatree_kind_for(other)
+                        dyn_kind_for(other)
                     )))
                 }
             };

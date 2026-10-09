@@ -40,16 +40,16 @@ pub fn open() -> PhpPool PhpError! {
 
 pub fn cancel(pool: PhpPool) { abi.cancel(pool.value) }
 
-fn decode_response(raw: String, code: Int) -> DataTree PhpError! {
+fn decode_response(raw: String, code: Int) -> Dyn PhpError! {
     if code == 1 -> return Err(PhpError.NotRunning)
     if code == 2 -> return Err(PhpError.Timeout)
     if code == 3 -> return Err(PhpError.Cancelled)
     if code == 5 -> return Err(PhpError.Limit)
     if code != 0 -> return Err(PhpError.Protocol)
     response := json.parse(raw) ?? return Err(PhpError.Protocol)
-    succeeded := (&response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    succeeded := (&response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
     if !succeeded -> return Err(PhpError.CommandFailed)
-    return Ok(&response.field("value") ?? DataTree.Null)
+    return Ok(&response.field("value") ?? Dyn.Null)
 }
 
 pub fn transform(pool: PhpPool, input: DataTree, deadline_ms: Int) -> DataTree PhpError! {

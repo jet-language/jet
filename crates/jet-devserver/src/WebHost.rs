@@ -25,7 +25,7 @@ use crate::TerminalStyleReload::{
 };
 use jet_driver::Diagnostics::ColorChoice;
 use jet_driver::Package::ReleaseDevtoolsPolicy;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::Devtools::{
     JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsEventBody, JetDevtoolsFormState,
     JetDevtoolsFreshnessFact, JetDevtoolsFreshnessState, JetDevtoolsFunctionIdentity,
@@ -121,12 +121,12 @@ pub(crate) fn decode_devtools_envelope(
 }
 
 fn decode_devtools_events(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     session_id: &str,
     started_at_ms: u64,
 ) -> Result<JetDevtoolsEnvelope, String> {
     let events = match object.get("events") {
-        Some(DataTree::Array(events)) => events,
+        Some(Dyn::Array(events)) => events,
         _ => return Err("devtools envelope `events` must be an array".to_string()),
     };
     if events.len() > JET_DEVTOOLS_MAX_EVENTS {
@@ -151,8 +151,8 @@ fn decode_devtools_events(
             .ok_or_else(|| "devtools envelope `fields` must be an object".to_string())?;
         let fields = crate::Session::render_json(fields_value);
         let payload = match event.get("payload") {
-            None | Some(DataTree::Null) => None,
-            Some(DataTree::Object(_)) => Some(devtools_required_object_json(&event, "payload")?),
+            None | Some(Dyn::Null) => None,
+            Some(Dyn::Object(_)) => Some(devtools_required_object_json(&event, "payload")?),
             Some(_) => return Err("devtools event payload must be an object or null".to_string()),
         };
         let event = match decode_devtools_body(&kind, &entity, fields_value)? {
@@ -183,8 +183,8 @@ fn decode_devtools_events(
     }
     if let Some(selection) = object.get("selection") {
         match selection {
-            DataTree::Null => envelope.set_selection(None),
-            DataTree::Object(selection) => {
+            Dyn::Null => envelope.set_selection(None),
+            Dyn::Object(selection) => {
                 let selection = object_map_entries(selection);
                 let panel_id = devtools_required_string(&selection, "panel_id")?;
                 let item_key = devtools_optional_string(&selection, "item_key")?;
@@ -197,9 +197,9 @@ fn decode_devtools_events(
     }
     if let Some(cursor) = object.get("cursor") {
         envelope.set_cursor(match cursor {
-            DataTree::Null => None,
-            DataTree::Int(value) if *value >= 0 => Some(*value as u64),
-            DataTree::Float(value)
+            Dyn::Null => None,
+            Dyn::Int(value) => Some(value.to_u64().ok_or_else(|| "devtools envelope cursor must be a sequence".to_string())?),
+            Dyn::Float(value)
                 if value.fract() == 0.0 && *value >= 0.0 && *value <= u64::MAX as f64 =>
             {
                 Some(*value as u64)
@@ -232,8 +232,8 @@ fn decode_devtools_events(
     }
     if let Some(identity) = object.get("source_identity") {
         envelope.source_identity = match identity {
-            DataTree::Null => None,
-            DataTree::Object(identity) => {
+            Dyn::Null => None,
+            Dyn::Object(identity) => {
                 let identity = object_map_entries(identity);
                 Some(JetDevtoolsSourceIdentityFact::new(
                     devtools_optional_string(&identity, "source_id")?,
@@ -259,7 +259,7 @@ fn decode_devtools_events(
 }
 
 fn decode_devtools_command_envelope(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     session_id: &str,
     started_at_ms: u64,
 ) -> Result<JetDevtoolsCommandEnvelope, String> {
@@ -287,7 +287,7 @@ fn decode_devtools_command_envelope(
         return Err("devtools command envelope direction must be host_to_runtime".to_string());
     }
     let commands = match object.get("commands") {
-        Some(DataTree::Array(commands)) => commands,
+        Some(Dyn::Array(commands)) => commands,
         _ => return Err("devtools envelope `commands` must be an array".to_string()),
     };
     if commands.len() > jet_foundation::DevtoolsControl::JET_DEVTOOLS_MAX_COMMANDS {
@@ -423,7 +423,7 @@ fn decode_devtools_command_envelope(
 fn decode_devtools_body(
     kind: &str,
     _entity: &str,
-    fields: &DataTree,
+    fields: &Dyn,
 ) -> Result<Option<JetDevtoolsEventBody>, String> {
     let object =
         object_map(fields).ok_or_else(|| "devtools event fields must be an object".to_string())?;
@@ -795,21 +795,21 @@ fn devtools_expected_fields(kind: &str) -> Option<&'static [&'static str]> {
     }
 }
 
-fn object_map(value: &DataTree) -> Option<std::collections::BTreeMap<String, DataTree>> {
+fn object_map(value: &Dyn) -> Option<std::collections::BTreeMap<String, Dyn>> {
     match value {
-        DataTree::Object(fields) => Some(fields.iter().cloned().collect()),
+        Dyn::Object(fields) => Some(fields.iter().cloned().collect()),
         _ => None,
     }
 }
 
 fn object_map_entries(
-    fields: &[(String, DataTree)],
-) -> std::collections::BTreeMap<String, DataTree> {
+    fields: &[(String, Dyn)],
+) -> std::collections::BTreeMap<String, Dyn> {
     fields.iter().cloned().collect()
 }
 
 fn devtools_has_exact_fields(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     expected: &[&str],
 ) -> bool {
     object.len() == expected.len()
@@ -819,7 +819,7 @@ fn devtools_has_exact_fields(
 }
 
 fn devtools_exact_fields(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     expected: &[&str],
 ) -> Result<(), String> {
     if !devtools_has_exact_fields(object, expected) {
@@ -829,11 +829,11 @@ fn devtools_exact_fields(
 }
 
 fn devtools_required_game_launch_phases(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<Vec<JetDevtoolsGameLaunchPhase>, String> {
     let values = match object.get(key) {
-        Some(DataTree::Array(values)) => values,
+        Some(Dyn::Array(values)) => values,
         _ => return Err(format!("devtools event `{key}` must be an array")),
     };
     if values.len() > 256 {
@@ -855,25 +855,25 @@ fn devtools_required_game_launch_phases(
         .collect()
 }
 fn devtools_required_string_array(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<Vec<String>, String> {
     let values = match object.get(key) {
-        Some(DataTree::Array(values)) => values,
+        Some(Dyn::Array(values)) => values,
         _ => return Err(format!("devtools event `{key}` must be an array")),
     };
     values
         .iter()
         .map(|value| match value {
-            DataTree::Text(value) if !value.is_empty() => Ok(value.clone()),
-            DataTree::Text(_) => Err(format!("devtools event `{key}` has an empty string")),
+            Dyn::Text(value) if !value.is_empty() => Ok(value.clone()),
+            Dyn::Text(_) => Err(format!("devtools event `{key}` has an empty string")),
             _ => Err(format!("devtools event `{key}` must contain strings")),
         })
         .collect()
 }
 
 fn devtools_required_u16(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<u16, String> {
     u16::try_from(devtools_required_u64(object, key)?)
@@ -881,21 +881,19 @@ fn devtools_required_u16(
 }
 
 fn devtools_optional_u64(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<Option<u64>, String> {
     match object.get(key) {
-        Some(DataTree::Null) | None => Ok(None),
-        Some(DataTree::Int(value)) if *value >= 0 => u64::try_from(*value)
-            .map(Some)
-            .map_err(|_| format!("devtools event `{key}` must be non-negative")),
-        Some(DataTree::Int(_)) => Err(format!("devtools event `{key}` must be non-negative")),
+        Some(Dyn::Null) | None => Ok(None),
+        Some(Dyn::Int(value)) => value.to_u64().map(Some)
+            .ok_or_else(|| format!("devtools event `{key}` must be non-negative")),
         Some(_) => Err(format!("devtools event `{key}` must be an integer or null")),
     }
 }
 
 fn devtools_required_function(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<JetDevtoolsFunctionIdentity, String> {
     let function = object
@@ -921,18 +919,18 @@ fn devtools_required_function(
 }
 
 fn devtools_optional_function(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<Option<JetDevtoolsFunctionIdentity>, String> {
     match object.get(key) {
-        None | Some(DataTree::Null) => Ok(None),
-        Some(DataTree::Object(_)) => devtools_required_function(object, key).map(Some),
+        None | Some(Dyn::Null) => Ok(None),
+        Some(Dyn::Object(_)) => devtools_required_function(object, key).map(Some),
         Some(_) => Err(format!("devtools event `{key}` must be an object or null")),
     }
 }
 
 fn devtools_required_u32(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<u32, String> {
     u32::try_from(devtools_required_u64(object, key)?)
@@ -940,13 +938,13 @@ fn devtools_required_u32(
 }
 
 fn devtools_required_string(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<String, String> {
     let value = object
         .get(key)
         .ok_or_else(|| format!("devtools envelope missing `{key}`"))?;
-    let DataTree::Text(value) = value else {
+    let Dyn::Text(value) = value else {
         return Err(format!("devtools envelope `{key}` must be a string"));
     };
     if value.is_empty() {
@@ -955,8 +953,8 @@ fn devtools_required_string(
     Ok(value.clone())
 }
 
-fn devtools_required_value_string(value: &DataTree, key: &str) -> Result<String, String> {
-    let DataTree::Text(value) = value else {
+fn devtools_required_value_string(value: &Dyn, key: &str) -> Result<String, String> {
+    let Dyn::Text(value) = value else {
         return Err(format!("devtools envelope `{key}` must be a string"));
     };
     if value.is_empty() {
@@ -966,13 +964,13 @@ fn devtools_required_value_string(value: &DataTree, key: &str) -> Result<String,
 }
 
 fn devtools_optional_string(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<Option<String>, String> {
     match object.get(key) {
-        None | Some(DataTree::Null) => Ok(None),
-        Some(DataTree::Text(value)) if !value.is_empty() => Ok(Some(value.clone())),
-        Some(DataTree::Text(_)) => Err(format!("devtools envelope `{key}` must not be empty")),
+        None | Some(Dyn::Null) => Ok(None),
+        Some(Dyn::Text(value)) if !value.is_empty() => Ok(Some(value.clone())),
+        Some(Dyn::Text(_)) => Err(format!("devtools envelope `{key}` must not be empty")),
         Some(_) => Err(format!(
             "devtools envelope `{key}` must be a string or null"
         )),
@@ -980,38 +978,38 @@ fn devtools_optional_string(
 }
 
 fn devtools_required_u64(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<u64, String> {
     let value = object
         .get(key)
         .ok_or_else(|| format!("devtools envelope missing `{key}`"))?;
     match value {
-        DataTree::Int(value) => u64::try_from(*value)
-            .map_err(|_| format!("devtools envelope `{key}` must be non-negative")),
+        Dyn::Int(value) => value.to_u64()
+            .ok_or_else(|| format!("devtools envelope `{key}` must be non-negative")),
         _ => Err(format!("devtools envelope `{key}` must be an integer")),
     }
 }
 
 fn devtools_required_bool(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<bool, String> {
     match object.get(key) {
-        Some(DataTree::Bool(value)) => Ok(*value),
+        Some(Dyn::Bool(value)) => Ok(*value),
         Some(_) => Err(format!("devtools envelope `{key}` must be a boolean")),
         None => Err(format!("devtools envelope missing `{key}`")),
     }
 }
 
 fn devtools_required_object_json(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<String, String> {
     let value = object
         .get(key)
         .ok_or_else(|| format!("devtools envelope missing `{key}`"))?;
-    if !matches!(value, DataTree::Object(_)) {
+    if !matches!(value, Dyn::Object(_)) {
         return Err(format!("devtools envelope `{key}` must be an object"));
     }
     Ok(crate::Session::render_json(value))
@@ -3804,12 +3802,12 @@ fn web_stream_request_error(message: impl Into<String>) -> (String, String) {
 }
 
 fn web_stream_required_string(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<String, (String, String)> {
     match object.get(key) {
-        Some(DataTree::Text(value)) if !value.is_empty() => Ok(value.clone()),
-        Some(DataTree::Text(_)) => Err(web_stream_request_error(format!(
+        Some(Dyn::Text(value)) if !value.is_empty() => Ok(value.clone()),
+        Some(Dyn::Text(_)) => Err(web_stream_request_error(format!(
             "web stream `{key}` must not be empty"
         ))),
         Some(_) => Err(web_stream_request_error(format!(
@@ -3821,11 +3819,11 @@ fn web_stream_required_string(
     }
 }
 fn web_stream_required_text(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<String, (String, String)> {
     match object.get(key) {
-        Some(DataTree::Text(value)) => Ok(value.clone()),
+        Some(Dyn::Text(value)) => Ok(value.clone()),
         Some(_) => Err(web_stream_request_error(format!(
             "web stream `{key}` must be a string"
         ))),
@@ -3836,12 +3834,11 @@ fn web_stream_required_text(
 }
 
 fn web_stream_required_u64(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<u64, (String, String)> {
     match object.get(key) {
-        Some(DataTree::Int(value)) if *value >= 0 => Ok(*value as u64),
-        Some(DataTree::Int(_)) => Err(web_stream_request_error(format!(
+        Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| web_stream_request_error(format!(
             "web stream `{key}` must be non-negative"
         ))),
         Some(_) => Err(web_stream_request_error(format!(
@@ -3854,11 +3851,11 @@ fn web_stream_required_u64(
 }
 
 fn web_stream_required_bool(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<bool, (String, String)> {
     match object.get(key) {
-        Some(DataTree::Bool(value)) => Ok(*value),
+        Some(Dyn::Bool(value)) => Ok(*value),
         Some(_) => Err(web_stream_request_error(format!(
             "web stream `{key}` must be a boolean"
         ))),
@@ -3868,7 +3865,7 @@ fn web_stream_required_bool(
     }
 }
 fn web_stream_required_usize(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<usize, (String, String)> {
     let value = web_stream_required_u64(object, key)?;
@@ -3877,9 +3874,9 @@ fn web_stream_required_usize(
 }
 
 fn web_stream_object(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
-) -> Result<std::collections::BTreeMap<String, DataTree>, (String, String)> {
+) -> Result<std::collections::BTreeMap<String, Dyn>, (String, String)> {
     let value = object
         .get(key)
         .ok_or_else(|| web_stream_request_error(format!("web stream request has no `{key}`")))?;
@@ -3888,7 +3885,7 @@ fn web_stream_object(
 }
 
 fn web_stream_identity(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<web_stream_bridge::JetWebIslandIdentity, (String, String)> {
     let identity = web_stream_object(object, key)?;
@@ -3901,7 +3898,7 @@ fn web_stream_identity(
 }
 
 fn web_stream_boundary_id(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<web_stream_bridge::JetWebBoundaryId, (String, String)> {
     web_stream_bridge::JetWebBoundaryId::new(web_stream_required_string(object, key)?)
@@ -3909,7 +3906,7 @@ fn web_stream_boundary_id(
 }
 
 fn web_stream_id(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<web_stream_bridge::JetWebStreamId, (String, String)> {
     let stream = web_stream_object(object, key)?;
@@ -3925,7 +3922,7 @@ fn web_stream_id(
 }
 
 fn web_stream_trigger(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<web_stream_bridge::JetWebHydrationTrigger, (String, String)> {
     let value = web_stream_required_string(object, key)?;
@@ -3937,7 +3934,7 @@ fn web_stream_trigger(
 }
 
 fn web_stream_target(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<web_stream_bridge::JetWebPendingProjectionTarget, (String, String)> {
     match web_stream_required_string(object, key)?.as_str() {
@@ -3950,7 +3947,7 @@ fn web_stream_target(
 }
 
 fn web_stream_failure(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
 ) -> Result<web_stream_bridge::JetWebPendingError, (String, String)> {
     let error = web_stream_object(object, "error")?;
     match web_stream_required_string(&error, "code")?.as_str() {
@@ -6053,11 +6050,11 @@ fn current_revision_for_request(canvas_file: &str, request: &str) -> String {
     let source_id = jet_foundation::JSON::parse_json(request)
         .ok()
         .and_then(|value| match value {
-            DataTree::Object(object) => object.into_iter().find_map(|(name, value)| {
+            Dyn::Object(object) => object.into_iter().find_map(|(name, value)| {
                 (name == "source_id")
                     .then_some(value)
                     .and_then(|value| match value {
-                        DataTree::Text(source_id) | DataTree::TypedText(source_id) => {
+                        Dyn::Text(source_id) => {
                             Some(source_id)
                         }
                         _ => None,
@@ -6077,14 +6074,14 @@ fn source_id_from_payload(payload: &str) -> String {
         return String::new();
     };
 
-    fn find(value: &DataTree) -> Option<String> {
+    fn find(value: &Dyn) -> Option<String> {
         match value {
-            DataTree::Object(object) => {
+            Dyn::Object(object) => {
                 if let Some(source_id) = object.iter().find_map(|(name, value)| {
                     (name == "source_id")
                         .then_some(value)
                         .and_then(|value| match value {
-                            DataTree::Text(source_id) | DataTree::TypedText(source_id) => {
+                            Dyn::Text(source_id) => {
                                 Some(source_id.clone())
                             }
                             _ => None,
@@ -6094,7 +6091,7 @@ fn source_id_from_payload(payload: &str) -> String {
                 }
                 object.iter().find_map(|(_, value)| find(value))
             }
-            DataTree::Array(values) => values.iter().find_map(find),
+            Dyn::Array(values) => values.iter().find_map(find),
             _ => None,
         }
     }

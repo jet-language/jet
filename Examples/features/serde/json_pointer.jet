@@ -1,4 +1,4 @@
-// json.pointer: RFC 6901 selection over a parsed DataTree (D-CORE-JSON-POINTER1=A).
+// json.pointer: RFC 6901 selection over a parsed Dyn (D-CORE-JSON-POINTER1=A).
 // "" is the whole value and "/" the member named "". `~1` spells `/` and `~0`
 // spells `~` inside one step. Array steps are canonical indices; `-` and
 // leading zeros are errors. A JSON null member is a value; a missing member is
@@ -12,7 +12,7 @@ fn kind_name(kind: encoding.EncodingErrorKind) -> String {
     "other"
 }
 
-fn show(tree: DataTree, path: String) {
+fn show(tree: Dyn, path: String) {
     selected :: json.pointer(tree, path) ?? {
         print("`{path}` -> {kind_name(err.kind)} at `{err.path}`: {err.reason}")
         return

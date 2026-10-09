@@ -8,7 +8,7 @@
 
 use crate::JSON;
 use crate::SHA256;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -41,7 +41,7 @@ impl ImportedNixState {
 
 /// Import a rich fallback record. `None` means the input is the old pinned
 /// `nix build --json` shape and has no fallback projections to retain.
-pub(crate) fn import_record(record: &DataTree) -> Result<Option<ImportedNixState>, String> {
+pub(crate) fn import_record(record: &Dyn) -> Result<Option<ImportedNixState>, String> {
     let object = record.as_object()?;
     let import = object_value(object, "jetpackImport")
         .or_else(|| object_value(object, "jetpack"))
@@ -94,15 +94,15 @@ pub(crate) fn import_record(record: &DataTree) -> Result<Option<ImportedNixState
 }
 
 fn object_value<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     name: &str,
-) -> Option<&'a DataTree> {
+) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(key, value)| (key == name).then_some(value))
 }
 
-fn looks_like_fallback(root: &[(String, DataTree)], import: &[(String, DataTree)]) -> bool {
+fn looks_like_fallback(root: &[(String, Dyn)], import: &[(String, Dyn)]) -> bool {
     object_value(root, "jetpackImport").is_some()
         || object_value(root, "jetpack").is_some()
         || object_value(root, "fallback").is_some()
@@ -117,10 +117,10 @@ fn looks_like_fallback(root: &[(String, DataTree)], import: &[(String, DataTree)
 }
 
 fn required<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     names: &[&str],
     label: &str,
-) -> Result<&'a DataTree, String> {
+) -> Result<&'a Dyn, String> {
     let mut found = None;
     for name in names {
         let Some(value) = object_value(object, name) else {
@@ -134,32 +134,24 @@ fn required<'a>(
     found.ok_or_else(|| format!("fallback document has no {label} field"))
 }
 
-fn canonical(value: &DataTree) -> Result<String, String> {
+fn canonical(value: &Dyn) -> Result<String, String> {
     let mut output = String::new();
     write_canonical(value, &mut output)?;
     Ok(output)
 }
 
-fn write_canonical(value: &DataTree, output: &mut String) -> Result<(), String> {
+fn write_canonical(value: &Dyn, output: &mut String) -> Result<(), String> {
     match value {
-        DataTree::Null => output.push_str("null"),
-        DataTree::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
-        DataTree::Int(value) => output.push_str(&value.to_string()),
-        DataTree::Float(value) if value.is_finite() => output.push_str(&value.to_string()),
-        DataTree::Float(_) => return Err("fallback document contains a non-finite number".into()),
-        DataTree::Number(value) => output.push_str(value),
-        DataTree::TypedText(value) | DataTree::Text(value) => output.push_str(&JSON::quote(value)),
-        DataTree::Bytes(values) => {
-            output.push('[');
-            for (index, value) in values.iter().enumerate() {
-                if index != 0 {
-                    output.push(',');
-                }
-                output.push_str(&value.to_string());
-            }
-            output.push(']');
-        }
-        DataTree::Array(values) => {
+        Dyn::Null => output.push_str("null"),
+        Dyn::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
+        Dyn::Int(value) => output.push_str(&value.to_string()),
+        Dyn::Float(value) if value.is_finite() => output.push_str(&value.to_string()),
+        Dyn::Float(_) => return Err("fallback document contains a non-finite number".into()),
+        Dyn::Number(value) => output.push_str(value),
+        Dyn::Text(value) => output.push_str(&JSON::quote(value)),
+        Dyn::Bytes(values) => output.push_str(&JSON::quote(&Dyn::bytes_text(values))),
+        Dyn::DateTime(value) => output.push_str(&JSON::quote(&value.to_rfc3339())),
+        Dyn::Array(values) => {
             output.push('[');
             for (index, value) in values.iter().enumerate() {
                 if index != 0 {
@@ -169,7 +161,7 @@ fn write_canonical(value: &DataTree, output: &mut String) -> Result<(), String> 
             }
             output.push(']');
         }
-        DataTree::Object(values) => {
+        Dyn::Object(values) => {
             output.push('{');
             for (index, (key, value)) in values.iter().enumerate() {
                 if index != 0 {

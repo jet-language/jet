@@ -1,6 +1,6 @@
-// core.encoding.cbor profile: RFC 8949 CBOR projected into DataTree. Each
+// core.encoding.cbor profile: RFC 8949 CBOR projected into Dyn. Each
 // case below is one cell of the accepted/rejected table; a rejection is a
-// typed CBORError (kind, byte offset, reason), never a silently coerced value.
+// typed EncodingError (kind, byte offset, reason), never a silently coerced value.
 // Every rejected error is dropped at the end of its handler, so each row also
 // proves the error carrier is released cleanly on every tier.
 use core.encoding.cbor as cbor
@@ -28,7 +28,7 @@ fn run() {
     show("float32 1.0", [U8]{250, 63, 128, 0, 0})
     show("indefinite array", [U8]{159, 1, 2, 255})
 
-    // Rejected cells.
+    // Boundary cells, including the native DateTime and Bytes cases.
     show("uint 2^64-1", [U8]{27, 255, 255, 255, 255, 255, 255, 255, 255})
     show("tag 1 datetime", [U8]{193, 26, 81, 75, 103, 176})
     show("bstr", [U8]{66, 1, 2})

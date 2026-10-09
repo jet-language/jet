@@ -206,7 +206,7 @@ fn run() {
 #[test]
 fn nested_return_if_keeps_live_value_branch_type() {
     let src = r#"
-fn nested_return_if(value: DataTree, right: DataTree) -> Bool Never! {
+fn nested_return_if(value: Dyn, right: Dyn) -> Bool Never! {
     return if value == {
         .Text(left_text) -> {
             return if right == {
@@ -219,7 +219,7 @@ fn nested_return_if(value: DataTree, right: DataTree) -> Bool Never! {
 }
 
 fn run() {
-    print(nested_return_if(DataTree.Null, DataTree.Null))
+    print(nested_return_if(Dyn.Null, Dyn.Null))
 }
 "#;
     let (jit_code, jit_stdout, jit_stderr) =
@@ -1525,8 +1525,8 @@ struct WriteOnly {
 }
 
 impl WriteOnly.Encode {
-    fn encode(self) -> DataTree {
-        return DataTree.Text("write")
+    fn encode(self) -> Dyn {
+        return Dyn.Text("write")
     }
 }
 
@@ -2176,12 +2176,12 @@ fn run() {
 }
 
 #[test]
-fn data_tree_pattern_dispatch_binds_payload_and_wildcard_on_all_tiers() {
+fn dyn_pattern_dispatch_binds_payload_and_wildcard_on_all_tiers() {
     if !have_rustc() {
         return;
     }
     let src = r#"
-fn classify(tree: DataTree) -> String {
+fn classify(tree: Dyn) -> String {
     if tree == {
         .Object(entries) -> { return "object:{entries.len()}" }
         .Int(_) -> { return "int" }
@@ -2189,16 +2189,16 @@ fn classify(tree: DataTree) -> String {
     }
 }
 fn run() {
-    print(classify(DataTree.Object(["a": DataTree.Int(7)])))
-    print(classify(DataTree.Int(3)))
-    print(classify(DataTree.Text("x")))
+    print(classify(Dyn.Object(["a": Dyn.Int(7)])))
+    print(classify(Dyn.Int(3)))
+    print(classify(Dyn.Text("x")))
 }
 "#;
-    let (aot_code, aot_stdout) = build_and_run("tir_data_tree_pattern_dispatch", src);
+    let (aot_code, aot_stdout) = build_and_run("tir_dyn_pattern_dispatch", src);
     assert_eq!(aot_code, 0);
     assert_eq!(aot_stdout, "object:1\nint\nother\n");
 
-    let (default_code, default_stdout, stderr) = default_run("tir_data_tree_pattern_dispatch", src);
+    let (default_code, default_stdout, stderr) = default_run("tir_dyn_pattern_dispatch", src);
     assert_eq!(default_code, 0, "default tier failed: {stderr}");
     assert_eq!(default_stdout, "object:1\nint\nother\n", "{stderr}");
 }
@@ -2302,16 +2302,16 @@ fn run() {
 }
 
 #[test]
-fn datatree_array_accepts_explicit_empty_payload_on_all_tiers() {
+fn dyn_array_accepts_explicit_empty_payload_on_all_tiers() {
     if !have_rustc() {
         return;
     }
     let src = r#"
 fn run() {
-    _value := DataTree.Array([DataTree]{})
+    _value := Dyn.Array([Dyn]{})
 }
 "#;
-    assert_tiers_agree("tir_datatree_empty_array_payload", src, "");
+    assert_tiers_agree("tir_dyn_empty_array_payload", src, "");
 }
 
 /// An arm-head range dispatch over a scalar subject with an `else` (the mixed-dispatch

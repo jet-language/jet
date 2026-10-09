@@ -38,7 +38,7 @@ use crate::Codegen::TIR::tir_add_pattern_bindings;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::is_json_variant;
-use crate::Codegen::{is_data_tree_subject, is_key_subject};
+use crate::Codegen::{is_dyn_subject, is_key_subject};
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::{variant_binding_types, variant_binding_types_for_enum};
@@ -117,7 +117,7 @@ pub(crate) fn return_type_has_value(ty: &Type) -> bool {
 pub(crate) fn encoding_reader_item_type(name: &str) -> Option<Type> {
     match name {
         "JSONReader" | "CBORReader" => Some(Type::Named("DataEvent".to_string())),
-        "JSONLReader" | "XMLReader" => Some(Type::Named("DataTree".to_string())),
+        "JSONLReader" | "XMLReader" => Some(Type::Named("Dyn".to_string())),
         "CSVReader" => Some(Type::Named("CSVRow".to_string())),
         _ => None,
     }
@@ -260,7 +260,7 @@ pub(super) fn is_binding_free_user_variant_pattern_test(pattern: &Pattern, cx: &
 }
 
 /// The enum that owns a binding-free variant test. The checked subject type
-/// decides first: a `DataTree`/`Key` subject keeps its prelude owner even when a
+/// decides first: a `Dyn`/`Key` subject keeps its prelude owner even when a
 /// user enum declares the same variant name, and a user enum subject keeps its
 /// own owner even when the variant is spelled like a builtin (`Int`, `Char`, …).
 fn binding_free_variant_owner(
@@ -269,7 +269,7 @@ fn binding_free_variant_owner(
     subject_enum: Option<String>,
     variant: &str,
 ) -> Option<String> {
-    if is_data_tree_subject(cx, subject_ty) {
+    if is_dyn_subject(cx, subject_ty) {
         return Some(Syntax::TYPE_DATA.to_string());
     }
     if is_key_subject(cx, subject_ty) {
@@ -696,7 +696,7 @@ fn lower_if_cond_atom(
     // inner field directly; `Object` binds its ordered `[(key, value)]` pair list
     // (D-DATATREE-ORDER1=A).
     //
-    // D-UNIONTYPE1=A: anonymous-union member tags collide with DataTree (`Int`/`Float`/…).
+    // D-UNIONTYPE1=A: anonymous-union member tags collide with Dyn (`Int`/`Float`/…).
     // Resolve the subject first and prefer the generated `__JetUnion_*` if-let whenever
     // the scrutinee is a union — same ownership fact `lower_enum_match` already uses.
     if let Expr::PatternTest {
@@ -713,8 +713,8 @@ fn lower_if_cond_atom(
     {
         let subj = lower_if_let_subject(subject, cx, env, cached);
         // DataEvent shares variant names (`Int`, `Float`, …) with the dynamic
-        // DataTree surface. Once sema has resolved the subject to DataEvent, use
-        // that enum's prelude pattern and payload facts instead of the DataTree
+        // Dyn surface. Once sema has resolved the subject to DataEvent, use
+        // that enum's prelude pattern and payload facts instead of the Dyn
         // heuristic below.
         if matches!(&subj.ty, Type::Named(name) if name == "DataEvent") {
             let enum_type = Some("DataEvent".to_string());
@@ -787,8 +787,8 @@ fn lower_if_cond_atom(
                 );
             }
         }
-        if is_json_variant(variant) && is_data_tree_subject(cx, &subj.ty) {
-            // DataTree dispatch is valid for unit and wildcard payload arms as
+        if is_json_variant(variant) && is_dyn_subject(cx, &subj.ty) {
+            // Dyn dispatch is valid for unit and wildcard payload arms as
             // well as bound payloads. Keep all three forms in TIR so statement
             // dispatch cannot fall through to the unsupported PatternTest
             // expression path (card #2356).
@@ -824,7 +824,7 @@ fn lower_if_cond_atom(
                 let place = TLocal::user(name);
                 // The wire subject decides the owner. A user/anonymous enum may
                 // export the same tag (`Int`, `Text`, …), so the name-only
-                // binding emitter cannot safely recover DataTree ownership.
+                // binding emitter cannot safely recover Dyn ownership.
                 return (
                     TIfCond::IfLet {
                         pattern: TPattern::arm(
@@ -842,7 +842,7 @@ fn lower_if_cond_atom(
         // pattern is the same `emit_if_let_pattern` (`__jet_E::__jet_V(user_b)`), and the
         // binding's type is the variant's first payload type from `variant_binding_types`
         // (the same total fact `add_pattern_bindings` reads on the AST path).
-        if !(is_json_variant(variant) && is_data_tree_subject(cx, &subj.ty)) {
+        if !(is_json_variant(variant) && is_dyn_subject(cx, &subj.ty)) {
             let subject_enum = checked_subject_enum(cx, &subj.ty, variant);
             let enum_type = binding_free_variant_owner(cx, &subj.ty, subject_enum, variant);
             let payload_tys = enum_type
@@ -894,7 +894,7 @@ fn lower_if_cond_atom(
         let subject_enum = checked_subject_enum(cx, &subj.ty, variant);
         let subject_owned_unit_variant = bindings.is_empty()
             && subject_enum.is_some()
-            && !is_data_tree_subject(cx, &subj.ty)
+            && !is_dyn_subject(cx, &subj.ty)
             && !is_key_subject(cx, &subj.ty);
         if subject_owned_unit_variant || is_binding_free_user_variant_pattern_test(pattern, cx) {
             let enum_type = binding_free_variant_owner(cx, &subj.ty, subject_enum, variant);
@@ -1360,11 +1360,11 @@ pub(crate) fn lower_switch<'a>(
     // while lowering these arms instead of sending them through the generic
     // user-enum match path. A user enum may declare the same variant names
     // (`Int`, `Text`, …); an identifier subject whose checked type is not
-    // `DataTree` takes the enum-match path below.
+    // `Dyn` takes the enum-match path below.
     let data_subject = match subject {
         Expr::Ident(name, _) => env
             .ty_of(name)
-            .is_none_or(|ty| is_data_tree_subject(cx, &ty)),
+            .is_none_or(|ty| is_dyn_subject(cx, &ty)),
         _ => true,
     };
     if data_subject

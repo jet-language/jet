@@ -2307,16 +2307,16 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "DataTree",
+        "Dyn",
         &[
             "Null",
             "Bool",
             "Int",
             "Float",
             "Number",
-            "TypedText",
             "Text",
             "Bytes",
+            "DateTime",
             "Array",
             "Object",
         ],
@@ -3645,12 +3645,13 @@ fn compiler_owned_type_defs<'a>(
                                 Some(Some(ty)) => TirVariantPayload::Single(ty),
                                 _ => TirVariantPayload::Unit,
                             }
-                        } else if *name == "DataTree" {
+                        } else if *name == "Dyn" {
                             match *variant {
                                 "Bool" => TirVariantPayload::Single(Type::Bool),
                                 "Int" => TirVariantPayload::Single(Type::Int),
                                 "Float" => TirVariantPayload::Single(Type::Float),
-                                "Number" | "TypedText" | "Text" => {
+                                "DateTime" => TirVariantPayload::Single(Type::Named("ZonedDateTime".to_string())),
+                                "Number" | "Text" => {
                                     TirVariantPayload::Single(Type::String)
                                 }
                                 "Bytes" => {
@@ -3660,14 +3661,14 @@ fn compiler_owned_type_defs<'a>(
                                     })))
                                 }
                                 "Array" => TirVariantPayload::Single(Type::List(Box::new(
-                                    Type::Named("DataTree".to_string()),
+                                    Type::Named("Dyn".to_string()),
                                 ))),
                                 "Object" => TirVariantPayload::Single(Type::List(Box::new(
                                     Type::Tuple(vec![
                                         ("key".to_string(), Box::new(Type::String)),
                                         (
                                             "value".to_string(),
-                                            Box::new(Type::Named("DataTree".to_string())),
+                                            Box::new(Type::Named("Dyn".to_string())),
                                         ),
                                     ]),
                                 ))),

@@ -8,7 +8,7 @@ pub use jet_sema::{
     Sema, Syntax, TargetMachine, Traits, AST, SHA256,
 };
 pub use jet_foundation::{
-    CLISchema, DataTree, Facts, JSON, Names, Numeric, OSTarget, ResourceSchedule, WebPartition,
+    CLISchema, Dyn, Facts, JSON, Names, Numeric, OSTarget, ResourceSchedule, WebPartition,
 };
 // `EncodingJson.rs` resolves exact-number validation through
 // `super::jet_json_number`; supply it at the root the same way `jet-jit` does.

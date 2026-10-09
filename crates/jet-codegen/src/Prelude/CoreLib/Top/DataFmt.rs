@@ -32,14 +32,14 @@ where
 
 
 // D-ENC-DYN1=A+ (c152): TOML is a full serde-equivalent adapter over the one rich
-// `DataTree` — nested `[table]`s, arrays-of-tables, dotted keys, and typed scalars.
-// The dynamic `parse` returns the `Data` value; `decode<T>` walks the rich tree;
-// `to_string` renders a `DataTree` back to a nested document.
-fn jet_std_toml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+// `Dyn` — nested `[table]`s, arrays-of-tables, dotted keys, and typed scalars.
+// The dynamic `parse` returns a `Dyn` value; `decode<T>` walks the rich tree;
+// `to_string` renders a `Dyn` back to a nested document.
+fn jet_std_toml_parse(text: &String) -> Result<jet_std::Dyn, jet_std::EncodingError> {
     jet_std::toml::parse_to_tree(text).map_err(|e| {
         jet_std::EncodingError::new(
             jet_std::EncodingFormat::TOML,
-            jet_std::EncodingErrorKind::Syntax,
+            if e.unsupported { jet_std::EncodingErrorKind::Unsupported } else { jet_std::EncodingErrorKind::Syntax },
             0,
             Ok(e.line as i64),
             Err(JetAbsent),
@@ -57,15 +57,15 @@ fn jet_enc_toml_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std:
     T::jet_decode(&tree)
 }
 
-// YAML typed decode: parse flat scalars into a DataTree::Object of Text, then decode.
+// YAML typed decode: parse flat scalars into a Dyn::Object of Text, then decode.
 // D-ENC-DYN1=A+ / D-ENC-YAML1 (c152): YAML is a full serde adapter over the one
-// rich `DataTree` — block + flow maps/sequences, typed core scalars, block scalars,
+// rich `Dyn` — block + flow maps/sequences, typed core scalars, block scalars,
 // comments, documents, anchors/aliases. parse → `Data`; decode<T> → typed tree.
-fn jet_std_yaml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+fn jet_std_yaml_parse(text: &String) -> Result<jet_std::Dyn, jet_std::EncodingError> {
     jet_std::yaml::parse_to_tree(text).map_err(|e| {
         jet_std::EncodingError::new(
             jet_std::EncodingFormat::YAML,
-            jet_std::EncodingErrorKind::Syntax,
+            if e.unsupported { jet_std::EncodingErrorKind::Unsupported } else { jet_std::EncodingErrorKind::Syntax },
             0,
             Ok(e.line as i64),
             Err(JetAbsent),

@@ -2204,6 +2204,14 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer(&mut self, e: &mut Expr) -> Option<Type> {
+        if let Expr::MethodCall { recv_type: Some(marker), resolved_ret: Some(ret), .. } = e {
+            if marker == "__DynOp__" || marker == "__DynField__" {
+                let ret = ret.clone();
+                return if self.expected_type.as_ref().is_some_and(crate::Sema::CheckerCoreLib::is_dyn_type) {
+                    self.wrap_dyn_value(e, &ret)
+                } else { Some(ret) };
+            }
+        }
         let suppress_auto = self.failure_auto_root_suppression > 0;
         // Grouping is semantically transparent. Keep the one-shot token alive
         // until it reaches the carrier-owned expression beneath any number of
@@ -2250,6 +2258,18 @@ impl<'a> Checker<'a> {
             if let Some(Type::Result { ok, .. }) = saved_expected.as_ref() {
                 self.expected_type = Some((**ok).clone());
             }
+        }
+        let dyn_expected = self.expected_type.as_ref()
+            .is_some_and(crate::Sema::CheckerCoreLib::is_dyn_type);
+        if dyn_expected {
+            self.expected_type = match e.without_parens() {
+                Expr::ListLit(..) => Some(Type::List(Box::new(json_ty()))),
+                Expr::MapLit(..) => Some(Type::Map {
+                    key: Box::new(Type::String), key_span: None, value: Box::new(json_ty()),
+                }),
+                value if crate::Sema::CheckerCoreLib::dyn_float_literal(value) => Some(Type::Float),
+                _ => None,
+            };
         }
         if matches!(e, Expr::If { .. }) {
             self.note_carrier_chain_subject(e);
@@ -2299,6 +2319,9 @@ impl<'a> Checker<'a> {
         } else {
             self.auto_propagate_call(e, result)
         };
+        let result = if dyn_expected {
+            result.and_then(|ty| self.wrap_dyn_value(e, &ty))
+        } else { result };
         if self.expr_definitely_diverges(e)
             || result
                 .as_ref()
@@ -2339,6 +2362,39 @@ impl<'a> Checker<'a> {
         let result = self.infer(e);
         self.expected_type = saved;
         result
+    }
+
+    pub(crate) fn wrap_dyn_value(&mut self, e: &mut Expr, ty: &Type) -> Option<Type> {
+        if crate::Sema::CheckerCoreLib::is_dyn_type(ty) {
+            return Some(json_ty());
+        }
+        if !crate::Sema::CheckerCoreLib::dyn_wrappable(ty) {
+            self.diags.push(Diagnostic::error("E0172",
+                format!("`{}` does not wrap into `Dyn` automatically", ty.show()),
+                "only primitive data and recursively wrappable collections wrap automatically".to_string(),
+                "write `Dyn.from(value)` (the type must implement `Encode`)".to_string(), Some(e.span())));
+            return None;
+        }
+        let span = e.span();
+        let value = std::mem::replace(e, Expr::Absent(span));
+        // A literal map keeps its source order; a map value has key order.
+        *e = if matches!(value.without_parens(), Expr::MapLit(..)) {
+            crate::Sema::CheckerCoreLib::dyn_call(Expr::Ident("Dyn".to_string(), span),
+                "Object", vec![value], json_ty(), span)
+        } else {
+            Expr::MethodCall {
+                receiver: Box::new(value), method: "encode".to_string(), method_span: span,
+                owner_type_args: Vec::new(), type_args: Vec::new(), args: Vec::new(),
+                recv_type: Some("__SerdeEncode__".to_string()), resolved_ret: Some(json_ty()),
+                operator_rhs: None, checked_widen: false,
+            }
+        };
+        Some(json_ty())
+    }
+
+    pub(crate) fn dyn_site(&self, span: Span) -> Expr {
+        Expr::Str(vec![StrPart::Lit(self.source.get(span.start..span.end)
+            .unwrap_or("…").to_string())], span)
     }
     /// Infer a value that is being placed into an aggregate slot.
     ///
@@ -4945,6 +5001,9 @@ impl<'a> Checker<'a> {
                             Some(base.as_ref().erased_inline_ranges())
                         } else if t == Type::Bool || t.is_integer() {
                             Some(t)
+                        } else if crate::Sema::CheckerCoreLib::is_dyn_type(&t) {
+                            self.diags.push(Diagnostic::from_row("E0170", &[], Some(*span)));
+                            None
                         } else {
                             self.diags.push(Diagnostic::error(
                                 "E0109",
@@ -5345,7 +5404,13 @@ impl<'a> Checker<'a> {
                         return self.infer(e);
                     }
                 }
-                self.infer_field(inner, &member, span)
+                let result = self.infer_field(inner, &member, span);
+                if let Expr::MethodCall { recv_type: Some(marker), .. } = &**inner {
+                    if marker == "__DynField__" {
+                        *e = *std::mem::replace(inner, Box::new(Expr::Absent(span)));
+                    }
+                }
+                result
             }
             Expr::OptField {
                 base,
@@ -7028,20 +7093,10 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn infer_index(
-        &mut self,
-        base: &mut Box<Expr>,
-        index: &mut Box<Expr>,
-        span: &Span,
-        kind: &mut IndexKind,
+    fn infer_index_with_base_type(
+        &mut self, index: &mut Box<Expr>,
+        span: &Span, kind: &mut IndexKind, base_ty: Type,
     ) -> Option<Type> {
-        // Keep the sema-to-TIR contract total even when an earlier expression
-        // error prevents either operand from producing a type. Diagnostics
-        // compilation still lowers the surrounding function, so an unknown
-        // index kind here would turn the user's real error into an ICE.
-        *kind = IndexKind::List;
-        self.borrow_ctx = true;
-        let base_ty = self.infer(base)?;
         if let Expr::Ident(name, selector_span) = index.as_ref() {
             if let Some(field) = crate::Syntax::layout_selector_name(name) {
                 if base_ty != Type::Named(crate::Syntax::TYPE_LAYOUT_INFO.to_string()) {
@@ -7601,9 +7656,9 @@ impl<'a> Checker<'a> {
         }
         if let Expr::Ident(type_name, type_span) = &**inner {
             let display_type_name = self.display_type_name(type_name, None);
-            // D-SERDE13=B: `Data.Null` etc. — retired spelling, point at `DataTree`.
+            // D-SERDE13=B: `Data.Null` etc. — retired spelling, point at `Dyn`.
             if type_name == "Data" {
-                self.diags.push(data_renamed_to_datatree(*type_span));
+                self.diags.push(data_renamed_to_dyn(*type_span));
                 return Some(json_ty());
             }
             if is_json_type_name(type_name) {
@@ -7684,6 +7739,24 @@ impl<'a> Checker<'a> {
         let t = self.infer(inner);
         self.suppress_partial_move_root_read = suppress;
         let t = t?;
+        if crate::Sema::CheckerCoreLib::is_dyn_type(&t) {
+            if crate::Sema::CheckerCoreLib::dyn_member(member) {
+                self.diags.push(Diagnostic::error("E0171",
+                    format!("`{member}` is a `Dyn` method, not a field"),
+                    "Dyn member names are reserved for methods".to_string(),
+                    format!("use indexing, for example `d[\"{member}\"]`"), Some(span)));
+                return None;
+            }
+            let receiver = *std::mem::replace(inner, Box::new(Expr::Absent(span)));
+            let key = Expr::Str(vec![StrPart::Lit(member.to_string())], span);
+            let mut call = crate::Sema::CheckerCoreLib::dyn_call(receiver, "__dyn_index_key",
+                vec![key, self.dyn_site(span)], json_ty(), span);
+            if let Expr::MethodCall { recv_type, .. } = &mut call {
+                *recv_type = Some("__DynField__".to_string());
+            }
+            *inner = Box::new(call);
+            return Some(json_ty());
+        }
         // D-ONCE-AT1=D / D-META-CODE1=A: compiler facts are typed
         // projections on every reflected value, not only on the root
         // `TypeInfo` value.  A derive loop commonly binds one `FieldInfo`

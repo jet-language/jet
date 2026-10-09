@@ -14,7 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use jet::ExitCodes;
 use jet::RecordIndex::{RecordCapture, RecordIdentity, RecordLink};
 use jet::SHA256;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::parse_json;
 
 const MAGIC: &[u8; 8] = b"JREPLAY\0";
@@ -1730,10 +1730,10 @@ fn extract_decision_ledger(bytes: &[u8]) -> Result<Option<String>, String> {
     let header = std::str::from_utf8(&bytes[16..header_end])
         .map_err(|_| "replay decision ledger header is not UTF-8".to_string())?;
     let value = parse_json(header).map_err(|_| "replay header is not valid JSON".to_string())?;
-    let DataTree::Object(root) = value else {
+    let Dyn::Object(root) = value else {
         return Err("replay header must be an object".into());
     };
-    let Some(DataTree::Object(extensions)) = object_field(&root, "extensions") else {
+    let Some(Dyn::Object(extensions)) = object_field(&root, "extensions") else {
         return Ok(None);
     };
     let Some(value) = object_field(extensions, "decision_ledger") else {
@@ -1819,7 +1819,7 @@ fn parse_recorded_act_payload(
     if canonical_json_value(&value)? != payload {
         return Err("recorded act payload is not canonical JSON".into());
     }
-    let DataTree::Object(root) = value else {
+    let Dyn::Object(root) = value else {
         return Err("recorded act payload must be an object".into());
     };
     require_object_keys(
@@ -1835,15 +1835,15 @@ fn parse_recorded_act_payload(
         return Err("recorded act function is empty".into());
     }
     let line = match object_field(&root, "line") {
-        Some(DataTree::Int(line)) => {
-            usize::try_from(*line).map_err(|_| "recorded act line is invalid".to_string())?
+        Some(Dyn::Int(line)) => {
+            line.to_usize().ok_or_else(|| "recorded act line is invalid".to_string())?
         }
         _ => return Err("recorded act line must be an integer".into()),
     };
     if line == 0 {
         return Err("recorded act line must be at least 1".into());
     }
-    let DataTree::Array(locals) = object_field(&root, "locals")
+    let Dyn::Array(locals) = object_field(&root, "locals")
         .ok_or_else(|| "recorded act locals are missing".to_string())?
     else {
         return Err("recorded act locals must be an array".into());
@@ -1853,7 +1853,7 @@ fn parse_recorded_act_payload(
     }
     let mut snapshots = Vec::with_capacity(locals.len());
     for local in locals {
-        let DataTree::Object(local) = local else {
+        let Dyn::Object(local) = local else {
             return Err("recorded act local must be an object".into());
         };
         require_object_keys(
@@ -1890,10 +1890,10 @@ fn parse_recorded_act_payload(
 
 fn time_ms_from_payload(payload: &str) -> Result<i64, String> {
     let value = parse_json(payload).map_err(|_| "Time payload is not valid JSON".to_string())?;
-    let DataTree::Object(root) = value else {
+    let Dyn::Object(root) = value else {
         return Err("Time payload must be an object".into());
     };
-    let DataTree::Object(unix_ns) = object_field(&root, "unix_ns")
+    let Dyn::Object(unix_ns) = object_field(&root, "unix_ns")
         .ok_or_else(|| "Time payload is missing unix_ns".to_string())?
     else {
         return Err("Time payload unix_ns must be an object".into());
@@ -1911,7 +1911,7 @@ fn validate_time_payload(payload: &str) -> Result<(), String> {
     if canonical_json_value(&value)? != payload {
         return Err("Time payload is not canonical JSON".to_string());
     }
-    let DataTree::Object(root) = value else {
+    let Dyn::Object(root) = value else {
         return Err("Time payload must be an object".into());
     };
     for (key, _) in &root {
@@ -1919,7 +1919,7 @@ fn validate_time_payload(payload: &str) -> Result<(), String> {
             return Err(format!("Time payload has unknown field `{key}`"));
         }
     }
-    if !matches!(object_field(&root, "call_id"), Some(DataTree::Int(0))) {
+    if !matches!(object_field(&root, "call_id"), Some(Dyn::Int(value)) if value.to_i64() == Some(0)) {
         return Err("Time payload call_id is invalid".into());
     }
     if !matches!(
@@ -1931,7 +1931,7 @@ fn validate_time_payload(payload: &str) -> Result<(), String> {
     ) {
         return Err("Time payload site_id is invalid".into());
     }
-    let DataTree::Object(unix_ns) = object_field(&root, "unix_ns")
+    let Dyn::Object(unix_ns) = object_field(&root, "unix_ns")
         .ok_or_else(|| "Time payload is missing unix_ns".to_string())?
     else {
         return Err("Time payload unix_ns must be an object".into());
@@ -1942,7 +1942,7 @@ fn validate_time_payload(payload: &str) -> Result<(), String> {
         &["bits", "t", "v"],
         &["bits", "t", "v"],
     )?;
-    if !matches!(object_field(unix_ns, "bits"), Some(DataTree::Int(64)))
+    if !matches!(object_field(unix_ns, "bits"), Some(Dyn::Int(value)) if value.to_i64() == Some(64))
         || !matches!(
             object_field(unix_ns, "t").and_then(|value| value.as_str().ok()),
             Some("int")
@@ -2005,38 +2005,32 @@ fn parse_canonical_u64(value: &str) -> Result<u64, String> {
     Ok(hexadecimal)
 }
 
-fn object_field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn object_field<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find(|(name, _)| name == key)
         .map(|(_, value)| value)
 }
 
-fn canonical_json_value(value: &DataTree) -> Result<String, String> {
+fn canonical_json_value(value: &Dyn) -> Result<String, String> {
     match value {
-        DataTree::Null => Ok("null".to_string()),
-        DataTree::Bool(value) => Ok(value.to_string()),
-        DataTree::Int(value) => Ok(value.to_string()),
-        DataTree::Float(value) if value.is_finite() => Ok(value.to_string()),
-        DataTree::Float(_) => Err("JSON contains a non-finite number".into()),
-        DataTree::Number(value) => Ok(value.clone()),
-        DataTree::TypedText(value) | DataTree::Text(value) => Ok(json_str(value)),
-        DataTree::Bytes(values) => Ok(format!(
-            "[{}]",
-            values
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        )),
-        DataTree::Array(values) => {
+        Dyn::Null => Ok("null".to_string()),
+        Dyn::Bool(value) => Ok(value.to_string()),
+        Dyn::Int(value) => Ok(value.to_string()),
+        Dyn::Float(value) if value.is_finite() => Ok(value.to_string()),
+        Dyn::Float(_) => Err("JSON contains a non-finite number".into()),
+        Dyn::Number(value) => Ok(value.clone()),
+        Dyn::Text(value) => Ok(json_str(value)),
+        Dyn::Bytes(values) => Ok(json_str(&Dyn::bytes_text(values))),
+        Dyn::DateTime(value) => Ok(json_str(&value.to_rfc3339())),
+        Dyn::Array(values) => {
             let mut rendered = Vec::with_capacity(values.len());
             for value in values {
                 rendered.push(canonical_json_value(value)?);
             }
             Ok(format!("[{}]", rendered.join(",")))
         }
-        DataTree::Object(object) => {
+        Dyn::Object(object) => {
             let mut entries = object.iter().collect::<Vec<_>>();
             entries.sort_by(|left, right| left.0.cmp(&right.0));
             let mut rendered = Vec::with_capacity(entries.len());
@@ -2053,7 +2047,7 @@ fn canonical_json_value(value: &DataTree) -> Result<String, String> {
 }
 
 fn require_object_keys(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     object_name: &str,
     required: &[&str],
     allowed: &[&str],
@@ -2075,7 +2069,7 @@ fn validate_mir_identity(value: &str) -> Result<(), String> {
     if canonical_json_value(&parsed)? != value {
         return Err("mir_identity is not canonical JSON".into());
     }
-    let DataTree::Object(object) = parsed else {
+    let Dyn::Object(object) = parsed else {
         return Err("mir_identity must be a JSON object".into());
     };
     require_object_keys(
@@ -2121,7 +2115,7 @@ fn validate_mir_identity(value: &str) -> Result<(), String> {
         return Err("mir_identity schema is unsupported".into());
     }
     for key in ["core_ids", "function_ids", "source_map", "target_facts"] {
-        if !matches!(object_field(&object, key), Some(DataTree::Array(_))) {
+        if !matches!(object_field(&object, key), Some(Dyn::Array(_))) {
             return Err(format!("mir_identity `{key}` must be an array"));
         }
     }
@@ -2135,7 +2129,7 @@ fn flatten_identity_fields(
     if canonical_json_value(&parsed)? != header_text {
         return Err("header is not canonical JSON".into());
     }
-    let DataTree::Object(root) = parsed else {
+    let Dyn::Object(root) = parsed else {
         return Err("header must be a JSON object".into());
     };
     require_object_keys(
@@ -2167,7 +2161,7 @@ fn flatten_identity_fields(
         ],
     )?;
     let mut out = std::collections::BTreeMap::new();
-    let string_field = |object: &[(String, DataTree)], key: &str| {
+    let string_field = |object: &[(String, Dyn)], key: &str| {
         object_field(object, key)
             .and_then(|value| value.as_str().ok())
             .map(str::to_string)
@@ -2176,7 +2170,7 @@ fn flatten_identity_fields(
     for key in ["schema", "artifact_id"] {
         out.insert(key.to_string(), string_field(&root, key)?);
     }
-    let DataTree::Object(identity) = object_field(&root, "identity")
+    let Dyn::Object(identity) = object_field(&root, "identity")
         .ok_or_else(|| "header missing identity object".to_string())?
     else {
         return Err("header identity must be an object".into());
@@ -2284,10 +2278,10 @@ fn flatten_identity_fields(
     ) {
         return Err("header privacy_salt is invalid".into());
     }
-    if !matches!(object_field(&root, "extensions"), Some(DataTree::Object(_))) {
+    if !matches!(object_field(&root, "extensions"), Some(Dyn::Object(_))) {
         return Err("header extensions must be an object".into());
     }
-    let DataTree::Object(capture) = object_field(&root, "capture")
+    let Dyn::Object(capture) = object_field(&root, "capture")
         .ok_or_else(|| "header missing capture object".to_string())?
     else {
         return Err("header capture must be an object".into());
@@ -2306,7 +2300,7 @@ fn flatten_identity_fields(
     }
     if !matches!(
         object_field(capture, "roots"),
-        Some(DataTree::Array(roots))
+        Some(Dyn::Array(roots))
             if roots.len() == 1
                 && matches!(
                     roots.first().and_then(|value| value.as_str().ok()),
@@ -2315,7 +2309,7 @@ fn flatten_identity_fields(
     ) {
         return Err("header capture roots are not exactly [Time]".into());
     }
-    let DataTree::Object(limits) =
+    let Dyn::Object(limits) =
         object_field(&root, "limits").ok_or_else(|| "header missing limits object".to_string())?
     else {
         return Err("header limits must be an object".into());
@@ -2326,15 +2320,15 @@ fn flatten_identity_fields(
         &["frames", "payload_bytes"],
         &["frames", "payload_bytes"],
     )?;
-    if !matches!(object_field(limits, "frames"), Some(DataTree::Int(100_000)))
+    if !matches!(object_field(limits, "frames"), Some(Dyn::Int(value)) if value.to_i64() == Some(100_000))
         || !matches!(
             object_field(limits, "payload_bytes"),
-            Some(DataTree::Int(268_435_456))
+            Some(Dyn::Int(value)) if value.to_i64() == Some(268_435_456)
         )
     {
         return Err("header replay limits are invalid".into());
     }
-    let DataTree::Object(run) =
+    let Dyn::Object(run) =
         object_field(&root, "run").ok_or_else(|| "header missing run object".to_string())?
     else {
         return Err("header run must be an object".into());
@@ -2349,7 +2343,8 @@ fn flatten_identity_fields(
         .and_then(|value| value.as_str().ok())
         .ok_or_else(|| "header run outcome is invalid".to_string())?;
     let status = match object_field(run, "status") {
-        Some(DataTree::Int(status)) if (0..=255).contains(status) => *status,
+        Some(Dyn::Int(status)) => status.to_i64().filter(|value| (0..=255).contains(value))
+            .ok_or_else(|| "header run status is invalid".to_string())?,
         _ => return Err("header run status is invalid".into()),
     };
     if !matches!(outcome, "exit" | "panic") {
@@ -2360,7 +2355,7 @@ fn flatten_identity_fields(
     }
     out.insert("run_outcome".to_string(), outcome.to_string());
     out.insert("run_status".to_string(), status.to_string());
-    let DataTree::Object(version) = object_field(&root, "version")
+    let Dyn::Object(version) = object_field(&root, "version")
         .ok_or_else(|| "header missing version object".to_string())?
     else {
         return Err("header version must be an object".into());
@@ -2371,8 +2366,8 @@ fn flatten_identity_fields(
         &["major", "minor"],
         &["major", "minor"],
     )?;
-    if !matches!(object_field(version, "major"), Some(DataTree::Int(1)))
-        || !matches!(object_field(version, "minor"), Some(DataTree::Int(0)))
+    if !matches!(object_field(version, "major"), Some(Dyn::Int(value)) if value.to_i64() == Some(1))
+        || !matches!(object_field(version, "minor"), Some(Dyn::Int(value)) if value.to_i64() == Some(0))
     {
         return Err("header version is incompatible".into());
     }
@@ -2381,7 +2376,7 @@ fn flatten_identity_fields(
 
 fn zero_artifact_id_header(header_text: &str) -> Result<Vec<u8>, String> {
     let mut value = parse_json(header_text).map_err(|_| "header is not valid JSON".to_string())?;
-    let DataTree::Object(root) = &mut value else {
+    let Dyn::Object(root) = &mut value else {
         return Err("header must be a JSON object".into());
     };
     let valid_length = object_field(root, "artifact_id")
@@ -2393,7 +2388,7 @@ fn zero_artifact_id_header(header_text: &str) -> Result<Vec<u8>, String> {
     let Some((_, artifact_id)) = root.iter_mut().find(|(key, _)| key == "artifact_id") else {
         return Err("header artifact_id must be a string".into());
     };
-    *artifact_id = DataTree::Text("0".repeat(24));
+    *artifact_id = Dyn::Text("0".repeat(24));
     Ok(canonical_json_value(&value)?.into_bytes())
 }
 

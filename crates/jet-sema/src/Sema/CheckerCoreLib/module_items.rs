@@ -64,7 +64,7 @@ pub fn core_module_type_item(module: &str, item: &str) -> bool {
             | "Limits" | "SMTPAuth" | "TLSTrust" | "DKIMConfig" | "SMTPConfig"
             | "Mailer")
         | ("core.encoding",
-            "DataTree" | "EncodingFormat" | "EncodingLimits" | "EncodingError" | "EncodingCause"
+            "Dyn" | "EncodingFormat" | "EncodingLimits" | "EncodingError" | "EncodingCause"
             | "EncodingErrorKind" | "DataEvent")
         | ("core.encoding.cbor",
             "CBORReader" | "CBORWriter" | "CBOROptions" | "CBORError" | "CBORErrorKind")

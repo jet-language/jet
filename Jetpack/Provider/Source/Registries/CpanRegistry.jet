@@ -45,7 +45,7 @@ fn provider_cpan_parse_search(repository: String, distribution: String, raw: Str
 
 // One MetaCPAN release: its identity, SHA-256, and runtime `requires`
 // dependencies (`perl` itself excluded).
-fn provider_cpan_parse_release(repository: String, value: DataTree) -> RegistryPackage RegistryError! {
+fn provider_cpan_parse_release(repository: String, value: Dyn) -> RegistryPackage RegistryError! {
     package_name :: provider_script_json_string(value, "distribution")
     version :: provider_script_json_string(value, "version")
     url :: provider_script_json_string(value, "download_url")
@@ -56,7 +56,7 @@ fn provider_cpan_parse_release(repository: String, value: DataTree) -> RegistryP
     dependencies := [RegistryDependency]{}
     if provider_script_json_field(value, "dependency") == {
         .Val(listed) -> {
-            items :: pkg_json_array(listed) ?? [DataTree]{}
+            items :: pkg_json_array(listed) ?? [Dyn]{}
             loop item in items {
                 relationship :: provider_script_json_string(item, "relationship")
                 phase :: provider_script_json_string(item, "phase")

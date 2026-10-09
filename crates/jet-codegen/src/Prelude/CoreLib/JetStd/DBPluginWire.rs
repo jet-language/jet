@@ -101,7 +101,7 @@ impl DBValue {
 }
 
 /// D-SHAPE-ONE1=A: project checked DB column names into ordered entries for
-/// the canonical DataTree adapter. The callback is supplied by each typed host
+/// the canonical Dyn adapter. The callback is supplied by each typed host
 /// so this carrier remains usable by AOT, JIT, and interpreter modules without
 /// defining a second decoder trait here.
 pub fn jet_db_row_project<T, F>(

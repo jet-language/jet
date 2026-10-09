@@ -12,7 +12,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::parse;
 
 use crate::common::{jetos_bin, jetpack_bin};
@@ -149,7 +149,7 @@ pub fn studio_json_string(response: &str, key: &str) -> String {
         .unwrap_or_else(|| panic!("missing Studio JSON string `{key}`: {response}"))
 }
 
-pub fn studio_json(response: &str) -> DataTree {
+pub fn studio_json(response: &str) -> Dyn {
     let body = response
         .split_once("\r\n\r\n")
         .map(|(_, body)| body)
@@ -158,9 +158,9 @@ pub fn studio_json(response: &str) -> DataTree {
         .unwrap_or_else(|error| panic!("invalid Studio JSON response: {error}: {response}"))
 }
 
-pub fn json_string(json: &DataTree, key: &str) -> String {
+pub fn json_string(json: &Dyn, key: &str) -> String {
     json.get(key)
-        .and_then(DataTree::as_str)
+        .and_then(Dyn::as_str)
         .unwrap_or_else(|error| panic!("invalid JSON string `{key}`: {error}: {json:?}"))
         .to_string()
 }

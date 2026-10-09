@@ -98,43 +98,39 @@ impl StatusValue {
 
     pub fn parse(text: &str) -> Result<Self, String> {
         let value = crate::JSON::parse(text)?;
-        Self::from_data_tree(&value)
+        Self::from_dyn(&value)
     }
 
-    pub fn from_data_tree(value: &crate::DataTree::DataTree) -> Result<Self, String> {
+    pub fn from_dyn(value: &crate::Dyn::Dyn) -> Result<Self, String> {
         match value {
-            crate::DataTree::DataTree::Null => Ok(Self::Null),
-            crate::DataTree::DataTree::Bool(value) => Ok(Self::Bool(*value)),
-            crate::DataTree::DataTree::Int(value) => Ok(Self::Integer(i128::from(*value))),
-            crate::DataTree::DataTree::Float(value) if value.is_finite() => {
+            crate::Dyn::Dyn::Null => Ok(Self::Null),
+            crate::Dyn::Dyn::Bool(value) => Ok(Self::Bool(*value)),
+            crate::Dyn::Dyn::Int(value) => value.to_i128().map(Self::Integer)
+                .ok_or_else(|| "report integer is outside i128".to_string()),
+            crate::Dyn::Dyn::Float(value) if value.is_finite() => {
                 Ok(Self::Float(value.to_string()))
             }
-            crate::DataTree::DataTree::Float(_) => {
+            crate::Dyn::Dyn::Float(_) => {
                 Err("status fields cannot contain non-finite numbers".to_string())
             }
-            crate::DataTree::DataTree::Number(value) => {
+            crate::Dyn::Dyn::Number(value) => {
                 if let Ok(parsed) = value.parse::<i128>() {
                     Ok(Self::Integer(parsed))
                 } else {
                     Ok(Self::Float(value.clone()))
                 }
             }
-            crate::DataTree::DataTree::TypedText(value)
-            | crate::DataTree::DataTree::Text(value) => Ok(Self::String(value.clone())),
-            crate::DataTree::DataTree::Bytes(values) => Ok(Self::Array(
+            crate::Dyn::Dyn::Text(value) => Ok(Self::String(value.clone())),
+            crate::Dyn::Dyn::Bytes(values) => Ok(Self::String(crate::Dyn::Dyn::bytes_text(values))),
+            crate::Dyn::Dyn::DateTime(value) => Ok(Self::String(value.to_rfc3339())),
+            crate::Dyn::Dyn::Array(values) => Ok(Self::Array(
                 values
                     .iter()
-                    .map(|value| Self::Integer(i128::from(*value)))
-                    .collect(),
-            )),
-            crate::DataTree::DataTree::Array(values) => Ok(Self::Array(
-                values
-                    .iter()
-                    .map(Self::from_data_tree)
+                    .map(Self::from_dyn)
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            crate::DataTree::DataTree::Object(values) => {
-                Ok(Self::Object(StatusFields::from_data_tree_object(values)?))
+            crate::Dyn::Dyn::Object(values) => {
+                Ok(Self::Object(StatusFields::from_dyn_object(values)?))
             }
         }
     }
@@ -264,12 +260,12 @@ impl StatusFields {
         self.0.iter().map(|(name, value)| (name.as_str(), value))
     }
 
-    fn from_data_tree_object(
-        value: &[(String, crate::DataTree::DataTree)],
+    fn from_dyn_object(
+        value: &[(String, crate::Dyn::Dyn)],
     ) -> Result<Self, String> {
         let mut fields = Self::new();
         for (name, value) in value {
-            fields.insert(name.clone(), StatusValue::from_data_tree(value)?)?;
+            fields.insert(name.clone(), StatusValue::from_dyn(value)?)?;
         }
         Ok(fields)
     }

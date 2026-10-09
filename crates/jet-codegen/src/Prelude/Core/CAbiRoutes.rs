@@ -478,7 +478,7 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_DataTree(value: *mut crate::jet_std::DataTree) {
+    pub extern "C" fn jet_rt_handle_drop_Dyn(value: *mut crate::jet_std::Dyn) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
             drop(unsafe { Box::from_raw(value) });
@@ -486,7 +486,7 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_DataTree(value: *mut crate::jet_std::DataTree) -> *mut crate::jet_std::DataTree {
+    pub extern "C" fn jet_rt_handle_clone_Dyn(value: *mut crate::jet_std::Dyn) -> *mut crate::jet_std::Dyn {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -5520,21 +5520,21 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_display_DataTree(value: *mut crate::jet_std::DataTree) -> JetCString {
+    pub extern "C" fn jet_rt_handle_display_Dyn(value: *mut crate::jet_std::Dyn) -> JetCString {
         // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::jet_std::DataTree as crate::JetDisplay>::jet_display(unsafe { &*value })))
+        guard(|| handle(<crate::jet_std::Dyn as crate::JetDisplay>::jet_display(unsafe { &*value })))
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_show_DataTree(value: *mut crate::jet_std::DataTree) -> JetCString {
+    pub extern "C" fn jet_rt_handle_show_Dyn(value: *mut crate::jet_std::Dyn) -> JetCString {
         // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::jet_std::DataTree as crate::JetShow>::jet_show(unsafe { &*value })))
+        guard(|| handle(<crate::jet_std::Dyn as crate::JetShow>::jet_show(unsafe { &*value })))
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_debug_DataTree(value: *mut crate::jet_std::DataTree) -> JetCString {
+    pub extern "C" fn jet_rt_handle_debug_Dyn(value: *mut crate::jet_std::Dyn) -> JetCString {
         // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::jet_std::DataTree as crate::JetDebug>::jet_debug(unsafe { &*value })))
+        guard(|| handle(<crate::jet_std::Dyn as crate::JetDebug>::jet_debug(unsafe { &*value })))
     }
 
     #[no_mangle]
@@ -7272,7 +7272,7 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_DataTree(left: *mut crate::jet_std::DataTree, right: *mut crate::jet_std::DataTree) -> bool {
+    pub extern "C" fn jet_rt_handle_eq_Dyn(left: *mut crate::jet_std::Dyn, right: *mut crate::jet_std::Dyn) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
     }
@@ -14841,7 +14841,7 @@ mod jet_c_abi_routes {
 
     /// TIR/lower/method_calls.rs
     #[no_mangle]
-    pub extern "C" fn jet_enc_json_canonical(a0: *mut crate::jet_std::DataTree, a1: *mut crate::jet_std::EncodingLimits, ok: *mut JetCString, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
+    pub extern "C" fn jet_enc_json_canonical(a0: *mut crate::jet_std::Dyn, a1: *mut crate::jet_std::EncodingLimits, ok: *mut JetCString, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
         guard(|| match crate::jet_enc_json_canonical(unsafe { &*a0 }, unsafe { &*a1 }) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -14895,7 +14895,7 @@ mod jet_c_abi_routes {
 
     /// core.handle.jsonl_writer.write
     #[no_mangle]
-    pub extern "C" fn jet_enc_jsonl_writer_write(a0: *mut crate::jet_std::JSONLWriter, a1: *mut crate::jet_std::DataTree, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
+    pub extern "C" fn jet_enc_jsonl_writer_write(a0: *mut crate::jet_std::JSONLWriter, a1: *mut crate::jet_std::Dyn, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
         guard(|| match crate::jet_enc_jsonl_writer_write(unsafe { &mut *a0 }, unsafe { &*a1 }.clone()) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -14922,7 +14922,7 @@ mod jet_c_abi_routes {
 
     /// core.handle.xml_writer.write
     #[no_mangle]
-    pub extern "C" fn jet_enc_xml_writer_write(a0: *mut crate::jet_std::XMLWriter, a1: *mut crate::jet_std::DataTree, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
+    pub extern "C" fn jet_enc_xml_writer_write(a0: *mut crate::jet_std::XMLWriter, a1: *mut crate::jet_std::Dyn, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
         guard(|| match crate::jet_enc_xml_writer_write(unsafe { &mut *a0 }, unsafe { &*a1 }.clone()) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -20745,7 +20745,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.json.events
     #[no_mangle]
-    pub extern "C" fn jet_std_json_events(a0: *mut crate::jet_std::DataTree) -> JetCString {
+    pub extern "C" fn jet_std_json_events(a0: *mut crate::jet_std::Dyn) -> JetCString {
         guard(|| handle(crate::jet_std_json_events(unsafe { &*a0 })))
     }
 
@@ -20760,13 +20760,13 @@ mod jet_c_abi_routes {
 
     /// core.encoding.json.to_string, core.encoding.json.dumps
     #[no_mangle]
-    pub extern "C" fn jet_std_json_render(a0: *mut crate::jet_std::DataTree) -> JetCString {
+    pub extern "C" fn jet_std_json_render(a0: *mut crate::jet_std::Dyn) -> JetCString {
         guard(|| handle(crate::jet_std_json_render(unsafe { &*a0 })))
     }
 
     /// core.encoding.json.to_string_pretty
     #[no_mangle]
-    pub extern "C" fn jet_std_json_render_pretty(a0: *mut crate::jet_std::DataTree) -> JetCString {
+    pub extern "C" fn jet_std_json_render_pretty(a0: *mut crate::jet_std::Dyn) -> JetCString {
         guard(|| handle(crate::jet_std_json_render_pretty(unsafe { &*a0 })))
     }
 
@@ -20794,7 +20794,7 @@ mod jet_c_abi_routes {
     /// core.encoding.jsonl.to_string, core.encoding.jsonl.dumps
     #[no_mangle]
     pub extern "C" fn jet_std_jsonl_render(a0_0: *const u64, a0_1: i64) -> JetCString {
-        guard(|| handle(crate::jet_std_jsonl_render(&list_in(a0_0, a0_1, |w| unsafe { &*(w as *const crate::jet_std::DataTree) }.clone()))))
+        guard(|| handle(crate::jet_std_jsonl_render(&list_in(a0_0, a0_1, |w| unsafe { &*(w as *const crate::jet_std::Dyn) }.clone()))))
     }
 
     /// core.math.abs_diff
@@ -21609,7 +21609,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.xml.canonical
     #[no_mangle]
-    pub extern "C" fn jet_std_xml_canonical(a0: *mut crate::jet_std::DataTree, a1: *mut crate::jet_std::XMLCanonical, ok: *mut JetCString, err: *mut *mut crate::jet_std::XMLError) -> i64 {
+    pub extern "C" fn jet_std_xml_canonical(a0: *mut crate::jet_std::Dyn, a1: *mut crate::jet_std::XMLCanonical, ok: *mut JetCString, err: *mut *mut crate::jet_std::XMLError) -> i64 {
         guard(|| match crate::jet_std_xml_canonical(unsafe { &*a0 }, unsafe { &*a1 }) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -21618,7 +21618,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.xml.content
     #[no_mangle]
-    pub extern "C" fn jet_std_xml_content(a0: *mut crate::jet_std::DataTree, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::XMLError) -> i64 {
+    pub extern "C" fn jet_std_xml_content(a0: *mut crate::jet_std::Dyn, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::XMLError) -> i64 {
         guard(|| match crate::jet_std_xml_content(unsafe { &*a0 }) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -21645,7 +21645,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.xml.to_string
     #[no_mangle]
-    pub extern "C" fn jet_std_xml_render(a0: *mut crate::jet_std::DataTree, ok: *mut JetCString, err: *mut *mut crate::jet_std::XMLError) -> i64 {
+    pub extern "C" fn jet_std_xml_render(a0: *mut crate::jet_std::Dyn, ok: *mut JetCString, err: *mut *mut crate::jet_std::XMLError) -> i64 {
         guard(|| match crate::jet_std_xml_render(unsafe { &*a0 }) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -21654,7 +21654,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.xml.root
     #[no_mangle]
-    pub extern "C" fn jet_std_xml_root(a0: *mut crate::jet_std::DataTree, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut crate::jet_std::XMLError) -> i64 {
+    pub extern "C" fn jet_std_xml_root(a0: *mut crate::jet_std::Dyn, ok: *mut *mut crate::jet_std::Dyn, err: *mut *mut crate::jet_std::XMLError) -> i64 {
         guard(|| match crate::jet_std_xml_root(unsafe { &*a0 }) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -24844,12 +24844,12 @@ mod jet_c_abi_routes {
 //   jet_enc_json_reader_next (core.handle.json_reader.next): result type Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError>
 //   jet_enc_json_writer (core.encoding.json.writer): parameter types  output: JetFileWriter, limits: jet_std::EncodingLimits, canonical: bool, 
 //   jet_enc_jsonl_reader (core.encoding.jsonl.reader): parameter types  input: JetFileReader, limits: jet_std::EncodingLimits, 
-//   jet_enc_jsonl_reader_next (core.handle.jsonl_reader.next): result type Result<JetOutcome<jet_std::DataTree, JetAbsent>, jet_std::EncodingError>
+//   jet_enc_jsonl_reader_next (core.handle.jsonl_reader.next): result type Result<JetOutcome<jet_std::Dyn, JetAbsent>, jet_std::EncodingError>
 //   jet_enc_jsonl_writer (core.encoding.jsonl.writer): parameter types  output: JetFileWriter, limits: jet_std::EncodingLimits, 
 //   jet_enc_toml_decode (TIR/lower/method_calls.rs): generic
 //   jet_enc_xml_decode (core.encoding.xml.decode): generic
 //   jet_enc_xml_reader (core.encoding.xml.reader): parameter types  input: JetFileReader, limits: jet_std::EncodingLimits, xml: jet_std::XMLParseOptions, 
-//   jet_enc_xml_reader_next (core.handle.xml_reader.next): result type Result<JetOutcome<jet_std::DataTree, JetAbsent>, jet_std::EncodingError>
+//   jet_enc_xml_reader_next (core.handle.xml_reader.next): result type Result<JetOutcome<jet_std::Dyn, JetAbsent>, jet_std::EncodingError>
 //   jet_enc_yaml_decode (TIR/lower/method_calls.rs): generic
 //   jet_eq (TIR/routes.rs): generic
 //   jet_expect_snapshot (core.test.expect_snapshot): no runtime function
@@ -25285,7 +25285,7 @@ mod jet_c_abi_routes {
 //   jet_std_fs_walk_parallel (core.files.walk_parallel): parameter types  path: &String, ignore_name: JetOutcome<String, JetAbsent>, 
 //   jet_std_io_progress_iter (core.term.progress_iter): generic
 //   jet_std_io_stdin_read_line (core.handle.stdin.read_line): result type Result<Option<String>, jet_std::IOError>
-//   jet_std_jsonl_first (core.encoding.jsonl.first): result type Result<Option<jet_std::DataTree>, jet_std::EncodingError>
+//   jet_std_jsonl_first (core.encoding.jsonl.first): result type Result<Option<jet_std::Dyn>, jet_std::EncodingError>
 //   jet_std_math_abs_f32 (TIR/routes.rs): parameter types value: f32
 //   jet_std_os_atexit (core.sys.atexit): generic
 //   jet_std_os_on_interrupt (TIR/routes.rs): parameter types handler: std::sync::Arc<dyn Fn() + Send + Sync + 'static>

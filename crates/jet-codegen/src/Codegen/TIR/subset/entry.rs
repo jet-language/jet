@@ -230,7 +230,7 @@ pub(crate) fn tir_covers_trait_method(
     // falling back to a second code-generation path.
     // D-SERDE2 (card #131 S1-bridge): a hand `impl T.Decode` `decode` is a STATIC trait
     // method (no `self`) — the codec bridge in `emit_tir_trait_method` renders it as
-    // `jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<FieldError>>` with no
+    // `jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<FieldError>>` with no
     // receiver. Admit it (the general "static trait fn" exclusion below does not apply).
     let is_decode = trait_name == crate::Generics::DECODE;
     if !is_decode && !is_checked_text && !is_literal {

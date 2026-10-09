@@ -95,10 +95,10 @@ fn publication_metadata_test_refusal(text: String, detail: String) Never! {
 }
 #Test("publication metadata descriptor merge stable lists and boolean OR") {
     dependencies := [String: PublicationRegistryDependency]{}
-    first :: DataTree.Object([String: DataTree]{"require": DataTree.Text("^1"), "prefer": DataTree.Text("~1.2"), "reject": pkg_json_texts([String]{"1.2.3", "1.0.0", "1.2.3"}), "strict": DataTree.Bool(true), "default": DataTree.Bool(true)})
+    first :: Dyn.Object([String: Dyn]{"require": Dyn.Text("^1"), "prefer": Dyn.Text("~1.2"), "reject": pkg_json_texts([String]{"1.2.3", "1.0.0", "1.2.3"}), "strict": Dyn.Bool(true), "default": Dyn.Bool(true)})
     publication_merge_registry_dependency(&dependencies, "x", first, "optional") ?? panic("first descriptor")
-    publication_merge_registry_dependency(&dependencies, "x", DataTree.Text("^1"), "normal") ?? panic("duplicate requirement")
-    publication_merge_registry_dependency(&dependencies, "x", DataTree.Text(">=1.1"), "build") ?? panic("second requirement")
+    publication_merge_registry_dependency(&dependencies, "x", Dyn.Text("^1"), "normal") ?? panic("duplicate requirement")
+    publication_merge_registry_dependency(&dependencies, "x", Dyn.Text(">=1.1"), "build") ?? panic("second requirement")
     x :: dependencies["x"]
     assert_eq(x.roles, [String]{"build", "normal", "optional"})
     assert_eq(x.requirements, [String]{"^1", ">=1.1"})

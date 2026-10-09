@@ -36,6 +36,7 @@ use jet_foundation.[
     TFailureCarrier,
     TForInMethod,
     TGenericParam,
+    THandleOp,
     THostCall,
     TIntegerBounds,
     TLambda,
@@ -993,7 +994,7 @@ fn sema_stmt_for_in_type_requires_owned_iteration(ty: Type) -> Bool Never! {
 
 fn sema_stmt_for_in_encoding_item_type(name: String) -> Type? {
     if sema_stmt_for_in_type_is_named(Type.Named{name: name}, "JSONReader") || sema_stmt_for_in_type_is_named(Type.Named{name: name}, "CBORReader") -> return Val(Type.Named{name: "DataEvent"})
-    if sema_stmt_for_in_type_is_named(Type.Named{name: name}, "JSONLReader") || sema_stmt_for_in_type_is_named(Type.Named{name: name}, "XMLReader") -> return Val(Type.Named{name: "DataTree"})
+    if sema_stmt_for_in_type_is_named(Type.Named{name: name}, "JSONLReader") || sema_stmt_for_in_type_is_named(Type.Named{name: name}, "XMLReader") -> return Val(Type.Named{name: "Dyn"})
     if sema_stmt_for_in_type_is_named(Type.Named{name: name}, "CSVReader") -> return Val(Type.Named{name: "CSVRow"})
     None
 }
@@ -5073,7 +5074,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                 cond_valid := cond_tir != None
                 if cond_tir != None && (cond_tir ?? sema_tir_expr(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty != Type.Bool {
                     cond_ty :: (cond_tir ?? sema_tir_expr(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty
-                    &diagnostics.push(sema_error("E0110", span, "the counted loop condition must be Bool, but this is {type_name(cond_ty)}", "the program needs a clear yes or no here", "compare the value to produce Bool"))
+                    &diagnostics.push(if sema_dyn_is_type(sema_expr_expected_type(cond_ty, environment)) -> sema_dyn_condition_error(span) else -> sema_error("E0110", span, "the counted loop condition must be Bool, but this is {type_name(cond_ty)}", "the program needs a clear yes or no here", "compare the value to produce Bool"))
                     cond_valid = false
                 }
                 // Each iteration starts from this mark; the join base is the
@@ -5120,7 +5121,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                     }
                     (cond ?? sema_tir_expr(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty != Type.Bool -> {
                         cond_ty :: (cond ?? sema_tir_expr(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty
-                        &diagnostics.push(sema_error("E0110", span, "the while condition must be Bool, but this is {type_name(cond_ty)}", "the program needs a clear yes or no here", "compare the value to produce Bool"))
+                        &diagnostics.push(if sema_dyn_is_type(sema_expr_expected_type(cond_ty, environment)) -> sema_dyn_condition_error(span) else -> sema_error("E0110", span, "the while condition must be Bool, but this is {type_name(cond_ty)}", "the program needs a clear yes or no here", "compare the value to produce Bool"))
                         complete = false
                     }
                     else -> {

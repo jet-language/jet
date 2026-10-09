@@ -2,7 +2,7 @@
 
 use super::trust::{quarantine_outputs, MimeBundle, POLICY_VERSION};
 use jet_foundation::PerformanceBudget::CanonicalJson;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::parse_json;
 use jet_foundation::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1205,24 +1205,20 @@ pub fn import_ipynb(text: &str) -> Result<(JetNotebook, LossReport), String> {
     Ok((nb, loss))
 }
 
-fn json_value_to_canonical(value: DataTree) -> CanonicalJson {
+fn json_value_to_canonical(value: Dyn) -> CanonicalJson {
     match value {
-        DataTree::Null => CanonicalJson::Null,
-        DataTree::Bool(value) => CanonicalJson::Bool(value),
-        DataTree::Int(value) => CanonicalJson::Integer(value.to_string()),
-        DataTree::Float(value) => CanonicalJson::String(value.to_string()),
-        DataTree::Number(value) => CanonicalJson::String(value),
-        DataTree::TypedText(value) | DataTree::Text(value) => CanonicalJson::String(value),
-        DataTree::Bytes(values) => CanonicalJson::Array(
-            values
-                .into_iter()
-                .map(|value| CanonicalJson::Integer(value.to_string()))
-                .collect(),
-        ),
-        DataTree::Array(values) => {
+        Dyn::Null => CanonicalJson::Null,
+        Dyn::Bool(value) => CanonicalJson::Bool(value),
+        Dyn::Int(value) => CanonicalJson::Integer(value.to_string()),
+        Dyn::Float(value) => CanonicalJson::String(value.to_string()),
+        Dyn::Number(value) => CanonicalJson::String(value),
+        Dyn::Text(value) => CanonicalJson::String(value),
+        Dyn::Bytes(values) => CanonicalJson::String(Dyn::bytes_text(&values)),
+        Dyn::DateTime(value) => CanonicalJson::String(value.to_rfc3339()),
+        Dyn::Array(values) => {
             CanonicalJson::Array(values.into_iter().map(json_value_to_canonical).collect())
         }
-        DataTree::Object(values) => CanonicalJson::Object(
+        Dyn::Object(values) => CanonicalJson::Object(
             values
                 .into_iter()
                 .map(|(key, value)| (key, json_value_to_canonical(value)))

@@ -1187,6 +1187,17 @@ impl JetZone {
         if name == "UTC" || name == "Etc/UTC" || name == "Z" {
             return Ok(Self::utc());
         }
+        if name.starts_with('+') || name.starts_with('-') {
+            if name.len() != 6 || name.as_bytes()[3] != b':' {
+                return Err(format!("invalid fixed time zone offset: {name}"));
+            }
+            let offset = jet_time_parse_offset(name)?;
+            if offset == 0 { return Ok(Self::utc()); }
+            return Ok(Self {
+                name: name.clone(), transitions: Vec::new(),
+                infos: vec![JetTtInfo { offset, is_dst: false }],
+            });
+        }
         if name.contains("..") || name.starts_with('/') || name.starts_with('\\') {
             return Err(format!("invalid time zone name: {}", name));
         }
@@ -1499,15 +1510,11 @@ impl Ord for JetZonedDateTime {
 
 impl JetZonedDateTime {
     fn display_parts(&self) -> (JetDate, JetLocalTime, i64) {
-        if self.instant.leap_second && self.zone.name == "UTC" {
-            (
-                self.instant.date(),
-                self.instant.time_for_output(),
-                0,
-            )
-        } else {
-            self.zone.local_parts(self.instant.to_timestamp())
-        }
+        let offset = self.zone.offset_at_utc(self.instant.unix_seconds_anchor());
+        let local = JetDateTime::from_timestamp_ns_with_leap(
+            self.instant.unix_seconds_anchor().saturating_add(offset),
+            self.instant.nanos, self.instant.leap_second);
+        (local.date(), local.time_for_output(), offset)
     }
     pub(crate) fn now(zone: &JetZone) -> Self {
         JetDateTime::now().in_zone(zone)

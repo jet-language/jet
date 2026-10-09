@@ -6,7 +6,7 @@
 //! independent of `WatchService`: a later host adapter can feed coalesced
 //! edits here without teaching the watcher or renderer about style semantics.
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_escape, parse_json_with_limit};
 use jet_foundation::SHA256;
 use std::collections::{BTreeMap, VecDeque};
@@ -1556,7 +1556,7 @@ fn parse_style_request(
         parse_json_with_limit(body, MAX_TERMINAL_STYLE_REQUEST_BYTES).map_err(|_| malformed_request())?;
     let object = object_map(&value).map_err(|_| malformed_request())?;
     let style_source = match object.get("source") {
-        Some(DataTree::Text(text)) => text.clone(),
+        Some(Dyn::Text(text)) => text.clone(),
         _ => {
             return Err(TerminalStyleHostOutcome::Unavailable(
                 TerminalStyleHostUnavailableReason::MissingSource,
@@ -1565,31 +1565,31 @@ fn parse_style_request(
     };
     let mut edit = TerminalStyleEdit::new(source.source_id.clone(), style_source)
         .with_capabilities(source.capabilities);
-    if let Some(DataTree::Text(layout)) = object.get("layout_fingerprint") {
+    if let Some(Dyn::Text(layout)) = object.get("layout_fingerprint") {
         edit = edit.with_layout_fingerprint(layout.clone());
     }
-    if let Some(DataTree::Text(type_fingerprint)) = object.get("type_fingerprint") {
+    if let Some(Dyn::Text(type_fingerprint)) = object.get("type_fingerprint") {
         edit = edit.with_type_fingerprint(type_fingerprint.clone());
     }
     if let Some(entries) = object.get("dependencies") {
-        let DataTree::Array(entries) = entries else {
+        let Dyn::Array(entries) = entries else {
             return Err(malformed_request());
         };
         let mut dependencies = Vec::with_capacity(entries.len());
         for entry in entries {
             let fields = object_map(entry).map_err(|_| malformed_request())?;
             let kind = match fields.get("kind") {
-                Some(DataTree::Text(kind)) => {
+                Some(Dyn::Text(kind)) => {
                     parse_dependency_kind(kind).ok_or_else(malformed_request)?
                 }
                 _ => return Err(malformed_request()),
             };
             let id = match fields.get("id") {
-                Some(DataTree::Text(id)) => id.clone(),
+                Some(Dyn::Text(id)) => id.clone(),
                 _ => return Err(malformed_request()),
             };
             let fingerprint = match fields.get("fingerprint") {
-                Some(DataTree::Text(fingerprint)) => fingerprint.clone(),
+                Some(Dyn::Text(fingerprint)) => fingerprint.clone(),
                 _ => return Err(malformed_request()),
             };
             let dependency = TerminalStyleDependency::new(kind, id, fingerprint).map_err(|error| {
@@ -1609,8 +1609,8 @@ fn parse_style_request(
     }
     Ok(edit)
 }
-fn object_map(value: &DataTree) -> Result<BTreeMap<String, DataTree>, String> {
-    let DataTree::Object(fields) = value else {
+fn object_map(value: &Dyn) -> Result<BTreeMap<String, Dyn>, String> {
+    let Dyn::Object(fields) = value else {
         return Err("terminal style request must be an object".to_string());
     };
     Ok(fields.iter().cloned().collect())

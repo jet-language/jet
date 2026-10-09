@@ -11,7 +11,7 @@ exercises the ratified `xml.canonical` options under D-ENCXML1.
 - Exclusive10: W3C Exclusive XML Canonicalization Version 1.0
   (https://www.w3.org/TR/xml-exc-c14n/)
 
-Vectors are hand-built from those algorithms for Jet's closed ordinary-DataTree
+Vectors are hand-built from those algorithms for Jet's closed ordinary-Dyn
 node schema. They are not copies of a third-party binary fixture pack.
 
 ## Coverage

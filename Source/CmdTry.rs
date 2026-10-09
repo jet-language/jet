@@ -8,7 +8,7 @@ use std::process::exit;
 use jet::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
 use jet::ExitCodes;
 use jet_foundation::Report::{StatusEnvelope, StatusFields};
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_semindex::{SemanticOp, SemanticOpTarget, SourceSpan};
 
 #[derive(Clone)]
@@ -113,12 +113,12 @@ fn read_plan(path: &Path) -> TryPlan {
     let value = jet_foundation::JSON::parse(&text)
         .unwrap_or_else(|e| fail(&format!("invalid try plan JSON: {e}")));
     let mut object = match value {
-        DataTree::Object(object) => object,
+        Dyn::Object(object) => object,
         _ => fail("try plan must be a JSON object"),
     };
 
     if let Some(version) = take_value(&mut object, "version") {
-        if !matches!(version, DataTree::Int(1)) {
+        if !matches!(version, Dyn::Int(value) if value.to_i64() == Some(1)) {
             fail("unsupported try plan version; expected version 1")
         }
     }
@@ -150,9 +150,9 @@ fn read_plan(path: &Path) -> TryPlan {
     }
 }
 
-fn take_edits(object: &mut Vec<(String, DataTree)>, plan_path: &Path) -> Vec<EditPlan> {
+fn take_edits(object: &mut Vec<(String, Dyn)>, plan_path: &Path) -> Vec<EditPlan> {
     let values = match take_value(object, "edits") {
-        Some(DataTree::Array(values)) => values,
+        Some(Dyn::Array(values)) => values,
         Some(_) => fail("`edits` must be an array"),
         None => fail("try plan is missing `edits`"),
     };
@@ -163,7 +163,7 @@ fn take_edits(object: &mut Vec<(String, DataTree)>, plan_path: &Path) -> Vec<Edi
         .into_iter()
         .map(|value| {
             let mut object = match value {
-                DataTree::Object(object) => object,
+                Dyn::Object(object) => object,
                 _ => fail("each try edit must be an object"),
             };
             let path = resolve_against(plan_path.parent(), &take_string(&mut object, "path"));
@@ -430,48 +430,48 @@ fn edit(span: SourceSpan, text: &str) -> TextEdit {
     }
 }
 
-fn take_value(object: &mut Vec<(String, DataTree)>, key: &str) -> Option<DataTree> {
+fn take_value(object: &mut Vec<(String, Dyn)>, key: &str) -> Option<Dyn> {
     let index = object.iter().position(|(name, _)| name == key)?;
     Some(object.remove(index).1)
 }
 
-fn contains_key(object: &[(String, DataTree)], key: &str) -> bool {
+fn contains_key(object: &[(String, Dyn)], key: &str) -> bool {
     object.iter().any(|(name, _)| name == key)
 }
 
-fn object_keys(object: &[(String, DataTree)]) -> Vec<String> {
+fn object_keys(object: &[(String, Dyn)]) -> Vec<String> {
     let mut keys = object.iter().map(|(name, _)| name.clone()).collect::<Vec<_>>();
     keys.sort();
     keys
 }
 
-fn take_string(object: &mut Vec<(String, DataTree)>, key: &str) -> String {
+fn take_string(object: &mut Vec<(String, Dyn)>, key: &str) -> String {
     match take_value(object, key) {
-        Some(DataTree::Text(value) | DataTree::TypedText(value)) => value,
+        Some(Dyn::Text(value)) => value,
         Some(_) => fail(&format!("`{key}` must be text")),
         None => fail(&format!("try plan is missing `{key}`")),
     }
 }
 
-fn take_string_opt(object: &mut Vec<(String, DataTree)>, key: &str) -> Option<String> {
+fn take_string_opt(object: &mut Vec<(String, Dyn)>, key: &str) -> Option<String> {
     match take_value(object, key) {
-        Some(DataTree::Text(value) | DataTree::TypedText(value)) => Some(value),
+        Some(Dyn::Text(value)) => Some(value),
         Some(_) => fail(&format!("`{key}` must be text")),
         None => None,
     }
 }
 
 fn take_string_default(
-    object: &mut Vec<(String, DataTree)>,
+    object: &mut Vec<(String, Dyn)>,
     key: &str,
     default: &str,
 ) -> String {
     take_string_opt(object, key).unwrap_or_else(|| default.into())
 }
 
-fn take_number(object: &mut Vec<(String, DataTree)>, key: &str) -> usize {
+fn take_number(object: &mut Vec<(String, Dyn)>, key: &str) -> usize {
     match take_value(object, key) {
-        Some(DataTree::Int(value)) if value >= 0 => value as usize,
+        Some(Dyn::Int(value)) => value.to_usize().unwrap_or_else(|| fail(&format!("`{key}` must be a non-negative integer"))),
         Some(_) => fail(&format!("`{key}` must be a non-negative integer")),
         None => fail(&format!("try edit is missing `{key}`")),
     }

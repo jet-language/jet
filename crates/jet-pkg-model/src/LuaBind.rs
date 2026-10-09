@@ -91,7 +91,7 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     identity.push(0);
     identity.extend_from_slice(root.to_string_lossy().as_bytes());
     let mut provenance = format!(
-        "schema=jet-lua-bind-v2\nsha256={}\nruntime={}\nstate=per-session\ntransport=datatree+table-view\ntable-view=zero-copy\nhook=instructions\n",
+        "schema=jet-lua-bind-v2\nsha256={}\nruntime={}\nstate=per-session\ntransport=dyn+table-view\ntable-view=zero-copy\nhook=instructions\n",
         crate::SHA256::sha256_hex(&identity),
         root.display()
     );
@@ -637,7 +637,7 @@ mod tests {
             .unwrap();
         assert!(body.contains("lua_rawget"));
         assert!(
-            !body.contains("decode(") && !body.contains("encode(") && !body.contains("DataTree")
+            !body.contains("decode(") && !body.contains("encode(") && !body.contains("Dyn")
         );
     }
 }

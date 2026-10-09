@@ -1207,7 +1207,9 @@ impl<'a> Checker<'a> {
         if matches!(op, BinOp::And | BinOp::Or) {
             let lt = self.infer(lhs);
             if let Some(lt) = &lt {
-                if *lt != Type::Bool {
+                if crate::Sema::CheckerCoreLib::is_dyn_type(lt) {
+                    self.diags.push(Diagnostic::from_row("E0170", &[], Some(lhs.span())));
+                } else if *lt != Type::Bool {
                     self.diags.push(Diagnostic::error(
                         "E0110",
                         format!(
@@ -1224,7 +1226,9 @@ impl<'a> Checker<'a> {
             }
             let rt = self.infer(rhs);
             if let Some(rt) = &rt {
-                if *rt != Type::Bool {
+                if crate::Sema::CheckerCoreLib::is_dyn_type(rt) {
+                    self.diags.push(Diagnostic::from_row("E0170", &[], Some(rhs.span())));
+                } else if *rt != Type::Bool {
                     // D-S25-RETIRE1=A: comparison distribution via `||`/`&&` is gone.
                     // Each side of `||`/`&&` must be a Bool expression.
                     self.diags.push(Diagnostic::error(
@@ -1257,10 +1261,22 @@ impl<'a> Checker<'a> {
         // operand; other operators retain the canonical owning-read clone rule.
         self.borrow_ctx = self.operator_operand_needs_borrow(lhs, op);
         let saved_expected = self.expected_type.clone();
+        let dyn_float_lhs = crate::Sema::CheckerCoreLib::dyn_float_literal(lhs).then(|| lhs.clone());
         if Self::is_exact_numeric_literal(lhs)
             && (self.known_measurement_expr(rhs)
                 || (matches!(op, BinOp::Mul | BinOp::Div) && self.known_unit_expr(rhs)))
         {
+            self.expected_type = Some(Type::Float);
+        }
+        let right_dyn = self.compound_expr_type(rhs).as_ref()
+            .is_some_and(crate::Sema::CheckerCoreLib::is_dyn_type)
+            || matches!(rhs.as_ref(), Expr::MethodCall { resolved_ret: Some(ty), .. }
+                if crate::Sema::CheckerCoreLib::is_dyn_type(ty))
+            || matches!(rhs.as_ref(), Expr::MethodCall { receiver, .. }
+                if matches!(receiver.as_ref(), Expr::Ident(name, _) if is_json_type_name(name)))
+            || matches!(rhs.as_ref(), Expr::Call(call)
+                if call.resolved_ret.as_ref().is_some_and(crate::Sema::CheckerCoreLib::is_dyn_type));
+        if right_dyn && crate::Sema::CheckerCoreLib::dyn_float_literal(lhs) {
             self.expected_type = Some(Type::Float);
         }
         let lt = self.infer(lhs);
@@ -1298,7 +1314,9 @@ impl<'a> Checker<'a> {
                 | BinOp::Gt
                 | BinOp::Ge
         ) {
-            self.expected_type = if lt.as_ref().is_some_and(Self::is_measurement_type)
+            self.expected_type = if lt.as_ref().is_some_and(crate::Sema::CheckerCoreLib::is_dyn_type) {
+                Some(json_ty())
+            } else if lt.as_ref().is_some_and(Self::is_measurement_type)
                 && Self::is_exact_numeric_literal(rhs)
             {
                 Some(Type::Float)

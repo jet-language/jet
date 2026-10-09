@@ -10,7 +10,7 @@ use super::Provider;
 use super::RefSpec::RefSpec;
 use super::Store::StoreEntry;
 use super::JSON;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use crate::Lock::{LockFile, LockSource};
 use crate::Syntax;
 use jet_env_model::ModuleEval::AdapterPlan;
@@ -555,7 +555,7 @@ fn json_string_array(items: &[String]) -> String {
     format!("[{body}]")
 }
 
-fn record_from_json(json: &DataTree) -> Result<PackageRecord, String> {
+fn record_from_json(json: &Dyn) -> Result<PackageRecord, String> {
     let obj = json.as_object()?;
     Ok(PackageRecord {
         source: required_str(obj, "source")?.to_string(),
@@ -575,19 +575,19 @@ fn record_from_json(json: &DataTree) -> Result<PackageRecord, String> {
     })
 }
 
-fn object_field<'a>(obj: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn object_field<'a>(obj: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     obj.iter()
         .find_map(|(name, value)| (name == key).then_some(value))
 }
 
-fn required_str<'a>(obj: &'a [(String, DataTree)], key: &str) -> Result<&'a str, String> {
+fn required_str<'a>(obj: &'a [(String, Dyn)], key: &str) -> Result<&'a str, String> {
     object_field(obj, key)
         .ok_or_else(|| format!("missing key `{key}`"))?
         .as_str()
 }
 
-fn string_array(json: Option<&DataTree>) -> Vec<String> {
-    let Some(DataTree::Array(items)) = json else {
+fn string_array(json: Option<&Dyn>) -> Vec<String> {
+    let Some(Dyn::Array(items)) = json else {
         return Vec::new();
     };
     items
@@ -596,8 +596,8 @@ fn string_array(json: Option<&DataTree>) -> Vec<String> {
         .collect()
 }
 
-fn option_array(json: Option<&DataTree>) -> Vec<OptionField> {
-    let Some(DataTree::Array(items)) = json else {
+fn option_array(json: Option<&Dyn>) -> Vec<OptionField> {
+    let Some(Dyn::Array(items)) = json else {
         return Vec::new();
     };
     items

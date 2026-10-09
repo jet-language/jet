@@ -16,7 +16,7 @@
 //! `Lock::LockedPackage` — the index does not invent new hash names.
 
 use crate::Diagnostics::Diagnostic;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{parse_json, quote as json_str};
 use std::collections::BTreeSet;
 use std::io;
@@ -72,7 +72,7 @@ impl IndexEntry {
     /// types, duplicate keys, unknown fields, or a line missing required
     /// package identity and trust fields.
     pub fn parse_line(line: &str) -> Option<IndexEntry> {
-        let DataTree::Object(fields) = parse_json(line).ok()? else {
+        let Dyn::Object(fields) = parse_json(line).ok()? else {
             return None;
         };
         const KEYS: &[&str] = &[
@@ -463,39 +463,39 @@ pub fn non_yanked_entries(repo: &Path, name: &str) -> io::Result<Vec<IndexEntry>
 // Minimal JSON (I6: no serde)
 // ──────────────────────────────────────────────
 
-fn field<'a>(fields: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn field<'a>(fields: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     fields
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
 }
 fn required_string(
-    fields: &[(String, DataTree)],
+    fields: &[(String, Dyn)],
     key: &str,
 ) -> Option<String> {
     match field(fields, key)? {
-        DataTree::Text(value) if !value.is_empty() => Some(value.clone()),
+        Dyn::Text(value) if !value.is_empty() => Some(value.clone()),
         _ => None,
     }
 }
 
 fn optional_string(
-    fields: &[(String, DataTree)],
+    fields: &[(String, Dyn)],
     key: &str,
 ) -> Option<String> {
     match field(fields, key) {
         None => Some(String::new()),
-        Some(DataTree::Text(value)) => Some(value.clone()),
+        Some(Dyn::Text(value)) => Some(value.clone()),
         _ => None,
     }
 }
 
 fn optional_bool(
-    fields: &[(String, DataTree)],
+    fields: &[(String, Dyn)],
     key: &str,
 ) -> Option<bool> {
     match field(fields, key) {
         None => Some(false),
-        Some(DataTree::Bool(value)) => Some(*value),
+        Some(Dyn::Bool(value)) => Some(*value),
         _ => None,
     }
 }

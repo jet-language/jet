@@ -23,18 +23,18 @@ fn jet_testing_relation(
 }
 
 fn jet_testing_observation(
-    value: &jet_std::DataTree,
+    value: &jet_std::Dyn,
 ) -> crate::jet_testing_comparison_foundation::ComparisonObservation {
     crate::jet_testing_comparison_foundation::ComparisonObservation::value(
-        jet_std::render_datatree_json(value, false, 0),
+        jet_std::render_dyn_json(value, false, 0),
     )
 }
 
 fn jet_testing_record(
     record: crate::jet_testing_comparison_foundation::ComparisonRecord,
-    cases: &Vec<jet_std::DataTree>,
-    reference_values: Vec<jet_std::DataTree>,
-    candidate_values: Vec<jet_std::DataTree>,
+    cases: &Vec<jet_std::Dyn>,
+    reference_values: Vec<jet_std::Dyn>,
+    candidate_values: Vec<jet_std::Dyn>,
     seed: Option<i64>,
 ) -> jet_std::JetTestComparison {
     let case_ids = record
@@ -66,9 +66,9 @@ fn jet_testing_record(
 }
 
 fn jet_testing_compare(
-    cases: &Vec<jet_std::DataTree>,
-    reference: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>,
-    candidate: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>,
+    cases: &Vec<jet_std::Dyn>,
+    reference: Box<dyn Fn(jet_std::Dyn) -> jet_std::Dyn>,
+    candidate: Box<dyn Fn(jet_std::Dyn) -> jet_std::Dyn>,
     relation: &String,
 ) -> jet_std::JetTestComparison {
     let relation = jet_testing_relation(relation);

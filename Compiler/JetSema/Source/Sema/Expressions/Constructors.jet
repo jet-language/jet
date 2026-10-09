@@ -149,7 +149,7 @@ fn sema_expression_enum_variant_path(base: Expr, member: String, environment: Se
         kind :: scopes.bindings[found].symbol.kind
         if kind != SymbolKind.Type && kind != SymbolKind.Module -> return None
     }
-    // `use core.encoding.[DataTree as Tree]`: an alias of a Core enum carrier
+    // `use core.encoding.[Dyn as Tree]`: an alias of a Core enum carrier
     // names that enum, whose variants are read by its Core leaf.
     enum_root :: sema_expression_core_enum_alias(root, &scopes) ?? root
     if sema_expression_names_enum(enum_root, environment, program, &scopes) -> return Val(SemaExpressionEnumPath{enum_name: enum_root, variant: sema_expression_join_segments(segments, 1)})
@@ -159,7 +159,7 @@ fn sema_expression_enum_variant_path(base: Expr, member: String, environment: Se
     Val(SemaExpressionEnumPath{enum_name: qualified, variant: sema_expression_join_segments(segments, 2)})
 }
 
-// The Core enum leaf a local type alias binds (`Tree` for `DataTree`): an
+// The Core enum leaf a local type alias binds (`Tree` for `Dyn`): an
 // imported Core carrier keeps its builtin type under the local name.
 fn sema_expression_core_enum_alias(name: String, scopes: &SemaScopeTable) -> String? {
     index :: sema_scope_resolve_index(scopes, name) ?? return None
@@ -536,6 +536,25 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
     // compiler-owned fact enum value, which has no registered declaration.
     fact_enum :: sema_fact_enum_literal(resolved_name, variant, args, span, variant_span, expected, environment, program, &diagnostics)
     if fact_enum.handled -> return fact_enum.value
+    // Compiler-owned data cases have no user enum declaration metadata.
+    // Route both qualified and contextual cases through the same payload
+    // checker as the static-call spelling.
+    if sema_data_is_json_name(resolved_name) || resolved_name == "DBValue" {
+        if !sema_data_check_explicit_type_args(resolved_name, type_args, 0, span, &diagnostics) -> return None
+        call_args := [CallArg]{}
+        loop argument in args {
+            payload_expr :: if argument == {
+                .Positional(value) -> value
+                else -> {
+                    &diagnostics.push(sema_error("E0764", span, "variant `{variant}` takes a positional payload", "compiler-owned data cases do not have field labels", "pass the value without a label"))
+                    return None
+                }
+            }
+            &call_args.push(CallArg{convention: AccessConvention.Read, expr: payload_expr, span: expr_span(payload_expr), flags: ast_empty_call_arg_flags(), label: None, spread: false})
+        }
+        checked :: sema_call_try_data_literal(Type.Named{name: resolved_name}, variant, call_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return checked.value
+    }
     // A Core enum with no source declaration (`IOError`, `ProcessStreamMode`)
     // builds its variant from the generated Core enum rows.
     owner_symbol :: sema_expression_type_symbol(&scopes, environment, resolved_name)

@@ -39,10 +39,10 @@ fn cli_hangar_register_external_root(verification: &StoreVerification, theme: Th
     if parsed.flags.json {
         if !parsed.flags.assume_yes {
             cli_hangar_status_json("register-external-root", StatusFields.new()
-                .with("applied", DataTree.Bool(false))
-                .with("label", DataTree.Text(label))
-                .with("reference", DataTree.Text(reference))
-                .with("closure_objects", DataTree.Int(closure_size))
+                .with("applied", Dyn.Bool(false))
+                .with("label", Dyn.Text(label))
+                .with("reference", Dyn.Text(reference))
+                .with("closure_objects", Dyn.Int(closure_size))
                 .with("expires_at", cli_optional_int_tree(expires_at))
                 .with("if_etag", cli_optional_text_tree(expected_etag))) ?? return cli_status_encoding_error(err)
             return EXIT_OK
@@ -72,12 +72,12 @@ fn cli_hangar_register_external_root(verification: &StoreVerification, theme: Th
 fn cli_hangar_list_external_roots(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     views :: store_list_external_roots(&verification, pkg_resolve_roots(), cli_external_root_principal()) ?? return cli_external_root_error(theme, parsed, err)
     if parsed.flags.json {
-        machine_roots := [DataTree]{}
+        machine_roots := [Dyn]{}
         loop view in views {
             &machine_roots.push(report_status_object(StatusFields.new()
-                .with("label", DataTree.Text(view.label))
-                .with("reference", DataTree.Text(view.reference))
-                .with("etag", DataTree.Text(view.etag))
+                .with("label", Dyn.Text(view.label))
+                .with("reference", Dyn.Text(view.reference))
+                .with("etag", Dyn.Text(view.etag))
                 .with("expires_at", cli_optional_int_tree(view.expires_at))))
         }
         cli_hangar_status_json("list-external-roots", StatusFields.new().with("roots", DataTree.Array(machine_roots))) ?? return cli_status_encoding_error(err)

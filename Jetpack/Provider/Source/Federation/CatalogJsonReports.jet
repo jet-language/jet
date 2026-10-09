@@ -237,7 +237,7 @@ impl ProviderFactReport {
         loop line in provider_lines(document) {
             if line.trim() != "" -> &lines.push(line)
         }
-        object := [String: DataTree]{}
+        object := [String: Dyn]{}
         duplicate_lines := [String]{}
         if pkg_json_parse_protocol(document) == {
             .Parsed(tree) -> {
@@ -370,7 +370,7 @@ impl ProviderFactReport {
         object :: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Github, "github", "release metadata is not valid JSON")
         losses := [String]{}
         conflicts := [String]{}
-        repository :: pkg_json_object(object.get("repository") ?? DataTree.Null) ?? [String: DataTree]{}
+        repository :: pkg_json_object(object.get("repository") ?? Dyn.Null) ?? [String: Dyn]{}
         name :: provider_graph_either(provider_graph_json_first_string(object, [String]{"name", "full_name"}), provider_graph_json_string(repository, "full_name")) ?? ""
         if name == "" -> &losses.push("GitHub release has no package or repository name")
         facts := MetadataFacts.empty(ProviderFamily.Github, name)
@@ -582,7 +582,7 @@ fn provider_graph_exact_digest(digest: String) -> Bool Never! {
     ProviderSelector.parse("#digest={digest}").is_exact()
 }
 
-fn provider_graph_is_string_array(value: DataTree) -> Bool Never! {
+fn provider_graph_is_string_array(value: Dyn) -> Bool Never! {
     items :: pkg_json_array(value) ?? return false
     loop item in items {
         if !provider_graph_is_text(item) -> return false
@@ -590,7 +590,7 @@ fn provider_graph_is_string_array(value: DataTree) -> Bool Never! {
     true
 }
 
-fn provider_graph_is_non_negative_int(value: DataTree) -> Bool Never! {
+fn provider_graph_is_non_negative_int(value: Dyn) -> Bool Never! {
     if value == {
         .Int(number) -> number >= 0
         else -> false
@@ -598,7 +598,7 @@ fn provider_graph_is_non_negative_int(value: DataTree) -> Bool Never! {
 }
 
 // Whether an optional field is absent or one of the allowed shapes.
-fn provider_graph_shape_is(value: DataTree?, text: Bool, array: Bool, object: Bool) -> Bool Never! {
+fn provider_graph_shape_is(value: Dyn?, text: Bool, array: Bool, object: Bool) -> Bool Never! {
     present :: value ?? return true
     if text && provider_graph_is_text(present) -> return true
     if array && pkg_json_array(present) != None -> return true
@@ -607,7 +607,7 @@ fn provider_graph_shape_is(value: DataTree?, text: Bool, array: Bool, object: Bo
 
 // Rust `provider_dependency_field`: the dependency names of an array field,
 // each item recorded by index and by name.
-fn provider_graph_dependency_field(facts: &MetadataFacts, object: [String: DataTree], field: String, kind: String, namespace: String, losses: &[String]) -> [String] Never! {
+fn provider_graph_dependency_field(facts: &MetadataFacts, object: [String: Dyn], field: String, kind: String, namespace: String, losses: &[String]) -> [String] Never! {
     value :: object.get(field) ?? return [String]{}
     items :: pkg_json_array(value) ?? {
         &losses.push("{namespace} `{field}` must be an array")
@@ -644,7 +644,7 @@ fn provider_graph_dependency_field(facts: &MetadataFacts, object: [String: DataT
 
 // vcpkg `dependencies`: names or dependency objects with version, feature,
 // platform, and host facts.
-fn provider_vcpkg_dependencies(object: [String: DataTree], facts: &MetadataFacts, losses: &[String]) -> [String] Never! {
+fn provider_vcpkg_dependencies(object: [String: Dyn], facts: &MetadataFacts, losses: &[String]) -> [String] Never! {
     value :: object.get("dependencies") ?? return [String]{}
     items :: pkg_json_array(value) ?? {
         &losses.push("vcpkg `dependencies` must be an array")
@@ -694,7 +694,7 @@ fn provider_vcpkg_dependencies(object: [String: DataTree], facts: &MetadataFacts
 }
 
 // Homebrew source, variant, hook, and advisory fields as typed facts.
-fn provider_homebrew_named_facts(facts: &MetadataFacts, object: [String: DataTree]) Never! {
+fn provider_homebrew_named_facts(facts: &MetadataFacts, object: [String: Dyn]) Never! {
     fields :: [(field: String, category: String)]{
         (field: "homepage", category: "source"), (field: "tap", category: "source"), (field: "full_name", category: "source"),
         (field: "urls", category: "source"), (field: "source", category: "source"), (field: "head", category: "source"),
@@ -712,7 +712,7 @@ fn provider_homebrew_named_facts(facts: &MetadataFacts, object: [String: DataTre
 }
 
 // Each stable bottle's artifact and exact sha256.
-fn provider_homebrew_bottle_facts(facts: &MetadataFacts, value: DataTree, losses: &[String]) Never! {
+fn provider_homebrew_bottle_facts(facts: &MetadataFacts, value: Dyn, losses: &[String]) Never! {
     bottle :: pkg_json_object(value) ?? {
         &losses.push("Homebrew `bottle` must be an object")
         return
@@ -725,13 +725,13 @@ fn provider_homebrew_bottle_facts(facts: &MetadataFacts, value: DataTree, losses
         &losses.push("Homebrew `bottle.stable` must be an object")
         return
     }
-    files :: pkg_json_object(stable.get("files") ?? DataTree.Null) ?? stable
+    files :: pkg_json_object(stable.get("files") ?? Dyn.Null) ?? stable
     loop platform in files.keys().to_list() {
         artifact :: pkg_json_object(files[platform]) ?? {
             if platform != "rebuild" -> &losses.push("Homebrew bottle entry `{platform}` must be an object")
             next
         }
-        &facts.add_typed_json("provider.homebrew.bottle.{platform}", DataTree.Object(artifact))
+        &facts.add_typed_json("provider.homebrew.bottle.{platform}", Dyn.Object(artifact))
         hash :: provider_graph_json_string(artifact, "sha256") ?? {
             &losses.push("Homebrew bottle entry `{platform}` has no content hash")
             next
@@ -743,7 +743,7 @@ fn provider_homebrew_bottle_facts(facts: &MetadataFacts, value: DataTree, losses
 
 // The formula's source hash from `sha256`, `source.sha256`, or
 // `urls.stable.sha256`; differing hashes are a loss.
-fn provider_homebrew_source_hash(object: [String: DataTree], losses: &[String]) -> String? Never! {
+fn provider_homebrew_source_hash(object: [String: Dyn], losses: &[String]) -> String? Never! {
     hashes := [String]{}
     if object.get("sha256") == {
         .Val(value) -> {
@@ -824,7 +824,7 @@ fn provider_homebrew_source_hash(object: [String: DataTree], losses: &[String]) 
 }
 
 // Each named release asset's projection, platform, and exact digest.
-fn provider_github_asset_facts(facts: &MetadataFacts, value: DataTree, losses: &[String]) Never! {
+fn provider_github_asset_facts(facts: &MetadataFacts, value: Dyn, losses: &[String]) Never! {
     assets :: pkg_json_array(value) ?? {
         &losses.push("GitHub `assets` must be an array")
         return
@@ -856,7 +856,7 @@ fn provider_github_asset_facts(facts: &MetadataFacts, value: DataTree, losses: &
 }
 
 // Each platform artifact's projection and exact digest.
-fn provider_binary_artifact_facts(facts: &MetadataFacts, value: DataTree, losses: &[String]) Never! {
+fn provider_binary_artifact_facts(facts: &MetadataFacts, value: Dyn, losses: &[String]) Never! {
     artifacts :: pkg_json_object(value) ?? {
         &losses.push("binary metadata `artifacts` must be an object")
         return

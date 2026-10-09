@@ -1,7 +1,7 @@
 //! U27 (D-JPK-BUILDDBG1=A): failed-build logs, preserved scratch, explain.
 
 use super::JSON;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -423,7 +423,7 @@ fn parse_attempt(text: &str) -> Result<Attempt, String> {
     Ok(attempt)
 }
 
-fn str_field(obj: &[(String, DataTree)], key: &str) -> Result<String, String> {
+fn str_field(obj: &[(String, Dyn)], key: &str) -> Result<String, String> {
     obj.iter()
         .find_map(|(name, value)| (name == key).then_some(value))
         .ok_or_else(|| format!("missing key `{key}`"))?
@@ -431,14 +431,14 @@ fn str_field(obj: &[(String, DataTree)], key: &str) -> Result<String, String> {
         .map(ToString::to_string)
 }
 
-fn num_field(obj: &[(String, DataTree)], key: &str) -> usize {
+fn num_field(obj: &[(String, Dyn)], key: &str) -> usize {
     match obj
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
     {
-        Some(DataTree::Int(value)) => (*value).try_into().unwrap_or(0),
-        Some(DataTree::Float(value)) if value.is_finite() && *value >= 0.0 => *value as usize,
-        Some(DataTree::Number(value)) => value.parse().unwrap_or(0),
+        Some(Dyn::Int(value)) => value.to_usize().unwrap_or(0),
+        Some(Dyn::Float(value)) if value.is_finite() && *value >= 0.0 => *value as usize,
+        Some(Dyn::Number(value)) => value.parse().unwrap_or(0),
         _ => 0,
     }
 }

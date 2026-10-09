@@ -3,21 +3,21 @@
 // packages or executing lifecycle commands. `--json` renders one object
 // through Core JSON in the Rust key order.
 
-fn cli_json_texts(values: [String]) -> DataTree Never! {
-    items := [DataTree]{}
-    loop value in values -> &items.push(DataTree.Text(value))
-    DataTree.Array(items)
+fn cli_json_texts(values: [String]) -> Dyn Never! {
+    items := [Dyn]{}
+    loop value in values -> &items.push(Dyn.Text(value))
+    Dyn.Array(items)
 }
 
-fn cli_json_optional_text(value: String?) -> DataTree Never! {
+fn cli_json_optional_text(value: String?) -> Dyn Never! {
     if value == {
-        .Val(text) -> DataTree.Text(text)
-        .None -> DataTree.Null
+        .Val(text) -> Dyn.Text(text)
+        .None -> Dyn.Null
     }
 }
 
-fn cli_json_render(value: DataTree) -> String Never! {
-    json.to_string(value) ?? panic("compact JSON rendering of a DataTree is total")
+fn cli_json_render(value: Dyn) -> String Never! {
+    json.to_string(value) ?? panic("compact JSON rendering of a Dyn is total")
 }
 
 // A map's keys in the Rust `BTreeMap` order.
@@ -91,51 +91,51 @@ fn cli_env_info_service_summary(service: DevServicePlan) -> String Never! {
 }
 
 // One service as its `env info --json` object.
-fn cli_env_info_service_json(service: DevServicePlan) -> DataTree Never! {
-    ports := [DataTree]{}
-    loop port in service.ports -> &ports.push(DataTree.Int(port))
+fn cli_env_info_service_json(service: DevServicePlan) -> Dyn Never! {
+    ports := [Dyn]{}
+    loop port in service.ports -> &ports.push(Dyn.Int(port))
     run :: if service.run == {
         .Val(argv) -> cli_json_texts(argv)
-        .None -> DataTree.Null
+        .None -> Dyn.Null
     }
     shutdown :: if service.shutdown == {
-        .None -> DataTree.Null
+        .None -> Dyn.Null
         .Val(policy) -> if policy == {
-            .Kill -> DataTree.Object(["kind": DataTree.Text("kill")])
-            .Term(grace_ms) -> DataTree.Object(["kind": DataTree.Text("term"), "grace_ms": DataTree.Int(grace_ms)])
+            .Kill -> Dyn.Object(["kind": Dyn.Text("kill")])
+            .Term(grace_ms) -> Dyn.Object(["kind": Dyn.Text("term"), "grace_ms": Dyn.Int(grace_ms)])
         }
     }
     ready_probe :: if service.ready_probe == {
-        .None -> DataTree.Null
+        .None -> Dyn.Null
         .Val(probe) -> if probe == {
-            .Exec(command) -> DataTree.Object(["kind": DataTree.Text("exec"), "command": DataTree.Text(command)])
+            .Exec(command) -> Dyn.Object(["kind": Dyn.Text("exec"), "command": Dyn.Text(command)])
             .HTTP(url, status) -> {
                 code :: if status == {
-                    .Val(value) -> DataTree.Int(value)
-                    .None -> DataTree.Null
+                    .Val(value) -> Dyn.Int(value)
+                    .None -> Dyn.Null
                 }
-                DataTree.Object(["kind": DataTree.Text("http"), "url": DataTree.Text(url), "status": code])
+                Dyn.Object(["kind": Dyn.Text("http"), "url": Dyn.Text(url), "status": code])
             }
-            .Notify(path) -> DataTree.Object(["kind": DataTree.Text("notify"), "path": DataTree.Text(path)])
-            .TCP(host, port) -> DataTree.Object(["kind": DataTree.Text("tcp"), "host": DataTree.Text(host), "port": DataTree.Int(port)])
+            .Notify(path) -> Dyn.Object(["kind": Dyn.Text("notify"), "path": Dyn.Text(path)])
+            .TCP(host, port) -> Dyn.Object(["kind": Dyn.Text("tcp"), "host": Dyn.Text(host), "port": Dyn.Int(port)])
         }
     }
     restart :: if service.restart == {
-        .None -> DataTree.Null
+        .None -> Dyn.Null
         .Val(policy) -> if policy == {
-            .Never -> DataTree.Object(["kind": DataTree.Text("never")])
-            .OnFailure(max, backoff_ms, exponential) -> DataTree.Object(["kind": DataTree.Text("on_failure"), "max": DataTree.Int(max), "backoff_ms": DataTree.Int(backoff_ms), "exponential": DataTree.Bool(exponential)])
-            .Always(max, backoff_ms, exponential) -> DataTree.Object(["kind": DataTree.Text("always"), "max": DataTree.Int(max), "backoff_ms": DataTree.Int(backoff_ms), "exponential": DataTree.Bool(exponential)])
+            .Never -> Dyn.Object(["kind": Dyn.Text("never")])
+            .OnFailure(max, backoff_ms, exponential) -> Dyn.Object(["kind": Dyn.Text("on_failure"), "max": Dyn.Int(max), "backoff_ms": Dyn.Int(backoff_ms), "exponential": Dyn.Bool(exponential)])
+            .Always(max, backoff_ms, exponential) -> Dyn.Object(["kind": Dyn.Text("always"), "max": Dyn.Int(max), "backoff_ms": Dyn.Int(backoff_ms), "exponential": Dyn.Bool(exponential)])
         }
     }
-    extra := [DataTree]{}
-    loop item in service.extra -> &extra.push(DataTree.Object(["name": DataTree.Text(item.name), "value": DataTree.Text(item.value)]))
+    extra := [Dyn]{}
+    loop item in service.extra -> &extra.push(Dyn.Object(["name": Dyn.Text(item.name), "value": Dyn.Text(item.value)]))
     readiness :: service.ready != None || service.ready_probe != None || service.ports.len() > 0
-    DataTree.Object([
-        "name": DataTree.Text(service.name),
-        "enabled": DataTree.Bool(service.enable),
-        "ports": DataTree.Array(ports),
-        "readiness": DataTree.Bool(readiness),
+    Dyn.Object([
+        "name": Dyn.Text(service.name),
+        "enabled": Dyn.Bool(service.enable),
+        "ports": Dyn.Array(ports),
+        "readiness": Dyn.Bool(readiness),
         "after": cli_json_texts(service.after),
         "run": run,
         "shutdown": shutdown,
@@ -146,7 +146,7 @@ fn cli_env_info_service_json(service: DevServicePlan) -> DataTree Never! {
         "watch": cli_json_texts(service.watch),
         "before_start": cli_json_texts(service.before_start),
         "sockets": cli_json_texts(service.sockets),
-        "extra": DataTree.Array(extra),
+        "extra": Dyn.Array(extra),
     ])
 }
 
@@ -283,60 +283,60 @@ fn cli_env_info_json(plan: RunPlan, preset: String, selected_presets: [String], 
     lifecycle :: facts.lifecycle
     preset_names := [String]{}
     loop item in facts.presets -> &preset_names.push(item.name)
-    profiles := [DataTree]{}
+    profiles := [Dyn]{}
     loop profile in facts.package_profiles {
-        collisions := [String: DataTree]{}
-        loop path in cli_sorted_keys(profile.collisions) -> collisions[path] = DataTree.Text(profile.collisions.get(path) ?? "")
-        &profiles.push(DataTree.Object([
-            "name": DataTree.Text(profile.name),
+        collisions := [String: Dyn]{}
+        loop path in cli_sorted_keys(profile.collisions) -> collisions[path] = Dyn.Text(profile.collisions.get(path) ?? "")
+        &profiles.push(Dyn.Object([
+            "name": Dyn.Text(profile.name),
             "extends": cli_json_texts(profile.extends),
             "packages": cli_json_texts(profile.packages),
-            "collisions": DataTree.Object(collisions),
+            "collisions": Dyn.Object(collisions),
             "sources": cli_json_texts(profile.sources),
         ]))
     }
-    catalog_packs := [DataTree]{}
+    catalog_packs := [Dyn]{}
     loop name in catalog.names() {
         pack :: catalog.get(name) ?? next
-        &catalog_packs.push(DataTree.Object(["name": DataTree.Text(pack.name), "fingerprint": DataTree.Text(pack.fingerprint())]))
+        &catalog_packs.push(Dyn.Object(["name": Dyn.Text(pack.name), "fingerprint": Dyn.Text(pack.fingerprint())]))
     }
-    languages := [DataTree]{}
+    languages := [Dyn]{}
     loop language in facts.languages {
-        &languages.push(DataTree.Object([
-            "name": DataTree.Text(language.name),
-            "enable": DataTree.Bool(language.enable),
+        &languages.push(Dyn.Object([
+            "name": Dyn.Text(language.name),
+            "enable": Dyn.Bool(language.enable),
             "version": cli_json_optional_text(language.version),
             "channel": cli_json_optional_text(language.channel),
-            "venv": DataTree.Bool(language.venv),
+            "venv": Dyn.Bool(language.venv),
             "extra": cli_json_texts(language.extra_packages),
         ]))
     }
-    packs := [DataTree]{}
+    packs := [Dyn]{}
     loop pack in facts.language_packs {
-        &packs.push(DataTree.Object([
-            "name": DataTree.Text(pack.name),
-            "fingerprint": DataTree.Text(pack.fingerprint()),
+        &packs.push(Dyn.Object([
+            "name": Dyn.Text(pack.name),
+            "fingerprint": Dyn.Text(pack.fingerprint()),
             "packages": cli_json_texts(pack.packages),
             "venv_packages": cli_json_texts(pack.venv_packages),
-            "host": DataTree.Text(pack.host),
+            "host": Dyn.Text(pack.host),
             "platforms": cli_json_texts(pack.platforms),
-            "license": DataTree.Text(pack.license),
+            "license": Dyn.Text(pack.license),
             "required_tools": cli_json_texts(pack.required_tools),
         ]))
     }
-    projections := [DataTree]{}
+    projections := [Dyn]{}
     loop projection in facts.language_projections {
         selection :: projection.selection
-        &projections.push(DataTree.Object([
-            "name": DataTree.Text(selection.name),
-            "enable": DataTree.Bool(selection.enable),
+        &projections.push(Dyn.Object([
+            "name": Dyn.Text(selection.name),
+            "enable": Dyn.Bool(selection.enable),
             "version": cli_json_optional_text(selection.version),
             "channel": cli_json_optional_text(selection.channel),
-            "venv": DataTree.Bool(selection.venv),
-            "pack_fingerprint": DataTree.Text(projection.pack.fingerprint()),
-            "host": DataTree.Text(projection.host),
-            "platform": DataTree.Text(projection.platform),
-            "license": DataTree.Text(projection.license),
+            "venv": Dyn.Bool(selection.venv),
+            "pack_fingerprint": Dyn.Text(projection.pack.fingerprint()),
+            "host": Dyn.Text(projection.host),
+            "platform": Dyn.Text(projection.platform),
+            "license": Dyn.Text(projection.license),
             "missing_tools": cli_json_texts(projection.missing_tools),
             "included": cli_json_texts(projection.included),
             "omitted": cli_json_texts(projection.omitted),
@@ -344,29 +344,29 @@ fn cli_env_info_json(plan: RunPlan, preset: String, selected_presets: [String], 
         ]))
     }
     formatter :: if lifecycle.formatter == {
-        .Val(spec) -> DataTree.Text(spec.package)
-        .None -> DataTree.Null
+        .Val(spec) -> Dyn.Text(spec.package)
+        .None -> Dyn.Null
     }
-    services := [DataTree]{}
+    services := [Dyn]{}
     loop service in plan.dev_services -> &services.push(cli_env_info_service_json(service))
-    variables := [DataTree]{}
+    variables := [Dyn]{}
     loop name in variable_names {
-        &variables.push(DataTree.Object(["name": DataTree.Text(name), "sources": cli_json_texts(variable_sources.get(name) ?? [String]{})]))
+        &variables.push(Dyn.Object(["name": Dyn.Text(name), "sources": cli_json_texts(variable_sources.get(name) ?? [String]{})]))
     }
     managed := [String]{}
     loop file in facts.files -> &managed.push(file.destination)
-    dotenv := [DataTree]{}
+    dotenv := [Dyn]{}
     loop item in lifecycle.dotenv {
-        &dotenv.push(DataTree.Object(["file": DataTree.Text(item.file), "allow": cli_json_texts(item.allow), "secrets": cli_json_texts(item.secrets)]))
+        &dotenv.push(Dyn.Object(["file": Dyn.Text(item.file), "allow": cli_json_texts(item.allow), "secrets": cli_json_texts(item.secrets)]))
     }
-    integrations := [DataTree]{}
+    integrations := [Dyn]{}
     loop integration in facts.integrations {
         integration_files := [String]{}
         loop file in integration.files -> &integration_files.push(file.destination)
-        &integrations.push(DataTree.Object([
-            "kind": DataTree.Text(integration.kind.as_str()),
-            "name": DataTree.Text(integration.name),
-            "preset": DataTree.Text(integration.preset),
+        &integrations.push(Dyn.Object([
+            "kind": Dyn.Text(integration.kind.as_str()),
+            "name": Dyn.Text(integration.name),
+            "preset": Dyn.Text(integration.preset),
             "option_keys": cli_json_texts(cli_sorted_keys(integration.options)),
             "packages": cli_json_texts(integration.packages),
             "files": cli_json_texts(integration_files),
@@ -378,35 +378,35 @@ fn cli_env_info_json(plan: RunPlan, preset: String, selected_presets: [String], 
             "losses": cli_json_texts(integration.losses),
         ]))
     }
-    report := [String: DataTree]{}
-    report["preset"] = DataTree.Text(preset)
+    report := [String: Dyn]{}
+    report["preset"] = Dyn.Text(preset)
     report["selected_presets"] = cli_json_texts(selected_presets)
     report["applied_presets"] = cli_json_texts(applied_presets)
     report["presets"] = cli_json_texts(preset_names)
-    report["package_profiles"] = DataTree.Array(profiles)
+    report["package_profiles"] = Dyn.Array(profiles)
     report["environments"] = cli_json_texts(facts.environment_names)
     report["active_environment"] = cli_json_optional_text(facts.active_environment)
     report["active_environment_provenance"] = cli_json_texts(facts.active_environment_provenance)
     report["sources"] = cli_json_texts(facts.source_files)
-    report["language_catalog"] = DataTree.Object([
-        "source": DataTree.Text("jet-env-model builtin"),
-        "fingerprint": DataTree.Text(catalog.fingerprint()),
-        "packs": DataTree.Array(catalog_packs),
+    report["language_catalog"] = Dyn.Object([
+        "source": Dyn.Text("jet-env-model builtin"),
+        "fingerprint": Dyn.Text(catalog.fingerprint()),
+        "packs": Dyn.Array(catalog_packs),
     ])
-    report["languages"] = DataTree.Array(languages)
-    report["language_packs"] = DataTree.Array(packs)
-    report["language_projections"] = DataTree.Array(projections)
+    report["languages"] = Dyn.Array(languages)
+    report["language_packs"] = Dyn.Array(packs)
+    report["language_projections"] = Dyn.Array(projections)
     report["packages"] = cli_json_texts(packages)
     report["formatter"] = formatter
-    report["services"] = DataTree.Array(services)
+    report["services"] = Dyn.Array(services)
     // D-JOB-NAME2=B: both keys always appear; the key text is the same
     // `Syntax` constant the human heading uses.
     report[ENV_REPORT_CHECKS_KEY] = cli_json_texts(checks)
     report[ENV_REPORT_JOBS_KEY] = cli_json_texts(jobs)
-    report["variables"] = DataTree.Array(variables)
+    report["variables"] = Dyn.Array(variables)
     report["files"] = cli_json_texts(managed)
-    report["dotenv"] = DataTree.Array(dotenv)
+    report["dotenv"] = Dyn.Array(dotenv)
     report["git_hooks_path"] = cli_json_optional_text(lifecycle.git_hooks_path)
-    report["integrations"] = DataTree.Array(integrations)
-    cli_json_render(DataTree.Object(report))
+    report["integrations"] = Dyn.Array(integrations)
+    cli_json_render(Dyn.Object(report))
 }

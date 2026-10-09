@@ -1380,11 +1380,11 @@ fn jet_decimal_to_float(a: &jet_std::JetDecimal) -> f64 {
 fn jet_std_json_parse(text: &str) -> Result<jet_std::DataTree, jet_std::EncodingError> {
     jet_std::parse_json_datatree(text)
 }
-fn jet_std_json_render(d: &jet_std::DataTree) -> String {
-    jet_std::render_datatree_json(d, false, 0)
+fn jet_std_json_render(d: &jet_std::Dyn) -> String {
+    jet_std::render_dyn_json(d, false, 0)
 }
-fn jet_std_json_render_pretty(d: &jet_std::DataTree) -> String {
-    jet_std::render_datatree_json(d, true, 0)
+fn jet_std_json_render_pretty(d: &jet_std::Dyn) -> String {
+    jet_std::render_dyn_json(d, true, 0)
 }
 fn jet_quote_json_local(s: &str) -> String {
     let mut out = String::from("\"");
@@ -1402,24 +1402,21 @@ fn jet_quote_json_local(s: &str) -> String {
     out.push('"');
     out
 }
-fn jet_std_json_render_canonical(d: &jet_std::DataTree) -> String {
-    fn render(t: &jet_std::DataTree) -> String {
+fn jet_std_json_render_canonical(d: &jet_std::Dyn) -> String {
+    fn render(t: &jet_std::Dyn) -> String {
         match t {
-            jet_std::DataTree::Null => "null".to_string(),
-            jet_std::DataTree::Bool(b) => b.to_string(),
-            jet_std::DataTree::Int(n) => jet_std::jet_int_to_string(*n),
-            jet_std::DataTree::Float(f) => format!("{:?}", f),
-            jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => {
-                unreachable!("internal JSON carrier escaped typed decode")
-            }
-            jet_std::DataTree::Text(s) => jet_quote_json_local(s),
-            jet_std::DataTree::Bytes(bs) => {
-                format!("[{}]", bs.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(","))
-            }
-            jet_std::DataTree::Array(xs) => {
+            jet_std::Dyn::Null => "null".to_string(),
+            jet_std::Dyn::Bool(b) => b.to_string(),
+            jet_std::Dyn::Int(n) => n.to_string_rep(),
+            jet_std::Dyn::Float(f) => format!("{:?}", f),
+            jet_std::Dyn::Number(text) => text.clone(),
+            jet_std::Dyn::Text(s) => jet_quote_json_local(s),
+            jet_std::Dyn::Bytes(bs) => jet_quote_json_local(&jet_std::Dyn::bytes_text(bs)),
+            jet_std::Dyn::DateTime(value) => jet_quote_json_local(&value.to_rfc3339()),
+            jet_std::Dyn::Array(xs) => {
                 format!("[{}]", xs.iter().map(render).collect::<Vec<_>>().join(","))
             }
-            jet_std::DataTree::Object(entries) => {
+            jet_std::Dyn::Object(entries) => {
                 let mut sorted = entries.clone();
                 sorted.sort_by(|a, b| a.0.cmp(&b.0));
                 let parts: Vec<String> = sorted
@@ -1432,18 +1429,18 @@ fn jet_std_json_render_canonical(d: &jet_std::DataTree) -> String {
     }
     render(d)
 }
-fn jet_std_json_events(d: &jet_std::DataTree) -> String {
-    fn walk(path: String, t: &jet_std::DataTree, out: &mut Vec<String>) {
+fn jet_std_json_events(d: &jet_std::Dyn) -> String {
+    fn walk(path: String, t: &jet_std::Dyn, out: &mut Vec<String>) {
         let here = if path.is_empty() { "$".to_string() } else { path };
         match t {
-            jet_std::DataTree::Object(entries) => {
+            jet_std::Dyn::Object(entries) => {
                 out.push(format!("object_start {here}"));
                 for (k, v) in entries {
                     walk(format!("{}.{}", here, k), v, out);
                 }
                 out.push(format!("object_end {here}"));
             }
-            jet_std::DataTree::Array(items) => {
+            jet_std::Dyn::Array(items) => {
                 out.push(format!("array_start {here}"));
                 for (i, v) in items.iter().enumerate() {
                     walk(format!("{}[{}]", here, i), v, out);
@@ -1475,7 +1472,7 @@ fn jet_std_jsonl_parse(text: &str) -> Result<Vec<jet_std::DataTree>, jet_std::En
     }
     Ok(out)
 }
-fn jet_std_jsonl_render(rows: &Vec<jet_std::DataTree>) -> String {
+fn jet_std_jsonl_render(rows: &Vec<jet_std::Dyn>) -> String {
     let mut out = rows
         .iter()
         .map(jet_std_json_render_canonical)

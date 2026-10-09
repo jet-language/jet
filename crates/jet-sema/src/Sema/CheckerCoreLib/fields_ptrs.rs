@@ -13,13 +13,13 @@ impl<'a> Checker<'a> {
         alias_span: Span,
         span: Span,
     ) -> Option<Type> {
-        // Direct type imports (`use core.encoding.[DataTree, DataEvent]`)
+        // Direct type imports (`use core.encoding.[Dyn, DataEvent]`)
         // bind the type name as an alias to the owning Core module. Resolve
-        // its constructors here instead of treating `DataTree.Text` as a
+        // its constructors here instead of treating `Dyn.Text` as a
         // module item lookup.
         if module == "core.encoding"
-            && alias == "DataTree"
-            && matches!(name, "Null" | "Bool" | "Int" | "Float" | "Text" | "Array" | "Object")
+            && alias == "Dyn"
+            && matches!(name, "Null" | "Bool" | "Int" | "Float" | "Text" | "Bytes" | "DateTime" | "Array" | "Object")
         {
             self.record_import_alias_reference(alias, alias_span);
             return Some(json_ty());

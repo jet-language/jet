@@ -2176,8 +2176,8 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
     self_access := MIRAccess?{None}
     owner := MIRType?{None}
     // MIRRust emit_impl: a codec impl bridges the Jet `encode`/`decode` verbs to
-    // the runtime `__jet_Encode::jet_encode(&self) -> DataTree` and the static
-    // `__jet_Decode::jet_decode(&DataTree) -> Result<Self, Vec<FieldError>>`.
+    // the runtime `__jet_Encode::jet_encode(&self) -> Dyn` and the static
+    // `__jet_Decode::jet_decode(&Dyn) -> Result<Self, Vec<FieldError>>`.
     encode_codec := false
     decode_codec := false
     if function.form == {
@@ -2269,7 +2269,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
         name :: jet_rust_emit_trait_param_name(parameter, index)
         scalar_by_ref :: arithmetic && !jet_rust_emit_type_is_borrowed(parameter.ty)
         ty :: if {
-            decode_codec -> "&{ctx.config.root_prefix}jet_std::DataTree"
+            decode_codec -> "&{ctx.config.root_prefix}jet_std::Dyn"
             scalar_by_ref -> "&{jet_rust_emit_type(&ctx, parameter.ty)}"
             else -> jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
         }
@@ -2289,7 +2289,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
         return
     }
     if decode_codec && (self_access != None || index != 1) {
-        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Decode implementation method is not static with one argument", "the codec bridge renders Decode as `jet_decode(tree: &DataTree)`", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Decode implementation method is not static with one argument", "the codec bridge renders Decode as `jet_decode(tree: &Dyn)`", Val(function.span))
         return
     }
     // Codec, compiler-generated and compiler-owned trait rows carry identity
@@ -2340,7 +2340,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
     view_lifetimes := [String]{}
     return_type := ""
     if {
-        encode_codec -> return_type = "{ctx.config.root_prefix}jet_std::DataTree"
+        encode_codec -> return_type = "{ctx.config.root_prefix}jet_std::Dyn"
         decode_codec -> return_type = "Result<Self, Vec<{ctx.config.root_prefix}jet_std::FieldError>>"
         else -> {
             if view_lifetime == {
@@ -2750,7 +2750,7 @@ fn jet_rust_emit_native_codec_type_def(ctx: &JetRustEmitContext, implementation:
 // reads back from the lowered template, so the printed body is checked
 // against what sema generated instead of re-deriving serde markers the MIR
 // does not carry (`#[Flatten]`, a `validate` block, defaults): every literal
-// string in body order, the key of every `DataTree.field` lookup in body
+// string in body order, the key of every `Dyn.field` lookup in body
 // order, and the one journey origin every `Err` return claims (a call
 // statement, empty when none). A call to another codec method of the same
 // direction (a nested field or payload's `decode`/`encode`) is what the
@@ -2826,7 +2826,7 @@ fn jet_rust_emit_codec_template(ctx: &JetRustEmitContext, function: MIRFunction)
                 .Semantic(operation) -> {
                     if operation == {
                         .HandleMethod(call, _, args, _, _) -> {
-                            if jet_rust_emit_prelude_symbol(&ctx, call).ends_with("jet_datatree_field") {
+                            if jet_rust_emit_prelude_symbol(&ctx, call).ends_with("jet_dyn_field") {
                                 if args.len() != 1 -> return None
                                 field_key :: texts_by_value.get(args[0].value) ?? return None
                                 &field_keys.push(field_key)
@@ -2942,7 +2942,7 @@ fn jet_rust_emit_native_derived_decode(ctx: &JetRustEmitContext, implementation:
             if !jet_rust_emit_same_texts(keys, template.field_keys) -> return false
             required := [Bool]{}
             loop key in keys -> &required.push(template.texts.contains("E2410: missing required field `{key}`"))
-            &body.push("if !matches!(__jet_tree, {root}jet_std::DataTree::Object(_)) {{ {origin}return Err(vec![{root}jet_std::FieldError {{ path: String::new(), reason: \"expected an object\".to_string() }}]); }}")
+            &body.push("if !matches!(__jet_tree, {root}jet_std::Dyn::Object(_)) {{ {origin}return Err(vec![{root}jet_std::FieldError {{ path: String::new(), reason: \"expected an object\".to_string() }}]); }}")
             &body.push("let mut __jet_errors: Vec<{root}jet_std::FieldError> = Vec::new();")
             steps :: jet_rust_emit_native_record_decode(&ctx, definition, "Self", "", fields, keys, required, "__jet_tree")
             loop step in steps -> &body.push(step)
@@ -2986,7 +2986,7 @@ fn jet_rust_emit_native_derived_decode(ctx: &JetRustEmitContext, implementation:
         }
         else -> return false
     }
-    &lines.push("fn jet_decode(__jet_tree: &{root}jet_std::DataTree) -> Result<Self, Vec<{root}jet_std::FieldError>> {{")
+    &lines.push("fn jet_decode(__jet_tree: &{root}jet_std::Dyn) -> Result<Self, Vec<{root}jet_std::FieldError>> {{")
     &lines.push("    {body.join("\n    ")}")
     &lines.push("}}")
     &lines.push("")
@@ -3012,7 +3012,7 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
     body := [String]{}
     if definition.kind == {
         .Struct(fields, _) -> {
-            &body.push("let mut __jet_pairs: Vec<(String, {root}jet_std::DataTree)> = Vec::new();")
+            &body.push("let mut __jet_pairs: Vec<(String, {root}jet_std::Dyn)> = Vec::new();")
             // Every key must appear in the template in field order; a
             // flattened field has no key of its own.
             cursor := 0
@@ -3034,7 +3034,7 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
                     &body.push("__jet_pairs.push(({quoted}.to_string(), {root}jet_codec_encode(0, {value})));")
                 }
             }
-            &body.push("{root}jet_std::DataTree::Object(__jet_pairs)")
+            &body.push("{root}jet_std::Dyn::Object(__jet_pairs)")
         }
         .Enum(variants, _) -> {
             if variants.len() == 0 -> return false
@@ -3050,7 +3050,7 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
                     }
                     .Single(_) -> {
                         value :: if jet_rust_emit_equality_edge_boxed(definition, variant.name) -> "__jet_value.as_ref()" else -> "__jet_value"
-                        &arms.push("{head}(__jet_value) => {root}jet_std::DataTree::Object(vec![({wire}.to_string(), {root}jet_codec_encode(0, {value}))]),")
+                        &arms.push("{head}(__jet_value) => {root}jet_std::Dyn::Object(vec![({wire}.to_string(), {root}jet_codec_encode(0, {value}))]),")
                     }
                     .Named(fields) -> {
                         bindings := [String]{}
@@ -3062,7 +3062,7 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
                             &pairs.push("({jet_rust_emit_quote(field.name)}.to_string(), {root}jet_codec_encode(0, {value}))")
                         }
                         pattern :: if bindings.len() == 0 -> ".." else -> bindings.join(", ")
-                        &arms.push("{head} {{ {pattern} }} => {root}jet_std::DataTree::Object(vec![({wire}.to_string(), {root}jet_std::DataTree::Object(vec![{pairs.join(", ")}]))]),")
+                        &arms.push("{head} {{ {pattern} }} => {root}jet_std::Dyn::Object(vec![({wire}.to_string(), {root}jet_std::Dyn::Object(vec![{pairs.join(", ")}]))]),")
                     }
                 }
             }
@@ -3070,7 +3070,7 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
         }
         else -> return false
     }
-    &lines.push("fn jet_encode(&self) -> {root}jet_std::DataTree {{")
+    &lines.push("fn jet_encode(&self) -> {root}jet_std::Dyn {{")
     &lines.push("    {body.join("\n    ")}")
     &lines.push("}}")
     &lines.push("")

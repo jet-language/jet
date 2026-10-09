@@ -1846,9 +1846,9 @@ The direct functions are useful when a typed builder is unnecessary:
 
 | API | Result | Description |
 | --- | --- | --- |
-| `decode()` | `DataTree` | Decode the current process arguments, including `help` and `h` flags. |
-| `decode_argv(argv)` | `DataTree` | Decode an explicit argument vector. |
-| `merge(base, overlay)` | `DataTree` | Recursively merge objects; overlay arrays and scalars replace. |
+| `decode()` | `Dyn` | Decode the current process arguments, including `help` and `h` flags. |
+| `decode_argv(argv)` | `Dyn` | Decode an explicit argument vector. |
+| `merge(base, overlay)` | `Dyn` | Recursively merge objects; overlay arrays and scalars replace. |
 | `get_text` / `get_bool` / `get_int` | scalar values | Read typed scalar fields with empty/false/zero fallbacks. |
 | `positionals(tree)` / `remainder(tree)` | `[String]` | Read positional values. |
 | `program(tree)` / `wants_help(tree)` | `String` / `Bool` | Read `argv[0]` or help intent. |
@@ -2771,7 +2771,7 @@ projection is the same on every execution tier.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
-| `encoding.DataTree` | type | Dynamic tree of null, Boolean, integer, float, lexical number, typed text, string, bytes, array, and ordered-object values. |
+| `encoding.Dyn` | type | Dynamic tree with `Null`, `Bool`, owned exact `Int`, `Float`, lexical `Number`, `Text`, `Bytes`, `DateTime`, `Array`, and ordered `Object` cases. |
 | `encoding.DataEvent` | type | Event emitted by an incremental reader. |
 | `encoding.EncodingCause`, `EncodingErrorKind`, `EncodingError` | types | Structured encoding failure information. |
 | `encoding.EncodingFormat` | type | Format selector used by generic readers and writers. |
@@ -2793,7 +2793,7 @@ The standard formats are exposed as `core.encoding.base32`, `base64`, `binary`,
 
 #### Typed codecs and validation
 
-A parser returns a `DataTree` (or a format-specific document). A typed codec
+A parser returns a `Dyn` (or a format-specific document). A typed codec
 maps a declared Jet type to and from that tree. `#Codable`, `#Encode`, and
 `#Decode` derive the typed encode/decode routes; field attributes such as
 `#Rename`, `#Skip`, `#Flatten`, `#RenameAll`, `#DenyUnknownFields`,
@@ -2801,6 +2801,12 @@ maps a declared Jet type to and from that tree. `#Codable`, `#Encode`, and
 ignored unless a type opts into rejection. A field conversion or missing
 required field is reported as a `FieldError` rather than silently defaulting to
 an unrelated type.
+Text never implicitly decodes as an integer, float, or Boolean, except in
+text-native sources: environment variables, CSV cells, route and query
+parameters. `Dyn.Int` owns its exact integer even beyond machine range.
+`Dyn.Number` retains a parsed number's spelling; `.int()`, `.float()` and
+typed decoding check the destination range when reading it. There is no
+public typed-text carrier.
 `#Codable` requests both directions; `#Encode` and `#Decode` request one-way derivation, and derivation is compiler-owned rather than macro- or reflection-driven (`D-SERDE1–8`). Typed `decode<T>` produces `T ![FieldError]` (or `[T] ![FieldError]` for CSV); each failure preserves its path and reason, and generic codec bounds are injected at the use site (`D-GENERIC-CALL1`; `D-SERDE6`; `D-SERDE9–12`). Hand-written codecs use the same `Encode`/`Decode` protocol and field-path accumulation (`D-SERDE2`; `D-SERDE13–16`).
 
 Validation can be declared as `validate { check(...) }`: all failed checks accumulate, and conditions and messages are purity-checked (`D-VALIDATE1`; `D-FIELDPOL1`; `S60/E3401`).
@@ -2813,10 +2819,11 @@ use an untyped string round trip as a substitute for a typed codec.
 
 ### `core.encoding.json` — JSON trees
 
-`core.encoding.json` parses strict RFC 8259-style JSON into `DataTree`. Integer
-literals remain exact integers; fractional values are floats. NaN and infinity
-syntax is rejected. `decode` has the same strict behavior as `parse`, despite
-its historical name. Compact output retains insertion order, pretty output
+`core.encoding.json` parses strict RFC 8259-style JSON into `Dyn`. Every
+number token remains a `Number` with its exact spelling, including trailing
+zeroes, exponent spelling, and numbers outside machine range. NaN and infinity
+syntax is rejected. Typed `decode<T>` checks numbers when projecting into `T`;
+quoted numbers stay text. Compact output retains insertion order, pretty output
 uses two-space indentation, and `canonical` is RFC 8785 JCS with UTF-16 key
 order. `parse`, `decode`, and `reader` reject a repeated object name with its
 path and position; the `_allow_duplicates` siblings are the explicit opt-in.
@@ -2824,14 +2831,14 @@ The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
-| `json.parse(text)` / `decode(text)` | `DataTree !EncodingError` | Parse one strict JSON value. |
-| `json.loads(text)` / `load(text)` | `DataTree !EncodingError` | Compatibility aliases for parsing text. |
+| `json.parse(text)` / `decode(text)` | `Dyn !EncodingError` | Parse one strict JSON value. |
+| `json.loads(text)` / `load(text)` | `Dyn !EncodingError` | Compatibility aliases for parsing text. |
 | `json.dumps(value)` / `dump(value)` / `to_string(value)` | `String` | Emit compact JSON. |
 | `json.to_string_pretty(value)` | `String` | Emit two-space pretty JSON. |
 | `json.canonical(value)` | `String !EncodingError` | Emit RFC 8785 JCS bytes: UTF-16 key order, ECMAScript numbers; reject NaN, infinities, and an `Int` that binary64 cannot hold exactly. |
-| `json.parse_allow_duplicates(text)` | `DataTree !EncodingError` | Parse like `parse`, but keep the later value of a repeated object name. |
-| `json.pointer(tree, path)` | `DataTree !EncodingError` | Select by RFC 6901 JSON Pointer; a missing member or bad step is a located error, JSON `null` is a value. |
-| `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `DataTree !EncodingError` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
+| `json.parse_allow_duplicates(text)` | `Dyn !EncodingError` | Parse like `parse`, but keep the later value of a repeated object name. |
+| `json.pointer(tree, path)` | `Dyn !EncodingError` | Select by RFC 6901 JSON Pointer; a missing member or bad step is a located error, JSON `null` is a value. |
+| `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `Dyn !EncodingError` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
 | `json.events(value)` | `[DataEvent]` | Produce the canonical event sequence for a tree. |
 | `json.reader(text)` / `reader_allow_duplicates(text)` | `JSONReader` | Pull events over text already held in memory; the duplicate-permitting reader reports each key occurrence. Its `next()` returns `DataEvent !EncodingError`, including an error after exhaustion. |
 | `json.reader(^input, limits)` / `json.writer(^output, limits, canonical)` | `JSONReader !EncodingError` / `JSONWriter !EncodingError` | Construct bounded file-backed event streams. |
@@ -2857,7 +2864,7 @@ is retained and counts as nonblank (only spaces and tabs make a blank record).
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
-| `jsonl.parse(text)` / `loads(text)` | `[DataTree] !EncodingError` | Parse all nonblank lines. |
+| `jsonl.parse(text)` / `loads(text)` | `[Dyn] !EncodingError` | Parse all nonblank lines. |
 | `jsonl.to_string(values)` / `dumps(values)` | `String` | Encode values as compact JSON lines with a trailing newline per row. |
 | `jsonl.count_rows(text)` | `Int` | Count nonblank rows. |
 | `jsonl.append_line(text, value)` | `String` | Append one encoded row. |
@@ -2896,12 +2903,14 @@ stream retains its separate native callback carrier.
 
 `core.encoding.toml` supports the common TOML 1.0 document forms: comments,
 dotted keys, tables, array tables, strings, integers, floats, booleans,
-inline tables, and arrays. TOML datetimes remain text in `DataTree`. Unsupported
-syntax fails closed, and output is minimal rather than comment-preserving.
+inline tables, and arrays. Numeric spellings remain `Dyn.Number`; duplicate
+keys (including inline tables) are errors. Offset datetimes become `Dyn.DateTime`;
+local dates and times remain text. Unsupported syntax fails closed, and output
+is minimal rather than comment-preserving.
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `toml.parse(text)` / `decode(text)` / `loads(text)` / `load(text)` | `DataTree !EncodingError` | Parse a TOML document or a compatibility alias. |
+| `toml.parse(text)` / `decode(text)` / `loads(text)` / `load(text)` | `Dyn !EncodingError` | Parse a TOML document or a compatibility alias. |
 | `toml.to_string(value)` | `String` | Emit a minimal TOML document. |
 
 ### `core.encoding.yaml` — bounded YAML input
@@ -2913,7 +2922,7 @@ serializer.
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `yaml.parse(text)` / `decode(text)` | `DataTree !EncodingError` | Parse supported YAML input. |
+| `yaml.parse(text)` / `decode(text)` | `Dyn !EncodingError` | Parse supported YAML input. |
 
 ### `core.encoding.xml` — bounded XML trees
 
@@ -4369,7 +4378,7 @@ lock-lifetime seam; this source port does not claim those rows are complete.
 | `tree(name: String) -> ServiceTree` | tree | Create a named service topology. |
 | `tree.worker(name: String, handler, capacity: Int) -> ServiceEndpoint !ServiceError` | endpoint | Register a checked top-level handler with a bounded mailbox. |
 | `tree.start()` / `tree.stop()` | — | Start or stop the service tree. |
-| `tree.show() -> DataTree` | tree | Inspect topology and delivery state. |
+| `tree.show() -> Dyn` | tree | Inspect topology and delivery state. |
 | `tree.set_restart(strategy: ServiceRestart)` | — | Select one-for-one, all-for-one, or rest-for-one restart. |
 | `runtime(store: String, retention: Duration) -> ServiceRuntime` | runtime | Describe runtime storage and retention. |
 | `state_store(path: String) -[FS.Read]> ServiceStateStore !ServiceError` | store | Validate a durable state-store path and its lexical ancestors. |

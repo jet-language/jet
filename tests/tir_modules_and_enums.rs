@@ -285,7 +285,7 @@ fn run() {
 }
 ";
     let adapter_src = "\
-pub fn concrete(table: ^Table<DataTree>) -> Table<DataTree> {
+pub fn concrete(table: ^Table<Dyn>) -> Table<Dyn> {
     return table
 }
 pub fn generic<T>(table: ^Table<T>) -> Table<T> {

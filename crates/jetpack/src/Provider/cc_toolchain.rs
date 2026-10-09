@@ -21,7 +21,7 @@ use crate::Store::{
     NixOutputRequest, ProducerRecord, Roots, StoreEntry,
 };
 use crate::{Envelope, JSON, SHA256};
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::Read;
@@ -1902,14 +1902,14 @@ fn read_bounded_file_named(path: &Path, limit: u64, label: &str) -> Result<Vec<u
     Ok(bytes)
 }
 
-fn object_field<'a>(object: &'a [(String, DataTree)], field: &str) -> Option<&'a DataTree> {
+fn object_field<'a>(object: &'a [(String, Dyn)], field: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == field).then_some(value))
 }
 
 fn json_string(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     field: &str,
 ) -> Result<String, String> {
     object_field(object, field)
@@ -1920,11 +1920,11 @@ fn json_string(
 }
 
 fn json_number(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     field: &str,
 ) -> Result<i64, String> {
     match object_field(object, field) {
-        Some(DataTree::Int(value)) => Ok(*value),
+        Some(Dyn::Int(value)) => value.to_i64().ok_or_else(|| format!("C toolchain manifest field `{field}` is outside I64")),
         _ => Err(format!("C toolchain manifest field `{field}` is not a number")),
     }
 }

@@ -1,0 +1,48 @@
+// Dyn.Bytes and Dyn.DateTime in every codec: CBOR has native byte strings and
+// date-time tags (0 and 1), TOML has native offset date-times, YAML has
+// `!!binary` and timestamps, and JSON/CSV carry base64 and RFC 3339 text that
+// typed decode accepts.
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.encoding.csv as csv
+use core.encoding.json as json
+use core.encoding.toml as toml
+use core.encoding.yaml as yaml
+use core.time as time
+
+#Codable
+struct Event {
+    at: DateTime
+    data: [U8]
+}
+
+fn run() [FieldError]! {
+    instant :: time.parse_rfc3339("2024-03-15T12:30:00Z") ?? panic("instant")
+    india :: time.zone("+05:30") ?? panic("zone")
+    row := Dyn.object()
+    row.at = Dyn.DateTime(time.zoned(instant, india))
+    row.data = Dyn.Bytes([U8]{104, 105})
+
+    print(json.to_string(row))
+    print(json.canonical(row) ?? panic("canonical"))
+    print(toml.to_string(row))
+    print(yaml.to_string(row))
+    wire :: cbor.to_bytes(row) ?? panic("cbor")
+    print(encoding.bytes_to_hex(wire))
+    print((cbor.parse(wire) ?? panic("cbor parse")) == row)
+
+    // Native forms parse back to the new cases.
+    from_toml :: toml.parse("at = 2024-03-15T18:00:00+05:30") ?? panic("toml")
+    print(from_toml.at == row.at)
+    from_yaml :: yaml.parse("at: 2024-03-15T18:00:00+05:30\ndata: !!binary aGk=") ?? panic("yaml")
+    print(from_yaml == row)
+    epoch :: cbor.parse(encoding.hex_to_bytes("c11a65f43f48") ?? panic("hex")) ?? panic("tag 1")
+    print(epoch)
+
+    // JSON has no native form: typed decode reads the texts back.
+    event :: json.decode<Event>("{{\"at\":\"2024-03-15T18:00:00+05:30\",\"data\":\"aGk=\"}}")
+    print(event.at.format_rfc3339())
+    print(event.data.len())
+    print(json.to_string(event))
+    print(csv.to_string([event]))
+}

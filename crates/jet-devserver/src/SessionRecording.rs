@@ -7,7 +7,7 @@
 //! the source/build identity or retained window changes.
 
 use crate::Session::JET_DEVTOOLS_PROTOCOL;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_escape, parse_json_with_limit};
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
@@ -124,8 +124,8 @@ impl SessionEvent {
             Some(payload) => {
                 let value = parse_json_value(&payload, "event payload")?;
                 match value {
-                    DataTree::Null => None,
-                    value @ DataTree::Object(_) => Some(canonical_json(&value)),
+                    Dyn::Null => None,
+                    value @ Dyn::Object(_) => Some(canonical_json(&value)),
                     _ => {
                         return Err(RecordingError::InvalidEvent(
                             "event payload must be an object or null".to_string(),
@@ -846,7 +846,7 @@ fn parse_envelope(
         .map_err(|_| RecordingError::InvalidEnvelope("envelope is not UTF-8".to_string()))?;
     let root = parse_json_value(text, "devtools envelope")?;
     let object = match root {
-        DataTree::Object(object) => object.into_iter().collect::<BTreeMap<_, _>>(),
+        Dyn::Object(object) => object.into_iter().collect::<BTreeMap<_, _>>(),
         _ => {
             return Err(RecordingError::InvalidEnvelope(
                 "envelope must be an object".to_string(),
@@ -856,7 +856,7 @@ fn parse_envelope(
     let protocol = object
         .get("protocol")
         .and_then(|value| match value {
-            DataTree::Text(protocol) => Some(protocol.as_str()),
+            Dyn::Text(protocol) => Some(protocol.as_str()),
             _ => None,
         })
         .ok_or_else(|| RecordingError::InvalidEnvelope("missing string `protocol`".to_string()))?;
@@ -870,7 +870,7 @@ fn parse_envelope(
         .get("events")
         .ok_or_else(|| RecordingError::InvalidEnvelope("missing `events` array".to_string()))?;
     let values = match values {
-        DataTree::Array(values) => values,
+        Dyn::Array(values) => values,
         _ => {
             return Err(RecordingError::InvalidEnvelope(
                 "envelope `events` must be an array".to_string(),
@@ -880,9 +880,9 @@ fn parse_envelope(
     values.iter().map(parse_event).collect()
 }
 
-fn parse_event(value: &DataTree) -> Result<SessionEvent, RecordingError> {
+fn parse_event(value: &Dyn) -> Result<SessionEvent, RecordingError> {
     let object = match value {
-        DataTree::Object(object) => object.iter().cloned().collect::<BTreeMap<_, _>>(),
+        Dyn::Object(object) => object.iter().cloned().collect::<BTreeMap<_, _>>(),
         _ => {
             return Err(RecordingError::InvalidEvent(
                 "event must be an object".to_string(),
@@ -898,7 +898,7 @@ fn parse_event(value: &DataTree) -> Result<SessionEvent, RecordingError> {
         .get("fields")
         .ok_or_else(|| RecordingError::InvalidEvent("missing event `fields`".to_string()))?;
     let fields_json = match fields {
-        DataTree::Object(_) => canonical_json(fields),
+        Dyn::Object(_) => canonical_json(fields),
         _ => {
             return Err(RecordingError::InvalidEvent(
                 "event fields must be an object".to_string(),
@@ -906,8 +906,8 @@ fn parse_event(value: &DataTree) -> Result<SessionEvent, RecordingError> {
         }
     };
     let payload_json = match object.get("payload") {
-        None | Some(DataTree::Null) => None,
-        Some(value @ DataTree::Object(_)) => Some(canonical_json(value)),
+        None | Some(Dyn::Null) => None,
+        Some(value @ Dyn::Object(_)) => Some(canonical_json(value)),
         Some(_) => {
             return Err(RecordingError::InvalidEvent(
                 "event payload must be an object or null".to_string(),
@@ -925,7 +925,7 @@ fn parse_event(value: &DataTree) -> Result<SessionEvent, RecordingError> {
     )
 }
 
-fn parse_json_value(text: &str, label: &str) -> Result<DataTree, RecordingError> {
+fn parse_json_value(text: &str, label: &str) -> Result<Dyn, RecordingError> {
     if text.len() > MAX_RECORDING_BYTES {
         return Err(RecordingError::InvalidEvent(format!(
             "{label} exceeds the {}-byte limit",
@@ -949,17 +949,17 @@ fn canonical_object(text: &str, label: &str) -> Result<String, RecordingError> {
         )));
     }
     let value = parse_json_value(text, label)?;
-    if !matches!(value, DataTree::Object(_)) {
+    if !matches!(value, Dyn::Object(_)) {
         return Err(RecordingError::InvalidEvent(format!("{label} must be an object")));
     }
     Ok(canonical_json(&value))
 }
 
-fn required_string(object: &BTreeMap<String, DataTree>, key: &str) -> Result<String, RecordingError> {
+fn required_string(object: &BTreeMap<String, Dyn>, key: &str) -> Result<String, RecordingError> {
     let value = object
         .get(key)
         .and_then(|value| match value {
-            DataTree::Text(value) => Some(value.clone()),
+            Dyn::Text(value) => Some(value.clone()),
             _ => None,
         })
         .ok_or_else(|| RecordingError::InvalidEvent(format!("missing string `{key}`")))?;
@@ -967,9 +967,9 @@ fn required_string(object: &BTreeMap<String, DataTree>, key: &str) -> Result<Str
     Ok(value)
 }
 
-fn required_u64(object: &BTreeMap<String, DataTree>, key: &str) -> Result<u64, RecordingError> {
+fn required_u64(object: &BTreeMap<String, Dyn>, key: &str) -> Result<u64, RecordingError> {
     match object.get(key) {
-        Some(DataTree::Int(value)) => u64::try_from(*value).map_err(|_| {
+        Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| {
             RecordingError::InvalidEvent(format!("event `{key}` must be a non-negative integer"))
         }),
         Some(_) => Err(RecordingError::InvalidEvent(format!(
@@ -980,7 +980,7 @@ fn required_u64(object: &BTreeMap<String, DataTree>, key: &str) -> Result<u64, R
 }
 
 fn validate_optional_envelope_identity(
-    object: &BTreeMap<String, DataTree>,
+    object: &BTreeMap<String, Dyn>,
     expected: &SessionIdentity,
 ) -> Result<(), RecordingError> {
     let source = object.get("source_id");
@@ -990,7 +990,7 @@ fn validate_optional_envelope_identity(
     }
     let source = source
         .and_then(|value| match value {
-            DataTree::Text(value) => Some(value.clone()),
+            Dyn::Text(value) => Some(value.clone()),
             _ => None,
         })
         .ok_or_else(|| {
@@ -998,7 +998,7 @@ fn validate_optional_envelope_identity(
         })?;
     let build = build
         .and_then(|value| match value {
-            DataTree::Text(value) => Some(value.clone()),
+            Dyn::Text(value) => Some(value.clone()),
             _ => None,
         })
         .ok_or_else(|| {
@@ -1044,23 +1044,17 @@ fn quoted(value: &str) -> String {
     format!("\"{}\"", json_escape(value))
 }
 
-fn canonical_json(value: &DataTree) -> String {
+fn canonical_json(value: &Dyn) -> String {
     match value {
-        DataTree::Null => "null".to_string(),
-        DataTree::Bool(value) => value.to_string(),
-        DataTree::Int(value) => value.to_string(),
-        DataTree::Float(value) => value.to_string(),
-        DataTree::Number(value) => value.clone(),
-        DataTree::TypedText(value) | DataTree::Text(value) => quoted(value),
-        DataTree::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(|value| value.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        DataTree::Array(values) => format!(
+        Dyn::Null => "null".to_string(),
+        Dyn::Bool(value) => value.to_string(),
+        Dyn::Int(value) => value.to_string(),
+        Dyn::Float(value) => value.to_string(),
+        Dyn::Number(value) => value.clone(),
+        Dyn::Text(value) => quoted(value),
+        Dyn::Bytes(values) => quoted(&Dyn::bytes_text(values)),
+        Dyn::DateTime(value) => quoted(&value.to_rfc3339()),
+        Dyn::Array(values) => format!(
             "[{}]",
             values
                 .iter()
@@ -1068,7 +1062,7 @@ fn canonical_json(value: &DataTree) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
-        DataTree::Object(values) => format!(
+        Dyn::Object(values) => format!(
 
             "{{{}}}",
             values

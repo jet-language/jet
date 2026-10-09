@@ -5,7 +5,7 @@
 //! compile that mutually dependent closure once as ONE `jet_runtime` rlib, then
 //! link the user program against it. The two blocks reference each other
 //! (the fixed runtime reaches `jet_std`, the scheduler world, SIMD kernels and
-//! `DataTree` in the Core block, and Core reaches the runtime traits), so they
+//! `Dyn` in the Core block, and Core reaches the runtime traits), so they
 //! cannot be two crates: Rust crates cannot depend on each other cyclically.
 //! The Core block is selected only by build facts (edition, OS, test harness,
 //! runtime parts, devtools policy), never by user source, so the key is the

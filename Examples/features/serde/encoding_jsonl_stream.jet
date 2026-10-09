@@ -12,7 +12,7 @@ use core.files as files
 fn write_catalog(path: Path) -> Bool (EncodingError | IOError)! {
     output :: files.create(path) ?? return Err(err)
     writer :: jsonl.writer(^output, encoding.EncodingLimits.safe()) ?? return Err(err)
-    &writer.write(DataTree.Object(["ok": DataTree.Bool(true)])) ?? return Err(err)
+    &writer.write(Dyn.Object(["ok": Dyn.Bool(true)])) ?? return Err(err)
     &writer.flush() ?? return Err(err)
     writer.finish() ?? return Err(err)
     return Ok(true)

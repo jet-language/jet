@@ -1,0 +1,31 @@
+// D-INFER-PRIVATE1=A: a Dyn object grows with dotted fields, like a Python
+// object, and every read is checked while the program runs.
+fn run() {
+    row := Dyn.object()
+    row.price = 2.5
+    row.qty = 4
+    row.note = "sale"
+    print(row.price * row.qty)
+    print(row.note)
+    print(row.get("discount")?.to_text() ?? "none")
+    total :: (row.price * row.qty).decode<Float>() ?? 0.0
+    print(total)
+
+    // A field may change kind; the object is dynamic.
+    row.qty = "four"
+    print(row.qty)
+    print(row)
+    loop key in row.keys() -> print("{key} = {row[key]}")
+    print(row.has("note"))
+    print(row.has("discount"))
+    print(row.len())
+
+    removed :: &row.remove("note")
+    print(removed?.to_text() ?? "none")
+    print(row.len())
+
+    // A field named like a Dyn method is reached with brackets.
+    row["len"] = 3
+    print(row["len"])
+    print(row)
+}

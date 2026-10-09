@@ -239,7 +239,7 @@ pub struct StoreEntry {
 
 // A JSON string literal for `text`.
 fn pkg_json_quote(text: String) -> String Never! {
-    pkg_json_render(DataTree.Text(~text))
+    pkg_json_render(Dyn.Text(~text))
 }
 
 fn pkg_hangar_json_string_array(items: [String]) -> String Never! {
@@ -286,7 +286,7 @@ pub fn pkg_parse_meta(text: String) -> ParsedMeta? Never! {
     references := [String]{}
     if object.get("references") == {
         .Val(value) -> {
-            items :: pkg_json_array(value) ?? [DataTree]{}
+            items :: pkg_json_array(value) ?? [Dyn]{}
             loop item in items {
                 reference_text :: pkg_json_text(item) ?? next
                 &references.push(reference_text)
@@ -297,7 +297,7 @@ pub fn pkg_parse_meta(text: String) -> ParsedMeta? Never! {
     named_outputs := [String: String]{}
     if object.get("named_outputs") == {
         .Val(value) -> {
-            fields :: pkg_json_object(value) ?? [String: DataTree]{}
+            fields :: pkg_json_object(value) ?? [String: Dyn]{}
             loop field in fields {
                 digest :: pkg_json_text(field.value) ?? next
                 named_outputs[field.key] = digest
@@ -334,13 +334,13 @@ pub fn pkg_parse_meta(text: String) -> ParsedMeta? Never! {
     })
 }
 
-fn pkg_meta_text(object: [String: DataTree], key: String) -> String? Never! {
+fn pkg_meta_text(object: [String: Dyn], key: String) -> String? Never! {
     value :: object.get(key) ?? return None
     pkg_json_text(value)
 }
 
 // A decimal u64 text field.
-fn pkg_meta_unsigned(object: [String: DataTree], key: String) -> Int? Never! {
+fn pkg_meta_unsigned(object: [String: Dyn], key: String) -> Int? Never! {
     text :: pkg_meta_text(object, key) ?? return None
     digits :: text.removeprefix("+")
     if digits == "" -> return None

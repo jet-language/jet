@@ -52,7 +52,7 @@ pub fn decode_argv(argv: [String]) -> DataTree Never! {
             i = i + 1
             loop {
                 if i >= argv.len() -> break
-                &positionals.push(DataTree.Text(~argv[i]))
+                &positionals.push(Dyn.Text(~argv[i]))
                 i = i + 1
             }
             break
@@ -68,7 +68,7 @@ pub fn decode_argv(argv: [String]) -> DataTree Never! {
                 next
             }
             if starts(rest, "no-") && rest.bytes().len() > 3 {
-                put_entry(&entries, drop_prefix(rest, 3), DataTree.Bool(false))
+                put_entry(&entries, drop_prefix(rest, 3), Dyn.Bool(false))
                 i = i + 1
                 next
             }
@@ -78,13 +78,13 @@ pub fn decode_argv(argv: [String]) -> DataTree Never! {
                 i = i + 2
                 next
             }
-            put_entry(&entries, rest, DataTree.Bool(true))
+            put_entry(&entries, rest, Dyn.Bool(true))
             i = i + 1
             next
         }
         if a == "-h" {
-            put_entry(&entries, "help", DataTree.Bool(true))
-            put_entry(&entries, "h", DataTree.Bool(true))
+            put_entry(&entries, "help", Dyn.Bool(true))
+            put_entry(&entries, "h", Dyn.Bool(true))
             i = i + 1
             next
         }
@@ -93,13 +93,13 @@ pub fn decode_argv(argv: [String]) -> DataTree Never! {
             raw :: a.bytes()
             loop k in 1..<raw.len() {
                 ch :: String.from_bytes([U8]{raw[k]}) ?? ""
-                put_entry(&entries, ch, DataTree.Bool(true))
-                if ch == "h" -> put_entry(&entries, "help", DataTree.Bool(true))
+                put_entry(&entries, ch, Dyn.Bool(true))
+                if ch == "h" -> put_entry(&entries, "help", Dyn.Bool(true))
             }
             i = i + 1
             next
         }
-        &positionals.push(DataTree.Text(~a))
+        &positionals.push(Dyn.Text(~a))
         i = i + 1
     }
     if argv.len() > 0 -> put_entry(&entries, "0", DataTree.Text(~argv[0]))
@@ -109,11 +109,11 @@ pub fn decode_argv(argv: [String]) -> DataTree Never! {
 
 
 
-fn parse_atom(text: String) -> DataTree {
+fn parse_atom(text: String) -> Dyn {
     if text == {
-        "true" -> return DataTree.Bool(true)
-        "false" -> return DataTree.Bool(false)
-        "null" -> return DataTree.Null
+        "true" -> return Dyn.Bool(true)
+        "false" -> return Dyn.Bool(false)
+        "null" -> return Dyn.Null
         else -> { _ := 0 }
     }
     n := 0
@@ -124,11 +124,11 @@ fn parse_atom(text: String) -> DataTree {
         sign = -1
         i = 1
     }
-    if i >= raw.len() -> DataTree.Text(~text)
+    if i >= raw.len() -> Dyn.Text(~text)
     loop {
-        if i >= raw.len() -> return DataTree.Int(sign * n)
+        if i >= raw.len() -> return Dyn.Int(sign * n)
         d :: raw[i]
-        if d < 48 || d > 57 -> return DataTree.Text(~text)
+        if d < 48 || d > 57 -> return Dyn.Text(~text)
         n = n * 10 + (d - 48)
         i = i + 1
     }
@@ -199,7 +199,7 @@ fn put_entry(entries: &[(key: String, value: DataTree)], key: String, value: Dat
             }
         }
         else -> {
-            _ :: &entries.add(key, value)
+            entries[key] = value
         }
     }
 }
@@ -231,7 +231,7 @@ fn index_of(text: String, needle: String) -> Int {
 }
 
 
-pub fn get_text(tree: DataTree, key: String) -> String Never! {
+pub fn get_text(tree: Dyn, key: String) -> String Never! {
     if tree == {
         .Object(entries) -> {
             v :: object_get(entries, key)
@@ -252,7 +252,7 @@ pub fn get_text(tree: DataTree, key: String) -> String Never! {
     ""
 }
 
-pub fn get_bool(tree: DataTree, key: String) -> Bool Never! {
+pub fn get_bool(tree: Dyn, key: String) -> Bool Never! {
     if tree == {
         .Object(entries) -> {
             v :: object_get(entries, key)
@@ -272,7 +272,7 @@ pub fn get_bool(tree: DataTree, key: String) -> Bool Never! {
     false
 }
 
-pub fn get_int(tree: DataTree, key: String) -> Int Never! {
+pub fn get_int(tree: Dyn, key: String) -> Int Never! {
     if tree == {
         .Object(entries) -> {
             v :: object_get(entries, key)
@@ -287,7 +287,7 @@ pub fn get_int(tree: DataTree, key: String) -> Int Never! {
     0
 }
 
-pub fn positionals(tree: DataTree) -> [String] Never! {
+pub fn positionals(tree: Dyn) -> [String] Never! {
     out := [String]{}
     if tree == {
         .Object(entries) -> {
@@ -310,11 +310,11 @@ pub fn positionals(tree: DataTree) -> [String] Never! {
     out
 }
 
-pub fn program(tree: DataTree) -> String Never! { get_text(tree, "0") }
+pub fn program(tree: Dyn) -> String Never! { get_text(tree, "0") }
 
 pub fn help_text(name: String, summary: String) -> String Never! { "{name} — {summary}\n\nOptions:\n  -h, --help    Show this help\n  --flag        Boolean flag\n  --key value   Key/value option\n" }
 
-pub fn has(tree: DataTree, key: String) -> Bool Never! {
+pub fn has(tree: Dyn, key: String) -> Bool Never! {
     if tree == {
         .Object(entries) -> {
             v :: object_get(entries, key)
@@ -380,11 +380,11 @@ pub fn default_value(def: ArgDef, value: String) -> ArgDef Never! {
     }
 }
 
-pub fn get_or(tree: DataTree, key: String, fallback: String) -> String Never! {
+pub fn get_or(tree: Dyn, key: String, fallback: String) -> String Never! {
     if has(tree, key) -> return get_text(tree, key)
     ~fallback
 }
-pub fn get_choice(tree: DataTree, key: String, choices: [String]) -> String? Never! {
+pub fn get_choice(tree: Dyn, key: String, choices: [String]) -> String? Never! {
     v :: get_text(tree, key)
     if v.bytes().len() == 0 -> return None
     result :: ~v
@@ -394,14 +394,14 @@ pub fn get_choice(tree: DataTree, key: String, choices: [String]) -> String? Nev
     None
 }
 
-pub fn missing_required(tree: DataTree, defs: [ArgDef]) -> [String] Never! {
+pub fn missing_required(tree: Dyn, defs: [ArgDef]) -> [String] Never! {
     out := [String]{}
     loop d in defs {
         if d.required && !has(tree, d.dest) && !has(tree, d.name) -> &out.push(~d.name)
     }
     out
 }
-pub fn apply_defaults(tree: DataTree, defs: [ArgDef]) -> DataTree Never! {
+pub fn apply_defaults(tree: Dyn, defs: [ArgDef]) -> Dyn Never! {
     out := tree
     loop d in defs {
         if d.default_text.bytes().len() == 0 -> next
@@ -448,13 +448,13 @@ pub fn help_from(name: String, summary: String, defs: [ArgDef]) -> String Never!
     s
 }
 
-pub fn remainder(tree: DataTree) -> [String] Never! { positionals(tree) }
+pub fn remainder(tree: Dyn) -> [String] Never! { positionals(tree) }
 
-pub fn count_flag(tree: DataTree, key: String) -> Int Never! {
+pub fn count_flag(tree: Dyn, key: String) -> Int Never! {
     n :: get_int(tree, key)
     if n > 0 -> return n
     if get_bool(tree, key) -> return 1
     0
 }
 
-pub fn wants_help(tree: DataTree) -> Bool Never! { get_bool(tree, "help") || has(tree, "h") }
+pub fn wants_help(tree: Dyn) -> Bool Never! { get_bool(tree, "help") || has(tree, "h") }

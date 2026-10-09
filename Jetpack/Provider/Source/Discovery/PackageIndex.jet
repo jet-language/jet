@@ -323,9 +323,9 @@ pub fn env_discovery_service_option_fields() -> [PackageOptionField] Never! {
 }
 
 pub fn env_discovery_search_json(records: [PackageIndexEntry]) -> String Never! {
-    items := [DataTree]{}
+    items := [Dyn]{}
     loop record in records -> &items.push(env_discovery_record_tree(record))
-    pkg_json_render(DataTree.Object(["packages": DataTree.Array(items)]))
+    pkg_json_render(Dyn.Object(["packages": Dyn.Array(items)]))
 }
 
 pub fn env_discovery_info_json(record: PackageIndexEntry) -> String Never! {
@@ -379,7 +379,7 @@ fn env_discovery_provider_output_path(text: String) -> String? Never! {
     results :: pkg_json_array(value) ?? return None
     if results.len() == 0 -> return None
     first :: pkg_json_object(results[0]) ?? return None
-    outputs :: pkg_json_object(first.get("outputs") ?? DataTree.Null) ?? return None
+    outputs :: pkg_json_object(first.get("outputs") ?? Dyn.Null) ?? return None
     output :: outputs.get("bin") ?? (outputs.get("out") ?? return None)
     pkg_json_text(output)
 }
@@ -443,23 +443,23 @@ fn env_discovery_split_query(query: String) -> (source: String?, name: String) N
     (source: None, name: query)
 }
 
-fn env_discovery_record_tree(record: PackageIndexEntry) -> DataTree Never! {
-    options := [DataTree]{}
+fn env_discovery_record_tree(record: PackageIndexEntry) -> Dyn Never! {
+    options := [Dyn]{}
     loop option in record.options {
-        &options.push(DataTree.Object(["name": DataTree.Text(option.name), "default": DataTree.Text(option.default), "docs": DataTree.Text(option.docs)]))
+        &options.push(Dyn.Object(["name": Dyn.Text(option.name), "default": Dyn.Text(option.default), "docs": Dyn.Text(option.docs)]))
     }
-    DataTree.Object([
-        "source": DataTree.Text(record.source),
-        "name": DataTree.Text(record.name),
-        "reference": DataTree.Text(record.reference),
-        "version": DataTree.Text(record.version),
+    Dyn.Object([
+        "source": Dyn.Text(record.source),
+        "name": Dyn.Text(record.name),
+        "reference": Dyn.Text(record.reference),
+        "version": Dyn.Text(record.version),
         "platforms": pkg_json_texts(record.platforms),
-        "docs": DataTree.Text(record.docs),
-        "provenance": DataTree.Text(record.provenance),
-        "tier": DataTree.Text(record.tier),
-        "gate_status": DataTree.Text(record.gate_status),
-        "maintainer_liveness": DataTree.Text(record.maintainer_liveness()),
-        "options": DataTree.Array(options),
+        "docs": Dyn.Text(record.docs),
+        "provenance": Dyn.Text(record.provenance),
+        "tier": Dyn.Text(record.tier),
+        "gate_status": Dyn.Text(record.gate_status),
+        "maintainer_liveness": Dyn.Text(record.maintainer_liveness()),
+        "options": Dyn.Array(options),
     ])
 }
 
@@ -467,7 +467,7 @@ fn env_discovery_record_to_json(record: PackageIndexEntry) -> String Never! {
     pkg_json_render(env_discovery_record_tree(record))
 }
 
-fn env_discovery_record_from_json(value: DataTree) -> PackageIndexEntry ProviderReason! {
+fn env_discovery_record_from_json(value: Dyn) -> PackageIndexEntry ProviderReason! {
     object :: provider_json_object(value)
     Ok(PackageIndexEntry{
         source: env_discovery_required_text(object, "source"),
@@ -483,18 +483,18 @@ fn env_discovery_record_from_json(value: DataTree) -> PackageIndexEntry Provider
     })
 }
 
-fn env_discovery_required_text(object: [String: DataTree], key: String) -> String ProviderReason! {
+fn env_discovery_required_text(object: [String: Dyn], key: String) -> String ProviderReason! {
     value :: object.get(key) ?? return Err(ProviderReason{message: "missing key `{key}`"})
     provider_json_string(value)
 }
 
-fn env_discovery_optional_text(object: [String: DataTree], key: String, fallback: String) -> String Never! {
+fn env_discovery_optional_text(object: [String: Dyn], key: String, fallback: String) -> String Never! {
     value :: object.get(key) ?? return fallback
     pkg_json_text(value) ?? fallback
 }
 
-fn env_discovery_string_array(value: DataTree?) -> [String] Never! {
-    items :: pkg_json_array(value ?? DataTree.Null) ?? return [String]{}
+fn env_discovery_string_array(value: Dyn?) -> [String] Never! {
+    items :: pkg_json_array(value ?? Dyn.Null) ?? return [String]{}
     out := [String]{}
     loop item in items {
         if pkg_json_text(item) == {
@@ -505,8 +505,8 @@ fn env_discovery_string_array(value: DataTree?) -> [String] Never! {
     out
 }
 
-fn env_discovery_option_array(value: DataTree?) -> [PackageOptionField] Never! {
-    items :: pkg_json_array(value ?? DataTree.Null) ?? return [PackageOptionField]{}
+fn env_discovery_option_array(value: Dyn?) -> [PackageOptionField] Never! {
+    items :: pkg_json_array(value ?? Dyn.Null) ?? return [PackageOptionField]{}
     out := [PackageOptionField]{}
     loop item in items {
         object :: pkg_json_object(item) ?? next

@@ -3,7 +3,7 @@ use super::types::OSFlags;
 use crate::Output::Theme;
 use crate::Syntax;
 use crate::JSON;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -365,15 +365,15 @@ fn import_plan_from_scan(args: &NixosImportArgs) -> Result<NixosImportPlan, Stri
 }
 
 pub(super) fn import_json_value<'a>(
-    root: &'a [(String, DataTree)],
+    root: &'a [(String, Dyn)],
     key: &str,
-) -> Option<&'a DataTree> {
+) -> Option<&'a Dyn> {
     root.iter()
         .find_map(|(name, value)| (name == key).then_some(value))
 }
 
 pub(super) fn import_json_string(
-    root: &[(String, DataTree)],
+    root: &[(String, Dyn)],
     key: &str,
 ) -> Option<String> {
     import_json_value(root, key)
@@ -382,7 +382,7 @@ pub(super) fn import_json_string(
 }
 
 pub(super) fn import_json_string_array(
-    root: &[(String, DataTree)],
+    root: &[(String, Dyn)],
     key: &str,
 ) -> Vec<String> {
     import_json_value(root, key)
@@ -397,7 +397,7 @@ pub(super) fn import_json_string_array(
 }
 
 pub(super) fn import_package_list(
-    root: &[(String, DataTree)],
+    root: &[(String, Dyn)],
     key: &str,
 ) -> (Vec<String>, Vec<String>) {
     let mut kept = Vec::new();
@@ -429,10 +429,10 @@ fn import_is_package_name(value: &str) -> bool {
 }
 
 fn import_json_option_object(
-    root: &[(String, DataTree)],
+    root: &[(String, Dyn)],
     key: &str,
 ) -> Vec<(String, String)> {
-    let Some(DataTree::Object(map)) = import_json_value(root, key) else {
+    let Some(Dyn::Object(map)) = import_json_value(root, key) else {
         return Vec::new();
     };
     map.iter()
@@ -441,7 +441,7 @@ fn import_json_option_object(
 }
 
 fn import_json_users(
-    root: &[(String, DataTree)],
+    root: &[(String, Dyn)],
     selected: &[String],
 ) -> Result<Vec<NixosImportUser>, String> {
     let Some(users_json) = import_json_value(root, "users") else {
@@ -465,7 +465,7 @@ fn import_json_users(
             packages,
             sourced_packages: Vec::new(),
             omitted_packages,
-            home_manager: matches!(import_json_value(user, "homeManager"), Some(DataTree::Bool(true))),
+            home_manager: matches!(import_json_value(user, "homeManager"), Some(Dyn::Bool(true))),
         });
     }
     Ok(users)
@@ -647,21 +647,22 @@ fn write_nixos_import_output(
     Ok((config_path, audit_path))
 }
 
-fn import_render_json_value(value: &DataTree) -> String {
+fn import_render_json_value(value: &Dyn) -> String {
     match value {
-        DataTree::Null => "null".to_string(),
-        DataTree::Bool(value) => value.to_string(),
-        DataTree::Int(value) => value.to_string(),
-        DataTree::Float(value) => {
+        Dyn::Null => "null".to_string(),
+        Dyn::Bool(value) => value.to_string(),
+        Dyn::Int(value) => value.to_string(),
+        Dyn::Float(value) => {
             if value.fract() == 0.0 {
                 format!("{}", *value as i64)
             } else {
                 value.to_string()
             }
         }
-        DataTree::Number(value) => value.clone(),
-        DataTree::TypedText(value) | DataTree::Text(value) => import_render_string(value),
-        DataTree::Bytes(values) => format!(
+        Dyn::Number(value) => value.clone(),
+        Dyn::Text(value) => import_render_string(value),
+        Dyn::DateTime(value) => import_render_string(&value.to_rfc3339()),
+        Dyn::Bytes(values) => format!(
             "[{}]",
             values
                 .iter()
@@ -669,7 +670,7 @@ fn import_render_json_value(value: &DataTree) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        DataTree::Array(values) => {
+        Dyn::Array(values) => {
             let rendered = values
                 .iter()
                 .map(import_render_json_value)
@@ -677,27 +678,21 @@ fn import_render_json_value(value: &DataTree) -> String {
                 .join(", ");
             format!("[{rendered}]")
         }
-        DataTree::Object(_) => import_render_string(&import_render_json_for_audit(value)),
+        Dyn::Object(_) => import_render_string(&import_render_json_for_audit(value)),
     }
 }
 
-fn import_render_json_for_audit(value: &DataTree) -> String {
+fn import_render_json_for_audit(value: &Dyn) -> String {
     match value {
-        DataTree::Null => "null".to_string(),
-        DataTree::Bool(value) => value.to_string(),
-        DataTree::Int(value) => value.to_string(),
-        DataTree::Float(value) => value.to_string(),
-        DataTree::Number(value) => value.clone(),
-        DataTree::TypedText(value) | DataTree::Text(value) => JSON::quote(value),
-        DataTree::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(u8::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        DataTree::Array(values) => {
+        Dyn::Null => "null".to_string(),
+        Dyn::Bool(value) => value.to_string(),
+        Dyn::Int(value) => value.to_string(),
+        Dyn::Float(value) => value.to_string(),
+        Dyn::Number(value) => value.clone(),
+        Dyn::Text(value) => JSON::quote(value),
+        Dyn::Bytes(values) => JSON::quote(&Dyn::bytes_text(values)),
+        Dyn::DateTime(value) => JSON::quote(&value.to_rfc3339()),
+        Dyn::Array(values) => {
             let parts = values
                 .iter()
                 .map(import_render_json_for_audit)
@@ -705,7 +700,7 @@ fn import_render_json_for_audit(value: &DataTree) -> String {
                 .join(",");
             format!("[{parts}]")
         }
-        DataTree::Object(map) => {
+        Dyn::Object(map) => {
             let parts = map
                 .iter()
                 .map(|(key, value)| {

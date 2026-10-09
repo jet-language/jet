@@ -6,17 +6,17 @@
 //! making a second protocol implementation.
 
 use crate::JSON;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use std::collections::BTreeMap;
 
-fn field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn field<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
 }
 
-fn object_from_map(map: BTreeMap<String, DataTree>) -> DataTree {
-    DataTree::Object(map.into_iter().collect())
+fn object_from_map(map: BTreeMap<String, Dyn>) -> Dyn {
+    Dyn::Object(map.into_iter().collect())
 }
 use std::fmt;
 
@@ -300,17 +300,19 @@ pub enum RequestId {
 }
 
 impl RequestId {
-    fn to_json_value(&self) -> DataTree {
+    fn to_json_value(&self) -> Dyn {
         match self {
-            Self::Number(value) => DataTree::Int(*value),
-            Self::String(value) => DataTree::Text(value.clone()),
+            Self::Number(value) => Dyn::Int((*value).into()),
+            Self::String(value) => Dyn::Text(value.clone()),
         }
     }
 
-    fn from_json_value(value: &DataTree) -> Result<Self, CodecError> {
+    fn from_json_value(value: &Dyn) -> Result<Self, CodecError> {
         match value {
-            DataTree::Int(value) => Ok(Self::Number(*value)),
-            DataTree::Text(value) => Ok(Self::String(value.clone())),
+            Dyn::Int(value) => value.to_i64().map(Self::Number).ok_or_else(|| CodecError::InvalidMessage(
+                "request id is outside the i64 range".to_string(),
+            )),
+            Dyn::Text(value) => Ok(Self::String(value.clone())),
             _ => Err(CodecError::InvalidMessage(
                 "request id must be an integer or string".to_string(),
             )),
@@ -323,7 +325,7 @@ impl RequestId {
 pub struct McpRequest {
     pub id: RequestId,
     pub method: String,
-    pub params: Option<DataTree>,
+    pub params: Option<Dyn>,
 }
 
 impl McpRequest {
@@ -331,7 +333,7 @@ impl McpRequest {
     pub fn new(
         id: RequestId,
         method: impl Into<String>,
-        params: Option<DataTree>,
+        params: Option<Dyn>,
     ) -> Result<Self, CodecError> {
         let request = Self {
             id,
@@ -352,14 +354,14 @@ impl McpRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub struct McpNotification {
     pub method: String,
-    pub params: Option<DataTree>,
+    pub params: Option<Dyn>,
 }
 
 impl McpNotification {
     /// Construct a notification with an optional object or array params value.
     pub fn new(
         method: impl Into<String>,
-        params: Option<DataTree>,
+        params: Option<Dyn>,
     ) -> Result<Self, CodecError> {
         let notification = Self {
             method: method.into(),
@@ -376,12 +378,12 @@ impl McpNotification {
 pub struct McpRpcError {
     pub code: i64,
     pub message: String,
-    pub data: Option<DataTree>,
+    pub data: Option<Dyn>,
 }
 
 impl McpRpcError {
     /// Construct an error payload.
-    pub fn new(code: i64, message: impl Into<String>, data: Option<DataTree>) -> Self {
+    pub fn new(code: i64, message: impl Into<String>, data: Option<Dyn>) -> Self {
         Self {
             code,
             message: message.into(),
@@ -395,13 +397,13 @@ impl McpRpcError {
 pub struct McpResponse {
     /// `None` represents a JSON-RPC null response ID.
     pub id: Option<RequestId>,
-    pub result: Option<DataTree>,
+    pub result: Option<Dyn>,
     pub error: Option<McpRpcError>,
 }
 
 impl McpResponse {
     /// Construct a successful response.
-    pub fn success(id: RequestId, result: DataTree) -> Self {
+    pub fn success(id: RequestId, result: Dyn) -> Self {
         Self {
             id: Some(id),
             result: Some(result),
@@ -447,16 +449,16 @@ impl McpMessage {
         codec.decode(text, limits)
     }
 
-    fn to_json_value(&self) -> Result<DataTree, CodecError> {
+    fn to_json_value(&self) -> Result<Dyn, CodecError> {
         let mut object = BTreeMap::new();
-        object.insert("jsonrpc".to_string(), DataTree::Text("2.0".to_string()));
+        object.insert("jsonrpc".to_string(), Dyn::Text("2.0".to_string()));
         match self {
             Self::Request(request) => {
                 request.validate()?;
                 object.insert("id".to_string(), request.id.to_json_value());
                 object.insert(
                     "method".to_string(),
-                    DataTree::Text(request.method.clone()),
+                    Dyn::Text(request.method.clone()),
                 );
                 if let Some(params) = &request.params {
                     object.insert("params".to_string(), params.clone());
@@ -467,7 +469,7 @@ impl McpMessage {
                 validate_params(notification.params.as_ref())?;
                 object.insert(
                     "method".to_string(),
-                    DataTree::Text(notification.method.clone()),
+                    Dyn::Text(notification.method.clone()),
                 );
                 if let Some(params) = &notification.params {
                     object.insert("params".to_string(), params.clone());
@@ -481,7 +483,7 @@ impl McpMessage {
                         .id
                         .as_ref()
                         .map(RequestId::to_json_value)
-                        .unwrap_or(DataTree::Null),
+                        .unwrap_or(Dyn::Null),
                 );
                 if let Some(result) = &response.result {
                     object.insert("result".to_string(), result.clone());
@@ -494,7 +496,7 @@ impl McpMessage {
         Ok(object_from_map(object))
     }
 
-    fn from_json_value(value: DataTree, limits: McpLimits) -> Result<Self, CodecError> {
+    fn from_json_value(value: Dyn, limits: McpLimits) -> Result<Self, CodecError> {
         limits.validate()?;
         ensure_depth(&value, 0, limits.max_schema_depth)?;
         let object = value
@@ -520,7 +522,7 @@ impl McpMessage {
             }
         };
         match method {
-            Some(DataTree::Text(method)) => {
+            Some(Dyn::Text(method)) => {
                 validate_method(method)?;
                 match field(object, "id") {
                     Some(id) => Ok(Self::Request(McpRequest {
@@ -541,7 +543,7 @@ impl McpMessage {
                 let id = field(object, "id")
                     .ok_or_else(|| CodecError::InvalidMessage("response is missing id".to_string()))?;
                 let id = match id {
-                    DataTree::Null => None,
+                    Dyn::Null => None,
                     value => Some(RequestId::from_json_value(value)?),
                 };
                 let result = field(object, "result").cloned();
@@ -568,7 +570,7 @@ impl McpMessage {
 /// retained so peers can extend the protocol without changing this core.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct McpCapabilities {
-    pub values: BTreeMap<String, DataTree>,
+    pub values: BTreeMap<String, Dyn>,
 }
 
 impl McpCapabilities {
@@ -578,16 +580,16 @@ impl McpCapabilities {
     }
 
     /// Add or replace one capability entry.
-    pub fn insert(&mut self, name: impl Into<String>, value: DataTree) {
+    pub fn insert(&mut self, name: impl Into<String>, value: Dyn) {
         self.values.insert(name.into(), value);
     }
 
     /// Look up one capability entry.
-    pub fn get(&self, name: &str) -> Option<&DataTree> {
+    pub fn get(&self, name: &str) -> Option<&Dyn> {
         self.values.get(name)
     }
 
-    fn to_json_value(&self, limits: McpLimits) -> Result<DataTree, CodecError> {
+    fn to_json_value(&self, limits: McpLimits) -> Result<Dyn, CodecError> {
         limits.validate()?;
         if self.values.len() > limits.max_capability_entries {
             return Err(CodecError::CapabilityLimitExceeded {
@@ -600,7 +602,7 @@ impl McpCapabilities {
         Ok(value)
     }
 
-    fn from_json_value(value: &DataTree, limits: McpLimits) -> Result<Self, CodecError> {
+    fn from_json_value(value: &Dyn, limits: McpLimits) -> Result<Self, CodecError> {
         limits.validate()?;
         ensure_depth(value, 0, limits.max_schema_depth)?;
         let values = value.as_object().map_err(|_| {
@@ -651,18 +653,18 @@ impl McpImplementation {
         Ok(())
     }
 
-    fn to_json_value(&self) -> Result<DataTree, CodecError> {
+    fn to_json_value(&self) -> Result<Dyn, CodecError> {
         self.validate()?;
         let mut object = BTreeMap::new();
-        object.insert("name".to_string(), DataTree::Text(self.name.clone()));
+        object.insert("name".to_string(), Dyn::Text(self.name.clone()));
         object.insert(
             "version".to_string(),
-            DataTree::Text(self.version.clone()),
+            Dyn::Text(self.version.clone()),
         );
         Ok(object_from_map(object))
     }
 
-    fn from_json_value(value: &DataTree) -> Result<Self, CodecError> {
+    fn from_json_value(value: &Dyn) -> Result<Self, CodecError> {
         let object = value.as_object().map_err(|_| {
             CodecError::InvalidMessage("implementation must be a JSON object".to_string())
         })?;
@@ -704,7 +706,7 @@ impl InitializeParams {
     }
 
     /// Encode this structured initialize value as JSON.
-    pub fn to_json_value(&self, limits: McpLimits) -> Result<DataTree, CodecError> {
+    pub fn to_json_value(&self, limits: McpLimits) -> Result<Dyn, CodecError> {
         limits.validate()?;
         let protocol_version = McpRevision::parse(&self.protocol_version).ok_or_else(|| {
             CodecError::InvalidMessage("unknown initialize protocol version".to_string())
@@ -719,7 +721,7 @@ impl InitializeParams {
         }
         object.insert(
             "protocolVersion".to_string(),
-            DataTree::Text(protocol_version.as_str().to_string()),
+            Dyn::Text(protocol_version.as_str().to_string()),
         );
         let value = object_from_map(object);
         ensure_depth(&value, 0, limits.max_schema_depth)?;
@@ -727,7 +729,7 @@ impl InitializeParams {
     }
 
     /// Decode a structured initialize value from JSON.
-    pub fn from_json_value(value: &DataTree, limits: McpLimits) -> Result<Self, CodecError> {
+    pub fn from_json_value(value: &Dyn, limits: McpLimits) -> Result<Self, CodecError> {
         limits.validate()?;
         ensure_depth(value, 0, limits.max_schema_depth)?;
         let object = value.as_object().map_err(|_| {
@@ -785,7 +787,7 @@ impl InitializeResult {
     }
 
     /// Encode this structured initialize value as JSON.
-    pub fn to_json_value(&self, limits: McpLimits) -> Result<DataTree, CodecError> {
+    pub fn to_json_value(&self, limits: McpLimits) -> Result<Dyn, CodecError> {
         limits.validate()?;
         let mut object = BTreeMap::new();
         object.insert(
@@ -794,7 +796,7 @@ impl InitializeResult {
         );
         object.insert(
             "protocolVersion".to_string(),
-            DataTree::Text(self.protocol_version.as_str().to_string()),
+            Dyn::Text(self.protocol_version.as_str().to_string()),
         );
         object.insert(
             "serverInfo".to_string(),
@@ -806,7 +808,7 @@ impl InitializeResult {
     }
 
     /// Decode a structured initialize result from JSON.
-    pub fn from_json_value(value: &DataTree, limits: McpLimits) -> Result<Self, CodecError> {
+    pub fn from_json_value(value: &Dyn, limits: McpLimits) -> Result<Self, CodecError> {
         limits.validate()?;
         ensure_depth(value, 0, limits.max_schema_depth)?;
         let object = value.as_object().map_err(|_| {
@@ -1344,8 +1346,8 @@ fn validate_method(method: &str) -> Result<(), CodecError> {
     Ok(())
 }
 
-fn validate_params(params: Option<&DataTree>) -> Result<(), CodecError> {
-    if matches!(params, Some(DataTree::Array(_) | DataTree::Object(_)) | None) {
+fn validate_params(params: Option<&Dyn>) -> Result<(), CodecError> {
+    if matches!(params, Some(Dyn::Array(_) | Dyn::Object(_)) | None) {
         Ok(())
     } else {
         Err(CodecError::InvalidMessage(
@@ -1354,19 +1356,19 @@ fn validate_params(params: Option<&DataTree>) -> Result<(), CodecError> {
     }
 }
 
-fn required_string(object: &[(String, DataTree)], name: &str) -> Result<String, CodecError> {
+fn required_string(object: &[(String, Dyn)], name: &str) -> Result<String, CodecError> {
     field(object, name)
         .and_then(JSON::json_str)
         .map(str::to_string)
         .ok_or_else(|| CodecError::InvalidMessage(format!("{name} must be a string")))
 }
 
-fn rpc_error_to_json(error: &McpRpcError) -> DataTree {
+fn rpc_error_to_json(error: &McpRpcError) -> Dyn {
     let mut object = BTreeMap::new();
-    object.insert("code".to_string(), DataTree::Int(error.code));
+    object.insert("code".to_string(), Dyn::Int((error.code).into()));
     object.insert(
         "message".to_string(),
-        DataTree::Text(error.message.clone()),
+        Dyn::Text(error.message.clone()),
     );
     if let Some(data) = &error.data {
         object.insert("data".to_string(), data.clone());
@@ -1374,12 +1376,14 @@ fn rpc_error_to_json(error: &McpRpcError) -> DataTree {
     object_from_map(object)
 }
 
-fn rpc_error_from_json(value: &DataTree) -> Result<McpRpcError, CodecError> {
+fn rpc_error_from_json(value: &Dyn) -> Result<McpRpcError, CodecError> {
     let object = value.as_object().map_err(|_| {
         CodecError::InvalidMessage("response error must be a JSON object".to_string())
     })?;
     let code = match field(object, "code") {
-        Some(DataTree::Int(code)) => *code,
+        Some(Dyn::Int(code)) => code.to_i64().ok_or_else(|| CodecError::InvalidMessage(
+            "response error code is outside the i64 range".to_string(),
+        ))?,
         _ => {
             return Err(CodecError::InvalidMessage(
                 "response error code must be an integer".to_string(),
@@ -1393,29 +1397,28 @@ fn rpc_error_from_json(value: &DataTree) -> Result<McpRpcError, CodecError> {
     })
 }
 
-fn ensure_depth(value: &DataTree, depth: usize, maximum: usize) -> Result<(), CodecError> {
+fn ensure_depth(value: &Dyn, depth: usize, maximum: usize) -> Result<(), CodecError> {
     if depth > maximum {
         return Err(CodecError::SchemaTooDeep { maximum });
     }
     match value {
-        DataTree::Array(values) => {
+        Dyn::Array(values) => {
             for value in values {
                 ensure_depth(value, depth + 1, maximum)?;
             }
         }
-        DataTree::Object(values) => {
+        Dyn::Object(values) => {
             for (_, value) in values {
                 ensure_depth(value, depth + 1, maximum)?;
             }
         }
-        DataTree::Null
-        | DataTree::Bool(_)
-        | DataTree::Int(_)
-        | DataTree::Float(_)
-        | DataTree::Number(_)
-        | DataTree::TypedText(_)
-        | DataTree::Text(_)
-        | DataTree::Bytes(_) => {}
+        Dyn::Null
+        | Dyn::Bool(_)
+        | Dyn::Int(_)
+        | Dyn::Float(_)
+        | Dyn::Number(_)
+        | Dyn::Text(_)
+        | Dyn::Bytes(_) | Dyn::DateTime(_) => {}
     }
     Ok(())
 }
@@ -1529,7 +1532,7 @@ fn valid_json_number(value: &str) -> bool {
 }
 
 fn stringify(
-    value: &DataTree,
+    value: &Dyn,
     depth: usize,
     maximum_depth: usize,
     maximum_bytes: usize,
@@ -1541,22 +1544,22 @@ fn stringify(
 }
 
 fn stringify_into(
-    value: &DataTree,
+    value: &Dyn,
     output: &mut String,
     maximum: usize,
 ) -> Result<(), CodecError> {
     match value {
-        DataTree::Null => append_fragment(output, "null", maximum),
-        DataTree::Bool(true) => append_fragment(output, "true", maximum),
-        DataTree::Bool(false) => append_fragment(output, "false", maximum),
-        DataTree::Int(value) => append_fragment(output, &value.to_string(), maximum),
-        DataTree::Float(value) if value.is_finite() => {
+        Dyn::Null => append_fragment(output, "null", maximum),
+        Dyn::Bool(true) => append_fragment(output, "true", maximum),
+        Dyn::Bool(false) => append_fragment(output, "false", maximum),
+        Dyn::Int(value) => append_fragment(output, &value.to_string(), maximum),
+        Dyn::Float(value) if value.is_finite() => {
             append_fragment(output, &value.to_string(), maximum)
         }
-        DataTree::Float(_) => Err(CodecError::InvalidMessage(
+        Dyn::Float(_) => Err(CodecError::InvalidMessage(
             "JSON numbers must be finite".to_string(),
         )),
-        DataTree::Number(value) => {
+        Dyn::Number(value) => {
             if value.len() > maximum {
                 return Err(CodecError::MessageTooLarge {
                     actual: value.len(),
@@ -1570,20 +1573,12 @@ fn stringify_into(
             }
             append_fragment(output, value, maximum)
         }
-        DataTree::TypedText(value) | DataTree::Text(value) => {
+        Dyn::Text(value) => {
             append_json_string(output, value, maximum)
         }
-        DataTree::Bytes(values) => {
-            append_fragment(output, "[", maximum)?;
-            for (index, value) in values.iter().enumerate() {
-                if index > 0 {
-                    append_fragment(output, ",", maximum)?;
-                }
-                append_fragment(output, &value.to_string(), maximum)?;
-            }
-            append_fragment(output, "]", maximum)
-        }
-        DataTree::Array(values) => {
+        Dyn::Bytes(values) => append_json_string(output, &Dyn::bytes_text(values), maximum),
+        Dyn::DateTime(value) => append_json_string(output, &value.to_rfc3339(), maximum),
+        Dyn::Array(values) => {
             append_fragment(output, "[", maximum)?;
             for (index, value) in values.iter().enumerate() {
                 if index > 0 {
@@ -1593,7 +1588,7 @@ fn stringify_into(
             }
             append_fragment(output, "]", maximum)
         }
-        DataTree::Object(values) => {
+        Dyn::Object(values) => {
             append_fragment(output, "{", maximum)?;
             for (index, (key, value)) in values.iter().enumerate() {
                 if index > 0 {
@@ -1683,7 +1678,7 @@ mod tests {
             McpRequest::new(
                 RequestId::Number(7),
                 "tools/list",
-                Some(DataTree::Object(Vec::new())),
+                Some(Dyn::Object(Vec::new())),
             )
             .unwrap(),
         );
@@ -1717,7 +1712,7 @@ mod tests {
             McpRequest::new(
                 RequestId::Number(1),
                 "tools/list",
-                Some(DataTree::Object(Vec::new())),
+                Some(Dyn::Object(Vec::new())),
             )
             .unwrap(),
         );
@@ -1743,11 +1738,11 @@ mod tests {
 
     #[test]
     fn codec_rejects_nested_values_beyond_schema_bound() {
-        let nested = DataTree::Object(vec![(
+        let nested = Dyn::Object(vec![(
             "nested".to_string(),
-            DataTree::Object(vec![(
+            Dyn::Object(vec![(
                 "value".to_string(),
-                DataTree::Object(Vec::new()),
+                Dyn::Object(Vec::new()),
             )]),
         )]);
         let request = McpMessage::Request(

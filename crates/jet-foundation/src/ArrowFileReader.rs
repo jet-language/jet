@@ -10,7 +10,7 @@ use crate::ArrowData::{
     ArrowArray, ArrowCell, ArrowError, ArrowErrorCode, ArrowFieldSpec, ArrowImported,
     ArrowImportMode, ArrowLimits, ArrowSchema, ColumnBatch,
 };
-use crate::DataTree::DataTree;
+use crate::Dyn::Dyn;
 use std::sync::{Arc, LazyLock, Mutex};
 
 /// Parquet byte-source format code used by the registered provider.
@@ -319,12 +319,12 @@ unsafe fn release_provider_outputs(
 ///
 /// This is the only tree projection at the Arrow boundary.  It keeps the
 /// validated batch alive while borrowed cell views are copied into owned
-/// `DataTree` values, so callers never retain a foreign-lifetime view.
+/// `Dyn` values, so callers never retain a foreign-lifetime view.
 pub fn read_tree(
     format: u8,
     input: &[u8],
     limits: &ArrowLimits,
-) -> Result<DataTree, ArrowError> {
+) -> Result<Dyn, ArrowError> {
     let batch = read::<()>(format, input, None, limits, ArrowImportMode::Shared)?;
     let mut rows = Vec::with_capacity(batch.report.rows);
     for row in 0..batch.report.rows {
@@ -338,36 +338,34 @@ pub fn read_tree(
                 Ok((field.name.clone(), value))
             })
             .collect::<Result<Vec<_>, ArrowError>>()?;
-        rows.push(DataTree::Object(fields));
+        rows.push(Dyn::Object(fields));
     }
-    Ok(DataTree::Array(rows))
+    Ok(Dyn::Array(rows))
 }
 
-fn tree_value(field: &ArrowFieldSpec, cell: ArrowCell<'_>) -> Result<DataTree, ArrowError> {
+fn tree_value(field: &ArrowFieldSpec, cell: ArrowCell<'_>) -> Result<Dyn, ArrowError> {
     if let Some(value) = temporal_tree_value(field, cell)? {
         return Ok(value);
     }
     Ok(match cell {
-        ArrowCell::Null => DataTree::Null,
-        ArrowCell::Bool(value) => DataTree::Bool(value),
-        ArrowCell::Signed(value) => DataTree::Int(value),
-        ArrowCell::Unsigned(value) => i64::try_from(value)
-            .map(DataTree::Int)
-            .unwrap_or_else(|_| DataTree::Number(value.to_string())),
-        ArrowCell::Float(value) => DataTree::Float(value),
-        ArrowCell::Utf8(value) => DataTree::Text(value.to_owned()),
-        ArrowCell::Binary(value) => DataTree::Bytes(value.to_vec()),
+        ArrowCell::Null => Dyn::Null,
+        ArrowCell::Bool(value) => Dyn::Bool(value),
+        ArrowCell::Signed(value) => Dyn::Int((value).into()),
+        ArrowCell::Unsigned(value) => Dyn::Int(value.into()),
+        ArrowCell::Float(value) => Dyn::Float(value),
+        ArrowCell::Utf8(value) => Dyn::Text(value.to_owned()),
+        ArrowCell::Binary(value) => Dyn::Bytes(value.to_vec()),
     })
 }
 
 /// Preserve the logical temporal annotation emitted by the official provider.
 /// Arrow's C data format carries these values as signed integers; projecting
-/// them as `DataTree::Int` silently changes Date/Time/Duration/DateTime fields
+/// them as `Dyn::Int` silently changes Date/Time/Duration/DateTime fields
 /// into unrelated user integers.
 fn temporal_tree_value(
     field: &ArrowFieldSpec,
     cell: ArrowCell<'_>,
-) -> Result<Option<DataTree>, ArrowError> {
+) -> Result<Option<Dyn>, ArrowError> {
     let Some(metadata) = field.metadata.as_deref() else {
         return Ok(None);
     };
@@ -409,7 +407,7 @@ fn temporal_tree_value(
                 format!("duration value {value} is outside Jet's nanosecond range"),
             )
         })?;
-        return Ok(Some(DataTree::Int(nanos)));
+        return Ok(Some(Dyn::Int((nanos).into())));
     } else if metadata.starts_with("jet.logical=") {
         return Err(ArrowError::new(
             ArrowErrorCode::UnsupportedSchema,
@@ -419,7 +417,7 @@ fn temporal_tree_value(
     } else {
         return Ok(None);
     };
-    Ok(Some(DataTree::TypedText(text)))
+    Ok(Some(Dyn::Text(text)))
 }
 
 fn scale_temporal(value: i64, unit: &str) -> Result<i128, ArrowError> {

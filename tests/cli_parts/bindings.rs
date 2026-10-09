@@ -1403,7 +1403,7 @@ fn dart_bind_rejects_untyped_contract_as_e3208() {
 }
 
 #[test]
-fn powershell_bind_round_trips_datatree_state_and_cleans_workers() {
+fn powershell_bind_round_trips_dyn_state_and_cleans_workers() {
     if Command::new("pwsh").arg("--version").output().is_err() {
         return;
     }
@@ -1586,7 +1586,7 @@ BEGIN {
 }
 
 #[test]
-fn perl_bind_round_trips_datatree_state_timeout_and_cancellation() {
+fn perl_bind_round_trips_dyn_state_timeout_and_cancellation() {
     if Command::new("perl").arg("-v").output().is_err() {
         return;
     }

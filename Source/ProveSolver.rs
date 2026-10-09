@@ -11,7 +11,7 @@ use jet::Lexer;
 use jet::Parser;
 use jet::AST::{BinOp, Expr, Item, Program, UnOp};
 use jet::SHA256;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{parse_json, quote as json_str};
 
 const MAX_OBLIGATIONS: usize = 10_000;
@@ -1351,7 +1351,7 @@ fn check_finite_certificate(formula: &Formula, certificate: &str) -> Result<(), 
     )?;
     let count = json_usize(object_field(object, "assignmentCount"))?;
     let manifest = match object_field(object, "domainManifest") {
-        Some(DataTree::Array(values)) if values.len() == 1 => as_object(&values[0])?,
+        Some(Dyn::Array(values)) if values.len() == 1 => as_object(&values[0])?,
         _ => return Err("certificate_invalid"),
     };
     exact_certificate_keys(manifest, &["lower", "name", "upper"])?;
@@ -1784,7 +1784,7 @@ fn check_certificate(formula: &Formula, certificate: &str) -> Result<(), &'stati
             let object = as_object(&root)?;
             exact_certificate_keys(object, &["children", "kind"])?;
             let children = match object_field(object, "children") {
-                Some(DataTree::Array(children)) => children,
+                Some(Dyn::Array(children)) => children,
                 _ => return Err("certificate_invalid"),
             };
             if children.len() != negated.len() {
@@ -1837,23 +1837,23 @@ fn check_certificate(formula: &Formula, certificate: &str) -> Result<(), &'stati
 }
 
 fn as_object(
-    value: &DataTree,
-) -> Result<&[(String, DataTree)], &'static str> {
+    value: &Dyn,
+) -> Result<&[(String, Dyn)], &'static str> {
     match value {
-        DataTree::Object(object) => Ok(object),
+        Dyn::Object(object) => Ok(object),
         _ => Err("certificate_invalid"),
     }
 }
 
 fn object_field<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     key: &str,
-) -> Option<&'a DataTree> {
+) -> Option<&'a Dyn> {
     object.iter().find_map(|(name, value)| (name == key).then_some(value))
 }
 
 fn exact_certificate_keys(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     keys: &[&str],
 ) -> Result<(), &'static str> {
     if object.len() != keys.len()
@@ -1865,23 +1865,21 @@ fn exact_certificate_keys(
     Ok(())
 }
 
-fn object_kind(value: &DataTree) -> Result<&str, &'static str> {
+fn object_kind(value: &Dyn) -> Result<&str, &'static str> {
     let object = as_object(value)?;
     object_field(object, "kind")
         .and_then(|value| value.as_str().ok())
         .ok_or("certificate_invalid")
 }
 
-fn json_usize(value: Option<&DataTree>) -> Result<usize, &'static str> {
+fn json_usize(value: Option<&Dyn>) -> Result<usize, &'static str> {
     match value {
-        Some(DataTree::Int(value)) if *value >= 0 => {
-            usize::try_from(*value).map_err(|_| "certificate_invalid")
-        }
+        Some(Dyn::Int(value)) => value.to_usize().ok_or("certificate_invalid"),
         _ => Err("certificate_invalid"),
     }
 }
 
-fn json_i128(value: Option<&DataTree>) -> Result<i128, &'static str> {
+fn json_i128(value: Option<&Dyn>) -> Result<i128, &'static str> {
     let Some(value) = value.and_then(|value| value.as_str().ok()) else {
         return Err("certificate_invalid");
     };
@@ -1892,24 +1890,18 @@ fn json_i128(value: Option<&DataTree>) -> Result<i128, &'static str> {
     Ok(parsed)
 }
 
-fn canonical_json_value(value: &DataTree) -> Result<String, &'static str> {
+fn canonical_json_value(value: &Dyn) -> Result<String, &'static str> {
     match value {
-        DataTree::Null => Ok("null".into()),
-        DataTree::Bool(value) => Ok(value.to_string()),
-        DataTree::Int(value) => Ok(value.to_string()),
-        DataTree::Float(value) if value.is_finite() => Ok(value.to_string()),
-        DataTree::Float(_) => Err("certificate_invalid"),
-        DataTree::Number(value) => Ok(value.clone()),
-        DataTree::TypedText(value) | DataTree::Text(value) => Ok(json_str(value)),
-        DataTree::Bytes(values) => Ok(format!(
-            "[{}]",
-            values
-                .iter()
-                .map(|value| value.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        )),
-        DataTree::Array(values) => Ok(format!(
+        Dyn::Null => Ok("null".into()),
+        Dyn::Bool(value) => Ok(value.to_string()),
+        Dyn::Int(value) => Ok(value.to_string()),
+        Dyn::Float(value) if value.is_finite() => Ok(value.to_string()),
+        Dyn::Float(_) => Err("certificate_invalid"),
+        Dyn::Number(value) => Ok(value.clone()),
+        Dyn::Text(value) => Ok(json_str(value)),
+        Dyn::Bytes(values) => Ok(json_str(&Dyn::bytes_text(values))),
+        Dyn::DateTime(value) => Ok(json_str(&value.to_rfc3339())),
+        Dyn::Array(values) => Ok(format!(
             "[{}]",
             values
                 .iter()
@@ -1917,7 +1909,7 @@ fn canonical_json_value(value: &DataTree) -> Result<String, &'static str> {
                 .collect::<Result<Vec<_>, _>>()?
                 .join(",")
         )),
-        DataTree::Object(object) => {
+        Dyn::Object(object) => {
             let mut entries = object.iter().collect::<Vec<_>>();
             entries.sort_by(|(left, _), (right, _)| left.cmp(right));
             let mut fields = Vec::with_capacity(entries.len());
@@ -1934,7 +1926,7 @@ fn canonical_json_value(value: &DataTree) -> Result<String, &'static str> {
 }
 
 fn check_certificate_node(
-    value: &DataTree,
+    value: &Dyn,
     inequalities: &[Inequality],
 ) -> Result<(), &'static str> {
     match object_kind(value)? {
@@ -1942,7 +1934,7 @@ fn check_certificate_node(
             let object = as_object(value)?;
             exact_certificate_keys(object, &["kind", "multipliers"])?;
             let entries = match object_field(object, "multipliers") {
-                Some(DataTree::Array(entries)) => entries,
+                Some(Dyn::Array(entries)) => entries,
                 _ => return Err("certificate_invalid"),
             };
             if entries.is_empty() {

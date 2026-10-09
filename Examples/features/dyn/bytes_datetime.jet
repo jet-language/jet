@@ -1,0 +1,27 @@
+// Dyn.Bytes and Dyn.DateTime (owner direction, 2026-10-02): an instant with a
+// fixed UTC offset, and raw bytes. Equality keeps the offset; ordering compares
+// instants; text forms are RFC 3339 and base64.
+use core.time as time
+
+fn run() {
+    instant :: time.parse_rfc3339("2024-03-15T12:30:00Z") ?? panic("instant")
+    india :: time.zone("+05:30") ?? panic("zone")
+    stamp :: Dyn.DateTime(time.zoned(instant, india))
+    same_instant :: Dyn.DateTime(time.zoned(instant, time.utc()))
+    blob :: Dyn.Bytes([U8]{104, 105})
+    print(stamp)
+    print(same_instant)
+    print(blob)
+    print(stamp == same_instant)
+    print(stamp < same_instant)
+    print(stamp.to_text() ?? "none")
+    print(blob.len())
+    if stamp == {
+        .DateTime(zoned) -> print(zoned.offset_seconds())
+        else -> print("not a date-time")
+    }
+    if blob == {
+        .Bytes(bytes) -> print(bytes[1])
+        else -> print("not bytes")
+    }
+}

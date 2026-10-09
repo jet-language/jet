@@ -6,7 +6,7 @@
 //! is machine-specific; proof details and content-derived Core fingerprints
 //! remain byte-exact.
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_get, json_str, parse};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -166,7 +166,7 @@ fn receipt_replayed(output: &Output) -> bool {
     String::from_utf8_lossy(&output.stderr).contains("ok: check current")
 }
 
-fn machine_rows(output: &Output) -> Vec<DataTree> {
+fn machine_rows(output: &Output) -> Vec<Dyn> {
     assert_project_check_passed(output, "machine project check");
     let stdout = String::from_utf8_lossy(&output.stdout);
     let report = parse(stdout.trim()).unwrap_or_else(|error| {
@@ -178,11 +178,11 @@ fn machine_rows(output: &Output) -> Vec<DataTree> {
         "project check machine contract changed"
     );
     assert!(
-        matches!(json_get(&report, "elapsed_ms"), Some(DataTree::Int(milliseconds)) if *milliseconds >= 0),
+        matches!(json_get(&report, "elapsed_ms"), Some(Dyn::Int(milliseconds)) if milliseconds.to_u64().is_some()),
         "project check machine result must record elapsed_ms"
     );
     match json_get(&report, "rows") {
-        Some(DataTree::Array(rows)) => rows.clone(),
+        Some(Dyn::Array(rows)) => rows.clone(),
         other => panic!("project check machine rows must be an array, got {other:?}"),
     }
 }

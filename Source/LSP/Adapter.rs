@@ -1,7 +1,7 @@
 //! Typed adapters for host extensions carried by the LSP JSON-RPC boundary.
 //!
 //! The LSP server owns the only frame/parser.  This module receives the
-//! already-decoded `DataTree`, converts it once into the devserver request
+//! already-decoded `Dyn`, converts it once into the devserver request
 //! types, and never calls the raw-JSON convenience API in `EditorHost`.
 
 
@@ -13,9 +13,9 @@ use jet_devserver::EditorHost::{
     EDITOR_NAVIGATE_METHOD, EDITOR_RECONNECT_METHOD, EDITOR_SELECT_METHOD,
     EDITOR_WORKBENCH_METHOD, EDITOR_MAX_HISTORY,
 };
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::json_str;
-fn object_get<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn object_get<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
@@ -39,7 +39,7 @@ impl EditorHostAdapter {
     pub(crate) fn dispatch(
         &mut self,
         method: &str,
-        params: Option<&DataTree>,
+        params: Option<&Dyn>,
     ) -> Result<String, EditorHostError> {
         let params = params.ok_or_else(|| {
             EditorHostError::InvalidRequest("editor host request is missing `params`".to_string())
@@ -170,7 +170,7 @@ struct RequestContext {
 }
 
 impl RequestContext {
-    fn parse(object: &[(String, DataTree)]) -> Result<Self, EditorHostError> {
+    fn parse(object: &[(String, Dyn)]) -> Result<Self, EditorHostError> {
         Ok(Self {
             host: EditorHost::parse(&required_string(object, "editor")?)?,
             session_id: required_string(object, "session_id")?,
@@ -193,7 +193,7 @@ impl RequestContext {
 }
 
 fn parse_open(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     context: &RequestContext,
 ) -> Result<EditorWorkbenchOpenRequest, EditorHostError> {
     Ok(EditorWorkbenchOpenRequest {
@@ -209,7 +209,7 @@ fn parse_open(
 }
 
 fn parse_reconnect(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     context: &RequestContext,
 ) -> Result<EditorReconnectRequest, EditorHostError> {
     Ok(EditorReconnectRequest {
@@ -223,7 +223,7 @@ fn parse_reconnect(
 }
 
 fn parse_navigation(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     context: &RequestContext,
 ) -> Result<EditorSourceNavigationRequest, EditorHostError> {
     Ok(EditorSourceNavigationRequest {
@@ -242,7 +242,7 @@ fn parse_navigation(
 }
 
 fn parse_selection(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     context: &RequestContext,
 ) -> Result<EditorPanelSelectionRequest, EditorHostError> {
     Ok(EditorPanelSelectionRequest {
@@ -257,12 +257,12 @@ fn parse_selection(
 }
 
 fn parse_command(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     context: &RequestContext,
 ) -> Result<EditorCommandRequest, EditorHostError> {
     let arguments = match object_get(object, "arguments") {
-        None | Some(DataTree::Null) => Vec::new(),
-        Some(DataTree::Array(values)) if values.len() <= EDITOR_MAX_HISTORY => values
+        None | Some(Dyn::Null) => Vec::new(),
+        Some(Dyn::Array(values)) if values.len() <= EDITOR_MAX_HISTORY => values
             .iter()
             .map(|value| {
                 json_str(value)
@@ -270,7 +270,7 @@ fn parse_command(
                     .ok_or_else(|| EditorHostError::InvalidRequest("command arguments must be strings".to_string()))
             })
             .collect::<Result<Vec<_>, _>>()?,
-        Some(DataTree::Array(_)) => {
+        Some(Dyn::Array(_)) => {
             return Err(EditorHostError::InvalidRequest(
                 "command arguments exceed the bounded limit".to_string(),
             ));
@@ -292,7 +292,7 @@ fn parse_command(
     })
 }
 
-fn required_string(object: &[(String, DataTree)], key: &str) -> Result<String, EditorHostError> {
+fn required_string(object: &[(String, Dyn)], key: &str) -> Result<String, EditorHostError> {
     object_get(object, key)
         .and_then(json_str)
         .map(str::to_string)
@@ -300,11 +300,11 @@ fn required_string(object: &[(String, DataTree)], key: &str) -> Result<String, E
 }
 
 fn optional_string(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     key: &str,
 ) -> Result<Option<String>, EditorHostError> {
     match object_get(object, key) {
-        None | Some(DataTree::Null) => Ok(None),
+        None | Some(Dyn::Null) => Ok(None),
         Some(value) => json_str(value)
             .map(|value| Some(value.to_string()))
             .ok_or_else(|| EditorHostError::InvalidRequest(format!("editor host field `{key}` must be a string or null"))),
@@ -312,7 +312,7 @@ fn optional_string(
 }
 
 fn optional_string_alias(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     keys: &[&str],
 ) -> Result<Option<String>, EditorHostError> {
     for key in keys {
@@ -323,9 +323,10 @@ fn optional_string_alias(
     Ok(None)
 }
 
-fn required_u64(object: &[(String, DataTree)], key: &str) -> Result<u64, EditorHostError> {
+fn required_u64(object: &[(String, Dyn)], key: &str) -> Result<u64, EditorHostError> {
     match object_get(object, key) {
-        Some(DataTree::Int(value)) if *value >= 0 => Ok(*value as u64),
+        Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| EditorHostError::InvalidRequest(format!(
+            "editor host field `{key}` must be a nonnegative integer"))),
         _ => Err(EditorHostError::InvalidRequest(format!(
             "editor host field `{key}` must be a nonnegative integer"
         ))),
@@ -333,24 +334,25 @@ fn required_u64(object: &[(String, DataTree)], key: &str) -> Result<u64, EditorH
 }
 
 fn optional_u64(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     key: &str,
 ) -> Result<Option<u64>, EditorHostError> {
     match object_get(object, key) {
-        None | Some(DataTree::Null) => Ok(None),
-        Some(DataTree::Int(value)) if *value >= 0 => Ok(Some(*value as u64)),
+        None | Some(Dyn::Null) => Ok(None),
+        Some(Dyn::Int(value)) => value.to_u64().map(Some).ok_or_else(|| EditorHostError::InvalidRequest(format!(
+            "editor host field `{key}` must be a nonnegative integer or null"))),
         _ => Err(EditorHostError::InvalidRequest(format!(
             "editor host field `{key}` must be a nonnegative integer or null"
         ))),
     }
 }
 
-fn parse_grants(object: &[(String, DataTree)]) -> Result<Option<Vec<String>>, EditorHostError> {
+fn parse_grants(object: &[(String, Dyn)]) -> Result<Option<Vec<String>>, EditorHostError> {
     let Some(value) = object_get(object, "grants") else {
         return Ok(None);
     };
-    let DataTree::Array(values) = value else {
-        if matches!(value, DataTree::Null) {
+    let Dyn::Array(values) = value else {
+        if matches!(value, Dyn::Null) {
             return Ok(Some(Vec::new()));
         }
         return Err(EditorHostError::InvalidRequest(

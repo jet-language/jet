@@ -103,7 +103,7 @@ pub fn reader(text: String) -> JSONLReader Never! {
 }
 
 
-pub fn loads(text: String) -> [DataTree] EncodingError! { parse(text) }
+pub fn loads(text: String) -> [Dyn] EncodingError! { parse(text) }
 
 pub fn dumps(rows: [DataTree]) -> String EncodingError! { to_string(rows) }
 
@@ -156,7 +156,7 @@ struct JSONLRecord {
     offset: Int
 }
 
-fn parse_record(record: JSONLRecord, index: Int) -> DataTree EncodingError! {
+fn parse_record(record: JSONLRecord, index: Int) -> Dyn EncodingError! {
     value :: json.parse(record.text) ?? return Err(record_error(err, record, index))
     Ok(value)
 }

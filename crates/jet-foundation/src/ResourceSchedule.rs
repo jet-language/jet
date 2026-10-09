@@ -1093,9 +1093,9 @@ fn encode_retention(retention: &JetFrameRetention) -> String {
 }
 
 fn json_object<'a>(
-    value: &'a crate::DataTree::DataTree,
+    value: &'a crate::Dyn::Dyn,
     what: &str,
-) -> Result<&'a [(String, crate::DataTree::DataTree)], String> {
+) -> Result<&'a [(String, crate::Dyn::Dyn)], String> {
     value
         .as_object()
         .map(Vec::as_slice)
@@ -1103,9 +1103,9 @@ fn json_object<'a>(
 }
 
 fn json_array<'a>(
-    value: &'a crate::DataTree::DataTree,
+    value: &'a crate::Dyn::Dyn,
     what: &str,
-) -> Result<&'a [crate::DataTree::DataTree], String> {
+) -> Result<&'a [crate::Dyn::Dyn], String> {
     value
         .as_array()
         .map(Vec::as_slice)
@@ -1113,57 +1113,56 @@ fn json_array<'a>(
 }
 
 fn json_field<'a>(
-    object: &'a [(String, crate::DataTree::DataTree)],
+    object: &'a [(String, crate::Dyn::Dyn)],
     name: &str,
-) -> Result<&'a crate::DataTree::DataTree, String> {
+) -> Result<&'a crate::Dyn::Dyn, String> {
     object
         .iter()
         .find_map(|(key, value)| (key == name).then_some(value))
         .ok_or_else(|| format!("frame schedule is missing `{name}`"))
 }
 
-fn json_text(value: &crate::DataTree::DataTree, what: &str) -> Result<String, String> {
+fn json_text(value: &crate::Dyn::Dyn, what: &str) -> Result<String, String> {
     value
         .as_str()
         .map(str::to_string)
         .map_err(|_| format!("expected {what} text"))
 }
 
-fn json_bool(value: &crate::DataTree::DataTree, what: &str) -> Result<bool, String> {
+fn json_bool(value: &crate::Dyn::Dyn, what: &str) -> Result<bool, String> {
     match value {
-        crate::DataTree::DataTree::Bool(value) => Ok(*value),
+        crate::Dyn::Dyn::Bool(value) => Ok(*value),
         _ => Err(format!("expected {what} boolean")),
     }
 }
 
-fn json_u64(value: &crate::DataTree::DataTree, what: &str) -> Result<u64, String> {
+fn json_u64(value: &crate::Dyn::Dyn, what: &str) -> Result<u64, String> {
     let text = match value {
-        crate::DataTree::DataTree::Int(value) if *value >= 0 => value.to_string(),
-        crate::DataTree::DataTree::Number(value)
-        | crate::DataTree::DataTree::Text(value)
-        | crate::DataTree::DataTree::TypedText(value) => value.clone(),
+        crate::Dyn::Dyn::Int(value) if value >= &crate::Numeric::JetInt::from_i64(0) => value.to_string(),
+        crate::Dyn::Dyn::Number(value)
+        | crate::Dyn::Dyn::Text(value) => value.clone(),
         _ => return Err(format!("expected {what} unsigned integer")),
     };
     text.parse::<u64>()
         .map_err(|_| format!("invalid {what} unsigned integer `{text}`"))
 }
 
-fn json_usize(value: &crate::DataTree::DataTree, what: &str) -> Result<usize, String> {
+fn json_usize(value: &crate::Dyn::Dyn, what: &str) -> Result<usize, String> {
     let value = json_u64(value, what)?;
     usize::try_from(value).map_err(|_| format!("{what} does not fit in usize"))
 }
 
 fn json_optional_text(
-    value: &crate::DataTree::DataTree,
+    value: &crate::Dyn::Dyn,
     what: &str,
 ) -> Result<Option<String>, String> {
     match value {
-        crate::DataTree::DataTree::Null => Ok(None),
+        crate::Dyn::Dyn::Null => Ok(None),
         _ => json_text(value, what).map(Some),
     }
 }
 
-fn parse_identity(value: &crate::DataTree::DataTree) -> Result<JetResourceIdentity, String> {
+fn parse_identity(value: &crate::Dyn::Dyn) -> Result<JetResourceIdentity, String> {
     let object = json_object(value, "resource identity")?;
     match json_text(json_field(object, "kind")?, "resource identity kind")?.as_str() {
         "named" => Ok(JetResourceIdentity::Named(json_text(
@@ -1175,7 +1174,7 @@ fn parse_identity(value: &crate::DataTree::DataTree) -> Result<JetResourceIdenti
     }
 }
 
-fn parse_mode(value: &crate::DataTree::DataTree) -> Result<JetResourceAccessMode, String> {
+fn parse_mode(value: &crate::Dyn::Dyn) -> Result<JetResourceAccessMode, String> {
     match json_text(value, "resource access mode")?.as_str() {
         "read" => Ok(JetResourceAccessMode::Read),
         "write" => Ok(JetResourceAccessMode::Write),
@@ -1184,7 +1183,7 @@ fn parse_mode(value: &crate::DataTree::DataTree) -> Result<JetResourceAccessMode
     }
 }
 
-fn parse_region(value: &crate::DataTree::DataTree) -> Result<JetResourceRegion, String> {
+fn parse_region(value: &crate::Dyn::Dyn) -> Result<JetResourceRegion, String> {
     let object = json_object(value, "resource region")?;
     match json_text(json_field(object, "kind")?, "resource region kind")?.as_str() {
         "whole" => Ok(JetResourceRegion::Whole),
@@ -1198,9 +1197,9 @@ fn parse_region(value: &crate::DataTree::DataTree) -> Result<JetResourceRegion, 
 }
 
 fn parse_layout(
-    value: &crate::DataTree::DataTree,
+    value: &crate::Dyn::Dyn,
 ) -> Result<Option<JetResourceLayout>, String> {
-    if matches!(value, crate::DataTree::DataTree::Null) {
+    if matches!(value, crate::Dyn::Dyn::Null) {
         return Ok(None);
     }
     let object = json_object(value, "resource layout")?;
@@ -1212,7 +1211,7 @@ fn parse_layout(
     }))
 }
 
-fn parse_access(value: &crate::DataTree::DataTree) -> Result<JetResourceAccess, String> {
+fn parse_access(value: &crate::Dyn::Dyn) -> Result<JetResourceAccess, String> {
     let object = json_object(value, "resource access")?;
     Ok(JetResourceAccess {
         resource: parse_identity(json_field(object, "resource")?)?,
@@ -1224,7 +1223,7 @@ fn parse_access(value: &crate::DataTree::DataTree) -> Result<JetResourceAccess, 
 }
 
 fn parse_completion(
-    value: &crate::DataTree::DataTree,
+    value: &crate::Dyn::Dyn,
 ) -> Result<JetFrameCompletion, String> {
     let object = json_object(value, "completion")?;
     let kind = json_text(json_field(object, "kind")?, "completion kind")?;
@@ -1240,7 +1239,7 @@ fn parse_completion(
     }
 }
 
-fn parse_operation(value: &crate::DataTree::DataTree) -> Result<JetFrameOperation, String> {
+fn parse_operation(value: &crate::Dyn::Dyn) -> Result<JetFrameOperation, String> {
     let object = json_object(value, "frame operation")?;
     let accesses = json_array(json_field(object, "accesses")?, "operation accesses")?
         .iter()
@@ -1265,7 +1264,7 @@ fn parse_operation(value: &crate::DataTree::DataTree) -> Result<JetFrameOperatio
     })
 }
 
-fn parse_dependency(value: &crate::DataTree::DataTree) -> Result<JetFrameDependency, String> {
+fn parse_dependency(value: &crate::Dyn::Dyn) -> Result<JetFrameDependency, String> {
     let object = json_object(value, "frame dependency")?;
     Ok(JetFrameDependency {
         before: json_usize(json_field(object, "before")?, "dependency before")?,
@@ -1275,7 +1274,7 @@ fn parse_dependency(value: &crate::DataTree::DataTree) -> Result<JetFrameDepende
     })
 }
 
-fn parse_transfer(value: &crate::DataTree::DataTree) -> Result<JetFrameTransfer, String> {
+fn parse_transfer(value: &crate::Dyn::Dyn) -> Result<JetFrameTransfer, String> {
     let object = json_object(value, "frame transfer")?;
     Ok(JetFrameTransfer {
         before: json_usize(json_field(object, "before")?, "transfer before")?,
@@ -1286,7 +1285,7 @@ fn parse_transfer(value: &crate::DataTree::DataTree) -> Result<JetFrameTransfer,
     })
 }
 
-fn parse_reuse(value: &crate::DataTree::DataTree) -> Result<JetFrameReuse, String> {
+fn parse_reuse(value: &crate::Dyn::Dyn) -> Result<JetFrameReuse, String> {
     let object = json_object(value, "frame reuse")?;
     Ok(JetFrameReuse {
         previous_resource: json_text(
@@ -1304,7 +1303,7 @@ fn parse_reuse(value: &crate::DataTree::DataTree) -> Result<JetFrameReuse, Strin
     })
 }
 
-fn parse_retention(value: &crate::DataTree::DataTree) -> Result<JetFrameRetention, String> {
+fn parse_retention(value: &crate::Dyn::Dyn) -> Result<JetFrameRetention, String> {
     let object = json_object(value, "frame retention")?;
     Ok(JetFrameRetention {
         resource: json_text(json_field(object, "resource")?, "retained resource")?,

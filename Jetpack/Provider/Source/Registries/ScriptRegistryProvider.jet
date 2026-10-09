@@ -535,25 +535,25 @@ fn provider_script_has_nul(value: String) -> Bool Never! {
     false
 }
 
-// ── DataTree readers (Rust `DataTree::get`/`as_str`/`as_array` texts) ──
+// ── Dyn readers (Rust `Dyn::get`/`as_str`/`as_array` texts) ──
 
-fn provider_script_json_field(value: DataTree, key: String) -> DataTree? Never! {
+fn provider_script_json_field(value: Dyn, key: String) -> Dyn? Never! {
     object :: pkg_json_object(value) ?? return None
     object.get(key)
 }
 
-fn provider_script_json_get(value: DataTree, key: String) -> DataTree RegistryError! {
+fn provider_script_json_get(value: Dyn, key: String) -> Dyn RegistryError! {
     found :: provider_script_json_field(value, key) ?? return Err(RegistryError.Reason("missing key `{key}`"))
     Ok(found)
 }
 
-fn provider_script_json_str(value: DataTree) -> String RegistryError! {
+fn provider_script_json_str(value: Dyn) -> String RegistryError! {
     text :: pkg_json_text(value) ?? return Err(RegistryError.Reason(PKG_JSON_NOT_STRING))
     Ok(text)
 }
 
 // A string field, failing as `invalid metadata field `{field}`: {error}`.
-fn provider_script_json_string(value: DataTree, field: String) -> String RegistryError! {
+fn provider_script_json_string(value: Dyn, field: String) -> String RegistryError! {
     found :: provider_script_json_get(value, field) ?? return Err(RegistryError.Reason("invalid metadata field `{field}`: {err.message()}"))
     text :: provider_script_json_str(found) ?? return Err(RegistryError.Reason("invalid metadata field `{field}`: {err.message()}"))
     Ok(text)

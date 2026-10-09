@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_escape, parse_json_with_limit};
 
 use crate::Session::{DevtoolsProjection, ResidentDevSession, JET_DEVTOOLS_PROTOCOL};
@@ -741,7 +741,7 @@ impl EditorHostTransport {
         let root = parse_json_with_limit(payload, EDITOR_MAX_TEXT_BYTES)
             .map_err(|_| EditorHostError::InvalidRequest("request is not valid bounded JSON".to_string()))?;
         let object = match root {
-            DataTree::Object(object) => object.into_iter().collect::<BTreeMap<_, _>>(),
+            Dyn::Object(object) => object.into_iter().collect::<BTreeMap<_, _>>(),
             _ => {
                 return Err(EditorHostError::InvalidRequest(
                     "JSON-RPC request must be an object".to_string(),
@@ -749,7 +749,7 @@ impl EditorHostTransport {
             }
         };
         match object.get("jsonrpc") {
-            Some(DataTree::Text(version)) if version == "2.0" => {}
+            Some(Dyn::Text(version)) if version == "2.0" => {}
             _ => {
                 return Err(EditorHostError::InvalidRequest(
                     "JSON-RPC version must be `2.0`".to_string(),
@@ -761,14 +761,14 @@ impl EditorHostTransport {
         })?;
         if !matches!(
             id,
-            DataTree::Null | DataTree::Text(_) | DataTree::Int(_) | DataTree::Float(_)
+            Dyn::Null | Dyn::Text(_) | Dyn::Int(_) | Dyn::Float(_)
         ) {
             return Err(EditorHostError::InvalidRequest(
                 "JSON-RPC id must be null, a string, or a number".to_string(),
             ));
         }
         let method = match object.get("method") {
-            Some(DataTree::Text(method)) => method.as_str(),
+            Some(Dyn::Text(method)) => method.as_str(),
             _ => {
                 return Err(EditorHostError::InvalidRequest(
                     "JSON-RPC request requires a method".to_string(),
@@ -776,7 +776,7 @@ impl EditorHostTransport {
             }
         };
         let params = match object.get("params") {
-            Some(DataTree::Object(params)) => params.iter().cloned().collect::<BTreeMap<_, _>>(),
+            Some(Dyn::Object(params)) => params.iter().cloned().collect::<BTreeMap<_, _>>(),
             _ => {
                 return Err(EditorHostError::InvalidRequest(
                     "JSON-RPC request requires an object params value".to_string(),
@@ -785,7 +785,7 @@ impl EditorHostTransport {
         };
         let field_text = |key: &str| -> Result<String, EditorHostError> {
             match params.get(key) {
-                Some(DataTree::Text(value)) => Ok(value.clone()),
+                Some(Dyn::Text(value)) => Ok(value.clone()),
                 _ => Err(EditorHostError::InvalidRequest(format!(
                     "editor request field `{key}` must be text"
                 ))),
@@ -793,8 +793,8 @@ impl EditorHostTransport {
         };
         let optional_text = |key: &str| -> Result<Option<String>, EditorHostError> {
             match params.get(key) {
-                None | Some(DataTree::Null) => Ok(None),
-                Some(DataTree::Text(value)) => Ok(Some(value.clone())),
+                None | Some(Dyn::Null) => Ok(None),
+                Some(Dyn::Text(value)) => Ok(Some(value.clone())),
                 _ => Err(EditorHostError::InvalidRequest(format!(
                     "editor request field `{key}` must be text or null"
                 ))),
@@ -802,8 +802,8 @@ impl EditorHostTransport {
         };
         let field_u64 = |key: &str| -> Result<u64, EditorHostError> {
             match params.get(key) {
-                Some(DataTree::Int(value)) if *value >= 0 => Ok(*value as u64),
-                Some(DataTree::Float(value))
+                Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| EditorHostError::InvalidRequest(format!("editor request field `{key}` must be a nonnegative integer"))),
+                Some(Dyn::Float(value))
                     if value.is_finite()
                         && *value >= 0.0
                         && *value <= u64::MAX as f64
@@ -839,7 +839,7 @@ impl EditorHostTransport {
                 request.panel_id = optional_text("panel_id")?;
                 request.item_key = optional_text("item_key")?;
                 request.cursor = match params.get("cursor") {
-                    None | Some(DataTree::Null) => None,
+                    None | Some(Dyn::Null) => None,
                     Some(_) => Some(field_u64("cursor")?),
                 };
                 EditorHostResponse::Workbench(self.open(&request)?)
@@ -847,7 +847,7 @@ impl EditorHostTransport {
             EDITOR_RECONNECT_METHOD => {
                 let (host, session_id, source_id, source_path, revision) = common()?;
                 let cursor = match params.get("cursor") {
-                    None | Some(DataTree::Null) => None,
+                    None | Some(Dyn::Null) => None,
                     Some(_) => Some(field_u64("cursor")?),
                 };
                 let request = EditorReconnectRequest::new(
@@ -899,10 +899,10 @@ impl EditorHostTransport {
                 let command = EditorCommand::parse(&field_text("command")?)?;
                 let arguments = match params.get("arguments") {
                     None => Vec::new(),
-                    Some(DataTree::Array(arguments)) => arguments
+                    Some(Dyn::Array(arguments)) => arguments
                         .iter()
                         .map(|argument| match argument {
-                            DataTree::Text(argument) => Ok(argument.clone()),
+                            Dyn::Text(argument) => Ok(argument.clone()),
                             _ => Err(EditorHostError::InvalidRequest(
                                 "editor command arguments must be text".to_string(),
                             )),

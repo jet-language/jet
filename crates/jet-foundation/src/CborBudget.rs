@@ -1,6 +1,6 @@
 //! Shared whole-CBOR allocation accounting for every execution tier.
 
-pub const DATA_TREE_SLOT_BYTES: usize = 32;
+pub const DYN_SLOT_BYTES: usize = 32;
 pub const MAP_ENTRY_SLOT_BYTES: usize = 56;
 
 #[derive(Debug)]

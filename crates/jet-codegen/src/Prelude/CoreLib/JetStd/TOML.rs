@@ -1,18 +1,20 @@
-    // ── core.encoding.toml: full TOML 1.0 → DataTree (D-ENC-DYN1=A+, c152) ────────
+    // ── core.encoding.toml: full TOML 1.0 → Dyn (D-ENC-DYN1=A+, c152) ────────
     // A complete std-only TOML 1.0 parser (ported from the compiler's
     // Source/Jetpack/TOML.rs, which the emitted prelude cannot reach) that lowers a
-    // document onto the one rich `DataTree`. Strings (every escape + multi-line),
+    // document onto the one rich `Dyn`. Strings (every escape + multi-line),
     // integers in every base, floats incl. inf/nan, booleans, datetimes (kept raw),
     // arrays, inline tables, dotted keys, `[table]` headers, and `[[array-of-tables]]`.
     pub mod toml {
-        use super::DataTree;
+        use super::Dyn;
 
         const MAX_TOML_DEPTH: usize = 64;
 
         #[derive(Clone, Debug, PartialEq)]
         pub enum Value {
             String(String),
-            Integer(i64),
+            /// A finite number's exact lexeme in JSON number spelling (#4602).
+            Number(String),
+            /// `inf` and `nan`, which have no number lexeme.
             Float(f64),
             Boolean(bool),
             Datetime(String),
@@ -30,9 +32,10 @@
         pub struct ParseError {
             pub line: usize,
             pub message: String,
+            pub unsupported: bool,
         }
 
-        pub fn parse_to_tree(raw: &str) -> Result<DataTree, ParseError> {
+        pub fn parse_to_tree(raw: &str) -> Result<Dyn, ParseError> {
             let mut p = Parser {
                 chars: raw.chars().collect(),
                 pos: 0,
@@ -45,21 +48,22 @@
                 if p.peek().is_none() {
                     break;
                 }
+                let line = p.line;
                 if let Some(item) = p.statement()? {
                     if let Item::Header { path, .. } = &item {
                         p.current_path_len = path.len();
                     }
-                    items.push(item);
+                    items.push((line, item));
                 }
             }
-            Ok(assemble(items))
+            assemble(items)
         }
 
-        // ── Assembly: a flat Item list → a nested ordered `DataTree::Object` ──────
-        fn assemble(items: Vec<Item>) -> DataTree {
-            let mut root = DataTree::Object(Vec::new());
+        // ── Assembly: a flat Item list → a nested ordered `Dyn::Object` ──────
+        fn assemble(items: Vec<(usize, Item)>) -> Result<Dyn, ParseError> {
+            let mut root = Dyn::Object(Vec::new());
             let mut current: Vec<String> = Vec::new();
-            for item in items {
+            for (line, item) in items {
                 match item {
                     Item::Header { path, array } => {
                         if array {
@@ -71,31 +75,33 @@
                         current = path;
                     }
                     Item::KeyVal { path, value } => {
-                        set_key(&mut root, &current, &path, value_to_tree(value));
+                        set_key(&mut root, &current, &path, value_to_tree(value)).map_err(
+                            |message| ParseError { line, message, unsupported: false },
+                        )?;
                     }
                 }
             }
-            root
+            Ok(root)
         }
 
         // Navigate to (creating along the way) the table at `path`. When a segment is
         // an array-of-tables, descend into its LAST element.
-        fn table_at<'a>(mut node: &'a mut DataTree, path: &[String]) -> &'a mut DataTree {
+        fn table_at<'a>(mut node: &'a mut Dyn, path: &[String]) -> &'a mut Dyn {
             for seg in path {
                 node = child_table_mut(node, seg);
             }
             node
         }
 
-        fn child_table_mut<'a>(node: &'a mut DataTree, seg: &str) -> &'a mut DataTree {
+        fn child_table_mut<'a>(node: &'a mut Dyn, seg: &str) -> &'a mut Dyn {
             let entries = match node {
-                DataTree::Object(entries) => entries,
+                Dyn::Object(entries) => entries,
                 other => return other,
             };
             let idx = match entries.iter().position(|(k, _)| k == seg) {
                 Some(i) => i,
                 None => {
-                    entries.push((seg.to_string(), DataTree::Object(Vec::new())));
+                    entries.push((seg.to_string(), Dyn::Object(Vec::new())));
                     entries.len() - 1
                 }
             };
@@ -103,80 +109,86 @@
             // target index immutably first, then take exactly one mutable borrow per
             // branch of a match on the (non-borrowing) `Option` — sidesteps the NLL snag.
             let arr_last: Option<usize> = match &entries[idx].1 {
-                DataTree::Array(arr) if !arr.is_empty() => Some(arr.len() - 1),
+                Dyn::Array(arr) if !arr.is_empty() => Some(arr.len() - 1),
                 _ => None,
             };
             match arr_last {
                 Some(n) => match &mut entries[idx].1 {
-                    DataTree::Array(arr) => &mut arr[n],
+                    Dyn::Array(arr) => &mut arr[n],
                     other => other,
                 },
                 None => &mut entries[idx].1,
             }
         }
 
-        fn push_array_table(root: &mut DataTree, path: &[String]) {
+        fn push_array_table(root: &mut Dyn, path: &[String]) {
             let (parent_path, last) = path.split_at(path.len() - 1);
             let parent = table_at(root, parent_path);
-            if let DataTree::Object(entries) = parent {
+            if let Dyn::Object(entries) = parent {
                 let idx = match entries.iter().position(|(k, _)| k == &last[0]) {
                     Some(i) => i,
                     None => {
-                        entries.push((last[0].clone(), DataTree::Array(Vec::new())));
+                        entries.push((last[0].clone(), Dyn::Array(Vec::new())));
                         entries.len() - 1
                     }
                 };
-                if let DataTree::Array(arr) = &mut entries[idx].1 {
-                    arr.push(DataTree::Object(Vec::new()));
+                if let Dyn::Array(arr) = &mut entries[idx].1 {
+                    arr.push(Dyn::Object(Vec::new()));
                 }
             }
         }
 
-        fn set_key(root: &mut DataTree, current: &[String], key_path: &[String], value: DataTree) {
+        // #4602: a repeated key is a parse error, never a silent overwrite.
+        fn set_key(
+            root: &mut Dyn,
+            current: &[String],
+            key_path: &[String],
+            value: Dyn,
+        ) -> Result<(), String> {
             let mut full: Vec<String> = current.to_vec();
             full.extend_from_slice(&key_path[..key_path.len() - 1]);
             let table = table_at(root, &full);
             let fk = &key_path[key_path.len() - 1];
-            if let DataTree::Object(entries) = table {
-                if let Some(slot) = entries.iter_mut().find(|(k, _)| k == fk) {
-                    slot.1 = value;
-                } else {
-                    entries.push((fk.clone(), value));
+            if let Dyn::Object(entries) = table {
+                if entries.iter().any(|(k, _)| k == fk) {
+                    return Err(format!("duplicate key `{fk}`"));
                 }
+                entries.push((fk.clone(), value));
             }
+            Ok(())
         }
 
-        fn value_to_tree(v: Value) -> DataTree {
+        fn value_to_tree(v: Value) -> Dyn {
             match v {
-                Value::String(s) => DataTree::Text(s),
-                Value::Integer(n) => DataTree::Int(n),
-                Value::Float(f) => DataTree::Float(f),
-                Value::Boolean(b) => DataTree::Bool(b),
-                Value::Datetime(s) => DataTree::Text(s),
-                Value::Array(xs) => DataTree::Array(xs.into_iter().map(value_to_tree).collect()),
+                Value::String(s) => Dyn::Text(s),
+                Value::Number(lexeme) => Dyn::Number(lexeme),
+                Value::Float(f) => Dyn::Float(f),
+                Value::Boolean(b) => Dyn::Bool(b),
+                Value::Datetime(s) => Dyn::parse_datetime(&s).unwrap_or_else(|_| Dyn::Text(s)),
+                Value::Array(xs) => Dyn::Array(xs.into_iter().map(value_to_tree).collect()),
                 Value::InlineTable(es) => {
-                    DataTree::Object(es.into_iter().map(|(k, v)| (k, value_to_tree(v))).collect())
+                    Dyn::Object(es.into_iter().map(|(k, v)| (k, value_to_tree(v))).collect())
                 }
             }
         }
 
-        // ── Render: a `DataTree` → TOML text (nested headers, arrays-of-tables) ───
-        pub fn render(t: &DataTree) -> String {
+        // ── Render: a `Dyn` → TOML text (nested headers, arrays-of-tables) ───
+        pub fn render(t: &Dyn) -> String {
             let mut out = String::new();
             render_table(t, &[], &mut out);
             out.trim_end().to_string()
         }
 
-        fn is_table(v: &DataTree) -> bool {
-            matches!(v, DataTree::Object(_))
+        fn is_table(v: &Dyn) -> bool {
+            matches!(v, Dyn::Object(_))
         }
-        fn is_array_of_tables(v: &DataTree) -> bool {
-            matches!(v, DataTree::Array(arr)
-                if !arr.is_empty() && arr.iter().all(|e| matches!(e, DataTree::Object(_))))
+        fn is_array_of_tables(v: &Dyn) -> bool {
+            matches!(v, Dyn::Array(arr)
+                if !arr.is_empty() && arr.iter().all(|e| matches!(e, Dyn::Object(_))))
         }
 
-        fn render_table(t: &DataTree, path: &[String], out: &mut String) {
-            if let DataTree::Object(entries) = t {
+        fn render_table(t: &Dyn, path: &[String], out: &mut String) {
+            if let Dyn::Object(entries) = t {
                 for (k, v) in entries {
                     if !is_table(v) && !is_array_of_tables(v) {
                         out.push_str(&format!("{} = {}\n", k, render_value(v)));
@@ -191,7 +203,7 @@
                     } else if is_array_of_tables(v) {
                         let mut p = path.to_vec();
                         p.push(k.clone());
-                        if let DataTree::Array(arr) = v {
+                        if let Dyn::Array(arr) = v {
                             for elem in arr {
                                 out.push_str(&format!("\n[[{}]]\n", p.join(".")));
                                 render_table(elem, &p, out);
@@ -202,26 +214,22 @@
             }
         }
 
-        fn render_value(v: &DataTree) -> String {
+        fn render_value(v: &Dyn) -> String {
             match v {
-                DataTree::Null => "\"\"".to_string(),
-                DataTree::Bool(b) => b.to_string(),
-                DataTree::Int(n) => n.to_string(),
-                DataTree::Float(f) => format!("{:?}", f),
-                DataTree::Number(_) | DataTree::TypedText(_) => {
-                    unreachable!("internal JSON carrier escaped typed decode")
-                }
-                DataTree::Text(s) => super::quote_json(s),
-                DataTree::Bytes(bs) => {
-                    let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
-                    format!("[{}]", parts.join(", "))
-                }
-                DataTree::Array(items) => {
+                Dyn::Null => "\"\"".to_string(),
+                Dyn::Bool(b) => b.to_string(),
+                Dyn::Int(n) => n.to_string(),
+                Dyn::Float(f) => format!("{:?}", f),
+                Dyn::Number(text) => text.clone(),
+                Dyn::Text(s) => super::quote_json(s),
+                Dyn::Bytes(bs) => super::quote_json(&Dyn::bytes_text(bs)),
+                Dyn::DateTime(value) => value.to_rfc3339(),
+                Dyn::Array(items) => {
                     let parts: Vec<String> = items.iter().map(render_value).collect();
                     format!("[{}]", parts.join(", "))
                 }
                 // An inline (non-header) object renders as a TOML inline table.
-                DataTree::Object(entries) => {
+                Dyn::Object(entries) => {
                     let parts: Vec<String> = entries
                         .iter()
                         .map(|(k, val)| format!("{} = {}", k, render_value(val)))
@@ -257,6 +265,7 @@
                 ParseError {
                     line: self.line,
                     message: message.into(),
+                    unsupported: false,
                 }
             }
             fn skip_inline_ws(&mut self) {
@@ -649,7 +658,11 @@
                     }
                     self.skip_inline_ws();
                     let value = self.value(depth + 1)?;
-                    entries.push((path.join("."), value));
+                    let key = path.join(".");
+                    if entries.iter().any(|(name, _)| name == &key) {
+                        return Err(self.err(format!("duplicate key `{key}`")));
+                    }
+                    entries.push((key, value));
                     self.skip_inline_ws();
                     match self.bump() {
                         Some(',') => continue,
@@ -706,6 +719,11 @@
                         break;
                     }
                 }
+                if s.len() >= 20 && (s.ends_with(['Z', 'z']) || s[19..].contains(['+', '-'])) {
+                    Dyn::parse_datetime(&s).map_err(|message| ParseError {
+                        line: self.line, message, unsupported: true,
+                    })?;
+                }
                 Ok(Value::Datetime(s))
             }
             fn number(&mut self) -> Result<Value, ParseError> {
@@ -737,7 +755,6 @@
                         }
                     }
                 }
-                let mut is_float = false;
                 while let Some(c) = self.peek() {
                     match c {
                         '0'..='9' | '_' => {
@@ -745,24 +762,15 @@
                             self.pos += 1;
                         }
                         '.' | 'e' | 'E' | '+' | '-' => {
-                            is_float = true;
                             tok.push(c);
                             self.pos += 1;
                         }
                         _ => break,
                     }
                 }
-                let clean: String = tok.chars().filter(|c| *c != '_').collect();
-                if is_float {
-                    clean
-                        .parse::<f64>()
-                        .map(Value::Float)
-                        .map_err(|_| self.err(crate::jet_encoding_errors::toml_invalid_number(&tok)))
-                } else {
-                    clean
-                        .parse::<i64>()
-                        .map(Value::Integer)
-                        .map_err(|_| self.err(crate::jet_encoding_errors::toml_invalid_number(&tok)))
+                match crate::jet_json_number::number_lexeme(&tok) {
+                    Some(lexeme) => Ok(Value::Number(lexeme)),
+                    _ => Err(self.err(crate::jet_encoding_errors::toml_invalid_number(&tok))),
                 }
             }
             fn radix_integer(&mut self) -> Result<Value, ParseError> {
@@ -788,9 +796,11 @@
                 if tok.is_empty() {
                     return Err(self.err(crate::jet_encoding_errors::TOML_EXPECTED_RADIX_DIGITS));
                 }
-                i64::from_str_radix(&tok, radix)
-                    .map(Value::Integer)
-            .map_err(|_| self.err(crate::jet_encoding_errors::toml_invalid_radix_integer(radix, &tok)))
+                crate::Numeric::CtBigInt::from_radix(&tok, radix)
+                    .map(|value| Value::Number(value.to_string_rep()))
+                    .map_err(|_| {
+                        self.err(crate::jet_encoding_errors::toml_invalid_radix_integer(radix, &tok))
+                    })
             }
         }
 
@@ -801,6 +811,22 @@
         #[cfg(test)]
         mod tests {
             use super::{parse_to_tree, MAX_TOML_DEPTH};
+
+            #[test]
+            fn dyn_rules_reject_duplicate_keys_in_every_map_form() {
+                for text in ["a = 1\na = 2", "a = { x = 1, x = 2 }", "a.x = 1\n[a]\nx = 2"] {
+                    assert!(parse_to_tree(text).is_err(), "host TOML accepted {text}");
+                }
+            }
+
+            #[test]
+            fn dyn_rules_preserve_huge_number_lexemes() {
+                let huge = "12345678901234567890123456789012345678901234567890";
+                for token in [huge, "1e400"] {
+                    let tree = parse_to_tree(&format!("a = {token}")).expect("host TOML number");
+                    assert!(matches!(&tree, super::Dyn::Object(fields) if fields.iter().any(|(key, value)| key == "a" && matches!(value, super::Dyn::Number(text) if text == token))));
+                }
+            }
 
             fn dotted_path(depth: usize) -> String {
                 (0..depth)

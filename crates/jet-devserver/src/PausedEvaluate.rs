@@ -6,7 +6,7 @@
 //! command to run: it only checks identity, authority, cancellation, and
 //! budgets before projecting the supplied result.
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_escape, json_int, parse_json_with_limit};
 use jet_foundation::SHA256::sha256_hex;
 use std::collections::BTreeSet;
@@ -2184,23 +2184,23 @@ fn array_json(values: impl Iterator<Item = String>) -> String {
     format!("[{}]", values.collect::<Vec<_>>().join(","))
 }
 
-fn object(raw: &str) -> Result<std::collections::BTreeMap<String, DataTree>, String> {
+fn object(raw: &str) -> Result<std::collections::BTreeMap<String, Dyn>, String> {
     let root = parse_json_with_limit(raw, MAX_REQUEST_BYTES)
         .map_err(|_| "paused request is not valid bounded JSON".to_string())?;
-    let DataTree::Object(fields) = root else {
+    let Dyn::Object(fields) = root else {
         return Err("paused request must be a JSON object".to_string());
     };
     Ok(fields.into_iter().collect())
 }
 
 fn required_string(
-    fields: &std::collections::BTreeMap<String, DataTree>,
+    fields: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<String, String> {
     let value = fields
         .get(key)
         .and_then(|value| match value {
-            DataTree::Text(value) => Some(value.clone()),
+            Dyn::Text(value) => Some(value.clone()),
             _ => None,
         })
         .ok_or_else(|| format!("paused request requires string `{key}`"))?;
@@ -2209,12 +2209,12 @@ fn required_string(
 }
 
 fn optional_string(
-    fields: &std::collections::BTreeMap<String, DataTree>,
+    fields: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<Option<String>, String> {
     match fields.get(key) {
-        None | Some(DataTree::Null) => Ok(None),
-        Some(DataTree::Text(value)) => {
+        None | Some(Dyn::Null) => Ok(None),
+        Some(Dyn::Text(value)) => {
             valid_text(value, key, 256)?;
             Ok(Some(value.clone()))
         }
@@ -2223,7 +2223,7 @@ fn optional_string(
 }
 
 fn required_u64(
-    fields: &std::collections::BTreeMap<String, DataTree>,
+    fields: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<u64, String> {
     let value = fields
@@ -2235,7 +2235,7 @@ fn required_u64(
 }
 
 fn required_u32(
-    fields: &std::collections::BTreeMap<String, DataTree>,
+    fields: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<u32, String> {
     let value = required_u64(fields, key)?;
@@ -2243,21 +2243,21 @@ fn required_u32(
 }
 
 fn optional_bool(
-    fields: &std::collections::BTreeMap<String, DataTree>,
+    fields: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<bool, String> {
     match fields.get(key) {
         None => Ok(false),
-        Some(DataTree::Bool(value)) => Ok(*value),
+        Some(Dyn::Bool(value)) => Ok(*value),
         Some(_) => Err(format!("paused request field `{key}` must be boolean")),
     }
 }
 
 fn parse_identity(
-    fields: &std::collections::BTreeMap<String, DataTree>,
+    fields: &std::collections::BTreeMap<String, Dyn>,
 ) -> Result<SessionIdentity, String> {
-    let identity: std::collections::BTreeMap<String, DataTree> = match fields.get("identity") {
-        Some(DataTree::Object(identity)) => identity.iter().cloned().collect(),
+    let identity: std::collections::BTreeMap<String, Dyn> = match fields.get("identity") {
+        Some(Dyn::Object(identity)) => identity.iter().cloned().collect(),
         Some(_) => return Err("paused request `identity` must be an object".to_string()),
         None => fields.clone(),
     };
@@ -2271,12 +2271,12 @@ fn parse_identity(
 }
 
 fn parse_budget(
-    fields: &std::collections::BTreeMap<String, DataTree>,
+    fields: &std::collections::BTreeMap<String, Dyn>,
  ) -> Result<EvaluationBudget, String> {
-    let Some(DataTree::Object(budget)) = fields.get("budget") else {
+    let Some(Dyn::Object(budget)) = fields.get("budget") else {
         return Ok(DEFAULT_EVALUATION_BUDGET);
     };
-    let budget: std::collections::BTreeMap<String, DataTree> =
+    let budget: std::collections::BTreeMap<String, Dyn> =
         budget.iter().cloned().collect();
     EvaluationBudget::new(
         required_u32(&budget, "max_depth")?,
@@ -2287,21 +2287,21 @@ fn parse_budget(
 }
 
 fn parse_authority(
-    fields: &std::collections::BTreeMap<String, DataTree>,
+    fields: &std::collections::BTreeMap<String, Dyn>,
 ) -> Result<Vec<AuthorityRequirement>, String> {
     let Some(value) = fields.get("authority") else {
         return Ok(Vec::new());
     };
-    let DataTree::Array(values) = value else {
+    let Dyn::Array(values) = value else {
         return Err("paused request `authority` must be an array".to_string());
     };
     values
         .iter()
         .map(|value| {
-            let DataTree::Object(fields) = value else {
+            let Dyn::Object(fields) = value else {
                 return Err("paused authority requirement must be an object".to_string());
             };
-            let fields: std::collections::BTreeMap<String, DataTree> =
+            let fields: std::collections::BTreeMap<String, Dyn> =
                 fields.iter().cloned().collect();
             AuthorityRequirement::new(
                 required_string(&fields, "capability")?,
@@ -2312,7 +2312,7 @@ fn parse_authority(
 }
 
 fn validate_header(
-    fields: &std::collections::BTreeMap<String, DataTree>,
+    fields: &std::collections::BTreeMap<String, Dyn>,
     kind: &str,
 ) -> Result<(), String> {
     if required_string(fields, "protocol")? != PAUSED_EVALUATE_PROTOCOL {
@@ -2362,10 +2362,10 @@ pub fn parse_evaluate_request(raw: &str) -> Result<EvaluateRequest, String> {
     };
     let effects = match fields.get("effects") {
         None => Vec::new(),
-        Some(DataTree::Array(values)) => values
+        Some(Dyn::Array(values)) => values
             .iter()
             .map(|value| match value {
-                DataTree::Text(value) => {
+                Dyn::Text(value) => {
                     valid_id(value, "evaluation effect")?;
                     Ok(value.clone())
                 }

@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt::Write as _;
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::Devtools::jet_observe_live_value_update;
 use jet_foundation::DevtoolsControl::JetDevtoolsCommandReceipt;
 use jet_foundation::HotSwap::HotSwapDecision;
@@ -337,9 +337,9 @@ pub(crate) fn sync_session(
 pub(crate) const SOURCE_TOOLS_OFF_REASON: &str =
     "This host runs without Canvas, so source is read and edited elsewhere.";
 
-fn object_map(value: &DataTree) -> Result<BTreeMap<String, DataTree>, String> {
+fn object_map(value: &Dyn) -> Result<BTreeMap<String, Dyn>, String> {
     match value {
-        DataTree::Object(fields) => Ok(fields.iter().cloned().collect()),
+        Dyn::Object(fields) => Ok(fields.iter().cloned().collect()),
         _ => Err("expected a JSON object".to_string()),
     }
 }
@@ -455,7 +455,7 @@ pub(crate) fn record_dom_snapshot(
 }
 
 fn parse_live_value_update(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
 ) -> Result<WebLiveValueUpdate, String> {
     for field in object.keys() {
         if !matches!(
@@ -473,8 +473,8 @@ fn parse_live_value_update(
     let key = required_json_string(object, "key")?;
     let type_identity = required_json_string(object, "type_identity")?;
     let rendered_value = match object.get("rendered_value") {
-        Some(DataTree::Null) => None,
-        Some(DataTree::Text(value)) => Some(value.to_string()),
+        Some(Dyn::Null) => None,
+        Some(Dyn::Text(value)) => Some(value.to_string()),
         Some(_) => {
             return Err(
                 "web DOM snapshot persist_live_value `rendered_value` must be a string or null"
@@ -493,7 +493,7 @@ fn parse_live_value_update(
 }
 
 fn required_json_string(
-    object: &std::collections::BTreeMap<String, DataTree>,
+    object: &std::collections::BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<String, String> {
     object
@@ -507,22 +507,22 @@ fn required_json_string(
         })
 }
 
-fn parse_dom_state_value(value: &DataTree) -> Result<WebStateValue, String> {
+fn parse_dom_state_value(value: &Dyn) -> Result<WebStateValue, String> {
     let object = object_map(value)
         .map_err(|_| "web DOM snapshot state value must be an object".to_string())?;
     let kind = required_json_string(&object, "kind")?;
     match kind.as_str() {
         "text" => Ok(WebStateValue::Text(required_json_string(&object, "value")?)),
         "integer" => match object.get("value") {
-            Some(DataTree::Int(value)) => Ok(WebStateValue::Integer(*value)),
+            Some(Dyn::Int(value)) => value.to_i64().map(WebStateValue::Integer).ok_or_else(|| "web DOM integer state value is outside I64".to_string()),
             _ => Err("web DOM integer state value must be a JSON integer".to_string()),
         },
         "unsigned" => match object.get("value") {
-            Some(DataTree::Int(value)) if *value >= 0 => Ok(WebStateValue::Unsigned(*value as u64)),
+            Some(Dyn::Int(value)) => value.to_u64().map(WebStateValue::Unsigned).ok_or_else(|| "web DOM unsigned state value must be a non-negative integer".to_string()),
             _ => Err("web DOM unsigned state value must be a non-negative integer".to_string()),
         },
         "boolean" => match object.get("value") {
-            Some(DataTree::Bool(value)) => Ok(WebStateValue::Boolean(*value)),
+            Some(Dyn::Bool(value)) => Ok(WebStateValue::Boolean(*value)),
             _ => Err("web DOM boolean state value must be a JSON boolean".to_string()),
         },
         "bytes" => {
@@ -534,7 +534,7 @@ fn parse_dom_state_value(value: &DataTree) -> Result<WebStateValue, String> {
             let mut bytes = Vec::with_capacity(values.len());
             for value in values {
                 match value {
-                    DataTree::Int(value) if (0..=255).contains(value) => bytes.push(*value as u8),
+                    Dyn::Int(value) if value.to_u64().is_some_and(|value| value <= 255) => bytes.push(value.to_u64().unwrap() as u8),
                     _ => return Err("web DOM bytes state value has a non-byte element".to_string()),
                 }
             }
@@ -685,7 +685,7 @@ pub(crate) fn manifest_artifact_identity(manifest: &str) -> Result<String, Strin
     Ok(identity)
 }
 
-fn parse_manifest(manifest: &str) -> Result<DataTree, String> {
+fn parse_manifest(manifest: &str) -> Result<Dyn, String> {
     let root = parse_json_with_limit(manifest, super::MAX_STATIC_RESPONSE_BYTES as usize)
         .map_err(|_| "web manifest is not valid bounded JSON".to_string())?;
     let object = object_map(&root).map_err(|_| "web manifest must be a JSON object".to_string())?;
@@ -726,7 +726,7 @@ fn snapshot_from_manifest(
         .map_err(|_| "web manifest modules must be an array".to_string())?;
     let mut module_facts = Vec::with_capacity(selected_modules.len());
     for selected in selected_modules {
-        let DataTree::Int(module_id) = selected else {
+        let Dyn::Int(module_id) = selected else {
             return Err("web manifest module id must be an integer".to_string());
         };
         let module_value = modules
@@ -735,7 +735,7 @@ fn snapshot_from_manifest(
                 let Ok(module) = object_map(module) else {
                     return false;
                 };
-                matches!(module.get("id"), Some(DataTree::Int(id)) if *id == *module_id)
+                matches!(module.get("id"), Some(Dyn::Int(id)) if id == module_id)
             })
             .ok_or_else(|| format!("web manifest selected module {module_id} is missing"))?;
         let module = object_map(module_value)
@@ -749,7 +749,7 @@ fn snapshot_from_manifest(
             .map_err(|_| "web manifest module imports must be an array".to_string())?
             .iter()
             .map(|id| match id {
-                DataTree::Int(id) => Ok(id.to_string()),
+                Dyn::Int(id) => Ok(id.to_string()),
                 _ => Err("web manifest module import id must be an integer".to_string()),
             })
             .collect::<Result<Vec<_>, _>>()?
@@ -1929,7 +1929,7 @@ pub(crate) fn parse_selection(payload: &[u8]) -> Result<Option<(String, Option<S
     let selection = object
         .get("selection")
         .ok_or_else(|| "browser selection body must include selection".to_string())?;
-    if matches!(selection, DataTree::Null) {
+    if matches!(selection, Dyn::Null) {
         return Ok(None);
     }
     let selection = object_map(selection)
@@ -1943,7 +1943,7 @@ pub(crate) fn parse_selection(payload: &[u8]) -> Result<Option<(String, Option<S
         return Err("browser selection panel_id must not be empty".to_string());
     }
     let item_key = match selection.get("item_key") {
-        None | Some(DataTree::Null) => None,
+        None | Some(Dyn::Null) => None,
         Some(value) => Some(
             value
                 .as_str()
@@ -2006,7 +2006,7 @@ pub(crate) fn parse_action(
     }
 }
 
-fn parse_source_grant(object: &BTreeMap<String, DataTree>) -> Result<BrowserSourceGrant, String> {
+fn parse_source_grant(object: &BTreeMap<String, Dyn>) -> Result<BrowserSourceGrant, String> {
     let grant = nested_object(object, "grant")?;
     let source = nested_object(&grant, "source")?;
     let function = optional_string(&source, "function");
@@ -2025,7 +2025,7 @@ fn parse_source_grant(object: &BTreeMap<String, DataTree>) -> Result<BrowserSour
     ))
 }
 
-fn parse_action_grant(object: &BTreeMap<String, DataTree>) -> Result<BrowserActionGrant, String> {
+fn parse_action_grant(object: &BTreeMap<String, Dyn>) -> Result<BrowserActionGrant, String> {
     let grant = nested_object(object, "grant")?;
     Ok(BrowserActionGrant::new(
         required_string(&grant, "session_id")?,
@@ -2037,9 +2037,9 @@ fn parse_action_grant(object: &BTreeMap<String, DataTree>) -> Result<BrowserActi
 }
 
 fn nested_object(
-    object: &BTreeMap<String, DataTree>,
+    object: &BTreeMap<String, Dyn>,
     key: &str,
-) -> Result<BTreeMap<String, DataTree>, String> {
+) -> Result<BTreeMap<String, Dyn>, String> {
     let value = object
         .get(key)
         .ok_or_else(|| format!("browser action is missing `{key}`"))?;
@@ -2047,7 +2047,7 @@ fn nested_object(
 }
 
 fn required_string<'a>(
-    object: &'a BTreeMap<String, DataTree>,
+    object: &'a BTreeMap<String, Dyn>,
     key: &str,
 ) -> Result<&'a str, String> {
     object
@@ -2057,35 +2057,33 @@ fn required_string<'a>(
         .map_err(|_| format!("browser action `{key}` must be a string"))
 }
 
-fn optional_string<'a>(object: &'a BTreeMap<String, DataTree>, key: &str) -> Option<&'a str> {
+fn optional_string<'a>(object: &'a BTreeMap<String, Dyn>, key: &str) -> Option<&'a str> {
     object.get(key).and_then(|value| value.as_str().ok())
 }
 
-fn required_u64(object: &BTreeMap<String, DataTree>, key: &str) -> Result<u64, String> {
+fn required_u64(object: &BTreeMap<String, Dyn>, key: &str) -> Result<u64, String> {
     match object.get(key) {
-        Some(DataTree::Int(value)) if *value >= 0 => {
-            u64::try_from(*value).map_err(|_| format!("browser action `{key}` is out of range"))
-        }
+        Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| format!("browser action `{key}` is out of range")),
         _ => Err(format!(
             "browser action `{key}` must be a non-negative integer"
         )),
     }
 }
 
-fn required_u32(object: &BTreeMap<String, DataTree>, key: &str) -> Result<u32, String> {
+fn required_u32(object: &BTreeMap<String, Dyn>, key: &str) -> Result<u32, String> {
     required_u64(object, key).and_then(|value| {
         u32::try_from(value).map_err(|_| format!("browser action `{key}` is out of range"))
     })
 }
 
-fn optional_u32(object: &BTreeMap<String, DataTree>, key: &str) -> Option<u32> {
+fn optional_u32(object: &BTreeMap<String, Dyn>, key: &str) -> Option<u32> {
     object.get(key).and_then(|value| match value {
-        DataTree::Int(value) if *value >= 0 => u32::try_from(*value).ok(),
+        Dyn::Int(value) => value.to_u64().and_then(|value| value.try_into().ok()),
         _ => None,
     })
 }
 
-fn parse_placement(value: &DataTree) -> Result<BrowserPlacement, String> {
+fn parse_placement(value: &Dyn) -> Result<BrowserPlacement, String> {
     match value
         .as_str()
         .map_err(|_| "browser action placement must be a string".to_string())?

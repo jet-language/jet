@@ -13,7 +13,7 @@ pub(crate) mod kernel {
 
     #[allow(non_camel_case_types)]
     pub(crate) trait __jet_Encode {
-        fn jet_encode(&self) -> jet_std::DataTree;
+        fn jet_encode(&self) -> jet_std::Dyn;
     }
 
     fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {

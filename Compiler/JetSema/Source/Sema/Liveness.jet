@@ -194,12 +194,13 @@ pub fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraph
     }
     &verdicts.sort_by((left: SemaLivenessVerdict, right: SemaLivenessVerdict) -> {
         source :: left.fact.source <=> right.fact.source
-        if source != Ordering.Equal -> return source
-        start :: left.fact.span.start <=> right.fact.span.start
-        if start != Ordering.Equal -> return start
-        code :: left.code <=> right.code
-        if code != Ordering.Equal -> return code
-        left.fact.subject <=> right.fact.subject
+        if source != Ordering.Equal -> source else -> {
+            start :: left.fact.span.start <=> right.fact.span.start
+            if start != Ordering.Equal -> start else -> {
+                code :: left.code <=> right.code
+                if code != Ordering.Equal -> code else -> left.fact.subject <=> right.fact.subject
+            }
+        }
     })
     result := SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [MIRStructureFact]{}}
     loop verdict in verdicts {

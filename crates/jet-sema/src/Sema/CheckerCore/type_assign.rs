@@ -3,7 +3,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{e0905, e0909, generic_depth_exceeded, substitute_type, COMPARABLE};
 use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::CheckerCoreLib::{
-    core_type_known, data_renamed_to_datatree, layout_handle_renamed_to_layout,
+    core_type_known, data_renamed_to_dyn, layout_handle_renamed_to_layout,
     phantom_fact_menu_diag, retired_acronym_spelling_diag, retired_authority_vocabulary_diag,
 };
 use crate::Sema::Diagnostics::{
@@ -327,9 +327,9 @@ impl<'a> Checker<'a> {
                     self.diags.push(type_hole_diag(span));
                     return;
                 }
-                // D-SERDE13=B: the retired `Data` spelling points at `DataTree`.
+                // D-SERDE13=B: the retired `Data` spelling points at `Dyn`.
                 if n == "Data" {
-                    self.diags.push(data_renamed_to_datatree(span));
+                    self.diags.push(data_renamed_to_dyn(span));
                     return;
                 }
                 // D-LAYOUT-CTOR1: the retired `LayoutHandle` spelling points at `Layout`.

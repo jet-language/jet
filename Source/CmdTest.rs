@@ -12,7 +12,7 @@ use jet::RecordIndex::{RecordKind, RecordLink};
 use jet::ReceiptStore::{
     input_paths_for, receipt_root_for, ReceiptSection, ReceiptStore,
 };
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::Evidence::{
     EvidenceBuild, EvidenceKind, EvidenceOutcome, EvidenceProducerKind, EvidenceRecord,
     EvidenceReport, EvidenceRevision, EvidenceSource, EvidenceAttachment, EvidenceIdentity,
@@ -36,7 +36,7 @@ struct ComparisonBinding {
     assumptions: Vec<String>,
 }
 
-fn validate_binding_shape(root: &DataTree) -> Result<(), String> {
+fn validate_binding_shape(root: &Dyn) -> Result<(), String> {
     for key in [
         "foreign",
         "foreign-binding",
@@ -95,7 +95,7 @@ fn validate_binding_shape(root: &DataTree) -> Result<(), String> {
 }
 
 impl ComparisonBinding {
-    fn from_root(root: &DataTree) -> Result<Self, String> {
+    fn from_root(root: &Dyn) -> Result<Self, String> {
         validate_binding_shape(root)?;
         let binding = Self {
             boundary_digest: binding_text(root, "boundary_digest")?,
@@ -145,27 +145,27 @@ impl ComparisonBinding {
     }
 }
 
-fn binding_value<'a>(root: &'a DataTree, key: &str) -> Option<&'a DataTree> {
+fn binding_value<'a>(root: &'a Dyn, key: &str) -> Option<&'a Dyn> {
     object_value(root, "foreign_binding")
         .and_then(|binding| object_value(binding, key))
 }
 
-fn binding_text(root: &DataTree, key: &str) -> Result<Option<String>, String> {
+fn binding_text(root: &Dyn, key: &str) -> Result<Option<String>, String> {
     let Some(value) = binding_value(root, key) else {
         return Ok(None);
     };
     match value {
-        DataTree::Text(value) | DataTree::TypedText(value) if !value.trim().is_empty() => {
+        Dyn::Text(value) if !value.trim().is_empty() => {
             Ok(Some(value.clone()))
         }
-        DataTree::Text(_) | DataTree::TypedText(_) => {
+        Dyn::Text(_) => {
             Err(format!("foreign binding `{key}` must not be empty"))
         }
         _ => Err(format!("foreign binding `{key}` must be a string")),
     }
 }
 
-fn binding_strings(root: &DataTree, key: &str) -> Result<Vec<String>, String> {
+fn binding_strings(root: &Dyn, key: &str) -> Result<Vec<String>, String> {
     let Some(value) = binding_value(root, key) else {
         return Ok(Vec::new());
     };
@@ -174,10 +174,10 @@ fn binding_strings(root: &DataTree, key: &str) -> Result<Vec<String>, String> {
         .map_err(|_| format!("foreign binding `{key}` must be an array"))?
         .iter()
         .map(|value| match value {
-            DataTree::Text(value) | DataTree::TypedText(value) if !value.trim().is_empty() => {
+            Dyn::Text(value) if !value.trim().is_empty() => {
                 Ok(value.clone())
             }
-            DataTree::Text(_) | DataTree::TypedText(_) => {
+            Dyn::Text(_) => {
                 Err(format!("foreign binding `{key}` entries must not be empty"))
             }
             _ => Err(format!("foreign binding `{key}` entries must be strings")),
@@ -410,7 +410,7 @@ fn comparison_evidence_outcome(status: ComparisonStatus) -> EvidenceOutcome {
 }
 
 fn parse_sample(
-    value: &DataTree,
+    value: &Dyn,
     index: usize,
     seed: Option<u64>,
     source: &str,
@@ -448,15 +448,15 @@ fn parse_sample(
 }
 
 fn parse_observation(
-    object: &DataTree,
+    object: &Dyn,
     prefix: &str,
     relation: &ObservationRelation,
 ) -> Result<ComparisonObservation, String> {
     let raw_value = object_value(object, prefix)
         .ok_or_else(|| format!("case observation `{prefix}` is missing"))?;
     let raw = match raw_value {
-        DataTree::Text(value) | DataTree::TypedText(value) => value.clone(),
-        value => canonical_data_tree(value),
+        Dyn::Text(value) => value.clone(),
+        value => canonical_dyn(value),
     };
     let failure = object_text(object, &format!("{prefix}_failure"));
     let mut observation = failure
@@ -474,7 +474,7 @@ fn parse_observation(
 }
 
 fn optional_observation(
-    object: &DataTree,
+    object: &Dyn,
     prefix: &str,
     relation: &ObservationRelation,
 ) -> Result<Option<ComparisonObservation>, String> {
@@ -548,7 +548,7 @@ fn comparison_status(value: &str) -> Option<ComparisonStatus> {
     })
 }
 
-fn object_value<'a>(value: &'a DataTree, key: &str) -> Option<&'a DataTree> {
+fn object_value<'a>(value: &'a Dyn, key: &str) -> Option<&'a Dyn> {
     value
         .as_object()
         .ok()?
@@ -556,29 +556,29 @@ fn object_value<'a>(value: &'a DataTree, key: &str) -> Option<&'a DataTree> {
         .find_map(|(name, value)| (name == key).then_some(value))
 }
 
-fn object_text<'a>(value: &'a DataTree, key: &str) -> Option<&'a str> {
+fn object_text<'a>(value: &'a Dyn, key: &str) -> Option<&'a str> {
     match object_value(value, key)? {
-        DataTree::Text(value) | DataTree::TypedText(value) => Some(value),
+        Dyn::Text(value) => Some(value),
         _ => None,
     }
 }
 
-fn object_int(value: &DataTree, key: &str) -> Option<i64> {
+fn object_int(value: &Dyn, key: &str) -> Option<i64> {
     match object_value(value, key)? {
-        DataTree::Int(value) => Some(*value),
-        DataTree::Number(value) => value.parse().ok(),
+        Dyn::Int(value) => value.to_i64(),
+        Dyn::Number(value) => value.parse().ok(),
         _ => None,
     }
 }
 
-fn object_bool(value: &DataTree, key: &str) -> Option<bool> {
+fn object_bool(value: &Dyn, key: &str) -> Option<bool> {
     match object_value(value, key)? {
-        DataTree::Bool(value) => Some(*value),
+        Dyn::Bool(value) => Some(*value),
         _ => None,
     }
 }
 
-fn object_strings(value: &DataTree, key: &str) -> Result<Vec<String>, String> {
+fn object_strings(value: &Dyn, key: &str) -> Result<Vec<String>, String> {
     let Some(value) = object_value(value, key) else {
         return Ok(Vec::new());
     };
@@ -587,37 +587,38 @@ fn object_strings(value: &DataTree, key: &str) -> Result<Vec<String>, String> {
         .map_err(|_| format!("`{key}` must be an array"))?
         .iter()
         .map(|value| match value {
-            DataTree::Text(value) | DataTree::TypedText(value) => Ok(value.clone()),
+            Dyn::Text(value) => Ok(value.clone()),
             _ => Err(format!("`{key}` entries must be strings")),
         })
         .collect()
 }
 
-fn canonical_data_tree(value: &DataTree) -> String {
+fn canonical_dyn(value: &Dyn) -> String {
     match value {
-        DataTree::Null => "null".to_string(),
-        DataTree::Bool(value) => value.to_string(),
-        DataTree::Int(value) => value.to_string(),
-        DataTree::Float(value) => value.to_string(),
-        DataTree::Number(value) => value.clone(),
-        DataTree::TypedText(value) | DataTree::Text(value) => {
+        Dyn::Null => "null".to_string(),
+        Dyn::Bool(value) => value.to_string(),
+        Dyn::Int(value) => value.to_string(),
+        Dyn::Float(value) => value.to_string(),
+        Dyn::Number(value) => value.clone(),
+        Dyn::Text(value) => {
             format!("\"{}\"", json_escape(value))
         }
-        DataTree::Bytes(value) => format!("bytes:{}", value.len()),
-        DataTree::Array(values) => format!(
+        Dyn::Bytes(value) => format!("bytes:{}", value.len()),
+        Dyn::DateTime(value) => format!("\"{}\"", value.to_rfc3339()),
+        Dyn::Array(values) => format!(
             "[{}]",
             values
                 .iter()
-                .map(canonical_data_tree)
+                .map(canonical_dyn)
                 .collect::<Vec<_>>()
                 .join(",")
         ),
-        DataTree::Object(values) => format!(
+        Dyn::Object(values) => format!(
             "{{{}}}",
             values
                 .iter()
                 .map(|(key, value)| {
-                    format!("\"{}\":{}", json_escape(key), canonical_data_tree(value))
+                    format!("\"{}\":{}", json_escape(key), canonical_dyn(value))
                 })
                 .collect::<Vec<_>>()
                 .join(",")

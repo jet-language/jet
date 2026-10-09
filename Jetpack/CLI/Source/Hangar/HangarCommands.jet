@@ -55,15 +55,15 @@ pub fn cli_cmd_list(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]> 
         return cli_hangar_report_error(theme, parsed, "E1340", "could not read the Hangar", err.message(), "repair the Hangar journal, then retry listing.")
     }
     if parsed.flags.json {
-        packages := [DataTree]{}
+        packages := [Dyn]{}
         loop entry in entries {
             fields :: StatusFields.new()
-                .with("id", DataTree.Text(entry.id))
-                .with("name", DataTree.Text(entry.name))
-                .with("version", DataTree.Text(entry.version))
-                .with("reference", DataTree.Text(entry.reference))
-                .with("output_hash", DataTree.Text(entry.envelope.output_hash))
-                .with("source_built", DataTree.Bool(entry.envelope.provenance.contains("core-")))
+                .with("id", Dyn.Text(entry.id))
+                .with("name", Dyn.Text(entry.name))
+                .with("version", Dyn.Text(entry.version))
+                .with("reference", Dyn.Text(entry.reference))
+                .with("output_hash", Dyn.Text(entry.envelope.output_hash))
+                .with("source_built", Dyn.Bool(entry.envelope.provenance.contains("core-")))
             &packages.push(report_status_object(fields))
         }
         print(report_render_status("list", true, StatusFields.new().with("packages", DataTree.Array(packages))) ?? return cli_status_encoding_error(err))
@@ -104,16 +104,16 @@ fn cli_hangar_du_all(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]>
         return cli_hangar_report_error(theme, parsed, "E1340", "could not read machine Hangar disk usage", err.message(), "repair the reported Hangar root, then retry.")
     }
     if parsed.flags.json {
-        roots := [DataTree]{}
+        roots := [Dyn]{}
         loop entry in report.roots {
             &roots.push(report_status_object(StatusFields.new()
-                .with("root", DataTree.Text(entry.root))
-                .with("hangar", DataTree.Text(entry.hangar))
-                .with("bytes", DataTree.Int(entry.bytes))))
+                .with("root", Dyn.Text(entry.root))
+                .with("hangar", Dyn.Text(entry.hangar))
+                .with("bytes", Dyn.Int(entry.bytes))))
         }
         shared_cas :: if report.shared_cas == {
-            .Val(pool) -> report_status_object(StatusFields.new().with("path", DataTree.Text(pool.path)).with("bytes", DataTree.Int(pool.bytes)))
-            .None -> DataTree.Null
+            .Val(pool) -> report_status_object(StatusFields.new().with("path", Dyn.Text(pool.path)).with("bytes", Dyn.Int(pool.bytes)))
+            .None -> Dyn.Null
         }
         cli_hangar_status_json("du", StatusFields.new()
             .with("shared_cas", shared_cas)
@@ -135,18 +135,18 @@ fn cli_hangar_du(verification: &StoreVerification, theme: Theme, parsed: CLIPars
         return cli_hangar_report_error(theme, parsed, "E1340", "could not read Hangar disk usage", err.message(), "run `jetpack hangar recover`, repair the reported state, then retry.")
     }
     if parsed.flags.json {
-        entries := [DataTree]{}
+        entries := [Dyn]{}
         loop entry in report.entries {
             &entries.push(report_status_object(StatusFields.new()
-                .with("id", DataTree.Text(entry.id))
+                .with("id", Dyn.Text(entry.id))
                 .with("unique_bytes", cli_optional_int_tree(entry.unique_bytes))
                 .with("shared_bytes", cli_optional_int_tree(entry.shared_bytes))
-                .with("source_built", DataTree.Bool(entry.source_built))))
+                .with("source_built", Dyn.Bool(entry.source_built))))
         }
         cli_hangar_status_json("du", StatusFields.new()
-            .with("objects", DataTree.Int(report.objects))
-            .with("packages", DataTree.Int(report.packages))
-            .with("built", DataTree.Int(report.built))
+            .with("objects", Dyn.Int(report.objects))
+            .with("packages", Dyn.Int(report.packages))
+            .with("built", Dyn.Int(report.built))
             .with("unique_bytes", cli_optional_int_tree(report.unique_bytes))
             .with("shared_bytes", cli_optional_int_tree(report.shared_bytes))
             .with("closure_physical_bytes", cli_optional_int_tree(report.closure_physical_bytes))
@@ -246,13 +246,13 @@ fn cli_hangar_doctor(verification: &StoreVerification, theme: Theme, parsed: CLI
     }
     remaining :: report.remaining_count()
     if parsed.flags.json {
-        findings := [DataTree]{}
+        findings := [Dyn]{}
         loop finding in report.findings {
             &findings.push(report_status_object(StatusFields.new()
-                .with("kind", DataTree.Text(finding.kind))
-                .with("subject", DataTree.Text(finding.subject))
-                .with("detail", DataTree.Text(finding.detail))
-                .with("fixed", DataTree.Bool(finding.fixed))))
+                .with("kind", Dyn.Text(finding.kind))
+                .with("subject", Dyn.Text(finding.subject))
+                .with("detail", Dyn.Text(finding.detail))
+                .with("fixed", Dyn.Bool(finding.fixed))))
         }
         print(report_render_status("hangar.doctor", remaining == 0, StatusFields.new()
             .with("objects", DataTree.Int(report.objects))
@@ -429,17 +429,17 @@ fn cli_hangar_confirm_apply(theme: Theme, parsed: CLIParsed, action: String) -[I
 }
 
 // Rust `StatusValue::from(Option<u64>)`.
-fn cli_optional_int_tree(value: Int?) -> DataTree Never! {
+fn cli_optional_int_tree(value: Int?) -> Dyn Never! {
     if value == {
-        .Val(number) -> DataTree.Int(number)
-        .None -> DataTree.Null
+        .Val(number) -> Dyn.Int(number)
+        .None -> Dyn.Null
     }
 }
 
-fn cli_optional_text_tree(value: String?) -> DataTree Never! {
+fn cli_optional_text_tree(value: String?) -> Dyn Never! {
     if value == {
-        .Val(text) -> DataTree.Text(text)
-        .None -> DataTree.Null
+        .Val(text) -> Dyn.Text(text)
+        .None -> Dyn.Null
     }
 }
 
