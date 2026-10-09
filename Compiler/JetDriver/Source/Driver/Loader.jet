@@ -2546,7 +2546,7 @@ fn jet_driver_parse_wave(request: JetDriverCompileRequest, source_units: [JetDri
         // happens after parsing. Missing has no input; unqueued units are absent.
         // String.len scheduling weights count scalars; count_bytes is the
         // existing borrowed O(1) UTF-8 byte query, reached only while tracing.
-        if request.trace_sink != None {
+        if request.trace_sink == .Val(_) {
             if job == {
                 .Source(text) -> {
                     user_input_bytes += text.count_bytes()

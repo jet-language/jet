@@ -46,6 +46,7 @@ use jet_foundation.[
     SymbolID,
     SymbolKind,
     TagMarker,
+    TExpr,
     TraitImplBlock,
     TraitMethodSig,
     Type,
@@ -63,6 +64,7 @@ use jet_foundation.[
     core_module_has_type,
     core_source_owns_type,
     expr_span,
+    generated_path,
     sema_reserved_type_name,
     symbol_id,
     type_identity,
@@ -304,6 +306,8 @@ pub struct SemaRegistrationField {
     pub identity: TypeIdentity
     pub identity_key: String
     pub default: Expr?
+    // The authenticated original default inferred in its declaration owner.
+    pub checked_default: TExpr?{None}
     pub computed: Bool
 }
 
@@ -453,6 +457,7 @@ pub struct SemaRegistrationModule {
     pub source_segments: [SemaSourceSegment]
     pub source_origin: SemaSourceOrigin
     pub program: Program
+    pub inline_bindings: SemaInlinePreparedBindings{SemaInlinePreparedBindings{imports: [String:SemaInlineFunctionBinding]{}, modules: [SemaInlineModuleSurface]{}}}
     pub source: String{""}
     pub declarations: [Item]
     pub symbols: [Symbol]
@@ -545,6 +550,9 @@ pub struct SemaRegistrationGraph {
     pub core_builtin_owner_facts: [SemaRegistrationCoreBuiltinOwnerFact]
     pub imports: [SemaRegistrationImport]
     pub unit_facts: [SemaRegistrationUnitFact]
+    // Output alias and callable references come from the same checked graph
+    // resolution as their facts; finalization publishes them with body refs.
+    pub output_name_references: [SemaNameReferenceFact]{[SemaNameReferenceFact]{}}
     pub lookup_counters: Shared<SemaLookupCounters>
     pub counting: Bool
     pub internal_problem: String?
@@ -1223,8 +1231,8 @@ fn sema_registration_trait_method(method: TraitMethodSig, module_identity: Strin
 
 // Hook callable identity is the operand pair, not the ordinary owner/name key.
 fn sema_registration_operator_owner(owner: SymbolID, module_identity: String, left: Type, trait_name: String?, rhs: Type?) -> SymbolID Never! {
-    trait_value :: trait_name ?? return owner
-    if !sema_checked_operator_trait(trait_value) -> return owner
+    trait_value :: trait_name ?? return ~owner
+    if !sema_checked_operator_trait(trait_value) -> return ~owner
     right :: rhs ?? left
     symbol_id(SymbolKind.Impl, module_identity, owner.key, "{type_name(left)}::{trait_value}<{type_name(right)}>")
 }
@@ -1245,7 +1253,7 @@ fn sema_registration_nominal(item: Item, module_identity: String, fallback_sourc
                     &methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_identity, Val(hook_owner), fallback_source_file, fallback_source_origin, source_segments, &diagnostics))
                 }
             }
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Struct, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: generic_identity_key, fields: sema_registration_struct_fields(definition, symbol, &diagnostics), variants: [SemaRegistrationVariant]{}, methods: methods, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Struct, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: generic_identity_key, fields: sema_registration_struct_fields(definition, symbol, &diagnostics), variants: [SemaRegistrationVariant]{}, methods: methods, trait_methods: trait_methods, compiler_owned: definition.compiler_builtin_error, generated_provenance: if definition.compiler_builtin_error -> Val(sema_registration_compiler_owned_default_err_provenance()) else -> None})
         }
         .Enum(definition) -> {
             ty :: sema_registration_nominal_type(definition.name, definition.type_params)
@@ -1295,27 +1303,49 @@ fn sema_registration_nominal(item: Item, module_identity: String, fallback_sourc
     }
 }
 
-fn sema_registration_prelude_error_nominals(module_identity: String, diagnostics: &[Diagnostic]) -> [SemaRegistrationNominal] {
-    // Exact original embedded Prelude source, once per declaration graph.
-    // The generated lexer admits the reserved private names; user source does
-    // not. Ordinary registration owns every field/default/symbol identity.
-    parsed :: parse_generated_source(SEMA_PRELUDE_ERROR_SOURCE.bytes())
+pub fn sema_registration_original_error_module(diagnostics: &[Diagnostic]) -> SemaRegistrationModuleInput? {
+    // Only this exact embedded original parse can mint the DefaultErr marker.
+    parsed := parse_generated_source(SEMA_PRELUDE_ERROR_SOURCE.bytes())
     loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic)
-    nominals := [SemaRegistrationNominal]{}
-    if sema_has_error_since(parsed.diagnostics, 0) -> return nominals
-    loop item in parsed.program.items {
-        if item == .Struct(definition) {
-            nominal := sema_registration_nominal(item, module_identity, SEMA_PRELUDE_ERROR_SOURCE_PATH, SemaSourceOrigin.CompilerGenerated, [SemaSourceSegment]{}, &diagnostics) ?? panic("Prelude error declaration has no nominal row")
+    if sema_has_error_since(parsed.diagnostics, 0) -> return None
+    program := ^parsed.program
+    declarations := [Item]{}
+    marked := 0
+    loop program.items.len() > 0 {
+        item := &program.items.pop() ?? panic("the original Prelude item drain lost a row")
+        if ^item == .Struct(definition) {
             if definition.name == "Err" {
-                // This role is attached only by this authenticated builtin
-                // source registration, never recovered from a later leaf name.
-                nominal.compiler_owned = true
-                nominal.generated_provenance = Val(sema_registration_compiler_owned_default_err_provenance())
+                definition.compiler_builtin_error = true
+                marked += 1
             }
-            &nominals.push(nominal)
+            &declarations.push(Item.Struct{value: ^definition})
         }
     }
-    nominals
+    if declarations.len() != 7 || marked != 1 {
+        &diagnostics.push(sema_error_optional("E0003", None, "the original Prelude error source is incomplete", "the canonical supplier owns seven ordinary declarations and exactly one marked default error", "regenerate the embedded original Prelude source from its canonical authority"))
+        return None
+    }
+    &declarations.reverse()
+    program.items = ^declarations
+    path :: SEMA_PRELUDE_ERROR_SOURCE_PATH
+    bytes :: SEMA_PRELUDE_ERROR_SOURCE.bytes()
+    line_starts := [Int]{0}
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{10}) -> &line_starts.push(index + 1)
+    }
+    Val(SemaRegistrationModuleInput{
+        package_identity: "jet:canonical-prelude",
+        module_identity: path,
+        module_name: generated_path(path),
+        core_source_alias: "",
+        module_path: "Prelude/Errors.jet",
+        source_file: path,
+        source_segments: [SemaSourceSegment]{SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: path, source_start: 0, line_starts: ^line_starts, origin: SemaSourceOrigin.CompilerGenerated}},
+        source_origin: SemaSourceOrigin.CompilerGenerated,
+        program: ^program,
+        foreign_handles: [SemaRegistrationForeignHandleFacts]{},
+        source: SEMA_PRELUDE_ERROR_SOURCE,
+    })
 }
 
 pub fn sema_registration_is_compiler_owned(nominal: SemaRegistrationNominal) -> Bool Never! {
@@ -1916,7 +1946,7 @@ fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, temp
     // D-MOD2/D-MOD3: inline modules give their members one lifted identity
     // (types beside the module, top-level member functions by member name)
     // and resolve `module.f(...)` and `use module.[f]` before registration.
-    sema_inline_modules_lower(&module_row.program, &diagnostics)
+    module_row.inline_bindings = sema_inline_modules_lower(&module_row.program, &diagnostics)
     // D-STRUCT-ONCE1=A: root `prep loop` declarations expand first, so every
     // generated impl, conversion, and test registers as a written item.
     sema_derive_expand_template_loops(&module_row.program.items, &diagnostics)
@@ -2063,7 +2093,13 @@ fn sema_registration_resolve_export(graph: SemaRegistrationGraph, module_index: 
                     return Val(SemaRegistrationExport{name: name, symbol: resolved.symbol, declaration: resolved.declaration, source_module_identity: resolved.source_module_identity, visibility: if import.declaration.is_pub -> 2 else -> 1})
                 }
             }
-            else -> {}
+            .File(_, _) | .Module(_, _) -> {
+                if import.declaration.alias != name -> next
+                visibility :: if import.declaration.is_pub -> 2 else -> 1
+                if !sema_registration_visible(visibility, requester_module, requester_package, module_row.module_identity, module_row.package_identity) -> return None
+                symbol :: Symbol{id: symbol_id(SymbolKind.Import, module_row.module_identity, import.target_module_identity, name), kind: SymbolKind.Import, name: ~name, module_name: ~module_row.module_identity, owner: None, span: import.declaration.alias_span, ty: None, visibility: visibility}
+                return Val(SemaRegistrationExport{name: ~name, symbol: ^symbol, declaration: None, source_module_identity: ~import.target_module_identity, visibility: visibility})
+            }
         }
     }
     // D-MOD-CYCLE1=A: a dependency package is bound through one member file;
@@ -2222,18 +2258,27 @@ fn sema_registration_compiler_builtin_module(graph: SemaRegistrationGraph, name:
 }
 
 fn sema_registration_inject_compiler_builtins(graph: &SemaRegistrationGraph) {
-    err_index :: sema_registration_compiler_builtin_module(graph, "Err")
-    if err_index == .Val(module_index) {
-        module_identity :: graph.modules[module_index].module_identity
-        first_nominal :: graph.modules[module_index].nominals.len()
-        declarations :: sema_registration_prelude_error_nominals(module_identity, &graph.diagnostics)
-        loop nominal in declarations {
-            row :: graph.modules[module_index].nominals.len()
-            name :: nominal.symbol.name
-            &graph.modules[module_index].nominals.push(nominal)
-            graph.compiler_builtin_rows[name] = SemaRegistrationRowRef{module_index: module_index, row: row}
+    original := SemaRegistrationRowRef?{None}
+    loop (module_index, module_row) in graph.modules {
+        loop (row, nominal) in module_row.nominals {
+            if sema_registration_compiler_builtin_marker(nominal) != (Val(TCompilerBuiltin.DefaultErr)) -> next
+            if original == .Val(_) || nominal.generic_params.len() != 0 {
+                graph.internal_problem = Val("the original Prelude default error needs one nongeneric checked owner")
+                graph.complete = false
+                return
+            }
+            original = Val(SemaRegistrationRowRef{module_index: module_index, row: row})
         }
-        sema_registration_index_nominal_rows(&graph, module_index, first_nominal)
+    }
+    owner :: original ?? {
+        graph.internal_problem = Val("the original Prelude error declaration supplier is missing")
+        graph.complete = false
+        return
+    }
+    // Resolve implicit compiler names to genuine ordinary declarations in the
+    // marked owner's module; emitted aliases never choose this owner.
+    loop (row, nominal) in graph.modules[owner.module_index].nominals {
+        graph.compiler_builtin_rows[nominal.symbol.name] = SemaRegistrationRowRef{module_index: owner.module_index, row: row}
     }
     runtime_enums :: [String]{"Ordering", "RemoveBy", "TaskFailure"}
     loop name in runtime_enums {
@@ -2247,9 +2292,8 @@ fn sema_registration_inject_compiler_builtins(graph: &SemaRegistrationGraph) {
     }
 }
 
-// The compiler-owned nominal row named `name`, read in place. Only
-// `sema_registration_inject_compiler_builtins` creates these rows, once per
-// name, and records them as they land.
+// Compiler names resolve to ordinary original Prelude declarations or the
+// existing runtime enum rows. The DefaultErr role comes only from its marker.
 pub fn sema_registration_compiler_builtin_row(graph: SemaRegistrationGraph, name: String) -> SemaRegistrationRowRef? {
     graph.compiler_builtin_rows.get(name)
 }

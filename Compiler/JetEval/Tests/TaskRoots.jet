@@ -1231,13 +1231,13 @@ fn jet_eval_task_roots_fixture_shape_index(machine: JetEvalMachine, shape_progra
             invalid_rows := jet_eval_program_shape_rows(shape_program)
             if owner.module_id != None {
                 invalid_rows.modules = [U64:Int]{}
-                if jet_eval_core_owner_check(shape_program, invalid_rows, row.ty) != .Invalid("native Core owner fact has no checked source module") -> return false
+                if jet_eval_core_owner_check(shape_program, invalid_rows, row.ty) != (.Invalid{message: "native Core owner fact has no checked source module"}) -> return false
             }
             duplicate_rows := jet_eval_program_shape_rows(shape_program)
             indices :: duplicate_rows.core_owners_by_id.get(owner.id.value) ?? return false
             if indices.len() != 1 -> return false
             duplicate_rows.core_owners_by_id[owner.id.value] = [Int]{indices[0], indices[0]}
-            if jet_eval_core_owner_check(shape_program, duplicate_rows, row.ty) != .Invalid("native Core owner registered ID is ambiguous") -> return false
+            if jet_eval_core_owner_check(shape_program, duplicate_rows, row.ty) != (.Invalid{message: "native Core owner registered ID is ambiguous"}) -> return false
         }
     }
     true

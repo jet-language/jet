@@ -46,7 +46,7 @@ pub fn jet_driver_read_schema_dependency(root: String, type_name: String) -[Env,
     // same read. Neither decoding nor a parse failure reopens the path.
     raw :: String.from_bytes(bytes) ?? {
         error :: IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("stream did not contain valid UTF-8")})
-        return JetDriverSchemaRead{name: type_name, cache_dir: cache, path: path, outcome: .IO(error, Val(bytes))}
+        return JetDriverSchemaRead{name: type_name, cache_dir: cache, path: path, outcome: .IO{error: error, bytes: Val(bytes)}}
     }
     outcome :: if SchemaSnapshot.parse(raw) == {
         .Ok(snapshot) -> JetDriverSchemaReadOutcome.Parsed{raw: raw, snapshot: snapshot}

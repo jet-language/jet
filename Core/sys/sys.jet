@@ -21,9 +21,9 @@ use __core_files_path_components as host_path
 #Layout(c)
 struct SysTargetPointer { pointer: *Int }
 
-SYS_TARGET_USIZE_MAX :: prep { target_usize_max() }
-
-fn target_usize_max() -> U64 Never! {
+// Layout facts must be evaluated inside the selected-target prep boundary,
+// not through an ordinary function checked outside compile-time context.
+SYS_TARGET_USIZE_MAX :: prep {
     layout :: SysTargetPointer.$layout
     size :: layout.size ?? panic("selected target has no concrete pointer layout")
     if size <= 0 || size > 8 -> panic("selected target pointer width does not fit the U64 carrier")
@@ -705,7 +705,7 @@ fn syscall_error(operation: IOOperation, resource: String?, errno: Int) -> IOErr
 fn syscall_input(operation: IOOperation, resource: String?, cause: String) -> IOError {
     // Preserve the existing Other context: the host's cause string includes
     // errno, while the public os_code field was historically absent.
-    IOError.Other(IOContext{operation: operation, resource: resource, os_code: None, cause: Val(cause)})
+    IOError.Other(IOContext{operation: ~operation, resource: resource, os_code: None, cause: Val(cause)})
 }
 
 fn has_nul(value: String) -> Bool {

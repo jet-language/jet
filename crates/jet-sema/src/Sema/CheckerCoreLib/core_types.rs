@@ -339,7 +339,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "DNSSRV" | "UnixListener" | "UnixStream" | "TLSStream" | "TLSClientConfig" | "TLSClientConfigType"
         | "TLSRootCertificates" | "TLSRootCertificatesType" | "TLSClientIdentity" | "TLSClientIdentityType"
         | "TLSClientTrust" | "TLSVersion" | "TLSPeerIdentity" | "TLSCertificate"
-        | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
+        | "NetError" | "NetErrorDetail" | "NetDNSError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
         | "__ResolveError"
         // D-COMPUTE1=D / D-COMPUTE-TYPE1=D: ranked tensor owner + compute errors.
         | "Tensor" | "ComputeError" | "ComputeDevice" | "ComputeStream" | "VJPRun"
@@ -2870,7 +2870,7 @@ pub fn core_net_error_variants(
     use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
     let mut variants = std::collections::HashMap::new();
-    if enum_name == "NetDnsError" {
+    if enum_name == "NetDNSError" {
         for name in ["NotFound", "Failure"] {
             variants.insert(
                 name.to_string(),
@@ -2910,7 +2910,7 @@ pub fn core_net_error_variants(
         "DNS".to_string(),
         (
             zero,
-            VariantPayload::Single(Type::Named("NetDnsError".to_string()), zero),
+            VariantPayload::Single(Type::Named("NetDNSError".to_string()), zero),
         ),
     );
     Some(variants)

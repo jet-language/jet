@@ -46,7 +46,7 @@ pub struct NetErrorDetail {
     pub os_code: Int?
 }
 
-pub enum NetDnsError {
+pub enum NetDNSError {
     NotFound(String)
     Failure(String)
 }
@@ -69,7 +69,7 @@ pub enum NetError {
     TLS(NetErrorDetail)
     Protocol(NetErrorDetail)
     Other(NetErrorDetail)
-    DNS(NetDnsError)
+    DNS(NetDNSError)
 
     impl Display {
         fn display(self) -> String { net_error_text(self) }
@@ -94,8 +94,8 @@ fn net_error_text(err: NetError) -> String Never! {
 }
 
 #Test("NetError display retains DNS and detail projections") {
-    assert(net_error_text(NetError.DNS(NetDnsError.NotFound("example.test"))) == "DNS name not found: `example.test`")
-    assert(net_error_text(NetError.DNS(NetDnsError.Failure("lookup failed"))) == "lookup failed")
+    assert(net_error_text(NetError.DNS(NetDNSError.NotFound("example.test"))) == "DNS name not found: `example.test`")
+    assert(net_error_text(NetError.DNS(NetDNSError.Failure("lookup failed"))) == "lookup failed")
     detail :: NetErrorDetail{operation: "read", address: None, name: None, message: "closed", os_code: None}
     assert(net_error_text(NetError.Closed(detail)) == "closed")
 }
@@ -548,12 +548,12 @@ pub fn dns_srv_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [SRV
 // NetHTTP.rs jet_net_dns_result: prefix tests precede the timeout substring
 // test, preserving cancellation/protocol precedence and DNS-specific payloads.
 fn dns_error(name: String, message: String) -> NetError Never! {
-    if starts_with(message, "DNS name not found") -> return NetError.DNS(NetDnsError.NotFound(name))
+    if starts_with(message, "DNS name not found") -> return NetError.DNS(NetDNSError.NotFound(name))
     detail :: NetErrorDetail{operation: "dns", address: None, name: Val(name), message: message, os_code: None}
     if starts_with(message, "network operation cancelled") -> return NetError.Cancelled(detail)
     if starts_with(message, "network protocol error") -> return NetError.Protocol(detail)
     if message.contains("timed out") || message.contains("timeout") -> return NetError.Timeout(detail)
-    NetError.DNS(NetDnsError.Failure(message))
+    NetError.DNS(NetDNSError.Failure(message))
 }
 
 #Test("DNS lookup errors preserve classification precedence and context") {
@@ -944,13 +944,13 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     assert(error_name(error) == detail.name)
     assert(error_os_code(error) == detail.os_code)
     assert(error_message(error) == "closed")
-    missing :: NetError.DNS(NetDnsError.NotFound("example.test"))
+    missing :: NetError.DNS(NetDNSError.NotFound("example.test"))
     assert(error_operation(missing) == "dns")
     assert(error_address(missing) == None)
     assert(error_name(missing) == detail.name)
     assert(error_os_code(missing) == None)
     assert(error_message(missing) == "DNS name not found: `example.test`")
-    failure :: NetError.DNS(NetDnsError.Failure("resolver unavailable"))
+    failure :: NetError.DNS(NetDNSError.Failure("resolver unavailable"))
     assert(error_name(failure) == None)
     assert(error_message(failure) == "resolver unavailable")
 }

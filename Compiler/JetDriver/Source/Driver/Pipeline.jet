@@ -73,6 +73,7 @@ use jet_foundation.[
     MIRVisibility,
     MIRValueFact,
     MIR_SCHEMA_VERSION,
+    OutputKind,
     Span,
     SymbolKind,
     TComptimeValue,
@@ -87,6 +88,7 @@ use jet_foundation.[
     THarnessKind,
     THarnessPlanFact,
     TJobFact,
+    TFunctionRef,
     TOutputCheckFact,
     TTestFact,
     core_module_export,
@@ -175,6 +177,7 @@ use jet_sema.[
     sema_name_structure_facts,
     sema_registration_lookup_counts,
     sema_registration_prepare_graph,
+    sema_output_resolve,
     sema_registration_callable_declaration,
     sema_source_location_at,
 ]
@@ -1174,6 +1177,27 @@ fn jet_driver_resolve_entry_function(
     functions: [MIRFunction],
     diagnostics: &[Diagnostic],
 ) -> MIRFunctionID? {
+    // Authenticated Source Output selection precedes the existing manifest
+    // entry projection. Its module cursor names the same checked graph, not a
+    // display path or a second name resolution.
+    loop source_module in semantic_graph.modules {
+        loop constant in source_module.constants {
+            if constant.declaration.resolved_output == .Val(output) {
+                if !output.selected || output.kind == OutputKind.Check -> next
+                if output.module_id < 0 || output.module_id >= semantic_graph.modules.len() {
+                    &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, source_module.module_identity, "E0003", output.reference, "the selected Output has no exact checked-module owner", "Output registration retains its authenticated module cursor", "retain the original Output module identity through checking"))
+                    return None
+                }
+                owner_identity :: semantic_graph.modules[output.module_id].module_identity
+                function_key :: symbol_id(SymbolKind.Function, owner_identity, "", output.semantic_name).key
+                function_id :: jet_driver_find_lowered_function_id(functions, function_key)
+                if function_id == .None {
+                    &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, owner_identity, "E0003", output.definition, "the selected Output entry has no unique MIR function identity", "Output entry identity is retained from its registered callable", "retain the canonical function key through MIR lowering"))
+                }
+                return function_id
+            }
+        }
+    }
     entry :: jet_driver_entry_selection(load) ?? return None
     target_module_identity := load.entry_module_identity
     if entry.module_alias != None {
@@ -3528,9 +3552,9 @@ pub fn jet_driver_compile_escaped_failure(message: String) -> JetDriverCompileRe
         internal_problem: Val(message),
     }
 }
-// Every named `#Test` block across the package's modules (Rust
-// `register_test_item` fills `ModuleState.tests` for each).
-fn jet_driver_named_test_count(graph: SemaRegistrationGraph) -> Int Never! {
+// Rust Completion's Test boundary admits either a named test block or an
+// authenticated selected Check Output.
+fn jet_driver_runnable_test_count(graph: SemaRegistrationGraph) -> Int Never! {
     count := 0
     loop module_index in 0..<graph.modules.len() {
         source_module :: graph.modules[module_index]
@@ -3538,19 +3562,23 @@ fn jet_driver_named_test_count(graph: SemaRegistrationGraph) -> Int Never! {
             if item == .Test(test) {
                 if test.name != None -> count += 1
             }
+            if source_module.module_identity == graph.entry_module_identity && item == .Const(constant) {
+                if constant.resolved_output == .Val(output) {
+                    if output.selected && output.kind == OutputKind.Check -> count += 1
+                }
+            }
         }
     }
     count
 }
 
-// The checked tests' facts, one Test harness over them in module and
-// declaration order (Rust artifact_plan.rs `lower_harness`), and their MIR
-// rows. Output checks and coverage points are not part of this compile:
-// `#Check` outputs and `jet test --coverage` are not ported to the Jet host.
-fn jet_driver_test_artifacts(package_identity: String, entry_module_identity: String, graph: &SemaGraphResult, functions: &[MIRFunction]) -> JetCodegenJobTestArtifacts Never! {
+// Checked named tests and selected Check Outputs share the canonical Test
+// harness, in declaration order. Coverage remains a separate request route.
+fn jet_driver_test_artifacts(package_identity: String, entry_module_identity: String, graph: &SemaGraphResult, functions: &[MIRFunction], diagnostics: &[Diagnostic]) -> JetCodegenJobTestArtifacts Never! {
     tests := [TTestFact]{}
     keys := [String]{}
     wanted := [String:Bool]{}
+    output_checks := [TOutputCheckFact]{}
     loop module_index in 0..<graph.modules.len() {
         graph_module :: graph.modules[module_index]
         if graph_module.module_identity != entry_module_identity -> next
@@ -3558,6 +3586,35 @@ fn jet_driver_test_artifacts(package_identity: String, entry_module_identity: St
             &tests.push(fact)
             &keys.push(fact.key)
             wanted[fact.key] = true
+        }
+        loop constant in graph_module.constants {
+            if constant.declaration.resolved_output == .Val(output) {
+                if !output.selected || output.kind != OutputKind.Check -> next
+                if output.module_id < 0 || output.module_id >= graph.modules.len() {
+                    &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected Check Output has no exact checked-module owner", "Output registration retains its authenticated module cursor", "retain the original Output module identity through checking"))
+                    next
+                }
+                owner :: graph.modules[output.module_id]
+                function_key :: symbol_id(SymbolKind.Function, owner.module_identity, "", output.semantic_name).key
+                reference := TFunctionRef?{None}
+                loop function in owner.functions {
+                    if function.key == function_key {
+                        reference = Val(TFunctionRef{key: ~function.key, module_identity: ~function.module_identity, name: ~function.name, span: function.source_span, visibility: function.visibility})
+                        break
+                    }
+                }
+                if reference == .None || jet_driver_find_lowered_function_id(functions, function_key) == .None {
+                    &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected Check Output entry has no unique checked MIR function identity", "Check Outputs invoke their registered checked callable", "retain the canonical function key through checking and MIR lowering"))
+                    next
+                }
+                function_ref :: ^reference ?? next
+                &output_checks.push(TOutputCheckFact{
+                    key: "{graph_module.module_identity}::output-check::{output.output_name}@{output.definition.start}..{output.definition.end}",
+                    name: ~output.output_name,
+                    function: ^function_ref,
+                })
+                wanted[function_key] = true
+            }
         }
     }
     test_functions := [TFunc]{}
@@ -3575,7 +3632,7 @@ fn jet_driver_test_artifacts(package_identity: String, entry_module_identity: St
         key: "{package_identity}::harness::Test",
         kind: THarnessKind.Test,
         tests: keys,
-        output_checks: [TOutputCheckFact]{},
+        output_checks: ^output_checks,
         selected_test: None,
         coverage_points: [TCoveragePointFact]{},
         command_override: false,
@@ -4016,18 +4073,19 @@ pub fn jet_driver_project_completed_check(
     schema_ingress: JetDriverSchemaIngress,
     trace: JetDriverCompileTrace,
 ) -> JetDriverCheckedProjectionResult {
+    owned_load := ^load
     capture := JetDriverCheckedProjectionCapture{schema_ingress: Val(schema_ingress)}
-    compile := if request.mode != JetDriverCompileMode.Check -> {
-        jet_driver_compile_internal_result(load, trace, "the retained checked projection requires Check mode")
-    } else if !graph.complete || jet_driver_has_errors(load.diagnostics) -> {
-        jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
+    compile := if request.mode != JetDriverCompileMode.Program -> {
+        jet_driver_compile_internal_result(owned_load, trace, "the retained checked projection requires Program mode")
+    } else if !graph.complete || jet_driver_has_errors(owned_load.diagnostics) -> {
+        jet_driver_compile_result(owned_load, owned_load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
     } else -> {
-        load.doc_modules = jet_driver_doc_modules(request, load, graph, registration, values, effect_identity, true, &capture)
-        if load.doc_modules.len() != load.modules.len() || capture.entry_module == None -> {
-            jet_driver_compile_internal_result(load, trace, "the retained checked projection lost its loaded-module ownership bijection or canonical entry")
+        owned_load.doc_modules = jet_driver_doc_modules(request, owned_load, graph, registration, values, effect_identity, true, &capture)
+        if owned_load.doc_modules.len() != owned_load.modules.len() || capture.entry_module == None -> {
+            jet_driver_compile_internal_result(owned_load, trace, "the retained checked projection lost its loaded-module ownership bijection or canonical entry")
         } else -> {
-            jet_driver_doc_gate_projection(&load.doc_modules, graph, registration, request, load.packages)
-            jet_driver_compile_result(load, load.diagnostics, None, None, None, None, None, true, trace)
+            jet_driver_doc_gate_projection(&owned_load.doc_modules, graph, registration, request, owned_load.packages)
+            jet_driver_compile_result(owned_load, owned_load.diagnostics, None, None, None, None, None, true, trace)
         }
     }
     if !compile.complete {
@@ -4091,7 +4149,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         failure :: load.failed_stage ?? JetDriverStage.Load
         return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(failure), false, trace)
     }
-    if checked_projection && request.mode != JetDriverCompileMode.Check -> return jet_driver_compile_internal_result(load, trace, "the retained checked projection requires Check mode")
+    if checked_projection && request.mode != JetDriverCompileMode.Program -> return jet_driver_compile_internal_result(load, trace, "the retained checked projection requires Program mode")
     canonical_effect_module_option := jet_driver_canonical_effect_module(request.canonical_effect_source)
     if canonical_effect_module_option == None {
         return jet_driver_compile_internal_result(load, trace, "the embedded compiler-owned Prelude effect source is invalid")
@@ -4173,6 +4231,10 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         )
     }
     if request.trace_sink == .Val(sink) -> sink.begin("sema.check", "", -1, -1)
+    output_intent :: if request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> request.output_intent
+    output_diagnostics :: sema_output_resolve(&registration_graph, output_intent, request.output_address)
+    loop diagnostic in output_diagnostics -> &registration_graph.diagnostics.push(diagnostic)
+    if jet_driver_has_errors(output_diagnostics) -> registration_graph.complete = false
     comptime_stage := sema_collect_comptime_declarations(registration_graph, package_policies, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("sema.check", comptime_stage.modules.len())
     jet_driver_trace_lookup_counters(request.trace_sink, "sema.check", sema_registration_lookup_counts(registration_graph), register_lookups)
@@ -4432,9 +4494,8 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         &module_function_counts.push(module_functions.len())
         jet_codegen_move_function_rows(&checked_functions, &module_functions)
     }
-    // Rust Completion.rs under `CompileMode::Test`: a package with no named
-    // `#Test` block in any module has nothing to run (E0601).
-    if request.mode == JetDriverCompileMode.Test && jet_driver_named_test_count(registration_graph) == 0 {
+    // E0601 only when neither named tests nor selected Check Outputs exist.
+    if request.mode == JetDriverCompileMode.Test && jet_driver_runnable_test_count(registration_graph) == 0 {
         &load.diagnostics.push(jet_driver_diagnostic_without_span("E0601", "no `#Test` blocks found to run", "add at least one top-level block: #Test(\"describes what this checks\") {{ ... }}", "use `assert` and `assert_eq` inside the block to check results"))
     }
     if jet_driver_has_errors(load.diagnostics) -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
@@ -4528,7 +4589,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     // `lower_artifact_rows`): the checked tests' facts and their one Test
     // harness, lowered while the tests' checked TIR rows are still resident.
     test_artifacts := JetCodegenJobTestArtifacts?{None}
-    if request.mode == JetDriverCompileMode.Test -> test_artifacts = Val(jet_driver_test_artifacts(load.package_identity, load.entry_module_identity, &checked_graph, &lowered.functions))
+    if request.mode == JetDriverCompileMode.Test -> test_artifacts = Val(jet_driver_test_artifacts(load.package_identity, load.entry_module_identity, &checked_graph, &lowered.functions, &load.diagnostics))
     // The checked TIR functions are as large as the MIR lowered from them;
     // release them before MIR assembly and optimization.
     if request.mode != JetDriverCompileMode.Repl {

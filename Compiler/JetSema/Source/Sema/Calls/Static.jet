@@ -599,7 +599,7 @@ fn sema_call_perf_static(method: String, type_args: [Type], args: [CallArg], spa
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return failed
     identity :: sema_call_core_module_identity(environment, "core.perf") ?? return failed
-    target :: sema_call_core_source_target(environment, identity, method, type_args, span, &diagnostics) ?? return failed
+    target :: sema_call_core_source_target(environment, identity, method, type_args, span, false, &diagnostics) ?? return failed
     probe_args := args
     binding :: sema_call_bind_direct("Perf.{method}", target.signature, &probe_args, span, &diagnostics) ?? return failed
     defaults :: sema_call_registration_defaults(graph, binding) ?? return failed

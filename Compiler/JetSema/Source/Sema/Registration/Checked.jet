@@ -2986,7 +2986,7 @@ fn sema_checked_constant(graph: SemaRegistrationGraph, module_row: SemaRegistrat
 fn sema_checked_runtime_tvalue_supported(definition: ConstDef, value: TComptimeValue) -> Bool Never! {
     if definition.is_comptime -> return true
     ty :: definition.ty ?? Type.Named{name: ""}
-    if ty == (Type.Named{name: "Output"}) || ty == (Type.Named{name: "OutputDefaults"}) -> return true
+    if ty == (Type.Named{name: "Output"}) || ty == (Type.Named{name: "__OutputDefaults"}) -> return true
     if !definition.mutable && !definition.is_persist -> return true
     if value == {
         .Int(_) | .Float(_, _) | .Bool(_) -> true
@@ -3022,6 +3022,7 @@ fn sema_checked_constant_from_value(graph: SemaRegistrationGraph, module_row: Se
 
 // `staged_values` holds the module's staged constant values by symbol key.
 fn sema_checked_constant_with_values(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, constant: SemaRegistrationConstant, staged_values: [String:SemaComptimeItemValue], diagnostics: &[Diagnostic]) -> TConstantDef? {
+    if sema_output_metadata_binding(constant.declaration) -> return None
     if !sema_checked_module_value_evaluates(constant.declaration) {
         &diagnostics.push(sema_checked_module_value_error(constant.declaration))
         return None
@@ -3039,7 +3040,7 @@ fn sema_checked_constant_with_values(graph: SemaRegistrationGraph, module_row: S
 pub fn sema_checked_module_value_evaluates(definition: ConstDef) -> Bool Never! {
     if definition.is_comptime -> return true
     ty :: definition.ty ?? Type.Named{name: ""}
-    if ty == (Type.Named{name: "Output"}) || ty == (Type.Named{name: "OutputDefaults"}) -> return true
+    if ty == (Type.Named{name: "Output"}) || ty == (Type.Named{name: "__OutputDefaults"}) -> return true
     sema_checked_module_literal(definition.value)
 }
 
@@ -3136,7 +3137,7 @@ fn sema_checked_module_uppercase(name: String) -> Bool Never! {
 fn sema_checked_runtime_constant_supported(definition: ConstDef, value: CtValue) -> Bool Never! {
     if definition.is_comptime -> return true
     ty :: definition.ty ?? Type.Named{name: ""}
-    if ty == (Type.Named{name: "Output"}) || ty == (Type.Named{name: "OutputDefaults"}) -> return true
+    if ty == (Type.Named{name: "Output"}) || ty == (Type.Named{name: "__OutputDefaults"}) -> return true
     if !definition.mutable && !definition.is_persist -> return true
     if value == {
         .Int(_) | .Float(_) | .Bool(_) -> true

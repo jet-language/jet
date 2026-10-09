@@ -1642,7 +1642,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "NetError" => Some("JetNetError"),
         "NetErrorDetail" => Some("JetNetErrorDetail"),
         "__ResolveError" => Some("Jet__ResolveError"),
-        "NetDnsError" => Some("JetNetDnsError"),
+        "NetDNSError" => Some("JetNetDNSError"),
         "NetShutdown" => Some("JetNetShutdown"),
         "NetReadyInterest" => Some("JetNetReadyInterest"),
         "NetReady" => Some("JetNetReady"),
@@ -6053,7 +6053,7 @@ pub(crate) fn build_cx_items(
         .collect();
     cx.struct_fields.insert("__ResolveError".to_string(), resolver_fields);
     cx.cloneable.insert("__ResolveError".to_string());
-    for enum_name in ["NetDnsError", "NetError"] {
+    for enum_name in ["NetDNSError", "NetError"] {
         let mut variant_payloads = crate::Sema::core_net_error_variants(enum_name)
             .unwrap_or_else(|| panic!("missing canonical Core enum {enum_name}"));
         let ordered_names =

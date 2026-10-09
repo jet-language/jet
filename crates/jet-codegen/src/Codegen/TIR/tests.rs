@@ -2223,7 +2223,7 @@ fn net_err(op: String, addr: String, message: String) -> NetError {
     })
 }
 fn dns_err(name: String) -> NetError {
-    return NetError.DNS(NetDnsError.NotFound(name))
+    return NetError.DNS(NetDNSError.NotFound(name))
 }
 fn run() {}
 ";
@@ -2284,8 +2284,8 @@ fn run() {}
         let net_dns_error = mir
             .types
             .iter()
-            .find(|ty| ty.key == "NetDnsError")
-            .expect("compiler-owned NetDnsError type row");
+            .find(|ty| ty.key == "NetDNSError")
+            .expect("compiler-owned NetDNSError type row");
         let detail = mir
             .types
             .iter()
@@ -2336,7 +2336,7 @@ fn run() {}
             ..
         } = &net_dns_error.kind
         else {
-            panic!("NetDnsError must be an enum row");
+            panic!("NetDNSError must be an enum row");
         };
         assert_eq!(
             net_dns_variants

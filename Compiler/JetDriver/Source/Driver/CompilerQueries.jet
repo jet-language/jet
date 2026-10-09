@@ -203,12 +203,12 @@ pub fn jet_driver_compiler_queries_clear_measurement(queries: &JetDriverCompiler
     loop (_, cache) in queries.roots -> sema_incremental_cache_clear_measurement(cache)
 }
 
-pub fn jet_driver_compiler_queries_check_disk(queries: &JetDriverCompilerQueries, parsed: JetCompilerServicesParseFacts, request: JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
+pub fn jet_driver_compiler_queries_check_disk(queries: &JetDriverCompilerQueries, parsed: JetCompilerServicesParseFacts, request: ^JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
     // Disk and text ingress differ only at the existing authorized CLI adapter.
-    jet_driver_compiler_queries_check_text(&queries, parsed, request)
+    jet_driver_compiler_queries_check_text(&queries, parsed, ^request)
 }
 
-pub fn jet_driver_compiler_queries_check_text(queries: &JetDriverCompilerQueries, parsed: JetCompilerServicesParseFacts, request: JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
+pub fn jet_driver_compiler_queries_check_text(queries: &JetDriverCompilerQueries, parsed: JetCompilerServicesParseFacts, request: ^JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
     root :: request.authorized_sources.entry_path
     jet_driver_compiler_queries_set_document(&queries, root, parsed.source)
     cache :: if queries.roots.get(root) == {
@@ -222,7 +222,7 @@ pub fn jet_driver_compiler_queries_check_text(queries: &JetDriverCompilerQueries
     // Root results deliberately remain volatile: every invocation enters the
     // ONE canonical checker, including fresh schema/global/downstream work.
     // Only Sema's exact frozen inputs and actual sticky producers allow replay.
-    jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: request, sema_session: Val(cache), retain_projection: true})
+    jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: ^request, sema_session: Val(cache), retain_projection: true})
 }
 
 fn jet_driver_compiler_check_failure(load: JetDriverLoadResult, stage: JetDriverStage, problem: String?) -> JetDriverCompilerCheckResult Never! {
@@ -387,7 +387,9 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
         false,
     )
     if input.retain_projection -> registration.retain_programs = true
-    output_diagnostics :: sema_output_resolve(&registration, input.request.output_intent, input.request.output_address)
+    if input.request.mode == JetDriverCompileMode.Test -> registration.test_mode = true
+    output_intent :: if input.request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> input.request.output_intent
+    output_diagnostics :: sema_output_resolve(&registration, output_intent, input.request.output_address)
     loop diagnostic in output_diagnostics -> &registration.diagnostics.push(diagnostic)
     if jet_driver_has_errors(output_diagnostics) -> registration.complete = false
     if registration.internal_problem == .Val(problem) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(problem))

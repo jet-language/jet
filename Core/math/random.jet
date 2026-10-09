@@ -98,13 +98,14 @@ pub struct RNG {
     pub fn normal(&self, mean: Float, stddev: Float) -> Float Never! {
         first :: &self.float_open()
         second :: &self.float()
-        sample :: math.sqrt(-2.0 * math.ln(first)) * math.cos(math.tau() * second)
+        sample :: math.sqrt((Float{-2.0}) * math.ln(first)) * math.cos(math.tau() * second)
         mean + sample * math.max_float(stddev, 0.0)
     }
 
     pub fn exponential(&self, lambda: Float) -> Float Never! {
         if lambda <= 0.0 || math.is_nan(lambda) -> return 0.0
-        -math.ln(&self.float_open()) / lambda
+        sample :: &self.float_open()
+        return -math.ln(sample) / lambda
     }
 
     pub fn bytes(&self, count: Int) -> [U8] Never! {

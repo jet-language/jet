@@ -3665,7 +3665,6 @@ pub struct MIRProgram {
 // identities. Consumers prepare this once; a short user type name never wins.
 pub fn mir_source_value_hook(program: MIRProgram, ty: MIRType, operation: String) -> MIRFunctionID? Never! {
     if ty.kind == .Tagged(_, inner) -> return mir_source_value_hook(program, inner, operation)
-    if ty.kind != .Apply(_, _) -> return None
     if ty.kind == .Apply(owner, _) {
         hook :: core_source_value_hook(owner.name, operation) ?? return None
         found := MIRFunctionID?{None}

@@ -3181,8 +3181,9 @@ function checkCoreCallRegistryOnly() {
 function fixedSignaturePairs(modules) {
   const source = read(FIXED_SIGS_PATH);
   const knownModules = new Set(modules.map(function (entry) { return entry.module; }));
-  const sigFn = source.includes("fn core_fixed_sig_impl(") ? "core_fixed_sig_impl" : "core_fixed_sig";
-  const arms = matchArms(functionBody(source, sigFn), "match (module, name)");
+  // The public signature and tuple-normalization entry points delegate here;
+  // only the canonical raw table contains the module/member match arms.
+  const arms = matchArms(functionBody(source, "core_fixed_sig_raw"), "match (module, name)");
   const pairs = new Set();
   for (const arm of arms) {
     const strings = quoted(arm.lhs);

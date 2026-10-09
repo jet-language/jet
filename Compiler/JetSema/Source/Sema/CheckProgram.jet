@@ -756,9 +756,11 @@ fn sema_incremental_module_input(environment: SemaScopeEnvironment, scopes: &Sem
     // per-body input, not whichever summary happened to run last. Everything
     // else read from the environment and the full binding table is exact.
     // This owner-only window ends before hooks, checking, publication or task
-    // launch. Move/restore only the transient scalar; never clone the scope.
+    // launch. Save/restore only the transient scalar; never clone the scope.
+    // A borrowed table cannot hand off its field owner: explicitly clone this
+    // Option<String>, then move it back after the normalized ordered snapshot.
     comptime_input :: sema_comptime_body_values_debug(environment.comptime_body_values)
-    location := ^scopes.location_function
+    location := ~scopes.location_function
     scopes.location_function = None
     input := "module={environment.module_identity:Debug};package={environment.package_identity:Debug};name={environment.module_name:Debug};file={environment.source_file:Debug};origin={environment.source_origin:Debug};segments={environment.source_segments:Debug};types={environment.checked_types:Debug};type_rows={environment.checked_type_rows:Debug};type_slots={environment.checked_type_name_slots:Debug};type_names={environment.checked_type_name_rows:Debug};boxed={environment.boxed_edges:Debug};declarations={declarations:Debug};generics={environment.generic_params:Debug};comptime={comptime_input};else={environment.else_arms:Debug};fixed_writes={environment.fixed_length_write_params:Debug};debug={environment.debug_sites:Debug};scope={scopes:Debug}"
     scopes.location_function = ^location
@@ -2308,7 +2310,7 @@ fn sema_function_check_registered_name(job: SemaBodyJob, module_index: Int, memo
     if &environment.registration_graph == .Val(graph) {
         if job == {
             .TopLevel(item_index) -> {
-                if &graph.modules[module_index].program.items[item_index] == .Func(func) {
+                if graph.modules[module_index].program.items[item_index] == .Func(func) {
                     environment.function_name = func.name
                     return
                 }
@@ -4059,6 +4061,7 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
         }
         module_index += 1
     }
+    loop reference in graph.output_name_references -> sema_name_add_reference(&facts, graph, owner_names, &module_indices, reference.span, reference.symbol, reference.kind)
     MIRNameFacts{
         modules: facts.modules,
         declarations: sema_name_first_declarations(facts.declarations),
@@ -4774,6 +4777,7 @@ fn sema_comptime_add_module_item_sources(sources: &SemaComptimeSourceList, graph
 fn sema_comptime_collect_module_sources(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule) -> [SemaComptimeItemSource] {
     sources := SemaComptimeSourceList{items: [SemaComptimeItemSource]{}, keys: [String:Bool]{}}
     loop constant in source_module.constants {
+        if sema_output_metadata_binding(constant.declaration) -> next
         if constant.declaration.ct != None -> next
         // D-MODULE-VALUE1: registration reports a non-literal module binding
         // (E0622); it is never evaluated.
@@ -4796,15 +4800,20 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
     loop diagnostic in graph.diagnostics -> &diagnostics.push(diagnostic)
     modules := [SemaGraphModuleResult]{}
     complete := graph.complete
-    memory_plan := sema_function_memory_plan_from_graph(graph)
+    initial_memory_plan := sema_function_memory_plan_from_graph(graph)
     body_values := sema_comptime_body_values_freeze([SemaComptimeBodyValue]{}, sema_comptime_body_work_new(trace_sink), false)
-    environment := sema_check_pass_environment(~graph, [TTypeDef]{}, ^body_values)
+    initial_environment := sema_check_pass_environment(~graph, [TTypeDef]{}, ^body_values)
+    module_state :: shared SemaCheckShared{environments: [SemaScopeEnvironment]{}, memory_plans: [SemaFunctionMemoryPlan]{}}
+    sema_check_shared_fill(module_state, ^initial_environment, ^initial_memory_plan)
     module_index := 0
     loop module_index < graph.modules.len() {
         if trace_sink == .Val(sink) -> sink.begin("sema.module", graph.modules[module_index].module_path, module_index, graph.modules.len())
+        environment := sema_check_shared_take_environment(module_state)
+        memory_plan := sema_check_shared_take_memory_plan(module_state)
         owned_check := sema_check_registration_module(^environment, None, ^memory_plan, module_index, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), None, None, "sema.check", trace_sink)
-        environment = ^owned_check.environment
-        memory_plan = ^owned_check.memory_plan
+        restored_environment := ^owned_check.environment
+        restored_memory_plan := ^owned_check.memory_plan
+        sema_check_shared_fill(module_state, ^restored_environment, ^restored_memory_plan)
         checked := ^owned_check.module_result
         if trace_sink == .Val(sink) -> sink.end("sema.module", graph.modules[module_index].declarations.len())
         loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
@@ -4812,6 +4821,7 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
         &modules.push(checked)
         module_index += 1
     }
+    environment := sema_check_shared_take_environment(module_state)
     // The source dependency probes re-target the pass environment, which
     // carries this same graph; its checked types are empty as theirs are.
     // Each module is entered and its probe scope built once for all of its
@@ -4868,15 +4878,20 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
 // `resolved_graph` already carries `values` (the run's sema_comptime_environment
 // graph), so it is read in place rather than rebuilt from the bare graph.
 pub fn sema_comptime_modules_with_values(resolved_graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> [SemaGraphModuleResult] {
-    memory_plan := sema_function_memory_plan_from_graph(resolved_graph)
+    initial_memory_plan := sema_function_memory_plan_from_graph(resolved_graph)
     body_values := sema_comptime_body_values_freeze(sema_comptime_body_values_from_items(values), None, false)
-    environment := sema_check_pass_environment(~resolved_graph, [TTypeDef]{}, ^body_values)
+    initial_environment := sema_check_pass_environment(~resolved_graph, [TTypeDef]{}, ^body_values)
+    module_state :: shared SemaCheckShared{environments: [SemaScopeEnvironment]{}, memory_plans: [SemaFunctionMemoryPlan]{}}
+    sema_check_shared_fill(module_state, ^initial_environment, ^initial_memory_plan)
     modules := [SemaGraphModuleResult]{}
     module_index := 0
     loop module_index < resolved_graph.modules.len() {
+        environment := sema_check_shared_take_environment(module_state)
+        memory_plan := sema_check_shared_take_memory_plan(module_state)
         owned_check := sema_check_registration_module(^environment, None, ^memory_plan, module_index, values, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), None, None, "", None)
-        environment = ^owned_check.environment
-        memory_plan = ^owned_check.memory_plan
+        restored_environment := ^owned_check.environment
+        restored_memory_plan := ^owned_check.memory_plan
+        sema_check_shared_fill(module_state, ^restored_environment, ^restored_memory_plan)
         &modules.push(^owned_check.module_result)
         module_index += 1
     }
@@ -5511,6 +5526,7 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
         effect_index :: sema_registration_module_index(final_graph, effects.modules[effect_module_index].module_identity) ?? next
         modules[effect_index].functions = ^effects.modules[effect_module_index].functions
     }
+    sema_output_publish_solved_effects(&final_graph, &modules)
     compute_work := SemaComputeValidationWork{}
     compute_diagnostics := sema_compute_validate_autodiff_purity(modules, &compute_work)
     loop diagnostic in compute_diagnostics {

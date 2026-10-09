@@ -66,7 +66,7 @@ pub fn sema_host_hooks_withheld(access: SemaHostHookAccess?) -> Bool {
 }
 
 pub fn sema_body_check_observe(access: SemaHostHookAccess?, observed: Shared<SemaBodyCheckReach>?) -> SemaHostHookAccess? {
-    if observed == None -> return access
+    if observed == None -> return ~access
     row :: access ?? return None
     Val(if row == {
         .Callbacks(hooks, _) -> SemaHostHookAccess.Callbacks{hooks: hooks, observed: observed}

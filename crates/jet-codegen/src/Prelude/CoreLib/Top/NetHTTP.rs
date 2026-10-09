@@ -156,7 +156,7 @@ pub struct JetNetErrorDetail {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum JetNetDnsError {
+pub enum JetNetDNSError {
     NotFound(String),
     Failure(String),
 }
@@ -174,7 +174,7 @@ pub enum JetNetError {
     Timeout(JetNetErrorDetail),
     Cancelled(JetNetErrorDetail),
     Unsupported(JetNetErrorDetail),
-    DNS(JetNetDnsError),
+    DNS(JetNetDNSError),
     TLS(JetNetErrorDetail),
     Protocol(JetNetErrorDetail),
     Other(JetNetErrorDetail),
@@ -548,10 +548,10 @@ impl JetShow for JetNetError {
             JetNetError::TLS(detail) => (11, Some(detail.message.as_str()), None, None),
             JetNetError::Protocol(detail) => (12, Some(detail.message.as_str()), None, None),
             JetNetError::Other(detail) => (13, Some(detail.message.as_str()), None, None),
-            JetNetError::DNS(JetNetDnsError::NotFound(name)) => {
+            JetNetError::DNS(JetNetDNSError::NotFound(name)) => {
                 (14, None, Some(0), Some(name.as_str()))
             }
-            JetNetError::DNS(JetNetDnsError::Failure(message)) => {
+            JetNetError::DNS(JetNetDNSError::Failure(message)) => {
                 (14, None, Some(1), Some(message.as_str()))
             }
         };
@@ -744,7 +744,7 @@ fn jet_net_tls_io_result<T>(
 fn jet_net_dns_result<T>(result: Result<T, String>, name: &str) -> Result<T, JetNetError> {
     result.map_err(|message| {
         if message.starts_with("DNS name not found") {
-            JetNetError::DNS(JetNetDnsError::NotFound(name.to_string()))
+            JetNetError::DNS(JetNetDNSError::NotFound(name.to_string()))
         } else if message.starts_with("network operation cancelled") {
             JetNetError::Cancelled(jet_net_detail(
                 "dns",
@@ -770,7 +770,7 @@ fn jet_net_dns_result<T>(result: Result<T, String>, name: &str) -> Result<T, Jet
                 None,
             ))
         } else {
-            JetNetError::DNS(JetNetDnsError::Failure(message))
+            JetNetError::DNS(JetNetDNSError::Failure(message))
         }
     })
 }
@@ -805,7 +805,7 @@ fn jet_net_error_address(error: &JetNetError) -> Option<String> {
 }
 fn jet_net_error_name(error: &JetNetError) -> Option<String> {
     match error {
-        JetNetError::DNS(JetNetDnsError::NotFound(name)) => Some(name.clone()),
+        JetNetError::DNS(JetNetDNSError::NotFound(name)) => Some(name.clone()),
         _ => jet_net_error_detail(error).and_then(|d| d.name.clone()),
     }
 }
@@ -851,7 +851,7 @@ fn jet_net_error_surface_parts(error: JetNetError) -> JetNetErrorSurfaceParts {
         JetNetError::TLS(value) => detail("TLS", 11, value),
         JetNetError::Protocol(value) => detail("Protocol", 12, value),
         JetNetError::Other(value) => detail("Other", 13, value),
-        JetNetError::DNS(JetNetDnsError::NotFound(value)) => JetNetErrorSurfaceParts {
+        JetNetError::DNS(JetNetDNSError::NotFound(value)) => JetNetErrorSurfaceParts {
             variant: "DNS",
             ordinal: 14,
             payload: JetNetErrorSurfacePayload::DNS {
@@ -860,7 +860,7 @@ fn jet_net_error_surface_parts(error: JetNetError) -> JetNetErrorSurfaceParts {
                 value,
             },
         },
-        JetNetError::DNS(JetNetDnsError::Failure(value)) => JetNetErrorSurfaceParts {
+        JetNetError::DNS(JetNetDNSError::Failure(value)) => JetNetErrorSurfaceParts {
             variant: "DNS",
             ordinal: 14,
             payload: JetNetErrorSurfacePayload::DNS {

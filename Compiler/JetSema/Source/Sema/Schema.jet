@@ -16,10 +16,10 @@ pub struct SchemaSnapshot {
     pub fields: [SnapshotField]
 
     pub fn write(self) -> String Never! {
-        out := "schema_version = {self.schema_version}\ntype = {self.type_name}\npublished_version = {self.published_version}\n"
-        if self.squashed_before == .Val(before) -> &out.push("squashed_before = {before}\n")
-        loop field in self.fields -> &out.push("field {field.name}: {field.ty}\n")
-        out
+        fragments := [String]{"schema_version = {self.schema_version}\ntype = {self.type_name}\npublished_version = {self.published_version}\n"}
+        if self.squashed_before == .Val(before) -> &fragments.push("squashed_before = {before}\n")
+        loop field in self.fields -> &fragments.push("field {field.name}: {field.ty}\n")
+        fragments.join("")
     }
 
     pub fn parse(raw: String) -> SchemaSnapshot SchemaSnapshotError! {
@@ -51,7 +51,8 @@ pub struct SchemaSnapshot {
                 line.starts_with("squashed_before = ") -> before = Val(line.removeprefix("squashed_before = "))
                 line.starts_with("field ") -> {
                     rest :: line.removeprefix("field ")
-                    colon :: rest.find(":") ?? return Err(SchemaSnapshotError{message: "malformed field line: {line}"})
+                    colon :: rest.find(":")
+                    if colon < 0 -> return Err(SchemaSnapshotError{message: "malformed field line: {line}"})
                     &fields.push(SnapshotField{name: rest.slice(0, colon).trim(), ty: rest.slice(colon + 1, rest.len()).trim()})
                 }
                 else -> return Err(SchemaSnapshotError{message: "unknown line in schema snapshot: {line}"})
