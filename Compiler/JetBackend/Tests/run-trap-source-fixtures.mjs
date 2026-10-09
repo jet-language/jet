@@ -6,7 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { candidateJetc0, frontReceipt } from './jet-front.mjs';
+import { candidateJetc0, runJetFront } from './jet-front.mjs';
+import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'link', 'run'].includes(mode)) throw Error('usage: run-trap-source-fixtures.mjs OUT assemble|lower|link|run');
@@ -46,20 +47,12 @@ if (mode === 'assemble') {
 } else if (mode === 'lower') {
   const pack = process.env.JET_RUNTIME_PACK;
   if (!pack || !existsSync(pack)) throw Error('fresh composed JET_RUNTIME_PACK required');
-  const frontEnv = { ...process.env };
-  for (const key of ['JET_FRONT_NATIVE_OUTPUT', 'JET_FRONT_LIBRARY_OBJECT_OUTPUT', 'JET_FRONT_LIBRARY_EXPORTS']) delete frontEnv[key];
   for (const c of cases) {
-    const unit = join(out, c.name), prefix = join(unit, 'fixture'), receipt = join(unit, 'front.receipt');
-    const selectedOutput = c.native ? { JET_FRONT_NATIVE_OUTPUT: prefix } : { JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: join(unit, 'exports.list') };
-    const result = command(c.name + '-front', candidateJetc0(), [], { timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 600000), env: { ...frontEnv,
-      JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: unit,
-      JET_BOOTSTRAP_ENTRY: 'Source/Fixture.jet', JET_BOOTSTRAP_OUTPUT: join(unit, 'unused.output'), JET_BOOTSTRAP_RECEIPT: receipt,
-      ...selectedOutput,
-      JET_RUNTIME_PACK: pack, JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608' } });
-    const problem = frontReceipt(existsSync(receipt) ? readFileSync(receipt, 'utf8') : '', result);
-    if (problem) throw Error(`${c.name}: ${problem.verdict}: ${problem.detail}`);
-    for (const suffix of ['.issues', '.pack-issues']) if (existsSync(prefix + suffix)) throw Error(readFileSync(prefix + suffix, 'utf8'));
-    if (!existsSync(prefix + '.o')) throw Error(`${c.name}: no actual compiled Source object`);
+    const unit = join(out, c.name), prefix = join(unit, 'fixture');
+    const problem = c.native
+      ? runJetFront({ candidate: candidateJetc0(), file: join(unit, 'Source/Fixture.jet'), root: unit, prefix, pack, store: join(out, 'store') })
+      : runNativeLibrary({ jet: candidateJetc0(), file: join(unit, 'Source/Fixture.jet'), prefix, exports: join(unit, 'exports.list'), env: { ...process.env, JET_TOOLCHAIN_ROOT: root, JET_RUNTIME_PACK: pack, JET_STORE_DIR: join(out, 'store') } }).problem;
+    if (problem) throw Error(`${c.name}: ${problem.detail}`);
   }
 } else if (mode === 'link') {
   const library = process.env.JET_RUNTIME_C_LIB;

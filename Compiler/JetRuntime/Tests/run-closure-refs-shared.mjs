@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {frontReceipt} from '../../JetBackend/Tests/jet-front.mjs';
+import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode, objectArg] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'link', 'run'].includes(mode)) throw Error('usage: run-closure-refs-shared.mjs OUT assemble|lower|link|run [JET_ONLY_RUNTIME_OBJECT_OR_ARCHIVE]');
@@ -31,15 +31,10 @@ if (mode === 'assemble') {
     if (!process.env.PQ_JOB || !/^[a-f0-9]{40}$/.test(process.env.COMPOSED_SHA ?? '')) throw Error('held proofq job and immutable composed source pin required');
     if (mode === 'lower') {
         if (!process.env.JET_FRONT_JETC0) throw Error('fresh composed Jet candidate required; no published/historical fallback');
-        const candidate = resolve(process.env.JET_FRONT_JETC0), receipt = join(out, 'front.receipt');
-        if (existsSync(prefix + '.o') || existsSync(receipt)) throw Error('refusing to overwrite lowering evidence');
-        const result = command('front', [candidate], {timeout: 600000, env: {...process.env,
-            JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: out,
-            JET_BOOTSTRAP_ENTRY: 'Source/Fixture.jet', JET_BOOTSTRAP_OUTPUT: join(out, 'unused.output'), JET_BOOTSTRAP_RECEIPT: receipt,
-            JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: join(out, 'exports.list'),
-            JET_STORE_DIR: join(out, 'store')}});
-        const problem = frontReceipt(existsSync(receipt) ? readFileSync(receipt, 'utf8') : '', result);
-        if (problem || !existsSync(prefix + '.o') || existsSync(prefix + '.issues')) throw Error(problem?.detail ?? 'missing source-owned object or lowering issues');
+        const candidate = resolve(process.env.JET_FRONT_JETC0);
+        if (existsSync(prefix + '.o')) throw Error('refusing to overwrite lowering evidence');
+        const { problem } = runNativeLibrary({ jet: candidate, file: join(out, 'Source/Fixture.jet'), prefix, exports: join(out, 'exports.list'), timeout: 600000, env: {...process.env, JET_TOOLCHAIN_ROOT: repo, JET_STORE_DIR: join(out, 'store')} });
+        if (problem) throw Error(problem.detail);
         writeFileSync(join(out, 'lower.json'), JSON.stringify({sha: process.env.COMPOSED_SHA, candidate, candidateSha256: hash(candidate), sourceSha256: hash(join(out, 'Source/Fixture.jet')), objectSha256: hash(prefix + '.o')}, null, 2) + '\n');
     } else if (mode === 'link') {
         // This fixture contains only the closure witness, not an aggregate runtime.

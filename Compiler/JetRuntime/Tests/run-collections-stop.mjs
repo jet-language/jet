@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // A test-only library object, not runtime telemetry or an exported pack API.
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
+import { candidateJetc0 } from '../../JetBackend/Tests/jet-front.mjs';
+import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
 import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
@@ -34,18 +35,9 @@ if (mode === '--assemble') {
     appendFileSync(join(out, 'Source/Fixture.jet'), '\n' + readFileSync(join(repo, 'Compiler/JetRuntime/Tests/CollectionsStopTests.jet'), 'utf8'));
     writeFileSync(join(out, 'lifecycle.list'), runtimeLifecycleList(parseRuntimeExports(readFileSync(unit, 'utf8'), 'Source/Fixture.jet')));
 } else if (mode === '--lower') {
-    const receipt = join(out, 'front.receipt'), prefix = join(out, 'fixture');
-    const result = spawnSync(candidateJetc0(), [], {
-        cwd: repo, encoding: 'utf8', timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), maxBuffer: 1 << 27,
-        env: { ...process.env, JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: out,
-            JET_BOOTSTRAP_ENTRY: 'Source/Fixture.jet', JET_BOOTSTRAP_OUTPUT: join(out, 'unused.output'), JET_BOOTSTRAP_RECEIPT: receipt,
-            JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_LIFECYCLE: join(out, 'lifecycle.list'), JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608' },
-    });
-    writeFileSync(join(out, 'front.log'), `${result.stdout ?? ''}${result.stderr ?? ''}`);
-    const problem = frontReceipt(existsSync(receipt) ? readFileSync(receipt, 'utf8') : '', result);
+    const prefix = join(out, 'fixture');
+    const { problem } = runNativeLibrary({ jet: candidateJetc0(), file: join(out, 'Source/Fixture.jet'), prefix, lifecycle: join(out, 'lifecycle.list'), timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), env: { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608' } });
     if (problem) throw Error(problem.detail);
-    if (existsSync(prefix + '.issues')) throw Error(readFileSync(prefix + '.issues', 'utf8'));
-    if (!existsSync(prefix + '.o')) throw Error('missing stopped-result fixture object');
 } else {
     const executable = join(out, 'caller');
     const build = run(process.env.CC ?? 'cc', ['-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/collections-stop.c'), join(out, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', executable]);

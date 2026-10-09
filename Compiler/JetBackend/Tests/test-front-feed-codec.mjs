@@ -5,17 +5,14 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Converter, encode, jetDecoder, loadMirSchema, parseJetSchema, parseRustDebug } from './mir-debug.mjs';
 import { decodeStream, jetWriter } from './front-feed-codec.mjs';
-import { frontReceipt } from './jet-front.mjs';
+import { nativeCommandProblem } from '../../../Tools/agent/compiler-native-transport.mjs';
 import { selfInventory } from './run-self-front.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const schema = loadMirSchema(repo);
-// Receipt parsing is strict: lints do not fail compilation, but errors,
-// interrupted candidates and absent completion never count as native passes.
-assert.equal(frontReceipt('complete=true\n', { status: 0 }), null);
-assert.equal(frontReceipt('complete=true\nreport_json={"severity":"warning","code":"W0001"}\n', { status: 0 }), null);
-assert.equal(frontReceipt('complete=true\nreport_json={"severity":"error","code":"E0101","what":"missing entry"}\n', { status: 0 }).verdict, 'no-mir');
-assert.equal(frontReceipt('complete=false\n', { status: 0 }).verdict, 'no-mir');
-assert.equal(frontReceipt('complete=true\n', { status: null, signal: 'SIGKILL' }).verdict, 'no-mir');
+// Native command status is strict: errors, signals, and nonzero exits never count as passes.
+assert.equal(nativeCommandProblem({ status: 0 }), null);
+assert.equal(nativeCommandProblem({ status: 1 }).verdict, 'no-mir');
+assert.equal(nativeCommandProblem({ status: null, signal: 'SIGKILL' }).verdict, 'no-mir');
 const named = name => ({ k: 'named', name });
 // MIR NameLedger rows have declaration defaults. The codec must consume their
 // types, never manufacture decoder names from the default initializer text.

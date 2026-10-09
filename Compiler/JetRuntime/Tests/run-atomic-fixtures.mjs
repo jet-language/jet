@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Real Jet inline-Atomic source object; link only its independent provider.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
+import { candidateJetc0 } from '../../JetBackend/Tests/jet-front.mjs';
+import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run'].includes(mode)) throw Error('usage: run-atomic-fixtures.mjs OUT assemble|lower|audit|link|run');
@@ -24,15 +25,9 @@ if (mode === 'assemble') {
   writeFileSync(join(unit, 'package.jet'), readFileSync(join(root, 'Compiler/JetRuntime/package.jet')));
   writeFileSync(join(unit, 'exports.list'), exports.sort().join('\n') + '\n');
 } else if (mode === 'lower') {
-  const prefix = join(unit, 'fixture'), receipt = join(unit, 'front.receipt');
-  const result = command('front', candidateJetc0(), [], { timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 600000), env: { ...process.env,
-    JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: unit,
-    JET_BOOTSTRAP_ENTRY: 'Source/Fixture.jet', JET_BOOTSTRAP_OUTPUT: join(unit, 'unused.output'), JET_BOOTSTRAP_RECEIPT: receipt,
-    JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: join(unit, 'exports.list'), JET_STORE_DIR: join(out, 'store') } });
-  const problem = frontReceipt(existsSync(receipt) ? readFileSync(receipt, 'utf8') : '', result);
+  const prefix = join(unit, 'fixture');
+  const { problem } = runNativeLibrary({ jet: candidateJetc0(), file: join(unit, 'Source/Fixture.jet'), prefix, exports: join(unit, 'exports.list'), env: { ...process.env, JET_TOOLCHAIN_ROOT: root, JET_STORE_DIR: join(out, 'store') } });
   if (problem) throw Error(`candidate front ${problem.verdict}: ${problem.detail}`);
-  if (existsSync(prefix + '.issues')) throw Error(readFileSync(prefix + '.issues', 'utf8'));
-  if (!existsSync(prefix + '.o')) throw Error('candidate did not emit the real Atomic fixture object');
 } else if (mode === 'audit') {
   const object = join(unit, 'fixture.o');
   const imports = command('imports', 'nm', ['-u', '--format=posix', object]).stdout;
