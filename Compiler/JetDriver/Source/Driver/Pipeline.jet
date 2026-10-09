@@ -3375,10 +3375,11 @@ fn jet_driver_comptime_run(
     // The `module\nkey` of every source pending or staged in this run.
     known_sources := [String:Bool]{}
     loop source in sources -> known_sources["{source.module_identity}\n{source.key}"] = true
-    // One environment owns the graph carrying the staged values for every
-    // item and function check; the values that landed since the last item
-    // are applied to that graph in place rather than rebuilding it per item,
-    // and counted into the run's available constant keys.
+    // One program-tables value owns the graph carrying the staged values for
+    // every item and function check, beside one environment they re-target;
+    // the values that landed since the last item are applied to that graph in
+    // place rather than rebuilding it per item, and counted into the run's
+    // available constant keys.
     owned := ^staged
     environment := sema_comptime_environment(^owned ?? ~graph, values, request.trace_sink)
     // The module scope every item and function check of the run checks in.

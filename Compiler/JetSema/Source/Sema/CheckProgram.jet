@@ -4848,6 +4848,7 @@ fn sema_comptime_probe_shared_take_sources(shared_state: Shared<SemaProbeShared>
 // The module is read from the tables' graph.
 fn sema_comptime_probe_module(shared_state: Shared<SemaProbeShared>, module_index: Int, host_hooks: SemaHostHookAccess?, threads: CompilerThreads) -> [SemaComptimeItemSource] {
     environment := sema_comptime_probe_shared_take_environment(shared_state)
+    program := sema_comptime_probe_shared_take_program(shared_state)
     module_sources := sema_comptime_collect_module_sources(graph, graph.modules[module_index])
     empty := if module_sources.len() > 0 -> sema_comptime_body_values_prefix(environment.comptime_body_publication, 0) else -> SemaComptimeBodyValues{}
     if module_sources.len() > 0 && sema_scope_environment_enter_probe_module(&environment, graph.modules[module_index].module_identity, ^empty) {
@@ -5697,6 +5698,8 @@ struct SemaFinalizeChecked {
 // order) against the graph's current contracts, traced as `phase` with the
 // number of checked functions. `pending_obligations`: the failure solve has
 // not run yet, so a failure obligation does not decide a keep-going trap.
+// `graph` moves into the pass's program tables (never copied) and back out
+// with the result.
 // SP15: a module with enough top-level function source for more than one of
 // `threads` checks those bodies on compiler threads first
 // (sema_check_bodies_parallel); the environment and memory plan move into
@@ -5766,6 +5769,7 @@ fn sema_check_module_item_count_in_shared(shared_state: Shared<SemaCheckShared>,
 fn sema_check_prepare_module(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], jobs: [SemaBodyJob], weights: [Int], workers: Int, session: SemaIncrementalCache?, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaPreparedBodies {
     if workers <= 1 -> return sema_check_prepared_none()
     environment := sema_check_shared_take_environment(shared_state)
+    program := sema_check_shared_take_program(shared_state)
     memory_plan := sema_check_shared_take_memory_plan(shared_state)
     scopes := sema_check_module_summary_scopes(&environment, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, counter_phase, trace_sink)
     memo := sema_incremental_module(session, environment, &scopes)
