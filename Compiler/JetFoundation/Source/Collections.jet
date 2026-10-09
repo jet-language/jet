@@ -10,6 +10,39 @@
 // `node Tools/agent/gen-core-tables.mjs --write` projects both tables into
 // Docs/spec/reference/core-library.md; `--check` rejects a stale projection.
 
+// Compiler-internal permutation: order[new index] is the original row index.
+// The caller supplies the complete permutation produced by its stable index
+// merge. Drain owning rows into unique empty slots in reverse destination
+// order, then pop them back in canonical order into the original receiver
+// (whose allocation and capacity pop retains). No row is read out of
+// a borrowed indexed place and no owning payload is copied.
+pub fn compiler_apply_order<T>(rows: &[T], order: [Int]) Never! {
+    count :: rows.len()
+    if count < 2 -> return
+    changed := false
+    loop index in 0..<count {
+        if order[index] != index -> changed = true
+    }
+    if !changed -> return
+    destinations := [Int]{}
+    slots := [T?]{}
+    loop index in 0..<count {
+        &destinations.push(0)
+        &slots.push(None)
+    }
+    loop index in 0..<count -> destinations[order[index]] = index
+    loop rows.len() > 0 {
+        original :: rows.len() - 1
+        row := &rows.pop() ?? panic("a nonempty compiler row list failed to pop")
+        slots[count - 1 - destinations[original]] = Val(^row)
+    }
+    loop slots.len() > 0 {
+        slot := &slots.pop() ?? panic("a nonempty compiler slot list failed to pop")
+        row := ^slot ?? panic("a compiler row permutation left an empty slot")
+        &rows.push(^row)
+    }
+}
+
 pub enum SemaCollectionKind {
     List(element: Type)
     FixedList(element: Type)
