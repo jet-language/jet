@@ -441,13 +441,12 @@ fn default_fields(argv: [String]) -> ProcessFields Never! {
     assert(!fields.detached && fields.terminal == None && fields.policy_wire == None)
 }
 
-// Process.rs:3299-3328: shared stdout/stderr BufReader leaves retain their
-// shared position and refill buffer. There is no FS fault checkpoint here.
-fn __stdout_next_line(stream: ProcessStdoutStream) -[Time.Wait]> String? IOError! {
+// Process stdout/stderr readers wait on the child execution boundary, not FS.
+fn __stdout_next_line(stream: ProcessStdoutStream) -[Exec, Time.Wait]> String? IOError! {
     pipe_line(core.process.__stdout_line_bytes(stream))
 }
 
-fn __stderr_next_line(stream: ProcessStderrStream) -[Time.Wait]> String? IOError! {
+fn __stderr_next_line(stream: ProcessStderrStream) -[Exec, Time.Wait]> String? IOError! {
     pipe_line(core.process.__stderr_line_bytes(stream))
 }
 
