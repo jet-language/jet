@@ -73,15 +73,16 @@ function codeOnly(source) {
 // Foreign/member calls and named address-call transports are not semantic
 // callback edges; their stop facts belong to the compiler's callback analysis.
 function rejectUnsupportedCalls(code, path) {
-  // Type arguments start with a standalone '<', not shift/comparison tokens.
-  for (const match of code.matchAll(/\b([A-Za-z_]\w*)\s*<(?![<=])/g)) {
+  // Mirrors Expressions.jet parser_turbofish_ahead: the head `name<` and the
+  // closing `>` must touch the call's `(`; spaced `a < b > (c)` is a comparison.
+  for (const match of code.matchAll(/\b([A-Za-z_]\w*)<(?![<=])/g)) {
     let at = match.index + match[0].length, depth = 1;
     while (at < code.length && depth && !/[{};]/.test(code[at])) {
       if (code[at] === "<") ++depth;
       else if (code[at] === ">") --depth;
       ++at;
     }
-    if (!depth && code.slice(at).trimStart().startsWith("(")) {
+    if (!depth && code[at] === "(") {
       throw new Error(`${path}: unsupported generic call ${match[1]}`);
     }
   }

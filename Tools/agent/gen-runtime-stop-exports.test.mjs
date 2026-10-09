@@ -131,6 +131,18 @@ fn rotate(word: I64, shift: I64) -> I64 {
 `), ["checked"]);
 });
 
+test("spaced comparisons followed by a later '> (' are not generic call heads", () => {
+  assert.deepEqual(closure(`
+fn advance(at: I64, length: I64, data: I64) -> I64 {
+    loop at < length && data > (I64{32}) -> at += I64{1}
+    at
+}
+#Export(c) fn ordinary(at: I64, length: I64) -> I64 { advance(at, length, I64{0}) }
+#Export(c) fn checked(value: I64) { rt_task_panic_publish(value, value, value) }
+`), ["checked"]);
+  assert.throws(() => closure("#Export(c) fn generic_caller() { external<T>(I64{0}) }"), /unsupported generic call external/);
+});
+
 test("missing publication root or malformed source fails instead of emitting incomplete facts", () => {
   assert.throws(() => runtimeStopExports([["Missing.jet", "#Export(c) fn ordinary() {}"]]), /missing runtime panic publication root/);
   assert.throws(() => closure("fn broken() {"), /unclosed broken body/);
