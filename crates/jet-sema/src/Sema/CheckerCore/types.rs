@@ -15,6 +15,20 @@ impl<'a> Checker<'a> {
         };
         registry.contains(leaf) && registry.source_owns_type(leaf)
     }
+
+    /// A raw projection uses the base registered by the declaring module, not
+    /// a same-spelled type in the reader's registry.
+    pub(crate) fn distinct_base_for_reader(&self, name: &str) -> Option<Type> {
+        let (namespace, leaf) = Self::split_type_name(name);
+        let owner = self.struct_owner_module(leaf, namespace)?;
+        let registry = if owner == self.module_idx {
+            self.registry
+        } else {
+            &self.modules?.get(owner)?.registry
+        };
+        let base = registry.distinct_base(leaf)?;
+        Some(self.owner_type_for_reader(owner, leaf, base.clone()))
+    }
     pub(crate) fn has_source_operator_left(&self, left: &Type, trait_name: &str) -> bool {
         let left_name = left.name();
         self.modules.is_some_and(|modules| modules.iter().any(|module|
