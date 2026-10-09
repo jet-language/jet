@@ -1104,10 +1104,15 @@ impl<'a> Checker<'a> {
         {
             let receiver_ty = if receiver_is_left { lt } else { rt };
             let argument_ty = if receiver_is_left { rt } else { lt };
+            let (_, registry, _) = self.capability_type_context(receiver_ty);
+            let key = jet_foundation::Traits::operator_method_identity(&row.left, trait_name, method, &row.rhs);
+            let result = registry.operator_signatures.get(&key)
+                .and_then(|signature| signature.return_type.clone())
+                .unwrap_or(row.result);
             (
                 receiver_ty.clone(),
                 argument_ty.clone(),
-                row.result,
+                result,
                 row.left,
                 Some(row.rhs),
             )
@@ -1655,7 +1660,7 @@ impl<'a> Checker<'a> {
                     _ => None,
                 };
                 if let Some((trait_name, method, mut ret)) = hook {
-                    let (owner_type, _, owner_traits) = self.capability_type_context(&lt);
+                    let (owner_type, registry, owner_traits) = self.capability_type_context(&lt);
                     let operator_rhs = owner_traits
                         .operator_impl_for(&owner_type, trait_name, &owner_type)
                         .map(|implementation| {
