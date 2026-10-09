@@ -3707,8 +3707,14 @@ impl<'a> Checker<'a> {
                 self.push_scope();
                 self.check_block(else_body, false);
                 let saved_expected = self.expected_type.clone();
-                if sibling_rule && bare_absent_arm(else_value, true) {
-                    self.expected_type = then_ty.clone().filter(|ty| ty.unwrap_option().is_some());
+                if sibling_rule
+                    && (bare_absent_arm(else_value, true)
+                        || matches!(else_value.without_parens(), Expr::If { .. }))
+                    && then_ty.as_ref().is_some_and(|ty| ty.unwrap_option().is_some())
+                {
+                    // A match is a nested if chain. Carry the live optional
+                    // sibling through later arms even when one arm returns.
+                    self.expected_type = then_ty.clone();
                 } else if if_expected.is_none() && self.uncontextual_err_arm(else_value) {
                     self.expected_type =
                         then_ty.clone().filter(|ty| matches!(ty, Type::Result { .. }));

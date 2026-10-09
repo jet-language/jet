@@ -111,7 +111,7 @@ fn project() -> String? ServiceError! {
     key :: if optional_text() == {
         .Val(value) -> Val(value)
         .None -> None
-        .Err(error) -> return Err(error)
+        .Err(error) -> { return Err(error) }
     }
     key
 }
@@ -134,7 +134,7 @@ fn next(scanner: &Scanner) -> Dyn? XMLFault! {
     candidate :: if (&scanner.next()) == {
         .Val(event) -> Val(event)
         .None -> None
-        .Err(error) -> return Err(error)
+        .Err(error) -> { return Err(error) }
     }
     if candidate == .Val(event) -> return Val(event)
     None
@@ -157,7 +157,7 @@ use core.files.[FileReader]
 fn byte(input: &FileReader) -> U8? StreamError! {
     byte :: if encoding.__read_byte(&input) == {
         .Ok(value) -> value
-        .Err(cause) -> return Err(StreamError.IO(cause.message))
+        .Err(cause) -> { return Err(StreamError.IO(cause.message)) }
     }
     byte
 }
@@ -165,7 +165,7 @@ fn statement_byte(input: &FileReader) -> U8? StreamError! {
     byte := U8?{None}
     if encoding.__read_byte(&input) == {
         .Ok(value) -> { byte = value }
-        .Err(cause) -> return Err(StreamError.IO(cause.message))
+        .Err(cause) -> { return Err(StreamError.IO(cause.message)) }
     }
     byte
 }
@@ -175,4 +175,67 @@ fn statement_byte(input: &FileReader) -> U8? StreamError! {
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn value_match_braced_error_arm_keeps_optional_sibling_context() {
+    for arms in [
+        ".Val(value) -> Val(value)\n.None -> None\n.Err(error) -> { return Err(error) }",
+        ".None -> None\n.Val(value) -> Val(value)\n.Err(error) -> { return Err(error) }",
+    ] {
+        let source = format!("#Error enum Fault {{ Bad }}\nfn read() -> Int? Fault! {{ None }}\nfn project() -> Int? Fault! {{\n value :: if read() == {{ {arms} }}\n value\n}}\nfn run() {{}}\n");
+        let errors = check_sources(&[("pkg/main.jet", "main", &source, &[])]);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+}
+
+#[test]
+fn source_core_enum_and_struct_keep_their_declaration_identity() {
+    let errors = check_sources(&[
+        ("<corelib>/Core/service/service.jet", "core_core_service", "#Error enum ServiceError { Full(String) }\n", &[]),
+        ("<corelib>/Core/jobs/jobs.jet", "core_core_jobs", "use core.service.[ServiceError]\nuse core.service as service\nstruct Wrapped { error: service.ServiceError }\nfn wrap(error: ServiceError) -> Wrapped Never! { Wrapped{error: error} }\n", &[]),
+        ("<corelib>/Core/crypto/crypto.jet", "core_core_crypto", "use bridge as jetc\nstruct Secret { bytes: [U8] }\nfn wrap() -> jetc.Wrapped Never! { jetc.Wrapped{key: Secret{bytes: [U8]{}}} }\n", &[("jetc", 3)]),
+        ("pkg/bridge.jet", "bridge", "use core.crypto as crypto\nstruct Wrapped { key: crypto.Secret }\n", &[]),
+        ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+    ]);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn native_core_enum_and_error_constructors_resolve_without_public_exports() {
+    let errors = check_sources(&[
+        ("<corelib>/Core/service/service.jet", "core_core_service", "use core as core\nfn adapter() -> __TreeStateAdapter Never! { __TreeStateAdapter.Empty }\nfn failure() -> TaskFailure Never! { TaskFailure.Cancelled }\n", &[]),
+        ("<corelib>/Core/time/time.jet", "core_time", "use core as core\nfn expired() -> Int Expired! { Err(Expired{}) }\nstruct Clock {}\nimpl Clock { fn now(self) -> Int Never! { 1 } }\nfn sample(clock: Clock) -> Int Never! { clock.now() }\n", &[]),
+        ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+    ]);
+    assert!(errors.is_empty(), "{errors:?}");
+    let errors = check_sources(&[
+        ("<corelib>/Core/files/files.jet", "core_files", "fn adapter() -> __TreeStateAdapter Never! { __TreeStateAdapter.Empty }\n", &[]),
+        ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+    ]);
+    assert!(errors.iter().any(|error| error.starts_with("E0119:")), "{errors:?}");
+}
+
+#[test]
+fn retained_core_arguments_accept_fresh_values_but_not_unmarked_places() {
+    let source = "use core as core\nfn append(tree: &ServiceTree, event: String) Never! { core.service.__tree_event_push(&tree, event.copy()) }\n";
+    for value in ["event.copy()", "\"fresh\""] {
+        let source = source.replace("event.copy()", value);
+        let errors = check_sources(&[
+            ("<corelib>/Core/service/service.jet", "core_core_service", &source, &[]),
+            ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+        ]);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+    let errors = check_sources(&[
+        ("<corelib>/Core/service/service.jet", "core_core_service", "use core as core\nfn group(tree: &ServiceTree, events: [String]) Never! { core.service.__group_push(&tree, \"fresh\", events[0..<1]) }\n", &[]),
+        ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+    ]);
+    assert!(errors.is_empty(), "{errors:?}");
+    let source = source.replace("event.copy()", "event");
+    let errors = check_sources(&[
+        ("<corelib>/Core/service/service.jet", "core_core_service", &source, &[]),
+        ("pkg/main.jet", "main", "fn run() {}\n", &[]),
+    ]);
+    assert!(errors.iter().any(|error| error.starts_with("E0201:")), "{errors:?}");
 }

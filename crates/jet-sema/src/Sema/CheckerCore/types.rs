@@ -745,13 +745,17 @@ impl<'a> Checker<'a> {
         ty: &Type,
         subst: &HashMap<String, Type>,
     ) -> Type {
+        // Resolve declared names in the field owner's import scope before
+        // substitution; caller-supplied generic arguments retain their owner.
+        let generic_names = subst.keys().cloned().collect();
+        let ty = self.qualify_method_type(owner_mod, ty, &generic_names);
         if owner_mod == self.module_idx {
-            self.trait_reg.instantiate_type(ty, subst)
+            self.trait_reg.instantiate_type(&ty, subst)
         } else {
             self.modules
                 .and_then(|modules| modules.get(owner_mod))
-                .map(|module| module.trait_reg.instantiate_type(ty, subst))
-                .unwrap_or_else(|| substitute_type(ty, subst))
+                .map(|module| module.trait_reg.instantiate_type(&ty, subst))
+                .unwrap_or_else(|| substitute_type(&ty, subst))
         }
     }
 }

@@ -3650,6 +3650,7 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
         // construction and field access; they need no source declaration.
         "TextError" => Some(vec![("message".to_string(), Type::String)]),
         "RangeError" => Some(vec![("reason".to_string(), Type::String)]),
+        "Expired" => Some(vec![]),
         // D-COMPUTE1=D: Tensor is a Core-exported struct whose source
         // declaration is owned by `core.compute`; keep its field shape here
         // so imported values and `Tensor{ ... }` literals share one oracle.

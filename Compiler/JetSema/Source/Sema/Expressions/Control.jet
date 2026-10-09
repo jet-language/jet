@@ -1699,7 +1699,11 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
         sema_ownership_fork_drop(&state, fork, then_found, else_found)
         return None
     }
-    else_expected :: if sibling_rule && sema_expression_bare_absent_arm(else_value, true) -> sema_expression_absent_sibling(then_first) else -> expected
+    // Decision-table continuations retain a live optional sibling even when
+    // a later error arm diverges instead of producing an optional value.
+    optional_continuation :: if else_value == .If(_, _, _, _, _, _) -> true else -> sema_expression_bare_absent_arm(else_value, true)
+    sibling_expected :: sema_expression_absent_sibling(then_first)
+    else_expected :: if sibling_rule && optional_continuation && sibling_expected != None -> sibling_expected else -> expected
     else_checked :: sema_check_expression(else_value, else_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
         sema_scope_leave(&scopes, &state)
         sema_scope_rollback(&scopes, else_mark)

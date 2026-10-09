@@ -184,7 +184,12 @@ The compiler's checked-build projections select Core graph record types with
 Imported Core record types retain their source-owned associated methods:
 `EncodingError.new(...)` through a grouped import, or
 `encoding.EncodingError.new(...)`, resolves the record's method rather
-than a module member called `new`.
+than a module member called `new`. The same declaration-owned lookup applies
+to an ordinary imported module's `alias.Type.method(...)`, including sealed
+Core source parts; qualification does not turn a type into a runtime field.
+Declared field types resolve qualified and grouped-import names in their
+declarer's scope before generic substitution. A bare value and a qualified
+field spelling for the same declaration share one nominal identity.
 Source-owned Core enum unit and payload cases resolve the enum's declaring
 registry before module-item lookup. Native Core enums use their canonical
 variant tables as well: grouped `EnvError.InvalidValue` and qualified
@@ -200,6 +205,13 @@ catalog identity, independently of any renamed module import. Qualified types
 inside imported signatures and fields resolve in the declaring module's import
 scope. Native private carriers remain nameable only in their owning Core scope;
 this admission does not create a source declaration or a public export.
+The same owner-only rule admits native enum menus such as
+`__TreeStateAdapter` when no source enum is declared. Compiler-owned
+`TaskFailure` uses its canonical enum menu, and `Expired{}` uses its empty
+record shape. Source-owned methods (including `Clock.now`) take precedence
+over same-spelled native method tables.
+Retained Core-call parameters follow ordinary ownership: existing places
+need `^`, but a fresh call or explicit copy result transfers unmarked.
 A qualified nominal head selects the declaration in that module, even when
 its leaf name matches a builtin trait such as `Writer`. A qualified reference
 back to the current module's type denotes the same nominal as its local name;
@@ -878,12 +890,18 @@ field paths, indexes, aliases, and calls never narrow — bind with
 binding for typed IR; codegen stays mechanical. Documentation teaches the
 `None` check for a direct stable name and the binding pattern for every other
 case.
+Value-match arms retain a live optional sibling's expected type across
+decision-table continuations, including braced `return Err(...)` arms.
+Those non-returning arms do not erase the type needed by bare `None`.
 
 **D-OPT-LIFT1=A — A plain value fills an optional slot** *(ratified
 2026-09-28, card #3685; amends S32 and E0108)*: a value of checked type `T`
 fills a slot whose checked type is `T?`: returns (including `?? return`), call
 arguments, struct fields and enum payloads, list and map items, typed
-bindings, and reassignment of a `T?` place. Callee and generic choices happen
+bindings, and reassignment of a `T?` place. The success payload of an explicit
+`Ok(...)` is also a fixed slot: after `if byte == None -> return Ok(None)`
+refines `byte` to `U8`, `Ok(byte)` fills a declared `U8?` success slot by
+lifting the payload once. Callee and generic choices happen
 first; the lift then adds exactly one `Present`, so it never picks a callee or
 infers a generic, and every tier lowers it exactly like a written `Val(x)`.
 `x == 5` holds only when `x` holds 5 and `x != 5` is its opposite; only

@@ -5597,10 +5597,9 @@ impl<'a> Checker<'a> {
         true
     }
 
-    /// Finish one typed Core argument after its ordinary inference.  Core rows
-    /// and user functions share the same ownership fact: a `Move` parameter
-    /// must receive `^`, and a successful move invalidates the source binding.
-    /// Keeping this at the ownership boundary avoids per-API move tracking.
+    /// Finish one typed Core argument after ordinary inference. An existing
+    /// place needs `^` to transfer ownership; a fresh result has no source
+    /// binding to invalidate and passes unmarked, as for user functions.
     pub(crate) fn finish_core_call_ownership(
         &mut self,
         call_name: &str,
@@ -5612,7 +5611,12 @@ impl<'a> Checker<'a> {
         if param_conv != AccessConvention::Move {
             return;
         }
-        if arg.convention != AccessConvention::Move {
+        if arg.convention != AccessConvention::Move
+            && self.place_from_expr(&arg.expr).is_some()
+            // A bare slice materializes an owned result; a marked range
+            // remains a Place and must not take this fresh-value route.
+            && !matches!(arg.expr.without_parens(), Expr::Slice { .. })
+        {
             self.diags.push(Diagnostic::error(
                 "E0201",
                 format!(

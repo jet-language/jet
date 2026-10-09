@@ -2007,17 +2007,25 @@ impl<'a> Checker<'a> {
     /// not the module reading the declaration's signature or record fields.
     fn owner_qualified_nominal(&self, owner: usize, name: &str) -> Option<String> {
         let (namespace, leaf) = Self::split_type_name(name);
-        let namespace = namespace?;
         let module = self.modules?.get(owner)?;
-        let imported_owner = if let Some(core_module) = module.core_imports.get(namespace) {
-            self.core_source_owner_module(core_module, leaf)?
-        } else {
-            let imported = *module.imports.get(namespace)?;
-            if self.modules?.get(imported)?.registry.contains(leaf) {
-                imported
+        let (imported_owner, leaf) = if let Some(namespace) = namespace {
+            let imported_owner = if let Some(core_module) = module.core_imports.get(namespace) {
+                self.core_source_owner_module(core_module, leaf)?
             } else {
-                self.name_ledger.namespace_owner(imported, leaf)?
-            }
+                let imported = *module.imports.get(namespace)?;
+                if self.modules?.get(imported)?.registry.contains(leaf) {
+                    imported
+                } else {
+                    self.name_ledger.namespace_owner(imported, leaf)?
+                }
+            };
+            (imported_owner, leaf)
+        } else if let Some(imported_leaf) = module.core_item_imports.get(name) {
+            let core_module = module.core_imports.get(name)?;
+            (self.core_source_owner_module(core_module, imported_leaf)?, imported_leaf.as_str())
+        } else {
+            let (imported_leaf, imported_owner) = module.unqualified_file.get(name)?;
+            (*imported_owner, imported_leaf.as_str())
         };
         Some(if imported_owner == self.module_idx {
             leaf.to_string()
@@ -2747,7 +2755,7 @@ impl<'a> Checker<'a> {
             return true;
         }
         // Native Core dot-literal enums do not have a source declaration.
-        if matches!(enum_name, "ProcessStreamMode" | "ProcessSignal" | "EnvError") {
+        if matches!(enum_name, "ProcessStreamMode" | "ProcessSignal" | "EnvError" | Syntax::TYPE_TASK_FAILURE) {
             return true;
         }
         // D-TEXTWIDTH1=B: `TextWidth`'s two field enums.
@@ -2944,6 +2952,18 @@ impl<'a> Checker<'a> {
         }
         if let Some(v) = core_tls_variants(enum_name) {
             return Some(v);
+        }
+        // The catalog already registers native unit enums. Their private
+        // menus remain usable only inside the cataloged owner, not as exports.
+        if !enum_name.starts_with("__")
+            || (self.module_is_core_source(self.module_idx)
+                && self.modules.and_then(|modules| modules.get(self.module_idx))
+                    .is_some_and(|state|
+                        jet_foundation::CoreModuleExports::core_source_module_by_alias(&state.module_alias)
+                            .is_some_and(|source|
+                                jet_foundation::CoreModuleExports::core_leaf_kind(source.module, enum_name).is_some())))
+        {
+            return core_declared_enum_variants(enum_name);
         }
         None
     }

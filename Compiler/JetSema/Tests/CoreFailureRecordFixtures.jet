@@ -43,5 +43,7 @@ fn run() {
     core_failure_record_check(duplicate_display, "user/fixture", "E0908")
     writer_source :: "module jetc {{ struct Writer {{ prefix: String }} }}\nfn prefix(writer: jetc.Writer) -> String {{ writer.prefix.copy() }}\nfn run() {{}}"
     core_failure_record_check(writer_source, "user/fixture", "")
+    optional_dispatch :: "#Error enum Fault {{ Bad }}\nfn read() -> Int? Fault! {{ None }}\nfn project() -> Int? Fault! {{\n value :: if read() == {{\n .Val(value) -> Val(value)\n .None -> None\n .Err(error) -> {{ return Err(error) }}\n }}\n value\n}}\nfn run() {{}}"
+    core_failure_record_check(optional_dispatch, "user/fixture", "")
     print("Core failure record literals: passed")
 }

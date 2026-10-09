@@ -7901,7 +7901,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false)
             .filter(|_| !matches!(&recv_ty, Type::Named(name) | Type::Apply { name, .. }
-                if self.resolve_opaque_method_sig(name, method).is_some())) {
+                if self.source_owns_nominal(name) || self.resolve_opaque_method_sig(name, method).is_some())) {
             let nominal_recv = match &recv_ty {
                 Type::Named(name) => Some(name.as_str()),
                 Type::Apply { name, args } if name == "Atomic" && args.len() == 1 => {
