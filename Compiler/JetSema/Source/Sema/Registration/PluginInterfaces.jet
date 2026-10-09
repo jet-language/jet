@@ -21,6 +21,7 @@ use jet_foundation.[
     ViewSourceProjection,
     access_sigil,
     dimension_identity,
+    failure_contract_of_function,
     measure_expression,
     measure_signed_value,
     mir_sha256_hex_bytes,
@@ -635,7 +636,21 @@ fn sema_plugin_export_from_function(function: Func, dimensions: [SemaPluginUnitD
         name: function.name,
         signature: sema_plugin_canonical_fn_signature(function, dimensions),
         params: params,
-        return_type: function.return_type,
+        return_type: sema_plugin_export_boundary_return_type(function),
+    }
+}
+
+// Rust Guest.rs `export_boundary_return_type`: an export publishes the success
+// value of its failure contract (the failure-set solve may already have turned
+// a written `-> T` into a span-less `T Never!` carrier). Optional and `Never`
+// carriers have no success value to publish and keep their written type.
+fn sema_plugin_export_boundary_return_type(function: Func) -> Type? {
+    written :: function.return_type ?? return None
+    if failure_contract_of_function(function.return_type, function.return_type_span) == {
+        .Default(success, _) | .Explicit(success, _) | .Inferred(success, _) -> Val(success)
+        .Converted(success, _, _) -> Val(success)
+        .ProvenUnreachable(success) | .InferredNever(success) -> Val(success)
+        .Optional(_) | .DeclaredNever -> Val(written)
     }
 }
 
