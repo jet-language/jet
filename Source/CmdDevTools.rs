@@ -8209,23 +8209,37 @@ pub(crate) fn run_eval_expression(source: &str, mode: OutputMode) {
     let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     match jet::REPL::eval_once(source, &base_dir, jet::REPL::ReplFlags::default()) {
         Ok(evaluated) => {
-            // An input that only binds or declares has no value of its own;
-            // render it as Unit, the same way a `run()` that hands nothing
-            // back renders in the file form. One canonical rendering.
-            let value = evaluated.value.unwrap_or(jet::CtValue::Unit);
+            // Native turns already carry checked Display text and typed JSON.
+            // A declaration-only input retains the file form's Unit rendering.
             if mode.json {
                 eprint!("{}{}", evaluated.stdout, evaluated.stderr);
-                print_eval_json(&value);
+                let value = evaluated.value.as_ref().map(|value| {
+                    StatusValue::parse(&value.json).expect("executor typed JSON must be valid JSON")
+                }).unwrap_or(StatusValue::Null);
+                println!("{}", StatusEnvelope::new("eval", true).with_field("value", value).json());
             } else {
                 print!("{}", evaluated.stdout);
                 eprint!("{}", evaluated.stderr);
-                println!("{}", value.render_pretty());
+                match evaluated.value {
+                    Some(value) if value.ty.as_deref() == Some("String") => println!("{}", jet::Diagnostics::json_str(&value.shown)),
+                    Some(value) => println!("{}", value.shown),
+                    None => println!("()"),
+                }
             }
         }
-        Err(diags) => {
+        Err(error) => {
+            if mode.json {
+                eprint!("{}", error.stdout);
+            } else {
+                print!("{}", error.stdout);
+            }
+            eprint!("{}", error.stderr);
+            if let Some(report) = error.report {
+                eprint!("{report}");
+            }
             eprint!(
                 "{}",
-                jet::render_all_colored(EVAL_EXPRESSION_LABEL, source, &diags, mode.color_stderr())
+                jet::render_all_colored(EVAL_EXPRESSION_LABEL, source, &error.diagnostics, mode.color_stderr())
             );
             exit(ExitCodes::USER_ERROR);
         }
