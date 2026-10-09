@@ -1690,6 +1690,18 @@ fn core_fixed_sig_raw(
         ("core.http.client", "__get") => Some((vec![(read, Type::String)], Some(result_ty(Type::Named("HTTPResponse".to_string()), Type::Named("HTTPError".to_string()))))),
         ("core.http.client", "__post") => Some((vec![(read, Type::String), (read, Type::String)], Some(result_ty(Type::Named("HTTPResponse".to_string()), Type::Named("HTTPError".to_string()))))),
         ("core.http.client", "__request") => Some((vec![(read, Type::String), (read, Type::String)], Some(Type::Named("HTTPRequest".to_string())))),
+        ("core.http.client", "jet_http_build_resolve") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::List(Box::new(u8_ty())))), Type::String)),
+        )),
+        ("core.http.client", "jet_http_build_get") => Some((
+            vec![
+                (read, Type::String), (read, Type::String), (read, Type::String), (read, Type::Bool),
+                (read, Type::List(Box::new(Type::List(Box::new(u8_ty()))))),
+                (read, Type::Int), (read, Type::Int), (read, Type::Int),
+            ],
+            Some(result_ty(Type::List(Box::new(Type::List(Box::new(u8_ty())))), Type::String)),
+        )),
         ("core.http.server", "__mux") => Some((vec![], Some(Type::Named("HTTPMux".to_string())))),
         ("core.http.server", "__serve_once") => Some((vec![(read, Type::String), (read, Type::Named("HTTPMux".to_string()))], Some(result_ty(unit_ty(), Type::Named("HTTPError".to_string()))))),
         ("core.http.server", "__serve_once_listener") => Some((vec![(read, Type::Named("TCPListener".to_string())), (read, Type::Named("HTTPMux".to_string()))], Some(result_ty(unit_ty(), Type::Named("HTTPError".to_string()))))),

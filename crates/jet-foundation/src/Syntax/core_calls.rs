@@ -755,7 +755,7 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
             ],
         ))
         || (same_text(module, "core.http.client")
-            && one_of(method, &["get", "post", "request", "__get", "__post", "__request"]))
+            && one_of(method, &["get", "post", "request", "__get", "__post", "__request", "jet_http_build_resolve", "jet_http_build_get"]))
         || (same_text(module, "core.http")
             && same_text(method, "get"))
         || (same_text(module, "core.http.server")
