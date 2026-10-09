@@ -1,5 +1,5 @@
-// The restored internal kernel is the one grammar and scalar policy owner.
-use core.db.runtime.kernel_sql_query as sql_kernel
+// The public SQL kernel is the one grammar and scalar policy owner.
+use core.db.sql as sql_kernel
 #Test("SQL canonical tokenizer retains Unicode strings and comments") {
     tokens :: sql_kernel.sql_tokens("SELECT 'x'';é', value /* outer */ FROM source -- tail\nWHERE value >= 2;") ?? panic("tokens")
     assert_eq(tokens, [String]{"SELECT", "'x'';é'", ",", "value", "FROM", "source", "WHERE", "value", ">=", "2", ";"})

@@ -4259,6 +4259,27 @@ migration retain both `DB` and `Time.Wait`, including at the provider boundary.
 The existing registered Rust SQLite bridge remains the raw host boundary under
 the Jet source policy until runtime cutover. The separate CFFI `__Driver`
 adapter is held; it is not part of this source-owned Core integration.
+
+### `core.db.sql` — pure SQL grammar and row selection
+
+[`Core/db/sql.jet`](../../../Core/db/sql.jet) is the canonical public SQL
+kernel. Import it with `use core.db.sql as sql`; the former Core-private
+runtime module has been relocated, without a compatibility module or re-export.
+It carries no database connection or raw-SQL execution authority.
+
+`parse_sql_query` produces a `JetSQLQuery` for `SELECT`, `WHERE`, `GROUP BY`,
+`ORDER BY`, and `LIMIT`, including `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`.
+`sql_query_fields` and `validate_sql_query_schema` inspect and validate its
+field references. `execute_sql_rows` projects callback-provided `JetSQLValue`
+cells into `JetSQLResultRow` values; `select_sql_indices` selects source rows
+using string-valued cells. The projection carriers are `JetSQLAggregate`,
+`JetSQLSelectItem`, and `JetSQLGroupKey`.
+
+The tokenizer, quoted-identifier handling, scalar comparisons, aggregation,
+and result lookup share this source implementation with the compiler CLI.
+Parser cursors, fixed-wide accumulation, grouping keys, and sorting carriers
+remain in its `priv module internal`.
+
 ### `core.compute` — checked tensors and explicit devices
 
 `core.compute` provides dense tensors, shape-checked operations, sparse CSR
@@ -4625,6 +4646,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.data.sketch.reservoir`
 - `core.data.sketch.tdigest`
 - `core.db`
+- `core.db.sql`
 - `core.email`
 - `core.encoding`
 - `core.encoding.base32`
