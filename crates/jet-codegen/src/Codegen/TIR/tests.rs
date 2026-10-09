@@ -2894,9 +2894,7 @@ fn mir_lowers_computed_field_getter_onto_inherent_impl() {
             .functions
             .iter()
             .find(|function| {
-                function.name == "Stats::doubled"
-                    || function.name.ends_with("::doubled")
-                    || function.name == "doubled"
+                function.name.ends_with(&Syntax::computed_field_getter_name("doubled"))
             })
             .expect("computed field getter doubled");
         match &method.form {

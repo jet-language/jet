@@ -1011,8 +1011,10 @@ fn lower_method_for_owner_inner(
         self_conv: if is_static { None } else { self_conv },
         owner_type: owner_ty,
     };
-    let memo_field = cx.fact_memo_fields(type_name)
-        .and_then(|fields| fields.contains_key(&f.name).then(|| f.name.clone()));
+    let memo_field = Syntax::computed_field_getter_field(&f.name).and_then(|field| {
+        cx.fact_memo_fields(type_name)
+            .and_then(|fields| fields.contains_key(field).then(|| field.to_string()))
+    });
     note_stack_sentry_in_tir(&body, &env);
     let uses_stack_sentry = env.stack_sentry_needed();
     TFunc {
