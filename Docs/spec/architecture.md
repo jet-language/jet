@@ -434,6 +434,14 @@ the lower worker primitive alone does not install this root-owned authority.
 `Comptime::with_ambient` restores the previous callbacks on return and unwind.
 Nothing in this crossing grants runtime code a compile-time compiler API.
 
+Checked comptime fragments retain per-context nominal/import facts, but share
+each reachable module's immutable function-body projection. The Rust host's
+`checked_comptime_nominals_for_modules` opens one loaded-module memo scope
+around the whole context collection, both before body checking and after its
+checked items are published. Opening the scope only for later body evaluation
+would already have copied every reachable AST once per context. The scope
+closes before module-state mutation, so sharing does not retain stale rows.
+
 This is a scoped Rust call boundary, not a C ABI or a promise about Rust
 `Vec`, enum or pointer layout. The worker transports a Rust panic payload
 unchanged back to its Rust caller; it does not relabel an ICE as a successful

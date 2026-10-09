@@ -2359,6 +2359,34 @@ mod structure_tests {
         }
     }
     #[test]
+    fn checked_nominal_contexts_share_reachable_module_bodies() {
+        let mut bundle = incremental_bundle("fn run() {}\n");
+        for (alias, source) in [
+            ("shared", "pub fn shared_value() -> Int { 1 }\n"),
+            ("left", "use shared\nfn left() -> Int { shared.shared_value() }\n"),
+            ("right", "use shared\nfn right() -> Int { shared.shared_value() }\n"),
+        ] {
+            let mut module = incremental_bundle(source).modules.remove(0);
+            module.path = std::path::PathBuf::from(format!("{alias}.jet"));
+            module.display = format!("{alias}.jet");
+            module.alias = alias.to_string();
+            bundle.modules.push(module);
+        }
+        let (diagnostics, _, facts) =
+            check_bundle_with_effect_facts(&mut bundle, CompileMode::Check);
+        assert!(
+            diagnostics.iter().all(|diagnostic|
+                diagnostic.severity != crate::Diagnostics::Severity::Error),
+            "{diagnostics:#?}"
+        );
+        let shared_body = |index: usize| facts[index].core_source_bodies.values()
+            .find(|body| body.functions.contains_key("shared_value"))
+            .expect("each importing context retains the shared function body");
+        assert!(std::sync::Arc::ptr_eq(shared_body(2), shared_body(3)));
+        assert!(!shared_body(2).functions["shared_value"].body.is_empty());
+    }
+
+    #[test]
     fn original_error_supplier_retains_one_source_owner_and_parser_provenance() {
         let mut bundle = incremental_bundle("struct Message { value: Int }\nfn run() {}\n");
         let user_items = bundle.modules[0].items.len();

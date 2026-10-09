@@ -754,6 +754,21 @@ fn project_fragment_module(
     FragmentModuleRows { row_key, body: std::sync::Arc::new(body), core_source_sigs, nominals }
 }
 
+/// Project every evaluating context under one loaded-module memo scope.
+/// Without this scope, each context deep-copies the same reachable function
+/// bodies before retaining them in its facts: memory grows with contexts times
+/// reachable AST size instead of one shared body projection per loaded module.
+pub(crate) fn checked_comptime_nominals_for_modules(
+    modules: &[crate::Sema::ModuleState],
+    name_ledger: &jet_foundation::Names::NameLedger,
+) -> std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]> {
+    let _modules = open_fragment_module_memos(modules);
+    modules.iter().enumerate().map(|(module_idx, _)| {
+        checked_comptime_nominals_for_context(modules, module_idx, name_ledger)
+            .expect("module index came from the checked states")
+    }).collect()
+}
+
 /// Project the checked nominal/import rows needed by an isolated comptime
 /// fragment before a `Checker` exists for the current module. Derive and
 /// marker expansion runs at that earlier bundle phase, but it must carry the

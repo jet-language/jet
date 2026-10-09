@@ -286,18 +286,8 @@ pub(super) fn complete_bundle_check(
     } else {
         None
     };
-    let checked_nominals: std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]> =
-        (0..states_mut.len())
-            .map(|idx| {
-                super::super::super::CheckerCore::checked_comptime_nominals_for_context(
-                    states_mut,
-                    idx,
-                    &name_ledger,
-                )
-                .expect("registered module must have a checked nominal context")
-            })
-            .collect::<Vec<_>>()
-            .into();
+    let checked_nominals =
+        crate::Sema::CheckerCore::checked_comptime_nominals_for_modules(states_mut, &name_ledger);
     for (state, facts) in states_mut.iter_mut().zip(checked_nominals.iter()) {
         state.checked_nominals = Some(std::sync::Arc::clone(facts));
     }
@@ -917,14 +907,8 @@ pub(super) fn complete_bundle_check(
         state.items.clone_from(&module.items);
         super::CheckInner::count_program_copy(module.items.len());
     }
-    let checked_nominals = {
-        let _modules = crate::Sema::CheckerCore::open_fragment_module_memos(states_mut);
-        states_mut.iter().enumerate().map(|(module_idx, _)| {
-            crate::Sema::CheckerCore::checked_comptime_nominals_for_context(
-                states_mut, module_idx, &name_ledger,
-            ).expect("module index came from the checked states")
-        }).collect::<std::sync::Arc<[_]>>()
-    };
+    let checked_nominals =
+        crate::Sema::CheckerCore::checked_comptime_nominals_for_modules(states_mut, &name_ledger);
     (
         diags,
         super::super::super::Effects::SemIndexEffectFacts {
