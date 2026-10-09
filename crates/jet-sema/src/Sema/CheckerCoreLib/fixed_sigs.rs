@@ -2303,22 +2303,6 @@ fn core_fixed_sig_raw(
             vec![(read, Type::Named("SyncList".into()))],
             Some(Type::String),
         )),
-        ("core.sync", "policy_new") => Some((
-            vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(Type::Named("RowPolicy".into()), Type::String)),
-        )),
-        ("core.sync", "policy_allows") => Some((
-            vec![
-                (read, Type::Named("RowPolicy".into())),
-                (read, Type::String),
-                (read, Type::String),
-            ],
-            Some(Type::Bool),
-        )),
-        ("core.sync", "policy_show") => Some((
-            vec![(read, Type::Named("RowPolicy".into()))],
-            Some(Type::String),
-        )),
         ("core.process", "exit") => Some((
             vec![(read, int)],
             Some(Type::Named(Syntax::TYPE_NEVER.to_string())),
