@@ -68,3 +68,11 @@ test('Root carrier regeneration leaves the selected Rust output byte-identical',
   success(run());
   assert.deepEqual(readFileSync(join(tree, outputs[1])), readFileSync(join(root, outputs[1])));
 }));
+
+test('generated Jet helpers have one declaration per function', () => fixture((tree, run) => {
+  success(run());
+  const source = readFileSync(join(tree, outputs[0]), 'utf8');
+  const names = [...source.matchAll(/\bfn\s+([A-Za-z_]\w*)\s*\(/g)].map(match => match[1]);
+  assert.equal(new Set(names).size, names.length);
+  assert.equal(names.filter(name => name === 'host_arguments_refused').length, 1);
+}));
