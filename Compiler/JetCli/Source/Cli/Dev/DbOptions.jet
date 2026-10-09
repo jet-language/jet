@@ -1,6 +1,5 @@
 // Pure bounded DB command policy, Rust Source/CmdDb.rs:39-113,687-1220.
 // OutputMode is the shared Adapter projection; color overrides are resolved Bool.
-use jet_foundation.[foundation_embedded_core]
 
 enum JetCLIDBOutput {
     Human
@@ -84,12 +83,11 @@ fn jet_cli_db_equal_folded(left: String, right: String) -> Bool Never! {
     true
 }
 // Rust effect_declarations() generated projection (Effects.rs:19-47).
-// The canonical embedded Core accessor owns declaration discovery.
+// The shared CLI effect declaration rows own canonical declaration discovery.
 fn jet_cli_db_declared_effect_names() -> [String] Never! {
     names := [String]{}
-    core :: foundation_embedded_core()
-    loop declaration in core.effect_declarations() {
-        &names.push(^declaration.name)
+    loop declaration in JET_CLI_EFFECT_DECLARATIONS {
+        &names.push(declaration.name.copy())
     }
     names
 }

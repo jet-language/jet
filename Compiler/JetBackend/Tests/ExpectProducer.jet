@@ -1,6 +1,6 @@
 // Appended to the compiler aggregate by run-expect-producer.mjs. The test-only
 // dispatch receives the real CLI request; no production bootstrap entry hook.
-use jet_driver.[JetDriverCompileRequest, JetDriverCompileResult, JetDriverCompileMode, jet_driver_compile_native_mir]
+use jet_driver.[JetDriverCompileRequest, JetDriverCompileResult, JetDriverCompileMode, jet_driver_compile_mir]
 use jet_foundation.[MIRProgram, MIRPreludeCallID, MIRBlockID, MIRSemanticOp, MIROperation, MIRTerminator, MIRPollKind, MIRScopeKind, MIRTestScopeMember, mir_program_bytes]
 use jet_backend.[lir_lower_entry, x64_relocatable_object]
 
@@ -14,7 +14,8 @@ fn fx_expect_producer_route(program: MIRProgram, call: MIRPreludeCallID, symbol:
 fn fx_expect_producer_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult Never! {
     selected := ^request
     selected.mode = JetDriverCompileMode.Test
-    result := jet_driver_compile_native_mir(^selected) ?? panic("native test producer escaped")
+    selected.native_stop_points = true
+    result := jet_driver_compile_mir(^selected) ?? panic("native test producer escaped")
     if !result.complete || result.internal_problem != None -> panic("native test producer did not complete")
     program :: result.mir ?? panic("native test producer has no MIR")
     if program.tests.len() != 1 -> panic("producer fixture must select exactly one real checked test")
