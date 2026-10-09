@@ -52,24 +52,24 @@ pub fn jet_driver_gate_query(request: JetDriverCompileRequest) -> JetDriverGateQ
     if !source.complete -> return JetDriverGateQueryResult{source: source, ledger: GateLedger{}, diagnostics: source.diagnostics, complete: false}
     modules := [SemaGateModule]{}
     programs := [Program]{}
-    loop module in source.modules {
-        row := SemaGateModule{source: module.path, program: module.program}
+    loop module_row in source.modules {
+        row := SemaGateModule{source: module_row.path, program: module_row.program}
         loop package in load.packages {
-            if package.identity != module.package_identity -> next
-            row.policy_path = Val(jet_driver_display_path(package.root_path, module.physical_path))
+            if package.identity != module_row.package_identity -> next
+            row.policy_path = Val(jet_driver_display_path(package.root_path, module_row.physical_path))
             row.unsafe_paths = package.policy_unsafe_paths
             row.expert = package.policy_expert
             break
         }
         loop policy in request.gate_policies {
-            if policy.package_identity != module.package_identity -> next
+            if policy.package_identity != module_row.package_identity -> next
             row.declarations = policy.declarations
             row.unsafe_paths = policy.unsafe_paths
             row.expert = policy.expert
             break
         }
         &modules.push(row)
-        &programs.push(module.program)
+        &programs.push(module_row.program)
     }
     names :: source.names ?? panic("completed load lost its canonical name facts")
     ledger := sema_gate_ledger_collect(modules, names, request.gate_set, request.external_gate_entries, sema_gate_checked_text_names(programs))
@@ -77,9 +77,9 @@ pub fn jet_driver_gate_query(request: JetDriverCompileRequest) -> JetDriverGateQ
     diagnostics := source.diagnostics
     loop entry in ledger.diagnostic_rows {
         path := entry.source
-        loop module in source.modules {
-            if module.path == entry.source {
-                path = module.physical_path
+        loop module_row in source.modules {
+            if module_row.path == entry.source {
+                path = module_row.physical_path
                 break
             }
         }

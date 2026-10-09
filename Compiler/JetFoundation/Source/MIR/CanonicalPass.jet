@@ -44,12 +44,22 @@ pub fn canonical_pass_mir_type(ty: MIRType) -> String Never! {
     "{{\"key\":{foundation_json_quote(mir_type_canonical_key(ty))},\"identity\":{identity},\"abi\":{foundation_json_quote(canonical_pass_mir_abi(ty.layout.abi))},\"size\":{canonical_pass_mir_size(ty.layout.size)},\"align\":{canonical_pass_mir_size(ty.layout.align)}}}"
 }
 fn canonical_pass_mir_size(size: MIRSize) -> String Never! {
-    if size == { .Static(value) -> "{value}" .Dynamic -> "null" }
+    if size == {
+        .Static(value) -> "{value}"
+        .Dynamic -> "null"
+    }
 }
 fn canonical_pass_mir_abi(abi: MIRABI) -> String Never! {
     if abi == {
         .Scalar(kind) -> {
-            scalar :: if kind == { .Int -> "Int" .Float -> "Float" .Float32 -> "Float32" .Bool -> "Bool" .Char -> "Char" .Pointer -> "Pointer" }
+            scalar :: if kind == {
+                .Int -> "Int"
+                .Float -> "Float"
+                .Float32 -> "Float32"
+                .Bool -> "Bool"
+                .Char -> "Char"
+                .Pointer -> "Pointer"
+            }
             "Scalar({scalar})"
         }
         .Aggregate -> "Aggregate"

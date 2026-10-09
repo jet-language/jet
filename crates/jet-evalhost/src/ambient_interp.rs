@@ -2467,3 +2467,35 @@ fn dispatch_mir_extern(
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loadavg_ambient_preserves_named_tuple_and_float64_carriers() {
+        let row = sys_env_ambient_core_call(
+            "core.sys",
+            "__loadavg",
+            Vec::new(),
+            Span::new(0, 0),
+            None,
+            None,
+        )
+        .expect("load-average producer is registered")
+        .expect("raw OS load-average sample is marshalled");
+        let CtValue::Struct { type_name, fields } = row else {
+            panic!("load-average producer must return its named tuple");
+        };
+        assert_eq!(type_name, "(available,count,first,second,third)");
+        assert_eq!(fields.len(), 5);
+        for ((name, _), expected) in fields.iter().zip(["available", "count", "first", "second", "third"]) {
+            assert_eq!(name, expected);
+        }
+        assert!(matches!(&fields[0].1, CtValue::Bool(_)));
+        assert!(matches!(&fields[1].1, CtValue::Int(_)));
+        for (_, value) in &fields[2..] {
+            assert!(matches!(value, CtValue::Float(CtFloat::F64(_))));
+        }
+    }
+}

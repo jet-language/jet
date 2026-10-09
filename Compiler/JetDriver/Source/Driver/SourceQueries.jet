@@ -55,8 +55,8 @@ fn jet_driver_source_query_loaded(load: JetDriverLoadResult, request: JetDriverC
         })
     }
     entry_index := -1
-    loop (index, module) in load.modules {
-        if module.module_identity == load.entry_module_identity -> entry_index = index
+    loop (index, module_row) in load.modules {
+        if module_row.module_identity == load.entry_module_identity -> entry_index = index
     }
     JetDriverSourceQueryResult{modules: modules, diagnostics: load.diagnostics, complete: load.complete, entry_package_version: entry_package_version, entry_module_index: entry_index, names: load.names}
 }
@@ -65,11 +65,11 @@ fn jet_driver_loaded_names(loaded: [JetDriverLoadedModule], units: [JetDriverSou
     modules := [MIRNameModule]{}
     programs := [Program]{}
     positions := [String:Int]{}
-    loop (index, module) in loaded {
-        unit :: units[module.source_unit_index]
-        positions[module.module_identity] = index
-        &modules.push(MIRNameModule{alias: module.module_name, path: jet_driver_module_display(unit.relative_path), package: module.package_identity, namespace: if unit.in_namespace -> Val(module.package_identity) else -> None})
-        &programs.push(module.program)
+    loop (index, module_row) in loaded {
+        unit :: units[module_row.source_unit_index]
+        positions[module_row.module_identity] = index
+        &modules.push(MIRNameModule{alias: module_row.module_name, path: jet_driver_module_display(unit.relative_path), package: module_row.package_identity, namespace: if unit.in_namespace -> Val(module_row.package_identity) else -> None})
+        &programs.push(module_row.program)
     }
     aliases := [MIRNameAlias]{}
     structure := [MIRStructureFact]{}

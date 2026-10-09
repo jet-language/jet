@@ -81,7 +81,7 @@ pub fn pkg_find_manifest_root_checked(cache: &WorkspaceDeclarationCache, start: 
     loop {
         authority :: if AuthorityResolver.open_for_authority_walk(dir) == {
             .Ok(found) -> found
-            .Err(error) -> return Err(pkg_entry_authority_error(error))
+            .Err(error) -> { return Err(pkg_entry_authority_error(error)) }
         }
         if authority == {
             .Val(resolver) -> {
@@ -148,7 +148,7 @@ pub fn pkg_find_inline_package_root_checked(cache: &WorkspaceDeclarationCache, s
     loop {
         authority :: if AuthorityResolver.open_for_authority_walk(dir) == {
             .Ok(found) -> found
-            .Err(error) -> return Err(pkg_entry_authority_error(error))
+            .Err(error) -> { return Err(pkg_entry_authority_error(error)) }
         }
         resolver :: if authority == {
             .Val(opened) -> opened

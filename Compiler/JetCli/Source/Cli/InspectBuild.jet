@@ -12,7 +12,10 @@ fn jet_cli_build_vector(query: JetDriverOptimizationQueryResult, json: Bool) -> 
             rule :: jet_cli_optimization_vector_rule(fact.rule)
             layout :: jet_cli_optimization_vector_layout(fact.layout)
             lane :: if fact.lane_width == .Val(width) -> "{width}" else -> "none"
-            decision :: if fact.decision == {.Eligible -> "accepted" .Rejected(reason) -> jet_cli_optimization_rejection(reason).code}
+            decision :: if fact.decision == {
+                .Eligible -> "accepted"
+                .Rejected(reason) -> jet_cli_optimization_rejection(reason).code
+            }
             if !json {
                 text += "vector\t{function.key}\t{fact.span.start}..{fact.span.end}\t{rule}\t{layout}\t{lane}\t{decision}\n"
             } else {
@@ -156,7 +159,7 @@ pub fn jet_cli_build_nodes_report(record: BuildRecord, json: Bool) -> String Nev
                 jet_cli_status_field("why_ran", jet_cli_status_text(node.why_ran)),
                 jet_cli_status_field("inputs", jet_cli_status_texts(node.inputs)),
             ]))
-        } else -> text += "{node.kind}\t{node.key}\t{node.subject}\t{duration}\t{node.why_ran}\t{node.inputs.join(",")}\n"
+        } else { text += "{node.kind}\t{node.key}\t{node.subject}\t{duration}\t{node.why_ran}\t{node.inputs.join(",")}\n" }
     }
     if json {
         document :: jet_cli_status_object([

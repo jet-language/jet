@@ -115,6 +115,9 @@ pub enum JetCLIPlan {
     // `jet test-compare <corpus.json>` (CmdTest.rs `run_test_compare`): the
     // corpus as typed and the jet-owned argv the receipt identity frames.
     Comparison(target: String, argv: [String], json: Bool)
+    // CmdTry uses the actual invocation-owned checked projection and counters.
+    // Quiet does not change its output contract; JSON selects its wire report.
+    Try(plan_path: String, keep: Bool, json: Bool)
     // `jet self devtools new-ui|check-fixture-paths|reduce|ice-report|bless`
     // (CmdDevTools.rs `run_devtools`): `args` is the raw argv after the tool
     // word; their confirmations are direct bytes under --json/--quiet too.
@@ -1467,6 +1470,10 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
         "toolchain" -> return jet_cli_self_toolchain(json)
         // CmdTest.rs `run_test_compare(target, jet_argv, mode)`.
         "test-compare" -> return JetCLIPlan.Comparison{target: if args.len() > 1 -> args[1] else -> "", argv: jet_argv, json: json}
+        "try" -> {
+            if args.len() < 2 -> return jet_cli_done("", if quiet || json -> "" else -> jet_cli_command_help("try"), JET_DRIVER_EXIT_USAGE)
+            return JetCLIPlan.Try{plan_path: args[1], keep: jet_argv.contains("--keep"), json: json}
+        }
         else -> {}
     }
     if jet_cli_inspect_word(command) {

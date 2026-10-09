@@ -18,12 +18,16 @@ fn run() {
     schema.standard = true
     schema.version = Val("1.2.3")
     schema.commands = [CLISubcommandSchema]{CLISubcommandSchema{name: "serve", description: None, inputs: [CLIInputSchema]{}}}
+    standard_zsh :: jet_cli_program_completions("zsh", "greeter", schema) ?? panic("standard zsh supported")
+    program_completion_require(standard_zsh.contains("'(-v --verbose){{-v,--verbose}}[print extra detail]'") && standard_zsh.contains("'(-q --quiet){{-q,--quiet}}[suppress normal output]'"), "standard zsh groups preserve literal shell braces")
     shell :: jet_cli_program_completions("powershell", "greeter", schema) ?? panic("PowerShell supported")
     program_completion_require(shell.contains("'--verbose','-v','--quiet','-q','--color','--version'") && shell.contains("'serve' = @('--help')") && shell.contains("$commandFlags.ContainsKey($selected)"), "standard and command inputs use canonical carrier")
-    program_completion_require(jet_cli_program_completion_name("build/greeter/.") == Val("greeter"), "basename components")
+    program_completion_require(jet_cli_program_completion_name("build/greeter/.") == (Val("greeter")), "basename components")
     program_completion_require(jet_cli_program_completion_name("/") == None && jet_cli_program_completion_name("..") == None, "no usable basename")
     program_completion_require(jet_cli_program_completion_name_control("safe\nINJECT") && !jet_cli_program_completion_name_control("épreuve"), "Unicode control classification")
     if jet_cli_program_completion_error("épreuve\n", "bad metadata") == .Done(output) {
         program_completion_require(output.stdout == "" && output.exit_code == 1 && output.stderr.contains("`\\u{{e9}}preuve\\n`"), "Rust escape_default, stderr and status")
-    } else -> panic("metadata error must be direct diagnostic")
+    } else {
+        panic("metadata error must be direct diagnostic")
+    }
 }

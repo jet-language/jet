@@ -2077,7 +2077,7 @@ fn core_fixed_sig_raw(
             (read, Type::Bool), (read, Type::Bool), (read, Type::Named("TerminalPolicy".into())),
             (read, Type::Bool), (read, Type::String),
         ], Some(Type::Named("ProcessSpec".into())))),
-        ("core.files", "__link_reader_at") => Some((vec![
+        ("core.files", "jet_files_link_reader_at_raw") => Some((vec![
             (read, Type::Named("FileReader".into())), (read, Type::Int), (read, Type::String),
         ], Some(Type::Tuple(vec![
             ("available".into(), Box::new(Type::Bool)), ("held".into(), Box::new(Type::Bool)),

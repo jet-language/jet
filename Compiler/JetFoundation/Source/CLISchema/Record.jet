@@ -12,6 +12,11 @@ CLI_SCHEMA_MAX_RECORD_BYTES :: 1048576
 CLI_SCHEMA_MAX_INPUTS :: 4096
 CLI_SCHEMA_MAX_JOBS :: 4096
 CLI_SCHEMA_MAX_STRING_BYTES :: 65536
+CLI_SCHEMA_BYTE_0 :: U8{0}
+CLI_SCHEMA_BYTE_1 :: U8{1}
+CLI_SCHEMA_BYTE_2 :: U8{2}
+CLI_SCHEMA_BYTE_3 :: U8{3}
+CLI_SCHEMA_BYTE_4 :: U8{4}
 
 #Error
 pub enum MetadataError { UnknownFormat Missing Duplicate Malformed(why: String) UnsupportedVersion(version: U16) }
@@ -52,8 +57,8 @@ impl CLIRecordCursor {
     }
     fn optional_string(&self) -> String? MetadataError! {
         if &self.byte() == {
-            U8{0} -> Ok(None)
-            U8{1} -> Ok(Val(&self.string()))
+            CLI_SCHEMA_BYTE_0 -> Ok(None)
+            CLI_SCHEMA_BYTE_1 -> Ok(Val(&self.string()))
             else -> Err(MetadataError.Malformed{why: "invalid optional string bit"})
         }
     }
@@ -81,9 +86,9 @@ pub fn decode_record(record: View<U8>) -> CLICommandSchema MetadataError! {
     entry_type :: &cursor.string()
     description :: &cursor.optional_string()
     standard :: if &cursor.byte() == {
-        U8{0} -> false
-        U8{1} -> true
-        else -> return Err(MetadataError.Malformed{why: "invalid standard bit"})
+        CLI_SCHEMA_BYTE_0 -> false
+        CLI_SCHEMA_BYTE_1 -> true
+        else -> { return Err(MetadataError.Malformed{why: "invalid standard bit"}) }
     }
     version_text :: &cursor.optional_string()
     count :: &cursor.u32()
@@ -117,39 +122,39 @@ fn cli_schema_decode_input(cursor: &CLIRecordCursor) -> CLIInputSchema MetadataE
     help :: &cursor.string()
     metavar :: &cursor.optional_string()
     shape :: if &cursor.byte() == {
-        U8{0} -> CLIInputShape.Flag
-        U8{1} -> {
+        CLI_SCHEMA_BYTE_0 -> CLIInputShape.Flag
+        CLI_SCHEMA_BYTE_1 -> {
             kind :: if &cursor.byte() == {
-                U8{0} -> CLIValueKind.Bool
-                U8{1} -> CLIValueKind.Int
-                U8{2} -> CLIValueKind.Float
-                U8{3} -> CLIValueKind.String
-                U8{4} -> CLIValueKind.Path
-                else -> return Err(MetadataError.Malformed{why: "unknown input kind"})
+                CLI_SCHEMA_BYTE_0 -> CLIValueKind.Bool
+                CLI_SCHEMA_BYTE_1 -> CLIValueKind.Int
+                CLI_SCHEMA_BYTE_2 -> CLIValueKind.Float
+                CLI_SCHEMA_BYTE_3 -> CLIValueKind.String
+                CLI_SCHEMA_BYTE_4 -> CLIValueKind.Path
+                else -> { return Err(MetadataError.Malformed{why: "unknown input kind"}) }
             }
             optional :: if &cursor.byte() == {
-                U8{0} -> false
-                U8{1} -> true
-                else -> return Err(MetadataError.Malformed{why: "invalid optional bit"})
+                CLI_SCHEMA_BYTE_0 -> false
+                CLI_SCHEMA_BYTE_1 -> true
+                else -> { return Err(MetadataError.Malformed{why: "invalid optional bit"}) }
             }
             default :: if &cursor.byte() == {
-                U8{0} -> None
-                U8{1} -> Val(CLIDefault.TypeDefault)
-                U8{2} -> Val(CLIDefault.Recorded{value: &cursor.string()})
-                else -> return Err(MetadataError.Malformed{why: "unknown default kind"})
+                CLI_SCHEMA_BYTE_0 -> None
+                CLI_SCHEMA_BYTE_1 -> Val(CLIDefault.TypeDefault)
+                CLI_SCHEMA_BYTE_2 -> Val(CLIDefault.Recorded{value: &cursor.string()})
+                else -> { return Err(MetadataError.Malformed{why: "unknown default kind"}) }
             }
             CLIInputShape.Value{kind: kind, optional: optional, default: default}
         }
-        else -> return Err(MetadataError.Malformed{why: "unknown input shape"})
+        else -> { return Err(MetadataError.Malformed{why: "unknown input shape"}) }
     }
     positional :: if &cursor.byte() == {
-        U8{0} -> None
-        U8{1} -> {
+        CLI_SCHEMA_BYTE_0 -> None
+        CLI_SCHEMA_BYTE_1 -> {
             order :: &cursor.u32()
             if order > 65535 -> return Err(MetadataError.Malformed{why: "positional order out of range"})
             Val(U16{order})
         }
-        else -> return Err(MetadataError.Malformed{why: "invalid positional bit"})
+        else -> { return Err(MetadataError.Malformed{why: "invalid positional bit"}) }
     }
     Ok(CLIInputSchema{field: field, flag: flag, short: short, env: env, help: help, metavar: metavar, shape: shape, positional: positional})
 }
@@ -163,10 +168,10 @@ fn cli_schema_decode_strings(cursor: &CLIRecordCursor, maximum: Int, refusal: St
 fn cli_schema_decode_job(cursor: &CLIRecordCursor) -> JobFact MetadataError! {
     name :: &cursor.string()
     scope :: if &cursor.byte() == {
-        U8{0} -> JobScope.Dev
-        U8{1} -> JobScope.Ship
-        U8{2} -> JobScope.Internal
-        else -> return Err(MetadataError.Malformed{why: "unknown job scope"})
+        CLI_SCHEMA_BYTE_0 -> JobScope.Dev
+        CLI_SCHEMA_BYTE_1 -> JobScope.Ship
+        CLI_SCHEMA_BYTE_2 -> JobScope.Internal
+        else -> { return Err(MetadataError.Malformed{why: "unknown job scope"}) }
     }
     doc :: &cursor.optional_string()
     schedule :: &cursor.optional_string()
@@ -183,37 +188,37 @@ fn cli_schema_decode_job(cursor: &CLIRecordCursor) -> JobFact MetadataError! {
         label :: &cursor.string()
         ty :: &cursor.string()
         required :: if &cursor.byte() == {
-            U8{0} -> false
-            U8{1} -> true
-            else -> return Err(MetadataError.Malformed{why: "invalid job argument required bit"})
+            CLI_SCHEMA_BYTE_0 -> false
+            CLI_SCHEMA_BYTE_1 -> true
+            else -> { return Err(MetadataError.Malformed{why: "invalid job argument required bit"}) }
         }
         default :: &cursor.optional_string()
         variadic :: if &cursor.byte() == {
-            U8{0} -> false
-            U8{1} -> true
-            else -> return Err(MetadataError.Malformed{why: "invalid job argument variadic bit"})
+            CLI_SCHEMA_BYTE_0 -> false
+            CLI_SCHEMA_BYTE_1 -> true
+            else -> { return Err(MetadataError.Malformed{why: "invalid job argument variadic bit"}) }
         }
         zone :: if &cursor.byte() == {
-            U8{0} -> ParamZone.PositionalOnly
-            U8{1} -> ParamZone.Either
-            U8{2} -> ParamZone.LabelOnly
-            else -> return Err(MetadataError.Malformed{why: "unknown job argument zone"})
+            CLI_SCHEMA_BYTE_0 -> ParamZone.PositionalOnly
+            CLI_SCHEMA_BYTE_1 -> ParamZone.Either
+            CLI_SCHEMA_BYTE_2 -> ParamZone.LabelOnly
+            else -> { return Err(MetadataError.Malformed{why: "unknown job argument zone"}) }
         }
         &arguments.push(JobArgumentSchema{name: argument_name, label: label, ty: ty, required: required, default: default, variadic: variadic, zone: zone})
     }
     packages :: cli_schema_decode_strings(&cursor, CLI_SCHEMA_MAX_INPUTS, "too many job packages")
     cwd :: &cursor.optional_string()
     skip :: if &cursor.byte() == {
-        U8{0} -> None
-        U8{1} -> Val(JobSkip.Always{reason: &cursor.string()})
-        U8{2} -> Val(JobSkip.UnlessPlatform{platform: &cursor.string()})
-        else -> return Err(MetadataError.Malformed{why: "unknown job skip rule"})
+        CLI_SCHEMA_BYTE_0 -> None
+        CLI_SCHEMA_BYTE_1 -> Val(JobSkip.Always{reason: &cursor.string()})
+        CLI_SCHEMA_BYTE_2 -> Val(JobSkip.UnlessPlatform{platform: &cursor.string()})
+        else -> { return Err(MetadataError.Malformed{why: "unknown job skip rule"}) }
     }
     cache :: if &cursor.byte() == {
-        U8{0} -> JobCachePolicy.Uncached
-        U8{1} -> JobCachePolicy.Local
-        U8{2} -> JobCachePolicy.Shared
-        else -> return Err(MetadataError.Malformed{why: "unknown job cache policy"})
+        CLI_SCHEMA_BYTE_0 -> JobCachePolicy.Uncached
+        CLI_SCHEMA_BYTE_1 -> JobCachePolicy.Local
+        CLI_SCHEMA_BYTE_2 -> JobCachePolicy.Shared
+        else -> { return Err(MetadataError.Malformed{why: "unknown job cache policy"}) }
     }
     limit_count :: &cursor.u32()
     if limit_count > CLI_SCHEMA_MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many job limits"})
@@ -238,7 +243,10 @@ fn cli_schema_put_string(out: &[U8], value: String) Never! {
 fn cli_schema_put_optional_string(out: &[U8], value: String?) Never! {
     if value == {
         None -> &out.push(U8{0})
-        .Val(text) -> { &out.push(U8{1}); cli_schema_put_string(&out, text) }
+        .Val(text) -> {
+            &out.push(U8{1})
+            cli_schema_put_string(&out, text)
+        }
     }
 }
 fn cli_schema_encode_input(out: &[U8], input: CLIInputSchema) Never! {
@@ -252,18 +260,30 @@ fn cli_schema_encode_input(out: &[U8], input: CLIInputSchema) Never! {
         .Flag -> &out.push(U8{0})
         .Value(kind, optional, default) -> {
             &out.push(U8{1})
-            &out.push(if kind == { .Bool -> U8{0} .Int -> U8{1} .Float -> U8{2} .String -> U8{3} .Path -> U8{4} })
+            &out.push(if kind == {
+                .Bool -> U8{0}
+                .Int -> U8{1}
+                .Float -> U8{2}
+                .String -> U8{3}
+                .Path -> U8{4}
+            })
             &out.push(if optional -> U8{1} else -> U8{0})
             if default == {
                 None -> &out.push(U8{0})
                 .Val(.TypeDefault) -> &out.push(U8{1})
-                .Val(.Recorded(text)) -> { &out.push(U8{2}); cli_schema_put_string(&out, text) }
+                .Val(.Recorded(text)) -> {
+                    &out.push(U8{2})
+                    cli_schema_put_string(&out, text)
+                }
             }
         }
     }
     if input.positional == {
         None -> &out.push(U8{0})
-        .Val(order) -> { &out.push(U8{1}); cli_schema_put_u32(&out, Int.from_u16(order)) }
+        .Val(order) -> {
+            &out.push(U8{1})
+            cli_schema_put_u32(&out, Int.from_u16(order))
+        }
     }
 }
 fn cli_schema_encode_strings(out: &[U8], values: [String]) Never! {
@@ -272,7 +292,11 @@ fn cli_schema_encode_strings(out: &[U8], values: [String]) Never! {
 }
 fn cli_schema_encode_job(out: &[U8], job: JobFact) Never! {
     cli_schema_put_string(&out, job.name)
-    &out.push(if job.scope == { .Dev -> U8{0} .Ship -> U8{1} .Internal -> U8{2} })
+    &out.push(if job.scope == {
+        .Dev -> U8{0}
+        .Ship -> U8{1}
+        .Internal -> U8{2}
+    })
     cli_schema_put_optional_string(&out, job.doc)
     cli_schema_put_optional_string(&out, job.schedule)
     cli_schema_encode_strings(&out, job.after)
@@ -287,18 +311,32 @@ fn cli_schema_encode_job(out: &[U8], job: JobFact) Never! {
         &out.push(if argument.required -> U8{1} else -> U8{0})
         cli_schema_put_optional_string(&out, argument.default)
         &out.push(if argument.variadic -> U8{1} else -> U8{0})
-        &out.push(if argument.zone == { .PositionalOnly -> U8{0} .Either -> U8{1} .LabelOnly -> U8{2} })
+        &out.push(if argument.zone == {
+            .PositionalOnly -> U8{0}
+            .Either -> U8{1}
+            .LabelOnly -> U8{2}
+        })
     }
     cli_schema_encode_strings(&out, job.packages)
     cli_schema_put_optional_string(&out, job.cwd)
     if job.skip == {
         None -> &out.push(U8{0})
-        .Val(.Always(reason)) -> { &out.push(U8{1}); cli_schema_put_string(&out, reason) }
-        .Val(.UnlessPlatform(platform)) -> { &out.push(U8{2}); cli_schema_put_string(&out, platform) }
+        .Val(.Always(reason)) -> {
+            &out.push(U8{1})
+            cli_schema_put_string(&out, reason)
+        }
+        .Val(.UnlessPlatform(platform)) -> {
+            &out.push(U8{2})
+            cli_schema_put_string(&out, platform)
+        }
     }
-    &out.push(if job.cache == { .Uncached -> U8{0} .Local -> U8{1} .Shared -> U8{2} })
+    &out.push(if job.cache == {
+        .Uncached -> U8{0}
+        .Local -> U8{1}
+        .Shared -> U8{2}
+    })
     cli_schema_put_u32(&out, job.limits.len())
-    order := loop index in 0..<job.limits.len() -> index
+    order := (loop index in 0..<job.limits.len() -> index)
     &order.sort_by((a: Int, b: Int) -> job.limits[a].key <=> job.limits[b].key)
     loop index in order {
         cli_schema_put_string(&out, job.limits[index].key)

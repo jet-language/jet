@@ -13,10 +13,10 @@ pub fn jet_cli_explain_marker_site(site: String) -> JetCLIMarkerSite String! {
  cut := bytes.len()
  loop cut > 0 {
  cut -= 1
- if bytes[cut] == U8{58} {
+ if (bytes[cut] == U8{58}) {
  text :: site.slice((cut + 1)..<bytes.len())
  line :: jet_cli_remote_unsigned(text) ?? return Err("marker line must be a positive number")
- if line == U64{0} -> return Err("marker line must be a positive number")
+ if (line == U64{0}) -> return Err("marker line must be a positive number")
  return Ok(JetCLIMarkerSite{file: site.slice(0..<cut), line: line})
  }
  }
@@ -46,12 +46,12 @@ pub fn jet_cli_explain_policy_lookup(key: PolicyKey, declarations: [PolicyDeclar
 }
 
 pub fn jet_cli_explain_marker_offset(source: String, line: U64) -> Int Never! {
- if line == U64{1} -> return 0
+ if (line == U64{1}) -> return 0
  remaining := line - U64{1}
  loop (index, byte) in source.bytes() {
- if byte != U8{10} -> next
+ if (byte != U8{10}) -> next
  remaining -= U64{1}
- if remaining == U64{0} -> return index + 1
+ if (remaining == U64{0}) -> return index + 1
  }
  source.bytes().len()
 }
@@ -65,9 +65,9 @@ pub fn jet_cli_explain_loaded_policy(key: PolicyKey, loaded: JetDriverSourceQuer
  declarations := [PolicyDeclaration]{}
  if line == .Val(number) {
  // Rust marker-site selection intentionally sees only the entry module.
- module :: loaded.modules[0]
- offset :: jet_cli_explain_marker_offset(module.source, number)
- loop declaration in module.program.policy_declarations {
+ source_module :: loaded.modules[0]
+ offset :: jet_cli_explain_marker_offset(source_module.source, number)
+ loop declaration in source_module.program.policy_declarations {
  if declaration.key != key -> next
  if declaration.scope == PolicyScope.Function || declaration.scope == PolicyScope.Block {
  target :: declaration.target ?? next
@@ -77,8 +77,8 @@ pub fn jet_cli_explain_loaded_policy(key: PolicyKey, loaded: JetDriverSourceQuer
  }
  } else {
  // Whole-file policy queries combine every loaded module, not just entry.
- loop module in loaded.modules {
- loop declaration in module.program.policy_declarations {
+ loop source_module in loaded.modules {
+ loop declaration in source_module.program.policy_declarations {
  if declaration.key == key -> &declarations.push(declaration)
  }
  }

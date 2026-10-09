@@ -121,6 +121,19 @@ and `FileReader`/`IOError` carriers. The terminal-context and waited-child facts
 likewise retain the existing `jet_term_is_terminal_raw` and
 `jet_process_exit_status_raw` runtime spellings, rather than reserved
 double-underscore member aliases or alternate host APIs.
+Checked-build DNS and pinned byte transport likewise use the existing
+`jet_http_build_resolve` and `jet_http_build_get` raw spellings. Driver retains
+address authorization, bounds, digest verification, and error classification;
+these leaves do not supply a second public HTTP or generic host policy.
+Held store linking keeps a distinct `compiler_link_held` source bridge: it
+extracts the private held-directory handle inside Core and calls the existing
+`jet_files_link_reader_at_raw` leaf. Compiler callers cannot substitute a path
+or bypass the directory authority, and the bridge does not change link/copy
+fallback policy.
+
+Remote builder records accept LF or CRLF line endings, removing only the single
+carriage return immediately before a newline. Extra or interior control bytes
+remain malformed record data, not whitespace to silently normalize.
 
 Remote builder records accept LF or CRLF line endings, removing only the single
 carriage return immediately before a newline. Extra or interior control bytes
@@ -773,6 +786,21 @@ diagnostic rows. The same authenticated `jet.mir.decisions.v1` payload carries
 the complete source/configuration/profile/target/implementation/artifact/run
 identity and checked derivation references for live snapshots and replay;
 readers reject altered identities, row IDs, derivations, and noncanonical bytes.
+
+Live inspection consumes only the runtime's private `jet.live.v1` snapshot.
+Its no-follow read retains one file descriptor, checks its regular-file type,
+owner and private permissions, and bounds the bytes to 1 MiB. Linux start identity
+and the two-second publication age bind it to the requested process. The closed
+snapshot schema bounds values, tasks and channels to 4096 rows; event observations
+retain exactly fifteen payload-free fields, at most 256 records, strictly
+increasing sequences, and the runtime's closed enums and unavailable-count sentinel.
+Text and JSON share this validated snapshot, including published rendered values
+and sorted shape identities. Optional decision ledgers use the optimizer's existing
+authenticated codec with a 512 KiB transport bound; absence is explicitly
+`unavailable`, not evidence of a compiler decision. No process memory is read.
+Duplicate keys anywhere in a snapshot are rejected as corrupt or forged runtime
+transport by the strict Core JSON parser. This intentionally does not preserve
+the retired host's first-scalar/last-container duplicate-key behavior.
 
 The CLI's `inspect.accel` status projects typed authenticated runtime receipt
 rows separately from static vector and gate facts. Missing measurements stay

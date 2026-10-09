@@ -173,13 +173,13 @@ fn store_build_last_run_directory(root: String, create: Bool) -[FS, Env]> files.
     }
     held := files.open_directory("/")
     loop part in parts -> held = held.open_directory(part)
-    loop part in [String]{".jet", "last-run"} {
+    loop part in ([String]{".jet", "last-run"}) {
         if create && held.entry_stat(part) == .Err(error) {
             if error == .NotFound(_) {
                 if held.create_directory(part, mode: Val(0o700)) == .Err(failure) {
                     if failure != .AlreadyExists(_) -> return Err(ArtifactStoreError.IO(failure))
                 }
-            } else -> return Err(ArtifactStoreError.IO(error))
+            } else { return Err(ArtifactStoreError.IO(error)) }
         }
         held = held.open_directory(part)
     }

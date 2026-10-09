@@ -172,7 +172,7 @@ fn jet_cli_inspect_parse(argv: [String]) -> JetCLIInspectParse Never! {
 
 // Source/main.rs `"inspect"`: parse the plane request, then run its
 // projection (CmdInspect.rs `run_inspect`).
-fn jet_cli_inspect_plane(argv: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_inspect_plane(argv: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env, Time]> JetCLIPlan Never! {
     if jet_cli_inspect_parse(argv) == {
         .Failed(message) -> return jet_cli_fail("E2104", message, jet_cli_why("E2104"), "run `jet inspect <types|rights|claims|shapes|accel|decisions|structure|build|gates> [TARGET] [--live PID | --replay ARTIFACT]`", color, JET_DRIVER_EXIT_USAGE)
         .Parsed(request) -> return jet_cli_inspect_run(request, color, json, threads)
@@ -183,7 +183,7 @@ fn jet_cli_inspect_plane(argv: [String], color: Bool, json: Bool, threads: Int?)
 // the scopes, then the live and replay scopes, the build coverage table
 // before the entry, and every other plane reads the entry
 // `inspect_entry_path` resolves.
-fn jet_cli_inspect_run(request: JetCLIInspectRequest, color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_inspect_run(request: JetCLIInspectRequest, color: Bool, json: Bool, threads: Int?) -[FS, Env, Time]> JetCLIPlan Never! {
     plane :: request.plane
     if plane == "accel" -> return jet_cli_inspect_optimization(request, color, json, threads)
     if request.scope == .Live(pid) -> return jet_cli_inspect_live(plane, pid, color, json)
@@ -289,18 +289,17 @@ fn jet_cli_inspect_optimization(request: JetCLIInspectRequest, color: Bool, json
     JetCLIPlan.Inspect{job: JetCLIInspectJob{action: plane, file: file, subject: target, json: json, color: color, threads: threads, notice: notice, project: project, profile: profile, release_build: release_build, scope: scope}}
 }
 
-// CmdInspect.rs `run_inspect_live` up to the snapshot (LiveInspect.rs
-// `read`/`read_plane`, `snapshot_path` under `std::env::temp_dir`): no
-// snapshot, or one that is not a regular file, is E2105. Reading and
-// projecting a published snapshot is not ported yet.
-fn jet_cli_inspect_live(plane: String, pid: Int, color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+// CmdInspect.rs run_inspect_live: one securely retained, validated snapshot
+// supplies the text renderer and all identity/shape/decision JSON projections.
+fn jet_cli_inspect_live(plane: String, pid: Int, color: Bool, json: Bool) -[FS, Env, Time]> JetCLIPlan Never! {
     fix :: "start the program with --observe, then run `jet inspect {plane} --live {pid}`"
-    directory := cli_sys.get("TMPDIR") ?? "/tmp"
-    if directory == "" -> directory = "/tmp"
-    path :: jet_cli_entry_join(directory, "jet-observe-{pid}.json")
-    stat :: cli_files.stat(path) ?? return jet_cli_inspect_b_report("E2105", "no live Jet runtime is observable at process {pid}", jet_cli_why("E2105"), fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
-    if stat.is_symlink || !stat.is_file -> return jet_cli_inspect_b_report("E2105", "live runtime snapshot is not a regular file", jet_cli_why("E2105"), fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
-    jet_cli_not_ported("inspect {plane} --live <published snapshot>", color)
+    snapshot :: jet_cli_live_read(pid) ?? return jet_cli_inspect_b_report("E2105", err.message, jet_cli_why("E2105"), fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
+    output :: if {
+        plane == "decisions" -> jet_cli_live_decisions_report(snapshot, json)
+        json -> jet_cli_live_json_report(snapshot, plane)
+        else -> jet_cli_live_text(snapshot)
+    }
+    jet_cli_done(output, "", JET_DRIVER_EXIT_OK)
 }
 
 // Does the normalized command word belong to the inspect group? `inspect`
@@ -320,7 +319,7 @@ pub fn jet_cli_inspect_word(command: String) -> Bool Never! {
 // Route one inspect-group command: `argv` is the normalized argv (the
 // `--` tail included), `jet_argv` the words before `--`, and `args` their
 // positional words; `args[0]` is the command word.
-pub fn jet_cli_inspect(argv: [String], jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
+pub fn jet_cli_inspect(argv: [String], jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
     command :: args[0]
     inspect_env :: command == "inspect" && args.len() > 1 && args[1] == "env"
     if command == "inspect" && !inspect_env -> return jet_cli_inspect_plane(argv, color, json, threads)

@@ -176,7 +176,7 @@ fn core_effect_leaf_legacy(module: &str, method: &str) -> Option<&'static str> {
     }
     if (module == "core.tasks" && method == "timeout")
         || (module == "core.http" && method == "serve")
-        || (module == "core.http.client" && matches!(method, "get" | "post" | "request" | "__build_resolve" | "__build_get"))
+        || (module == "core.http.client" && matches!(method, "get" | "post" | "request" | "jet_http_build_resolve" | "jet_http_build_get"))
         || (module == "core.http.server"
             && matches!(method, "serve" | "serve_once" | "serve_once_listener"))
         || (module == "core.web.browser"

@@ -7,7 +7,7 @@ use jet_driver.[JetDriverBuildHTTPInputs, JetDriverBuildHTTPResponse]
 struct JetCLIBuildHTTPInputs {}
 impl JetCLIBuildHTTPInputs.JetDriverBuildHTTPInputs {
     fn resolve(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] String! {
-        cli_build_http.__build_resolve(host, port)
+        cli_build_http.jet_http_build_resolve(host, port)
     }
     fn get(self, url: String, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> JetDriverBuildHTTPResponse String! {
         parsed :: cli_build_url.parse(url) ?? return Err("invalid URL")
@@ -16,7 +16,7 @@ impl JetCLIBuildHTTPInputs.JetDriverBuildHTTPInputs {
         if path == "" -> path = "/"
         query :: parsed.query()
         if query != "" -> path = "{path}?{query}"
-        wire := cli_build_http.__build_get(host, parsed.authority(), path, parsed.scheme() == "https", addresses, port, timeout_ms, limit)
+        wire := cli_build_http.jet_http_build_get(host, parsed.authority(), path, parsed.scheme() == "https", addresses, port, timeout_ms, limit)
         if wire.len() < 2 -> return Err("HTTP transport lost its response")
         status_bytes := &wire.pop() ?? return Err("HTTP transport lost its status")
         body := &wire.pop() ?? return Err("HTTP transport lost its body")

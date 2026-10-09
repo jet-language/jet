@@ -441,8 +441,8 @@ pub struct Directory {
 
 // Compiler-private store bridge, not a public filesystem API. The store
 // validates the plain destination name and interprets errno (including EXDEV).
-#Unsafe("the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened") pub fn __link_held(source: FileReader, into: Directory, name: String) -[FS.Write]> (available: Bool, held: Bool, value: Int, errno: Int) Never! {
-    core.files.__link_reader_at(source, into.handle, name)
+#Unsafe("the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened") pub fn compiler_link_held(source: FileReader, into: Directory, name: String) -[FS.Write]> (available: Bool, held: Bool, value: Int, errno: Int) Never! {
+    core.files.jet_files_link_reader_at_raw(source, into.handle, name)
 }
 
 // Compiler-private process bridge. The borrowed Directory stays live through

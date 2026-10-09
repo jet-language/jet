@@ -722,7 +722,7 @@ fn foundation_copy_held_reader(reader: FileReader, destination: Directory, name:
 fn foundation_link_held_reader(reader: FileReader, destination: Directory, name: String) -[FS, Env]> Bool IOError! {
     foundation_directory_authority_name(name)
     #Unsafe("source-store linkat uses the live held reader and directory, a validated plain name, and no source pathname; raw syscall facts are classified here") {
-        facts :: core.files.__link_held(reader, destination, name)
+        facts :: core.files.compiler_link_held(reader, destination, name)
         if !facts.available {
             if sys.is_macos() || sys.name() == "ios" -> return Ok(false)
             return Err(IOError.Other(foundation_io_context(.Write, name, "held source linking is unavailable on this platform")))

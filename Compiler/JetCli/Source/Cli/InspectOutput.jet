@@ -2,7 +2,17 @@
 use jet_driver.[JetDriverCompileRequest, JetDriverOutputQueryResult, JetDriverVerbOutput, jet_driver_output_query, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
 use jet_foundation.[OutputKind, ResolvedOutput, type_name, failure_contract_effective_type, failure_contract_source, diagnostic_render_all]
 fn jet_cli_output_kind(kind: OutputKind) -> String Never! {
-    if kind == { .Library -> "Library" .Executable -> "Executable" .Service -> "Service" .Check -> "Check" .Environment -> "Environment" .Image -> "Image" .Bundle -> "Bundle" .System -> "System" .Fleet -> "Fleet" }
+    if kind == {
+        .Library -> "Library"
+        .Executable -> "Executable"
+        .Service -> "Service"
+        .Check -> "Check"
+        .Environment -> "Environment"
+        .Image -> "Image"
+        .Bundle -> "Bundle"
+        .System -> "System"
+        .Fleet -> "Fleet"
+    }
 }
 fn jet_cli_output_effects_text(effects: [String]) -> String Never! {
     if effects.len() == 0 -> "none" else -> effects.join(", ")
@@ -10,11 +20,11 @@ fn jet_cli_output_effects_text(effects: [String]) -> String Never! {
 pub fn jet_cli_output_report(query: JetDriverOutputQueryResult, output: ResolvedOutput, json: Bool) -> String Never! {
     // Doc projection can omit synthetic modules. Resolve the retained graph
     // index, not its position in the filtered array or a source-path basename.
-    module_index :: loop (index, module) in query.compile.doc_modules {
-        if module.name_module_index == output.module_id -> break index
+    module_index :: loop (index, projection) in query.compile.doc_modules {
+        if projection.name_module_index == output.module_id -> break index
     } ?? panic("selected Output lost its canonical module projection")
-    module :: query.compile.doc_modules[module_index]
-    identity :: "{module.module_name}::{output.semantic_name}"
+    projection :: query.compile.doc_modules[module_index]
+    identity :: "{projection.module_name}::{output.semantic_name}"
     failure :: type_name(failure_contract_effective_type(output.failure_contract))
     failure_source :: failure_contract_source(output.failure_contract)
     effects :: jet_cli_sorted_set(output.effects)
@@ -45,5 +55,5 @@ pub fn jet_cli_output_host(request: JetDriverCompileRequest, address: String?, f
     loop output in query.outputs {
         if output.selected -> return JetDriverVerbOutput{stdout: jet_cli_output_report(query, output, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    jet_cli_inspect_b_report("E2104", "the checked source has no selected Output", jet_cli_why("E2104"), "declare one Executable Output or select one by address", false, json, JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_execute(jet_cli_inspect_b_report("E2104", "the checked source has no selected Output", jet_cli_why("E2104"), "declare one Executable Output or select one by address", false, json, JET_DRIVER_EXIT_USER_ERROR))
 }

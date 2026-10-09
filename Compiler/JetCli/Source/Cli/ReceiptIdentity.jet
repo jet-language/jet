@@ -5,7 +5,7 @@ use jet_foundation.[foundation_json_quote]
 fn jet_cli_receipt_secret_component(component: String) -> Bool Never! {
     bytes :: component.bytes()
     end := bytes.len()
-    loop end > 0 && bytes[end - 1] >= U8{48} && bytes[end - 1] <= U8{57} -> end -= 1
+    loop end > 0 && bytes[end - 1] >= (U8{48}) && bytes[end - 1] <= (U8{57}) -> end -= 1
     name :: component.slice(0, end)
     [String]{"secret", "token", "password", "passwd", "credential", "key"}.contains(name)
 }
@@ -21,9 +21,9 @@ pub fn jet_cli_receipt_secret_name(name: String) -> Bool Never! {
         if upper && index > 0 {
             previous :: bytes[index - 1]
             boundary = (previous >= U8{97} && previous <= U8{122}) || (previous >= U8{48} && previous <= U8{57})
-            if previous >= U8{65} && previous <= U8{90} && index + 1 < bytes.len() {
+            if previous >= (U8{65}) && previous <= (U8{90}) && index + 1 < bytes.len() {
                 following :: bytes[index + 1]
-                if following >= U8{97} && following <= U8{122} -> boundary = true
+                if following >= (U8{97}) && following <= (U8{122}) -> boundary = true
             }
         }
         if (!upper && !lower && !digit) || boundary {
@@ -40,7 +40,7 @@ pub fn jet_cli_receipt_secret_name(name: String) -> Bool Never! {
 fn jet_cli_receipt_secret_environment(name: String) -> Bool Never! {
     if jet_cli_receipt_secret_name(name) -> return true
     normalized :: name.to_lower()
-    loop part in [String]{"secret", "token", "password", "passwd", "credential", "key"} {
+    loop part in ([String]{"secret", "token", "password", "passwd", "credential", "key"}) {
         if normalized.contains(part) -> return true
     }
     false
@@ -72,7 +72,7 @@ pub fn jet_cli_receipt_environment_identity(names: [String]) -[Env]> [U8] Never!
     &sorted.sort()
     out := [U8]{}
     loop name in sorted {
-        if [String]{"INVOCATION_ID", "JET_RECEIPT_BYPASS", "NIX_BUILD_TOP", "TEMP", "TEMPDIR", "TMP", "TMPDIR"}.contains(name) -> next
+        if ([String]{"INVOCATION_ID", "JET_RECEIPT_BYPASS", "NIX_BUILD_TOP", "TEMP", "TEMPDIR", "TMP", "TMPDIR"}).contains(name) -> next
         value :: cli_sys.get(name) ?? next
         jet_cli_receipt_frame(&out, name.bytes())
         jet_cli_receipt_frame(&out, (if jet_cli_receipt_secret_environment(name) -> "<redacted>" else -> value).bytes())
@@ -102,7 +102,7 @@ pub fn jet_cli_receipt_context_identity(verb: String, argv: [String], terminal: 
     if verb == "" -> return Err("receipt verb is empty")
     if terminal.len() != 3 -> return Err("receipt terminal identity requires three host bits")
     loop bit in terminal {
-        if bit != U8{48} && bit != U8{49} -> return Err("receipt terminal identity requires three host bits")
+        if bit != (U8{48}) && bit != (U8{49}) -> return Err("receipt terminal identity requires three host bits")
     }
     out := JET_CLI_RECEIPT_MAGIC
     jet_cli_receipt_frame(&out, verb.bytes())
@@ -111,7 +111,7 @@ pub fn jet_cli_receipt_context_identity(verb: String, argv: [String], terminal: 
     names :: cli_sys.vars() ?? return Err("could not read receipt environment: {err}")
     jet_cli_receipt_frame(&out, jet_cli_receipt_environment_identity(names))
     tools := [U8]{}
-    loop name in [String]{"jet", "jetpack", "rustc", "cargo", "wasm-tools"} {
+    loop name in ([String]{"jet", "jetpack", "rustc", "cargo", "wasm-tools"}) {
         jet_cli_receipt_frame(&tools, name.bytes())
         path :: jet_cli_receipt_tool_path(name) ?? {
             jet_cli_receipt_frame(&tools, "missing".bytes())
@@ -135,10 +135,10 @@ pub fn jet_cli_receipt_context_identity(verb: String, argv: [String], terminal: 
 // malformed authorities so they cannot make an old claim appear current.
 fn jet_cli_receipt_authority_roots(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> [String] Never! {
     root := cli_files.realpath(start) ?? start
-    if jet_cli_find_workspace_root_checked(&cache, start) == .Ok(Val(found)) {
-        root = found
-    } else if jet_cli_find_package_root_checked(&cache, start) == .Ok(Val(found)) {
-        root = found
+    if jet_cli_find_workspace_root_checked(&cache, start) == .Ok(found) && found == .Val(found_root) {
+        root = found_root
+    } else if jet_cli_find_package_root_checked(&cache, start) == .Ok(found) && found == .Val(found_root) {
+        root = found_root
     }
     roots := [String]{root}
     directory := start
@@ -177,7 +177,7 @@ fn jet_cli_receipt_generated_paths(path: String, strict: Bool, paths: &[String])
     held :: JetCLIRootedDirectory.open(path, [String]{}, false) ?? return Err(err.message)
     entries :: held.list() ?? return Err(err.message)
     loop entry in entries {
-        if entry.is_dir && [String]{".git", "target", "build"}.contains(entry.name) && !strict -> next
+        if entry.is_dir && ([String]{".git", "target", "build"}).contains(entry.name) && !strict -> next
         jet_cli_receipt_generated_paths(jet_cli_rooted_join(path, entry.name), strict, &paths)
     }
 }
@@ -188,7 +188,7 @@ pub fn jet_cli_comparison_input_paths(cache: &WorkspaceDeclarationCache, target:
     directory :: AuthorityResolver.authority_walk_root(absolute) ?? return Err("could not resolve comparison corpus directory")
     paths := [String]{absolute}
     loop root in jet_cli_receipt_authority_roots(&cache, directory) {
-        loop name in [String]{"package.jet", "pkg.jet", "workspace.jet", "build.jet", ".jet/lock"} {
+        loop name in ([String]{"package.jet", "pkg.jet", "workspace.jet", "build.jet", ".jet/lock"}) {
             path :: jet_cli_rooted_join(root, name)
             if jet_cli_receipt_regular(path) -> &paths.push(path)
         }
@@ -256,7 +256,7 @@ pub fn jet_cli_receipt_target_identity(cache: &WorkspaceDeclarationCache, target
     members := [JetCLIReceiptInput]{}
     loop input in inputs -> jet_cli_receipt_canonical_member(input, cwd, &members)
     loop root in jet_cli_lock_canonical(roots) {
-        loop name in [String]{"package.jet", "pkg.jet", "workspace.jet", "build.jet", ".jet/lock"} {
+        loop name in ([String]{"package.jet", "pkg.jet", "workspace.jet", "build.jet", ".jet/lock"}) {
             path :: jet_cli_rooted_join(root, name)
             info :: cli_files.stat(path) ?? {
                 if jet_cli_rooted_missing(err) -> next

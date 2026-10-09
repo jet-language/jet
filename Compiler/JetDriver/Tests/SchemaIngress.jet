@@ -1,0 +1,57 @@
+// Real same-read schema dependency witnesses. The fixture launcher unsets
+// JET_SCHEMA_CACHE_DIR so every write remains beneath this owned temporary root.
+use core.files as schema_test_files
+use core.sys as schema_test_sys
+use core.process as schema_test_process
+
+fn run() -[FS, Env]> {
+    assert(schema_test_sys.get("JET_SCHEMA_CACHE_DIR") == None)
+    root :: schema_test_files.join(schema_test_sys.temp_dir(), "jet-schema-ingress-{schema_test_process.current_pid()}")
+    schema_test_files.create_dir(root) ?? panic("exclusive schema fixture root")
+    cache :: schema_test_files.join(root, ".jet/cache/schema")
+    schema_test_files.create_dir_all(cache) ?? panic("schema fixture cache")
+    missing :: jet_driver_read_schema_dependency(root, "Missing")
+    assert(missing.cache_dir == cache && missing.path == schema_test_files.join(cache, "Missing.snapshot") && missing.name == "Missing")
+    if missing.outcome == {
+        .Missing(_) -> {}
+        else -> panic("missing schema input was not retained")
+    }
+    raw :: "schema_version = 1\ntype = DifferentEmbeddedLabel\npublished_version = 1.0.0\nfield name: String\n"
+    path :: schema_test_files.join(cache, "Account.snapshot")
+    schema_test_files.write(path, raw) ?? panic("schema fixture write")
+    parsed :: jet_driver_read_schema_dependency(root, "Account")
+    if parsed.outcome == {
+        .Parsed(actual, snapshot) -> {
+            assert(actual == raw && parsed.name == "Account" && snapshot.type_name == "DifferentEmbeddedLabel")
+            assert(snapshot.fields.len() == 1 && snapshot.fields[0].name == "name")
+        }
+        else -> panic("valid schema same-read bytes were lost")
+    }
+    malformed :: "schema_version = bad\n"
+    schema_test_files.write(path, malformed) ?? panic("malformed schema fixture write")
+    invalid :: jet_driver_read_schema_dependency(root, "Account")
+    if invalid.outcome == {
+        .Invalid(actual, _) -> assert(actual == malformed)
+        else -> panic("schema parse failure was not retained")
+    }
+    assert(load_snapshot(root, "Account") == None)
+    bytes :: [U8]{U8{255}, U8{254}}
+    schema_test_files.write_bytes(path, bytes) ?? panic("invalid UTF-8 schema fixture write")
+    encoding :: jet_driver_read_schema_dependency(root, "Account")
+    if encoding.outcome == {
+        .IO(error, actual) -> {
+            assert(actual == Val(bytes))
+            assert(error == IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("stream did not contain valid UTF-8")}))
+        }
+        else -> panic("schema UTF-8 failure lost actual bytes or read classification")
+    }
+    assert(load_snapshot(root, "Account") == None)
+    schema_test_files.remove(path) ?? panic("remove schema fixture file")
+    schema_test_files.create_dir(path) ?? panic("unreadable schema fixture directory")
+    unreadable :: jet_driver_read_schema_dependency(root, "Account")
+    if unreadable.outcome == {
+        .IO(_, bytes) -> assert(bytes == None)
+        else -> panic("schema IO failure was not retained")
+    }
+    schema_test_files.remove_all(root) ?? panic("schema fixture cleanup")
+}

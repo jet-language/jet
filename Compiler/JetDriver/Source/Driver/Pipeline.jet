@@ -4546,9 +4546,9 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     if request.capture_build_program {
         module_sources := [SemaCompilerModuleSource]{}
         source_positions :: jet_driver_source_file_positions(load.source_files)
-        loop module in load.modules {
-            unit :: load.source_units[module.source_unit_index]
-            &module_sources.push(SemaCompilerModuleSource{module_identity: module.module_identity, source: jet_driver_source_text_at(load.source_files, source_positions, unit.path)})
+        loop source_module in load.modules {
+            unit :: load.source_units[source_module.source_unit_index]
+            &module_sources.push(SemaCompilerModuleSource{module_identity: source_module.module_identity, source: jet_driver_source_text_at(load.source_files, source_positions, unit.path)})
         }
         &module_sources.push(SemaCompilerModuleSource{module_identity: canonical_effect_module_identity, source: request.canonical_effect_source})
         load.build_program = jet_eval_compiler_services_program_info(resolved_registration, checked_graph, jet_driver_source_text_at(load.source_files, source_positions, request.authorized_sources.entry_path), module_sources)

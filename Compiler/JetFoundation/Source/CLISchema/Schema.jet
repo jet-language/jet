@@ -5,13 +5,22 @@ use jet_foundation.[JobScope, JobSkip, JobCachePolicy, JobMetadata, ParamZone, S
 pub enum CLIValueKind { Bool Int Float String Path }
 impl CLIValueKind {
     pub fn as_str(self) -> String Never! {
-        if self == { .Bool -> "Bool" .Int -> "Int" .Float -> "Float" .String -> "String" .Path -> "Path" }
+        if self == {
+            .Bool -> "Bool"
+            .Int -> "Int"
+            .Float -> "Float"
+            .String -> "String"
+            .Path -> "Path"
+        }
     }
 }
 pub enum CLIDefault { TypeDefault Recorded(value: String) }
 impl CLIDefault {
     pub fn display(self) -> String Never! {
-        if self == { .TypeDefault -> "type default" .Recorded(value) -> value }
+        if self == {
+            .TypeDefault -> "type default"
+            .Recorded(value) -> value
+        }
     }
 }
 pub enum CLIInputShape { Flag Value(kind: CLIValueKind, optional: Bool, default: CLIDefault?) }
@@ -27,10 +36,16 @@ pub struct CLIInputSchema {
 }
 impl CLIInputSchema {
     pub fn required(self) -> Bool Never! {
-        if self.shape == { .Value(_, optional, default) -> !optional && default == None else -> false }
+        if self.shape == {
+            .Value(_, optional, default) -> !optional && default == None
+            else -> false
+        }
     }
     pub fn value_kind(self) -> CLIValueKind Never! {
-        if self.shape == { .Flag -> CLIValueKind.Bool .Value(kind, _, _) -> kind }
+        if self.shape == {
+            .Flag -> CLIValueKind.Bool
+            .Value(kind, _, _) -> kind
+        }
     }
     pub fn default_display(self) -> String? Never! {
         if self.shape == {
@@ -74,7 +89,11 @@ pub struct JobFact {
     pub schedule: String?
 
     pub fn scope_name(self) -> String Never! {
-        if self.scope == { .Dev -> "dev" .Ship -> "ship" .Internal -> "internal" }
+        if self.scope == {
+            .Dev -> "dev"
+            .Ship -> "ship"
+            .Internal -> "internal"
+        }
     }
     pub fn metadata(self) -> JobMetadata Never! {
         JobMetadata{scope: self.scope, after: self.after, packages: self.packages, cwd: self.cwd, inputs: self.inputs, outputs: self.outputs, skip: self.skip, cache: self.cache, parallel: Val(self.parallel), limits: self.limits}
