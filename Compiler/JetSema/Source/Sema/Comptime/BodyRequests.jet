@@ -49,7 +49,7 @@ fn sema_comptime_body_sources_truncate(context: &SemaCheckContext, length: Int) 
     loop context.comptime_body_sources.len() > length {
         row :: context.comptime_body_sources.len() - 1
         slot :: context.comptime_body_source_modules.get(context.comptime_body_sources[row].module_identity) ?? panic("a body source has no module index")
-        if context.comptime_body_source_rows[slot].get(context.comptime_body_sources[row].key) == Val(row) -> _ := &context.comptime_body_source_rows[slot].remove(context.comptime_body_sources[row].key)
+        if context.comptime_body_source_rows[slot].get(context.comptime_body_sources[row].key) == (Val(row)) -> _ := &context.comptime_body_source_rows[slot].remove(context.comptime_body_sources[row].key)
         _ := &context.comptime_body_sources.pop()
     }
 }
@@ -128,33 +128,42 @@ fn sema_comptime_body_work_count(values: SemaComptimeBodyValues, operation: Sema
     }
 }
 
+// Copy only scalar diagnostic totals; close the read guard before any sink
+// callback can perform host I/O or re-enter an observer.
+fn sema_comptime_body_work_snapshot(cell: Shared<SemaComptimeBodyWork>) -> SemaComptimeBodyWork {
+    permit :: cell.guard_read()
+    ~permit.value
+}
+
 // Called after tasks join, by the existing phase owner holding the real sink.
 // One aggregate event per numeric field, never one filesystem write per query.
 pub fn sema_comptime_body_work_flush(values: SemaComptimeBodyValues, trace_sink: CompilerTraceSink?, phase: String) {
     cell :: values.work ?? return
     if trace_sink == .Val(sink) {
-        permit :: cell.guard_read()
-        sink.progress("counters.{phase}.ct_value_publications", permit.value.publications, -1)
-        sink.progress("counters.{phase}.ct_value_publication_rows", permit.value.publication_rows, -1)
-        sink.progress("counters.{phase}.ct_value_index_builds", permit.value.index_builds, -1)
-        sink.progress("counters.{phase}.ct_value_index_rows_visited", permit.value.indexed_rows, -1)
-        sink.progress("counters.{phase}.ct_value_index_key_utf8_bytes", permit.value.index_key_utf8_bytes, -1)
-        sink.progress("counters.{phase}.ct_value_functions_started", permit.value.functions_started, -1)
-        sink.progress("counters.{phase}.ct_value_check_passes_started", permit.value.check_passes_started, -1)
-        sink.progress("counters.{phase}.ct_value_context_value_carriers_attached", permit.value.context_value_carriers_attached, -1)
-        sink.progress("counters.{phase}.ct_value_context_value_snapshots", permit.value.context_value_snapshots, -1)
-        sink.progress("counters.{phase}.ct_value_queries", permit.value.queries, -1)
-        sink.progress("counters.{phase}.ct_value_module_probes", permit.value.module_probes, -1)
-        sink.progress("counters.{phase}.ct_value_first_row_probes", permit.value.first_row_probes, -1)
-        sink.progress("counters.{phase}.ct_value_second_row_probes", permit.value.second_row_probes, -1)
-        sink.progress("counters.{phase}.ct_value_owned_rows_returned", permit.value.owned_rows_returned, -1)
+        totals :: sema_comptime_body_work_snapshot(cell)
+        sink.progress("counters.{phase}.ct_value_publications", totals.publications, -1)
+        sink.progress("counters.{phase}.ct_value_publication_rows", totals.publication_rows, -1)
+        sink.progress("counters.{phase}.ct_value_index_builds", totals.index_builds, -1)
+        sink.progress("counters.{phase}.ct_value_index_rows_visited", totals.indexed_rows, -1)
+        sink.progress("counters.{phase}.ct_value_index_key_utf8_bytes", totals.index_key_utf8_bytes, -1)
+        sink.progress("counters.{phase}.ct_value_functions_started", totals.functions_started, -1)
+        sink.progress("counters.{phase}.ct_value_check_passes_started", totals.check_passes_started, -1)
+        sink.progress("counters.{phase}.ct_value_context_value_carriers_attached", totals.context_value_carriers_attached, -1)
+        sink.progress("counters.{phase}.ct_value_context_value_snapshots", totals.context_value_snapshots, -1)
+        sink.progress("counters.{phase}.ct_value_queries", totals.queries, -1)
+        sink.progress("counters.{phase}.ct_value_module_probes", totals.module_probes, -1)
+        sink.progress("counters.{phase}.ct_value_first_row_probes", totals.first_row_probes, -1)
+        sink.progress("counters.{phase}.ct_value_second_row_probes", totals.second_row_probes, -1)
+        sink.progress("counters.{phase}.ct_value_owned_rows_returned", totals.owned_rows_returned, -1)
     }
 }
 
-// The module memo observes published row contents, never Shared identity.
-// Environments always expose their complete publication; only contexts can
-// truncate a prefix while checking/rolling back a speculative branch.
+// The two module-memo boundaries restore the full publication before reading
+// this fingerprint (sema_check_registration_module / sema_check_prepare_module).
+// Item probes can select length zero, but never freeze a module memo; preserve
+// that empty ordered-row view without reading or copying the fact payload.
 fn sema_comptime_body_values_debug(values: SemaComptimeBodyValues) -> String {
+    if values.length == 0 -> return "{[SemaComptimeBodyValue]{}:Debug}"
     facts :: values.facts ?? return "{[SemaComptimeBodyValue]{}:Debug}"
     permit :: facts.guard_read()
     "{permit.value.values:Debug}"

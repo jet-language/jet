@@ -294,10 +294,12 @@ fn body_index_publication_lifecycle() {
     context := sema_check_context_init()
     context.comptime_body_values = ~environment.comptime_body_values
     body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", span, site) == None, "the item probe intentionally sees no body values")
+    body_index_require(sema_comptime_body_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{}:Debug}", "an empty selected view fingerprints the original empty ordered row list")
     full := ~environment.comptime_body_publication
     body_index_require(sema_scope_environment_enter_probe_module(&environment, "mod::one", ^full), "the next function restores the publication")
     context.comptime_body_values = ~environment.comptime_body_values
     body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", span, site) == Val(first), "empty item reset cannot erase a published function value")
+    body_index_require(sema_comptime_body_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{first}:Debug}", "a full selected view fingerprints ordered row contents, not the Shared cell")
     prior :: ~environment.comptime_body_publication
     next_site :: Span{start: 30, end: 31}
     second :: body_index_value("mod::one", "function::one", span, next_site, 9)
@@ -308,6 +310,7 @@ fn body_index_publication_lifecycle() {
     body_index_require(sema_scope_environment_enter_probe_module(&environment, "mod::one", ^next_full), "the next function selects the new publication")
     context.comptime_body_values = ~environment.comptime_body_values
     body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", span, site) == Val(first) && sema_comptime_body_value_find(context, "mod::one", "function::one", span, next_site) == Val(second), "the new function sees the entire ordered updated publication")
+    body_index_require(sema_comptime_body_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{first, second}:Debug}", "the next full view fingerprints the newly published row order")
 }
 
 fn run() {
