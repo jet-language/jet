@@ -113,9 +113,8 @@ enum LowerRepr {
     // Float: the IEEE double's bits in one word (LIR Float layout).
     FloatBits
     // F32: four stored bytes, raw binary32 bits in the low 32 of a word
-    // register. Reader materialization and binary32 shortest text only;
-    // numeric/compare/cast operations remain refused. Future FP-register
-    // operations must use the canonical LIR Bitcast, never numeric Convert.
+    // register. Numeric operations bitcast to the single-precision LIR
+    // layout and back, preserving the reader/runtime word carrier ABI.
     Float32Bits
     // Bool: one byte holding 0 or 1.
     Flag
@@ -678,7 +677,7 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
         .Bool -> LowerRepr.Flag
         .Float -> LowerRepr.FloatBits
         .Float32 -> LowerRepr.Float32Bits
-        .IntN(_, bits) -> if bits <= 64 -> LowerRepr.Word else -> LowerRepr.Unsupported{reason: "{bits}-bit integers"}
+        .IntN(_, bits) -> if bits <= 64 -> LowerRepr.Word else if bits == 128 -> LowerRepr.Inline{ty: ty} else -> LowerRepr.Unsupported{reason: "{bits}-bit integers"}
         .String -> LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
         .Tagged(_, inner) -> lower_repr(p, inner)
         .InlineRange(base, _, _) -> lower_repr(p, base)
@@ -2167,6 +2166,8 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         .BuildString(parts) -> lower_build_string(p, c, &m, &f, instruction, parts)
         .BuildList(values, trait_coercion) -> lower_build_list(p, c, &m, &f, instruction, values, trait_coercion)
         .BuildMap(entries) -> lower_build_map(p, c, &m, &f, instruction, entries)
+        .MapLookup(map, key, cache) -> lower_map_lookup(p, c, &m, &f, instruction, map, key, cache)
+        .Range(start, end, exclusive) -> lower_range_value(p, c, &m, &f, instruction, start, end, exclusive)
         .Index(_, base, index, kind, access, _, _) -> {
             if kind == .Map -> return lower_map_index(p, c, &m, &f, instruction, base, index, access)
             lower_list_index(p, c, &m, &f, instruction, base, index, kind, access)
@@ -2277,6 +2278,98 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         else -> lower_fail(&m, &f, "MIR operation {lower_operation_name(instruction.operation)} is not lowered at O0 yet")
     }
 }
+// Pattern lookups (Codegen/Expressions.jet) cache Option<Ptr<V>> inside an
+// outer Option. A present cache also remembers a missing key, so repeated
+// arms do not search again. map.find is the same native Map ABI as has_key.
+fn lower_map_lookup(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, map_place: MIRPlaceID, key_value: MIRValueID, cache_place: MIRPlaceID) Never! {
+    map_row :: lower_place_row(c.mir, map_place) ?? return lower_fail(&m, &f, "MapLookup map place is missing")
+    shape :: lower_map_shape(p, map_row.ty) ?? return lower_fail(&m, &f, "MapLookup requires a Map place")
+    cache_row :: lower_place_row(c.mir, cache_place) ?? return lower_fail(&m, &f, "MapLookup cache place is missing")
+    slot :: c.place_slots.get(cache_place.value) ?? return lower_fail(&m, &f, "MapLookup cache has no lowered root")
+    cached :: lower_slot_root(p, c, &m, &f, slot) ?? return lower_fail(&m, &f, "MapLookup cache is uninitialized")
+    lookup_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "MapLookup has no checked type")
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    zero :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: zero, value: 0})
+    ready :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: ready, condition: LIRCondition.Ne, left: cached, right: zero})
+    reuse :: lower_new_block(&f)
+    search :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: ready, then_target: lower_target(reuse, [LIRValueID]{}), else_target: lower_target(search, [LIRValueID]{})})
+    lower_start(&f, reuse, [LIRValueID]{})
+    previous :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: previous, base: cached, offset: 0})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{previous, cached})})
+    lower_start(&f, search, [LIRValueID]{})
+    map := LIRValueID{value: -1}
+    if map_row.base == .Static(name) {
+        address :: lower_static_walk(p, c, &m, &f, map_row, name) ?? return
+        map = lower_address(&f, address.base, address.offset)
+    } else {
+        map = lower_receiver_header(p, c, &m, &f, Val(map_place), "MapLookup") ?? return
+    }
+    key :: lower_use(&m, &f, key_value) ?? return
+    found :: lower_word(&f)
+    lower_call_helper(&m, &f, "map.find", map_row.ty, [LIRValueID]{map, key}, Val(found))
+    present :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: present, condition: LIRCondition.Ge, left: found, right: lower_const(&f, 0)})
+    hit :: lower_new_block(&f)
+    miss :: lower_new_block(&f)
+    publish :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: present, then_target: lower_target(hit, [LIRValueID]{}), else_target: lower_target(miss, [LIRValueID]{})})
+    lower_start(&f, hit, [LIRValueID]{})
+    data :: lower_list_data(&f, map)
+    entry :: lower_list_address(&f, data, found, shape.stride)
+    address :: lower_address(&f, entry, shape.value_offset)
+    lookup :: lower_pointer(&f)
+    lower_alloc(&m, &f, lookup, 8)
+    lower_emit(&f, LIRInst.Store{base: lookup, offset: 0, value: address})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(publish, [LIRValueID]{lookup})})
+    lower_start(&f, miss, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(publish, [LIRValueID]{zero})})
+    selected :: lower_pointer(&f)
+    lower_start(&f, publish, [LIRValueID]{selected})
+    outer :: lower_pointer(&f)
+    lower_alloc(&m, &f, outer, lower_option_box_size(p, lookup_ty))
+    lower_emit(&f, LIRInst.Store{base: outer, offset: 0, value: selected})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{selected, outer})})
+    cache :: lower_pointer(&f)
+    result :: lower_pointer(&f)
+    lower_start(&f, done, [LIRValueID]{result, cache})
+    if c.slots[slot].cell {
+        cell :: (f.cells[slot].copy()) ?? return lower_fail(&m, &f, "MapLookup cache cell has no storage")
+        lower_write_at(p, &f, cell, 0, cache, cache_row.ty)
+    } else {
+        lower_set_slot(&f, slot, Val(cache))
+    }
+    // The cache owns its Option box. Owned MIR results need an independent
+    // box even though the Ptr payload itself is borrowed from the Map.
+    if lower_value_drop(f, dst) != .Trivial -> lower_clone_into(p, &m, &f, result, dst, lookup_ty)
+    else -> lower_emit(&f, LIRInst.Move{dst: dst, src: result})
+}
+
+// The checked Range declaration supplies the layout consumed by Iter.jet.
+fn lower_range_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, start: MIRValueID, end: MIRValueID, exclusive: Bool) Never! {
+    ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "Range has no checked type")
+    members :: lower_range_members(p, ty) ?? return lower_fail(&m, &f, "Range has no native range layout")
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_storage_into(p, &f, dst, ty)
+    bounds :: [MIRValueID]{start, end}
+    loop (index, bound) in bounds {
+        value := lower_use(&m, &f, bound) ?? return
+        bound_ty :: lower_value_type(c, bound) ?? return lower_fail(&m, &f, "Range bound has no checked type")
+        if lower_is_exact_int(bound_ty) && !lower_is_exact_int(members[index].ty) {
+            native :: lower_word(&f)
+            lower_convert_exact(&m, &f, native, value, "jet_int_owned_to_i64", false)
+            value = native
+        }
+        lower_write_at(p, &f, dst, members[index].offset, value, members[index].ty)
+    }
+    flag :: lower_const_flag(&f, if exclusive -> 1 else -> 0)
+    lower_write_at(p, &f, dst, members[2].offset, flag, members[2].ty)
+}
+
 
 // Scopes whose meaning is fully checked before lowering emit nothing, as in
 // the Rust emitter (MIRRust.rs `scope_operation_expression`), which calls the
@@ -2434,6 +2527,8 @@ fn lower_constant(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if constant == .Unit -> return lower_alias_absent(&f, instruction)
     if lower_constant_reject(&m, &f, constant) -> return
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    ty :: lower_checked_type(c, instruction) ?? return
+    if lower_wide_signed(p, ty) != None -> return lower_constant_into(p, c, &m, &f, instruction, constant, dst)
     if constant == {
         .Int(value, _, _) -> {
             exact :: if instruction.ty == .Val(ty) -> lower_is_exact_int(ty) else -> false
@@ -3137,7 +3232,7 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
     left_value :: lower_use(&m, &f, left) ?? return
     right_value :: lower_use(&m, &f, right) ?? return
     left_ty :: lower_value_type(c, left) ?? return lower_fail(&m, &f, "operand {left.value} has no checked type")
-    if lower_repr(p, left_ty) == .Float32Bits -> return lower_fail(&m, &f, "Float32 operations are not lowered at O0 yet")
+    if lower_repr(p, left_ty) == .Float32Bits -> return lower_float32_binary(p, c, &m, &f, instruction, op, left_value, right_value, left_ty)
     exact :: lower_is_exact_int(left_ty)
     unsigned :: lower_is_unsigned_word(left_ty)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return lower_fail(&m, &f, "binary operator has no result")
@@ -3260,6 +3355,22 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
     lower_emit(&f, LIRInst.Binary{dst: dst, op: if unsigned && word_op == .Shr -> LIRBinaryOp.UShr else -> word_op, left: left_value, right: right_value})
 }
 
+// F32's public carrier is a word, not an integer value: enter SSE via Bitcast.
+fn lower_float32_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, op: MIRBinaryOp, left: LIRValueID, right: LIRValueID, ty: MIRType) Never! {
+    a :: lower_new_value(&f, lir_layout_float32(), LIRDrop.Trivial, None)
+    b :: lower_new_value(&f, lir_layout_float32(), LIRDrop.Trivial, None)
+    lower_emit(&f, LIRInst.Bitcast{dst: a, src: left})
+    lower_emit(&f, LIRInst.Bitcast{dst: b, src: right})
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    if lower_condition_of(op) == .Val(condition) {
+        return lower_emit(&f, LIRInst.Compare{dst: dst, condition: condition, left: a, right: b})
+    }
+    result :: lower_new_value(&f, lir_layout_float32(), LIRDrop.Trivial, None)
+    lower_float_binary(&m, &f, result, op, ty, true, a, b)
+    if f.failed -> return
+    lower_emit(&f, LIRInst.Bitcast{dst: dst, src: result})
+}
+
 // Float and F32 arithmetic: SSE2 for `+ - * /`; `%` (truncated remainder) and
 // `**` are the C library's fmod/fmodf and pow/powf, which the compiled runtime
 // links (-lm).
@@ -3270,12 +3381,12 @@ fn lower_float_binary(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: M
         .Mul -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Mul, left: left, right: right})
         .Div -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Div, left: left, right: right})
         .FloorDiv -> {
-            quotient :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+            quotient :: lower_new_value(&f, if single -> lir_layout_float32() else -> lir_layout_float(), LIRDrop.Trivial, None)
             lower_emit(&f, LIRInst.Binary{dst: quotient, op: LIRBinaryOp.Div, left: left, right: right})
-            lower_call_runtime(&m, &f, "floor", [LIRValueID]{quotient}, Val(dst))
+            lower_call_runtime(&m, &f, if single -> "floorf" else -> "floor", [LIRValueID]{quotient}, Val(dst))
         }
-        .Rem -> lower_call_runtime(&m, &f, "fmod", [LIRValueID]{left, right}, Val(dst))
-        .Pow -> lower_call_runtime(&m, &f, "pow", [LIRValueID]{left, right}, Val(dst))
+        .Rem -> lower_call_runtime(&m, &f, if single -> "fmodf" else -> "fmod", [LIRValueID]{left, right}, Val(dst))
+        .Pow -> lower_call_runtime(&m, &f, if single -> "powf" else -> "pow", [LIRValueID]{left, right}, Val(dst))
         else -> lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(ty)} is not lowered at O0 yet")
     }
 }
@@ -3283,9 +3394,13 @@ fn lower_float_binary(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: M
 fn lower_unary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, op: MIRUnaryOp, value: MIRValueID) Never! {
     operand :: lower_use(&m, &f, value) ?? return
     ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "operand {value.value} has no checked type")
-    if lower_repr(p, ty) == .Float32Bits -> return lower_fail(&m, &f, "Float32 operations are not lowered at O0 yet")
     dst :: lower_result(p, c, &m, &f, instruction) ?? return lower_fail(&m, &f, "unary operator has no result")
     layout :: lower_value_layout(f, operand)
+    if lower_repr(p, ty) == .Float32Bits {
+        if op == .Not -> return lower_fail(&m, &f, "`not` on F32 is not lowered at O0 yet")
+        sign :: lower_const(&f, 2147483648)
+        return lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Xor, left: operand, right: sign})
+    }
     if op == .Not {
         if layout == lir_layout_bool() {
             no :: lower_const_flag(&f, 0)

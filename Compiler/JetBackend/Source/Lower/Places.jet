@@ -152,6 +152,44 @@ fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                     return None
                 }
             }
+            .MapLookup(lookup, optional, _) -> {
+                value_ty :: lower_map_value_type(ty) ?? {
+                    lower_fail(&m, &f, "MapLookup projection requires a Map")
+                    return None
+                }
+                selected :: lower_use(&m, &f, lookup) ?? return None
+                address :: lower_pointer(&f)
+                if optional {
+                    hit :: lower_new_block(&f)
+                    miss :: lower_new_block(&f)
+                    done :: lower_new_block(&f)
+                    zero :: lower_pointer(&f)
+                    lower_emit(&f, LIRInst.Const{dst: zero, value: 0})
+                    present :: lower_flag(&f)
+                    lower_emit(&f, LIRInst.Compare{dst: present, condition: LIRCondition.Ne, left: selected, right: zero})
+                    lower_seal(&f, LIRTerminator.Branch{condition: present, then_target: lower_target(hit, [LIRValueID]{}), else_target: lower_target(miss, [LIRValueID]{})})
+                    lower_start(&f, hit, [LIRValueID]{})
+                    payload :: lower_pointer(&f)
+                    lower_emit(&f, LIRInst.Load{dst: payload, base: selected, offset: 0})
+                    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{payload})})
+                    lower_start(&f, miss, [LIRValueID]{})
+                    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{zero})})
+                    lower_start(&f, done, [LIRValueID]{address})
+                    // A borrowed Option<V> points directly at the map's V
+                    // storage. An owning ReadPlace clones it through normal
+                    // Option glue; the map's storage is never transferred.
+                    base = lower_pointer(&f)
+                    lower_emit(&f, LIRInst.StackSlot{dst: base, size: 8, align: 8})
+                    lower_emit(&f, LIRInst.Store{base: base, offset: 0, value: address})
+                    ty = lower_option_type(value_ty)
+                } else {
+                    lower_emit(&f, LIRInst.Load{dst: address, base: selected, offset: 0})
+                    base = address
+                    ty = value_ty
+                }
+                offset = 0
+                borrowed = true
+            }
             .Deref(_) -> {
                 elem :: lower_shared_guard_element(ty) ?? {
                     lower_fail(&m, &f, "Deref projection of {mir_type_display_name(ty)} is not lowered at O0 yet")
