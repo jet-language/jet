@@ -785,6 +785,10 @@ never the compiler bootstrap unit. Adjacent `// runtime-init: N` and
 no arguments and return nothing; the object writer emits the corresponding
 priority-suffixed ELF init/fini arrays, without special-casing function names.
 Allocator initialization has priority zero; host stdio initializes after it.
+Equal priorities use lexical export-symbol order, matching the canonical
+exports list rather than source declarations. Same-priority initializers
+must be independent and idempotent; an initializer with a dependency uses
+a later priority. Programs and entryless libraries consume this one inventory.
 
 D-STDOUT-BUFFER1=A gives stdout one locked 8192-byte process-wide buffer:
 newline flushing on terminals, full-buffer flushing on files and pipes.
@@ -804,8 +808,8 @@ through the canonical numeric seam, never by treating a boxed Int as i64.
 Core stdio wrappers check `IO.Write`/`IO.Flush` faults before entering the
 raw transport. Runtime print, panic and abort do not consult those switches.
 stderr text lines use a borrowed text iovec and a stack-local LF, avoiding a
-temporary line allocation; byte lists compact eight-byte slots into bounded
-mapping-owned scratch. A zero write keeps a distinct WriteZero sentinel,
+temporary line allocation; byte lists lend packed bytes directly without
+scratch compaction. A zero write keeps a distinct WriteZero sentinel,
 not a fabricated errno. OS causes use pinned musl 1.2.5 wording from
 `JetRuntime/Assets/MuslErrno1_2_5`, with source hashes and MIT attribution.
 
@@ -820,10 +824,14 @@ are copied once into a single runtime-owned NUL-terminated byte block and the
 index points into it. Later host `setenv`/`putenv` cannot invalidate the
 snapshot. argv remains borrowed for the runtime lifetime. Zero-sized process
 stream tokens are the constant non-null word 1 and have no allocation/drop.
+Program mains separately call `jet_rt_host_program_start` after startup capture
+to ignore SIGPIPE, matching Rust's program lifecycle. This is not an init-array
+entry: entryless libraries preserve the embedding host's signal disposition.
+An explicit program-start opt-in fails fatally if the signal action is refused.
 Startup indexing follows Rust 1.90 `sys/env/unix.rs`: skip empty/malformed
 entries and search `=` after byte zero, preserving names beginning with `=`,
 non-UTF-8 bytes, duplicate rows and host order. Core transfers use owned
-List<U8> headers with eight-byte slots. Runtime-only scheduler/deadline flags
+List<U8> headers with packed bytes and allocator alignment 8. Runtime-only scheduler/deadline flags
 read this immutable snapshot through an internal helper; Core overlay writes
 do not alter those flags. No overlay-provider callback is registered.
 

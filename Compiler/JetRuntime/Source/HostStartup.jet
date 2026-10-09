@@ -4,6 +4,21 @@
 // arrays/bytes are lent only during capture, then copied into one owned block.
 // The native logical cell alone owns environment writes; this index is startup.
 // All storage uses the one MIR .Global mechanism, never foreign data imports.
+// One native List<U8> epoch fact shared by network/time/transport adapters.
+// NativeInteg flips this one constant alongside the canonical packed ABI.
+RT_HOST_U8_STRIDE :: prep { I64{8} }
+fn host_u8_get(data: I64, index: I64) -> I64 {
+    #Unsafe("data lends index's initialized native U8 element; low byte is meaningful in either epoch") {
+        return os_load_u8(wrapping(data + index * RT_HOST_U8_STRIDE))
+    }
+}
+fn host_u8_put(data: I64, index: I64, byte: I64) {
+    #Unsafe("data owns index's complete native U8 slot; initialize word-epoch padding before low-byte store") {
+        address :: wrapping(data + index * RT_HOST_U8_STRIDE)
+        if (RT_HOST_U8_STRIDE == I64{8}) -> os_store_i64(address, I64{0})
+        os_store_u8(address, byte)
+    }
+}
 host_argc := I64{-1}
 
 host_argv := I64{0}
@@ -113,19 +128,19 @@ fn host_startup_byte_length(bytes: I64) -> I64 {
     count
 }
 
-// Native List<U8> has eight-byte value slots. Empty data is null; capacity is
-// exactly length, and the sole owner releases length*8 bytes at alignment 8.
-fn host_startup_byte_words(bytes: I64, length: I64) -> I64 {
+// Native List<U8> is packed. Empty data is null; capacity is exactly length,
+// and the sole owner releases length bytes at the native list alignment 8.
+fn host_startup_bytes(bytes: I64, length: I64) -> I64 {
     if (length == I64{0}) { return I64{0} }
-    data :: jet_rt_alloc(length * I64{8}, I64{8})
+    data :: jet_rt_alloc(length, I64{8})
     source := bytes
     destination := data
     remaining := length
-    #Unsafe("startup lends length bytes; data exclusively owns length initialized byte value slots") {
+    #Unsafe("startup lends length bytes; data exclusively owns length initialized packed bytes") {
         loop remaining > (I64{0}) {
-            os_store_i64(destination, os_load_u8(source))
+            os_store_u8(destination, os_load_u8(source))
             source = wrapping(source + I64{1})
-            destination = wrapping(destination + I64{8})
+            destination = wrapping(destination + I64{1})
             remaining = wrapping(remaining - I64{1})
         }
     }
@@ -133,7 +148,7 @@ fn host_startup_byte_words(bytes: I64, length: I64) -> I64 {
 }
 
 fn host_startup_list(bytes: I64, length: I64, output: I64) {
-    data :: host_startup_byte_words(bytes, length)
+    data :: host_startup_bytes(bytes, length)
     #Unsafe("output lends a 24-byte native List<U8> header and receives ownership of data") {
         os_store_i64(output, length)
         os_store_i64(wrapping(output + I64{8}), length)
@@ -158,14 +173,14 @@ fn host_startup_list(bytes: I64, length: I64, output: I64) {
 }
 
 // Private Core primitive adapters use the generated list-out ABI, not a
-// temporary native header. They transfer the same word buffer allocator/owner.
+// temporary native header. They transfer the same packed buffer allocator/owner.
 #Export(c) fn jet_sys_startup_env_count_raw() -> I64 { jet_rt_env_count() }
 
 #Export(c) fn jet_sys_startup_env_name_raw(index: I64, data_out: I64) -> I64 {
     row :: host_environment_row(index)
     #Unsafe("row borrows its immutable record; data_out lends one writable pointer word") {
         length :: os_load_i64(wrapping(row + I64{8}))
-        os_store_i64(data_out, host_startup_byte_words(os_load_i64(row), length))
+        os_store_i64(data_out, host_startup_bytes(os_load_i64(row), length))
         return length
     }
 }
@@ -175,7 +190,7 @@ fn host_startup_list(bytes: I64, length: I64, output: I64) {
     #Unsafe("row borrows its immutable record; data_out lends one writable pointer word") {
         bytes :: wrapping(os_load_i64(row) + os_load_i64(wrapping(row + I64{16})))
         length :: host_startup_byte_length(bytes)
-        os_store_i64(data_out, host_startup_byte_words(bytes, length))
+        os_store_i64(data_out, host_startup_bytes(bytes, length))
         return length
     }
 }
