@@ -1237,6 +1237,7 @@ mod tests {
             span: Span::new(0, 0),
             is_pub: true,
             is_package_pub: false,
+            compiler_builtin_error: false,
             name: "Packet".to_string(),
             name_span: Span::new(0, 0),
             type_params: Vec::new(),

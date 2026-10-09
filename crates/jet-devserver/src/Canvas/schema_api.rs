@@ -965,7 +965,7 @@ fn command_receipt_json_for_entry_inner(entry: &Path, request: &str) -> Result<S
     let (success, exit_code, stdout, stderr, diagnostics) = if action_id == "canvas.command:check" {
         let abs = canonical_path(&source_path);
         let overlay = source_override.as_deref().map(|text| (abs.as_path(), text));
-        let (diags, _bundle, _facts) = jet_driver::Driver::check_file_with_effect_facts(
+        let (diags, _bundle, _facts, _) = jet_driver::Driver::check_file_with_effect_facts(
             &source_path.display().to_string(),
             overlay,
             true,

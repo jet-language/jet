@@ -665,7 +665,7 @@ mod tests {
         std::fs::write(&src_path, SOURCE_X).unwrap();
         let wasm = fixture_wasm("lint_no_x.wasm");
         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
-        let (diags, bundle, _) =
+        let (diags, bundle, _, _) =
             crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
         std::env::remove_var(ENV_COMPILER_EXTENSION);
         assert!(bundle.is_some(), "sema must succeed; diags={diags:?}");
@@ -686,7 +686,7 @@ mod tests {
         std::fs::write(&src_path, SOURCE_Y).unwrap();
         let wasm = fixture_wasm("lint_no_x.wasm");
         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
-        let (diags, bundle, _) =
+        let (diags, bundle, _, _) =
             crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
         std::env::remove_var(ENV_COMPILER_EXTENSION);
         assert!(bundle.is_some(), "sema must succeed; diags={diags:?}");
@@ -704,7 +704,7 @@ mod tests {
         std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
         let wasm = fixture_wasm("crash.wasm");
         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
-        let (diags, bundle, _) =
+        let (diags, bundle, _, _) =
             crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
         std::env::remove_var(ENV_COMPILER_EXTENSION);
         assert!(bundle.is_some());
@@ -725,7 +725,7 @@ mod tests {
         std::fs::write(&src_path, "fn run() {\n    print(missing)\n}\n").unwrap();
         let wasm = fixture_wasm("crash.wasm");
         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
-        let (diags, bundle, _) =
+        let (diags, bundle, _, _) =
             crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
         std::env::remove_var(ENV_COMPILER_EXTENSION);
         assert!(bundle.is_some(), "loader should return sema-invalid bundle");
@@ -744,7 +744,7 @@ mod tests {
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
         std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
-        let (diags, bundle, facts) =
+        let (diags, bundle, facts, _) =
             crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
         assert!(
             !diags
@@ -791,7 +791,7 @@ mod tests {
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
         std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
-        let (diags, bundle, _) =
+        let (diags, bundle, _, _) =
             crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
         assert!(
             !diags
@@ -885,7 +885,7 @@ mod tests {
 
         let mut bundle_check =
             crate::Loader::load_entry_with_overlay(path, None, false).expect("load check");
-        let (diags_c, facts_c) = crate::Sema::check_bundle_with_effect_facts(
+        let (diags_c, facts_c, _) = crate::Sema::check_bundle_with_effect_facts(
             &mut bundle_check,
             crate::Sema::CompileMode::Check,
         );
@@ -902,7 +902,7 @@ mod tests {
 
         let mut bundle_run =
             crate::Loader::load_entry_with_overlay(path, None, false).expect("load run");
-        let (diags_r, facts_r) = crate::Sema::check_bundle_with_effect_facts(
+        let (diags_r, facts_r, _) = crate::Sema::check_bundle_with_effect_facts(
             &mut bundle_run,
             crate::Sema::CompileMode::Run,
         );
@@ -940,7 +940,7 @@ mod tests {
         let wasm = fixture_wasm("lint_no_x.wasm");
         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
 
-        let (check_diags, bundle, _) =
+        let (check_diags, bundle, _, _) =
             crate::Driver::check_file_with_effect_facts(path, None, false);
         assert!(
             bundle.is_some(),

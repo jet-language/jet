@@ -601,7 +601,7 @@ pub(crate) fn child_exit_code(status: std::process::ExitStatus) -> i32 {
 fn vector_build_projection(
     file: &str,
 ) -> Vec<(String, usize, usize, String, String, String, String)> {
-    let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts(file, None, false);
+    let (diagnostics, bundle, _, checked_nominals) = jet::Driver::check_file_with_effect_facts(file, None, false);
     if diagnostics
         .iter()
         .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
@@ -613,6 +613,7 @@ fn vector_build_projection(
     };
     let (mir, _) = jet::lower_checked_semantic_mir_program_for(
         &bundle,
+        &checked_nominals,
         jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
@@ -1149,7 +1150,7 @@ fn resolve_run_authority_before_execution(
             "the checked source closure is empty".to_string(),
         );
     }
-    let (diagnostics, bundle, facts) = jet::run_compiler_work(|| {
+    let (diagnostics, bundle, facts, _nominals) = jet::run_compiler_work(|| {
         jet::Driver::check_file_with_effect_facts_for_run_and_entry_with_source_closure(
             file,
             &source_closure,
@@ -3500,8 +3501,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             .map(|projection| projection.diagnostics.clone())
             .unwrap_or_default();
         if let Some(projection) = checked.as_ref() {
-            if let Err(error) =
-                crate::CmdDevTools::merge_cost_diagnostics(&projection.bundle, &mut all_diags)
+            if let Err(error) = crate::CmdDevTools::merge_cost_diagnostics(
+                &projection.bundle, &projection.checked_nominals, &mut all_diags,
+            )
             {
                 crate::CmdDevTools::exit_cost_projection_error(file, &error);
             }
@@ -4354,7 +4356,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                         ),
                     }
                 };
-                let (diagnostics, bundle, facts) = checked;
+                let (diagnostics, bundle, facts, _nominals) = checked;
                 if diagnostics
                     .iter()
                     .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)

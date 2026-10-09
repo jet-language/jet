@@ -17,6 +17,7 @@ pub(super) fn complete_bundle_check(
 ) -> (
     Vec<Diagnostic>,
     super::super::super::Effects::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     let states: &[ModuleState] = &*states_mut;
     populate_name_ledger(bundle, &states, &mut name_ledger);
@@ -298,7 +299,9 @@ pub(super) fn complete_bundle_check(
             .module_alias(idx)
             .unwrap_or(&module.alias)
             .to_string();
-        if let Some(sealed) = seal.as_mut().and_then(|plan| plan.modules.get_mut(&idx)) {
+        if let Some(sealed) = seal.as_mut().and_then(|plan| plan.modules.get_mut(&idx))
+            .filter(|_| states[idx].compiler_builtin_error_owner != Some(idx))
+        {
             // A sealed module is not body-checked: its recorded item
             // summaries and module facts stand in for the checked bodies.
             global_addr_taken.extend(sealed.address_taken.iter().cloned());
@@ -870,6 +873,18 @@ pub(super) fn complete_bundle_check(
                 .is_some_and(|origin| origin.is_core_source())
     });
     jet_foundation::Diagnostics::order_diagnostics_root_first(&mut diags);
+    for (state, module) in states_mut.iter_mut().zip(&bundle.modules) {
+        state.items.clone_from(&module.items);
+        super::CheckInner::count_program_copy(module.items.len());
+    }
+    let checked_nominals = {
+        let _modules = crate::Sema::CheckerCore::open_fragment_module_memos(states_mut);
+        states_mut.iter().enumerate().map(|(module_idx, _)| {
+            crate::Sema::CheckerCore::checked_comptime_nominals_for_context(
+                states_mut, module_idx, &name_ledger,
+            ).expect("module index came from the checked states")
+        }).collect::<std::sync::Arc<[_]>>()
+    };
     (
         diags,
         super::super::super::Effects::SemIndexEffectFacts {
@@ -882,6 +897,7 @@ pub(super) fn complete_bundle_check(
             web_app: app_graph,
             fact_registry,
         },
+        checked_nominals,
     )
 }
 fn suppress_duplicate_root_panic(

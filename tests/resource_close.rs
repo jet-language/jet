@@ -483,8 +483,9 @@ fn deferred_close_agrees_on_interpreter_and_native() {
     let path = root.join("main.jet");
     fs::write(&path, SIMPLE).unwrap();
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics.into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
@@ -494,7 +495,7 @@ fn deferred_close_agrees_on_interpreter_and_native() {
     assert_eq!(native.stdout, b"body\nclose dev\n");
 
     let policy = common::development_policy();
-    match common::run_interpreted(&bundle, &policy) {
+    match common::run_interpreted(&bundle, &checked_nominals, &policy) {
         RunOutcome::Ran { stdout, .. } => {
             assert_eq!(stdout, "body\nclose dev\n");
         }

@@ -2042,6 +2042,9 @@ pub struct StructDef {
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) struct …`.
     pub is_package_pub: bool,
+    /// Authenticated origin set only by the canonical Prelude error supplier.
+    /// Ordinary parsed/generated declarations never grant builtin authority.
+    pub compiler_builtin_error: bool,
     pub name: String,
     pub name_span: Span,
     /// S45: `<T>` after the struct name.

@@ -339,7 +339,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "DNSSRV" | "UnixListener" | "UnixStream" | "TLSStream" | "TLSClientConfig" | "TLSClientConfigType"
         | "TLSRootCertificates" | "TLSRootCertificatesType" | "TLSClientIdentity" | "TLSClientIdentityType"
         | "TLSClientTrust" | "TLSVersion" | "TLSPeerIdentity" | "TLSCertificate"
-        | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
+        | "NetError" | "NetErrorDetail" | "NetDNSError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
         // D-COMPUTE1=D / D-COMPUTE-TYPE1=D: ranked tensor owner + compute errors.
         | "Tensor" | "ComputeError" | "ComputeDevice" | "ComputeStream" | "VJPRun"
         | "SparseTensor"
@@ -708,16 +708,6 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         return match field {
             "requested_bytes" => Some(Type::Int),
             "allocator" => Some(Type::String),
-            _ => None,
-        };
-    }
-    if type_name == Syntax::TYPE_ERR {
-        return match field {
-            "message" => Some(Type::String),
-            "code" => Some(Type::Option(Box::new(Type::String))),
-            "cause" => Some(Type::Option(Box::new(Type::Named(
-                Syntax::TYPE_ERR.to_string(),
-            )))),
             _ => None,
         };
     }
@@ -2910,7 +2900,7 @@ pub fn core_net_error_variants(
     use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
     let mut variants = std::collections::HashMap::new();
-    if enum_name == "NetDnsError" {
+    if enum_name == "NetDNSError" {
         for name in ["NotFound", "Failure"] {
             variants.insert(
                 name.to_string(),
@@ -2950,7 +2940,7 @@ pub fn core_net_error_variants(
         "DNS".to_string(),
         (
             zero,
-            VariantPayload::Single(Type::Named("NetDnsError".to_string()), zero),
+            VariantPayload::Single(Type::Named("NetDNSError".to_string()), zero),
         ),
     );
     Some(variants)
@@ -3674,15 +3664,6 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("device".to_string(), Type::String),
             ("numeric_profile".to_string(), Type::String),
             ("requested".to_string(), Type::String),
-        ]),
-        // D-FAIL-ERROR1=A: constructor calls normalize to this private shape.
-        name if name == Syntax::TYPE_ERR => Some(vec![
-            ("message".to_string(), Type::String),
-            ("code".to_string(), Type::Option(Box::new(Type::String))),
-            (
-                "cause".to_string(),
-                Type::Option(Box::new(Type::Named(Syntax::TYPE_ERR.to_string()))),
-            ),
         ]),
         "HandleID" | "TaskID" | "EventID" => Some(vec![("value".to_string(), Type::Named("Count".to_string()))]),
         "HistoryCase" => Some(vec![

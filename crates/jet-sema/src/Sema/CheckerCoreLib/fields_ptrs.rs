@@ -31,7 +31,8 @@ impl<'a> Checker<'a> {
                 .is_some_and(|variants| variants.contains_key(name))
         {
             self.record_import_alias_reference(alias, alias_span);
-            return Some(Type::Named(alias.to_string()));
+            return Some(Type::Named(self.import_qualified_nominal(alias)
+                .unwrap_or_else(|| alias.to_string())));
         }
         // Canonical Core enum imports (`use core.compute.[ComputeError]`,
         // etc.) keep the imported item alongside its module alias. Resolve
@@ -42,16 +43,26 @@ impl<'a> Checker<'a> {
                 jet_foundation::CoreModuleExports::core_leaf_kind(module, &item),
                 Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
             );
+            let identity = self.import_qualified_nominal(alias)
+                .unwrap_or_else(|| item.clone());
             if is_core_enum
                 && self
-                    .resolve_enum_variants_cloned(&item)
+                    .resolve_enum_variants_cloned(&identity)
                     .is_some_and(|variants| variants.contains_key(name))
             {
                 self.record_import_alias_reference(alias, alias_span);
-                return Some(Type::Named(item));
+                return Some(Type::Named(identity));
             }
         }
 
+        if module == "core.encoding"
+            && matches!(jet_foundation::CoreModuleExports::core_leaf_kind(module, name),
+                Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_)))
+        {
+            if let Some(owner) = self.core_source_enum_owner_module(module, name) {
+                return Some(Type::Named(self.canonical_nominal_name(owner, name)));
+            }
+        }
         let result = match (module, name) {
             ("core.math", "pi" | "e" | "tau" | "infinity" | "nan") => Some(Type::Float),
             // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): `mem.Arena`, `mem.Bump`,

@@ -1402,6 +1402,7 @@ impl<'a> Parser<'a> {
             span: Span::new(item_start, item_end),
             is_pub,
             is_package_pub,
+            compiler_builtin_error: false,
             name,
             name_span,
             type_params,

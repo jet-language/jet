@@ -1646,7 +1646,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "TLSCertificate" => Some("JetTLSCertificate"),
         "NetError" => Some("JetNetError"),
         "NetErrorDetail" => Some("JetNetErrorDetail"),
-        "NetDnsError" => Some("JetNetDnsError"),
+        "NetDNSError" => Some("JetNetDnsError"),
         "NetShutdown" => Some("JetNetShutdown"),
         "NetReadyInterest" => Some("JetNetReadyInterest"),
         "NetReady" => Some("JetNetReady"),
@@ -1703,7 +1703,7 @@ impl Cx {
     pub(crate) fn install_fragment_signature(
         &mut self,
         function: &Func,
-        signature: &crate::Comptime::MirBridge::MirFragmentCoreSourceSignature,
+        signature: &crate::AST::MirFragmentCoreSourceSignature,
     ) {
         self.sigs.insert(function.name.clone(), signature.params.clone());
         self.install_fragment_function_types(&function.name, function, signature);
@@ -1713,7 +1713,7 @@ impl Cx {
         &mut self,
         name: &str,
         function: &Func,
-        signature: &crate::Comptime::MirBridge::MirFragmentCoreSourceSignature,
+        signature: &crate::AST::MirFragmentCoreSourceSignature,
     ) {
         let value_type = function_value_type(function,
             signature.params.iter().map(|(_, ty)| ty.with_effective_fn_returns()).collect(),
@@ -6132,7 +6132,7 @@ pub(crate) fn build_cx_items(
     cx.struct_fields
         .insert("NetErrorDetail".to_string(), net_error_detail_fields);
     cx.cloneable.insert("NetErrorDetail".to_string());
-    for enum_name in ["NetDnsError", "NetError"] {
+    for enum_name in ["NetDNSError", "NetError"] {
         let mut variant_payloads = crate::Sema::core_net_error_variants(enum_name)
             .unwrap_or_else(|| panic!("missing canonical Core enum {enum_name}"));
         let ordered_names =

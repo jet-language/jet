@@ -3626,7 +3626,7 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
         None
     };
     let core_abi = proof_core_abi(
-        semantic_bundle.as_ref().map(|(bundle, _)| bundle),
+        semantic_bundle.as_ref().map(|(bundle, _, _)| bundle),
         &source_digest,
     );
     let mir = proof_mir_identity(
@@ -3789,8 +3789,8 @@ fn load_checked_proof_bundle(
     entry: &str,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-) -> Option<(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts)> {
-    let (diagnostics, bundle, facts) =
+) -> Option<(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<jet::AST::MirFragmentNominalFacts>]>)> {
+    let (diagnostics, bundle, facts, checked_nominals) =
         jet::Driver::check_file_with_effect_facts_for_run(entry, profile, setting_overrides);
     if diagnostics
         .iter()
@@ -3798,7 +3798,7 @@ fn load_checked_proof_bundle(
     {
         None
     } else {
-        bundle.map(|bundle| (bundle, facts))
+        bundle.map(|bundle| (bundle, facts, checked_nominals))
     }
 }
 
@@ -3845,14 +3845,15 @@ fn unavailable_mir_identity(
 }
 
 fn proof_mir_identity(
-    checked: Option<&(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts)>,
+    checked: Option<&(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<jet::AST::MirFragmentNominalFacts>]>)>,
     source_digest: &str,
     core_abi: &str,
     members: &[Member],
 ) -> jet_foundation::MIR::MirProgramIdentity {
-    if let Some((bundle, _facts)) = checked {
+    if let Some((bundle, _facts, checked_nominals)) = checked {
         let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
             bundle,
+            checked_nominals,
             jet_foundation::MIR::MirArtifactRequest::new(
                 jet_foundation::MIR::MirArtifactTarget::RustAot,
                 jet_foundation::MIR::MirArtifactKind::NativeExecutable,

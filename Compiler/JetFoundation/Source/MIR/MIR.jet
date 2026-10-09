@@ -3192,6 +3192,62 @@ pub enum MIREntryOutput { NoOutput ReturnValue StandardOutput ExitStatus }
 
 pub struct MIRExport { pub symbol: String, pub function: MIRFunctionID, pub abi: MIRForeignABI }
 
+// The native Library C export law (owner ruling U3, 2026-10-09): every
+// parameter and the result of an `#Export(c)` function is one C primitive,
+// independently per position. Fixed widths map 1:1 to their C types; `Int` is
+// `int64_t`, `Float` is `double`, `String` is the JetText pointer/length pair.
+// The frozen Rust compiler keeps its older homogeneous Library scalar rule;
+// this law is Jet-only.
+pub enum MIRCPrimitive { Int Float Bool Text I8 I16 I32 I64 U8 U16 U32 U64 F32 }
+
+pub fn mir_c_primitive(ty: MIRType) -> MIRCPrimitive? {
+    if ty.kind == {
+        .Int -> Val(MIRCPrimitive.Int)
+        .Float -> Val(MIRCPrimitive.Float)
+        .Bool -> Val(MIRCPrimitive.Bool)
+        .String -> Val(MIRCPrimitive.Text)
+        .Float32 -> Val(MIRCPrimitive.F32)
+        .IntN(signed, bits) -> {
+            if bits == 8 -> return Val(if signed -> MIRCPrimitive.I8 else -> MIRCPrimitive.U8)
+            if bits == 16 -> return Val(if signed -> MIRCPrimitive.I16 else -> MIRCPrimitive.U16)
+            if bits == 32 -> return Val(if signed -> MIRCPrimitive.I32 else -> MIRCPrimitive.U32)
+            if bits == 64 -> return Val(if signed -> MIRCPrimitive.I64 else -> MIRCPrimitive.U64)
+            None
+        }
+        else -> None
+    }
+}
+
+// A C `void` result: the checked unit value.
+pub fn mir_c_void(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Tuple(fields) -> fields.len() == 0
+        .Apply(name, args) -> args.len() == 0 && name.name == "Unit"
+        else -> false
+    }
+}
+
+// The value an export publishes: the success value of a Result carrier (the
+// generated boundary exits on failure) or the plain return. Optional and
+// diverging carriers have no C result.
+pub fn mir_c_export_result(function: MIRFunction) -> MIRType? {
+    if function.failure == {
+        .Infallible -> Val(function.return_type)
+        .Result(success, _) -> Val(success)
+        else -> None
+    }
+}
+
+// Whether a checked top-level function satisfies the C export law.
+pub fn mir_c_export_signature(function: MIRFunction) -> Bool Never! {
+    if function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 -> return false
+    loop param in function.params {
+        if mir_c_primitive(param.ty) == None -> return false
+    }
+    result :: mir_c_export_result(function) ?? return false
+    mir_c_void(result) || mir_c_primitive(result) != None
+}
+
 pub struct MIREntrySpec {
     pub kind: MIREntryKind
     pub function: MIRFunctionID?

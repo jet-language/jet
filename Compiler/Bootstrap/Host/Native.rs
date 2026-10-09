@@ -2388,6 +2388,18 @@ fn emit_bootstrap_host_factory(
     // #4643: the request's compile mode; the bootstrap host always compiles a program.
     let request_mode = symbols.field_symbol("JetDriverCompileRequest", "mode")?;
     let mode_program = symbols.variant_path("JetDriverCompileMode", "Program")?;
+    let request_schema_snapshots = symbols.field_symbol("JetDriverCompileRequest", "schema_snapshots")?;
+    let request_gate_set = symbols.field_symbol("JetDriverCompileRequest", "gate_set")?;
+    let request_gate_policies = symbols.field_symbol("JetDriverCompileRequest", "gate_policies")?;
+    let request_external_gate_entries = symbols.field_symbol("JetDriverCompileRequest", "external_gate_entries")?;
+    let request_evaluation_entry = symbols.field_symbol("JetDriverCompileRequest", "evaluation_entry")?;
+    let request_output_intent = symbols.field_symbol("JetDriverCompileRequest", "output_intent")?;
+    let request_output_address = symbols.field_symbol("JetDriverCompileRequest", "output_address")?;
+    let output_check = symbols.variant_path("SemaOutputIntent", "Check")?;
+    let gate_type = symbols.type_symbol("GateSet")?;
+    let gate_allowed = symbols.field_symbol("GateSet", "allowed")?;
+    let gate_build_flag = symbols.field_symbol("GateSet", "build_flag")?;
+    let gate_session_flag = symbols.field_symbol("GateSet", "session_flag")?;
     let threads_type = symbols.type_symbol("CompilerThreads")?;
     let threads_cap = symbols.field_symbol("CompilerThreads", "cap")?;
     let threads_cores = symbols.field_symbol("CompilerThreads", "cores")?;
@@ -2516,6 +2528,13 @@ fn emit_bootstrap_host_factory(
             "        {request_eval_config}: __jet_eval_config,\n",
             "        {request_target}: __jet_target,\n",
             "        {request_record_store}: __jet_bootstrap_record_store(),\n",
+            "        {request_schema_snapshots}: Err(Default::default()),\n",
+            "        {request_gate_set}: {gate_type} {{ {gate_allowed}: Vec::new(), {gate_build_flag}: false, {gate_session_flag}: false }},\n",
+            "        {request_gate_policies}: Vec::new(),\n",
+            "        {request_external_gate_entries}: Vec::new(),\n",
+            "        {request_evaluation_entry}: Err(Default::default()),\n",
+            "        {request_output_intent}: {output_check},\n",
+            "        {request_output_address}: Err(Default::default()),\n",
             "        {request_trace_sink}: __jet_bootstrap_trace_sink(),\n",
             "        // Full verification (MIR Lint after every optimizer pass) is an\n",
             "        // explicit host opt-in for tests and verification runs.\n",
@@ -2577,6 +2596,18 @@ fn emit_bootstrap_host_factory(
         host_active_os = host_active_os,
         request_effect_source = request_effect_source,
         request_record_store = request_record_store,
+        request_schema_snapshots = request_schema_snapshots,
+        request_gate_set = request_gate_set,
+        request_gate_policies = request_gate_policies,
+        request_external_gate_entries = request_external_gate_entries,
+        request_evaluation_entry = request_evaluation_entry,
+        request_output_intent = request_output_intent,
+        request_output_address = request_output_address,
+        output_check = output_check,
+        gate_type = gate_type,
+        gate_allowed = gate_allowed,
+        gate_build_flag = gate_build_flag,
+        gate_session_flag = gate_session_flag,
         request_trace_sink = request_trace_sink,
         request_mir_lint_every_pass = request_mir_lint_every_pass,
         request_compiler_threads = request_compiler_threads,
@@ -3036,6 +3067,10 @@ fn emit_bootstrap_manifest_adapter(
             "    }}\n",
             "    if web_artifact.is_some() || web_artifacts.is_some() {{\n",
             "        if web_artifact.is_none() || web_artifacts.is_none() || mir.is_none() || entry_function.is_none() {{ return Err(\"complete Web result has no exact artifact, artifacts, MIR, or entry function\".to_string()); }}\n",
+            "        return Ok(crate::BootstrapJetCompileResult {{ selected_factory_tier, actual_factory_tier, complete, emitted_source: None, bindings: None, source_program, runtime_config: runtime_config.take(), mir, entry_function, runtime_artifact, web_artifact, web_artifacts, comptime_stdout, comptime_stderr, soft_stop, exit_code, internal_problem, reports, resources: None }});\n",
+            "    }}\n",
+            "    // MIR-only native compilation has no Rust source or emission bindings.\n",
+            "    if mir.is_some() && ({value}).{result_manifest}.as_ref().ok().is_none() && ({value}).{result_source}.as_ref().ok().is_none() {{\n",
             "        return Ok(crate::BootstrapJetCompileResult {{ selected_factory_tier, actual_factory_tier, complete, emitted_source: None, bindings: None, source_program, runtime_config: runtime_config.take(), mir, entry_function, runtime_artifact, web_artifact, web_artifacts, comptime_stdout, comptime_stderr, soft_stop, exit_code, internal_problem, reports, resources: None }});\n",
             "    }}\n",
             "    let manifest = ({value}).{result_manifest}.as_ref().ok().ok_or_else(|| \"complete bootstrap compiler result has no Rust emission manifest\".to_string())?;\n",

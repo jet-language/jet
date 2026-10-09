@@ -16,7 +16,7 @@ pub(super) use Derives::{expand_builtin_derive_items, expand_builtin_derive_item
 pub(crate) use Items::{
     check_strong_shared_cycles, comptime_context_from_items, const_evaluated_at_build,
     core_string_source_method, eval_comptime_items, name_defined,
-    register_const, register_distinct, register_enum, register_impl_methods,
+    register_builtin_error_struct, register_const, register_distinct, register_enum, register_impl_methods,
     register_missing_type_methods, register_struct, register_type_alias, register_type_methods,
     resolve_comptime_declaration_values,
 };

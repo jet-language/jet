@@ -1106,19 +1106,29 @@ fn sema_marker_rules_is_guest_marker(marker: Marker, site: RuleSite?) -> Bool Ne
         return false
     }
     if site == (Val(RuleSite.Function)) && (marker.name == "Import" || marker.name == "Export") {
-        if marker.args.len() == 0 {
-            return false
-        }
-        argument :: marker.args[0]
-        if argument == .Expr(value) {
-            if value == .Ident(name, _) {
-                return name == "c"
-            }
-        }
-        return false
+        return sema_marker_c_argument(marker)
     }
     if site == (Val(RuleSite.Module)) && marker.name == "Import" && marker.args.len() == 0 {
         return true
+    }
+    false
+}
+
+// Whether a function marker is the ratified `#Export(c)` spelling (Rust
+// `Sema::Guest::is_guest_export_marker`).
+pub fn sema_marker_is_guest_export(marker: Marker) -> Bool Never! {
+    !marker.negated && marker.name == "Export" && sema_marker_c_argument(marker)
+}
+
+fn sema_marker_c_argument(marker: Marker) -> Bool Never! {
+    if marker.args.len() == 0 {
+        return false
+    }
+    argument :: marker.args[0]
+    if argument == .Expr(value) {
+        if value == .Ident(name, _) {
+            return name == "c"
+        }
     }
     false
 }

@@ -80,7 +80,7 @@ fn package_dependency_policy_checks_source_less_dependencies_once_in_order() {
         ]
     );
 
-    let (diagnostics, _, _) = jet::Driver::check_file_with_effect_facts(
+    let (diagnostics, _, _, _checked_nominals) = jet::Driver::check_file_with_effect_facts(
         entry.to_str().unwrap(),
         None,
         false,

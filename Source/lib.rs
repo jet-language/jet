@@ -249,6 +249,7 @@ pub fn with_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
 pub struct CheckedMirSnapshot {
     pub bundle: AST::ProgramBundle,
     pub facts: Sema::SemIndexEffectFacts,
+    pub checked_nominals: std::sync::Arc<[std::sync::Arc<AST::MirFragmentNominalFacts>]>,
     pub mir: jet_foundation::MIR::MirProgram,
     pub artifact: jet_foundation::MIR::MirArtifactId,
 }
@@ -257,9 +258,10 @@ pub struct CheckedMirSnapshot {
 /// before returning the backend-ready program.
 pub fn lower_checked_semantic_mir_program_for(
     bundle: &AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<AST::MirFragmentNominalFacts>],
     request: jet_foundation::MIR::MirArtifactRequest,
 ) -> (jet_foundation::MIR::MirProgram, jet_foundation::MIR::MirArtifactId) {
-    let (mir, artifact) = Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+    let (mir, artifact) = Codegen::TIR::lower_checked_mir_program_for(bundle, checked_nominals, request)
         .unwrap_or_else(|error| jet_foundation::ice!(Some(error.span), "{error}"));
     mir.validate()
         .unwrap_or_else(|error| jet_foundation::ice!(None, "canonical MIR validation failed: {error}"));
@@ -2867,7 +2869,7 @@ fn coverable_functions_inner(
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Vec<(String, usize)> {
-    let (diagnostics, bundle, _) = Driver::check_file_with_effect_facts_profile_and_settings(
+    let (diagnostics, bundle, _, _) = Driver::check_file_with_effect_facts_profile_and_settings(
         file,
         None,
         false,
@@ -2990,7 +2992,7 @@ fn eval_pure_program_value_inner(
     // Use the checked eval bundle rather than rebuilding a top-level function
     // map.  The bundle carries the same impl/trait methods and sema facts that
     // the forced interpreter consumes, so eval cannot silently lose operators.
-    let (diagnostics, bundle, _effect_facts) = Driver::check_eval_with_effect_facts(src, file);
+    let (diagnostics, bundle, _effect_facts, checked_nominals) = Driver::check_eval_with_effect_facts(src, file);
     if diagnostics
         .iter()
         .any(|diagnostic| diagnostic.severity == Diagnostics::Severity::Error)
@@ -3000,6 +3002,7 @@ fn eval_pure_program_value_inner(
     let bundle = bundle.ok_or(diagnostics)?;
     let (mir, artifact) = lower_checked_semantic_mir_program_for(
         &bundle,
+        &checked_nominals,
         jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::Interpreter,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,

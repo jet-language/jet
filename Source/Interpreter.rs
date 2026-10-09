@@ -467,7 +467,7 @@ fn checked_snapshot_with_application_authority_and_entry_with_overlays(
                         jet_driver::Driver::swap_entry_point(&mut bundle, entry_fn);
                     }
                 }
-                let (diags, effect_facts) = crate::Sema::check_bundle_gates_with_effect_facts(
+                let (diags, effect_facts, checked_nominals) = crate::Sema::check_bundle_gates_with_effect_facts(
                     &mut bundle,
                     crate::Sema::CompileMode::Run,
                     gates,
@@ -512,11 +512,12 @@ fn checked_snapshot_with_application_authority_and_entry_with_overlays(
                 let requested_artifact =
                     artifact_request_for(&bundle, artifact_target, profile);
                 let (mir, artifact) =
-                    crate::lower_checked_semantic_mir_program_for(&bundle, requested_artifact);
+                    crate::lower_checked_semantic_mir_program_for(&bundle, &checked_nominals, requested_artifact);
                 Ok(CheckedSnapshot {
                     snapshot: crate::CheckedMirSnapshot {
                         bundle,
                         facts: effect_facts,
+                        checked_nominals,
                         mir,
                         artifact,
                     },

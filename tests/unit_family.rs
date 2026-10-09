@@ -254,14 +254,15 @@ fn run() {
     let entry = dir.join("main.jet");
     std::fs::write(&entry, src).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
 
     {
         use jet::Interpreter::RunOutcome;
         let policy = common::development_policy();
-        match common::run_interpreted(&bundle, &policy) {
+        match common::run_interpreted(&bundle, &checked_nominals, &policy) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, "44482216152605.0\n"),
             RunOutcome::Problems(diagnostics) => {
                 panic!("JIT rejected standard force conversion: {diagnostics:?}")
@@ -316,14 +317,15 @@ fn run() {
     let entry = dir.join("main.jet");
     std::fs::write(&entry, src).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
 
         use jet::Interpreter::RunOutcome;
     {
         let policy = common::development_policy();
-        match common::run_interpreted(&bundle, &policy) {
+        match common::run_interpreted(&bundle, &checked_nominals, &policy) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, "3.0\n"),
             RunOutcome::Problems(diagnostics) => {
                 panic!("JIT rejected open dimensions: {diagnostics:?}")
@@ -1376,10 +1378,11 @@ fn run() {
         let path = dir.join("main.jet");
         std::fs::write(&path, defaults).unwrap();
         let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-        let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        let (diagnostics, _facts, checked_nominals) =
+            jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let policy = common::development_policy();
-        match common::run_interpreted(&bundle, &policy) {
+        match common::run_interpreted(&bundle, &checked_nominals, &policy) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(
                 stdout,
                 "12 meter\n4 meter/ns\n766 px\n5 usd\n12 Meter\n12\n12.0\n"
@@ -1413,14 +1416,15 @@ fn run() {
     let path = dir.join("main.jet");
     std::fs::write(&path, explicit).unwrap();
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
     {
         use jet::Interpreter::RunOutcome;
 
         let policy = common::development_policy();
-        match common::run_interpreted(&bundle, &policy) {
+        match common::run_interpreted(&bundle, &checked_nominals, &policy) {
             RunOutcome::Ran { stdout, .. } => {
                 assert_eq!(stdout, "custom length\ncustom length\n12\n")
             }
@@ -1486,11 +1490,12 @@ fn dimensional_quantities_example_stays_in_native_jit() {
 
     let path = "Examples/features/types/dimensional_quantities.jet";
     let mut bundle = jet::Loader::load_entry(path).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
     let policy = common::development_policy();
-    match common::run_interpreted(&bundle, &policy) {
+    match common::run_interpreted(&bundle, &checked_nominals, &policy) {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -1557,7 +1562,8 @@ fn run() {
     let entry = dir.join("main.jet");
     std::fs::write(&entry, main).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
 
@@ -1565,7 +1571,7 @@ fn run() {
         use jet::Interpreter::RunOutcome;
 
         let policy = common::development_policy();
-        match common::run_interpreted(&bundle, &policy) {
+        match common::run_interpreted(&bundle, &checked_nominals, &policy) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, expected),
             RunOutcome::Problems(diagnostics) => {
                 panic!("JIT rejected imported unit display: {diagnostics:?}")
