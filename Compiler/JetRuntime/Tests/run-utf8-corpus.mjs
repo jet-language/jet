@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// This historical witness requires a Rust harness; no native C mode exists here.
+console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+process.exit(0);
 // A narrow seed-oracle/native witness. The producer must supply this exact
 // tree's freshly emitted Jet object and same-tree post-E2 runtime pack.
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';

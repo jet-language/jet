@@ -1,16 +1,16 @@
 #!/usr/bin/env node
-// One composed native object supplies actual comptime, numeric and U32 kernels.
-// Pass the admitted fresh native runtime library explicitly; never discover or
-// reconstruct a historical pack. Each mode can run under cheap.sh + jet-env.
+// One aggregate Jet object supplies actual comptime, numeric and U32 kernels.
+// Link fixture.o only plus platform libraries, never another runtime pack.
+// Each mode can run under cheap.sh + jet-env.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const [output, mode, library] = process.argv.slice(2);
+const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'link', 'run'].includes(mode)) {
-  throw Error('usage: run-residue-fixtures.mjs OUT assemble|lower|link|run [FRESH_NATIVE_LIBRARY]');
+  throw Error('usage: run-residue-fixtures.mjs OUT assemble|lower|link|run');
 }
 const out = resolve(output), fixture = join(out, 'fixture');
 const read = path => readFileSync(join(repo, path), 'utf8');
@@ -40,17 +40,16 @@ if (mode === 'assemble') {
   writeFileSync(join(fixture,'package.jet'),read('Compiler/JetRuntime/package.jet'));
 } else if (mode === 'lower') {
   const prefix=join(fixture,'fixture'),receipt=join(fixture,'front.receipt');
-  const result=spawnSync(candidateJetc0(),[],{cwd:repo,encoding:'utf8',maxBuffer:1<<27,timeout:600000,env:{...process.env,JET_BOOTSTRAP_MODE:'factory',JET_BOOTSTRAP_FACTORY_TIER:'aot',JET_BOOTSTRAP_SOURCE_ROOT:fixture,JET_BOOTSTRAP_ENTRY:'Source/Fixture.jet',JET_BOOTSTRAP_OUTPUT:join(fixture,'unused.output'),JET_BOOTSTRAP_RECEIPT:receipt,JET_FRONT_LIBRARY_OBJECT_OUTPUT:prefix,JET_FRONT_LIBRARY_EXPORTS:join(fixture,'exports.list'),JET_STORE_DIR:join(out,'store'),RUST_MIN_STACK:'8388608'}});
+  const result=spawnSync(candidateJetc0(),[],{cwd:repo,encoding:'utf8',maxBuffer:1<<27,timeout:600000,env:{...process.env,JET_BOOTSTRAP_MODE:'factory',JET_BOOTSTRAP_FACTORY_TIER:'aot',JET_BOOTSTRAP_SOURCE_ROOT:fixture,JET_BOOTSTRAP_ENTRY:'Source/Fixture.jet',JET_BOOTSTRAP_OUTPUT:join(fixture,'unused.output'),JET_BOOTSTRAP_RECEIPT:receipt,JET_FRONT_LIBRARY_OBJECT_OUTPUT:prefix,JET_FRONT_LIBRARY_EXPORTS:join(fixture,'exports.list'),JET_STORE_DIR:join(out,'store')}});
   writeFileSync(join(fixture,'front.log'),`${result.stdout??''}${result.stderr??''}`);
   const problem=frontReceipt(existsSync(receipt)?readFileSync(receipt,'utf8'):'',result);
   if(problem)throw Error(problem.detail);
   if(existsSync(prefix+'.issues'))throw Error(readFileSync(prefix+'.issues','utf8'));
   if(!existsSync(prefix+'.o'))throw Error('candidate lacks runtime-object hook');
 } else if (mode === 'link') {
-  if (!library || !existsSync(library)) throw Error('link requires explicit admitted fresh native runtime library');
   for (const [name, source] of cases) {
     const provider=name==='u32'?[]:['-DU32_KERNELS_ONLY',join(repo,'Compiler/JetBackend/Tests/u32-import.c')];
-    command(process.env.CC??'cc',['-O2',...provider,join(repo,source),join(fixture,'fixture.o'),resolve(library),'-lpthread','-ldl','-lm','-o',join(out,name)]);
+    command(process.env.CC??'cc',['-O2',...provider,join(repo,source),join(fixture,'fixture.o'),'-lpthread','-ldl','-lm','-o',join(out,name)]);
   }
 } else {
   for (const [name] of cases) {

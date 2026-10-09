@@ -9,6 +9,10 @@ import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.m
 import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
+if (mode === 'reference') {
+  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  process.exit(0);
+}
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run', 'render'].includes(mode)) throw Error('usage: run-world-sentry-fixtures.mjs OUT assemble|lower|audit|link|run|render');
 const out = resolve(output), unit = join(out, 'unit');
 const fixturePaths = ['WorldTests.jet', 'SentryTests.jet', 'SentryInlineTests.jet', 'TestScopeTests.jet', 'AllocationPolicyTests.jet'].map(name => 'Compiler/JetRuntime/Tests/' + name);
@@ -52,12 +56,11 @@ if (mode === 'assemble') {
     if (results.get(stem) !== 'pass') throw Error(`typed render ${stem}: ${results.get(stem) ?? 'missing result'}`);
   }
 } else if (mode === 'link') {
-  const library = process.env.JET_RUNTIME_C_LIB, rlib = process.env.JET_RUNTIME_NATIVE_RLIB;
-  if (!library || !existsSync(library) || !rlib || !existsSync(rlib)) throw Error('fresh composed JET_RUNTIME_C_LIB and JET_RUNTIME_NATIVE_RLIB required');
-  command('link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/world-sentry-fixture.c'), join(unit, 'fixture.o'), library, '-lpthread', '-ldl', '-lm', '-o', join(out, 'world-sentry-fixture')]);
-  command('logical-env-link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/LogicalEnvironmentTests.c'), join(unit, 'fixture.o'), library, '-lpthread', '-ldl', '-lm', '-o', join(out, 'logical-env-fixture')]);
-  command('link-native-link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/LinkNativeTests.c'), join(unit, 'fixture.o'), library, '-lpthread', '-ldl', '-lm', '-o', join(out, 'link-native-fixture')]);
-  command('reference-link', 'rustc', ['--edition', '2021', join(root, 'Compiler/JetRuntime/Tests/sentry-ledger-reference.rs'), '--extern', `jet_runtime=${rlib}`, '-C', `link-arg=${join(unit, 'fixture.o')}`, '-o', join(out, 'ledger-reference')]);
+  // Aggregated fixture.o already contains the complete Jet runtime.
+  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  command('link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/world-sentry-fixture.c'), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'world-sentry-fixture')]);
+  command('logical-env-link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/LogicalEnvironmentTests.c'), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'logical-env-fixture')]);
+  command('link-native-link', process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/LinkNativeTests.c'), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'link-native-fixture')]);
 } else {
   const failures = [];
   // Raw-check predicates now observe faults too. Never write to checkout/.jet,
@@ -68,8 +71,10 @@ if (mode === 'assemble') {
       env: { ...process.env, JET_MEMORY_LEDGER: join(ledgers, 'raw-checks/ledger.jsonl') } });
     if (result.stdout !== '' || result.stderr !== '') throw Error('runtime witnesses changed empty output');
   } catch (error) { failures.push(error.message); }
-  const referencePath = join(ledgers, 'reference/ledger.jsonl'), nativePath = join(ledgers, 'return/ledger.jsonl'), stopPath = join(ledgers, 'stop/ledger.jsonl');
-  for (const [name, binary, args, path] of [['reference', join(out, 'ledger-reference'), [], referencePath], ['native', join(out, 'world-sentry-fixture'), ['ledger'], nativePath]]) {
+  const referencePath = process.env.JET_SENTRY_LEDGER_REFERENCE ?? join(out, 'ledger-reference.jsonl');
+  const nativePath = join(ledgers, 'return/ledger.jsonl'), stopPath = join(ledgers, 'stop/ledger.jsonl');
+  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  for (const [name, binary, args, path] of [['native', join(out, 'world-sentry-fixture'), ['ledger'], nativePath]]) {
     try { command(name, binary, args, { timeout: 30000, env: { ...process.env, JET_MEMORY_LEDGER: path } }); }
     catch (error) { failures.push(error.message); }
   }
@@ -81,8 +86,9 @@ if (mode === 'assemble') {
   const exitMetadata = stopped.stderr?.split('\n').filter(line => line.startsWith('exit: ')) ?? [];
   if (exitMetadata.length !== 1 || exitMetadata[0] !== `exit: ${stopped.status}`) failures.push('sentry report exit metadata differs from the actual fault status');
   try {
-    const reference = readFileSync(referencePath), native = readFileSync(nativePath);
-    if (!reference.equals(native)) throw Error('ledger JSONL differs byte-for-byte from canonical Rust writer');
+    const native = readFileSync(nativePath);
+    // Compare only saved oracle bytes, never execute a retired reference binary.
+    if (existsSync(referencePath) && !readFileSync(referencePath).equals(native)) throw Error('ledger JSONL differs byte-for-byte from frozen reference');
     const stop = readFileSync(stopPath);
     for (const [name, bytes] of [['fault-return', native], ['fault-stop', stop]]) {
       if (bytes.toString('utf8').trimEnd().split('\n').length !== 1 || !bytes.length) throw Error(`${name} did not write exactly one ledger row`);

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Same full-object convention as run-scheduler-fixtures.mjs. Runtime and Jet
 // callbacks are lowered together; the C witness only transports code pointers.
-// Composition supplies the accepted raw-leaf library, never a Rust substitute.
+// Aggregate fixture.o supplies the Jet-only runtime; link platform libs only.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -38,7 +38,7 @@ if (mode === 'assemble') {
     timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 600000), env: { ...process.env,
       JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: dir,
       JET_BOOTSTRAP_ENTRY: 'Source/Fixture.jet', JET_BOOTSTRAP_OUTPUT: join(dir, 'unused.output'), JET_BOOTSTRAP_RECEIPT: receipt,
-      JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: join(dir, 'exports.list'), JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608' } });
+      JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: join(dir, 'exports.list'), JET_STORE_DIR: join(out, 'store') } });
   writeFileSync(join(dir, 'front.log'), `${result.stdout ?? ''}${result.stderr ?? ''}`);
   const problem = frontReceipt(existsSync(receipt) ? readFileSync(receipt, 'utf8') : '', result);
   if (problem) throw Error(`candidate front ${problem.verdict}: ${problem.detail}`);
@@ -55,11 +55,7 @@ if (mode === 'assemble') {
   }
   writeFileSync(join(out, 'disassembly.txt'), command('objdump', ['-dr', object]).stdout);
 } else if (mode === 'link') {
-  const library = process.env.JET_RUNTIME_C_LIB;
-  if (!library || !existsSync(library)) throw Error('JET_RUNTIME_C_LIB must name the freshly composed accepted raw-leaf library, not a Rust runtime');
-  const symbols = command('nm', ['--defined-only', '--format=posix', library]).stdout;
-  if (/(?:^|\n)(?:_R|_ZN|__rust|rust_eh_personality)/u.test(symbols)) throw Error('JET_RUNTIME_C_LIB contains Rust symbols; a raw-leaf-only native library is required');
-  command(process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/test-suite-fixture.c'), join(dir, 'fixture.o'), library,
+  command(process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/test-suite-fixture.c'), join(dir, 'fixture.o'),
     '-lpthread', '-ldl', '-lm', '-o', join(out, 'test-suite-fixture')]);
 } else {
   const result = spawnSync(join(out, 'test-suite-fixture'), [], { encoding: 'utf8', timeout: 300000 });

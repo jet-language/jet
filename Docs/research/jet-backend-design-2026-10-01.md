@@ -3118,12 +3118,23 @@ fresh composed object; syntax/parse receipts alone do not prove behavior.
 `test-unit-runtime.mjs FIXTURE_EXE` compares exact status/stdout/stderr across
 capture policies, text/JSON reports, empty reports, UTF-8/control characters,
 shuffle boundaries, and malformed/property records. Runtime admission also
-requires native `jet test` parity on `features/basics/onboarding/run.jet`,
+requires native `jet test` checks on `features/basics/onboarding/run.jet`,
 `features/tooling/test_members.jet`, and `features/tooling/expected_fail.jet`,
-using the native runner's same-head host/reference protocol checks.
-`run-test-runtime.mjs OUT NATIVE_STATICLIB JET_OBJECT HOSTED_JET REFERENCE_JET`
+across all capture, filter, serial and shuffle policies.
+`run-test-runtime.mjs OUT JET_ONLY_RUNTIME_OBJECT HOSTED_JET`
 checks the object's audited undefined-symbol set, builds/runs that fixture,
-and runs the three-example native CLI parity checks with the fresh pack.
+and runs all eighteen native CLI cases. Standalone C witnesses link the full
+Jet-authored `KEY/jet_runtime_jet.o` once plus platform libraries; aggregate
+fixture objects link alone. Live Rust-provider/oracle modes are parked:
+Rust reference retired (owner #38/#59); Tower #4923. Existing frozen expectations
+remain usable; retirement does not remove any Jet or C case.
+Display preparation retains the complete corpus; execution reads saved oracle
+captures with `--frozen DIR` rather than compiling Rust. HTTP body performance
+runs all four Jet trials with optional frozen JSON timing comparison. World/Sentry
+fixtures link their aggregate object alone and may compare a saved ledger via
+`JET_SENTRY_LEDGER_REFERENCE`; no reference rlib is built. Host native goldens
+keep authored expected streams, while only the live reference mode is parked.
+
 
 ### Raw file and process host boundary
 

@@ -9,6 +9,10 @@ import {fileURLToPath} from 'node:url';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');
 const here=join(root,'Compiler/JetRuntime/Tests');
 const [mode,outArg,object]=process.argv.slice(2);
+if (mode === '--freeze') {
+  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  process.exit(0);
+}
 if(!['--freeze','--native'].includes(mode)||!outArg||(mode==='--native'&&!object)) throw Error('usage: run-native-layout.mjs --freeze OUT | --native OUT fresh-runtime.o');
 const out=resolve(outArg); mkdirSync(out,{recursive:true});
 const hash=b=>createHash('sha256').update(b).digest('hex');

@@ -1,16 +1,18 @@
 #!/usr/bin/env node
-// L4a direct ABI parity, independent BigInt oracle, and exact stopped reports.
-// The two libraries must come from the SAME source tree: Rust seed transport
-// and native remaining layers. The native executable additionally links the
-// Jet-authored runtime object; it cannot silently fall back to Rust numerics.
+// Jet-only direct ABI witness, independent BigInt oracle, and stopped reports.
+// The retired Rust-provider comparison is parked at Tower #4923.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const [output, rustLibrary, nativeLibrary, jetObject, mode] = process.argv.slice(2);
-if (!output || (mode !== "--corpus-only" && (!rustLibrary || !nativeLibrary || !jetObject)) || (mode && mode !== "--corpus-only")) {
-  throw Error("usage: run-int-cabi.mjs OUT RUST.staticlib NATIVE.staticlib JetRuntime.o [--corpus-only]");
+const [output, jetObject, mode] = process.argv.slice(2);
+if (jetObject === "--rust-reference" || mode === "--rust-reference") {
+  console.log("int-cabi Rust provider: parked: Rust reference retired (owner #38/#59); Tower #4923");
+  process.exit(0);
+}
+if (!output || !jetObject || process.argv.length > 5 || (mode && mode !== "--corpus-only")) {
+  throw Error("usage: run-int-cabi.mjs OUT JET_ONLY_RUNTIME_OBJECT_OR_ARCHIVE [--corpus-only] | OUT --corpus-only | OUT --rust-reference");
 }
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
@@ -85,12 +87,11 @@ for (const [index, text] of [...floatInputs].entries()) {
 statements.push('    { int64_t x = parse("9223372036854775808"); IntNode *n = (IntNode *)(uintptr_t)((uint64_t)x & ((UINT64_C(1)<<62)-1)); uint64_t before = n->refs; int64_t cloned = jet_rt_int_clone(x); if (cloned != x || n->refs != before + 1) ++failures; jet_rt_int_drop(cloned); if (n->refs != before) ++failures; jet_rt_int_drop(x); }');
 writeFileSync(join(out, "int-corpus.inc"), `static void int_corpus(void) {\n${statements.join("\n")}\n}\n`);
 writeFileSync(join(out, "corpus.json"), JSON.stringify({ numericAndFloatCases: count, floatCases: floatInputs.size }, null, 2) + "\n");
-if (mode !== "--corpus-only") {
+if (mode !== "--corpus-only" && jetObject !== "--corpus-only") {
   const failures = [];
-  const outputs = new Map();
-  for (const [tier, library, extra] of [["rust", rustLibrary, []], ["jet", nativeLibrary, [resolve(jetObject)]]]) {
+  for (const tier of ["jet"]) {
     const binary = join(out, `${tier}-int-cabi`);
-    const built = spawnSync(process.env.CC ?? "cc", ["-std=c11", "-O1", ...(tier === "jet" ? ["-DJET_INT_NATIVE_FIXTURE"] : []), "-I", out, join(root, "Compiler/JetRuntime/Tests/int-cabi.c"), ...extra, resolve(library), "-ldl", "-lpthread", "-lm", "-o", binary], { encoding: "utf8" });
+    const built = spawnSync(process.env.CC ?? "cc", ["-std=c11", "-O1", "-DJET_INT_NATIVE_FIXTURE", "-I", out, join(root, "Compiler/JetRuntime/Tests/int-cabi.c"), resolve(jetObject), "-ldl", "-lpthread", "-lm", "-o", binary], { encoding: "utf8" });
     writeFileSync(join(out, `${tier}-build.log`), `${built.stdout ?? ""}${built.stderr ?? ""}`);
     if (built.error || built.status !== 0) { failures.push(`${tier}: link`); continue; }
     for (const name of ["values", "zero", "exponent", "shift-negative", "shift-wide", "fixed", "native"]) {
@@ -99,39 +100,25 @@ if (mode !== "--corpus-only") {
       writeFileSync(join(out, `${tier}-${name}.stderr`), result.stderr ?? "");
       const status = { status: result.status, signal: result.signal, error: result.error?.message ?? null };
       writeFileSync(join(out, `${tier}-${name}.status.json`), JSON.stringify(status) + "\n");
-      outputs.set(`${tier}-${name}`, { ...status, stdout: result.stdout, stderr: result.stderr });
       if (result.error || result.signal || result.status !== (name === "values" ? 0 : 70)) failures.push(`${tier}: ${name}`);
     }
   }
-  for (const name of ["values", "zero", "exponent", "shift-negative", "shift-wide", "fixed", "native"]) {
-    if (JSON.stringify(outputs.get(`rust-${name}`)) !== JSON.stringify(outputs.get(`jet-${name}`)) || !outputs.has(`rust-${name}`)) failures.push(`parity: ${name}`);
-  }
+  console.log("int-cabi Rust provider: parked: Rust reference retired (owner #38/#59); Tower #4923");
   const undefinedSymbols = spawnSync("nm", ["-u", resolve(jetObject)], { encoding: "utf8" });
+  const definitions = spawnSync("nm", ["--defined-only", resolve(jetObject)], { encoding: "utf8", maxBuffer: 1 << 27 });
   writeFileSync(join(out, "undefined-symbols.txt"), undefinedSymbols.stdout ?? "");
-  const memorySeam = "jet_rt_int_retire_zero";
+  writeFileSync(join(out, "defined-symbols.txt"), definitions.stdout ?? "");
   const exactImports = (undefinedSymbols.stdout ?? "").match(/\b(?:jet_int_\w+|jet_rt_int_\w+)\b/gu) ?? [];
-  if (undefinedSymbols.error || undefinedSymbols.status !== 0 || exactImports.some((name) => name !== memorySeam) || !exactImports.includes(memorySeam)) failures.push("Jet object has missing/unregistered exact Int memory seam or numeric fallback");
-  const remaining = readFileSync(join(root, "Compiler/JetRuntime/remaining-int.list"), "utf8")
-    .split("\n").filter((name) => name && !name.startsWith("#"));
-  const demangledImports = spawnSync("nm", ["-C", "-u", resolve(jetObject)], { encoding: "utf8" });
-  const remainingDefinitions = spawnSync("nm", ["-C", "--defined-only", resolve(nativeLibrary)], { encoding: "utf8", maxBuffer: 1 << 27 });
-  writeFileSync(join(out, "undefined-symbols-demangled.txt"), demangledImports.stdout ?? "");
-  const ownershipImport = (demangledImports.stdout ?? "").split("\n")
-    .filter((line) => /(?:JetInt|jet_(?:rt_)?int_|JET_INT_HAZARD|JET_INT_RETIRED)/u.test(line));
-  const ownershipDefinitions = (remainingDefinitions.stdout ?? "").split("\n")
-    .filter((line) => /(?:JetInt|jet_(?:rt_)?int_|JET_INT_HAZARD|JET_INT_RETIRED)/u.test(line));
-  writeFileSync(join(out, "remaining-int-ownership.json"), JSON.stringify({
-    declaredRustSourceIdentities: remaining,
-    observedRemainingRustDefinitions: ownershipDefinitions,
-    observedJetObjectOwnershipImports: ownershipImport,
-    nativeUserIntDrop: "Lower.jet: .Int -> LowerRepr.Word; lower_drop -> LIRDrop.Trivial",
-    approvedCAbiMemorySeam: memorySeam,
-    separateLeakItem: "L4a provides jet_rt_int_drop; NativeInteg2 owns wiring general native boxed-Int drop/copy-retain glue. int_discard only frees private refs1 workspaces.",
-  }, null, 2) + "\n");
-  if (demangledImports.error || demangledImports.status !== 0 || remainingDefinitions.error || remainingDefinitions.status !== 0 || ownershipImport.some((line) => !/\sjet_rt_int_retire_zero$/u.test(line))) {
-    failures.push("unreported exact Int ownership import or ownership audit failure");
+  if (undefinedSymbols.error || undefinedSymbols.status !== 0 || definitions.error || definitions.status !== 0 ||
+      exactImports.length || /(?:^|\n)\S*\s+\w\s+(?:_R|_ZN|__rust|rust_eh_personality)/u.test(definitions.stdout ?? "")) {
+    failures.push("Jet-only object has an exact Int fallback import, Rust definition, or symbol audit failure");
   }
+  writeFileSync(join(out, "int-ownership.json"), JSON.stringify({
+    provider: "Jet-only",
+    observedExactIntImports: exactImports,
+    rustReference: "parked; Tower #4923",
+  }, null, 2) + "\n");
   writeFileSync(join(out, "result.json"), JSON.stringify({ cases: count, stopCases: 6, concurrentHazardFixture: true, failures }, null, 2) + "\n");
   if (failures.length) throw Error(`exact Int ABI witness failed: ${failures.join(", ")}`);
-  console.log(`exact Int ABI: ${count} numeric/float cases + 6 exact stopped reports, clone/drop and concurrent hazard fixture; Rust/Jet identical, only explicit shared-domain retirement import`);
+  console.log(`exact Int ABI: ${count} numeric/float cases + 6 stopped reports, clone/drop and concurrent hazard fixture; Jet-only provider`);
 }

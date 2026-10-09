@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Historical oracle recipe retained; frozen fixtures remain native inputs.
+console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+process.exit(0);
 // ONE deterministic seed render/exit capture. Never execute or capture OS draws.
 import {readFileSync, writeFileSync, mkdirSync, existsSync} from 'node:fs';
 import {resolve, dirname, join} from 'node:path';

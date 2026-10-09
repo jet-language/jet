@@ -6,8 +6,12 @@ import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const [outArg, nativeLibrary, jetObject, hosted, reference] = process.argv.slice(2);
-if (!reference || process.argv.length !== 7) throw new Error("usage: run-test-runtime.mjs OUT fresh-native-staticlib jet_runtime_jet.o HOSTED_JET REFERENCE_JET");
+const [outArg, jetObject, hosted] = process.argv.slice(2);
+if (jetObject === "--rust-reference") {
+  console.log("test runtime Rust reference: parked: Rust reference retired (owner #38/#59); Tower #4923");
+  process.exit(0);
+}
+if (!outArg || !jetObject || !hosted || process.argv.length !== 5) throw new Error("usage: run-test-runtime.mjs OUT JET_ONLY_RUNTIME_OBJECT HOSTED_JET");
 const out = resolve(outArg);
 mkdirSync(out, { recursive: true });
 const results = [];
@@ -29,9 +33,9 @@ const fixture = join(out, "test-unit-runtime");
 const build = step("fixture-build", process.env.CC ?? "cc", [
   "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Wextra", "-Werror",
   join(repo, "Compiler/JetRuntime/Tests/test-unit-runtime.c"), resolve(jetObject),
-  resolve(nativeLibrary), "-ldl", "-lpthread", "-lm", "-lrt", "-lutil", "-o", fixture,
+  "-ldl", "-lpthread", "-lm", "-lrt", "-lutil", "-o", fixture,
 ]);
 if (build.status === 0) step("unit-outcomes", process.execPath, [join(repo, "Compiler/JetRuntime/Tests/test-unit-runtime.mjs"), fixture]);
-step("native-three-examples", process.execPath, [join(repo, "Compiler/JetBackend/Tests/test-native-test-host.mjs"), join(out, "cli"), resolve(hosted), resolve(reference)]);
+step("native-three-examples", process.execPath, [join(repo, "Compiler/JetBackend/Tests/test-native-test-host.mjs"), join(out, "cli"), resolve(hosted)]);
 writeFileSync(join(out, "results.json"), JSON.stringify({ results, ok: results.every(row => row.status === 0 && !row.signal && !row.error) }, null, 2) + "\n");
 process.exitCode = results.every(row => row.status === 0 && !row.signal && !row.error) ? 0 : 1;

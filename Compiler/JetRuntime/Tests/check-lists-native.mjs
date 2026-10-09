@@ -5,6 +5,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runtimeExportSignatures } from "../../../Tools/agent/runtime-route-abi.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+// Rust provenance checks are retired; independent Jet dispatch checks stay live.
+console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
 const lower = join(root, "Compiler/JetBackend/Source/Lower");
 const ledger = readFileSync(join(root, "Compiler/JetRuntime/Tests/lists-native.tsv"), "utf8").trim().split("\n");
 const failures = [];
@@ -51,8 +53,6 @@ for (const line of ledger.slice(1)) {
             (entry.includes("lower_list_method(p, c,") && listEntry.includes(`${dispatchName}(`)) ||
             (entry.includes("lower_closure_method(p, c,") && closureEntry.includes(`${dispatchName}(`));
         if (!linked) failures.push(`${symbol}: dispatcher is not linked to MIR entry`);
-        const [rustFile, rustName] = reference.split(":");
-        if (!read(join(root, "crates/jet-codegen/src/Prelude", rustFile)).includes(`fn ${rustName}`)) failures.push(`${symbol}: missing reference ${reference}`);
         const [, bodyName] = body.split(":");
         if (bodyName.startsWith("lower_helper_") && !entry.includes(`${bodyName}(p, &m, glue)`)) failures.push(`${symbol}: helper is not registered`);
         const calls = runtimeCalls.filter(call => call.symbol === symbol);
@@ -86,11 +86,6 @@ for (const line of residue) {
         } else if (status === "native-export") {
             nativeProviders++;
             if (!nativeExports.has(symbol) || !code.includes(`#Export(c) fn ${symbol}(`)) failures.push(`${symbol}: native provider declaration/ownership missing`);
-            if (symbol.startsWith("jet_loop_")) {
-                const seed = read(join(root, "crates/jet-codegen/src/Prelude/Core/CAbi.rs"));
-                const guarded = new RegExp(`#\\[cfg\\(not\\(jet_native_pack\\)\\)\\]\\s*#\\[no_mangle\\]\\s*pub extern "C" fn ${symbol}\\(`, "u");
-                if (!guarded.test(seed)) failures.push(`${symbol}: Rust seed provider is not excluded from the native pack`);
-            }
         } else if (status === "provider-live") {
             liveProviders++;
             if (nativeExports.has(symbol)) failures.push(`${symbol}: provider has acquired a native export; reconcile its call path`);

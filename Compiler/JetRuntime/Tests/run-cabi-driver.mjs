@@ -1,19 +1,20 @@
 #!/usr/bin/env node
-// Explicit pack-linked C-ABI test. Missing object/provider fails, never skips.
+// Explicit Jet-only pack-linked C-ABI test. Missing object/provider fails.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, ...inputs] = process.argv.slice(2);
-if (!output || !inputs.length) throw Error('usage: run-cabi-driver.mjs OUT OBJECT_OR_ARCHIVE... [LINK_ARG...]');
+if (!output || !inputs.some(input => !input.startsWith('-'))) throw Error('usage: run-cabi-driver.mjs OUT JET_ONLY_OBJECT_OR_ARCHIVE... [LINK_ARG...]');
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
 const driver = join(out, 'driver');
-// Inputs are real objects/archives; unresolved exports fail, never use a shim.
+// Supply real Jet-only objects/archives (KEY/jet_runtime_jet.o, not the startup
+// pack jet_runtime.pack.o); unresolved exports fail, never use a Rust provider.
 const built = spawnSync(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', '-pedantic',
     join(repo, 'Compiler/JetRuntime/Tests/CAbiDriver.c'),
-    ...inputs.map(input => input.startsWith('-') ? input : resolve(input)), '-o', driver], { encoding: 'utf8' });
+    ...inputs.map(input => input.startsWith('-') ? input : resolve(input)), '-lpthread', '-ldl', '-lm', '-o', driver], { encoding: 'utf8' });
 writeFileSync(join(out, 'build.log'), `${built.stdout ?? ''}${built.stderr ?? ''}`);
 writeFileSync(join(out, 'build.status.json'), JSON.stringify({ status: built.status, signal: built.signal, error: built.error?.message ?? null }) + '\n');
 if (built.error || built.signal || built.status !== 0) throw Error(`driver link failed: ${built.error ?? built.signal ?? built.stderr}`);

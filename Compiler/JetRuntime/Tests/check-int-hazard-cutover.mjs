@@ -5,6 +5,11 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const int = readFileSync(join(root, 'Compiler/JetRuntime/Source/Int.jet'), 'utf8');
+if (/Import\(c\)/.test(int) || !int.includes('jet_rt_int_retire_zero(node)')) throw Error('Int still imports an external retirement domain');
+// Only the Jet ownership gate is live; retain the retired Rust source recipe.
+console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+process.exit(0);
 const path = 'crates/jet-foundation/src/Numeric.rs';
 const current = readFileSync(join(root, path), 'utf8');
 const baseline = spawnSync('git', ['show', '417ce17ff:' + path], { cwd: root, encoding: 'utf8', maxBuffer: 1 << 24 });
@@ -49,8 +54,6 @@ const oldRelease = oldDrop.body.slice(oldDrop.body.indexOf('if jet_int_is_pointe
 if (!nextDrop.body.includes(oldRelease) || !nextDrop.body.includes('jet_rt_int_drop(self.0 as i64)')) throw Error('JetInt Drop seed/native forwarding drift');
 const equality = blocks(current, 'pub fn atomic_equal<F>')[0];
 if (equality.body !== blocks(baseline.stdout, 'pub fn atomic_equal<F>')[0].body) throw Error('atomic_equal policy changed instead of forwarding existing guard sites');
-const int = readFileSync(join(root, 'Compiler/JetRuntime/Source/Int.jet'), 'utf8');
-if (/Import\(c\)/.test(int) || !int.includes('jet_rt_int_retire_zero(node)')) throw Error('Int still imports an external retirement domain');
 const abi = readFileSync(join(root, 'crates/jet-codegen/src/Prelude/Core/CAbi.rs'), 'utf8');
 const at = abi.indexOf('pub extern "C" fn jet_rt_int_retire_zero(');
 if (at < 0 || !abi.slice(at - 180, at).includes('#[cfg(not(jet_native_pack))]')) throw Error('duplicate native CAbi retirement provider');

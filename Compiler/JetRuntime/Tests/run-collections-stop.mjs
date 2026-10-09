@@ -47,10 +47,8 @@ if (mode === '--assemble') {
     if (existsSync(prefix + '.issues')) throw Error(readFileSync(prefix + '.issues', 'utf8'));
     if (!existsSync(prefix + '.o')) throw Error('missing stopped-result fixture object');
 } else {
-    const library = process.env.JET_RUNTIME_C_LIB;
-    if (!library || !existsSync(library)) throw Error('JET_RUNTIME_C_LIB must name the freshly built remaining native staticlib');
     const executable = join(out, 'caller');
-    const build = run(process.env.CC ?? 'cc', ['-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/collections-stop.c'), join(out, 'fixture.o'), library, '-lpthread', '-ldl', '-lm', '-o', executable]);
+    const build = run(process.env.CC ?? 'cc', ['-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/collections-stop.c'), join(out, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', executable]);
     writeFileSync(join(out, 'build.log'), `${build.stdout}${build.stderr}`);
     const result = run(executable, [], { timeout: 30000 });
     writeFileSync(join(out, 'run.stdout'), result.stdout);

@@ -9,6 +9,10 @@ import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const [mode, output, object] = process.argv.slice(2);
+if (mode === "--seed") {
+  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  process.exit(0);
+}
 if (!output || !["--seed", "--native"].includes(mode) || (mode === "--native" && !object) || process.argv.length !== (mode === "--native" ? 5 : 4)) {
   throw new Error("usage: run-native-text-normalize.mjs --seed OUT | --native OUT fresh-runtime.o");
 }
@@ -25,7 +29,7 @@ function run(command, args, label, stdoutFile) {
   if (stdoutFile) writeFileSync(stdoutFile, result.stdout);
   console.log(`${label}: exit=0`);
 }
-const oracle = join(out, "seed-nfc.scalars");
+const oracle = process.env.JET_NFC_FROZEN_SCALARS ? resolve(process.env.JET_NFC_FROZEN_SCALARS) : join(out, "seed-nfc.scalars");
 if (mode === "--seed") {
   const text = readFileSync(join(root, "crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs"), "utf8");
   const start = text.indexOf("const HANGUL_SBASE:");

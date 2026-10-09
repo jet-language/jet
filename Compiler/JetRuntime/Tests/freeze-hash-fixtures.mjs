@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Historical oracle recipe retained; frozen fixtures remain native inputs.
+console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+process.exit(0);
 // One std-only Rust seed capture; artifacts are native differential expectations,
 // never runtime implementations. Existing SHAFamily/SHA256Raw bodies unchanged.
 import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';

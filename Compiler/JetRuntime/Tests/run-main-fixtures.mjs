@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Link/run only against an explicitly supplied, freshly admitted native pack.
-// No Rust entry wrapper or replacement observer is accepted for these witnesses.
+// Link/run only against an explicit fresh Jet-only runtime object/archive
+// (KEY/jet_runtime_jet.o, not startup-bearing jet_runtime.pack.o or a Rust provider).
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode, pack] = process.argv.slice(2);
-if (!output || !['link', 'run'].includes(mode) || !pack || !existsSync(pack)) throw Error('usage: run-main-fixtures.mjs OUT link|run FRESH_NATIVE_PACK');
+if (!output || !['link', 'run'].includes(mode) || !pack || !existsSync(pack)) throw Error('usage: run-main-fixtures.mjs OUT link|run JET_ONLY_RUNTIME_OBJECT_OR_ARCHIVE');
 const out = resolve(output), executable = join(out, 'main-fixture');
 mkdirSync(out, {recursive:true});
 function checked(binary, args) {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Actual canonical Jet provider acceptance. No seed descriptor implementation.
 // Run modes independently so an integrator can collect every failure in one pass.
+// Aggregate fixture.o owns the full Jet-only runtime; link platform libs only.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -34,19 +35,14 @@ if (mode === 'assemble') {
   writeFileSync(join(fixture,'package.jet'),read('Compiler/JetRuntime/package.jet'));
 } else if (mode === 'lower') {
   const prefix = join(fixture,'fixture'), receipt = join(fixture,'front.receipt');
-  const result = spawnSync(candidateJetc0(),[],{cwd:repo,encoding:'utf8',maxBuffer:1<<27,timeout:Number(process.env.JET_FRONT_TIMEOUT_MS??600000),env:{...process.env,JET_BOOTSTRAP_MODE:'factory',JET_BOOTSTRAP_FACTORY_TIER:'aot',JET_BOOTSTRAP_SOURCE_ROOT:fixture,JET_BOOTSTRAP_ENTRY:'Source/Fixture.jet',JET_BOOTSTRAP_OUTPUT:join(fixture,'unused.output'),JET_BOOTSTRAP_RECEIPT:receipt,JET_FRONT_LIBRARY_OBJECT_OUTPUT:prefix,JET_FRONT_LIBRARY_EXPORTS:join(fixture,'exports.list'),JET_STORE_DIR:join(out,'store'),RUST_MIN_STACK:'8388608'}});
+  const result = spawnSync(candidateJetc0(),[],{cwd:repo,encoding:'utf8',maxBuffer:1<<27,timeout:Number(process.env.JET_FRONT_TIMEOUT_MS??600000),env:{...process.env,JET_BOOTSTRAP_MODE:'factory',JET_BOOTSTRAP_FACTORY_TIER:'aot',JET_BOOTSTRAP_SOURCE_ROOT:fixture,JET_BOOTSTRAP_ENTRY:'Source/Fixture.jet',JET_BOOTSTRAP_OUTPUT:join(fixture,'unused.output'),JET_BOOTSTRAP_RECEIPT:receipt,JET_FRONT_LIBRARY_OBJECT_OUTPUT:prefix,JET_FRONT_LIBRARY_EXPORTS:join(fixture,'exports.list'),JET_STORE_DIR:join(out,'store')}});
   writeFileSync(join(fixture,'front.log'),`${result.stdout??''}${result.stderr??''}`);
   const problem = frontReceipt(existsSync(receipt)?readFileSync(receipt,'utf8'):'',result);
   if (problem) throw Error(problem.detail);
   if (existsSync(prefix+'.issues')) throw Error(readFileSync(prefix+'.issues','utf8'));
   if (!existsSync(prefix+'.o')) throw Error('candidate lacks runtime-object hook');
 } else if (mode === 'link') {
-  // The current native pack still has reviewed OS/hazard-domain bridge leaves.
-  // This library MUST be freshly built for the composed native pack, never the
-  // Rust seed runtime: the provider itself is only the above canonical Jet .o.
-  const support = process.env.JET_SHARED_SOURCE_C_LIB;
-  if (!support || !existsSync(support)) throw Error('missing composed native-pack support library JET_SHARED_SOURCE_C_LIB');
-  command(process.env.CC??'cc',['-std=c11','-Wall','-Wextra','-Werror','-O2',join(repo,'Compiler/JetRuntime/Tests/shared-source-fixture.c'),join(fixture,'fixture.o'),support,'-lpthread','-ldl','-lm','-o',join(out,'shared-source-native')]);
+  command(process.env.CC??'cc',['-std=c11','-Wall','-Wextra','-Werror','-O2',join(repo,'Compiler/JetRuntime/Tests/shared-source-fixture.c'),join(fixture,'fixture.o'),'-lpthread','-ldl','-lm','-o',join(out,'shared-source-native')]);
 } else {
   const result = command(join(out,'shared-source-native'),[],{timeout:120000});
   writeFileSync(join(out,'shared-source.stdout'),result.stdout);

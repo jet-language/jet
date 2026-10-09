@@ -2,8 +2,8 @@
 // L8a-1: actual Jet source, checked/lowered by the composed Jet candidate.
 // Separate modes permit one held keep-going proof: assemble, lower (including
 // negative intrinsic witnesses), audit, link, run. Standalone uses no Rust;
-// shared-link/shared-run exercise the real remaining Shared implementation.
-// rust-link/rust-run use the actual remaining attachment guard on Rust spawns.
+// shared-link/shared-run exercise the complete Jet-authored Shared runtime.
+// rust-link/rust-run are frozen reference branches (Tower #4923).
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -13,6 +13,10 @@ import { parseRuntimeExports, runtimeLifecycleList } from "../../../Tools/agent/
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const [output, mode] = process.argv.slice(2);
+if (["rust-link", "rust-run"].includes(mode)) {
+  console.log(`${mode}: parked: Rust reference retired (owner #38/#59); Tower #4923`);
+  process.exit(0);
+}
 if (!output || !["assemble", "lower", "audit", "link", "run", "shared-link", "shared-run", "rust-link", "rust-run"].includes(mode)) {
   throw Error("usage: run-thread-fixtures.mjs OUT assemble|lower|audit|link|run|shared-link|shared-run|rust-link|rust-run");
 }
@@ -55,7 +59,9 @@ if (mode === "assemble") {
   const sharedBlock = /(?:\/\/ Interim Shared ABI import dies at L8a-4[\s\S]*?)?^#Export\(c\) fn jet_rt_tls_shared_destructor[\s\S]*?(?=^fn thread_tls_destroy)/m;
   if (!sharedBlock.test(complete)) throw Error("missing Shared TLS source block");
   const unit = complete.replace(sharedBlock, "");
-  const shared = complete + "\n" + read("Compiler/JetRuntime/Tests/SharedThreadTests.jet");
+  const shared = read("Compiler/JetRuntime/sources.list").split("\n").map(path => path.trim())
+    .filter(path => path && !path.startsWith("#")).map(read).join("\n")
+    + "\n" + read("Compiler/JetRuntime/Tests/SharedThreadTests.jet");
   // Duplicate #Export(c) names are fatal in the good and shared fixture units.
   for (const text of [unit, shared]) {
     const names = [...text.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)].map((match) => match[1]);
@@ -122,10 +128,8 @@ if (mode === "assemble") {
   command(process.env.CC ?? "cc", ["-static", "-nostdlib", "-no-pie", join(musl, "crt1.o"), join(musl, "crti.o"),
     join(repo, "Compiler/JetRuntime/Tests/thread-fixture.c"), join(out, "good/fixture.o"), join(musl, "libc.a"), "-lgcc", "-lgcc_eh", join(musl, "crtn.o"), "-o", join(out, "thread-fixture")]);
 } else if (mode === "shared-link") {
-  const library = process.env.JET_RUNTIME_C_LIB;
-  if (!library || !existsSync(library)) throw Error("JET_RUNTIME_C_LIB must name the freshly built remaining Rust Shared staticlib");
   command(process.env.CC ?? "cc", ["-DJET_SHARED_TLS_FIXTURE", join(repo, "Compiler/JetRuntime/Tests/thread-fixture.c"),
-    join(out, "shared/fixture.o"), library, "-lpthread", "-ldl", "-lm", "-o", join(out, "shared-thread-fixture")]);
+    join(out, "shared/fixture.o"), "-lpthread", "-ldl", "-lm", "-o", join(out, "shared-thread-fixture")]);
 } else if (mode === "shared-run") {
   const result = command(join(out, "shared-thread-fixture"), [], { timeout: 30000 });
   writeFileSync(join(out, "shared-result.txt"), `status=${result.status}\nstdout=${JSON.stringify(result.stdout)}\nstderr=${JSON.stringify(result.stderr)}\n`);

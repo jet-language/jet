@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Historical oracle recipe retained; frozen fixtures remain native inputs.
+console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+process.exit(0);
 // ONE original-Rust capture; NIST CAVP KATs + explicit known seed divergences.
 import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
 import {resolve,dirname,join} from 'node:path';

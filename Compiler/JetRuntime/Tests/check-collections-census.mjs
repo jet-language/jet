@@ -4,6 +4,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+// Rust provenance checks are retired; independent Jet ownership checks stay live.
+console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
 const source = new Map(), failures = [];
 function read(path) {
   if (!source.has(path)) source.set(path, readFileSync(join(root, path), 'utf8'));
@@ -51,8 +53,6 @@ for (const [symbol, status, dispatch, body, nativeExport, reference] of census) 
   if (!route || !route.includes(`"${symbol}"`)) failures.push(`${symbol}: missing checked dispatcher ${dispatch}`);
   if (!reachable.has(dispatch)) failures.push(`${symbol}: dispatcher not reachable from Lower entry`);
   if (!implementation) failures.push(`${symbol}: missing Jet body ${body}`);
-  const [rustPath, rustName] = reference.split(':');
-  if (!read(rustPath).includes(`fn ${rustName}`)) failures.push(`${symbol}: missing Rust reference ${reference}`);
   if (literalCalls.some(([, called]) => called === symbol)) failures.push(`${symbol}: literal Rust provider call remains`);
   if (status === 'native-provider') {
     if (!exported.has(nativeExport) || !implementation?.startsWith(`#Export(c) fn ${nativeExport}(`)) failures.push(`${symbol}: missing exported Jet provider ${nativeExport}`);
@@ -66,15 +66,10 @@ const hands = rows('Compiler/JetRuntime/Tests/collections-hand-abi.tsv', 5);
 for (const [symbol, status, nativeExport, provider, rustPath] of hands) {
   const implementation = functions.get(provider);
   if (!exported.has(nativeExport) || !implementation?.startsWith(`#Export(c) fn ${nativeExport}(`)) failures.push(`${symbol}: missing native provider ${provider}`);
-  const text = read(rustPath), marker = `fn ${symbol}(`, at = text.indexOf(marker);
   if (status === 'removed') {
-    if (at >= 0) failures.push(`${symbol}: obsolete handwritten Rust ABI returned`);
     const dispatch = read(lower + 'LazyIter.jet');
     if (!dispatch.includes(`"${symbol}"`) || !dispatch.includes('"jet_rt_native_{tail}"')) failures.push(`${symbol}: missing native callback/count dispatcher`);
-  } else if (status === 'seed-only') {
-    const prefix = text.slice(Math.max(0, at - 180), at);
-    if (at < 0 || !prefix.includes('#[cfg(not(jet_native_pack))]') || !prefix.includes('#[no_mangle]')) failures.push(`${symbol}: seed ABI not excluded from native pack`);
-  } else failures.push(`${symbol}: invalid handwritten ABI disposition`);
+  } else if (status !== 'seed-only') failures.push(`${symbol}: invalid handwritten ABI disposition`);
 }
 if (hands.length !== 19 || hands.filter(row => row[1] === 'removed').length !== 14 || hands.filter(row => row[1] === 'seed-only').length !== 5) failures.push('handwritten ABI coverage drift');
 const residue = rows('Compiler/JetRuntime/Tests/collections-residue.tsv', 9);

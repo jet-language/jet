@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Actual Jet Shared-held closure with generated clone/drop glue. No C stand-in
 // closure, Rust runtime replacement, serial fallback, or simulated free count.
-// usage: run-closure-refs-shared.mjs OUT assemble|lower|link|run [JET_OBJECT REMAINING_NATIVE_STATICLIB]
+// usage: run-closure-refs-shared.mjs OUT assemble|lower|link|run [JET_ONLY_RUNTIME_OBJECT_OR_ARCHIVE]
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
@@ -9,8 +9,8 @@ import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {frontReceipt} from '../../JetBackend/Tests/jet-front.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const [output, mode, objectArg, remainingArg] = process.argv.slice(2);
-if (!output || !['assemble', 'lower', 'link', 'run'].includes(mode)) throw Error('usage: run-closure-refs-shared.mjs OUT assemble|lower|link|run [JET_OBJECT REMAINING_NATIVE_STATICLIB]');
+const [output, mode, objectArg] = process.argv.slice(2);
+if (!output || !['assemble', 'lower', 'link', 'run'].includes(mode)) throw Error('usage: run-closure-refs-shared.mjs OUT assemble|lower|link|run [JET_ONLY_RUNTIME_OBJECT_OR_ARCHIVE]');
 const out = resolve(output), prefix = join(out, 'fixture'), binary = join(out, 'driver');
 const hash = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 const read = path => readFileSync(join(repo, path), 'utf8');
@@ -37,19 +37,19 @@ if (mode === 'assemble') {
             JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: out,
             JET_BOOTSTRAP_ENTRY: 'Source/Fixture.jet', JET_BOOTSTRAP_OUTPUT: join(out, 'unused.output'), JET_BOOTSTRAP_RECEIPT: receipt,
             JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: join(out, 'exports.list'),
-            JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608'}});
+            JET_STORE_DIR: join(out, 'store')}});
         const problem = frontReceipt(existsSync(receipt) ? readFileSync(receipt, 'utf8') : '', result);
         if (problem || !existsSync(prefix + '.o') || existsSync(prefix + '.issues')) throw Error(problem?.detail ?? 'missing source-owned object or lowering issues');
         writeFileSync(join(out, 'lower.json'), JSON.stringify({sha: process.env.COMPOSED_SHA, candidate, candidateSha256: hash(candidate), sourceSha256: hash(join(out, 'Source/Fixture.jet')), objectSha256: hash(prefix + '.o')}, null, 2) + '\n');
     } else if (mode === 'link') {
-        if (!objectArg || !remainingArg) throw Error('fresh Jet object and remaining native staticlib required');
-        const object = resolve(objectArg), remaining = resolve(remainingArg);
+        // This fixture contains only the closure witness, not an aggregate runtime.
+        if (!objectArg) throw Error('fresh Jet-only runtime object/archive required (KEY/jet_runtime_jet.o, not jet_runtime.pack.o)');
+        const object = resolve(objectArg);
         const lower = JSON.parse(readFileSync(join(out, 'lower.json'), 'utf8'));
         if (lower.sha !== process.env.COMPOSED_SHA || lower.objectSha256 !== hash(prefix + '.o')) throw Error('lowering pin changed');
-        command('exports', ['node', 'Tools/packaging/check-runtime-exports.mjs', object, remaining]);
-        command('link', ['cc', '-std=c11', '-O2', join(repo, 'Compiler/JetRuntime/Tests/closure-refs-shared.c'), prefix + '.o', object, remaining,
+        command('link', ['cc', '-std=c11', '-O2', join(repo, 'Compiler/JetRuntime/Tests/closure-refs-shared.c'), prefix + '.o', object,
             '-Wl,--wrap=jet_rt_alloc', '-Wl,--wrap=jet_rt_free', '-lpthread', '-ldl', '-lm', '-o', binary]);
-        writeFileSync(join(out, 'link.json'), JSON.stringify({sha: process.env.COMPOSED_SHA, lower, object, objectSha256: hash(object), remaining, remainingSha256: hash(remaining), driverSha256: hash(join(repo, 'Compiler/JetRuntime/Tests/closure-refs-shared.c')), binarySha256: hash(binary)}, null, 2) + '\n');
+        writeFileSync(join(out, 'link.json'), JSON.stringify({sha: process.env.COMPOSED_SHA, lower, object, objectSha256: hash(object), driverSha256: hash(join(repo, 'Compiler/JetRuntime/Tests/closure-refs-shared.c')), binarySha256: hash(binary)}, null, 2) + '\n');
     } else {
         const linked = JSON.parse(readFileSync(join(out, 'link.json'), 'utf8'));
         if (linked.sha !== process.env.COMPOSED_SHA || linked.binarySha256 !== hash(binary)) throw Error('linked witness pin changed');

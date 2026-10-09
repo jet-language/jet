@@ -125,6 +125,7 @@ static void queue_tests(void) {
 #ifdef JET_CHANNEL_INTERNAL
     jet_rt_channel_fixture_reservations(&word_meta);
     assert(jet_rt_channel_fixture_select_wake_handoff(&word_meta) == 1);
+    puts("select wake handoff parity ok");
     unsigned cancelled_drops = atomic_load(&drops);
     jet_rt_channel_fixture_stops(&word_meta, (W)jet_rt_channel_fixture_stop,
                                 &owned_meta, (W)inspect);

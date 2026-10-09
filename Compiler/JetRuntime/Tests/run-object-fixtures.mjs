@@ -2,6 +2,7 @@
 // E2: real source .Global exports and allocator startup in executable/library.
 // OUT --assemble only prepares units. --lower uses the composed Jet candidate;
 // --global/--initializer/--allocator execute separately so a proof keeps going.
+// Aggregate init/fixture.o supplies the Jet-only runtime; no additional pack.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -48,7 +49,7 @@ if (mode === '--assemble') {
                 cwd: repo, encoding: 'utf8', timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), maxBuffer: 1 << 27,
                 env: { ...process.env, JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: dir,
                     JET_BOOTSTRAP_ENTRY: 'Source/Fixture.jet', JET_BOOTSTRAP_OUTPUT: join(dir, 'unused.output'), JET_BOOTSTRAP_RECEIPT: receipt,
-                    JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_LIFECYCLE: join(dir, 'lifecycle.list'), JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608' },
+                    JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_LIFECYCLE: join(dir, 'lifecycle.list'), JET_STORE_DIR: join(out, 'store') },
             });
             writeFileSync(join(dir, 'front.log'), `${result.stdout ?? ''}${result.stderr ?? ''}`);
             const problem = frontReceipt(existsSync(receipt) ? readFileSync(receipt, 'utf8') : '', result);
@@ -66,8 +67,6 @@ if (mode === '--assemble') {
     run(process.env.CC ?? 'cc', [join(repo, 'Compiler/JetRuntime/Tests/global-word.c'), object, '-o', join(out, 'global/caller')]);
     run(join(out, 'global/caller'), []);
 } else {
-    const library = process.env.JET_RUNTIME_C_LIB;
-    if (!library) throw Error('JET_RUNTIME_C_LIB must name the freshly built remaining Rust staticlib');
     const object = join(out, 'init/fixture.o');
     const source = join(repo, 'Compiler/JetRuntime/Tests/initializer.c');
     const executable = join(out, 'init/caller');
@@ -76,10 +75,10 @@ if (mode === '--assemble') {
         if (result.stdout !== 'alloc tests: ok\n' || result.stderr !== '') throw Error('allocator stdout/stderr changed');
     } else {
         const cc = process.env.CC ?? 'cc';
-        run(cc, [source, object, library, '-lpthread', '-ldl', '-lm', '-o', executable]);
+        run(cc, [source, object, '-lpthread', '-ldl', '-lm', '-o', executable]);
         run(executable, []);
         const shared = join(out, 'init/entryless.so');
-        run(cc, ['-shared', '-Wl,-Bsymbolic', '-Wl,-z,defs', object, library, '-lpthread', '-ldl', '-lm', '-o', shared]);
+        run(cc, ['-shared', '-Wl,-Bsymbolic', '-Wl,-z,defs', object, '-lpthread', '-ldl', '-lm', '-o', shared]);
         const sections = run('readelf', ['-SW', shared]).stdout;
         if (!sections.includes('.init_array')) throw Error('entryless library lost its constructor array');
         if (/^main\s/m.test(run('nm', ['-g', '--defined-only', '--format=posix', shared]).stdout)) throw Error('library unexpectedly has main');

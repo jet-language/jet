@@ -9,6 +9,10 @@ import { collectGoldenEntries, loadExampleStdin } from '../../../Tools/agent/com
 import { copyFeatureProject, featureProjectRoot, withoutWarningDiagnostics } from '../../../Tools/agent/run-feature-examples.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');
 const [output,mode]=process.argv.slice(2);
+if (mode === 'reference') {
+  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  process.exit(0);
+}
 if(!output||!['prepare','reference','native'].includes(mode))throw Error('usage: run-host-goldens.mjs OUT prepare|reference|native');
 const out=resolve(output),features=join(root,'Examples/features'),list=join(out,'cases.list');
 const filters=['io/process_','io/env_overlay','io/os_','io/sys_','io/files','io/path','io/terminal_source'];

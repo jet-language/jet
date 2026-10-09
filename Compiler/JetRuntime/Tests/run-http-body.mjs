@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// ABI-only L9 proof: the actual Jet body kernels plus a same-tree native seed
-// archive. The scripted delivered-only rail follows check-stop-points.c. This
-// does not prove Core head/transport integration; that belongs to the cutover.
+// ABI-only L9 proof: actual Jet body kernels from an explicit Jet-only runtime
+// object/archive (KEY/jet_runtime_jet.o, not startup-bearing jet_runtime.pack.o).
+// The delivered-only rail follows check-stop-points.c. This does not prove Core
+// head/transport integration; that belongs to the cutover.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -9,9 +10,9 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const args = process.argv.slice(2);
-if (args.length !== 3) throw new Error("usage: run-http-body.mjs OUT SAME_TREE_NATIVE_ARCHIVE JET_RUNTIME_OBJECT");
-const [out, native, object] = args.map((path) => resolve(path));
-for (const path of [native, object]) if (!existsSync(path)) throw new Error(`missing proof input ${path}`);
+if (args.length !== 2) throw new Error("usage: run-http-body.mjs OUT JET_ONLY_RUNTIME_OBJECT_OR_ARCHIVE");
+const [out, object] = args.map((path) => resolve(path));
+if (!existsSync(object)) throw new Error(`missing Jet-only runtime proof input ${object}`);
 mkdirSync(out, { recursive: true });
 const rows = [], failures = [];
 function record(name, result, ok) {
@@ -21,7 +22,7 @@ function record(name, result, ok) {
 const program = join(out, "http-body.hosted");
 const link = spawnSync(process.env.CC ?? "cc", [
   "-std=c11", "-Wall", "-Wextra", "-Werror", join(root, "Compiler/JetRuntime/Tests/check-http-body.c"),
-  object, native, "-Wl,--wrap=jet_rt_session_propagate", "-lpthread", "-ldl", "-lm", "-o", program,
+  object, "-Wl,--wrap=jet_rt_session_propagate", "-lpthread", "-ldl", "-lm", "-o", program,
 ], { cwd: root, encoding: "utf8", timeout: 120000, maxBuffer: 1 << 24 });
 writeFileSync(join(out, "link.log"), `${link.stdout ?? ""}${link.stderr ?? ""}`);
 record("link", link, link.status === 0 && !link.error && link.signal === null);

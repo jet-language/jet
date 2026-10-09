@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Same E2 source/object lane as the scheduler fixtures; no substitute runtime.
+// Full Jet source/object lane: fixture.o supplies the runtime, not another pack.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -30,7 +30,7 @@ if (mode === 'assemble') {
     timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 600000), env: { ...process.env,
       JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: dir,
       JET_BOOTSTRAP_ENTRY: 'Source/Fixture.jet', JET_BOOTSTRAP_OUTPUT: join(dir, 'unused.output'), JET_BOOTSTRAP_RECEIPT: receipt,
-      JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_LIFECYCLE: join(dir, 'lifecycle.list'), JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608' } });
+      JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_LIFECYCLE: join(dir, 'lifecycle.list'), JET_STORE_DIR: join(out, 'store') } });
   writeFileSync(join(dir, 'front.log'), `${result.stdout ?? ''}${result.stderr ?? ''}`);
   if (result.error || result.status !== 0) throw Error(`candidate front failed: ${result.error?.message ?? result.status}`);
   const problem = frontReceipt(existsSync(receipt) ? readFileSync(receipt, 'utf8') : '', result);
@@ -46,11 +46,7 @@ if (mode === 'assemble') {
   for (const name of ['jet_rt_native_para_walk', 'jet_rt_native_para_worker']) if (symbols.split('\n').filter(line => line.startsWith(`${name} T `)).length !== 1) throw Error(`expected one strong Jet ${name}`);
   writeFileSync(join(out, 'symbols.nm'), symbols);
 } else if (mode === 'link') {
-  const library = process.env.JET_RUNTIME_C_LIB;
-  if (!library || !existsSync(library)) throw Error('JET_RUNTIME_C_LIB must name the freshly composed native pack');
-  const symbols = command('nm', ['-g', '--defined-only', '--format=posix', library]).stdout;
-  if (symbols.split('\n').some(line => line.startsWith('jet_rt_native_para_walk T '))) throw Error('remaining native pack still owns Rust para_walk');
-  command(process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/parallel-fixture.c'), join(dir, 'fixture.o'), library, '-lpthread', '-ldl', '-lm', '-o', join(out, 'parallel-fixture')]);
+  command(process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/parallel-fixture.c'), join(dir, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'parallel-fixture')]);
 } else {
   const result = spawnSync(join(out, 'parallel-fixture'), [], { encoding: 'utf8', timeout: 300000 });
   writeFileSync(join(out, 'run.receipt.json'), JSON.stringify({ status: result.status, signal: result.signal, error: result.error?.message ?? null, stdout: result.stdout, stderr: result.stderr }, null, 2) + '\n');

@@ -63,9 +63,7 @@ if (mode === 'assemble') {
     for (const name of fixtures) for (const match of readFileSync(join(root, `Compiler/JetRuntime/Tests/${name}Tests.jet`), 'utf8').matchAll(/#Export\(c\)\s+fn\s+(\w+)\(/gu)) if (!strong.has(match[1])) throw Error(`missing strong Jet fixture export ${match[1]}`);
     command('disassembly', 'objdump', ['-dr', object]);
 } else if (mode === 'link') {
-    const library = process.env.JET_RUNTIME_C_LIB;
-    if (!library || !existsSync(library)) throw Error('fresh composed JET_RUNTIME_C_LIB required');
-    for (const name of fixtures) command(`link-${name}`, process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', join(root, `Compiler/JetRuntime/Tests/${name}Witness.c`), join(unit, 'fixture.o'), library, '-lpthread', '-ldl', '-lm', '-o', join(out, name)]);
+    for (const name of fixtures) command(`link-${name}`, process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', join(root, `Compiler/JetRuntime/Tests/${name}Witness.c`), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, name)]);
 } else {
     const digest = bytes => createHash('sha256').update(bytes).digest('hex');
     const fixtureFile = join(root, 'Compiler/JetRuntime/Tests/AgeV1Fixtures.json');

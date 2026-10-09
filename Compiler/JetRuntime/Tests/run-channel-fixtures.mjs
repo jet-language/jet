@@ -9,8 +9,13 @@ import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.m
 import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode, source] = process.argv.slice(2);
-const modes = ['assemble', 'assemble-stm', 'assemble-sync', 'assemble-observe', 'assemble-publication', 'lower', 'prepare-native', 'prepare-seed', 'link', 'link-seed', 'link-stm', 'run-stm', 'link-sync', 'run-sync', 'link-observe', 'run-observe', 'link-publication', 'run-publication', 'link-weak', 'run-weak', 'run', 'run-seed', 'cross', 'fatal', 'perf'];
-if (!output || !modes.includes(mode)) throw Error(`usage: run-channel-fixtures.mjs OUT ${modes.join('|')} [FRESH_RUNTIME_RS]`);
+const parkedModes = ['prepare-native', 'prepare-seed', 'link-seed', 'run-seed', 'cross', 'fatal-reference', 'perf-reference'];
+const modes = ['assemble', 'assemble-stm', 'assemble-sync', 'assemble-observe', 'assemble-publication', 'lower', 'link', 'link-stm', 'run-stm', 'link-sync', 'run-sync', 'link-observe', 'run-observe', 'link-publication', 'run-publication', 'link-weak', 'run-weak', 'run', 'fatal', 'perf'];
+if (parkedModes.includes(mode)) {
+  console.log(`${mode}: parked: Rust reference retired (owner #38/#59); Tower #4923`);
+  process.exit(0);
+}
+if (!output || !modes.includes(mode)) throw Error(`usage: run-channel-fixtures.mjs OUT ${modes.join('|')}`);
 const out = resolve(output), fixture = join(out, 'fixture');
 const read = p => readFileSync(join(repo, p), 'utf8');
 function command(bin, args, options = {}) {
@@ -97,36 +102,25 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
   command('node',[join(repo,'Compiler/JetBackend/Tests/prepare-call-runtime.mjs'),resolve(source),prepared,'--allparts'],{cwd:repo});
   writeFileSync(destination,readFileSync(prepared,'utf8')+bridge);
 } else if (mode === 'link' || mode === 'link-seed') {
-  const seed=mode==='link-seed';
-  const lib=seed?process.env.JET_CHANNEL_SEED_C_LIB:process.env.JET_CHANNEL_NATIVE_C_LIB;
-  if(!lib||!existsSync(lib))throw Error('missing freshly compiled fixture library');
-  const flags=seed?['-DJET_SEED','-Djet_rt_handle_clone_Closed=jet_fixture_rust_closed_clone','-Djet_rt_handle_drop_Closed=jet_fixture_rust_closed_drop','-Djet_rt_handle_eq_Closed=jet_fixture_rust_closed_eq','-Djet_rt_handle_show_Closed=jet_fixture_rust_closed_show']:['-DJET_CHANNEL_INTERNAL','-DJET_CLOSED_CROSS'];
-  const objects=seed?[]:[join(fixture,'fixture.o')];
-  command(process.env.CC??'cc',['-O2',...flags,join(repo,'Compiler/JetRuntime/Tests/channel-fixture.c'),...objects,lib,'-lpthread','-ldl','-lm','-o',join(out,seed?'channel-seed':'channel-native')]);
+  command(process.env.CC??'cc',['-O2','-DJET_CHANNEL_INTERNAL',join(repo,'Compiler/JetRuntime/Tests/channel-fixture.c'),join(fixture,'fixture.o'),'-lpthread','-ldl','-lm','-o',join(out,'channel-native')]);
 } else if (mode === 'link-publication') {
-  const lib = process.env.JET_CHANNEL_NATIVE_C_LIB;
-  if (!lib || !existsSync(lib)) throw Error('missing freshly compiled native fixture library');
-  command(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/shared-publication-fixture.c'), join(fixture, 'fixture.o'), lib, '-lpthread', '-ldl', '-lm', '-o', join(out, 'shared-publication-native')]);
+  command(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/shared-publication-fixture.c'), join(fixture, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'shared-publication-native')]);
 } else if (mode === 'run-publication') {
   const result = command(join(out, 'shared-publication-native'), [], {timeout:120000});
   writeFileSync(join(out, `${mode}.txt`), result.stdout + result.stderr);
   const expected = 'Shared World race/loser once/register once/reset owner only ok\nShared Process race/loser once/no World registration ok\n';
   if (result.stdout !== expected || result.stderr !== '') throw Error('invalid Shared publication fixture result');
 } else if (mode === 'link-weak') {
-  const lib = process.env.JET_CHANNEL_NATIVE_C_LIB;
-  if (!lib || !existsSync(lib)) throw Error('missing freshly compiled native fixture library');
-  command(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/shared-weak-fixture.c'), join(fixture, 'fixture.o'), lib, '-lpthread', '-ldl', '-lm', '-o', join(out, 'shared-weak-native')]);
+  command(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', join(repo, 'Compiler/JetRuntime/Tests/shared-weak-fixture.c'), join(fixture, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'shared-weak-native')]);
 } else if (mode === 'run-weak') {
   const result = command(join(out, 'shared-weak-native'), [], {timeout:120000});
   writeFileSync(join(out, `${mode}.txt`), result.stdout + result.stderr);
   const expected = 'Shared weak no resurrection/payload once/last weak frees Cell96 ok\nShared weak upgrade versus final strong drop 256 races ok\nShared physical clean/dirty/abort/resume/alias once/logical versus pin lifetime ok\n';
   if (result.stdout !== expected || result.stderr !== '') throw Error('invalid Shared weak fixture result');
 } else if (['link-stm', 'link-sync', 'link-observe'].includes(mode)) {
-  const lib = process.env.JET_CHANNEL_NATIVE_C_LIB;
-  if (!lib || !existsSync(lib)) throw Error('missing freshly compiled native fixture library');
   const kind = mode.slice(5);
   const flags = kind === 'stm' ? [] : ['-DJET_CONDITION_FIXTURE', ...(kind === 'observe' ? ['-DJET_OBSERVE_FIXTURE'] : [])];
-  command(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', ...flags, join(repo, 'Compiler/JetRuntime/Tests/sync-fixture.c'), join(fixture, 'fixture.o'), lib, '-lpthread', '-ldl', '-lm', '-o', join(out, `${kind}-native`)]);
+  command(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', ...flags, join(repo, 'Compiler/JetRuntime/Tests/sync-fixture.c'), join(fixture, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, `${kind}-native`)]);
 } else if (['run-stm', 'run-sync', 'run-observe'].includes(mode)) {
   const kind = mode.slice(4);
   const result = command(join(out, `${kind}-native`), [], {timeout:120000});
@@ -144,7 +138,7 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
   const failures = [];
   for (const name of ['select-closed', 'select-empty']) {
     const results = {};
-    for (const tier of ['native', 'seed']) {
+    for (const tier of ['native']) {
       const result = spawnSync(join(out, `channel-${tier}`), [name], {encoding:'utf8',timeout:120000,maxBuffer:1<<27});
       results[tier] = result;
       writeFileSync(join(out, `${name}-${tier}.txt`), result.stdout ?? '');
@@ -152,13 +146,13 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
       writeFileSync(join(out, `${name}-${tier}.status.json`), JSON.stringify({status:result.status,signal:result.signal,error:result.error?.message})+'\n');
       if (result.error || result.status !== 1 || result.stdout !== '') failures.push(`${name}/${tier}: invalid fatal exit`);
     }
-    if (results.native.stderr !== results.seed.stderr) failures.push(`${name}: native/seed stderr mismatch`);
+    console.log('fatal-reference: parked: Rust reference retired (owner #38/#59); Tower #4923');
   }
   if (failures.length) throw Error(failures.join('\n'));
 } else if (mode === 'perf') {
   const rows=[];
-  // Alternate order to avoid comparing a cold program with a warm competitor.
-  for(let round=0;round<5;round++)for(const tier of round%2?['seed','native']:['native','seed']){
+  // Keep all five native benchmark rounds; the Rust comparison is frozen.
+  for(let round=0;round<5;round++)for(const tier of ['native']){
     const result=command(join(out,`channel-${tier}`),['perf'],{timeout:120000});
     writeFileSync(join(out,`perf-${round}-${tier}.txt`),result.stdout+result.stderr);
     const m=/^ping rounds=1000000 checksum=500000500000 ns=(\d+)\n$/.exec(result.stdout);
@@ -166,12 +160,10 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
     rows.push({round,tier,ns:Number(m[1])});
   }
   const median=t=>rows.filter(r=>r.tier===t).map(r=>r.ns).sort((a,b)=>a-b)[2];
-  const jet=median('native'),rust=median('seed');
+  const jet=median('native');
   writeFileSync(join(out,'perf.tsv'),'round\ttier\tns\n'+rows.map(r=>`${r.round}\t${r.tier}\t${r.ns}`).join('\n')+'\n');
-  const speedup=rust/jet,strictWin=speedup>1.05;
-  writeFileSync(join(out,'perf-summary.json'),JSON.stringify({messages:1000000,jet_median_ns:jet,rust_median_ns:rust,ratio:jet/rust,speedup,strict_win:strictWin},null,2)+'\n');
-  console.log(`1M-message ping-pong Jet/Rust=${jet/rust}`);
-  if(!strictWin)throw Error('ping-pong cell has not strictly beaten the matched Rust peer');
+  writeFileSync(join(out,'perf-summary.json'),JSON.stringify({messages:1000000,jet_median_ns:jet,provider:'Jet-only',rust_reference:'parked; Tower #4923'},null,2)+'\n');
+  console.log('perf-reference: parked: Rust reference retired (owner #38/#59); Tower #4923');
 } else {
   const seed=mode==='run-seed',binary=join(out,seed?'channel-seed':'channel-native');
   const result=command(binary,[],{timeout:120000});

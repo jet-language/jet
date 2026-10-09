@@ -6,7 +6,7 @@ jet_archive_fixture:
     ret
 .size jet_archive_fixture, .-jet_archive_fixture
 
-// Archive-only packing still owns a startup; the object layer overrides this weak one.
+// The platform object supplies a weak startup; the Jet runtime object overrides it.
 .section .text.archive_start,"ax",@progbits
 .weak _start
 .type _start,@function

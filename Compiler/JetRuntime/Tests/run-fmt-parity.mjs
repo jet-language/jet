@@ -1,16 +1,20 @@
 #!/usr/bin/env node
-// Verification-only Rust oracle: include the existing policy bodies, never
-// duplicate them. Source-body comparison is Rust-seed execution, NOT proof of
-// native selector lowering or native runtime-pack admission.
+// Jet source-body comparison against saved formatter oracle bytes.
+// Preparation preserves every case without invoking a live Rust reference.
+// This is not native selector lowering or runtime-pack admission proof.
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const [mode, output, checker] = process.argv.slice(2);
+const [mode, output, checker, frozenExpected] = process.argv.slice(2);
+if (mode === 'reference') {
+  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  process.exit(0);
+}
 if (!['prepare', 'compare'].includes(mode) || !output || (mode === 'compare' && !checker))
-  throw Error('usage: run-fmt-parity.mjs prepare OUT | compare OUT CHECKER');
+  throw Error('usage: run-fmt-parity.mjs prepare OUT [FROZEN_EXPECTED] | compare OUT CHECKER [FROZEN_EXPECTED]');
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
 const i = value => ({ kind: 'int', value: String(value) });
@@ -48,16 +52,6 @@ if (registered.length !== 23 || registered.some(kernel => !kernels.includes(kern
 if (new Set(cases.map(row => row.id)).size !== cases.length) throw Error('duplicate case id');
 const quote = text => JSON.stringify(text);
 const jetArg = arg => arg.kind === 'text' ? quote(arg.value.replace(/\{/g, '{{').replace(/\}/g, '}}')) : arg.value;
-const rustArg = arg => arg.kind === 'text' ? `&String::from(${quote(arg.value).replace(/\\u([0-9a-fA-F]{4})/g, '\\u{$1}')})` : `${arg.value}${arg.kind === 'int' ? 'i64' : 'f64'}`;
-function rustCall(row) {
-  const args = row.args.map(rustArg);
-  // CommonTypes.rs:5124-5155 owned Int adapters expose exact decimal spellings;
-  // use their same Fmt.rs kernels without interpreting tagged Int ABI words.
-  if (['bin', 'oct', 'hex', 'decimal_int', 'grouped_int'].includes(row.kernel)) args[0] = `&String::from(${quote(row.args[0].value)})`;
-  const kernel = ['bin', 'oct', 'hex'].includes(row.kernel) ? `${row.kernel}_decimal` : row.kernel;
-  return `jet_fmt_${kernel}(${args.join(', ')})`;
-}
-const rust = `#![allow(dead_code)]\ninclude!(${quote(join(root, 'crates/jet-codegen/src/Prelude/Core/Fmt.rs'))});\nfn main() {\n${cases.map(row => `println!("CASE ${row.id}"); println!("{}", ${rustCall(row)}); println!("END ${row.id}");`).join('\n')}\n}\n`;
 const jet = `use fmt_source as fmt\nfn run() {\n${cases.map(row => `    print("CASE ${row.id}")\n    print(fmt.${members[row.kernel] ?? row.kernel}(${row.args.map(jetArg).join(', ')}))\n    print("END ${row.id}")`).join('\n')}\n}\n`;
 function run(binary, args, name, cwd = out) {
   const result = spawnSync(binary, args, { cwd, encoding: 'utf8', maxBuffer: 1 << 27, timeout: 0 });
@@ -68,18 +62,12 @@ function run(binary, args, name, cwd = out) {
 }
 if (mode === 'prepare') {
   writeFileSync(join(out, 'cases.json'), JSON.stringify(cases, null, 2) + '\n');
-  writeFileSync(join(out, 'oracle.rs'), rust);
   writeFileSync(join(out, 'source.jet'), jet);
   writeFileSync(join(out, 'fmt_source.jet'), readFileSync(join(root, 'Core/text/fmt.jet')));
   writeFileSync(join(out, 'package.jet'), 'name: "fmt_source_parity"\nversion: "0.0.1"\nedition: "2028"\n');
-  // Cargo.toml:47-97 has only dev overrides. The runtime seed is direct rustc:
-  // prebuild-runtime.sh:39-46 selects --release; Source/main.rs:539-540 sets
-  // opt-level=3 and rustc_args_for_target:501-558 has no overflow override.
-  // Its optimized rustc default is overflow-checks=no, made explicit here.
-  run('rustc', ['--edition=2021', '-C', 'opt-level=3', '-C', 'overflow-checks=no', join(out, 'oracle.rs'), '-o', join(out, 'oracle')], 'oracle-build');
-  const expected = run(join(out, 'oracle'), [], 'oracle-run');
-  writeFileSync(join(out, 'expected.out'), expected);
-  console.log(`fmt parity prepared: kernels=${kernels.length} cases=${cases.length}; oracle=existing Rust seed bodies; source/native comparison NOT RUN`);
+  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  if (checker) writeFileSync(join(out, 'expected.out'), readFileSync(resolve(checker)));
+  console.log(`fmt parity prepared: kernels=${kernels.length} cases=${cases.length}; expected bytes must be supplied frozen; source/native comparison NOT RUN`);
 } else {
   // Refresh the source body after Core parity fixes without regenerating or
   // weakening the saved Rust oracle bytes.
@@ -88,7 +76,7 @@ if (mode === 'prepare') {
   const checkerPath = realpathSync(resolve(checker));
   const checkerSha256 = createHash('sha256').update(readFileSync(checkerPath)).digest('hex');
   const actual = run(resolve(checker), ['run', '--release', join(out, 'source.jet')], 'source-run');
-  const expected = readFileSync(join(out, 'expected.out'), 'utf8');
+  const expected = readFileSync(frozenExpected ? resolve(frozenExpected) : join(out, 'expected.out'), 'utf8');
   function blocks(text) {
     const result = new Map();
     for (const row of cases) {

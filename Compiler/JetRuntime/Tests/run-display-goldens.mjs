@@ -1,10 +1,9 @@
 #!/usr/bin/env node
-// Differential proof of the real native Jet display object, not a JS port of
-// its digit algorithm. Rust is only the independent seed/verification oracle.
+// Native display proof against frozen oracle bytes; no live Rust reference.
 // Prepare: node run-display-goldens.mjs OUT --prepare [--baseline RESULTS.tsv]
-// Prove:   node run-display-goldens.mjs OUT --object JET.o --pack PACK.o
-// The object/pack must include --test FloatBits. Also runs selected goldens
-// and one 1M-float native-versus-Rust formatting cell after byte parity.
+// Prove: node run-display-goldens.mjs OUT --object JET.o --pack JET_ONLY.o [--frozen RECEIPT_DIR]
+// The object/pack must include --test FloatBits. All selected native goldens
+// and the 1M-float native formatting cell remain live.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -13,16 +12,21 @@ import { collectGoldenEntries } from "../../../Tools/agent/compiler-diff.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const args = process.argv.slice(2);
+if (args.includes("--reference")) {
+  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  process.exit(0);
+}
 const out = resolve(args.shift() ?? "");
-let prepare = false, baseline, object, pack;
+let prepare = false, baseline, object, pack, frozen;
 for (let i = 0; i < args.length; ++i) {
   if (args[i] === "--prepare") prepare = true;
   else if (args[i] === "--baseline") baseline = resolve(args[++i]);
   else if (args[i] === "--object") object = resolve(args[++i]);
   else if (args[i] === "--pack") pack = resolve(args[++i]);
+  else if (args[i] === "--frozen") frozen = resolve(args[++i]);
   else throw new Error(`unknown argument ${args[i]}`);
 }
-if (process.argv.length < 4 || (!prepare && (!object || !pack))) throw new Error("usage: run-display-goldens.mjs OUT --prepare [--baseline RESULTS.tsv] | --object JET.o --pack PACK.o");
+if (process.argv.length < 4 || (!prepare && (!object || !pack))) throw new Error("usage: run-display-goldens.mjs OUT --prepare [--baseline RESULTS.tsv] | --object JET.o --pack JET_ONLY.o [--frozen RECEIPT_DIR]");
 mkdirSync(out, { recursive: true });
 const exports = ["jet_rt_bool_to_string", "jet_rt_char_to_string", "jet_rt_i64_to_string", "jet_rt_u64_to_string", "jet_rt_int_to_string", "jet_rt_float_to_string", "jet_rt_float_debug", "jet_rt_float32_to_string", "jet_rt_float32_debug"];
 const mask = (1n << 64n) - 1n, sign = 1n << 63n, fraction = (1n << 52n) - 1n;
@@ -81,13 +85,6 @@ if (prepare) {
     add32(BigInt(random32 >>> 0));
   }
   writeFileSync(join(out, "bits32.txt"), [...corpus32].sort().join("\n") + "\n");
-  writeFileSync(join(out, "oracle32.rs"), `use std::io::{self, Read, Write};
-fn main() {
- let mut input=String::new(); io::stdin().read_to_string(&mut input).unwrap();
- let mut out=io::BufWriter::new(io::stdout().lock());
- for line in input.lines() { let bits=u64::from_str_radix(line,16).unwrap(); let value=f32::from_bits(bits as u32); writeln!(out,"{bits:016x}\\t{value}\\t{value:?}").unwrap(); }
-}
-`);
   const entries = collectGoldenEntries(join(root, "Examples/features"));
   const passes = baseline ? new Set(readFileSync(baseline, "utf8").split("\n").filter((line) => line.split("\t")[1] === "pass").map((line) => line.split("\t")[0])) : null;
   const cases = [];
@@ -102,32 +99,12 @@ fn main() {
   writeFileSync(join(out, "bits.txt"), [...corpus].sort().join("\n") + "\n");
   writeFileSync(join(out, "golden.cases"), cases.join("\n") + "\n");
   writeFileSync(join(out, "corpus.json"), JSON.stringify({ bit_patterns: corpus.size, random_bit_samples: 1000000, binary32_patterns: corpus32.size, binary32_random_samples: 1000000, golden_literals: literals, golden_cases: cases.length, baseline: baseline ?? null }, null, 2) + "\n");
-  // Values.rs JetDisplay/JetShow/JetDebug f64 all call format!("{:?}").
   writeFileSync(join(out, "benchmark_bits.h"), `#define DISPLAY_BENCH_ITERATIONS UINT64_C(1000000)\n#define DISPLAY_BENCH_VALUES ${benchmarkBits.length}\nstatic const uint64_t benchmark_bits[] = {${benchmarkBits.map((bits) => `UINT64_C(0x${bits.toString(16)})`).join(",")}};\n`);
-  writeFileSync(join(out, "oracle.rs"), `use std::io::{self, Read, Write};
-fn main() {
- if std::env::args().nth(1).as_deref() == Some("--benchmark") {
-  let values: [u64; ${benchmarkBits.length}] = [${benchmarkBits.map((bits) => `0x${bits.toString(16)}`).join(",")}];
-  let start = std::time::Instant::now();
-  let mut digest = 14695981039346656037u64;
-  for iteration in 0..1000000 {
-   let text = format!("{:?}", f64::from_bits(values[iteration % values.len()]));
-   for byte in text.bytes().chain(std::iter::once(b'\\n')) {
-    digest = (digest ^ u64::from(byte)).wrapping_mul(1099511628211);
-   }
-  }
-  let elapsed = start.elapsed().as_nanos();
-  println!("benchmark\\t1000000\\t{digest:016x}\\t{elapsed:016x}");
-  return;
- }
- let mut input=String::new(); io::stdin().read_to_string(&mut input).unwrap();
- let mut out=io::BufWriter::new(io::stdout().lock());
- for line in input.lines() { let bits=u64::from_str_radix(line,16).unwrap(); let value=f64::from_bits(bits); writeln!(out,"{bits:016x}\\t{value:?}\\t{value:?}").unwrap(); }
-}
-`);
   console.log(`prepared ${corpus.size} IEEE patterns, ${literals} golden literals, ${cases.length} native display goldens`);
   process.exit(0);
 }
+console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+const frozenOut = frozen ?? out;
 const receipts = [];
 let failures = 0;
 function command(label, program, parameters, input, options = {}) {
@@ -150,21 +127,19 @@ const unresolved = [...symbols(undefinedJet.text).keys()].filter((name) => !pack
 const exactImports = [...symbols(undefinedJet.text).keys()].filter((name) => name.startsWith("jet_int_"));
 if (missingExports.length || unresolved.length || exactImports.length) ++failures;
 const cc = command("witness-compile", process.env.CC ?? "cc", ["-std=c11", "-O2", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-fno-pie", "-I", out, "-c", join(root, "Compiler/JetRuntime/Tests/DisplayWitness.c"), "-o", join(out, "witness.o")]);
-const rust = command("oracle-compile", process.env.RUSTC ?? "rustc", ["--edition=2021", "-O", join(out, "oracle.rs"), "-o", join(out, "oracle")]);
+const oracle = { ok: true, text: readFileSync(join(frozenOut, "rust.stdout"), "utf8") };
 const linked = cc.ok && command("witness-link", process.env.LD ?? "ld", ["--gc-sections", "-o", join(out, "witness"), "--entry=_start", join(out, "witness.o"), pack]);
 const bits = readFileSync(join(out, "bits.txt"), "utf8");
 const native = linked?.ok ? command("native", join(out, "witness"), [], bits) : null;
-const oracle = rust.ok ? command("rust", join(out, "oracle"), [], bits) : null;
 const mismatches = [];
 if (native && oracle) {
   const actual = native.text.trimEnd().split("\n"), expected = oracle.text.trimEnd().split("\n");
   for (let i = 0; i < Math.max(actual.length, expected.length); ++i) if (actual[i] !== expected[i]) mismatches.push({ row: i + 1, expected: expected[i] ?? null, actual: actual[i] ?? null });
   if (mismatches.length) ++failures;
 }
-const rust32 = command("oracle32-compile", process.env.RUSTC ?? "rustc", ["--edition=2021", "-O", join(out, "oracle32.rs"), "-o", join(out, "oracle32")]);
+const oracle32 = { ok: true, text: readFileSync(join(frozenOut, "rust32.stdout"), "utf8") };
 const bits32 = readFileSync(join(out, "bits32.txt"), "utf8");
 const native32 = linked?.ok ? command("native32", join(out, "witness"), [], bits32.split("\n").filter(Boolean).map((line) => `F${line}\n`).join("")) : null;
-const oracle32 = rust32.ok ? command("rust32", join(out, "oracle32"), [], bits32) : null;
 const mismatches32 = [];
 if (native32 && oracle32) {
   const actual = native32.text.trimEnd().split("\n"), expected = oracle32.text.trimEnd().split("\n");
@@ -174,15 +149,15 @@ if (native32 && oracle32) {
 let performance = null;
 if (native?.ok && oracle?.ok && !mismatches.length) {
   const nativeBench = command("native-benchmark", join(out, "witness"), [], "B\n", { timeout: 0 });
-  const rustBench = command("rust-benchmark", join(out, "oracle"), ["--benchmark"], undefined, { timeout: 0 });
+  const rustBench = { ok: true, text: readFileSync(join(frozenOut, "rust-benchmark.stdout"), "utf8") };
   const cell = (text) => /^benchmark\t1000000\t([0-9a-f]{16})\t([0-9a-f]{16})\n$/u.exec(text);
   const n = cell(nativeBench.text), r = cell(rustBench.text);
   const ok = nativeBench.ok && rustBench.ok && n !== null && r !== null && n[1] === r[1] && BigInt(`0x${n[2]}`) > 0n && BigInt(`0x${r[2]}`) > 0n;
   if (!ok) ++failures;
-  performance = { label: "runtime object unoptimized", iterations: 1000000, digest_equal: Boolean(n && r && n[1] === r[1]), native_ns: n ? Number(BigInt(`0x${n[2]}`)) : null, rust_ns: r ? Number(BigInt(`0x${r[2]}`)) : null, ratio: ok ? Number(BigInt(`0x${n[2]}`)) / Number(BigInt(`0x${r[2]}`)) : null, ok };
+  performance = { label: "runtime object unoptimized; Rust timing/digest frozen", frozen_receipt: frozenOut, iterations: 1000000, digest_equal: Boolean(n && r && n[1] === r[1]), native_ns: n ? Number(BigInt(`0x${n[2]}`)) : null, rust_ns: r ? Number(BigInt(`0x${r[2]}`)) : null, ratio: ok ? Number(BigInt(`0x${n[2]}`)) / Number(BigInt(`0x${r[2]}`)) : null, ok };
 }
 const goldenOut = join(out, "goldens");
-const goldenHarness = command("goldens", process.execPath, [join(root, "Compiler/JetBackend/Tests/run-goldens.mjs"), goldenOut, "--case-list", join(out, "golden.cases")], undefined, { timeout: 0, env: { ...process.env, JET_RUNTIME_PACK: pack, JET_MIR_EMIT: "0" } });
+const goldenHarness = command("goldens", process.execPath, [join(root, "Compiler/JetBackend/Tests/run-goldens.mjs"), goldenOut, "--front", "jet", "--case-list", join(out, "golden.cases")], undefined, { timeout: 0, env: { ...process.env, JET_RUNTIME_PACK: pack, JET_MIR_EMIT: "0" } });
 const selected = readFileSync(join(out, "golden.cases"), "utf8").trim().split("\n");
 let goldenRows = new Map();
 try { goldenRows = new Map(readFileSync(join(goldenOut, "results.tsv"), "utf8").trim().split("\n").map((row) => row.split("\t")).map(([stem, verdict]) => [stem, verdict])); }

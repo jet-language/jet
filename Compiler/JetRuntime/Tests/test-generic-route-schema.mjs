@@ -56,22 +56,6 @@ assert.throws(() => nativeProviderHandles(incompletePipe), /native Pipe24 provid
 const wrongPipe = parseRuntimeExports(pipeDefinitions.replace("len: I64", "len: F64"), "PipeFixture.jet");
 assert.throws(() => nativeProviderHandles(wrongPipe), /line_bytes_raw.*does not match C ABI/);
 
-const pipeDefinitions = ["ProcessStdoutStream", "ProcessStderrStream"].flatMap((type) => [
-  `#Export(c) fn jet_rt_handle_clone_${type}(value: I64) -> I64 { value }`,
-  `#Export(c) fn jet_rt_handle_drop_${type}(value: I64) {}`,
-]).concat([
-  "#Export(c) fn jet_process_pipe_take_raw(fd: I64) -> I64 { fd }",
-  "#Export(c) fn jet_process_stream_line_bytes_raw(pipe: I64, data: I64, len: I64, error: I64) -> I64 { I64{1} }",
-]).join("\n");
-const pipeAbi = parseRuntimeExports(pipeDefinitions, "PipeFixture.jet");
-assert.deepEqual(nativeProviderHandles(new Map()), []);
-assert.equal(nativeProviderHandles(pipeAbi).length, 4);
-const incompletePipe = new Map(pipeAbi);
-incompletePipe.delete("jet_rt_handle_drop_ProcessStderrStream");
-assert.throws(() => nativeProviderHandles(incompletePipe), /native Pipe24 provider requires jet_rt_handle_drop_ProcessStderrStream/);
-const wrongPipe = parseRuntimeExports(pipeDefinitions.replace("len: I64", "len: F64"), "PipeFixture.jet");
-assert.throws(() => nativeProviderHandles(wrongPipe), /line_bytes_raw.*does not match C ABI/);
-
 try {
   for (const name of ["gen-c-abi-routes.mjs", "runtime-route-abi.mjs", "native-route-handles.mjs", "native-route-records.mjs"]) {
     const path = `Tools/agent/${name}`;

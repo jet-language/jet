@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Full composed Jet runtime, real kernel descriptors/processes, C ABI carriers.
-// The held proof supplies the FINAL E2 producer and freshly composed native pack.
+// The held proof supplies the FINAL E2 producer; fixture.o owns the full runtime.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -31,7 +31,7 @@ if (mode === 'assemble') {
       JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: dir,
       JET_BOOTSTRAP_ENTRY: 'Source/Fixture.jet', JET_BOOTSTRAP_OUTPUT: join(dir, 'unused.output'), JET_BOOTSTRAP_RECEIPT: receipt,
       JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_LIFECYCLE: join(dir, 'lifecycle.list'),
-      JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608' } });
+      JET_STORE_DIR: join(out, 'store') } });
   writeFileSync(join(dir, 'front.log'), `${result.stdout ?? ''}${result.stderr ?? ''}`);
   const problem = frontReceipt(existsSync(receipt) ? readFileSync(receipt, 'utf8') : '', result);
   if (problem) throw Error(problem.detail);
@@ -53,11 +53,11 @@ if (mode === 'assemble') {
 } else if (mode === 'compile') {
   for (const [name, source] of fixtures) command(join(root, 'Tools/agent/jet-env'), [process.env.CC ?? 'cc', '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', '-c', join(root, 'Compiler/JetRuntime/Tests', source), '-o', join(out, `${name}.o`)]);
 } else if (mode === 'link') {
-  const pack = process.env.JET_RUNTIME_PACK, musl = process.env.JET_PACK_MUSL_LIB, compiler = process.env.JET;
-  if (!pack || !existsSync(pack) || !musl || !compiler) throw Error('fresh JET_RUNTIME_PACK, JET_PACK_MUSL_LIB and matching FINAL E2 JET are required');
+  const musl = process.env.JET_PACK_MUSL_LIB, compiler = process.env.JET;
+  if (!musl || !compiler) throw Error('JET_PACK_MUSL_LIB and matching FINAL E2 JET are required; fixture.o supplies the Jet-only runtime');
   command(process.execPath, [join(root, 'Compiler/JetBackend/Tests/run-link.mjs'), join(out, 'link')]);
   for (const [name] of fixtures) {
-    const result = command(compiler, ['run', join(out, 'link/unit.jet'), '--', join(out, name), join(musl, 'crt1.o'), join(musl, 'crti.o'), join(out, `${name}.o`), pack, join(musl, 'crtn.o')], { cwd: join(out, 'link') });
+    const result = command(compiler, ['run', join(out, 'link/unit.jet'), '--', join(out, name), join(musl, 'crt1.o'), join(musl, 'crti.o'), join(out, `${name}.o`), join(dir, 'fixture.o'), join(musl, 'libc.a'), join(musl, 'crtn.o')], { cwd: join(out, 'link') });
     writeFileSync(join(out, `${name}-link.log`), result.stdout + result.stderr);
   }
 } else {
