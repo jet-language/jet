@@ -380,9 +380,9 @@ impl FunctionRegistry {
 
     /// Resolve every `Close` owner to its checked MIR type identity. Runs once
     /// the type rows exist, before any function body is lowered.
-    fn index_close_impls(&mut self, types: &[MirTypeDef]) -> Result<(), LowerError> {
+    fn index_close_impls(&mut self, type_index: &NominalTypeIndex<'_>) -> Result<(), LowerError> {
         for (module, owner, span, function) in std::mem::take(&mut self.close_impl_rows) {
-            let owner = module_relative_type_instance(types, &owner, &module, span)?;
+            let owner = module_relative_type_instance(type_index, &owner, &module, span)?;
             let Some(identity) = owner.identity else {
                 return Err(LowerError::new(span, "checked Close owner has no nominal identity"));
             };
@@ -920,12 +920,17 @@ fn lower_anonymous_union_type_defs(
         .enum_variants
         .keys()
         .filter(|name| name.starts_with("__JetUnion_"))
-        .cloned()
         .collect::<Vec<_>>();
     names.sort_unstable();
+    // Keep generated rows separate while the index borrows declaration keys.
+    // Added carrier keys borrow the program's enum table, so each insertion is
+    // immediately visible to subsequent unions without borrowing a growing Vec.
+    let mut type_index = NominalTypeIndex::build(types);
+    let mut type_ids = types.iter().map(|row| row.id).collect::<HashSet<_>>();
+    let mut generated = Vec::new();
 
     for name in names {
-        let variant_names = program.enum_variants.get(&name).ok_or_else(|| {
+        let variant_names = program.enum_variants.get(name).ok_or_else(|| {
             LowerError::new(span, format!("anonymous union `{name}` has no variants"))
         })?;
         let mut members = Vec::with_capacity(variant_names.len());
@@ -972,7 +977,7 @@ fn lower_anonymous_union_type_defs(
             }
             members.push(member.clone());
         }
-        if crate::AST::union_enum_name(&members) != name {
+        if crate::AST::union_enum_name(&members) != *name {
             return Err(LowerError::new(
                 span,
                 format!("anonymous union `{name}` has a non-canonical shape"),
@@ -982,12 +987,9 @@ fn lower_anonymous_union_type_defs(
         // The carrier identity is the checked instance identity: members name
         // their canonical declaration keys (`module::DBError`), exactly as
         // `canonical_type_instance` spells every value of this union type.
-        let canonical_union = canonicalize_type(types, &Type::Union(members.clone()), span)?;
+        let canonical_union = canonicalize_type(&type_index, &Type::Union(members.clone()), span)?;
         let union_id = MirTypeId(stable_id("mir-type", &type_identity_key(&canonical_union)));
-        if types
-            .iter()
-            .any(|definition| definition.id == union_id || definition.key == name)
-        {
+        if type_ids.contains(&union_id) || type_index.exact.contains_key(name.as_str()) {
             continue;
         }
 
@@ -1002,7 +1004,7 @@ fn lower_anonymous_union_type_defs(
                     wire_name: tag,
                     span,
                     payload: MirVariantPayload::Single(canonical_type_instance(
-                        types, member, span,
+                        &type_index, member, span,
                     )?),
                     discriminant: None,
                 })
@@ -1013,7 +1015,7 @@ fn lower_anonymous_union_type_defs(
             .iter()
             .find(|definition| {
                 definition.generic_params.is_empty()
-                    && definition.name == name
+                    && definition.name == *name
                     && definition.key.ends_with(&qualified_suffix)
                     && matches!(
                         &definition.kind,
@@ -1028,7 +1030,7 @@ fn lower_anonymous_union_type_defs(
             id: union_id,
             module: module_id,
             key: name.clone(),
-            name,
+            name: name.clone(),
             span,
             public: false,
             package_public: false,
@@ -1077,8 +1079,12 @@ fn lower_anonymous_union_type_defs(
             definition.ownership = source.ownership;
             definition.boxed_edges = source.boxed_edges;
         }
-        types.push(definition);
+        type_index.insert(name, name, definition.id, definition.generic_params.is_empty());
+        type_ids.insert(definition.id);
+        generated.push(definition);
     }
+    drop(type_index);
+    types.extend(generated);
     Ok(())
 }
 
@@ -1191,8 +1197,13 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
         &function_registry,
     );
     fold_anonymous_union_declarations(&mut types);
-    function_registry.index_close_impls(&types)?;
+    // Close owners historically resolve before sorting; retain first-row
+    // selection in that declaration phase as well as in the frozen index.
+    if !function_registry.close_impl_rows.is_empty() {
+        function_registry.index_close_impls(&NominalTypeIndex::build(&types))?;
+    }
     types.sort_unstable_by_key(|ty| ty.id);
+    let type_index = NominalTypeIndex::build(&types);
     let mut functions: Vec<MirFunction> = Vec::with_capacity(program.funcs.len());
     let mut prelude_calls: Vec<MirPreludeCall> = Vec::new();
     let mut callbacks: Vec<MirCallbackAdapter> = Vec::new();
@@ -1207,7 +1218,7 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
     for definition in &types {
         for embedded in type_def_types(definition) {
             let instance =
-                canonical_type_instance(&types, &mir_type_as_ast(&embedded), definition.span)?;
+                canonical_type_instance(&type_index, &mir_type_as_ast(&embedded), definition.span)?;
             merge_type_instance(&mut type_instances, instance, definition.span)?;
         }
     }
@@ -1234,6 +1245,7 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
             lower_function(
                 function,
                 &types,
+                &type_index,
                 &nominal_identities,
                 &program.reflect_paths,
                 &program.declarations.traits,
@@ -1285,13 +1297,13 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
             }
             for embedded in function_type_rows(&lowered) {
                 let instance =
-                    canonical_type_instance(&types, &mir_type_as_ast(&embedded), lowered.span)?;
+                    canonical_type_instance(&type_index, &mir_type_as_ast(&embedded), lowered.span)?;
                 merge_type_instance(&mut type_instances, instance, lowered.span)?;
             }
             for nested_function in &nested {
                 for embedded in function_type_rows(nested_function) {
                     let instance = canonical_type_instance(
-                        &types,
+                        &type_index,
                         &mir_type_as_ast(&embedded),
                         nested_function.span,
                     )?;
@@ -1419,12 +1431,12 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
     for foreign in &foreign {
         for param in &foreign.params {
             let instance =
-                canonical_type_instance(&types, &mir_type_as_ast(&param.ty), foreign.span)?;
+                canonical_type_instance(&type_index, &mir_type_as_ast(&param.ty), foreign.span)?;
             merge_type_instance(&mut type_instances, instance, foreign.span)?;
         }
         if let Some(return_type) = &foreign.return_type {
             let instance =
-                canonical_type_instance(&types, &mir_type_as_ast(return_type), foreign.span)?;
+                canonical_type_instance(&type_index, &mir_type_as_ast(return_type), foreign.span)?;
             merge_type_instance(&mut type_instances, instance, foreign.span)?;
         }
     }
@@ -1436,7 +1448,7 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
     for trait_def in &traits {
         for method in &trait_def.methods {
             for ty in trait_method_type_rows(method) {
-                let instance = canonical_type_instance(&types, &mir_type_as_ast(&ty), method.span)?;
+                let instance = canonical_type_instance(&type_index, &mir_type_as_ast(&ty), method.span)?;
                 merge_type_instance(&mut type_instances, instance, method.span)?;
             }
         }
@@ -1446,14 +1458,9 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
         &program.funcs,
         &function_registry,
         &types,
+        &type_index,
     )?;
     attach_orphan_methods(&mut impls, &functions);
-    retain_selected_derives(
-        &mut types,
-        &impls,
-        &program.artifact_facts.modules,
-        program.artifact_facts.target,
-    );
     for implementation in &impls {
         merge_type_instance(
             &mut type_instances,
@@ -1467,7 +1474,9 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
             merge_type_instance(&mut type_instances, ty.clone(), implementation.span)?;
         }
     }
-    ensure_referenced_traits(&mut traits, &impls, &functions, &types, &type_instances.rows);
+    // Trait synthesis sees only the instances present before constants, as
+    // before. Derive metadata can be pruned once borrowed lookup keys expire.
+    let trait_type_instance_count = type_instances.rows.len();
     let mut constants = lower_constant_rows(&program.declarations.constants);
     constants.extend(shared_sites.into_values());
     constants.sort_unstable_by_key(|row| row.id);
@@ -1479,7 +1488,7 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
     {
         // A bare spelling resolves in the constant's own module first, so a
         // user `FontStyle` row never reads as a same-named Core declaration.
-        let instance = module_relative_type_instance(&types, &row.ty, &row.module, row.span);
+        let instance = module_relative_type_instance(&type_index, &row.ty, &row.module, row.span);
         // A prepared constant is materialized only when its folded value has
         // a canonical MIR type; reads of any other stay folded at the use.
         if row.is_comptime && instance.is_err() {
@@ -1494,6 +1503,17 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
         }
         merge_type_instance(&mut type_instances, instance, row.span)?;
     }
+    drop(type_index);
+    retain_selected_derives(
+        &mut types,
+        &impls,
+        &program.artifact_facts.modules,
+        program.artifact_facts.target,
+    );
+    ensure_referenced_traits(
+        &mut traits, &impls, &functions, &types,
+        &type_instances.rows[..trait_type_instance_count],
+    );
     let jobs = lower_job_rows(
         &program.artifact_facts.jobs,
         &program.funcs,
@@ -2377,6 +2397,7 @@ fn lower_impl_rows(
     functions: &[TFunc],
     registry: &FunctionRegistry,
     types: &[MirTypeDef],
+    type_index: &NominalTypeIndex<'_>,
 ) -> Result<Vec<MirImplDef>, LowerError> {
     // Indexes over `functions`, built once instead of rescanning every
     // function for each impl method key (rows x methods x functions): each
@@ -2404,7 +2425,7 @@ fn lower_impl_rows(
     let mut result = Vec::new();
     for row in rows {
         let declared_self_type =
-            module_relative_type_instance(types, &row.self_type, &row.module, row.span)?;
+            module_relative_type_instance(type_index, &row.self_type, &row.module, row.span)?;
         let trait_name = row.trait_ref.as_ref().or(row.trait_name.as_ref());
         let mut method_groups: Vec<(MirType, Vec<MirFunctionId>)> = Vec::new();
         for method_key in &row.methods {
@@ -2434,7 +2455,7 @@ fn lower_impl_rows(
                 let Some((owner, _)) = tfunc_method_owner(function) else {
                     continue;
                 };
-                let owner = module_relative_type_instance(types, owner, &row.module, row.span)?;
+                let owner = module_relative_type_instance(type_index, owner, &row.module, row.span)?;
                 if let Some((_group_owner, group_methods)) = method_groups
                     .iter_mut()
                     .find(|(group_owner, _)| same_impl_owner(group_owner, &owner))
@@ -2487,7 +2508,7 @@ fn lower_impl_rows(
                         Ok(MirAssociatedTypeValue {
                             name: associated.name.clone(),
                             ty: module_relative_type_instance(
-                                types,
+                                type_index,
                                 &associated.ty,
                                 &row.module,
                                 associated.span,
@@ -2509,7 +2530,7 @@ fn lower_impl_rows(
                 operator_rhs: row
                     .operator_rhs
                     .as_ref()
-                    .map(|ty| module_relative_type_instance(types, ty, &row.module, row.span))
+                    .map(|ty| module_relative_type_instance(type_index, ty, &row.module, row.span))
                     .transpose()?,
                 operator_marker: row.operator_marker.clone(),
                 target_os: row.target_os.clone(),
@@ -4466,6 +4487,7 @@ fn int_width(ty: &Type) -> Option<(bool, u8)> {
 fn lower_function(
     f: &TFunc,
     type_defs: &[MirTypeDef],
+    type_index: &NominalTypeIndex<'_>,
     nominal_identities: &HashMap<String, String>,
     reflect_paths: &HashMap<String, String>,
     trait_defs: &[super::tir_to_mir_types::TirTraitDef],
@@ -4478,6 +4500,7 @@ fn lower_function(
     let mut ctx = LowerCtx::new(
         f,
         type_defs,
+        type_index,
         nominal_identities,
         reflect_paths,
         trait_defs,
@@ -4810,15 +4833,62 @@ pub(super) fn type_identity_key(ty: &Type) -> String {
     }
 }
 
-/// The bare `Group` is the compiler-owned task-group handle. The same-leaf
-/// Core record (`core.data::Group<K, V>`) is generic and always spelled with
-/// arguments, so it never claims the bare spelling; only a non-generic checked
-/// row keyed exactly `Group` may.
-fn is_builtin_task_group(type_defs: &[MirTypeDef], name: &str) -> bool {
-    name == crate::Syntax::TYPE_TASKGROUP
-        && !type_defs
-            .iter()
-            .any(|row| row.key == name && row.generic_params.is_empty())
+/// Nominal lookup facts borrowed from the type table. Declaration phases keep
+/// first-row order; after union folding and sorting, all function and lambda
+/// lowering shares one frozen index.
+pub(super) struct NominalTypeIndex<'a> {
+    exact: HashMap<&'a str, ExactNominal>,
+    declared_names: HashSet<(&'a str, &'a str)>,
+    core_carriers: HashMap<&'a str, &'a str>,
+    has_bare_task_group: bool,
+}
+
+struct ExactNominal {
+    id: MirTypeId,
+    ambiguous: bool,
+}
+
+impl<'a> NominalTypeIndex<'a> {
+    fn build(type_defs: &'a [MirTypeDef]) -> Self {
+        let mut index = Self {
+            exact: HashMap::with_capacity(type_defs.len()),
+            declared_names: HashSet::with_capacity(type_defs.len()),
+            core_carriers: HashMap::new(),
+            has_bare_task_group: false,
+        };
+        for row in type_defs {
+            index.insert(&row.key, &row.name, row.id, row.generic_params.is_empty());
+        }
+        index
+    }
+
+    fn insert(&mut self, key: &'a str, name: &'a str, id: MirTypeId, non_generic: bool) {
+        self.exact.entry(key)
+            .and_modify(|row| row.ambiguous = true)
+            .or_insert(ExactNominal { id, ambiguous: false });
+        self.declared_names.insert((key, name));
+        self.has_bare_task_group |= key == crate::Syntax::TYPE_TASKGROUP && non_generic;
+        if key.starts_with(jet_foundation::Diagnostics::CORE_SOURCE_ROOT) {
+            if let Some((owner, leaf)) = key.rsplit_once("::") {
+                if let Some((_, path)) = owner.rsplit_once("::") {
+                    if registered_core_owner_path(leaf) == Some(path) {
+                        // Preserve the original scan's first-row selection.
+                        self.core_carriers.entry(leaf).or_insert(key);
+                    }
+                }
+            }
+        }
+    }
+
+    fn declares(&self, key: &str, name: &str) -> bool {
+        self.declared_names.contains(&(key, name))
+    }
+}
+
+/// The bare `Group` is the compiler-owned handle unless a non-generic
+/// checked row keyed exactly `Group` claims that spelling.
+fn is_builtin_task_group(type_index: &NominalTypeIndex<'_>, name: &str) -> bool {
+    name == crate::Syntax::TYPE_TASKGROUP && !type_index.has_bare_task_group
 }
 
 /// The task-group handle's identity key. Every lowering path derives the
@@ -4830,7 +4900,7 @@ const BUILTIN_TASK_GROUP_IDENTITY_KEY: &str = "builtin:task-group";
 /// Bare Core carriers have an owner registered in Core.jet. Resolve only that
 /// exact source identity; an unrelated declaration with the same leaf cannot
 /// participate. Ordinary source nominals arrive already module-qualified.
-fn registered_core_nominal_key<'a>(type_defs: &'a [MirTypeDef], name: &str) -> Option<&'a str> {
+fn registered_core_owner_path(name: &str) -> Option<&'static str> {
     if name.contains("::") || name.contains('.') {
         return None;
     }
@@ -4843,36 +4913,25 @@ fn registered_core_nominal_key<'a>(type_defs: &'a [MirTypeDef], name: &str) -> O
             *module
         }
     };
-    let source = jet_foundation::CoreModuleExports::core_source_module(module)?;
-    type_defs.iter()
-        .find(|row| {
-            row.key.starts_with(jet_foundation::Diagnostics::CORE_SOURCE_ROOT)
-                && row.key.rsplit_once("::").is_some_and(|(owner, leaf)| {
-                    leaf == name && owner.rsplit_once("::").is_some_and(|(_, path)| path == source.path)
-                })
-        })
-        .map(|row| row.key.as_str())
+    jet_foundation::CoreModuleExports::core_source_module(module).map(|source| source.path)
 }
 
 fn canonical_nominal_name(
-    type_defs: &[MirTypeDef],
+    type_index: &NominalTypeIndex<'_>,
     name: &str,
     span: Span,
 ) -> Result<String, LowerError> {
     if let Some(carrier) = crate::Codegen::TIR::tir_to_mir_types::core_term_stream_carrier(name) {
         return Ok(carrier.to_string());
     }
-    // At most two matches decide each lookup: unique or ambiguous.
-    let mut exact = type_defs.iter().filter(|ty| ty.key == name);
-    match (exact.next(), exact.next()) {
-        (Some(ty), None) => return Ok(ty.key.clone()),
-        (Some(_), Some(_)) => {
+    if let Some((key, row)) = type_index.exact.get_key_value(name) {
+        if row.ambiguous {
             return Err(LowerError::new(
                 span,
                 format!("ambiguous checked MIR type key `{name}`"),
             ));
         }
-        _ => {}
+        return Ok((*key).to_string());
     }
     // D-UNIONTYPE1=A: a module-qualified anonymous-union spelling names the
     // one structural carrier row (`fold_anonymous_union_declarations`).
@@ -4881,11 +4940,11 @@ fn canonical_nominal_name(
         .next()
         .filter(|leaf| *leaf != name && leaf.starts_with("__JetUnion_"))
     {
-        if type_defs.iter().any(|ty| ty.key == leaf) {
+        if type_index.exact.contains_key(leaf) {
             return Ok(leaf.to_string());
         }
     }
-    if let Some(key) = registered_core_nominal_key(type_defs, name) {
+    if let Some(key) = type_index.core_carriers.get(name) {
         return Ok(key.to_string());
     }
     // Sema/TIR supplies module-qualified identities for source nominals.
@@ -4894,23 +4953,23 @@ fn canonical_nominal_name(
     Ok(name.to_string())
 }
 
-fn canonicalize_type(type_defs: &[MirTypeDef], ty: &Type, span: Span) -> Result<Type, LowerError> {
+fn canonicalize_type(type_index: &NominalTypeIndex<'_>, ty: &Type, span: Span) -> Result<Type, LowerError> {
     Ok(match ty {
-        Type::List(inner) => Type::List(Box::new(canonicalize_type(type_defs, inner, span)?)),
+        Type::List(inner) => Type::List(Box::new(canonicalize_type(type_index, inner, span)?)),
         Type::Map {
             key,
             key_span,
             value,
         } => Type::Map {
-            key: Box::new(canonicalize_type(type_defs, key, span)?),
+            key: Box::new(canonicalize_type(type_index, key, span)?),
             key_span: *key_span,
-            value: Box::new(canonicalize_type(type_defs, value, span)?),
+            value: Box::new(canonicalize_type(type_index, value, span)?),
         },
-        Type::Shared(inner) => Type::Shared(Box::new(canonicalize_type(type_defs, inner, span)?)),
-        Type::Option(inner) => Type::Option(Box::new(canonicalize_type(type_defs, inner, span)?)),
+        Type::Shared(inner) => Type::Shared(Box::new(canonicalize_type(type_index, inner, span)?)),
+        Type::Option(inner) => Type::Option(Box::new(canonicalize_type(type_index, inner, span)?)),
         Type::Result { ok, err } => Type::Result {
-            ok: Box::new(canonicalize_type(type_defs, ok, span)?),
-            err: Box::new(canonicalize_type(type_defs, err, span)?),
+            ok: Box::new(canonicalize_type(type_index, ok, span)?),
+            err: Box::new(canonicalize_type(type_index, err, span)?),
         },
         Type::Fn {
             params,
@@ -4922,79 +4981,77 @@ fn canonicalize_type(type_defs: &[MirTypeDef], ty: &Type, span: Span) -> Result<
         } => Type::Fn {
             params: params
                 .iter()
-                .map(|param| canonicalize_type(type_defs, param, span))
+                .map(|param| canonicalize_type(type_index, param, span))
                 .collect::<Result<Vec<_>, _>>()?,
             ret: ret
                 .as_deref()
-                .map(|ret| canonicalize_type(type_defs, ret, span).map(Box::new))
+                .map(|ret| canonicalize_type(type_index, ret, span).map(Box::new))
                 .transpose()?,
             effect_bound: effect_bound.clone(),
             param_contract: param_contract.clone(),
             call_metadata: call_metadata.clone(),
             return_view_provenance: return_view_provenance.clone(),
         },
-        Type::Named(name) if is_builtin_task_group(type_defs, name) => ty.clone(),
-        Type::Named(name) => Type::Named(canonical_nominal_name(type_defs, name, span)?),
+        Type::Named(name) if is_builtin_task_group(type_index, name) => ty.clone(),
+        Type::Named(name) => Type::Named(canonical_nominal_name(type_index, name, span)?),
         Type::Apply { name, args } => Type::Apply {
-            name: canonical_nominal_name(type_defs, name, span)?,
+            name: canonical_nominal_name(type_index, name, span)?,
             args: args
                 .iter()
-                .map(|arg| canonicalize_type(type_defs, arg, span))
+                .map(|arg| canonicalize_type(type_index, arg, span))
                 .collect::<Result<Vec<_>, _>>()?,
         },
         Type::Tuple(fields) => Type::Tuple(
             fields
                 .iter()
                 .map(|(name, ty)| {
-                    canonicalize_type(type_defs, ty, span).map(|ty| (name.clone(), Box::new(ty)))
+                    canonicalize_type(type_index, ty, span).map(|ty| (name.clone(), Box::new(ty)))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
         ),
         Type::FixedList { elem, len } => Type::FixedList {
-            elem: Box::new(canonicalize_type(type_defs, elem, span)?),
+            elem: Box::new(canonicalize_type(type_index, elem, span)?),
             len: len.clone(),
         },
         Type::InlineRange { base, lo, hi } => Type::InlineRange {
-            base: Box::new(canonicalize_type(type_defs, base, span)?),
+            base: Box::new(canonicalize_type(type_index, base, span)?),
             lo: *lo,
             hi: *hi,
         },
         Type::Tagged { marker, inner } => Type::Tagged {
             marker: marker.clone(),
-            inner: Box::new(canonicalize_type(type_defs, inner, span)?),
+            inner: Box::new(canonicalize_type(type_index, inner, span)?),
         },
         Type::Union(members) => Type::Union(
             members
                 .iter()
-                .map(|member| canonicalize_type(type_defs, member, span))
+                .map(|member| canonicalize_type(type_index, member, span))
                 .collect::<Result<Vec<_>, _>>()?,
         ),
         Type::Quantity { base, dimension } => Type::Quantity {
-            base: Box::new(canonicalize_type(type_defs, base, span)?),
+            base: Box::new(canonicalize_type(type_index, base, span)?),
             dimension: dimension.clone(),
         },
         _ => ty.clone(),
     })
 }
 fn canonical_type_instance(
-    type_defs: &[MirTypeDef],
+    type_index: &NominalTypeIndex<'_>,
     ty: &Type,
     span: Span,
 ) -> Result<MirType, LowerError> {
-    let source = canonicalize_type(type_defs, ty, span)?;
+    let source = canonicalize_type(type_index, ty, span)?;
     let key = type_identity_key(&source);
     let identity = match &source {
-        Type::Named(name) if is_builtin_task_group(type_defs, name) => {
+        Type::Named(name) if is_builtin_task_group(type_index, name) => {
             MirTypeId(stable_id("mir-type", &key))
         }
-        Type::Named(name) => type_defs
-            .iter()
-            .find(|row| row.key == *name)
+        Type::Named(name) => type_index.exact
+            .get(name.as_str())
             .map(|row| row.id)
             .unwrap_or_else(|| MirTypeId(stable_id("mir-type", &key))),
-        Type::Apply { name, args } if args.is_empty() => type_defs
-            .iter()
-            .find(|row| row.key == *name)
+        Type::Apply { name, args } if args.is_empty() => type_index.exact
+            .get(name.as_str())
             .map(|row| row.id)
             .unwrap_or_else(|| MirTypeId(stable_id("mir-type", &key))),
         _ => MirTypeId(stable_id("mir-type", &key)),
@@ -5002,7 +5059,7 @@ fn canonical_type_instance(
     Ok(lower_type(&source).with_identity(identity))
 }
 fn module_relative_type_instance(
-    type_defs: &[MirTypeDef],
+    type_index: &NominalTypeIndex<'_>,
     ty: &Type,
     module: &str,
     span: Span,
@@ -5012,12 +5069,9 @@ fn module_relative_type_instance(
             return None;
         }
         let candidate = format!("{module}::{name}");
-        type_defs
-            .iter()
-            .any(|definition| definition.key == candidate && definition.name == name)
-            .then_some(candidate)
+        type_index.declares(&candidate, name).then_some(candidate)
     });
-    canonical_type_instance(type_defs, &qualified, span)
+    canonical_type_instance(type_index, &qualified, span)
 }
 fn lower_visibility(visibility: super::TVisibility) -> jet_foundation::MIR::MirVisibility {
     match visibility {
@@ -5296,6 +5350,8 @@ pub(super) struct IndexedSource<'s> {
 pub(super) struct LowerCtx<'a> {
     pub(super) function: &'a TFunc,
     pub(super) type_defs: &'a [MirTypeDef],
+    type_index: &'a NominalTypeIndex<'a>,
+    generic_parameters: HashSet<&'a str>,
     pub(super) nominal_identities: &'a HashMap<String, String>,
     pub(super) reflect_paths: &'a HashMap<String, String>,
     pub(super) trait_defs: &'a [super::tir_to_mir_types::TirTraitDef],
@@ -5499,6 +5555,7 @@ impl<'a> LowerCtx<'a> {
     fn new(
         function: &'a TFunc,
         type_defs: &'a [MirTypeDef],
+        type_index: &'a NominalTypeIndex<'a>,
         nominal_identities: &'a HashMap<String, String>,
         reflect_paths: &'a HashMap<String, String>,
         trait_defs: &'a [super::tir_to_mir_types::TirTraitDef],
@@ -5524,6 +5581,9 @@ impl<'a> LowerCtx<'a> {
             nominal_identities,
             reflect_paths,
             type_defs,
+            type_index,
+            generic_parameters: function.generic_params.iter()
+                .map(|parameter| parameter.name.as_str()).collect(),
             trait_defs,
             function_registry,
             trait_method_traits: HashMap::new(),
@@ -6256,24 +6316,15 @@ impl<'a> LowerCtx<'a> {
         // export row keyed `Effect`), as `mir_type` resolves the value type.
         let scoped = (!self.function.module.is_empty() && !key.contains("::"))
             .then(|| format!("{}::{key}", self.function.module))
-            .filter(|scoped| {
-                self.type_defs
-                    .iter()
-                    .any(|ty| ty.key == *scoped && ty.name == key)
-            });
+            .filter(|scoped| self.type_index.declares(scoped, key));
         let canonical_key = canonical_nominal_name(
-            self.type_defs,
+            self.type_index,
             scoped.as_deref().unwrap_or(key),
             self.span(),
         )?;
-        let exact = self
-            .type_defs
-            .iter()
-            .filter(|ty| ty.key == canonical_key)
-            .collect::<Vec<_>>();
-        match exact.as_slice() {
-            [ty] => Ok(ty.id),
-            [] => match self
+        match self.type_index.exact.get(canonical_key.as_str()) {
+            Some(row) if !row.ambiguous => Ok(row.id),
+            None => match self
                 .trait_defs
                 .iter()
                 .filter(|trait_def| trait_def.key == key || trait_def.name == key)
@@ -6312,12 +6363,7 @@ impl<'a> LowerCtx<'a> {
 
     fn normalize_contextual_type(&self, ty: &Type) -> Type {
         ty.map_named_types(&|name| {
-            if self
-                .function
-                .generic_params
-                .iter()
-                .any(|parameter| parameter.name == name)
-            {
+            if self.generic_parameters.contains(name) {
                 return None;
             }
             let scoped = format!("{}::{name}", self.function.module);
@@ -6333,10 +6379,7 @@ impl<'a> LowerCtx<'a> {
                 .cloned()
                 .or_else(|| {
                     let qualified = (!self.function.module.is_empty()).then_some(scoped)?;
-                    self.type_defs
-                        .iter()
-                        .any(|definition| definition.key == qualified && definition.name == name)
-                        .then_some(qualified)
+                    self.type_index.declares(&qualified, name).then_some(qualified)
                 })
         })
     }
@@ -6344,7 +6387,7 @@ impl<'a> LowerCtx<'a> {
     pub(super) fn mir_type(&mut self, ty: &Type) -> Result<MirType, LowerError> {
         let span = self.span();
         let normalized = self.normalize_contextual_type(ty);
-        let instance = canonical_type_instance(self.type_defs, &normalized, span)?;
+        let instance = canonical_type_instance(self.type_index, &normalized, span)?;
         merge_type_instance(&mut self.type_instances, instance.clone(), span)?;
         Ok(instance)
     }
@@ -6442,7 +6485,7 @@ impl<'a> LowerCtx<'a> {
             // A structural union owns the generated carrier row whose identity
             // is keyed by its canonical members, as in `mir_type`.
             Type::Union(_) => {
-                type_identity_key(&canonicalize_type(self.type_defs, ty, self.span())?)
+                type_identity_key(&canonicalize_type(self.type_index, ty, self.span())?)
             }
             _ => type_identity_key(ty),
         };
@@ -6507,7 +6550,7 @@ impl<'a> LowerCtx<'a> {
         if let Type::Tuple(fields) = ty {
             if let Some(field_name) = tuple_field_name(fields, key) {
                 let identity =
-                    canonical_type_instance(self.type_defs, ty, self.span())?.identity_key();
+                    canonical_type_instance(self.type_index, ty, self.span())?.identity_key();
                 return Ok(MirFieldId(stable_id(
                     "mir-field",
                     &format!("{identity}::{field_name}"),
@@ -11227,6 +11270,7 @@ impl<'a> LowerCtx<'a> {
         let (nested, calls, files, instances, deeper, callbacks, sites) = lower_function(
             &function,
             self.type_defs,
+            self.type_index,
             self.nominal_identities,
             self.reflect_paths,
             self.trait_defs,
@@ -12635,5 +12679,161 @@ fn tir_place_path(expr: &TExpr) -> bool {
         TExprKind::Local(local) => !local.is_persistent(),
         TExprKind::Field { recv, .. } => tir_place_path(recv),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod nominal_index_tests {
+    use super::*;
+
+    fn fixture() -> TirProgram {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let (bundle, nominals) = super::super::tests::checked_bundle(
+                "struct Gauge {\n n: Int\n}\nfn run() {}\n",
+            );
+            let request = jet_foundation::MIR::MirArtifactRequest::new(
+                MirArtifactTarget::RustAot,
+                jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+                jet_foundation::MIR::MirArtifactBuildMode::Dev,
+            );
+            super::super::lower_checked_tir_program_for(&bundle, &nominals, request)
+                .expect("checked nominal lookup fixture")
+        })
+    }
+
+    #[test]
+    fn nominal_index_retains_duplicate_key_diagnostic_and_first_identity() {
+        let program = fixture();
+        let registry = FunctionRegistry::build(&program.funcs, program.entry_call_alias.as_ref())
+            .unwrap();
+        let mut types = lower_type_defs(&program.declarations.type_defs, &registry).unwrap();
+        let gauge = types.iter().find(|row| row.name == "Gauge").unwrap().clone();
+        let span = Span::new(17, 23);
+        let index = NominalTypeIndex::build(&types);
+        assert_eq!(
+            canonical_type_instance(&index, &Type::Named(gauge.key.clone()), span)
+                .unwrap().identity,
+            Some(gauge.id),
+        );
+        drop(index);
+        types.push(gauge.clone());
+        let index = NominalTypeIndex::build(&types);
+        let error = canonical_nominal_name(&index, &gauge.key, span).unwrap_err();
+        assert_eq!(error.span, span);
+        assert_eq!(error.message, format!("ambiguous checked MIR type key `{}`", gauge.key));
+    }
+
+    #[test]
+    fn nominal_index_tracks_generated_union_then_folded_qualified_spelling() {
+        let mut program = fixture();
+        let members = vec![Type::Int, Type::String];
+        let name = crate::AST::union_enum_name(&members);
+        let variants = members.iter().map(crate::AST::union_member_tag).collect::<Vec<_>>();
+        program.enum_variants.insert(name.clone(), variants.clone());
+        for (member, variant) in members.iter().zip(&variants) {
+            program.enum_variant_payload_types.insert(
+                format!("{name}::{variant}"), vec![member.clone()],
+            );
+        }
+        let registry = FunctionRegistry::build(&program.funcs, program.entry_call_alias.as_ref())
+            .unwrap();
+        let mut types = lower_type_defs(&program.declarations.type_defs, &registry).unwrap();
+        lower_anonymous_union_type_defs(&program, &mut types).unwrap();
+        let carrier = types.iter().find(|row| row.key == name).unwrap().clone();
+        let mut qualified = carrier.clone();
+        qualified.key = format!("scope::{name}");
+        qualified.id = MirTypeId(stable_id("mir-type", &qualified.key));
+        types.push(qualified);
+        fold_anonymous_union_declarations(&mut types);
+        types.sort_unstable_by_key(|row| row.id);
+        let index = NominalTypeIndex::build(&types);
+        assert!(!index.exact.contains_key(format!("scope::{name}").as_str()));
+        assert_eq!(
+            canonical_type_instance(&index, &Type::Named(format!("scope::{name}")), Span::new(0, 0))
+                .unwrap().identity,
+            Some(carrier.id),
+        );
+    }
+
+    #[test]
+    fn nominal_index_core_carrier_requires_registered_source_owner() {
+        let program = fixture();
+        let registry = FunctionRegistry::build(&program.funcs, program.entry_call_alias.as_ref())
+            .unwrap();
+        let types = lower_type_defs(&program.declarations.type_defs, &registry).unwrap();
+        let template = types.iter().find(|row| row.name == "Gauge").unwrap();
+        let source = registered_core_owner_path("DateTime").expect("Core DateTime owner");
+        let mut unrelated = template.clone();
+        unrelated.name = "DateTime".into();
+        unrelated.key = "<corelib>/fixture::unrelated/time.jet::DateTime".into();
+        let mut owner = unrelated.clone();
+        owner.key = format!("<corelib>/fixture::{source}::DateTime");
+        let mut later_owner = owner.clone();
+        later_owner.key = format!("<corelib>/later::{source}::DateTime");
+        let rows = vec![unrelated.clone(), owner.clone(), later_owner];
+        let index = NominalTypeIndex::build(&rows);
+        assert_eq!(
+            canonical_nominal_name(&index, "DateTime", Span::new(0, 0)).unwrap(),
+            owner.key,
+        );
+        let rows = vec![unrelated];
+        let index = NominalTypeIndex::build(&rows);
+        assert_eq!(
+            canonical_nominal_name(&index, "DateTime", Span::new(0, 0)).unwrap(),
+            "DateTime",
+        );
+    }
+
+    #[test]
+    fn nominal_index_context_is_scoped_and_generic_parameters_shadow_nominals() {
+        let program = fixture();
+        let registry = FunctionRegistry::build(&program.funcs, program.entry_call_alias.as_ref())
+            .unwrap();
+        let mut types = lower_type_defs(&program.declarations.type_defs, &registry).unwrap();
+        let mut function = program.funcs.iter().find(|row| row.name == "run").unwrap().clone();
+        function.module = "scope".into();
+        let mut local = types.iter().find(|row| row.name == "Gauge").unwrap().clone();
+        local.name = "Local".into();
+        local.key = "scope::Local".into();
+        types.push(local);
+        let mut unrelated = types.last().unwrap().clone();
+        unrelated.name = "Unrelated".into();
+        unrelated.key = "elsewhere::Unrelated".into();
+        types.push(unrelated);
+        let index = NominalTypeIndex::build(&types);
+        let identities = HashMap::from([
+            ("scope::Visible".into(), "owner::Visible".into()),
+            ("checked::Imported".into(), "owner::Imported".into()),
+            ("Unrelated".into(), "elsewhere::Unrelated".into()),
+        ]);
+        let reflect = HashMap::new();
+        let sources = BTreeMap::new();
+        let ctx = LowerCtx::new(
+            &function, &types, &index, &identities, &reflect, &[], &registry, &sources, &[],
+        );
+        for (name, expected) in [
+            ("Local", "scope::Local"),
+            ("Visible", "owner::Visible"),
+            ("checked::Imported", "owner::Imported"),
+            ("Unrelated", "Unrelated"),
+        ] {
+            assert_eq!(
+                ctx.normalize_contextual_type(&Type::Named(name.into())),
+                Type::Named(expected.into()),
+            );
+        }
+        drop(ctx);
+        function.generic_params = vec![super::super::TGenericParam {
+            name: "Local".into(), bounds: Vec::new(),
+        }, super::super::TGenericParam {
+            name: "Visible".into(), bounds: Vec::new(),
+        }];
+        let ctx = LowerCtx::new(
+            &function, &types, &index, &identities, &reflect, &[], &registry, &sources, &[],
+        );
+        for name in ["Local", "Visible"] {
+            let ty = Type::Named(name.into());
+            assert_eq!(ctx.normalize_contextual_type(&ty), ty);
+        }
     }
 }
