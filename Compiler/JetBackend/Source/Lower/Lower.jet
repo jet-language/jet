@@ -401,7 +401,6 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         comptime_budget: !wrap_entry,
         mir_signatures: [LIRSignatureID]{},
         mir_results: [Int]{},
-        comptime_budget: !wrap_entry,
         glue_base: prepared.functions.len(),
         glue: [LowerGlue]{},
         glue_rows: [String:Int]{},
@@ -569,36 +568,6 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
                 &core_callables.push(LIRCoreCallableExport{semantic_identity: "closure.release:{key}", role: "closure.release", type_key: key, function: release})
             }
         }
-    }
-    if !shared_sites_dynamic {
-        // Getters are published only after the host runs this noarg Unit
-        // startup. Emit it last so helper bodies have discovered every fixup.
-        startup :: lower_helper_id(&m, "core.shared.init", mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}}))
-        &functions.push(lower_helper_function(program, &m, m.glue[startup.value - m.glue_base]))
-        lowered_entry = Val(startup)
-    }
-    closures :: if !wrap_entry && m.issues.len() == 0 -> lower_closure_value_layouts(program, prepared, m) else -> [LIRClosureValueLayout]{}
-    core_callables := [LIRCoreCallableExport]{}
-    if !shared_sites_dynamic {
-        loop glue in m.glue {
-            if glue.helper != "lazy.clone" && glue.helper != "lazy.drop" -> next
-            key :: lower_mono_fingerprint(glue.ty)
-            &core_callables.push(LIRCoreCallableExport{semantic_identity: "{glue.helper}:{key}", role: glue.helper, type_key: key, function: glue.id})
-        }
-        loop closure in closures {
-            key :: "closure:{closure.function.value}"
-            &core_callables.push(LIRCoreCallableExport{semantic_identity: "closure.code:{key}", role: "closure.code", type_key: key, function: closure.code})
-            if closure.release == .Val(release) {
-                &core_callables.push(LIRCoreCallableExport{semantic_identity: "closure.release:{key}", role: "closure.release", type_key: key, function: release})
-            }
-        }
-    }
-    if !shared_sites_dynamic {
-        // Getters are published only after the host runs this noarg Unit
-        // startup. Emit it last so helper bodies have discovered every fixup.
-        startup :: lower_helper_id(&m, "core.shared.init", mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}}))
-        &functions.push(lower_helper_function(program, &m, m.glue[startup.value - m.glue_base]))
-        lowered_entry = Val(startup)
     }
     lowered :: LIRModule{signatures: m.signatures.copy(), functions: functions, data: m.data.copy()}
     issues := m.issues.copy()
@@ -1151,37 +1120,6 @@ fn lower_comptime_leave(m: &LowerModule, f: &LowerFunction) Never! {
     if m.comptime_budget -> lower_call_runtime(&m, &f, "jet_rt_comptime_leave", [LIRValueID]{}, None)
 }
 
-// `mir_sources` retains the original program.functions row even for mono clones.
-// Synthetic glue/helpers never use these hooks or become diagnostic owners.
-fn lower_comptime_site(m: &LowerModule, f: &LowerFunction, symbol: String, start: Int, end: Int) Never! {
-    if !m.comptime_budget -> return
-    owner :: lower_const(&f, m.mir_sources[f.builder.id.value])
-    first :: lower_const(&f, start)
-    last :: lower_const(&f, end)
-    lower_call_runtime(&m, &f, symbol, [LIRValueID]{owner, first, last}, None)
-}
-
-fn lower_comptime_leave(m: &LowerModule, f: &LowerFunction) Never! {
-    if m.comptime_budget -> lower_call_runtime(&m, &f, "jet_rt_comptime_leave", [LIRValueID]{}, None)
-}
-
-// A C U32 result defines eax only; LIR narrow integers live in full words.
-// Use the checked MIR type, never a symbol-name guess or a new 4B layout.
-// lower_narrow_wrap emits a logical zero extension into a distinct SSA value.
-fn lower_call_runtime_typed(c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, symbol: String, args: [LIRValueID], dst: LIRValueID?) Never! {
-    if dst == .Val(result) {
-        if instruction.result == .Val(value) {
-            if lower_value_type(c, value) == .Val(ty) {
-                if lower_narrow_bits(ty) == 32 && !lower_narrow_signed(ty) {
-                    raw :: lower_word(&f)
-                    lower_call_runtime(&m, &f, symbol, args, Val(raw))
-                    return lower_narrow_wrap(&f, result, raw, false, 32)
-                }
-            }
-        }
-    }
-    lower_call_runtime(&m, &f, symbol, args, dst)
-}
 
 // A static string's address and byte length, for runtime calls.
 fn lower_static_text(m: &LowerModule, f: &LowerFunction, text: String) -> [LIRValueID] Never! {
