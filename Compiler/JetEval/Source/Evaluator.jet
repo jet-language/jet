@@ -923,48 +923,6 @@ fn jet_eval_pure_session_value(machine: &JetEvalMachine, function_id: MIRFunctio
     data
 }
 
-// Run each of `function_ids` with no arguments as one pure evaluation on ONE
-// machine (Rust PureFold `evaluate` over one borrowed program): the program
-// and its row index are built once, each evaluation starts from a fresh
-// session, and the program and computed values are returned together once.
-// Value `i` is None when evaluation `i` failed, stopped, printed, or left a
-// resource that did not retire cleanly. A machine per function copied the
-// whole program twice per evaluation (a field move clones), and the caller's
-// recursion retained one copy per evaluation.
-fn jet_eval_pure_functions(program: ^MIRProgram, function_ids: [MIRFunctionID], config: JetEvalConfig) -> (program: MIRProgram, values: [TComptimeValue?]) {
-    values := [TComptimeValue?]{}
-    span := jet_eval_empty_span()
-    first_config := config
-    machine := jet_eval_machine(^program, ^first_config)
-    loop (index, function_id) in function_ids {
-        if index > 0 {
-            session_config := config
-            jet_eval_reset_session(&machine, ^session_config)
-        }
-        &values.push(jet_eval_pure_session_value(&machine, function_id, span))
-    }
-    (program: machine.program, values: ^values)
-}
-
-// A fresh evaluation session on `machine`'s program: every field
-// jet_eval_machine starts empty is reset; program and rows are kept.
-fn jet_eval_reset_session(machine: &JetEvalMachine, config: ^JetEvalConfig) {
-    machine.config = jet_eval_new_session_config(^config)
-    machine.registry = jet_eval_registry_new()
-    machine.identity = jet_eval_registry_machine_identity(machine.registry)
-    machine.frames = [JetEvalFrame]{}
-    machine.callback_roots = [Int:JetEvalCallbackRoot]{}
-    machine.entry_access = None
-    machine.entry_shared_loans = [JetEvalSharedEntryLoan]{}
-    machine.steps = 0
-    machine.stdout = ""
-    machine.stderr = ""
-    machine.soft_stop = false
-    machine.exit_code = None
-    machine.failure = None
-    machine.internal_problem = None
-}
-
 // One pure evaluation of `function_id` in `machine`'s current session.
 fn jet_eval_pure_session_value(machine: &JetEvalMachine, function_id: MIRFunctionID, span: Span) -> TComptimeValue? {
     data := TComptimeValue?{None}
