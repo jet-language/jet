@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::AST::{
-    AccessConvention, ComptimeInput, CtFloat, CtKey, CtReport, Expr, Func, MirFragmentNominalFacts,
+    ComptimeInput, CtFloat, CtKey, CtReport, Expr, Func, MirFragmentNominalFacts,
     ProgramBundle, Stmt, StructDef, Type,
 };
 use crate::Comptime::{CtValue, DebugHook, DevSink, PurityStage, ReplAuthorizer};
