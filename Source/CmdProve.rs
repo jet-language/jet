@@ -2724,28 +2724,9 @@ fn collect_capture_pattern(
     local_functions: &HashSet<String>,
     sites: &mut Vec<CaptureSite>,
 ) {
-    match pattern {
-        jet::AST::Pattern::Or(patterns, _) => {
-            for pattern in patterns {
-                collect_capture_pattern(pattern, aliases, local_functions, sites);
-            }
-        }
-        jet::AST::Pattern::Struct { fields, .. } => {
-            for field in fields {
-                if let jet::AST::StructPatField::Value { value, .. } = field {
-                    collect_capture_expr(value, aliases, local_functions, sites);
-                }
-            }
-        }
-        jet::AST::Pattern::Variant { .. }
-        | jet::AST::Pattern::Present { .. }
-        | jet::AST::Pattern::Absent(_)
-        | jet::AST::Pattern::Ok { .. }
-        | jet::AST::Pattern::Err { .. }
-        | jet::AST::Pattern::Range { .. }
-        | jet::AST::Pattern::StrMatch { .. }
-        | jet::AST::Pattern::BinMatch { .. } => {}
-    }
+    pattern.for_each_value_expr(&mut |expr| {
+        collect_capture_expr(expr, aliases, local_functions, sites);
+    });
 }
 
 fn capture_receiver_path(expr: &Expr) -> Option<String> {
@@ -3886,7 +3867,7 @@ pub(crate) fn proof_mir_identity_for_file(
     let checked = load_checked_proof_bundle(file, profile, setting_overrides)
         .ok_or_else(|| format!("could not check `{file}` for MIR artifact identity"))?;
     let source_digest = jet::SHA256::sha256_hex(member.bytes.as_slice());
-    let core_abi = proof_core_abi(Some(&checked.bundle), &source_digest);
+    let core_abi = proof_core_abi(Some(&checked.0), &source_digest);
     Ok(proof_mir_identity(
         Some(&checked),
         &source_digest,

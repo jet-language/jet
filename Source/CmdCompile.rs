@@ -2770,13 +2770,30 @@ fn finish_native_run(
         }
     }
 }
-/// Private child entry used by the REPL. The parent sends the exact session
-/// snapshot on stdin; this path never admits a source pathname.
-pub(crate) fn run_native_source_from_stdin() -> ! {
-    let mut source = String::new();
-    if let Err(error) = std::io::stdin().read_to_string(&mut source) {
-        crate::cli_error!("E2105", "couldn't read REPL source: {}", error);
-        exit(ExitCodes::USER_ERROR);
+/// Private child entry of the REPL/eval session executor (#4720, D-EXEC2).
+/// The parent sends a framed turn program on stdin; `rights` carries only
+/// invocation `--allow=`/`--deny=` rows, never a source pathname.
+pub(crate) fn run_native_source_from_stdin(rights: &[String]) -> ! {
+    let mut allow = Vec::new();
+    let mut deny = Vec::new();
+    for row in rights {
+        let (target, value) = if let Some(value) = row.strip_prefix("--allow=") {
+            (&mut allow, value)
+        } else if let Some(value) = row.strip_prefix("--deny=") {
+            (&mut deny, value)
+        } else {
+            crate::cli_error!("E2104", "unknown REPL child argument `{}`", row);
+            exit(ExitCodes::USAGE);
+        };
+        for right in value.split(',').map(str::trim).filter(|right| !right.is_empty()) {
+            match jet_foundation::Authority::parse_right(right) {
+                Some(canonical) => target.push(canonical),
+                None => {
+                    crate::cli_error!("E2104", "unknown authority right `{}`", right);
+                    exit(ExitCodes::USAGE);
+                }
+            }
+        }
     }
     // `<byte length>\n<source>`; the bytes after the source stay on stdin
     // for the program's own `input()` calls.
@@ -4108,7 +4125,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         .is_some_and(|checked| program_uses_game_runtime(&checked.bundle))
         || src.contains("core.game");
     if let Some(bundle) = checked_runtime.as_mut() {
-        tier.project(&mut bundle.bundle.build_facts, &profile);
+        bundle.bundle.build_facts.profile = profile.budget_name().to_string();
+        bundle.bundle.build_facts.target_dossier.tier_identity =
+            jet::TargetMachine::ExecutionTier::Aot.as_str().to_string();
     }
     inject_game_crash_reporter_bootstrap(&mut rust_code, game_runtime);
     progress.minor("generated Rust", &format!("{} bytes", rust_code.len()));
@@ -4414,7 +4433,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                         &src,
                         package_manifest.as_ref().map(|(root, _)| root.as_path()),
                     );
-                if let Some(inputs) = plain.then(|| receipt.sealed_inputs(bundle)).flatten() {
+                if let Some(inputs) = plain.then(|| receipt.sealed_inputs(&bundle.bundle)).flatten() {
                     let mut facts = BTreeMap::new();
                     facts.insert("native_key".to_string(), key.clone());
                     let rust = fs::read(generated_rust_path(&artifact_path, file)).unwrap_or_default();
