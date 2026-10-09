@@ -3,6 +3,49 @@ use crate::AST::{Expr, Func, Item, Pattern, Stmt};
 use std::collections::{HashMap, HashSet};
 
 #[test]
+fn comptime_nominal_fact_binding_uses_selected_target_and_lexical_shadowing() {
+    let source = "#Layout(c)\nstruct TargetPointer { pointer: *Int }\nenum Choice {\n One\n Two\n}\n";
+    let (tokens, diagnostics) = crate::Lexer::lex(source);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let (program, _) = crate::Parser::parse_for_check_with_source(&tokens, source).unwrap();
+    let mut cx = build_cx_items(
+        &program.items, source, "target-facts.jet", None, &std::sync::Arc::default(), "2026",
+    );
+    cx.local_type_identities.insert("pointer.TargetPointer".into(), "TargetPointer".into());
+    let requested = [
+        ("TargetPointer".into(), "$layout".into()),
+        ("pointer.TargetPointer".into(), "$layout".into()),
+        ("TargetPointer".into(), "$name".into()),
+        ("TargetPointer".into(), "$fields".into()),
+        ("Choice".into(), "$layout".into()),
+    ].into_iter().collect();
+    let target = jet_foundation::Layout::TargetLayout::from_triple("wasm32-unknown-unknown");
+    bind_fragment_type_facts(&mut cx, &program.items, &requested, &target);
+    let layout = &cx.comptime_type_facts["TargetPointer"]["$layout"];
+    let CtValue::Struct { fields, .. } = layout else { panic!("layout carrier") };
+    assert!(fields.iter().any(|(name, value)| {
+        name == "size" && matches!(value, CtValue::Present(inner) if **inner == CtValue::Int(4))
+    }), "{layout:?}");
+    assert!(fields.iter().any(|(name, value)| {
+        name == "target" && *value == CtValue::Str(target.triple.clone())
+    }), "{layout:?}");
+    assert_eq!(cx.comptime_type_facts["pointer.TargetPointer"]["$layout"], *layout);
+    assert!(cx.comptime_type_facts["Choice"].contains_key("$layout"));
+    assert_eq!(cx.comptime_type_facts["TargetPointer"]["$name"], CtValue::Str("TargetPointer".into()));
+    assert!(matches!(cx.comptime_type_facts["TargetPointer"]["$fields"], CtValue::List(_)));
+
+    let span = crate::Diagnostics::Span::new(0, 0);
+    let subject = Expr::Field(Box::new(Expr::Ident("TargetPointer".into(), span)), "$layout".into(), span);
+    let mut env = LowerEnv::new("helper".into());
+    let lowered = lower::lower_expr(&subject, &cx, &mut env);
+    assert!(matches!(lowered.kind, TExprKind::CtLit(_)));
+    env.bind("TargetPointer", TLocal::user("TargetPointer"), Some(Type::Named("TypeInfo".into())));
+    let shadowed = lower::lower_expr(&subject, &cx, &mut env);
+    assert!(matches!(shadowed.kind, TExprKind::Field { recv, .. }
+        if matches!(recv.kind, TExprKind::Local(_))));
+}
+
+#[test]
 fn fact_channel_prefers_exact_literal_bounds_over_carrier_range() {
     let expr = TExpr {
         ty: crate::AST::Type::InlineRange {

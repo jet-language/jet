@@ -2084,6 +2084,18 @@ fn core_fixed_sig_raw(
             ("value".into(), Box::new(Type::Int)), ("errno".into(), Box::new(Type::Int)),
         ])))),
         ("core.files", "__metadata_directory") => Some((vec![(read, Type::String)], Some(result_ty(Type::Bool, Type::String)))),
+        ("core.files", "__directory_fd") => Some((vec![(read, Type::Int)], Some(Type::Tuple(vec![
+            ("available".into(), Box::new(Type::Bool)), ("held".into(), Box::new(Type::Bool)),
+            ("fd".into(), Box::new(Type::Int)),
+        ])))),
+        ("core.process", "__with_directory_raw") => Some((vec![
+            (read, Type::Named("ProcessSpec".into())), (read, Type::Int),
+            (read, Type::Int), (read, Type::Bool),
+        ], Some(Type::Tuple(vec![
+            ("spec".into(), Box::new(Type::Named("ProcessSpec".into()))),
+            ("available".into(), Box::new(Type::Bool)),
+            ("assigned_fd".into(), Box::new(Type::Int)), ("errno".into(), Box::new(Type::Int)),
+        ])))),
         ("core.sys", "__current_dir") => Some((vec![], Some(result_ty(Type::String, Type::String)))),
         ("core.sys", "__set_current_dir") => Some((vec![(read, Type::String)], Some(result_ty(unit_ty(), Type::String)))),
         ("core.sys", "umask" | "exitcode") => Some((vec![(read, Type::Int)], Some(Type::Int))),
