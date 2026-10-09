@@ -313,10 +313,7 @@ pub(crate) fn restore_compiler_image(
         entry_function: raw_header.entry_function,
         identity,
     };
-    Ok(RestoredCompilerImage {
-        header,
-        program: compiler_image_signature_program(&program),
-    })
+    Ok(RestoredCompilerImage { header, program })
 }
 
 fn check_envelope(

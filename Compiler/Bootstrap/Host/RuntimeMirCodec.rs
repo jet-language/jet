@@ -2451,6 +2451,27 @@ fn parse_fields(input: &str) -> Result<Vec<Field>, String> {
     Ok(fields)
 }
 
+/// Jet struct fields: one per line, or comma-separated on one line, each
+/// `name: Type` after an optional `priv`. Marker lines carry no shape.
+fn parse_jet_fields(input: &str) -> Result<Vec<Field>, String> {
+    let mut fields = Vec::new();
+    for line in input.lines() {
+        for part in split_top_level(line, ',') {
+            let part = part.trim();
+            if part.is_empty() || part.starts_with('#') {
+                continue;
+            }
+            let part = part.strip_prefix("priv ").map_or(part, str::trim_start);
+            let index = top_level_colon(part).ok_or_else(|| format!("field `{part}` has no type"))?;
+            fields.push(Field {
+                name: part[..index].trim().to_string(),
+                ty: part[index + 1..].trim().to_string(),
+            });
+        }
+    }
+    Ok(fields)
+}
+
 /// A Jet field may declare its default as a typed literal after the type
 /// (`display_paths: [MIRNameDisplayPath]{[MIRNameDisplayPath]{}}`,
 /// `namespace: String?{None}`); the field's type is the text before it.
@@ -2671,7 +2692,7 @@ fn read_identifier(input: &str, cursor: &mut usize) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{host_shape_empty_field, parse_definitions, parse_type, Body, TypeExpr, SOURCE_MIR_SCHEMA};
+    use super::{host_shape_empty_field, parse_definitions, parse_type, Body, SchemaSyntax, TypeExpr, SOURCE_MIR_SCHEMA};
 
     #[test]
     fn source_schema_parser_retains_nested_typed_rows() {
@@ -2749,8 +2770,8 @@ mod tests {
     fn mir_bigint_key_schema_and_canonical_carrier_agree() {
         use jet_foundation::MIR::MirConstKey;
         use jet_foundation::Numeric::CtBigInt;
-        let source = parse_definitions(super::SOURCE_MIR_SCHEMA).expect("source schema");
-        let host = parse_definitions(super::HOST_MIR_SCHEMA).expect("host schema");
+        let source = parse_definitions(super::SOURCE_MIR_SCHEMA, SchemaSyntax::Jet).expect("source schema");
+        let host = parse_definitions(super::HOST_MIR_SCHEMA, SchemaSyntax::Rust).expect("host schema");
         let source = source.iter().find(|row| row.name == "MIRConstKey").expect("source key");
         let host = host.iter().find(|row| row.name == "MirConstKey").expect("host key");
         let (Body::Enum(source), Body::Enum(host)) = (&source.body, &host.body) else {
