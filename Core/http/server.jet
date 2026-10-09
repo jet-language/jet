@@ -61,7 +61,9 @@ fn __middleware_entry(mux: HTTPMux, middleware: ^fn(HTTPHandler) -> HTTPHandler)
 }
 
 fn response(status: Int, body: String) -> HTTPResponse Never! {
-    response_body(status, ^core.http.body_text(body), ^core.http.headers())
+    payload :: core.http.body_text(body)
+    fields :: core.http.headers()
+    response_body(status, ^payload, ^fields)
 }
 
 // Head policy stays in Jet. The resource transfer consumes the selected body
@@ -73,10 +75,17 @@ fn response_body(status: Int, body: ^Body, headers: ^Headers) -> HTTPResponse Ne
         selected = 500
         payload = core.http.body_text("500 Internal Server Error")
     }
+    version :: "HTTP/1.1"
+    trailers :: core.http.headers()
+    wire_version :: "HTTP/1.1"
+    wire_length :: ""
+    wire_transfer :: [String]{}
+    wire_chunks :: [I64]{}
+    wire_failure :: String?{None}
     #Unsafe("move the normalized response head and one-shot body into the transport carrier") {
         return core.http.server.__response_parts(
-            I64{selected}, ^"HTTP/1.1", ^headers, ^payload, ^core.http.headers(),
-            None, false, ^"HTTP/1.1", ^"", ^[String]{}, ^[I64]{}, false, ^None
+            I64{selected}, ^version, ^headers, ^payload, ^trailers,
+            None, false, ^wire_version, ^wire_length, ^wire_transfer, ^wire_chunks, false, ^wire_failure
         )
     }
 }
@@ -84,7 +93,8 @@ fn response_body(status: Int, body: ^Body, headers: ^Headers) -> HTTPResponse Ne
 fn json<T: Encode>(status: Int, body: T) -> HTTPResponse HTTPError! {
     text :: core.encoding.json.to_string(body.encode()) ?? return Err(HTTPError.InvalidFraming)
     fields :: core.http.headers_set(core.http.headers(), "content-type", "application/json; charset=utf-8")
-    response_body(status, ^core.http.body_text(text), ^fields)
+    payload :: core.http.body_text(text)
+    response_body(status, ^payload, ^fields)
 }
 
 fn static_file(path: String, content_type: String) -[Net]> HTTPResponse HTTPError! {
@@ -106,7 +116,8 @@ fn tls(cert: String, key: String) -> HTTPServerTLS Never! {
 fn sse(body: String) -> HTTPResponse Never! {
     fields :: core.http.headers_set(core.http.headers(), "content-type", "text/event-stream")
     headers :: core.http.headers_set(fields, "cache-control", "no-cache")
-    response_body(200, ^core.http.body_text("data: {body}\n\n"), ^headers)
+    payload :: core.http.body_text("data: {body}\n\n")
+    response_body(200, ^payload, ^headers)
 }
 
 fn cors_policy(origins: [String] | HTTPCorsOrigins, methods: [String]{[String]{}}, headers: [String]{[String]{}}, credentials: Bool{false}, max_age: Int{86400}) -> HTTPCorsPolicy HTTPError! {
@@ -215,9 +226,15 @@ fn cors_join(values: [String], fallback: ^String) -> String Never! {
 }
 
 #Test("response transport accepts every source body kind by move") {
-    assert(response_body(204, ^core.http.body_empty(), ^core.http.headers()).status == 204)
-    assert(response_body(200, ^core.http.body_text("text"), ^core.http.headers()).status == 200)
-    assert(response_body(201, ^core.http.body_bytes([U8]{0, 255}), ^core.http.headers()).status == 201)
+    empty :: core.http.body_empty()
+    empty_headers :: core.http.headers()
+    assert(response_body(204, ^empty, ^empty_headers).status == 204)
+    text :: core.http.body_text("text")
+    text_headers :: core.http.headers()
+    assert(response_body(200, ^text, ^text_headers).status == 200)
+    bytes :: core.http.body_bytes([U8]{0, 255})
+    bytes_headers :: core.http.headers()
+    assert(response_body(201, ^bytes, ^bytes_headers).status == 201)
 }
 
 #Test("JSON response encoding rejects non-finite numbers on the HTTP error rail") {
