@@ -134,6 +134,14 @@ impl LowerError {
             message: message.into(),
         }
     }
+
+    fn in_function(mut self, function: &TFunc) -> Self {
+        self.message = format!(
+            "{} (module {}), {}: {}",
+            function.source_file, function.module, function.name, self.message
+        );
+        self
+    }
 }
 
 impl fmt::Display for LowerError {
@@ -1230,9 +1238,7 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
                 None,
                 None,
             )
-            .map_err(|error| {
-                LowerError::new(error.span, format!("{}: {}", function.name, error.message))
-            })
+            .map_err(|error| error.in_function(function))
         };
         let result = if sweep {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(lower)).unwrap_or_else(
@@ -1242,10 +1248,10 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
                         .map(String::as_str)
                         .or_else(|| payload.downcast_ref::<&str>().copied())
                         .unwrap_or("non-string panic");
-                    Err(LowerError::new(
-                        function.source_span,
-                        format!("{}: panic: {message}", function.name),
-                    ))
+                    Err(
+                        LowerError::new(function.source_span, format!("panic: {message}"))
+                            .in_function(function),
+                    )
                 },
             )
         } else {
@@ -1358,14 +1364,12 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
             })
         } else {
             merge()
-        };
+        }
+        .map_err(|error| error.in_function(function));
         match merged {
             Ok(()) => {}
             Err(error) if sweep => {
-                let error = LowerError::new(
-                    error.span,
-                    format!("{}: merge: {}", function.name, error.message),
-                );
+                let error = LowerError::new(error.span, format!("merge: {}", error.message));
                 report_lower_sweep_failure(&indexed_sources, &function.source_file, &error);
                 sweep_failures.push(error);
             }

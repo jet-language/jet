@@ -5295,7 +5295,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
             jet_codegen_emit_value(&builder, program, expression.span, target, MIROperation.TraitBox{value: value_id, target: target_id})
         }
         .DistinctRaw(argument) -> {
-            if jet_codegen_unit_distinct_base(builder, program, argument.ty) == None -> panic("checked distinct raw extraction has no distinct source type")
+            if jet_codegen_unit_distinct_base(builder, program, argument.ty) == None -> panic(jet_codegen_lowering_error_message(builder.function, expression.span, "checked distinct raw extraction has no distinct source type"))
             value := jet_codegen_lower_expr(&builder, program, argument)
             target := jet_codegen_lower_type_for_function(expression.ty, builder, program)
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Convert{value: value, parameters: [MIRValueID]{}, target: target, conversion: MIRConversion.Transparent})
@@ -5585,7 +5585,8 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
         .ModuleCall(target, form, target_return, type_args, args) -> jet_codegen_lower_module_call(&builder, program, expression, target, form, target_return, type_args, args)
         .DefaultLit | .ListLit(_) | .ColumnarListLit(_, _) | .TupleLit(_, _) | .IndexRead(_, _, _, _, _) | .SliceOwned(_, _, _, _, _) | .MapLit(_) | .LayoutLit(_) -> jet_codegen_lower_collection_expression(&builder, program, expression)
         .SharedGuardValue(_, _) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .ConditionNotify(_, _) | .AllocNew(_, _) | .Print(_) -> jet_codegen_lower_guard_expression(&builder, program, expression)
-        else -> panic("checked TIR expression lies outside the current Jet codegen contract")
+        .InvariantViolation(construct, span) -> panic(jet_codegen_lowering_error_message(builder.function, span, construct))
+        else -> panic(jet_codegen_lowering_error_message(builder.function, expression.span, "checked TIR expression lies outside the current Jet codegen contract"))
     }
 }
 
