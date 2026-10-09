@@ -1312,6 +1312,11 @@ returns an `HTTPServer` handle whose `shutdown()` drains pending requests and
 returns an `HTTPShutdownReport`. It is distinct from the blocking
 `core.http.server.serve(addr, mux, ...)` operation.
 
+`core.http.serve(mux, deadline:)` is the loopback lifecycle entry point: it
+returns an `HTTPServer` handle whose `shutdown()` drains pending requests and
+returns an `HTTPShutdownReport`. It is distinct from the blocking
+`core.http.server.serve(addr, mux, ...)` operation.
+
 | API | Result | Description |
 | --- | --- | --- |
 | `mux()` | `HTTPMux` | Create a router carrier. |
