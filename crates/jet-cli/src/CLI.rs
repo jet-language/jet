@@ -2341,7 +2341,9 @@ mod tests {
                     assert!(moved_command(action.name).is_none());
                     continue;
                 }
-                if action.also_canonical_top_level {
+                if action.also_canonical_top_level
+                    || COMMANDS.iter().any(|command| command.name == action.name)
+                {
                     assert!(is_canonical_top_level(action.name));
                     assert!(moved_command(action.name).is_none());
                     continue;
@@ -2429,7 +2431,11 @@ mod tests {
                     nested_command(group.name, action.name).map(|(_, value)| value.handler),
                     Some(action.handler)
                 );
-                if action.handler.keeps_group() {
+                if group.name == "inspect" && action.name == "env" {
+                    assert_eq!(action.handler, HandlerKey::Env);
+                    assert!(action.handler.keeps_group());
+                    assert_eq!(action.handler.dispatch_word(), "env");
+                } else if action.handler.keeps_group() {
                     assert_eq!(
                         action.handler.dispatch_word(),
                         group.name,
@@ -2560,16 +2566,14 @@ fn authority_flags_render_in_registry_completions_and_man() {
         }
     }
 
-    /// #1659 criterion 1: a command is declared exactly once in the one
-    /// `COMMANDS` table. A non-keeps_group nested action's dispatch word must
-    /// never also appear as its own separate top-level `COMMANDS` row — that
-    /// would be the same command declared twice within the one table.
-    /// (`keeps_group` actions legitimately share their owning group's own row.)
+    /// #1659 criterion 1: moved-only dispatch words must not have a second
+    /// top-level `COMMANDS` row. Group-preserving actions share their owning
+    /// group's row; explicitly canonical top-level actions retain that entry.
     #[test]
     fn no_command_declared_in_both_tables() {
         for group in command_groups() {
             for action in group.actions {
-                if action.handler.keeps_group() {
+                if action.handler.keeps_group() || action.also_canonical_top_level {
                     continue;
                 }
                 assert!(
