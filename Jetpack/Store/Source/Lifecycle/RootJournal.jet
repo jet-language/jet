@@ -82,7 +82,7 @@ struct LifecycleJournalScan {
 
 // Take the Hangar lock, recover abandoned partials and read the closure
 // inputs.
-fn store_lifecycle_session(verification: &StoreVerification, roots: HangarRoots) -[FS, Env]> LifecycleSession StoreError! {
+fn store_lifecycle_session(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> LifecycleSession StoreError! {
     lock :: env_runtime_lock(roots.root, "hangar")
     store_lifecycle_recover_unlocked(roots)
     inputs :: store_lifecycle_inputs_unlocked(&verification, roots)
@@ -290,7 +290,7 @@ pub fn store_lifecycle_snapshot_with_legacy(verification: &StoreVerification, ro
 }
 
 // Rust `recover`: the number of abandoned partial members removed.
-pub fn store_lifecycle_recover(verification: &StoreVerification, roots: HangarRoots) -[FS, Env]> Int StoreError! {
+pub fn store_lifecycle_recover(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> Int StoreError! {
     lock :: env_runtime_lock(roots.root, "hangar")
     recovered :: store_lifecycle_recover_unlocked(roots)
     inputs :: store_lifecycle_inputs_unlocked(&verification, roots)

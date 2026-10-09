@@ -73,7 +73,14 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
     watch :: time.start()
     if env_acquire_lock_waiting(root, "hangar", time.duration_ms(80)) == {
         .Ok(_) -> panic("contended advisory lock must time out")
-        .Err(error) -> assert(env_rt_test_is_timeout(error))
+        .Err(error) -> {
+            assert(env_rt_test_is_timeout(error))
+            if error == .TimedOut(context) {
+                path :: env_lock_path_for_scope(root, "hangar")
+                assert_eq(context.resource, Val(path))
+                assert_eq(context.cause, Val("timed out waiting for jetpack lock `{path}`"))
+            }
+        }
     }
     elapsed :: time.duration_as_ms(time.elapsed(watch))
     assert(elapsed >= 60)
@@ -129,6 +136,33 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
     close(^first)
     replacement :: env_acquire_lock(root, "hangar") ?? panic("the replaced marker is usable once the root is free")
     close(^replacement)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("all scopes probe the SAME managed-root advisory domain") {
+    root :: env_rt_test_scratch("same-root-domain")
+    first :: env_acquire_lock(root, "first") ?? panic("first root claim")
+    second :: env_try_acquire_lock(root, "second") ?? panic("nonblocking second scope")
+    assert(second == None)
+    second_path :: env_lock_path_for_scope(root, "second")
+    assert_eq(env_lock_state(second_path) ?? panic("held second marker"), RuntimeLockState.Held)
+    close(^first)
+    assert_eq(env_lock_state(second_path) ?? panic("idle second marker"), RuntimeLockState.Idle)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("nested identity is FileID, not the root's current pathname") {
+    root :: env_rt_test_scratch("nested-renamed-root")
+    managed :: files.join(root, SOURCE_ROOT_DIR)
+    renamed :: files.join(root, "renamed-root")
+    files.create_dir_all(managed) ?? panic("managed root")
+    session := RuntimeLockSession.new()
+    outer :: session.enter(managed, "outer") ?? panic("outer root claim")
+    files.rename(managed, renamed) ?? panic("rename retained root")
+    inner :: session.enter(renamed, "inner") ?? panic("same inode must reuse the held claim")
+    assert(inner.lock == None)
+    session.leave(^inner)
+    session.leave(^outer)
     files.remove_all(root).drop("test cleanup")
 }
 
