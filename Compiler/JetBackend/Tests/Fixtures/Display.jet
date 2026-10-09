@@ -8,6 +8,8 @@ use jet_foundation.[
     MIRVariantPayload, mir_field_id, mir_function_id, mir_trait_id,
     mir_type_from_kind, mir_type_id,
 ]
+use jet_foundation.[MIRArtifactID, MIRArtifactKind, MIRArtifactTarget, MIRArtifactBuildMode, MIRExport, MIRForeignABI, MIRJobID, MIRLinkUnitID]
+use jet_backend.x64_runtime_library
 
 fn fx_display_type(name: String, kind: MIRTypeDefKind) -> MIRTypeDef Never! {
     definition := fx_type_def(name, kind)
@@ -282,4 +284,55 @@ fn fx_runtime_bitcast_refusals() -> Bool Never! {
         return true
     }
     false
+}
+
+// Exercise the real library recognizer, not a guessed callback address.
+fn fx_journey_address_program(arity: Int, include_target: Bool) -> MIRProgram Never! {
+    word :: mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64})
+    reference := fx_builder()
+    zero :: fx_copy(&reference, word, MIROperation.Constant{value: MIRConstant.Int{value: 0, width: None, spelling: None}})
+    fx_block(&reference, 0, MIRTerminator.Return{value: Val(zero)})
+    helper :: fx_function("rt_journey_destructor_address", reference, word)
+    target_body := fx_builder()
+    loop index in 0..<arity -> fx_param(&target_body, "arg{index}", word, mir_copy_ownership()).drop("reference callback parameter")
+    result :: fx_copy(&target_body, word, MIROperation.Constant{value: MIRConstant.Int{value: 0, width: None, spelling: None}})
+    fx_block(&target_body, 0, MIRTerminator.Return{value: Val(result)})
+    target := fx_function("jet_rt_journey_destructor", target_body, word)
+    source :: "#Export(c) fn jet_rt_journey_destructor("
+    target.span = Span{start: 0, end: source.bytes().len()}
+    functions := [MIRFunction]{helper}
+    exports := [MIRExport]{}
+    if include_target {
+        &functions.push(target)
+        &exports.push(MIRExport{symbol: "jet_rt_journey_destructor", function: target.id, abi: .C})
+    } else {
+        // A valid unrelated export gets past library validation before the
+        // Journey intrinsic's required target lookup refuses the program.
+        other := ~target
+        other.id = mir_function_id("unrelated")
+        other.name = "unrelated"
+        other.key = "unrelated"
+        other.span = Span{start: 0, end: "#Export(c) fn unrelated(".bytes().len()}
+        &functions.push(other)
+        &exports.push(MIRExport{symbol: "unrelated", function: other.id, abi: .C})
+    }
+    program := fx_program(functions, [MIRTypeDef]{})
+    program.source_files[0].source = if include_target -> source else -> "#Export(c) fn unrelated("
+    program.artifacts = [MIRArtifactPlan]{MIRArtifactPlan{
+        id: MIRArtifactID{value: 1}, kind: .NativeLibrary, name: "journey-test",
+        target: MIRArtifactTarget.RustAOT, mode: MIRArtifactBuildMode.Dev,
+        modules: [MIRModuleID]{}, links: [MIRLinkUnitID]{}, jobs: [MIRJobID]{},
+        runtime_parts: [MIRRuntimePartID]{}, exports: exports,
+        provider_identity: "", closure_identity: "", artifact_identity: "",
+        entry: None, harness: None,
+    }}
+    program
+}
+fn fx_journey_address_checks() -> Bool Never! {
+    missing :: x64_runtime_library(fx_journey_address_program(2, false), [String]{"unrelated"})
+    if missing.object.errors.len() != 1 || !missing.object.errors[0].contains("requires #Export(c) jet_rt_journey_destructor") -> return false
+    wrong :: x64_runtime_library(fx_journey_address_program(1, true), [String]{"jet_rt_journey_destructor"})
+    if wrong.object.errors.len() != 1 || !wrong.object.errors[0].contains("2 I64 parameters") -> return false
+    valid :: x64_runtime_library(fx_journey_address_program(2, true), [String]{"jet_rt_journey_destructor"})
+    valid.object.errors.len() == 0 && valid.object.bytes.len() != 0
 }
