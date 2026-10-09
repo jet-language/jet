@@ -64,6 +64,28 @@ pub use mir::{
 use tir_to_mir_types::{
     TirDeclarations, lower_declarations_from_items_with_boxed_edges, lower_tir_declarations,
 };
+pub(super) fn source_constant_value(
+    definition: &crate::AST::ConstDef,
+) -> Option<crate::AST::CtValue> {
+    definition.ct.clone().or_else(|| match &definition.value {
+        crate::AST::Expr::Int(value, ..) => Some(crate::AST::CtValue::Int(*value)),
+        crate::AST::Expr::Float(value, _, is_f32, _) => Some(crate::AST::CtValue::Float(
+            crate::AST::CtFloat::literal(*value, *is_f32),
+        )),
+        crate::AST::Expr::Bool(value, _) => Some(crate::AST::CtValue::Bool(*value)),
+        crate::AST::Expr::Char(value, _) => Some(crate::AST::CtValue::Char(*value)),
+        crate::AST::Expr::Str(parts, _)
+            if matches!(parts.as_slice(), [crate::AST::StrPart::Lit(_)]) =>
+        {
+            let [crate::AST::StrPart::Lit(value)] = parts.as_slice() else {
+                unreachable!("string literal guard must match one literal part");
+            };
+            Some(crate::AST::CtValue::Str(value.clone()))
+        }
+        _ => None,
+    })
+}
+
 
 fn source_array_literal(
     definition: &crate::AST::ConstDef,
