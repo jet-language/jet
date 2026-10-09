@@ -1334,49 +1334,9 @@ impl CoreCallRecord {
         self.module == module && target == member
     }
 
-    pub const fn with_source_target(mut self, target: &'static str) -> Self {
-        self.source_target = Some(target);
-        self
-    }
-
-    pub const fn source_member(self) -> Option<&'static str> {
-        if !matches!(self.symbol, CoreCallSymbol::SourceOwned) {
-            return None;
-        }
-        match self.source_target {
-            Some(target) => Some(target),
-            None => Some(self.member),
-        }
-    }
-
     /// The existing checked plugin Authority-to-wire boundary, before forwarding.
     pub const fn authority_boundary_at(self, index: usize) -> bool {
         same_text(self.module, "core.plugin") && same_text(self.member, "load") && index == 1
-    }
-
-    /// Admit an implementation's checked signature without publishing another
-    /// public Core member or changing ordinary import visibility.
-    pub fn targets_source_function(self, module: &str, member: &str) -> bool {
-        let Some(target) = self.source_member() else { return false };
-        if target.starts_with("core.") {
-            return target.rsplit_once('.').is_some_and(|(owner, name)| owner == module && name == member);
-        }
-        self.module == module && target == member
-    }
-
-    pub const fn with_source_target(mut self, target: &'static str) -> Self {
-        self.source_target = Some(target);
-        self
-    }
-
-    pub const fn source_member(self) -> Option<&'static str> {
-        if !matches!(self.symbol, CoreCallSymbol::SourceOwned) {
-            return None;
-        }
-        match self.source_target {
-            Some(target) => Some(target),
-            None => Some(self.member),
-        }
     }
 
     /// Construct a row with an explicit consumer projection set. Use this for
@@ -1656,7 +1616,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: d74dd562e31788c2c527b9841e6b9a95a173f8a81eaa178ed10f97ac85bf70b0
+// Source SHA-256: 0b82dcce856c9f2dc890e7e24158f17fa208093abf19fb40be06c4117eb69e49
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.crypto", "__jetc_open_directory"),
@@ -2269,6 +2229,7 @@ pub static CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.term", "__stdin_line", "jet_stdin_line_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.term", "terminal_width", &[]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.term", "terminal_height", &[]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.term", "jet_term_is_terminal_raw", "jet_term_is_terminal_raw", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.term", "style", &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.term", "style_force", "jet_std_io_style_force", true, &[true, true], ) .with_pure_route(CoreCallPureRoute::Io),
     CoreCallRecord::source_owned("core.term", "progress", &[true]).with_max_arity(3).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2600,17 +2561,18 @@ pub static CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.encoding.json", "loads", "jet_std_json_parse", true, &[true], ),
     CoreCallRecord::source_owned("core.encoding.json", "decode", &[true]),
     CoreCallRecord::source_owned("core.encoding.json", "to_string", &[true]),
-    CoreCallRecord::new( "core.encoding.json", "dumps", "jet_std_json_render", true, &[true], ),
+    CoreCallRecord::source_owned("core.encoding.json", "dumps", &[true]),
+    CoreCallRecord::source_owned("core.encoding.json", "dump", &[true]),
     CoreCallRecord::source_owned("core.encoding.json", "to_string_pretty", &[true]),
     CoreCallRecord::new( "core.encoding.csv", "decode", "jet_enc_csv_decode", true, &[true], ),
     CoreCallRecord::new( "core.game", "run", "jet_game_run", true, &[true, true, true, true], ) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.encoding.json", "events", "jet_std_json_events", true, &[true], ),
     CoreCallRecord::new( "core.encoding.jsonl", "parse", "jet_std_jsonl_parse", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.jsonl", "to_string", "jet_std_jsonl_render", true, &[true], ),
+    CoreCallRecord::source_owned("core.encoding.jsonl", "to_string", &[true]),
     CoreCallRecord::new( "core.encoding.jsonl", "loads", "jet_std_jsonl_parse", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.jsonl", "dumps", "jet_std_jsonl_render", true, &[true], ),
+    CoreCallRecord::source_owned("core.encoding.jsonl", "dumps", &[true]),
     CoreCallRecord::new( "core.encoding.jsonl", "count_rows", "jet_std_jsonl_count_rows", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.jsonl", "append_line", "jet_std_jsonl_append_line", true, &[true, true], ),
+    CoreCallRecord::source_owned("core.encoding.jsonl", "append_line", &[true, true]),
     CoreCallRecord::new( "core.encoding.jsonl", "first", "jet_std_jsonl_first", true, &[true], ),
     CoreCallRecord::new( "core.encoding.csv", "parse", "jet_ring_csv_parse", true, &[true, true, false, false], ),
     CoreCallRecord::new( "core.encoding.csv", "rows", "jet_ring_csv_rows", true, &[true, true, false, false], ) .without_direct_aot(),

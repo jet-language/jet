@@ -2096,7 +2096,8 @@ function parseCoreSource(source, root = ROOT) {
         const descriptor = parts[1] || "plain";
         const genericMatch = descriptor.match(/^generic\(([1-9][0-9]*)\)$/);
         const enumMatch = descriptor.match(/^plain\(([^()]*)\)$/);
-        const kind = genericMatch || enumMatch ? "plain" : descriptor;
+        const fromMatch = descriptor.match(/^from\((core\.[A-Za-z_][A-Za-z0-9_.]*)\)$/);
+        const kind = genericMatch || enumMatch || fromMatch ? "plain" : descriptor;
         if (!["plain", "crypto_nominal"].includes(kind)) {
           throw new Error("invalid Core type kind `" + kind + "` in Core.jet line " + sourceLine);
         }
@@ -2119,6 +2120,7 @@ function parseCoreSource(source, root = ROOT) {
           kind: kind,
           variants: variants,
           genericArity: genericMatch ? Number(genericMatch[1]) : null,
+          ...(fromMatch ? {fromModule: fromMatch[1]} : {}),
         });
       }
       const memberSet = new Set();
@@ -2147,6 +2149,29 @@ function parseCoreSource(source, root = ROOT) {
     }
     throw new Error("unrecognized Core declaration at line " + sourceLine + ": " + line);
   }
+  // Reexports share one catalog definition instead of copying variant ordinals.
+  // DataPlot's canonical definition moves to Jet when Rust DataPlot.rs is ported.
+  const typeModules = new Map(modules.map((module) => [module.module, module]));
+  const resolving = new Set();
+  function resolveType(module, type) {
+    if (!type.fromModule) return type;
+    const key = module.module + "." + type.name;
+    if (resolving.has(key)) throw new Error("cyclic Core type reference `" + key + "`");
+    const owner = typeModules.get(type.fromModule);
+    const target = owner?.types.find((row) => row.name === type.name);
+    if (!target || !owner.members.includes(type.name)) {
+      throw new Error("unknown Core type reference `" + type.fromModule + "." + type.name + "`");
+    }
+    resolving.add(key);
+    const canonical = resolveType(owner, target);
+    type.kind = canonical.kind;
+    type.variants = canonical.variants;
+    type.genericArity = canonical.genericArity;
+    delete type.fromModule;
+    resolving.delete(key);
+    return type;
+  }
+  for (const module of modules) for (const type of module.types) resolveType(module, type);
 
   if (!bootstraps.length) throw new Error("Core.jet has no bootstrap declarations");
   const bootstrapNames = new Set(bootstraps.map(function (step) { return step.name; }));
@@ -3135,16 +3160,38 @@ function rustTaskFailureVariantFamily(source, constants) {
 
 function rustDataEventVariantFamily(source, constants) {
   const body = rustFunctionBody(source, "core_encoding_variants", CORE_TYPES_RS_PATH);
-  const units = /"DataEvent" => &\[([^\]]*)\]/.exec(body);
-  const payloads = /if enum_name == "DataEvent" \{\s*for \(name, ty\) in \[([\s\S]*?)\]\s*\{/.exec(body);
-  if (!units || !payloads) throw new Error(CORE_TYPES_RS_PATH + ": DataEvent variant table changed shape");
-  const rows = Array.from(units[1].matchAll(/"([^"]*)"/g), (match) => ({ variant: match[1], payload: [] }));
-  for (const match of payloads[1].matchAll(/\(\s*("[^"]+"|Syntax::\w+),\s*([\s\S]*?)\),\s*(?=\(|$)/g)) {
-    rows.push({ variant: rustSyntaxString(match[1], constants, CORE_TYPES_RS_PATH),
-      payload: [rustPayloadType(match[2], constants, CORE_TYPES_RS_PATH)] });
+  const table = /pub const DATA_EVENT_VARIANTS: \[&str;\s*(\d+)\]\s*=\s*\[([^\]]*)\];/.exec(source);
+  if (!table || !/for name in DATA_EVENT_VARIANTS\s*\{/.test(body) ||
+      !/match data_event_payload\(name\)/.test(body)) {
+    throw new Error(CORE_TYPES_RS_PATH + ": DataEvent variant table changed shape");
   }
-  if (rows.length !== 12) throw new Error(CORE_TYPES_RS_PATH + ": DataEvent payload projection is incomplete");
-  return { name: "DataEvent", rows };
+  const variants = table[2].split(",").map((value) => value.trim()).filter(Boolean)
+    .map((value) => rustSyntaxString(value, constants, CORE_TYPES_RS_PATH));
+  if (variants.length !== Number(table[1]) || new Set(variants).size !== variants.length) {
+    throw new Error(CORE_TYPES_RS_PATH + ": DataEvent variant table is incomplete or duplicated");
+  }
+  const payloadBody = rustFunctionBody(source, "data_event_payload", CORE_TYPES_RS_PATH);
+  const arms = /^\s*match variant\s*\{([\s\S]*)\}\s*$/.exec(payloadBody);
+  if (!arms) throw new Error(CORE_TYPES_RS_PATH + ": DataEvent payload table changed shape");
+  const payloads = new Map();
+  const lines = arms[1].split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.pop() !== "_ => None,") {
+    throw new Error(CORE_TYPES_RS_PATH + ": DataEvent payload table has no closed default");
+  }
+  for (const line of lines) {
+    const arm = /^(.+?)\s*=>\s*Some\((None|Some\((.+)\))\),$/.exec(line);
+    if (!arm) throw new Error(CORE_TYPES_RS_PATH + ": unrecognized DataEvent payload arm `" + line + "`");
+    const payload = arm[2] === "None" ? [] : [rustPayloadType(arm[3], constants, CORE_TYPES_RS_PATH)];
+    for (const name of arm[1].split("|")) {
+      const variant = rustSyntaxString(name, constants, CORE_TYPES_RS_PATH);
+      if (payloads.has(variant)) throw new Error(CORE_TYPES_RS_PATH + ": duplicate DataEvent payload `" + variant + "`");
+      payloads.set(variant, payload);
+    }
+  }
+  if (payloads.size !== variants.length || variants.some((variant) => !payloads.has(variant))) {
+    throw new Error(CORE_TYPES_RS_PATH + ": DataEvent payload projection is incomplete");
+  }
+  return {name: "DataEvent", rows: variants.map((variant) => ({variant, payload: payloads.get(variant)}))};
 }
 
 function coreEnumPayloadFamilies(declarations) {
@@ -6529,6 +6576,7 @@ export {
   buildLedger,
   parseCoreSource,
   coreSourceFacts,
+  rustDataEventVariantFamily,
   ownedWrapperRuntimeUnit,
   publicDispatcherRows,
   validatePublicDispatcher,

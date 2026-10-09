@@ -565,7 +565,6 @@ runs each of these cases.
 | `Set<T>` | `min()` | borrows | Lookup | None | current |
 | `Set<T>` | `max()` | borrows | Lookup | None | current |
 | `Set<T>` | `clear()` | exclusive, in place | Mutate | Unit | current |
-| `Set<T>` | `copy()` | borrows | Copy | empty Set | current |
 | `Set<T>` | `to_set()` | borrows | Copy | empty Set | current |
 | `Set<T>` | `add(item)` | exclusive, in place | Mutate | true | current |
 | `Set<T>` | `remove(item)` | exclusive, in place | Mutate | Unit | current |
@@ -617,7 +616,6 @@ runs each of these cases.
 | `Bits` | `remove(Int)` | exclusive, in place | Mutate | Unit | current |
 | `Bits` | `has(Int)` | borrows | Measure | false | current |
 | `Bits` | `clear()` | exclusive, in place | Mutate | Unit | current |
-| `Bits` | `copy()` | borrows | Copy | empty Bits | current |
 | `Tally<T>` | `add(item)` | exclusive, in place | Mutate | true | current |
 | `Tally<T>` | `remove(item)` | exclusive, in place | Mutate | Unit | current |
 | `Tally<T>` | `has(item)` | borrows | Measure | false | current |
@@ -684,7 +682,6 @@ runs each of these cases.
 | `[K:V]` | `any((key, value) -> Bool)` | borrows | Decide | false | current |
 | `[K:V]` | `all((key, value) -> Bool)` | borrows | Decide | true | current |
 | `[K:V]` | `fold(seed, (acc, key, value) -> acc)` | borrows | Fold | the seed | current |
-| `[K:V]` | `copy()` | borrows | Copy | empty map | current |
 | `[K:V]` | `clear()` | exclusive, in place | Mutate | Unit | current |
 | `View<T>` | `map((item) -> T)` | borrows | Visit | empty list | current |
 | `View<T>` | `fold(seed, (acc, item) -> acc)` | borrows | Fold | the seed | current |
@@ -702,7 +699,6 @@ runs each of these cases.
 | `[T]` | `index(item)` | borrows | Lookup | None | current |
 | `[T]` | `contains(item)` | borrows | Measure | false | current |
 | `[T]` | `count(item)` | borrows | Measure | 0 | current |
-| `[T]` | `copy()` | borrows | Copy | empty list | current |
 | `[T]` | `update_first((item) -> Bool, item)` | exclusive, in place | Decide | false | current |
 | `[T]` | `replace(Int, item)` | borrows | Build | empty list | current |
 | `[T]` | `binary_search(item)` | borrows | Lookup | None | current |

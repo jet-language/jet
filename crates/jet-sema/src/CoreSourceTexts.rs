@@ -76,6 +76,7 @@ const CORE_SOURCE_TEXTS: &[(&str, &str)] = &[
     ("core.reactive", include_str!("../../../Core/reactive/reactive.jet")),
     ("core.reactive.loadable", include_str!("../../../Core/reactive/loadable.jet")),
     ("core.reflect", include_str!("../../../Core/reflect/reflect.jet")),
+    ("core.regex", include_str!("../../../Core/regex/regex.jet")),
     ("core.rt", include_str!("../../../Core/rt/rt.jet")),
     ("core.service", include_str!("../../../Core/service/service.jet")),
     ("core.sync", include_str!("../../../Core/sync/sync.jet")),
@@ -118,6 +119,9 @@ const CORE_SOURCE_TEXTS: &[(&str, &str)] = &[
 // Body text of every runtime unit in
 // `jet_foundation::CoreSourceParts::CORE_RUNTIME_PARTS`, keyed by its module.
 const CORE_RUNTIME_SOURCE_TEXTS: &[(&str, &str)] = &[
+    ("core.db.runtime.kernel_sql_query", include_str!("../../../Core/db/runtime/kernel_sql_query.jet")),
+    ("core.files.runtime.kernel_path_components", include_str!("../../../Core/files/runtime/kernel_path_components.jet")),
+    ("core.prelude.runtime.kernel_fixed_arithmetic", include_str!("../../../Core/prelude/runtime/kernel_fixed_arithmetic.jet")),
     ("core.text.runtime.assets.assets", include_str!("../../../Core/text/runtime/assets/assets.jet")),
     ("core.text.runtime.assets.unicode_alphabetic", include_str!("../../../Core/text/runtime/assets/unicode_alphabetic.jet")),
     ("core.text.runtime.assets.unicode_case_ignorable", include_str!("../../../Core/text/runtime/assets/unicode_case_ignorable.jet")),
