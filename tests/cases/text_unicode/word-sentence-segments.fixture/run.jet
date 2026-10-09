@@ -67,7 +67,7 @@ fn s3_unicode_break(line: String) -> S3UnicodeBreak? Never! {
     loop token in s3_unicode_split_ws(line) {
         if token == "÷" {
             if current != "" {
-                &segments.push(~current)
+                &segments.push(current.copy())
                 current = ""
             }
         } else if token != "×" {
@@ -87,7 +87,7 @@ fn s3_unicode_break(line: String) -> S3UnicodeBreak? Never! {
 fn s3_unicode_clean(raw: String) -> String Never! {
     // Rust raw.split('#').next().unwrap_or("").trim().
     head :: s3_unicode_parse.split(raw, "#")[0]
-    ~head.trim()
+    head.trim().copy()
 }
 
 // Port of tests/text_unicode.rs:281-295: break-preserving word/sentence APIs,

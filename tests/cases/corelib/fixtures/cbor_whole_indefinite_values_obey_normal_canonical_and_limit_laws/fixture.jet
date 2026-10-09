@@ -17,11 +17,11 @@ fn run() {
     print(packet.data)
 
     strict := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }
-    if cbor.parse([159, 1, 255], ~strict) == {
+    if cbor.parse([159, 1, 255], strict.copy()) == {
         .Ok(_) -> print(false)
         .Err(e) -> print(e.byte_offset == 0 && e.path == "$" && e.reason == "indefinite-length CBOR is not Core deterministic")
     }
-    if cbor.parse([129, 127, 97, 120, 255], ~strict) == {
+    if cbor.parse([129, 127, 97, 120, 255], strict.copy()) == {
         .Ok(_) -> print(false)
         .Err(e) -> print(e.byte_offset == 1 && e.path == "$[0]")
     }

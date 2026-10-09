@@ -27,7 +27,7 @@ fn multipart_test() {
             shown :: String.from_bytes(request) ?? panic("request UTF-8")
             header_end :: txt.find(shown, multipart_crlf() + multipart_crlf())
             if header_end < 0 -> next
-            headers :: ~shown.slice(0, header_end)
+            headers :: shown.slice(0, header_end).copy()
             content_length :: multipart_length(headers)
             if request.len() >= header_end + 4 + content_length -> break
         }
@@ -53,7 +53,7 @@ fn multipart_test() {
     prefix :: "content-type: multipart/form-data; boundary="
     loop line in headers.lines() {
         if line.starts_with(prefix) {
-            boundary = ~line.slice(prefix.bytes().len(), line.bytes().len())
+            boundary = line.slice(prefix.bytes().len(), line.bytes().len()).copy()
             break
         }
     }
@@ -68,7 +68,7 @@ fn multipart_test() {
     assert(!field_value.contains(boundary), "multipart value collision")
     marker :: "--{boundary}{crlf}"
     assert(body.starts_with(marker), "original body prefix")
-    stripped :: ~body.slice(marker.bytes().len(), body.bytes().len())
+    stripped :: body.slice(marker.bytes().len(), body.bytes().len()).copy()
     part :: txt.split_once(stripped, crlf + crlf)
     assert(part.found, "original part separator")
     field_name :: "safe%22%0D%0AX-Extra: yes%0D%0A{long_candidate}{candidates}"

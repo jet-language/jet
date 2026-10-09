@@ -117,7 +117,7 @@ fn s5_web_response(raw: [U8]) -> S5HTTPResponse? {
         if s5_web_find(bytes, [U8]{58}) == .Val(colon) {
             name :: String.from_bytes_lossy(s5_web_bytes(bytes, 0, colon))
             if !seen && s5_web_ascii_equal(name, "content-type") {
-                content_type = ~String.from_bytes_lossy(s5_web_bytes(bytes, colon + 1, bytes.len())).trim()
+                content_type = String.from_bytes_lossy(s5_web_bytes(bytes, colon + 1, bytes.len())).trim().copy()
                 seen = true
             }
         }

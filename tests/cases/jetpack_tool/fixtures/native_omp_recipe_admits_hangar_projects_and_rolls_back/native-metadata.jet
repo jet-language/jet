@@ -8,7 +8,7 @@ fn native_metadata_check() {
     matched := false
     loop entry in entries {
         path :: entry.path + "/meta.json"
-        if files.is_file(~path) {
+        if files.is_file(path.copy()) {
             found_any = true
             metadata :: files.read(path)
             if metadata.contains("omp@releases") && !metadata.contains("/nix/store/") -> matched = true

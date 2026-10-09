@@ -40,18 +40,18 @@ fn s6_required_u64(text: String, key: String) -> String {
 
 fn s6_tail(text: String, marker: String) -> String {
     framed :: text.split_once(marker) ?? panic("missing {marker}: {text}")
-    ~framed.after
+    framed.after.copy()
 }
 
 fn s6_array(text: String, marker: String, end: String) -> String {
     tail :: s6_tail(text, marker)
     framed :: tail.split_once(end) ?? panic("missing array end {end}: {text}")
-    ~framed.before
+    framed.before.copy()
 }
 
 fn s6_find_task(tasks: [String], id: String) -> String {
     loop row in tasks {
-        if s6_json_u64_after(row, "id") == Val(id) -> return ~row
+        if s6_json_u64_after(row, "id") == Val(id) -> return row.copy()
     }
     panic("span task {id} missing: {tasks}")
 }
@@ -102,7 +102,7 @@ fn s6_honest_capture() {
     }
     target_tail :: s6_tail(native, "\"target\":\"")
     target_frame :: target_tail.split_once("\"") ?? panic("missing native target")
-    target :: ~target_frame.before
+    target :: target_frame.before.copy()
     if sys.is_linux() || sys.name() == "android" {
         assert(native.contains("\"status\":\"captured\""))
         duration :: s6_required_u64(native, "duration_ns")

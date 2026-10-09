@@ -5,7 +5,7 @@ use core.data.sketch.reservoir as reservoir
 fn run() {
     original := reservoir.new(3)
     loop i in 0..<3 -> &original.add("{i}")
-    clone := ~original
+    clone := original.copy()
     loop i in 3..<20 -> &clone.add("{i}")
     assert_eq(original.sample(), [String]{"0", "1", "2"})
     // Observed from the retired shipped seed at 4e77834f3.

@@ -40,7 +40,7 @@ fn run() {
         print("restarted:{tree.restarts(endpoint) ?? panic("restarts")}")
         receipt :: runtime.send(endpoint, "order", key: "order-restart") ?? panic("recover")
         retry :: runtime.retry(receipt) ?? panic("retry")
-        retry_copy :: ~retry
+        retry_copy :: retry.copy()
         print(receipt_kind(^retry_copy))
         message :: tree.receive(endpoint) ?? panic("receive")
         print(message)

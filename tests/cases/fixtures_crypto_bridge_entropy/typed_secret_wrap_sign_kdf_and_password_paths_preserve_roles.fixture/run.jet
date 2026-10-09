@@ -38,7 +38,7 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
     secret :: crypto.Secret.from_text("do not print")
     wrapped :: crypto.wrap(secret, recipient.public_key()) ?? panic("wrap")
     assert_eq(cut(wrapped.bytes, 0, 4), "JETW".bytes())
-    unwrapped :: crypto.unwrap(recipient, crypto.WrappedKey{bytes: ~wrapped.bytes}) ?? panic("unwrap")
+    unwrapped :: crypto.unwrap(recipient, crypto.WrappedKey{bytes: wrapped.bytes.copy()}) ?? panic("unwrap")
     assert(crypto.constant_time_equal(secret, unwrapped))
     derived :: crypto.hkdf_sha256(secret.bytes, [U8]{}, "domain".bytes(), 32) ?? panic("derive")
     assert(!crypto.constant_time_equal(secret, derived))

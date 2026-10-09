@@ -18,7 +18,7 @@ fn run() {
     (newest_started_tx, newest_started_rx) :: channel<Int>()
     (newest_release_tx, newest_release_rx) :: channel<Int>()
     newest.on(newest_scope, (n: Int) -> {
-        newest_started_tx.send(~n)
+        newest_started_tx.send(n.copy())
         released_newest :: newest_release_rx.receive() ?? panic("release")
     })
     newest_first :: newest.emit_async(1)
@@ -38,7 +38,7 @@ fn run() {
     (oldest_started_tx, oldest_started_rx) :: channel<Int>()
     (oldest_release_tx, oldest_release_rx) :: channel<Int>()
     oldest.on(oldest_scope, (n: Int) -> {
-        oldest_started_tx.send(~n)
+        oldest_started_tx.send(n.copy())
         released_oldest :: oldest_release_rx.receive() ?? panic("release")
     })
     oldest_first :: oldest.emit_async(1)
@@ -59,7 +59,7 @@ fn run() {
     (once_release_tx, once_release_rx) :: channel<Int>()
     once_event.on_priority(once_scope, 10, (n: Int) -> {
         if n == 1 {
-            once_started_tx.send(~n)
+            once_started_tx.send(n.copy())
             released_once :: once_release_rx.receive() ?? panic("release")
         }
     })

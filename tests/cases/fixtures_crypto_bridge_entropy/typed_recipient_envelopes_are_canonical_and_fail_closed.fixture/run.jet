@@ -42,11 +42,11 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
     sealed :: crypto.seal([bob.public_key(), alice.public_key()], plain, aad) ?? panic("seal")
     bytes :: crypto.sealed_bytes(sealed)
     assert_eq(cut(bytes, 0, 4), "JETV".bytes())
-    assert_eq(crypto.open(alice, crypto.Sealed{bytes: ~bytes}, aad) ?? panic("open"), plain)
+    assert_eq(crypto.open(alice, crypto.Sealed{bytes: bytes.copy()}, aad) ?? panic("open"), plain)
     // Core/crypto/crypto.jet447,477 public tag OpenFailed.
-    assert_eq(crypto.open(wrong, crypto.Sealed{bytes: ~bytes}, aad), Err(crypto.CryptoError.OpenFailed))
-    assert_eq(crypto.open(alice, crypto.Sealed{bytes: ~bytes}, "wrong".bytes()), Err(crypto.CryptoError.OpenFailed))
-    tampered := ~bytes
+    assert_eq(crypto.open(wrong, crypto.Sealed{bytes: bytes.copy()}, aad), Err(crypto.CryptoError.OpenFailed))
+    assert_eq(crypto.open(alice, crypto.Sealed{bytes: bytes.copy()}, "wrong".bytes()), Err(crypto.CryptoError.OpenFailed))
+    tampered := bytes.copy()
     last :: tampered.len() - 1
     tampered[last] = (U8{Int.from_u8(tampered[last]) ~| 1})
     assert_eq(crypto.open(alice, crypto.Sealed{bytes: tampered}, aad), Err(crypto.CryptoError.OpenFailed))

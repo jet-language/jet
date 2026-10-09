@@ -17,7 +17,7 @@ fn run() {
     (started_tx, started_rx) :: channel<Int>()
     (release_tx, release_rx) :: channel<Int>()
     ev.on(scope, (n: Int) -> {
-        started_tx.send(~n)
+        started_tx.send(n.copy())
         released :: release_rx.receive() ?? panic("release")
     })
     first :: ev.emit_async(1)

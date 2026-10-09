@@ -24,7 +24,7 @@ fn run() {
         if candidate == host -> next
         if process.cmd([String]{"rustc", "--print", "target-libdir", "--target", candidate}).run() == {
             .Ok(output) -> {
-                if output.success && files.is_dir(~output.output.trim()) {
+                if output.success && files.is_dir(output.output.trim().copy()) {
                     print(candidate)
                     return
                 }

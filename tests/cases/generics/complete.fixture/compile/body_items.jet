@@ -14,7 +14,7 @@ module complete<T>(count: Int, label: String) {
     #Target(OS.Linux)
     impl Wrapped { fn linux_value(self) -> T { return self.value } }
     module plain { fn value() -> Int { return count } }
-    module nested<U> { fn keep(value: U) -> U { return ~value } }
+    module nested<U> { fn keep(value: U) -> U { return value.copy() } }
     module nested_use :: nested<T>
     #Meta(category: label)
     fn marked(value: ^#Marked T) -> #Marked T {

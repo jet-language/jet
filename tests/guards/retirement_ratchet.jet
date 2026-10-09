@@ -104,7 +104,7 @@ fn s6_ratchet_authority_scan(directory: String, relative: String, offenders: &[S
     loop entry in entries {
         kind :: s6_ratchet_files.stat(entry.path) ?? next
         if kind.is_symlink -> next
-        path := ~entry.name
+        path := entry.name.copy()
         if relative != "" -> path = "{relative}/{entry.name}"
         if kind.is_dir {
             if entry.name.starts_with(".") || entry.name.starts_with("target") ||
@@ -116,7 +116,7 @@ fn s6_ratchet_authority_scan(directory: String, relative: String, offenders: &[S
             number := 0
             loop raw in content.lines() {
                 number += 1
-                line :: ~raw
+                line :: raw.copy()
                 hits :: s6_ratchet_hits(line)
                 if hits.len() == 0 || s6_ratchet_history(path) || s6_ratchet_fixture(path) ||
                     s6_ratchet_producer(path, line) || s6_ratchet_unrelated(path, line) -> next

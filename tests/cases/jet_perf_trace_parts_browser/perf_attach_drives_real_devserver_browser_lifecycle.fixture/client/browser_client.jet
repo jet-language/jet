@@ -34,13 +34,13 @@ fn s6_browser_request(port: String, method: String, path: String, body: String) 
     if words.len() < 2 -> return None
     status :: words[1].to_int() ?? return None
     if status < 0 || status > 65535 -> return None
-    Val(S6BrowserReply{status: status, body: ~framed.after})
+    Val(S6BrowserReply{status: status, body: framed.after.copy()})
 }
 
 fn s6_browser_nonce(html: String) -> String? {
     rest :: html.split_once("jetPerfNonce = \"") ?? return None
     nonce :: rest.after.split_once("\"") ?? return None
-    Val(~nonce.before)
+    Val(nonce.before.copy())
 }
 
 fn s6_browser_wait(port: String, path: String, condition: String, previous: String) -> String {
@@ -50,10 +50,10 @@ fn s6_browser_wait(port: String, path: String, condition: String, previous: Stri
         if reply == {
             .Val(value) -> {
                 if value.status == 200 {
-                    body :: ~value.body
+                    body :: value.body.copy()
                     accepted := false
                     if condition == "any" -> accepted = true
-                    if condition == "nonempty" -> accepted = ~body.trim() != ""
+                    if condition == "nonempty" -> accepted = body.trim().copy() != ""
                     if condition == "different" -> accepted = body != previous
                     if condition == "nonce" -> accepted = s6_browser_nonce(body) != None
                     if condition == "new_nonce" {

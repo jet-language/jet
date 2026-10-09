@@ -32,7 +32,7 @@ fn run() {
     tree.start() ?? panic("start")
 
     receipt :: runtime.send(endpoint, "pending", key: "pending") ?? panic("send")
-    id :: receipt_id(~receipt)
+    id :: receipt_id(receipt.copy())
     print("sent:{receipt_kind(^receipt)}")
     print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
     print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")

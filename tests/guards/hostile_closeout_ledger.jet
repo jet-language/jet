@@ -59,7 +59,7 @@ fn s2_closeout_observed() -> [String:Int] {
         text :: closeout_files.read(path) ?? panic("cannot read {path}")
         in_codes := false
         loop line in text.lines() {
-            trimmed :: ~line.trim()
+            trimmed :: line.trim().copy()
             if !in_codes {
                 if trimmed.starts_with("\"codes\": [") -> in_codes = true
                 next
@@ -81,7 +81,7 @@ fn s2_closeout_rows(ledger: String, finding: String) -> [String] {
     rows := [String]{}
     loop line in ledger.lines() {
         columns :: line.split("|").to_list()
-        if columns.len() > 1 && columns[1].trim().starts_with(finding) -> &rows.push(~line)
+        if columns.len() > 1 && columns[1].trim().starts_with(finding) -> &rows.push(line.copy())
     }
     rows
 }
@@ -124,7 +124,7 @@ fn s2_closeout_test_missing_row() {
     loop spec in s2_closeout_specs() {
         kept := [String]{}
         loop line in ledger.lines() {
-            if !line.contains("| {spec.finding} ") -> &kept.push(~line)
+            if !line.contains("| {spec.finding} ") -> &kept.push(line.copy())
         }
         error :: s2_closeout_validate(kept.join("\n"), observed)
         assert(error != "", "an observed finding without its owner row must fail closed")
@@ -144,7 +144,7 @@ fn s2_closeout_test_mismatched_row() {
         loop required in requirements {
             mismatched :: row.replace(required, "__mismatched__")
             lines := [String]{}
-            loop line in ledger.lines() -> &lines.push(if line == row -> mismatched else -> ~line)
+            loop line in ledger.lines() -> &lines.push(if line == row -> mismatched else -> line.copy())
             error :: s2_closeout_validate(lines.join("\n"), observed)
             assert(error != "", "a mismatched owner or witness must fail closed")
             assert(error.contains(spec.finding) && error.contains(required), "mismatch error lost {spec.finding} identity: {error}")

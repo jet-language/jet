@@ -91,7 +91,7 @@ fn s5_grammar_first_quoted(text: String, start: Int) -> String? {
     named := false
     seen_named := false
     loop line in nodes.split("\n") {
-        trimmed :: ~line.trim()
+        trimmed :: line.trim().copy()
         if line.starts_with("  {{") {
             current_type = None
             named = false
@@ -113,7 +113,7 @@ fn s5_grammar_first_quoted(text: String, start: Int) -> String? {
     }
     query :: files.read("Tools/editors/zed/languages/jet/highlights.scm") ?? panic("read Zed highlights")
     loop line in query.split("\n") {
-        trimmed :: ~line.trim()
+        trimmed :: line.trim().copy()
         if trimmed.starts_with(";") -> next
         at := 0
         loop {

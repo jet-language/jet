@@ -7,7 +7,7 @@ fn s1_host_maintained_lines(path: String) -> Int {
     count := 0
     loop line in s1_host_read(path).lines() {
         // #4819: stored trim views ICE at String method calls; keep owned text.
-        trimmed :: ~line.trim()
+        trimmed :: line.trim().copy()
         if !trimmed.is_empty() && !trimmed.starts_with("#") && !trimmed.starts_with("//") && !trimmed.starts_with("<!--") -> count += 1
     }
     count

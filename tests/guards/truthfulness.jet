@@ -6,7 +6,7 @@ use core.text.parse as s3_truth_parse
 fn s3_truth_md_paths(directory: String) -> [String] {
     entries :: s3_truth_files.list_dir(directory) ?? return [String]{}
     paths := [String]{}
-    loop entry in entries -> &paths.push(~entry.path)
+    loop entry in entries -> &paths.push(entry.path.copy())
     &paths.sort()
     result := [String]{}
     loop path in paths {
@@ -45,7 +45,7 @@ fn s3_guard_docs_examples() {
     content := s3_truth_files.read("README.md") ?? ""
     entries :: s3_truth_files.list_dir("Docs") ?? panic("Docs/ missing")
     paths := [String]{}
-    loop entry in entries -> &paths.push(~entry.path)
+    loop entry in entries -> &paths.push(entry.path.copy())
     &paths.sort()
     loop path in paths {
         if s3_truth_files.is_dir(path) {
@@ -128,7 +128,7 @@ fn s3_truth_link_targets(text: String) -> [String] {
         body :: policy_slice_bytes(after, 0, end)
         first := ""
         loop word in policy_split_whitespace(body) {
-            first = ~word
+            first = word.copy()
             break
         }
         &result.push(first)

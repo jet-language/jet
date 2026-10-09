@@ -5,7 +5,7 @@ fn s5_changed(port: Int, baseline: String, timeout_ms: Int) -> String {
     loop {
         if s5_web_get(port, "/__jet_dev_version", None) == .Val(response) {
             if response.status == 200 {
-                version :: ~String.from_bytes_lossy(response.body).trim()
+                version :: String.from_bytes_lossy(response.body).trim().copy()
                 if version != baseline && !version.is_empty() -> return version
             }
         }

@@ -66,7 +66,7 @@ fn s3_guard_tombstone_provenance() {
         id_part :: if title >= 0 -> s5_grammar_slice_bytes(bold, 0, title) else -> bold
         loop comma_piece in id_part.split(",") {
             loop piece in comma_piece.split(" / ") {
-                token :: ~piece.trim()
+                token :: piece.trim().copy()
                 if !token.starts_with("D-") -> next
                 loop expanded in s3_decision_expand(token) {
                     if !ids.contains(expanded) -> &ids.push(expanded)

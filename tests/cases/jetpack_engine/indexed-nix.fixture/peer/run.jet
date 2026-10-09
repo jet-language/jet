@@ -208,10 +208,10 @@ fn run(args: [String]) {
             }
         }
         text :: String.from_bytes(request) ?? ""
-        first :: ~text.split("\n").to_list()[0]
+        first :: text.split("\n").to_list()[0].copy()
         words :: first.split(" ").to_list()
-        target :: if words.len() >= 2 -> ~words[1] else -> "/"
-        path :: ~target.split("?").to_list()[0]
+        target :: if words.len() >= 2 -> words[1].copy() else -> "/"
+        path :: target.split("?").to_list()[0].copy()
         counts[path] = (counts.get(path) ?? 0) + 1
         stop :: path == "/stop"
         body :: if path == "/counts" -> Val("{{\"root\":{peer_object_count(counts, PEER_ROOT, "root")},\"lib\":{peer_object_count(counts, PEER_LIB, "lib")},\"runtime\":{peer_object_count(counts, PEER_RUNTIME, "runtime")}}}".bytes()) else if stop -> Val("".bytes()) else -> routes.get(path)

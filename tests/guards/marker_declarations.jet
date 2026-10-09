@@ -22,7 +22,7 @@ fn s3_guard_retired_marker_forms() {
         if relative_dir != "" -> directory = "./{relative_dir}"
         entries :: s3_marker_files.list_dir(directory) ?? next
         loop entry in entries {
-            relative := ~entry.name
+            relative := entry.name.copy()
             if relative_dir != "" -> relative = "{relative_dir}/{entry.name}"
             if relative == frozen || relative.starts_with("{frozen}/") -> next
             metadata :: s3_marker_files.stat(entry.path) ?? next

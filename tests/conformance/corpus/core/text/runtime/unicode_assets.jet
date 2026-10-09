@@ -23,7 +23,7 @@ use core.text.runtime.assets.unicode_composition_exclusions as text_excluded
     assert_eq(empty_pool.len(), 0)
     assert(!text_asset.valid(asset, 2, 7))
     assert(!text_asset.valid(asset, 3, 6))
-    corrupt := ~asset
+    corrupt := asset.copy()
     corrupt[4] = U8{2}
     assert(!text_asset.valid(corrupt, 3, 7))
     corrupt[4] = U8{1}
@@ -139,7 +139,7 @@ use core.text.runtime.assets.unicode_composition_exclusions as text_excluded
 #Test("Unicode borrowed trim retains original parameter owner") {
     source :: " \tjet \n"
     view :: text_string.trim_view(source)
-    assert_eq(~view, "jet")
+    assert_eq(view.copy(), "jet")
 }
 
 #Test("Unicode substring search is scalar indexed nonoverlapping and absent") {

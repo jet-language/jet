@@ -9,7 +9,7 @@ struct S6RetirementReviewedHit { line: Int spelling: String }
 struct S6RetirementReviewedFence { marker: Int length: Int rest: String }
 
 fn s6_retirement_reviewed_slice(text: String, start: Int, end: Int) -> String {
-    String.from_bytes(~text.bytes()[start..<end]) ?? panic("source boundary")
+    String.from_bytes(text.bytes()[start..<end].copy()) ?? panic("source boundary")
 }
 
 fn s6_retirement_reviewed_skipped(path: String) -> Bool {
@@ -154,7 +154,7 @@ fn s6_retirement_reviewed_detector_law() {
 }
 
 fn s6_retirement_reviewed_fence(line: String) -> S6RetirementReviewedFence? {
-    trimmed :: ~line.trim_start()
+    trimmed :: line.trim_start().copy()
     bytes :: trimmed.bytes()
     if bytes.len() == 0 -> return None
     marker :: Int.from_u8(bytes[0])

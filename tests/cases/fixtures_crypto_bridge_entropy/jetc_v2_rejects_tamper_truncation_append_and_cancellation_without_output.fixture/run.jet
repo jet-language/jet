@@ -40,7 +40,7 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
     canonical :: files.read_bytes("sealed.jetc") ?? panic("canonical")
     body_at :: 20 + little(canonical, 8, 4)
     loop mode in 0..<17 {
-        hostile := ~canonical
+        hostile := canonical.copy()
         if mode == 0 {
             last :: hostile.len() - 1
             hostile[last] = (U8{Int.from_u8(hostile[last]) ~| 1})

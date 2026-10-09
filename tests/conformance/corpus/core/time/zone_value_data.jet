@@ -20,7 +20,7 @@ fn check_zones() -[Env, FS.Read]> {
     assert_eq(summer.offset_seconds(), -14400)
     assert_eq(zone.next_transition(1705323600) ?? -1, 1710054000)
     assert_eq(zone.previous_transition(1721059200) ?? -1, 1710054000)
-    duplicate :: ~zone
+    duplicate :: zone.copy()
     assert_eq(duplicate.next_transition(1705323600), zone.next_transition(1705323600))
     utc :: time.parse_zoned("2024-03-01T12:00:00+00:00[UTC]") ?? panic("UTC parse")
     assert_eq(utc.format_rfc9557(), "2024-03-01T12:00:00Z[UTC]")

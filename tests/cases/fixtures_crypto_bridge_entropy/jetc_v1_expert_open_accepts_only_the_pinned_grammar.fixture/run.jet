@@ -50,7 +50,7 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
             }
             assert_eq(expert.open_v1(key, envelope), Ok(plain))
             loop mode in 0..<5 {
-                hostile := ~envelope
+                hostile := envelope.copy()
                 if mode == 0 -> hostile[0] = (U8{Int.from_u8(hostile[0]) ~| 1})
                 if mode == 1 -> hostile[4] = (U8{2})
                 if mode == 2 -> hostile[5] = (U8{3})

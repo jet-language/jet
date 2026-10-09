@@ -9,8 +9,8 @@ fn owner_teardown_task() -> Task<DispatchReport<String>> {
     (started_tx, started_rx) :: channel<Int>()
     (release_tx, release_rx) :: channel<Int>()
     ev.on(owner_scope, (n: Int) -> {
-        started_tx.send(~n)
-        held_sender :: ~release_tx
+        started_tx.send(n.copy())
+        held_sender :: release_tx.copy()
         released :: release_rx.receive() ?? panic("release")
     })
     running :: ev.emit_async(98)
@@ -25,7 +25,7 @@ fn run() {
     (cancel_started_tx, cancel_started_rx) :: channel<Int>()
     (cancel_release_tx, cancel_release_rx) :: channel<Int>()
     cancelled.on(cancel_scope, (n: Int) -> {
-        cancel_started_tx.send(~n)
+        cancel_started_tx.send(n.copy())
         released :: cancel_release_rx.receive() ?? panic("release")
     })
     cancel_running :: cancelled.emit_async(1)
@@ -47,7 +47,7 @@ fn run() {
     (queued_started_tx, queued_started_rx) :: channel<Int>()
     (queued_release_tx, queued_release_rx) :: channel<Int>()
     queued_deadline.on(queued_scope, (n: Int) -> {
-        queued_started_tx.send(~n)
+        queued_started_tx.send(n.copy())
         released :: queued_release_rx.receive() ?? panic("release")
     })
     queued_running :: queued_deadline.emit_async(10)
@@ -65,7 +65,7 @@ fn run() {
     (pending_started_tx, pending_started_rx) :: channel<Int>()
     (pending_release_tx, pending_release_rx) :: channel<Int>()
     pending_deadline.on(pending_scope, (n: Int) -> {
-        pending_started_tx.send(~n)
+        pending_started_tx.send(n.copy())
         released :: pending_release_rx.receive() ?? panic("release")
     })
     pending_running :: pending_deadline.emit_async(20)
