@@ -73,7 +73,7 @@ fn ambient_core_call(
             span,
         )));
     };
-    let payload = match jet_codegen::Comptime::render_datatree_for_tir(value) {
+    let payload = match jet_codegen::Comptime::render_dyn_for_tir(value) {
         Ok(payload) => payload,
         Err(error) => return Some(Err(receipt_diag(error.reason, span))),
     };

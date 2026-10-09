@@ -1840,7 +1840,7 @@ impl CtValue {
         Ok(out)
     }
 
-    fn append_json(&self, out: &mut String) -> Result<(), EncodingError> {
+    pub fn append_json(&self, out: &mut String) -> Result<(), EncodingError> {
         match self {
             CtValue::Int(n) => write!(out, "{n}").unwrap(),
             CtValue::Float(value) => value.append_json(out)?,
