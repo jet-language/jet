@@ -2179,17 +2179,15 @@ fn append_synced(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
 
 fn ensure_dir(path: &Path) -> Result<(), StoreError> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(StoreError::Config(format!(
-            "store directory is a symlink: {}",
-            path.display()
-        ))),
-        Ok(metadata) if metadata.is_dir() => Ok(()),
-        Ok(_) => Err(StoreError::Config(format!("store path is not a directory: {}", path.display()))),
+        Ok(metadata) => existing_store_dir(path, &metadata),
         Err(error) if error.kind() == io::ErrorKind::NotFound => match fs::create_dir(path) {
             Ok(()) => sync_dir(path.parent().expect("created directory has parent")),
-            // A concurrent opener created it between the check and the create:
-            // validate what it made instead of failing the open.
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => ensure_dir(path),
+            // Another process (or thread) created it between the check and
+            // the create: creation is idempotent, but the winner's entry must
+            // still pass the same symlink/directory checks.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                existing_store_dir(path, &fs::symlink_metadata(path)?)
+            }
             Err(error) => Err(StoreError::Io(error)),
         },
         Err(error) => Err(StoreError::Io(error)),
