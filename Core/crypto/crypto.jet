@@ -12,7 +12,7 @@ use core
 use core.crypto.expert as rawcrypto
 use core.crypto.random as random
 use core.crypto.vault.[KeyUnlock, WrappedVaultKey]
-use __core_crypto_ct as ct
+use __core_crypto_ct as fixedcrypto
 
 // core.crypto - safe envelopes and expert primitives (D-ONCE-LAYER1=B).
 //
@@ -67,7 +67,7 @@ impl JetcTemp.Close {
 }
 
 // Incremental SHA-256 uses the same compressor as the one-shot API. Pending
-// plaintext is secret-owned and never grows beyond one compression block.
+// plaintext is secret-owned: one partial block, or two blocks during final padding.
 struct JetcHash { state: [Int], pending: Secret, length: Int }
 fn jetc_hash() -> JetcHash Never! {
     JetcHash{state: copy_ints(C_SHA256_IV), pending: Secret.from_bytes([U8]{}), length: 0}
@@ -96,13 +96,13 @@ fn jetc_hash_update(hash: &JetcHash, data: [U8]) Never! {
     }
 }
 fn jetc_hash_finish(hash: &JetcHash) -> [U8] Never! {
-    tail := ^hash.pending.bytes
+    // Finalize in the owned pending buffer; no move out of the edit borrow.
+    &hash.pending.bytes.push(U8{128})
+    loop hash.pending.bytes.len() %% 64 != 56 -> &hash.pending.bytes.push(U8{0})
+    loop b in be64(hash.length * 8) -> &hash.pending.bytes.push(b)
+    loop offset in 0..<hash.pending.bytes.len(), 64 -> sha256_block(&hash.state, hash.pending.bytes, offset)
+    core.crypto.__zeroize(&hash.pending.bytes)
     hash.pending.bytes = [U8]{}
-    &tail.push(U8{128})
-    loop tail.len() %% 64 != 56 -> &tail.push(U8{0})
-    loop b in be64(hash.length * 8) -> &tail.push(b)
-    loop offset in 0..<tail.len(), 64 -> sha256_block(&hash.state, tail, offset)
-    core.crypto.__zeroize(&tail)
     words_to_bytes(hash.state, 4)
 }
 
@@ -312,15 +312,25 @@ struct WrappedKey {
 
 // Vault key-wrap carriers have one canonical source owner in core.crypto.vault.
 fn __vault_wrapped_from_bytes(bytes: ^[U8]) -> WrappedVaultKey KeyWrapError! {
-    wrapped :: core.crypto.vault.__wrapped_from_bytes(^bytes) ?? return Err(KeyWrapError{reason: err.reason})
-    Ok(wrapped)
+    #Unsafe("vault key import: validate a serialized wrapped carrier at the typed crypto boundary") {
+        wrapped :: core.crypto.vault.__wrapped_from_bytes(^bytes) ?? return Err(KeyWrapError{reason: err.reason})
+        return Ok(wrapped)
+    }
 }
-fn __vault_wrapped_bytes(wrapped: WrappedVaultKey) -> [U8] Never! { core.crypto.vault.__wrapped_bytes(wrapped) }
+fn __vault_wrapped_bytes(wrapped: WrappedVaultKey) -> [U8] Never! {
+    #Unsafe("vault key import: expose the authenticated wrapped carrier, not plaintext key material") {
+        return core.crypto.vault.__wrapped_bytes(wrapped)
+    }
+}
 fn __vault_unlock_recipient(identity: X25519SecretKey) -> KeyUnlock Never! {
-    core.crypto.vault.__key_unlock_recipient(identity)
+    #Unsafe("vault key import: construct the typed recipient unlock request") {
+        return core.crypto.vault.__key_unlock_recipient(identity)
+    }
 }
 fn __vault_unlock_passphrase(passphrase: Secret) -> KeyUnlock Never! {
-    core.crypto.vault.__key_unlock_passphrase(passphrase)
+    #Unsafe("vault key import: construct the typed passphrase unlock request") {
+        return core.crypto.vault.__key_unlock_passphrase(passphrase)
+    }
 }
 
 struct PasswordHash {
@@ -648,8 +658,8 @@ fn file_open(identity: X25519SecretKey, source: Path, destination: Path) FileCry
     input :: jetc_source(source.to_string(), .OpenFailed)
     metadata :: jetc_stat(input, .OpenFailed)
     fixed :: jetc_read_exact(input, 20, "open-input-read", .OpenFailed)
-    size :: jetc.header_length(fixed.bytes, metadata.len)
-    header :: jetc_read_exact(input, size, "open-input-read", .OpenFailed)
+    header_size :: jetc.header_length(fixed.bytes, metadata.len)
+    header :: jetc_read_exact(input, header_size, "open-input-read", .OpenFailed)
     reader := jetc.reader(identity, fixed.bytes, header.bytes, metadata.len)
     parent :: jetc_parent(destination.to_string())
     output :: jetc_temp(parent, "jetc-open")
@@ -672,7 +682,7 @@ fn file_open(identity: X25519SecretKey, source: Path, destination: Path) FileCry
 // Internal source-owned migration coordinator, shared with expert.migrate_v1.
 // The legacy grammar intentionally retains its bounded whole-buffer contract.
 fn __migrate_v1(key: [U8], source: Path, recipients: [X25519PublicKey], destination: Path) -[FS, Rand]> Bool FileCryptoError! {
-    if source == destination -> return Err(.DestinationExists)
+    if source.to_string() == destination.to_string() -> return Err(.DestinationExists)
     input :: jetc_source(source.to_string(), .SourceIO)
     total :: jetc_stat(input, .SourceIO).len
     if total > 1073741858 -> return Err(.OpenFailed)
@@ -865,7 +875,8 @@ fn jetc_revalidate(parent: JetcParent) FileCryptoError! {
     if before.dev != after.dev || before.ino != after.ino -> return Err(.DestinationIO)
     Ok()
 }
-fn jetc_publish(output: ^JetcTemp, parent: JetcParent, operation: String) FileCryptoError! {
+fn jetc_publish(owned: ^JetcTemp, parent: JetcParent, operation: String) FileCryptoError! {
+    output := ^owned
     jetc_cancel_checkpoint()
     if parent.linux {
         jetc_sync(output.file, "{operation}-output-fsync")
@@ -942,8 +953,8 @@ fn jetc_seal_stage(recipients: [jetc.Recipient], parent: JetcParent, stage: Jetc
     Ok()
 }
 
-fn jetc_random(length: Int) -> Secret FileCryptoError! {
-    if random_bytes(length) == {
+fn jetc_random(length: Int) -[Rand]> Secret FileCryptoError! {
+    if random.bytes(length) == {
         .Ok(bytes) -> Ok(Secret{bytes: bytes})
         .Err(error) -> Err(.SealFailed(error))
     }
@@ -2098,7 +2109,11 @@ fn chacha20_xor(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never
     }
 }
 
-fn poly1305(key: [U8], data: [U8]) -> [U8] Never! { rawcrypto.poly1305(key, data) }
+fn poly1305(key: [U8], data: [U8]) -> [U8] Never! {
+    #Unsafe("crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing") {
+        return rawcrypto.poly1305(key, data)
+    }
+}
 
 fn le_bytes(n: Int, width: Int) -> [U8] Never! {
     out := [U8]{}
@@ -2207,14 +2222,26 @@ fn xchacha_open(key: [U8], nonce24: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
     chacha_poly_open(sub, n, aad, cipher)
 }
 
-fn x25519_scalarmult(sk: [U8], u: [U8]) -> [U8] Never! { rawcrypto.x25519_scalarmult(sk, u) }
+fn x25519_scalarmult(sk: [U8], u: [U8]) -> [U8] Never! {
+    #Unsafe("crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets") {
+        return rawcrypto.x25519_scalarmult(sk, u)
+    }
+}
 
 /// RFC 8032 5.1.5: the encoded public key A = [s]B for a 32-byte seed.
-fn ed25519_public_raw(seed: [U8]) -> [U8] Never! { ct.ed_public(seed) }
+fn ed25519_public_raw(seed: [U8]) -> [U8] Never! { fixedcrypto.ed_public(seed) }
 
-fn ed25519_sign_raw(seed: [U8], msg: [U8]) -> [U8] Never! { rawcrypto.ed25519_sign_raw(seed, msg) }
+fn ed25519_sign_raw(seed: [U8], msg: [U8]) -> [U8] Never! {
+    #Unsafe("crypto expert: typed signing keys validate the Ed25519 seed width") {
+        return rawcrypto.ed25519_sign_raw(seed, msg)
+    }
+}
 
-fn ed25519_verify_raw(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! { rawcrypto.ed25519_verify_raw(pk, msg, sig) }
+fn ed25519_verify_raw(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! {
+    #Unsafe("crypto expert: typed verification validates public key and signature widths before strict verification") {
+        return rawcrypto.ed25519_verify_raw(pk, msg, sig)
+    }
+}
 
 // Existing public coordinate carrier. Secret arithmetic uses private fixed limbs.
 struct EdPoint {
@@ -2511,6 +2538,18 @@ fn g(s: &[Int], a: Int, b: Int, c: Int, d: Int, mx: Int, my: Int) {
     }
     assert(jetc_hash_finish(&hash) == sha256(data).bytes)
     assert(hash.pending.bytes.len() == 0)
+}
+
+#Test("JETC2 streaming hash finalizes one- and two-block padding in place") {
+    lengths :: [Int]{0, 55, 56, 63, 64, 65, 127}
+    loop length in lengths {
+        data := [U8]{}
+        loop index in 0..<length -> &data.push(U8{index %% 251})
+        hash := jetc_hash()
+        jetc_hash_update(&hash, data)
+        assert(jetc_hash_finish(&hash) == sha256(data).bytes)
+        assert(hash.pending.bytes.len() == 0)
+    }
 }
 
 #Test("JETC2 never overwrites destinations and removes unauthenticated outputs") {
