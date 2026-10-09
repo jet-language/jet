@@ -3550,8 +3550,10 @@ fn __jet_bootstrap_key_fields_to_host(fields: &[@t.TComptimeKeyField@]) -> Resul
 }
 fn __jet_bootstrap_key_to_host(value: &@t.TComptimeKey@) -> Result<::jet_foundation::MIR::MirConstKey, String> {
     match value {
-        @p.TComptimeKey.Int@{ value } => Ok(match value.to_i64() { Some(number) => ::jet_foundation::MIR::MirConstKey::Int(number), None => ::jet_foundation::MIR::MirConstKey::from_bigint(&value.to_big()) }),
-        @p.TComptimeKey.BigInt@{ decimal } => Ok(::jet_foundation::MIR::MirConstKey::from_bigint(&jet_foundation::Numeric::CtBigInt::from_str(decimal)?)),
+        // Source Int owns the standalone runtime carrier; host MIR receives its
+        // canonical value, never the runtime's nominal CtBigInt allocation.
+        @p.TComptimeKey.Int@{ value } => Ok(match value.to_i64() { Some(number) => ::jet_foundation::MIR::MirConstKey::Int(number), None => ::jet_foundation::MIR::MirConstKey::BigInt(value.to_string_rep()) }),
+        @p.TComptimeKey.BigInt@{ decimal } => Ok(::jet_foundation::MIR::MirConstKey::from_bigint(&::jet_foundation::Numeric::CtBigInt::from_str(decimal)?)),
         @p.TComptimeKey.String@{ value } => Ok(::jet_foundation::MIR::MirConstKey::String(value.clone())),
         @p.TComptimeKey.Bool@{ value } => Ok(::jet_foundation::MIR::MirConstKey::Bool(*value)),
         @p.TComptimeKey.Char@{ value } => Ok(::jet_foundation::MIR::MirConstKey::Char(char::from_u32(value.to_i64().ok_or_else(|| "constant key character exceeds i64".to_string())? as u32).ok_or_else(|| "constant key character is invalid".to_string())?)),
@@ -3653,7 +3655,7 @@ fn __jet_bootstrap_ct_from_host(value: &::jet_foundation::MIR::MirRuntimeValue) 
 fn __jet_bootstrap_runtime_key_from_host(value: &::jet_foundation::MIR::MirRuntimeValue) -> Result<::jet_foundation::MIR::MirConstKey, String> {
     match value {
         ::jet_foundation::MIR::MirRuntimeValue::Int(value) => Ok(::jet_foundation::MIR::MirConstKey::Int(*value)),
-        ::jet_foundation::MIR::MirRuntimeValue::BigInt(value) => Ok(::jet_foundation::MIR::MirConstKey::from_bigint(&jet_foundation::Numeric::CtBigInt::from_str(value)?)),
+        ::jet_foundation::MIR::MirRuntimeValue::BigInt(value) => Ok(::jet_foundation::MIR::MirConstKey::from_bigint(&::jet_foundation::Numeric::CtBigInt::from_str(value)?)),
         ::jet_foundation::MIR::MirRuntimeValue::String(value) => Ok(::jet_foundation::MIR::MirConstKey::String(value.clone())),
         ::jet_foundation::MIR::MirRuntimeValue::Bool(value) => Ok(::jet_foundation::MIR::MirConstKey::Bool(*value)),
         ::jet_foundation::MIR::MirRuntimeValue::Char(value) => Ok(::jet_foundation::MIR::MirConstKey::Char(*value)),

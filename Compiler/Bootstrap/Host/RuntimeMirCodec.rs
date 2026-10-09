@@ -9,7 +9,6 @@
 
 use crate::compiler_bootstrap_host::{BootstrapCodecSymbols, BootstrapHostCodecError};
 use std::collections::BTreeMap;
-use jet_foundation::Numeric::JetInt;
 use std::fmt::Write as _;
 
 const SOURCE_MIR_SCHEMA: &str = include_str!("../../JetFoundation/Source/MIR/MIR.jet");
@@ -70,15 +69,19 @@ const HOST_SUPPORT_SCHEMAS: &[(&str, &str)] = &[
 ];
 
 /// Source MIR spells a Unicode scalar as an exact Int; native MIR carries a
-/// Rust char. Decimal text is not a character encoding (97 means 'a', not "97").
-pub(crate) fn source_char_to_host(value: &JetInt) -> Result<char, String> {
+/// Rust char. Project shared scalar values rather than borrowing a nominal
+/// host JetInt: the generated runtime owns a distinct exact-integer carrier.
+/// Decimal text is evaluated only on failure, and is not a character encoding.
+pub(crate) fn source_char_to_host(
+    value: Option<i64>,
+    decimal: impl FnOnce() -> String,
+) -> Result<char, String> {
     value
-        .to_i64()
         .and_then(|value| u32::try_from(value).ok())
         .and_then(char::from_u32)
         .ok_or_else(|| format!(
             "MIR integer is not a Unicode scalar: source Int -> host char; decimal value {}",
-            value.to_string_rep(),
+            decimal(),
         ))
 }
 
@@ -1610,7 +1613,7 @@ fn convert_named_expression(
             };
             if target == "char" {
                 return Ok(format!(
-                    "crate::compiler_bootstrap_runtime_mir_codec::source_char_to_host(&({expression}))?"
+                    "{{ let __value = &({expression}); crate::compiler_bootstrap_runtime_mir_codec::source_char_to_host(__value.to_i64(), || __value.to_string_rep())? }}"
                 ));
             }
             let diagnostic = format!("MIR integer is outside native range: source Int -> host {target}; decimal value {{}}");
@@ -2641,11 +2644,15 @@ mod tests {
         use jet_foundation::Numeric::{CtBigInt, JetInt};
         for expected in ['\0', ' ', 'a', 'π', '🙂', '\u{10ffff}'] {
             let value = JetInt::from_i64(i64::from(u32::from(expected)));
-            assert_eq!(super::source_char_to_host(&value), Ok(expected));
+            assert_eq!(
+                super::source_char_to_host(value.to_i64(), || panic!("valid scalar must not format decimal")),
+                Ok(expected),
+            );
         }
-        for decimal in ["-1", "55296", "57343", "1114112", "18446744073709551615"] {
+        for decimal in ["-9223372036854775809", "-9223372036854775808", "-1", "55296", "57343", "1114112", "4294967296", "9223372036854775807", "18446744073709551615"] {
             let value = JetInt::from_big(CtBigInt::from_str(decimal).expect("exact integer"));
-            let error = super::source_char_to_host(&value).expect_err("not a scalar");
+            let error = super::source_char_to_host(value.to_i64(), || value.to_string_rep())
+                .expect_err("not a scalar");
             assert!(error.contains("source Int -> host char"));
             assert!(error.contains(&format!("decimal value {decimal}")));
         }
@@ -2654,6 +2661,10 @@ mod tests {
             let expression = super::convert_expression("Int", "char", "value", &pairs, owner)
                 .expect("generated scalar converter");
             assert!(expression.contains("source_char_to_host"));
+            assert!(expression.contains("__value.to_i64()"));
+            assert!(expression.contains("|| __value.to_string_rep()"));
+            assert!(!expression.contains("source_char_to_host(&"));
+            assert_eq!(expression.matches("let __value =").count(), 1);
             assert!(expression.contains(owner));
             let reverse = super::convert_from_host_expression("Int", "char", "value", &pairs)
                 .expect("generated codepoint converter");

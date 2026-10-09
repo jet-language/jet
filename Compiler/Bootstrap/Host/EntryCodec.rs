@@ -3307,7 +3307,9 @@ fn to_const_key_expression(
     use MirTypeKind as Kind;
     let key = "::jet_foundation::MIR::MirConstKey";
     Ok(match ty.kind() {
-        Kind::Int => format!("match ({source}).to_i64() {{ Some(value) => {key}::Int(value), None => {key}::from_bigint(&({source}).to_big()) }}"),
+        // The source carrier is embedded in standalone runtime code, not the
+        // linked host Numeric module. Its decimal representation is canonical.
+        Kind::Int => format!("match ({source}).to_i64() {{ Some(value) => {key}::Int(value), None => {key}::BigInt(({source}).to_string_rep()) }}"),
         Kind::IntN { .. } => format!("{key}::Int(({source}).to_string().parse::<i64>().map_err(|_| \"fixed-width integer map key exceeds i64\".to_string())?)"),
         Kind::String => format!("{key}::String(({source}).clone())"),
         Kind::Bool => format!("{key}::Bool(*({source}))"),
