@@ -85,7 +85,7 @@ fn reserve<T>(allocation: AllocationBudget, values: &[T], additional: Int) -> Bo
     true
 }
 
-fn __reserve_checked<T>(allocation: AllocationBudget, values: &[T], additional: Int) -> () __ReserveFailure! {
+fn __reserve_checked<T>(allocation: AllocationBudget, values: &[T], additional: Int) __ReserveFailure! {
     old :: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     requested :: (values.len() + additional) * mem.__type_size<T>()
     if additional == 0 || requested <= old -> return
@@ -1698,7 +1698,7 @@ struct JSONLinesPush {
         self.record_index += 1
     }
 
-    fn fail(&self, error: EncodingError) -> () EncodingError! {
+    fn fail(&self, error: EncodingError) EncodingError! {
         first := jsonl_under(error, "$[{self.record_index}]")
         first.format = .JSONL
         if self.terminal == None -> &self.writer.discard()
