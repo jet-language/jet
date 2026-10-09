@@ -124,7 +124,7 @@ struct SRVRecord {
     weight: Int
 }
 
-fn gethostname() -[Env]> String Never! {
+fn gethostname() -[Env, FS]> String Never! {
     environment :: core.sys.get("HOSTNAME") ?? ""
     if environment.len() > 0 -> return environment
     contents :: core.files.read("/etc/hostname") ?? return "localhost"
@@ -149,7 +149,7 @@ fn ip_is_ipv4(addr: IPAddr) -> Bool Never! {
     #Unsafe("read the native IP address discriminant") { return core.net.__ip_is_v4(addr) }
 }
 
-fn socket_addr(host: String, port: Int) -[Net]> SocketAddr NetError! {
+fn socket_addr(host: String, port: Int) -[Net, Time.Wait]> SocketAddr NetError! {
     if !valid_host_text(host) -> return Err(net_err("socket_addr", host, "socket host is empty or contains invalid bytes"))
     if !valid_port(port) -> return Err(net_err("socket_addr", host, "port must be in 0..=65535"))
     host_text := host
