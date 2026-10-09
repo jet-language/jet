@@ -19,7 +19,7 @@ core.numeric rem_euclid Panic
 
 struct PreludeRouteEffect { module_name: String, member: String, effect_kind: Effect }
 
-PRELUDE_ROUTE_EFFECTS :: prep {
+fn prelude_route_effect_rows() -> [PreludeRouteEffect] Never! {
     rows := [PreludeRouteEffect]{}
     loop line in PRELUDE_ROUTE_EFFECT_ROWS.lines() {
         if line == "" -> next
@@ -36,7 +36,7 @@ PRELUDE_ROUTE_EFFECTS :: prep {
 }
 
 fn prelude_route_effect(module_name: String, member: String) -> Effect? Never! {
-    loop row in PRELUDE_ROUTE_EFFECTS {
+    loop row in prelude_route_effect_rows() {
         if row.module_name == module_name && row.member == member -> return Val(row.effect_kind)
     }
     None

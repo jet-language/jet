@@ -48,7 +48,9 @@ fn ast_comptime_value_json(value: CtValue) -> String comptime_encoding.EncodingE
         .Map(entries) -> {
             parts := [String]{}
             loop entry in entries {
-                key :: if entry.key == .Str(text) -> text else -> return Err(ast_comptime_json_unsupported("JSON cannot encode non-text map keys"))
+                key :: if entry.key == .Str(text) -> text else -> {
+                    return Err(ast_comptime_json_unsupported("JSON cannot encode non-text map keys"))
+                }
                 encoded :: ast_comptime_value_json(entry.value) ?? return Err(err)
                 &parts.push("{foundation_json_quote(key)}:{encoded}")
             }
