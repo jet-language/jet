@@ -7,8 +7,8 @@ package {
 fn run() {
     (sender, ch) :: channel<Int>(capacity: 8)
     loop i in 1..1000 {
-        dup :: ~sender
-        dup2 :: ~sender
+        dup :: sender.copy()
+        dup2 :: sender.copy()
         task dup.send(1)
     }
     total := 0

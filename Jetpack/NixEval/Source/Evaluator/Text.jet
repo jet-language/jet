@@ -190,7 +190,7 @@ fn nixeval_last_segment(text: String, separators: String) -> String Never! {
         }
         index -= 1
     }
-    ~text
+    text.copy()
 }
 
 fn nixeval_lowercase_ascii(text: String) -> String Never! {
@@ -202,7 +202,7 @@ fn nixeval_lowercase_ascii(text: String) -> String Never! {
             else -> &out.push(byte)
         }
     }
-    String.from_bytes(out) ?? ~text
+    String.from_bytes(out) ?? text.copy()
 }
 
 fn nixeval_contains_text(list: [String], text: String) -> Bool Never! {
@@ -214,7 +214,7 @@ fn nixeval_contains_text(list: [String], text: String) -> Bool Never! {
 
 // Sort and remove adjacent duplicates (Rust `sort(); dedup()`).
 fn nixeval_sorted_unique(values: [String]) -> [String] Never! {
-    sorted := ~values
+    sorted := values.copy()
     &sorted.sort()
     out := [String]{}
     loop value in sorted {
@@ -227,7 +227,7 @@ fn nixeval_sorted_unique(values: [String]) -> [String] Never! {
 // attribute sets, JSON objects and the reference `BTreeMap`s are key-ordered,
 // so key iteration goes through `nixeval_sorted(map.keys().to_list())`.
 fn nixeval_sorted(names: [String]) -> [String] Never! {
-    sorted := ~names
+    sorted := names.copy()
     &sorted.sort()
     sorted
 }

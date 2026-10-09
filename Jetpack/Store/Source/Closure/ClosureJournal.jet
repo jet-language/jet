@@ -145,7 +145,7 @@ pub fn store_apply_entry(graph: &ClosureGraph, entry: ClosureJournalEntry) Store
         }
     }
     if entry.kind == ClosureJournalKind.Snapshot -> graph = ClosureGraph.empty()
-    deleted := ~graph.deleted_records
+    deleted := graph.deleted_records.copy()
     loop id in entry.deleted_records {
         &graph.records.remove(id).drop("a tombstone may name an already removed record")
         &deleted.push(id)
@@ -503,13 +503,13 @@ fn store_render_journal_entry(entry: ClosureJournalEntry) -> String Never! {
         .Snapshot -> "kind\tsnapshot\n"
     }
     out := "{STORE_JOURNAL_HEADER}\n{kind}"
-    objects := ~entry.objects
+    objects := entry.objects.copy()
     &objects.sort_by(object -> object.digest)
     loop object in objects {
         external :: if object.external -> "1" else -> "0"
         out = "{out}object\t{store_hex_text(object.digest)}\t{store_hex_text(object.path)}\t{external}\n"
     }
-    records := ~entry.records
+    records := entry.records.copy()
     &records.sort_by(record -> record.id)
     loop record in records {
         id :: store_hex_text(record.id)
@@ -517,7 +517,7 @@ fn store_render_journal_entry(entry: ClosureJournalEntry) -> String Never! {
         loop name in store_sorted_keys(record.outputs) -> out = "{out}output\t{id}\t{store_hex_text(name)}\t{store_hex_text(record.outputs[name])}\n"
         loop reference in record.references -> out = "{out}reference\t{id}\t{store_hex_text(reference)}\n"
     }
-    deleted := ~entry.deleted_records
+    deleted := entry.deleted_records.copy()
     &deleted.sort()
     loop id in deleted -> out = "{out}delete\t{store_hex_text(id)}\n"
     out
@@ -567,7 +567,7 @@ pub fn store_parse_journal_entry(raw: String) -> ClosureJournalEntry StoreError!
             field_kind == "reference" && fields.len() == 3 -> {
                 id :: store_journal_unhex(fields[1])
                 record := records.get(id) ?? return Err(StoreError.Other("reference precedes record `{id}`"))
-                references := ~record.references
+                references := record.references.copy()
                 &references.push(store_journal_unhex(fields[2]))
                 record.references = store_sorted_unique(references)
                 records[id] = record

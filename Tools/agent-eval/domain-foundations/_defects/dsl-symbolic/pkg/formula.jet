@@ -13,7 +13,7 @@ pub struct RecalcResult {
 
 fn eval(cell: CalcCell, values: [String:Int]) -> Int {
     if cell.kind == 0 -> return cell.value
-    return (values.get(~cell.left) ?? 0) + (values.get(~cell.right) ?? 0)
+    return (values.get(cell.left.copy()) ?? 0) + (values.get(cell.right.copy()) ?? 0)
 }
 
 pub fn recalc(cells: [String:CalcCell], previous: [String:Int], changed: String) -> RecalcResult {
@@ -23,12 +23,12 @@ pub fn recalc(cells: [String:CalcCell], previous: [String:Int], changed: String)
     dirty[changed] = true
     order :: [String]{"a", "one", "b", "total", "unrelated"}
     loop name in order {
-        if dirty.get(~name) ?? false {
-            if cells.get(~name) == .Val(cell) {
-                values[name] = eval(~cell, values)
+        if dirty.get(name.copy()) ?? false {
+            if cells.get(name.copy()) == .Val(cell) {
+                values[name] = eval(cell.copy(), values)
                 &touched.push(name)
                 loop target in order {
-                    if cells.get(~target) == .Val(next) {
+                    if cells.get(target.copy()) == .Val(next) {
                         if next.deps.contains(name) -> dirty[target] = true
                     }
                 }

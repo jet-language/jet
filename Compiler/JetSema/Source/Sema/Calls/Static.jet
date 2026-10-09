@@ -268,7 +268,7 @@ fn sema_call_static_rewrite_value(value: &TExpr, target: SemaStaticMethodTarget)
                 .ExprStmt(call, statement_span) -> {
                     updated_call := call
                     if !sema_call_static_rewrite_value(&updated_call, target) -> return false
-                    updated_statements := ~statements
+                    updated_statements := statements.copy()
                     updated_statements[last] = TStmt.ExprStmt{value: updated_call, span: statement_span}
                     value.kind = TExprKind.InlineBlock{body: updated_statements}
                     return true

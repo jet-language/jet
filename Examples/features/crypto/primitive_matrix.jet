@@ -102,7 +102,7 @@ fn run() {
     print("-- envelopes")
     plaintext :: "matrix".bytes()
     aad :: "aad".bytes()
-    sealed :: crypto.seal([crypto.X25519PublicKey]{~alice_public}, plaintext, aad) ?? return
+    sealed :: crypto.seal([crypto.X25519PublicKey]{alice_public.copy()}, plaintext, aad) ?? return
     recipient_text :: alice.public_key().text()
     print("x25519_recipient_text {recipient_text}")
     print("x25519_recipient_roundtrip {(crypto.X25519PublicKey.from_text(recipient_text) ?? crypto.X25519PublicKey{bytes: [U8]{}}).bytes == alice.public_key().bytes}")

@@ -106,7 +106,7 @@ fn fx_mono_outer() -> MIRFunction Never! {
     fx_mono_template("outer", b, t)
 }
 
-// fn identity<T>(x: T) -> T { ~x }
+// fn identity<T>(x: T) -> T { x.copy() }
 // fn run() { a :: 7; s :: "mono"; r :: Record{label:"owned",number:9}
 //   print(identity(a)); _ :: identity(a); print(identity(s))
 //   returned :: identity(r); print(returned.label); print(returned.number) }
@@ -183,7 +183,7 @@ fn fx_mono_print_pair(b: &FxBuilder, pair: MIRValueID, elem: MIRType) Never! {
 // fn rename(&s: String) { s = "changed" }
 // fn run() { i :: Pair<Int>{first:1,second:2}; print(i.first); print(i.second)
 //   s :: Pair<String>{first:"left",second:"right"}; print(s.first); print(s.second)
-//   duplicate := ~s; rename(&duplicate.second)
+//   duplicate := s.copy(); rename(&duplicate.second)
 //   print(s.first); print(duplicate.second) }
 // The computed member occupies no slot between the two stored fields.
 // expect-stdout mono-generic-struct: "1\n2\nleft\nright\nleft\nchanged\n"
@@ -264,9 +264,9 @@ fn fx_mono_set_method() -> MIRFunction Never! {
     f
 }
 
-// impl<T> Pair<T> { fn first_value(self) -> T { ~self.first }
-//   fn choose<U>(self, x: U) -> U { ~x }
-//   fn set_first(&self, x: T) { self.first = ~x } }
+// impl<T> Pair<T> { fn first_value(self) -> T { self.first.copy() }
+//   fn choose<U>(self, x: U) -> U { x.copy() }
+//   fn set_first(&self, x: T) { self.first = x.copy() } }
 // fn run() { i := Pair<Int>{first:3,second:4}; s := Pair<String>{first:"owner",second:"tail"}
 //   print(Pair<Int>.first_value(i)); print(s.first_value())
 //   print(i.choose<String>("independent")); print(s.choose<Int>(8))
@@ -343,9 +343,9 @@ fn fx_mono_recursive_template(name: String, next: String) -> MIRFunction Never! 
     fx_mono_template(name, b, t)
 }
 
-// fn recur<T>(x:T,n:Int)->T { if n == 0 -> ~x else -> recur<T>(x,n-1) }
-// fn even<T>(x:T,n:Int)->T { if n == 0 -> ~x else -> odd<T>(x,n-1) }
-// fn odd<T>(x:T,n:Int)->T { if n == 0 -> ~x else -> even<T>(x,n-1) }
+// fn recur<T>(x:T,n:Int)->T { if n == 0 -> x.copy() else -> recur<T>(x,n-1) }
+// fn even<T>(x:T,n:Int)->T { if n == 0 -> x.copy() else -> odd<T>(x,n-1) }
+// fn odd<T>(x:T,n:Int)->T { if n == 0 -> x.copy() else -> even<T>(x,n-1) }
 // fn unused_captured<T>() { /* never reached: never instantiated */ }
 // fn run() { print(recur<Int>(13,3)); print(even<String>("mutual",4)) }
 // expect-stdout mono-recursive: "13\nmutual\n"
@@ -473,7 +473,7 @@ fn fx_mono_render() -> MIRProgram Never! {
     p
 }
 
-// Structural-only: impl<T> Pair<T> { fn inventory<U>(self, x:T)->T { ~x } }
+// Structural-only: impl<T> Pair<T> { fn inventory<U>(self, x:T)->T { x.copy() } }
 // carrying failure/coercion/host/hardware/data metadata. Execution of those
 // routes is not O0's; every type-bearing row must still be substituted.
 // type GenericAlias<T> = T; distinct GenericDistinct<T> = T

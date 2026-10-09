@@ -2422,7 +2422,7 @@ fn run() {
     }
     print(total)
     values :: [10, 20, 30, 40, 50, 60]
-    print(~values[copied])
+    print(values[copied].copy())
     band = 7..9
     print(band)
 }
@@ -2465,7 +2465,7 @@ fn run() {
     }
     print(total)
     values := [10, 20, 30, 40, 50, 60]
-    print(~values[band])
+    print(values[band].copy())
     edit :: &values[band]
     edit[0] = 99
     print(values)
@@ -2996,7 +2996,7 @@ derive T.Access {
         return @name<@param>{ value: value }
     }
     fn marker() -> Int { 17 }
-    fn get_value(self) -> @param { ~self.value }
+    fn get_value(self) -> @param { self.value.copy() }
     fn type_name(self) -> String { T.$name }
 }
 
@@ -3005,7 +3005,7 @@ derive T.NumericAccess {
     param :: info.type_params[0].name
     fn replace(&self, value: ^@param) -> @param {
         self.value = value
-        return ~self.value
+        return self.value.copy()
     }
     fn plus(self, rhs: @param) -> @param { self.value + rhs }
     fn equal_to(self, rhs: @param) -> Bool { self.value == rhs }
@@ -3121,7 +3121,7 @@ fn nested_generic_user_derive_reaches_resident_jit() {
 derive T.Access {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn get_value(self) -> @param { ~self.value }
+    fn get_value(self) -> @param { self.value.copy() }
 }
 
 #Access
@@ -3131,7 +3131,7 @@ struct Outer<T: Printable> {
     value: T
 
     fn read(self) -> T {
-        inner := Inner<T>{ value: ~self.value }
+        inner := Inner<T>{ value: self.value.copy() }
         return inner.get_value()
     }
 }
@@ -3154,9 +3154,9 @@ fn unused_expanding_generic_body_does_not_expand_the_instantiation_worklist() {
 struct Grow<T: Printable> {
     value: T
 
-    fn read(self) -> T { return ~self.value }
+    fn read(self) -> T { return self.value.copy() }
     fn unused(self) -> Int {
-        nested := Grow<[T]>{ value: [~self.value] }
+        nested := Grow<[T]>{ value: [self.value.copy()] }
         return nested.unused()
     }
 }
@@ -4229,7 +4229,7 @@ fn u8_id(value: U8) -> U8 { return value }
 fn u16_id(value: U16) -> U16 { return value }
 fn u32_id(value: U32) -> U32 { return value }
 fn u64_id(value: U64) -> U64 { return value }
-fn pass_u64(value: U64?) -> (U64?) { return ~value }
+fn pass_u64(value: U64?) -> (U64?) { return value.copy() }
 
 fn run() {
     print(i8_id(I8{-8}))

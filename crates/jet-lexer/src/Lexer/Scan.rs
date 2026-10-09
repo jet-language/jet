@@ -714,8 +714,9 @@ impl<'a> Lexer<'a> {
                 '%' => toks.push(simple(self, TokKind::Percent, 1)),
                 '^' if next == '=' => toks.push(simple(self, TokKind::CaretEq, 2)),
                 '^' => toks.push(simple(self, TokKind::Caret, 1)),
-                // D-SHAPE-COPY1=A: `~` is the copy sigil. `~~` is longest-match
-                // lexed first so the parser can still emit the retired
+                // D-COPY-WORD1=A: a lone `~` is the retired copy sigil, lexed
+                // so the parser can teach E0941. `~~` is longest-match lexed
+                // first so the parser can still emit the retired
                 // external-method connector diagnostic (E0325).
                 '~' if next == '~' => toks.push(simple(self, TokKind::TildeTilde, 2)),
                 // D-XORSPELL1=A: `~|=` before `~|` before `~` (longest match).

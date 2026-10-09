@@ -68,8 +68,8 @@ pub fn pkg_path_file_name(path: String) -> String Never! {
 }
 
 pub fn pkg_path_join(base: String, tail: String) -> String Never! {
-    if tail.starts_with("/") -> return ~tail
-    if base == "" -> return ~tail
+    if tail.starts_with("/") -> return tail.copy()
+    if base == "" -> return tail.copy()
     if base.ends_with("/") -> return "{base}{tail}"
     "{base}/{tail}"
 }
@@ -130,7 +130,7 @@ fn pkg_import_target_paths(root: String, importer: String, kind: ImportKind) -> 
 pub fn pkg_path_without_extension(path: String) -> String Never! {
     name :: pkg_path_file_name(path)
     dot :: name.cut_last(".") ?? return path
-    if dot.before == "" -> return ~path
+    if dot.before == "" -> return path.copy()
     stem :: pkg_binder_slice(path, 0, path.bytes().len() - name.bytes().len())
     "{stem}{dot.before}"
 }
@@ -159,7 +159,7 @@ pub fn pkg_reachable_import_module_targets(root: String, wanted: String, sources
     visited := [String]{}
     targets := [String]{}
     loop pending.len() > 0 {
-        path :: ~pending[pending.len() - 1]
+        path :: pending[pending.len() - 1].copy()
         pending = pending[0..<pending.len() - 1]
         normalized :: pkg_normalize_discovery_path(path)
         if visited.contains(normalized) -> next
@@ -194,7 +194,7 @@ pub fn pkg_imported_source_paths(root: String, source: ParsedSource, sources: [P
     visited := [String]{}
     imported := [String]{}
     loop pending.len() > 0 {
-        path :: ~pending[pending.len() - 1]
+        path :: pending[pending.len() - 1].copy()
         pending = pending[0..<pending.len() - 1]
         normalized :: pkg_normalize_discovery_path(path)
         if visited.contains(normalized) -> next

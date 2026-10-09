@@ -1390,7 +1390,7 @@ struct Widget {
     title: String
 
     fn label(self) -> String {
-        ~self.title
+        self.title.copy()
     }
 }
 
@@ -1445,7 +1445,7 @@ struct Client {
 
 impl Client {
     fn connect(self, host: String, /, timeout seconds: Int{30}, *, tls enabled: Bool{true}, rest: ...String) -> String {
-        ~host
+        host.copy()
     }
 }
 

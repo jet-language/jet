@@ -699,7 +699,7 @@ fn sema_registration_function_identity_key(module_identity: String, owner_key: S
 }
 
 fn sema_registration_generic_identity(owner_key: String, params: [SemaRegistrationGenericParam]) -> String Never! {
-    if params.len() == 0 -> return ~owner_key
+    if params.len() == 0 -> return owner_key.copy()
     parts :: loop parameter in params -> {
         bound :: parameter.bounds.join("+")
         "{parameter.index}:{parameter.name}[{bound}]"
@@ -1021,7 +1021,7 @@ pub fn sema_registration_callable_declaration(graph: SemaRegistrationGraph, targ
 // buckets. Rows only append, so a key already present keeps its earlier row.
 pub fn sema_registration_index_nominal_rows(graph: &SemaRegistrationGraph, module_index: Int, first_row: Int) Never! {
     loop row in first_row..<graph.modules[module_index].nominals.len() {
-        key :: ~graph.modules[module_index].nominals[row].symbol.id.key
+        key :: graph.modules[module_index].nominals[row].symbol.id.key.copy()
         if graph.nominal_symbol_rows.get(key) == None -> &graph.nominal_symbol_rows.add(key, SemaRegistrationRowRef{module_index: module_index, row: row}).drop("checked absent above")
     }
     sema_registration_index_nominal_names(&graph, module_index, first_row)
@@ -1086,7 +1086,7 @@ fn sema_registration_index_callables(graph: &SemaRegistrationGraph) Never! {
     loop module_index in 0..<graph.modules.len() {
         sema_registration_index_nominal_names(&graph, module_index, 0)
         loop row in 0..<graph.modules[module_index].impls.len() {
-            name :: ~graph.modules[module_index].impls[row].target_type_name
+            name :: graph.modules[module_index].impls[row].target_type_name.copy()
             reference :: SemaRegistrationRowRef{module_index: module_index, row: row}
             if graph.impl_row_slots.get(name) == .Val(slot) {
                 &graph.impl_row_buckets[slot].push(reference)
@@ -2084,7 +2084,7 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // copied row would carry its whole source declaration).
     loop nominal_index in 0..<module_row.nominals.len() {
         if module_row.nominals[nominal_index].kind != SemaRegistrationNominalKind.ForeignHandle -> next
-        source :: ~module_row.nominals[nominal_index].source
+        source :: module_row.nominals[nominal_index].source.copy()
         if source == .ForeignHandle(facts) {
             updated_facts := facts
             updated_facts.close_function_key = sema_registration_foreign_handle_close_key(module_row, updated_facts)
@@ -2101,7 +2101,7 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // Root exports are retained separately so private declarations never become
     // cross-module candidates merely because their name is known.
     loop symbol_index in 0..<module_row.symbols.len() {
-        symbol :: ~module_row.symbols[symbol_index]
+        symbol :: module_row.symbols[symbol_index].copy()
         if symbol.visibility > 0 {
             declaration :: sema_registration_declaration_for_symbol(module_row, symbol)
             &module_row.exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol, declaration: declaration, source_module_identity: module_row.module_identity, visibility: symbol.visibility})
@@ -2142,7 +2142,7 @@ fn sema_registration_module_name(graph: SemaRegistrationGraph, identity: String)
 fn sema_registration_push_graph_diagnostic(graph: &SemaRegistrationGraph, module_index: Int, diagnostic: Diagnostic) Never! {
     if {
         module_index >= 0 && module_index < graph.modules.len() -> {
-            &graph.diagnostics.push(sema_diagnostic_with_source_location(~diagnostic, graph.modules[module_index].source_segments))
+            &graph.diagnostics.push(sema_diagnostic_with_source_location(diagnostic.copy(), graph.modules[module_index].source_segments))
         }
         else -> {
             &graph.diagnostics.push(diagnostic)

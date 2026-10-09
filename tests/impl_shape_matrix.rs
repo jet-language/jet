@@ -217,7 +217,7 @@ fn assert_matrix_cells() {
                 row.owner
             );
         }
-        let print_call = format!("print(~{})", row.binding);
+        let print_call = format!("print({}.copy())", row.binding);
         assert_eq!(
             SOURCE.matches(print_call.as_str()).count(),
             1,
@@ -225,8 +225,13 @@ fn assert_matrix_cells() {
             row.owner
         );
     }
+    let direct_print_cells = SOURCE
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("print(") && line.ends_with(".copy())"))
+        .count();
     assert_eq!(
-        SOURCE.matches("print(~").count(),
+        direct_print_cells,
         ROWS.len(),
         "source must have one direct print cell per row"
     );

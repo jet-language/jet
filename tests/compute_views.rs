@@ -48,7 +48,7 @@ fn tensor_mutable_window_write_uses_shared_prelude_policy() {
 use core.compute as compute
 fn run() {
     tensor := compute.from_list([1.0, 2.0, 3.0, 4.0]) ?? panic("tensor")
-        copied :: ~tensor[1..2]
+        copied :: tensor[1..2].copy()
     edit :: &tensor[1..2]
     edit[0] = 9.0
     print(compute.to_list(copied))
@@ -82,13 +82,13 @@ struct Holder { value: Tensor }
 
 fn run() {
     tensor := compute.from_list([1.0, 2.0]) ?? panic("tensor")
-    copied :: ~tensor
+    copied :: tensor.copy()
     copied_edit :: &copied[0..1]
     copied_edit[0] = 9.0
     print(compute.to_list(tensor))
     print(compute.to_list(copied))
 
-    holder := Holder{ value: ~tensor }
+    holder := Holder{ value: tensor.copy() }
     aliased :: holder.value
     aliased_edit :: &aliased[0..1]
     aliased_edit[0] = 8.0
@@ -159,7 +159,7 @@ fn tensor_slice_is_represented_by_the_compute_prelude() {
 use core.compute as compute
 fn run() {
     tensor :: compute.from_list([1.0, 2.0]) ?? panic("tensor")
-        read :: ~tensor[0..1]
+        read :: tensor[0..1].copy()
     print(compute.to_list(read))
 }
 "#;
@@ -177,7 +177,7 @@ use core.compute as compute
 fn run() {
     tensor := compute.from_list([1.0, 2.0, 3.0, 4.0]) ?? panic("tensor")
     window :: 1..2
-        copied :: ~tensor[window]
+        copied :: tensor[window].copy()
     edit :: &tensor[window]
     edit[1] = 8.0
     print(compute.to_list(copied))

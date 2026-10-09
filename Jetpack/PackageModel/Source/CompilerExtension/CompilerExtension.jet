@@ -567,7 +567,7 @@ pub struct ExtensionSession {
         if self.session_phase != ExtensionSessionPhase.Loaded -> return Err(ExtensionProtocolError.new("stage_response requires a Loaded session"))
         if self.committed -> return Err(ExtensionProtocolError.new("session already committed; open a new session"))
         response :: AnalyzeResponse.decode_and_validate(snapshot, bytes)
-        self.staged_response = Val(~response)
+        self.staged_response = Val(response.copy())
         Ok(response)
     }
 
@@ -580,7 +580,7 @@ pub struct ExtensionSession {
     // The host's explicit accept of staged output.
     fn accept_staged(&self) -> AnalyzeResponse ExtensionProtocolError! {
         if self.session_phase != ExtensionSessionPhase.Loaded -> return Err(ExtensionProtocolError.new("accept requires Loaded session"))
-        staged :: ~self.staged_response ?? return Err(ExtensionProtocolError.new("nothing staged to accept"))
+        staged :: self.staged_response.copy() ?? return Err(ExtensionProtocolError.new("nothing staged to accept"))
         self.staged_response = None
         self.committed = true
         Ok(staged)
@@ -590,7 +590,7 @@ pub struct ExtensionSession {
     // returning what the closer reports (false when no handle was live).
     // Staged output is cleared and the session ends Closed.
     fn close(&self, close_guest: fn(Int) -> Bool Never!) -> Bool Never! {
-        live :: ~self.handle
+        live :: self.handle.copy()
         self.handle = None
         self.staged_response = None
         self.committed = false
@@ -663,7 +663,7 @@ pub fn pkg_extension_message_exposes_rustc(message: String) -> Bool Never! {
 // A failure message with any leaked internal diagnostic replaced.
 fn pkg_extension_public_error(error: ExtensionProtocolError) -> ExtensionProtocolError Never! {
     if pkg_extension_message_exposes_rustc(error.message) -> return ExtensionProtocolError.new(EXTENSION_INTERNAL_FAILURE)
-    ~error
+    error.copy()
 }
 
 // Load, analyze, validate and stage, accept, and close through one supplied

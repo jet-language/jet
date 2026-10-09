@@ -113,7 +113,7 @@ pub fn count(text: String, needle: String) -> Int Never! {
 }
 
 pub fn replace(text: String, old: String, new: String, count: Int) -> String Never! {
-    if old.bytes().len() == 0 -> return ~text
+    if old.bytes().len() == 0 -> return text.copy()
     out := ""
     i := 0
     done := 0
@@ -150,14 +150,14 @@ pub fn ends_with(text: String, suffix: String) -> Bool Never! {
 
 pub fn strip_prefix(text: String, prefix: String) -> String Never! {
     if starts_with(text, prefix) -> return slice_str(text, prefix.bytes().len(), text.bytes().len())
-    return ~text
+    return text.copy()
 }
 
 pub fn strip_suffix(text: String, suffix: String) -> String Never! {
     if ends_with(text, suffix) {
         return slice_str(text, 0, text.bytes().len() - suffix.bytes().len())
     }
-    return ~text
+    return text.copy()
 }
 
 pub fn parse_int(text: String) -> Int? Never! { parse_int_base(text, 10) }
@@ -371,21 +371,21 @@ pub fn strip(text: String) -> String Never! { lstrip(rstrip(text)) }
 pub fn ljust(text: String, width: Int, fill: String) -> String Never! {
     pad :: fill_to(fill)
     n := width - text.bytes().len()
-    if n <= 0 -> return ~text
+    if n <= 0 -> return text.copy()
     "{text}{repeat_char(pad, n)}"
 }
 
 pub fn rjust(text: String, width: Int, fill: String) -> String Never! {
     pad :: fill_to(fill)
     n := width - text.bytes().len()
-    if n <= 0 -> return ~text
+    if n <= 0 -> return text.copy()
     "{repeat_char(pad, n)}{text}"
 }
 
 pub fn center(text: String, width: Int, fill: String) -> String Never! {
     pad :: fill_to(fill)
     n := width - text.bytes().len()
-    if n <= 0 -> return ~text
+    if n <= 0 -> return text.copy()
     left :: n /% 2
     "{repeat_char(pad, left)}{text}{repeat_char(pad, n - left)}"
 }
@@ -399,13 +399,13 @@ pub fn zfill(text: String, width: Int) -> String Never! {
         rest = slice_b(raw, 1, raw.len())
     }
     n := width - text.bytes().len()
-    if n <= 0 -> return ~text
+    if n <= 0 -> return text.copy()
     "{sign}{repeat_char("0", n)}{rest}"
 }
 
 pub fn capitalize(text: String) -> String Never! {
     raw :: text.bytes()
-    if raw.len() == 0 -> return ~text
+    if raw.len() == 0 -> return text.copy()
     first :: ascii_case(raw[0], true)
     out := [U8]{first}
     i := 1

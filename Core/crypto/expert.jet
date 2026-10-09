@@ -346,13 +346,13 @@ fn all_zero(bytes: [U8]) -> Bool Never! {
     diff == U8{0}
 }
 
-pub fn secret_bytes(secret: Secret) -> [U8] Never! { ~secret.bytes }
+pub fn secret_bytes(secret: Secret) -> [U8] Never! { secret.bytes.copy() }
 
-pub fn shared_secret_bytes(secret: SharedSecret) -> [U8] Never! { ~secret.bytes }
+pub fn shared_secret_bytes(secret: SharedSecret) -> [U8] Never! { secret.bytes.copy() }
 
-pub fn signing_key_bytes(key: SigningKey) -> [U8] Never! { ~key.bytes }
+pub fn signing_key_bytes(key: SigningKey) -> [U8] Never! { key.bytes.copy() }
 
-pub fn x25519_secret_bytes(key: X25519SecretKey) -> [U8] Never! { ~key.bytes }
+pub fn x25519_secret_bytes(key: X25519SecretKey) -> [U8] Never! { key.bytes.copy() }
 
 fn open_v1_body(key: [U8], mode: U8, nonce: [U8], body: [U8]) -> [U8]? {
     if mode == (U8{1}) -> return chacha_poly_open(key, nonce, [U8]{}, body)

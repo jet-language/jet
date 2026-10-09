@@ -99,7 +99,7 @@ pub fn derivation_record_json(record: DerivationRecord) -> String Never! {
     "{{\"assumptions\":[{assumptions}],\"claim\":{derivation_record_quote(record.claim)},\"disposition\":{derivation_disposition_name(record.disposition)},\"id\":{derivation_record_quote(record.id)},\"identity\":{{\"build\":{derivation_record_quote(record.identity.build)},\"run\":{derivation_record_quote(record.identity.run)},\"source\":{derivation_record_quote(record.identity.source)},\"target\":{derivation_record_quote(record.identity.target)}}},\"method\":{derivation_method_name(record.method)},\"observation\":{observation},\"payload\":{payload},\"premises\":[{premises}],\"producer\":{derivation_record_quote(record.producer)},\"rule\":{derivation_record_quote(record.rule)},\"subject\":{derivation_record_quote(record.subject)}}}"
 }
 fn derivation_optional_payload_json(payload: DerivationPayload?, absent: String) -> String Never! {
-    value :: payload ?? return ~absent
+    value :: payload ?? return absent.copy()
     derivation_payload_json(value)
 }
 

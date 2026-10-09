@@ -43,7 +43,7 @@ pub fn repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModule
         if bytes[index] == (U8{10}) -> &lines.push(index + 1)
     }
     files :: program.source_files
-    checker :: sema_repl_session_new(graph, ~modules, source, root)
+    checker :: sema_repl_session_new(graph, modules.copy(), source, root)
     lowering :: jet_codegen_repl_session_new(root, ^functions, ^modules, ^program)
     initial :: jet_codegen_repl_initial_program(lowering)
     root_id := MIRFunctionID?{None}

@@ -27,7 +27,7 @@ pub fn next<T>(stream: &DataStream<T>) -> T? DataError! {
     if stream.cancelled -> return Err(stream_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
     if stream.index < 0 -> stream.index = 0
     if stream.index >= stream.items.len() -> return Ok(None)
-    value :: ~stream.items[stream.index]
+    value :: stream.items[stream.index].copy()
     stream.index = stream.index + 1
     Ok(Val(value))
 }
@@ -37,7 +37,7 @@ pub fn collect<T>(stream: &DataStream<T>) -> [T] DataError! {
     out := [T]{}
     if stream.index < 0 -> stream.index = 0
     loop stream.index < stream.items.len() {
-        &out.push(~stream.items[stream.index])
+        &out.push(stream.items[stream.index].copy())
         stream.index = stream.index + 1
     }
     Ok(out)
@@ -63,7 +63,7 @@ pub fn take_n<T>(stream: &DataStream<T>, count: Int) -> [T] DataError! {
     available := stream.items.len() - stream.index
     if remaining > available -> remaining = available
     loop remaining > 0 {
-        &out.push(~stream.items[stream.index])
+        &out.push(stream.items[stream.index].copy())
         stream.index = stream.index + 1
         remaining = remaining - 1
     }

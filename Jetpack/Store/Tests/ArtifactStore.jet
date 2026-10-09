@@ -117,8 +117,8 @@ fn store_artifact_test_host_limit(store: ArtifactStore) -[FS]> Int? Never! {
     root :: store_artifact_test_root("concurrent")
     store :: store_artifact_test_open(ArtifactStoreConfig.new(root).with_cap_bytes(1024 * 1024).with_reserve_bytes(0).with_lock_wait(time.duration_seconds(3)))
     lock :: store.acquire_lock() ?? panic("test lock")
-    left_store :: ~store
-    right_store :: ~store
+    left_store :: store.copy()
+    right_store :: store.copy()
     left :: task ^left_store { store_artifact_test_published(left_store, "left") }
     right :: task ^right_store { store_artifact_test_published(right_store, "right") }
     time.sleep(time.duration_ms(2200))

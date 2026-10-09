@@ -1,7 +1,7 @@
 // D-CALLSITE-MARK1=A (amends D-COPY-DEFAULT1=A at call arguments): an
 // unmarked argument to a take (`^T`) parameter moves when the call is the
 // name's last use, exactly as `^name` would. A use that is not the last needs
-// the explicit copy `~name` (E0209 teaches it). An edit keeps its `&`.
+// the explicit copy `name.copy()` (E0209 teaches it). An edit keeps its `&`.
 struct Order {
     id: Int
     items: [String]
@@ -30,7 +30,7 @@ fn run() {
     print(archive(order))
 
     kept :: Order{id: 8, items: ["lamp"]}
-    print(archive(~kept))
+    print(archive(kept.copy()))
     print("kept still holds {kept.items.len()} item")
 
     loop round in 0..<3 {
@@ -41,7 +41,7 @@ fn run() {
     // One name in two slots of one call has no last use there: the take
     // slot writes `^` next to the copy.
     name :: "crate"
-    print(label(~name, ^name))
+    print(label(name.copy(), ^name))
 
     score := 41
     bump(&score)

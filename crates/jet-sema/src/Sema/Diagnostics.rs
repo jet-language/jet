@@ -460,11 +460,10 @@ pub(crate) fn aliasing_while_mut(name: &str, span: Span) -> Diagnostic {
         ),
         "while something is being changed through the write-access marker `&`, nobody else may be looking at it".to_string(),
         format!(
-            "pass the write-access marker `&` (`{}{}`) only once, or copy first with `{}{}`",
+            "pass the write-access marker `&` (`{}{}`) only once, or copy first with `{}`",
             Syntax::SIGIL_WRITE,
             name,
-            Syntax::SIGIL_COPY,
-            name
+            Syntax::copy_call(name)
         ),
         Some(span),
     )
@@ -479,10 +478,9 @@ pub(crate) fn aliasing_mut_after_read(name: &str, span: Span) -> Diagnostic {
         ),
         "while something is being looked at, nobody else may be changing it".to_string(),
         format!(
-            "drop the extra use of `{}`, or copy first with `{}{}`",
+            "drop the extra use of `{}`, or copy first with `{}`",
             name,
-            Syntax::SIGIL_COPY,
-            name
+            Syntax::copy_call(name)
         ),
         Some(span),
     )
@@ -498,9 +496,8 @@ pub(crate) fn aliasing_take_while_lent(name: &str, callee: &str, span: Span) -> 
             "an earlier argument lets `{callee}` read `{name}` for the whole call, so this argument can't hand the same value over"
         ),
         format!(
-            "pass a copy to one of the two parameters with the copy marker `{}` (`{}{name}`)",
-            Syntax::SIGIL_COPY,
-            Syntax::SIGIL_COPY,
+            "pass a copy to one of the two parameters with `{}`",
+            Syntax::copy_call(name),
         ),
         Some(span),
     )

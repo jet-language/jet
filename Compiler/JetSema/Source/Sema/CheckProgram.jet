@@ -937,8 +937,8 @@ struct SemaFunctionResult {
 fn sema_function_compute_facts(function_key: String, context: SemaCheckContext) -> SemaComputeFunctionFacts Never! {
     SemaComputeFunctionFacts{
         function_key: function_key,
-        compute_calls: ~context.compute_calls,
-        autodiff_obligations: ~context.autodiff_obligations,
+        compute_calls: context.compute_calls.copy(),
+        autodiff_obligations: context.autodiff_obligations.copy(),
         autodiff_safe_panic: context.autodiff_safe_panic,
         autodiff_unsafe_panic: context.autodiff_unsafe_panic,
     }
@@ -948,10 +948,10 @@ fn sema_function_failure_facts(function_key: String, context: SemaCheckContext) 
     Val(SemaFunctionFailureFacts{
         function_key: function_key,
         direct: context.failure_direct_source,
-        edges: ~context.failure_edges,
-        union_members: ~context.failure_union_members,
-        union_cases: ~context.failure_union_cases,
-        union_edges: ~context.failure_union_edges,
+        edges: context.failure_edges.copy(),
+        union_members: context.failure_union_members.copy(),
+        union_cases: context.failure_union_cases.copy(),
+        union_edges: context.failure_union_edges.copy(),
         union_general: context.failure_union_general || context.failure_direct_source,
     })
 }
@@ -961,12 +961,12 @@ fn sema_function_check_incomplete(function_key: String, context: SemaCheckContex
         value: None,
         complete: false,
         exact_int_reachable: context.exact_int_reachable,
-        copy_events: ~context.copy_events,
+        copy_events: context.copy_events.copy(),
         hardware_use: sema_hardware_use_snapshot(context.hardware_use),
-        comptime_body_sources: ~context.comptime_body_sources,
+        comptime_body_sources: context.comptime_body_sources.copy(),
         compute_facts: sema_function_compute_facts(function_key, context),
         failure: sema_function_failure_facts(function_key, context),
-        incomplete_reasons: ~context.incomplete_reasons,
+        incomplete_reasons: context.incomplete_reasons.copy(),
     }
 }
 
@@ -1040,7 +1040,7 @@ fn sema_function_view_contract_for_slot(map: ViewProvenanceMap, slot: [String]) 
 
 fn sema_function_return_view_provenance(func: Func, inferred: ViewProvenanceMap?, diagnostics: &[Diagnostic], complete: &Bool) -> ViewProvenanceMap? {
     declared_option := func.declared_return_view_provenance
-    if declared_option == None -> return ~inferred
+    if declared_option == None -> return inferred.copy()
     declared :: declared_option ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
     if inferred != None {
         inferred_map :: inferred
@@ -1441,11 +1441,11 @@ fn sema_function_normalize_owner_type(graph: SemaRegistrationGraph, owner_type: 
         .Named(name) -> {
             nominal_row :: sema_type_resolve_nominal_row(graph, owner_type, caller_module_identity) ?? return owner_type
             nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-            if nominal.generic_params.len() == 0 -> return ~owner_type
+            if nominal.generic_params.len() == 0 -> return owner_type.copy()
             args :: loop parameter in nominal.generic_params -> Type.Named{name: parameter.name}
             return Type.Apply{name: name, args: args}
         }
-        else -> return ~owner_type
+        else -> return owner_type.copy()
     }
 }
 
@@ -1522,7 +1522,7 @@ fn sema_function_kind_owner_type(function_kind: TFuncKind) -> Type? {
 // D-COPY-DEFAULT1=A: an unmarked use of a value moves it only when it is the
 // last use. A check records each unmarked move site that a later use reached;
 // the function is then checked again with those sites known, where each one
-// checks as the copy `~name` and leaves its source usable. A site whose type
+// checks as the copy `name.copy()` and leaves its source usable. A site whose type
 // does not copy stays a move, so its later use keeps E0121.
 // The caller's environment and module scope table are borrowed, not copied:
 // the function's generic parameters and name are set on the environment for
@@ -1886,15 +1886,15 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         memo_field: None,
         uses_stack_sentry: false,
         kind: function_kind,
-        origin_facts: ~context.origin_facts,
+        origin_facts: context.origin_facts.copy(),
     }
     SemaFunctionResult{
         value: Val(tir),
         complete: true,
         exact_int_reachable: context.exact_int_reachable,
-        copy_events: ~context.copy_events,
+        copy_events: context.copy_events.copy(),
         hardware_use: sema_hardware_use_snapshot(context.hardware_use),
-        comptime_body_sources: ~context.comptime_body_sources,
+        comptime_body_sources: context.comptime_body_sources.copy(),
         compute_facts: sema_function_compute_facts(owner_id.key, context),
         failure: sema_function_failure_facts(owner_id.key, context),
     }
@@ -2208,7 +2208,7 @@ pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &
         comptime_body_sources: checked.comptime_body_sources,
         compute_facts: checked.compute_facts,
         exact_int_reachable: checked.exact_int_reachable,
-        copy_events: ~checked.copy_events,
+        copy_events: checked.copy_events.copy(),
         diagnostics: diagnostics,
         complete: memory_complete && checked.complete && owner_generic_complete && !sema_has_error_since(diagnostics, 0) && waiting.len() == 0,
         incomplete_reasons: incomplete_reasons,
@@ -4020,7 +4020,7 @@ fn sema_name_visibility_flags(is_pub: Bool, is_package_pub: Bool) -> MIRNameVisi
 }
 
 fn sema_name_scoped(prefix: String, name: String) -> String Never! {
-    if prefix == "" -> return ~name
+    if prefix == "" -> return name.copy()
     "{prefix}.{name}"
 }
 
@@ -4738,7 +4738,7 @@ fn sema_comptime_probe_dependencies(environment: SemaScopeEnvironment, program: 
     context.host_hooks = host_hooks
     mark :: sema_scope_mark(&table)
     table.comptime_execution_depth = 1
-    probe_diagnostics := ~diagnostics
+    probe_diagnostics := diagnostics.copy()
     state := sema_ownership_state_init()
     tail_store := sema_statement_tail_store_init()
     _ := sema_check_expression(expression, expected_type, environment, program, &table, &state, &tail_store, &context, &probe_diagnostics)
@@ -4786,7 +4786,7 @@ fn sema_comptime_probe_parallel(shared_state: Shared<SemaProbeShared>, probe: Se
     parts := [Shared<SemaProbePart>]{}
     loop part in 0..<workers {
         row :: shared SemaProbePart{table: sema_scope_init(""), diagnostics: [Diagnostic]{}, first: bounds[part], last: bounds[part + 1], dependencies: [[String]]{}, wanted: [Bool]{}}
-        sema_comptime_probe_part_fill(row, ~probe.table, ~probe.diagnostics)
+        sema_comptime_probe_part_fill(row, probe.table.copy(), probe.diagnostics.copy())
         &parts.push(row)
     }
     _ := sema_comptime_probe_parts(shared_state, parts, 0)

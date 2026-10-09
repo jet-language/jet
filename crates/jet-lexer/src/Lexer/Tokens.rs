@@ -133,9 +133,8 @@ pub enum TokKind {
     Amp,
     Pipe,
     Caret,
-    /// D-SHAPE-COPY1=A: `~x` is the one copy sigil (supersedes D-CAP2/S4's
-    /// `copy` verb; was retired by D-MEM1 as the D-CAP7 write sigil, since
-    /// superseded by `&`).
+    /// D-COPY-WORD1=A: prefix `~x` is the retired copy sigil; it lexes only so
+    /// the parser can teach E0941 and its rewrite to `x.copy()`.
     Tilde,
     /// D-XORSPELL1=A: `a ~| b` is bitwise exclusive-or.
     TildePipe,

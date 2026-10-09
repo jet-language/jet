@@ -14,7 +14,7 @@ fn bump(counts: &[String:Int], key: String) {
 }
 
 fn run(args: Args) IOError! {
-    input :: files.open(~args.input)
+    input :: files.open(args.input.copy())
     level_counts := [String:Int]{}
     error_components := [String:Int]{}
     first := ""
@@ -31,10 +31,10 @@ fn run(args: Args) IOError! {
         component :: third_fields.before
         millis :: parse_millis(stamp)
         if first == "" {
-            first = ~stamp
+            first = stamp.copy()
             first_ms = millis
         }
-        last = ~stamp
+        last = stamp.copy()
         last_ms = millis
         bump(&level_counts, level)
         if level == "ERROR" -> bump(&error_components, component)

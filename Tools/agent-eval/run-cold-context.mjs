@@ -223,7 +223,7 @@ export function validateCapsule(capsule) {
     "## 7. Cold-agent rules",
     "&T",
     "^T",
-    "~value",
+    "value.copy()",
     "-[",
     "Ok(value)",
     "Err(error)",

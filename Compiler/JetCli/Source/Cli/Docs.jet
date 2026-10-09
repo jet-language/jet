@@ -253,10 +253,10 @@ fn jet_cli_doc_stable_path(path: String) -> String Never! {
 
 // Docs.rs `module_name`: the alias, else the file stem.
 fn jet_cli_doc_module_name(path: String, alias: String) -> String Never! {
-    if alias != "" -> return ~alias
+    if alias != "" -> return alias.copy()
     parts :: path.split("/").to_list()
     file :: parts[parts.len() - 1]
-    if file == "" || file == "." || file == ".." -> return ~path
+    if file == "" || file == "." || file == ".." -> return path.copy()
     bytes :: file.bytes()
     dot := -1
     loop index in 1..<bytes.len() {
@@ -267,7 +267,7 @@ fn jet_cli_doc_module_name(path: String, alias: String) -> String Never! {
 }
 
 fn jet_cli_doc_qualified(parent: String, name: String) -> String Never! {
-    if parent == "" -> return ~name
+    if parent == "" -> return name.copy()
     "{parent}::{name}"
 }
 
@@ -455,7 +455,7 @@ fn jet_cli_doc_callable_for(index: JetCLISemIndex, item: JetCLIDocItem) -> JetCL
 // The first semindex distinct nominal definition that documents `item`.
 fn jet_cli_doc_nominal_for(index: JetCLISemIndex, item: JetCLIDocItem) -> JetCLISemDefinition? Never! {
     loop definition in index.definitions {
-        if definition.def.name == item.name && definition.nominal_base != None && jet_cli_doc_belongs(definition.def, item) -> return Val(~definition)
+        if definition.def.name == item.name && definition.nominal_base != None && jet_cli_doc_belongs(definition.def, item) -> return Val(definition.copy())
     }
     None
 }
@@ -477,7 +477,7 @@ fn jet_cli_doc_trait_contract(contract: JetCLISemTraitContract) -> String Never!
 // The checked module whose stable path is `path`.
 pub fn jet_cli_doc_module_at(modules: [JetDriverDocModule], path: String) -> JetDriverDocModule? Never! {
     loop candidate in modules {
-        if jet_cli_doc_stable_path(candidate.path) == path -> return Val(~candidate)
+        if jet_cli_doc_stable_path(candidate.path) == path -> return Val(candidate.copy())
     }
     None
 }
@@ -485,7 +485,7 @@ pub fn jet_cli_doc_module_at(modules: [JetDriverDocModule], path: String) -> Jet
 // Docs.rs `enrich_callable_contracts` and `enrich_type_contracts`.
 fn jet_cli_doc_enrich(items: &[JetCLIDocItem], index: JetCLISemIndex) Never! {
     loop item_index in 0..<items.len() {
-        item :: ~items[item_index]
+        item :: items[item_index].copy()
         if item.kind == "function" {
             callable :: jet_cli_doc_callable_for(index, item) ?? next
             if !callable.signature_facts_available -> next

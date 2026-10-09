@@ -407,7 +407,7 @@ fn run() { _ :: invoke(factory, (value: Bool) -> 1) }
 #[test]
 fn nested_callable_containers_ignore_declaration_call_metadata() {
     let src = r#"
-fn lower(value: String) -> String { ~value }
+fn lower(value: String) -> String { value.copy() }
 fn run() {
     handlers :: [String:fn(String) -> String]{"lower": lower}
     nested :: [[String:fn(String) -> String]]{^handlers}
@@ -505,7 +505,7 @@ Label :: distinct String
 #UnitFamily(Currency) { usd }
 
 fn checked_user(value: U64) -> UserID String! { return UserID.from_u64(value) }
-fn pass_user(value: UserID String!) -> UserID String! { return ~value }
+fn pass_user(value: UserID String!) -> UserID String! { return value.copy() }
 
 fn run() {
     fallback :: UserID.from_int(0)
@@ -557,7 +557,7 @@ fn checked(raw: Int) -> Severity String! {
     return Ok(Severity.from_int(raw))
 }
 
-fn pass_checked(value: Severity String!) -> Severity String! { return ~value }
+fn pass_checked(value: Severity String!) -> Severity String! { return value.copy() }
 fn direct() -> Severity { return Severity.from_u8(8) }
 
 fn run() {
@@ -787,7 +787,7 @@ fn run() {
 
 /// c109 Phase 23: named tuples (S73/D-SG7). A tuple literal `(x: 1, y: 2)` → a generated
 /// `JetTup_<hash>` struct lit (canonical field order); field access `p.x` → `(p).__jet_x`;
-/// destructure `(a, b) :: ~p` → the borrow-temp + per-field `.clone()` form;
+/// destructure `(a, b) :: p.copy()` → the borrow-temp + per-field `.clone()` form;
 /// equality is native. The tuple type passes/returns byte-identically.
 #[test]
 fn named_tuples() {
@@ -802,7 +802,7 @@ fn run() {
     p :: (x: 1, y: 2)
     q :: (y: 3, x: 4)
     same_shape :: (p == q)
-    (a, b) :: ~p
+    (a, b) :: p.copy()
     print(\"{p.x} {p.y} {a} {b} {same_shape}\")
     pair :: bounds()
     print(\"{pair.min} {pair.max}\")
@@ -956,7 +956,7 @@ pub fn make_note(name: ^String, t: ^NoteType) -> Note {
     return Note{name: name, note_type: t, parent: None}
 }
 pub fn kind_str(n: Note) -> String {
-    k :: ~n.note_type
+    k :: n.note_type.copy()
     if k == {
         .User -> { return \"user\" }
         .Feedback -> { return \"feedback\" }
@@ -976,7 +976,7 @@ fn classify(raw: String) -> Query {
     if raw == \"user\" {
         return Query.Kind(NoteType.User)
     }
-    return Query.Tag(~raw)
+    return Query.Tag(raw.copy())
 }
 fn describe(n: Note, q: ^Query) -> String {
     if q == {

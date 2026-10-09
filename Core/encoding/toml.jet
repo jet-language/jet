@@ -585,7 +585,7 @@ fn ensure_table_path(entries: [(key: String, value: DataTree)], path: [String], 
                             else -> { _ := 0 }
                         }
                     }
-                    array_items = ~items
+                    array_items = items.copy()
                 }
                 else -> { _ := 0 }
             }
@@ -620,7 +620,7 @@ fn ensure_array_path(entries: [(key: String, value: DataTree)], path: [String], 
             .Val(existing) -> {
                 if existing == {
                     .Array(items) -> {
-                        mutable := ~items
+                        mutable := items.copy()
                         &mutable.push(item)
                         table_set(&out, key, DataTree.Array(mutable))
                     }
@@ -650,7 +650,7 @@ fn ensure_array_path(entries: [(key: String, value: DataTree)], path: [String], 
                             else -> { _ := 0 }
                         }
                     }
-                    array_items = ~items
+                    array_items = items.copy()
                 }
                 else -> { _ := 0 }
             }
@@ -707,7 +707,7 @@ fn put_path(entries: [(key: String, value: DataTree)], path: [String], i: Int, v
                 .Object(obj) -> child = obj
                 .Array(items) -> {
                     if items.len() > 0 {
-                        mutable := ~items
+                        mutable := items.copy()
                         last_index := mutable.len() - 1
                         if mutable[last_index] == {
                             .Object(obj) -> {

@@ -314,9 +314,9 @@ fn jfmt_result_handler_source_end(f: JetFmt, expr: Expr) -> Int Never! {
 
 fn jfmt_emit_result_handler_comments(f: &JetFmt, start: Int, end: Int) Never! {
     loop f.comment_i < f.comments.len() {
-        comment :: ~f.comments[f.comment_i]
+        comment :: f.comments[f.comment_i].copy()
         if comment.span.start < start || comment.span.start >= end -> break
-        jfmt_emit_comment_line(&f, ~comment.text)
+        jfmt_emit_comment_line(&f, comment.text.copy())
         f.comment_i += 1
     }
 }
@@ -1482,7 +1482,7 @@ pub fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_write(&f, "*")
             jfmt_fmt_expr(&f, inner, JFMT_PREC_UNARY)
         }
-        // D-SHAPE-COPY1=A: prefix `~x`.
+        // D-SHAPE-COPY1=A: prefix `x.copy()`.
         .Copy(inner, _) -> {
             jfmt_write(&f, "~")
             jfmt_fmt_expr(&f, inner, JFMT_PREC_UNARY)
@@ -1741,18 +1741,18 @@ fn jfmt_is_subjectless_guard(subject: Expr, span: Span) -> Bool Never! {
 // A loop body that is one subjectless single-arm guard prints as `if cond`;
 // returns the statements that remain for the braces.
 fn jfmt_guarded_loop_body(f: &JetFmt, body: [Stmt], loop_span: Span?) -> [Stmt] {
-    if body.len() != 1 -> return ~body
+    if body.len() != 1 -> return body.copy()
     if body[0] == .Switch(subject, arms, else_body, span) {
-        if else_body != None -> return ~body
+        if else_body != None -> return body.copy()
         if loop_span == .Val(required) {
-            if !jfmt_same_span(span, required) -> return ~body
+            if !jfmt_same_span(span, required) -> return body.copy()
         }
-        if !jfmt_is_subjectless_guard(subject, span) || arms.len() != 1 -> return ~body
+        if !jfmt_is_subjectless_guard(subject, span) || arms.len() != 1 -> return body.copy()
         jfmt_write(&f, " if ")
         jfmt_fmt_expr(&f, arms[0].cond, JFMT_PREC_OR_FALLBACK)
-        return ~arms[0].body
+        return arms[0].body.copy()
     }
-    ~body
+    body.copy()
 }
 
 fn jfmt_fmt_value_loop_body(f: &JetFmt, body: [Stmt], loop_span: Span) {

@@ -195,7 +195,7 @@ fn zip_entries(count: Int) -> [U8] {
         push32(&central, offset)
         &central.push(U8{120})
     }
-    out := ~local
+    out := local.copy()
     loop b in central -> &out.push(b)
     push32(&out, 0x06054b50)
     loop v in ([Int]{0, 0, count & 65535, count & 65535}) -> push16(&out, v)
@@ -254,10 +254,10 @@ fn run() {
     good_gz :: gz.compress(hello) ?? panic("gzip compress")
     gzip_case("roundtrip", good_gz)
     gzip_case("truncated", good_gz[0..<(good_gz.len() - 5)])
-    bad_crc := ~good_gz
+    bad_crc := good_gz.copy()
     bad_crc[good_gz.len() - 8] = bad_crc[good_gz.len() - 8] ~| (U8{255})
     gzip_case("bad crc", bad_crc)
-    bad_isize := ~good_gz
+    bad_isize := good_gz.copy()
     bad_isize[good_gz.len() - 1] = U8{127}
     gzip_case("isize mismatch", bad_isize)
     bad_payload := [U8]{31, 139, 8, 0, 0, 0, 0, 0, 0, 255}
@@ -286,10 +286,10 @@ fn run() {
     good_zip :: ar.create("entry.txt", hello) ?? panic("zip create")
     zip_case("roundtrip", good_zip)
     zip_case("truncated", good_zip[0..<(good_zip.len() - 10)])
-    bad_zip_crc := ~good_zip
+    bad_zip_crc := good_zip.copy()
     bad_zip_crc[14] = bad_zip_crc[14] ~| (U8{255})
     zip_case("bad crc", bad_zip_crc)
-    zip_bomb := ~good_zip
+    zip_bomb := good_zip.copy()
     loop k in 0..<4 -> zip_bomb[22 + k] = byte(0x04000001 >> (8 * k))
     zip_case("declared output bomb", zip_bomb)
     dotted :: ar.create("..xevil", hello) ?? panic("zip create")
@@ -303,7 +303,7 @@ fn run() {
     // and one entry over the 4,096-entry cap.
     good_tar :: ar.tar_add([U8]{}, "entry.txt", hello) ?? panic("tar add")
     tar_case("roundtrip", good_tar, "entry.txt")
-    bad_tar_sum := ~good_tar
+    bad_tar_sum := good_tar.copy()
     bad_tar_sum[0] = U8{69}
     tar_case("bad checksum", bad_tar_sum, "entry.txt")
     tar_case("missing end", good_tar[0..<(good_tar.len() - 1024)], "entry.txt")

@@ -26,7 +26,7 @@ pub struct Path {
 }
 
 
-pub fn of(raw: String) -> Path Never! { Path{raw: ~raw} }
+pub fn of(raw: String) -> Path Never! { Path{raw: raw.copy()} }
 
 
 /// Construct a path from its platform-neutral textual spelling.
@@ -84,12 +84,12 @@ fn ends_colon(text: String) -> Bool {
 pub fn parents(path: Path) -> [Path] Never! {
     out := [Path]{}
     cur := parent(path)
-    seen := ~path.raw
+    seen := path.raw.copy()
     loop {
         if cur.raw == seen || cur.raw.bytes().len() == 0 -> return out
-        &out.push(~cur)
+        &out.push(cur.copy())
         if cur.raw == "/" || (cur.raw.bytes().len() == 2 && ends_colon(cur.raw)) -> return out
-        seen = ~cur.raw
+        seen = cur.raw.copy()
         nxt := parent(cur)
         if nxt.raw == cur.raw -> return out
         cur = nxt
@@ -201,7 +201,7 @@ pub fn as_posix(path: Path) -> String Never! {
             &out.push(b)
         }
     }
-    String.from_bytes(out) ?? ~path.raw
+    String.from_bytes(out) ?? path.raw.copy()
 }
 
 
@@ -214,7 +214,7 @@ pub fn as_windows(path: Path) -> String Never! {
             &out.push(b)
         }
     }
-    String.from_bytes(out) ?? ~path.raw
+    String.from_bytes(out) ?? path.raw.copy()
 }
 
 
@@ -258,7 +258,7 @@ pub fn relative_to(path: Path, start: Path) -> Path Never! { Path{raw: files.rel
 pub fn is_relative_to(path: Path, start: Path) -> Bool Never! {
     target :: files.collapse(path.raw)
     base :: files.collapse(start.raw)
-    common :: files.commonpath([String]{~target, ~base})
+    common :: files.commonpath([String]{target.copy(), base.copy()})
     if common != base -> return false
     if base == "." && starts_dotdot(target) -> return false
     true
@@ -424,7 +424,7 @@ pub fn open_read(path: Path) -[FS]> FileReader IOError! { files.open(path.raw) }
 pub fn open_write(path: Path) -[FS]> FileWriter IOError! { files.create(path.raw) }
 
 
-pub fn show(path: Path) -> String Never! { ~path.raw }
+pub fn show(path: Path) -> String Never! { path.raw.copy() }
 
 
 pub fn equals(a: Path, b: Path) -> Bool Never! { files.collapse(a.raw) == files.collapse(b.raw) }

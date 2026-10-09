@@ -545,8 +545,8 @@ fn jfmt_write_normalized_source_fragment(f: &JetFmt, fragment: String) {
 pub fn jfmt_emit_leading_statement_gap(f: &JetFmt, start: Int, end: Int) {
     cursor := start
     loop f.comment_i < f.comments.len() {
-        text :: ~f.comments[f.comment_i].text
-        span :: ~f.comments[f.comment_i].span
+        text :: f.comments[f.comment_i].text.copy()
+        span :: f.comments[f.comment_i].span.copy()
         if span.start >= end -> break
         if span.start < start {
             jfmt_emit_comment_line(&f, text)
@@ -1232,7 +1232,7 @@ fn jfmt_authored_braced_loop_exit(f: JetFmt, body: [Stmt]) -> Bool {
 
 fn jfmt_emit_classic_if_condition_trivia(f: &JetFmt, condition_start: Int) {
     loop f.comment_i < f.comments.len() && f.comments[f.comment_i].span.start < condition_start {
-        text :: ~f.comments[f.comment_i].text
+        text :: f.comments[f.comment_i].text.copy()
         jfmt_write(&f, text)
         f.comment_i += 1
         if text.starts_with("//") {
@@ -1669,7 +1669,7 @@ fn jfmt_resugar_layout_stmt(layout_name: String, stmt: Stmt) -> Stmt Never! {
             b2.init = jfmt_resugar_layout_expr(layout_name, b.init)
             Stmt.Val{binding: b2}
         }
-        else -> ~stmt
+        else -> stmt.copy()
     }
 }
 
@@ -1710,6 +1710,6 @@ fn jfmt_resugar_layout_expr(layout_name: String, e: Expr) -> Expr Never! {
             call2.args = jfmt_resugar_layout_args(layout_name, call.args)
             Expr.Call{call: call2}
         }
-        else -> ~e
+        else -> e.copy()
     }
 }

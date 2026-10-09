@@ -179,7 +179,7 @@ pub fn store_write_seal(verification: &StoreVerification, path: String, hangar: 
     seals :: files.join(hangar, STORE_SEALS_DIR)
     store_seal_ensure_real_directory(seals, "Hangar seal directory")
     target :: files.join(seals, digest)
-    sequence :: ~store_seal_sequence
+    sequence :: store_seal_sequence.copy()
     store_seal_sequence = store_seal_sequence + 1
     temporary :: files.join(seals, ".{digest}-{process.current_pid()}-{sequence}{STORE_SEAL_PARTIAL_SUFFIX}")
     store_seal_publish(temporary, target, record.bytes()) ?? {

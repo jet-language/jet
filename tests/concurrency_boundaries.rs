@@ -222,7 +222,7 @@ use core.tasks as tasks
 fn run() {
     pending := reactive.signal(0)
     (tx, rx) :: channel<Signal<Int>>()
-    tx.send(~pending)
+    tx.send(pending.copy())
     got :: rx.receive() ?? panic("recv")
     print(got.get())
 }
@@ -290,7 +290,7 @@ fn run() {
     base := reactive.signal(1)
     twice := reactive.computed(() -> (base.get() * 2))
     (tx, rx) :: channel<Computed<Int>>()
-    tx.send(~twice)
+    tx.send(twice.copy())
     got :: rx.receive() ?? panic("recv")
     print(got.get())
 }

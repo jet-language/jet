@@ -53,9 +53,9 @@ pub fn bind_text<T>(loader: &DataLoader<T>, text: String) DataError! {
     bind<T>(&loader, text.bytes())
 }
 
-pub fn authority<T>(loader: DataLoader<T>) -> DataAuthority Never! { ~loader.authority }
+pub fn authority<T>(loader: DataLoader<T>) -> DataAuthority Never! { loader.authority.copy() }
 
-pub fn status<T>(loader: DataLoader<T>) -> DataLoaderStatus Never! { ~loader.status }
+pub fn status<T>(loader: DataLoader<T>) -> DataLoaderStatus Never! { loader.status.copy() }
 
 pub fn ready<T>(loader: DataLoader<T>) -> Bool Never! {
     !loader.cancelled && !loader.status.backpressure
@@ -78,7 +78,7 @@ pub fn snapshot_reusable(previous: DataSnapshotIdentity, current: DataSnapshotId
         && previous.format == current.format
 }
 
-pub fn source_identity<T>(loader: DataLoader<T>) -> DataSourceIdentity Never! { ~loader.source }
+pub fn source_identity<T>(loader: DataLoader<T>) -> DataSourceIdentity Never! { loader.source.copy() }
 
 pub fn cancel<T>(loader: &DataLoader<T>) Never! {
     loader.cancelled = true
@@ -112,7 +112,7 @@ pub fn offline<T>(loader: &DataLoader<T>, enabled: Bool) Never! {
 }
 
 pub fn invalidate<T>(loader: &DataLoader<T>, cause: DataInvalidationCause) Never! {
-    loader.status.invalidated_by = ~cause
+    loader.status.invalidated_by = cause.copy()
     loader.status.freshness = DataFreshness.Stale
     loader.status.error = ""
     if loader.source.kind != DataLoaderKind.Value -> loader.payload = None
@@ -164,7 +164,7 @@ fn decode_jsonl<T: Decode>(text: String) -> [T] DataError! {
                 wrapped := "[{line}]"
                 row :: core.data.json<T>(wrapped) ?? return Err(loader_error(DataErrorKind.Decode, "JSONL row decode failed", "data.loader.stream"))
                 if row.len() != 1 -> return Err(loader_error(DataErrorKind.Decode, "JSONL row did not decode to one value", "data.loader.stream"))
-                &out.push(~row[0])
+                &out.push(row[0].copy())
             }
         }
         start = i + 1

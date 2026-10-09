@@ -27,7 +27,7 @@ pub fn trust_semantic_lock_atomic_commit(project: String, lock: SemanticLockFile
     _guard :: env_runtime_project_lock(project, SEMANTIC_LOCK_SCOPE)
     existing :: files.read(path) ?? ""
     stripped :: trust_strip_semantic_sections(existing)
-    machine := ~stripped
+    machine := stripped.copy()
     if {
         stripped.trim() == "" -> {
             fresh := pkg_lock_parse("version = 1\n")

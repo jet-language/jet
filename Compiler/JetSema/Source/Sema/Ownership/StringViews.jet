@@ -152,12 +152,12 @@ fn sema_string_view_owner(scopes: SemaScopeTable, state: SemaOwnershipState, nam
 // Rust `report_string_view_unsupported_use`.
 pub fn sema_string_view_unsupported_use(name: String, what: String, span: Span, scopes: SemaScopeTable, state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
     owner :: sema_string_view_owner(scopes, state, name)
-    diagnostic :: sema_error("E2307", span, "`{name}` cannot {what} without an owning copy", "`{name}` is a zero-copy view into `{owner}` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled", "write `~{name}` first, or remove `copies: .Explicit` to use the default owning copy")
-    &diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: span.start, end: span.start}, new_text: "~"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+    diagnostic :: sema_error("E2307", span, "`{name}` cannot {what} without an owning copy", "`{name}` is a zero-copy view into `{owner}` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled", "write `{name}.copy()` first, or remove `copies: .Explicit` to use the default owning copy")
+    &diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: span.end, end: span.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
 }
 
 // Under `copies: .Explicit`, a bare string-view read outside the positions
-// that take a view (`~`, interpolation, a view method receiver, an implicit
+// that take a view (`.copy()`, interpolation, a view method receiver, an implicit
 // owning copy) is the one refusal for every owning destination.
 pub fn sema_string_view_check_read(name: String, span: Span, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     if !scopes.copies_explicit || context.allow_string_view_read || !sema_string_view_binding(scopes, name) -> return
@@ -228,12 +228,12 @@ pub fn sema_string_view_check_field(value: Expr, field_ty: Type, environment: Se
         return Val(viewed)
     }
     if sema_string_view_call_sources(value, scopes, &state).len() > 0 -> return sema_string_view_lower_init(checked)
-    &diagnostics.push(sema_error("E2307", span, "an owned `String` cannot fill a `View<str>` slot", "`View<str>` needs a zero-copy window from `.trim()` / `.after()` / `.before()` (or an already-tracked string-view binding); a plain `String` place owns its buffer instead", "bind a window with `.trim()`/`.after()`/`.before()`, return a `View` of the owning element and read the field through it, or store an owned `String` field and copy with `~`"))
+    &diagnostics.push(sema_error("E2307", span, "an owned `String` cannot fill a `View<str>` slot", "`View<str>` needs a zero-copy window from `.trim()` / `.after()` / `.before()` (or an already-tracked string-view binding); a plain `String` place owns its buffer instead", "bind a window with `.trim()`/`.after()`/`.before()`, return a `View` of the owning element and read the field through it, or store an owned `String` field and copy with `.copy()`"))
     None
 }
 
 fn sema_string_view_return_boundary(span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_error("E2307", span, "returned string views need a stable owner relationship", "each public `View<str>` slot must name a bounded set of receiver, parameter, or static `String` sources that stay live; this return did not prove those sources", "return a view derived from parameters or the receiver on every path, or return an owned `String` copy with `~`"))
+    &diagnostics.push(sema_error("E2307", span, "returned string views need a stable owner relationship", "each public `View<str>` slot must name a bounded set of receiver, parameter, or static `String` sources that stay live; this return did not prove those sources", "return a view derived from parameters or the receiver on every path, or return an owned `String` copy with `.copy()`"))
 }
 
 // Rust `string_view_return`: a `View<str>` return reads a string-view

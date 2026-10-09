@@ -110,7 +110,7 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
     if !files.exists(entry.out) {
         store_ensure_real_directory(snapshot_root, "cache lease snapshot")
         return Ok(CacheLease{
-            verification: ~verification,
+            verification: verification.copy(),
             files: [SnapshotFile]{},
             executables: [SnapshotFile]{},
             out: entry.out,
@@ -233,7 +233,7 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
         .None -> {}
     }
     Ok(CacheLease{
-        verification: ~verification,
+        verification: verification.copy(),
         files: lease_files,
         executables: executables,
         out: entry.out,

@@ -775,11 +775,11 @@ fn resident() -[]> String {
         letter: 'Z'
     }
     encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
-    decoded := cbor.decode<Packet>(~encoded) ?? panic("decode {err}")
+    decoded := cbor.decode<Packet>(encoded.copy()) ?? panic("decode {err}")
     roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
     boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
     boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
-    boxed_back := cbor.decode<Wrap<Int>>(~boxed_wire) ?? panic("generic roundtrip")
+    boxed_back := cbor.decode<Wrap<Int>>(boxed_wire.copy()) ?? panic("generic roundtrip")
     return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
 }
 
@@ -798,11 +798,11 @@ fn forced_deopt(seed: String) -[]> String {
         letter: 'Z'
     }
     encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
-    decoded := cbor.decode<Packet>(~encoded) ?? panic("decode {err}")
+    decoded := cbor.decode<Packet>(encoded.copy()) ?? panic("decode {err}")
     roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
     boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
     boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
-    boxed_back := cbor.decode<Wrap<Int>>(~boxed_wire) ?? panic("generic roundtrip")
+    boxed_back := cbor.decode<Wrap<Int>>(boxed_wire.copy()) ?? panic("generic roundtrip")
     return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
 }
 
@@ -889,7 +889,7 @@ fn decode_old() -[]> String {
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
         0x09
     }
-    profile :: cbor.decode<Profile>(~bytes) ?? panic("decode")
+    profile :: cbor.decode<Profile>(bytes.copy()) ?? panic("decode")
     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
 }
 
@@ -904,7 +904,7 @@ fn forced_deopt() -[]> String {
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
         0x09
     }
-    profile :: cbor.decode<Profile>(~bytes) ?? panic("decode")
+    profile :: cbor.decode<Profile>(bytes.copy()) ?? panic("decode")
     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
 }
 
@@ -918,7 +918,7 @@ fn failed_change() -[]> String {
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
         0x09
     }
-    cbor.decode<Profile>(~bytes) ? _value -> return "accepted" ! error -> return "{error[0].path}:{error[0].reason}"
+    cbor.decode<Profile>(bytes.copy()) ? _value -> return "accepted" ! error -> return "{error[0].path}:{error[0].reason}"
 }
 
 fn run() {

@@ -2473,7 +2473,7 @@ impl<'a> Checker<'a> {
             if !sig.is_extern {
                 // A `&name` argument grants the named place itself, so it is a
                 // borrow position: the owning-slot copy below must never turn
-                // a `&` parameter passed onward into `~name` (E0202). A write
+                // a `&` parameter passed onward into `name.copy()` (E0202). A write
                 // parameter is a borrow slot too: a bare name reaching it must
                 // stay a name so the missing `&` is reported, never copied.
                 if arg.convention == AccessConvention::Write {
@@ -2500,7 +2500,7 @@ impl<'a> Checker<'a> {
             // borrowed-place arm, so the copy landed BEFORE the convention
             // check read the name, and the hard error the law demands was
             // never reported — a clone became silent, which is the one thing
-            // D-MEM1/S2 forbids. `~name` and `^name` are not bare names
+            // D-MEM1/S2 forbids. `name.copy()` and `^name` are not bare names
             // (`Expr::Copy` / `AccessConvention::Move`), so the caller's own
             // ownership decision is still recognized and still exempt.
             let bare_arg_name = match &arg.expr {

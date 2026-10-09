@@ -228,12 +228,12 @@ fn jet_cli_claim_validate_relation(manifest: JetCLIStatusValue, relation: JetCLI
             &errors.push("row is not counted: {id}")
         } else { counted += 1 }
     }
-    sorted_names := ~identity_names
+    sorted_names := identity_names.copy()
     &sorted_names.sort()
     loop identity_name in sorted_names {
         loop (index, name) in identity_names {
             if name != identity_name -> next
-            modes := ~identity_modes[index]
+            modes := identity_modes[index].copy()
             &modes.sort()
             loop mode in modes {
                 id :: "{identity_name}@{mode}"

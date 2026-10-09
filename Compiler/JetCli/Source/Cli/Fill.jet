@@ -191,7 +191,7 @@ pub fn jet_cli_compile_fill(target: String, json: Bool, color: Bool) -> JetDrive
         }
     }
     if jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc) == {
-        .Refused(refusal) -> return ~refusal
+        .Refused(refusal) -> return refusal.copy()
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             if jet_cli_errors(diagnostics).len() > 0 {

@@ -465,7 +465,7 @@ fn strip_inline_comment(text: String) -> String Never! {
         }
         i += 1
     }
-    ~text
+    text.copy()
 }
 
 fn yaml_scalar(text: String) -> String Never! {
@@ -543,7 +543,7 @@ fn split_once(text: String, sep: U8) -> (after: String, before: String) Never! {
             return (before: before, after: after)
         }
     }
-    (before: ~text, after: "")
+    (before: text.copy(), after: "")
 }
 
 fn drop_prefix(text: String, n: Int) -> String Never! {
@@ -569,8 +569,8 @@ fn spaces(n: Int) -> String {
 
 fn unquote(text: String) -> String Never! {
     raw :: text.bytes()
-    if raw.len() < 2 -> return ~text
-    if (raw[0] != (U8{34}) && raw[0] != (U8{39})) || raw[raw.len() - 1] != raw[0] -> return ~text
+    if raw.len() < 2 -> return text.copy()
+    if (raw[0] != (U8{34}) && raw[0] != (U8{39})) || raw[raw.len() - 1] != raw[0] -> return text.copy()
     out := [U8]{}
     i := 1
     loop i < raw.len() - 1 {
@@ -586,7 +586,7 @@ fn unquote(text: String) -> String Never! {
         }
         i += 1
     }
-    String.from_bytes(out) ?? ~text
+    String.from_bytes(out) ?? text.copy()
 }
 
 #Test("YAML renderer preserves scalar quoting") {

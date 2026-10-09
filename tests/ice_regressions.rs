@@ -79,7 +79,7 @@ fn b1_json_text_clones_borrowed_view_param() {
         r#"
 use core.encoding.json as json
 fn wrap(x: String) -[]> String {
-    j :: JSON.Text(~x)
+    j :: JSON.Text(x.copy())
     return json.to_string(j)
 }
 fn run() {
@@ -215,7 +215,7 @@ fn next(value: Dyn) -> Bool Never! { return true }
 fn value_if_bool_never(value: Dyn) -> Bool Never! {
     return if value == {
         .Null -> false
-        else -> next(~value)
+        else -> next(value.copy())
     }
 }
 fn run() {
@@ -230,7 +230,7 @@ fn next(value: Dyn) -> String { return "next" }
 fn value_if_string_err(value: Dyn) -> String {
     return if value == {
         .Null -> "null"
-        else -> next(~value)
+        else -> next(value.copy())
     }
 }
 fn run() {

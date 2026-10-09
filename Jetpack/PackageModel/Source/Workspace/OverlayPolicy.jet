@@ -60,8 +60,8 @@ pub struct OverlayPolicy {
             loop field in scalar_fields {
                 value :: candidate.scalar(field) ?? next
                 priority :: candidate.field_priority(field.name())
-                &resolved.provenance.push(OverrideProvenance{overlay: overlay.name, order: order, field: field.name(), value: ~value, priority: priority})
-                if pkg_overlay_scalar_wins(winners, field.name(), priority, order, resolved.scalar(field), ~value, package, self.overlays) {
+                &resolved.provenance.push(OverrideProvenance{overlay: overlay.name, order: order, field: field.name(), value: value.copy(), priority: priority})
+                if pkg_overlay_scalar_wins(winners, field.name(), priority, order, resolved.scalar(field), value.copy(), package, self.overlays) {
                     &resolved.set_scalar(field, value)
                     winners[field.name()] = OverrideWinner{priority: priority, order: order}
                     resolved.field_priorities[field.name()] = priority
@@ -70,24 +70,24 @@ pub struct OverlayPolicy {
             loop flag in candidate.flags {
                 priority :: candidate.field_priority("flags")
                 field :: "flags.{flag}"
-                &resolved.provenance.push(OverrideProvenance{overlay: overlay.name, order: order, field: ~field, value: "true", priority: priority})
+                &resolved.provenance.push(OverrideProvenance{overlay: overlay.name, order: order, field: field.copy(), value: "true", priority: priority})
                 &flags.push(flag)
                 &resolved.raise_priority(field, priority)
             }
             loop fact in candidate.env {
                 field :: "env.{fact.key}"
                 priority :: candidate.field_priority(field)
-                &resolved.provenance.push(OverrideProvenance{overlay: overlay.name, order: order, field: ~field, value: fact.value, priority: priority})
+                &resolved.provenance.push(OverrideProvenance{overlay: overlay.name, order: order, field: field.copy(), value: fact.value, priority: priority})
                 if pkg_overlay_keyed_wins(winners, field, priority) {
                     &resolved.set_env(fact.key, fact.value)
-                    winners[~field] = OverrideWinner{priority: priority, order: order}
+                    winners[field.copy()] = OverrideWinner{priority: priority, order: order}
                     resolved.field_priorities[field] = priority
                 }
             }
             loop patch in candidate.patches {
                 priority :: candidate.field_priority("patches")
-                &resolved.provenance.push(OverrideProvenance{overlay: overlay.name, order: order, field: "patches", value: ~patch, priority: priority})
-                &resolved.patches.push(~patch)
+                &resolved.provenance.push(OverrideProvenance{overlay: overlay.name, order: order, field: "patches", value: patch.copy(), priority: priority})
+                &resolved.patches.push(patch.copy())
                 &resolved.raise_priority("patches.{patch}", priority)
             }
             if candidate.allow_unfree {
@@ -417,7 +417,7 @@ fn pkg_overlay_scalar_wins(winners: [String: OverrideWinner], field: String, pri
     previous :: winners.get(field) ?? return Ok(true)
     if priority > previous.priority -> return Ok(true)
     if priority < previous.priority -> return Ok(false)
-    if ~current == {
+    if current.copy() == {
         .Val(value) -> {
             if value == incoming -> return Ok(false)
         }

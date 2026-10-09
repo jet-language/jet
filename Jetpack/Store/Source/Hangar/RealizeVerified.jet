@@ -247,7 +247,7 @@ fn store_record_realized_mode_unlocked(verification: &StoreVerification, roots: 
 // build the package record the transaction will commit.
 fn store_record_realized_in_transaction(roots: HangarRoots, realized: Realized, graph: ClosureGraph, captured_outputs: [String: String], transaction: &AdmissionTransaction) -> StoreEntry StoreError! {
     paths :: if realized.producer.provider == "nix" -> store_project_nix_outputs_unlocked(roots, realized, graph, &transaction) else -> store_stage_local_output_unlocked(roots, realized.out, realized.bin, realized.rlib, realized.envelope.output_hash, &transaction)
-    named_outputs := ~captured_outputs
+    named_outputs := captured_outputs.copy()
     named_outputs["out"] = realized.envelope.output_hash
     content_addressed :: realized.producer.provider == "nix" || realized.producer.provider == "jetpackage"
     id :: if content_addressed -> store_content_addressed_entry_id(realized.name, realized.version, realized.reference, realized.envelope.output_hash) else -> store_entry_id(realized.name, realized.version, realized.reference, paths.out)
@@ -683,7 +683,7 @@ fn store_restore_substituted_candidate(verification: &StoreVerification, roots: 
     exists :: files.lexists(candidate.out)
     output_is_valid :: exists && !files.is_symlink(candidate.out) && (store_try_entry_output_hash(&verification, roots, candidate) ?? "") == candidate.envelope.output_hash
     if !output_is_valid && exists -> return Ok(false)
-    entry := ~candidate
+    entry := candidate.copy()
     entry.last_used_at = store_now_secs()
     dir :: files.join(roots.hangar_dir(), entry.id)
     store_pin_nix_gc_root(dir, entry.out)

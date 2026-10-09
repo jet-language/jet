@@ -20,7 +20,7 @@ fn run() {
     if secret.with((borrowed) -> borrowed.public_key()) == .Ok(_) {
         print("available")
     }
-    fork := ~clock
+    fork := clock.copy()
     &fork.tick(1001)
     if secret.with((borrowed) -> borrowed.public_key()) == .Ok(_) {
         print("forked")

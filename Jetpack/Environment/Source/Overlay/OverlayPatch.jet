@@ -81,7 +81,7 @@ struct OverlayAuthority {
 
     fn open(path: String, label: String) -[FS, Env]> OverlayAuthority OverlayError! {
         resolver :: AuthorityResolver.open(path) ?? return Err(OverlayError.IO("could not open {label} authority `{path}`: {err.message()}"))
-        root :: ~resolver.root
+        root :: resolver.root.copy()
         checked :: resolver.checked_directory("") ?? return Err(OverlayError.IO("could not hold {label} authority `{root}`: {err.message()}"))
         Ok(OverlayAuthority{root, resolver, root_handle: checked.handle})
     }

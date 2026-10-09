@@ -678,7 +678,7 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) :: channel<Int>()
     loop i in 1..1000 {
-        dup :: ~sender
+        dup :: sender.copy()
         task {
             dup.send(1)
         }
@@ -717,7 +717,7 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) :: channel<Int>()
     loop i in 1..10000 {
-        dup :: ~sender
+        dup :: sender.copy()
         task {
             dup.send(1)
         }
@@ -757,7 +757,7 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) :: channel<Int>()
     loop i in 1..100000 {
-        dup :: ~sender
+        dup :: sender.copy()
         task {
             dup.send(1)
         }

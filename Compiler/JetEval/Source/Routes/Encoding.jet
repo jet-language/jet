@@ -230,7 +230,7 @@ fn jet_eval_encoding_b64url_encode(bytes: [U8], padded: Bool) -> String {
 
 fn jet_eval_encoding_b64_pad(text: String) -> String Never! {
     remainder :: text.bytes().len() %% 4
-    padded := ~text
+    padded := text.copy()
     if remainder == 0 -> return padded
     loop _ in 0..<(4 - remainder) -> padded = "{padded}="
     padded
@@ -697,7 +697,7 @@ fn jet_eval_route_core_encoding_text(key: String, data: [TComptimeValue], editio
 // program's package edition (D-ENCBASE-STRICT1).
 fn jet_eval_route_core_encoding(row: MIRCoreCall, data: [TComptimeValue], fallibility: MIRCallFallibility, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     key :: "{row.module_name}.{row.member}"
-    edition :: ~machine.program.facts.edition
+    edition :: machine.program.facts.edition.copy()
     if data.len() > 0 && data[0] == .String(_) -> return jet_eval_route_core_encoding_text(key, data, edition, fallibility, &machine, span)
     bytes :: jet_eval_encoding_bytes_arg(data, 0, &machine, span) ?? return None
     output := jet_eval_encoding_string_value("")

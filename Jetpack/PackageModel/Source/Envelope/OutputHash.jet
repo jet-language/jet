@@ -104,7 +104,7 @@ pub struct EnvelopeWalkHook {
     }
 
     fn observe(&self, path: String, stage: EnvelopeWalkStage) Never! -[FS]> {
-        &self.events.push(EnvelopeWalkEvent{path: ~path, stage: stage})
+        &self.events.push(EnvelopeWalkEvent{path: path.copy(), stage: stage})
         self.react(path, stage)
     }
 }
@@ -381,7 +381,7 @@ fn pkg_envelope_encode_node(root: String, path: String, rel: String, envelope_ar
     }
     if info.is_file {
         key :: pkg_envelope_file_identity(info)
-        if ~key == {
+        if key.copy() == {
             .Val(identity) -> {
                 loop index in 0..<hardlinks.len() {
                     if hardlinks[index].key == identity {

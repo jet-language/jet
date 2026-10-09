@@ -94,7 +94,7 @@ fn jet_cli_struct_load(path: String) -> JetCLIStructLoaded {
                 &units.push(JetCLIStructUnit{fact: fact, source: jet_cli_doc_text(source.bytes(), fact.span.start, fact.span.end).trim(), leading: ""})
             }
             loop position in 1..<units.len() {
-                unit :: ~units[position]
+                unit :: units[position].copy()
                 destination := position
                 loop destination > 0 && units[destination - 1].fact.span.start > unit.fact.span.start {
                     units[destination] = units[destination - 1]
@@ -225,7 +225,7 @@ fn jet_cli_struct_diff(before: JetCLIStructDocument, after: JetCLIStructDocument
         if !used[row] -> &changes.push(jet_cli_struct_change(0, "added", unit, Val(unit), None))
     }
     loop position in 1..<changes.len() {
-        change :: ~changes[position]
+        change :: changes[position].copy()
         destination := position
         loop destination > 0 && (changes[destination - 1].stable_id > change.stable_id || (changes[destination - 1].stable_id == change.stable_id && changes[destination - 1].rank > change.rank)) {
             changes[destination] = changes[destination - 1]
@@ -241,11 +241,11 @@ fn jet_cli_struct_conflict(kind: String, base: JetCLIStructUnit, ours: JetCLIStr
 }
 
 fn jet_cli_struct_merge_text(kind: String, stable: String, identity: String, base: String, ours: String, theirs: String, conflicts: &[JetCLIStructConflict]) -> String Never! {
-    if ours == theirs -> return ~ours
-    if ours == base -> return ~theirs
-    if theirs == base -> return ~ours
+    if ours == theirs -> return ours.copy()
+    if ours == base -> return theirs.copy()
+    if theirs == base -> return ours.copy()
     &conflicts.push(JetCLIStructConflict{kind: kind, stable_id: stable, identity: identity, ours: "sha256:{mir_sha256_hex(ours)}", theirs: "sha256:{mir_sha256_hex(theirs)}"})
-    ~base
+    base.copy()
 }
 
 fn jet_cli_struct_ambiguous(base: JetCLIStructUnit, side: String, rows: [Int], units: [JetCLIStructUnit]) -> JetCLIStructConflict Never! {
@@ -470,7 +470,7 @@ pub fn jet_cli_structural(argv: [String], command: String, json: Bool) -> JetDri
     documents := [JetCLIStructDocument]{}
     loop path in paths {
         if jet_cli_struct_load(path) == {
-            .Failed(output) -> return ~output
+            .Failed(output) -> return output.copy()
             .Document(document) -> &documents.push(document)
         }
     }
@@ -500,7 +500,7 @@ pub fn jet_cli_structural(argv: [String], command: String, json: Bool) -> JetDri
     }
     output :: jet_cli_report_path(jet_cli_report_cwd(), jet_cli_option_value(argv, "--out") ?? paths[1])
     if jet_cli_compile_overlays(paths[1], output, [JetCLIOverlay]{JetCLIOverlay{path: output, source: formatted.text}}, false, false, None, JetDriverCompileMode.Doc) == {
-        .Refused(refusal) -> return ~refusal
+        .Refused(refusal) -> return refusal.copy()
         .Compiled(result, _) -> {
             if jet_cli_errors(result.diagnostics).len() > 0 {
                 return jet_cli_struct_index_error("merged output did not pass parser and sema", result.diagnostics)

@@ -898,7 +898,7 @@ fn user_derive_generic_impl_runs_in_aot_and_default_dev() {
 derive T.TypeName {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn get_value(self) -> @param { ~self.value }
+    fn get_value(self) -> @param { self.value.copy() }
     fn type_name(self) -> String { T.$name }
 }
 
@@ -953,7 +953,7 @@ fn run() {
 fn user_derive_generated_non_clonable_copy_is_rejected_in_sema() {
     let src = r#"
 derive T.CopyCallback {
-    fn duplicate(self) -> fn(Int) -> Int { ~self.callback }
+    fn duplicate(self) -> fn(Int) -> Int { self.callback.copy() }
 }
 
 #CopyCallback
@@ -1077,7 +1077,7 @@ fn structure_once_example_runs_aot_with_generated_meaning() {
 }
 
 /// #495 / I2: a field read from a bare (`Read`) parameter is still rooted in
-/// the borrowed parameter. The explicit `~` required by E0209 must produce
+/// the borrowed parameter. The explicit `.copy()` required by E0209 must produce
 /// owned values for both shallow and nested fields, compile through rustc, and
 /// run with the expected data.
 #[test]

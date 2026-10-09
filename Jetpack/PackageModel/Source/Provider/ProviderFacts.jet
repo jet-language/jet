@@ -171,11 +171,11 @@ pub struct ProviderFacts {
             losses: [ProviderLoss]{},
             conflicts: [ProviderConflict]{}
         }
-        name :: ~facts.provider
-        target :: ~facts.target
+        name :: facts.provider.copy()
+        target :: facts.target.copy()
         &facts.add_fact("provider.name", ProviderFactValue.Text(name), "ref")
         &facts.add_fact("provider.target", ProviderFactValue.Text(target), "ref")
-        selector_text :: ~facts.selector.raw
+        selector_text :: facts.selector.raw.copy()
         if selector_text != "" -> &facts.add_fact("provider.selector", ProviderFactValue.Text(selector_text), "ref")
         if explicit_provider != "" && authority.provider.trim() != "" && explicit_provider != authority.provider {
             // Named sources such as `@default` are source authorities, not

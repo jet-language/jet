@@ -164,7 +164,7 @@ pub struct StagedPlanAction {
                 }
                 loop owned in output_owners {
                     if pkg_staged_paths_overlap(owned.output, output) {
-                        return Err(StagedPlanError.OutputConflict{first: owned.output, first_owner: owned.owner, second: ~output, second_owner: action.name})
+                        return Err(StagedPlanError.OutputConflict{first: owned.output, first_owner: owned.owner, second: output.copy(), second_owner: action.name})
                     }
                 }
                 &output_owners.push((output: output, owner: action.name))
@@ -182,7 +182,7 @@ pub struct StagedPlanAction {
         }
         loop action in pkg_staged_sorted_keys(dependencies) {
             loop dependency in dependencies[action] {
-                if !names.contains(dependency) -> return Err(StagedPlanError.UnknownDependency{action: ~action, dependency: dependency})
+                if !names.contains(dependency) -> return Err(StagedPlanError.UnknownDependency{action: action.copy(), dependency: dependency})
             }
         }
         pkg_staged_detect_cycle(dependencies)

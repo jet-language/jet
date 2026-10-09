@@ -170,7 +170,7 @@ fn load(id: U64) -[]> Record String! {{
     #Unsafe("live non-null out slot; read only after status zero") {{
         p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
         status = c.load_record(id, p)
-        if Int.from_i32(status) == 0 {{ slot = ~p.* }}
+        if Int.from_i32(status) == 0 {{ slot = p.copy().* }}
     }}
     if Int.from_i32(status) != 0 {{ return Err("status {{status}}") }}
     return Ok(slot)

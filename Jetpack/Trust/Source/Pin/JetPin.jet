@@ -63,7 +63,7 @@ fn trust_pin_is_named_channel(channel: String) -> Bool Never! {
 pub fn trust_pin_channel_of(version: String) -> String Never! {
     parts :: trust_text_split(version, TRUST_DOT)
     if parts.len() >= 2 -> return "{parts[0]}.{parts[1]}"
-    ~version
+    version.copy()
 }
 
 // ── T2: channel resolution + lock record ──
@@ -80,7 +80,7 @@ pub fn trust_pin_resolve_channel(channel: String) -[Env]> String TrustError! {
 fn trust_pin_version_of_channel(channel: String) -> String Never! {
     parts :: trust_text_split(channel, TRUST_DOT)
     if parts.len() == 2 -> return "{parts[0]}.{parts[1]}.0"
-    ~channel
+    channel.copy()
 }
 
 // `jet-<version>-<fp>` with a short platform-qualified fingerprint (D-PM1).

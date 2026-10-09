@@ -67,7 +67,7 @@ pub struct NarInfo {
 
     fn unsigned_text(self) -> String StoreError! {
         self.validate()
-        references := ~self.references
+        references := self.references.copy()
         &references.sort()
         out := ""
         out = "{out}{store_nar_line("StorePath", self.store_path)}"
@@ -89,7 +89,7 @@ pub struct NarInfo {
 
     fn to_text(self) -> String StoreError! {
         out := self.unsigned_text()
-        signatures := ~self.signatures
+        signatures := self.signatures.copy()
         &signatures.sort_by(signature -> signature.key_id)
         loop signature in signatures -> out = "{out}{store_nar_line("Sig", "{signature.key_id}:{signature.algorithm}:{signature.sig_hex}")}"
         Ok(out)
@@ -134,7 +134,7 @@ pub struct NarInfo {
     }
 
     fn signed(self, key: TrustKey) -> NarInfo StoreError! {
-        signed := ~self
+        signed := self.copy()
         signed.signatures = [NarSignature]{}
         signature :: key.sign(signed.unsigned_text().bytes())
         &signed.signatures.push(NarSignature.from_trust(signature))

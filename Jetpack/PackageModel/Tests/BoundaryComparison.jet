@@ -34,9 +34,9 @@ fn pkg_boundary_test_comparison(candidate: String, declared_equal: Bool) -> Comp
     testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{pkg_boundary_test_sample(candidate, declared_equal)})
 }
 fn pkg_boundary_test_accept(contract: &ForeignBoundaryContract, comparison: ComparisonRecord) -> ForeignSourceReceipt ForeignBridgeError! {
-    derivation :: pkg_boundary_test_derivation(~contract)
-    current_identity :: ~contract.identity
-    current_coverage :: ~contract.artifact_coverage
+    derivation :: pkg_boundary_test_derivation(contract.copy())
+    current_identity :: contract.identity.copy()
+    current_coverage :: contract.artifact_coverage.copy()
     &contract.accept_reasoned_replacement(current_identity, current_coverage, derivation, pkg_boundary_test_evidence(derivation), comparison, "replacement")
 }
 fn pkg_boundary_test_accept_error(contract: &ForeignBoundaryContract, comparison: ComparisonRecord) -> String Never! {
@@ -163,7 +163,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
     records :: [ComparisonRecord]{pkg_boundary_test_comparison("43", false), testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{}), testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{pkg_boundary_test_sample("42", true)}, 1), testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{}, 2), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Unsupported, "unsupported"), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Unavailable, "unavailable"), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Timeout, "timeout"), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Cancelled, "cancelled"), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.InvalidOracle, "invalid"), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Contaminated, "contaminated")}
     loop record in records {
         contract := pkg_boundary_test_contract(ForeignLanguage.Py)
-        before :: ~contract
+        before :: contract.copy()
         expected :: if comparison_record_assert_equal(record) == {
             .Ok(_) -> panic("refused comparison")
             .Err(error) -> comparison_assertion_error_text(error)
@@ -240,7 +240,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
 
 #Test("reasoned replacement requires canonical derivation and agreeing valid evidence") {
     contract := pkg_boundary_test_contract(ForeignLanguage.Py)
-    before :: ~contract
+    before :: contract.copy()
     derivation := pkg_boundary_test_derivation(contract)
     evidence := pkg_boundary_test_evidence(derivation)
     record :: pkg_boundary_test_comparison("42", true)

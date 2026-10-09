@@ -336,7 +336,7 @@ fn local_cell_guards_are_linear_before_codegen() {
 fn run() {
     cell :: Cell.new(1)
     guard :: cell.guard_read()
-    copied :: ~guard
+    copied :: guard.copy()
     print(copied.get())
 }
 "#;

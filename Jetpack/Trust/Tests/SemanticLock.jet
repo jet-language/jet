@@ -10,7 +10,7 @@ fn trust_test_pkg(owner: String, key: String, exact: String, hash: String) -> Se
     rationale.source_ref = "catalog:{key}"
     rationale.provider = "core"
     rationale.channel_input = "stable"
-    rationale.exact_output = ~exact
+    rationale.exact_output = exact.copy()
     rationale.policy_fingerprint = "policy-1"
     rationale.signature = "ed25519:sig"
     rationale.cache_provenance = "hangar"
@@ -218,9 +218,9 @@ dependencies = ["app"]
 #Test("three way merge preserves inputs and source maps") {
     base := SemanticLockFile.empty()
     base.inputs = [LockInput]{LockInput{name: "nixpkgs", url: "old", follows: ""}}
-    left := ~base
+    left := base.copy()
     left.source_maps = [SourceMapEntry]{SourceMapEntry{pattern: "Acme.*", sources: [String]{"nuget:Acme"}}}
-    right := ~base
+    right := base.copy()
     right.inputs = [LockInput]{LockInput{name: "nixpkgs", url: "new", follows: ""}}
     outcome :: trust_merge_semantic_locks(base, left, right)
     assert_eq(outcome.conflicts.len(), 0)

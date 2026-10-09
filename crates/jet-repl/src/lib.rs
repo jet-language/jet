@@ -2148,7 +2148,7 @@ fn restore_move_diagnostic(d: Diagnostic, moved_names: &HashSet<String>) -> Diag
                 "E0121",
                 format!("`{name}` was given away earlier, so it can't be used here"),
                 "after a value moves somewhere else, the old name no longer holds it".to_string(),
-                format!("give away a copy instead (`~{name}`) where it moved"),
+                format!("give away a copy instead (`{name}.copy()`) where it moved"),
                 d.span,
             );
         }

@@ -450,7 +450,7 @@ struct Queue {{
 }}
 
 fn attach(label: String, node: &Node) -> Queue from node {{
-    return Queue{{label: ~label, head: mem.pin(&node)}}
+    return Queue{{label: label.copy(), head: mem.pin(&node)}}
 }}
 
 fn run() {{

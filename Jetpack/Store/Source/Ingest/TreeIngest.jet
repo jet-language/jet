@@ -214,7 +214,7 @@ pub struct MovePathPermissions {
 
     fn make_writable(&self, path: String, root: String) StoreError! -[FS]> {
         if !store_path_starts_with(path, root) -> return Err(StoreError.Other("quarantine path escapes Hangar root"))
-        current := ~path
+        current := path.copy()
         loop {
             info :: files.stat(current)
             if info.is_dir {
@@ -363,7 +363,7 @@ fn store_is_single_component(id: String) -> Bool Never! {
 }
 
 fn store_quarantine_suffix() -[Env, Time]> String Never! {
-    sequence :: ~store_quarantine_sequence
+    sequence :: store_quarantine_sequence.copy()
     store_quarantine_sequence += 1
     nanos :: time.unix_ns()
     "{sys.pid()}-{if nanos < 0 -> 0 else -> nanos}-{sequence}"

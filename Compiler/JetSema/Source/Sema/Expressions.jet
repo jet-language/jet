@@ -77,7 +77,7 @@ fn sema_expr_unwrap_tag(ty: Type) -> Type Never! {
         .Tagged(_, inner) -> return sema_expr_unwrap_tag(inner)
         else -> {}
     }
-    ~ty
+    ty.copy()
 }
 
 fn sema_expr_is_integer(ty: Type) -> Bool Never! {
@@ -113,7 +113,7 @@ fn sema_expr_numeric_base(ty: Type) -> Type Never! {
         .InlineRange(base, _, _) -> return sema_expr_numeric_base(base)
         else -> {}
     }
-    ~ty
+    ty.copy()
 }
 
 fn sema_expr_integer_range_for_type(ty: Type) -> SemaIntegerRange? {
@@ -2554,6 +2554,21 @@ fn sema_expr_core_module_alias_visible(alias: String, scopes: SemaScopeTable) ->
     kind == SymbolKind.Module || kind == SymbolKind.Import
 }
 
+// D-COPY-WORD1=A: Rust `copy_receiver_names_type`. A receiver that names a
+// declared type (`Recipe.copy()`, `List<Int>.copy()`, `alias.Type.copy()`)
+// keeps associated-function lookup; every other receiver is a value.
+fn sema_expr_copy_receiver_names_type(receiver: Expr, owner_type_args: [Type], scopes: SemaScopeTable) -> Bool Never! {
+    if owner_type_args.len() > 0 -> return true
+    if receiver == .Ident(name, _) {
+        index :: sema_scope_resolve_index(scopes, name) ?? return false
+        return scopes.bindings[index].symbol.kind == SymbolKind.Type
+    }
+    if receiver == .Field(base, _, _) {
+        if base == .Ident(alias, _) -> return sema_expr_core_module_alias_visible(alias, scopes)
+    }
+    false
+}
+
 fn sema_expr_canonical_type_binding(name: String, scopes: SemaScopeTable) -> Bool Never! {
     index :: sema_scope_resolve_index(scopes, name) ?? return false
     binding := scopes.bindings[index]
@@ -3225,7 +3240,7 @@ fn sema_expr_unit_probe_shape(expr: Expr) -> Bool Never! {
 // and a literal before a measurement (or a unit under `*` or `/`) is Float.
 fn sema_expr_decimal_lhs_expected(op: BinOp, left: Expr, right: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Type? {
     if !sema_expr_decimal_literal_operand(left, true) -> return None
-    if sema_expr_expects_machine_float(expected) -> return ~expected
+    if sema_expr_expects_machine_float(expected) -> return expected.copy()
     if !sema_expr_unit_probe_shape(right) -> return None
     probe_diagnostics := [Diagnostic]{}
     probed :: sema_probe_expression(right, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return None
@@ -3271,10 +3286,10 @@ fn sema_expr_wants_expected_form(expr: Expr) -> Bool Never! {
 // optional builder (`Val(x)`, `None`) compared with a plain left operand
 // (a flow-refined `x` after `if x == None -> …`) is built at the lifted `T?`.
 fn sema_expr_rhs_hint(op: BinOp, left: Type, right: Expr) -> Type Never! {
-    if op != BinOp.Eq && op != BinOp.Ne -> return ~left
-    if sema_expr_unwrap_tag(left) == .Option(_) -> return ~left
-    if !sema_expr_optional_builder(right) -> return ~left
-    Type.Option{inner: ~left}
+    if op != BinOp.Eq && op != BinOp.Ne -> return left.copy()
+    if sema_expr_unwrap_tag(left) == .Option(_) -> return left.copy()
+    if !sema_expr_optional_builder(right) -> return left.copy()
+    Type.Option{inner: left.copy()}
 }
 
 fn sema_expr_optional_builder(expr: Expr) -> Bool Never! {
@@ -3554,7 +3569,7 @@ fn sema_expr_check_copy(value: Expr, span: Span, expected: Type?, environment: S
 }
 
 // D-COPY-DEFAULT1=A: an unmarked move site that a later use reached is a
-// share. It checks like the authored copy `~name`; MIR records it as a Share
+// share. It checks like the authored copy `name.copy()`; MIR records it as a Share
 // copy, the clone the TIR read paths can elide like any sema-inserted copy.
 fn sema_expr_check_shared_identifier(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     previous_borrow := context.borrow_ctx
@@ -3918,7 +3933,7 @@ fn sema_expr_bare_member_chain_text(expr: Expr) -> String Never! {
 // The chain with its empty receiver named `subject`.
 fn sema_expr_replace_bare_subject(expr: Expr, subject: String) -> Expr Never! {
     if expr == {
-        .Ident(name, span) -> if name == "" -> Expr.Ident{name: subject, span: span} else -> ~expr
+        .Ident(name, span) -> if name == "" -> Expr.Ident{name: subject, span: span} else -> expr.copy()
         .Field(base, member, span) -> Expr.Field{base: sema_expr_replace_bare_subject(base, subject), member: member, span: span}
         .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen, checked_callee) -> Expr.MethodCall{receiver: sema_expr_replace_bare_subject(receiver, subject), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, recv_type: recv_type, resolved_ret: resolved_ret, operator_rhs: operator_rhs, checked_widen: checked_widen, checked_callee: checked_callee}
         else -> ~expr

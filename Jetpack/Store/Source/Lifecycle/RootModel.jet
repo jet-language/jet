@@ -375,14 +375,14 @@ fn store_lifecycle_pad20(value: Int) -> String Never! {
 
 // Sorted, duplicate-free union of two target sets.
 fn store_lifecycle_union(left: [String], right: [String]) -> [String] Never! {
-    merged := ~left
+    merged := left.copy()
     loop value in right -> &merged.push(value)
     store_lifecycle_sorted_set(merged)
 }
 
 // Sort and drop duplicates.
 fn store_lifecycle_sorted_set(values: [String]) -> [String] Never! {
-    sorted := ~values
+    sorted := values.copy()
     &sorted.sort()
     out := [String]{}
     loop value in sorted {

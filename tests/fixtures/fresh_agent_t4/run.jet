@@ -30,17 +30,17 @@ fn run() {
     loop line in source.lines() {
         line_number += 1
         parts :: text.splitn(line, "\t", 3)
-        if parts.len() != 2 -> fail(~path, line_number, "what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>")
+        if parts.len() != 2 -> fail(path.copy(), line_number, "what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>")
 
         key_raw :: parts.get(0) ?? panic("missing report key")
-        key :: ~(key_raw.trim())
-        value :: ~(parts.get(1) ?? panic("missing report value"))
-        if key.is_empty() -> fail(~path, line_number, "what=empty TSV key; why=each row needs a named report field; fix=write name, count, or note before the tab")
+        key :: key_raw.trim().copy()
+        value :: (parts.get(1) ?? panic("missing report value")).copy()
+        if key.is_empty() -> fail(path.copy(), line_number, "what=empty TSV key; why=each row needs a named report field; fix=write name, count, or note before the tab")
 
         if {
             key == "name" -> {
                 if {
-                    seen_name -> fail(~path, line_number, "what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row")
+                    seen_name -> fail(path.copy(), line_number, "what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row")
                     else -> {
                         name = value
                         seen_name = true
@@ -49,7 +49,7 @@ fn run() {
             }
             key == "count" -> {
                 if {
-                    seen_count -> fail(~path, line_number, "what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row")
+                    seen_count -> fail(path.copy(), line_number, "what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row")
                     else -> {
                         count_text = value
                         count_line = line_number
@@ -59,20 +59,20 @@ fn run() {
             }
             key == "note" -> {
                 if {
-                    seen_note -> fail(~path, line_number, "what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row")
+                    seen_note -> fail(path.copy(), line_number, "what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row")
                     else -> {
                         note = value
                         seen_note = true
                     }
                 }
             }
-            else -> fail(~path, line_number, "what=unknown TSV key; why=only name, count, and note are valid report fields; fix=use one of the required keys")
+            else -> fail(path.copy(), line_number, "what=unknown TSV key; why=only name, count, and note are valid report fields; fix=use one of the required keys")
         }
     }
 
-    if !seen_name || !seen_count || !seen_note -> fail(~path, line_number + 1, "what=missing required TSV key; why=report needs name, count, and note; fix=add the missing row")
+    if !seen_name || !seen_count || !seen_note -> fail(path.copy(), line_number + 1, "what=missing required TSV key; why=report needs name, count, and note; fix=add the missing row")
     count :: count_text.to_int() ?? {
-        fail(~path, count_line, "what=invalid count value; why=count must be a decimal integer; fix=write a whole-number count")
+        fail(path.copy(), count_line, "what=invalid count value; why=count must be a decimal integer; fix=write a whole-number count")
         0
     }
     report :: Report{count: count, name: name, note: note}

@@ -77,7 +77,7 @@ fn pkg_overlay_find_word(raw: [U8], word: String, start: Int) -> Int? Never! {
     needle :: word.bytes()
     cursor := start
     loop cursor < raw.len() {
-        at :: ~cursor
+        at :: cursor.copy()
         code :: Int.from_u8(raw[at])
         peek :: pkg_bytes_code(raw, at + 1)
         cursor += 1
@@ -97,7 +97,7 @@ fn pkg_overlay_find_word(raw: [U8], word: String, start: Int) -> Int? Never! {
 fn pkg_overlay_find_char(raw: [U8], start: Int, wanted: Int) -> Int? Never! {
     cursor := start
     loop cursor < raw.len() {
-        at :: ~cursor
+        at :: cursor.copy()
         code :: Int.from_u8(raw[at])
         peek :: pkg_bytes_code(raw, at + 1)
         cursor += 1

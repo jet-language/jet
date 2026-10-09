@@ -185,7 +185,7 @@ pub struct ForeignSourceReceipt {
             replacement_identity: replacement_identity,
             source_authority: contract.source_authority,
             derivation: derivation,
-            evidence: ~contract.evidence,
+            evidence: contract.evidence.copy(),
             comparison_artifact_id: comparison_artifact_id,
             comparison_schema_version: comparison.schema_version,
             comparison_status: comparison_status_as_str(comparison.status),
@@ -510,13 +510,13 @@ pub struct ForeignBoundaryContract {
         if evidence_outcome_is_failure(evidence.outcome) || evidence_outcome_is_incomplete(evidence.outcome) || evidence.outcome == EvidenceOutcome.Unchecked -> return Err(pkg_bridge_error("foreign replacement evidence is not a complete successful observation: {evidence_outcome_name(evidence.outcome)}"))
         comparison_record_assert_equal(comparison) ?? return Err(pkg_bridge_error("foreign replacement comparison was not accepted: {comparison_assertion_error_text(err)}"))
         // Exactly one copy, Rust's `self.clone()`; the attach steps consume it.
-        candidate := ~self
+        candidate := self.copy()
         candidate = ^candidate.attach_derivation(derivation)
         candidate = ^candidate.attach_evidence(evidence)
         &candidate.record_comparison(comparison, Val(evidence.identity))
         &candidate.mark_replacement_accepted()
         receipt :: ForeignSourceReceipt.from_contract(candidate, comparison, replacement_identity)
-        candidate.source_receipt = Val(~receipt)
+        candidate.source_receipt = Val(receipt.copy())
         candidate.validate()
         self = candidate
         Ok(receipt)

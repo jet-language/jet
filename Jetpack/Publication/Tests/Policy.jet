@@ -150,7 +150,7 @@ fn publication_policy_test_error(result: PublicationPackagePolicyReceipt Publica
     canonical :: "licenses=Some([\"Apache-2.0\", \"MIT\"]);sources=[(\"a\", [\"local\"]), (\"z*\", [\"internal\", \"public\"])];exceptions=[PackagePolicyException {{ id: \"a\", scope: \"a#1\", reason: \"reviewed\", expires_at: 7 }}, PackagePolicyException {{ id: \"b\", scope: \"z#2\", reason: \"quoted \\\"reason\\\"\", expires_at: 9 }}]"
     assert_eq(publication_policy_fingerprint_text(policy), canonical)
     assert_eq(publication_policy_fingerprint(policy), "sha256-8c6bc618f50d5c5cf2c4432a8139f5b841a711b5c3de070ea76eb0da5f2c45cc")
-    reordered := ~policy
+    reordered := policy.copy()
     reordered.licenses = Val([String]{"Apache-2.0", "MIT"})
     reordered.source_maps = [PolicySourceMap]{PolicySourceMap{pattern: "a", sources: [String]{"local"}}, PolicySourceMap{pattern: "z*", sources: [String]{"internal", "public"}}}
     reordered.exceptions = [PackagePolicyException]{policy.exceptions[1], policy.exceptions[0]}

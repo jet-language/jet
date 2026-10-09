@@ -75,9 +75,9 @@ fn lower_render_method(p: MIRProgram, implementation: MIRImplDef, show: Bool) ->
 }
 
 fn lower_render_name(name: String) -> String Never! {
-    if !name.starts_with("__jet_") -> return ~name
+    if !name.starts_with("__jet_") -> return name.copy()
     bytes :: name.bytes()
-    String.from_bytes(bytes.slice(6, bytes.len())) ?? ~name
+    String.from_bytes(bytes.slice(6, bytes.len())) ?? name.copy()
 }
 
 fn lower_render_static(m: &LowerModule, f: &LowerFunction, builder: LIRValueID, text: String) Never! {
@@ -123,7 +123,7 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
         args := [LIRValueID]{}
         if value == .Val(operand) -> &args.push(operand)
         text :: lower_render_string(&f)
-        signature :: ~m.mir_signatures[index]
+        signature :: m.mir_signatures[index].copy()
         lower_emit(&f, LIRInst.Call{dst: Val(text), signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: args})
         return Val(LowerText{value: text, owned: true})
     }
@@ -280,7 +280,7 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
     if lower_priority_queue_element(glue.ty) != None -> return lower_helper_priority_queue_render(p, &m, glue)
     layout :: lower_repr_layout(lower_repr(p, glue.ty)) ?? lir_layout_pointer()
     f := lower_helper_start(&m, glue, [LIRLayout]{layout}, Val(lir_layout_pointer()))
-    operand :: ~f.open_params[0]
+    operand :: f.open_params[0].copy()
     mode :: if glue.helper == "show" -> LowerRenderMode.Show else if glue.helper == "debug" -> LowerRenderMode.Debug else -> LowerRenderMode.Display
     // List.join requests show<String>, independently of the lazy iterator's
     // scalar callback. Both use the ordinary renderer and return an owner.

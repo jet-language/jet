@@ -203,7 +203,7 @@ pub struct OpaqueHandleDiscovery {
             if overlay.close_for(typedef_name, jet_name, shape.struct_tag) == {
                 .Val(symbol) -> {
                     if !pkg_opaque_is_ident(symbol) {
-                        &unresolved.push((typedef_name: ~typedef_name, reason: "overlay close symbol `{symbol}` for opaque handle `{typedef_name}` is not a valid C identifier"))
+                        &unresolved.push((typedef_name: typedef_name.copy(), reason: "overlay close symbol `{symbol}` for opaque handle `{typedef_name}` is not a valid C identifier"))
                         next
                     }
                     close = symbol
@@ -211,11 +211,11 @@ pub struct OpaqueHandleDiscovery {
                 }
                 .None -> {
                     if candidates.len() == 0 {
-                        &unresolved.push((typedef_name: ~typedef_name, reason: "opaque handle `{typedef_name}` has no conventional close function; provide an overlay close mapping"))
+                        &unresolved.push((typedef_name: typedef_name.copy(), reason: "opaque handle `{typedef_name}` has no conventional close function; provide an overlay close mapping"))
                         next
                     }
                     if candidates.len() > 1 {
-                        &unresolved.push((typedef_name: ~typedef_name, reason: "opaque handle `{typedef_name}` has ambiguous conventional close functions ({candidates.join(", ")}); provide an overlay close mapping"))
+                        &unresolved.push((typedef_name: typedef_name.copy(), reason: "opaque handle `{typedef_name}` has ambiguous conventional close functions ({candidates.join(", ")}); provide an overlay close mapping"))
                         next
                     }
                     close = candidates[0]
@@ -228,7 +228,7 @@ pub struct OpaqueHandleDiscovery {
                 close: close,
                 close_source: close_source,
                 thread_safety: safety,
-                link_closure: ~links
+                link_closure: links.copy()
             })
         }
         handle_indices := [String: Int]{}
@@ -280,7 +280,7 @@ fn pkg_opaque_sorted_keys(keys: [String]) -> [String] Never! {
 // `name_t` names its handle `name`.
 fn pkg_opaque_handle_name_seed(typedef_name: String) -> String Never! {
     if typedef_name.ends_with("_t") && typedef_name != "_t" -> return typedef_name.removesuffix("_t")
-    ~typedef_name
+    typedef_name.copy()
 }
 
 // Whether `function` is `<stem><verb>`, `<stem>_<verb>`, or `<verb>_<stem>`
@@ -307,7 +307,7 @@ fn pkg_opaque_conventional_close_name(function: String, typedef_name: String, st
     wanted :: function.to_lower()
     loop stem in stems {
         loop verb in OPAQUE_HANDLE_CLOSE_VERBS {
-            forms :: [String]{[String]{~stem, ~verb}.join(""), "{stem}_{verb}", "{verb}_{stem}"}
+            forms :: [String]{[String]{stem.copy(), verb.copy()}.join(""), "{stem}_{verb}", "{verb}_{stem}"}
             if forms.contains(wanted) -> return true
         }
     }
@@ -529,7 +529,7 @@ fn pkg_opaque_parse_type_shape(raw: String) -> OpaqueCTypeShape Never! {
             else -> {
                 if pkg_opaque_is_ident(token) {
                     if previous_struct {
-                        shape.struct_tag = Val(~token)
+                        shape.struct_tag = Val(token.copy())
                         previous_struct = false
                     }
                     shape.base = Val(token)
@@ -637,20 +637,20 @@ fn pkg_opaque_strip_comments_and_directives(text: String) -> String Never! {
 fn pkg_opaque_without_trailing_cr(line: String) -> String Never! {
     bytes :: line.bytes()
     if bytes.len() > 0 && Int.from_u8(bytes[bytes.len() - 1]) == 13 -> return pkg_bytes_text(bytes, 0, bytes.len() - 1)
-    ~line
+    line.copy()
 }
 
 // `preferred`, or `preferred_2`, `preferred_3`, … when taken.
 fn pkg_opaque_unique_name(used: &[String], preferred: String) -> String Never! {
     if !used.contains(preferred) {
-        &used.push(~preferred)
-        return ~preferred
+        &used.push(preferred.copy())
+        return preferred.copy()
     }
     suffix := 2
     loop {
         candidate :: "{preferred}_{suffix}"
         if !used.contains(candidate) {
-            &used.push(~candidate)
+            &used.push(candidate.copy())
             return candidate
         }
         suffix += 1

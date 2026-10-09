@@ -5681,7 +5681,7 @@ impl MirLoopSourceKind {
 /// without one (`verify_mir_legality` checks the fact against the type).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MirCopyFact {
-    /// The programmer wrote `~x`.
+    /// The programmer wrote `x.copy()`.
     Explicit,
     /// D-MEM-COPYSEM1: an owning destination filled from a value its scope keeps.
     Materialize,

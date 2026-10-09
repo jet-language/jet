@@ -605,8 +605,8 @@ impl<'a> Checker<'a> {
             "the function can access this parameter, but it does not own any part of it"
                 .to_string(),
             format!(
-                "copy the selected value explicitly by prefixing it with `{}`",
-                Syntax::SIGIL_COPY
+                "copy the selected value explicitly by calling `.{}()` on it",
+                Syntax::METHOD_COPY
             ),
             Some(expr.span()),
         );
@@ -3696,7 +3696,7 @@ impl<'a> Checker<'a> {
 
     /// Rewrite a struct-literal (or enum-payload, via the same call from
     /// `check_enum_lit`) field VALUE that is a bare non-`Copy` ident into an
-    /// `Expr::Copy` node (D-CAP2 — the same node `~x` uses), when leaving it a
+    /// `Expr::Copy` node (D-CAP2 — the same node `x.copy()` uses), when leaving it a
     /// move would either (a) not type-check (a borrowed param) or (b) silently
     /// move an OWNED LOCAL that is still read later — both would otherwise
     /// reach rustc as a raw, unreported E0507/E0382 (I2). Read-only values use
@@ -3731,7 +3731,7 @@ impl<'a> Checker<'a> {
         }
         // A repeated field/parameter name is still an owning slot. Read-only
         // values materialize here under D-MEM-COPYSEM1; the explicit policy
-        // restores the old refusal and its `~value` fix.
+        // restores the old refusal and its `value.copy()` fix.
         if let Some(field_name) = field_name {
             let borrowed = matches!(payload, Expr::Ident(name, _) if name == field_name)
                 && if let Expr::Ident(name, _) = &*payload {
@@ -3766,7 +3766,7 @@ impl<'a> Checker<'a> {
                     "E0120",
                     format!("`{name}` was not moved here, so it cannot fill an owned field"),
                     "this function has read access only and does not own the value".to_string(),
-                    format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
+                    format!("copy it explicitly with `{}`", Syntax::copy_call(name)),
                     Some(span),
                 );
                 self.diags
@@ -3795,7 +3795,7 @@ impl<'a> Checker<'a> {
         };
         if should_clone && self.copies_explicit() {
             // `copies: .Explicit` makes every implicit copy the audit reports
-            // a diagnostic with the Safe `~` edit, including a local that is
+            // a diagnostic with the Safe `.copy()` edit, including a local that is
             // still read after it fills this field (#3738).
             if let Expr::Ident(name, span) = &*payload {
                 let (name, span) = (name.clone(), *span);
@@ -3820,7 +3820,7 @@ impl<'a> Checker<'a> {
                     "E0120",
                     what,
                     why.to_string(),
-                    format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
+                    format!("copy it explicitly with `{}`", Syntax::copy_call(&name)),
                     Some(span),
                 );
                 self.diags

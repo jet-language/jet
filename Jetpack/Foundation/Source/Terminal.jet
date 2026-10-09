@@ -84,7 +84,7 @@ pub struct TerminalPalette {
     }
 
     fn paint(self, sgr: String, text: String) -> String Never! {
-        if !self.color -> return ~text
+        if !self.color -> return text.copy()
         esc :: terminal_esc()
         "{esc}[{sgr}m{text}{esc}[0m"
     }
@@ -239,7 +239,7 @@ fn terminal_pad() -> String Never! {
 fn terminal_pad_end(text: String, width: Int) -> String Never! {
     scalars := 0
     loop _ in text.chars() -> scalars += 1
-    if scalars >= width -> return ~text
+    if scalars >= width -> return text.copy()
     "{text}{" ".repeat(width - scalars)}"
 }
 
@@ -306,7 +306,7 @@ fn terminal_ansi_visible_width(input: String) -> Int Never! {
 // columns, and a reset is restored when an active style is cut.
 pub fn terminal_fit_line(input: String, width: Int) -> String Never! {
     if width <= 0 -> return ""
-    if terminal_ansi_visible_width(input) <= width -> return ~input
+    if terminal_ansi_visible_width(input) <= width -> return input.copy()
     content_width :: width - 1
     raw :: input.bytes()
     index := 0
@@ -689,7 +689,7 @@ pub struct Theme {
     fn spinner(self, msg: String) -[IO, Env, Time]> Spinner Never! {
         if !self.live_enabled() -> return Spinner{stop: None, running: None}
         stop :: shared SpinnerState{stop: false}
-        flag :: ~stop
+        flag :: stop.copy()
         pad :: terminal_pad()
         shown :: terminal_fit_live_line(msg, terminal_columns() - 1)
         esc :: terminal_esc()

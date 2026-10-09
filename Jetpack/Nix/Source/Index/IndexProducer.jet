@@ -14,9 +14,9 @@ pub struct NixIndexOracleCandidate {
 // A validated document: records and misses sorted, coverage derived from the
 // indexed records.
 fn nix_index_generated_document(channel: String, revision: String, system: String, released_unix: Int, records: [NixIndexRecord], not_indexed: [NixIndexCoverageMiss]) -> NixIndexDocument NixIndexError! {
-    sorted_records := ~records
+    sorted_records := records.copy()
     &sorted_records.sort_by((left: NixIndexRecord, right: NixIndexRecord) -> nix_index_attrpath_order(left.attrpath, right.attrpath))
-    misses := ~not_indexed
+    misses := not_indexed.copy()
     &misses.sort_by((left: NixIndexCoverageMiss, right: NixIndexCoverageMiss) -> nix_index_attrpath_order(left.attrpath, right.attrpath).then(left.reason <=> right.reason))
     indexed := [[String]]{}
     wires := [NixIndexRecordWire]{}

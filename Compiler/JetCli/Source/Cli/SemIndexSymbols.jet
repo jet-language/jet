@@ -235,7 +235,7 @@ pub fn jet_cli_symbol_index(symbols: [JetCLISymbol]) -> [JetCLISymbol] Never! {
         }
     }
     loop index in 1..<unique.len() {
-        value :: ~unique[index]
+        value :: unique[index].copy()
         position := index
         loop position > 0 && jet_cli_symbol_before(value, unique[position - 1]) {
             unique[position] = unique[position - 1]
@@ -857,7 +857,7 @@ fn jet_cli_symbol_display(modules: [JetDriverDocModule], module_path: String, na
         permit :: storage.guard_read()
         return name_ledger_display_path(permit.value, doc_module.name_module_index, name, Val(doc_module.name_module_index)) ?? name
     }
-    ~name
+    name.copy()
 }
 
 fn jet_cli_symbol_canonical_name(modules: [JetDriverDocModule], module_path: String, name: String, owner: String?, span: Span) -> String Never! {

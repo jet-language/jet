@@ -276,7 +276,7 @@ fn lower_map_index_write(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
         if c.slots[slot].cell {
             held = lower_slot_root(p, c, &m, &f, slot)
         } else {
-            held = ~f.current[slot]
+            held = f.current[slot].copy()
         }
         root :: held ?? {
             lower_fail(&m, &f, "Map entry of place {row.id.value} is written before the place has a value")
@@ -779,8 +779,8 @@ fn lower_map_method_query(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
 // 0 or 1: the first member pair that differs decides (derived Ord).
 fn lower_helper_map_key_compare(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_word()))
-    left :: ~f.open_params[0]
-    right :: ~f.open_params[1]
+    left :: f.open_params[0].copy()
+    right :: f.open_params[1].copy()
     loop member in lower_inline_members(p, glue.ty) {
         a :: lower_read_at(p, &f, left, member.offset, member.ty) ?? next
         b :: lower_read_at(p, &f, right, member.offset, member.ty) ?? next
@@ -820,8 +820,8 @@ fn lower_helper_map(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunct
 // Binary search over the ascending entries.
 fn lower_helper_map_find(p: MIRProgram, m: &LowerModule, glue: LowerGlue, shape: LowerMapShape) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lower_map_key_layout(p, shape)}, Val(lir_layout_word()))
-    map :: ~f.open_params[0]
-    key :: ~f.open_params[1]
+    map :: f.open_params[0].copy()
+    key :: f.open_params[1].copy()
     length :: lower_list_word(&f, map, 0)
     data :: lower_list_data(&f, map)
     zero :: lower_const(&f, 0)

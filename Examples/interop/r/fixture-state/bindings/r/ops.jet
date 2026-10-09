@@ -174,7 +174,7 @@ pub fn sleep_call(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError!
 }
 
 pub fn sleep_call_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
-    raw :: abi.sleep_call_table(session.value, json.to_string(~rows), deadline_ms)
+    raw :: abi.sleep_call_table(session.value, json.to_string(rows.copy()), deadline_ms)
     code :: abi.take_error()
     value := decode_response(raw, code)
     return Ok(json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol))

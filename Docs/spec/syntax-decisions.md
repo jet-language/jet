@@ -20,6 +20,7 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | --- | --- | --- |
 | `::` | immutable binding | `D-BIND1` |
 | `:=` | mutable binding | `D-BIND1` |
+| `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value; the retired prefix `~x` teaches E0941 and the retired `copy x` word E0991 | `D-COPY-WORD1=A` |
 | `#` | attached marker; #[A, B] stacks | `D-VERDICT-732-1; D-MARK-STACK1` |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring | `D-TEST-STOPMSG1=A` |
 | `marker Name = #[A, B]` | fixed named marker-group declaration; expands at each use without hiding gates or refusals | `D-MARKER-GROUP1=A` |
@@ -641,7 +642,7 @@ Range arm heads and `distinct Int(0..10)` constraints stay literal-only.
 D-SHAPE-PLACE1's retired `.view(range)` method remains retired; bracket slicing
 is the one live range-place surface. A bare place projection such as
 `window :: values[range]` is a no-copy `View`; `&values[range]` is a
-write-through `ViewMut`. Write `~values[range]` when an independent list copy
+write-through `ViewMut`. Write `values[range].copy()` when an independent list copy
 must outlive or detach from the owner.
 The parser keeps a retired `.view(range)` as an ordinary call for the E0214
 teaching diagnostic; it must not split the range into constructor arguments.
@@ -2558,9 +2559,9 @@ stays a verb — no third sigil (D-CAP2). Dereference is **postfix `p.*`**
 keywords (E0056/E0057 retired by D-S14-PAUSE; E0058 retired earlier by
 D-MEM1/S3).
 
-*Supersession (D-SHAPE-COPY1=A, ratified 2026-07-15):* `copy x` is
-historical text in this frozen entry, not current syntax. The current copy
-form is `~x`; the retired `copy` word produces E0991.
+*Supersession (D-COPY-WORD1=A, confirmed by D-COPY-MOVE-SPELL1=A):* `copy x`
+and `~x` are historical text in this frozen entry, not current syntax. The
+current copy form is `x.copy()`; the retired forms teach E0991 and E0941.
 
 *History:* D-CAP7's original text (pre-2026-07-03) had a third visible
 parameter sigil `~T` (edit/mutate), a fourth `*T` in parameter position, and
@@ -2657,6 +2658,16 @@ spec.md's memory chapter rewritten to v5 end to end, this file's
 D-CAP7/D-CAP8/D-CAP4-5-6/D-REF-SHORTHAND1/2 supersession notes, stale
 `~`/`.clone()`/`api:` sweep across docs/reference. S9 (final verification
 gate) remains.
+
+**D-COPY-WORD1=A — the one copy is the method `x.copy()`** *(ratified
+2026-10-06)*: amends D-SHAPE-COPY1=A's spelling only. A deliberate copy is the
+compiler-owned method `x.copy()`. The parser reads it as an ordinary method
+call; sema decides by name resolution: on a value receiver it is the copy,
+resolved before ordinary method lookup so no type can redefine it, and on a
+receiver that names a type (`Recipe.copy()`) it stays an associated call. It
+chains without parentheses (`input.copy().rotate()`). The prefix `~x` is a
+retired mark: E0941 teaches it and its Safe fix writes `x.copy()`. The
+entries below keep their historical `~x` text.
 
 **D-SHAPE-COPY1=A — the one copy sigil, `~x`** *(ratified 2026-07-15,
 card #535)*: supersedes D-CAP2/S4's `copy x` word. `~x` is a prefix-verb

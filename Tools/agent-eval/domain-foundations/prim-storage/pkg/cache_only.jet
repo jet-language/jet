@@ -11,7 +11,7 @@ fn run() {
     if fs.exists(root) -> fs.remove_all(root) ?? panic("cleanup")
     fs.create_dir_all(root) ?? panic("create")
     p :: Path.from(root).join("cache_only.txt")
-    fs.append_all(~p, "a") ?? panic("a")
-    fs.append_all(~p, "b") ?? panic("b")
+    fs.append_all(p.copy(), "a") ?? panic("a")
+    fs.append_all(p.copy(), "b") ?? panic("b")
     print("ok")
 }

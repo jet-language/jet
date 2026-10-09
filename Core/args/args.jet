@@ -237,7 +237,7 @@ pub fn get_text(tree: Dyn, key: String) -> String Never! {
             v :: object_get(entries, key)
             value :: v ?? return ""
             if value == {
-                .Text(s) -> return ~s
+                .Text(s) -> return s.copy()
                 .Int(n) -> return "{n}"
                 .Float(n) -> return "{n}"
                 .Bool(b) -> {
@@ -297,7 +297,7 @@ pub fn positionals(tree: Dyn) -> [String] Never! {
                 .Array(items) -> {
                     loop item in items {
                         if item == {
-                            .Text(s) -> &out.push(~s)
+                            .Text(s) -> &out.push(s.copy())
                             else -> { _ := 0 }
                         }
                     }
@@ -382,14 +382,14 @@ pub fn default_value(def: ArgDef, value: String) -> ArgDef Never! {
 
 pub fn get_or(tree: Dyn, key: String, fallback: String) -> String Never! {
     if has(tree, key) -> return get_text(tree, key)
-    ~fallback
+    fallback.copy()
 }
 pub fn get_choice(tree: Dyn, key: String, choices: [String]) -> String? Never! {
     v :: get_text(tree, key)
     if v.bytes().len() == 0 -> return None
-    result :: ~v
+    result :: v.copy()
     loop c in choices {
-        if c == ~v -> return Val(~result)
+        if c == v.copy() -> return Val(result.copy())
     }
     None
 }
@@ -397,7 +397,7 @@ pub fn get_choice(tree: Dyn, key: String, choices: [String]) -> String? Never! {
 pub fn missing_required(tree: Dyn, defs: [ArgDef]) -> [String] Never! {
     out := [String]{}
     loop d in defs {
-        if d.required && !has(tree, d.dest) && !has(tree, d.name) -> &out.push(~d.name)
+        if d.required && !has(tree, d.dest) && !has(tree, d.name) -> &out.push(d.name.copy())
     }
     out
 }
@@ -405,7 +405,7 @@ pub fn apply_defaults(tree: Dyn, defs: [ArgDef]) -> Dyn Never! {
     out := tree
     loop d in defs {
         if d.default_text.bytes().len() == 0 -> next
-        if ~out == {
+        if out.copy() == {
             .Object(entries) -> {
                 if object_get(entries, d.dest) == .None && object_get(entries, d.name) == .None {
                     next_entries := ~entries

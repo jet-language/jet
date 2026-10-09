@@ -218,12 +218,12 @@ fn pkg_collect_effects_for_key(key: String, reachable: [String: Bool], solved: [
 // The deepest function on a static path from `key` that directly performs
 // (or maximally may perform) `effect`.
 fn pkg_effect_site(key: String, effect_name: String, solved: [String: [String]], summaries: [String: PackageEffectSummary], seen: &[String: Bool]) -> String Never! {
-    if seen.has_key(key) -> return ~key
+    if seen.has_key(key) -> return key.copy()
     seen[key] = true
-    summary :: summaries.get(key) ?? return ~key
-    if summary.maximal -> return ~key
+    summary :: summaries.get(key) ?? return key.copy()
+    if summary.maximal -> return key.copy()
     loop direct in summary.direct {
-        if authority_covers(direct, effect_name) -> return ~key
+        if authority_covers(direct, effect_name) -> return key.copy()
     }
     loop callee in authority_holds(summary.edges) {
         effects :: solved.get(callee) ?? next
@@ -231,7 +231,7 @@ fn pkg_effect_site(key: String, effect_name: String, solved: [String: [String]],
             return pkg_effect_site(callee, effect_name, solved, summaries, &seen)
         }
     }
-    ~key
+    key.copy()
 }
 
 // Whether any candidate effect covers `effect` (`effect_covers(candidate, effect)`).

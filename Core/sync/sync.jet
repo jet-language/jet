@@ -348,26 +348,26 @@ pub fn list_show(list: SyncList) -> String Never! {
 pub fn policy_new() -> RowPolicy Never! { RowPolicy{allow: [String]{}, deny: [String]{}} }
 
 pub fn policy_grant(policy: RowPolicy, action: String) -> RowPolicy Never! {
-    if action.len() == 0 || contains(policy.allow, action) -> return ~policy
-    allow := ~policy.allow
+    if action.len() == 0 || contains(policy.allow, action) -> return policy.copy()
+    allow := policy.allow.copy()
     &allow.push(action)
-    RowPolicy{allow: allow, deny: ~policy.deny}
+    RowPolicy{allow: allow, deny: policy.deny.copy()}
 }
 
 pub fn policy_deny(policy: RowPolicy, action: String) -> RowPolicy Never! {
-    if action.len() == 0 || contains(policy.deny, action) -> return ~policy
-    deny := ~policy.deny
+    if action.len() == 0 || contains(policy.deny, action) -> return policy.copy()
+    deny := policy.deny.copy()
     &deny.push(action)
-    RowPolicy{allow: ~policy.allow, deny: deny}
+    RowPolicy{allow: policy.allow.copy(), deny: deny}
 }
 
 pub fn policy_revoke(policy: RowPolicy, action: String) -> RowPolicy Never! {
     allow := [String]{}
-    loop item in ~policy.allow {
+    loop item in policy.allow.copy() {
         if item != action -> &allow.push(item)
     }
     deny := [String]{}
-    loop item in ~policy.deny {
+    loop item in policy.deny.copy() {
         if item != action -> &deny.push(item)
     }
     RowPolicy{allow: allow, deny: deny}

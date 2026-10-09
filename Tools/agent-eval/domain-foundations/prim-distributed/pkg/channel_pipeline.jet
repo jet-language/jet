@@ -10,8 +10,8 @@ use core.time as time
 fn run() {
     (input_tx, input_rx) :: channel<Int>(capacity: 2)
     (output_tx, output_rx) :: channel<Int>(capacity: 2)
-    producer_tx :: ~input_tx
-    worker_tx :: ~output_tx
+    producer_tx :: input_tx.copy()
+    worker_tx :: output_tx.copy()
 
     producer :: task {
         loop n in 1..8 {

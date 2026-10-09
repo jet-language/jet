@@ -17,7 +17,7 @@ fn run() {
     print("before:{compute.to_list(before)}")
     before_loss :: compute.mse_loss(before, target) ?? panic("before_loss")
     print("loss:{compute.to_list(before_loss)}")
-    gradients :: compute.gradient(training_loss, ~weight, ~input, ~target, wrt: [weight])
+    gradients :: compute.gradient(training_loss, weight.copy(), input.copy(), target.copy(), wrt: [weight])
     next :: compute.sgd_step(weight, gradients.weight, 0.5) ?? panic("sgd")
     after :: predict(next, input)
     print("after:{compute.to_list(after)}")

@@ -94,7 +94,7 @@ fn publication_validate_pre(text: String) -> String? Never! {
         }
         if publication_numeric(id) && id.len() > 1 && id.starts_with("0") -> return None
     }
-    Val(~text)
+    Val(text.copy())
 }
 
 fn publication_validate_build(text: String) -> String? Never! {
@@ -104,7 +104,7 @@ fn publication_validate_build(text: String) -> String? Never! {
             if !publication_is_id_byte(byte) -> return None
         }
     }
-    Val(~text)
+    Val(text.copy())
 }
 
 fn publication_cmp_pre(left: String?, right: String?) -> Ordering Never! {
@@ -234,7 +234,7 @@ pub fn publication_intersects(requirement: PublicationVersionReq, other: Publica
 
 pub fn publication_version_req_display(requirement: PublicationVersionReq) -> String Never! {
     if requirement.raw == "" -> return "*"
-    ~requirement.raw
+    requirement.raw.copy()
 }
 
 struct PublicationPartial {
@@ -313,7 +313,7 @@ fn publication_split_simples(range: String) -> [String] Never! {
             &out.push("{token}{tokens[index + 1]}")
             index += 2
         } else {
-            &out.push(~token)
+            &out.push(token.copy())
             index += 1
         }
     }

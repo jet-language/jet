@@ -46,7 +46,7 @@ use core.encoding.base64 as api
 TEXT :: prep { "Zg==" }
 
 fn report_shadowed_local(text: String) {
-    input :: ~text
+    input :: text.copy()
     if api.decode(input) == {
         .Ok(bytes) -> print(bytes.len())
         .Err(error) -> print(error.reason)

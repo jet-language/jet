@@ -35,12 +35,12 @@ fn run(args: Args) {
     (jobs_sender, jobs_receiver) :: channel<Int>(capacity: 32)
     (results_sender, results_receiver) :: channel<Int>(capacity: 32)
     task.group _workers(limit: 4) {
-        <: worker1..worker4 :> :: task worker(~jobs_receiver, ~results_sender)
+        <: worker1..worker4 :> :: task worker(jobs_receiver.copy(), results_sender.copy())
         listener :: net.tcp_listen("127.0.0.1:{args.port}")
         loop {
             stream := &listener.accept()
             command :: "{stream.read_text(1024).trim()}"
-            reply :: response(command, ~jobs_sender, ~results_receiver)
+            reply :: response(command, jobs_sender.copy(), results_receiver.copy())
             stream.write_text("{reply}\n")
             stream.close()
             if command == "shutdown" {

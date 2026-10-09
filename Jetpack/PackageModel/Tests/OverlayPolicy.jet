@@ -114,7 +114,7 @@ module workspace {
 `)
     app :: policy.package_override("ordered", "app") ?? panic("app override")
     assert_eq(app.patches, [String]{"b.patch", "a.patch", "c.patch"})
-    reversed := ~app
+    reversed := app.copy()
     reversed.patches = [String]{"c.patch", "a.patch", "b.patch"}
     overlay :: policy.overlay("ordered") ?? panic("overlay ordered")
     assert(app.policy_fingerprint(overlay) != reversed.policy_fingerprint(overlay))

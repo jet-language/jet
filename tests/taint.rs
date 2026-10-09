@@ -75,7 +75,7 @@ fn run() {
 fn origin_facts_clear_through_scrub_gate() {
     let src = r#"
 use core.files as files
-#Scrub(Input) fn clean(raw: #Input String) -> String { return ~raw }
+#Scrub(Input) fn clean(raw: #Input String) -> String { return raw.copy() }
 fn run() {
     raw :: files.read("payload.txt") ?? return Err("test")
     safe :: clean(raw)

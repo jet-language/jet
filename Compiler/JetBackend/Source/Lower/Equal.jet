@@ -96,8 +96,8 @@ fn lower_equal_words(f: &LowerFunction, a: LIRValueID, b: LIRValueID, differ: LI
 fn lower_helper_equal(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     layout :: lower_repr_layout(lower_repr(p, glue.ty)) ?? lir_layout_pointer()
     f := lower_helper_start(&m, glue, [LIRLayout]{layout, layout}, Val(lir_layout_bool()))
-    left :: ~f.open_params[0]
-    right :: ~f.open_params[1]
+    left :: f.open_params[0].copy()
+    right :: f.open_params[1].copy()
     equal :: lower_new_block(&f)
     differ :: lower_new_block(&f)
     ty :: glue.ty

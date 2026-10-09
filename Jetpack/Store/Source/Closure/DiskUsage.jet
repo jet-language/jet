@@ -69,7 +69,7 @@ pub fn store_du(verification: &StoreVerification, roots: HangarRoots) -> DuRepor
     object_owners := [String: [String]]{}
     loop entry in entries {
         record :: graph.records.get(entry.id) ?? return Err(StoreError.InvalidData("closure graph has no package record for `{entry.id}`"))
-        expected_outputs := ~entry.named_outputs
+        expected_outputs := entry.named_outputs.copy()
         expected_outputs["out"] = entry.envelope.output_hash
         if record.primary != entry.envelope.output_hash || record.outputs != expected_outputs {
             return Err(StoreError.InvalidData("closure graph outputs for `{entry.id}` disagree with its metadata projection"))
@@ -230,7 +230,7 @@ fn store_measure_physical_walk(digest: String, path: String, owners: [String], n
     bytes :: metadata.size_on_disk
     node := nodes.get(key) ?? PhysicalNode{bytes: bytes, owners: [String]{}}
     if node.bytes != bytes -> return Err(StoreError.InvalidData("filesystem allocation changed while measuring `{path}`"))
-    all_owners := ~node.owners
+    all_owners := node.owners.copy()
     loop owner in owners -> &all_owners.push(owner)
     node.owners = store_sorted_unique(all_owners)
     nodes[key] = node

@@ -31,9 +31,9 @@ fn jet_cli_structure_facts(result: JetDriverCompileResult) -> [MIRStructureFact]
     loop doc in result.doc_modules {
         storage :: doc.name_ledger ?? next
         permit :: storage.guard_read()
-        return ~permit.value.facts.structure_facts
+        return permit.value.facts.structure_facts.copy()
     }
-    if result.mir == .Val(program) -> return ~program.names.structure_facts
+    if result.mir == .Val(program) -> return program.names.structure_facts.copy()
     result.structure_facts
 }
 
@@ -107,7 +107,7 @@ pub fn jet_cli_structure_core(json: Bool) -> JetDriverVerbOutput Never! {
 pub fn jet_cli_structure_host(file: String, color: Bool, json: Bool, threads: Int?) -> JetDriverVerbOutput {
     compiled :: jet_cli_compile_file(file, color, false, threads, JetDriverCompileMode.Doc)
     if compiled == {
-        .Refused(refusal) -> return ~refusal
+        .Refused(refusal) -> return refusal.copy()
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             errors :: jet_cli_errors(diagnostics)
@@ -115,7 +115,7 @@ pub fn jet_cli_structure_host(file: String, color: Bool, json: Bool, threads: In
             ledger := GateLedger{}
             if jet_cli_gate_ledger(result) == .Val(storage) {
                 permit :: storage.guard_read()
-                ledger = ~permit.value
+                ledger = permit.value.copy()
             }
             if errors.len() > 0 {
                 ledger = GateLedger{}

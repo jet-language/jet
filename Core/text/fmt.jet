@@ -361,7 +361,7 @@ fn float_fixed(n: Float, frac: Int) -> String Never! {
 }
 
 fn trim_point_zero(text: String) -> String Never! {
-    if text.ends_with(".0") -> text.slice(0, unicode.scalar_count(text) - 2) else -> ~text
+    if text.ends_with(".0") -> text.slice(0, unicode.scalar_count(text) - 2) else -> text.copy()
 }
 
 // Groups the whole part of a fixed decimal; sign and fraction are kept verbatim.
@@ -379,7 +379,7 @@ fn grouped_digits(text: String) -> String Never! {
         if i > 0 && (raw.len() - i) % 3 == 0 -> &out.push(U8{44})
         &out.push(raw[i])
     }
-    String.from_bytes(out) ?? ~text
+    String.from_bytes(out) ?? text.copy()
 }
 
 fn pad_need(text: String, width: Int) -> Int Never! {
@@ -499,7 +499,7 @@ fn ascii_lower(text: String) -> String Never! {
     raw :: text.bytes()
     out := [U8]{}
     loop byte in raw -> &out.push(if byte >= 65 && byte <= 90 -> byte + U8{32} else -> byte)
-    String.from_bytes(out) ?? ~text
+    String.from_bytes(out) ?? text.copy()
 }
 
 // Core/Fmt.rs:389-419: empty fill means space, and each centered side

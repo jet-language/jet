@@ -1,6 +1,6 @@
 // #3738 / D-MEM-COPYSEM1: an owning destination filled from a value this
 // scope does not give up is an implicit copy site. The default materializes
-// the copy; `copies: .Explicit` turns each site into E0120 with the Safe `~`
+// the copy; `copies: .Explicit` turns each site into E0120 with the Safe `.copy()`
 // edit instead (Rust `clone_borrowed_struct_field_value`, the assignment
 // audit and `materialize_if_arm_local_read`): a read or write parameter it
 // does not own, or a local that is still used after the site. A field or
@@ -68,7 +68,7 @@ fn sema_copy_site_find(value: Expr, environment: SemaScopeEnvironment, program: 
     }
 }
 
-// Rust `with_ownership_copy_edit`: the `~` edit only for a proven
+// Rust `with_ownership_copy_edit`: the `.copy()` edit only for a proven
 // cloneable, non-resource type.
 fn sema_copy_site_report(site: SemaCopySite, what: String, why: String, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     sema_copy_site_push(sema_error("E0120", site.span, what, why, "copy it explicitly with `~{site.name}`"), site, environment, program, context, &diagnostics)
@@ -77,7 +77,7 @@ fn sema_copy_site_report(site: SemaCopySite, what: String, why: String, environm
 fn sema_copy_site_push(diagnostic: Diagnostic, site: SemaCopySite, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     facts :: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
     if facts.complete && facts.cloneable && !facts.resource {
-        &diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: site.span.start, end: site.span.start}, new_text: "~"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+        &diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: site.span.end, end: site.span.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
         return
     }
     &diagnostics.push(diagnostic)

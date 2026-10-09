@@ -53,7 +53,7 @@ fn occurrences(schedule: DailySchedule, start: LocalDate, days: Int) -> [ZonedDa
     current := local
     i := 0
     loop i < days {
-        &out.push(~current)
+        &out.push(current.copy())
         current = current.add_period(time.period_days(1))
         i += 1
     }
@@ -184,20 +184,20 @@ fn to_julian(value: AstroTime) -> JulianDate {
 fn run() {
     new_year :: time.new(2024, 1, 1)
     christmas :: time.new(2024, 12, 25)
-    calendar :: ExchangeCalendar{holidays: [LocalDate]{~new_year, ~christmas}}
+    calendar :: ExchangeCalendar{holidays: [LocalDate]{new_year.copy(), christmas.copy()}}
     start :: time.new(2023, 12, 29)
-    forward :: add_business_days(~calendar, ~start, 2)
-    backward :: add_business_days(~calendar, ~start, -2)
+    forward :: add_business_days(calendar.copy(), start.copy(), 2)
+    backward :: add_business_days(calendar.copy(), start.copy(), -2)
     print("business_forward={forward.to_string()}")
     print("business_backward={backward.to_string()}")
-    print("holiday_is_business={calendar.is_business_day(~new_year)}")
+    print("holiday_is_business={calendar.is_business_day(new_year.copy())}")
     weekend :: time.new(2023, 12, 30)
-    print("weekend_is_business={calendar.is_business_day(~weekend)}")
+    print("weekend_is_business={calendar.is_business_day(weekend.copy())}")
 
     zone :: time.zone("America/New_York") ?? panic("zone")
-    schedule :: DailySchedule{zone: ~zone, hour: 9, minute: 30}
+    schedule :: DailySchedule{zone: zone.copy(), hour: 9, minute: 30}
     schedule_start :: time.new(2024, 3, 8)
-    scheduled :: occurrences(~schedule, ~schedule_start, 5)
+    scheduled :: occurrences(schedule.copy(), schedule_start.copy(), 5)
     loop item in scheduled {
         text :: item.format("yyyy-MM-dd HH:mm:ss VV XXX")
         offset :: item.offset_seconds()
@@ -229,16 +229,16 @@ fn run() {
 
     utc :: time.parse_rfc3339("2016-12-31T23:59:59Z") ?? panic("utc")
     utc_after :: time.parse_rfc3339("2017-01-01T00:00:00Z") ?? panic("utc_after")
-    tai :: utc_to_tai(~utc)
-    tai_after :: utc_to_tai(~utc_after)
-    tt :: tai_to_tt(~tai)
-    ut1 :: utc_to_ut1(~utc, 334_000_000)
-    tai_back :: tai_to_utc(~tai)
-    tt_back :: tt_to_tai(~tt)
-    ut1_back :: ut1_to_utc(~ut1, 334_000_000)
-    tai_jd :: to_julian(~tai)
-    tt_jd :: to_julian(~tt)
-    ut1_jd :: to_julian(~ut1)
+    tai :: utc_to_tai(utc.copy())
+    tai_after :: utc_to_tai(utc_after.copy())
+    tt :: tai_to_tt(tai.copy())
+    ut1 :: utc_to_ut1(utc.copy(), 334_000_000)
+    tai_back :: tai_to_utc(tai.copy())
+    tt_back :: tt_to_tai(tt.copy())
+    ut1_back :: ut1_to_utc(ut1.copy(), 334_000_000)
+    tai_jd :: to_julian(tai.copy())
+    tt_jd :: to_julian(tt.copy())
+    ut1_jd :: to_julian(ut1.copy())
     tai_back_text :: tai_back.format_rfc3339()
     ut1_back_text :: ut1_back.format_rfc3339()
     print("tai={tai.seconds}s+{tai.nanoseconds}ns scale={tai.scale}")

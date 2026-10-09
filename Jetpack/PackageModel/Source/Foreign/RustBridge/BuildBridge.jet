@@ -395,7 +395,7 @@ fn pkg_ffi_normalize_ffi_generated_source_line(line: String) -> String Never! {
         parts :: line.split_once(marker) ?? next
         return "{parts.before}{marker}<generated wrapper>)"
     }
-    ~line
+    line.copy()
 }
 
 // `jet_ffi_<16 hex>` becomes `jet_ffi_<hash>`.
@@ -457,7 +457,7 @@ fn pkg_ffi_normalize_ffi_cache_path(line: String) -> String Never! {
         rest = rest.removeprefix("deps/")
     }
     hash_len :: pkg_ffi_hex_prefix_len(rest)
-    if hash_len != 16 -> return ~line
+    if hash_len != 16 -> return line.copy()
     suffix :: pkg_bytes_text(rest.bytes(), hash_len, rest.bytes().len())
     "{pkg_bytes_text(bytes, 0, path_start)}~/.cache/jet/ffi/{shared}<hash>{suffix}"
 }
