@@ -35,8 +35,8 @@ fn is_foreign_member_list(imp: &ImportDecl) -> bool {
         && !foreign_imports_after_frontend(imp).is_empty()
 }
 
-/// Look up the pre-resolved module index for an import. Returns `None` for
-/// core modules, C imports, and unqualified imports (they have no file target).
+/// Look up the canonical module index recorded by the frontend for this
+/// declaration, including selective imports from sealed Core source parts.
 #[inline]
 fn resolve_target(bundle: &ProgramBundle, module_idx: usize, imp: &ImportDecl) -> Option<usize> {
     bundle.name_ledger.import_target(module_idx, imp.span)
@@ -133,13 +133,22 @@ pub(crate) fn foreign_list_targets_in_scope(
         .unwrap_or_default()
 }
 
-fn file_import_target(bundle: &ProgramBundle, module_idx: usize, alias: &str) -> Option<usize> {
-    bundle.modules[module_idx]
-        .imports
-        .iter()
-        .filter(|imp| !matches!(imp.kind, ImportKind::Unqualified { .. }))
-        .filter(|imp| imp.import_alias() == alias)
-        .find_map(|imp| resolve_target(bundle, module_idx, imp))
+fn selective_import_target(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    imp: &ImportDecl,
+) -> Option<usize> {
+    resolve_target(bundle, module_idx, imp).or_else(|| {
+        // Inline-module imports can refer to an enclosing file's namespace.
+        // That namespace already has a checked ledger identity as well.
+        let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
+            return None;
+        };
+        bundle
+            .name_ledger
+            .alias(module_idx, module_alias)
+            .and_then(|alias| alias.target_module)
+    })
 }
 
 fn inline_code_module_named(bundle: &ProgramBundle, module_idx: usize, name: &str) -> bool {
@@ -738,13 +747,13 @@ fn unqualified_file_module_targets(
     let module = &bundle.modules[module_idx];
     let mut targets = Vec::new();
     for imp in &module.imports {
-        let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
+        let ImportKind::Unqualified { .. } = &imp.kind else {
             continue;
         };
         if is_foreign_member_list(imp) {
             continue;
         }
-        let Some(parent) = file_import_target(bundle, module_idx, module_alias) else {
+        let Some(parent) = selective_import_target(bundle, module_idx, imp) else {
             continue;
         };
         for binding in imp.walk_bindings() {
@@ -805,7 +814,7 @@ pub(crate) fn reexport_call_map(
                 continue;
             }
             let real_idx =
-                file_import_target(bundle, target_idx, module_alias).unwrap_or_else(|| {
+                selective_import_target(bundle, target_idx, reimp).unwrap_or_else(|| {
                     unreachable!(
                         "re-export target missing after sema: module={} alias={module_alias}",
                         target_idx
@@ -840,7 +849,7 @@ pub(crate) fn reexport_call_map(
             {
                 continue;
             }
-            let real_idx = file_import_target(bundle, module_idx, module_alias)
+            let real_idx = selective_import_target(bundle, module_idx, reimp)
                 .unwrap_or_else(|| {
                     unreachable!(
                         "inline re-export target missing after sema: module={} alias={module_alias}",
@@ -958,7 +967,7 @@ pub(crate) fn unqualified_import_maps(
                 inline_map.insert(local, target);
             } else if let Some(target) = alias
                 .and_then(|name| name.target_module)
-                .or_else(|| file_import_target(bundle, module_idx, module_alias))
+                .or_else(|| selective_import_target(bundle, module_idx, imp))
             {
                 let real_name = alias
                     .and_then(|name| {
@@ -1042,7 +1051,7 @@ pub(crate) fn inline_import_maps(
             } else if imp.core_module_path().is_none()
                 && crate::AST::core_list_prefix(module_alias).is_none()
             {
-                let target = file_import_target(bundle, module_idx, module_alias);
+                let target = selective_import_target(bundle, module_idx, imp);
                 let target = target.unwrap_or_else(|| {
                     unreachable!(
                         "inline unqualified import target missing after sema: module={} alias={module_alias}",
@@ -1464,7 +1473,7 @@ fn unqualified_file_function_entries(
         }) {
             continue;
         }
-        let Some(target) = file_import_target(bundle, module_idx, module_alias) else {
+        let Some(target) = selective_import_target(bundle, module_idx, imp) else {
             if is_foreign_member_list(imp)
                 || crate::AST::core_list_prefix(module_alias).is_some()
                 || inline_code_module_named(bundle, module_idx, module_alias)

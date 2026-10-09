@@ -1276,6 +1276,12 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   declaration paths, aliases, visibility, and reference origins; all Rust-name
   projections use its canonical mangle functions. This implements ratified
   D-NAME-TREE1 without adding a user-facing spelling.
+  Selective file imports also carry the checked namespace target keyed by
+  their declaration span. This includes sealed Core parts selected by their
+  reserved catalog name even when the namespace import uses a different local
+  alias. Rust emission consumes that ledger edge, rather than resolving the
+  catalog again. The Jet driver carries the same canonical target through
+  `SemaRegistrationImportEdge` and lowers checked member identities into MIR.
 - **R7 — Backend is swappable.** Every back end reads the same MIR
   (D-TIER-FORM1): the Jet code generator in `Compiler/JetBackend`, and, until
   it covers every program, the transitional Rust emission in

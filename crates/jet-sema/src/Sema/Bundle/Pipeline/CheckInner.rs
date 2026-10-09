@@ -2173,6 +2173,10 @@ pub(super) fn check_bundle_opts_for_output_inner(
                             && candidate.path.to_string_lossy().starts_with(crate::Diagnostics::CORE_SOURCE_ROOT))
                 })
             {
+                // Preserve the canonical namespace selected above, including
+                // sealed catalog parts whose reserved name is not a local
+                // module alias. Backends consume this edge, not another lookup.
+                name_ledger.record_import_target(idx, imp.span, imported_idx);
                 // File module: look up items in the target module's state.
                 let is_reexport = imp.is_pub;
                 for binding in &bindings {
