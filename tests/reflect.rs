@@ -200,6 +200,7 @@ fn method(name: &str, is_pub: bool) -> Func {
             variadic: false,
             variadic_bound_list: None,
             declared_view_from_names: None,
+            footprint: Default::default(),
         }],
         return_type: Some(Type::Named("String".to_string())),
         return_type_span: Some(span()),

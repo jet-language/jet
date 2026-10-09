@@ -104,7 +104,7 @@ impl<'a> Parser<'a> {
     }
 
     /// S73: reject `.0` / `.1` field access before `expect_ident`.
-    pub(super) fn expect_field_name(&mut self) -> Result<(String, Span), Diagnostic> {
+    pub(in crate::Parser) fn expect_field_name(&mut self) -> Result<(String, Span), Diagnostic> {
         if matches!(self.peek().kind, TokKind::Int(_, _) | TokKind::Float(..)) {
             let span = self.peek().span;
             self.bump();

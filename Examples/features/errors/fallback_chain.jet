@@ -1,0 +1,25 @@
+// D-FALLBACK-CHAIN1=A: `a ?? b ?? c` groups from the right as `a ?? (b ?? c)`,
+// so each fallback is tried in turn and the last one ends the chain.
+fn primary(city: String) -> String Err! {
+    if city == "Oslo" -> return Ok("primary: {city}")
+    Err("primary timed out")
+}
+
+fn backup(city: String) -> String? {
+    if city == "Lima" -> return Val("backup: {city}")
+    None
+}
+
+fn lookup(city: String) -> String { primary(city) ?? backup(city) ?? "unknown" }
+
+fn first_port(ports: [Int]) -> Int { ports.first() ?? ports.last() ?? return -1 }
+
+fn run() {
+    print(lookup("Oslo"))
+    print(lookup("Lima"))
+    print(lookup("Rome"))
+    grouped :: (backup("Rome") ?? "none").len()
+    print(grouped)
+    print(first_port([8080, 9090]))
+    print(first_port([Int]{}))
+}

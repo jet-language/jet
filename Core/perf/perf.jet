@@ -54,7 +54,7 @@ pub fn is_full(perf: Perf) -> Bool Never! { perf.fidelity >= 1.0 }
 pub fn is_low(perf: Perf) -> Bool Never! { perf.fidelity < 0.25 }
 
 pub fn scale(perf: Perf, work: Int) -> Int Never! {
-    n :: Int{(Float{work}) * perf.fidelity}
+    n :: Int.from_float((Float{work}) * perf.fidelity) ?? panic("scaled work must be finite")
     if n < 0 -> return 0
     n
 }

@@ -28,4 +28,12 @@ fn run() {
     absent :: sema_expression_absent(Span{start: 0, end: 1}, Val(payload), &diagnostics) ?? panic("optional Result success rejected None")
     if absent.ty != slot || diagnostics.len() != 0 -> panic("None lost the enclosing success type")
     print("E0113 return repairs: passed")
+    diagnostics := [Diagnostic]{}
+    span :: Span{start: 12, end: 17}
+    if !sema_expression_typed_literal_float_to_integer(Type.Int, Type.Float, span, &diagnostics) -> panic("Float typed body became Int")
+    if diagnostics.len() != 1 || diagnostics[0].code != "E0112" || diagnostics[0].span != (Val(span)) -> panic("typed body diagnostic lost its identity or span")
+    if !diagnostics[0].fix.contains("Int.from_float(value)") || !diagnostics[0].fix.contains("math.round(value)") -> panic("typed body diagnostic lost its conversion repair")
+    if sema_expression_typed_literal_float_to_integer(Type.Float, Type.Int, span, &diagnostics) -> panic("valid numeric widening was rejected")
+    if sema_expression_typed_literal_float_to_integer(Type.Int, Type.Int, span, &diagnostics) -> panic("same-type body was rejected")
+    print("E0112 typed scalar narrowing: passed")
 }

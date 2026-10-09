@@ -1,0 +1,88 @@
+// core.text.fmt contract rows (owner rulings, card #4588). Calls and the
+// matching interpolation selectors print the same text on every tier.
+use core.text.fmt as fmt
+
+struct P {
+    x: Int
+    y: Int
+}
+
+fn row(label: String, actual: String, expected: String) {
+    if actual != expected -> panic("{label}: expected |{expected}|, got |{actual}|")
+    print("{label} = |{actual}|")
+}
+
+fn run() {
+    print("percent")
+    row("percent(12345.6, 0)", fmt.percent(12345.6, 0), "1,234,560%")
+    row("percent(0.1234, 1)", fmt.percent(Float{0.1234}, 1), "12.3%")
+
+    print("sci")
+    row("sci(1234.0, 2)", fmt.sci(1234.0, 2), "1.23e3")
+    row("sci(9.999, 2)", fmt.sci(9.999, 2), "1.00e1")
+    row("sci(0.00123, 2)", fmt.sci(0.00123, 2), "1.23e-3")
+    row("sci(0.0, 2)", fmt.sci(0.0, 2), "0.00e0")
+    row("sci(123.4, 2)", fmt.sci(Float{123.4}, 2), "1.23e2")
+
+    print("pretty")
+    row("pretty record", fmt.pretty("P{{x: 1, y: 2}}"), "P {{\n  x: 1,\n  y: 2\n}}")
+    row("pretty empty list", fmt.pretty("[]"), "[]")
+    row("pretty empty map", fmt.pretty("[:]"), "[:]")
+    row("pretty redacted", fmt.pretty("[REDACTED]"), "[REDACTED]")
+    row("pretty scalar", fmt.pretty("jet"), "jet")
+    row("pretty nested", fmt.pretty("Org {{title: \"a{{{{b}}}}c\", teams: [Team {{name: \"core\"}}]}}"), "Org {{\n  title: \"a{{{{b}}}}c\",\n  teams: [\n    Team {{\n      name: \"core\"\n    }}\n  ]\n}}")
+
+    print("bytes")
+    row("bytes(1536)", fmt.bytes(1536), "1.5 KB")
+    row("bytes(1000)", fmt.bytes(1000), "1 KB")
+    row("bytes(1024)", fmt.bytes(1024), "1 KB")
+    row("bytes(1500000000)", fmt.bytes(1500000000), "1.5 GB")
+    row("bytes(999)", fmt.bytes(999), "999 B")
+    row("bytes(25000000)", fmt.bytes(25000000), "25 MB")
+    row("bytes(-2048)", fmt.bytes(-2048), "-2 KB")
+
+    print("decimal")
+    row("decimal(0.125, 2)", fmt.decimal(0.125, 2), "0.13")
+    row("decimal(-0.0001, 2)", fmt.decimal(-0.0001, 2), "0.00")
+    row("decimal(12.34, 2)", fmt.decimal(Float{12.34}, 2), "12.34")
+    row("grouped(1234.5678, 2)", fmt.grouped(Float{1234.5678}, 2), "1,234.57")
+
+    print("pad")
+    row("pad(ab, 5, empty)", fmt.pad("ab", 5, ""), "ab   ")
+    row("pad_center(x, 4, ab)", fmt.pad_center("x", 4, "ab"), "axab")
+    row("pad_center(x, 3, .)", fmt.pad_center("x", 3, "."), ".x.")
+    row("pad_left(7, 3, 0)", fmt.pad_left("7", 3, "0"), "007")
+    row("pad_right(go, 4, .)", fmt.pad_right("go", 4, "."), "go..")
+
+    print("integers")
+    row("number(1204331)", fmt.number(1204331), "1,204,331")
+    row("hex(255, 4)", fmt.hex(255, 4), "00ff")
+    row("hex(-255, 4)", fmt.hex(-255, 4), "-00ff")
+    row("bin(10)", fmt.bin(10), "1010")
+    row("oct(10)", fmt.oct(10), "12")
+    row("ordinal(21)", fmt.ordinal(21), "21st")
+    row("ordinal(112)", fmt.ordinal(112), "112th")
+    row("plural(2, row, rows)", fmt.plural(2, "row", "rows"), "2 rows")
+    row("duration(222000)", fmt.duration(222000), "3m 42s")
+    row("duration(-5)", fmt.duration(-5), "-5ms")
+    row("duration(90061000)", fmt.duration(90061000), "1d 1h 1m")
+
+    print("selectors")
+    tie :: Float{0.125}
+    tiny :: Float{-0.0001}
+    price :: Float{1234.5678}
+    big :: Float{1234.0}
+    carry :: Float{9.999}
+    share :: Float{12345.6}
+    point :: P{x: 1, y: 2}
+    empty :: [Int]{}
+    row("tie:Fixed(2)", "{tie:Fixed(2)}", fmt.decimal(tie, 2))
+    row("tiny:Fixed(2)", "{tiny:Fixed(2)}", fmt.decimal(tiny, 2))
+    row("price:Grouped(2)", "{price:Grouped(2)}", fmt.grouped(price, 2))
+    row("big:Sci(2)", "{big:Sci(2)}", fmt.sci(big, 2))
+    row("carry:Sci(2)", "{carry:Sci(2)}", fmt.sci(carry, 2))
+    row("share:Percent(0)", "{share:Percent(0)}", fmt.percent(share, 0))
+    row("point:Pretty", "{point:Pretty}", fmt.pretty("P{{x: 1, y: 2}}"))
+    row("empty:Pretty", "{empty:Pretty}", fmt.pretty("[]"))
+    row("pretty(point:Debug)", fmt.pretty("{point:Debug}"), "{point:Pretty}")
+}

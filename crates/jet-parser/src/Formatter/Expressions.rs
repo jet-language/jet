@@ -940,6 +940,7 @@ impl<'a> Fmt<'a> {
                             variadic: false,
                             variadic_bound_list: None,
                             declared_view_from_names: None,
+                            footprint: Default::default(),
                             public_label: None,
                             zone: crate::AST::ParamZone::Either,
                         })
@@ -1947,7 +1948,9 @@ impl<'a> Fmt<'a> {
                 if prec > Prec::OrFallback {
                     self.write("(");
                 }
-                self.fmt_expr(value, Prec::OrFallback.add_rhs());
+                // D-FALLBACK-CHAIN1=A: `??` groups from the right, so a chain
+                // on the left keeps its parentheses and one on the right needs none.
+                self.fmt_expr(value, Prec::Range);
                 self.write(" ?? ");
                 self.fmt_or_fallback(fallback);
                 if prec > Prec::OrFallback {

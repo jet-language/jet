@@ -216,7 +216,6 @@ fn run() -> Result<(), Failure> {
     execution.emit_foreign = true;
     execution.emit_metadata = false;
     execution.emit_runtime = true;
-    execution.prune_unreachable_codecs = true;
     let metadata_config = MirRustConfig {
         target: TargetLayout::host(),
         target_kind: MirRustTarget::Native,

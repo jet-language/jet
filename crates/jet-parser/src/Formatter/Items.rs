@@ -1581,6 +1581,23 @@ impl<'a> Fmt<'a> {
         );
     }
 
+    /// D-METHOD-FOOTPRINT1=A: a stated receiver footprint, `self.log` or
+    /// `self.[log, hits]`.
+    fn fmt_receiver_footprint(&mut self, p: &Param) {
+        let Some(fields) = &p.footprint.declared else {
+            return;
+        };
+        if let [(field, _)] = fields.as_slice() {
+            self.write(".");
+            self.write(field);
+            return;
+        }
+        let names: Vec<&str> = fields.iter().map(|(field, _)| field.as_str()).collect();
+        self.write(".[");
+        self.write(&names.join(", "));
+        self.write("]");
+    }
+
     fn fmt_param(&mut self, p: &Param) {
         if p.root {
             self.write("#");
@@ -1602,6 +1619,7 @@ impl<'a> Fmt<'a> {
                 self.write(s);
             }
             self.write(&p.name);
+            self.fmt_receiver_footprint(p);
         } else {
             // D-APILABEL1=A: `timeout seconds: Int` — public label, then local name.
             if let Some((label, _)) = &p.public_label {
@@ -1609,6 +1627,7 @@ impl<'a> Fmt<'a> {
                 self.write(" ");
             }
             self.write(&p.name);
+            self.fmt_receiver_footprint(p);
             self.write(": ");
             if let Some(s) = sigil {
                 self.write(s);

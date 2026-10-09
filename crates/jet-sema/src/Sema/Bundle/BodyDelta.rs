@@ -567,6 +567,12 @@ codec_struct!(Param {
     variadic,
     variadic_bound_list,
     declared_view_from_names,
+    footprint,
+});
+
+codec_struct!(ReceiverFootprint {
+    declared,
+    inferred,
 });
 
 codec_enum!(ParamZone {

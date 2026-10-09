@@ -1,0 +1,17 @@
+// D-PARAM-CONST1=A: an unmarked parameter is Jet's const: deep, call-long,
+// no-copy read access, even when the caller's binding is mutable.
+fn total(xs: [Int]) -> Int {
+    sum := 0
+    loop x in xs -> sum += x
+    sum
+}
+
+fn grow(xs: &[Int], n: Int) { &xs.push(n) }
+
+fn run() {
+    nums := [1, 2, 3]
+    print(total(nums))
+    grow(&nums, 4)
+    print(total(nums))
+    print(nums.len())
+}

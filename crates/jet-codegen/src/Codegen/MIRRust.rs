@@ -491,9 +491,6 @@ pub struct MirRustExecutionConfig<'a> {
     /// D-DX-PROD1: one typed release policy controls every emitted DevTools
     /// producer.  The code generator never reconstructs a parallel bool.
     pub release_devtools_policy: jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-    /// Stage zero: skip derived serde impls no emitted body demands
-    /// (`demanded_codec_impls`).
-    pub prune_unreachable_codecs: bool,
 }
 
 impl<'a> MirRustExecutionConfig<'a> {
@@ -508,7 +505,6 @@ impl<'a> MirRustExecutionConfig<'a> {
             emit_debug_linemap: false,
             emit_runtime: true,
             release_devtools_policy: jet_pkg_model::Package::ReleaseDevtoolsPolicy::development(),
-            prune_unreachable_codecs: false,
         }
     }
 }
@@ -606,17 +602,22 @@ fn alias_parameter_uses(def: &MirTypeDef) -> Option<Vec<bool>> {
 /// A demanded impl's methods are scanned in turn. A missed demand fails
 /// rustc with E0277; it never changes behavior.
 fn demanded_codec_impls(program: &MirProgram) -> Vec<bool> {
+    let candidate = |implementation: &MirImplDef| {
+        implementation.compiler_generated
+            && implementation.serde.is_some()
+            && implementation.self_type.nominal_name().is_some()
+    };
     let mut keep = program
         .impls
         .iter()
-        .map(|implementation| {
-            !(implementation.compiler_generated
-                && implementation.serde.is_some()
-                && implementation.self_type.nominal_name().is_some())
-        })
+        .map(|implementation| !candidate(implementation))
         .collect::<Vec<_>>();
     let mut by_method = BTreeMap::<MirFunctionId, usize>::new();
-    let mut by_name = std::collections::HashMap::<&str, Vec<usize>>::new();
+    // Per codec (`[Encode, Decode]`): candidate rows by self nominal.
+    let mut by_name = [
+        HashMap::<&str, Vec<usize>>::new(),
+        HashMap::<&str, Vec<usize>>::new(),
+    ];
     for (index, implementation) in program.impls.iter().enumerate() {
         if keep[index] {
             continue;
@@ -625,7 +626,8 @@ fn demanded_codec_impls(program: &MirProgram) -> Vec<bool> {
             by_method.insert(*method, index);
         }
         if let Some(name) = implementation.self_type.nominal_name() {
-            by_name.entry(name).or_default().push(index);
+            let codec = usize::from(implementation.serde == Some(MirSerdeCodec::Decode));
+            by_name[codec].entry(name).or_default().push(index);
         }
     }
     let functions = program
@@ -633,52 +635,44 @@ fn demanded_codec_impls(program: &MirProgram) -> Vec<bool> {
         .iter()
         .map(|function| (function.id, function))
         .collect::<BTreeMap<_, _>>();
+    let prelude_codec_routes = program
+        .prelude_calls
+        .iter()
+        .filter(|call| match &call.symbol {
+            MirSymbol::Prelude(symbol) | MirSymbol::Runtime(symbol) => codec_route_symbol(symbol),
+        })
+        .map(|call| call.id)
+        .collect::<HashSet<_>>();
+    let core_codec_calls = program
+        .core_calls
+        .iter()
+        .filter(|call| codec_route_symbol(call.symbol.name()))
+        .map(|call| call.id)
+        .collect::<HashSet<_>>();
+    let mut demands = CodecDemands::default();
+    for job in &program.jobs {
+        if let Some(&function) = functions.get(&job.function) {
+            mir_signature_codec_roots(function, &mut |ty| demands.ty(BOTH_CODECS, ty));
+        }
+    }
+    for export in program.artifacts.iter().flat_map(|artifact| &artifact.exports) {
+        if let Some(&function) = functions.get(&export.function) {
+            mir_signature_codec_roots(function, &mut |ty| demands.ty(BOTH_CODECS, ty));
+        }
+    }
     let mut pending = program
         .functions
         .iter()
         .filter(|function| !by_method.contains_key(&function.id))
         .collect::<Vec<_>>();
-    let mut seen_names = std::collections::HashSet::<&str>::new();
+    let mut seen_names = [HashSet::<&str>::new(), HashSet::<&str>::new()];
     let mut demanded = Vec::new();
-    while let Some(function) = pending.pop() {
-        let mut names = Vec::new();
-        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
-            match &instruction.operation {
-                MirOperation::Call {
-                    callee, type_args, ..
-                } => {
-                    if let MirCallee::User(id)
-                    | MirCallee::Associated { function: id, .. }
-                    | MirCallee::Method { function: id, .. } = callee
-                    {
-                        if let Some(&index) = by_method.get(id) {
-                            demanded.push(index);
-                        }
-                    }
-                    type_args.iter().for_each(|ty| mir_type_nominals(ty, &mut names));
+    loop {
+        for (codec, codec_names) in demands.names.iter_mut().enumerate() {
+            for name in codec_names.drain(..) {
+                if seen_names[codec].insert(name) {
+                    demanded.extend(by_name[codec].get(name).into_iter().flatten().copied());
                 }
-                MirOperation::IndirectCall { type_args, .. }
-                | MirOperation::CoreCall { type_args, .. } => {
-                    type_args.iter().for_each(|ty| mir_type_nominals(ty, &mut names));
-                }
-                MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
-                    owner_type_args,
-                    type_args,
-                    ..
-                }) => {
-                    for type_arg in owner_type_args {
-                        if let MirPreludeTypeArg::Type(ty) = type_arg {
-                            mir_type_nominals(ty, &mut names);
-                        }
-                    }
-                    type_args.iter().for_each(|ty| mir_type_nominals(ty, &mut names));
-                }
-                _ => {}
-            }
-        }
-        for name in names {
-            if seen_names.insert(name) {
-                demanded.extend(by_name.get(name).into_iter().flatten().copied());
             }
         }
         for index in demanded.drain(..) {
@@ -692,8 +686,153 @@ fn demanded_codec_impls(program: &MirProgram) -> Vec<bool> {
                 );
             }
         }
+        let Some(function) = pending.pop() else {
+            break;
+        };
+        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+            match &instruction.operation {
+                MirOperation::Call {
+                    callee:
+                        callee @ (MirCallee::User(id)
+                        | MirCallee::Associated { function: id, .. }
+                        | MirCallee::Method { function: id, .. }),
+                    type_args,
+                    ..
+                } => {
+                    if let Some(&index) = by_method.get(id) {
+                        demanded.push(index);
+                    }
+                    let codecs = functions.get(id).map_or([false, false], |callee| {
+                        callee.generic_params.iter().fold([false, false], |codecs, param| {
+                            let bound = mir_bound_codecs(&param.bounds);
+                            [codecs[0] | bound[0], codecs[1] | bound[1]]
+                        })
+                    });
+                    if codecs != [false, false] {
+                        if let MirCallee::Associated { owner, .. } | MirCallee::Method { owner, .. } =
+                            callee
+                        {
+                            demands.ty(codecs, owner);
+                        }
+                        demands.instantiated(codecs, function, instruction, type_args);
+                    }
+                }
+                MirOperation::Call {
+                    callee: MirCallee::Core(id),
+                    type_args,
+                    ..
+                } if core_codec_calls.contains(id) => {
+                    demands.instantiated(BOTH_CODECS, function, instruction, type_args);
+                }
+                MirOperation::Call {
+                    callee: MirCallee::Prelude(id),
+                    type_args,
+                    ..
+                } if prelude_codec_routes.contains(id) => {
+                    demands.instantiated(BOTH_CODECS, function, instruction, type_args);
+                }
+                MirOperation::CoreCall {
+                    call,
+                    route,
+                    type_args,
+                    ..
+                } if core_codec_calls.contains(call) || prelude_codec_routes.contains(route) => {
+                    demands.instantiated(BOTH_CODECS, function, instruction, type_args);
+                }
+                MirOperation::Call { type_args, .. }
+                | MirOperation::CoreCall { type_args, .. }
+                | MirOperation::IndirectCall { type_args, .. } => {
+                    type_args.iter().for_each(|ty| demands.ty(BOTH_CODECS, ty));
+                }
+                MirOperation::Semantic(operation)
+                    if operation
+                        .prelude_calls()
+                        .iter()
+                        .any(|call| prelude_codec_routes.contains(call)) =>
+                {
+                    if let MirSemanticOp::StaticPreludeCall {
+                        owner_type_args, ..
+                    } = operation
+                    {
+                        for type_arg in owner_type_args {
+                            if let MirPreludeTypeArg::Type(ty) = type_arg {
+                                demands.ty(BOTH_CODECS, ty);
+                            }
+                        }
+                    }
+                    let type_args = match operation {
+                        MirSemanticOp::StaticPreludeCall { type_args, .. } => type_args.as_slice(),
+                        _ => &[],
+                    };
+                    demands.instantiated(BOTH_CODECS, function, instruction, type_args);
+                }
+                _ => {}
+            }
+        }
     }
     keep
+}
+
+const BOTH_CODECS: [bool; 2] = [true, true];
+
+/// Nominal names demanded per codec (`[Encode, Decode]`) and not yet resolved
+/// to candidate impl rows.
+#[derive(Default)]
+struct CodecDemands<'p> {
+    names: [Vec<&'p str>; 2],
+}
+
+impl<'p> CodecDemands<'p> {
+    /// Demand `codecs` of every nominal inside `ty`.
+    fn ty(&mut self, codecs: [bool; 2], ty: &'p MirType) {
+        let mut found = Vec::new();
+        mir_type_nominals(ty, &mut found);
+        for (codec, wanted) in codecs.into_iter().enumerate() {
+            if wanted {
+                self.names[codec].extend(found.iter().copied());
+            }
+        }
+    }
+
+    /// A codec-bounded call instantiated by its type arguments, its operands
+    /// (a runtime generic infers its parameter from them) and its result (a
+    /// decode returns the parameter).
+    fn instantiated(
+        &mut self,
+        codecs: [bool; 2],
+        function: &'p MirFunction,
+        instruction: &'p MirInstruction,
+        type_args: &'p [MirType],
+    ) {
+        for ty in type_args {
+            self.ty(codecs, ty);
+        }
+        for value in instruction.operation.value_uses() {
+            if let Some((_, ty, ..)) = function.values.iter().find(|(id, ..)| *id == value) {
+                self.ty(codecs, ty);
+            }
+        }
+        if let Some(ty) = &instruction.ty {
+            self.ty(codecs, ty);
+        }
+    }
+}
+
+/// Every type an export or job wrapper decodes or encodes: its parameters,
+/// its result and its failure carrier.
+fn mir_signature_codec_roots<'p>(function: &'p MirFunction, found: &mut impl FnMut(&'p MirType)) {
+    for param in &function.params {
+        found(&param.ty);
+    }
+    found(&function.return_type);
+    match &function.failure {
+        MirFailureCarrier::Infallible => {}
+        MirFailureCarrier::Result { success, error } => {
+            found(success);
+            found(error);
+        }
+        MirFailureCarrier::Optional { value } | MirFailureCarrier::Diverges { value } => found(value),
+    }
 }
 
 fn mir_type_uses_atomic_word(ty: &MirType) -> bool {
@@ -1289,19 +1428,14 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
         }
     }
     emitter.emit_callback_trampolines(EmissionUnits::sink(&mut units, out, None));
-    let codec_keep = config
-        .execution
-        .prune_unreachable_codecs
-        .then(|| demanded_codec_impls(program));
+    let codec_keep = demanded_codec_impls(program);
     for (index, implementation) in program.impls.iter().enumerate() {
         if !emitter.module_selected(implementation.module)
             || !emitter.impl_selected_for_target(implementation)
         {
             continue;
         }
-        if codec_keep.as_ref().is_some_and(|keep| !keep[index])
-            || emitter.runtime_carrier_trait_impl(implementation)
-        {
+        if !codec_keep[index] || emitter.runtime_carrier_trait_impl(implementation) {
             emitted_methods.extend(implementation.methods.iter().copied());
             continue;
         }

@@ -311,8 +311,9 @@ fn run() {
 #[test]
 fn user_struct_named_noclone_is_still_cloneable() {
     // A user type literally named `NoClone` must not hit a hidden magic name —
-    // it's an Int-only struct, so it's cloneable, and passing it to a Move
-    // param without `^` is E0209 (D-MEM1/S2), not E0201 (can't-be-copied).
+    // it's an Int-only struct, so it's cloneable: passing it to a Move param
+    // without `^` while it is read again is E0209 (D-COPY-DEFAULT1=A), not
+    // E0201 (can't-be-copied).
     let src = r#"
 struct NoClone {
     n: Int
@@ -325,6 +326,7 @@ fn eat(v: ^NoClone) {
 fn run() {
     v :: NoClone{ n: 1 }
     eat(v)
+    print(v.n)
 }
 "#;
     let diags = jet::compile(src).expect_err("should error");
