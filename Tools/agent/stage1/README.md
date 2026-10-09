@@ -76,16 +76,18 @@ known-failing cases as passes.
 
 ```sh
 Tools/agent/jet-env node Tools/agent/compiler-registries.mjs \
-  manifest FULL_CURRENT_HEAD --out /disk/compiler-registries
+  manifest FULL_COMMITTED_SHA --out /disk/compiler-registries
 Tools/agent/jet-env node Tools/agent/compiler-registries.mjs \
   run --jet /path/to/stage3/jet --manifest /disk/compiler-registries/manifest.json \
   --receipt /disk/compiler-registries/receipt.json
 ```
 
 Manifest generation is source assembly only; execution still needs Main's
-measured proofq admission. The manifest binds the current head, source manifests,
-compiler source bytes, registry inventory, assembled units, testkit sources and
-case IDs. Unsupported fixture transports are explicit `BLOCKED` entries and
+measured proofq admission. Both commands use the same immutable SHA export from
+`proof-source.mjs`, validating every exported Git blob rather than racing the
+live worktree. The manifest binds that commit and export receipt, source
+manifests, compiler source bytes, registry inventory, assembled units, testkit
+sources and case IDs. Unsupported fixture transports are explicit `BLOCKED` entries and
 prevent a successful receipt, never silently disappear. A `run` registry counts
 one complete registry callback and prints an exact terminal counted sentinel.
 `test` registries use the existing `jet.test.v1` JSON reporter, requiring the

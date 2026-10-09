@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Canonical compiler-owned registry census and runner. No Cargo, oracle,
-// selection filters, skips, release/Rust emission, or historical source reads.
-// manifest HEAD [--out EXTERNAL_DIR] prints the complete source-bound JSON;
+// selection filters, skips, or release/Rust emission.
+// manifest SHA [--out EXTERNAL_DIR] prints the immutable-source-bound JSON;
 // run --jet JET --manifest JSON [--receipt JSON] executes every listed entry.
 // BLOCKED entries remain in the manifest and make the receipt fail. Supporting
 // files and non-registry test inputs remain visible in inventory, not counted
@@ -13,12 +13,31 @@ import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { prepareTransport, runTransport } from './compiler-registry-transports.mjs';
+import { assertPinnedSource } from './proof-source.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n');
-const currentHead = () => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
-const usage = 'compiler-registries.mjs manifest HEAD [--out DIR]; run --jet JET --manifest JSON [--runtime DIR] [--receipt JSON]';
+const proofPath = join(dirname(repo), 'source.manifest.json');
+const currentHead = () => {
+    const proof = JSON.parse(readFileSync(proofPath, 'utf8'));
+    return assertPinnedSource(repo, proof.commit).commit;
+};
+function usePinnedSource(head) {
+    if (!/^[a-f0-9]{40}$/.test(head ?? '')) throw Error('registry source requires a full committed SHA');
+    if (existsSync(proofPath)) {
+        assertPinnedSource(repo, head);
+        return;
+    }
+    const source = execFileSync(process.execPath, [join(repo, 'Tools/agent/proof-source.mjs'), head, repo],
+        { encoding: 'utf8', maxBuffer: 8 << 20 }).trim();
+    assertPinnedSource(source, head);
+    const child = spawnSync(process.execPath, [join(source, 'Tools/agent/compiler-registries.mjs'), ...process.argv.slice(2)],
+        { cwd: source, env: process.env, stdio: 'inherit' });
+    if (child.error) throw child.error;
+    process.exit(child.status ?? 1);
+}
+const usage = 'compiler-registries.mjs manifest SHA [--out DIR]; run --jet JET --manifest JSON [--runtime DIR] [--receipt JSON]';
 const [command, ...args] = process.argv.slice(2);
 const options = {};
 if (command === 'manifest') options.head = args.shift();
@@ -151,7 +170,7 @@ function nativeRuntime(jet) {
     return { runtimeDir, runtimePack, runtimeObject, packSha256: provenance.packSha256, objectSha256: provenance.objectSha256 };
 }
 function generate() {
-    if (!/^[a-f0-9]{40}$/.test(options.head ?? '') || options.head !== currentHead()) throw Error('manifest requires the current full committed head');
+    if (options.head !== currentHead()) throw Error('manifest requires its pinned committed source SHA');
     const out = options.out ?? join(homedir(), '.cache/jet-dev/scratch/RegistryRunnerLead', options.head);
     if (out === repo || out.startsWith(repo + '/')) throw Error('assembled registries belong outside the repository');
     if (existsSync(join(out, 'manifest.json'))) throw Error(`manifest output already sealed: ${out}; choose a fresh --out`);
@@ -209,8 +228,9 @@ function generate() {
         testCount: kit.cases.length, sources: kit.sources.map(source => source.path), caseNames: kit.cases.map(source => source.path),
         ...(kit.rustToolRequirements.length ? { status: 'BLOCKED',
             reason: `full testkit cases have ${kit.rustToolRequirements.length} active Rust tool requirements/guards; removing Rust would skip required case branches. See testkit.rustToolRequirements for exact paths/lines` } : {}) });
-    if (options.head !== currentHead()) throw Error('head advanced during assembly; regenerate on the newest committed head');
-    const manifest = { head: options.head, completeCompilerRegistries: true, repo, sourceManifests: manifests,
+    if (options.head !== currentHead()) throw Error('pinned source changed during assembly');
+    const sourceProof = { path: proofPath, sha256: hash(readFileSync(proofPath)), tree: JSON.parse(readFileSync(proofPath, 'utf8')).tree };
+    const manifest = { head: options.head, completeCompilerRegistries: true, repo, sourceProof, sourceManifests: manifests,
         compilerSources: (sourceMap?.files ?? []).map(({ path, sha256 }) => ({ path, sha256 })), inventory: census, testkit: kit, entries,
         retiredWithRust: { testkitCases: kit.retiredCases,
             compilerRegistries: retirements().filter(row => row.path.startsWith('Compiler/')), bootstrapTests: retiredBootstrapTests() } };
@@ -222,7 +242,8 @@ async function run() {
     if (!options.jet || !options.manifest) throw Error(usage);
     options.jet = realpathSync(options.jet);
     const bytes = readFileSync(options.manifest), manifest = JSON.parse(bytes);
-    if (manifest.head !== currentHead() || manifest.completeCompilerRegistries !== true || !manifest.entries?.length) throw Error('complete current-head manifest required');
+    if (manifest.head !== currentHead() || manifest.repo !== repo || manifest.sourceProof?.sha256 !== hash(readFileSync(proofPath))
+        || manifest.completeCompilerRegistries !== true || !manifest.entries?.length) throw Error('complete pinned-source manifest required');
     // Re-census: a forged/truncated entries array cannot turn omissions into PASS.
     const current = inventory(), required = [...registryRows(current).map(row => row.id), 'testkit/cases'];
     const ids = manifest.entries.map(entry => entry.id);
@@ -235,7 +256,7 @@ async function run() {
     mkdirSync(dirname(receiptPath), { recursive: true });
     const logDir = `${receiptPath}.logs`; mkdirSync(logDir, { recursive: true });
     const receipt = { status: 'FAIL', head: manifest.head, jet: options.jet, jetSha256: hash(readFileSync(options.jet)),
-        manifestSha256: hash(bytes), total: ids.length, passed: 0, blocked: 0, failed: 0, entries: [] };
+        manifestSha256: hash(bytes), sourceProof: manifest.sourceProof, total: ids.length, passed: 0, blocked: 0, failed: 0, entries: [] };
     let runtime, runtimeError;
     if (manifest.entries.some(entry => entry.kind === 'transport' && entry.status !== 'BLOCKED')) {
         try { runtime = nativeRuntime(options.jet); receipt.runtime = runtime; }
@@ -304,12 +325,14 @@ async function run() {
         }
         receipt.entries.push(result); json(receiptPath, receipt);
     }
-    if (manifest.head !== currentHead()) { receipt.failed++; receipt.reason = 'head advanced during registry run'; }
+    try { if (manifest.head !== currentHead()) throw Error('source SHA changed'); }
+    catch (error) { receipt.failed++; receipt.reason = `pinned source changed during registry run: ${error.message}`; }
     receipt.status = receipt.passed === receipt.total && receipt.blocked === 0 && receipt.failed === 0 ? 'PASS' : 'FAIL';
     json(receiptPath, receipt);
     console.log(`${receipt.status} compiler registries ${receipt.passed}/${receipt.total}; blocked=${receipt.blocked} failed=${receipt.failed}; ${receiptPath}`);
     process.exitCode = receipt.status === 'PASS' ? 0 : 1;
 }
+usePinnedSource(command === 'manifest' ? options.head : options.manifest ? JSON.parse(readFileSync(options.manifest, 'utf8')).head : null);
 if (command === 'manifest') generate();
 else if (command === 'run') await run();
 else throw Error(usage);
