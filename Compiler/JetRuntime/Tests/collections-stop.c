@@ -36,17 +36,15 @@ static int64_t show(int64_t input) {
     static const char text[] = "x";
     return jet_rt_string_from_static((int64_t)(intptr_t)text, 1);
 }
-static int64_t release(int64_t env) {
+static void release(int64_t env) {
     (void)env;
     ++releases;
-    return 0;
 }
-static int64_t list_drop(int64_t slot) {
+static void list_drop(int64_t slot) {
     int64_t *header = (int64_t *)(intptr_t)slot;
     if (header[1]) jet_rt_free(header[2], header[1] * 8, 8);
     header[0] = header[1] = header[2] = 0;
     ++lists_dropped;
-    return 0;
 }
 extern int64_t jet_rt_alloc(int64_t size, int64_t alignment);
 extern void jet_rt_progress_state_advance(int64_t state);
@@ -67,27 +65,24 @@ void coll_stop_progress_advance(int64_t state) {
     ++advances;
     jet_rt_comptime_work(UINT64_C(1000001));
 }
-static int64_t owned_clone(int64_t input, int64_t output) {
+static void owned_clone(int64_t input, int64_t output) {
     int64_t payload = jet_rt_alloc(8, 8);
     *(int64_t *)(intptr_t)payload = **(int64_t **)(intptr_t)input;
     *(int64_t *)(intptr_t)output = payload;
     ++clones;
-    return 0;
 }
-static int64_t owned_drop(int64_t slot) {
+static void owned_drop(int64_t slot) {
     int64_t *word = (int64_t *)(intptr_t)slot;
     assert(*word);
     jet_rt_free(*word, 8, 8);
     *word = 0;
     ++drops;
-    return 0;
 }
-static int64_t boxed_drop(int64_t slot) {
+static void boxed_drop(int64_t slot) {
     int64_t box = *(int64_t *)(intptr_t)slot;
     assert(*(int64_t *)(intptr_t)box == 0);
     owned_drop(box + 8);
     jet_rt_free(box, 16, 8);
-    return 0;
 }
 static int64_t owned_unary(int64_t env, int64_t input, int64_t output) {
     (void)env;

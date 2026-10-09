@@ -92,6 +92,18 @@ fn coll_call4(code: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
     }
 }
 
+fn coll_call1_unit(code: I64, a: I64) {
+    #Unsafe("checked native Unit callback; its raw argument stays valid for the synchronous call") {
+        os_call1_unit_i64(code, a)
+    }
+}
+
+fn coll_call2_unit(code: I64, a: I64, b: I64) {
+    #Unsafe("checked Unit clone callback; source remains live and target lends writable output storage") {
+        os_call2_unit_i64(code, a, b)
+    }
+}
+
 fn coll_slot_new(meta: I64) -> I64 {
     slot :: jet_rt_alloc(coll_size(meta), I64{8})
     coll_zero(slot, coll_size(meta))
@@ -99,12 +111,12 @@ fn coll_slot_new(meta: I64) -> I64 {
 }
 
 fn coll_slot_clone(source: I64, target: I64, meta: I64) {
-    _ := coll_call2(trap_word(meta + I64{8}), source, target)
+    coll_call2_unit(trap_word(meta + I64{8}), source, target)
 }
 
 fn coll_slot_drop(slot: I64, meta: I64) {
     code :: trap_word(meta + I64{16})
-    if (code != I64{0}) { _ := coll_call1(code, slot) }
+    if (code != I64{0}) { coll_call1_unit(code, slot) }
 }
 
 fn coll_slot_free(slot: I64, meta: I64) {

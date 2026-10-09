@@ -394,7 +394,7 @@ fn iter_pull_nested(node: I64, output: I64) -> Bool {
     release :: trap_word(node + I64{64})
     if (release != I64{0}) {
         jet_rt_session_shield_enter()
-        _ := coll_call1(release, trap_word(node + I64{48}))
+        coll_call1_unit(release, trap_word(node + I64{48}))
         jet_rt_session_shield_leave()
     }
     coll_meta_drop(callback_meta)
@@ -754,7 +754,7 @@ fn iter_eager_callback(source: I64, env: I64, invoke: I64, release: I64, meta: I
     if (node == I64{0}) {
         if (release != I64{0}) {
             jet_rt_session_shield_enter()
-            _ := coll_call1(release, env)
+            coll_call1_unit(release, env)
             jet_rt_session_shield_leave()
         }
         return I64{0}
@@ -850,7 +850,7 @@ fn iter_release_callback(node: I64) {
     release :: trap_word(node + I64{64})
     if (release != I64{0}) {
         jet_rt_session_shield_enter()
-        _ := coll_call1(release, trap_word(node + I64{48}))
+        coll_call1_unit(release, trap_word(node + I64{48}))
         jet_rt_session_shield_leave()
         trap_store(node + I64{64}, I64{0})
     }

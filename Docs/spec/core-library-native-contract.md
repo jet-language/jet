@@ -205,6 +205,13 @@ Exact-Int arithmetic and native narrowing use that same publication path.
 Runtime marshaling checks each narrowing before subsequent syscalls, allocations,
 or output-slot initialization; moved constructor children and select inputs are
 released on the stopped path, while borrowed inputs remain caller-owned.
+Compiler runtime-call stop facts are generated from the direct named-call closure
+of the runtime's panic publication entry, including private helpers. The
+projection rejects generic declarations/calls and computed or bound-value calls;
+foreign/member calls and address-call transports are not semantic callback edges.
+Callback stop analysis remains the compiler's responsibility. Both compiler
+halves consume `Registry/RuntimeStopExports.jet`; the runtime generator freshness
+gate checks this projection instead of maintaining a parallel symbol list.
 Core `Task` handles are move-only: one consuming joiner uses the completion
 park slot, while lexical cleanup drains the retained state with a wake-all
 completion word. Rejected bounded-group spawns return their admission permit.
