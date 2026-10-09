@@ -79,7 +79,6 @@ pub fn jet_driver_build_plan_json(plan: BuildSessionPlan, vector_json: String) -
     keys :: loop key in graph.action_keys -> "{{\"action\":{foundation_json_quote(key.action)},\"key\":{foundation_json_quote(key.key)}}}"
     hits :: loop action in graph.cache_hits -> "{{\"action\":{foundation_json_quote(action.name)},\"key\":{foundation_json_quote(action.key)}}}"
     files :: loop file in graph.files -> jet_driver_build_file_json(file)
-    affected :: loop file in graph.affected_files -> jet_driver_build_file_json(file)
     tools :: loop tool in state.toolchains -> "{{\"name\":{foundation_json_quote(tool.name)},\"target\":{foundation_json_quote(tool.target_triple)}}}"
     probes := [String]{}
     loop probe in state.probes {
@@ -95,5 +94,7 @@ pub fn jet_driver_build_plan_json(plan: BuildSessionPlan, vector_json: String) -
     }
     generated :: loop generated_row in state.generated -> "{{\"name\":{foundation_json_quote(generated_row.name)},\"path\":{foundation_json_quote(generated_row.path)},\"digest\":{foundation_json_quote(generated_row.source_digest)}}}"
     default :: if plan.default >= 0 -> "{plan.default}" else -> "null"
-    "{{\"schema_version\":1,\"default\":{default},\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{affected.join(",")}],\"toolchains\":[{tools.join(",")}],\"probes\":[{probes.join(",")}],\"generated\":[{generated.join(",")}],\"vector\":{vector_json}}}"
+    // Rust BuildGraph.affected_files() is the static file universe here,
+    // not receipt_diff's rebuild-impact closure. Reuse the canonical rows.
+    "{{\"schema_version\":1,\"default\":{default},\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{files.join(",")}],\"toolchains\":[{tools.join(",")}],\"probes\":[{probes.join(",")}],\"generated\":[{generated.join(",")}],\"vector\":{vector_json}}}"
 }

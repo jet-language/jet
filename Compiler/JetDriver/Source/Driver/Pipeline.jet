@@ -1077,6 +1077,7 @@ fn jet_driver_compile_result(
         authority_policy: jet_driver_authority_policy(load),
         doc_modules: load.doc_modules,
         build_program: load.build_program,
+        build_nodes: if complete -> load.build_nodes else -> None,
     }
 }
 
@@ -4513,6 +4514,10 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     checked_graph = ^validation.graph
     comptime_values = validation.values
     comptime_functions = validation.functions
+    if request.capture_build_nodes && checked_graph.complete && !jet_driver_has_errors(load.diagnostics) {
+        load.build_nodes = jet_driver_build_compiler_nodes(request, load, checked_graph, canonical_effect_module_identity)
+        if load.build_nodes == None -> return jet_driver_compile_internal_result(load, trace, "the final checked build bundle lost its exact source bytes or node identity")
+    }
     // A Comptime compile ends with its evaluated build-time values; nothing
     // is lowered or emitted for run time.
     if request.mode == JetDriverCompileMode.Comptime {
