@@ -20,7 +20,7 @@ const out = resolve(output);
 const read = (path) => readFileSync(join(repo, path), "utf8");
 const sources = [
   "Compiler/JetBackend/Source/OS/Linux.jet",
-  "Compiler/JetRuntime/Source/Alloc.jet", "Compiler/JetRuntime/Source/TrapMessages.jet",
+  "Compiler/JetRuntime/Source/Alloc.jet", "Compiler/JetRuntime/Source/TrapMessages.jet", "Compiler/JetRuntime/Source/TrapDefectMessages.jet",
   "Compiler/JetRuntime/Source/Trap.jet", "Compiler/JetRuntime/Source/Sync.jet",
   "Compiler/JetRuntime/Source/Thread.jet", "Compiler/JetRuntime/Tests/ThreadTests.jet",
 ];
