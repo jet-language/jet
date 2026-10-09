@@ -2518,6 +2518,7 @@ fn lower_constant(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
             else -> lower_emit(&f, LIRInst.Const{dst: dst, value: value})
         }
         .BigInt(decimal) -> {
+            if lower_is_unsigned_word(ty) -> return lower_constant_into(p, c, &m, &f, instruction, constant, dst)
             exact :: if instruction.ty == .Val(ty) -> lower_is_exact_int(ty) else -> false
             if !exact -> return lower_fail(&m, &f, "BigInt constant of a non-Int type is not lowered at O0 yet")
             lower_big_int_constant(&m, &f, dst, decimal)
