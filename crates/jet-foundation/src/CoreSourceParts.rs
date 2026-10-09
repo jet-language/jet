@@ -256,6 +256,16 @@ pub const CORE_ENCODING_STREAM_SOURCE_PART: CorePrivateSourcePart = CorePrivateS
     },
 };
 
+pub const CORE_ENCODING_STREAM_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
+    owner: CORE_ENCODING_STREAM_OWNER,
+    source: CoreSourceModule {
+        module: CORE_ENCODING_STREAM_MODULE,
+        alias: CORE_ENCODING_STREAM_ALIAS,
+        path: "Core/encoding/stream.jet",
+        owned_members: &["json_reader", "json_writer", "int_is_binary64", "jcs_number", "utf16_units", "compare_units", "sort_by_units"],
+    },
+};
+
 /// All compiler-private source parts. Keep this separate from
 /// `CoreModuleExports::CORE_SOURCE_MODULES`: adding a row there would make the
 /// part publicly importable.
