@@ -2391,17 +2391,9 @@ fn emit_bootstrap_host_factory(
     let request_mode = symbols.field_symbol("JetDriverCompileRequest", "mode")?;
     let mode_program = symbols.variant_path("JetDriverCompileMode", "Program")?;
     let request_schema_snapshots = symbols.field_symbol("JetDriverCompileRequest", "schema_snapshots")?;
-    let request_gate_set = symbols.field_symbol("JetDriverCompileRequest", "gate_set")?;
-    let request_gate_policies = symbols.field_symbol("JetDriverCompileRequest", "gate_policies")?;
-    let request_external_gate_entries = symbols.field_symbol("JetDriverCompileRequest", "external_gate_entries")?;
-    let request_evaluation_entry = symbols.field_symbol("JetDriverCompileRequest", "evaluation_entry")?;
     let request_output_intent = symbols.field_symbol("JetDriverCompileRequest", "output_intent")?;
     let request_output_address = symbols.field_symbol("JetDriverCompileRequest", "output_address")?;
     let output_check = symbols.variant_path("SemaOutputIntent", "Check")?;
-    let gate_type = symbols.type_symbol("GateSet")?;
-    let gate_allowed = symbols.field_symbol("GateSet", "allowed")?;
-    let gate_build_flag = symbols.field_symbol("GateSet", "build_flag")?;
-    let gate_session_flag = symbols.field_symbol("GateSet", "session_flag")?;
     let threads_type = symbols.type_symbol("CompilerThreads")?;
     let threads_cap = symbols.field_symbol("CompilerThreads", "cap")?;
     let threads_cores = symbols.field_symbol("CompilerThreads", "cores")?;
@@ -2531,10 +2523,6 @@ fn emit_bootstrap_host_factory(
             "        {request_target}: __jet_target,\n",
             "        {request_record_store}: __jet_bootstrap_record_store(),\n",
             "        {request_schema_snapshots}: Err(Default::default()),\n",
-            "        {request_gate_set}: {gate_type} {{ {gate_allowed}: Vec::new(), {gate_build_flag}: false, {gate_session_flag}: false }},\n",
-            "        {request_gate_policies}: Vec::new(),\n",
-            "        {request_external_gate_entries}: Vec::new(),\n",
-            "        {request_evaluation_entry}: Err(Default::default()),\n",
             "        {request_output_intent}: {output_check},\n",
             "        {request_output_address}: Err(Default::default()),\n",
             "        {request_trace_sink}: __jet_bootstrap_trace_sink(),\n",
@@ -2600,17 +2588,9 @@ fn emit_bootstrap_host_factory(
         request_effect_source = request_effect_source,
         request_record_store = request_record_store,
         request_schema_snapshots = request_schema_snapshots,
-        request_gate_set = request_gate_set,
-        request_gate_policies = request_gate_policies,
-        request_external_gate_entries = request_external_gate_entries,
-        request_evaluation_entry = request_evaluation_entry,
         request_output_intent = request_output_intent,
         request_output_address = request_output_address,
         output_check = output_check,
-        gate_type = gate_type,
-        gate_allowed = gate_allowed,
-        gate_build_flag = gate_build_flag,
-        gate_session_flag = gate_session_flag,
         request_trace_sink = request_trace_sink,
         request_mir_lint_every_pass = request_mir_lint_every_pass,
         request_comptime_stop_points = request_comptime_stop_points,

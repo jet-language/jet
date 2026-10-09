@@ -1334,7 +1334,7 @@ fn emit_stage_zero_source(
     // The compiler unit has no `fn run`: the Host/Runner splice supplies the
     // Rust `main`, so the unit lowers as a `NativeLibrary` (D4), never as an
     // executable without an entry.
-    let (bundle, _lints, reference_ffi) =
+    let (bundle, _lints, reference_ffi, checked_nominals) =
         crate::Driver::check_bundle_path_with_source_closure_for_artifact(
             &compiler_snapshot.entry_path,
             crate::Sema::CompileMode::Check,
@@ -1367,7 +1367,7 @@ fn emit_stage_zero_source(
             MirArtifactBuildMode::Dev,
         );
         let mut lower_span = jet_driver::Trace::span("lower");
-        let (mir, artifact) = crate::lower_checked_semantic_mir_program_for(bundle, request);
+        let (mir, artifact) = crate::lower_checked_semantic_mir_program_for(bundle, &checked_nominals, request);
         lower_span.items(mir.functions.len());
         drop(lower_span);
         assert_evaluator_materialization_helpers_in_mir(&mir);
