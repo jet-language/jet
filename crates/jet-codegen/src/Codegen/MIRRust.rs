@@ -19,6 +19,116 @@ use jet_foundation::MIR::*;
 
 const CORE_NET_RESOLVE_ERROR_TYPE: &str = "<corelib>/Core/net::Core/net/net.jet::__ResolveError";
 
+#[derive(Default)]
+pub(super) struct CloseFacts {
+    nominal: std::cell::RefCell<HashMap<String, Option<MirFunctionId>>>,
+    owned: std::cell::RefCell<HashMap<String, bool>>,
+}
+
+impl CloseFacts {
+    pub(super) fn nominal(&self, program: &MirProgram, ty: &MirType) -> Option<MirFunctionId> {
+        let key = ty.canonical_key();
+        if let Some(answer) = self.nominal.borrow().get(&key) {
+            return *answer;
+        }
+        let answer = nominal_close_function(program, ty);
+        self.nominal.borrow_mut().insert(key, answer);
+        answer
+    }
+
+    pub(super) fn contains_owned(&self, program: &MirProgram, ty: &MirType) -> bool {
+        let key = ty.canonical_key();
+        if let Some(answer) = self.owned.borrow().get(&key) {
+            return *answer;
+        }
+        // Cache only completed roots: a recursive cycle assumption must not
+        // publish a negative answer for an independently queried child.
+        let answer = contains_owned_close_with(&program.types, ty,
+            &|ty| self.nominal(program, ty).is_some(), &mut Vec::new());
+        self.owned.borrow_mut().insert(key, answer);
+        answer
+    }
+}
+
+// Seed/verification tier only; native cleanup is source-owned Lower glue.
+// Match checked identities, never a leaf spelling such as user `Secret`.
+pub(super) fn nominal_close_function(program: &MirProgram, ty: &MirType) -> Option<MirFunctionId> {
+    let owner = match ty.kind() {
+        MirTypeKind::Apply { name, .. } => name.id,
+        _ => ty.identity?,
+    };
+    program.impls.iter().find_map(|implementation| {
+        let trait_ref = implementation.trait_ref.as_ref()?;
+        if !program.traits.iter().any(|row| row.id == trait_ref.id && row.name == "Close") {
+            return None;
+        }
+        let identity = match implementation.self_type.kind() {
+            MirTypeKind::Apply { name, .. } => name.id,
+            _ => implementation.self_type.identity?,
+        };
+        (identity == owner).then(|| implementation.methods.iter().copied().find(|id| {
+            program.functions.iter().any(|row| row.id == *id && row.name == "close")
+        })).flatten()
+    })
+}
+
+pub(super) fn close_owned_fields(program: &MirProgram, ty: &MirType) -> Vec<(MirFieldId, String, MirType)> {
+    close_owned_fields_from(&program.types, ty)
+}
+
+fn close_owned_fields_from(types: &[MirTypeDef], ty: &MirType) -> Vec<(MirFieldId, String, MirType)> {
+    let MirTypeKind::Apply { name, args } = ty.kind() else { return Vec::new() };
+    let Some(definition) = types.iter().find(|row| row.id == name.id)
+        .filter(|row| matches!(row.ownership, MirOwnershipMode::Owned | MirOwnershipMode::Move)) else {
+            return Vec::new();
+        };
+    let MirTypeDefKind::Struct { fields, .. } = &definition.kind else { return Vec::new() };
+    let bindings = definition.generic_params.iter().zip(args)
+        .map(|(param, ty)| (param.name.clone(), ty.clone())).collect();
+    fields.iter().filter(|field| !field.computed).map(|field| {
+        (field.id, field.name.clone(), RustEmitter::history_capture_type(&field.ty, &bindings))
+    }).collect()
+}
+
+pub(super) fn contains_owned_close_with(types: &[MirTypeDef], ty: &MirType, close: &impl Fn(&MirType) -> bool, seen: &mut Vec<String>) -> bool {
+    if close(ty) { return true; }
+    let key = ty.canonical_key();
+    if seen.contains(&key) { return false; }
+    seen.push(key);
+    let result = match ty.kind() {
+        MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. }
+        | MirTypeKind::Option(inner) => contains_owned_close_with(types, inner, close, seen),
+        MirTypeKind::Result { ok, err } =>
+            contains_owned_close_with(types, ok, close, seen) || contains_owned_close_with(types, err, close, seen),
+        MirTypeKind::Tuple(fields) => fields.iter().any(|(_, ty)| contains_owned_close_with(types, ty, close, seen)),
+        MirTypeKind::Apply { .. } => close_owned_fields_from(types, ty).iter()
+            .any(|(_, _, ty)| contains_owned_close_with(types, ty, close, seen)),
+        _ => false,
+    };
+    seen.pop();
+    result
+}
+
+pub(super) fn close_receiver_drop(function: &MirFunction, value: MirValueId) -> bool {
+    let operation = function.blocks.iter().flat_map(|block| &block.instructions)
+        .find(|row| row.result == Some(value)).map(|row| &row.operation);
+    match operation {
+        Some(MirOperation::MovePlace { place }) => function.places.iter()
+            .find(|row| row.id == *place && row.projections.is_empty())
+            .is_some_and(|row| match row.base {
+                MirPlaceBase::Parameter(value) => function.blocks.iter()
+                    .flat_map(|block| &block.instructions)
+                    .any(|row| row.result == Some(value) && matches!(
+                        row.operation, MirOperation::Parameter { index: 0, .. })),
+                _ => false,
+            }),
+        Some(MirOperation::Move { value } | MirOperation::AttachTag { value, .. }) =>
+            close_receiver_drop(function, *value),
+        Some(MirOperation::Parameter { index: 0, .. }) => true,
+        _ => false,
+    }
+}
+
 /// Which MIR target partition this printer emits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MirRustTarget {
@@ -507,6 +617,94 @@ impl<'a> MirRustExecutionConfig<'a> {
             release_devtools_policy: jet_pkg_model::Package::ReleaseDevtoolsPolicy::development(),
         }
     }
+}
+
+/// Calls `found` with the trait name of every single-bound trait object
+/// (`Box<dyn T>`) inside `ty`.
+fn mir_type_single_trait_objects(ty: &MirType, found: &mut impl FnMut(&str)) {
+    match ty.kind() {
+        MirTypeKind::TraitObject(bounds) => {
+            if let [bound] = bounds.as_slice() {
+                found(&bound.name);
+            }
+        }
+        MirTypeKind::Apply { args: inner, .. } | MirTypeKind::Union(inner) => {
+            for ty in inner {
+                mir_type_single_trait_objects(ty, found);
+            }
+        }
+        MirTypeKind::List(inner)
+        | MirTypeKind::Shared(inner)
+        | MirTypeKind::Option(inner)
+        | MirTypeKind::FixedList { elem: inner, .. }
+        | MirTypeKind::InlineRange { base: inner, .. }
+        | MirTypeKind::Tagged { inner, .. }
+        | MirTypeKind::Quantity { base: inner, .. } => mir_type_single_trait_objects(inner, found),
+        MirTypeKind::Map { key, value }
+        | MirTypeKind::Result { ok: key, err: value } => {
+            mir_type_single_trait_objects(key, found);
+            mir_type_single_trait_objects(value, found);
+        }
+        MirTypeKind::Tuple(fields) => {
+            for (_, field) in fields {
+                mir_type_single_trait_objects(field, found);
+            }
+        }
+        MirTypeKind::Fn(signature) => {
+            for param in &signature.params {
+                mir_type_single_trait_objects(param, found);
+            }
+            if let Some(ret) = signature.ret.as_deref() {
+                mir_type_single_trait_objects(ret, found);
+            }
+        }
+        MirTypeKind::SendFn { params, ret, .. } => {
+            for param in params {
+                mir_type_single_trait_objects(param, found);
+            }
+            if let Some(ret) = ret.as_deref() {
+                mir_type_single_trait_objects(ret, found);
+            }
+        }
+        MirTypeKind::Int
+        | MirTypeKind::Float
+        | MirTypeKind::Bool
+        | MirTypeKind::String
+        | MirTypeKind::Char
+        | MirTypeKind::IntN { .. }
+        | MirTypeKind::Float32
+        | MirTypeKind::Measure(_) => {}
+    }
+}
+
+/// Runtime symbol families whose generic parameters carry codec bounds.
+/// Mirrored by JetFoundation's MIR reachability classification.
+const CODEC_ROUTE_PREFIXES: [&str; 16] = [
+    "jet_codec_", "jet_decode_", "jet_enc_", "jet_data_", "jet_db_",
+    "jet_args_", "jet_config_", "jet_std_env_", "jet_http_", "jet_job_",
+    "jet_receipt_", "jet_sync_", "jet_app_", "jet_web_", "jet_testing_",
+    "jet_history_",
+];
+const CODEC_ROUTE_LEAVES: [&str; 7] = [
+    "call", "decode", "from_json", "loader", "snapshot", "register_type", "typed_factory",
+];
+
+/// Whether a runtime route may require codecs at its instantiated types.
+fn codec_route_symbol(symbol: &str) -> bool {
+    let leaf = symbol.rsplit([':', '.']).next().unwrap_or(symbol);
+    CODEC_ROUTE_PREFIXES.iter().any(|prefix| leaf.starts_with(prefix))
+        || CODEC_ROUTE_LEAVES.contains(&leaf)
+}
+
+/// The serde codecs (`[Encode, Decode]`) a trait bound list requires.
+fn mir_bound_codecs(bounds: &[MirTraitRef]) -> [bool; 2] {
+    let mut codecs = [false, false];
+    for bound in bounds {
+        let leaf = bound.name.rsplit(['.', ':']).next().unwrap_or(&bound.name);
+        codecs[0] |= leaf == crate::Generics::ENCODE || leaf == jet_foundation::Syntax::MARKER_CODABLE;
+        codecs[1] |= leaf == crate::Generics::DECODE || leaf == jet_foundation::Syntax::MARKER_CODABLE;
+    }
+    codecs
 }
 
 /// Every nominal type name inside `ty`, including type arguments and
@@ -4427,7 +4625,7 @@ mod core_native_projection_tests {
     #[test]
     fn nominal_ingress_rejects_duplicate_identity_but_not_shared_leaf_names() {
         jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let bundle = crate::Codegen::TIR::tests::checked_bundle(
+        let (bundle, nominal_facts) = crate::Codegen::TIR::tests::checked_bundle(
             r#"
 module left { pub struct Item { pub value: Int } }
 module right { pub struct Item { pub value: Int } }
@@ -4444,7 +4642,7 @@ fn run() {
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
         let (mut program, artifact) =
-            crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
+            crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, &nominal_facts, request)
                 .expect("real checked nominal fixture lowers");
         let item_rows: Vec<_> = program
             .types
@@ -5241,6 +5439,12 @@ impl<'a> RustEmitter<'a> {
             } else {
                 mangle_path(&definition.key)
             };
+            if !compiler_owned
+                && !crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&definition.key)
+            {
+                user_traits_by_name.insert(definition.key.as_str(), symbol.clone());
+                user_traits_by_name.insert(definition.name.as_str(), symbol.clone());
+            }
             traits.insert(definition.id, symbol.clone());
             traits_by_name.insert(definition.key.clone(), symbol.clone());
             traits_by_name.insert(definition.name.clone(), symbol);
@@ -6700,7 +6904,8 @@ impl<'a> RustEmitter<'a> {
         args: &[MirCallArg],
         destination: &str,
     ) -> String {
-        let borrow_mask = self.parameter_borrow_mask(&self.function_row(target).params);
+        let borrow_mask: Vec<_> = self.function_row(target).params.iter()
+            .map(|param| self.parameter_borrowed(param)).collect();
         self.call_symbol_with_slot(
             function,
             return_slot_symbol(&self.function_name(target)),
@@ -7902,7 +8107,7 @@ impl<'a> RustEmitter<'a> {
     fn is_core_http_type(&self, type_id: MirTypeId, leaf: &str) -> bool {
         let key = &self.type_def(type_id).key;
         key.starts_with("<corelib>/Core/http::")
-            && !crate::Codegen::core_source_record_owns_layout(key)
+            && !jet_foundation::CoreModuleExports::core_source_owns_type(key)
             && key.rsplit_once("::").is_some_and(|(_, name)| name == leaf)
     }
     fn is_structural_tuple_type(&self, type_id: MirTypeId) -> bool {
@@ -9580,7 +9785,7 @@ impl<'a> RustEmitter<'a> {
             if index != 0 {
                 rendered.push_str(" + ");
             }
-            rendered.push_str(self.traits.get(&bound.id).expect("checked trait declaration"));
+            rendered.push_str(self.traits_by_name.get(&bound.name).expect("checked trait declaration"));
         }
         Some(rendered)
     }
@@ -21345,7 +21550,7 @@ impl<'a> RustEmitter<'a> {
             let _ = write!(
                 setup,
                 "let __jet_stage_{index} = {}; ",
-                self.plain_closure(function, target, captures)
+                self.plain_closure(function, target, captures, false)
             );
             let item = if index == 0 { "__jet_item" } else { "&__jet_item" };
             if *filters {
@@ -21377,7 +21582,7 @@ impl<'a> RustEmitter<'a> {
         target: MirFunctionId,
         captures: &[MirCaptureOperand],
     ) -> String {
-        let closure = self.plain_closure(function, target, captures);
+        let closure = self.plain_closure(function, target, captures, false);
         let mask = self.callable_borrow_mask(self.value_type(function, callable));
         let text_view = Self::callable_parameters(self.value_type(function, callable))
             .any(|(ty, access)| self.read_text_parameter(ty, access));
@@ -22920,9 +23125,6 @@ impl<'a> RustEmitter<'a> {
                         .chain(semantic_args.iter().filter_map(|arg| arg.place))
                         .any(|place| self.place_rooted_at(function, place, local))
                         || match &instruction.operation {
-                            MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { local: entries, .. }) => {
-                                *entries == local
-                            }
                             MirOperation::Semantic(MirSemanticOp::RequireStop { context, .. }) => {
                                 context.locals.iter().any(|(_, printed)| *printed == local)
                             }
@@ -23032,14 +23234,14 @@ impl<'a> RustEmitter<'a> {
                             && args
                                 .iter()
                                 .enumerate()
-                                .all(|(index, arg)| arg.value != value || self.core_call_argument_borrowed(*route, index))
+                                .all(|(index, arg)| arg.value != value || self.core_call_argument_borrowed(self.prelude_row(*route), index))
                     }
                     MirOperation::Semantic(MirSemanticOp::BuiltinMethod { call, receiver, args, .. }) => {
                         measures(*call)
                             && std::iter::once(receiver)
                                 .chain(args)
                                 .enumerate()
-                                .all(|(index, operand)| *operand != value || self.core_call_argument_borrowed(*call, index))
+                                .all(|(index, operand)| *operand != value || self.core_call_argument_borrowed(self.prelude_row(*call), index))
                     }
                     _ => false,
                 })
@@ -27978,7 +28180,8 @@ impl<'a> RustEmitter<'a> {
                 if !row.capture_params.is_empty() {
                     panic!("MIR captured function called without a Closure operation");
                 }
-                let borrow_mask = self.parameter_borrow_mask(&row.params);
+                let borrow_mask: Vec<_> = row.params.iter()
+                    .map(|param| self.parameter_borrowed(param)).collect();
                 if row.module == "core_core_service" && row.name == "worker" {
                     assert_eq!(args.len(), 5, "checked source worker ABI");
                     let rendered = args.iter().enumerate().map(|(index, arg)| {
@@ -33445,6 +33648,26 @@ impl<'a> RustEmitter<'a> {
                 MirTypeKind::SendFn { .. }
             )
         });
+        let closure = self.plain_closure(outer, target_id, captures, send);
+        if send {
+            format!("std::sync::Arc::new({closure})")
+        } else {
+            format!("std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({closure}))))")
+        }
+    }
+
+    /// The host closure handed directly to inline callbacks, or wrapped in
+    /// the MIR callable carrier. Send environments serialize mutable captures.
+    fn plain_closure(
+        &self,
+        outer: &MirFunction,
+        target_id: MirFunctionId,
+        captures: &[MirCaptureOperand],
+        send: bool,
+    ) -> String {
+        let target = self.function_row(target_id);
+        let mut setup = String::new();
+        let mut call_args = Vec::with_capacity(captures.len() + target.params.len());
         // SendFn keeps the host's Fn + Sync ABI. Only environments that
         // mutate or consume need serialization; read-only captures stay bare.
         let locked = send && target.capture_params.iter().any(|capture| {
@@ -35190,33 +35413,6 @@ impl<'a> RustEmitter<'a> {
                     type_name,
                     path,
                     self.value_owned(*display),
-                    fields,
-                )
-            }
-            MirSemanticOp::ReflectOf {
-                type_name,
-                path,
-                display,
-                fields,
-            } => {
-                let fields = fields
-                    .iter()
-                    .map(|field| {
-                        format!(
-                            "jet_reflect_field_new({:?}.to_string(), jet_reflect_value_from_field(&({}), {:?}, {:?}))",
-                            field.name,
-                            self.value_read(field.value),
-                            field.type_name,
-                            field.path,
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!(
-                    "jet_reflect_value_finish({:?}.to_string(), {:?}.to_string(), {}, vec![{}])",
-                    type_name,
-                    path,
-                    self.value_read(*display),
                     fields,
                 )
             }
@@ -37468,6 +37664,7 @@ impl<'a> RustEmitter<'a> {
         };
 
         let mut native_option = false;
+        let mut skip_option_payload = false;
         for projection in remaining {
             if skip_option_payload && matches!(projection, MirProjection::Payload { kind: MirPayloadKind::Option, .. }) {
                 expression = format!("**({}).as_ref().expect(\"checked map entry\")", expression);
@@ -38507,6 +38704,7 @@ impl<'a> RustEmitter<'a> {
                     panic!("MIR enum constant mixes named and positional payloads");
                 }
             }
+            MirConstant::SharedSite(_) => panic!("publication site nested in MIR constant value"),
             MirConstant::Present(value) => format!("Ok({})", self.constant(value)),
             MirConstant::Failed(report) => match report {
                 MirConstReport::Clean(_) => format!("Err({}JetAbsent)", self.config.root_prefix),
