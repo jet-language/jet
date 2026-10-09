@@ -730,19 +730,19 @@ fn text_iter_drop(state: I64) {
 fn rt_c_string_stop(kind: I64) {
     capacity :: if (kind == I64{1}) -> I64{23} else -> I64{28}
     message :: rt_text_builder_with_capacity(capacity)
-    rt_text_push_word(message, I64{4836977559045693806}, I64{8}) // "native C"
-    rt_text_push_word(message, I64{2334956330985739040}, I64{8}) // " String "
+    rt_text_push_word(message, I64{4836977559045693806}, I64{8})  // "native C"
+    rt_text_push_word(message, I64{2334956330985739040}, I64{8})  // " String "
     if {
         (kind == I64{0}) -> {
-            rt_text_push_word(message, I64{8317701429086023523}, I64{8}) // "contains"
-            rt_text_push_word(message, I64{1280658976}, I64{4}) // " NUL"
+            rt_text_push_word(message, I64{8317701429086023523}, I64{8})  // "contains"
+            rt_text_push_word(message, I64{1280658976}, I64{4})  // " NUL"
         }
         (kind == I64{1}) -> {
-            rt_text_push_word(message, I64{30518549099344745}, I64{7}) // "is null"
+            rt_text_push_word(message, I64{30518549099344745}, I64{7})  // "is null"
         }
         else -> {
-            rt_text_push_word(message, I64{6134030714416427881}, I64{8}) // "is not U"
-            rt_text_push_word(message, I64{942491220}, I64{4}) // "TF-8"
+            rt_text_push_word(message, I64{6134030714416427881}, I64{8})  // "is not U"
+            rt_text_push_word(message, I64{942491220}, I64{4})  // "TF-8"
         }
     }
     jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
@@ -786,6 +786,4 @@ fn rt_c_string_stop(kind: I64) {
     rt_text_copy(ptr, len)
 }
 
-#Export(c) fn jet_rt_c_string_free(ptr: I64, size: I64) {
-    jet_rt_free(ptr, size, I64{1})
-}
+#Export(c) fn jet_rt_c_string_free(ptr: I64, size: I64) { jet_rt_free(ptr, size, I64{1}) }
