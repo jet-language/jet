@@ -1,17 +1,9 @@
 #!/usr/bin/env node
-// Run the static x86-64 executables the fixture unit wrote (see
-// run-lower-fixtures.mjs) and compare stdout, exit status and (where a fixture names it) stderr with the
-// fixtures' Jet meaning. With JET_RUNTIME_C_LIB naming the compiled
-// runtime's C-ABI static library, also link each `<name>.o` against it with
-// the system C compiler (`cc`, or $CC), and load each in-memory image
-// `<name>.image` into a process that carries the same runtime
-// (load-memory-image.c), and check both the same way. With JET_RUN naming
-// the command that runs jet (a jet binary or a wrapper such as safe-jet.sh)
-// as well, also link the runtime into a shared library and load each image
-// in process from Jet code (`jet run load/load.jet <name> <library>`, the
-// Jet loader on the Jet OS layer).
-//
-// usage: [JET_RUNTIME_C_LIB=libjet_runtime_c.a [JET_RUN=jet]] node Compiler/JetBackend/Tests/check-native-fixtures.mjs <outdir>
+// Check object-first executables linked with the explicitly admitted fresh Jet
+// pack. No freestanding or C-library fallback. An explicit JET_RUNTIME_C_LIB
+// optionally exercises supplementary seed-only memory/C rails; it never
+// supplies the executable used for the primary fixture verdict.
+// usage: node Compiler/JetBackend/Tests/check-native-fixtures.mjs <outdir>
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -48,12 +40,10 @@ if (existsSync(fixtureDir)) {
       // fixture that stops the program, e.g. 70 for a runtime stop.
       const exit = /^\/\/ expect-exit ([\w-]+): (\d+)\s*$/.exec(line);
       if (exit) expected.find((fixture) => fixture.name === exit[1]).status = Number(exit[2]);
-      // `// expect-static-only <name>` (after its expect-stdout line): a
-      // hand-linked static executable with no object or in-memory image.
-      const only = /^\/\/ expect-static-only ([\w-]+)\s*$/.exec(line);
-      if (only) expected.find((fixture) => fixture.name === only[1]).staticOnly = true;
-      // Compiled-runtime kernels have no freestanding implementation. Never
-      // treat a missing native runtime as a successful skipped witness.
+      // Hand-compiled foreign ABI driver has an object but no memory image.
+      const objectOnly = /^\/\/ expect-object-only ([\w-]+)\s*$/.exec(line);
+      if (objectOnly) expected.find((fixture) => fixture.name === objectOnly[1]).objectOnly = true;
+      // Never treat a missing native pack executable as a skipped witness.
       const runtimeOnly = /^\/\/ expect-runtime-only ([\w-]+)\s*$/.exec(line);
       if (runtimeOnly) expected.find((fixture) => fixture.name === runtimeOnly[1]).runtimeOnly = true;
       const requiresRoute = /^\/\/ expect-requires-route ([\w-]+) ([A-Za-z0-9_]+)\s*$/.exec(line);
@@ -84,27 +74,22 @@ function check(label, path, fixture, args = [], options = {}, compareStderr = tr
   }
 }
 
-// These witnesses need no runtime library: dirty ABI bytes enter generated
-// callees directly, and a tiny C host checks the linked object's data address.
+// Dirty ABI transport and datum alignment both use the admitted Jet pack.
 for (const place of ["register", "stack"]) {
   for (const [value, status] of [["false", 0], ["true", 1]]) {
     const name = `bool-${place}-${value}`;
-    const run = spawnSync(`${outDir}/${name}.elf`, [], { encoding: "utf8", timeout: 10000 });
+    const run = spawnSync(`${outDir}/${name}.exe`, [], { encoding: "utf8", timeout: 10000 });
     const ok = run.status === status && run.stdout === "";
     if (!ok) failures += 1;
     console.log(`${name}: ${ok ? "ok" : "FAIL"} (exit ${run.status ?? run.signal}, expected ${status})`);
   }
 }
-check("align64 (static image)", `${outDir}/align64.elf`, "");
-const alignmentSource = `${dirname(fileURLToPath(import.meta.url))}/check-alignment.c`;
-const alignmentProgram = `${outDir}/align64.hosted`;
-const alignmentLink = spawnSync(process.env.CC ?? "cc", [alignmentSource, `${outDir}/align64.o`, "-o", alignmentProgram], { encoding: "utf8" });
-if (alignmentLink.status !== 0) {
-  console.log(`align64 (linked object): LINK FAILED\n${alignmentLink.stderr}`);
-  failures += 1;
-} else {
-  check("align64 (linked object)", alignmentProgram, "");
+check("align64 (Jet pack)", `${outDir}/align64.exe`, { stdout: "", status: 0 });
+check("word-entry-37 (Jet adapter)", `${outDir}/word-entry-37.exe`, { stdout: "", status: 37 });
+for (const [name, status] of [["i32-entry-minus1", 255], ["u32-entry-max", 255], ["bool-entry-true", 1]]) {
+  check(`${name} (Jet adapter)`, `${outDir}/${name}.exe`, { stdout: "", status });
 }
+// align64.o/runtime-exports.o remain separate export/initializer writer witnesses.
 
 // Link one loader per fixture: `-rdynamic` exports the runtime's symbols to
 // dlsym, and `-u` keeps every export the image imports.
@@ -149,23 +134,14 @@ for (const fixture of process.argv.includes("--abi") ? [] : expected.filter(({ n
     console.log(`${fixture.name}: REFUSED (requires canonical route ${fixture.requiresRoute}; lowering refusal witness runs in unit.jet)`);
     continue;
   }
-  if (!fixture.runtimeOnly) {
-    const path = `${outDir}/${fixture.name}.elf`;
-    if (!existsSync(path)) {
-      console.log(`${fixture.name}: MISSING ${path}`);
-      failures += 1;
-      continue;
-    }
-    check(`${fixture.name} (static image)`, path, fixture);
-  }
-  if (!runtimeLib) {
-    if (fixture.runtimeOnly) {
-      console.log(`${fixture.name}: MISSING required compiled runtime library`);
-      failures += 1;
-    }
+  const path = `${outDir}/${fixture.name}.exe`;
+  if (!existsSync(path)) {
+    console.log(`${fixture.name}: MISSING required Jet pack executable ${path}`);
+    failures += 1;
     continue;
   }
-  if (fixture.staticOnly) continue;
+  check(`${fixture.name} (Jet pack)`, path, fixture);
+  if (!runtimeLib || fixture.objectOnly) continue;
   checkMemoryImage(fixture);
   if (sharedRuntime) {
     check(`${fixture.name} (in-process Jet loader)`, jetRun, fixture, ["run", "load/load.jet", fixture.name, sharedRuntime], { cwd: outDir, timeout: 600000 }, false);

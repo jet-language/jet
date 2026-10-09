@@ -8,13 +8,12 @@
 // `runtime-pack.txt` names a runtime pack, `<case>.exe`: the object linked with
 // that pack by the in-process linker, exactly as native `jet build` links
 // (wall time in `<case>.link-ms`; or the link error in `<case>.pack-issues`),
-// and, when the freestanding image runtime serves every import, the static
-// executable `<case>.elf`; or
+// with an explicit freshly admitted Jet runtime pack; or
 // the reasons it could not into `<case>.issues`. One line `<case>\t<status>`
 // per case goes to stdout as soon as the case is done, so run-goldens.mjs can
 // restart after a crash. The unit is assembled by run-goldens.mjs and never
 // listed in Compiler/Bootstrap/sources.list.
-use jet_backend.[lir_lower_entry, lir_optimize_module, lir_print_module, lir_sanitize_module, x64_link_executable, x64_relocatable_object, x64_static_executable]
+use jet_backend.[lir_lower_entry, lir_optimize_module, lir_print_module, lir_sanitize_module, x64_link_executable, x64_relocatable_object]
 use core.files as files
 use core.math as math
 use core.time as time
@@ -80,7 +79,7 @@ fn gl_write_issues(name: String, lines: [String]) {
     files.write("{name}.issues", text) ?? panic("cannot write {name}.issues")
 }
 
-fn gl_case(name: String, pack: GLPack?, level: Int) -> String {
+fn gl_case(name: String, pack: GLPack, level: Int) -> String {
     text :: files.read("{name}.mird") ?? return "missing"
     r := MIRDReader{lines: text.split("\n").to_list(), at: 0}
     entry_id :: mird_u64(&r)
@@ -92,12 +91,13 @@ fn gl_case(name: String, pack: GLPack?, level: Int) -> String {
         return "unsupported"
     }
     entry :: lowered.entry ?? panic("lowering without issues has an entry")
-    lir :: lir_optimize_module(lowered.lir, level)
+    lir := lir_optimize_module(lowered.lir, level)
+    hosted_entry :: test_pack_entry(&lir, entry)
     // A `<case>.want-lir` marker asks for the (optimized) LIR as `<case>.lir`.
     if files.exists("{name}.want-lir") {
         files.write("{name}.lir", lir_print_module(lir)) ?? panic("cannot write {name}.lir")
     }
-    object :: x64_relocatable_object(lir, entry)
+    object :: x64_relocatable_object(lir, hosted_entry)
     if object.errors.len() > 0 {
         lines := [String]{}
         loop error in object.errors -> &lines.push("native\t{error}")
@@ -108,16 +108,15 @@ fn gl_case(name: String, pack: GLPack?, level: Int) -> String {
     // `sanitize.txt` asks for the AddressSanitizer-instrumented object too, as
     // `<case>.asan.o` (run-sanitized.mjs links it with an ASan runtime).
     if files.exists("sanitize.txt") {
-        instrumented :: x64_relocatable_object(lir_sanitize_module(lir), entry)
+        instrumented :: x64_relocatable_object(lir_sanitize_module(lir), hosted_entry)
         if instrumented.errors.len() > 0 {
             files.write("{name}.asan-issues", "{instrumented.errors[0]}\n") ?? panic("cannot write {name}.asan-issues")
         } else {
             files.write_bytes("{name}.asan.o", instrumented.bytes) ?? panic("cannot write {name}.asan.o")
         }
     }
-    if pack == .Val(runtime) {
-        watch :: time.start()
-        linked :: x64_link_executable([String]{"{name}.o", runtime.path}, ^[[U8]]{object.bytes, runtime.bytes})
+    watch :: time.start()
+    linked :: x64_link_executable([String]{"{name}.o", pack.path}, ^[[U8]]{object.bytes, pack.bytes})
         files.write("{name}.link-ms", "{watch.elapsed_millis()}\n") ?? panic("cannot write {name}.link-ms")
         if linked.errors.len() > 0 {
             report := ""
@@ -127,22 +126,15 @@ fn gl_case(name: String, pack: GLPack?, level: Int) -> String {
             files.write_bytes("{name}.exe", linked.bytes) ?? panic("cannot write {name}.exe")
             files.set_mode("{name}.exe", 0o755) ?? panic("cannot make {name}.exe executable")
         }
-    }
-    image :: x64_static_executable(lir, entry)
-    if image.errors.len() > 0 {
-        files.write("{name}.static-issues", "{image.errors[0]}\n") ?? panic("cannot write {name}.static-issues")
-        return "object"
-    }
-    files.write_bytes("{name}.elf", image.bytes) ?? panic("cannot write {name}.elf")
-    files.set_mode("{name}.elf", 0o755) ?? panic("cannot make {name}.elf executable")
-    "static"
+    if linked.errors.len() > 0 -> return "object"
+    "pack"
 }
 
 // The runtime pack `runtime-pack.txt` names, read once for every case.
-fn gl_pack() -> GLPack? {
-    text :: files.read("runtime-pack.txt") ?? return None
+fn gl_pack() -> GLPack {
+    text :: files.read("runtime-pack.txt") ?? panic("runtime-pack.txt must name an admitted fresh Jet pack")
     path :: text.trim()
-    Val(GLPack{path: path, bytes: files.read_bytes(path) ?? panic("cannot read the runtime pack {path}")})
+    GLPack{path: path, bytes: files.read_bytes(path) ?? panic("cannot read the runtime pack {path}")}
 }
 
 // The optimization level `opt-level.txt` names (Compiler/JetBackend/Docs/O1.md); 0 without one.
