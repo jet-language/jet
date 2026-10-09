@@ -786,7 +786,8 @@ fn jet_driver_publish_record(request: JetDriverCompileRequest, schema: String, k
     if request.record_store == .Val(store) {
         encoded :: record_encode(schema, sections)
         bytes :: encoded.bytes ?? return None
-        address :: key ?? record_blob_key(bytes)
+        view :: bytes[0..<bytes.len()]
+        address :: key ?? record_blob_key(view)
         if !store.put_record(schema, address, bytes) -> return None
         return Val(address)
     }

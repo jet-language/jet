@@ -90,8 +90,22 @@ for (const name of partsList[1].split(",").map((part) => part.trim()).filter(Boo
     path: field(body, "path", name),
     owner: field(body, "owner", name),
     members: members(owned[1]),
+    runtime: false,
   });
 }
+
+// Runtime units, in CORE_RUNTIME_PARTS order (generated from Core/*/runtime).
+const runtimeStart = partsSource.indexOf("pub const CORE_RUNTIME_PARTS: &[CoreSourceModule] = &[");
+if (runtimeStart < 0) fail(`${partsPath} has no CORE_RUNTIME_PARTS table`);
+const runtimeEnd = partsSource.indexOf("\n];", runtimeStart);
+if (runtimeEnd < 0) fail(`${partsPath}: CORE_RUNTIME_PARTS is not closed`);
+const runtimeTable = partsSource.slice(runtimeStart, runtimeEnd);
+const runtimeRowCount = (runtimeTable.match(/CoreSourceModule \{/g) ?? []).length;
+const runtimeRowsBefore = rows.length;
+for (const match of runtimeTable.matchAll(rowPattern)) {
+  rows.push({ module: match[1], alias: match[2], path: match[3], owner: "", members: members(match[4]), runtime: true });
+}
+if (rows.length - runtimeRowsBefore !== runtimeRowCount) fail(`${partsPath}: parsed ${rows.length - runtimeRowsBefore} of ${runtimeRowCount} CORE_RUNTIME_PARTS rows`);
 
 // The canonical effect source is the file Effects.rs embeds.
 const effectsInclude = effectsRust.match(/pub const EFFECT_SOURCE: &str = include_str!\("([^"]+)"\);/);

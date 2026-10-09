@@ -230,10 +230,11 @@ fn fragment_signature(
 type FragmentImportSignatures =
     HashMap<(String, String), crate::AST::MirFragmentCoreSourceSignature>;
 
-/// The user-module call surface of module `owner` for a comptime fragment:
-/// its `use` aliases and member-imported functions keyed to the loaded source
-/// rows (a user module's row key is its loader alias), and the declared
-/// signatures of those callees. Core modules keep their own Core route.
+/// The module-import call surface of module `owner` for a comptime fragment:
+/// its `use` aliases and member-imported functions keyed to the loaded
+/// non-Core-row targets (user modules and Core runtime units, keyed by loader
+/// alias), and the declared signatures of those callees. Public Core modules
+/// keep their own Core route.
 fn fragment_module_imports(
     owner: usize,
     modules: &[crate::Sema::ModuleState],

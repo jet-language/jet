@@ -9,6 +9,7 @@ package {
     }
 }
 use core.text as unicode
+use core.text.runtime.kernel_unicode_string as parse_unicode_string
 
 // core.text.parse — scanning, splitting, and number parsers.
 //
@@ -713,11 +714,6 @@ fn escape_c(text: String) -> String Never! {
     out
 }
 
-fn fill_to(fill: String) -> String {
-    if fill.bytes().len() == 0 -> return " "
-    slice_b(fill.bytes(), 0, 1)
-}
-
 fn repeat_char(ch: String, n: Int) -> String {
     s := ""
     i := 0
@@ -728,12 +724,3 @@ fn repeat_char(ch: String, n: Int) -> String {
     s
 }
 
-fn ascii_case(b: U8, upper: Bool) -> U8 {
-    n :: b
-    if upper {
-        if n >= 97 && n <= 122 -> return (U8{n - 32})
-        return b
-    }
-    if n >= 65 && n <= 90 -> return (U8{n + 32})
-    b
-}

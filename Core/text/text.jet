@@ -120,7 +120,7 @@ fn word_views(text: String) -> [String] Never! { words(text) }
 fn line_views(text: String) -> [String] Never! { split_lines(text) }
 fn byte_views(text: String) -> [String] Never! {
     out := [String]{}
-    loop b in text.bytes() -> &out.push("{b}")
+    loop b in text_unicode_string.utf8_bytes(text) -> &out.push("{b}")
     out
 }
 
@@ -232,40 +232,10 @@ fn splitn(text: String, sep: String, n: Int) -> [String] Never! { split_limit(te
 
 fn rsplitn(text: String, sep: String, n: Int) -> [String] Never! { split_limit(text, sep, n, true) }
 
-fn ascii_alpha(b: U8) -> Bool {
-    n :: b
-    (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
-}
 
 fn ascii_space(b: U8) -> Bool {
     n :: b
     n == 32 || n == 9 || n == 10 || n == 11 || n == 12 || n == 13
-}
-
-fn ascii_lower(text: String) -> String {
-    out := [U8]{}
-    loop b in text.bytes() {
-        n :: b
-        if n >= 65 && n <= 90 {
-            &out.push(U8{n + 32})
-        } else {
-            &out.push(b)
-        }
-    }
-    String.from_bytes(out) ?? ""
-}
-
-fn ascii_upper(text: String) -> String {
-    out := [U8]{}
-    loop b in text.bytes() {
-        n :: b
-        if n >= 97 && n <= 122 {
-            &out.push(U8{n - 32})
-        } else {
-            &out.push(b)
-        }
-    }
-    String.from_bytes(out) ?? ""
 }
 
 fn slice_bytes(raw: [U8], start: Int, end: Int) -> String {
@@ -284,8 +254,8 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> String {
 }
 
 fn starts_with(text: String, prefix: String) -> Bool {
-    a :: text.bytes()
-    b :: prefix.bytes()
+    a :: text_unicode_string.utf8_bytes(text)
+    b :: text_unicode_string.utf8_bytes(prefix)
     if b.len() > a.len() -> return false
     loop i in 0..<b.len() {
         if a[i] != b[i] -> return false
@@ -294,8 +264,8 @@ fn starts_with(text: String, prefix: String) -> Bool {
 }
 
 fn ends_with(text: String, suffix: String) -> Bool {
-    a :: text.bytes()
-    b :: suffix.bytes()
+    a :: text_unicode_string.utf8_bytes(text)
+    b :: text_unicode_string.utf8_bytes(suffix)
     if b.len() > a.len() -> return false
     off :: a.len() - b.len()
     loop i in 0..<b.len() {
@@ -324,7 +294,7 @@ fn pad_side(text: String, width: Int, fill: String, left: Bool) -> String {
 
 fn split_limit(text: String, sep: String, n: Int, from_right: Bool) -> [String] {
     if n <= 0 -> return [String]{}
-    if n == 1 || sep.bytes().len() == 0 -> return [String]{text}
+    if n == 1 || text_unicode_string.utf8_bytes(sep).len() == 0 -> return [String]{text}
     parts := [String]{}
     rest := text
     loop {
@@ -338,11 +308,11 @@ fn split_limit(text: String, sep: String, n: Int, from_right: Bool) -> [String] 
             return parts
         }
         if from_right {
-            &parts.push(slice_bytes(rest.bytes(), at + sep.bytes().len(), rest.bytes().len()))
-            rest = slice_bytes(rest.bytes(), 0, at)
+            &parts.push(slice_bytes(text_unicode_string.utf8_bytes(rest), at + text_unicode_string.utf8_bytes(sep).len(), text_unicode_string.utf8_bytes(rest).len()))
+            rest = slice_bytes(text_unicode_string.utf8_bytes(rest), 0, at)
         } else {
-            &parts.push(slice_bytes(rest.bytes(), 0, at))
-            rest = slice_bytes(rest.bytes(), at + sep.bytes().len(), rest.bytes().len())
+            &parts.push(slice_bytes(text_unicode_string.utf8_bytes(rest), 0, at))
+            rest = slice_bytes(text_unicode_string.utf8_bytes(rest), at + text_unicode_string.utf8_bytes(sep).len(), text_unicode_string.utf8_bytes(rest).len())
         }
     }
 }
@@ -378,22 +348,17 @@ struct IndexedCp {
     cp: Int
 }
 
-fn decode_scalars(text: String) -> [Int] Never! {
-    pairs :: decode_indexed(text)
-    out := [Int]{}
-    loop p in pairs -> &out.push(p.cp)
-    out
-}
+fn decode_scalars(text: String) -> [Int] Never! { text_width.decode_scalars(text) }
 
 fn decode_indexed(text: String) -> [IndexedCp] Never! {
-    raw :: text.bytes()
+    raw :: text_unicode_string.utf8_bytes(text)
     out := [IndexedCp]{}
     i := 0
     loop {
         if i >= raw.len() -> return out
         start := i
         first := Int.from_u8(raw[i])
-        width :: utf8_width_at(raw, i)
+        width :: text_unicode_string.utf8_width_at(raw, i)
         if width == 1 {
             if first < 128 {
                 &out.push(IndexedCp{index: start, cp: first})
@@ -428,62 +393,9 @@ fn decode_indexed(text: String) -> [IndexedCp] Never! {
     }
 }
 
-fn utf8_width_at(raw: [U8], at: Int) -> Int Never! {
-    if at < 0 || at >= raw.len() -> return 1
-    first :: raw[at]
-    if first < 128 -> return 1
-    if first >= 194 && first <= 223 {
-        if at + 1 < raw.len() {
-            second :: raw[at + 1]
-            if second >= 128 && second <= 191 -> return 2
-        }
-        return 1
-    }
-    if first >= 224 && first <= 239 {
-        if at + 2 < raw.len() {
-            second :: raw[at + 1]
-            third :: raw[at + 2]
-            if second >= 128 && second <= 191 && third >= 128 && third <= 191 {
-                if first != 224 || second >= 160 {
-                    if first != 237 || second <= 159 -> return 3
-                }
-            }
-        }
-        return 1
-    }
-    if first >= 240 && first <= 244 {
-        if at + 3 < raw.len() {
-            second :: raw[at + 1]
-            third :: raw[at + 2]
-            fourth :: raw[at + 3]
-            if second >= 128 && second <= 191 && third >= 128 && third <= 191 && fourth >= 128 && fourth <= 191 {
-                if first != 240 || second >= 144 {
-                    if first != 244 || second <= 143 -> return 4
-                }
-            }
-        }
-    }
-    1
-}
 fn encode_cp(cp: Int) -> String {
-    n := cp
-    if n < 0 || n > 1114111 || (n >= 55296 && n <= 57343) -> n = 65533
     out := [U8]{}
-    if n < 128 {
-        &out.push(U8{n})
-    } else if n < 2048 {
-        &out.push(U8{Int{192} | (n >> 6)})
-        &out.push(U8{Int{128} | (n & Int{63})})
-    } else if n < 65536 {
-        &out.push(U8{Int{224} | (n >> 12)})
-        &out.push(U8{Int{128} | ((n >> 6) & Int{63})})
-        &out.push(U8{Int{128} | (n & Int{63})})
-    } else {
-        &out.push(U8{Int{240} | (n >> 18)})
-        &out.push(U8{Int{128} | ((n >> 12) & Int{63})})
-        &out.push(U8{Int{128} | ((n >> 6) & Int{63})})
-        &out.push(U8{Int{128} | (n & Int{63})})
-    }
+    text_unicode_string.append_cp(&out, cp)
     String.from_bytes(out) ?? ""
 }
 
@@ -1138,40 +1050,6 @@ fn split_lines(text: String) -> [String] {
     out
 }
 
-fn cluster_width(cps: [Int]) -> Int {
-    if cps.len() == 0 -> return 0
-    wide := false
-    pictographic := false
-    keycap := false
-    visible := false
-    variation := false
-    loop cp in cps {
-        if cp == 0x20E3 -> keycap = true
-        if cp == 0xFE0F -> variation = true
-        if is_emoji(cp) -> pictographic = true
-        w :: east_asian_width(cp)
-        if w > 1 -> wide = true
-        if w > 0 && !is_extend(cp) -> visible = true
-    }
-    if keycap || wide || pictographic || (variation && visible) -> return 2
-    if !visible -> return 0
-    1
-}
-
-fn east_asian_width(cp: Int) -> Int {
-    if combining_class(cp) != 0 -> return 0
-    if cp < 32 || (cp >= 127 && cp <= 159) -> return 0
-    if (cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2329 && cp <= 0x232A) -> return 2
-    if (cp >= 0x2E80 && cp <= 0xA4CF) && cp != 0x303F -> return 2
-    if cp >= 0xAC00 && cp <= 0xD7A3 -> return 2
-    if cp >= 0xF900 && cp <= 0xFAFF -> return 2
-    if cp >= 0xFE10 && cp <= 0xFE19 -> return 2
-    if cp >= 0xFE30 && cp <= 0xFE6F -> return 2
-    if cp >= 0xFF00 && cp <= 0xFF60 -> return 2
-    if cp >= 0xFFE0 && cp <= 0xFFE6 -> return 2
-    if cp >= 0x1F300 && cp <= 0x1FAFF -> return 2
-    1
-}
 
 fn hex_cp(cp: Int) -> String {
     hex := "0123456789ABCDEF"

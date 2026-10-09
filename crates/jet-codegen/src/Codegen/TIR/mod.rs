@@ -4396,14 +4396,14 @@ fn fragment_core_source_cx(
             cx.import_mods.insert(alias.clone(), mangle(&loaded.alias));
         }
     }
+    install_fragment_module_imports(
+        &mut cx,
+        facts,
+        &source.module_imports,
+        &source.imported_functions,
+        &source.import_signatures,
+    );
     if user_module {
-        install_fragment_module_imports(
-            &mut cx,
-            facts,
-            &source.module_imports,
-            &source.imported_functions,
-            &source.import_signatures,
-        );
         cx.foreign_types = fragment_cx.foreign_types.clone();
         cx.local_type_identities.extend(source.nominal_identities.clone());
         cx.type_names.extend(facts.structs.keys().cloned());
@@ -10618,9 +10618,10 @@ fn core_source_module_indices(bundle: &ProgramBundle) -> std::collections::HashS
                 });
             let private_source = jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS
                 .iter()
+                .map(|part| &part.source)
+                .chain(jet_foundation::CoreSourceParts::CORE_RUNTIME_PARTS)
                 .any(|part| {
-                    part.source.alias == module.alias
-                        && part.source.path == module.display.as_str()
+                    part.alias == module.alias && part.path == module.display.as_str()
                 });
             (public_source || private_source).then_some(index)
         })
@@ -10825,6 +10826,8 @@ fn checked_core_source_call_edges(
     let core_modules = core_source_module_indices(bundle);
     let functions = CostFunctionIndex::new(bundle);
     let mut edges = Vec::new();
+    let part_targets = private_part_receiver_callables(bundle, index);
+    let format_targets = source_format_callables(bundle, index);
 
     for (caller_index, callable) in callables.iter().enumerate() {
         let Some((function, _)) = functions.get(callable.module, &callable.declaration_name) else {
@@ -11449,21 +11452,7 @@ fn reachable_core_source_callables(
             .is_some_and(|(function, _)| {
                 !function.pre.is_empty() && !function.params.is_empty()
             });
-        // Keep private source-part bodies rooted because receiver resolution for
-        // those compiler-owned callables has no source declaration to reference.
-        let private_source = bundle
-            .modules
-            .get(callable.module)
-            .is_some_and(|module| {
-                jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS
-                    .iter()
-                    .any(|part| {
-                        part.source.alias == module.alias
-                            && part.source.path == module.display.as_str()
-                    })
-            });
         callable.root |= !is_core
-            || (is_core && private_source)
             || artifact_export
             || selected_entry
             || ffi_callback
@@ -11484,6 +11473,13 @@ fn reachable_core_source_callables(
             // Selected outputs and enabled test bodies have no enclosing
             // callable row, but still contribute direct checked references.
             rooted[target].root = true;
+        }
+    }
+    let part_targets = private_part_receiver_callables(bundle, &lookup);
+    let format_targets = source_format_callables(bundle, &lookup);
+    if !part_targets.is_empty() || !format_targets.is_empty() {
+        for data in &bundle.modules {
+            root_test_private_part_methods(&data.items, include_tests, &part_targets, &format_targets, &mut rooted);
         }
     }
 

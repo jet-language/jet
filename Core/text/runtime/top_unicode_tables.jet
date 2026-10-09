@@ -1,0 +1,20 @@
+// Rust Prelude/CoreLib/Top/UnicodeTables.rs:1-54.
+// Every original table symbol lives in its separately retained assets module.
+// Unicode names use UTF-8 pools; mapping/range/scalar access shares unicode_assets.
+use core.text.runtime.unicode_assets as text_asset
+pub UNICODE_VERSION :: "17.0.0"
+
+// Borrowed extent into the name asset's UTF-8 pool, not an allocated String.
+pub fn name_span(index: View<U8>, names: View<U8>, cp: Int) -> (start: Int, length: Int)? {
+    row :: text_asset.mapping_row(index, cp, 11) ?? return None
+    start :: text_asset.uint(index, row + 3, 4)
+    length :: text_asset.uint(index, row + 7, 4)
+    assert(start + length <= names.len(), "invalid Unicode name extent")
+    Val((start: start, length: length))
+}
+
+// C+S simple fold used by one-scalar matching, distinct from full C+F expansion.
+pub fn simple_fold(index: View<U8>, cp: Int) -> Int Never! {
+    row :: text_asset.mapping_row(index, cp, 6) ?? return cp
+    text_asset.uint(index, row + 3, 3)
+}
