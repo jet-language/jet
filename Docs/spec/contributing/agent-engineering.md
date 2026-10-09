@@ -54,6 +54,9 @@ cases. Dirty files and concurrent-owner reservations are left untouched and
 listed by owner in `~/.cache/jet-dev/scratch/CopySigilMigration/dirty-files.tsv`;
 release an owned file only after committing its unrelated edits. Update source
 generators as well, so regeneration cannot reintroduce the retired sigil.
+Jet `.template` inputs are included in the same traversal. File owners can use
+`--owner-write /absolute/owned/file.jet [...]` after explicitly authorizing
+their own dirty-file edits; this mode rejects directory-wide writes.
 
 ## Keep verification honest
 
