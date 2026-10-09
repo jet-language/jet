@@ -4818,6 +4818,21 @@ pub fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) ->
     jet_driver_compile_loaded_stages(request, &kg, false, ^load)
 }
 
+// Produce the complete installed Core library through the same checked
+// registration/comptime/TIR/MIR pipeline. The caller's user source snapshot is
+// not loaded; the graph anchor is a real catalog module, never a synthetic run.
+pub fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
+    request.mode = JetDriverCompileMode.Program
+    request.target = JetDriverCompileTarget.Native
+    request.evaluation_entry = None
+    request.eval_config.runtime_execution = false
+    kg := jet_driver_keep_going_log(None)
+    if request.trace_sink == .Val(sink) -> sink.begin("load", "", -1, -1)
+    load := jet_driver_load_core_library(request)
+    if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
+    jet_driver_compile_loaded_stages(request, &kg, false, ^load)
+}
+
 // JET_KEEP_GOING (the bootstrap entry reads it): every phase runs past the
 // failures before it; each failure is a row of the result's keep_going_rows.
 // The result keeps every error report, so a compile with any row never
