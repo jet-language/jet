@@ -62,7 +62,7 @@ function specification(id) {
         if (crypto.has(name)) return { type: 'suite', runner: rt + 'run-crypto-fixtures.mjs', modes: ['assemble', 'lower', 'link', 'run'], crypto: true };
         if (plain[name]) return { type: 'plain', name, call: plain[name][0], expected: plain[name][1], runner: rt + 'check-runtime.mjs' };
         if (suites[name]) return { type: 'suite', runner: rt + suites[name][0], modes: suites[name][1], name };
-        if (['EnvironmentLeaves', 'FaultSchedule', 'IterCharge', 'ProgressState', 'HostFault', 'FloatBits', 'TerminalColor', 'TrapReport', 'VaultHooks', 'VaultProvider', 'Thread', 'HostSpawn'].includes(name)) return { type: 'c', name, runner: be + 'run-runtime.mjs' };
+        if (['EnvironmentLeaves', 'FaultSchedule', 'IterCharge', 'ProgressState', 'HostFault', 'FloatBits', 'TerminalColor', 'TrapReport', 'VaultHooks', 'VaultProvider', 'Thread', 'HostSpawn', 'CompilerEnv', 'CompilerRoutes'].includes(name)) return { type: 'c', name, runner: be + 'run-runtime.mjs' };
         if (name === 'GenericRouteSchema') return { type: 'direct', runner: 'Compiler/JetRuntime/Tests/GenericRouteSchema.jet', expected: '' };
         return { blocked: `No registered transport for ${id}; the source must not be counted without an exact native verdict` };
     }
@@ -85,6 +85,8 @@ export function prepareTransport(row, { repo, out }) {
     const entry = { id, package: row.package, mode: 'run', kind: 'transport', path: adapter,
         cwd: join(out, id), sha256: digest(readFileSync(adapter)), testCount: 1,
         stdout: `JET_COMPILER_REGISTRY PASS ${id} tests=1\n`, sources: [row.source], sourceManifests: ['Compiler/Bootstrap/sources.list', 'Compiler/JetRuntime/sources.list'] };
+    const witness = row.source.replace(/\.jet$/, '.c');
+    if (spec.type === 'c' && existsSync(join(repo, witness))) entry.sources.push(witness);
     if (spec.blocked) return { ...entry, status: 'BLOCKED', reason: spec.blocked };
     return { ...entry, transport: { ...spec, runnerSha256: digest(readFileSync(join(repo, spec.runner))) } };
 }
@@ -114,14 +116,15 @@ export function planTransport(entry, { jet, repo, runtimePack }) {
     } else if (spec.type === 'c') {
         node(spec.runner, out, '--until', 'assemble', '--test', spec.name);
         checkLibrary(join(out, 'library/Source/Runtime.jet'), join(out, 'jet_runtime_jet'), join(repo, 'Compiler/JetRuntime/lifecycle.list'));
-        cc(['VaultHooks', 'VaultProvider'].includes(spec.name) ? join(repo, rt + spec.name + 'Witness.c') : spec.name === 'Thread' ? join(repo, rt + 'thread-fixture.c') : spec.name === 'HostSpawn' ? join(repo, rt + 'HostSpawnTests.c') : join(out, 'driver.c'), join(out, 'jet_runtime_jet.o'), join(out, 'driver'));
+        cc(['VaultHooks', 'VaultProvider'].includes(spec.name) ? join(repo, rt + spec.name + 'Witness.c') : spec.name === 'Thread' ? join(repo, rt + 'thread-fixture.c') : ['HostSpawn', 'CompilerEnv', 'CompilerRoutes'].includes(spec.name) ? join(repo, rt + spec.name + 'Tests.c') : join(out, 'driver.c'), join(out, 'jet_runtime_jet.o'), join(out, 'driver'));
         if (spec.name === 'TrapReport') {
             for (let kind = 0; kind < 5; kind++) for (const mode of ['direct', 'captured']) {
                 run(join(out, 'driver'), [String(kind), mode], { code: 70, stdout: '' });
                 steps.at(-1).comparison = 'committed simple-report literal and complete direct/captured byte equality';
             }
         } else {
-            run(join(out, 'driver')); if (spec.name === 'HostFault') run(join(out, 'driver'), ['unreachable']);
+            run(join(out, 'driver'), spec.name === 'CompilerRoutes' ? [out] : []); if (spec.name === 'HostFault') run(join(out, 'driver'), ['unreachable']);
+            if (spec.name === 'CompilerEnv') run(join(out, 'driver'), ['empty']);
         }
     } else if (spec.type === 'direct') {
         steps.push({ action: 'copy real source to isolated project', source: join(repo, spec.runner) }); build(join(out, 'unit.jet')); run(join(out, 'registry-native.exe'), [], { code: 0, stdout: spec.expected, stderr: '' });
@@ -293,7 +296,7 @@ export async function runTransport(entry, { jet, repo, logDir, runtimePack, runt
         } else if (spec.type === 'c') {
             node(spec.runner, out, '--until', 'assemble', '--test', spec.name);
             library(join(out, 'library/Source/Runtime.jet'), join(out, 'jet_runtime_jet'), join(repo, 'Compiler/JetRuntime/lifecycle.list'));
-            const source = ['VaultHooks', 'VaultProvider'].includes(spec.name) ? join(repo, rt + spec.name + 'Witness.c') : spec.name === 'Thread' ? join(repo, rt + 'thread-fixture.c') : spec.name === 'HostSpawn' ? join(repo, rt + 'HostSpawnTests.c') : join(out, 'driver.c');
+            const source = ['VaultHooks', 'VaultProvider'].includes(spec.name) ? join(repo, rt + spec.name + 'Witness.c') : spec.name === 'Thread' ? join(repo, rt + 'thread-fixture.c') : ['HostSpawn', 'CompilerEnv', 'CompilerRoutes'].includes(spec.name) ? join(repo, rt + spec.name + 'Tests.c') : join(out, 'driver.c');
             if (source === join(out, 'driver.c')) writeFileSync(source, cSource(spec.name, repo));
             const binary = join(out, 'driver'); link(source, join(out, 'jet_runtime_jet.o'), binary);
             if (spec.name === 'HostFault') {
@@ -311,8 +314,9 @@ export async function runTransport(entry, { jet, repo, logDir, runtimePack, runt
                     if (kind === 0) exact(direct, '', simple);
                 }
             } else {
-                const expected = { VaultHooks: 'vault hooks witness OK (TLS ownership, exact stops, 8 root-filtered two-phase barriers)\n', VaultProvider: 'vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)\n', Thread: 'tls ok\n', HostSpawn: 'process raw: ok\n' }[spec.name] ?? '';
-                exact(execute(binary), expected);
+                const expected = { VaultHooks: 'vault hooks witness OK (TLS ownership, exact stops, 8 root-filtered two-phase barriers)\n', VaultProvider: 'vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)\n', Thread: 'tls ok\n', HostSpawn: 'process raw: ok\n', CompilerEnv: 'compiler environment routes: Jet-only (Rust frozen)\n', CompilerRoutes: 'compiler routes: Jet-only (Rust frozen)\n' }[spec.name] ?? '';
+                exact(execute(binary, spec.name === 'CompilerRoutes' ? [out] : []), expected);
+                if (spec.name === 'CompilerEnv') exact(execute(binary, ['empty']), expected);
             }
         } else if (spec.type === 'calls') {
             node(spec.runner, out, ...(spec.session ? ['--session'] : []));

@@ -156,6 +156,10 @@ function environment() {
     }
     return env;
 }
+function registryEnvironment(entry) {
+    const scratch = join(entry.cwd, 'scratch');
+    return { TMPDIR: scratch, ...(entry.sources.some(path => readFileSync(join(repo, path), 'utf8').includes('"JET_CLI_FMT_TEST_ROOT"')) ? { JET_CLI_FMT_TEST_ROOT: scratch } : {}) };
+}
 function nativeRuntime(jet) {
     const runtimeDir = realpathSync(options.runtime ?? join(dirname(jet), 'jet-runtime'));
     const key = readFileSync(join(runtimeDir, 'native.key'), 'utf8').trim();
@@ -186,13 +190,14 @@ function generate() {
     const manifests = ['Compiler/Bootstrap/sources.list', 'Compiler/JetRuntime/sources.list'].map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) }));
     const sourceMap = assemblyError ? null : JSON.parse(readFileSync(join(home, '.cache/jet-luna/compiler-bootstrap/compiler.map.json'), 'utf8'));
     for (const row of registryRows(census)) {
-        if (row.package === 'JetRuntime' || (row.package === 'JetBackend' && row.entry)) {
+        const standalone = row.package === 'JetRuntime' && row.mode === 'test';
+        if (!standalone) {
             const transport = prepareTransport(row, { repo, out });
             if (transport) { entries.push(transport); continue; }
         }
         const mode = row.mode;
         let reason = assemblyError;
-        if (row.package === 'JetRuntime') reason = 'runtime hand-ABI registries require their native C fixture driver/runtime source assembly; not a compiler Test harness';
+        if (row.package === 'JetRuntime' && !standalone) reason = 'runtime hand-ABI registries require their native C fixture driver/runtime source assembly; not a compiler Test harness';
         if (row.package === 'JetBackend' && row.entry) reason = 'backend artifact/FFI registry needs its existing run-*.mjs source assembly plus native artifact execution/checker; a returned fn run is not its success verdict';
         const sources = [row.source];
         if (row.package === 'JetParser' && row.names.length) sources.unshift('Compiler/JetParser/Tests/Support.jet');
@@ -200,11 +205,12 @@ function generate() {
         const id = row.id;
         const stdout = mode === 'test' ? 'jet.test.v1' : `JET_COMPILER_REGISTRY PASS ${id} tests=1\n`;
         const entry = { id, package: row.package, mode, path: join(out, id, 'registry.jet'), cwd: join(out, id),
-            sha256: row.sha256, stdout, testCount: mode === 'test' ? baseNames.length + row.names.length : 1,
+            sha256: row.sha256, stdout, testCount: mode === 'test' ? (standalone ? 0 : baseNames.length) + row.names.length : 1,
             sources, sourceManifests: manifests.map(item => item.path) };
+        entry.environment = registryEnvironment(entry);
         if (reason) { entries.push({ ...entry, status: 'BLOCKED', reason }); continue; }
-        const seen = new Set([...base.matchAll(/^use core\.[^\[\n]*$/gm)].map(match => match[0].trimEnd()));
-        let body = base;
+        const seen = new Set([...(standalone ? '' : base).matchAll(/^use core\.[^\[\n]*$/gm)].map(match => match[0].trimEnd()));
+        let body = standalone ? '' : base;
         for (const path of sources) {
             let text = readFileSync(join(repo, path), 'utf8');
             if (path === row.source && mode === 'run') text = text.replace(/^fn run(?=\s*\()/m, 'fn compiler_registry_body');
@@ -212,7 +218,7 @@ function generate() {
         }
         if (mode === 'run') body += `\nfn run() {\n    compiler_registry_body()\n    print(${JSON.stringify(stdout.trimEnd())})\n}\n`;
         entry.sha256 = hash(Buffer.from(body));
-        entry.testNames = mode === 'test' ? [...baseNames, ...row.names] : [];
+        entry.testNames = mode === 'test' ? [...(standalone ? [] : baseNames), ...row.names] : [];
         mkdirSync(entry.cwd, { recursive: true });
         writeFileSync(entry.path, body);
         writeFileSync(join(entry.cwd, 'package.jet'), 'name: "compiler_registry"\nversion: "0.0.1"\nedition: "2028"\n');
@@ -265,6 +271,9 @@ async function run() {
     for (const entry of manifest.entries) {
         const result = { id: entry.id, mode: entry.mode, testCount: entry.testCount };
         if (entry.status === 'BLOCKED') { result.status = 'BLOCKED'; result.reason = entry.reason; receipt.blocked++; }
+        else if (entry.kind === 'transport' && runtimeError) {
+            result.status = 'BLOCKED'; result.reason = `runtime prerequisite: ${runtimeError.message}`; receipt.blocked++;
+        }
         else {
             try {
                 if (!['run', 'test'].includes(entry.mode) || !Number.isInteger(entry.testCount) || entry.testCount < 1 || hash(readFileSync(entry.path)) !== entry.sha256) throw Error('invalid or changed assembled registry');
@@ -294,7 +303,6 @@ async function run() {
                         result.report = report;
                     }
                 } else if (entry.kind === 'transport') {
-                    if (runtimeError) throw runtimeError;
                     const ran = await runTransport(entry, { jet: options.jet, repo, logDir, ...runtime });
                     if (ran.testCount !== entry.testCount) throw Error('transport verdict count differs from complete registry');
                     command = ['native-registry-transport', entry.path, entry.id];
@@ -302,7 +310,10 @@ async function run() {
                     result.transportEvidence = ran.evidence;
                 } else {
                     command = [options.jet, entry.mode, ...(entry.mode === 'test' ? ['--capture=all', '--color=never'] : []), entry.path];
-                    child = spawnSync(command[0], command.slice(1), { cwd: entry.cwd, env: environment(), encoding: 'utf8',
+                    if (JSON.stringify(entry.environment) !== JSON.stringify(registryEnvironment(entry))) throw Error('registry environment changed since manifest');
+                    mkdirSync(entry.environment.TMPDIR, { recursive: true });
+                    result.environment = entry.environment;
+                    child = spawnSync(command[0], command.slice(1), { cwd: entry.cwd, env: { ...environment(), ...entry.environment }, encoding: 'utf8',
                         maxBuffer: 128 << 20, timeout: Number(process.env.JET_REGISTRY_TIMEOUT_MS ?? 3500000) });
                 }
                 writeFileSync(`${stem}.stdout`, child.stdout ?? ''); writeFileSync(`${stem}.stderr`, child.stderr ?? '');

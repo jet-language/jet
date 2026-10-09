@@ -113,4 +113,12 @@ drivers. `run --runtime DIR` explicitly names the admitted runtime directory;
 otherwise transports use `jet-runtime` beside the supplied compiler. Its
 `native.key`, Jet-only object, full pack and matching zero-Rust/LLVM provenance
 are required. Transport command evidence is retained in the same receipt.
+The compiler environment C witness runs in both normal and empty-environment
+processes. Compiler filesystem/wait/status routes use their C witness with a
+disk-backed scratch path. Source-owned compiler routes use their standalone
+native `#Test` registry, without appending the compiler aggregate.
+All standalone/compiler-aggregate registries receive private disk-backed
+`TMPDIR` scratch; fixtures requiring `JET_CLI_FMT_TEST_ROOT` receive that same
+declared root. Missing admitted runtime prerequisites produce explicit blocked
+receipt entries, never successful or skipped outcomes.
 
