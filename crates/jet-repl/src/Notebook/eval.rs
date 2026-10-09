@@ -1,68 +1,11 @@
 //! Evaluate one notebook cell against a live REPL [`Session`].
 
-use crate::Comptime::{self, CtValue, DevSink, REPL_FUEL_BUDGET};
-use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{Func, StructDef};
 use crate::{
-    classify, collect_moved_names, e1802, normalize_repl_input, rebuild_funcs,
-    repl_executable_stmts, type_check_item, type_check_stmts, update_core_imports_from_ledger,
-    InputKind, ReplTurnStatus, Session,
+    classify, echo_text, failure_text, normalize_repl_input, rebuild_funcs, run_stmts_turn,
+    turn_failure_summary, type_check_item, update_core_imports_from_ledger, Executor, InputKind,
+    ReplAuthorization, ReplTurnStatus, Session, TurnResult,
 };
-use std::collections::{HashMap, HashSet};
 use std::path::Path;
-
-struct TrackingAuthorizer<'a> {
-    inner: &'a mut dyn Comptime::ReplAuthorizer,
-    observed: bool,
-}
-
-impl Comptime::ReplAuthorizer for TrackingAuthorizer<'_> {
-    fn preflight(
-        &mut self,
-        request: &Comptime::ReplEffectRequest,
-        span: Span,
-    ) -> Result<(), Diagnostic> {
-        self.inner.preflight(request, span)
-    }
-    fn authorize(
-        &mut self,
-        request: &Comptime::ReplEffectRequest,
-        span: Span,
-    ) -> Result<(), Diagnostic> {
-        let result = self.inner.authorize(request, span);
-        if result.is_ok() {
-            self.observed = true;
-        }
-        result
-    }
-    fn fs_read(&mut self, path: &str) -> std::io::Result<Vec<u8>> {
-        self.inner.fs_read(path)
-    }
-    fn fs_write(&mut self, path: &str, bytes: &[u8], append: bool) -> std::io::Result<()> {
-        self.inner.fs_write(path, bytes, append)
-    }
-    fn fs_exists(&mut self, path: &str) -> std::io::Result<bool> {
-        self.inner.fs_exists(path)
-    }
-    fn fs_is_dir(&mut self, path: &str) -> std::io::Result<bool> {
-        self.inner.fs_is_dir(path)
-    }
-    fn fs_create_dir(&mut self, path: &str) -> std::io::Result<()> {
-        self.inner.fs_create_dir(path)
-    }
-    fn fs_remove(&mut self, path: &str) -> std::io::Result<()> {
-        self.inner.fs_remove(path)
-    }
-    fn verified_root(&mut self) -> std::io::Result<std::fs::File> {
-        self.inner.verified_root()
-    }
-    fn read_input(&mut self, prompt: &str) -> std::io::Result<String> {
-        self.inner.read_input(prompt)
-    }
-    fn reset_session(&mut self) {
-        self.inner.reset_session()
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct EvalResult {
@@ -70,7 +13,24 @@ pub struct EvalResult {
     pub status: ReplTurnStatus,
     pub had_effect: bool,
     pub quit: bool,
-    pub value: Option<CtValue>,
+    /// The echoed value with its type-directed JSON (rich cell output).
+    pub value: Option<Executor::TurnValue>,
+}
+
+impl EvalResult {
+    fn plain(text: String, status: ReplTurnStatus) -> Self {
+        Self {
+            text,
+            status,
+            had_effect: false,
+            quit: false,
+            value: None,
+        }
+    }
+}
+
+fn error_lines(diagnostics: &[crate::Diagnostics::Diagnostic]) -> String {
+    failure_text(diagnostics, None)
 }
 
 /// Run one input after the notebook has supplied its complete declaration set.
@@ -78,24 +38,16 @@ pub(crate) fn evaluate_step_with_items(
     session: &mut Session,
     input: &str,
     base_dir: &Path,
-    authorizer: &mut dyn Comptime::ReplAuthorizer,
+    authorizer: &mut ReplAuthorization<'_>,
     notebook_items_preloaded: bool,
 ) -> EvalResult {
-    jet_driver::boot_mir_eval();
     let normalized = normalize_repl_input(input);
     let trimmed = normalized.trim();
     if trimmed.is_empty() {
-        return EvalResult {
-            text: String::new(),
-            status: ReplTurnStatus::Ok,
-            had_effect: false,
-            quit: false,
-            value: None,
-        };
+        return EvalResult::plain(String::new(), ReplTurnStatus::Ok);
     }
 
     session.step += 1;
-    let mut out = String::new();
 
     // Notebook declarations are file-wide (D-NOTEBOOK-SURFACE1): the kernel
     // already placed every parser-plane item cell (`is_item_input`) into the
@@ -103,11 +55,8 @@ pub(crate) fn evaluate_step_with_items(
     // the item lane too — `classify`'s keyword heads only cover `fn`/`struct`/…,
     // so an `@name :: expr` or `#Test` cell would fall into the statement lane,
     // where `Checker::declare` collides with the cell's own file-wide
-    // declaration (E0118 "already taken"). Hard rejects (D-REPL6) keep priority.
-    let classified = if notebook_items_preloaded
-        && crate::reject_feature(trimmed).is_none()
-        && crate::is_item_input(trimmed)
-    {
+    // declaration (E0118 "already taken").
+    let classified = if notebook_items_preloaded && crate::is_item_input(trimmed) {
         Ok(InputKind::Item(format!("{trimmed}\n")))
     } else {
         classify(trimmed, session.step)
@@ -115,71 +64,26 @@ pub(crate) fn evaluate_step_with_items(
     let kind = match classified {
         Ok(k) => k,
         Err(ds) => {
-            for d in &ds {
-                out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
-            }
-            session.record_turn(
-                trimmed,
-                ReplTurnStatus::Error,
-                ds.iter()
-                    .map(|d| format!("{}: {}", d.code, d.what))
-                    .collect::<Vec<_>>()
-                    .join("; "),
-            );
-            return EvalResult {
-                text: out,
-                status: ReplTurnStatus::Error,
-                had_effect: false,
-                quit: false,
-                value: None,
-            };
+            session.record_turn(trimmed, ReplTurnStatus::Error, turn_failure_summary(&ds, None));
+            return EvalResult::plain(error_lines(&ds), ReplTurnStatus::Error);
         }
     };
 
     match kind {
-        InputKind::Empty => EvalResult {
-            text: out,
-            status: ReplTurnStatus::Ok,
-            had_effect: false,
-            quit: false,
-            value: None,
-        },
+        InputKind::Empty => EvalResult::plain(String::new(), ReplTurnStatus::Ok),
 
         InputKind::Meta(cmd, _) => {
             if matches!(cmd.as_str(), "quit" | "q" | "exit") {
-                out.push_str("bye\n");
                 return EvalResult {
-                    text: out,
-                    status: ReplTurnStatus::Ok,
-                    had_effect: false,
                     quit: true,
-                    value: None,
+                    ..EvalResult::plain("bye\n".to_string(), ReplTurnStatus::Ok)
                 };
             }
-            out.push_str(&format!(
-                "error: notebook cells do not run meta-command `:{cmd}`\n"
-            ));
             session.record_turn(trimmed, ReplTurnStatus::Error, format!("meta:{cmd}"));
-            EvalResult {
-                text: out,
-                status: ReplTurnStatus::Error,
-                had_effect: false,
-                quit: false,
-                value: None,
-            }
-        }
-
-        InputKind::Reject(feature) => {
-            let d = e1802(&feature);
-            out.push_str(&format!("error [E1802]: {}\n", d.what));
-            session.record_turn(trimmed, ReplTurnStatus::Error, "E1802".to_string());
-            EvalResult {
-                text: out,
-                status: ReplTurnStatus::Error,
-                had_effect: false,
-                quit: false,
-                value: None,
-            }
+            EvalResult::plain(
+                format!("error: notebook cells do not run meta-command `:{cmd}`\n"),
+                ReplTurnStatus::Error,
+            )
         }
 
         InputKind::Item(src) => {
@@ -187,25 +91,12 @@ pub(crate) fn evaluate_step_with_items(
                 match type_check_item(session, if notebook_items_preloaded { "" } else { &src }) {
                     Ok(bundle) => bundle,
                     Err(errors) => {
-                        for d in &errors {
-                            out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
-                        }
                         session.record_turn(
                             trimmed,
                             ReplTurnStatus::Error,
-                            errors
-                                .iter()
-                                .map(|d| format!("{}: {}", d.code, d.what))
-                                .collect::<Vec<_>>()
-                                .join("; "),
+                            turn_failure_summary(&errors, None),
                         );
-                        return EvalResult {
-                            text: out,
-                            status: ReplTurnStatus::Error,
-                            had_effect: false,
-                            quit: false,
-                            value: None,
-                        };
+                        return EvalResult::plain(error_lines(&errors), ReplTurnStatus::Error);
                     }
                 };
             if !notebook_items_preloaded {
@@ -213,242 +104,97 @@ pub(crate) fn evaluate_step_with_items(
             }
             rebuild_funcs(session);
             update_core_imports_from_ledger(&bundle, &mut session.core_imports);
-            out.push_str("ok\n");
             session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
             session.remember_success(trimmed);
-            EvalResult {
-                text: out,
-                status: ReplTurnStatus::Ok,
-                had_effect: false,
-                quit: false,
-                value: None,
-            }
+            EvalResult::plain("ok\n".to_string(), ReplTurnStatus::Ok)
         }
 
         InputKind::Import(src) => {
-            session.import_srcs.push(src.clone());
+            session.import_srcs.push(src);
             let bundle = match type_check_item(session, "") {
                 Ok(bundle) => bundle,
                 Err(errors) => {
                     session.import_srcs.pop();
-                    for d in &errors {
-                        out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
-                    }
                     session.record_turn(
                         trimmed,
                         ReplTurnStatus::Error,
-                        errors
-                            .iter()
-                            .map(|d| format!("{}: {}", d.code, d.what))
-                            .collect::<Vec<_>>()
-                            .join("; "),
+                        turn_failure_summary(&errors, None),
                     );
-                    return EvalResult {
-                        text: out,
-                        status: ReplTurnStatus::Error,
-                        had_effect: false,
-                        quit: false,
-                        value: None,
-                    };
+                    return EvalResult::plain(error_lines(&errors), ReplTurnStatus::Error);
                 }
             };
             rebuild_funcs(session);
             update_core_imports_from_ledger(&bundle, &mut session.core_imports);
-            out.push_str("ok\n");
             session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
             session.remember_success(trimmed);
-            EvalResult {
-                text: out,
-                status: ReplTurnStatus::Ok,
-                had_effect: false,
-                quit: false,
-                value: None,
-            }
+            EvalResult::plain("ok\n".to_string(), ReplTurnStatus::Ok)
         }
 
-        InputKind::Stmts(stmts, suppress, check_src) => {
-            let (checked_stmts, checked_core_imports) =
-                match type_check_stmts(session, &stmts, session.step, &check_src) {
-                    Ok(checked) => checked,
-                    Err(errors) => {
-                        for d in &errors {
-                            out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
-                        }
-                        session.record_turn(
-                            trimmed,
-                            ReplTurnStatus::Error,
-                            errors
-                                .iter()
-                                .map(|d| format!("{}: {}", d.code, d.what))
-                                .collect::<Vec<_>>()
-                                .join("; "),
-                        );
-                        return EvalResult {
-                            text: out,
-                            status: ReplTurnStatus::Error,
-                            had_effect: false,
-                            quit: false,
-                            value: None,
-                        };
-                    }
-                };
-
-            let session_binding_names: HashSet<String> = session.scope.keys().cloned().collect();
-            let newly_moved = collect_moved_names(&stmts, &session_binding_names, &session.scope);
-            // A cell executes the AST sema checked, exactly as one interactive
-            // REPL turn does. Sema's one prelude opening (D-NAME-ALIAS1=A) lives
-            // in that AST: `assert`/`assert_eq` already select the shared stop
-            // kernel and `read_file`/`write_file`/`file_exists`/`eprint` are
-            // already calls on a compiler-owned Core alias, so the cell needs
-            // the alias map sema resolved against (D-CTCORE1) beside it.
-            let stmts = repl_executable_stmts(checked_stmts.clone());
-            let mut core_imports = session.core_imports.clone();
-            core_imports.extend(checked_core_imports);
-            let before_keys: HashSet<String> = session.scope.keys().cloned().collect();
-            let funcs: HashMap<String, &Func> = session
-                .func_defs
-                .iter()
-                .map(|(k, v)| (k.clone(), v))
-                .collect();
-            let structs: HashMap<String, &StructDef> = session
-                .struct_defs
-                .iter()
-                .map(|(k, v)| (k.clone(), v))
-                .collect();
-
-            let mut trial_scope = session.scope.clone();
-            let mut sink = DevSink::new();
-            let mut tracking = TrackingAuthorizer {
-                inner: authorizer,
-                observed: false,
-            };
-            let result = if Comptime::repl_interruptible_turn_active() {
-                Comptime::run_repl_step_interruptible(
-                    &stmts,
-                    &funcs,
-                    base_dir,
-                    &mut sink,
-                    &mut trial_scope,
-                    REPL_FUEL_BUDGET,
-                    suppress,
-                    &core_imports,
-                    &structs,
-                    &session.binding_types,
-                    &mut tracking,
-                )
-            } else {
-                Comptime::run_repl_step(
-                    &stmts,
-                    &funcs,
-                    base_dir,
-                    &mut sink,
-                    &mut trial_scope,
-                    REPL_FUEL_BUDGET,
-                    suppress,
-                    &core_imports,
-                    &structs,
-                    &session.binding_types,
-                    &mut tracking,
-                )
-                .map_err(Comptime::ReplStepError::Diagnostic)
-            };
-
-            match result {
-                Ok(echo_val) => {
-                    for name in &newly_moved {
-                        trial_scope.remove(name);
-                    }
-                    session.scope = trial_scope;
-                    session.moved_names.extend(newly_moved);
-                    let raw = trimmed.trim_end_matches(';').trim().to_string();
-                    if !raw.is_empty() && !raw.starts_with("__repl_echo__") {
-                        session.stmt_srcs.push(format!("{raw};"));
-                    }
-                    let new_names: Vec<String> = session
-                        .scope
-                        .keys()
-                        .filter(|k| !before_keys.contains(*k) && *k != "__repl_echo__")
-                        .cloned()
-                        .collect();
-                    session.record_stmts(&checked_stmts);
-
-                    let mut summary = String::new();
-                    if !sink.stdout.is_empty() {
-                        out.push_str(&sink.stdout);
-                        summary.push_str(&sink.stdout);
-                    }
-                    if !sink.stderr.is_empty() {
-                        out.push_str(&sink.stderr);
-                        summary.push_str(&sink.stderr);
-                    }
-                    let result_value = echo_val.clone();
-                    if let Some(v) = echo_val {
-                        if !matches!(v, CtValue::Unit) {
-                            let shown = crate::display_value(&v);
-                            out.push_str(&shown);
-                            out.push('\n');
-                            summary.push_str(&shown);
-                        }
-                    }
-                    let had_effect =
-                        tracking.observed || !sink.stdout.is_empty() || !sink.stderr.is_empty();
-                    let bound_name = match new_names.as_slice() {
-                        [only] => Some(only.clone()),
-                        _ => None,
-                    };
-                    session.record_turn_ex(
-                        trimmed,
-                        ReplTurnStatus::Ok,
-                        summary,
-                        had_effect,
-                        bound_name,
-                    );
-                    session.remember_success(trimmed);
-                    EvalResult {
-                        text: out,
-                        status: ReplTurnStatus::Ok,
-                        had_effect,
-                        quit: false,
-                        value: result_value,
-                    }
+        InputKind::Stmts(stmts, suppress, check_src) => match run_stmts_turn(
+            session, &stmts, suppress, &check_src, trimmed, base_dir, authorizer, true,
+        ) {
+            TurnResult::Done {
+                stdout,
+                stderr,
+                echo,
+                bound_name,
+                had_effect,
+                ..
+            } => {
+                let mut out = format!("{stdout}{stderr}");
+                let mut summary = out.clone();
+                if let Some(value) = &echo {
+                    let shown = echo_text(value);
+                    out.push_str(&shown);
+                    out.push('\n');
+                    summary.push_str(&shown);
                 }
-                Err(Comptime::ReplStepError::Interrupted) => {
-                    let had_effect =
-                        tracking.observed || !sink.stdout.is_empty() || !sink.stderr.is_empty();
-                    out.push_str(
-                        "Interrupted. External effects already performed were not rolled back.\n",
-                    );
-                    session.record_turn_ex(
-                        trimmed,
+                session.record_turn_ex(trimmed, ReplTurnStatus::Ok, summary, had_effect, bound_name);
+                session.remember_success(trimmed);
+                EvalResult {
+                    text: out,
+                    status: ReplTurnStatus::Ok,
+                    had_effect,
+                    quit: false,
+                    value: echo,
+                }
+            }
+            TurnResult::Interrupted => {
+                session.record_turn_ex(
+                    trimmed,
+                    ReplTurnStatus::Interrupted,
+                    "Interrupted".to_string(),
+                    true,
+                    None,
+                );
+                EvalResult {
+                    had_effect: true,
+                    ..EvalResult::plain(
+                        "Interrupted. External effects already performed were not rolled back.\n"
+                            .to_string(),
                         ReplTurnStatus::Interrupted,
-                        "Interrupted".to_string(),
-                        had_effect,
-                        None,
-                    );
-                    EvalResult {
-                        text: out,
-                        status: ReplTurnStatus::Interrupted,
-                        had_effect,
-                        quit: false,
-                        value: None,
-                    }
-                }
-                Err(Comptime::ReplStepError::Diagnostic(d)) => {
-                    out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
-                    session.record_turn(
-                        trimmed,
-                        ReplTurnStatus::Error,
-                        format!("{}: {}", d.code, d.what),
-                    );
-                    EvalResult {
-                        text: out,
-                        status: ReplTurnStatus::Error,
-                        had_effect: false,
-                        quit: false,
-                        value: None,
-                    }
+                    )
                 }
             }
-        }
+            TurnResult::Failed {
+                stdout,
+                stderr,
+                diagnostics,
+                report,
+            } => {
+                session.record_turn(
+                    trimmed,
+                    ReplTurnStatus::Error,
+                    turn_failure_summary(&diagnostics, report.as_deref()),
+                );
+                EvalResult::plain(
+                    format!(
+                        "{stdout}{stderr}{}",
+                        failure_text(&diagnostics, report.as_deref())
+                    ),
+                    ReplTurnStatus::Error,
+                )
+            }
+        },
     }
 }

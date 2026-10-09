@@ -56,7 +56,8 @@ pub(crate) fn run_interactive(
     // use; `fn run` is not invoked.
     if let Some(file) = &preload {
         let mut stdout = io::stdout();
-        super::cmd_load(file, &mut session, &base_dir, color, false, &mut stdout);
+        let mut authorizer = policy.authorizer(None);
+        super::cmd_load(file, &mut session, &base_dir, false, &mut authorizer, &mut stdout);
     }
 
     let stdin = io::stdin();
@@ -138,7 +139,7 @@ struct InteractiveEffectPrompt<'a, R: Read> {
     guard: &'a mut RawGuard,
 }
 
-fn print_effect_roles(request: &crate::Comptime::ReplEffectRequest, reused: bool) {
+fn print_effect_roles(request: &crate::ReplEffectRequest, reused: bool) {
     println!("  Required effects: {}", request.root);
     println!(
         "  Granted effects: {}",
@@ -162,7 +163,7 @@ fn print_effect_roles(request: &crate::Comptime::ReplEffectRequest, reused: bool
 impl<R: Read> EffectPrompt for InteractiveEffectPrompt<'_, R> {
     fn choose(
         &mut self,
-        request: &crate::Comptime::ReplEffectRequest,
+        request: &crate::ReplEffectRequest,
         reused: bool,
     ) -> PromptChoice {
         if reused {

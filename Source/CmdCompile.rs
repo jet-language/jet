@@ -2778,9 +2778,52 @@ pub(crate) fn run_native_source_from_stdin() -> ! {
         crate::cli_error!("E2105", "couldn't read REPL source: {}", error);
         exit(ExitCodes::USER_ERROR);
     }
-    run_native_source_execution(&source)
+    // `<byte length>\n<source>`; the bytes after the source stay on stdin
+    // for the program's own `input()` calls.
+    let source = match read_framed_repl_source() {
+        Ok(source) => source,
+        Err(error) => {
+            crate::cli_error!("E2105", "couldn't read REPL source: {}", error);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let authority = (!allow.is_empty() || !deny.is_empty()).then(|| {
+        jet_foundation::Authority::ApplicationAuthority::from_policy(
+            Some(&allow),
+            Some(&deny),
+            "jet repl invocation policy",
+        )
+    });
+    run_native_source_execution(&source, authority.as_ref())
 }
-fn run_native_source_execution(source: &str) -> ! {
+/// Read exactly the framed source without buffering past it, so the rest of
+/// stdin belongs to the program.
+fn read_framed_repl_source() -> std::io::Result<String> {
+    let mut stdin = std::io::stdin().lock();
+    let mut header = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        stdin.read_exact(&mut byte)?;
+        if byte[0] == b'\n' {
+            break;
+        }
+        header.push(byte[0]);
+    }
+    let length: usize = std::str::from_utf8(&header)
+        .ok()
+        .and_then(|text| text.trim().parse().ok())
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "missing source length header")
+        })?;
+    let mut source = vec![0u8; length];
+    stdin.read_exact(&mut source)?;
+    String::from_utf8(source)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+fn run_native_source_execution(
+    source: &str,
+    invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+) -> ! {
     let file_path = std::env::temp_dir().join("__jet_repl_run_stdin.jet");
     let file = file_path.to_string_lossy().into_owned();
     let empty_strings: Vec<String> = Vec::new();
@@ -2796,7 +2839,7 @@ fn run_native_source_execution(source: &str) -> ! {
         no_os: false,
         gates: jet::Policy::GateSet::default(),
         build_grants: &empty_strings,
-        invocation_authority: None,
+        invocation_authority,
         remote_builder: None,
         locked: false,
         target: None,
@@ -2810,8 +2853,8 @@ fn run_native_source_execution(source: &str) -> ! {
         output: None,
         program_args: &empty_args,
         mode: OutputMode {
-            json: false,
-            color: jet::Diagnostics::ColorChoice::Auto,
+            json: true,
+            color: jet::Diagnostics::ColorChoice::Never,
             quiet: false,
         },
         output_profile: None,
