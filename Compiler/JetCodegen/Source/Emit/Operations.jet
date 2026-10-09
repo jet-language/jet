@@ -336,7 +336,7 @@ fn jet_rust_emit_read_trait_value_is_loan(ctx: &JetRustEmitContext, function: MI
     instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return false
     if instruction.operation == {
         .Parameter(index, _) -> jet_rust_emit_find_parameter(function, index).access == MIRAccess.Read
-        .Capture(slot) -> jet_rust_emit_capture_access(function, slot) == MIRAccess.Read
+        .Capture(slot) -> jet_rust_emit_capture_access(function, slot) == MIRAccess.Read && !jet_rust_emit_capture_move_required(&ctx, function, slot)
         .ReadPlace(place) | .AddressOf(place, _) -> jet_rust_emit_read_trait_place_is_loan(&ctx, function, place)
         else -> {
             if !jet_rust_emit_inspected_transfer(&ctx, function, value) -> return false
@@ -1902,7 +1902,7 @@ fn jet_rust_emit_callback_handler(ctx: &JetRustEmitContext, function: MIRFunctio
         }
         name :: jet_rust_emit_capture_name(capture.slot)
         setup = "{setup}let {name} = ({captured}).clone(); "
-        &call_args.push("&{name}")
+        &call_args.push(jet_rust_emit_read_trait_referent(&ctx, capture.ty, "&{name}", false))
         index += 1
     }
     if target_function.params.len() == 0 {
@@ -4339,7 +4339,7 @@ fn jet_rust_emit_drop_value(ctx: &JetRustEmitContext, function: MIRFunction, val
     if jet_rust_emit_find_value_instruction(ctx, function, value) == .Val(producer) {
         if producer.operation == {
             .Parameter(index, _) -> { if jet_rust_emit_find_parameter(function, index).access != MIRAccess.Move -> return "()" }
-            .Capture(slot) -> { if jet_rust_emit_capture_access(function, slot) != MIRAccess.Move -> return "()" }
+            .Capture(slot) -> { if jet_rust_emit_capture_binding_access(&ctx, function, slot) != MIRAccess.Move -> return "()" }
             // Dropping a shared-constant read ends the borrow; it never copies.
             .Global(name) -> { if jet_rust_emit_shared_constant_accessor(&ctx, name) != None -> return "{{ {jet_rust_emit_value_slot(value)}.release(); () }}" }
             else -> {}
@@ -4378,9 +4378,10 @@ fn jet_rust_emit_closure(ctx: &JetRustEmitContext, outer: MIRFunction, target_id
     call_args := [String]{}
     loop (index, operand) in captures {
         capture := target_function.capture_params[index]
+        move_required :: jet_rust_emit_capture_move_required(&ctx, target_function, capture.slot)
         captured :: if operand == {
             .Place(place) -> {
-                if capture.access == {
+                if move_required -> jet_rust_emit_place_move(&ctx, outer, place) else if capture.access == {
                     .Move -> jet_rust_emit_place_move(&ctx, outer, place)
                     // The carrier is a `'static` `Box<dyn FnMut>`: a read capture owns a copy of the place.
                     .Read -> jet_rust_emit_place_read(&ctx, outer, place)
@@ -4388,7 +4389,7 @@ fn jet_rust_emit_closure(ctx: &JetRustEmitContext, outer: MIRFunction, target_id
                 }
             }
             // MIRRust closure: a value operand is moved into an owned cell.
-            .Value(value) -> if capture.access == MIRAccess.Move || capture.ownership.mode == MIROwnershipMode.Owned -> jet_rust_emit_value_move(ctx, value) else -> jet_rust_emit_value_owned(ctx, outer, value)
+            .Value(value) -> if move_required || capture.access == MIRAccess.Move || capture.ownership.mode == MIROwnershipMode.Owned -> jet_rust_emit_value_move(ctx, value) else -> jet_rust_emit_value_owned(ctx, outer, value)
         }
         name :: jet_rust_emit_capture_name(capture.slot)
         value_operand :: if operand == {
@@ -4398,7 +4399,7 @@ fn jet_rust_emit_closure(ctx: &JetRustEmitContext, outer: MIRFunction, target_id
         // MIRRust S47/M2: a written shared-cell local is captured as a handle
         // to the owner's cell and borrowed mutably only for each call.
         shared_slot := String?{None}
-        if capture.access == MIRAccess.Write {
+        if capture.access == MIRAccess.Write && !move_required {
             if operand == .Place(place_id) {
                 loop row in outer.places {
                     if row.id != place_id || row.projections.len() != 0 -> next
@@ -4413,11 +4414,12 @@ fn jet_rust_emit_closure(ctx: &JetRustEmitContext, outer: MIRFunction, target_id
             capture.access == MIRAccess.Write && value_operand -> "{setup}let mut {name} = {captured}; "
             else -> "{setup}let {name} = {captured}; "
         }
-        // MIRRust: a Read capture is always passed by shared borrow; a Write
-        // place capture already is the unique borrow.
+        // A genuine checked Move capture transfers the environment cell;
+        // other Read captures lend it only for this invocation.
         call_arg :: if {
+            move_required -> name
             shared_slot != None -> "{name}.borrow_mut().as_mut().expect(\"MIR local\")"
-            capture.access == MIRAccess.Read -> "&{name}"
+            capture.access == MIRAccess.Read -> jet_rust_emit_read_trait_referent(&ctx, capture.ty, "&{name}", false)
             capture.access == MIRAccess.Write && value_operand -> "&mut {name}"
             else -> name
         }
@@ -5310,7 +5312,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
             if jet_rust_emit_window_param(ctx, function.id, index) -> return "(*{jet_rust_emit_parameter_name(function, index)}).to_vec()"
             return jet_rust_emit_parameter_expression(function, index, jet_rust_emit_find_parameter(function, index).access)
         }
-        .Capture(slot) -> return jet_rust_emit_capture_expression(function, slot)
+        .Capture(slot) -> return jet_rust_emit_capture_expression(&ctx, function, slot)
         .Global(name) -> return jet_rust_emit_global_symbol(&ctx, name)
         .Phi(incoming) -> {
             if jet_rust_emit_phi_is_trivial(incoming) -> return jet_rust_emit_value_transfer(ctx, function, incoming[0].value)

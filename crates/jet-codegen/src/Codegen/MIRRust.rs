@@ -11477,7 +11477,7 @@ impl<'a> RustEmitter<'a> {
                 };
                 let name = self.capture_param_name(capture.slot);
                 let _ = writeln!(setup, "let {name} = ({captured}).clone();");
-                let call_arg = format!("&{name}");
+                let call_arg = self.read_trait_referent(&capture.ty, format!("&{name}"), false);
                 call_args.push(call_arg);
             }
             let event_param = target
@@ -17611,7 +17611,7 @@ impl<'a> RustEmitter<'a> {
         match self.value_definition(function, value)? {
             MirOperation::Capture { slot } => Some((
                 MirPlaceBase::Capture(value),
-                self.capture_param(function, *slot).access,
+                self.capture_binding_access(function, *slot),
             )),
             MirOperation::Parameter { index, .. } => {
                 let param = function.params.iter().find(|param| param.index == *index)?;
@@ -19786,7 +19786,7 @@ impl<'a> RustEmitter<'a> {
         let access = match self.value_definition(function, value) {
             Some(MirOperation::Parameter { index, .. }) => function.params.iter()
                 .find(|parameter| parameter.index == *index).expect("checked MIR parameter").access,
-            Some(MirOperation::Capture { slot }) => self.capture_param(function, *slot).access,
+            Some(MirOperation::Capture { slot }) => self.capture_binding_access(function, *slot),
             _ => return false,
         };
         access == MirAccess::Move && !self.is_scalar(self.value_type(function, value))
@@ -21227,10 +21227,17 @@ impl<'a> RustEmitter<'a> {
             .is_some_and(|value| index.moved_captures.contains(value))
     }
 
+    fn capture_binding_access(&self, function: &MirFunction, slot: usize) -> MirAccess {
+        if self.capture_move_required(function, slot) {
+            MirAccess::Move
+        } else {
+            self.capture_param(function, slot).access
+        }
+    }
+
     fn capture_expression(&self, function: &MirFunction, slot: usize) -> String {
-        let capture = self.capture_param(function, slot);
         let name = self.capture_param_name(slot);
-        match capture.access {
+        match self.capture_binding_access(function, slot) {
             MirAccess::Read | MirAccess::Write => format!("(*{name}).clone()"),
             MirAccess::Move => name,
         }
@@ -28197,7 +28204,9 @@ impl<'a> RustEmitter<'a> {
                     } else {
                         slot.clone()
                     };
-                    (initial, format!("&({value})"), format!("&({value})"))
+                    let reference = format!("&({value})");
+                    let argument = self.read_trait_referent(&capture.ty, reference.clone(), false);
+                    (initial, reference, argument)
                 }
                 MirAccess::Write if self.shared_capture_local(outer, operand).is_some() => {
                     // S47/M2: the environment shares the owner's cell and
@@ -28371,7 +28380,7 @@ impl<'a> RustEmitter<'a> {
                 name
             } else {
                 match (capture.access, operand) {
-                    (MirAccess::Read, _) => format!("&{name}"),
+                    (MirAccess::Read, _) => self.read_trait_referent(&capture.ty, format!("&{name}"), false),
                     (MirAccess::Write, MirCaptureOperand::Value(_)) => format!("&mut {name}"),
                     (MirAccess::Write, MirCaptureOperand::Place(_))
                         if self.shared_capture_local(outer, operand).is_some() =>
@@ -32331,7 +32340,7 @@ impl<'a> RustEmitter<'a> {
                     let capture = self.capture_param(function, *slot);
                     Some((
                         self.capture_param_name(*slot),
-                        capture.access,
+                        self.capture_binding_access(function, *slot),
                         self.is_scalar(&capture.ty),
                         true,
                     ))

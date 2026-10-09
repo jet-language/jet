@@ -39,12 +39,12 @@ fn jet_rust_emit_function_param_type(ctx: &JetRustEmitContext, function: MIRFunc
     jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
 }
 
-// MIRRust capture_parameter_type: a Read capture is always a shared borrow
-// (whatever its scalar ABI), a Write capture a unique borrow, a Move capture
-// the owned `mut` binding.
-fn jet_rust_emit_capture_param(ctx: &JetRustEmitContext, capture: MIRCaptureParam) -> String Never! {
+// Capture binding ABI is owned when an actual checked Move place consumes it;
+// otherwise Read lends the captured value and Write lends it uniquely.
+fn jet_rust_emit_capture_param(ctx: &JetRustEmitContext, function: MIRFunction, capture: MIRCaptureParam) -> String Never! {
     rendered :: jet_rust_emit_type(&ctx, capture.ty)
     name :: jet_rust_emit_capture_name(capture.slot)
+    if jet_rust_emit_capture_move_required(&ctx, function, capture.slot) -> return "{name}: {rendered}"
     if capture.access == MIRAccess.Read {
         if jet_rust_emit_read_trait_type(&ctx, capture.ty) == .Val(borrowed) -> return "{name}: &{borrowed}"
     }
@@ -1112,7 +1112,7 @@ fn jet_rust_emit_function_signature(ctx: &JetRustEmitContext, function: MIRFunct
     params := [String]{}
     types := [String]{}
     loop capture in function.capture_params {
-        rendered :: jet_rust_emit_capture_param(&ctx, capture)
+        rendered :: jet_rust_emit_capture_param(&ctx, function, capture)
         &params.push(rendered)
         &types.push(rendered)
     }
