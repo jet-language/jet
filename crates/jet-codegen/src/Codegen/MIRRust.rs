@@ -491,6 +491,9 @@ pub struct MirRustExecutionConfig<'a> {
     /// D-DX-PROD1: one typed release policy controls every emitted DevTools
     /// producer.  The code generator never reconstructs a parallel bool.
     pub release_devtools_policy: jet_pkg_model::Package::ReleaseDevtoolsPolicy,
+    /// Stage zero: skip derived serde impls no emitted body demands
+    /// (`demanded_codec_impls`).
+    pub prune_unreachable_codecs: bool,
 }
 
 impl<'a> MirRustExecutionConfig<'a> {
@@ -505,6 +508,7 @@ impl<'a> MirRustExecutionConfig<'a> {
             emit_debug_linemap: false,
             emit_runtime: true,
             release_devtools_policy: jet_pkg_model::Package::ReleaseDevtoolsPolicy::development(),
+            prune_unreachable_codecs: false,
         }
     }
 }
@@ -3941,6 +3945,10 @@ struct RustEmitter<'a> {
     user_impls_by_trait: BTreeMap<&'a str, Vec<&'a MirImplDef>>,
     traits: BTreeMap<MirTraitId, String>,
     traits_by_name: BTreeMap<String, String>,
+    /// Symbols of the declared traits used as single-bound trait objects
+    /// (`Box<dyn T>`). Each gets a clone-box supertrait so the boxed value is
+    /// `Clone` and does not block the derives of the rows that carry it.
+    dyn_clone_traits: BTreeSet<String>,
     fields: BTreeMap<MirFieldId, String>,
     history_capture_encoders: std::cell::RefCell<BTreeMap<String, String>>,
     history_callable_arities: std::cell::RefCell<BTreeSet<usize>>,
@@ -4111,6 +4119,7 @@ impl<'a> RustEmitter<'a> {
         }
         let mut traits = BTreeMap::new();
         let mut traits_by_name = BTreeMap::new();
+        let mut user_traits_by_name = BTreeMap::new();
         for definition in &program.traits {
             let compiler_owned =
                 crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&definition.name);
@@ -4122,6 +4131,14 @@ impl<'a> RustEmitter<'a> {
             traits.insert(definition.id, symbol.clone());
             traits_by_name.insert(definition.key.clone(), symbol.clone());
             traits_by_name.insert(definition.name.clone(), symbol);
+        }
+        let mut dyn_clone_traits = BTreeSet::new();
+        for ty in &program.type_instances {
+            mir_type_single_trait_objects(ty, &mut |name: &str| {
+                if let Some(symbol) = user_traits_by_name.get(name) {
+                    dyn_clone_traits.insert(symbol.clone());
+                }
+            });
         }
         let mut emitter = Self {
             program,
@@ -4145,6 +4162,7 @@ impl<'a> RustEmitter<'a> {
             user_impls_by_trait,
             traits,
             traits_by_name,
+            dyn_clone_traits,
             fields,
             history_capture_encoders: std::cell::RefCell::new(BTreeMap::new()),
             history_callable_arities: std::cell::RefCell::new(BTreeSet::new()),
@@ -27801,6 +27819,17 @@ impl<'a> RustEmitter<'a> {
                         self.host_borrow_callback_value(function, value_id, false, false)
                     {
                         return callback;
+                    }
+                    // `jet_shared_read<F: FnOnce(&T) -> R>` calls a host
+                    // closure, not the Rc callable carrier.
+                    if index == 1
+                        && route.symbol.name() == "jet_shared_read"
+                        && matches!(
+                            self.value_type(function, value_id).kind(),
+                            MirTypeKind::Fn(_)
+                        )
+                    {
+                        return self.host_callback_with_inputs(function, value_id, &[true]);
                     }
                     if index > 0 && route.symbol.name() == "jet_http_shutdown_report_field" {
                         let value = self.value_move(value_id);

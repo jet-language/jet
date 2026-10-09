@@ -4271,6 +4271,16 @@ fn jet_rust_emit_static_path(ctx: &JetRustEmitContext, name: String) -> String N
     "{ctx.config.root_prefix}{jet_rust_emit_generated_path(name)}"
 }
 
+// The persistent cell a static place names: the storage constant whose key the
+// checked persistent local carries.
+fn jet_rust_emit_static_path(ctx: &JetRustEmitContext, name: String) -> String Never! {
+    loop constant in ctx.program.constants {
+        if constant.key == name && constant.is_storage -> return "{ctx.config.root_prefix}{jet_rust_emit_symbol("__jet_const_", constant.name, constant.id.value)}"
+    }
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR static place has no storage constant", "persistent places name exactly one checked storage constant", None)
+    "{ctx.config.root_prefix}{jet_rust_emit_sanitize(name)}"
+}
+
 fn jet_rust_emit_scope_fact(scope: MIRScope, key: String) -> String? {
     loop fact in scope.facts { if fact.key == key -> return Val(fact.value) }
     None

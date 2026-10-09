@@ -1194,6 +1194,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         symbol :: if jet_rust_emit_compiler_owned_trait(trait_row.name) -> jet_rust_emit_compiler_trait_symbol(trait_row.name) else -> jet_rust_emit_generated_path(trait_row.key)
         &ctx.trait_names.add(key, symbol).drop("the prior lookup proved this trait key is new")
     }
+    loop instance in ctx.program.type_instances -> jet_rust_emit_collect_dyn_clone_traits(&ctx, instance)
     loop foreign in ctx.program.foreign {
         key :: foreign.id.value
         if ctx.foreign_names.get(key) != None {

@@ -664,6 +664,31 @@ fn mir_pass_name(pass: MIROptimizationPassID) -> String Never! {
     }
 }
 
+// Legality after `pass`, then MIR Lint when every pass is linted.
+fn mir_pass_check(program: MIRProgram, pass: MIROptimizationPassID, lint: Bool) -> MIROptimizationError? {
+    validation :: mir_pass_validate_program(program, pass)
+    if validation != None || !lint -> return validation
+    mir_pass_lint(program, pass)
+}
+
+// MIR Lint over the program `pass` produced; a failure names the pass and rule.
+fn mir_pass_lint(program: MIRProgram, pass: MIROptimizationPassID) -> MIROptimizationError? {
+    failure :: mir_lint_program(program) ?? return None
+    Val(mir_pass_error(pass, .Lint, Val(failure.function), failure.span, "MIR lint failed after pass {mir_pass_name(pass)}: {mir_lint_error_text(failure)}"))
+}
+
+fn mir_pass_name(pass: MIROptimizationPassID) -> String Never! {
+    if pass == {
+        .LegalityVerification -> "legality-verification"
+        .UnreachableBlockElimination -> "unreachable-block-elimination"
+        .CFGSimplification -> "cfg-simplification"
+        .ExactConstantFolding -> "exact-constant-folding"
+        .BoundsCheckElimination -> "bounds-check-elimination"
+        .DeadPureValueElimination -> "dead-pure-value-elimination"
+        .CanonicalLoopFacts -> "canonical-loop-facts"
+    }
+}
+
 // Only a program whose every function carries the complete pass order and a
 // seal can skip the pipeline, so the program is digested only then.
 fn mir_optimizer_has_complete_seal(program: MIRProgram) -> Bool {

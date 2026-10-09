@@ -1894,6 +1894,14 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, program: JetCodeg
         access: MIRAccess.Write,
         persist_key: None,
     })
+    // The flag reads false on every path that never reached the binding: an
+    // exit's drop chain releases every local its frame registers, including
+    // ones bound after that exit. Entry-block writes dominate every path.
+    resume_block := builder.current
+    builder.current = builder.entry
+    cleared := jet_codegen_emit_value(&builder, owner_span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: false}})
+    _ := jet_codegen_emit(&builder, owner_span, None, MIROperation.WritePlace{place: live_place, value: cleared})
+    builder.current = resume_block
     record := JetCodegenDropLive{
         place: place,
         live: live_place,
