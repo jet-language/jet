@@ -1291,6 +1291,17 @@ fn verify_function(
                 span: capture.span,
             });
         }
+        if capture.place_only
+            && !matches!((capture.access, capture.ownership.mode),
+                (MirAccess::Read, MirOwnershipMode::ReadBorrow)
+                | (MirAccess::Write, MirOwnershipMode::WriteBorrow))
+        {
+            return Err(MirLegalityError::InvalidReference {
+                function: function.id,
+                subject: "place-only capture must lend a borrowed address".to_string(),
+                span: capture.span,
+            });
+        }
         verify_type(&capture.ty, capture.span, function.id)?;
         verify_ownership(
             capture.ownership,
@@ -3014,16 +3025,7 @@ fn verify_semantic_operation(
         MirSemanticOp::MathBuiltin { type_id, .. } | MirSemanticOp::PreciseBuiltin { type_id, .. } => {
             check_type(*type_id)?;
         }
-        MirSemanticOp::StructLiteral {
-            type_id,
-            trait_coercion,
-            ..
-        } => {
-            check_type(*type_id)?;
-            if let Some(trait_coercion) = trait_coercion {
-                check_type(*trait_coercion)?;
-            }
-        }
+        MirSemanticOp::StructLiteral { type_id, .. } => check_type(*type_id)?,
         MirSemanticOp::ColumnarRead {
             accessor,
             column_index,
@@ -6591,7 +6593,6 @@ fn inline_semantic(
             type_id,
             fields,
             extra,
-            trait_coercion,
             boxed_fields,
         } => MirSemanticOp::StructLiteral {
             type_id: *type_id,
@@ -6600,7 +6601,6 @@ fn inline_semantic(
                 .map(|(field, value)| (*field, inline_value(ids, *value)))
                 .collect(),
             extra: extra.clone(),
-            trait_coercion: *trait_coercion,
             boxed_fields: boxed_fields.clone(),
         },
         MirSemanticOp::ReflectOf {
@@ -14740,7 +14740,6 @@ fn encode_semantic_operation(writer: &mut CanonicalWriter, operation: &MirSemant
             type_id,
             fields,
             extra,
-            trait_coercion,
             boxed_fields,
         } => {
             writer.tag("struct-literal");
@@ -14751,7 +14750,6 @@ fn encode_semantic_operation(writer: &mut CanonicalWriter, operation: &MirSemant
                 writer.u64(value.0);
             }
             encode_struct_extra(writer, *extra);
-            writer.option_u64(trait_coercion.map(|ty| ty.0));
             writer.len(boxed_fields.len());
             for field in boxed_fields {
                 writer.u64(field.0);
@@ -15313,6 +15311,7 @@ fn encode_capture_param(
     writer.mir_type(&param.ty);
     writer.debug(&param.access);
     writer.debug(&param.ownership);
+    writer.bool(param.place_only);
 }
 
 fn encode_foreign(writer: &mut CanonicalWriter, foreign: &MirForeign) {

@@ -10257,6 +10257,7 @@ impl<'a> LowerCtx<'a> {
                 ty: mir_ty.clone(),
                 access,
                 ownership,
+                place_only: false,
             });
             let names: &[&str] = if runtime == source {
                 &[source.as_str()]
@@ -11736,6 +11737,7 @@ impl<'a> LowerCtx<'a> {
             TExprKind::Clone(..)
             | TExprKind::ExplicitCopy(_)
             | TExprKind::MaterializeView(_)
+            | TExprKind::TraitBox { .. }
             | TExprKind::Move(_)
             | TExprKind::ResourceTake(_) => (MirAccess::Move, None),
             _ if crate::Collections::is_iter_type(&arg.ty) => (MirAccess::Move, None),

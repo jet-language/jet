@@ -2321,7 +2321,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MIRFunction
             return "{{ type: {jet_web_js_quote(type_name)}, path: {jet_web_js_quote(path)}, display: {jet_web_js_value(display)}, fields: {{ {rendered.join(", ")} }} }}"
         }
         .LayoutLiteral(inner) -> return jet_web_js_value(inner)
-        .StructLiteral(type_id, fields, _, _, _) -> return jet_web_js_field_object(&ctx, type_id, fields, false)
+        .StructLiteral(type_id, fields, _, _) -> return jet_web_js_field_object(&ctx, type_id, fields, false)
         .CellGuardProject(map_call, split_call, guard, paths, editable, disjoint) -> return jet_web_js_cell_guard_project(&ctx, result_ty, map_call, split_call, jet_web_js_value(guard), paths, editable, disjoint)
         .SharedGuardMap(call, guard, path, editable) -> {
             if path.len() == 0 {

@@ -1037,7 +1037,7 @@ fn mir_digest_semantic_operation(writer: &MIRCanonicalWriter, value: MIRSemantic
             mir_digest_tag(&writer, "layout-literal")
             mir_digest_u64(&writer, inner.value)
         }
-        .StructLiteral(type_id, fields, extra, trait_coercion, boxed_fields) -> {
+        .StructLiteral(type_id, fields, extra, boxed_fields) -> {
             mir_digest_tag(&writer, "struct-literal")
             mir_digest_u64(&writer, type_id.value)
             mir_digest_len(&writer, fields.len())
@@ -1046,7 +1046,6 @@ fn mir_digest_semantic_operation(writer: &MIRCanonicalWriter, value: MIRSemantic
                 mir_digest_u64(&writer, field.value.value)
             }
             mir_digest_struct_extra(&writer, extra)
-            mir_digest_option_u64(&writer, trait_coercion.map(row -> row.value))
             mir_digest_len(&writer, boxed_fields.len())
             loop field in boxed_fields -> mir_digest_u64(&writer, field.value)
         }
@@ -2358,6 +2357,7 @@ fn mir_digest_capture_param(writer: &MIRCanonicalWriter, value: MIRCaptureParam)
     mir_digest_type(&writer, value.ty)
     mir_digest_string(&writer, mir_digest_access_debug(value.access))
     mir_digest_string(&writer, mir_digest_ownership_debug(value.ownership))
+    mir_digest_bool(&writer, value.place_only)
 }
 
 fn mir_digest_cli_value_kind(value: MIRCLIValueKind) -> Int Never! {

@@ -525,7 +525,7 @@ fn lower_subst_semantic(operation: MIRSemanticOp, bindings: LowerBindings, ids: 
     if operation == {
         .MathBuiltin(type_id, call, args) -> MIRSemanticOp.MathBuiltin{type_id: lower_subst_type_id(type_id, bindings, ids), call: call, args: args}
         .PreciseBuiltin(type_id, call, args) -> MIRSemanticOp.PreciseBuiltin{type_id: lower_subst_type_id(type_id, bindings, ids), call: call, args: args}
-        .StructLiteral(type_id, fields, extra, trait_coercion, boxed_fields) -> MIRSemanticOp.StructLiteral{type_id: type_id, fields: fields, extra: extra, trait_coercion: lower_subst_optional_id(trait_coercion, bindings, ids), boxed_fields: boxed_fields}
+        .StructLiteral(type_id, fields, extra, boxed_fields) -> MIRSemanticOp.StructLiteral{type_id: type_id, fields: fields, extra: extra, boxed_fields: boxed_fields}
         .StaticPreludeCall(call, args, owner_type_args, type_args) -> {
             owners :: loop arg in owner_type_args -> if arg == {
                 .Type(ty) -> MIRPreludeTypeArg.Type{ty: lower_subst_type(ty, bindings)}

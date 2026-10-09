@@ -866,6 +866,7 @@ fn canonicalize_expr(expr: &mut TExpr) {
         | TExprKind::Clone(operand, _)
         | TExprKind::ExplicitCopy(operand)
         | TExprKind::MaterializeView(operand)
+        | TExprKind::TraitBox { value: operand, .. }
         | TExprKind::DistinctRaw(operand)
         | TExprKind::Present(operand)
         | TExprKind::Ok(operand)

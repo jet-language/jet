@@ -1089,7 +1089,6 @@ pub(super) fn lower_receiver_place(
                                 ),
                             ],
                             extra: None,
-                            as_trait: None,
                         },
                     };
                     ctx.lower_child(&range)?
@@ -2034,23 +2033,17 @@ pub(super) fn lower_expr(
                 },
             )
         }
-        TExprKind::StructLit {
-            fields,
-            extra,
-            as_trait,
-        } => {
-            let owner_ty = match as_trait {
-                Some((_, concrete)) => Type::Named(concrete.clone()),
-                None => expr.ty.clone(),
-            };
-            let owner = match as_trait {
-                Some((_, concrete)) => ctx.type_id_for(concrete)?,
-                None => ctx.field_owner_id_for_type(&expr.ty)?,
-            };
+        TExprKind::TraitBox { value, target } => {
+            let lowered = ctx.lower_child(value)?;
+            ctx.trait_box_value(lowered, &value.ty, target)
+        }
+        TExprKind::StructLit { fields, extra } => {
+            let owner_ty = &expr.ty;
+            let owner = ctx.field_owner_id_for_type(owner_ty)?;
             let lowered_fields = fields
                 .iter()
                 .map(|(name, value, _)| {
-                    let expected = ctx.checked_field_type(&owner_ty, name)?;
+                    let expected = ctx.checked_field_type(owner_ty, name)?;
                     // A bare `None` has no payload to infer from; its option
                     // type is exactly the checked field it initializes.
                     let (source, lowered) = if matches!(value.kind, TExprKind::Absent)
@@ -2073,10 +2066,6 @@ pub(super) fn lower_expr(
             let extra = extra.as_ref().map(|extra| match extra {
                 super::TStructExtra::HTTPRequestParams => MirStructExtra::HttpRequestParams,
             });
-            let trait_coercion = as_trait
-                .as_ref()
-                .map(|(trait_name, _)| ctx.type_id_for(trait_name))
-                .transpose()?;
             let boxed_fields = fields
                 .iter()
                 .filter(|(_, _, boxed)| *boxed)
@@ -2089,7 +2078,6 @@ pub(super) fn lower_expr(
                     type_id: owner,
                     fields: lowered_fields,
                     extra,
-                    trait_coercion,
                     boxed_fields,
                 }),
             )

@@ -29920,17 +29920,9 @@ impl<'a> RustEmitter<'a> {
                 type_id,
                 fields,
                 boxed_fields,
-                trait_coercion,
                 ..
             } => {
-                let value = self.rust_struct_literal(*type_id, fields, boxed_fields, true);
-                match trait_coercion {
-                    Some(trait_id) => {
-                        let trait_object = self.trait_object_type(*trait_id);
-                        format!("Box::new({value}) as {}", self.rust_type(trait_object))
-                    }
-                    None => value,
-                }
+                self.rust_struct_literal(*type_id, fields, boxed_fields, true)
             }
             MirSemanticOp::ReflectOf {
                 type_name,

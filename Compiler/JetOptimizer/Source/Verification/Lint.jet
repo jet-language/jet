@@ -1209,7 +1209,7 @@ fn mir_lint_semantic(ctx: MIRLintContext, instruction: MIRInstruction, semantic:
             value :: condition ?? return None
             mir_lint_expect_value_class(ctx, rule, "condition", value, mir_lint_bool())
         }
-        .StructLiteral(type_id, fields, extra, _, boxed_fields) -> mir_lint_struct_fields(ctx, type_id, fields, boxed_fields, extra == None)
+        .StructLiteral(type_id, fields, extra, boxed_fields) -> mir_lint_struct_fields(ctx, type_id, fields, boxed_fields, extra == None)
         .ColumnarRead(_, index, column, _, _) -> {
             problem :: mir_lint_expect_value_class(ctx, rule, "row index", index, mir_lint_integer())
             if problem != None -> return problem

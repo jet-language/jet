@@ -60,7 +60,7 @@ fn fx_reach() -> MIRProgram Never! {
     _ := fx_copy(&c, fx_int(), MIROperation.Capture{slot: 0})
     fx_block(&c, 0, MIRTerminator.Return{value: None})
     captured := fx_function("unused_capture", c, fx_unit())
-    captured.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "x", span: fx_span(), ty: fx_int(), access: MIRAccess.Read, ownership: mir_copy_ownership()}}
+    captured.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "x", span: fx_span(), ty: fx_int(), access: MIRAccess.Read, ownership: mir_copy_ownership(), place_only: false}}
 
     r := fx_builder()
     _ := fx_copy(&r, fx_unit(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("used")}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
@@ -149,7 +149,7 @@ fn fx_reach_metadata_checks() -> Bool Never! {
     fx_do(&r, MIROperation.Call{callee: MIRCallee.TraitMethod{method: method_id, trait_ref: trait_ref, receiver: receiver}, args: [], type_args: []})
     fx_block(&r, 0, MIRTerminator.Return{value: None})
     root := fx_function("run", r, fx_unit())
-    root.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "handle", span: fx_span(), ty: fx_string(), access: MIRAccess.Move, ownership: mir_owned_ownership()}}
+    root.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "handle", span: fx_span(), ty: fx_string(), access: MIRAccess.Move, ownership: mir_owned_ownership(), place_only: false}}
     root.drops = [MIRDropAction]{MIRDropAction{place: place, edge: .Return, span: fx_span()}}
     implemented := fx_reach_empty("implementation")
     implemented.name = "show"

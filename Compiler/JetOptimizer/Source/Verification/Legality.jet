@@ -184,14 +184,15 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
 
     // Every identity set and definition row is keyed, so each check is a
     // map probe instead of a scan of the rows seen so far.
-    seen_blocks := [U64:Bool]{}
+    seen_blocks := [U64:Int]{}
     seen_operations := [U64:Bool]{}
     definition_rows := [U64:MIRPassDefinition]{}
     result_types := [U64:MIRType]{}
+    block_index := 0
     loop block in function.blocks {
         if block.id.value == 0 -> return Val(mir_pass_error(pass, .InvalidCFG, Val(function.id), block.span, "MIR block has a zero stable identity"))
         if seen_blocks.get(block.id.value) != None -> return Val(mir_pass_error(pass, .InvalidCFG, Val(function.id), block.span, "MIR block identity is duplicated"))
-        &seen_blocks.add(block.id.value, true).drop("checked absent above")
+        &seen_blocks.add(block.id.value, block_index).drop("checked absent above")
         if block.span.start > block.span.end -> return Val(mir_pass_error(pass, .InvalidCFG, Val(function.id), block.span, "MIR block span is inverted"))
         index := 0
         loop instruction in block.instructions {
@@ -212,6 +213,7 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
 
             index += 1
         }
+        block_index += 1
     }
     definitions :: MIRPassDefinitions{values: definition_rows, places: mir_pass_place_rows(function), metadata: mir_pass_value_rows(function)}
 
@@ -243,6 +245,7 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
             }
             loop value in mir_operation_value_uses(instruction.operation) {
                 if !mir_pass_definition_exists(definitions, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), instruction.span, "MIR operation reads an undefined SSA value"))
+                if mir_pass_value_is_place_only_capture(function, definitions, seen_blocks, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), instruction.span, "place-only Capture result is used as an SSA value"))
             }
             loop place in mir_pass_operation_place_refs(instruction.operation) {
                 loop value in mir_pass_place_value_uses(function.places, definitions.places, place) {
@@ -261,16 +264,22 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
         }
         loop value in mir_terminator_value_uses(block.terminator) {
             if !mir_pass_definition_exists(definitions, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), block.span, "MIR terminator reads an undefined SSA value"))
+            if mir_pass_value_is_place_only_capture(function, definitions, seen_blocks, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), block.span, "place-only Capture result is used by a terminator"))
         }
     }
     loop place in function.places {
+        position := 0
         loop value in mir_pass_place_value_uses(function.places, definitions.places, place.id) {
             if !mir_pass_definition_exists(definitions, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), place.span, "MIR place base or projection reads an undefined SSA value"))
+            address_anchor :: position == 0 && (if place.base == .Capture(_) -> true else -> false)
+            if !address_anchor && mir_pass_value_is_place_only_capture(function, definitions, seen_blocks, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), place.span, "place-only Capture result is used by a place base or projection"))
+            position += 1
         }
     }
     loop scope in function.scopes {
         if scope.deadline == .Val(value) {
             if !mir_pass_definition_exists(definitions, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), scope.span, "MIR scope deadline reads an undefined SSA value"))
+            if mir_pass_value_is_place_only_capture(function, definitions, seen_blocks, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), scope.span, "place-only Capture result is used as a scope deadline"))
         }
     }
 
@@ -326,6 +335,17 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
         return Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, message))
     }
     None
+}
+
+// Reuse the original definition/block indexes for the typed Capture fact.
+fn mir_pass_value_is_place_only_capture(function: MIRFunction, definitions: MIRPassDefinitions, blocks: [U64:Int], value: MIRValueID) -> Bool Never! {
+    definition :: mir_pass_find_definition(definitions, value) ?? return false
+    block :: blocks.get(definition.block.value) ?? return false
+    instruction :: function.blocks[block].instructions[definition.index]
+    if instruction.operation == .Capture(slot) {
+        if slot >= 0 && slot < function.capture_params.len() -> return function.capture_params[slot].place_only
+    }
+    false
 }
 
 // Stop points (unified host/stop contract, #4720). A Propagate poll directly
@@ -463,6 +483,7 @@ fn mir_pass_validate_function_legality(
         if capture.slot != capture_slot || capture.name == "" -> return Val("capture slot or name is not canonical")
         if !mir_pass_type_valid(capture.ty) -> return Val("capture type has invalid MIR layout")
         if !mir_pass_ownership_valid(capture.ownership) -> return Val("capture ownership/drop metadata is inconsistent")
+        if capture.place_only && !((capture.access == MIRAccess.Read && capture.ownership.mode == MIROwnershipMode.ReadBorrow) || (capture.access == MIRAccess.Write && capture.ownership.mode == MIROwnershipMode.WriteBorrow)) -> return Val("place-only capture must lend a borrowed address")
         capture_slot += 1
     }
     loop value in function.values {
@@ -801,7 +822,7 @@ fn mir_pass_operation_place_refs(operation: MIROperation) -> [MIRPlaceID] Never!
 fn mir_pass_semantic_field_uses(operation: MIRSemanticOp) -> [MIRFieldID] Never! {
     fields := [MIRFieldID]{}
     if operation == {
-        .StructLiteral(_, values, _, _, boxed) -> {
+        .StructLiteral(_, values, _, boxed) -> {
             loop value in values -> &fields.push(value.field)
             loop field in boxed -> &fields.push(field)
         }

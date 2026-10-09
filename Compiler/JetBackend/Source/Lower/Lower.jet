@@ -2007,7 +2007,7 @@ fn lower_stored_operands(operation: MIROperation) -> [MIRValueID] Never! {
         .Present(value) | .ResultOk(value) | .ResultErr(value) | .TraitBox(value, _) -> &stored.push(value)
         // A record literal moves its field values into the struct like `Struct`.
         .Semantic(semantic) -> {
-            if semantic == .StructLiteral(_, fields, _, _, _) {
+            if semantic == .StructLiteral(_, fields, _, _) {
                 loop field in fields -> &stored.push(field.value)
             }
         }
@@ -2773,7 +2773,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         return lower_alias_absent(&f, instruction)
     }
     if semantic == .DataEntriesToMap(_, local) -> return lower_data_entries_to_map(p, c, &m, &f, instruction, local)
-    if semantic == .StructLiteral(type_id, fields, extra, trait_coercion, boxed_fields) -> return lower_struct_literal(p, c, &m, &f, instruction, type_id, fields, extra, trait_coercion, boxed_fields)
+    if semantic == .StructLiteral(type_id, fields, extra, boxed_fields) -> return lower_struct_literal(p, c, &m, &f, instruction, type_id, fields, extra, boxed_fields)
     if semantic == .RequireStop(call, kind, condition, location, context, values, always_stops) -> return lower_require_stop(p, c, &m, &f, instruction, call, kind, condition, location, context, values, always_stops)
     if semantic == .NumericMethod(call, receiver) -> return lower_numeric_method(p, c, &m, &f, instruction, call, receiver)
     if semantic == .NumericBinaryMethod(call, receiver, argument) -> return lower_numeric_euclid(p, c, &m, &f, instruction, call, receiver, argument)
@@ -2862,7 +2862,7 @@ fn lower_semantic_name(p: MIRProgram, semantic: MIRSemanticOp) -> String Never! 
         .LayoutCompare(_, _, _, _) -> "LayoutCompare"
         .ReflectOf(_, _, _, _) -> "ReflectOf"
         .LayoutLiteral(_) -> "LayoutLiteral"
-        .StructLiteral(_, _, _, _, _) -> "StructLiteral"
+        .StructLiteral(_, _, _, _) -> "StructLiteral"
         .CellGuardProject(_, _, _, _, _, _) -> "CellGuardProject"
         .SharedGuardMap(_, _, _, _) -> "SharedGuardMap"
         .SharedGuardSplit(_, _, _, _, _, _) -> "SharedGuardSplit"

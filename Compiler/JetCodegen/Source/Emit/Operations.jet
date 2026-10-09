@@ -5511,10 +5511,8 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                     }
                     return emitted
                 }
-                .StructLiteral(type_id, fields, _, trait_coercion, boxed_fields) -> {
-                    value :: jet_rust_emit_struct_literal(&ctx, type_id, fields, boxed_fields)
-                    if trait_coercion == .Val(trait_id) -> return "Box::new({value}) as {jet_rust_emit_trait_object_type(&ctx, trait_id)}"
-                    return value
+                .StructLiteral(type_id, fields, _, boxed_fields) -> {
+                    return jet_rust_emit_struct_literal(&ctx, type_id, fields, boxed_fields)
                 }
                 .ReflectOf(type_name, path, display, fields) -> {
                     rendered := [String]{}

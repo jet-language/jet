@@ -10,8 +10,7 @@ use jet_foundation.[
     MIRTypeID,
 ]
 
-fn lower_struct_literal(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, type_id: MIRTypeID, fields: [MIRFieldValue], extra: MIRStructExtra?, trait_coercion: MIRTypeID?, boxed_fields: [MIRFieldID]) Never! {
-    if trait_coercion != None -> return lower_fail(&m, &f, "StructLiteral trait coercion is not lowered at O0 yet")
+fn lower_struct_literal(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, type_id: MIRTypeID, fields: [MIRFieldValue], extra: MIRStructExtra?, boxed_fields: [MIRFieldID]) Never! {
     // MIRStructExtra has only HTTPRequestParams, not a spread/base value.
     // MIRRust.rs:semantic (26836) ignores that host-only marker;
     // O0 cannot supply its native HTTP request fields and must not omit them.

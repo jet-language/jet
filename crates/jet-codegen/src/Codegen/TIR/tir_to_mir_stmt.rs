@@ -952,7 +952,6 @@ fn lower_split_view(
                     ),
                 ],
                 extra: None,
-                as_trait: None,
             },
         };
         let view = TExpr {

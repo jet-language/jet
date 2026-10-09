@@ -9491,6 +9491,7 @@ fn collect_cost_expr_with_state_and_context(
         | TExprKind::RawOf(arg)
         | TExprKind::Clone(arg, _)
         | TExprKind::ExplicitCopy(arg)
+        | TExprKind::TraitBox { value: arg, .. }
         | TExprKind::MaterializeView(arg) => {
             collect_cost_expr(arg, function, expr_span, loop_depth, sites);
         }
@@ -12037,6 +12038,12 @@ pub enum TExprKind {
         op: UnOp,
         operand: Box<TExpr>,
     },
+    /// One checked owned concrete-to-trait coercion. The child retains its
+    /// original nominal identity and generic arguments until MIR lowering.
+    TraitBox {
+        value: Box<TExpr>,
+        target: Type,
+    },
     /// c109 Phase 3: a struct literal `S { f: v, … }`. The head type is `TExpr.ty`;
     /// each field carries its Jet name (emit mangles) and value. No clone/coercion
     /// at the literal site (mirrors the AST path).
@@ -12046,8 +12053,6 @@ pub enum TExprKind {
         /// c109 Phase 17: injected prelude fields (HTTPRequest route metadata).
         /// Structured — emit spells the Rust field lines.
         extra: Option<TStructExtra>,
-        /// c109 Phase 30: TRAIT-OBJECT coercion — `(trait, concrete owner)`.
-        as_trait: Option<(String, String)>,
     },
     /// c109 Phase 3: a struct field *read* `recv.field` in borrow position.
     /// `field` is the Jet field name (emit mangles / core-renames).

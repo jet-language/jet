@@ -218,7 +218,7 @@ fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction,
         .AllocNew(_, _, _, args) | .ClosureMethod(_, args, _) | .HostCall(_, args) -> { loop arg in args -> lower_reach_arg(&q, arg, parent) }
         .HostBorrowCallback(_, types) -> { loop ty in types -> lower_mono_intern_type(&q, ty, parent) }
         .MathBuiltin(id, _, _) | .PreciseBuiltin(id, _, _) -> lower_reach_id(&q, id.value, parent)
-        .StructLiteral(_, _, _, target, _) -> { if target == .Val(id) -> lower_reach_id(&q, id.value, parent) }
+        .StructLiteral(type_id, _, _, _) -> lower_reach_id(&q, type_id.value, parent)
         .TextPatternMatch(_, _, parts) | .CursorTakePattern(_, _, parts) -> {
             loop part in parts {
                 if part == .Hole(_, ty, _) -> lower_reach_id(&q, ty.value, parent)

@@ -4156,7 +4156,6 @@ fn lower_raw_err_value(call: &Call, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 ),
             ],
             extra: None,
-            as_trait: None,
         },
     }
 }
@@ -4317,7 +4316,6 @@ fn lower_raw_err_call(call: &Call, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr>
             kind: TExprKind::StructLit {
                 fields: Vec::new(),
                 extra: None,
-                as_trait: None,
             },
         });
     let payload = match target_error.as_ref() {
@@ -4638,7 +4636,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     ),
                 ],
                 extra: None,
-                as_trait: None,
             },
         },
         Expr::Char(c, _) => TExpr {
@@ -6882,11 +6879,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // delegate here as well so this dispatch remains total when called directly.
         Expr::If { .. } => lower_expr_segment(e, cx, env),
 
-        // c109 Phase 3: a struct literal. The gate already proved the type is a
-        // plain covered user struct (no trait coercion, no import namespace, no
-        // generic args), so the Rust head is `__jet_<name>` and field names mangle.
-        // Field values are lowered as-is — no clone/coercion at the literal site
-        // (mirrors the AST path; a value's own move/clone facts live in itself).
+        // Construct the original checked concrete type, including its generic
+        // arguments, before any explicitly requested owned TraitBox wrapper.
+        // Field values retain their own move/copy facts; a trait formal's Read
+        // loan is not an owned conversion at this literal boundary.
         Expr::StructLit {
             type_name,
             type_args,
@@ -6933,14 +6929,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
             }
             in_own_frame(|| {
-                // c109 Phase 30: a trait-object coercion (`Circle {…}` in a `[Shape]` list). The
-                // AST wraps the rendered literal `Box::new(<lit>) as Box<dyn __jet_<Trait>>`; the
-                // value's type is the trait object. Resolved here (totality) — only the plain
-                // user-struct branch below carries it (a coerced import_ns/prelude literal is
-                // not a construct any covered program produces; the gate keeps those uncoerced).
-                let trait_coerce = as_trait
-                    .as_ref()
-                    .map(|trait_name| (trait_name.clone(), type_name.clone()));
                 // c109 Phase 19: a FOREIGN (imported user) struct literal `alias.Type { … }`
                 // (`import_ns`). The AST `emit_struct_lit` `import_ns` branch emits
                 // `{root}{import_mods[alias]}::{mangle(Type)}[::<args>]` with MANGLED fields.
@@ -6968,7 +6956,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     kind: TExprKind::StructLit {
                                         fields: tfields,
                                         extra: None,
-                                        as_trait: None,
                                     },
                                 };
                             });
@@ -6990,7 +6977,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     kind: TExprKind::StructLit {
                                         fields: tfields,
                                         extra: None,
-                                        as_trait: None,
                                     },
                                 };
                             });
@@ -7019,7 +7005,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     kind: TExprKind::StructLit {
                                         fields: tfields,
                                         extra: None,
-                                        as_trait: None,
                                     },
                                 };
                             });
@@ -7054,7 +7039,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     kind: TExprKind::StructLit {
                                         fields: tfields,
                                         extra: None,
-                                        as_trait: None,
                                     },
                                 };
                             });
@@ -7094,7 +7078,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields,
                                 extra: None,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7130,7 +7113,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields.drain(..).collect(),
                                 extra,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7155,7 +7137,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields,
                                 extra: None,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7174,7 +7155,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields,
                                 extra: None,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7192,7 +7172,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields,
                                 extra: None,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7214,7 +7193,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields,
                                 extra: None,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7234,7 +7212,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields,
                                 extra: None,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7262,7 +7239,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields,
                                 extra: None,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7316,7 +7292,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 kind: TExprKind::StructLit {
                                     fields: tfields,
                                     extra: None,
-                                    as_trait: None,
                                 },
                             };
                         });
@@ -7424,19 +7399,18 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         };
                         tfields.push((Syntax::PUBLISHED_UNKNOWN_FIELDS.to_string(), holder, false));
                     }
-                    // c109 Phase 30: a trait-coerced literal's value type is the trait object (so a
-                    // list of them types `[Shape]`); an uncoerced literal keeps its struct type.
-                    let ty = match as_trait {
-                        Some(t) => Type::TraitObject(vec![t.clone()]),
-                        None => resolved_ty,
+                    let source = TExpr {
+                        ty: resolved_ty,
+                        kind: TExprKind::StructLit { fields: tfields, extra: None },
                     };
-                    TExpr {
-                        ty,
-                        kind: TExprKind::StructLit {
-                            fields: tfields,
-                            extra: None,
-                            as_trait: trait_coerce,
-                        },
+                    if let Some(trait_name) = as_trait {
+                        let target = Type::TraitObject(vec![trait_name.clone()]);
+                        TExpr {
+                            ty: target.clone(),
+                            kind: TExprKind::TraitBox { value: Box::new(source), target },
+                        }
+                    } else {
+                        source
                     }
                 })
             })

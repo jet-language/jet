@@ -3559,7 +3559,7 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
         .Unary(_, operand) | .Present(operand) | .Ok(operand) | .Err(operand) | .Try(operand, _, _) | .Print(operand) -> jet_codegen_stability_expr(&state, operand, value)
         .CompareChain(operands, _, _) -> jet_codegen_stability_values(&state, operands)
         .CoreCall(_, args, _, _, _, _, _) -> jet_codegen_stability_values(&state, args)
-        .StructLit(fields, _, _) -> loop field in fields -> jet_codegen_stability_expr(&state, field.value, value)
+        .StructLit(fields, _) -> loop field in fields -> jet_codegen_stability_expr(&state, field.value, value)
         .StrLit(parts) -> loop part in parts {
             if part == .Interpolation(hole, _) -> jet_codegen_stability_expr(&state, hole, value)
         }
