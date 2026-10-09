@@ -1,0 +1,9 @@
+// A written refutable binding that reuses its Optional subject's name is a
+// shadow, not a flow refinement (D-FLOWTYPE1 refines only the compiler's
+// own exit-guard rewrite).
+fn twice(x: Int?) -> Int {
+    x == .Val(x) ?? return 0
+    x * 2
+}
+
+fn run() { print(twice(Val(2))) }
