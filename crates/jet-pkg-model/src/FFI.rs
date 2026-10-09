@@ -6927,7 +6927,11 @@ mod tests {
             );
             println!("canonical bridge test={name} stderr:\n{stderr}");
             let expected_pass = format!("test {name} ... ok");
+            let stdout_valid = std::str::from_utf8(&ran.output.stdout).is_ok();
+            let stderr_valid = std::str::from_utf8(&ran.output.stderr).is_ok();
             let passed = ran.output.status.success()
+                && stdout_valid
+                && stderr_valid
                 && stdout.lines().filter(|line| *line == expected_pass).count() == 1
                 && stdout.contains("test result: ok. 1 passed; 0 failed; 0 ignored;");
             println!(
@@ -6935,9 +6939,7 @@ mod tests {
                 if passed { "PASS" } else { "FAIL" },
                 ran.output.status,
             );
-            if std::str::from_utf8(&ran.output.stdout).is_err()
-                || std::str::from_utf8(&ran.output.stderr).is_err()
-            {
+            if !stdout_valid || !stderr_valid {
                 println!(
                     "canonical bridge test={name} raw_stdout={:?} raw_stderr={:?}",
                     ran.output.stdout, ran.output.stderr,
