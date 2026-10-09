@@ -1,0 +1,79 @@
+// FIPS 180-4 KAT transport supplies byte spans, not a second hash engine.
+// Every split hashes the same input without concatenation. Digest canaries and
+// scratch-zero checks witness exact boundaries, including the empty input.
+#Export(c) fn jet_rt_sha256_fixture(input: I64, length: I64, expected: I64) {
+    scratch :: jet_rt_alloc(I64{576}, I64{8})
+    output :: jet_rt_alloc(I64{34}, I64{1})
+    split := I64{0}
+    loop split <= length {
+        rt_text_put(output, I64{165})
+        rt_text_put(output + I64{33}, I64{90})
+        rt_sha256_parts(input, split, input + split, length - split, output + I64{1}, scratch)
+        at := I64{0}
+        loop {
+            if (at >= I64{32}) -> break
+            if (rt_text_byte(output + I64{1} + at) != rt_text_byte(expected + at)) -> jet_rt_unreachable(I64{0}, I64{0})
+            at += I64{1}
+        }
+        if (rt_text_byte(output) != I64{165} || rt_text_byte(output + I64{33}) != I64{90}) -> jet_rt_unreachable(I64{0}, I64{0})
+        at = I64{0}
+        loop {
+            if (at >= I64{576}) -> break
+            if (rt_text_word(scratch + at) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+            at += I64{8}
+        }
+        // Short vectors exercise every split; the million-byte KAT exercises
+        // empty-left, an interior block boundary, and empty-right only.
+        if (length > I64{64}) {
+            if {
+                (split == I64{0}) -> split = I64{64}
+                (split == I64{64}) -> split = length
+                else -> break
+            }
+        } else { split += I64{1} }
+    }
+    jet_rt_native_sha256(input, length, output + I64{1}, scratch)
+    at := I64{0}
+    loop {
+        if (at >= I64{32}) -> break
+        if (rt_text_byte(output + I64{1} + at) != rt_text_byte(expected + at)) -> jet_rt_unreachable(I64{0}, I64{0})
+        at += I64{1}
+    }
+    // Every short-input split across four borrowed spans, including empty
+    // inner spans; the million-byte vector uses selected block-edge splits.
+    first := I64{0}
+    loop first <= length {
+        second := first
+        loop second <= length {
+            third := second
+            loop third <= length {
+                rt_sha256_parts4(input, first, input + first, second - first, input + second, third - second, input + third, length - third, output + I64{1}, scratch)
+                at = I64{0}
+                loop {
+                    if (at >= I64{32}) -> break
+                    if (rt_text_byte(output + I64{1} + at) != rt_text_byte(expected + at)) -> jet_rt_unreachable(I64{0}, I64{0})
+                    at += I64{1}
+                }
+                at = I64{0}
+                loop {
+                    if (at >= I64{576}) -> break
+                    if (rt_text_word(scratch + at) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+                    at += I64{8}
+                }
+                if (length > I64{64}) -> break
+                third += I64{1}
+            }
+            if (length > I64{64}) -> break
+            second += I64{1}
+        }
+        if (length > I64{64}) {
+            if {
+                (first == I64{0}) -> first = I64{64}
+                (first == I64{64}) -> first = length
+                else -> break
+            }
+        } else { first += I64{1} }
+    }
+    jet_rt_free(output, I64{34}, I64{1})
+    jet_rt_free(scratch, I64{576}, I64{8})
+}

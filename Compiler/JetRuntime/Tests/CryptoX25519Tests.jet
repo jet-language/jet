@@ -1,0 +1,78 @@
+// RFC 7748 vector transport. Test-only C exports are not runtime API.
+#Export(c) fn jet_rt_x25519_fixture(scalar: I64, point: I64, expected: I64) {
+    scratch :: jet_rt_alloc(I64{1568}, I64{8})
+    output :: jet_rt_alloc(I64{34}, I64{1})
+    rt_text_put(output, I64{165})
+    rt_text_put(output + I64{33}, I64{90})
+    rt_crypto_x25519(scalar, point, output + I64{1}, scratch)
+    i := I64{0}
+    loop {
+        if (i >= I64{32}) -> break
+        if (rt_text_byte(output + I64{1} + i) != rt_text_byte(expected + i)) -> jet_rt_unreachable(I64{0}, I64{0})
+        i += I64{1}
+    }
+    if (rt_text_byte(output) != I64{165} || rt_text_byte(output + I64{33}) != I64{90}) -> jet_rt_unreachable(I64{0}, I64{0})
+    i = I64{0}
+    loop {
+        if (i >= I64{1536}) -> break
+        if (rt_text_byte(scratch + i) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+        i += I64{1}
+    }
+    jet_rt_free(output, I64{34}, I64{1})
+    jet_rt_free(scratch, I64{1568}, I64{8})
+}
+#Export(c) fn jet_rt_x25519_iteration_fixture(iterations: I64, expected: I64) {
+    scratch :: jet_rt_alloc(I64{1568}, I64{8})
+    k :: jet_rt_alloc(I64{32}, I64{1})
+    u :: jet_rt_alloc(I64{32}, I64{1})
+    output :: jet_rt_alloc(I64{32}, I64{1})
+    rt_crypto_wipe(k, I64{32})
+    rt_crypto_wipe(u, I64{32})
+    rt_text_put(k, I64{9})
+    rt_text_put(u, I64{9})
+    n := I64{0}
+    loop n < iterations {
+        rt_crypto_x25519(k, u, output, scratch)
+        i := I64{0}
+        loop {
+            if (i >= I64{32}) -> break
+            rt_text_put(u + i, rt_text_byte(k + i))
+            rt_text_put(k + i, rt_text_byte(output + i))
+            i += I64{1}
+        }
+        n += I64{1}
+    }
+    i := I64{0}
+    loop {
+        if (i >= I64{32}) -> break
+        if (rt_text_byte(k + i) != rt_text_byte(expected + i)) -> jet_rt_unreachable(I64{0}, I64{0})
+        i += I64{1}
+    }
+    rt_crypto_wipe(k, I64{32})
+    rt_crypto_wipe(u, I64{32})
+    rt_crypto_wipe(output, I64{32})
+    jet_rt_free(k, I64{32}, I64{1})
+    jet_rt_free(u, I64{32}, I64{1})
+    jet_rt_free(output, I64{32}, I64{1})
+    jet_rt_free(scratch, I64{1568}, I64{8})
+}
+// Signed shifts are SAR: Lower/Lower.jet:2617 -> X64/Select.jet:512.
+#Export(c) fn jet_rt_x25519_negative_carry_fixture() {
+    limbs :: jet_rt_alloc(I64{128}, I64{8})
+    i := I64{0}
+    loop {
+        if (i >= I64{16}) -> break
+        rt_text_store(limbs + i * I64{8}, I64{-1})
+        i += I64{1}
+    }
+    rt_x25519_carry(limbs)
+    if (rt_text_word(limbs) != I64{65497}) -> jet_rt_unreachable(I64{0}, I64{0})
+    i = I64{1}
+    loop {
+        if (i >= I64{16}) -> break
+        if (rt_text_word(limbs + i * I64{8}) != I64{65534}) -> jet_rt_unreachable(I64{0}, I64{0})
+        i += I64{1}
+    }
+    rt_crypto_wipe(limbs, I64{128})
+    jet_rt_free(limbs, I64{128}, I64{8})
+}
