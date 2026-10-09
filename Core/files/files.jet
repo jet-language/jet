@@ -15,6 +15,7 @@ use core.text as unicode
 use core.sys as sys
 use core.process as process
 use __core_files_path_components as host_path
+use core.files.[__host_path_is_absolute, __host_path_join, __temp_path_sample, __temp_directory]
 // core.files — one filesystem surface.
 //
 // Whole-file helpers (`read`, `write`, `write_bytes`, `append_all`) and
@@ -639,7 +640,7 @@ fn io_err(operation: String, path: String, message: String) -> IOError Never! {
 
 
 // Public checkpoints precede OS work exactly once, not once per raw leaf.
-fn file_fault(operation_path: String, operation: IOOperation, path: String) IOError! {
+fn file_fault(operation_path: String, operation: IOOperation, path: String) -> () IOError! {
     if core.testing.__fault_should_fail(operation_path) {
         return Err(IOError.Other(IOContext{
             operation: operation, resource: Val(path), os_code: None,
@@ -649,7 +650,7 @@ fn file_fault(operation_path: String, operation: IOOperation, path: String) IOEr
     Ok()
 }
 
-fn file_writer_refusal(path: String) IOError! -[FS.Write]> {
+fn file_writer_refusal(path: String) -[FS.Write]> () IOError! {
     if core.files.__writer_refusal(path) == {
         .None -> {}
         .Val(error) -> return Err(error)
@@ -676,28 +677,28 @@ fn map(path: String | Path) -[FS.Read]> MappedFile IOError! {
 }
 
 
-fn write(path: String | Path, text: String) IOError! -[FS.Write]> {
+fn write(path: String | Path, text: String) -[FS.Write]> () IOError! {
     target :: path_text(path)
     file_fault("FS.Write", .Write, target)
     core.files.__write_bytes_os(target, text.bytes())
 }
 
 
-fn write_bytes(path: String, bytes: [U8]) IOError! -[FS.Write]> {
+fn write_bytes(path: String, bytes: [U8]) -[FS.Write]> () IOError! {
     file_writer_refusal(path)
     file_fault("FS.Write", .Write, path)
     core.files.__write_bytes_os(path, bytes)
 }
 
 
-fn append_all(path: String | Path, text: String) IOError! -[FS.Write]> {
+fn append_all(path: String | Path, text: String) -[FS.Write]> () IOError! {
     target :: path_text(path)
     file_fault("FS.Write", .Write, target)
     core.files.__append_bytes_os(target, text.bytes())
 }
 
 
-fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
+fn write_atomic(path: String, bytes: [U8]) -[FS.Write]> () IOError! {
     file_writer_refusal(path)
     file_fault("FS.Write", .Write, path)
     platform :: file_path_platform()
@@ -825,7 +826,7 @@ fn files8_other(operation: IOOperation, resource: String?, cause: String) -> IOE
     IOError.Other(IOContext{operation: operation, resource: resource, os_code: None, cause: Val(cause)})
 }
 
-fn files8_preflight(probe: String, operation: IOOperation, path: String) IOError! {
+fn files8_preflight(probe: String, operation: IOOperation, path: String) -> () IOError! {
     if core.files.__fault_should_fail(probe) -> return Err(files8_other(operation, Val(path), "fault injected: {probe}"))
     Ok(())
 }
@@ -978,9 +979,9 @@ fn join(a: String, b: String) -> String Never! { join_impl(a, b) }
 
 fn absolute(path: String | Path) -[FS, Env]> String IOError! {
     text :: path_text(path)
-    if core.files.__host_path_is_absolute(text.copy()) -> return Ok(text)
+    if __host_path_is_absolute(text.copy()) -> return Ok(text)
     cwd :: sys.current_dir()
-    Ok(core.files.__host_path_join(cwd, text))
+    Ok(__host_path_join(cwd, text))
 }
 
 fn temp_prefix(prefix: String) -> String Never! {
@@ -998,10 +999,10 @@ fn temp_prefix(prefix: String) -> String Never! {
 
 fn mktemp(prefix: String) -[FS, Env, Time]> String Never! {
     clean :: temp_prefix(prefix)
-    row :: core.files.__temp_path_sample()
+    row :: __temp_path_sample()
     nanos :: if row.clock_available -> row.nanos else -> "0"
     pid :: sys.getpid()
-    core.files.__host_path_join(core.files.__temp_directory(), "{clean}_{pid}_{nanos}")
+    __host_path_join(__temp_directory(), "{clean}_{pid}_{nanos}")
 }
 
 #Test("temporary path prefixes replace each non-ASCII scalar once") {
@@ -1384,7 +1385,7 @@ fn walk_error(operation: IOOperation, kind: Int, code: Int?, cause: String?, res
     }
 }
 
-fn walk_validate(context: Int, directory: Int, root: String) IOError! -[FS]> {
+fn walk_validate(context: Int, directory: Int, root: String) -[FS]> () IOError! {
     source :: core.files.__walk_validation_path(context, directory)
     loop ancestor in core.files.__walk_ancestors(context, source) {
         metadata :: core.files.__walk_metadata(context, ancestor)
@@ -1578,7 +1579,7 @@ fn files_temp_path(prefix: String) -[FS]> String Never! {
     clock :: core.files.__temp_clock_raw()
     nanos :: if clock.clock_available -> clock.nanos else -> "0"
     pid :: core.files.__process_id_raw()
-    core.files.__host_path_join(core.files.__temp_directory_raw(), "{clean}_{pid}_{nanos}")
+    __host_path_join(core.files.__temp_directory_raw(), "{clean}_{pid}_{nanos}")
 }
 
 
@@ -1593,7 +1594,7 @@ fn temp_file(prefix: String) -[FS]> TempFile IOError! {
 /// lock file is created owner-only; a final symbolic link is refused. Closing
 /// the returned owner releases the lock but never removes the lock file.
 /// `timeout` bounds acquisition; omitting it waits without limit.
-fn lock(path: String | Path, timeout: Duration?{None}) -[FS]> FileLock IOError! {
+fn lock(path: String | Path, timeout: Duration?{None}) -[FS, Env]> FileLock IOError! {
     text :: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     lock_path(text)
@@ -1615,7 +1616,7 @@ fn lock(path: String | Path, timeout: Duration?{None}) -[FS]> FileLock IOError! 
 
 /// Return None only when another owner holds the exclusive system lock.
 /// Missing paths are created as with `lock`; other failures remain errors.
-fn try_lock(path: String | Path) -[FS]> FileLock? IOError! {
+fn try_lock(path: String | Path) -[FS, Env]> FileLock? IOError! {
     text :: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     lock_path(text)
@@ -1690,7 +1691,7 @@ fn lock_errno(path: String, code: Int, platform: Int) -> IOError Never! {
     IOError.Other(context)
 }
 
-fn lock_open(path: String) -[FS]> __LockFd IOError! {
+fn lock_open(path: String) -[FS, Env]> __LockFd IOError! {
     opened :: core.files.__lock_open(path)
     if opened.value < 0 -> return Err(lock_errno(path, opened.errno, opened.platform))
     fd :: __LockFd{fd: opened.value}
@@ -1702,7 +1703,7 @@ fn lock_open(path: String) -[FS]> __LockFd IOError! {
     Ok(^fd)
 }
 
-fn lock_current(path: String, fd: Int) -[FS]> Bool IOError! {
+fn lock_current(path: String, fd: Int) -[FS, Env]> Bool IOError! {
     held :: core.files.__lock_fd_identity(fd)
     if held.errno != 0 -> return Err(lock_errno(path, held.errno, held.platform))
     current :: core.files.__lock_path_identity(path)
