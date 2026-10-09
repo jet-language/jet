@@ -3304,10 +3304,12 @@ source location. A test target with no tests or doctests reports E0601; bare
 package testing skips source members with neither, then reports the resolved
 package contains no testable member at all. (R9)
 
-Bare `jet test` in a package discovers every source member in the package's
-checked project set, not only the entry file. A directory without a package
-manifest is walked recursively for `*.jet` files. A package-level `fn test`
-override owns the command unless `--show-default` requests the stock harness.
+Bare `jet test` and `jet test <package dir>` discover every source member in the
+package's checked project set, not only the entry file, and run the aggregate
+`#Test` and contract harness exactly once. Documentation examples remain
+file-local and run once per member. A directory without a package manifest is
+walked recursively for `*.jet` files. A package-level `fn test` override owns
+the command unless `--show-default` requests the stock harness.
 The default child-output policy is `--capture=failed`; choose `all` or `none`
 explicitly. `--fresh` bypasses only the persisted test-result cache; the build
 cache remains reusable. `--docs` selects checked documentation examples.

@@ -1566,10 +1566,15 @@ fn bare_jet_test_discovers_tests_in_every_package_module() {
         stdout,
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(
-        stdout.contains("double returns twice the input: pass"),
-        "the sibling module's test never ran:\n{}",
-        stdout
+    assert_eq!(
+        stdout.matches("double returns twice the input: pass").count(),
+        1,
+        "the sibling module's test must run exactly once:\n{stdout}"
+    );
+    assert_eq!(
+        stdout.matches("1 passed, 0 failed, 0 skipped").count(),
+        1,
+        "bare package testing must emit one aggregate summary:\n{stdout}"
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1585,6 +1590,11 @@ fn jet_test_package_directory_aggregates_mixed_modules() {
     fs::write(
         dir.join("math.jet"),
         "#Test(\"mixed package test\") {\n    assert(true)\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("checks.jet"),
+        "#Test(\"sibling package test\") {\n    assert(true)\n}\n",
     )
     .unwrap();
     let out = Command::new(&jet)
@@ -1604,15 +1614,74 @@ fn jet_test_package_directory_aggregates_mixed_modules() {
         out.status.success(),
         "mixed package directory failed:\nstdout: {stdout}\nstderr: {stderr}"
     );
-    assert!(
-        stdout.contains("mixed package test: pass"),
-        "test-bearing module never ran:\n{stdout}"
+    for name in ["mixed package test", "sibling package test"] {
+        assert_eq!(
+            stdout.matches(&format!("{name}: pass")).count(),
+            1,
+            "each unique package test must run exactly once:\n{stdout}"
+        );
+    }
+    assert_eq!(
+        stdout.matches(": pass\n").count(),
+        2,
+        "the run count must equal the two unique #Test blocks:\n{stdout}"
+    );
+    assert_eq!(
+        stdout.matches("2 passed, 0 failed, 0 skipped").count(),
+        1,
+        "package testing must emit one aggregate summary:\n{stdout}"
     );
     assert!(
         !stderr.contains("E0601"),
         "test-free package modules must not emit E0601:\n{stderr}"
     );
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jet_test_package_runs_member_doctests_once() {
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+    let dir = bare_package_project("package_doctests", &jet);
+    let documented = "/// ```jet\n/// assert_eq(1 + 1, 2)\n/// ```\nfn documented() {}\n";
+    fs::write(
+        dir.join("math.jet"),
+        format!("{documented}\n#Test(\"documented package test\") {{ assert(true) }}\n"),
+    )
+    .unwrap();
+    fs::write(dir.join("notes.jet"), documented.replace("documented", "notes")).unwrap();
+    for docs_only in [false, true] {
+        let mut command = Command::new(&jet);
+        command.args(["test", "--show-default", "--capture=all", "--fresh", "--serial"]);
+        if docs_only {
+            command.arg("--docs");
+        }
+        let out = command
+            .arg(dir.to_str().unwrap())
+            .env("NO_COLOR", "1")
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            out.status.success(),
+            "package doctests (docs_only={docs_only}) failed:\nstdout: {stdout}\nstderr: {stderr}"
+        );
+        let combined = format!("{stdout}{stderr}");
+        assert_eq!(
+            combined.matches("doctest at").count(),
+            2,
+            "each member's doctest must run exactly once:\n{combined}"
+        );
+        assert_eq!(
+            stdout.matches("documented package test: pass").count(),
+            usize::from(!docs_only),
+            "ordinary tests run once, except with --docs:\n{stdout}"
+        );
+    }
 }
 
 #[test]
