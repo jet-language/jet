@@ -20,6 +20,13 @@ source records; lowering uses their checked declarations rather than synthetic
 compiler-owned records. Their raw host transports retain paired Prelude carrier
 name mappings until the host runtime is replaced at cutover.
 
+Compiler-private `Core/*/runtime` imports join the loaded Core source closure
+on demand. They retain their local aliases as ordinary checked module edges;
+applications still cannot import those units. Unicode String methods and text
+helpers share these runtime kernels. Segmentation lookup binds a stable read
+window before passing table bytes to `View<U8>` parameters, without copying
+the table or an owned slice.
+
 Whole-file filesystem checks, atomic-write sequencing, scoped path selection,
 logical environment policy, signal masks, and line decoding live in Jet source.
 Their reserved raw bindings preserve the existing host handles and shared read

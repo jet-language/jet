@@ -2695,12 +2695,31 @@ fn load_entry_with_overlays_mode_on_stack(
             core_source_modules.push(part.source);
         }
     }
+    // Queue position i loads at core_module_base + i. Runtime entry checks
+    // reuse that entry rather than scheduling a second copy of the same unit.
+    let core_module_base = bundle.modules.len();
+    let mut runtime_targets = HashMap::<&'static str, usize>::new();
+    if let Some(part) =
+        core_runtime_entry(&bundle.modules[entry_idx].path, &bundle.modules[entry_idx].source)
+    {
+        scheduled_core_source_modules.insert(part.module);
+        runtime_targets.insert(part.module, entry_idx);
+        let mut imports = std::mem::take(&mut bundle.modules[entry_idx].imports);
+        bind_core_runtime_imports(
+            &mut imports,
+            entry_idx,
+            core_module_base,
+            &mut core_source_modules,
+            &mut scheduled_core_source_modules,
+            &mut runtime_targets,
+            &mut bundle.name_ledger,
+        );
+        bundle.modules[entry_idx].imports = imports;
+    }
     let mut core_source_module_index = 0;
     while core_source_module_index < core_source_modules.len() {
         let source_module = core_source_modules[core_source_module_index];
         core_source_module_index += 1;
-        let runtime_unit =
-            jet_foundation::CoreSourceParts::core_runtime_part(source_module.module).is_some();
         let source = jet_sema::CoreSources::core_source_text(source_module.module)
             .unwrap_or_else(|| panic!("Core source module `{}` has no body text", source_module.module))
             .to_string();
@@ -2751,6 +2770,17 @@ fn load_entry_with_overlays_mode_on_stack(
                 }
             }
         }
+        // Core-only runtime imports join the closure lazily and become
+        // ordinary module edges, preserving the source's chosen alias.
+        bind_core_runtime_imports(
+            &mut program.imports,
+            bundle.modules.len(),
+            core_module_base,
+            &mut core_source_modules,
+            &mut scheduled_core_source_modules,
+            &mut runtime_targets,
+            &mut bundle.name_ledger,
+        );
         // Source metadata selects the declared members that have crossed the
         // Core cutover. Keep helpers and declarations needed by those members,
         // but do not compile legacy wrappers (declared Core members that still
@@ -6201,6 +6231,31 @@ mod stale_manifest_name_tests {
                 .map(|entry| &entry.module),
             Some(PreparedFrontendModule::Parsed(_, _, _))
         ));
+    }
+
+    #[test]
+    fn core_text_runtime_imports_keep_aliases_and_load_each_unit_once() {
+        let root = tempdir("core-text-runtime-imports");
+        let entry = root.join("main.jet");
+        fs::write(
+            &entry,
+            "use core.text as text\nfn run() { print(\"A\".lower()); print(text.display_width(\"a\")) }\n",
+        ).unwrap();
+        let bundle = load_entry(entry.to_str().unwrap()).expect("Core text runtime closure loads");
+        for (owner, alias, target) in [
+            ("Core/text/string.jet", "string_unicode", "core.text.runtime.kernel_unicode_string"),
+            ("Core/text/string.jet", "string_width", "core.text.runtime.kernel_text_width"),
+            ("Core/text/text.jet", "text_unicode_string", "core.text.runtime.kernel_unicode_string"),
+        ] {
+            let part = jet_foundation::CoreSourceParts::core_runtime_part(target).unwrap();
+            assert_eq!(bundle.modules.iter().filter(|module| module.alias == part.alias).count(), 1);
+            let source = bundle.modules.iter().find(|module| module.display == owner).unwrap();
+            assert!(source.imports.iter().any(|import| {
+                import.alias == alias
+                    && matches!(&import.kind, ImportKind::Module(name, _) if name == part.alias)
+            }), "{owner} must retain {alias} as an ordinary module binding");
+        }
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
