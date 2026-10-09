@@ -131,7 +131,7 @@ pub fn run_interpreter_checked_bundle(
     let (program, artifact) =
         lower_interpreter_bundle(bundle, checked_nominals)
             .expect("checked bundle must lower to interpreter MIR");
-    jet::Interpreter::run_checked(&program, artifact, try_anyway, invocation, policy)
+    jet::Interpreter::run_checked(&program, artifact, try_anyway, policy)
 }
 
 /// Run a checked bundle through the in-process evaluator (the Canvas dev
@@ -145,7 +145,6 @@ pub fn run_interpreted(
         bundle,
         checked_nominals,
         false,
-        jet::Interpreter::InterpreterInvocation::RunInterpret,
         policy,
     )
 }

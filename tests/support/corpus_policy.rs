@@ -1899,6 +1899,8 @@ fn for_each_statement_expr<'a>(body: &'a [Stmt], mut f: impl FnMut(&'a Expr)) {
                 | Pattern::Err { .. }
                 | Pattern::Range { .. }
                 | Pattern::StrMatch { .. }
+                | Pattern::List { .. }
+                | Pattern::Map { .. }
                 | Pattern::BinMatch { .. } => {}
             },
             CorpusWalkNode::Fallback(fallback) => match fallback {
