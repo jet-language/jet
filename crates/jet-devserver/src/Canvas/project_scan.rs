@@ -49,7 +49,7 @@ fn project_file_with_runtime_on_compiler_stack(
     let src = checked.text().map_err(|error| vec![error.diagnostic()])?;
     let package_facts = jet_semindex::package_facts_for_entry(path)
         .map_err(|error| vec![jet_semindex::package_facts_diagnostic(path, &error)])?;
-    let (diags, bundle, facts) = jet_driver::Driver::check_file_with_effect_facts(
+    let (diags, bundle, facts, _) = jet_driver::Driver::check_file_with_effect_facts(
         &path_str,
         Some((&checked.path, &src)),
         true,

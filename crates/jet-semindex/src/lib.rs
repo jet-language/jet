@@ -1,4 +1,6 @@
 //! D-SEMINDEX1: stable semantic-index query API over compiler facts.
+//! Index projection consumes the checked bundle and effect/name-ledger facts;
+//! the same check's MIR nominal carrier is not an input to these index builders.
 
 #![allow(non_snake_case)]
 #![deny(warnings)]
@@ -183,7 +185,7 @@ fn attach_package_facts(index: &mut SemIndex, entry: &Path) -> Result<(), SemInd
 /// Load, check, and build the semantic index for an entry file (loader → parser → sema).
 pub fn open(entry: &Path) -> Result<SemIndex, SemIndexError> {
     let entry_str = entry.to_string_lossy();
-    let (diags, bundle, facts) =
+    let (diags, bundle, facts, _) =
         jet_driver::Driver::check_file_with_effect_facts(&entry_str, None, false);
     if !diags
         .iter()
@@ -201,7 +203,7 @@ pub fn open(entry: &Path) -> Result<SemIndex, SemIndexError> {
 /// Load, check, and build consumer-neutral symbol facts for docs/completion/help.
 pub fn open_symbols(entry: &Path) -> Result<SemanticSymbolIndex, SemIndexError> {
     let entry_str = entry.to_string_lossy();
-    let (diags, bundle, facts) =
+    let (diags, bundle, facts, _) =
         jet_driver::Driver::check_file_with_effect_facts(&entry_str, None, false);
     if !diags
         .iter()
@@ -220,7 +222,7 @@ pub fn open_with_overlays(
     overlays: &[(&Path, &str)],
 ) -> Result<SemIndex, SemIndexError> {
     let entry_str = entry.to_string_lossy();
-    let (diags, bundle, facts) =
+    let (diags, bundle, facts, _) =
         jet_driver::Driver::check_file_with_overlays(&entry_str, overlays, false);
     if !diags
         .iter()
@@ -242,7 +244,7 @@ pub fn open_structural_with_overlays(
     overlays: &[(&Path, &str)],
 ) -> Result<SemIndex, SemIndexError> {
     let entry_str = entry.to_string_lossy();
-    let (diags, bundle, facts) =
+    let (diags, bundle, facts, _) =
         jet_driver::Driver::check_file_with_overlays_and_import_root(&entry_str, overlays);
     if !diags
         .iter()
@@ -276,7 +278,7 @@ pub fn open_with_overlays_diagnostics_and_inputs(
     overlays: &[(&Path, &str)],
 ) -> Result<(SemIndex, Vec<Diagnostic>, Vec<std::path::PathBuf>), SemIndexError> {
     let entry_str = entry.to_string_lossy();
-    let (diags, bundle, facts) =
+    let (diags, bundle, facts, _) =
         jet_driver::Driver::check_file_with_overlays(&entry_str, overlays, false);
     match bundle {
         Some(bundle) => {
