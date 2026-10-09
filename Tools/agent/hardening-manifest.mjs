@@ -3063,7 +3063,6 @@ export function buildCapabilityRelation({
     consumers: {
       inspect: { relation: "manifest.capability_relation.rows", identity: "row_id", evidence: "row.evidence" },
       hardening: { relation: "manifest.capability_relation.rows", identity: "row_id", evidence: "row.evidence" },
-      learner: { relation: "manifest.capability_relation.rows", projection: "jet-learning-census-v1.records" },
       release: { relation: "manifest.capability_relation.rows", candidate: "row.candidate_identity" },
     },
     revision_rule: "source_snapshot_hash and every source_identity digest must match before evidence is current",

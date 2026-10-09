@@ -846,12 +846,6 @@ function activate(context) {
         runJetInTerminal(serverPath, ["test", file]);
       }
     }),
-    vscode.commands.registerCommand("jet.learn", () => {
-      runJetInTerminal(serverPath, ["learn"]);
-    }),
-    vscode.commands.registerCommand("jet.learnOnce", () => {
-      runJetInTerminal(serverPath, ["learn", "--watch=off"]);
-    }),
     vscode.workspace.onDidChangeTextDocument((event) => {
       const state = reasoningPanelState;
       if (

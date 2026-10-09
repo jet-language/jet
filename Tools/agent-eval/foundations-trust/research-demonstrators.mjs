@@ -755,7 +755,6 @@ const FRONTIER_EVIDENCE_SCHEMA = "jet.frontier-evidence-class-validation.v1";
 const FRONTIER_STUDY_ROOT = path.join(path.dirname(DEMONSTRATOR_FILE), "fixtures");
 const FRONTIER_ENV_RUNNER = "Tools/agent/jet-env";
 const FRONTIER_DEFAULT_TIMEOUT_MS = 30_000;
-const FRONTIER_HUMAN_ABSENCE_REASON = "human transfer evidence is unavailable: agent/model output cannot establish whether a reader can explain, predict, modify, or derive; supply a consented observation record";
 const FRONTIER_MAX_BUFFER = 4 * 1024 * 1024;
 const FRONTIER_DISPOSITIONS = Object.freeze([
   "reject",
@@ -766,14 +765,12 @@ const FRONTIER_EVIDENCE_CLASSES = Object.freeze([
   "model",
   "runtime",
   "formal",
-  "simulated-learner",
   "human",
 ]);
 const FRONTIER_FALSIFIERS = Object.freeze({
   H1: "An explanation needs a second semantic interpreter; a valid derivation licenses a wrong transform; a source edit leaves a current-looking old fact; or the derivation cannot represent a required observation. A latency regression is a product problem even if the theorem succeeds.",
   H2: "A stale capability is accepted; ordinary safe reuse becomes inexpressible; callbacks erase the relation; or the implementation must maintain a separate lifecycle law for each subsystem.",
   H3: "The optimized program changes failures or results; the “faster” path wins only after changing input or output rules; an expert rejection uses a different semantic implementation; or dispatch costs erase the benefit. The current campaign runs no Jet benchmark, so these remain obligations under existing performance cards.",
-  H4: "Gains disappear on transfer, are explained by extra time, or require a visual feature unavailable in ordinary editors. The source-based RLI5 assessment in this bundle does not answer that empirical question. [#2926](index.md#card-2926) owns it.",
 });
 const FRONTIER_PRIOR_WORK = Object.freeze({
   H1: Object.freeze([
@@ -791,11 +788,6 @@ const FRONTIER_PRIOR_WORK = Object.freeze({
     { name: "MEMOIR", source: "https://doi.org/10.1145/3563323", comparison: "memory transformation reasoning; not Jet's whole-job conditional cost contract" },
     { name: "Marmoset", source: "https://doi.org/10.1145/3520304.3529027", comparison: "compiler validation workloads; not this paired legality/profitability witness" },
     { name: "Indexed Streams", source: "https://doi.org/10.1145/3563323.3563338", comparison: "indexed stream transformations; not this defined failure and input-consumption relation" },
-  ]),
-  H4: Object.freeze([
-    { name: "prediction-versus-production research", source: "https://doi.org/10.1145/3025453.3025636", comparison: "prediction can expose a learner model; not evidence of Jet transfer here" },
-    { name: "SMoL misconceptions", source: "https://cs.brown.edu/~sk/Publications/Papers/Published/ghk-sme-plt-tutor/", comparison: "misconception-led programming instruction; not this source-bound reason record" },
-    { name: "Python Tutor", source: "https://pythontutor.com/", comparison: "stepwise values and frames; not a claim of human effectiveness from this scripted route" },
   ]),
 });
 const FRONTIER_STUDIES = Object.freeze([
@@ -837,19 +829,6 @@ const FRONTIER_STUDIES = Object.freeze([
     contract: "frontier2954-conditional-optimization.json",
     baseline: "frontier2954-conditional-optimization-baseline.mjs",
     intervention: "frontier2954-conditional-optimization-intervention.mjs",
-  }),
-  Object.freeze({
-    id: "H4-evidence-backed-explanation",
-    key: "H4",
-    title: "Evidence-backed explanations and unfamiliar transfer",
-    claim: "A reason record linked to source and oracle identities can support prediction, controlled change, and an unfamiliar transfer task without claiming a human learning effect.",
-    falsifier: FRONTIER_FALSIFIERS.H4,
-    owners: Object.freeze(["#2945", "#2947", "#2926"]),
-    proof_families: Object.freeze(["core", "checking"]),
-    fixture: "frontier2954-explanation-transfer",
-    contract: null,
-    baseline: "frontier2954-explanation-transfer-baseline.mjs",
-    intervention: "frontier2954-explanation-transfer-intervention.mjs",
   }),
 ]);
 
@@ -951,21 +930,6 @@ function frontierFixtureIdentity(study) {
   };
 }
 
-function frontierTaskSourceIdentity(task) {
-  if (typeof task?.source?.path !== "string") {
-    return { path: null, digest: null };
-  }
-  const candidates = [
-    path.join("Examples/learn", task.source.path),
-    path.join("Examples/learn/feedback", task.source.path),
-  ];
-  const sourcePath = candidates.find((candidate) =>
-    existsSync(path.resolve(REPO_ROOT, candidate))) ?? candidates[0];
-  return {
-    path: sourcePath,
-    digest: frontierFileDigest(path.resolve(REPO_ROOT, sourcePath)),
-  };
-}
 
 function frontierLoadGauntletRelation() {
   const matrix = frontierReadJson("Tools/gauntlet/matrix.json");
@@ -1067,50 +1031,6 @@ function frontierLoadGauntletRelation() {
   };
 }
 
-function frontierLoadLearningRelation() {
-  const curriculum = frontierReadJson("Examples/learn/curriculum.json");
-  const value = curriculum.value;
-  const valid = curriculum.status === "available"
-    && value?.schema === "jet-learning-curriculum-v1"
-    && value?.relation === "jet-learning-census-v1"
-    && value?.relation_source === "Examples/learn/curriculum.json"
-    && Array.isArray(value.tasks);
-  if (!valid) {
-    return {
-      status: "unavailable",
-      reason: curriculum.reason ?? "canonical learning relation is malformed or unavailable",
-      path: curriculum.path,
-      digest: curriculum.digest,
-      task_joins: [],
-      relation: "Examples/learn/curriculum.json.tasks projected from Examples/learn/curriculum.json",
-    };
-  }
-  const taskJoins = value.tasks.map((task) => ({
-    task_id: task.id ?? null,
-    capability_id: task.capability_id ?? null,
-    family: task.family ?? null,
-    source_identity: frontierTaskSourceIdentity(task),
-    input_identity: task.input_identity ?? null,
-    oracle_id: task.oracle?.id ?? null,
-    status: task.id && task.capability_id && task.oracle?.id ? "joined" : "unavailable",
-    reason: task.id && task.capability_id && task.oracle?.id
-      ? null
-      : "canonical learning task lacks an identity-bearing capability or oracle",
-  }));
-  return {
-    status: taskJoins.every((task) => task.status === "joined") ? "available" : "unavailable",
-    reason: taskJoins.every((task) => task.status === "joined")
-      ? null
-      : "one or more canonical learning tasks cannot be joined without inventing an identity",
-    path: curriculum.path,
-    digest: curriculum.digest,
-    schema: value.schema,
-    relation: "Examples/learn/curriculum.json.tasks projected from Examples/learn/curriculum.json",
-    revision_rule: value.revision_rule,
-    task_joins: taskJoins,
-    tasks: value.tasks,
-  };
-}
 
 function frontierLoadProofRelation() {
   const obligations = frontierReadJson("tests/compiler-proof/obligations.json");
@@ -1151,7 +1071,6 @@ function frontierLoadProofRelation() {
 function frontierLoadCanonicalRelations() {
   return {
     gauntlet: frontierLoadGauntletRelation(),
-    learning: frontierLoadLearningRelation(),
     proof: frontierLoadProofRelation(),
   };
 }
@@ -1183,28 +1102,6 @@ function frontierProofJoin(relation, families) {
   };
 }
 
-function frontierContractIdentity(study) {
-  if (!study.contract) {
-    return {
-      status: "canonical-learning-join",
-      relation: "Examples/learn/curriculum.json",
-      path: "Examples/learn/curriculum.json",
-      digest: null,
-    };
-  }
-  const contract = frontierReadJson(
-    path.join("Tools/agent-eval/foundations-trust/fixtures", study.fixture, study.contract),
-  );
-  return {
-    status: contract.status,
-    relation: "frontier study job contract",
-    path: contract.path,
-    digest: contract.digest,
-    job_id: contract.value?.job_id ?? null,
-    contract_id: contract.value?.contract_id ?? null,
-    reason: contract.reason ?? null,
-  };
-}
 
 function frontierFixturePaths(study) {
   const root = path.join(FRONTIER_STUDY_ROOT, study.fixture);
@@ -1248,7 +1145,6 @@ function frontierModelEvidence(study) {
     H1: ["staleRevisionFactAttachment"],
     H2: ["entitySlotReuse", "fixedStepAccumulator"],
     H3: ["ieee754Reassociation"],
-    H4: [],
   }[study.key] ?? [];
   const observations = Object.fromEntries(witnesses
     .filter((name) => output.cases?.[name])
@@ -1521,20 +1417,18 @@ function frontierStudyCanonicalRefs(relations, study) {
   return {
     gauntlet_matrix: relations.gauntlet.matrix.digest,
     gauntlet_manifest: relations.gauntlet.measurement_manifest.digest,
-    learning_curriculum: relations.learning.digest,
     proof_obligations: relations.proof.digest,
     proof_families: [...study.proof_families],
   };
 }
 
 function frontierStudyContract(study) {
-  if (!study.contract) return { status: "canonical-learning-relation", value: null };
-  const contractPath = path.join(
+  const contract = frontierReadJson(path.join(
     "Tools/agent-eval/foundations-trust",
     "fixtures",
     study.fixture,
     study.contract,
-  );
+  ));
   const valid = contract.status === "available"
     && contract.value?.schema === "jet.frontier-study-job.v1"
     && contract.value?.study_id === study.id
@@ -1771,257 +1665,12 @@ function frontierEvaluateH3(study, pairs) {
   };
 }
 
-function frontierEvaluateHumanTransfer(study, humanEvidence, learning) {
-  if (humanEvidence?.status !== "available") {
-    return {
-      disposition: "unresolved",
-      reason: humanEvidence?.reason ?? FRONTIER_HUMAN_ABSENCE_REASON,
-      checks: [],
-      defects: [],
-    };
-  }
-  const canonicalTasks = Array.isArray(learning?.tasks) ? learning.tasks : [];
-  const checks = canonicalTasks.map((task) => {
-    const source = frontierTaskSourceIdentity(task);
-    const records = humanEvidence.records.filter((record) => record.task_id === task.id);
-    const current = records.filter((record) => record.source_revision === source.digest);
-    const stale = records.filter((record) =>
-      record.source_revision && record.source_revision !== source.digest);
-    const unrevisioned = records.filter((record) => !record.source_revision);
-    return {
-      task_id: task.id,
-      records: current.length,
-      stale_records: stale.length,
-      unrevisioned_records: unrevisioned.length,
-      source_revision_current: current.length > 0
-        && records.length === current.length,
-      transfer_observed: current.some((record) => record.transfer === true),
-      all_required_observations: current.length > 0 && current.every((record) =>
-        record.completion === true
-        && record.prediction_correct === true
-        && record.transfer === true
-        && record.recovery === true),
-    };
-  });
-  const complete = checks.length > 0
-    && checks.every((check) =>
-      check.records > 0
-      && check.stale_records === 0
-      && check.unrevisioned_records === 0
-      && check.source_revision_current
-      && check.all_required_observations);
-  const observedFailure = checks.some((check) =>
-    check.records > 0
-    && (check.stale_records > 0 || !check.all_required_observations));
-  return {
-    disposition: complete
-      ? "supported-with-scope"
-      : observedFailure ? "reject" : "unresolved",
-    reason: complete
-      ? "consented human records cover every canonical transfer task at the current source revision"
-      : observedFailure
-        ? "a consented human record is stale or fails a required transfer observation"
-        : "consented human records do not cover every canonical transfer task",
-    checks,
-    defects: complete || !observedFailure ? [] : frontierExpectedEvidenceFailure(
-      study,
-      "consented human transfer record did not satisfy the current source-bound observation contract",
-      { owner: "#2926" },
-    ),
-    scope: "Human evidence is limited to the supplied consented records and current source revisions; it does not generalize beyond their participants or tasks.",
-  };
-}
 
-function frontierEvaluateH4(study, pairs, learning, humanEvidence = null) {
-  if (!pairs.length) {
-    return {
-      disposition: "unresolved",
-      reason: learning.status === "available"
-        ? "no simulated learner pair was retained"
-        : learning.reason,
-      checks: {},
-      defects: [],
-      human_transfer: frontierEvaluateHumanTransfer(study, humanEvidence, learning),
-    };
-  }
-  const canonicalTasks = Array.isArray(learning?.tasks) ? learning.tasks : [];
-  const checks = [];
-  for (const pair of pairs) {
-    const task = canonicalTasks.find((candidate) => candidate.id === pair.task_id);
-    const intervention = frontierFirstObserved(pair, "intervention");
-    const baseline = frontierFirstObserved(pair, "baseline");
-    const sourceIdentity = frontierTaskSourceIdentity(task);
-    const refs = intervention?.parsed?.explanation?.evidence_refs ?? [];
-    const sourceRef = refs.find((ref) => ref.kind === "source");
-    const oracleRef = refs.find((ref) => ref.kind === "oracle");
-    const sameJobIdentity = baseline?.parsed?.study_id === study.id
-      && intervention?.parsed?.study_id === study.id
-      && baseline?.parsed?.task_id === pair.task_id
-      && intervention?.parsed?.task_id === pair.task_id;
-    const routeVariants = baseline?.parsed?.variant === "baseline"
-      && intervention?.parsed?.variant === "intervention";
-    checks.push({
-      same_job_identity: sameJobIdentity,
-      baseline_intervention_variants: routeVariants,
-      task_id: pair.task_id,
-      canonical_task_joined: Boolean(task),
-      baseline_observed: Boolean(baseline),
-      intervention_observed: Boolean(intervention),
-      intervention_reason_linked: Boolean(
-        sourceRef
-        && sourceRef.path === sourceIdentity.path
-        && sourceRef.digest === sourceIdentity.digest
-        && oracleRef?.id === task?.oracle?.id,
-      ),
-      intervention_transfer_observed: intervention?.parsed?.interaction?.transfer?.passed === true,
-      baseline_has_no_reason_links: (baseline?.parsed?.explanation?.evidence_refs ?? []).length === 0,
-    });
-  }
-  const supported = checks.length === canonicalTasks.length
-    && checks.length > 0
-    && checks.every((check) =>
-      check.same_job_identity
-      && check.baseline_intervention_variants
-      && check.canonical_task_joined
-      && check.baseline_observed
-      && check.intervention_observed
-      && check.intervention_reason_linked
-      && check.intervention_transfer_observed
-      && check.baseline_has_no_reason_links);
-  return {
-    disposition: supported ? "supported-with-scope" : "reject",
-    reason: supported
-      ? "the simulated learner route linked source/oracle identities and solved structurally different transfer jobs"
-      : "the explanation route invented a reason, lost a canonical identity, or failed transfer",
-    checks,
-    defects: supported ? [] : frontierExpectedEvidenceFailure(
-      study,
-      "evidence-backed explanation or unfamiliar transfer failed its canonical identity check",
-    ),
-    human_transfer: frontierEvaluateHumanTransfer(study, humanEvidence, learning),
-    scope: "This route measures a deterministic simulated learner only. It does not claim human comprehension, uptake, accessibility, or learning effectiveness.",
-  };
-}
 
-function frontierEvaluateStudy(study, pairs, relations, contract, humanEvidence = null) {
+function frontierEvaluateStudy(study, pairs, relations, contract) {
   if (study.key === "H1") return frontierEvaluateH1(study, pairs, contract);
   if (study.key === "H2") return frontierEvaluateH2(study, pairs, contract);
-  if (study.key === "H3") return frontierEvaluateH3(study, pairs, contract);
-  return frontierEvaluateH4(study, pairs, relations.learning, humanEvidence);
-}
-function frontierHumanEvidence(pathValue, learning) {
-  const requiredFields = [
-    "participant",
-    "task_id",
-    "completion",
-    "prediction_correct",
-    "transfer",
-    "recovery",
-    "latency_ms",
-  ];
-  if (!pathValue) {
-    return {
-      status: "unavailable",
-      evidence_class: "human",
-      reason: FRONTIER_HUMAN_ABSENCE_REASON,
-      required_fields: requiredFields,
-      records: [],
-    };
-  }
-  const relativePath = path.isAbsolute(pathValue) ? frontierRelative(pathValue) : pathValue;
-  const loaded = frontierReadJson(relativePath);
-  if (loaded.status !== "available") {
-    return {
-      status: "unavailable",
-      evidence_class: "human",
-      reason: loaded.reason,
-      required_fields: requiredFields,
-      records: [],
-    };
-  }
-  const parsed = loaded.value;
-  const records = Array.isArray(parsed) ? parsed : parsed?.records;
-  const consent = parsed && !Array.isArray(parsed) ? parsed.consent : null;
-  const consented = consent?.obtained === true || consent?.consented === true;
-  if (!consented) {
-    return {
-      status: "unavailable",
-      evidence_class: "human",
-      reason: "human observation record does not carry explicit consent.obtained=true or consent.consented=true",
-      required_fields: requiredFields,
-      records: [],
-      path: loaded.path,
-      digest: loaded.digest,
-    };
-  }
-  if (!Array.isArray(records)) {
-    return {
-      status: "unavailable",
-      evidence_class: "human",
-      reason: "human observation record must be an array or an object with records",
-      required_fields: requiredFields,
-      records: [],
-      path: loaded.path,
-      digest: loaded.digest,
-    };
-  }
-  const canonicalTasks = new Set(learning.task_joins.map((task) => task.task_id));
-  const errors = [];
-  const clean = [];
-  records.forEach((record, index) => {
-    if (!record || typeof record !== "object" || Array.isArray(record)) {
-      errors.push(`${index}.record`);
-      return;
-    }
-    for (const field of requiredFields) if (!(field in record)) errors.push(`${index}.${field}`);
-    if (record.participant !== "newcomer" && record.participant !== "experienced") {
-      errors.push(`${index}.participant`);
-    }
-    if (!canonicalTasks.has(record.task_id)) errors.push(`${index}.task_id`);
-    for (const field of ["completion", "prediction_correct", "transfer", "recovery"]) {
-      if (typeof record[field] !== "boolean") errors.push(`${index}.${field}`);
-    }
-    if (typeof record.latency_ms !== "number" || record.latency_ms < 0) {
-      errors.push(`${index}.latency_ms`);
-    }
-    if (record.source_revision !== undefined && typeof record.source_revision !== "string") {
-      errors.push(`${index}.source_revision`);
-    }
-    if (errors.length === 0 || !errors.some((error) => error.startsWith(`${index}.`))) {
-      clean.push({
-        participant: record.participant,
-        task_id: record.task_id,
-        completion: record.completion,
-        prediction_correct: record.prediction_correct,
-        transfer: record.transfer,
-        recovery: record.recovery,
-        latency_ms: record.latency_ms,
-        source_revision: record.source_revision ?? null,
-      });
-    }
-  });
-  if (errors.length > 0) {
-    return {
-      status: "unavailable",
-      evidence_class: "human",
-      reason: `human observation record is invalid: ${errors.slice(0, 16).join(", ")}`,
-      required_fields: requiredFields,
-      records: [],
-      path: loaded.path,
-      digest: loaded.digest,
-      consent: { obtained: true },
-    };
-  }
-  return {
-    status: "available",
-    evidence_class: "human",
-    reason: null,
-    required_fields: requiredFields,
-    records: clean,
-    path: loaded.path,
-    digest: loaded.digest,
-    consent: { obtained: true },
-  };
+  return frontierEvaluateH3(study, pairs, contract);
 }
 
 function frontierEvidenceClassValidation(studies, humanEvidence) {
@@ -2080,8 +1729,6 @@ function frontierEvidenceClassValidation(studies, humanEvidence) {
         observed: seenClasses.has(name),
         scope: name === "human"
           ? "consented participant observations only"
-          : name === "simulated-learner"
-            ? "scripted interaction output; not a participant result"
             : name === "formal"
               ? "checked proof artifacts only"
               : name === "model"
@@ -2103,7 +1750,6 @@ function frontierNormalizeOptions(options = {}) {
     execute: options.execute === true,
     replay: options.replay ?? null,
     artifact: options.artifact ?? null,
-    humanRecord: options.humanRecord ?? null,
     study: options.study ?? "all",
     studySet,
     repeat: Number.isInteger(options.repeat) && options.repeat > 0 ? options.repeat : 1,
@@ -2138,18 +1784,10 @@ function frontierStudyRecord(study, relations, options) {
       required: true,
       baseline_fixture: frontierRelative(fixturePaths.baseline),
       intervention_fixture: frontierRelative(fixturePaths.intervention),
-      input_identity: contract.digest ?? relations.learning.digest,
+      input_identity: contract.digest,
     },
     fixtures: fixtureIdentity,
-    contract: study.contract
-      ? contract
-      : {
-        status: relations.learning.status,
-        relation: relations.learning.relation,
-        path: relations.learning.path,
-        digest: relations.learning.digest,
-        reason: relations.learning.reason ?? null,
-      },
+    contract,
     workload_basis: workload,
     whole_job_comparison: {
       required: true,
@@ -2157,7 +1795,7 @@ function frontierStudyRecord(study, relations, options) {
       omission_policy: "no omissions; unavailable joins remain explicit",
       substitution_policy: "no substitute workload or easier input",
       aggregation: "per-area and per-join only; no averaging away a loss",
-      evidence_promotion: "forbidden across model, runtime, formal, simulated-learner, and human classes",
+      evidence_promotion: "forbidden across model, runtime, formal, and human classes",
     },
     proof_relation: proof,
     canonical_refs: canonicalRefs,
@@ -2191,26 +1829,7 @@ function frontierBuildStudy(study, relations, options = {}) {
   const pairs = [];
   const selected = options.execute && options.studySet.has(study.id);
   if (selected) {
-    if (study.key === "H4") {
-      if (relations.learning.status === "available") {
-        for (const task of relations.learning.tasks) {
-          const input = {
-            ...task,
-            source_identity: frontierTaskSourceIdentity(task),
-          };
-          const pair = frontierPair({
-            study,
-            input,
-            fixtureIdentity: record.fixtureIdentity,
-            fixturePaths: record.fixturePaths,
-            options,
-            canonicalRefs: record.canonicalRefs,
-          });
-          pair.task_id = task.id;
-          pairs.push(pair);
-        }
-      }
-    } else if (record.contract.status === "available") {
+    if (record.contract.status === "available") {
       pairs.push(frontierPair({
         study,
         input: record.contract.value,
@@ -2224,9 +1843,7 @@ function frontierBuildStudy(study, relations, options = {}) {
   const executionStatus = selected
     ? pairs.length > 0 ? frontierRunAvailability(pairs) : "unavailable"
     : "not-requested";
-  const humanEvidence = study.key === "H4"
-    ? frontierHumanEvidence(options.humanRecord, relations.learning)
-    : {
+  const humanEvidence = {
       status: "not-applicable",
       evidence_class: "human",
       reason: "this hypothesis does not measure human transfer",
@@ -2266,9 +1883,7 @@ function frontierBuildStudy(study, relations, options = {}) {
       study_id: study.id,
       owner: study.owners[0],
       owners: [...study.owners],
-      reason: study.key === "H4"
-        ? relations.learning.reason ?? "canonical learning relation is unavailable"
-        : record.contract.reason ?? "study contract is unavailable",
+      reason: record.contract.reason ?? "study contract is unavailable",
     }]
     : [];
   const result = {
@@ -2313,13 +1928,12 @@ function frontierArtifactForStudies(studies, relations) {
     canonical_relations: {
       gauntlet_matrix: relations.gauntlet.matrix.digest,
       gauntlet_manifest: relations.gauntlet.measurement_manifest.digest,
-      learning_curriculum: relations.learning.digest,
       proof_obligations: relations.proof.digest,
     },
     studies: studies.map((study) => ({
       study_id: study.id,
       fixture_identity: study.fixtures.digest,
-      contract_identity: study.contract.digest ?? study.canonical_refs.learning_curriculum,
+      contract_identity: study.contract.digest,
       pairs: study.execution.pairs,
     })),
     content_digest: null,
@@ -2390,10 +2004,6 @@ function frontierBuildEnvelope(options = {}) {
         scope: "checked proof artifacts only; this driver retains the canonical relation without claiming a checker result",
         promoted_from_runtime: false,
       },
-      simulated_learner: {
-        scope: "scripted learner interaction only",
-        promoted_to_human: false,
-      },
       human: {
         scope: "consented participant records only",
         available: studies.some((study) => study.human_evidence.status === "available"),
@@ -2405,7 +2015,6 @@ function frontierBuildEnvelope(options = {}) {
     limits: [
       "A model witness is not Jet runtime evidence.",
       "A runtime fixture result is not formal proof or a universal semantic claim.",
-      "A simulated learner is not a human participant.",
       "A joined Gauntlet workload identity does not make an unavailable area measurable.",
       "No performance winner or novelty claim is inferred without the named same-job and prior-work evidence.",
     ],
@@ -2499,7 +2108,6 @@ function frontierReplayArtifact(artifactPath) {
   const currentRelationDigests = {
     gauntlet_matrix: currentRelations.gauntlet.matrix.digest,
     gauntlet_manifest: currentRelations.gauntlet.measurement_manifest.digest,
-    learning_curriculum: currentRelations.learning.digest,
     proof_obligations: currentRelations.proof.digest,
   };
   if (!frontierEqual(artifact?.canonical_relations, currentRelationDigests)) {
@@ -2517,9 +2125,7 @@ function frontierReplayArtifact(artifactPath) {
     if (storedStudy.fixture_identity !== fixtureIdentity.digest) {
       issues.push(`${study.id} fixture identity does not match current fixture files`);
     }
-    const currentContractIdentity = study.contract
-      ? frontierStudyContract(study).digest
-      : currentRelations.learning.digest;
+    const currentContractIdentity = frontierStudyContract(study).digest;
     if (storedStudy.contract_identity !== currentContractIdentity) {
       issues.push(`${study.id} contract identity does not match current canonical input`);
     }
@@ -2558,14 +2164,7 @@ function frontierReplayArtifact(artifactPath) {
       currentRelations,
       contract.value,
     );
-    const humanEvidence = study.key === "H4"
-      ? {
-        status: "unavailable",
-        evidence_class: "human",
-        reason: "replay does not synthesize consented human evidence",
-        records: [],
-      }
-      : {
+    const humanEvidence = {
         status: "not-applicable",
         evidence_class: "human",
         reason: "this hypothesis does not measure human transfer",
@@ -2615,12 +2214,11 @@ function frontierUsage() {
     "",
     "Without --execute, emit the study plan and canonical joins.",
     "  --execute, --run             run selected baseline/intervention fixtures",
-    "  --study <all|H1|H2|H3|H4>    select one study or all (default: all)",
+    "  --study <all|H1|H2|H3>       select one study or all (default: all)",
     "  --repeat <n>                  repeat each same-job route (default: 1)",
     "  --timeout-ms <n>              child timeout in milliseconds",
     "  --runner <path|node>          runner (default: Tools/agent/jet-env)",
     "  --artifact <path>             retain raw execution artifact",
-    "  --human-record <path>         consented human transfer observations for H4",
     "  --replay <artifact>            independently replay retained raw output",
     "  --help                         show this help",
   ].join("\n");
@@ -2631,7 +2229,6 @@ function frontierParseArgs(argv) {
     execute: false,
     replay: null,
     artifact: null,
-    humanRecord: null,
     study: "all",
     studySet: new Set(FRONTIER_STUDIES.map((study) => study.id)),
     repeat: 1,
@@ -2656,9 +2253,6 @@ function frontierParseArgs(argv) {
     } else if (arg === "--artifact" || arg === "--out") {
       options.artifact = argv[++index];
       if (!options.artifact) throw new Error(`${arg} requires a path`);
-    } else if (arg === "--human-record") {
-      options.humanRecord = argv[++index];
-      if (!options.humanRecord) throw new Error("--human-record requires a path");
     } else if (arg === "--study" || arg === "--studies") {
       options.study = argv[++index];
       if (!options.study) throw new Error(`${arg} requires a study`);

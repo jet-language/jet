@@ -57,7 +57,6 @@ The command palette provides:
 - **Jet: Run File**, which opens a terminal for `jet run <file>`;
 - **Jet: Test File**, which opens a terminal for `jet test <file>`;
 - **Jet: Debug File**, which starts the native debug adapter;
-- **Jet: Learn (Watch)** and **Jet: Learn Once**; and
 - **Jet: Explain Reasoning**, which opens the static reasoning panel.
 
 The run/test code lenses use the same executable selected for the language
