@@ -4442,7 +4442,6 @@ fn compile_build_from_front_end(
         )?;
         lints.extend(planned_lints);
         runtime_effect_facts = planned_facts;
-        runtime_checked_nominals = planned_nominals;
     }
     // Recompute after generated sources replace the runtime bundle. The final
     // source-owned closure, not the build-entry projection, is authoritative.
@@ -6762,6 +6761,7 @@ pub fn check_bundle_path_with_source_closure_for_artifact(
         Vec<Diagnostic>,
         Option<crate::FFI::FfiLink>,
         std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
+        crate::Sema::SemIndexEffectFacts,
     ),
     Vec<Diagnostic>,
 > {
@@ -6788,7 +6788,8 @@ pub fn check_bundle_path_with_source_closure_for_artifact(
 
 /// The checked front half of artifact compilation: load, select the target,
 /// seed build facts, check, refresh the target dossier, gate diagnostics and
-/// prepare the FFI link. Returns the bundle, its lints and the FFI link.
+/// prepare the FFI link. Returns the bundle, lints, link, original nominal facts,
+/// and effect facts from this same check for downstream runtime admission.
 fn check_bundle_for_artifact_on_compiler_stack(
     file: &str,
     mode: crate::Sema::CompileMode,
@@ -6811,6 +6812,7 @@ fn check_bundle_for_artifact_on_compiler_stack(
         Vec<Diagnostic>,
         Option<crate::FFI::FfiLink>,
         std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
+        crate::Sema::SemIndexEffectFacts,
     ),
     Vec<Diagnostic>,
 > {
@@ -6887,7 +6889,7 @@ fn check_bundle_for_artifact_on_compiler_stack(
         }
         None => crate::FFI::prepare(&bundle),
     }?;
-    Ok((bundle, lints, ffi, checked_nominals))
+    Ok((bundle, lints, ffi, checked_nominals, effect_facts))
 }
 
 fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
@@ -6909,8 +6911,8 @@ fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
     target_dossier: Option<jet_foundation::Facts::TargetDossier>,
     source_closure: Option<&[(std::path::PathBuf, String)]>,
     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-) -> Result<(crate::CompileOutput, crate::AST::ProgramBundle), Vec<Diagnostic>> {
-    let (mut bundle, lints, ffi, checked_nominals) = check_bundle_for_artifact_on_compiler_stack(
+) -> Result<(crate::CompileOutput, CheckedSourceBundle), Vec<Diagnostic>> {
+    let (mut bundle, lints, ffi, checked_nominals, effect_facts) = check_bundle_for_artifact_on_compiler_stack(
         file,
         mode,
         no_os,

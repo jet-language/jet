@@ -2802,7 +2802,6 @@ fn load_entry_with_overlays_mode_on_stack(
         bundle.modules.push(LoadedModule {
             path: PathBuf::from(core_path),
             display,
-            frontend_source: inline_package.map(|_| source_for_parse),
             source,
             core_identifier_demand: Lexer::core_identifier_demand(&tokens),
             alias,
@@ -4471,8 +4470,14 @@ fn load_file_located(
             return Err(LoaderError::at(display, &source, diagnostics));
         }
         None => {
-            // Reuse the exact masked input retained for semantic replay.
-            let (tokens, lex_diags) = Lexer::lex(source_for_parse);
+            let source_for_parse = crate::Package::mask_inline_package_source(&source)
+                .map_err(|error| LoaderError::at(display, &source, vec![error.diagnostic()]))?
+                .0;
+            let (tokens, lex_diags) = if core_entry {
+                Lexer::lex_generated(&source_for_parse)
+            } else {
+                Lexer::lex(&source_for_parse)
+            };
             if !lex_diags.is_empty() {
                 return Err(LoaderError::at(display, &source, lex_diags));
             }
