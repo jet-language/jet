@@ -128,6 +128,8 @@ mod jet_std {
         Closed(IOContext),
         Protocol(IOContext),
         Other(IOContext),
+        AlreadyExists(IOContext),
+        Unsupported(IOContext),
     }
 
     // The canonical DataTree extension calls these exact-Int helpers. This
