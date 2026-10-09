@@ -1910,16 +1910,15 @@ fn data_loader_render(out: &[U8], tree: encoding.Dyn) Never! {
             &out.push(U8{93})
         }
         .Object(_) -> {
-            entries :: encoding_stream.object_entries(tree)
-            indices := [Int]{}
-            loop index in 0..<entries.len() -> &indices.push(index)
-            &indices.sort_by((left: Int, right: Int) -> entries[left].key <=> entries[right].key)
+            // Sort the owned entries directly; the comparator captures no tree.
+            entries := encoding_stream.object_entries(tree)
+            &entries.sort_by((left: (key: String, value: Dyn), right: (key: String, value: Dyn)) -> left.key <=> right.key)
             &out.push(U8{123})
-            loop (position, index) in indices {
+            loop (position, entry) in entries {
                 if position != 0 -> &out.push(U8{44})
-                data_loader_quote(&out, entries[index].key)
+                data_loader_quote(&out, entry.key)
                 &out.push(U8{58})
-                data_loader_render(&out, entries[index].value)
+                data_loader_render(&out, entry.value)
             }
             &out.push(U8{125})
         }
