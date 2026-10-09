@@ -18,26 +18,26 @@ use jet_foundation.[
     Span,
 ]
 
-struct MIRInlineExpansionResult { pub expanded: Int, pub blocks_removed: Int, pub error: MIROptimizationError? }
+struct MIRInlineExpansionResult { expanded: Int, blocks_removed: Int, error: MIROptimizationError? }
 
-struct MIRInlineOneCallResult { pub blocks_removed: Int, pub error: MIROptimizationError? }
+struct MIRInlineOneCallResult { blocks_removed: Int, error: MIROptimizationError? }
 
 struct MIRInlineCallSite {
-    pub caller: MIRFunctionID
-    pub block: MIRBlockID
-    pub instruction: MIROpID
-    pub callee: MIRFunctionID
-    pub args: [MIRCallArg]
-    pub type_args: [MIRType]
+    caller: MIRFunctionID
+    block: MIRBlockID
+    instruction: MIROpID
+    callee: MIRFunctionID
+    args: [MIRCallArg]
+    type_args: [MIRType]
 }
 
-struct MIRInlineCallPosition { pub block: Int, pub instruction: Int }
+struct MIRInlineCallPosition { block: Int, instruction: Int }
 
 // Function rows never move during expansion. Candidate positions are rebuilt
 // only for changed bodies, keeping discovery in function/block/instruction order.
 struct MIRInlineIndex {
-    pub functions: [U64:Int]
-    pub eligible: [U64:Bool]
+    functions: [U64:Int]
+    eligible: [U64:Bool]
 }
 
 fn mir_pass_expand_inline_always(program: &MIRProgram) -> MIRInlineExpansionResult Never! {

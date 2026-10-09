@@ -5,10 +5,10 @@
 // is ratified separately as `policy.replacements` and `replacementProof:`.
 
 // A provider-qualified package identity.
-pub struct PackageIdentity {
-    pub provider: String
-    pub name: String
-    pub version: String
+struct PackageIdentity {
+    provider: String
+    name: String
+    version: String
 
     fn new(provider: String, name: String, version: String) -> PackageIdentity Never! {
         PackageIdentity{provider: provider, name: name, version: version}
@@ -21,7 +21,7 @@ pub struct PackageIdentity {
     }
 }
 
-pub enum ProofStatus {
+enum ProofStatus {
     Missing
     Failed
     Passed
@@ -29,16 +29,16 @@ pub enum ProofStatus {
 
 // A native package offered in place of a foreign one, with the proof that
 // makes it eligible.
-pub struct ReplacementCandidate {
-    pub foreign_identity: PackageIdentity
-    pub native_identity: PackageIdentity
-    pub covered_public_symbols: [String]
-    pub unsupported_symbols: [String]
-    pub license: String
-    pub platforms: [String]
-    pub proof_status: ProofStatus
-    pub proof_digest: String
-    pub proof_inputs: [String]
+struct ReplacementCandidate {
+    foreign_identity: PackageIdentity
+    native_identity: PackageIdentity
+    covered_public_symbols: [String]
+    unsupported_symbols: [String]
+    license: String
+    platforms: [String]
+    proof_status: ProofStatus
+    proof_digest: String
+    proof_inputs: [String]
 
     // A candidate that is listed but has no proof yet.
     fn visible_but_inactive(foreign_identity: PackageIdentity, native_identity: PackageIdentity) -> ReplacementCandidate Never! {
@@ -91,11 +91,11 @@ pub struct ReplacementCandidate {
 }
 
 // One public API symbol with its effect and error shape.
-pub struct PublicSymbol {
-    pub name: String
-    pub signature: String
-    pub effects: [String]
-    pub errors: [String]
+struct PublicSymbol {
+    name: String
+    signature: String
+    effects: [String]
+    errors: [String]
 
     fn new(name: String, signature: String) -> PublicSymbol Never! {
         PublicSymbol{name: name, signature: signature, effects: [String]{}, errors: [String]{}}
@@ -115,13 +115,13 @@ pub struct PublicSymbol {
 }
 
 // Observed behavior of one example run.
-pub struct GoldenFixture {
-    pub name: String
-    pub stdout: String
-    pub stderr: String
-    pub exit_code: Int
-    pub files: [(path: String, content: String)]
-    pub side_effects: [String]
+struct GoldenFixture {
+    name: String
+    stdout: String
+    stderr: String
+    exit_code: Int
+    files: [(path: String, content: String)]
+    side_effects: [String]
 
     fn new(name: String, stdout: String) -> GoldenFixture Never! {
         GoldenFixture{name: name, stdout: stdout, stderr: "", exit_code: 0, files: [(path: String, content: String)]{}, side_effects: [String]{}}
@@ -137,12 +137,12 @@ pub struct GoldenFixture {
 }
 
 // The public surface of one package on which compatibility is proved.
-pub struct CompatibilitySurface {
-    pub identity: PackageIdentity
-    pub public_symbols: [PublicSymbol]
-    pub examples: [String]
-    pub goldens: [GoldenFixture]
-    pub platforms: [String]
+struct CompatibilitySurface {
+    identity: PackageIdentity
+    public_symbols: [PublicSymbol]
+    examples: [String]
+    goldens: [GoldenFixture]
+    platforms: [String]
 
     fn new(identity: PackageIdentity) -> CompatibilitySurface Never! {
         CompatibilitySurface{identity: identity, public_symbols: [PublicSymbol]{}, examples: [String]{}, goldens: [GoldenFixture]{}, platforms: [String]{}}
@@ -204,7 +204,7 @@ pub struct CompatibilitySurface {
     }
 }
 
-pub enum ProofFailureKind {
+enum ProofFailureKind {
     MissingPublicSymbol
     SignatureMismatch
     EffectMismatch
@@ -213,21 +213,21 @@ pub enum ProofFailureKind {
     PlatformMismatch
 }
 
-pub struct ProofFailure {
-    pub kind: ProofFailureKind
-    pub name: String
-    pub expected: String
-    pub found: String
+struct ProofFailure {
+    kind: ProofFailureKind
+    name: String
+    expected: String
+    found: String
 }
 
-pub struct ProofReport {
-    pub foreign_identity: PackageIdentity
-    pub native_identity: PackageIdentity
-    pub platform: String
-    pub inputs: [String]
-    pub covered_public_symbols: [String]
-    pub failures: [ProofFailure]
-    pub digest: String
+struct ProofReport {
+    foreign_identity: PackageIdentity
+    native_identity: PackageIdentity
+    platform: String
+    inputs: [String]
+    covered_public_symbols: [String]
+    failures: [ProofFailure]
+    digest: String
 
     fn passed(self) -> Bool Never! {
         self.failures.len() == 0
@@ -259,7 +259,7 @@ pub struct ProofReport {
     }
 }
 
-pub enum ReplacementPolicyMode {
+enum ReplacementPolicyMode {
     Allow
     Deny
     Prefer
@@ -273,18 +273,18 @@ pub enum ReplacementPolicyMode {
     }
 }
 
-pub struct ReplacementPolicyRule {
-    pub foreign_identity: String
-    pub native_identity: String
-    pub mode: ReplacementPolicyMode
-    pub owner_package: String
-    pub fingerprint: String
+struct ReplacementPolicyRule {
+    foreign_identity: String
+    native_identity: String
+    mode: ReplacementPolicyMode
+    owner_package: String
+    fingerprint: String
 }
 
 // `policy.replacements`: per-pair rules over a default mode.
-pub struct ReplacementPolicy {
-    pub default_mode: ReplacementPolicyMode
-    pub rules: [ReplacementPolicyRule]
+struct ReplacementPolicy {
+    default_mode: ReplacementPolicyMode
+    rules: [ReplacementPolicyRule]
 
     // Deny everything.
     fn deny_all() -> ReplacementPolicy Never! {
@@ -316,20 +316,20 @@ pub struct ReplacementPolicy {
     }
 }
 
-pub enum ReplacementDecision {
+enum ReplacementDecision {
     Inactive(reason: String)
     Denied(reason: String)
     Active(ActiveReplacement)
 }
 
-pub struct ActiveReplacement {
-    pub foreign_call_site: String
-    pub native_identity: PackageIdentity
-    pub policy_mode: ReplacementPolicyMode
-    pub lock_record: SemanticRecord
+struct ActiveReplacement {
+    foreign_call_site: String
+    native_identity: PackageIdentity
+    policy_mode: ReplacementPolicyMode
+    lock_record: SemanticRecord
 }
 
-pub enum ImporterReplacementStatus {
+enum ImporterReplacementStatus {
     NoCandidate
     CandidateFound
     ProofFailed
@@ -338,12 +338,12 @@ pub enum ImporterReplacementStatus {
 }
 
 // One importer progress line about a package's native replacement.
-pub struct ImporterProgressFact {
-    pub foreign_identity: PackageIdentity
-    pub native_identity: PackageIdentity?
-    pub status: ImporterReplacementStatus
-    pub proof_digest: String
-    pub detail: String
+struct ImporterProgressFact {
+    foreign_identity: PackageIdentity
+    native_identity: PackageIdentity?
+    status: ImporterReplacementStatus
+    proof_digest: String
+    detail: String
 
     fn no_candidate(foreign_identity: PackageIdentity) -> ImporterProgressFact Never! {
         ImporterProgressFact{foreign_identity: foreign_identity, native_identity: None, status: ImporterReplacementStatus.NoCandidate, proof_digest: "", detail: "no native replacement candidate found"}

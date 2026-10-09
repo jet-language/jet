@@ -5,7 +5,7 @@
 
 // One producer record for a provider realization; the policy facts bind the
 // cache identity's policy fingerprint and platform.
-pub fn provider_producer_record(provider: String, immutable_source: String, source_digest: String, plan_facts: [String: String], toolchain_facts: String, identity: CacheIdentity, facts: [String: String]) -> ProducerRecord ProviderError! {
+fn provider_producer_record(provider: String, immutable_source: String, source_digest: String, plan_facts: [String: String], toolchain_facts: String, identity: CacheIdentity, facts: [String: String]) -> ProducerRecord ProviderError! {
     plan :: ProviderPlanFacts.from_facts(plan_facts) ?? return Err(ProviderError.CoreBuild(err.message()))
     record :: ProducerRecord.new(provider, immutable_source, source_digest, plan, toolchain_facts, "policy={identity.policy_fingerprint}\nplatform={identity.platform}", facts) ?? return Err(ProviderError.CoreBuild(err.message()))
     Ok(record)
@@ -16,7 +16,7 @@ pub fn provider_producer_record(provider: String, immutable_source: String, sour
 // additive typed facts with one provenance source. The two carrier fields are
 // left out of that native document so cache and lock refreshes never grow it
 // recursively.
-pub fn provider_refresh_provider_facts(producer: &ProducerRecord, reference: String) ProviderError! {
+fn provider_refresh_provider_facts(producer: &ProducerRecord, reference: String) ProviderError! {
     carriers :: [String]{PROVIDER_SHARED_FACTS, PROVIDER_SHARED_FACTS_DIGEST}
     native := producer
     native.facts = provider_without_keys(producer.facts, carriers)
@@ -47,7 +47,7 @@ pub fn provider_refresh_provider_facts(producer: &ProducerRecord, reference: Str
 
 // Rust `cache_identity`: the source fingerprint, the recipe's digest, the
 // runtime cache policy, and this host's platform.
-pub fn provider_plain_cache_identity(source: String, recipe: String, ctx: ProviderCtx) -[FS, Env]> CacheIdentity Never! {
+fn provider_plain_cache_identity(source: String, recipe: String, ctx: ProviderCtx) -[FS, Env]> CacheIdentity Never! {
     CacheIdentity{
         source_fingerprint: source,
         recipe_fingerprint: pkg_sha256_hex(recipe.bytes()),
@@ -58,7 +58,7 @@ pub fn provider_plain_cache_identity(source: String, recipe: String, ctx: Provid
 
 // A provider identity whose policy also binds the provider's current
 // authority, so a repointed authority never reuses an old cache record.
-pub fn provider_cache_identity(source: String, recipe: String, ctx: ProviderCtx, authority: String) -[FS, Env]> CacheIdentity Never! {
+fn provider_cache_identity(source: String, recipe: String, ctx: ProviderCtx, authority: String) -[FS, Env]> CacheIdentity Never! {
     policy :: "{env_cache_policy_fingerprint(ctx.offline)}\n{authority}"
     CacheIdentity{
         source_fingerprint: source,
@@ -74,7 +74,7 @@ pub fn provider_cache_identity(source: String, recipe: String, ctx: ProviderCtx,
 // identity records the required sandbox policy, not this machine's current
 // capability, so a trusted substitute built under a native backend stays
 // selectable; the actual backend is recorded in the producer receipt.
-pub fn provider_adapter_action_identity(plan: AdapterPlan, recipe: BuildRecipe, source_digest: String, platform: String, table: SourceTable) -> String Never! {
+fn provider_adapter_action_identity(plan: AdapterPlan, recipe: BuildRecipe, source_digest: String, platform: String, table: SourceTable) -> String Never! {
     if plan.recipe == {
         .Build(_) -> {
             identity :: recipe.build_identity_for_source_with_dependencies(plan.name, plan.source, source_digest, platform, provider_adapter_identity_inputs(plan, table))
@@ -87,7 +87,7 @@ pub fn provider_adapter_action_identity(plan: AdapterPlan, recipe: BuildRecipe, 
 // The exact package refs that provide build tools, sorted. The dependency list
 // is an authority input: changing a provider or source changes the hook
 // subject before any tool is realized.
-pub fn provider_adapter_dependency_refs(plan: AdapterPlan) -> [String] Never! {
+fn provider_adapter_dependency_refs(plan: AdapterPlan) -> [String] Never! {
     dependencies := [String]{}
     loop dependency in plan.deps -> &dependencies.push(envmodel_pkg_ref(dependency))
     &dependencies.sort()
@@ -97,21 +97,21 @@ pub fn provider_adapter_dependency_refs(plan: AdapterPlan) -> [String] Never! {
 // The dependency refs plus every declared source authority. A named source can
 // keep its spelling while its pinned upstream or provider changes; that is a
 // trust change even when the recipe and dependency refs do not move.
-pub fn provider_adapter_identity_inputs(plan: AdapterPlan, table: SourceTable) -> [String] Never! {
+fn provider_adapter_identity_inputs(plan: AdapterPlan, table: SourceTable) -> [String] Never! {
     inputs := provider_adapter_dependency_refs(plan)
     loop line in table.trust_lines() -> &inputs.push("authority:{line}")
     &inputs.sort()
     inputs
 }
 
-pub fn provider_adapter_cache_identity(source_digest: String, action_identity: String, ctx: ProviderCtx) -[FS, Env]> CacheIdentity Never! {
+fn provider_adapter_cache_identity(source_digest: String, action_identity: String, ctx: ProviderCtx) -[FS, Env]> CacheIdentity Never! {
     provider_plain_cache_identity(source_digest, "adapter-v1:{action_identity}", ctx)
 }
 
 // Derive the adapter cache identity without trusting an existing output.
 // Staging reads the declared source; the output path follows only from those
 // bytes and the normalized recipe.
-pub fn provider_adapter_cache_expectation(plan: AdapterPlan, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation ProviderError! {
+fn provider_adapter_cache_expectation(plan: AdapterPlan, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation ProviderError! {
     source_ref :: ProviderRef.classify(plan.source) ?? return Err(ProviderError.Adapter("adapter source `{plan.source}` is not a provider ref"))
     staged :: provider_stage_adapter_source(source_ref, ctx)
     recipe :: provider_adapter_recipe_to_build(plan.recipe)
@@ -136,7 +136,7 @@ fn provider_adapter_id_input(plan: AdapterPlan, source_hash: String, build_ident
 }
 
 // A locked provider authority must equal the current `authority.providers`.
-pub fn provider_ensure_locked_authority(provider: String, repository: String, locked: String, current: RegistryAuthority) ProviderError! {
+fn provider_ensure_locked_authority(provider: String, repository: String, locked: String, current: RegistryAuthority) ProviderError! {
     if repository != current.registry() || locked != current.provenance() {
         return Err(ProviderError.Registry{title: provider, reason: "locked provider authority does not match current authority.providers (locked repository `{repository}`, current `{current.registry()}`)"})
     }
@@ -145,14 +145,14 @@ pub fn provider_ensure_locked_authority(provider: String, repository: String, lo
 // The normalized Nix identity of a ref: its source authority, flake node,
 // source alias, and package query. `@jetpack` and the retired `@nixpkgs`
 // alias share one identity.
-pub struct NixIdentityParts {
-    pub source: String
-    pub node: String
-    pub alias: String
-    pub query: String
+struct NixIdentityParts {
+    source: String
+    node: String
+    alias: String
+    query: String
 }
 
-pub fn provider_nix_identity_parts(spec: RefSpec, table: SourceTable) -> NixIdentityParts Never! {
+fn provider_nix_identity_parts(spec: RefSpec, table: SourceTable) -> NixIdentityParts Never! {
     source :: if spec.source == {
         .Jetpack | .Nixpkgs -> REF_SOURCE_JETPACK
         .Named(name) -> table.upstream(name) ?? name
@@ -176,7 +176,7 @@ fn provider_normalize_nix_identity(value: String) -> String Never! {
 
 // The Nix cache identity: the provider identity bound to the normalized ref
 // identity and the fixed Nix build facts, on the realized platform.
-pub fn provider_nix_cache_identity(source: String, platform: String, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheIdentity Never! {
+fn provider_nix_cache_identity(source: String, platform: String, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheIdentity Never! {
     parts :: provider_nix_identity_parts(spec, table)
     authority :: "source={parts.source}\nnode={parts.node}\nalias={parts.alias}\nquery={parts.query}\nbuild-facts={provider_nix_build_facts_digest()}"
     identity := provider_cache_identity(source, PROVIDER_NIX_RECIPE_ID, ctx, authority)
@@ -184,7 +184,7 @@ pub fn provider_nix_cache_identity(source: String, platform: String, spec: RefSp
     identity
 }
 
-pub fn provider_nix_cache_key(identity: CacheIdentity) -> String Never! {
+fn provider_nix_cache_key(identity: CacheIdentity) -> String Never! {
     pkg_sha256_hex("nix-cache-key-v1\nsource={identity.source_fingerprint}\nrecipe={identity.recipe_fingerprint}\npolicy={identity.policy_fingerprint}\nplatform={identity.platform}".bytes())
 }
 
@@ -192,7 +192,7 @@ pub fn provider_nix_cache_key(identity: CacheIdentity) -> String Never! {
 // the flake selector; direct ecosystem roots keep their package selector. A
 // named source (D-JPK17) resolves through `table` to its upstream/pin, then
 // selects the package as a flake attr: `<upstream>#<package>`.
-pub fn provider_flake_ref(spec: RefSpec, table: SourceTable) -> String Never! {
+fn provider_flake_ref(spec: RefSpec, table: SourceTable) -> String Never! {
     if spec.source == {
         .Jetpack | .Nixpkgs -> "nixpkgs#{provider_nix_package_name(spec.package)}"
         .Github -> "github:{spec.package}"
@@ -223,12 +223,12 @@ fn provider_nix_package_name(package: String) -> String Never! {
 }
 
 // The fixture filename for a ref, e.g. `jetpack-fastfetch.json`.
-pub fn provider_fixture_name(spec: RefSpec) -> String Never! {
+fn provider_fixture_name(spec: RefSpec) -> String Never! {
     "{spec.source.label()}-{spec.package.replace("/", "_")}.json"
 }
 
 // The fixtures directory from an explicit flag or `JETPACK_FIXTURES`.
-pub fn provider_fixtures_from_env(explicit: String?) -[Env]> String? Never! {
+fn provider_fixtures_from_env(explicit: String?) -[Env]> String? Never! {
     if explicit != None -> return explicit
     sys.get("JETPACK_FIXTURES")
 }

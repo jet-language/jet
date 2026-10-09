@@ -507,7 +507,7 @@ fn render_jet(lib: &str, functions: &[String]) -> String {
         out.push_str(&format!("    fn {name}_table(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}_table\"\n"));
         out.push_str(&format!("    fn {name}_plot(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}_plot\"\n"));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\n#Error\npub enum RError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n"));
+    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\nstruct Session {{ value: Int }}\n#Error\nenum RError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n"));
     out.push_str(&crate::Bindgen::render_decode_response(
         "RError",
         crate::Bindgen::DecoderProtocol::StandardEnvelope,
@@ -517,15 +517,15 @@ fn render_jet(lib: &str, functions: &[String]) -> String {
     fn close(^self) { abi.close(self.value) }
 }
 
-pub fn close(^session: Session) { abi.close(session.value) }
+fn close(^session: Session) { abi.close(session.value) }
 
-pub fn open() -> Session RError! {
+fn open() -> Session RError! {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(RError.NotRunning)
     return Ok(Session{ value: handle })
 }
 
-pub fn cancel(session: Session) { abi.cancel(session.value) }
+fn cancel(session: Session) { abi.cancel(session.value) }
 
 "#,
     );

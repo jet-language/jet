@@ -512,9 +512,9 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         &format!("{}_close", surface.handle.group),
     );
     output.push_str(
-        "}\n\n#Error\npub enum PascalError {\n    InvalidHandle\n    Foreign\n    ResourceLimit\n}\n\n",
+        "}\n\n#Error\nenum PascalError {\n    InvalidHandle\n    Foreign\n    ResourceLimit\n}\n\n",
     );
-    output.push_str("pub struct ");
+    output.push_str("struct ");
     output.push_str(&ty);
     output.push_str(" {\n    value: Int\n}\n\n");
     output.push_str("fn error(code: Int) -> PascalError {\n");
@@ -523,7 +523,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
     output.push_str("    return PascalError.Foreign\n}\n\n");
 
     for routine in &surface.plain {
-        output.push_str("pub fn ");
+        output.push_str("fn ");
         output.push_str(&routine.name);
         params_jet(&mut output, &routine.params, 0);
         output.push_str(" -> ");
@@ -534,7 +534,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         output.push_str("\n}\n\n");
     }
 
-    output.push_str("pub fn ");
+    output.push_str("fn ");
     output.push_str(&surface.handle.ctor.name);
     params_jet(&mut output, &surface.handle.ctor.params, 0);
     output.push_str(" -> ");
@@ -549,7 +549,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
     output.push_str("{value: raw_handle})\n}\n\n");
 
     for routine in &surface.handle.methods {
-        output.push_str("pub fn ");
+        output.push_str("fn ");
         output.push_str(&routine.name);
         output.push_str("(handle: ");
         output.push_str(&ty);
@@ -569,7 +569,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         );
     }
 
-    output.push_str("pub fn close(^handle: ");
+    output.push_str("fn close(^handle: ");
     output.push_str(&ty);
     output.push_str(") {}\n\nimpl ");
     output.push_str(&ty);

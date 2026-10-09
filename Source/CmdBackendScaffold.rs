@@ -1911,7 +1911,7 @@ fn {slug}_worker() {{
     job.enqueue("{name} job")
 }}
 
-pub fn run() {{
+fn run() {{
     tree := service.tree("{slug}")
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     endpoint :: tree.worker("{slug}", {slug}_worker, capacity: 1) ?? panic("worker")
@@ -1936,16 +1936,16 @@ fn job_source(name: &str, slug: &str) -> String {
         r#"use core.jobs as jobs
 
 #Codable
-pub struct {payload} {{
+struct {payload} {{
     message: String
 }}
 
 #Job
-pub fn {slug}_job(payload: {payload}) {{
+fn {slug}_job(payload: {payload}) {{
     print(payload.message)
 }}
 
-pub fn enqueue(message: String) {{
+fn enqueue(message: String) {{
     queue := jobs.queue() ?? panic("queue")
     payload :: {payload}{{message: message}}
     receipt :: queue.enqueue({slug}_job, payload) ?? panic("enqueue")
@@ -1979,7 +1979,7 @@ fn model_name(name: &str) -> String {
 }
 
 fn model_source(model: &str) -> String {
-    format!("#Codable\npub struct {model} {{\n    pub id: Int\n}}\n")
+    format!("#Codable\nstruct {model} {{\n    id: Int\n}}\n")
 }
 
 fn test_source(name: &str, model: &str) -> String {

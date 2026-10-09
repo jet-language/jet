@@ -28,12 +28,12 @@ pub fn port(host: String, port: Int) -[Net]> WatchHandle Never! {
 pub fn set() -> WatchSet Never! { core.watcher.__set() }
 
 
-pub fn add(set: WatchSet, handle: WatchHandle) -[IO]> WatchSet Never! {
+fn add(set: WatchSet, handle: WatchHandle) -[IO]> WatchSet Never! {
     set.add(handle)
     set.copy()
 }
 
-pub fn remove(set: WatchSet, target: String) -> WatchSet IOError! {
+fn remove(set: WatchSet, target: String) -> WatchSet IOError! {
     if target.len() == 0 {
         return Err(IOError.InvalidInput(IOContext{
             operation: .Resolve,
@@ -50,7 +50,7 @@ pub fn remove(set: WatchSet, target: String) -> WatchSet IOError! {
     }))
 }
 
-pub fn contains(set: WatchSet, target: String) -> Bool IOError! {
+fn contains(set: WatchSet, target: String) -> Bool IOError! {
     if target.len() == 0 -> return Ok(false)
     Err(IOError.Other(IOContext{
         operation: .Resolve,
@@ -60,26 +60,26 @@ pub fn contains(set: WatchSet, target: String) -> Bool IOError! {
     }))
 }
 
-pub fn len(set: WatchSet) -> Int Never! {
+fn len(set: WatchSet) -> Int Never! {
     summary_count(set.summary())
 }
 
-pub fn kind(handle: WatchHandle) -> String Never! {
+fn kind(handle: WatchHandle) -> String Never! {
     summary_kind(handle.summary())
 }
 
-pub fn target(handle: WatchHandle) -> String Never! {
+fn target(handle: WatchHandle) -> String Never! {
     summary_target(handle.summary())
 }
 
 
-pub enum WatchDomain {
+enum WatchDomain {
     File
     Process
     Port
 }
 
-pub enum WatchEventKind {
+enum WatchEventKind {
     Created
     Modified
     Removed
@@ -174,7 +174,7 @@ pub fn recursive(path: String) -[FS]> WatchHandle IOError! {
     files(path)
 }
 
-pub fn debounce(handle: WatchHandle, ms: Int) -> WatchHandle IOError! {
+fn debounce(handle: WatchHandle, ms: Int) -> WatchHandle IOError! {
     if ms < 0 {
         return Err(IOError.InvalidInput(IOContext{
             operation: .Resolve,
@@ -191,17 +191,17 @@ pub fn debounce(handle: WatchHandle, ms: Int) -> WatchHandle IOError! {
     }))
 }
 
-pub fn poll(handle: WatchHandle) -[IO]> [WatchEvent] Never! { handle.poll() }
+fn poll(handle: WatchHandle) -[IO]> [WatchEvent] Never! { handle.poll() }
 
-pub fn events(handle: WatchHandle) -[IO]> [WatchEvent] Never! { handle.events() }
+fn events(handle: WatchHandle) -[IO]> [WatchEvent] Never! { handle.events() }
 
-pub fn cancel(handle: WatchHandle) Never! -[IO]> { handle.cancel() }
+fn cancel(handle: WatchHandle) Never! -[IO]> { handle.cancel() }
 
-pub fn is_active(handle: WatchHandle) -> Bool Never! { handle.is_active() }
+fn is_active(handle: WatchHandle) -> Bool Never! { handle.is_active() }
 
-pub fn summary(handle: WatchHandle) -> String Never! { handle.summary() }
+fn summary(handle: WatchHandle) -> String Never! { handle.summary() }
 
-pub fn drain(set: WatchSet) -[IO]> [WatchEvent] Never! { set.poll() }
+fn drain(set: WatchSet) -[IO]> [WatchEvent] Never! { set.poll() }
 
 fn summary_kind(text: String) -> String {
     if has_prefix(text, "watch file ") -> return "file"

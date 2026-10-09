@@ -19,7 +19,7 @@ enum ProfileField {
 }
 
 // A `profile.<name>: Profile{ … }` contribution written as an expression.
-pub fn envmodel_evaluate_package_profile_expr(name: String, value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
+fn envmodel_evaluate_package_profile_expr(name: String, value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
     if value == {
         .StructLit(type_name, _, _, _, fields, _, _) -> {
             if type_name != "" && type_name != TYPE_PROFILE -> return Err(envmodel_wrong_namespace_type(TYPE_PROFILE, type_name, expr_span(value)))
@@ -31,7 +31,7 @@ pub fn envmodel_evaluate_package_profile_expr(name: String, value: Expr, src: St
     }
 }
 
-pub fn envmodel_evaluate_package_profile_fields(name: String, fields: [NamedExpr], src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
+fn envmodel_evaluate_package_profile_fields(name: String, fields: [NamedExpr], src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
     seen := [String]{}
     loop field in fields {
         if ProfileField.parse(field.name) == None {

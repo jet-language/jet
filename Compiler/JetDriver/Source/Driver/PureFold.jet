@@ -81,7 +81,7 @@ struct JetDriverPureFoldCandidates {
 // program through one machine that evaluates every candidate (never a copy
 // per evaluation), drops the synthetics again, and only then writes the
 // folded constants, so every evaluation of a round sees the same program.
-pub fn jet_driver_fold_pure_calls(program: ^MIRProgram) -> MIRProgram {
+fn jet_driver_fold_pure_calls(program: ^MIRProgram) -> MIRProgram {
     declined := [String:Bool]{}
     folded := jet_driver_pure_fold_rounds(^program, &declined, 0)
     jet_driver_pure_fold_resolve_joins(&folded)

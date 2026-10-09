@@ -179,7 +179,7 @@ fn core_api_syntax_is_taught_by_reference_editor_and_diagnostic_surfaces() {
         "Stream<Int>",
         "yield i",
         "delay: Int",
-        "pub policy audit",
+        "policy audit",
         "wrap(call)",
         "#Policy(",
     ] {

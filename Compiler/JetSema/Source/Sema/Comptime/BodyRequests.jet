@@ -8,11 +8,11 @@ use jet_foundation.[
     Type,
 ]
 
-pub fn sema_comptime_body_destination_key(function_key: String, source_span: Span, site_span: Span) -> String Never! {
+fn sema_comptime_body_destination_key(function_key: String, source_span: Span, site_span: Span) -> String Never! {
     "{function_key}::body-comptime::{site_span.start}:{site_span.end}::{source_span.start}:{source_span.end}"
 }
 
-pub fn sema_comptime_body_source_key(module_identity: String, function_key: String, source_span: Span, site_span: Span) -> String Never! {
+fn sema_comptime_body_source_key(module_identity: String, function_key: String, source_span: Span, site_span: Span) -> String Never! {
     "{module_identity}::{sema_comptime_body_destination_key(function_key, source_span, site_span)}"
 }
 
@@ -273,7 +273,7 @@ pub fn sema_comptime_body_value_find(
     Val(~permit.value.values[row])
 }
 
-pub fn sema_comptime_body_item_source(source: SemaComptimeBodySource) -> SemaComptimeItemSource Never! {
+fn sema_comptime_body_item_source(source: SemaComptimeBodySource) -> SemaComptimeItemSource Never! {
     SemaComptimeItemSource{
         module_identity: source.module_identity,
         key: source.key,

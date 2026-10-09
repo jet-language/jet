@@ -11,20 +11,20 @@ FORTRAN_BIND_SCHEMA :: prep { "jet-fortran-bind-v1" }
 FORTRAN_TOOL_ACTION :: prep { "rejected the ISO_C_BINDING source" }
 FORTRAN_COLUMN_MAJOR :: prep { "column-major" }
 
-pub struct FortranBindResult {
-    pub source: String
-    pub bound: [String]
-    pub archive: String
-    pub layouts: [FortranArrayLayoutFact]
-    pub provenance: String
+struct FortranBindResult {
+    source: String
+    bound: [String]
+    archive: String
+    layouts: [FortranArrayLayoutFact]
+    provenance: String
 }
 
 // One fixed-shape array parameter's extents and storage order.
-pub struct FortranArrayLayoutFact {
-    pub routine: String
-    pub parameter: String
-    pub extents: [Int]
-    pub order: String
+struct FortranArrayLayoutFact {
+    routine: String
+    parameter: String
+    extents: [Int]
+    order: String
 }
 
 enum FortranScalar {
@@ -102,7 +102,7 @@ struct FortranDeclaration {
 
 // Discover supported routines, generate the Jet wrapper, compile the Fortran
 // object, and archive it beside the generated cache.
-pub fn pkg_fortran_bind(source_path: String, source: String, lib: String, cache_dir: String) -[FS, Env, Exec, Time.Wait]> FortranBindResult ForeignBindError! {
+fn pkg_fortran_bind(source_path: String, source: String, lib: String, cache_dir: String) -[FS, Env, Exec, Time.Wait]> FortranBindResult ForeignBindError! {
     if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
     routines :: pkg_fortran_parse_routines(source)
     has_arrays := false
@@ -384,7 +384,7 @@ fn pkg_fortran_render(lib: String, routines: [FortranRoutine]) -> String Never! 
         // D-PANICROOT1=A: the wrapper's column-major extent guard is a local
         // stop path, not a grantable positive effect; the wrapper publishes
         // only its FFI leaf.
-        out = "{out}pub fn {routine.jet_name}{pkg_fortran_params(routine.params)} -[FFI.Fortran]> {routine.result.jet()} {{\n"
+        out = "{out}fn {routine.jet_name}{pkg_fortran_params(routine.params)} -[FFI.Fortran]> {routine.result.jet()} {{\n"
         loop entry in routine.params {
             if entry.param.is_array() {
                 len :: entry.param.flat_len()

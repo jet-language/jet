@@ -286,7 +286,7 @@ total builtins such as `add_wrap` need no block.
 Before (`Core/mem/mem.jet:42-46` and `Prelude/Core.jet:255`):
 
 ```jet
-pub fn volatile_read<T>(pointer: *T) -> T Never! {
+fn volatile_read<T>(pointer: *T) -> T Never! {
     #Unsafe("volatile access requires an audited typed pointer") {
         return core.mem.volatile_read<T>(pointer)   // a routing row, not this function
     }
@@ -300,11 +300,11 @@ After:
 ```jet
 // Core/builtins/memory.jet, module jet_builtins: no body, the compiler emits one load
 #Unsafe("reads memory the type system cannot see")
-pub fn volatile_load<T>(pointer: *T) -> T Never!
+fn volatile_load<T>(pointer: *T) -> T Never!
 
 // Core/mem/mem.jet
 use jet_builtins as builtin
-pub fn volatile_read<T>(pointer: *T) -> T Never! {
+fn volatile_read<T>(pointer: *T) -> T Never! {
     #Unsafe("volatile access requires an audited typed pointer") {
         return builtin.volatile_load<T>(pointer)
     }
@@ -315,7 +315,7 @@ A builtin with a plain meaning:
 
 ```jet
 // module jet_builtins: one machine add; the body is the meaning
-pub fn add_wrap<prep n: Int>(a: Bits<n>, b: Bits<n>) -> Bits<n> Never! {
+fn add_wrap<prep n: Int>(a: Bits<n>, b: Bits<n>) -> Bits<n> Never! {
     Bits<n>.from_int((a.to_int() + b.to_int()) %% (1 << n))
 }
 ```
@@ -397,11 +397,11 @@ After (`Core/math/numeric.jet`, shape from D-TRAIT-OVERLOAD1):
 use jet_builtins as builtin
 
 #builtin.Role(.Add)
-pub trait Add {
+trait Add {
     fn add(self, rhs: Self) -> Self
 }
 
-pub trait Numeric: [Add, Sub, Mul, Comparable] {
+trait Numeric: [Add, Sub, Mul, Comparable] {
     fn zero() -> Self
     fn one() -> Self
 }
@@ -473,8 +473,8 @@ widths would give two spellings for one meaning (`Unsigned<7>` and
 // Core/math/fixed.jet (illustrative)
 use jet_builtins as builtin
 
-pub struct Unsigned<prep bits: Int> { raw: builtin.Bits<bits> }
-pub struct Signed<prep bits: Int> { raw: builtin.Bits<bits> }
+struct Unsigned<prep bits: Int> { raw: builtin.Bits<bits> }
+struct Signed<prep bits: Int> { raw: builtin.Bits<bits> }
 
 alias U8 :: Unsigned<8>
 alias U16 :: Unsigned<16>
@@ -497,7 +497,7 @@ impl Unsigned<prep bits: Int>.Add {
 Decimal family:
 
 ```jet
-pub struct IEEE<prep exponent: Int, prep fraction: Int> { raw: builtin.Float<exponent, fraction> }
+struct IEEE<prep exponent: Int, prep fraction: Int> { raw: builtin.Float<exponent, fraction> }
 alias F16 :: IEEE<5, 10>
 alias BF16 :: IEEE<8, 7>
 alias F32 :: IEEE<8, 23>
@@ -597,7 +597,7 @@ effect is permission while a feature is machine provision
 
 ```jet
 #Multiversion(x86_64, x86_64_v4)
-pub fn dot(a: [F32], b: [F32]) -> F32 {
+fn dot(a: [F32], b: [F32]) -> F32 {
     prep if $build.cpu.has(.AVX512F) { return dot16(a, b) }
     plain_dot(a, b)
 }
@@ -622,7 +622,7 @@ separate marker row. A derivation-only capability with no trait, such as
 D-MARKER-GROUP1).
 
 ```jet
-pub trait Equatable {
+trait Equatable {
     fn equal(self, rhs: Self) -> Bool
     derive {
         fn equal(self, rhs: Self) -> Bool {

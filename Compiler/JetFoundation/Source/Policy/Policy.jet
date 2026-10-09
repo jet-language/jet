@@ -5,7 +5,7 @@
 // owned by Jetpack/PackageModel/Source/Merge/FactLaw.jet, not repeated here.
 
 // Rust `PolicyKey::name`.
-pub fn policy_key_name(key: PolicyKey) -> String Never! {
+fn policy_key_name(key: PolicyKey) -> String Never! {
     if key == {
         .Unsafe -> "unsafe"
         .Impure -> "impure"
@@ -29,7 +29,7 @@ pub fn policy_key_name(key: PolicyKey) -> String Never! {
 }
 
 // Rust `PolicyKey::parse`.
-pub fn policy_key_parse(name: String) -> PolicyKey? Never! {
+fn policy_key_parse(name: String) -> PolicyKey? Never! {
     if name == {
         "unsafe" -> Val(PolicyKey.Unsafe)
         "impure" -> Val(PolicyKey.Impure)
@@ -54,7 +54,7 @@ pub fn policy_key_parse(name: String) -> PolicyKey? Never! {
 }
 
 // Rust `PolicyKey::is_audited_gate`.
-pub fn policy_key_is_audited_gate(key: PolicyKey) -> Bool Never! {
+fn policy_key_is_audited_gate(key: PolicyKey) -> Bool Never! {
     if key == {
         .ScopedGC | .ExplicitUnits | .Copies | .Sentries -> false
         else -> true
@@ -62,7 +62,7 @@ pub fn policy_key_is_audited_gate(key: PolicyKey) -> Bool Never! {
 }
 
 // Rust `PolicyValue::display`.
-pub fn policy_value_display(value: PolicyValue) -> String Never! {
+fn policy_value_display(value: PolicyValue) -> String Never! {
     if value == {
         .Enabled -> "true"
         .Limit(limit) -> "{limit}"
@@ -82,7 +82,7 @@ pub fn policy_value_display(value: PolicyValue) -> String Never! {
 }
 
 // Rust `Authority::Scope::name`.
-pub fn policy_scope_name(scope: PolicyScope) -> String Never! {
+fn policy_scope_name(scope: PolicyScope) -> String Never! {
     if scope == {
         .Organization -> "organization"
         .Package -> "package"
@@ -93,7 +93,7 @@ pub fn policy_scope_name(scope: PolicyScope) -> String Never! {
 }
 
 // Rust `Authority::Scope::rank`: the lexical ladder, outer to inner.
-pub fn policy_scope_rank(scope: PolicyScope) -> Int Never! {
+fn policy_scope_rank(scope: PolicyScope) -> Int Never! {
     if scope == {
         .Organization -> 0
         .Package -> 1
@@ -103,19 +103,19 @@ pub fn policy_scope_rank(scope: PolicyScope) -> Int Never! {
     }
 }
 
-pub enum PolicyCombine { Tighten Override Merge }
+enum PolicyCombine { Tighten Override Merge }
 
-pub struct PolicyRule {
-    pub key: PolicyKey
-    pub scopes: [PolicyScope]
-    pub combine: PolicyCombine
+struct PolicyRule {
+    key: PolicyKey
+    scopes: [PolicyScope]
+    combine: PolicyCombine
 }
 
 POLICY_PACKAGE_SCOPES :: prep { [PolicyScope]{PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
 POLICY_ALL_SCOPES :: prep { [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
 
 // Rust `POLICY_RULES`.
-pub POLICY_RULES :: prep { [PolicyRule]{
+POLICY_RULES :: prep { [PolicyRule]{
     PolicyRule{key: PolicyKey.Unsafe, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     PolicyRule{key: PolicyKey.Impure, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     PolicyRule{key: PolicyKey.Nondeterministic, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
@@ -137,22 +137,22 @@ pub POLICY_RULES :: prep { [PolicyRule]{
 } }
 
 // Rust `rule`.
-pub fn policy_rule(key: PolicyKey) -> PolicyRule Never! {
+fn policy_rule(key: PolicyKey) -> PolicyRule Never! {
     loop row in POLICY_RULES {
         if row.key == key -> return row
     }
     panic("registered policy key")
 }
 
-pub struct EffectivePolicy {
-    pub key: PolicyKey
-    pub value: PolicyValue
+struct EffectivePolicy {
+    key: PolicyKey
+    value: PolicyValue
     // Outer-to-inner declaration chain, including overridden declarations.
-    pub provenance: [PolicyDeclaration]
+    provenance: [PolicyDeclaration]
 }
 
 #Error
-pub enum PolicyError {
+enum PolicyError {
     ProhibitedScope(key: PolicyKey, scope: PolicyScope, span: Span)
     Conflict(key: PolicyKey, scope: PolicyScope, first: Span, second: Span)
     Widening(key: PolicyKey, outer: PolicyValue, inner: PolicyValue, span: Span)
@@ -229,7 +229,7 @@ fn policy_span_debug_text(span: Span) -> String Never! {
 // Rust `resolve_policy` (the `ResolutionKey for PolicyKey` arm of `resolve`):
 // declarations resolve outer-to-inner into one effective value, and every
 // shadowed or tightened declaration stays in the provenance chain.
-pub fn policy_resolve(key: PolicyKey, declarations: [PolicyDeclaration]) -> EffectivePolicy? PolicyError! {
+fn policy_resolve(key: PolicyKey, declarations: [PolicyDeclaration]) -> EffectivePolicy? PolicyError! {
     // Rust sorts by scope rank with a stable sort: written order within a rung.
     ordered := [PolicyDeclaration]{}
     loop scope in POLICY_ALL_SCOPES {
@@ -282,7 +282,7 @@ fn policy_merge(outer: PolicyValue, inner: PolicyValue) -> PolicyValue? Never! {
 }
 
 // Rust `gate_widens`, arm for arm (including its non-reflexive cases).
-pub fn policy_gate_widens(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
+fn policy_gate_widens(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
     if outer == PolicyValue.Forbid && inner == PolicyValue.Allow -> return true
     if inner == PolicyValue.Allow -> return false
     if outer == PolicyValue.Forbid -> return inner != PolicyValue.Forbid
@@ -303,14 +303,14 @@ pub fn policy_gate_widens(outer: PolicyValue, inner: PolicyValue) -> Bool Never!
 
 // Rust `parse_value` returns the refusal as a `String`.
 #Error
-pub struct PolicyValueError {
-    pub detail: String
+struct PolicyValueError {
+    detail: String
 
     fn message(self) -> String Never! { self.detail }
 }
 
 // Rust `parse_value`: one package-policy value for `key`.
-pub fn policy_parse_value(key: PolicyKey, raw: String) -> PolicyValue PolicyValueError! {
+fn policy_parse_value(key: PolicyKey, raw: String) -> PolicyValue PolicyValueError! {
     value :: raw.trim()
     if (key == PolicyKey.ScopedGC || key == PolicyKey.ExplicitUnits) && value == "true" -> return Ok(PolicyValue.Enabled)
     if key == PolicyKey.Copies {

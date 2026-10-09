@@ -8,10 +8,10 @@
 ENV_ENTRY_RECEIPT_HEADER :: prep { "jetpack-env-entry-v4" }
 ENV_ENTRY_RECEIPT_NAME :: prep { "env-entry" }
 
-pub struct EnvEntryReceipt {
-    pub stamp: String
-    pub secret_identity: String
-    pub packages: [EnvironmentSelection]
+struct EnvEntryReceipt {
+    stamp: String
+    secret_identity: String
+    packages: [EnvironmentSelection]
 }
 
 // The canonical receipt path under the project's managed folder.
@@ -193,7 +193,7 @@ fn cli_env_entry_matches_plan(receipt: EnvEntryReceipt, plan: RunPlan) -> Bool N
 }
 
 // `env ready in 1.8s (cache hit 100 percent)`: seconds to one decimal.
-pub fn cli_format_env_ready(elapsed: time.Duration, cache_hit_percent: Int) -> String Never! {
+fn cli_format_env_ready(elapsed: time.Duration, cache_hit_percent: Int) -> String Never! {
     tenths :: (elapsed.ns + 50000000) /% 100000000
     "env ready in {tenths /% 10}.{tenths %% 10}s (cache hit {cache_hit_percent} percent)"
 }
@@ -205,7 +205,7 @@ fn cli_package_label(name: String, version: String) -> String Never! {
 
 // The `what changed:` banner between two `(name, version)` sets: the first
 // update, addition, and removal, each with its count when more than one.
-pub fn cli_format_env_changes(previous: [(name: String, version: String)], current: [(name: String, version: String)]) -> String? Never! {
+fn cli_format_env_changes(previous: [(name: String, version: String)], current: [(name: String, version: String)]) -> String? Never! {
     before := [String: String]{}
     loop pair in previous -> before[pair.name] = pair.version
     after := [String: String]{}

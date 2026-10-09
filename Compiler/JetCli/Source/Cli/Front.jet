@@ -26,7 +26,7 @@ use jet_foundation.[
     policy_key_parse,
 ]
 
-pub enum JetCLIPlan {
+enum JetCLIPlan {
     // The command finished: write these bytes and exit with this status.
     Done(output: JetDriverVerbOutput)
     // A command refused before it ran (main.rs `emit_cli_report`): one
@@ -141,15 +141,15 @@ pub enum JetCLIPlan {
 }
 
 // One native `jet fmt` invocation (Source/main.rs `"fmt"` -> `run_fmt`).
-pub struct JetCLIFmtRequest {
+struct JetCLIFmtRequest {
     // Explicit file/directory targets; empty formats the project root.
-    pub paths: [String]
+    paths: [String]
     // `-`: format stdin to stdout under the `stdin_path` label.
-    pub stdin_mode: Bool
-    pub stdin_path: String?
+    stdin_mode: Bool
+    stdin_path: String?
     // `--check`/`--dry-run` report instead of writing; `diff` adds unified diffs.
-    pub check: Bool
-    pub diff: Bool
+    check: Bool
+    diff: Bool
     // `--changed`: only the VCS-changed `.jet` files (git).
     pub changed: Bool
     // `--explicit-copies`: write `.copy()` at each implicit copy site sema reports.
@@ -158,7 +158,7 @@ pub struct JetCLIFmtRequest {
     pub color: Bool
     pub quiet: Bool
     // `--json`: the Rust status envelopes (`--check` clean/dirty/diff, preflight errors).
-    pub json: Bool{false}
+    json: Bool{false}
 }
 
 // The `jet test` options the Jet host carries out (Source/CmdCompile.rs
@@ -224,7 +224,7 @@ fn jet_cli_why(code: String) -> String Never! {
 }
 
 // One spanless CLI diagnostic, rendered as the host prints it.
-pub fn jet_cli_report(code: String, what: String, why: String, fix: String, color: Bool) -> String Never! {
+fn jet_cli_report(code: String, what: String, why: String, fix: String, color: Bool) -> String Never! {
     diagnostic_render_all("", "", [Diagnostic]{diagnostic_from_registry(code, None, what, why, fix)}, color)
 }
 
@@ -856,7 +856,7 @@ fn jet_cli_has_doctests(source: String) -> Bool Never! {
 // command override (D-CMD-OVERRIDE1=C). Top-level declarations start their line.
 fn jet_cli_declares_test_override(source: String) -> Bool Never! {
     loop line in source.split("\n") {
-        if line.starts_with("fn test(") || line.starts_with("pub fn test(") || line.starts_with("fn test ") || line.starts_with("pub fn test ") -> return true
+        if line.starts_with("fn test(") || line.starts_with("fn test ") -> return true
     }
     false
 }

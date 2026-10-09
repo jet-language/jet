@@ -316,7 +316,6 @@ module.exports = grammar({
     function_def: ($) =>
       seq(
         repeat(choice($._marker, $._lower_marker)),
-        optional("pub"),
         "fn",
         field("name", choice($.identifier, $.type_identifier, $.compiler_fact)),
         optional($.type_params),
@@ -335,7 +334,6 @@ module.exports = grammar({
     struct_def: ($) =>
       seq(
         repeat(choice($._marker, $._lower_marker)),
-        optional("pub"),
         "struct",
         field("name", $.type_identifier),
         optional($.type_params),
@@ -373,7 +371,7 @@ module.exports = grammar({
     struct_field: ($) =>
       seq(
         repeat($._marker),
-        optional("pub"),
+        optional("priv"),
         optional(seq("ref", optional(seq("[", $.identifier, "]")))),
         field("name", $.identifier),
         ":",
@@ -427,7 +425,6 @@ module.exports = grammar({
     enum_def: ($) =>
       seq(
         repeat(choice($._marker, $._lower_marker)),
-        optional("pub"),
         "enum",
         field("name", $.type_identifier),
         optional($.type_params),
@@ -457,7 +454,6 @@ module.exports = grammar({
     // A declaration always has a non-empty deny policy; `from` is optional.
     tag_def: ($) =>
       seq(
-        optional("pub"),
         "tag",
         field("name", $.type_identifier),
         "{",
@@ -527,7 +523,6 @@ module.exports = grammar({
     // ── Trait definition (S28) ─────────────────────────────────────────────
     trait_def: ($) =>
       seq(
-        optional("pub"),
         "trait",
         field("name", $.type_identifier),
         optional($.type_params),
@@ -568,7 +563,6 @@ module.exports = grammar({
     // D-TYPEALIAS1 / D-ALIAS-OP1=B: `alias Name<T> :: Target`.
     alias_def: ($) =>
       seq(
-        optional(choice("pub", seq("pub", "(", "package", ")"))),
         "alias",
         field("name", $.type_identifier),
         optional($.type_params),

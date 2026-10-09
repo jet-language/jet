@@ -985,7 +985,6 @@ fn incremental_module_interface(module: &crate::AST::LoadedModule) -> Vec<u8> {
         &module.alias,
         &module.imports,
         module.web_target_ceiling,
-        module.pub_file,
         module.no_prelude,
         &module.default_target,
         &module.html_path,
@@ -2339,7 +2338,6 @@ mod structure_tests {
                 script_body: std::mem::take(&mut program.script_body),
                 block_spans: std::mem::take(&mut program.block_spans),
                 web_target_ceiling: program.web_target_ceiling,
-                pub_file: program.pub_file,
                 no_prelude: program.no_prelude,
                 default_target: program.default_target,
                 html_path: program.html_path,
@@ -2571,7 +2569,7 @@ mod structure_tests {
         );
         let import_span = bundle.modules[0].imports[0].span;
         let mut dependency =
-            incremental_bundle("pub #UnitFamily(Inventory, dimension, base: item) { item }\n")
+            incremental_bundle("#UnitFamily(Inventory, dimension, base: item) { item }\n")
                 .modules
                 .remove(0);
         dependency.path = "deps/dep.jet".into();
@@ -2605,9 +2603,9 @@ mod structure_tests {
     #[test]
     fn incremental_dependencies_include_nested_module_imports() {
         let mut bundle = incremental_bundle(
-            "module api {\n    use dep.[value]\n    pub fn call() -> Int { return value() }\n}\n",
+            "module api {\n    use dep.[value]\n    fn call() -> Int { return value() }\n}\n",
         );
-        let mut dependency = incremental_bundle("pub fn value() -> Int { return 1 }\n")
+        let mut dependency = incremental_bundle("fn value() -> Int { return 1 }\n")
             .modules
             .remove(0);
         dependency.path = "dep.jet".into();
@@ -2623,7 +2621,7 @@ mod structure_tests {
     fn incremental_dependencies_match_directory_module_imports() {
         let mut bundle =
             incremental_bundle("use archive\nfn run() -> Int { return archive.value() }\n");
-        let mut dependency = incremental_bundle("pub fn value() -> Int { return 1 }\n")
+        let mut dependency = incremental_bundle("fn value() -> Int { return 1 }\n")
             .modules
             .remove(0);
         dependency.path = "archive/run.jet".into();

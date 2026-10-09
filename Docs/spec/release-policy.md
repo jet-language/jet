@@ -54,9 +54,10 @@ machine-visible statement of which editions a toolchain accepts.
 
 ## Deprecation and migration
 
-The public lifecycle is one ladder: `_name` is internal, `pub _name` is
-soft-public, `pub` is stable, and `#Deprecated` is the retiring rung for a
-stable public item. A named removal edition is the final delta.
+The public lifecycle is one ladder: `_name` is soft-public, a plain name is
+stable, and `#Deprecated` is the retiring rung for a stable public item; a
+`priv module` keeps internals out of the ladder (D-VIS-MODULE1). A named
+removal edition is the final delta.
 
 1. Mark a public item with
    `#Deprecated(since: "1.2", use: "parse", removed_in: "2028")`. `since:`

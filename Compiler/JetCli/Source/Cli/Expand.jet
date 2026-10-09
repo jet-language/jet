@@ -4,17 +4,17 @@ use jet_driver.[JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ER
 use jet_foundation.[Diagnostic, diagnostic_from_registry, Func, Item, Span, diagnostic_column_at, diagnostic_line_at, type_name]
 use jet_foundation.[ViewProvenanceEntry, ViewSourcePath, failure_contract_effective_type, failure_contract_source]
 
-pub struct JetCLIExpandFact {
-    pub source: String
-    pub offset: Int
-    pub name: String
-    pub text: String
-    pub value: JetCLIStatusValue
+struct JetCLIExpandFact {
+    source: String
+    offset: Int
+    name: String
+    text: String
+    value: JetCLIStatusValue
 }
 
-pub struct JetCLIExpandLensSpec {
-    pub name: String
-    pub summary: String
+struct JetCLIExpandLensSpec {
+    name: String
+    summary: String
 }
 
 JET_CLI_EXPAND_LENSES :: [JetCLIExpandLensSpec]{
@@ -122,7 +122,7 @@ fn jet_cli_expand_inline_items(items: [Item], owner: String?, unit: JetDriverDoc
     }
 }
 
-pub fn jet_cli_expand_inline(modules: [JetDriverDocModule], json: Bool) -> [JetCLIExpandFact] Never! {
+fn jet_cli_expand_inline(modules: [JetDriverDocModule], json: Bool) -> [JetCLIExpandFact] Never! {
     output := [JetCLIExpandFact]{}
     loop unit in modules {
         rows := [JetCLIExpandFact]{}
@@ -142,7 +142,7 @@ pub fn jet_cli_expand_inline(modules: [JetDriverDocModule], json: Bool) -> [JetC
     output
 }
 
-pub fn jet_cli_expand_effects(index: JetCLISemIndex) -> [JetCLIExpandFact] Never! {
+fn jet_cli_expand_effects(index: JetCLISemIndex) -> [JetCLIExpandFact] Never! {
     output := [JetCLIExpandFact]{}
     loop row in index.effects {
         provenance :: loop proof in row.provenance -> {
@@ -173,7 +173,7 @@ pub fn jet_cli_expand_effects(index: JetCLISemIndex) -> [JetCLIExpandFact] Never
     output
 }
 
-pub fn jet_cli_expand_derive(index: JetCLISemIndex, modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
+fn jet_cli_expand_derive(index: JetCLISemIndex, modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
     output := [JetCLIExpandFact]{}
     loop definition in index.definitions {
         if definition.derives.len() == 0 -> next
@@ -210,7 +210,7 @@ fn jet_cli_expand_template(unit: JetDriverDocModule, span: Span, kind: String, n
     JetCLIExpandFact{source: unit.path, offset: span.start, name: "{kind}:{name}", text: "{unit.path}:{line}:{column}   {text}   [from closed comptime prep loop]", value: value}
 }
 
-pub fn jet_cli_expand_templates(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
+fn jet_cli_expand_templates(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
     output := [JetCLIExpandFact]{}
     loop unit in modules {
         has_loop := false
@@ -263,7 +263,7 @@ pub fn jet_cli_expand_templates(modules: [JetDriverDocModule]) -> [JetCLIExpandF
 
 // Shared presentation for completed lenses. The host supplies the canonical
 // check record, also used by the sibling inspect commands.
-pub fn jet_cli_expand_text(index: JetCLISemIndex, lens: JetCLIExpandLensSpec, facts: [JetCLIExpandFact], check_text: String) -> String Never! {
+fn jet_cli_expand_text(index: JetCLISemIndex, lens: JetCLIExpandLensSpec, facts: [JetCLIExpandFact], check_text: String) -> String Never! {
     plural :: if facts.len() == 1 -> "" else -> "s"
     text := "effect roles\n  {jet_cli_effect_projection_line(index.effect_projection)}\n{lens.name} — {lens.summary} ({facts.len()} fact{plural})\n"
     if facts.len() == 0 -> text = "{text}  (none in this program)\n"
@@ -271,7 +271,7 @@ pub fn jet_cli_expand_text(index: JetCLISemIndex, lens: JetCLIExpandLensSpec, fa
     "{text}{check_text}"
 }
 
-pub fn jet_cli_expand_json(index: JetCLISemIndex, selection: String, lenses: [JetCLIStatusValue], check: JetCLIStatusValue) -> String {
+fn jet_cli_expand_json(index: JetCLISemIndex, selection: String, lenses: [JetCLIStatusValue], check: JetCLIStatusValue) -> String {
     payload :: jet_cli_semindex_payload(index)
     head :: jet_cli_doc_text(payload.bytes(), 0, payload.bytes().len() - 1)
     expand :: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("selection", jet_cli_status_text(selection)), jet_cli_status_field("lenses", jet_cli_status_array(lenses))})
@@ -279,7 +279,7 @@ pub fn jet_cli_expand_json(index: JetCLISemIndex, selection: String, lenses: [Je
     "{jet_cli_status_render("inspect.semindex", true, [JetCLIStatusField]{jet_cli_status_field("semindex", JetCLIStatusValue.Float{text: expanded}), jet_cli_status_field("check", check)})}\n"
 }
 
-pub fn jet_cli_expand_lens_value(lens: JetCLIExpandLensSpec, facts: [JetCLIExpandFact]) -> JetCLIStatusValue Never! {
+fn jet_cli_expand_lens_value(lens: JetCLIExpandLensSpec, facts: [JetCLIExpandFact]) -> JetCLIStatusValue Never! {
     values :: loop fact in facts -> fact.value
     jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(lens.name)), jet_cli_status_field("summary", jet_cli_status_text(lens.summary)), jet_cli_status_field("facts", jet_cli_status_array(values))})
 }
@@ -337,7 +337,7 @@ fn jet_cli_expand_parameter_text(parameter: JetCLISemParam) -> String Never! {
     "{access}{variadic}{label}{default}: {type_name(parameter.ty)} [{jet_cli_sem_zone_name(parameter.zone)}]"
 }
 
-pub fn jet_cli_expand_callable(index: JetCLISemIndex, modules: [JetDriverDocModule]) -> [JetCLIExpandFact] {
+fn jet_cli_expand_callable(index: JetCLISemIndex, modules: [JetDriverDocModule]) -> [JetCLIExpandFact] {
     output := [JetCLIExpandFact]{}
     loop definition in index.definitions {
         row :: definition.def
@@ -388,7 +388,7 @@ pub fn jet_cli_expand_callable(index: JetCLISemIndex, modules: [JetDriverDocModu
     output
 }
 
-pub enum JetCLIExpandParse {
+enum JetCLIExpandParse {
     Ready(file: String, selection: String?)
     Done(output: JetDriverVerbOutput)
 }
@@ -414,7 +414,7 @@ fn jet_cli_expand_usage(code: String, what: String, why: String, fix: String, js
     JetCLIExpandParse.Done{output: JetDriverVerbOutput{stdout: "", stderr: "{error}{suffix}", exit_code: JET_DRIVER_EXIT_USER_ERROR}}
 }
 
-pub fn jet_cli_expand_parse(args: [String], json: Bool, color: Bool) -> JetCLIExpandParse {
+fn jet_cli_expand_parse(args: [String], json: Bool, color: Bool) -> JetCLIExpandParse {
     selection := String?{None}
     file := String?{None}
     index := 0

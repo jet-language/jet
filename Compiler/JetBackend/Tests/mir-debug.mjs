@@ -220,7 +220,7 @@ function splitTopLevel(text, sep) {
 export function parseJetSchema(source, only = null) {
   const defs = new Map();
   const clean = source.replace(/\/\/[^\n]*/g, "");
-  const re = /^(?:pub )?(struct|enum) (\w+)\s*\{/gm;
+  const re = /^(struct|enum) (\w+)\s*\{/gm;
   let m;
   while ((m = re.exec(clean))) {
     const [, kind, name] = m;
@@ -235,7 +235,10 @@ export function parseJetSchema(source, only = null) {
     if (only && !only.includes(name)) continue;
     if (kind === "struct") {
       const fields = [];
-      for (const fm of body.matchAll(/pub (\w+): ([^\n]+?)\s*(?=\n|pub |$)/g)) {
+      // One field per line, or comma-separated on one line (`struct T { a: A, b: B }`).
+      for (const piece of body.split("\n").flatMap((line) => splitTopLevel(line, ","))) {
+        const fm = piece.match(/^(?:priv\s+)?(\w+):\s*(.+?)$/s);
+        if (!fm) continue;
         const type = parseType(fm[2]);
         fields.push({ name: fm[1], type, empty: emptyDefault(type, splitDefault(fm[2])[1]) });
       }

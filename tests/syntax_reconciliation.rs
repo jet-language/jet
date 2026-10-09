@@ -713,7 +713,6 @@ fn marker_plane_matrix_covers_current_marker_families() {
     );
 
     for syntax_anchor in [
-        "MARKER_PUB_FILE",
         "MARKER_TARGET",
         "MARKER_LAYOUT",
         "MARKER_CODABLE",

@@ -4,25 +4,25 @@
 // A report keeps unsupported or ambiguous fields visible as losses and
 // conflicts instead of silent defaults.
 
-pub struct MetadataFacts {
-    pub family: ProviderFamily
-    pub name: String
-    pub version: String
-    pub source_identity: String
-    pub integrity_hash: String
-    pub dependencies: [String]
-    pub dev_dependencies: [String]
-    pub build_dependencies: [String]
-    pub scripts: [String]
-    pub platforms: [String]
-    pub license: String
-    pub bins: [String]
-    pub trust_roots: [String]
-    pub todos: [String]
+struct MetadataFacts {
+    family: ProviderFamily
+    name: String
+    version: String
+    source_identity: String
+    integrity_hash: String
+    dependencies: [String]
+    dev_dependencies: [String]
+    build_dependencies: [String]
+    scripts: [String]
+    platforms: [String]
+    license: String
+    bins: [String]
+    trust_roots: [String]
+    todos: [String]
     // Typed projection of native fields, by fact key.
-    pub typed: [String: [String]]
-    pub replacement_candidates: [ReplacementCandidate]
-    pub conflicts: [String]
+    typed: [String: [String]]
+    replacement_candidates: [ReplacementCandidate]
+    conflicts: [String]
 
     fn empty(family: ProviderFamily, name: String) -> MetadataFacts Never! {
         MetadataFacts{
@@ -117,12 +117,12 @@ pub struct MetadataFacts {
 
 // One provider-native document normalized into shared facts plus what could
 // not be carried losslessly.
-pub struct ProviderFactReport {
-    pub facts: MetadataFacts
-    pub losses: [String]
-    pub conflicts: [String]
-    pub native_format: String
-    pub native_document: String
+struct ProviderFactReport {
+    facts: MetadataFacts
+    losses: [String]
+    conflicts: [String]
+    native_format: String
+    native_document: String
 
     // A report over `facts` that loses the package name or exact identity
     // when either is missing; the facts' conflicts carry over.

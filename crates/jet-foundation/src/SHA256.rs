@@ -1333,7 +1333,7 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("empty/nested")).unwrap();
-        std::fs::write(root.join("src.jet"), b"pub fn stable() {}\n").unwrap();
+        std::fs::write(root.join("src.jet"), b"fn stable() {}\n").unwrap();
         let first = try_tree_hash(&root).expect("regular files and empty directories are valid");
         let second = try_tree_hash(&root).expect("the valid tree remains hashable");
         assert_eq!(first, second);

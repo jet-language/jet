@@ -50,19 +50,19 @@ TOKEN :: [Int]{65}
 PAYLOAD :: [Int]{17}
 ALIAS_VALUES :: [Int]{31}
 
-pub fn token_at(index: Int) -> Int {
+fn token_at(index: Int) -> Int {
     return TOKEN[index]
 }
 
-pub fn payload_at(index: Int) -> Int {
+fn payload_at(index: Int) -> Int {
     return PAYLOAD[index]
 }
 
-pub fn alias_value_list() -> [Int] {
+fn alias_value_list() -> [Int] {
     return ALIAS_VALUES
 }
 
-pub fn shadowed(token: [Int]) -> Int {
+fn shadowed(token: [Int]) -> Int {
     return token[0]
 }
 "#;
@@ -73,19 +73,19 @@ PAYLOAD :: [U8]{84}
 ALIAS_VALUES :: [U8]{42}
 IMPORT_VALUES :: [U8]{43}
 
-pub fn token_at(index: Int) -> Int {
+fn token_at(index: Int) -> Int {
     return TOKEN[index]
 }
 
-pub fn payload_at(index: Int) -> U8 {
+fn payload_at(index: Int) -> U8 {
     return PAYLOAD[index]
 }
 
-pub fn alias_value_list() -> [U8] {
+fn alias_value_list() -> [U8] {
     return ALIAS_VALUES
 }
 
-pub fn import_value_list() -> [U8] {
+fn import_value_list() -> [U8] {
     return IMPORT_VALUES
 }
 "#;
@@ -313,7 +313,7 @@ fn aliased_single_member_import_uses_the_grouped_member_resolution() {
     .unwrap();
     fs::write(
         scratch.path.join("alpha.jet"),
-        "pub fn value() -> Int { 31 }\n",
+        "fn value() -> Int { 31 }\n",
     )
     .unwrap();
     let diagnostics = jet::run_compiler_work(|| {
@@ -327,26 +327,6 @@ fn aliased_single_member_import_uses_the_grouped_member_resolution() {
         "member imports must resolve to public functions: {diagnostics:#?}"
     );
 
-    fs::write(
-        scratch.path.join("alpha.jet"),
-        "fn value() -> Int { 31 }\n",
-    )
-    .unwrap();
-    let diagnostics = jet::run_compiler_work(|| {
-        let entry = scratch.path.join("main.jet");
-        let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap())
-            .expect("a private member still belongs to a valid module");
-        jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-    });
-    assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0609"),
-        "private member import must be rejected: {diagnostics:#?}"
-    );
-    fs::write(
-        scratch.path.join("alpha.jet"),
-        "pub fn value() -> Int { 31 }\n",
-    )
-    .unwrap();
     fs::write(
         scratch.path.join("main.jet"),
         "use renamed.[value as grouped]\nuse renamed.value as dotted\n\
@@ -376,15 +356,15 @@ fn aliased_dotted_module_import_retains_module_precedence_and_ambiguity() {
          fn run() { print(selected.answer()); print(deep.answer()) }\n",
     )
     .unwrap();
-    fs::write(scratch.path.join("alpha.jet"), "pub fn value() -> Int { 31 }\n").unwrap();
+    fs::write(scratch.path.join("alpha.jet"), "fn value() -> Int { 31 }\n").unwrap();
     fs::write(
         scratch.path.join("alpha.value.jet"),
-        "pub fn answer() -> Int { 42 }\n",
+        "fn answer() -> Int { 42 }\n",
     )
     .unwrap();
     fs::write(
         scratch.path.join("alpha.tools.value.jet"),
-        "pub fn answer() -> Int { 43 }\n",
+        "fn answer() -> Int { 43 }\n",
     )
     .unwrap();
     let entry = scratch.path.join("main.jet");
@@ -411,7 +391,7 @@ fn aliased_dotted_module_import_retains_module_precedence_and_ambiguity() {
     fs::create_dir_all(scratch.path.join("other")).unwrap();
     fs::write(
         scratch.path.join("other/alpha.value.jet"),
-        "pub fn answer() -> Int { 7 }\n",
+        "fn answer() -> Int { 7 }\n",
     )
     .unwrap();
     let errors = jet::Loader::load_entry(entry.to_str().unwrap())

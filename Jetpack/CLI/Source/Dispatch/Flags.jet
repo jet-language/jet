@@ -4,81 +4,81 @@
 // the child command untouched.
 
 // Parsed global flags shared by every command.
-pub struct CLIFlags {
-    pub color: ColorChoice
-    pub fixtures: String?
+struct CLIFlags {
+    color: ColorChoice
+    fixtures: String?
     // Explicit local unofficial nixpkgs catalog. It has no publisher
     // signature and is never selected by default.
-    pub local_nix_catalog: String?
-    pub offline: Bool
-    pub online: Bool
+    local_nix_catalog: String?
+    offline: Bool
+    online: Bool
     // U19: one-shot bypass of the env/dev trust gate (`--trust`); it never
     // persists a grant.
-    pub trust: Bool
+    trust: Bool
     // U16: ad-hoc packages from `-p <pkg>...`, repeatable.
-    pub packages: [String]
+    packages: [String]
     // D-JPK-SELECTOR1=C: exact workspace member names from `-p` on
     // build/test/run (cargo-style, repeatable).
-    pub workspace_members: [String]
-    pub affected: Bool
-    pub affected_since: String?
+    workspace_members: [String]
+    affected: Bool
+    affected_since: String?
     // U16: force foreign-flake/devenv detection over declared `env.*`.
-    pub flake: Bool
+    flake: Bool
     // U16: isolate the foreign projected shell from host variables.
-    pub pure: Bool
+    pure: Bool
     // D-VERDICT-2189-1: materialize without entering a shell.
-    pub prep: Bool
+    prep: Bool
     // Card #2214: show the full environment acquisition plan.
-    pub explain_plan: Bool
+    explain_plan: Bool
     // D-JPK-IMAGE1: the registry ref or local layout `image --push` targets.
-    pub push: String?
+    push: String?
     // The generic `--name <name>` flag (`hangar ingest`).
-    pub name: String?
+    name: String?
     // D-CONF-WORD1=A: the named environment composition under `presets:`.
-    pub preset: String?
+    preset: String?
     // D-ENVFLAG1=A: explicit selector for one `env.<name>` module.
-    pub environment: String?
+    environment: String?
     // U20: `jetpack add <ref> --adapt` drafts an adapter declaration.
-    pub adapt: Bool
+    adapt: Bool
     // Emit machine-readable output where the command has a structured form.
-    pub json: Bool
+    json: Bool
     // U27: open a shell in preserved failed build scratch.
-    pub shell_on_fail: Bool
+    shell_on_fail: Bool
     // D-JPK-GRANTCMD1=A: `jet trust grant <selector> --scope repo|user`.
-    pub trust_scope: String?
+    trust_scope: String?
     // D-FE-CLI1: bypass mutation confirmation gates (`-y` / `--yes`).
-    pub assume_yes: Bool
+    assume_yes: Bool
     // D-VERDICT-2192-1: narrow `jetpack update` to project dependencies or
     // to user tools.
-    pub update_deps: Bool
-    pub update_tools: Bool
+    update_deps: Bool
+    update_tools: Bool
     // Card #2218: git revision used by `jetpack lock diff`.
-    pub lock_against: String?
+    lock_against: String?
     // D-JPK-TOOLRUN1: `jetpack tool install <ref> --as <name>`.
-    pub as_name: String?
+    as_name: String?
     // D-BROWSER-AUTO1=A (#1187): browser lock/provision inputs.
-    pub browser_binary: String?
-    pub browser_version: String?
-    pub browser_protocol: String?
+    browser_binary: String?
+    browser_version: String?
+    browser_protocol: String?
     // D-CLI-HANGAR1=B: Hangar archive destination, signer, and source.
-    pub archive_to: String?
-    pub archive_key: String?
-    pub archive_from: String?
+    archive_to: String?
+    archive_key: String?
+    archive_from: String?
     // D-CLI-HANGAR1=B: export only the selected object, not its closure.
-    pub archive_no_deps: Bool
+    archive_no_deps: Bool
     // Explicit expert escape hatch for a local unsigned archive.
-    pub archive_allow_unsigned: Bool
+    archive_allow_unsigned: Bool
     // D-JPK-CACHECONFIG1=D: host-owned cache role and typed credential
     // provider label (never a secret); D-JPK-CACHEAUTH1: the write grant.
-    pub cache_role: String?
-    pub cache_credential: String?
-    pub cache_write: Bool
+    cache_role: String?
+    cache_credential: String?
+    cache_write: Bool
     // D-ECO12: `--lang <language>` and the formatter modes of `fmt`.
-    pub fmt_language: String?
-    pub fmt_check: Bool
-    pub fmt_diff: Bool
-    pub fmt_dry_run: Bool
-    pub fmt_changed: Bool
+    fmt_language: String?
+    fmt_check: Bool
+    fmt_diff: Bool
+    fmt_dry_run: Bool
+    fmt_changed: Bool
 
     fn empty() -> CLIFlags Never! {
         CLIFlags{
@@ -130,11 +130,11 @@ pub struct CLIFlags {
 }
 
 // Flags, positional arguments, and the command after a `--`.
-pub struct CLIParsed {
-    pub flags: CLIFlags
-    pub positional: [String]
+struct CLIParsed {
+    flags: CLIFlags
+    positional: [String]
     // Everything after a `--`, if present.
-    pub command: [String]?
+    command: [String]?
 }
 
 // `args[start..]` as an owned list.
@@ -159,13 +159,13 @@ fn cli_flag_argument(args: [String], index: Int) -> String? Never! {
 }
 
 // Verb-agnostic parse; the verb-aware form decides what `-p` means.
-pub fn cli_parse_args(args: [String]) -> CLIParsed Never! {
+fn cli_parse_args(args: [String]) -> CLIParsed Never! {
     cli_parse_args_for("", args)
 }
 
 // Verb-aware parse: `-p` means ad-hoc packages on `env`/`use` and workspace
 // members on `build`/`test`/`run` (D-JPK-SELECTOR1=C).
-pub fn cli_parse_args_for(verb: String, args: [String]) -> CLIParsed Never! {
+fn cli_parse_args_for(verb: String, args: [String]) -> CLIParsed Never! {
     workspace_select :: verb == "build" || verb == "test" || verb == "run"
     lock_verb :: verb == JETPACK_LOCK_VERB
     lock_against_prefix :: "{LOCK_DIFF_FLAG_AGAINST}="
@@ -320,7 +320,7 @@ pub fn cli_parse_args_for(verb: String, args: [String]) -> CLIParsed Never! {
 
 // The arguments before the first `--`; retired-spelling checks never read
 // the child command.
-pub fn cli_before_argument_separator(args: [String]) -> [String] Never! {
+fn cli_before_argument_separator(args: [String]) -> [String] Never! {
     out := [String]{}
     loop arg in args {
         if arg == "--" -> break

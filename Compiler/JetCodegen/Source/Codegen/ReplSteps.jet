@@ -3,7 +3,7 @@
 use jet_foundation.[MIRBlockID, MIRFunction, MIRFunctionID, MIRProgram, MIRSourceFile, MIRTerminator, MIRValueID, TExpr, TFunc, TStmt, Type]
 use jet_sema.[ReplSetupError, SemaGraphModuleResult]
 
-pub struct JetCodegenReplSession {
+struct JetCodegenReplSession {
     builder: JetCodegenBuilder
     // The program-wide lowering inputs every builder call reads.
     inputs: JetCodegenProgram
@@ -19,7 +19,7 @@ pub struct JetCodegenReplStep {
     pub closure_sources: [JetCodegenClosureSource]
 }
 
-pub fn jet_codegen_repl_session_new(root: TFunc, functions: ^[TFunc], modules: ^[SemaGraphModuleResult], program: ^MIRProgram) -> JetCodegenReplSession ReplSetupError! {
+fn jet_codegen_repl_session_new(root: TFunc, functions: ^[TFunc], modules: ^[SemaGraphModuleResult], program: ^MIRProgram) -> JetCodegenReplSession ReplSetupError! {
     if root.params.len() != 0 || root.body.len() != 0 {
         return Err(ReplSetupError{message: "REPL lowering requires an empty checked zero-parameter root"})
     }
@@ -93,7 +93,7 @@ fn jet_codegen_repl_pack(session: &JetCodegenReplSession) -> MIRProgram {
     session.program
 }
 
-pub fn jet_codegen_repl_append(session: &JetCodegenReplSession, checked_root: TFunc, statements: [TStmt], echo: TExpr?, source_files: [MIRSourceFile]) -> JetCodegenReplStep {
+fn jet_codegen_repl_append(session: &JetCodegenReplSession, checked_root: TFunc, statements: [TStmt], echo: TExpr?, source_files: [MIRSourceFile]) -> JetCodegenReplStep {
     session.builder.function.effects = checked_root.effects
     session.inputs.source_files = source_files.copy()
     session.inputs.source_index = jet_codegen_source_index(source_files)
@@ -128,6 +128,6 @@ pub fn jet_codegen_repl_close(session: &JetCodegenReplSession) -> MIRProgram {
     jet_codegen_repl_pack(&session)
 }
 
-pub fn jet_codegen_repl_initial_program(session: JetCodegenReplSession) -> MIRProgram Never! {
+fn jet_codegen_repl_initial_program(session: JetCodegenReplSession) -> MIRProgram Never! {
     session.program
 }

@@ -19,14 +19,14 @@
 // the number of cores the system reports; `memory_available` is the memory
 // free for new work, in bytes, when the host can read it. The cap limits the
 // compiler only, never the threads of a program it builds or runs.
-pub struct CompilerThreads {
-    pub cap: Int?
-    pub cores: Int
-    pub memory_available: Int?
+struct CompilerThreads {
+    cap: Int?
+    cores: Int
+    memory_available: Int?
 }
 
 // One thread: every phase runs its jobs inline, in order.
-pub fn compiler_threads_single() -> CompilerThreads Never! {
+fn compiler_threads_single() -> CompilerThreads Never! {
     CompilerThreads{cap: Val(1), cores: 1, memory_available: None}
 }
 
@@ -39,7 +39,7 @@ pub fn compiler_threads_single() -> CompilerThreads Never! {
 // the host reported free: `parallel_scratch` bytes once (the step's jobs
 // copied out for their threads, say) plus `scratch_per_thread` bytes for each
 // thread.
-pub fn compiler_threads_admit(threads: CompilerThreads, items: Int, work: Int, min_work_per_thread: Int, scratch_per_thread: Int, parallel_scratch: Int) -> Int Never! {
+fn compiler_threads_admit(threads: CompilerThreads, items: Int, work: Int, min_work_per_thread: Int, scratch_per_thread: Int, parallel_scratch: Int) -> Int Never! {
     cores :: if threads.cores < 1 -> 1 else -> threads.cores
     limit := threads.cap ?? cores
     if limit > cores -> limit = cores
@@ -56,7 +56,7 @@ pub fn compiler_threads_admit(threads: CompilerThreads, items: Int, work: Int, m
 // `bounds[p]` is the first job of part `p` and `bounds[workers]` is the job
 // count. Each part holds about an equal share of the total weight (a job
 // weighs at least 1); a part is empty when one heavy job covers its share.
-pub fn compiler_threads_partition(weights: [Int], workers: Int) -> [Int] Never! {
+fn compiler_threads_partition(weights: [Int], workers: Int) -> [Int] Never! {
     total := 0
     loop weight in weights -> total += if weight < 1 -> 1 else -> weight
     bounds := [Int]{0}
@@ -79,7 +79,7 @@ pub fn compiler_threads_partition(weights: [Int], workers: Int) -> [Int] Never! 
 
 // The part of job `position` under `bounds`, searching down from `part`
 // (jobs leave their list last-first, so the part only ever decreases).
-pub fn compiler_threads_part_of(bounds: [Int], part: Int, position: Int) -> Int Never! {
+fn compiler_threads_part_of(bounds: [Int], part: Int, position: Int) -> Int Never! {
     found := part
     loop found > 0 && position < bounds[found] -> found -= 1
     found
@@ -87,7 +87,7 @@ pub fn compiler_threads_part_of(bounds: [Int], part: Int, position: Int) -> Int 
 
 // A failed compiler thread's panic text, re-raised on the caller unchanged so
 // an internal error reads the same with any thread count.
-pub fn compiler_threads_failure_text(failure: TaskFailure) -> String Never! {
+fn compiler_threads_failure_text(failure: TaskFailure) -> String Never! {
     if failure == {
         .Panicked(reason) -> reason
         .DeadlineBlown -> "a compiler thread passed its deadline"

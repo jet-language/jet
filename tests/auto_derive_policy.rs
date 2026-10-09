@@ -813,7 +813,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
         "name: \"dep\"\nversion: \"1\"\npolicy: { lints: { deny: [auto_derive] } }\n",
     )
     .unwrap();
-    std::fs::write(dep.join("dep.jet"), "pub struct DepType { value: Int }\n").unwrap();
+    std::fs::write(dep.join("dep.jet"), "struct DepType { value: Int }\n").unwrap();
     let mut bundle = jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
     let mut by_module = std::collections::HashMap::new();
     for module in &bundle.modules {
@@ -890,7 +890,7 @@ fn run() {
         "name: \"dep\"\nversion: \"1\"\npolicy: { lints: { deny: [auto_derive] } }\n",
     )
     .unwrap();
-    std::fs::write(dep.join("dep.jet"), "pub struct Token { value: Int }\n").unwrap();
+    std::fs::write(dep.join("dep.jet"), "struct Token { value: Int }\n").unwrap();
     std::fs::write(
         open_dep.join("package.jet"),
         "name: \"open_dep\"\nversion: \"1\"\n",
@@ -898,7 +898,7 @@ fn run() {
     .unwrap();
     std::fs::write(
         open_dep.join("open_dep.jet"),
-        "pub struct Badge { pub value: Int }\n",
+        "struct Badge { value: Int }\n",
     )
     .unwrap();
 

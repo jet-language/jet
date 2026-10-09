@@ -20,7 +20,7 @@ package {
 // Decoders return a typed `ArchiveError`; an empty byte list is therefore a
 // valid decoded value, never the malformed-input sentinel.
 #Error
-pub enum ArchiveError {
+enum ArchiveError {
     Malformed
     Unsupported
     Checksum
@@ -59,7 +59,7 @@ C_DIST_EXTRA :: [Int]{0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8
 C_CL_ORDER :: [Int]{16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15}
 
 /// ISO 3309 CRC-32, reflected polynomial `0xEDB88320`.
-pub fn crc32(data: [U8]) -> Int Never! {
+fn crc32(data: [U8]) -> Int Never! {
     crc := C_MASK32
     loop b in data {
         crc = (crc ~| u8_int(b)) & C_MASK32
@@ -73,7 +73,7 @@ pub fn crc32(data: [U8]) -> Int Never! {
 }
 
 /// Adler-32 (RFC 1950). Empty input is 1.
-pub fn adler32(data: [U8]) -> Int Never! {
+fn adler32(data: [U8]) -> Int Never! {
     a := 1
     b := 0
     loop byte in data {
@@ -86,7 +86,7 @@ pub fn adler32(data: [U8]) -> Int Never! {
 /// RFC 1951 deflate. Stored blocks keep the codec small while remaining
 /// interoperable with every conforming inflater. Input above the 64 MiB
 /// codec budget is `ArchiveError.Unsupported`, never an empty buffer.
-pub fn deflate(data: [U8]) -> [U8] ArchiveError! {
+fn deflate(data: [U8]) -> [U8] ArchiveError! {
     if data.len() > C_MAX_OUTPUT -> return Err(ArchiveError.Unsupported)
     out := [U8]{}
     i := 0
@@ -117,7 +117,7 @@ pub fn deflate(data: [U8]) -> [U8] ArchiveError! {
 }
 
 /// RFC 1951 inflate. Stored, fixed Huffman, and dynamic Huffman.
-pub fn inflate(data: [U8]) -> [U8] ArchiveError! {
+fn inflate(data: [U8]) -> [U8] ArchiveError! {
     r := BitReader{data: data, i: 0, bit: 0, bad: false}
     out := [U8]{}
     finished := false
@@ -177,7 +177,7 @@ pub fn inflate(data: [U8]) -> [U8] ArchiveError! {
 
 /// Python `zlib.compress` / `zlib.decompress` compatible wrappers. Input above
 /// the 64 MiB codec budget is `ArchiveError.Unsupported`.
-pub fn compress(data: [U8]) -> [U8] ArchiveError! {
+fn compress(data: [U8]) -> [U8] ArchiveError! {
     if data.len() > C_MAX_OUTPUT -> return Err(ArchiveError.Unsupported)
     payload :: deflate(data)
     checksum :: adler32(data)
@@ -190,7 +190,7 @@ pub fn compress(data: [U8]) -> [U8] ArchiveError! {
     Ok(out)
 }
 
-pub fn decompress(data: [U8]) -> [U8] ArchiveError! {
+fn decompress(data: [U8]) -> [U8] ArchiveError! {
     if data.len() < 6 -> return Err(ArchiveError.Malformed)
     cmf :: u8_int(data[0])
     flg :: u8_int(data[1])
@@ -212,13 +212,13 @@ fn slice_u8(data: [U8], start: Int, end: Int) -> [U8] Never! {
     out
 }
 
-pub fn zip_decompress(data: [U8]) -> [U8] ArchiveError! {
+fn zip_decompress(data: [U8]) -> [U8] ArchiveError! {
     files :: zip_files(data)
     if files.len() == 0 -> return Err(ArchiveError.NotFound)
     Ok(files[0].data)
 }
 
-pub fn zip_names_json(archive: [U8]) -> String ArchiveError! {
+fn zip_names_json(archive: [U8]) -> String ArchiveError! {
     names :: zip_list(archive)
     out := "["
     first := true
@@ -233,56 +233,56 @@ pub fn zip_names_json(archive: [U8]) -> String ArchiveError! {
     Ok("{out}]")
 }
 /// Return the names stored in a ZIP archive.
-pub fn list(archive: [U8]) -> [String] ArchiveError! { zip_list(archive) }
+fn list(archive: [U8]) -> [String] ArchiveError! { zip_list(archive) }
 
 
 /// An empty buffer opens a writer: the result is the valid empty ZIP that
 /// `zip_write` extends and `zip_close` finishes. Any other buffer must already
 /// be a well-formed ZIP.
-pub fn zip_open(archive: [U8]) -> [U8] ArchiveError! {
+fn zip_open(archive: [U8]) -> [U8] ArchiveError! {
     if archive.len() == 0 -> return zip_from_files([ZipFile]{})
     _ :: zip_files(archive)
     Ok(archive)
 }
 
-pub fn zip_next(reader: [U8], index: Int) -> String ArchiveError! {
+fn zip_next(reader: [U8], index: Int) -> String ArchiveError! {
     names :: zip_list(reader)
     if index < 0 || index >= names.len() -> return Err(ArchiveError.NotFound)
     Ok(names[index])
 }
 
-pub fn zip_read(reader: [U8], name: String) -> [U8] ArchiveError! {
+fn zip_read(reader: [U8], name: String) -> [U8] ArchiveError! {
     zip_extract(reader, name)
 }
 
-pub fn zip_write(writer: [U8], name: String, data: [U8]) -> [U8] ArchiveError! {
+fn zip_write(writer: [U8], name: String, data: [U8]) -> [U8] ArchiveError! {
     files := zip_parse_writer(writer)
     if files.len() >= C_MAX_ENTRIES -> return Err(ArchiveError.Unsupported)
     &files.push(ZipFile{name: name, data: data})
     zip_from_files(files)
 }
 
-pub fn zip_close(writer: [U8]) -> [U8] ArchiveError! {
+fn zip_close(writer: [U8]) -> [U8] ArchiveError! {
     if writer.len() > 0 {
         _ :: zip_files(writer)
     }
     Ok(writer)
 }
 
-pub fn zip_extract(archive: [U8], name: String) -> [U8] ArchiveError! {
+fn zip_extract(archive: [U8], name: String) -> [U8] ArchiveError! {
     files :: zip_files(archive)
     loop f in files {
         if f.name == name -> return Ok(f.data)
     }
     Err(ArchiveError.NotFound)
 }
-pub fn unzip(archive: [U8], name: String) -> [U8] ArchiveError! { zip_extract(archive, name) }
+fn unzip(archive: [U8], name: String) -> [U8] ArchiveError! { zip_extract(archive, name) }
 
 /// Append one regular-file entry to an in-memory tar archive. A traversal,
 /// absolute, NUL- or backslash-bearing name is `ArchiveError.Malformed`; data
 /// or a result above the 64 MiB budget is `ArchiveError.Unsupported`. The
 /// input archive is never returned unchanged as a silent refusal.
-pub fn tar_add(archive: [U8], name: String, data: [U8]) -> [U8] ArchiveError! {
+fn tar_add(archive: [U8], name: String, data: [U8]) -> [U8] ArchiveError! {
     if !archive_name_valid(name) -> return Err(ArchiveError.Malformed)
     if data.len() > C_MAX_OUTPUT -> return Err(ArchiveError.Unsupported)
     nb :: name.bytes()
@@ -310,7 +310,7 @@ pub fn tar_add(archive: [U8], name: String, data: [U8]) -> [U8] ArchiveError! {
 
 
 
-pub fn tar_get(archive: [U8], name: String) -> [U8] ArchiveError! {
+fn tar_get(archive: [U8], name: String) -> [U8] ArchiveError! {
     if archive.len() == 0 -> return Err(ArchiveError.Malformed)
     i := 0
     entries := 0
@@ -379,7 +379,7 @@ pub fn tar_get(archive: [U8], name: String) -> [U8] ArchiveError! {
     Err(ArchiveError.NotFound)
 }
 
-pub fn tar_names_json(archive: [U8]) -> String ArchiveError! {
+fn tar_names_json(archive: [U8]) -> String ArchiveError! {
     if archive.len() == 0 -> return Err(ArchiveError.Malformed)
     out := "["
     first := true
@@ -1372,6 +1372,6 @@ fn inflate_dynamic(r: &BitReader, out: &[U8]) -> Int Never! {
 }
 /// Create a one-entry ZIP archive. An unsafe name is `ArchiveError.Malformed`;
 /// data above the 64 MiB budget is `ArchiveError.Unsupported`.
-pub fn create(name: String, data: [U8]) -> [U8] ArchiveError! {
+fn create(name: String, data: [U8]) -> [U8] ArchiveError! {
     zip_from_files([ZipFile]{ZipFile{name: name, data: data}})
 }

@@ -1,12 +1,12 @@
 #Error
-pub enum TextError {
+enum TextError {
     Empty
     QueryShape
     SelectorShape
     IdentityShape
 }
 
-pub fn explain(error: TextError) -> String {
+fn explain(error: TextError) -> String {
     if error == .Empty -> return "rejected: empty"
     if error == .QueryShape -> return "rejected: query shape"
     if error == .SelectorShape -> return "rejected: selector shape"
@@ -14,7 +14,7 @@ pub fn explain(error: TextError) -> String {
     return "rejected: unknown"
 }
 
-pub Pattern :: distinct String
+Pattern :: distinct String
 
 impl Pattern.CheckedText {
     type Error = TextError
@@ -27,7 +27,7 @@ impl Pattern.CheckedText {
     fn encode_hole<T: Printable>(value: T) -[]> String { return "[{value}]" }
 }
 
-pub Query :: distinct String
+Query :: distinct String
 
 impl Query.CheckedText {
     type Error = TextError
@@ -41,7 +41,7 @@ impl Query.CheckedText {
     fn encode_hole<T: Printable>(value: T) -[]> String { return "?" }
 }
 
-pub Selector :: distinct String
+Selector :: distinct String
 
 impl Selector.CheckedText {
     type Error = TextError
@@ -55,7 +55,7 @@ impl Selector.CheckedText {
     fn encode_hole<T: Printable>(value: T) -[]> String { return "[{value}]" }
 }
 
-pub Identity :: distinct String
+Identity :: distinct String
 
 impl Identity.CheckedText {
     type Error = TextError

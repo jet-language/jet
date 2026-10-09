@@ -6,12 +6,12 @@
 // Actual focused Sign/Index/Diagnostic closure is gated by #4303: borrowed
 // trim returns &str where generated String.bytes expects &String. No copy shim.
 
-pub struct PublicationVerifiedEntries {
-    pub entries: [PublicationIndexEntry]
-    pub warnings: [String]
+struct PublicationVerifiedEntries {
+    entries: [PublicationIndexEntry]
+    warnings: [String]
 }
 
-pub fn publication_verify_index_entry(all: [PublicationIndexEntry], entry: PublicationIndexEntry, require_signed: Bool, registry_name: String) -> [String] PublicationDiagnosticError! {
+fn publication_verify_index_entry(all: [PublicationIndexEntry], entry: PublicationIndexEntry, require_signed: Bool, registry_name: String) -> [String] PublicationDiagnosticError! {
     takeover :: publication_is_takeover(all, entry)
     if entry.signature.trim() == "" {
         if require_signed || takeover -> return Err(PublicationDiagnosticError{diagnostic: publication_e1247(registry_name, entry.name, entry.version)})
@@ -30,7 +30,7 @@ pub fn publication_verify_index_entry(all: [PublicationIndexEntry], entry: Publi
 // JP-PUB-REG-TRUST-CACHE seams (#4262/#3593/#3594), not a checkout here.
 // Rust closure: DNS=Net, git=Exec, lock sleep=Time.Wait, suffix=Time/Env,
 // descriptor-relative clone installation=FS; TUF also uses FS/Env/Time.
-pub fn publication_resolve_and_verify_all(registry: PublicationRegistryConfig, name: String) -[FS, Env, Time, Time.Wait, Exec, Net]> PublicationVerifiedEntries PublicationDiagnosticError! {
+fn publication_resolve_and_verify_all(registry: PublicationRegistryConfig, name: String) -[FS, Env, Time, Time.Wait, Exec, Net]> PublicationVerifiedEntries PublicationDiagnosticError! {
     repo :: publication_ensure_index_clone(registry)
     all :: publication_verify_registry_package(repo, registry.name, name)
     warnings := [String]{}
@@ -44,7 +44,7 @@ pub fn publication_resolve_and_verify_all(registry: PublicationRegistryConfig, n
 
 // Rust resolve_and_verify: filter only AFTER all recorded entries have passed
 // TUF, tier and signature verification. A yank never invalidates an exact lock.
-pub fn publication_resolve_and_verify(registry: PublicationRegistryConfig, name: String) -[FS, Env, Time, Time.Wait, Exec, Net]> PublicationVerifiedEntries PublicationDiagnosticError! {
+fn publication_resolve_and_verify(registry: PublicationRegistryConfig, name: String) -[FS, Env, Time, Time.Wait, Exec, Net]> PublicationVerifiedEntries PublicationDiagnosticError! {
     verified :: publication_resolve_and_verify_all(registry, name)
     live := [PublicationIndexEntry]{}
     loop entry in verified.entries {
@@ -55,25 +55,25 @@ pub fn publication_resolve_and_verify(registry: PublicationRegistryConfig, name:
 
 // Publication/Policy owns the canonical community refusal; verification supplies
 // the recorded gate evidence directly, with no Registry-local diagnostic alias.
-pub fn publication_verify_entry_tier(entry: PublicationIndexEntry) PublicationDiagnosticError! {
+fn publication_verify_entry_tier(entry: PublicationIndexEntry) PublicationDiagnosticError! {
     if entry.tier == .Community && !publication_community_open(entry.gate_status) -> return Err(PublicationDiagnosticError{diagnostic: publication_community_gate_error(entry.name, entry.version, entry.gate_status)})
 }
 
-pub fn publication_e1246(name: String, version: String) -> Diagnostic Never! {
+fn publication_e1246(name: String, version: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1246", None,
         "signature verification failed for `{name}` {version}: the signature doesn't match the recorded public key",
         "this means the package was tampered with after signing, or the index entry is corrupt — the author's Ed25519 signature over the content hash no longer checks out.",
         "do not use this version. Re-run `jet store fetch` after clearing the store entry; if the problem persists, report it — this should never happen for an untampered registry.")
 }
 
-pub fn publication_e1247(registry: String, name: String, version: String) -> Diagnostic Never! {
+fn publication_e1247(registry: String, name: String, version: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1247", None,
         "registry `{registry}` requires signed packages (`require_signed: true`) but `{name}` {version} has no signature",
         "this registry is configured to accept only author-signed releases; an unsigned entry can't be trusted under that policy.",
         "use a different registry, or ask the package author to publish a signed release (`jet registry publish` auto-signs by default — they likely used `--no-sign`).")
 }
 
-pub fn publication_e1234(name: String, version: String) -> Diagnostic Never! {
+fn publication_e1234(name: String, version: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1234", None,
         "`{name}` {version} is already reserved in the registry index",
         "published versions are immutable (D-VERSION1) — a version can never be overwritten or reused after a yank, so anyone who already locked it keeps building the exact same bytes.",
@@ -83,7 +83,7 @@ pub fn publication_e1234(name: String, version: String) -> Diagnostic Never! {
 // RegistryTransport supplies publication_redact_registry_url to this unit.
 // Never expose git's raw detail; credentials have one canonical redactor.
 
-pub fn publication_e1235(url: String, detail: String) -> Diagnostic Never! {
+fn publication_e1235(url: String, detail: String) -> Diagnostic Never! {
     safe_url :: publication_redact_registry_url(url)
     diagnostic_from_registry("E1235", None,
         "couldn't reach the registry index at `{safe_url}`",

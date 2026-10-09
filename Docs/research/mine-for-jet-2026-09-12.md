@@ -3827,7 +3827,7 @@ fn run() {
 
 ```jet
 // scoring.jet
-pub fn letter(score: Int) String -> {
+fn letter(score: Int) String -> {
     return if {
         score >= 90 -> "A"
         score >= 80 -> "B"
@@ -3838,7 +3838,7 @@ pub fn letter(score: Int) String -> {
 
 ```jet
 // util.jet
-pub fn shout(msg: String) String -> "{msg}!"
+fn shout(msg: String) String -> "{msg}!"
 ```
 
 Main ran `scripts/agent/jet-env target/debug/jet check <baseline>/run.jet` and `... run --trace-tiers <baseline>/run.jet`. Both exited 0. Run stdout was exactly:
@@ -3857,7 +3857,7 @@ The requested change adds an explicit score adjustment:
 <a id="input-047d74b67e4916aa3d5d1283fae73574616aaf3df7b6b9c8aaab00143245a005"></a>
 
 ```jet
-pub fn letter(score: Int, offset: Int) String -> {
+fn letter(score: Int, offset: Int) String -> {
     adjusted :: score + offset
     return if {
         adjusted >= 90 -> "A"
@@ -52017,7 +52017,7 @@ fn run() {
 **Complete literal input:**
 
 ```jet
-pub fn shout(msg: String) String -> "{msg}!"
+fn shout(msg: String) String -> "{msg}!"
 ```
 
 <a id="input-654e5d08351e4c2b905795d8da9cb8b2273cadb10853988fc52b5ea12b79b6b7"></a>
@@ -52055,7 +52055,7 @@ fn run() {
 **Complete literal input:**
 
 ```jet
-pub fn letter(score: Int, offset: Int) String -> {
+fn letter(score: Int, offset: Int) String -> {
     adjusted = score + offset
     return if {
         adjusted >= 90 -> "A"
@@ -52105,7 +52105,7 @@ fn letter(score: Int, offset: Int) String -> {
 **Complete literal input:**
 
 ```jet
-pub fn letter(score: Int) String -> {
+fn letter(score: Int) String -> {
     return if {
         score >= 90 -> "A"
         score >= 80 -> "B"
@@ -52127,7 +52127,7 @@ pub fn letter(score: Int) String -> {
 **Complete literal input:**
 
 ```jet
-pub fn letter(value: Int) String -> "other:{value}"
+fn letter(value: Int) String -> "other:{value}"
 ```
 
 <a id="input-e98e3d358e946102e65ff0dc413e3679b7900bfd5a79a8d9699c592d680210ff"></a>

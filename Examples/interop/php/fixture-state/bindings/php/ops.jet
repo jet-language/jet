@@ -12,12 +12,12 @@ use core.encoding.json as json
     fn pooled_sleep(handle: Int, input: String, deadline_ms: Int) -> String = "jet_php_ops_invoke_pooled_sleep"
 }
 
-pub struct PhpPool {
-    value: Int
+struct PhpPool {
+    priv value: Int
 }
 
 #Error
-pub enum PhpError {
+enum PhpError {
     NotRunning
     Timeout
     Cancelled
@@ -30,15 +30,15 @@ impl PhpPool.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
-pub fn close(pool: ^PhpPool) { abi.close(pool.value) }
+fn close(pool: ^PhpPool) { abi.close(pool.value) }
 
-pub fn open() -> PhpPool PhpError! {
+fn open() -> PhpPool PhpError! {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(PhpError.NotRunning)
     return Ok(PhpPool{value: handle})
 }
 
-pub fn cancel(pool: PhpPool) { abi.cancel(pool.value) }
+fn cancel(pool: PhpPool) { abi.cancel(pool.value) }
 
 fn decode_response(raw: String, code: Int) -> Dyn PhpError! {
     if code == 1 -> return Err(PhpError.NotRunning)

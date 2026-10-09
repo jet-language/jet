@@ -1,4 +1,4 @@
-pub enum Node {
+enum Node {
     Const(Float)
     Var(String)
     Add
@@ -7,8 +7,8 @@ pub enum Node {
     Neg
 }
 
-pub struct Expr {
-    code: [Node]
+struct Expr {
+    priv code: [Node]
 }
 
 fn atom(node: Node) -> Expr { return Expr{code: [Node]{node}} }
@@ -42,7 +42,7 @@ code: &[Node],
     }
 }
 
-pub fn parse(source: String) -> Expr? {
+fn parse(source: String) -> Expr? {
     tokens :: source.trim().split(" ").to_list()
     if tokens.len() == 0 -> return None
 
@@ -136,7 +136,7 @@ fn subtract(left: Expr, right: Expr) -> Expr { return append_binary(left, right,
 
 fn multiply(left: Expr, right: Expr) -> Expr { return append_binary(left, right, Node.Mul) }
 
-pub fn simplify(expr: Expr) -> Expr {
+fn simplify(expr: Expr) -> Expr {
     stack := [Expr]{}
     loop token in expr.code {
         if token == {
@@ -187,7 +187,7 @@ pub fn simplify(expr: Expr) -> Expr {
     return &stack.pop() ?? zero()
 }
 
-pub fn differentiate(expr: Expr, variable: String) -> Expr {
+fn differentiate(expr: Expr, variable: String) -> Expr {
     expressions := [Expr]{}
     derivatives := [Expr]{}
     loop token in expr.code {
@@ -240,7 +240,7 @@ pub fn differentiate(expr: Expr, variable: String) -> Expr {
     return &derivatives.pop() ?? zero()
 }
 
-pub fn evaluate(expr: Expr, environment: [String:Float]) -> Float? {
+fn evaluate(expr: Expr, environment: [String:Float]) -> Float? {
     stack := [Float]{}
     loop token in expr.code {
         if token == {
@@ -274,7 +274,7 @@ pub fn evaluate(expr: Expr, environment: [String:Float]) -> Float? {
     return Val(&stack.pop() ?? 0.0)
 }
 
-pub fn show(expr: Expr) -> String {
+fn show(expr: Expr) -> String {
     stack := [String]{}
     loop token in expr.code {
         if token == {

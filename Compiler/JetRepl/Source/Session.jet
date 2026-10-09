@@ -7,7 +7,7 @@ use jet_sema.[ReplSetupError, SemaGraphModuleResult, SemaRegistrationGraph, Sema
 use jet_codegen.[JetCodegenReplSession, jet_codegen_repl_session_new, jet_codegen_repl_initial_program, jet_codegen_repl_append, jet_codegen_repl_close]
 use jet_eval.[JetEvalConfig, JetEvalReplSession, JetEvalReplStepResult, JetEvalRunBoundary, jet_eval_repl_session_new, jet_eval_repl_run_step, jet_eval_repl_session_close]
 
-pub struct ReplSession {
+struct ReplSession {
     checker: SemaReplSession
     lowering: JetCodegenReplSession
     runtime: JetEvalReplSession
@@ -16,11 +16,11 @@ pub struct ReplSession {
     source_files: [MIRSourceFile]
     segments: [SemaSourceSegment]
     root_source: String
-    pub step: Int
-    pub valid: Bool
+    step: Int
+    valid: Bool
 }
 
-pub enum ReplStepResult {
+enum ReplStepResult {
     Evaluated(result: JetEvalReplStepResult, diagnostics: [Diagnostic])
     Rejected(diagnostics: [Diagnostic])
     CompilerIncomplete(reasons: [String])
@@ -28,7 +28,7 @@ pub enum ReplStepResult {
     InvalidSession(message: String)
 }
 
-pub fn repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], source: Func, root: TFunc, program: ^MIRProgram, config: ^JetEvalConfig) -> ReplSession ReplSetupError! {
+fn repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], source: Func, root: TFunc, program: ^MIRProgram, config: ^JetEvalConfig) -> ReplSession ReplSetupError! {
     module_index :: sema_registration_module_index(graph, root.module_identity) ?? return Err(ReplSetupError{message: "REPL root module is absent from registration"})
     functions := [TFunc]{}
     loop module_row in modules {
@@ -56,7 +56,7 @@ pub fn repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModule
     Ok(ReplSession{checker: ^checker, lowering: ^lowering, runtime: ^runtime, source: ^bytes, line_starts: ^lines, source_files: files, segments: graph.modules[module_index].source_segments, root_source: root.source_file, step: 0, valid: valid})
 }
 
-pub fn repl_session_step(session: &ReplSession, text: String) -> ReplStepResult {
+fn repl_session_step(session: &ReplSession, text: String) -> ReplStepResult {
     if !session.valid {
         return ReplStepResult.InvalidSession{message: "REPL runtime bindings were reset; create a new checked session before evaluating another input"}
     }
@@ -124,7 +124,7 @@ pub fn repl_session_step(session: &ReplSession, text: String) -> ReplStepResult 
     ReplStepResult.Control{input: input}
 }
 
-pub fn repl_session_close(session: &ReplSession) -> ReplStepResult {
+fn repl_session_close(session: &ReplSession) -> ReplStepResult {
     if !session.valid {
         return ReplStepResult.InvalidSession{message: "REPL session has already been retired"}
     }

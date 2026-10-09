@@ -243,7 +243,7 @@ mod tests {
                 .collect::<Vec<_>>();
             assert!(!response_externs.is_empty());
             for name in response_externs {
-                let marker = format!("pub fn {name}");
+                let marker = format!("\nfn {name}");
                 let start = source
                     .find(&format!("{marker}("))
                     .or_else(|| source.find(&format!("{marker}<")))
@@ -297,7 +297,7 @@ mod tests {
                     .collect::<Vec<_>>();
                 assert!(!view_externs.is_empty(), "Lua probe lacks view externs");
                 for name in view_externs {
-                    let marker = format!("pub fn {name}(");
+                    let marker = format!("\nfn {name}(");
                     let start = source
                         .find(&marker)
                         .expect("every Lua view extern has a generated wrapper");
@@ -875,7 +875,7 @@ impl BindingPlan {
                     self.operation.name
                 ));
                 source.push_str(&format!(
-                    "pub fn {}({}: &[U8]) -> {} {{\n    return __jet_ffi_native_{}({}, {}.len())\n}}\n",
+                    "fn {}({}: &[U8]) -> {} {{\n    return __jet_ffi_native_{}({}, {}.len())\n}}\n",
                     self.operation.name,
                     pointer_count.pointer_parameter,
                     self.operation.result_type,

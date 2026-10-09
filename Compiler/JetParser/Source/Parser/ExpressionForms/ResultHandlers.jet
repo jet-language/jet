@@ -20,7 +20,7 @@ use jet_lexer.[
     TOKEN_UNIFIED_ARROW,
 ]
 
-pub fn parser_expression_result_handler_ahead(state: &JetParserState) -> Bool Never! {
+fn parser_expression_result_handler_ahead(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_QUESTION && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_UNIFIED_ARROW
 }
 
@@ -101,7 +101,7 @@ fn parser_expression_form_result_handler_inner(state: &JetParserState, value: Pa
     ParsedExpr{expr: output, span: span}
 }
 
-pub fn parser_parse_result_handler_form(state: &JetParserState, value: ParsedExpr, depth: Int) -> ParsedExpr {
+fn parser_parse_result_handler_form(state: &JetParserState, value: ParsedExpr, depth: Int) -> ParsedExpr {
     question :: parser_bump(&state)
     check_duplicate_failure :: state.result_handler_depth == 0
     state.result_handler_depth += 1

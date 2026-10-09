@@ -16,12 +16,12 @@ use core as core
 // a TTY unless `style_force` is used. Width and height fall back to 80x24.
 //
 // ANSI SGR parsing is Jet. Byte IO is host (fd 0/1/2).
-pub struct Reader {
-    pub fd: Int
+struct Reader {
+    fd: Int
 }
 
-pub struct Writer {
-    pub fd: Int
+struct Writer {
+    fd: Int
 }
 
 pub struct StdinHandle {
@@ -80,7 +80,7 @@ pub struct Stderr {
 }
 
 // D-TERM1: the one `Key` value `read_key()` answers on every tier.
-pub enum Key {
+enum Key {
     Char(Char)
     Enter
     Escape
@@ -95,7 +95,7 @@ pub enum Key {
     Ctrl(Char)
     Unknown
 }
-pub fn print(text: String) Never! -[IO, Time.Wait]> {
+fn print(text: String) Never! -[IO, Time.Wait]> {
     out :: core.term.stdout()
     &out.write_line(text).drop("stdout write")
 }
@@ -105,7 +105,7 @@ pub fn eprint(text: String) Never! -[IO, Time.Wait]> {
     &out.write("{text}\n").drop("stderr write")
 }
 
-pub fn input(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
+fn input(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
     core.term.input(prompt)
 }
 
@@ -215,7 +215,7 @@ pub fn style(style: String, text: String) -[IO]> String Never! {
     "{esc}[{code}m{text}{esc}[0m"
 }
 
-pub fn style_force(style: String, text: String) -> String Never! {
+fn style_force(style: String, text: String) -> String Never! {
     codes :: sgr(style)
     if codes.len() == 0 -> return text.copy()
     esc :: String.from_bytes([U8]{27}) ?? ""
@@ -228,9 +228,9 @@ pub fn read_key() -[IO, Time.Wait]> Key Never! {
     decode_key(raw.bytes, raw.platform)
 }
 
-pub struct WinSize {
-    pub w: Int
-    pub h: Int
+struct WinSize {
+    w: Int
+    h: Int
 }
 pub fn progress(label: String) IOError! -[IO, Time.Wait]> {
     if !core.term.__terminal8_stderr_tty() || core.term.__terminal8_machine_output() -> return Ok()

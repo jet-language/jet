@@ -6,22 +6,22 @@
 PUBLICATION_REGISTRY_PACKAGE_METADATA_FILE :: prep { "registry.json" }
 PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES :: prep { 1048576 }
 
-pub struct PublicationRegistryDependency {
-    pub name: String
-    pub requirements: [String]
+struct PublicationRegistryDependency {
+    name: String
+    requirements: [String]
     // Rust BTreeSet fields are sorted unique lists.
-    pub roles: [String]
-    pub prefer: [String]
-    pub reject: [String]
-    pub strict: Bool
-    pub enabled_by_default: Bool
+    roles: [String]
+    prefer: [String]
+    reject: [String]
+    strict: Bool
+    enabled_by_default: Bool
 }
-pub struct PublicationRegistryPackageMetadata {
-    pub name: String
-    pub version: String
-    dependencies: [PublicationRegistryDependency]
-    active_features: [String]
-    canonical_text: String
+struct PublicationRegistryPackageMetadata {
+    name: String
+    version: String
+    priv dependencies: [PublicationRegistryDependency]
+    priv active_features: [String]
+    priv canonical_text: String
 
     fn active_dependencies(self) -> [PublicationRegistryDependency] Never! {
         out := [PublicationRegistryDependency]{}
@@ -49,7 +49,7 @@ pub struct PublicationRegistryPackageMetadata {
 // Foundation's canonical descriptor-relative reader retains every ancestor
 // and refuses links. Only its known semantic bound/nonregular refusals change
 // into the Rust metadata diagnostic; OS errors retain their kind and context.
-pub fn publication_read_registry_package_metadata(artifact: String, expected_name: String, expected_version: String) -[FS, Env]> PublicationRegistryPackageMetadata? IOError! {
+fn publication_read_registry_package_metadata(artifact: String, expected_name: String, expected_version: String) -[FS, Env]> PublicationRegistryPackageMetadata? IOError! {
     held :: if foundation_open_file_authority(artifact, PUBLICATION_REGISTRY_PACKAGE_METADATA_FILE) == {
         .Ok(source) -> source
         .Err(error) -> if error == {
@@ -76,12 +76,12 @@ pub fn publication_read_registry_package_metadata(artifact: String, expected_nam
     held.revalidate()
     Ok(Val(metadata))
 }
-pub fn publication_validate_registry_metadata_file(source: String, expected_name: String, expected_version: String) IOError! -[FS, Env]> {
+fn publication_validate_registry_metadata_file(source: String, expected_name: String, expected_version: String) IOError! -[FS, Env]> {
     _ :: publication_read_registry_package_metadata(source, expected_name, expected_version)
 }
 
 // Rust parse_registry_package_metadata: trim/join lines without re-encoding.
-pub fn publication_parse_registry_package_metadata(text: String, expected_name: String, expected_version: String) -> PublicationRegistryPackageMetadata IOError! {
+fn publication_parse_registry_package_metadata(text: String, expected_name: String, expected_version: String) -> PublicationRegistryPackageMetadata IOError! {
     // Collect the trimmed lines and join once, as Rust's collect::<String>()
     // does, instead of re-copying the growing text for every line.
     trimmed := [String]{}

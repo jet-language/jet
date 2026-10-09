@@ -81,38 +81,38 @@ use jet_foundation.[
     type_mir_identity_key,
 ]
 
-struct MIRInlineIDMap { pub source: U64, pub target: U64 }
+struct MIRInlineIDMap { source: U64, target: U64 }
 
-struct MIRInlineValueMap { pub source: MIRValueID, pub target: MIRValueID, pub parameter: Bool }
+struct MIRInlineValueMap { source: MIRValueID, target: MIRValueID, parameter: Bool }
 
-struct MIRInlinePlaceMap { pub source: MIRPlaceID, pub target: MIRPlaceID, pub materialize: Bool }
+struct MIRInlinePlaceMap { source: MIRPlaceID, target: MIRPlaceID, materialize: Bool }
 
-struct MIRInlineTypeSubstitution { pub name: String, pub ty: MIRType }
+struct MIRInlineTypeSubstitution { name: String, ty: MIRType }
 
 struct MIRInlineMaps {
-    pub values: [MIRInlineValueMap]
-    pub blocks: [MIRInlineIDMap]
-    pub places: [MIRInlinePlaceMap]
-    pub locals: [MIRInlineIDMap]
-    pub scopes: [MIRInlineIDMap]
-    pub operations: [MIRInlineIDMap]
+    values: [MIRInlineValueMap]
+    blocks: [MIRInlineIDMap]
+    places: [MIRInlinePlaceMap]
+    locals: [MIRInlineIDMap]
+    scopes: [MIRInlineIDMap]
+    operations: [MIRInlineIDMap]
 }
 
 struct MIRInlinePlan {
-    pub entry: MIRBlockID
-    pub continuation: MIRBlockID
-    pub blocks: [MIRBasicBlock]
-    pub adapter_instructions: [MIRInstruction]
-    pub values: [MIRValueFact]
-    pub locals: [MIRLocal]
-    pub places: [MIRPlace]
-    pub scopes: [MIRScope]
-    pub drops: [MIRDropAction]
-    pub return_incoming: [MIRPhiIncoming]
-    pub returns: Bool
+    entry: MIRBlockID
+    continuation: MIRBlockID
+    blocks: [MIRBasicBlock]
+    adapter_instructions: [MIRInstruction]
+    values: [MIRValueFact]
+    locals: [MIRLocal]
+    places: [MIRPlace]
+    scopes: [MIRScope]
+    drops: [MIRDropAction]
+    return_incoming: [MIRPhiIncoming]
+    returns: Bool
 }
 
-struct MIRInlinePlanResult { pub plan: MIRInlinePlan?, pub error: MIROptimizationError? }
+struct MIRInlinePlanResult { plan: MIRInlinePlan?, error: MIROptimizationError? }
 
 fn mir_pass_inline_plan(
     caller: MIRFunction,

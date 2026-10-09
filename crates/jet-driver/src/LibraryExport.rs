@@ -251,7 +251,7 @@ fn e1257(delta: &str) -> Diagnostic {
         "E1257",
         "this Library's exported interface changed incompatibly".to_string(),
         format!(
-            "a Library's frozen `pub` interface is the load and foreign-call contract (D-LIB-EXPORT1=C) — {delta}"
+            "a Library's frozen public interface is the load and foreign-call contract (D-LIB-EXPORT1=C) — {delta}"
         ),
         "restore the removed or changed export, or delete the stale `.jet/cache/api/` snapshot to re-freeze this deliberate breaking change".to_string(),
         None,

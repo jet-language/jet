@@ -1925,7 +1925,7 @@ use math.[sin, cos as c]         // grouped + aliased selective import
 ```
 
 Two-step dot access; `use math.*` wildcard rejected (E0612, D-GLOBIMPORT1).
-Re-export is `pub use` (D-MOD4); a directory module's summary file is
+Re-export is `pub use` (D-MOD4, ballot pending; see S18); a directory module's summary file is
 `module.jet`. Ambiguous module resolution E0606/E0607. `import` is not a
 keyword.
 
@@ -1948,11 +1948,30 @@ namespace like any other, so `use` and `pub use` are legal inside
 `module name { }`. They resolve in the enclosing file's scope and bind only
 inside that body.
 
-**S18 — Visibility** *(D-MOD3, D-VISDEFAULT2, D-PUBPKG1)*: private by
-default; `pub` exports. `#PubFile` flips a file to public-by-default with
-`priv` marking exceptions (E0412–E0418). `pub(package)` exposes to the same
-package/workspace only (other `pub(...)` forms E0411). Cross-file private
-access E0605/E0609.
+**S18 — Visibility** *(D-VIS-MODULE1, owner directive 2026-10-07, card #4723;
+supersedes D-MOD3, D-VISDEFAULT2, D-PUBPKG1)*: everything is public by default,
+and declarations never carry a visibility marker. The only visibility keyword is
+`priv`, and it marks only two things:
+
+- a module: `priv module name { … }` or the file-module form `priv module name`.
+  Its contents are usable only by the enclosing module and that module's other
+  children. `priv(package) module` makes them usable by every module of the same
+  package and invisible to other packages (other `priv(…)` qualifiers: E0414).
+- a struct field: `priv value: T` is readable and writable only by code in the
+  type's own module (and its children). Invariant carriers such as secrets,
+  native handles and validated values use it.
+
+Removed forms are compile errors whose fix deletes the marker: `pub` and
+`pub(…)` on a declaration, method or field (E0411), `private` (E0412), `priv`
+on any other declaration (E0413), `pub:`/`priv:` section labels (E0415),
+`priv(package)` on a field (E0417), and `#PubFile` (E0418). Reaching into a
+`priv module` or a `priv` field from outside is E0605/E0609. There is no
+package-level privacy yet (it will come through the manifest).
+`Tools/agent/vis-cutover.mjs` migrates source written for the retired model.
+
+Re-export (`pub use`) is not decided: it stays the only `pub` form until the
+re-export ballot is ratified (the owner leans toward imports being public by
+default with `priv use` keeping one local).
 
 **U3 / D-SHAPE-MODULEINTERNAL1=A — Module declarations and internal discovery**
 *(ratified 2026-07-15, card #602)*: `module name { … }` is the single outermost
@@ -3060,10 +3079,10 @@ used through dynamic dispatch keeps its declared upper-bound contract.
 fn twice(n: Int) -> Int { n * 2 }
 // inferred []: pure
 
-pub fn load(path: String) -> String { core.files.read(path) }
+fn load(path: String) -> String { core.files.read(path) }
 // API snapshot: load -[FS.Read]> String
 
-pub fn bounded(path: String) String -[FS.Read]> { core.files.read(path) }
+fn bounded(path: String) String -[FS.Read]> { core.files.read(path) }
 fn hash(text: String) Int -[]> { text.length() }
 
 trait Renderer { fn render(self) Image -[GPU]> }
@@ -7183,7 +7202,7 @@ whitespace, comments, or the byte-zero `#!/...` launch header may precede it. An
 inline carrier after another top-level declaration, a duplicate carrier, an
 unbalanced carrier, or a carrier beside `package.jet` is rejected with E1360,
 E1361, E1362, or E1363. The word `package` remains contextual rather than a
-lexer keyword, so `pub(package)` keeps its existing visibility meaning.
+lexer keyword, so `priv(package)` keeps its module-visibility meaning.
 
 **D-ECO-SPLITPOLICY1=A — `jet split` extracts and moves closed facts**
 *(ratified 2026-07-15)*: splitting inline Package facts creates the equivalent
@@ -7459,10 +7478,9 @@ D-NAME-REFLECT1=A, D-NAME-SIGIL1=A** *(card #1625)*.
 - **D-NAME-ALIAS1=A** — Core ships one short prelude module. It declares the
   ambient basics and uses `pub use` aliases for the rest of the ratified Core
   tree. The compiler opens it for every file, and `#NoPrelude` still opts out.
-- **D-NAME-FENCE1=A** — `pub` opens an edge, `pub(package)` fences at the
-  package, and `_name` means internal everywhere. `pub module` makes a
-  public-by-default subtree and replaces `#PubFile`; `priv` opts a member of
-  that subtree back to private.
+- **D-NAME-FENCE1** — superseded by D-VIS-MODULE1 (card #4723): declarations
+  are public by default, `priv module` / `priv(package) module` and `priv`
+  fields carry all privacy, and `_name` means internal everywhere.
 - **D-NAME-WALK1=A** — `use` and `pub use` work in module bodies with the same
   meaning as at file top. `.[ ]` always means "these members of that prefix":
   values in expression position and aliases after `use`.
@@ -7941,9 +7959,9 @@ separate lint plane, or external analyzer; it amends no prior decision and
 retires no separate mechanism.
 
 **2026-08-19 — D-STRUCT-LIVE1=A** *(card #2052; ratified 2026-08-19)*:
-Unused imports, bindings, private functions, and unreachable `pub(package)` or
+Unused imports, bindings, unused functions of a `priv module`, and unreachable package-scoped or
 application-target exports are warning verdicts under D-LINTPOLICY1, with
-delete-or-rename-to-`_name` (D-NAME-SIGIL1) as the repair and library `pub`
+delete-or-rename-to-`_name` (D-NAME-SIGIL1) as the repair and library public items
 exempt. It adds no spelling or new suppression mechanism, and amends or retires
 none.
 
@@ -7963,7 +7981,7 @@ with the existing effect vocabulary; it amends no prior source decision.
 
 **2026-08-19 — D-STRUCT-POLICY1=A** *(card #2052; ratified 2026-08-19)*:
 Users may declare nominal package-scoped settings through checked bodies,
-`pub policy audit(topic: String) { wrap(call) { ... } }`, which observe typed
+`policy audit(topic: String) { wrap(call) { ... } }`, which observe typed
 arguments/results and visible effects without editing the wrapped signature.
 It extends D-CALLPOLICY1's setting vocabulary while preserving the `#Policy(...)`
 and `apply(...)` spellings; `policy` and `wrap` are the new declaration words,
@@ -8917,10 +8935,10 @@ structure-program-is-a-value slate. They are ratified law.
   compiler guard; `jet inspect structure` reads the same gate ledger, and all
   rows erase before runtime.
 - **D-STRUCT-LIVE1=A — four liveness verdicts.** Unused imports, unused
-  bindings, unused private functions, and unreachable `pub(package)` or
+  bindings, unused functions of a `priv module`, and unreachable package-scoped or
   application-target exports warn under D-LINTPOLICY1 and never fail by
   default. Delete the name or rename it to the existing `_name` form; library
-  `pub` remains exempt, the first three checks are file-local, and export
+  public items remain exempt, the first three checks are file-local, and export
   reachability uses the package's explicit import graph.
 - **D-STRUCT-LIFE1=A — one lifecycle ladder.** `_name` is internal, `pub _name`
   is soft-public, `pub` is stable, `#Deprecated(since: "1.2", use: "parse")`
@@ -8938,7 +8956,7 @@ structure-program-is-a-value slate. They are ratified law.
   build. Checked `Structure.ImportEdge` rows enter the D-STRUCT-PLANE1 gate
   ledger, then the policy is erased before every execution tier.
 - **D-STRUCT-POLICY1=A — users may author settings.** The declaration form is
-  `pub policy audit(topic: String) { wrap(call) { ... } }`; parameters are
+  `policy audit(topic: String) { wrap(call) { ... } }`; parameters are
   typed/defaulted, the wrapper body receives the callable, observes its
   arguments/results, and adds visible effects without changing its signature.
   The setting is nominal and package-scoped, unknown names identify their

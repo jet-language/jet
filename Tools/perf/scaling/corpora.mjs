@@ -37,9 +37,9 @@ function modules(n, r) {
     const a = r.int(3, 97);
     const b = r.int(2, 31);
     files[`modules/part_${i}.jet`] = [
-      `pub struct Record${i} {`, '    pub id: Int', '    pub weight: Int', '}', '',
-      `pub fn record_${i}_make(seed: Int) -> Record${i} { Record${i}{id: seed % 97, weight: (seed * ${a}) % 89} }`, '',
-      `pub fn record_${i}_score(seed: Int) -> Int {`,
+      `struct Record${i} {`, '    id: Int', '    weight: Int', '}', '',
+      `fn record_${i}_make(seed: Int) -> Record${i} { Record${i}{id: seed % 97, weight: (seed * ${a}) % 89} }`, '',
+      `fn record_${i}_score(seed: Int) -> Int {`,
       `    record :: record_${i}_make(seed)`,
       `    (record.id * ${b} + record.weight) % ${M}`, '}', '',
     ].join('\n');
@@ -281,7 +281,7 @@ function imports(n, r) {
   const entries = [];
   for (let i = 0; i < n; i++) {
     files[`services/service_${i}.jet`] = [...CORE_IMPORTS, '',
-      `pub fn service_${i}_value(seed: Int) -> Int { math.max(seed % 13, ${r.int(1, 12)}) + math.min(seed, ${r.int(1, 99)}) }`, ''].join('\n');
+      `fn service_${i}_value(seed: Int) -> Int { math.max(seed % 13, ${r.int(1, 12)}) + math.min(seed, ${r.int(1, 99)}) }`, ''].join('\n');
     entries.push(`service_${i}_value`);
   }
   return finish('imports', files, consumerTree(files, entries, 'imports'));

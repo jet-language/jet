@@ -137,21 +137,21 @@ impl ExpiryCloseOwner.Close {
     }
 }
 
-pub struct MutationPlan<T> {
-    pub json: String
+struct MutationPlan<T> {
+    json: String
 }
 
-pub struct Rotation<T> {
-    pub previous: KeyRef<T>
-    pub current: KeyRef<T>
+struct Rotation<T> {
+    previous: KeyRef<T>
+    current: KeyRef<T>
 }
 
-pub struct VaultWrite<T> {
-    pub path: String
+struct VaultWrite<T> {
+    path: String
 }
 
-pub struct WrappedImportPlan<T> {
-    pub json: String
+struct WrappedImportPlan<T> {
+    json: String
 }
 
 #Error
@@ -212,13 +212,13 @@ pub fn __key_unlock_passphrase(passphrase: Secret) -> KeyUnlock Never! {
 }
 
 #Error
-pub struct KeyWrapError {
-    pub reason: String
+struct KeyWrapError {
+    reason: String
 }
 
 // `get` is the repository secret store, whose intentionally untyped optional
 // result is separate from typed vault key handles.
-pub fn get(name: String) -[Secret]> String? Never! { vault.get(name) }
+fn get(name: String) -[Secret]> String? Never! { vault.get(name) }
 
 pub fn load<T>(key: &KeyRef<T>) -[Secret]> T VaultError! {
     #Unsafe("vault typed load provider boundary") {
@@ -276,7 +276,7 @@ pub fn prepare_import_x25519(name: String, bytes: ^[U8]) -[Secret]> MutationPlan
     }
 }
 
-pub fn prepare_import_wrapped<T>(name: String, wrapped: WrappedVaultKey, unlock: KeyUnlock) -[Secret]> WrappedImportPlan<T> KeyWrapError! {
+fn prepare_import_wrapped<T>(name: String, wrapped: WrappedVaultKey, unlock: KeyUnlock) -[Secret]> WrappedImportPlan<T> KeyWrapError! {
     validate_name(name) ?? return Err(KeyWrapError{reason: "invalid vault key name"})
     if wrapped.encoded.len() < 16 || wrapped.encoded.len() > 8192 -> return Err(KeyWrapError{reason: "invalid wrapped key length"})
     #Unsafe("vault wrapped import provider boundary") {
@@ -380,18 +380,18 @@ pub fn export_to_recipients<T>(key: &KeyRef<T>, recipients: [X25519PublicKey]) -
     }
 }
 
-pub struct VaultRec {
-    pub name: String
-    pub version: Int
-    pub status: String
-    pub secret_hex: String
+struct VaultRec {
+    name: String
+    version: Int
+    status: String
+    secret_hex: String
 }
 
-pub struct PlanBits {
-    pub op: String
-    pub name: String
-    pub version: Int
-    pub payload: String
+struct PlanBits {
+    op: String
+    name: String
+    version: Int
+    payload: String
 }
 
 fn same_text(left: String, right: String) -> Bool Never! {

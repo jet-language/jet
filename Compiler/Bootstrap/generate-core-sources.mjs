@@ -136,7 +136,7 @@ const output = [
   ...header,
   "",
   "// The canonical effect source the Rust host embeds as `Effects::EFFECT_SOURCE`.",
-  `pub JET_CLI_EFFECT_SOURCE :: prep { ${jetStringLiteral(effectSource, effectSourceDisplay)} }`,
+  `JET_CLI_EFFECT_SOURCE :: prep { ${jetStringLiteral(effectSource, effectSourceDisplay)} }`,
   "",
   "",
 ].join("\n");

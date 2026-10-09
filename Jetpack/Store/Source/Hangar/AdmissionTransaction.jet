@@ -15,22 +15,22 @@ store_admission_failure := 0
 // A verified object supplied by a format adapter. The adapter owns how the
 // bytes were fetched and hashed; the transaction owns their durable
 // publication.
-pub struct AdmissionObject {
-    pub source: String
-    pub digest: String
-    pub bytes: Int
-    pub allow_semantic_xattrs: Bool
-    pub repair_corrupt: Bool
+struct AdmissionObject {
+    source: String
+    digest: String
+    bytes: Int
+    allow_semantic_xattrs: Bool
+    repair_corrupt: Bool
 }
 
 // A format-specific receipt whose atomic publication is shared with package
 // receipts. Nix builds the closure receipt bytes; Hangar publishes them.
-pub struct AdmissionReceipt {
-    pub digest: String
-    pub bytes: [U8]
+struct AdmissionReceipt {
+    digest: String
+    bytes: [U8]
 }
 
-pub enum AdmissionFailurePoint {
+enum AdmissionFailurePoint {
     AfterObjectPublication
     AfterReceiptPublication
     AfterClosureRegistration
@@ -54,13 +54,13 @@ pub enum AdmissionFailurePoint {
 
 // Arm the injected failure for the admissions that follow; returns the
 // previous setting for `store_end_admission_failure`.
-pub fn store_begin_admission_failure(point: AdmissionFailurePoint) -> Int Never! {
+fn store_begin_admission_failure(point: AdmissionFailurePoint) -> Int Never! {
     previous :: store_admission_failure
     store_admission_failure = point.tag()
     previous
 }
 
-pub fn store_end_admission_failure(previous: Int) Never! {
+fn store_end_admission_failure(previous: Int) Never! {
     store_admission_failure = previous
 }
 
@@ -79,14 +79,14 @@ struct PublishedObject {
     created: Bool
 }
 
-pub struct AdmissionTransaction {
-    verification: StoreVerification
-    roots: HangarRoots
-    stage: String
-    objects: [AdmissionObject]
-    published: [PublishedObject]
-    receipts: [String]
-    committed: Bool
+struct AdmissionTransaction {
+    priv verification: StoreVerification
+    priv roots: HangarRoots
+    priv stage: String
+    priv objects: [AdmissionObject]
+    priv published: [PublishedObject]
+    priv receipts: [String]
+    priv committed: Bool
 
     fn new(verification: &StoreVerification, roots: HangarRoots) -> AdmissionTransaction StoreError! {
         hangar :: roots.hangar_dir()
@@ -492,7 +492,7 @@ fn store_transaction_remove_node(path: String) StoreError! {
 // Remove only abandoned children from a staging directory. The directory
 // itself must be a real directory; a symlink is a path-escape repair stop,
 // not permission to walk or remove the target it names.
-pub fn store_sweep_abandoned_directory(path: String, label: String) -> Int StoreError! {
+fn store_sweep_abandoned_directory(path: String, label: String) -> Int StoreError! {
     metadata :: if files.stat(path) == {
         .Ok(metadata) -> metadata
         .Err(error) -> {

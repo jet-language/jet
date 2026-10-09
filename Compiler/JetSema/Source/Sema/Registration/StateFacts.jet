@@ -9,22 +9,22 @@ use jet_foundation.[
     StructDef,
 ]
 
-pub struct SemaStateGraphNode {
-    pub name: String
-    pub terminal: Bool
-    pub reachable: Bool?
+struct SemaStateGraphNode {
+    name: String
+    terminal: Bool
+    reachable: Bool?
 }
 
-pub struct SemaStateGraphTransition {
-    pub operation: String
-    pub from: String?
-    pub to: String
+struct SemaStateGraphTransition {
+    operation: String
+    from: String?
+    to: String
 }
 
-pub struct SemaStateGraphFact {
-    pub type_name: String
-    pub states: [SemaStateGraphNode]
-    pub transitions: [SemaStateGraphTransition]
+struct SemaStateGraphFact {
+    type_name: String
+    states: [SemaStateGraphNode]
+    transitions: [SemaStateGraphTransition]
 }
 
 struct SemaStateGraphEdge {
@@ -126,7 +126,7 @@ fn sema_state_graph_for_struct(definition: StructDef, items: [Item]) -> SemaStat
     SemaStateGraphFact{type_name: definition.name, states: nodes, transitions: transitions}
 }
 
-pub fn sema_state_graph_facts(items: [Item]) -> [SemaStateGraphFact] Never! {
+fn sema_state_graph_facts(items: [Item]) -> [SemaStateGraphFact] Never! {
     graphs := [SemaStateGraphFact]{}
     loop item in items {
         if item == .Struct(definition) && definition.state != None -> &graphs.push(sema_state_graph_for_struct(definition, items))

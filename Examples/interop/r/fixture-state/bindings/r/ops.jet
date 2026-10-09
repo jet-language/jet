@@ -27,12 +27,12 @@ use core.encoding.json as json
     fn sleep_call_plot(handle: Int, input: String, deadline_ms: Int) -> String = "jet_r_ops_invoke_sleep_call_plot"
 }
 
-pub struct Session {
-    value: Int
+struct Session {
+    priv value: Int
 }
 
 #Error
-pub enum RError {
+enum RError {
     NotRunning
     Timeout
     Cancelled
@@ -45,15 +45,15 @@ impl Session.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
-pub fn close(session: ^Session) { abi.close(session.value) }
+fn close(session: ^Session) { abi.close(session.value) }
 
-pub fn open() -> Session RError! {
+fn open() -> Session RError! {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(RError.NotRunning)
     return Ok(Session{value: handle})
 }
 
-pub fn cancel(session: Session) { abi.cancel(session.value) }
+fn cancel(session: Session) { abi.cancel(session.value) }
 
 fn decode_response(raw: String, code: Int) -> Dyn RError! {
     if code == 1 -> return Err(RError.NotRunning)

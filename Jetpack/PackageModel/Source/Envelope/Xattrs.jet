@@ -19,7 +19,7 @@ ENVELOPE_EXCLUDED_XATTR_PREFIXES :: prep { [String]{
 } }
 
 // True when `name` is a security/quarantine xattr Hangar strips from identity.
-pub fn pkg_is_excluded_xattr(name: String) -> Bool Never! {
+fn pkg_is_excluded_xattr(name: String) -> Bool Never! {
     loop prefix in ENVELOPE_EXCLUDED_XATTR_PREFIXES {
         if name == prefix || name.starts_with(prefix) -> return true
     }
@@ -27,7 +27,7 @@ pub fn pkg_is_excluded_xattr(name: String) -> Bool Never! {
 }
 
 // The xattr names on `path`, without following a final link.
-pub fn pkg_list_xattr_names(path: String) -[FS]> [String] EnvelopeError! {
+fn pkg_list_xattr_names(path: String) -[FS]> [String] EnvelopeError! {
     names :: files.extended_attribute_names(path) ?? return Err(EnvelopeError.Xattr("cannot inspect xattrs on `{path}`: {err}"))
     Ok(names)
 }
@@ -48,7 +48,7 @@ fn pkg_semantic_xattr_rejection(path: String, names: [String]) -> EnvelopeError 
 
 // Reject semantic xattrs unless an explicit platform artifact kind allows
 // them. Excluded security/quarantine names are ignored.
-pub fn pkg_check_xattrs(path: String, allow_semantic_xattrs: Bool) EnvelopeError! -[FS]> {
+fn pkg_check_xattrs(path: String, allow_semantic_xattrs: Bool) EnvelopeError! -[FS]> {
     names := [String]{}
     loop name in pkg_list_xattr_names(path) {
         if !pkg_is_excluded_xattr(name) -> &names.push(name)
@@ -84,7 +84,7 @@ fn pkg_xattr_value(path: String, name: String) -[FS]> [U8] EnvelopeError! {
 // Sparse-file policy (JP1): whether a regular file has unallocated holes.
 // Holes never change the digest; the probe only reports policy. Linux only,
 // as in the reference; other hosts report no holes.
-pub fn pkg_file_has_sparse_holes(path: String) -[FS, Env]> Bool EnvelopeError! {
+fn pkg_file_has_sparse_holes(path: String) -[FS, Env]> Bool EnvelopeError! {
     if !sys.is_linux() -> return Ok(false)
     reader :: files.open(path, links: .Refuse) ?? return Err(EnvelopeError.SparseProbe{path: path, detail: "{err}"})
     info :: reader.stat() ?? return Err(EnvelopeError.SparseStat{path: path, detail: "{err}"})

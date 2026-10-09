@@ -1150,7 +1150,7 @@ fn plugin_using_an_effect_is_e1258() {
     let dir = isolated_cwd("plugin_effect_denied");
     fs::write(
         dir.join("main.jet"),
-        "use core.sys as env\n\npub fn get_secret() -> Int {\n    _ :: env.get(\"SECRET\")\n    return 1\n}\n\nfn run() { print(get_secret()) }\n",
+        "use core.sys as env\n\nfn get_secret() -> Int {\n    _ :: env.get(\"SECRET\")\n    return 1\n}\n\nfn run() { print(get_secret()) }\n",
     )
     .unwrap();
     let out = Command::new(jet())
@@ -1224,7 +1224,7 @@ fn plugin_missing_wasm_tools_is_e1259() {
     let dir = isolated_cwd("plugin_no_wasmtools");
     fs::write(
         dir.join("main.jet"),
-        "pub fn scale(a: Float, b: Float) -> Float {\n    return a * b\n}\n\nfn run() {}\n",
+        "fn scale(a: Float, b: Float) -> Float {\n    return a * b\n}\n\nfn run() {}\n",
     )
     .unwrap();
 

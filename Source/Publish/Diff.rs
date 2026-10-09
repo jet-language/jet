@@ -8,7 +8,7 @@ use crate::Diagnostics::Diagnostic;
 
 /// Compare old and new public API surfaces and return a list of breaking
 /// changes. A change is breaking when an item is removed or its signature
-/// changes (any method removed from a trait, any field removed from a pub
+/// changes (any method removed from a trait, any field removed from a public
 /// struct, any function's parameter list or return type changed).
 #[derive(Debug, Clone)]
 pub struct BreakingChange {
@@ -37,7 +37,7 @@ pub fn diff_public_api(old: &[ApiItem], new: &[ApiItem]) -> Vec<BreakingChange> 
             matched[index] = true;
             changes.push(BreakingChange {
                 description: format!(
-                    "pub {} `{}` changed signature\n   | was: {}\n   | now: {}",
+                    "public {} `{}` changed signature\n   | was: {}\n   | now: {}",
                     old_item.kind, old_item.name, old_item.signature, new_item.signature
                 ),
                 item_name: old_item.name.clone(),
@@ -45,7 +45,7 @@ pub fn diff_public_api(old: &[ApiItem], new: &[ApiItem]) -> Vec<BreakingChange> 
         } else {
             changes.push(BreakingChange {
                 description: format!(
-                    "pub {} `{}` was removed\n   | {}\n   | (removed)",
+                    "public {} `{}` was removed\n   | {}\n   | (removed)",
                     old_item.kind, old_item.name, old_item.signature
                 ),
                 item_name: old_item.name.clone(),

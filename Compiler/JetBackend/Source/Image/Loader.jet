@@ -22,9 +22,9 @@ pub struct X64Runtime {
 
 // A loaded image: `base` is the mapping, `entry` the absolute entry address,
 // and `slots[i]` the absolute address of the slot bound to `imports[i]`.
-pub struct X64LoadedImage {
-    pub base: Int
-    pub size: Int
+struct X64LoadedImage {
+    base: Int
+    size: Int
     // Only [base, base + code_size) is executable. Data is never executable.
     pub code_size: Int
     pub entry: Int
@@ -39,7 +39,7 @@ fn x64_loaded_failure(errors: [String]) -> X64LoadedImage Never! {
 }
 
 // Open the compiled runtime's shared library at `path`.
-pub fn x64_runtime_open(path: String) -> X64Runtime {
+fn x64_runtime_open(path: String) -> X64Runtime {
     library :: os_library_open(path)
     if library == 0 -> return X64Runtime{library: 0, errors: [String]{"cannot load the runtime library {path}"}}
     X64Runtime{library: library, errors: [String]{}}
@@ -47,7 +47,7 @@ pub fn x64_runtime_open(path: String) -> X64Runtime {
 
 // Resolve symbols already exported by this process (RTLD_DEFAULT). The host
 // must retain the resident runtime for the lifetime of every loaded image.
-pub fn x64_runtime_current() -> X64Runtime Never! {
+fn x64_runtime_current() -> X64Runtime Never! {
     X64Runtime{library: 0, errors: [String]{}}
 }
 
@@ -93,7 +93,7 @@ fn x64_core_bind_exports(runtime: X64Runtime, image: X64MemoryImage, loaded: X64
 }
 
 // Map, copy and bind `image`, then make it read+execute.
-pub fn x64_load_image(image: X64MemoryImage, runtime: X64Runtime) -> X64LoadedImage {
+fn x64_load_image(image: X64MemoryImage, runtime: X64Runtime) -> X64LoadedImage {
     if image.errors.len() > 0 -> return x64_loaded_failure(image.errors)
     if runtime.errors.len() > 0 -> return x64_loaded_failure(runtime.errors)
     addresses := [Int]{}
@@ -185,7 +185,7 @@ pub fn x64_load_image_bound(image: X64MemoryImage, addresses: [Int]) -> X64Loade
 // Run the loaded entry through `jet_rt_main`, which sets up the runtime,
 // calls the entry and returns the exit status. A runtime stop ends the
 // process from inside the runtime instead.
-pub fn x64_run_image(loaded: X64LoadedImage, runtime: X64Runtime) -> Int {
+fn x64_run_image(loaded: X64LoadedImage, runtime: X64Runtime) -> Int {
     if loaded.errors.len() > 0 || runtime.errors.len() > 0 || loaded.entry == 0 -> return -1
     main :: os_library_symbol(runtime.library, "jet_rt_main")
     if main == 0 -> return -1
@@ -205,7 +205,7 @@ pub fn x64_run_image(loaded: X64LoadedImage, runtime: X64Runtime) -> Int {
 // The page never executes while it is writable, so a thread running code on
 // it would fault; the per-function slot table of the tier design lives on its
 // own pages for that reason.
-pub fn x64_rebind_slot(loaded: X64LoadedImage, slot: Int, address: Int) -> Bool {
+fn x64_rebind_slot(loaded: X64LoadedImage, slot: Int, address: Int) -> Bool {
     if loaded.errors.len() > 0 || address == 0 -> return false
     found := false
     loop candidate in loaded.slots { if candidate == slot -> found = true }

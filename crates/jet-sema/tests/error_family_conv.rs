@@ -40,7 +40,6 @@ fn diags(src: &str) -> Vec<Diagnostic> {
             source: src.to_string(),
             core_identifier_demand: Lexer::core_identifier_demand(&toks),
             web_target_ceiling: prog.web_target_ceiling,
-            pub_file: prog.pub_file,
             no_prelude: prog.no_prelude,
             default_target: prog.default_target,
             html_path: prog.html_path.clone(),

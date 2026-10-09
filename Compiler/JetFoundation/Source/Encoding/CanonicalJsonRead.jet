@@ -17,7 +17,7 @@ fn canonical_json_valid_integer(value: String) -> Bool Never! {
     true
 }
 
-pub fn canonical_json_integer(value: String) -> CanonicalJSON CanonicalJSONError! {
+fn canonical_json_integer(value: String) -> CanonicalJSON CanonicalJSONError! {
     if !canonical_json_valid_integer(value) {
         return Err(canonical_json_error("non-canonical integer `{value}`"))
     }
@@ -40,7 +40,7 @@ fn canonical_json_take(parser: &CanonicalJSONParser) -> Int Never! {
     byte
 }
 
-pub fn canonical_json_parse(bytes: [U8]) -> CanonicalJSON CanonicalJSONError! {
+fn canonical_json_parse(bytes: [U8]) -> CanonicalJSON CanonicalJSONError! {
     _ :: String.from_bytes(bytes) ?? return Err(canonical_json_error("canonical JSON is not UTF-8"))
     if bytes.len() >= 3 && Int.from_u8(bytes[0]) == 239 && Int.from_u8(bytes[1]) == 187 && Int.from_u8(bytes[2]) == 191 {
         return Err(canonical_json_error("canonical JSON has a BOM"))
@@ -214,7 +214,7 @@ fn canonical_json_parse_object(parser: &CanonicalJSONParser) -> CanonicalJSON Ca
 }
 
 // Rust CanonicalJson's derived Eq, without allocating encoded JSON bytes.
-pub fn canonical_json_equal(left: CanonicalJSON, right: CanonicalJSON) -> Bool Never! {
+fn canonical_json_equal(left: CanonicalJSON, right: CanonicalJSON) -> Bool Never! {
     if left == {
         .Null -> right == .Null
         .Bool(value) -> if right == .Bool(other) -> value == other else -> false

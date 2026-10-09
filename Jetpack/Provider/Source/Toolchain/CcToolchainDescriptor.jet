@@ -38,19 +38,19 @@ CC_TOOLCHAIN_MAX_STORE_NAME_BYTES :: prep { 256 }
 // from the exact signed Nix index records below; the Nix cache then admits
 // their complete signed closure into Hangar. No compiler payload is vendored
 // and no host executable is a fallback.
-pub struct CcNixAcquisitionRecord {
-    pub id: String
-    pub channel: String
-    pub revision: String
-    pub system: String
-    pub target: String
-    pub compiler_attr: [String]
-    pub linker_attr: [String]
-    pub compiler_path: String
-    pub cxx_path: String
-    pub linker_path: String
-    pub sysroot_marker: String
-    pub abi: String
+struct CcNixAcquisitionRecord {
+    id: String
+    channel: String
+    revision: String
+    system: String
+    target: String
+    compiler_attr: [String]
+    linker_attr: [String]
+    compiler_path: String
+    cxx_path: String
+    linker_path: String
+    sysroot_marker: String
+    abi: String
 
     // `nixpkgs:<channel>#<revision>:<system>`, the producer's immutable source.
     fn immutable_source(self) -> String Never! {
@@ -85,7 +85,7 @@ CC_NIX_ACQUISITION_RECORDS :: prep { [CcNixAcquisitionRecord]{
 
 // How a descriptor's bytes are laid out in Hangar: one fixture bundle
 // directory, or separate signed Nix closure objects per role.
-pub enum CcToolchainLayout {
+enum CcToolchainLayout {
     Fixture
     NixIndexHangar
 
@@ -106,7 +106,7 @@ pub enum CcToolchainLayout {
 }
 
 // The mounted role roots of a Nix-layout toolchain under its virtual root.
-pub enum CcToolchainRole {
+enum CcToolchainRole {
     Compiler
     Linker
     Sysroot
@@ -123,7 +123,7 @@ pub enum CcToolchainRole {
 // The C toolchain failure carrier. `MissingDescriptor` is the one expected
 // miss: Hangar has no verified descriptor yet, so acquisition may proceed.
 #Error
-pub enum CcToolchainError {
+enum CcToolchainError {
     MissingDescriptor(String)
     Invalid(String)
 
@@ -143,38 +143,38 @@ pub enum CcToolchainError {
     }
 }
 
-pub struct CcMount {
-    pub store_path: String
-    pub digest: String
-    pub source: String
-    pub destination: String
+struct CcMount {
+    store_path: String
+    digest: String
+    source: String
+    destination: String
 }
 
-pub struct CcToolchainDescriptor {
-    pub entry_id: String
-    pub root: String
-    pub host: String
-    pub target: String
-    pub version: String
-    pub abi: String
-    pub compiler: String
-    pub compiler_sha256: String
-    pub cxx: String
-    pub cxx_sha256: String
-    pub linker: String
-    pub linker_sha256: String
-    pub sysroot: String
-    pub sysroot_sha256: String
-    pub bundle_sha256: String
-    pub layout: CcToolchainLayout
-    pub compiler_root: String
-    pub cxx_root: String
-    pub linker_root: String
-    pub sysroot_root: String
-    pub mounts: [CcMount]
-    pub references: [String]
-    pub envelope: Envelope
-    pub producer: ProducerRecord
+struct CcToolchainDescriptor {
+    entry_id: String
+    root: String
+    host: String
+    target: String
+    version: String
+    abi: String
+    compiler: String
+    compiler_sha256: String
+    cxx: String
+    cxx_sha256: String
+    linker: String
+    linker_sha256: String
+    sysroot: String
+    sysroot_sha256: String
+    bundle_sha256: String
+    layout: CcToolchainLayout
+    compiler_root: String
+    cxx_root: String
+    linker_root: String
+    sysroot_root: String
+    mounts: [CcMount]
+    references: [String]
+    envelope: Envelope
+    producer: ProducerRecord
 
     fn virtual_root(self) -> String Never! {
         files.join(CC_TOOLCHAIN_VIRTUAL_BASE, self.bundle_sha256)
@@ -299,22 +299,22 @@ pub struct CcToolchainDescriptor {
 
 // A fixture bundle manifest (`jet-cc-toolchain[-<target>].json`), already
 // shape-checked by `parse`.
-pub struct CcBundleManifest {
-    pub host: String
-    pub target: String
-    pub version: String
-    pub abi: String
-    pub bundle: String
-    pub compiler: String
-    pub compiler_sha256: String
-    pub cxx: String
-    pub cxx_sha256: String
-    pub linker: String
-    pub linker_sha256: String
-    pub sysroot: String
-    pub sysroot_sha256: String
-    pub bundle_sha256: String
-    pub source: String
+struct CcBundleManifest {
+    host: String
+    target: String
+    version: String
+    abi: String
+    bundle: String
+    compiler: String
+    compiler_sha256: String
+    cxx: String
+    cxx_sha256: String
+    linker: String
+    linker_sha256: String
+    sysroot: String
+    sysroot_sha256: String
+    bundle_sha256: String
+    source: String
 
     // Parse and validate manifest text read from `file_name` for the
     // normalized `target`. `host` is this machine's target triple.
@@ -439,7 +439,7 @@ fn provider_cc_fixture_mount(root: String, bundle_sha256: String) -> CcMount Nev
 
 // Whether a package ref names the one C/C++ toolchain package. It stays in
 // the existing native provider rather than adding a second ProviderKind.
-pub fn provider_cc_toolchain_is_reference(spec: RefSpec) -> Bool Never! {
+fn provider_cc_toolchain_is_reference(spec: RefSpec) -> Bool Never! {
     package :: spec.package.split_once("#")?.before ?? spec.package
     if package != CC_TOOLCHAIN_PACKAGE -> return false
     if spec.source == {
@@ -451,7 +451,7 @@ pub fn provider_cc_toolchain_is_reference(spec: RefSpec) -> Bool Never! {
 
 // The normalized target a ref selects: the host without a selector, or the
 // explicit `#target=<target-triple>`.
-pub fn provider_cc_toolchain_requested_target(spec: RefSpec) -[Env]> String CcToolchainError! {
+fn provider_cc_toolchain_requested_target(spec: RefSpec) -[Env]> String CcToolchainError! {
     selector :: spec.package.split_once("#")?.after ?? ""
     if selector == "" -> return provider_cc_normalize_target(provider_cc_toolchain_host_target_triple())
     if !selector.starts_with("target=") || selector == "target=" {
@@ -460,7 +460,7 @@ pub fn provider_cc_toolchain_requested_target(spec: RefSpec) -[Env]> String CcTo
     provider_cc_normalize_target(selector.removeprefix("target="))
 }
 
-pub fn provider_cc_toolchain_host_target_triple() -[Env]> String Never! {
+fn provider_cc_toolchain_host_target_triple() -[Env]> String Never! {
     provider_cc_target_triple_for(PlatformKey.host())
 }
 

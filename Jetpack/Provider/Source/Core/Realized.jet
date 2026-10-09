@@ -22,56 +22,56 @@ PROVIDER_NIX_NATIVE_DOCUMENT :: prep { "nix.native.document" }
 // source table: offline fixtures, the store to materialize into, the project
 // whose lock records Nix identities, the signed index, and the Hangar roots
 // used by native cache admission.
-pub struct ProviderCtx {
-    pub fixtures: String?
-    pub store_dir: String
-    pub offline: Bool
+struct ProviderCtx {
+    fixtures: String?
+    store_dir: String
+    offline: Bool
     // D-JPK-OFFLINE2=B: the project whose `.jet/lock` records and matches a
     // Nix-provider package's locked identity. None records no lock and gets
     // no offline reuse.
-    pub project_dir: String?
+    project_dir: String?
     // Signed nixpkgs index client. None keeps non-Nix and fixture callers
     // independent of the production index transport.
-    pub nix_index: NixIndexClient?
+    nix_index: NixIndexClient?
     // Roots used by native cache admission; separate from `store_dir`
     // because reproducibility probes use private Hangars.
-    pub nix_roots: HangarRoots?
+    nix_roots: HangarRoots?
     // Invocation-only permission from `--local-nix-catalog`, never a stored
     // grant.
-    pub allow_local_nix_catalog: Bool
+    allow_local_nix_catalog: Bool
     // Terminal progress for admission and registration (Rust installed it
     // thread-locally; here the context carries it).
-    pub progress: ProgressHandle?{None}
+    progress: ProgressHandle?{None}
 }
 
 // A realized package: where its bytes are and what to put on PATH. `bin` is
 // the directory to prepend to PATH, or empty for a library package (U10).
-pub struct Realized {
-    pub name: String
+struct Realized {
+    name: String
     // Package version for the hangar id (`<name>-<version>-<fp>`, D-PM1), or
     // empty when the provider cannot determine one.
-    pub version: String
-    pub reference: String
-    pub out: String
-    pub bin: String
+    version: String
+    reference: String
+    out: String
+    bin: String
     // The built Rust rlib of a library carrying `Cargo.toml` (D-BFS1).
-    pub rlib: String
+    rlib: String
     // D-JPK-CACHE1=A: the A4 envelope of this realized output.
-    pub envelope: Envelope
-    pub cache_identity: CacheIdentity
+    envelope: Envelope
+    cache_identity: CacheIdentity
     // D-JPK-CACHE1 reporting (T4): how this realization was satisfied.
-    pub source_state: SourceState
+    source_state: SourceState
     // Provider output names mapped to exact immutable paths.
-    pub named_outputs: [String: String]
+    named_outputs: [String: String]
     // CAS closure edges discovered by the provider.
-    pub references: [String]
+    references: [String]
     // Canonical replay/source/toolchain/policy facts.
-    pub producer: ProducerRecord
+    producer: ProducerRecord
 }
 
 // How a dependency was realized, for the `jet build` per-package report
 // (`Built | Substituted | Cached`, D-JPK-CACHE1).
-pub enum SourceState {
+enum SourceState {
     // Compiled from source by a first-party provider this run.
     Built
     // Downloaded from a verified native release artifact.
@@ -94,7 +94,7 @@ pub enum SourceState {
 // What can go wrong realizing a ref through a provider. Each variant renders
 // one friendly diagnostic (`report`).
 #Error
-pub enum ProviderError {
+enum ProviderError {
     // A compatibility provider failed; carries a trimmed reason.
     BuildFailed(String)
     // The provider output did not have the expected shape.
@@ -206,39 +206,39 @@ fn provider_nix_index_code(error: NixIndexError) -> String Never! {
 // provider JSON accessors). Callers wrap it in the `ProviderError` variant
 // their boundary owns.
 #Error
-pub struct ProviderReason {
-    pub message: String
+struct ProviderReason {
+    message: String
 }
 
 // A package ref that needs an explicit Nix compatibility bridge output.
-pub struct NixBridgeNeed {
-    pub reference: String
-    pub package: String
+struct NixBridgeNeed {
+    reference: String
+    package: String
 }
 
-pub enum PlanState {
+enum PlanState {
     New
     Cached
     Repaired
 }
 
-pub struct PlanItem {
-    pub package: String
-    pub state: PlanState
-    pub download_bytes: Int?
-    pub disk_bytes: Int?
+struct PlanItem {
+    package: String
+    state: PlanState
+    download_bytes: Int?
+    disk_bytes: Int?
 }
 
 // Acquisition metadata resolved before realization. A byte total stays unknown
 // (None) as soon as one item's size is unknown or the sum overflows.
-pub struct DownloadPlan {
-    pub new: Int
-    pub cached: Int
-    pub repaired: Int
-    pub download_bytes: Int?
-    pub disk_bytes: Int?
-    pub estimated_seconds: Int?
-    pub items: [PlanItem]
+struct DownloadPlan {
+    new: Int
+    cached: Int
+    repaired: Int
+    download_bytes: Int?
+    disk_bytes: Int?
+    estimated_seconds: Int?
+    items: [PlanItem]
 
     fn empty() -> DownloadPlan Never! {
         DownloadPlan{new: 0, cached: 0, repaired: 0, download_bytes: Val(0), disk_bytes: Val(0), estimated_seconds: None, items: [PlanItem]{}}

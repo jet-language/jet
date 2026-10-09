@@ -78,8 +78,8 @@ fn pkg_facts_test_write(dir: String, relative: String, text: String) Never! -[FS
 #Test("config composition does not publish paths before success") {
     dir :: pkg_facts_test_dir("config-transaction")
     facts := PackageFacts.parse_uncomposed("name: \"demo\"\nconfigs: [first, second]\n", files.join(dir, "package.jet")) ?? panic("parses")
-    pkg_facts_test_write(dir, "first.jet", "pub first :: Config{{ version: \"1\" }}\n")
-    pkg_facts_test_write(dir, "second.jet", "pub second :: Config{{ version: \"2\" }}\n")
+    pkg_facts_test_write(dir, "first.jet", "first :: Config{{ version: \"1\" }}\n")
+    pkg_facts_test_write(dir, "second.jet", "second :: Config{{ version: \"2\" }}\n")
     if &facts.compose_configs(dir) == {
         .Err(error) -> assert(error.message().contains("second.jet"))
         .Ok(_) -> panic("a malformed later Config must abort composition")
@@ -114,7 +114,7 @@ fn pkg_facts_test_write(dir: String, relative: String, text: String) Never! -[FS
 #Test("inline and file configs compose once and keep identity") {
     dir :: pkg_facts_test_dir("configs")
     pkg_facts_test_write(dir, "package.jet", "\nname: \"demo\"\nconfigs: [dev, \"release.jet\"]\ndefaults: {{ run: app }}\ndev :: Config{{\n    version: \"1\"\n}}\n")
-    pkg_facts_test_write(dir, "release.jet", "pub release :: Config{{ outputs: {{ app: Executable{{ entry: run }} }} }}")
+    pkg_facts_test_write(dir, "release.jet", "release :: Config{{ outputs: {{ app: Executable{{ entry: run }} }} }}")
     facts :: (PackageFacts.load(dir) ?? panic("loads")) ?? panic("package root")
     assert_eq(facts.version, Val("1"))
     assert_eq(facts.inline_configs["dev"].name, Val("dev"))
@@ -124,9 +124,9 @@ fn pkg_facts_test_write(dir: String, relative: String, text: String) Never! -[FS
 #Test("named config discovery skips leading underscore files") {
     dir :: pkg_facts_test_dir("config-discovery")
     pkg_facts_test_write(dir, "package.jet", "name: \"demo\"\nconfigs: [dev]\n")
-    pkg_facts_test_write(dir, "_dev.jet", "pub dev :: Config{{ version: \"ignored\" }}\n")
-    pkg_facts_test_write(dir, "one.jet", "pub dev :: Config{{ version: \"selected\" }}\n")
-    pkg_facts_test_write(dir, "ordinary.jet", "pub run() {{ }}\n")
+    pkg_facts_test_write(dir, "_dev.jet", "dev :: Config{{ version: \"ignored\" }}\n")
+    pkg_facts_test_write(dir, "one.jet", "dev :: Config{{ version: \"selected\" }}\n")
+    pkg_facts_test_write(dir, "ordinary.jet", "fn run() {{ }}\n")
     facts :: (PackageFacts.load(dir) ?? panic("loads")) ?? panic("package root")
     assert_eq(facts.version, Val("selected"))
     assert(facts.field_provenance("version").contains(files.join(dir, "one.jet")))
@@ -140,8 +140,8 @@ fn pkg_facts_test_write(dir: String, relative: String, text: String) Never! -[FS
 #Test("ambiguous named config discovery fails before composition") {
     dir :: pkg_facts_test_dir("config-ambiguous")
     pkg_facts_test_write(dir, "package.jet", "name: \"demo\"\nconfigs: [dev]\n")
-    pkg_facts_test_write(dir, "one.jet", "pub dev :: Config{{ version: \"same\" }}\n")
-    pkg_facts_test_write(dir, "two.jet", "pub dev :: Config{{ version: \"same\" }}\n")
+    pkg_facts_test_write(dir, "one.jet", "dev :: Config{{ version: \"same\" }}\n")
+    pkg_facts_test_write(dir, "two.jet", "dev :: Config{{ version: \"same\" }}\n")
     if PackageFacts.load(dir) == {
         .Err(error) -> assert(error.message().contains("Config `dev` is ambiguous"))
         .Ok(_) -> panic("an ambiguous named Config must fail")
@@ -201,7 +201,7 @@ fn pkg_facts_test_write(dir: String, relative: String, text: String) Never! -[FS
 #Test("output entry resolves a nested main module") {
     dir :: pkg_facts_test_dir("output-entry-nested-main")
     pkg_facts_test_write(dir, "entry.jet", "use \"src/cli/main\" as app\n")
-    pkg_facts_test_write(dir, "src/cli/main.jet", "pub fn cli_run() {{}}\nfn run() {{ cli_run() }}\n")
+    pkg_facts_test_write(dir, "src/cli/main.jet", "fn cli_run() {{}}\nfn run() {{ cli_run() }}\n")
     facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: app.cli_run }} }}", "package.jet") ?? panic("parses")
     expected :: files.join(dir, "src/cli/main.jet")
     assert_eq(facts.entry_path(dir, facts.outputs["app"]) ?? panic("entry"), Val(expected))
@@ -216,7 +216,7 @@ fn pkg_facts_test_write(dir: String, relative: String, text: String) Never! -[FS
     pkg_facts_test_write(dir, "entry.jet", "use \"runner\" as runner\n")
     pkg_facts_test_write(dir, "runner.jet", "use \"bridge\" as bridge\n")
     pkg_facts_test_write(dir, "bridge.jet", "use \"src/cli/main\" as app\n")
-    pkg_facts_test_write(dir, "src/cli/main.jet", "pub fn cli_run() {{}}\n")
+    pkg_facts_test_write(dir, "src/cli/main.jet", "fn cli_run() {{}}\n")
     facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: app.cli_run }} }}", "package.jet") ?? panic("parses")
     assert_eq(facts.entry_path(dir, facts.outputs["app"]) ?? panic("entry"), Val(files.join(dir, "src/cli/main.jet")))
 }
@@ -236,8 +236,8 @@ fn pkg_facts_assert_nested_entry_rejected(label: String, entry_source: String, e
 #Test("nested output entries fail closed for missing ambiguous and escaping imports") {
     pkg_facts_assert_nested_entry_rejected("output-entry-nested-missing", "use \"src/cli/missing\" as app\n", [ManifestEntry]{})
     pkg_facts_assert_nested_entry_rejected("output-entry-nested-ambiguous", "use \"src/cli/main\" as app\n", [ManifestEntry]{
-        ManifestEntry{key: "src/cli/main.jet", value: "pub fn cli_run() {{}}\n"},
-        ManifestEntry{key: "src/cli/main/module.jet", value: "pub fn cli_run() {{}}\n"},
+        ManifestEntry{key: "src/cli/main.jet", value: "fn cli_run() {{}}\n"},
+        ManifestEntry{key: "src/cli/main/module.jet", value: "fn cli_run() {{}}\n"},
     })
     pkg_facts_assert_nested_entry_rejected("output-entry-nested-escaping", "use \"../../outside/main\" as app\n", [ManifestEntry]{})
 }

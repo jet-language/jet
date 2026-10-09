@@ -2,7 +2,7 @@
 // jetpack::CLI::trust_env_build::cmd_trust, D-JPK-GRANTCMD1=A). Jetpack owns
 // the trust store; top-level `jet trust` dispatches here.
 
-pub enum TrustVerb {
+enum TrustVerb {
     Grant
     List
     Explain
@@ -19,7 +19,7 @@ pub enum TrustVerb {
     }
 }
 
-pub fn cli_cmd_trust(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_trust(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     store :: trust_store_path()
     verb :: TrustVerb.parse(parsed.positional.get(0) ?? "") ?? {
         theme.error("`jet trust` needs a verb", "the trust verbs are: {TRUST_VERBS.join(", ")}.", "try `list`, `explain`, `grant`, or `revoke`.")

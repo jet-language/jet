@@ -7,7 +7,7 @@ SERVICES_HEALTH_POLL_MS :: prep { 300 }
 SERVICES_NO_PROBE_STABILITY_MS :: prep { 300 }
 
 // A `services health` result for one service.
-pub enum ServiceHealth {
+enum ServiceHealth {
     Disabled
     NotRunning
     Healthy
@@ -24,11 +24,11 @@ pub enum ServiceHealth {
 }
 
 // One-shot readiness check; it neither waits nor retries.
-pub fn services_health_one(project_dir: String, plan: DevServicePlan) -[FS, Env, Exec, Net, Time, Time.Wait]> ServiceHealth Never! {
+fn services_health_one(project_dir: String, plan: DevServicePlan) -[FS, Env, Exec, Net, Time, Time.Wait]> ServiceHealth Never! {
     services_health_one_with_env(project_dir, None, plan)
 }
 
-pub fn services_health_one_with_env(project_dir: String, env: ShellEnv?, plan: DevServicePlan) -[FS, Env, Exec, Net, Time, Time.Wait]> ServiceHealth Never! {
+fn services_health_one_with_env(project_dir: String, env: ShellEnv?, plan: DevServicePlan) -[FS, Env, Exec, Net, Time, Time.Wait]> ServiceHealth Never! {
     if services_validate_service_name(plan.name) == .Err(_) -> return ServiceHealth.NotRunning
     if !plan.enable -> return ServiceHealth.Disabled
     dir :: services_service_dir(project_dir, plan.name)
@@ -124,11 +124,11 @@ fn services_probe_http(url: String, expected_status: Int?) -[Net, Time.Wait]> Bo
 
 // Poll readiness until it passes or `timeout` elapses; false on timeout
 // (the caller renders E1261).
-pub fn services_wait_healthy(project_dir: String, plan: DevServicePlan, timeout: Duration) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
+fn services_wait_healthy(project_dir: String, plan: DevServicePlan, timeout: Duration) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
     services_wait_healthy_with_env(project_dir, None, plan, timeout)
 }
 
-pub fn services_wait_healthy_with_env(project_dir: String, env: ShellEnv?, plan: DevServicePlan, timeout: Duration) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
+fn services_wait_healthy_with_env(project_dir: String, env: ShellEnv?, plan: DevServicePlan, timeout: Duration) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
     if !plan.enable -> return true
     // With no readiness probe and no port, a service is healthy only after
     // it stays alive for one bounded window, so a fast exit that a detached

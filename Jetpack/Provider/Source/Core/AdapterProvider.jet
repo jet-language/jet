@@ -7,7 +7,7 @@ pub fn provider_realize_adapter(_plan: AdapterPlan, _ctx: ProviderCtx, _expected
 }
 
 // The build recipe an adapter recipe lowers to.
-pub fn provider_adapter_recipe_to_build(recipe: AdapterRecipe) -> BuildRecipe Never! {
+fn provider_adapter_recipe_to_build(recipe: AdapterRecipe) -> BuildRecipe Never! {
     if recipe == {
         .Copy -> BuildRecipe{steps: [BuildStep]{BuildStep.InstallTree{src: ".", dest: "."}}}
         .Prebuilt(bin, as_name) -> BuildRecipe{steps: [BuildStep]{BuildStep.Install{src: bin, dest: "bin/{as_name}"}}}
@@ -17,7 +17,7 @@ pub fn provider_adapter_recipe_to_build(recipe: AdapterRecipe) -> BuildRecipe Ne
 
 // Stage an adapter's declared source bytes: a local directory in place, or a
 // fetched GitHub checkout. Index and registry refs are not source bytes.
-pub fn provider_stage_adapter_source(source: ProviderRef, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
+fn provider_stage_adapter_source(source: ProviderRef, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
     if source.provider == {
         .Path -> {
             target :: pkg_split_channel_ref(source.target).base

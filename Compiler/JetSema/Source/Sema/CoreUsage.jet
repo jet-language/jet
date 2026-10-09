@@ -35,35 +35,35 @@ use jet_foundation.[
     symbol_id,
 ]
 
-pub struct SemaCoreImport {
-    pub alias: String
-    pub module_name: String
-    pub item: String?
-    pub span: Span
+struct SemaCoreImport {
+    alias: String
+    module_name: String
+    item: String?
+    span: Span
 }
 
 
-pub struct SemaCoreUsageSpan {
-    pub usage: String
-    pub span: Span
+struct SemaCoreUsageSpan {
+    usage: String
+    span: Span
 }
 
-pub struct SemaCoreModuleUsageResult {
-    pub module_identity: String
-    pub used_core: [String]
-    pub usage_spans: [SemaCoreUsageSpan]
-    pub ffi_callback_keys: [String]
-    pub closure: [String]
-    pub inferred_layer: MIRRuntimeLayer
+struct SemaCoreModuleUsageResult {
+    module_identity: String
+    used_core: [String]
+    usage_spans: [SemaCoreUsageSpan]
+    ffi_callback_keys: [String]
+    closure: [String]
+    inferred_layer: MIRRuntimeLayer
 }
 
-pub struct SemaCoreUsageResult {
-    pub used_core: [String]
-    pub usage_spans: [SemaCoreUsageSpan]
-    pub ffi_callback_keys: [String]
-    pub closure: [String]
-    pub inferred_layer: MIRRuntimeLayer
-    pub modules: [SemaCoreModuleUsageResult]
+struct SemaCoreUsageResult {
+    used_core: [String]
+    usage_spans: [SemaCoreUsageSpan]
+    ffi_callback_keys: [String]
+    closure: [String]
+    inferred_layer: MIRRuntimeLayer
+    modules: [SemaCoreModuleUsageResult]
 }
 
 fn sema_core_string_contains(values: [String], value: String) -> Bool Never! {
@@ -438,7 +438,7 @@ fn sema_core_has_source_package(module_name: String) -> Bool Never! {
     module_name == "core.archive"
 }
 
-pub fn sema_expand_core_reachable_closure(roots: [String]) -> [String] Never! {
+fn sema_expand_core_reachable_closure(roots: [String]) -> [String] Never! {
     used := [String]{}
     loop root in roots -> sema_core_string_add(&used, root)
     direct := [String]{}
@@ -652,7 +652,7 @@ fn sema_core_collect_source_wrapper(function: Func, owner: String, imports: [Sem
 // module calls. Self-recursion is not a sibling call: a wrapper's own
 // `core.ui.gtk_backend()` may resolve to itself. Rust: CoreUsage.rs
 // core_source_sibling_calls.
-pub fn sema_core_source_unshared_functions(registration_module: SemaRegistrationModule, call_facts: [SemaCallSiteFact]) -> [String] Never! {
+fn sema_core_source_unshared_functions(registration_module: SemaRegistrationModule, call_facts: [SemaCallSiteFact]) -> [String] Never! {
     unshared := [String]{}
     if !registration_module.module_identity.starts_with("<corelib>/") -> return unshared
     called := [String:Bool]{}
@@ -811,7 +811,7 @@ fn sema_core_import_usage(row: SemaCoreImport, fallback: String) -> String Never
     }
 }
 
-pub fn sema_core_helper_import_chain(usage: String, imports: [SemaCoreImport]) -> String Never! {
+fn sema_core_helper_import_chain(usage: String, imports: [SemaCoreImport]) -> String Never! {
     if usage == "core.term::input" -> return "ambient `input()` (helper `{usage}`)"
     parts := usage.split("::").to_list()
     module_name := if parts.len() > 0 -> parts[0] else -> usage
@@ -1249,7 +1249,7 @@ pub fn sema_core_module_usage_from_registration(graph: SemaRegistrationGraph, re
 
 // The module's Core-visible imports, read from its registration rows without
 // copying the module's program.
-pub fn sema_core_registration_imports(registration_module: SemaRegistrationModule) -> [SemaCoreImport] Never! {
+fn sema_core_registration_imports(registration_module: SemaRegistrationModule) -> [SemaCoreImport] Never! {
     imports := [SemaCoreImport]{}
     loop registration in registration_module.imports {
         declaration := registration.declaration
@@ -1295,7 +1295,7 @@ fn sema_core_sorted_set_add(values: &[String], seen: &[String:Bool], value: Stri
     sema_core_string_insert_sorted(&values, value)
 }
 
-pub fn sema_core_combine_module_usage(modules: [SemaCoreModuleUsageResult]) -> SemaCoreUsageResult {
+fn sema_core_combine_module_usage(modules: [SemaCoreModuleUsageResult]) -> SemaCoreUsageResult {
     used := [String]{}
     used_seen := [String:Bool]{}
     spans := [SemaCoreUsageSpan]{}

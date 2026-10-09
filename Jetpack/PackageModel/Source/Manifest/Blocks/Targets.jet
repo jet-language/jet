@@ -2,13 +2,13 @@
 // selections (Package/Blocks.rs).
 
 // The realize axis for a package (U10).
-pub enum PackageKind {
+enum PackageKind {
     Library
     Executable
 }
 
 // One build target of a package (Rust `Blocks::Target`).
-pub enum PackageTarget {
+enum PackageTarget {
     Library
     Executable
     Test
@@ -17,15 +17,15 @@ pub enum PackageTarget {
 }
 
 // One entry in the `packages: { … }` block.
-pub struct PackageEntry {
-    pub name: String
-    pub targets: [PackageTarget]
+struct PackageEntry {
+    name: String
+    targets: [PackageTarget]
 }
 
 // Why a target-profile identity or selection set was refused.
 #Error
-pub struct TargetProfileError {
-    pub detail: String
+struct TargetProfileError {
+    detail: String
 
     fn message(self) -> String Never! { self.detail }
 }
@@ -36,7 +36,7 @@ TARGET_PROFILE_WEB_NO_OS :: prep { "web.no_os" }
 
 // The exact identity selected for a package target. Built-in web identities
 // are closed; any other identity names a typed target-profile declaration.
-pub enum TargetProfileIdentity {
+enum TargetProfileIdentity {
     WebBrowser
     WebWasiServer
     WebNoOS
@@ -94,14 +94,14 @@ pub enum TargetProfileIdentity {
 }
 
 // One named package target and the exact profile it selects.
-pub struct TargetProfileSelection {
-    pub name: String
-    pub profile: TargetProfileIdentity
+struct TargetProfileSelection {
+    name: String
+    profile: TargetProfileIdentity
 }
 
 // Target-profile selections keyed by target name.
-pub struct PackageTargets {
-    selections: [String: TargetProfileSelection]
+struct PackageTargets {
+    priv selections: [String: TargetProfileSelection]
 
     fn empty() -> PackageTargets Never! {
         PackageTargets{selections: [String: TargetProfileSelection]{}}
@@ -164,7 +164,7 @@ fn pkg_target_profile_entries(body: String) -> [ManifestEntry] PackageParseError
 }
 
 // Parse the body of `targets: { web: { profile: "web.browser" }, … }`.
-pub fn pkg_parse_target_profiles(body: String) -> PackageTargets PackageParseError! {
+fn pkg_parse_target_profiles(body: String) -> PackageTargets PackageParseError! {
     entries :: pkg_target_profile_entries(body)
     if entries.len() == 0 -> return Err(PackageParseError.BadTargetField{name: "targets", detail: "the `targets` block must declare at least one target"})
     selections := [TargetProfileSelection]{}
@@ -193,7 +193,7 @@ pub fn pkg_parse_target_profiles(body: String) -> PackageTargets PackageParseErr
 }
 
 // Parse the body of `packages: { name: executable, lib: { targets: [...] } }`.
-pub fn pkg_parse_packages(body: String) -> [PackageEntry] PackageParseError! {
+fn pkg_parse_packages(body: String) -> [PackageEntry] PackageParseError! {
     packages := [PackageEntry]{}
     loop piece in pkg_top_level_commas(body) {
         entry :: piece.trim()

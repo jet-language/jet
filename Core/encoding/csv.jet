@@ -55,7 +55,7 @@ pub struct CSVRow {
 /// returns only data records; `skip_blank` drops records with no field
 /// content. Every `CSVRow.line` is the one-based physical line where that
 /// record opens.
-pub fn rows(text: String, delimiter: String{","}, header: Bool{false}, skip_blank: Bool{true}) -> [CSVRow] EncodingError! {
+fn rows(text: String, delimiter: String{","}, header: Bool{false}, skip_blank: Bool{true}) -> [CSVRow] EncodingError! {
     delimiter_bytes :: delimiter.bytes()
     if delimiter.len() != 1 || delimiter_bytes[0] == (U8{34}) || delimiter_bytes[0] == (U8{10}) || delimiter_bytes[0] == (U8{13}) {
         return Err(unsupported_error(EncodingFormat.CSV, 0, "a CSV delimiter is one character other than a quote or a line ending"))
@@ -462,12 +462,12 @@ fn encode_field(field: String) -> String {
     String.from_bytes(out) ?? field
 }
 
-pub struct DictRow {
-    pub fields: [String]
-    pub values: [String]
+struct DictRow {
+    fields: [String]
+    values: [String]
 }
 
-pub fn dict_rows(text: String) -> [DictRow] EncodingError! {
+fn dict_rows(text: String) -> [DictRow] EncodingError! {
     physical :: parse_rows(text, true)
     if physical.len() == 0 -> return Ok([DictRow]{})
     header :: physical[0].fields
@@ -490,7 +490,7 @@ pub fn dict_rows(text: String) -> [DictRow] EncodingError! {
     Ok(out)
 }
 
-pub fn dict_get(row: DictRow, key: String) -> String? Never! {
+fn dict_get(row: DictRow, key: String) -> String? Never! {
     i := 0
     loop i < row.fields.len() {
         if row.fields[i] == key -> return Val(row.values[i])
@@ -499,18 +499,18 @@ pub fn dict_get(row: DictRow, key: String) -> String? Never! {
     None
 }
 
-pub fn dict_get_or(row: DictRow, key: String, fallback: String) -> String Never! {
+fn dict_get_or(row: DictRow, key: String, fallback: String) -> String Never! {
     dict_get(row, key) ?? fallback
 }
 
-pub fn write_dict(rows: [DictRow]) -> String Never! {
+fn write_dict(rows: [DictRow]) -> String Never! {
     if rows.len() == 0 -> return ""
     out := "{encode_row(rows[0].fields)}\n"
     loop row in rows -> out = "{out}{encode_row(row.values)}\n"
     out
 }
 
-pub fn fieldnames(rows: [DictRow]) -> [String] Never! {
+fn fieldnames(rows: [DictRow]) -> [String] Never! {
     if rows.len() == 0 -> return [String]{}
     rows[0].fields
 }

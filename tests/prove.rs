@@ -37,7 +37,7 @@ fn budget_workspace(name: &str) -> PathBuf {
         limit: .AtMost(10),
     }],
 }
-pub fn api() {}
+fn api() {}
 fn run() {}
 "#,
     )

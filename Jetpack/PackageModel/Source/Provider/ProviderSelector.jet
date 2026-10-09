@@ -7,14 +7,14 @@
 // carrier can report it instead of guessing.
 
 // The selector facts a provider reference may carry after `#`.
-pub struct ProviderSelector {
-    pub raw: String
-    pub version: String
-    pub revision: String
-    pub baseline: String
-    pub features: [String]
-    pub digest: String
-    pub platform: String
+struct ProviderSelector {
+    raw: String
+    version: String
+    revision: String
+    baseline: String
+    features: [String]
+    digest: String
+    platform: String
 
     fn empty(raw: String) -> ProviderSelector Never! {
         ProviderSelector{raw: raw, version: "", revision: "", baseline: "", features: [String]{}, digest: "", platform: ""}
@@ -116,7 +116,7 @@ pub struct ProviderSelector {
 
 // One selector fact key. `rev`, `feature`, `hash`/`sha256`, and `target` are
 // accepted spellings of their canonical keys.
-pub enum ProviderSelectorField {
+enum ProviderSelectorField {
     Version
     Revision
     Baseline
@@ -169,11 +169,11 @@ pub enum ProviderSelectorField {
 }
 
 // A selector with the facts it could not normalize losslessly.
-pub struct ProviderSelectorDetails {
-    pub selector: ProviderSelector
-    pub unknown: [String]
-    pub conflicts: [(key: String, left: String, right: String)]
-    pub duplicates: [String]
+struct ProviderSelectorDetails {
+    selector: ProviderSelector
+    unknown: [String]
+    conflicts: [(key: String, left: String, right: String)]
+    duplicates: [String]
 
     // Facts separate on `&`, and on a `,` that starts another known
     // `key=value` fact; a fact without `=` is a version.

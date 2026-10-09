@@ -6,8 +6,8 @@
     worker :: pkg_perl_render_worker(functions)
     cases :: [(foreign: String, projected: String)]{(foreign: "Fail", projected: "fail"), (foreign: "Sleep", projected: "sleep"), (foreign: "Transform", projected: "transform")}
     loop case in cases {
-        assert(jet.contains("pub fn {case.projected}("))
-        assert(!jet.contains("pub fn {case.foreign}("))
+        assert(jet.contains("\nfn {case.projected}("))
+        assert(!jet.contains("\nfn {case.foreign}("))
         assert(worker.contains("'{case.foreign}' => 1"))
     }
 }

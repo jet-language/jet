@@ -43,9 +43,9 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaFactReadCheck {
-    pub handled: Bool
-    pub value: TExpr?
+struct SemaFactReadCheck {
+    handled: Bool
+    value: TExpr?
 }
 
 fn sema_fact_read_unhandled() -> SemaFactReadCheck Never! {
@@ -137,7 +137,7 @@ fn sema_fact_optional(name: String) -> Type Never! {
 // compiler-owned menus (Rust `core_fact_kind_variants`). `FactKind` is the
 // registered plane projection: `Effect`, `State`, `Tag`, then each value
 // plane's reflection kind in Prelude `Facts.jet` row order.
-pub fn sema_fact_enum_variants(enum_name: String) -> [String]? {
+fn sema_fact_enum_variants(enum_name: String) -> [String]? {
     if {
         enum_name == "FactKind" -> Val([String]{"Effect", "State", "Tag", "Nominal", "Range", "Layout", "Measure", "Dimension", "Classification", "Exactness", "Obligation", "Flow", "Taint", "Duty", "Effects", "States", "Sendability", "ViewProvenance", "Movedness", "Attribution", "Origin", "UnitScaleProvenance", "Maturity"})
         enum_name == "Maturity" -> Val([String]{"Experimental", "Tested", "Hardened"})
@@ -152,7 +152,7 @@ pub fn sema_fact_enum_variants(enum_name: String) -> [String]? {
 // every module sees without a declaration. `<=>` and `compare` produce an
 // `Ordering`; checked removals select by `RemoveBy`. They share the closed
 // menu checks below, but they are runtime values, so codegen never folds them.
-pub fn sema_compiler_enum_variants(enum_name: String) -> [String]? {
+fn sema_compiler_enum_variants(enum_name: String) -> [String]? {
     if {
         enum_name == "Ordering" -> Val([String]{"Less", "Equal", "Greater"})
         enum_name == "RemoveBy" -> Val([String]{"Val", "Slot"})
@@ -282,7 +282,7 @@ fn sema_fact_field_when(condition: Bool, ty: Type) -> Type? {
 
 // The typed field rows of the compiler-owned reflection records
 // (Rust `core_struct_field`). These records exist only as compile-time values.
-pub fn sema_fact_reflection_field_type(type_name: String, field: String) -> Type? {
+fn sema_fact_reflection_field_type(type_name: String, field: String) -> Type? {
     string :: Type.String
     if type_name == "Range" -> return sema_fact_field_when(field == "start" || field == "end", Type.Int)
     if type_name == "TypeInfo" {
@@ -585,7 +585,7 @@ fn sema_fact_first_dimension(value: TComptimeValue) -> TComptimeValue? {
 // Project one registered fact from an aggregate reflection value through its
 // typed FactInfo/FactValue carrier (Rust `Comptime::reflected_fact_field`).
 // Codegen reuses this for `$` steps of a prepared-constant path.
-pub fn sema_fact_reflected_field(value: TComptimeValue, member: String) -> TComptimeValue? {
+fn sema_fact_reflected_field(value: TComptimeValue, member: String) -> TComptimeValue? {
     read :: sema_fact_read_kind(member) ?? return None
     sema_fact_reflected_read(value, read)
 }
@@ -619,7 +619,7 @@ fn sema_fact_reflected_read(value: TComptimeValue, read: String) -> TComptimeVal
 // A checked value whose content is known before code generation: a literal
 // compile-time value, a prepared constant, or a field/`[i]` projection of one.
 // Only these carry compiler-owned reflection records.
-pub fn sema_fact_constant_path(value: TExpr) -> Bool Never! {
+fn sema_fact_constant_path(value: TExpr) -> Bool Never! {
     if value.kind == {
         .CtLit(_) | .ConstRef(_) -> true
         .Field(receiver, _) -> sema_fact_constant_path(receiver)
@@ -631,7 +631,7 @@ pub fn sema_fact_constant_path(value: TExpr) -> Bool Never! {
 // `record.field` over a compiler-owned reflection record. The checked read
 // keeps a field reference with no nominal owner; codegen folds the prepared
 // constant path to its value.
-pub fn sema_fact_reflection_field(base: TExpr, member: String, span: Span) -> TExpr? {
+fn sema_fact_reflection_field(base: TExpr, member: String, span: Span) -> TExpr? {
     owner_name := ""
     if base.ty == {
         .Named(name) -> owner_name = name
@@ -688,7 +688,7 @@ fn sema_fact_build_value(path: String, facts: SemaBuildFacts) -> SemaFactReadVal
 
 // `$build.settings.<key>` names one declared setting (Rust
 // `Registry::build_setting_key`): a single non-empty key segment.
-pub fn sema_fact_build_setting_key(path: String) -> String? {
+fn sema_fact_build_setting_key(path: String) -> String? {
     prefix :: "$build.settings."
     if !path.starts_with(prefix) -> return None
     key :: path.slice(prefix.len(), path.len())
@@ -696,7 +696,7 @@ pub fn sema_fact_build_setting_key(path: String) -> String? {
     Val(key)
 }
 
-pub fn sema_fact_build_setting_undeclared(key: String, span: Span) -> Diagnostic {
+fn sema_fact_build_setting_undeclared(key: String, span: Span) -> Diagnostic {
     sema_error("E0302", span, "`$build.settings.{key}` is undeclared", "a setting must be declared with a type and default in the package manifest before it can be read", "add `{key}: Type = default` to the package `settings: {{ … }}` block")
 }
 
@@ -736,7 +736,7 @@ pub fn sema_fact_prepared_expr(value: TComptimeValue, ty: Type, span: Span, envi
 // The value of a checked prepared-constant path over a literal compile-time
 // record (`FACT.field`, `FACTS[0]`, `x.$sendability.known`). Codegen folds the
 // same paths (`PreparedConstants.jet`).
-pub fn sema_fact_constant_path_value(value: TExpr) -> TComptimeValue? {
+fn sema_fact_constant_path_value(value: TExpr) -> TComptimeValue? {
     if value.kind == {
         .IntLit(number, _) -> return Val(TComptimeValue.Int{value: number})
         .BoolLit(flag) -> return Val(TComptimeValue.Bool{value: flag})

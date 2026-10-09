@@ -848,13 +848,10 @@ impl<'a> Parser<'a> {
         while matches!(&self.peek().kind, TokKind::Semi) {
             self.bump();
         }
-        let is_pub = outer_is_pub
-            || if matches!(&self.peek().kind, TokKind::KwPub) {
-                self.bump();
-                true
-            } else {
-                false
-            };
+        if matches!(&self.peek().kind, TokKind::KwPub) {
+            self.reject_retired_pub();
+        }
+        let is_pub = outer_is_pub;
         if matches!(self.peek().kind, TokKind::KwEnum) {
             if has_alignment || !matches!(layout.as_ref(), Some(crate::AST::StructLayout::C)) {
                 return Err(Diagnostic::error(
@@ -990,11 +987,11 @@ impl<'a> Parser<'a> {
         while matches!(&self.peek().kind, TokKind::Semi) {
             self.bump();
         }
-        // optional `pub` after the marker (the `pub #SingleUse` form already ate it)
-        let want_pub = outer_is_pub || matches!(&self.peek().kind, TokKind::KwPub);
-        if !outer_is_pub && matches!(&self.peek().kind, TokKind::KwPub) {
-            self.bump();
+        // D-VIS-MODULE1: a retired `pub` after the marker is reported and deleted.
+        if matches!(&self.peek().kind, TokKind::KwPub) {
+            self.reject_retired_pub();
         }
+        let want_pub = outer_is_pub;
         match self.peek().kind {
                 TokKind::KwStruct => {
                     let mut def = self.struct_def_after_pub(want_pub)?;
@@ -1064,10 +1061,10 @@ impl<'a> Parser<'a> {
         while matches!(&self.peek().kind, TokKind::Semi) {
             self.bump();
         }
-        let want_pub = outer_is_pub || matches!(&self.peek().kind, TokKind::KwPub);
-        if !outer_is_pub && matches!(&self.peek().kind, TokKind::KwPub) {
-            self.bump();
+        if matches!(&self.peek().kind, TokKind::KwPub) {
+            self.reject_retired_pub();
         }
+        let want_pub = outer_is_pub;
         match self.peek().kind {
                 TokKind::KwStruct => {
                     let mut def = self.struct_def_after_pub(want_pub)?;
@@ -1138,14 +1135,11 @@ impl<'a> Parser<'a> {
         while matches!(&self.peek().kind, TokKind::Semi) {
             self.bump();
         }
-        // optional `pub` after the marker
-        let is_pub = outer_is_pub
-            || if matches!(&self.peek().kind, TokKind::KwPub) {
-                self.bump();
-                true
-            } else {
-                false
-            };
+        // D-VIS-MODULE1: a retired `pub` after the marker is reported and deleted.
+        if matches!(&self.peek().kind, TokKind::KwPub) {
+            self.reject_retired_pub();
+        }
+        let is_pub = outer_is_pub;
         let mut def = self.struct_def_after_pub(is_pub)?;
         def.is_published_schema = true;
         def.published_schema_span = Some(attr_span);

@@ -263,7 +263,7 @@ fn validate_panel_signature(function: &Func, diags: &mut Vec<Diagnostic>) -> Opt
             E_DEVTOOLS_INVALID_PANEL,
             &function.name,
             "a devtools panel is a public package entry point",
-            "write `pub fn panel(state: State) -> UINode { ... }`",
+            "write `fn panel(state: State) -> UINode { ... }` outside any `priv module`",
             function.name_span,
         ));
         return None;

@@ -44,17 +44,17 @@ use jet_foundation.[
 // general `Err` (D-FAIL-INFER-UNION1 rule 5).
 JET_FAILURE_UNION_JOIN_ROUND_CAP :: 64
 
-pub struct SemaFailureCaseField {
-    pub label: String?
-    pub ty: Type
+struct SemaFailureCaseField {
+    label: String?
+    ty: Type
 }
 
 // D-ERR-CASES1=A: one `Err(.Case(payload))` written where the default `Err`
 // route is expected. The payload types come from the checked arguments.
-pub struct SemaFailureCase {
-    pub name: String
-    pub payload: [SemaFailureCaseField]
-    pub span: Span
+struct SemaFailureCase {
+    name: String
+    payload: [SemaFailureCaseField]
+    span: Span
 }
 
 struct SemaFailureUnionRow {
@@ -88,7 +88,7 @@ fn sema_failure_union_typed(ty: Type) -> Bool Never! {
 
 // One failure reaching the default route: a message or the general `Err`
 // marks the row general, `Never` adds nothing, a union adds each member.
-pub fn sema_failure_union_add_member(context: &SemaCheckContext, ty: Type) Never! {
+fn sema_failure_union_add_member(context: &SemaCheckContext, ty: Type) Never! {
     if ty == {
         .Union(members) -> {
             loop member in members -> sema_failure_union_add_member(&context, member)
@@ -455,10 +455,10 @@ fn sema_failure_project_returns(graph: &SemaRegistrationGraph, projections: [Sem
 // The union contracts one bundle projected: their function keys, the
 // modules whose declarations changed (a projected function's or a minted
 // `#Error enum`'s declaring module), and whether any type was minted.
-pub struct SemaFailureUnionProjected {
-    pub keys: [String]
-    pub modules: [Int]
-    pub minted: Bool
+struct SemaFailureUnionProjected {
+    keys: [String]
+    modules: [Int]
+    minted: Bool
 }
 
 // D-FAIL-INFER-UNION1=A: join the default-route rows of the unannotated

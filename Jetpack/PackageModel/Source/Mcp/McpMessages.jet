@@ -31,7 +31,7 @@ impl MCPCodec {
 }
 
 // JSON-RPC request identifier. Fractional and null IDs are rejected.
-pub enum MCPRequestID {
+enum MCPRequestID {
     Number(Int)
     Text(String)
 
@@ -149,7 +149,7 @@ pub struct MCPResponse {
 }
 
 // One JSON-RPC message in the MCP protocol core.
-pub enum MCPMessage {
+enum MCPMessage {
     Request(MCPRequest)
     Notification(MCPNotification)
     Response(MCPResponse)
@@ -285,10 +285,10 @@ pub struct MCPCapabilities {
 }
 
 // Parameters carried by the stable `initialize` request.
-pub struct MCPInitializeParams {
-    pub protocol_version: String
-    pub capabilities: MCPCapabilities
-    pub client_info: MCPImplementation?
+struct MCPInitializeParams {
+    protocol_version: String
+    capabilities: MCPCapabilities
+    client_info: MCPImplementation?
 
     fn new(protocol_version: MCPRevision, capabilities: MCPCapabilities, client_info: MCPImplementation?) -> MCPInitializeParams Never! {
         MCPInitializeParams{protocol_version: protocol_version.as_str(), capabilities: capabilities, client_info: client_info}
@@ -331,10 +331,10 @@ pub struct MCPInitializeParams {
 }
 
 // Result carried by the stable `initialize` response.
-pub struct MCPInitializeResult {
-    pub protocol_version: MCPRevision
-    pub capabilities: MCPCapabilities
-    pub server_info: MCPImplementation
+struct MCPInitializeResult {
+    protocol_version: MCPRevision
+    capabilities: MCPCapabilities
+    server_info: MCPImplementation
 
     fn new(protocol_version: MCPRevision, capabilities: MCPCapabilities, server_info: MCPImplementation) -> MCPInitializeResult Never! {
         MCPInitializeResult{protocol_version: protocol_version, capabilities: capabilities, server_info: server_info}

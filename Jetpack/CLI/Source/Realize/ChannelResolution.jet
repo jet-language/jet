@@ -6,15 +6,15 @@
 // One declared source that tracks a channel. `lock_channel` is the channel
 // name recorded in the lock; a pinned NixOS/nixpkgs declaration records its
 // nixpkgs channel and keeps its manifest spelling.
-pub struct ChannelSource {
-    pub name: String
-    base: String
-    pub channel: ChannelRef
-    pub policy: ChannelPolicy
-    pub raw: String
-    pub lock_channel: String
-    nix_channel: String?
-    preserve_manifest: Bool
+struct ChannelSource {
+    name: String
+    priv base: String
+    channel: ChannelRef
+    policy: ChannelPolicy
+    raw: String
+    lock_channel: String
+    priv nix_channel: String?
+    priv preserve_manifest: Bool
 
     // The channel `git ls-remote` or the local catalog resolves.
     fn resolution_channel(self) -> String Never! {
@@ -28,7 +28,7 @@ pub struct ChannelSource {
 cli_resolved_channels := [String: String]{}
 
 // Every declared source that tracks a channel, in source-table name order.
-pub fn cli_channel_sources(table: SourceTable) -> [ChannelSource] Never! {
+fn cli_channel_sources(table: SourceTable) -> [ChannelSource] Never! {
     sources := [ChannelSource]{}
     loop decl in table.declarations() {
         split :: pkg_split_channel_ref(decl.upstream)
@@ -97,7 +97,7 @@ fn cli_is_lower_hex(text: String) -> Bool Never! {
 // sources never enter this loop. NixOS/nixpkgs channel declarations are the
 // one implicit moving-source form because the provider requires their exact
 // lock before realization.
-pub fn cli_apply_locked_channels(theme: Theme, project_dir: String, table: &SourceTable, flags: CLIFlags) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+fn cli_apply_locked_channels(theme: Theme, project_dir: String, table: &SourceTable, flags: CLIFlags) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
     _lock_diff :: CLILockDiffGuard.new(theme, project_dir)
     loop source in cli_channel_sources(table) {
         if source.policy == ChannelPolicy.Automatic && !flags.offline {
@@ -141,13 +141,13 @@ pub fn cli_apply_locked_channels(theme: Theme, project_dir: String, table: &Sour
 
 // The one failure carrier of manifest writeback; the text is the Rust error.
 #Error
-pub struct ChannelManifestError {
-    pub message: String
+struct ChannelManifestError {
+    message: String
 }
 
 // Write a resolved moving source back to the same declarative reference. The
 // policy marker remains visible, while the exact selector becomes explicit.
-pub fn cli_rewrite_channel_manifest(project_dir: String, source: ChannelSource, exact: String) ChannelManifestError! -[FS]> {
+fn cli_rewrite_channel_manifest(project_dir: String, source: ChannelSource, exact: String) ChannelManifestError! -[FS]> {
     if source.preserve_manifest -> return
     path :: EnvFile.path_in(project_dir)
     current :: files.read(path) ?? return Err(ChannelManifestError{message: "could not read `{path}`: {err}"})
@@ -184,7 +184,7 @@ fn cli_report_unlocked_channel(theme: Theme, name: String, channel: String) Neve
 // Resolve one tracked source to its exact upstream: fixture metadata first,
 // then the explicit local nixpkgs catalog, then `git ls-remote` (memoized
 // per command). Offline and CI runs never resolve over the network.
-pub fn cli_resolve_source_channel(source: ChannelSource, flags: CLIFlags) -[FS, Env, Exec, Net, Time, Time.Wait]> String ProviderError! {
+fn cli_resolve_source_channel(source: ChannelSource, flags: CLIFlags) -[FS, Env, Exec, Net, Time, Time.Wait]> String ProviderError! {
     if cli_resolve_channel_from_fixture(source, flags) == .Val(exact) -> return Ok(exact)
     if source.nix_channel == .Val(channel) {
         if flags.local_nix_catalog == .Val(catalog) {
@@ -234,7 +234,7 @@ fn cli_resolve_channel_from_fixture(source: ChannelSource, flags: CLIFlags) -[FS
 }
 
 // The fixture's recorded download size for a channel resolution, if any.
-pub fn cli_channel_download_size_from_fixture(source: ChannelSource, flags: CLIFlags) -[FS, Env]> Int? Never! {
+fn cli_channel_download_size_from_fixture(source: ChannelSource, flags: CLIFlags) -[FS, Env]> Int? Never! {
     rows :: cli_channel_fixture_rows(flags)
     loop columns in rows {
         if columns.len() >= 4 && cli_fixture_row_matches(source, columns) -> return Int.parse(columns[3])
@@ -307,7 +307,7 @@ fn cli_git_ls_remote(url: String, pattern: String) -[Env, Exec, Time.Wait]> Stri
 }
 
 // `jetpack <command>` is a network-class command; refuse it under --offline.
-pub fn cli_offline_refusal(theme: Theme, command: String) -[IO, Time.Wait]> Int Never! {
+fn cli_offline_refusal(theme: Theme, command: String) -[IO, Time.Wait]> Int Never! {
     ProviderError.Offline("`jetpack {command}` is a network-class command and cannot run under --offline").report(theme)
     EXIT_USAGE
 }

@@ -6,10 +6,10 @@
 // here and travels as `CliError.Reported(code)`.
 
 // Realization facts for the env-entry banner and the receipt stamp.
-pub struct EnvReadyStats {
-    pub total: Int
-    pub cache_hits: Int
-    pub realized: [EnvironmentSelection]
+struct EnvReadyStats {
+    total: Int
+    cache_hits: Int
+    realized: [EnvironmentSelection]
 
     fn empty() -> EnvReadyStats Never! {
         EnvReadyStats{total: 0, cache_hits: 0, realized: [EnvironmentSelection]{}}
@@ -112,14 +112,14 @@ fn cli_take_warm_realization(warm: &[String: [VerifiedRealization]], reference: 
 
 // A native dev tool: the flake definition name, the command, and the
 // repository-relative binary it projects.
-pub struct NativeDevTool {
-    pub definition: String
-    pub command: String
-    pub relative_binary: String
+struct NativeDevTool {
+    definition: String
+    command: String
+    relative_binary: String
 }
 
 // The target condition of a native output fact.
-pub enum NativeOutputPlatform {
+enum NativeOutputPlatform {
     Any
     Linux
 
@@ -133,11 +133,11 @@ pub enum NativeOutputPlatform {
 
 // A realized package output selected by the native shell contract: the
 // package, the relative output, the variable, and its target condition.
-pub struct NativeOutputFact {
-    pub package: String
-    pub relative: String
-    pub variable: String
-    pub platform: NativeOutputPlatform
+struct NativeOutputFact {
+    package: String
+    relative: String
+    variable: String
+    platform: NativeOutputPlatform
 }
 
 CLI_NATIVE_OUTPUT_FACTS :: prep { [NativeOutputFact]{
@@ -153,23 +153,23 @@ CLI_NATIVE_DEV_TOOLS :: prep { [NativeDevTool]{
     NativeDevTool{definition: "jetpackDev", command: "jetpack", relative_binary: "target/debug/jetpack"}
 } }
 
-pub enum NativeActivation {
+enum NativeActivation {
     Disabled
 }
 
-pub enum NixShellScratch {
+enum NixShellScratch {
     NotCreated
 }
 
 // Typed host facts for the Jet-native shell projection. The variable map is
 // only the child-process adapter; paths and markers stay typed until then.
-pub struct NativeEnvironmentProjection {
-    pub project_root: String
-    pub native_bin_dirs: [String]
-    pub tzdir: String?
-    pub loader_paths: [String]
-    pub activation: NativeActivation
-    pub nix_shell_scratch: NixShellScratch
+struct NativeEnvironmentProjection {
+    project_root: String
+    native_bin_dirs: [String]
+    tzdir: String?
+    loader_paths: [String]
+    activation: NativeActivation
+    nix_shell_scratch: NixShellScratch
 
     fn from_realized(project_root: String, realized: [(name: String, output: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
         native_bin_dirs := [String]{}
@@ -242,18 +242,18 @@ fn cli_native_environment_projection(project_root: String, realized: [(name: Str
 
 // Realize every ref in `plan` and compose the shell env. A realization
 // failure is reported here and travels as `Reported(code)`.
-pub fn cli_compose_env(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
+fn cli_compose_env(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
     cli_compose_env_scoped(&verification, theme, roots, flags, plan, RealizeScope.Project, false)
 }
 
 // A user tool installs into the user profile, so it is never reconciled
 // against the project the shell happens to stand in.
-pub fn cli_compose_env_scoped(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
+fn cli_compose_env_scoped(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
     composed :: cli_compose_env_scoped_with_stats(&verification, theme, roots, flags, plan, scope, confirm_download)
     Ok(composed.env)
 }
 
-pub fn cli_compose_env_scoped_with_stats(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
+fn cli_compose_env_scoped_with_stats(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
     cli_compose_env_scoped_with_warm(&verification, theme, roots, flags, plan, scope, confirm_download, None, true)
 }
 
@@ -276,7 +276,7 @@ fn cli_warm_complete(warm: [String: [VerifiedRealization]]?, plan: RunPlan) -> B
 // The composer with optional warm realizations from a verified environment
 // receipt. Cold or partial project composition still collects selections
 // for the receipt and producer sealing.
-pub fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, warm: [VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
+fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, warm: [VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
     warm_realizations := if warm == {
         .Val(list) -> Val(cli_index_warm_realizations(list))
         .None -> None
@@ -531,9 +531,9 @@ pub fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme:
 }
 
 // One provider metadata file and the variable it feeds.
-pub struct ProviderMetadataFile {
-    pub file: String
-    pub variable: String
+struct ProviderMetadataFile {
+    file: String
+    variable: String
 }
 
 CLI_PROVIDER_METADATA_FILES :: prep { [ProviderMetadataFile]{
@@ -587,7 +587,7 @@ fn cli_reject_unprompted_acquisition(verification: &StoreVerification, theme: Th
 
 // Every integration fact must still be executable: disclosed tasks keep their
 // packages, secrets, providers, grants, and host checks.
-pub fn cli_validate_integration_facts(plan: RunPlan) CLIError! -[Env]> {
+fn cli_validate_integration_facts(plan: RunPlan) CLIError! -[Env]> {
     facts :: plan.environment.integration_facts
     if facts.validate() == {
         .Err(error) -> return Err(CLIError.InvalidData(error.message))
@@ -706,7 +706,7 @@ fn cli_dotenv_valid_name(name: String) -> Bool Never! {
 
 // Relative provider metadata paths resolve inside the realized output;
 // absolute legacy paths stay as written, and a parent escape is refused.
-pub fn cli_resolve_provider_paths(entry_out: String, file: String, value: String) -[Env]> String? Never! {
+fn cli_resolve_provider_paths(entry_out: String, file: String, value: String) -[Env]> String? Never! {
     if !cli_is_provider_metadata_file(file) -> return Val(value)
     separator :: if file == "lua-path" || file == "lua-cpath" -> ";" else -> pkg_path_separator_for_os(sys.name())
     resolved := [String]{}

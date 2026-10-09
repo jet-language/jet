@@ -46,35 +46,35 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaCheckedPattern {
-    pub subject: TExpr
-    pub pattern: TPattern
-    pub bindings: [TPatternBindingFact]
+struct SemaCheckedPattern {
+    subject: TExpr
+    pattern: TPattern
+    bindings: [TPatternBindingFact]
 }
 
 // A failed pattern keeps the valid native recovery bindings for scope
 // diagnostics, but never publishes a checked TPattern.  Callers own scope
 // installation and branch lifetime.
-pub struct SemaPatternCheck {
-    pub complete: Bool
-    pub checked: SemaCheckedPattern?
-    pub bindings: [TPatternBindingFact]
+struct SemaPatternCheck {
+    complete: Bool
+    checked: SemaCheckedPattern?
+    bindings: [TPatternBindingFact]
 }
 
 struct SemaPatternPayload {
-    pub types: [Type]
-    pub owner: SymbolID?
-    pub payload: VariantPayload?
-    pub known: Bool
-    pub group: Bool
-    pub range_forbidden: Bool
+    types: [Type]
+    owner: SymbolID?
+    payload: VariantPayload?
+    known: Bool
+    group: Bool
+    range_forbidden: Bool
 }
 
 struct SemaPatternValidation {
-    pub shape: TPatternShape
-    pub enum_type: SymbolID?
-    pub bindings: [TPatternBindingFact]
-    pub complete: Bool
+    shape: TPatternShape
+    enum_type: SymbolID?
+    bindings: [TPatternBindingFact]
+    complete: Bool
 }
 
 fn sema_pattern_unwrap_tags(ty: Type) -> Type Never! {
@@ -1096,7 +1096,7 @@ fn sema_pattern_facts_equal(left: [TPatternBindingFact], right: [TPatternBinding
     true
 }
 
-pub fn sema_pattern_binding_facts(checked: SemaCheckedPattern) -> [TPatternBindingFact] Never! {
+fn sema_pattern_binding_facts(checked: SemaCheckedPattern) -> [TPatternBindingFact] Never! {
     checked.bindings
 }
 

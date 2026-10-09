@@ -1,27 +1,27 @@
 // Environment-shell presets: named compositions of packages and variables
 // that may be selected explicitly or ambiently by hostname and user.
 
-pub struct PresetSpec {
-    pub name: String{""}
-    pub extends: [String]{[String]{}}
-    pub packages: [String]{[String]{}}
-    pub variables: [String: String]{[String: String]{}}
-    pub hostname: String?{None}
-    pub user: String?{None}
+struct PresetSpec {
+    name: String{""}
+    extends: [String]{[String]{}}
+    packages: [String]{[String]{}}
+    variables: [String: String]{[String: String]{}}
+    hostname: String?{None}
+    user: String?{None}
 }
 
-pub struct ResolvedPreset {
-    pub name: String{""}
+struct ResolvedPreset {
+    name: String{""}
     // Ambient selection before inheritance expansion. Explicit CLI selection
     // chooses one preset; ambient hostname and user matches may merge.
-    pub selected_presets: [String]{[String]{}}
-    pub applied: [String]{[String]{}}
-    pub packages: [String]{[String]{}}
-    pub variables: [String: String]{[String: String]{}}
+    selected_presets: [String]{[String]{}}
+    applied: [String]{[String]{}}
+    packages: [String]{[String]{}}
+    variables: [String: String]{[String: String]{}}
 }
 
 #Error
-pub enum PresetError {
+enum PresetError {
     Missing(String)
     Cycle([String])
     Conflict(String)
@@ -35,8 +35,8 @@ pub enum PresetError {
     }
 }
 
-pub struct PresetSet {
-    pub presets: [String: PresetSpec]{[String: PresetSpec]{}}
+struct PresetSet {
+    presets: [String: PresetSpec]{[String: PresetSpec]{}}
 
     fn insert(&self, preset: PresetSpec) PresetError! {
         &self.insert_checked(preset)

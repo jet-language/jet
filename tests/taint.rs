@@ -421,7 +421,7 @@ fn run() {
 #[test]
 fn bare_sanitizer_pub_fn_is_e0059() {
     let src = r#"
-sanitizer pub fn clean(raw: #Input String) -> String { return raw.split(" ")[0] }
+sanitizer fn clean(raw: #Input String) -> String { return raw.split(" ")[0] }
 fn run() {
     print(clean("a b c"))
 }

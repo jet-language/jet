@@ -76,9 +76,9 @@ use jet_foundation.[
 ]
 use core.math as math
 
-pub struct LIRLoweringIssue {
-    pub function: String
-    pub message: String
+struct LIRLoweringIssue {
+    function: String
+    message: String
 }
 
 // `lir` is complete only when `issues` is empty; the lowering lints the
@@ -140,30 +140,30 @@ enum LowerRepr {
 // closure helper (Closures.jet) is one for lowered function row `function`
 // (-1 for every other glue).
 struct LowerGlue {
-    pub key: String
-    pub ty: MIRType
-    pub id: LIRFunctionID
-    pub clone: Bool
-    pub helper: String
-    pub function: Int
+    key: String
+    ty: MIRType
+    id: LIRFunctionID
+    clone: Bool
+    helper: String
+    function: Int
 }
 
 // A root place (local, parameter, temporary or capture) carried as an SSA
 // value, or kept in a memory cell.
 struct LowerSlot {
-    pub base: MIRPlaceBase
-    pub ty: MIRType
-    pub ownership: MIROwnership
+    base: MIRPlaceBase
+    ty: MIRType
+    ownership: MIROwnership
     // False for Unit locals, which carry no LIR value, and for cells.
-    pub carried: Bool
+    carried: Bool
     // For a Write parameter's place, the MIR parameter index whose incoming
     // pointer names the caller's storage; -1 otherwise. The slot still carries
     // the current value; every root write also stores through the pointer.
-    pub write_param: Int
+    write_param: Int
     // A place a closure captures by reference, or a captured place inside a
     // closure body: every read and write goes through its memory cell
     // (LowerFunction.cells, Closures.jet).
-    pub cell: Bool
+    cell: Bool
 }
 
 // These operations are enabled only for checked IDs selected by RuntimeLibrary.
@@ -188,11 +188,11 @@ struct LowerModule {
     pub native_pack: Bool
     pub native_exports: [String:LIRFunctionID]
     // Signature shape key -> its id (lower_signature_key).
-    pub signature_rows: [String:Int]
-    pub data: [LIRData]
+    signature_rows: [String:Int]
+    data: [LIRData]
     // Interned text -> its data id, and first program row per MIR function
     // id, so interning and call lowering probe a map instead of scanning.
-    pub data_rows: [String:Int]
+    data_rows: [String:Int]
     // MIRConstantDef key -> root LIRData of its frozen static tree (Statics.jet).
     pub static_rows: [String:Int]
     pub shared_sites_dynamic: Bool
@@ -202,7 +202,7 @@ struct LowerModule {
     // Callable initialization and finalization share this filled-statics flag.
     pub static_live: LIRDataID?
     // MIR source file id -> byte offsets of its line starts (Numeric.jet lower_source_line).
-    pub line_starts: [U64:[Int]]
+    line_starts: [U64:[Int]]
     // MIR source file id -> its row in program.source_files.
     pub source_rows: [U64:Int]
     // Shared stop classification indexes checked Prelude effects once.
@@ -212,9 +212,9 @@ struct LowerModule {
     pub foreign_rows: [U64:Int]
     // Concrete MIR function ID -> its LIR function row (Mono.jet's inventory
     // order), and per row the program.functions row of its original.
-    pub mir_rows: [U64:Int]
-    pub mir_sources: [Int]
-    pub mir_signatures: [LIRSignatureID]
+    mir_rows: [U64:Int]
+    mir_sources: [Int]
+    mir_signatures: [LIRSignatureID]
     // Per LIR function row: the bytes of the inline aggregate it returns
     // through a hidden result pointer (its first parameter), or 0.
     pub mir_results: [Int]
@@ -243,27 +243,27 @@ struct LowerContext {
     pub slots: [LowerSlot]
     pub place_slots: [U64:Int]
     // MIR local id -> its root slot (require diagnostics read current local storage).
-    pub local_slots: [U64:Int]
+    local_slots: [U64:Int]
     // MIR value read or moved out of a root place -> its slot.
-    pub read_slots: [U64:Int]
+    read_slots: [U64:Int]
     // MIR value a parameter or temporary place stands for -> its slot.
-    pub defined_slots: [U64:Int]
+    defined_slots: [U64:Int]
     // MIR values written into a place, stored into a new aggregate (List,
     // Map, struct, tuple, variant, Option/Result box, closure capture, trait
     // box) or returned: an owned place read that lands there is a copy of its
     // own (MIRRust.rs place_read clones).
-    pub sunk: [U64:Bool]
+    sunk: [U64:Bool]
     // MIR value a `Move` defines -> the value it moves.
-    pub moves: [U64:U64]
-    pub order: [Int]
-    pub lir_blocks: [LIRBlockID]
-    pub split_entry: Bool
+    moves: [U64:U64]
+    order: [Int]
+    lir_blocks: [LIRBlockID]
+    split_entry: Bool
     // Per MIR block position: its rank in `order` (-1 when unreachable). An
     // edge to a block of lower or equal rank is a loop's back edge.
-    pub ranks: [Int]
+    ranks: [Int]
     // Per MIR block position: the carried slots live on entry, ascending
     // (Liveness.jet); its LIR params and every edge into it carry these.
-    pub live: [[Int]]
+    live: [[Int]]
 }
 
 // A real cleanup entry, not a Shield or an inferred task/root role. The saved
@@ -274,8 +274,8 @@ struct LowerStopCleanupScope {
 
 // The function being built.
 struct LowerFunction {
-    pub name: String
-    pub builder: LIRFunctionBuilder
+    name: String
+    builder: LIRFunctionBuilder
     // MIR value -> LIR value index; MIR values carried by no LIR value are in `absent`.
     pub values: [U64:Int]
     pub absent: [U64:Bool]
@@ -287,14 +287,14 @@ struct LowerFunction {
     pub open_params: [LIRValueID]
     pub failed: Bool
     // The hidden result pointer when the function returns an inline aggregate.
-    pub result_storage: LIRValueID?
+    result_storage: LIRValueID?
     // Per slot: the frame storage a back edge copies an inline aggregate
     // slot's value into, so a carried value is never a temporary that the
     // next loop iteration overwrites. MIR phi value -> its frame storage, likewise.
-    pub storage: [LIRValueID?]
-    pub phi_storage: [U64:Int]
+    storage: [LIRValueID?]
+    phi_storage: [U64:Int]
     // A closure body's box parameter (Closures.jet).
-    pub env: LIRValueID?
+    env: LIRValueID?
     // Per slot: the memory cell of a cell slot (LowerSlot.cell), else None.
     pub cells: [LIRValueID?]
     // Caller-owned saves for sentry scopes and the function's unsafe gate.
@@ -2646,15 +2646,15 @@ fn lower_initialize_uninit(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
 }
 
 struct LowerFieldAddress {
-    pub base: LIRValueID
-    pub offset: Int
+    base: LIRValueID
+    offset: Int
 }
 
 struct LowerFieldInfo {
-    pub offset: Int
-    pub ty: MIRType
+    offset: Int
+    ty: MIRType
     // A recursive edge: the field holds a pointer to a wrapper box.
-    pub boxed: Bool
+    boxed: Bool
 }
 
 // Every stored field and payload member sits at its natural offset
@@ -3267,8 +3267,8 @@ fn lower_unary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
 // Display text of one value as a String; `owned` tells whether the caller
 // must drop it. Strings are displayed as themselves.
 struct LowerText {
-    pub value: LIRValueID
-    pub owned: Bool
+    value: LIRValueID
+    owned: Bool
 }
 
 fn lower_display(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID) -> LowerText? {
@@ -3788,9 +3788,9 @@ fn lower_call_args(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
 // The cell is a stack slot of the caller's frame, or, for a Write parameter
 // passed on, its own pointer to the original caller's storage.
 struct LowerWriteBack {
-    pub place: MIRPlaceID
-    pub slot: Int
-    pub cell: LIRValueID
+    place: MIRPlaceID
+    slot: Int
+    cell: LIRValueID
 }
 
 // The checked place a Write argument lends (MIRRust.rs
@@ -3909,15 +3909,15 @@ fn lower_write_back(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // owned contents of the active shape, then the box itself.
 
 struct LowerGlueField {
-    pub offset: Int
-    pub ty: MIRType
+    offset: Int
+    ty: MIRType
 }
 
 // One shape of a box: `selector` is the slot-0 value selecting it, or -1 when
 // the box has a single shape and no discriminant.
 struct LowerGlueShape {
-    pub selector: Int
-    pub fields: [LowerGlueField]
+    selector: Int
+    fields: [LowerGlueField]
 }
 
 fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {

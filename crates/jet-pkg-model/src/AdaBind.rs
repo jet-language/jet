@@ -403,9 +403,9 @@ fn render_jet(lib: &str, routines: &[Routine]) -> String {
     }
     o.push_str("}\nuse c.");
     o.push_str(&abi);
-    o.push_str(" as abi\n\npub enum AdaError { Constraint }\n\n");
+    o.push_str(" as abi\n\nenum AdaError { Constraint }\n\n");
     for r in routines {
-        o.push_str("pub fn ");
+        o.push_str("fn ");
         o.push_str(&r.name);
         params_jet(&mut o, &r.params);
         o.push_str(" -[FFI.Ada]> ");
@@ -693,7 +693,7 @@ mod tests {
             }],
         );
         assert!(source.contains("fn double_lat(lat: Float) -> Float = \"jet_ada_geo_double_lat\""));
-        assert!(source.contains("pub fn double_lat(lat: Float) -[FFI.Ada]> Float AdaError!"));
+        assert!(source.contains("fn double_lat(lat: Float) -[FFI.Ada]> Float AdaError!"));
         assert!(source.contains("lat < -90.0 || lat > 90.0"));
         assert!(!source.contains("=>"));
     }

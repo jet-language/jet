@@ -123,28 +123,30 @@ use jet_lexer.[
     Token,
 ]
 
-pub struct ParsedItemOrImport {
-    pub item: Item?
-    pub import: ImportDecl?
-    pub handled: Bool
+struct ParsedItemOrImport {
+    item: Item?
+    import: ImportDecl?
+    handled: Bool
 }
 
-pub struct ParsedItemModifiers {
-    pub is_pub: Bool
-    pub is_package_pub: Bool
-    pub is_comptime: Bool
-    pub markers: [Marker]
-    pub start_span: Span
+struct ParsedItemModifiers {
+    is_pub: Bool
+    is_package_pub: Bool
+    is_comptime: Bool
+    markers: [Marker]
+    start_span: Span
     // D-TAINT-SAN: the retired bare `sanitizer` word before `fn` (E0059).
-    pub is_sanitizer: Bool{false}
+    is_sanitizer: Bool{false}
+    // D-MOD4: `pub use` re-exports (the only remaining `pub`, ballot pending).
+    reexport: Bool{false}
 }
-pub struct ParsedFunction {
-    pub value: Func
-    pub has_body: Bool
+struct ParsedFunction {
+    value: Func
+    has_body: Bool
 }
-pub struct ParsedUserPolicy {
-    pub value: UserPolicyDecl
-    pub valid: Bool
+struct ParsedUserPolicy {
+    value: UserPolicyDecl
+    valid: Bool
 }
 
 fn parser_user_policy_ahead(state: &JetParserState) -> Bool Never! {
@@ -156,11 +158,12 @@ fn parser_user_policy_ahead(state: &JetParserState) -> Bool Never! {
     token.kind == TOKEN_IDENT && parser_value(state, token) == "policy"
 }
 
+// D-STRUCT-POLICY1=A: `policy name(params…) { wrap(call) { … } }`, public
+// like every declaration (D-VIS-MODULE1); a retired `pub` is E0411.
 fn parser_parse_user_policy(state: &JetParserState) -> ParsedUserPolicy {
-    is_pub := false
     if parser_current_kind(&state) == TOKEN_KW_PUB {
-        parser_bump(&state)
-        is_pub = true
+        word :: parser_bump(&state)
+        parser_add_error_code_edit(&state, "E0411", word.span, "`pub` was removed: everything is public by default", "privacy belongs to a `priv module` (or `priv(package) module`) and to `priv` fields", "delete `pub`", parser_deletion_edit(state, word.span))
     }
     start :: parser_expect_name(&state, "to start a policy declaration")
     name :: parser_expect_name(&state, "as the policy setting name")
@@ -251,8 +254,8 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
         }
         parser_current_kind(&state) == TOKEN_KW_USE -> {
             import := parser_parse_import(&state)
-            import.is_pub = modifiers.is_pub
-            import.is_package_pub = modifiers.is_package_pub
+            import.is_pub = modifiers.reexport
+            import.is_package_pub = false
             return ParsedItemOrImport{item: None, import: Val(import), handled: true}
         }
     }
@@ -270,12 +273,11 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
             value :: parser_parse_template_loop(&state)
             return ParsedItemOrImport{item: Val(Item.TemplateLoop{value: value}), import: None, handled: true}
         }
-        // 3A: `pub NAME :: value` exports a module constant like any item.
         // D-PREP-SURFACE2=A: an ALL_CAPS `NAME :: value` (or a retired
         // `@name ::`) in an inline module body is a module constant (Rust
         // `top_level_item_in_code_module`); file scope routes it as a module
         // binding before reaching here.
-        parser_comptime_const_ahead(&state, 0) || parser_marked_const_ahead(&state, 0) || ((modifiers.is_pub || modifiers.is_package_pub) && token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON) -> {
+        parser_comptime_const_ahead(&state, 0) || parser_marked_const_ahead(&state, 0) -> {
             value :: parser_parse_const(&state, modifiers)
             return ParsedItemOrImport{item: Val(Item.Const{value: value}), import: None, handled: true}
         }
@@ -341,29 +343,27 @@ fn parser_report_repeated_state_section(state: &JetParserState, section: StateDe
     parser_add_error_code(&state, "E0168", section.span, "`{type_name}` may declare only one `state {{ … }}` section", "The state set is one erased fact row owned by the struct", "Merge the state names into one `state {{ … }}` section")
 }
 
-// `item_visibility` is the top-level item path (D-VISDEFAULT2=A): `priv`,
-// the foreign `private`, and `#PubFile` defaults are judged there. Members
-// and methods only accept the `pub` / `pub(package)` qualifier.
+// D-VIS-MODULE1 (card #4723): declarations are public by default. `priv` and
+// `priv(package)` mark a module (`item_visibility`) or a field (members);
+// `pub`, `pub(…)`, `private`, and `priv` on any other declaration are reported
+// with a fix that deletes them, and the declaration parses as if they were absent.
 fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) -> ParsedItemModifiers {
     start := parser_current(&state).span
-    is_pub := false
+    is_pub := true
     is_package_pub := false
     is_comptime := false
     is_sanitizer := false
+    reexport := false
     markers := [Marker]{}
     marker_chunks := 0
     bracket_chunks := 0
     sequence := parser_current(&state).span
-    // D-VISDEFAULT2=A: whether `pub`, `pub(package)`, or `priv` was written;
-    // an unqualified top-level item of a `#PubFile` file is public.
-    visibility_written := false
     loop {
         kind := parser_current_kind(&state)
-        if kind == TOKEN_KW_PUB {
+        if kind == TOKEN_KW_PUB && item_visibility && (parser_kind_at(&state, 1) == TOKEN_KW_USE || (parser_kind_at(&state, 1) == TOKEN_LPAREN && parser_kind_at(&state, 4) == TOKEN_KW_USE)) {
+            // D-MOD4: `pub use` stays the re-export spelling; a `pub(…)`
+            // qualifier on it was removed (E0411) and is deleted.
             parser_bump(&state)
-            visibility_written = true
-            is_pub = true
-            is_package_pub = false
             if parser_current_kind(&state) == TOKEN_LPAREN {
                 parser_bump(&state)
                 qualifier :: parser_current(&state)
@@ -383,29 +383,50 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
                     if parser_current_kind(&state) == TOKEN_RPAREN -> parser_bump(&state)
                 }
             }
-            if item_visibility && state.pub_file_default && is_pub {
-                pub_span :: parser_lookahead(&state, -1).span
-                parser_add_error_code(&state, "E0414", pub_span, "`pub` is redundant in a `#PubFile` file", "after `#PubFile`, top-level items are already public unless marked `priv`", "drop `pub` or mark exceptions with `priv`")
+            reexport = true
+            next
+        }
+        if kind == TOKEN_KW_PUB {
+            word :: parser_bump(&state)
+            removed := word.span
+            if parser_current_kind(&state) == TOKEN_LPAREN {
+                loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF -> parser_bump(&state)
+                if parser_current_kind(&state) == TOKEN_RPAREN -> removed = parser_cover(word.span, parser_bump(&state).span)
             }
+            written :: parser_source_slice(state, removed.start, removed.end)
+            shown :: if written == "" -> "pub" else -> written
+            parser_add_error_code_edit(&state, "E0411", removed, "`pub` was removed: everything is public by default", "privacy belongs to a `priv module` (or `priv(package) module`) and to `priv` fields", "delete `{shown}`", parser_deletion_edit(state, removed))
             next
         }
         foreign_private :: item_visibility && kind == TOKEN_IDENT && parser_value_at(&state, 0) == "private" && parser_foreign_private_ahead(&state)
         if kind == TOKEN_KW_PRIV || foreign_private {
             word :: parser_bump(&state)
-            visibility_written = true
-            if foreign_private {
-                parser_add_error_code(&state, "E0412", word.span, "write `priv`, not `private`", "inside a `#PubFile` file, `priv` marks an item that stays private to this file", "write `priv fn …` instead of `private fn …`")
+            parser_add_error_code_edit(&state, "E0412", word.span, "Jet has no `private`", "declarations are public by default; privacy belongs to a `priv module` or a `priv` field", "delete `private`; move the declaration into a `priv module` if it must stay internal", parser_deletion_edit(state, word.span))
+            next
+        }
+        if kind == TOKEN_KW_PRIV {
+            word :: parser_bump(&state)
+            marker_span := word.span
+            package := false
+            if parser_current_kind(&state) == TOKEN_LPAREN {
+                open :: parser_bump(&state).span
+                qualifier :: parser_current(&state)
+                package = qualifier.kind == TOKEN_IDENT && qualifier.payload.decoded == "package" && parser_kind_at(&state, 1) == TOKEN_RPAREN
+                loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF -> parser_bump(&state)
+                if parser_current_kind(&state) == TOKEN_RPAREN -> marker_span = parser_cover(word.span, parser_bump(&state).span)
+                written :: Span{start: open.start, end: marker_span.end}
+                if !package -> parser_add_error_code_edit(&state, "E0414", written, "unknown `priv(…)` qualifier: only `priv(package)` exists", "`priv(package) module` is the only qualified module privacy", "delete the qualifier, or write `priv(package)`", TextEdit{span: written, new_text: ""})
             }
-            if item_visibility && parser_current_kind(&state) == TOKEN_KW_PUB {
-                conflict :: parser_cover(word.span, parser_bump(&state).span)
-                if parser_current_kind(&state) == TOKEN_LPAREN -> parser_skip_group(&state)
-                parser_add_error_code(&state, "E0417", conflict, "`priv` and `pub` can't both apply to one item", "an item is either public or private — pick one qualifier", "drop `pub` (already public in a `#PubFile` file) or remove `priv`")
+            if item_visibility && parser_current_kind(&state) != TOKEN_KW_MODULE {
+                parser_add_error_code_edit(&state, "E0413", marker_span, "`priv` marks only modules and fields", "declarations are public by default; privacy belongs to a `priv module` or a `priv` field", "delete `priv`; move the declaration into a `priv module` if it must stay internal", parser_deletion_edit(state, marker_span))
+                next
             }
-            if item_visibility && !state.pub_file_default {
-                parser_add_error_code(&state, "E0413", word.span, "`priv` only applies inside a `#PubFile` file", "without `#PubFile`, items are private by default and export with `pub`", "add `#PubFile` at the top of the file, or write `pub` instead of `priv`")
+            if !item_visibility && package {
+                parser_add_error_code_edit(&state, "E0417", marker_span, "a field takes plain `priv`, not `priv(package)`", "a `priv` field is usable only by its type's module; package privacy belongs to modules", "write `priv`", TextEdit{span: Span{start: marker_span.start + 4, end: marker_span.end}, new_text: ""})
+                package = false
             }
             is_pub = false
-            is_package_pub = false
+            is_package_pub = package
             next
         }
         // D-TAINT-SAN: a bare `sanitizer fn` is the retired spelling of the
@@ -443,10 +464,9 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
         }
         break
     }
-    if item_visibility && state.pub_file_default && !visibility_written -> is_pub = true
     noun :: parser_marker_sequence_noun(&state, item_visibility)
     if noun != "" -> parser_report_adjacent_markers(&state, markers, marker_chunks, bracket_chunks, sequence, noun)
-    ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start, is_sanitizer: is_sanitizer}
+    ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start, is_sanitizer: is_sanitizer, reexport: reexport}
 }
 
 // The target a declaration marker sequence attaches to, named as Rust's
@@ -1190,22 +1210,22 @@ fn parser_bind_guest_import_symbol(state: &JetParserState, func: &Func) {
     func.body = [Stmt]{}
 }
 
-pub struct ParsedFuncEffects {
-    pub effects: [EffectRowEntry]?
-    pub via: NamedSpan?
+struct ParsedFuncEffects {
+    effects: [EffectRowEntry]?
+    via: NamedSpan?
 }
 
-pub struct ParsedCallableResult {
-    pub return_type: Type?
-    pub return_type_span: Span?
-    pub effects: [EffectRowEntry]?
-    pub via: NamedSpan?
-    pub prefix_effect: Bool
+struct ParsedCallableResult {
+    return_type: Type?
+    return_type_span: Span?
+    effects: [EffectRowEntry]?
+    via: NamedSpan?
+    prefix_effect: Bool
     // A retired bare result before the arrow (E0068) already teaches the
     // whole `-> Type { … }` shape; the arrow-body codes stay quiet then.
-    pub retired_shape: Bool
+    retired_shape: Bool
     // The result follows a plain `->` (not an effect arrow or a bare `E!`).
-    pub plain_arrow: Bool
+    plain_arrow: Bool
 }
 
 // The start of an effect arrow: canonical `-[`, or a retired `:[`, `=[`,

@@ -38,8 +38,8 @@ use jet_foundation.[
 ]
 
 struct SemaHTTPStaticTarget {
-    pub namespace: String
-    pub type_name: String
+    namespace: String
+    type_name: String
 }
 
 fn sema_call_http_nominal_leaf(ty: Type) -> String Never! {
@@ -258,7 +258,7 @@ fn sema_call_http_static_result(ok: Type) -> Type Never! {
     Type.Result{ok: ok, err: Type.Named{name: "HTTPError"}}
 }
 
-pub fn sema_call_try_http_static(
+fn sema_call_try_http_static(
     receiver: Expr,
     method: String,
     owner_type_args: [Type],
@@ -606,7 +606,7 @@ fn sema_call_http_middleware(receiver: Expr, receiver_value: TExpr, args: [CallA
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)}
 }
  
-pub fn sema_call_try_http_method(
+fn sema_call_try_http_method(
     receiver: Expr,
     receiver_value: TExpr,
     method: String,

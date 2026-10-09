@@ -264,7 +264,7 @@ fn run() {
 #[test]
 fn pub_pure_fn_compiles() {
     let src = r#"
-pub fn double(n: Int) -[]> Int {
+fn double(n: Int) -[]> Int {
     return n * 2
 }
 fn run() {

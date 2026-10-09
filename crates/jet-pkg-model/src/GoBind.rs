@@ -232,9 +232,9 @@ fn render(lib: &str, functions: &[Function]) -> String {
     }
     out.push_str("}\nuse c.");
     out.push_str(&abi);
-    out.push_str(" as abi\n\npub struct Handle { value: Int }\n\n");
+    out.push_str(" as abi\n\nstruct Handle { value: Int }\n\n");
     for function in functions {
-        out.push_str("pub fn ");
+        out.push_str("fn ");
         out.push_str(&function.name);
         render_public_params(&mut out, &function.params);
         if let Some(result) = function.result {

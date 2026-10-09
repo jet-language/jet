@@ -3,9 +3,9 @@
 // belong to written markers or the checked Core registry, never a name table.
 use jet_foundation.[CoreMarkerApplication, Diagnostic, Expr, Marker, MIRStructureFact, MIRStructureFactKind, Span, TextEdit, diagnostic_with_edit]
 
-pub struct SemaLifecycleResult {
-    pub diagnostics: [Diagnostic]
-    pub facts: [MIRStructureFact]
+struct SemaLifecycleResult {
+    diagnostics: [Diagnostic]
+    facts: [MIRStructureFact]
 }
 
 fn sema_lifecycle_marker_string(marker: Marker, label: String, positional: Int) -> String? {
@@ -118,7 +118,7 @@ fn sema_lifecycle_record(payload: CoreMarkerApplication, source: String, span: S
     &result.diagnostics.push(diagnostic)
 }
 
-pub fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], policies: [SemaRegistrationPackagePolicy]) -> SemaLifecycleResult {
+fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], policies: [SemaRegistrationPackagePolicy]) -> SemaLifecycleResult {
     result := SemaLifecycleResult{diagnostics: [Diagnostic]{}, facts: [MIRStructureFact]{}}
     payloads := [String:CoreMarkerApplication]{}
     editions := [String:String]{}

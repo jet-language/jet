@@ -19,9 +19,9 @@ fn evidence_checked_offset(at: U64, length: U64, maximum: U64) -> U64? Never! {
     Val(at + length)
 }
 
-pub struct EvidenceDecoded {
-    pub records: [EvidenceRecord]
-    pub derivations: [DerivationRecord]
+struct EvidenceDecoded {
+    records: [EvidenceRecord]
+    derivations: [DerivationRecord]
 }
 
 
@@ -218,7 +218,7 @@ fn evidence_decode_record(cursor: &EvidenceCursor) -> EvidenceDecodedRecord Evid
     Ok(EvidenceDecodedRecord{record: record, derivation: definition})
 }
 
-pub fn evidence_decode_report_bytes(bytes: [U8], usize_max: U64) -> EvidenceDecoded EvidenceCodecError! {
+fn evidence_decode_report_bytes(bytes: [U8], usize_max: U64) -> EvidenceDecoded EvidenceCodecError! {
     if bytes.len() > 16777216 {
         return Err(evidence_codec_error("evidence report exceeds the 16 MiB limit"))
     }
@@ -271,7 +271,7 @@ pub fn evidence_decode_report_bytes(bytes: [U8], usize_max: U64) -> EvidenceDeco
 }
 
 
-pub fn evidence_report_from_bytes(bytes: [U8], usize_max: U64) -> EvidenceReport EvidenceCodecError! {
+fn evidence_report_from_bytes(bytes: [U8], usize_max: U64) -> EvidenceReport EvidenceCodecError! {
     decoded :: evidence_decode_report_bytes(bytes, usize_max)
     report_id :: if decoded.records.len() == 0 -> "test-run" else -> decoded.records[0].identity.report_id
     if evidence_report_try_from_records(report_id, decoded.records, decoded.derivations) == {

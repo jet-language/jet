@@ -67,10 +67,10 @@ mod tests {
 
     #[test]
     fn format_preserves_inline_package_and_ordinary_source() {
-        let source = "package {\n    name: \"inline-demo\"\n}\n\npub(package) fn helper() -> String { return \"ok\" }\nfn run() { print(helper()) }\n";
+        let source = "package {\n    name: \"inline-demo\"\n}\n\nfn helper() -> String { return \"ok\" }\nfn run() { print(helper()) }\n";
         let formatted = format_source(source).expect("inline Package source should format");
         assert!(formatted.starts_with("package {\n    name: \"inline-demo\"\n}\n"));
-        assert!(formatted.contains("pub(package) fn helper"));
+        assert!(formatted.contains("fn helper"));
         assert!(formatted.contains("fn run"));
     }
 

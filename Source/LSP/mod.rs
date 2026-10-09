@@ -195,7 +195,7 @@ mod tests {
     name: "lsp-inline"
 }
 
-pub(package) fn secret() -> String {
+fn secret() -> String {
     return "ok"
 }
 
@@ -342,7 +342,7 @@ fn run() {
         let project = TestProject::new();
         std::fs::write(
             project.root.join("library.jet"),
-            "pub fn render(#Root value: Int) -> Int { return value }\n",
+            "fn render(#Root value: Int) -> Int { return value }\n",
         )
         .expect("write imported root-call library");
         let src = "use \"./library\" as one\nfn run() { value :: 1\n    value.render()\n}\n";
@@ -552,7 +552,7 @@ alias Count :: Int
 #UnitFamily(Length) { meter }
 struct Door { state { Open } }
 protocol Wire { client: Send(value: Int) }
-module holder<T> { pub struct Box { value: T } }
+module holder<T> { struct Box { value: T } }
 module cache :: holder<Int>
 fn run() {}
 "#;
@@ -765,7 +765,7 @@ fn run() {
 
     #[test]
     fn completion_hides_soft_public_names_until_explicitly_requested() {
-        let src = "pub fn _helper() {}\nfn run() {}\n";
+        let src = "fn _helper() {}\nfn run() {}\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         assert!(db.symbols.lookup("_helper").len() == 1);

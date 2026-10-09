@@ -313,7 +313,7 @@ mod tests {
         let store = temp_store("round-trip");
         let module_source = "fn run() {\n    x := 1\n}\n".to_string();
         let origin = Arc::new(DiagnosticOrigin::new("main.jet", "/p/main.jet", module_source.clone()));
-        let core = Arc::new(DiagnosticOrigin::new("math", "<corelib>/math", "pub fn one() {}\n"));
+        let core = Arc::new(DiagnosticOrigin::new("math", "<corelib>/math", "fn one() {}\n"));
         let module = ReceiptInput {
             path: "main.jet".to_string(),
             digest: origin.revision.clone(),
@@ -343,7 +343,7 @@ mod tests {
         let json = jet_foundation::RecordCodec::record_json(&payload).unwrap();
         assert!(json.starts_with("{\"schema\":\"jet.receipt/v1\""));
         assert!(!json.contains("x := 1"));
-        assert!(json.contains("pub fn one() {}"));
+        assert!(json.contains("fn one() {}"));
 
         // A closure whose module bytes changed cannot resolve the stored
         // origin: that is a miss, never a replay against different bytes.

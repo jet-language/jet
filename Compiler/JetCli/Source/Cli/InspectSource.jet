@@ -1,7 +1,7 @@
 // Resolve report bytes from the same immutable checked bundle, not fresh disk IO.
 use jet_driver.[JetDriverCompileResult, JetDriverAuthorizedSourceSnapshot]
 
-pub fn jet_cli_inspection_source(result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, display: String) -> String {
+fn jet_cli_inspection_source(result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, display: String) -> String {
     loop doc_module in result.doc_modules {
         if doc_module.path == display || doc_module.physical_path == display -> return doc_module.source
     }

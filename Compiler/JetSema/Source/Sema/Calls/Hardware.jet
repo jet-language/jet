@@ -29,34 +29,34 @@ use jet_foundation.[
     expr_span,
 ]
 
-pub struct SemaHardwareBoardPath {
-    pub profile_id: String
-    pub segments: [String]
+struct SemaHardwareBoardPath {
+    profile_id: String
+    segments: [String]
 }
 
 // A start produces this explicit side fact. The caller that binds the returned
 // transfer records its local symbol identity; wait consumes that exact fact
 // rather than guessing from the opaque TIR handle type.
-pub struct SemaHardwareDMATransferFact {
-    pub transfer_name: String
-    pub transfer_key: String
-    pub profile_id: String
-    pub channel: String
-    pub buffer_name: String
-    pub buffer_key: String
-    pub buffer_type: Type
-    pub start_span: Span
-    pub scope_frame: Int
-    pub buffer_frame: Int
+struct SemaHardwareDMATransferFact {
+    transfer_name: String
+    transfer_key: String
+    profile_id: String
+    channel: String
+    buffer_name: String
+    buffer_key: String
+    buffer_type: Type
+    start_span: Span
+    scope_frame: Int
+    buffer_frame: Int
 }
 
-pub struct SemaHardwareMethodCheck {
-    pub check: SemaMethodSpecialCheck
-    pub hardware_use: MIRTargetHardwareUse
-    pub dma_transfer: SemaHardwareDMATransferFact?
+struct SemaHardwareMethodCheck {
+    check: SemaMethodSpecialCheck
+    hardware_use: MIRTargetHardwareUse
+    dma_transfer: SemaHardwareDMATransferFact?
 }
 
-pub fn sema_hardware_empty_use() -> MIRTargetHardwareUse Never! {
+fn sema_hardware_empty_use() -> MIRTargetHardwareUse Never! {
     MIRTargetHardwareUse{
         register_accesses: [MIRTargetRegisterAccessFact]{},
         interrupt_handlers: [MIRTargetInterruptHandlerFact]{},
@@ -65,7 +65,7 @@ pub fn sema_hardware_empty_use() -> MIRTargetHardwareUse Never! {
     }
 }
 
-pub fn sema_hardware_use_snapshot(source: MIRTargetHardwareUse) -> MIRTargetHardwareUse Never! {
+fn sema_hardware_use_snapshot(source: MIRTargetHardwareUse) -> MIRTargetHardwareUse Never! {
     result := sema_hardware_empty_use()
     loop fact in source.register_accesses -> &result.register_accesses.push(fact)
     loop fact in source.interrupt_handlers -> &result.interrupt_handlers.push(fact)
@@ -74,7 +74,7 @@ pub fn sema_hardware_use_snapshot(source: MIRTargetHardwareUse) -> MIRTargetHard
     result
 }
 
-pub fn sema_hardware_use_merge(destination: &MIRTargetHardwareUse, source: MIRTargetHardwareUse) Never! {
+fn sema_hardware_use_merge(destination: &MIRTargetHardwareUse, source: MIRTargetHardwareUse) Never! {
     loop fact in source.register_accesses -> &destination.register_accesses.push(fact)
     loop fact in source.interrupt_handlers -> &destination.interrupt_handlers.push(fact)
     loop fact in source.dma_operations -> &destination.dma_operations.push(fact)
@@ -151,7 +151,7 @@ fn sema_hardware_expr_is_dma_start(expression: Expr) -> Bool Never! {
     }
 }
 
-pub fn sema_hardware_bind_pending_dma_transfer(init: Expr, symbol: Symbol, scopes: &SemaScopeTable) -> Bool {
+fn sema_hardware_bind_pending_dma_transfer(init: Expr, symbol: Symbol, scopes: &SemaScopeTable) -> Bool {
     if !sema_hardware_expr_is_dma_start(init) -> return false
     init_span := expr_span(init)
     found := -1
@@ -171,7 +171,7 @@ pub fn sema_hardware_bind_pending_dma_transfer(init: Expr, symbol: Symbol, scope
     true
 }
 
-pub fn sema_hardware_consume_dma_transfer(transfer_key: String, scopes: &SemaScopeTable) Never! {
+fn sema_hardware_consume_dma_transfer(transfer_key: String, scopes: &SemaScopeTable) Never! {
     index := scopes.hardware_transfers.len() - 1
     loop index >= 0 {
         if scopes.hardware_transfers[index].transfer_key == transfer_key {
@@ -263,7 +263,7 @@ pub fn sema_hardware_board_path(expression: Expr, environment: SemaScopeEnvironm
 }
 
 
-pub fn sema_hardware_bind_dma_transfer_identity(fact: ^SemaHardwareDMATransferFact, name: String, key: String, scope_frame: Int) -> SemaHardwareDMATransferFact Never! {
+fn sema_hardware_bind_dma_transfer_identity(fact: ^SemaHardwareDMATransferFact, name: String, key: String, scope_frame: Int) -> SemaHardwareDMATransferFact Never! {
     updated := fact
     updated.transfer_name = name
     updated.transfer_key = key
@@ -272,7 +272,7 @@ pub fn sema_hardware_bind_dma_transfer_identity(fact: ^SemaHardwareDMATransferFa
 }
 // A general expression visitor appends this only while the buffer is in-flight;
 // TargetMachine then rejects CPU access until the device returns ownership.
-pub fn sema_hardware_dma_buffer_use_fact(buffer_name: String) -> MIRTargetDMAOperationFact Never! {
+fn sema_hardware_dma_buffer_use_fact(buffer_name: String) -> MIRTargetDMAOperationFact Never! {
     MIRTargetDMAOperationFact{
         channel: "",
         buffer: buffer_name,

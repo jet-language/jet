@@ -17,21 +17,21 @@ fn pkg_cpp_render_jet(lib: String, surface: CppSurface) -> String Never! {
     loop function in surface.functions {
         out = "{out}    fn {function.jet_name}({pkg_cpp_jet_params(function.params)}) -> {function.result.jet()} = \"{abi}_{function.jet_name}\"\n"
     }
-    out = "{out}}}\nuse c.{abi} as abi\n\npub enum CppError {{ Exception InvalidHandle ResourceLimit }}\n\nfn cpp_error(code: Int) -[]> CppError {{ if code == 2 {{ return CppError.InvalidHandle }} if code == 3 {{ return CppError.ResourceLimit }} return CppError.Exception }}\n\n"
+    out = "{out}}}\nuse c.{abi} as abi\n\nenum CppError {{ Exception InvalidHandle ResourceLimit }}\n\nfn cpp_error(code: Int) -[]> CppError {{ if code == 2 {{ return CppError.InvalidHandle }} if code == 3 {{ return CppError.ResourceLimit }} return CppError.Exception }}\n\n"
     loop class in surface.classes {
         name :: pkg_cpp_snake(class.name)
-        out = "{out}#SingleUse\npub struct {class.name} {{ value: Int }}\n\npub fn new_{name}({pkg_cpp_jet_params(class.ctor)}) -[FFI.Cpp]> {class.name} CppError! {{\n    value :: abi.{name}_new({pkg_cpp_jet_args(class.ctor)})\n    code :: abi.take_error()\n    if code != 0 {{ return Err(cpp_error(code)) }}\n    return Ok({class.name}{{ value: value }})\n}}\n\n"
+        out = "{out}#SingleUse\nstruct {class.name} {{ value: Int }}\n\nfn new_{name}({pkg_cpp_jet_params(class.ctor)}) -[FFI.Cpp]> {class.name} CppError! {{\n    value :: abi.{name}_new({pkg_cpp_jet_args(class.ctor)})\n    code :: abi.take_error()\n    if code != 0 {{ return Err(cpp_error(code)) }}\n    return Ok({class.name}{{ value: value }})\n}}\n\n"
         if class.methods.len() > 0 -> out = "{out}impl {class.name} {{\n"
         loop method in class.methods {
             params :: if method.params.len() > 0 -> ", {pkg_cpp_jet_params(method.params)}" else -> ""
             args :: if method.params.len() > 0 -> ", {pkg_cpp_jet_args(method.params)}" else -> ""
-            out = "{out}    pub fn {method.jet_name}(self{params}) -[FFI.Cpp]> {method.result.jet()} CppError! {{\n        result_value :: abi.{name}_{method.jet_name}(self.value{args})\n        code :: abi.take_error()\n        if code != 0 {{ return Err(cpp_error(code)) }}\n        return Ok(result_value)\n    }}\n"
+            out = "{out}    fn {method.jet_name}(self{params}) -[FFI.Cpp]> {method.result.jet()} CppError! {{\n        result_value :: abi.{name}_{method.jet_name}(self.value{args})\n        code :: abi.take_error()\n        if code != 0 {{ return Err(cpp_error(code)) }}\n        return Ok(result_value)\n    }}\n"
         }
         if class.methods.len() > 0 -> out = "{out}}}\n\n"
-        out = "{out}pub fn close_{name}(value: ^{class.name}) -[FFI.Cpp]> {{\n    abi.{name}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n"
+        out = "{out}fn close_{name}(value: ^{class.name}) -[FFI.Cpp]> {{\n    abi.{name}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n"
     }
     loop function in surface.functions {
-        out = "{out}pub fn {function.jet_name}({pkg_cpp_jet_params(function.params)}) -[FFI.Cpp]> {function.result.jet()} CppError! {{\n    result_value :: abi.{function.jet_name}({pkg_cpp_jet_args(function.params)})\n    code :: abi.take_error()\n    if code != 0 {{ return Err(cpp_error(code)) }}\n    return Ok(result_value)\n}}\n\n"
+        out = "{out}fn {function.jet_name}({pkg_cpp_jet_params(function.params)}) -[FFI.Cpp]> {function.result.jet()} CppError! {{\n    result_value :: abi.{function.jet_name}({pkg_cpp_jet_args(function.params)})\n    code :: abi.take_error()\n    if code != 0 {{ return Err(cpp_error(code)) }}\n    return Ok(result_value)\n}}\n\n"
     }
     out
 }

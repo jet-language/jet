@@ -11,8 +11,8 @@ MEMBER_INPUT_HASHES :: prep { "member-input-hashes" }
 
 // A selection failure carries the registered diagnostic the CLI renders.
 #Error
-pub struct MemberSelectError {
-    pub diagnostic: Diagnostic
+struct MemberSelectError {
+    diagnostic: Diagnostic
 
     fn message(self) -> String Never! {
         self.diagnostic.what
@@ -24,13 +24,13 @@ impl AuthorityError -> MemberSelectError {
 }
 
 // The CLI selection request for a workspace command.
-pub struct SelectRequest {
+struct SelectRequest {
     // Exact member names from repeated `-p <member>`.
-    pub packages: [String]
+    packages: [String]
     // `--affected`: diff the working tree against recorded input hashes.
-    pub affected: Bool
+    affected: Bool
     // `--affected-since <ref>`: members changed since this git ref.
-    pub affected_since: String?
+    affected_since: String?
 
     fn all() -> SelectRequest Never! {
         SelectRequest{packages: [String]{}, affected: false, affected_since: None}
@@ -42,7 +42,7 @@ pub struct SelectRequest {
 }
 
 // Which workspace members a command should run, in workspace order.
-pub fn env_select_members(root: String, plan: WorkspacePlan, request: SelectRequest) -[FS, Env, Exec, Time.Wait]> [WorkspacePlanMember] MemberSelectError! {
+fn env_select_members(root: String, plan: WorkspacePlan, request: SelectRequest) -[FS, Env, Exec, Time.Wait]> [WorkspacePlanMember] MemberSelectError! {
     if !request.is_restricting() -> return Ok(plan.members)
     selected := [String]{}
     if request.packages.len() > 0 {
@@ -74,12 +74,12 @@ pub fn env_select_members(root: String, plan: WorkspacePlan, request: SelectRequ
 // its `package.jet` depends on, and external dependencies do not affect the
 // order. Package resolution owns dependency-cycle diagnostics, so a cycle
 // keeps stable source order here.
-pub fn env_dependency_order(root: String, members: [WorkspacePlanMember]) -[FS, Env]> [WorkspacePlanMember] MemberSelectError! {
+fn env_dependency_order(root: String, members: [WorkspacePlanMember]) -[FS, Env]> [WorkspacePlanMember] MemberSelectError! {
     resolver :: AuthorityResolver.open(root)
     Ok(env_dependency_order_checked(resolver, members))
 }
 
-pub fn env_dependency_order_checked(resolver: AuthorityResolver, members: [WorkspacePlanMember]) -[FS, Env]> [WorkspacePlanMember] AuthorityError! {
+fn env_dependency_order_checked(resolver: AuthorityResolver, members: [WorkspacePlanMember]) -[FS, Env]> [WorkspacePlanMember] AuthorityError! {
     ordered := [WorkspacePlanMember]{}
     pairs :: env_dependency_order_packages_checked(resolver, members)
     loop pair in pairs -> &ordered.push(pair.member)
@@ -89,7 +89,7 @@ pub fn env_dependency_order_checked(resolver: AuthorityResolver, members: [Works
 // Members in dependency order with the package snapshots used to inspect
 // their dependencies. Callers pass these snapshots through to realization;
 // reopening a member by path after ordering would open a validation gap.
-pub fn env_dependency_order_packages_checked(resolver: AuthorityResolver, members: [WorkspacePlanMember]) -[FS, Env]> [(member: WorkspacePlanMember, package: CheckedPackage)] AuthorityError! {
+fn env_dependency_order_packages_checked(resolver: AuthorityResolver, members: [WorkspacePlanMember]) -[FS, Env]> [(member: WorkspacePlanMember, package: CheckedPackage)] AuthorityError! {
     count :: members.len()
     dependents := [[Int]]{}
     indegree := [Int]{}
@@ -148,7 +148,7 @@ pub fn env_dependency_order_packages_checked(resolver: AuthorityResolver, member
 // Persist member input hashes after a successful workspace build so the next
 // `--affected` run diffs against them. Best effort, like the action cache: a
 // member that cannot be hashed keeps its previous record.
-pub fn env_record_member_input_hashes(root: String, members: [WorkspacePlanMember]) Never! -[FS, Env]> {
+fn env_record_member_input_hashes(root: String, members: [WorkspacePlanMember]) Never! -[FS, Env]> {
     path :: env_member_input_hash_path(root)
     files.create_dir_all(files.dirname(path)).drop("the hash cache directory is best effort")
     existing := env_load_member_input_hashes(root)
@@ -326,7 +326,7 @@ fn env_e1292_bad_ref(query: String, suggestions: [String], why_detail: String) -
 }
 
 // Reject the pnpm-style `--filter` pattern DSL (D-JPK-SELECTOR1=C).
-pub fn env_reject_filter_dsl(args: [String]) -> Diagnostic? Never! {
+fn env_reject_filter_dsl(args: [String]) -> Diagnostic? Never! {
     loop arg in args {
         if arg == "--filter" || arg.starts_with("--filter=") {
             return Val(diagnostic_from_registry("E1296", None, "`{arg}` is not a Jet workspace selector", "D-JPK-SELECTOR1 rejects pnpm-style `--filter` pattern DSLs; Jet uses exact `-p <member>` and computed `--affected` / `--affected-since <ref>` instead.", "use `-p <member>` (repeatable) or `--affected` / `--affected-since <ref>`."))

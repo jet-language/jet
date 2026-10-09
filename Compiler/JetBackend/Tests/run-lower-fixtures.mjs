@@ -174,7 +174,7 @@ writeFileSync(`${outDir}/unit.jet`, [...coreUses, "", ...parts].join("\n"));
 coreUses.clear();
 const loadParts = [
   "// [unit source: Compiler/JetBackend/Source/Image/Memory.jet]",
-  item("Compiler/JetBackend/Source/Image/Memory.jet", "pub struct X64MemoryImage {"),
+  item("Compiler/JetBackend/Source/Image/Memory.jet", "struct X64MemoryImage {"),
   "",
   body("Compiler/JetBackend/Source/OS/Linux.jet"),
   body("Compiler/JetBackend/Source/Image/Loader.jet"),

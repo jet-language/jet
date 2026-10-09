@@ -1,18 +1,18 @@
-pub struct Formula {
-    kind: Int
-    value: Int
-    left: String
-    right: String
+struct Formula {
+    priv kind: Int
+    priv value: Int
+    priv left: String
+    priv right: String
 }
 
-pub struct Book {
-    cells: [String:Formula]
-    order: [String]
+struct Book {
+    priv cells: [String:Formula]
+    priv order: [String]
 }
 
-pub struct Recalc {
-    pub values: [String:Int]
-    pub touched: [String]
+struct Recalc {
+    values: [String:Int]
+    touched: [String]
 }
 
 fn parse_formula(source: String) -> Formula? {
@@ -42,7 +42,7 @@ fn parse_formula(source: String) -> Formula? {
     Val(Formula{kind: kind, value: 0, left: left, right: right})
 }
 
-pub fn parse(source: String) -> Book? {
+fn parse(source: String) -> Book? {
     cells := [String:Formula]{}
     order := [String]{}
     loop raw_line in source.lines() {
@@ -169,7 +169,7 @@ visiting: &[String],
     return value
 }
 
-pub fn recalculate(
+fn recalculate(
 book: Book,
 previous: [String:Int],
 changed: String,

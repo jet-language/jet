@@ -745,7 +745,7 @@ fn jet_cli_doc_undocumented_report(graph: JetCLIDocGraph, modules: [JetDriverDoc
                 Val(Span{start: item.source.start, end: item.source.end}),
                 "Public API item `{name}` has no documentation",
                 "Generated reference documentation needs a summary for every public API item so users can find and understand the supported surface.",
-                "Add a `///` summary before `{name}`, or remove `pub` when it is not part of the public API.",
+                "Add a `///` summary before `{name}`, or move it into a `priv module` when it is not part of the public API.",
             ))
         }
         rendered = if json -> "{rendered}{jet_cli_render_all_json(cwd, doc_module.physical_path, doc_module.source, diagnostics)}" else -> "{rendered}{diagnostic_render_all(path, doc_module.source, diagnostics, color)}"
@@ -830,18 +830,18 @@ JET_CLI_FMT_IGNORED_DIRS :: [String]{"vendor", "target", "build", ".git", "node_
 
 // One preflight result (`run_fmt` `FileResult`); `report` is a host
 // refusal already rendered (a `--explicit-copies` check that could not run).
-pub struct JetCLIFmtFile {
-    pub path: String
-    pub original: String
-    pub formatted: String
-    pub changed: Bool
-    pub retired_interpolation_selectors: Int
-    pub retired_print_family_spellings: Int
-    pub retired_type_names: Int
-    pub retired_target_spellings: Int
-    pub io_error: String?
-    pub diagnostics: [Diagnostic]
-    pub report: String?
+struct JetCLIFmtFile {
+    path: String
+    original: String
+    formatted: String
+    changed: Bool
+    retired_interpolation_selectors: Int
+    retired_print_family_spellings: Int
+    retired_type_names: Int
+    retired_target_spellings: Int
+    io_error: String?
+    diagnostics: [Diagnostic]
+    report: String?
 }
 
 // One formatted source, or what stopped it (`format_source_for_fmt`'s
@@ -913,11 +913,10 @@ fn jet_cli_fmt_walk(directory: String, files: &[String]) {
 fn jet_cli_fmt_is_typed_package_source(source: String, origin: String) -> Bool Never! {
     if jet_cli_fmt_file_name(origin) == "package.jet" -> return true
     trimmed :: source.trim()
-    head :: if trimmed.starts_with("pub ") -> trimmed.slice(4..<trimmed.len()) else -> trimmed
     value := ""
-    halves :: head.split("::").to_list()
+    halves :: trimmed.split("::").to_list()
     if halves.len() > 1 {
-        value = head.slice(halves[0].len() + 2..<head.len()).trim()
+        value = trimmed.slice(halves[0].len() + 2..<trimmed.len()).trim()
     } else if trimmed.starts_with("Config") {
         value = trimmed.slice(6..<trimmed.len()).trim()
     } else {

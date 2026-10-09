@@ -5,17 +5,17 @@
 // D-BOUND-PROV1: evidence recorded once per locked dependency. Empty fields
 // are meaningful: an unattested dependency stays resolvable by default, but
 // `authority.trust.require` can require the missing rung.
-pub struct DependencyProvenance {
-    pub transparency: String?{None}
-    pub publisher: String?{None}
-    pub build: String?{None}
+struct DependencyProvenance {
+    transparency: String?{None}
+    publisher: String?{None}
+    build: String?{None}
 
     fn empty() -> DependencyProvenance Never! {
         DependencyProvenance{transparency: None, publisher: None, build: None}
     }
 }
 
-pub enum ProvenanceStatus {
+enum ProvenanceStatus {
     Enforced
     Verified
     Recorded
@@ -29,32 +29,32 @@ pub enum ProvenanceStatus {
     }
 }
 
-pub struct ProvenanceField {
-    pub value: String
-    pub status: ProvenanceStatus
+struct ProvenanceField {
+    value: String
+    status: ProvenanceStatus
 
     fn not_recorded() -> ProvenanceField Never! {
         ProvenanceField{value: "not recorded", status: ProvenanceStatus.Recorded}
     }
 }
 
-pub struct DependencyProvenanceReport {
-    pub name: String
-    pub version: String
-    pub integrity: ProvenanceField
-    pub transparency: ProvenanceField
-    pub publisher: ProvenanceField
-    pub build: ProvenanceField
-    pub required_effects: [String]
-    pub granted_effects: [String]
-    pub denied_effects: [String]
-    pub authority: String
+struct DependencyProvenanceReport {
+    name: String
+    version: String
+    integrity: ProvenanceField
+    transparency: ProvenanceField
+    publisher: ProvenanceField
+    build: ProvenanceField
+    required_effects: [String]
+    granted_effects: [String]
+    denied_effects: [String]
+    authority: String
 }
 
 // Enforce one manifest-selected provenance floor over every non-root lock
 // record. Integrity is deliberately not part of this switch; E1204 remains
 // the unconditional store check.
-pub fn pkg_lock_enforce_provenance_requirement(lock: LockFile, requirement: ProvenanceRequirement) LockError! {
+fn pkg_lock_enforce_provenance_requirement(lock: LockFile, requirement: ProvenanceRequirement) LockError! {
     if requirement == ProvenanceRequirement.Unrequired -> return
     loop package in lock.packages {
         if package.is_root() -> next
@@ -73,32 +73,32 @@ pub fn pkg_lock_enforce_provenance_requirement(lock: LockFile, requirement: Prov
 
 // A presentation-only package change. The lock schema stays the source of
 // truth; these copies let a renderer outlive its input lock values.
-pub enum LockPackageChangeKind {
+enum LockPackageChangeKind {
     Added
     Removed
     Updated
 }
 
-pub struct LockPackageChange {
-    pub name: String
-    pub kind: LockPackageChangeKind
-    pub before_version: String?
-    pub after_version: String?
-    pub before_trust: String?
-    pub after_trust: String?
-    pub before_output: String?
-    pub after_output: String?
+struct LockPackageChange {
+    name: String
+    kind: LockPackageChangeKind
+    before_version: String?
+    after_version: String?
+    before_trust: String?
+    after_trust: String?
+    before_output: String?
+    after_output: String?
 }
 
-pub struct LockChannelChange {
-    pub name: String
-    pub before: String?
-    pub after: String?
+struct LockChannelChange {
+    name: String
+    before: String?
+    after: String?
 }
 
-pub struct LockDiff {
-    pub packages: [LockPackageChange]
-    pub channels: [LockChannelChange]
+struct LockDiff {
+    packages: [LockPackageChange]
+    channels: [LockChannelChange]
 
     // Compare two lock snapshots without changing or interpreting the lock
     // schema. `None` is a missing snapshot: an empty side of the diff.

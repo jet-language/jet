@@ -143,7 +143,7 @@ pub fn sema_call_reflection_validate_value(value: TExpr, span: Span, environment
 }
 
 // Runtime handle method contracts shared by direct method dispatch.
-pub fn sema_call_reflection_method_return(type_name: String, method: String, args: [Type]) -> Type? {
+fn sema_call_reflection_method_return(type_name: String, method: String, args: [Type]) -> Type? {
     if type_name == "Value" {
         if args.len() != 0 -> return None
         if method == "type_name" || method == "path" || method == "display" -> return Val(Type.String)
@@ -178,7 +178,7 @@ fn sema_call_reflection_metadata_method(owner: String, method: String) -> Bool N
     false
 }
 
-pub fn sema_call_try_reflection_metadata_method(
+fn sema_call_try_reflection_metadata_method(
     receiver: Expr,
     receiver_value: TExpr,
     method: String,
@@ -230,7 +230,7 @@ fn sema_call_reflection_handle_operation(owner: String, method: String) -> THand
     None
 }
 
-pub fn sema_call_try_reflection_handle_method(
+fn sema_call_try_reflection_handle_method(
     receiver: Expr,
     receiver_value: TExpr,
     method: String,

@@ -633,7 +633,7 @@ deps: {
     .expect("write package manifest fixture");
     fs::write(
         root.join("config/build.jet"),
-        r#"pub build :: Config{
+        r#"build :: Config{
     outputs: { app: Executable{ entry: run } }
 }
 "#,
@@ -796,7 +796,7 @@ configs: ["config/build.jet"]
         fs::create_dir_all(root.join("config")).expect("create carrier fixture");
         fs::write(
             root.join("config/build.jet"),
-            "pub build :: Config{ outputs: { app: Executable{ entry: run } } }\n",
+            "build :: Config{ outputs: { app: Executable{ entry: run } } }\n",
         )
         .expect("write carrier config");
     }
@@ -847,7 +847,7 @@ fn run() {}
     let config = root.join("config/build.jet");
     fs::write(
         &config,
-        "pub build :: Config{ outputs: { app: Executable{ entry: run } } }\n",
+        "build :: Config{ outputs: { app: Executable{ entry: run } } }\n",
     )
     .expect("write first package config");
     let (first_result, first_inputs) =
@@ -856,7 +856,7 @@ fn run() {}
 
     fs::write(
         &config,
-        "pub build :: Config{ outputs: { app: Executable{ entry: check } } }\n",
+        "build :: Config{ outputs: { app: Executable{ entry: check } } }\n",
     )
     .expect("write changed package config");
     let (second_result, second_inputs) =

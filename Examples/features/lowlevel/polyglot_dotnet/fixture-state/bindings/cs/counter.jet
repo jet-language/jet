@@ -8,20 +8,20 @@
 }
 use c.jet_cs_counter as abi
 
-pub struct Handle { value: Int }
+struct Handle { priv value: Int }
 #Error
-pub enum DotNetError { Exception InvalidHandle ResourceLimit }
+enum DotNetError { Exception InvalidHandle ResourceLimit }
 
 fn error(code: Int) -[]> DotNetError Never! { if code == 2 { return DotNetError.InvalidHandle } if code == 3 { return DotNetError.ResourceLimit } return DotNetError.Exception }
 
-pub fn new(arg0: Int) -[FFI.DotNet]> Handle DotNetError! {
+fn new(arg0: Int) -[FFI.DotNet]> Handle DotNetError! {
     value :: abi.new(arg0)
     code :: abi.take_error()
     if code != 0 { return Err(error(code)) }
     return Ok(Handle{ value: value })
 }
 
-pub fn close(^handle: Handle) -[FFI.DotNet]> {}
+fn close(^handle: Handle) -[FFI.DotNet]> {}
 
 impl Handle.Close {
     fn close(^self) {
@@ -30,21 +30,21 @@ impl Handle.Close {
     }
 }
 
-pub fn add(handle: Handle, arg0: Int) -[FFI.DotNet]> Int DotNetError! {
+fn add(handle: Handle, arg0: Int) -[FFI.DotNet]> Int DotNetError! {
     value :: abi.add(handle.value, arg0)
     code :: abi.take_error()
     if code != 0 { return Err(error(code)) }
     return Ok(value)
 }
 
-pub fn explode(handle: Handle, arg0: Int) -[FFI.DotNet]> Int DotNetError! {
+fn explode(handle: Handle, arg0: Int) -[FFI.DotNet]> Int DotNetError! {
     value :: abi.explode(handle.value, arg0)
     code :: abi.take_error()
     if code != 0 { return Err(error(code)) }
     return Ok(value)
 }
 
-pub fn twice(arg0: Float) -[FFI.DotNet]> Float DotNetError! {
+fn twice(arg0: Float) -[FFI.DotNet]> Float DotNetError! {
     value :: abi.twice(arg0)
     code :: abi.take_error()
     if code != 0 { return Err(error(code)) }

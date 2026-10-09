@@ -21,31 +21,31 @@ use jet_foundation.[
     type_name,
 ]
 
-pub enum SemaExpressionLayoutAxis {
+enum SemaExpressionLayoutAxis {
     Horizontal
     Vertical
     Neutral
 }
 
-pub struct SemaExpressionLayoutBinaryResult {
-    pub result_type: Type?
-    pub axis_mismatch: Bool
+struct SemaExpressionLayoutBinaryResult {
+    result_type: Type?
+    axis_mismatch: Bool
 }
 
-pub struct SemaExpressionLayoutBinaryCheck {
-    pub handled: Bool
-    pub value: TExpr?
+struct SemaExpressionLayoutBinaryCheck {
+    handled: Bool
+    value: TExpr?
 }
 
 pub fn sema_expression_layout_is_axis_type(name: String) -> Bool Never! {
     name == "HVar" || name == "VVar" || name == "LengthVar"
 }
 
-pub fn sema_expression_layout_is_type(name: String) -> Bool Never! {
+fn sema_expression_layout_is_type(name: String) -> Bool Never! {
     sema_expression_layout_is_axis_type(name) || name == "Constraint" || name == "Layout"
 }
 
-pub fn sema_expression_layout_axis_of(ty: Type) -> SemaExpressionLayoutAxis? {
+fn sema_expression_layout_axis_of(ty: Type) -> SemaExpressionLayoutAxis? {
     if ty == (Type.Named{name: "HVar"}) -> return Val(SemaExpressionLayoutAxis.Horizontal)
     if ty == (Type.Named{name: "VVar"}) -> return Val(SemaExpressionLayoutAxis.Vertical)
     if ty == (Type.Named{name: "LengthVar"}) -> return Val(SemaExpressionLayoutAxis.Neutral)
@@ -69,7 +69,7 @@ fn sema_expression_layout_axis_type_name(axis: SemaExpressionLayoutAxis) -> Stri
     }
 }
 
-pub fn sema_expression_layout_binop_result(op: BinOp, left: Type, right: Type) -> SemaExpressionLayoutBinaryResult? {
+fn sema_expression_layout_binop_result(op: BinOp, left: Type, right: Type) -> SemaExpressionLayoutBinaryResult? {
     left_layout := if left == {.Named(name) -> sema_expression_layout_is_axis_type(name) else -> false}
     right_layout := if right == {.Named(name) -> sema_expression_layout_is_axis_type(name) else -> false}
     if !left_layout && !right_layout -> return None
@@ -82,7 +82,7 @@ pub fn sema_expression_layout_binop_result(op: BinOp, left: Type, right: Type) -
     Val(SemaExpressionLayoutBinaryResult{result_type: Val(result_type), axis_mismatch: false})
 }
 
-pub fn sema_expression_layout_literal(value: TExpr) -> TExpr Never! {
+fn sema_expression_layout_literal(value: TExpr) -> TExpr Never! {
     if value.ty == Type.Int || value.ty == Type.Float || value.ty == .InlineRange(_, _, _) {
         return sema_tir_expr(Type.Named{name: "LengthVar"}, TExprKind.LayoutLiteral{value: value}, value.span)
     }

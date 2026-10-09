@@ -5,7 +5,7 @@
 // BLOCKED #4262 integration: shared Encoding/CanonicalJson.jet must land in
 // main Compiler/ after stage 2; Bootstrap never references a worktree path.
 
-pub enum BundleFileKind {
+enum BundleFileKind {
     Executable
     Launcher
     Metadata
@@ -34,11 +34,11 @@ pub enum BundleFileKind {
 }
 
 // One exact file in a plan or emitted artifact.
-pub struct BundleFile {
-    pub path: String
-    pub kind: BundleFileKind
-    pub mode: Int
-    pub bytes: [U8]
+struct BundleFile {
+    path: String
+    kind: BundleFileKind
+    mode: Int
+    bytes: [U8]
 
     fn new(path: String, kind: BundleFileKind, mode: Int, bytes: [U8]) -> BundleFile Never! {
         BundleFile{path: path, kind: kind, mode: mode, bytes: bytes}
@@ -60,10 +60,10 @@ pub struct BundleFile {
 }
 
 // The exact launch paths a later adapter must preserve.
-pub struct LaunchDescriptor {
-    pub launcher: String
-    pub executable: String
-    pub arguments_passthrough: Bool
+struct LaunchDescriptor {
+    launcher: String
+    executable: String
+    arguments_passthrough: Bool
 
     fn new(launcher: String, executable: String) -> LaunchDescriptor Never! {
         LaunchDescriptor{launcher: launcher, executable: executable, arguments_passthrough: true}
@@ -79,18 +79,18 @@ pub struct LaunchDescriptor {
 }
 
 // Updater manifest generated from the exact executable payload.
-pub struct UpdaterManifest {
-    pub schema: String
-    pub package: String
-    pub version: String
-    pub target: BundleTarget
-    pub channel: String
-    pub artifact: String
-    pub url: String
-    pub signature_url: String?
-    pub release_notes_url: String?
-    pub payload_sha256: String
-    pub payload_bytes: Int
+struct UpdaterManifest {
+    schema: String
+    package: String
+    version: String
+    target: BundleTarget
+    channel: String
+    artifact: String
+    url: String
+    signature_url: String?
+    release_notes_url: String?
+    payload_sha256: String
+    payload_bytes: Int
 
     fn for_spec(spec: BundleSpec, updater: UpdaterSpec, payload_sha256: String) -> UpdaterManifest Never! {
         UpdaterManifest{
@@ -152,11 +152,11 @@ pub struct UpdaterManifest {
 }
 
 // One input the plan read, with its digest and size.
-pub struct BundleInputFact {
-    pub role: String
-    pub path: String
-    pub digest: String
-    pub bytes: Int
+struct BundleInputFact {
+    role: String
+    path: String
+    digest: String
+    bytes: Int
 
     fn to_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
@@ -179,23 +179,23 @@ pub struct BundleInputFact {
 
 // A complete, deterministic target layout. It contains no host-derived
 // values and can be handed to a platform adapter without re-planning.
-pub struct BundlePlan {
-    pub schema_version: Int
-    pub kind: BundleKind
-    pub target: BundleTarget
-    pub package: String
-    pub version: String
+struct BundlePlan {
+    schema_version: Int
+    kind: BundleKind
+    target: BundleTarget
+    package: String
+    version: String
     // Source path of the executable input, kept for receipt provenance.
-    pub executable_source: String
-    pub artifact_name: String
-    pub metadata: BundleMetadata
-    pub files: [BundleFile]
-    pub launch: LaunchDescriptor
-    pub inputs: [BundleInputFact]
-    pub signing_hooks: [SigningHook]
-    pub updater: UpdaterManifest?
-    pub game: GameBundleSpec?
-    pub identity: String
+    executable_source: String
+    artifact_name: String
+    metadata: BundleMetadata
+    files: [BundleFile]
+    launch: LaunchDescriptor
+    inputs: [BundleInputFact]
+    signing_hooks: [SigningHook]
+    updater: UpdaterManifest?
+    game: GameBundleSpec?
+    identity: String
 
     // Validate `spec` and lay out its target files. A Windows version is
     // normalized to four parts; other versions are trimmed.
@@ -438,16 +438,16 @@ pub struct BundlePlan {
 }
 
 // Bytes plus receipt facts ready for a platform adapter to materialize.
-pub struct BundleArtifact {
-    pub schema_version: Int
-    pub kind: BundleKind
-    pub target: BundleTarget
-    pub package: String
-    pub version: String
-    pub artifact_name: String
-    pub files: [BundleFile]
-    pub launch: LaunchDescriptor
-    pub receipt: BundleReceipt
+struct BundleArtifact {
+    schema_version: Int
+    kind: BundleKind
+    target: BundleTarget
+    package: String
+    version: String
+    artifact_name: String
+    files: [BundleFile]
+    launch: LaunchDescriptor
+    receipt: BundleReceipt
 
     fn digest(self) -> String Never! {
         self.receipt.artifact_sha256
@@ -488,7 +488,7 @@ pub struct BundleArtifact {
 
 // Whether the artifact facts describe only the checked plan or a transport a
 // platform adapter produced.
-pub enum BundleArtifactStatus {
+enum BundleArtifactStatus {
     Planned
     Materialized
 
@@ -502,7 +502,7 @@ pub enum BundleArtifactStatus {
 
 // Signing state an adapter recorded. A declared hook is only `Requested`; it
 // never implies a signer ran or produced a signature.
-pub enum BundleSigningStatus {
+enum BundleSigningStatus {
     NotRequested
     Requested
     Signed
@@ -519,12 +519,12 @@ pub enum BundleSigningStatus {
 }
 
 // Signing execution facts attached after a platform adapter runs.
-pub struct BundleSigningFact {
-    pub status: BundleSigningStatus
-    pub tool: String?
-    pub tool_identity: String?
-    pub tool_version: String?
-    pub diagnostic: String?
+struct BundleSigningFact {
+    status: BundleSigningStatus
+    tool: String?
+    tool_identity: String?
+    tool_version: String?
+    diagnostic: String?
 
     fn signed() -> BundleSigningFact Never! {
         BundleSigningFact{status: BundleSigningStatus.Signed, tool: None, tool_identity: None, tool_version: None, diagnostic: None}
@@ -554,7 +554,7 @@ pub struct BundleSigningFact {
 }
 
 // Installability verdict derived from materialization and signing evidence.
-pub enum BundleInstallability {
+enum BundleInstallability {
     NotMaterialized
     Installable
     RequiresSigning
@@ -572,14 +572,14 @@ pub enum BundleInstallability {
 
 // Identity and authority facts for the adapter that produced the transport.
 // `tool_identity` is the SHA-256 digest of the resolved executable.
-pub struct BundleMaterializerFact {
-    pub tool: String
-    pub tool_identity: String
-    pub tool_version: String
-    pub executable: String
-    pub authority: String
-    pub mechanism: String
-    pub policy: String
+struct BundleMaterializerFact {
+    tool: String
+    tool_identity: String
+    tool_version: String
+    executable: String
+    authority: String
+    mechanism: String
+    policy: String
 
     fn to_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
@@ -594,12 +594,12 @@ pub struct BundleMaterializerFact {
     }
 }
 
-pub struct BundleFileFact {
-    pub path: String
-    pub kind: BundleFileKind
-    pub mode: Int
-    pub bytes: Int
-    pub sha256: String
+struct BundleFileFact {
+    path: String
+    kind: BundleFileKind
+    mode: Int
+    bytes: Int
+    sha256: String
 
     fn receipt_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
@@ -613,25 +613,25 @@ pub struct BundleFileFact {
 }
 
 // Machine-readable facts carried beside a packaged artifact.
-pub struct BundleReceipt {
-    pub schema: String
-    pub plan_identity: String
-    pub kind: BundleKind
-    pub target: BundleTarget
-    pub package: String
-    pub version: String
-    pub executable_source: String
-    pub artifact_name: String
-    pub artifact_sha256: String
-    pub artifact_bytes: Int
-    pub files: [BundleFileFact]
-    pub launch: LaunchDescriptor
-    pub inputs: [BundleInputFact]
-    pub signing_hooks: [SigningHook]
-    pub updater: UpdaterManifest?
-    pub game: GameBundleSpec?
-    pub materializer: BundleMaterializerFact?
-    pub signing: BundleSigningFact?
+struct BundleReceipt {
+    schema: String
+    plan_identity: String
+    kind: BundleKind
+    target: BundleTarget
+    package: String
+    version: String
+    executable_source: String
+    artifact_name: String
+    artifact_sha256: String
+    artifact_bytes: Int
+    files: [BundleFileFact]
+    launch: LaunchDescriptor
+    inputs: [BundleInputFact]
+    signing_hooks: [SigningHook]
+    updater: UpdaterManifest?
+    game: GameBundleSpec?
+    materializer: BundleMaterializerFact?
+    signing: BundleSigningFact?
 
     fn from_plan(plan: BundlePlan, artifact_sha256: String) -> BundleReceipt Never! {
         BundleReceipt.from_plan_with_bytes(plan, artifact_sha256, plan.logical_artifact_bytes())
@@ -765,12 +765,12 @@ pub struct BundleReceipt {
 }
 
 // The checked plan for `spec` (Rust `package_bundle_plan`).
-pub fn pkg_package_bundle_plan(spec: BundleSpec) -> BundlePlan BundleError! {
+fn pkg_package_bundle_plan(spec: BundleSpec) -> BundlePlan BundleError! {
     BundlePlan.from_spec(spec)
 }
 
 // The logical artifact of `spec` (Rust `emit_package_bundle`).
-pub fn pkg_emit_package_bundle(spec: BundleSpec) -> BundleArtifact BundleError! {
+fn pkg_emit_package_bundle(spec: BundleSpec) -> BundleArtifact BundleError! {
     Ok(BundlePlan.from_spec(spec).emit())
 }
 

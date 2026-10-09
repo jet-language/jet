@@ -5,7 +5,7 @@ use jet_foundation.[
     UnitRatio,
 ]
 
-pub enum SemaNumericUnitConversionProof {
+enum SemaNumericUnitConversionProof {
     Exact(value: Float)
     Inexact
     Unavailable
@@ -22,8 +22,8 @@ pub enum SemaHostHookAccess {
     Withheld(wanted: Shared<SemaHostHookWanted>, observed: Shared<SemaBodyCheckReach>?)
 }
 
-pub struct SemaHostHookWanted {
-    pub wanted: Bool
+struct SemaHostHookWanted {
+    wanted: Bool
 }
 
 // Sticky for one accepted logical body query, including share-site passes and
@@ -39,7 +39,7 @@ pub fn sema_host_hook_access(hooks: Shared<SemaRegistrationHostHooks>) -> SemaHo
 
 // The callbacks behind `access`, or None. A withheld access records that this
 // check wanted them.
-pub fn sema_host_hook_callbacks(access: SemaHostHookAccess?) -> Shared<SemaRegistrationHostHooks>? {
+fn sema_host_hook_callbacks(access: SemaHostHookAccess?) -> Shared<SemaRegistrationHostHooks>? {
     row :: access ?? return None
     if row == {
         .Callbacks(hooks, observed) -> {
@@ -57,7 +57,7 @@ pub fn sema_host_hook_callbacks(access: SemaHostHookAccess?) -> Shared<SemaRegis
 }
 
 // Whether `access` withholds the callbacks (a check on a compiler thread).
-pub fn sema_host_hooks_withheld(access: SemaHostHookAccess?) -> Bool {
+fn sema_host_hooks_withheld(access: SemaHostHookAccess?) -> Bool {
     row :: access ?? return false
     if row == {
         .Callbacks(_, _) -> false

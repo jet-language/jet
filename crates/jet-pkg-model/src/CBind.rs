@@ -5109,7 +5109,7 @@ mod tests {
         "#;
         let result = generate(header, "arrays").unwrap();
         assert!(result.source.contains(
-            "#Layout(c)\npub struct Sample {\n    value: U32,\n    ratio: Float,\n}"
+            "#Layout(c)\nstruct Sample {\n    value: U32,\n    ratio: Float,\n}"
         ));
         assert!(result
             .source
@@ -5169,7 +5169,7 @@ mod tests {
         "#;
         let result = generate(header, "wrapped").unwrap();
         assert!(result.source.contains(
-            "#Layout(c)\npub struct Sample {\n    value: U32,\n}"
+            "#Layout(c)\nstruct Sample {\n    value: U32,\n}"
         ));
         assert!(result
             .source
@@ -5236,7 +5236,7 @@ mod tests {
             int gzclose(gzFile file);
         "#;
         let result = generate(header, "zlib").unwrap();
-        assert!(result.source.contains("pub struct GzFile {}"));
+        assert!(result.source.contains("struct GzFile {}"));
         assert!(result
             .source
             .contains("#Close(gzclose)\nfn gzopen(path: String, mode: String) -> GzFile = \"gzopen\"\n"));

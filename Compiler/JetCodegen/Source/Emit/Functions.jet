@@ -181,8 +181,8 @@ fn jet_rust_emit_identifier_byte(byte: U8) -> Bool Never! {
 
 // One `<prefix><id>` slot mention: the id digits and the byte column it starts at.
 struct JetRustEmitSlotMention {
-    pub id: String
-    pub column: Int
+    id: String
+    column: Int
 }
 
 fn jet_rust_emit_value_mentions(line: String) -> [JetRustEmitSlotMention] Never! {
@@ -213,8 +213,8 @@ fn jet_rust_emit_slot_mentions(line: String, prefix: String) -> [JetRustEmitSlot
 // The emitted function lines after slot localization, and the line where the
 // remaining value declarations end and the body begins.
 struct JetRustEmitLocalizedSlots {
-    pub lines: [String]
-    pub body_start: Int
+    lines: [String]
+    body_start: Int
 }
 
 // MIRRust lent_slots: the candidate `<prefix><id>` slots (ids in `types`) some
@@ -739,10 +739,10 @@ fn jet_rust_emit_fold_inside_closure(bytes: [U8], at: Int) -> Bool Never! {
 // One slot definition line (MIRRust slot_definition): its indent, value id,
 // `Some(..)` payload, and whether it assigns a slot declared at the top.
 struct JetRustEmitSlotDefinition {
-    pub indent: Int
-    pub id: String
-    pub payload: String
-    pub hoisted: Bool
+    indent: Int
+    id: String
+    payload: String
+    hoisted: Bool
 }
 
 fn jet_rust_emit_fold_indent(bytes: [U8]) -> Int Never! {
@@ -801,8 +801,8 @@ fn jet_rust_emit_fold_attributed(lines: [String], index: Int) -> Bool Never! {
 // Whole identifiers are counted even in quoted text, as variable_mentions
 // does; a field (preceded by '.') is not a variable mention.
 struct JetRustEmitFoldIdentifiers {
-    pub names: [String]
-    pub counts: [String:Int]
+    names: [String]
+    counts: [String:Int]
 }
 
 // Every whole `__jet_` identifier in `text` with its count, in first-mention
@@ -908,10 +908,10 @@ fn jet_rust_emit_fold_index_next(tree: [Int:Int], row: Int, from: Int, size: Int
 }
 
 struct JetRustEmitFoldLine {
-    pub definition: JetRustEmitSlotDefinition?
-    pub pure: Bool
-    pub skippable: Bool
-    pub identifiers: JetRustEmitFoldIdentifiers
+    definition: JetRustEmitSlotDefinition?
+    pure: Bool
+    skippable: Bool
+    identifiers: JetRustEmitFoldIdentifiers
 }
 
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::fold_value_slots
@@ -2134,12 +2134,12 @@ fn jet_rust_emit_function_signature(ctx: &JetRustEmitContext, function: MIRFunct
 // One requirement edge of jet_rust_emit_collect_clone_bounds: when `callee`
 // needs `Clone` for its parameter `param`, `caller` needs it for every
 // parameter of `scope` that `ty` names (`same`: the parameter of that name).
-pub struct JetRustEmitCloneEdge {
-    pub caller: String
-    pub callee: String
-    pub param: String
-    pub ty: MIRType?
-    pub scope: [MIRGenericParam]
+struct JetRustEmitCloneEdge {
+    caller: String
+    callee: String
+    param: String
+    ty: MIRType?
+    scope: [MIRGenericParam]
 }
 
 // The generic parameters whose Rust bound needs `Clone`, per function id key

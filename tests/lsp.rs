@@ -1944,7 +1944,7 @@ fn lsp_budget_reports_projects_canonical_report_without_measuring() {
     let source = r#"module perf.package {
     budgets: [Budget{ name: "api", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(10) }]
 }
-pub fn api() {}
+fn api() {}
 fn run() {}
 "#;
     // Bare `jet budget check` resolves the canonical `run.jet` entry
@@ -3372,8 +3372,8 @@ fn lsp_sibling_import_edit_never_publishes_stale_verdict() {
     let _guard = lock_lsp_process();
     let root = common::Scratch::new("lsp-sibling-import");
     fs::write(root.join("package.jet"), "name: \"sibling\"\nversion: \"0.1.0\"\n").unwrap();
-    let helper_int = "pub fn value() -> Int { return 1 }\n";
-    let helper_text = "pub fn value() -> String { return \"one\" }\n";
+    let helper_int = "fn value() -> Int { return 1 }\n";
+    let helper_text = "fn value() -> String { return \"one\" }\n";
     let main = "use \"helper\"\nfn run() { print(helper.value() + 1) }\n";
     let other = "fn run() { print(2) }\n";
     fs::write(root.join("helper.jet"), helper_int).unwrap();
@@ -3801,8 +3801,8 @@ fn lsp_checked_identity_and_versioned_rename() {
     let root = common::Scratch::new("lsp-checked-rename");
     fs::write(root.join("package.jet"), "name: \"rename\"\nversion: \"0.1.0\"\n").unwrap();
     let main = "use scoring as grades\nuse \"util\"\nfn run() {\n    print(grades.letter(91))\n    print(util.letter(91))\n}\nfn shadow(letter: Int) { print(letter) }\n";
-    let scoring = "pub fn letter(score: Int) -> String { \"A\" }\n";
-    let util = "pub fn letter(score: Int) -> String { \"unrelated\" }\n";
+    let scoring = "fn letter(score: Int) -> String { \"A\" }\n";
+    let util = "fn letter(score: Int) -> String { \"unrelated\" }\n";
     let sources = [("run.jet", main), ("scoring.jet", scoring), ("util.jet", util)];
     for (name, source) in sources {
         fs::write(root.join(name), source).unwrap();
@@ -3931,7 +3931,7 @@ fn lsp_checked_imported_diagnostics_and_repairs() {
     let root = common::Scratch::new("lsp-imported-reports");
     fs::write(root.join("package.jet"), "name: \"reports\"\nversion: \"0.1.0\"\n").unwrap();
     let main = "use \"scoring\"\nfn run() { print(scoring.letter(91)) }\n";
-    let scoring = "pub fn letter(score: Int, offset: Int) -> String {\n    adjusted = score + offset\n    return if {\n        adjusted >= 90 -> \"A\"\n        adjusted >= 80 -> \"B\"\n        else -> \"C\"\n    }\n}\nfn repair_probe() {\n    m :: [String:Int]{}\n    _ :: m.gett(\"a\")\n}\n";
+    let scoring = "fn letter(score: Int, offset: Int) -> String {\n    adjusted = score + offset\n    return if {\n        adjusted >= 90 -> \"A\"\n        adjusted >= 80 -> \"B\"\n        else -> \"C\"\n    }\n}\nfn repair_probe() {\n    m :: [String:Int]{}\n    _ :: m.gett(\"a\")\n}\n";
     let file_uri = |name: &str| format!("file://{}", root.join(name).display())
         .replace('%', "%25").replace(' ', "%20").replace('(', "%28").replace(')', "%29");
     let main_uri = file_uri("run.jet");
@@ -4290,8 +4290,8 @@ fn lsp_definition_imported_identity_collisions_are_exact() {
     )
     .expect("write definition collision package manifest");
     let main_source = "use scoring as grades\nuse \"util\"\nfn run() {\n    print(grades.letter(91))\n    print(util.letter(91))\n}\nfn local(letter: Int) {\n    print(letter)\n}\n";
-    let scoring_source = "pub fn letter(score: Int) -> String { \"A\" }\n";
-    let util_source = "pub fn letter(score: Int) -> String { \"unrelated\" }\n";
+    let scoring_source = "fn letter(score: Int) -> String { \"A\" }\n";
+    let util_source = "fn letter(score: Int) -> String { \"unrelated\" }\n";
     fs::write(root.join("run.jet"), main_source).expect("write definition collision root");
     fs::write(root.join("scoring.jet"), scoring_source).expect("write scoring module");
     fs::write(root.join("util.jet"), util_source).expect("write util module");

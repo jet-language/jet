@@ -22,9 +22,9 @@ struct SemaLivenessVerdict {
     fact: MIRStructureFact
 }
 
-pub struct SemaLivenessResult {
-    pub diagnostics: [Diagnostic]
-    pub facts: [MIRStructureFact]
+struct SemaLivenessResult {
+    diagnostics: [Diagnostic]
+    facts: [MIRStructureFact]
 }
 
 fn sema_liveness_verdict(code: String, name: String, source: String, span: Span, detail: String, diagnostic: Diagnostic, verdicts: &[SemaLivenessVerdict]) Never! {
@@ -87,11 +87,11 @@ fn sema_liveness_note_import(program: Program, foreign_aliases: [String], name: 
 // entry, jobs, wasm exports) are never reported. Only snapshot (user) modules
 // are judged; every module's references count.
 
-pub struct SemaLivenessCandidate {
-    pub module_index: Int
-    pub body: Span
-    pub package_identity: String
-    pub private: Bool
+struct SemaLivenessCandidate {
+    module_index: Int
+    body: Span
+    package_identity: String
+    private: Bool
 }
 
 fn sema_liveness_ignored(name: String) -> Bool Never! {
@@ -133,7 +133,7 @@ fn sema_liveness_note_site(candidates: [String:SemaLivenessCandidate], reached: 
     if !candidate.private || sema_registration_package_is_namespace(candidate.package_identity) -> reached[key] = true
 }
 
-pub fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> SemaLivenessResult {
+fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> SemaLivenessResult {
     verdicts := [SemaLivenessVerdict]{}
     if modules.len() != graph.modules.len() -> return SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [MIRStructureFact]{}}
     candidates := [String:SemaLivenessCandidate]{}
@@ -211,7 +211,7 @@ pub fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraph
 }
 
 fn sema_liveness_unreachable_export(name: String, source: String, span: Span, verdicts: &[SemaLivenessVerdict]) {
-    diagnostic :: sema_lint("L0105", span, "Package export `{name}` is unreachable.", "The package's explicit import graph and application roots contain no consumer for this package-scoped export; library `pub` remains open to external consumers.", "Remove the export, or rename `{name}` to `_{name}` when it is intentional.")
+    diagnostic :: sema_lint("L0105", span, "Package export `{name}` is unreachable.", "The package's explicit import graph and application roots contain no consumer for this package-scoped export; a library's public items remain open to external consumers.", "Remove the export, or rename `{name}` to `_{name}` when it is intentional.")
     sema_liveness_verdict("L0105", name, source, span, "package export is unreachable", diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: "_{name}"}), &verdicts)
 }
 

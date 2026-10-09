@@ -21,7 +21,7 @@ pub alias RNG :: random.RNG
 // World lifecycle and suite harness state remain host-owned;
 // callback comparison and bounded history generation stay portable Jet code.
 
-pub fn assert_equal(comparison: TestComparison) -> Bool Never! {
+fn assert_equal(comparison: TestComparison) -> Bool Never! {
     // The typed provider also requires recorded samples; the source twin can
     // validate only the scalar proof fields exposed by the declaration.
     comparison.status == "matched" && !comparison.universal_proof && comparison.first_difference < 0
@@ -170,7 +170,7 @@ pub fn corpus(glob: String) -[FS]> [String] Never! {
 }
 
 /// The test-facing spelling of the deterministic Prelude `Clock` built by `Clock.new`.
-pub fn fake_clock(unix_ms: Int) -> Clock Never! { Clock.new(unix_ms) }
+fn fake_clock(unix_ms: Int) -> Clock Never! { Clock.new(unix_ms) }
 
 /// A caller-owned deterministic RNG seeded by the ordinary source constructor.
 pub fn fake_rng(seed: Int) -> random.RNG Never! { random.rng(seed) }
@@ -320,7 +320,7 @@ pub fn histories<T>(
 // Preserve the existing native lifecycle rather than changing Err-path order.
 pub fn world(body: fn(DeterministicWorld)) Never! { core.testing.world(body) }
 
-pub fn status(comparison: TestComparison) -> String Never! { comparison.status }
+fn status(comparison: TestComparison) -> String Never! { comparison.status }
 
 
 #Test("corpus reports an absent directory as an empty collection") {

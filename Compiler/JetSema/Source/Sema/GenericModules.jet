@@ -795,15 +795,15 @@ fn sema_genmod_visit(node: String, nodes: [SemaGenericModuleNode], state: &[Stri
 // A template an alias can name: a local `module cache<K>` or one imported
 // with `use defs.box`. The key names the defining module, so equal
 // applications of one template share one instance.
-pub struct SemaGenericModuleSource {
-    pub local: String
-    pub key: String
-    pub definition: GenericModuleDef
+struct SemaGenericModuleSource {
+    local: String
+    key: String
+    definition: GenericModuleDef
     // An imported template's defining-module declarations: each instance
     // carries them under its own member names.
-    pub source_items: [Item]
+    source_items: [Item]
     // Closed constants of the defining module.
-    pub source_values: [String:Expr]
+    source_values: [String:Expr]
 }
 
 struct SemaGenericModuleBinding {
@@ -895,7 +895,7 @@ fn sema_genmod_definition_items(items: [Item]) -> [Item] {
 
 // Expands `program`'s module aliases in place; a program without one is left
 // untouched (not copied).
-pub fn sema_generic_modules_expand(program: &Program, module_identity: String, imported: [SemaGenericModuleSource]) {
+fn sema_generic_modules_expand(program: &Program, module_identity: String, imported: [SemaGenericModuleSource]) {
     rewritten :: sema_generic_modules_rewritten_items(program, module_identity, imported) ?? return
     program.items = rewritten
 }

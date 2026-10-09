@@ -507,8 +507,8 @@ fn run() {
 }
 ";
     let notes_src = "\
-pub struct Note {
-    pub text: String
+struct Note {
+    text: String
 }
 ";
     let (code, stdout) = build_and_run_multi(

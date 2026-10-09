@@ -68,7 +68,7 @@ fn sema_single_use_argument(state: SemaOwnershipState, expr: Expr, scopes: SemaS
 }
 
 // E0142: only an owning (`^`) parameter may receive a `#SingleUse` value.
-pub fn sema_single_use_check_argument(state: SemaOwnershipState, callee: String, param_convention: AccessConvention, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_single_use_check_argument(state: SemaOwnershipState, callee: String, param_convention: AccessConvention, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if param_convention == AccessConvention.Move -> return true
     name :: sema_single_use_argument(state, expr, scopes) ?? return true
     &diagnostics.push(sema_single_use_diag_aliased(name, callee, expr_span(expr)))
@@ -99,7 +99,7 @@ pub fn sema_single_use_check_scope_end(state: SemaOwnershipState, diagnostics: &
 }
 
 // Rust `pop_scope`: the scope-end duty check, then the lexical scope exit.
-pub fn sema_single_use_leave_scope(scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
+fn sema_single_use_leave_scope(scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
     sema_single_use_check_scope_end(state, &diagnostics)
     sema_scope_leave(&scopes, &state)
 }

@@ -90,8 +90,8 @@ wide :: I64{ 9_000_000_000 } // `_` digit separators (S67)
 // `fn name(params) -> Ret { … }` or `fn name(params) -[Effects]> Ret { … }`:
 // one arrow, then the result, then a braced body; unit callables keep bare
 // braces (D-SIG-AFTER1=A).
-// Private by default; `pub` exports
-// to every consumer; `pub(package)` exports only inside the package boundary.
+// Everything is public by default (D-VIS-MODULE1); `priv module` and `priv`
+// fields are the only privacy.
 
 fn greet(who: String) -> String { who }}"
 fn id<T>(x: ^T) -> T { x }
@@ -123,7 +123,7 @@ fn member_spread(user: User) -> [String] { user.[name, email] }
 // D-CALLPOLICY1=E / D-STRUCT-POLICY1=A: typed callable policies preserve the
 // wrapped function's labels, defaults, zones, effects, errors, variadics, and
 // returned-view contract. `apply` selects or replaces the declared chain.
-pub policy audit(topic: String, prefix: String{"audit"}) {
+policy audit(topic: String, prefix: String{"audit"}) {
     wrap(call) {
         return "{prefix}:{topic}:{call()}"
     }
@@ -496,9 +496,9 @@ use core.encoding.json as json       // unified encoding library (D-ENC1)
 use core.tasks as tasks              // see async/tasks below
 use core.regex as re                  // std-only linear regex (D-REGEXENGINE1)
 
-// Inline module; `pub` controls cross-file access (S18).
+// Inline module; its items are public unless it is a `priv module` (S18, D-VIS-MODULE1).
 module math {
-    pub fn double(n: Int) -> Int { n * 2 }
+    fn double(n: Int) -> Int { n * 2 }
 }
 
 // Kebab-case allowed in name positions only (package/module/system/image/env) (S84).

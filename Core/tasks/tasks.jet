@@ -62,23 +62,23 @@ impl Condition {
     pub fn notify_all(self) Never! { core.tasks.__condition_notify_all(self) }
 }
 
-pub fn yield_now() Never! -[Time.Wait]> { host_yield() }
+fn yield_now() Never! -[Time.Wait]> { host_yield() }
 
-pub fn current_task() -> String Never! { host_task_id() }
+fn current_task() -> String Never! { host_task_id() }
 
 /// Receive from the host scheduler channel. A closed channel maps to the
 /// existing integer sentinel because this convenience rail is non-fallible.
-pub fn recv(rx: Receiver<Int>) -[Time.Wait]> Int Never! {
+fn recv(rx: Receiver<Int>) -[Time.Wait]> Int Never! {
     value :: rx.receive() ?? return -1
     value
 }
 
 /// Blocking receive spellings used by queue/future adapters.
-pub fn get(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
+fn get(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
 
-pub fn result(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
+fn result(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
 
-pub fn wait(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
+fn wait(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
 
 
 fn host_sleep_ms(ms: Int) -[Time]> {
@@ -99,40 +99,40 @@ fn task_trace(paused: Bool, cancel: Bool) -> String Never! {
 }
 
 /// Receiver metadata is owned by the scheduler's typed handle.
-pub fn is_timer(rx: Receiver<Int>) -> Bool Never! { rx.is_timer() }
+fn is_timer(rx: Receiver<Int>) -> Bool Never! { rx.is_timer() }
 
-pub fn is_interval(rx: Receiver<Int>) -> Bool Never! { rx.is_interval() }
+fn is_interval(rx: Receiver<Int>) -> Bool Never! { rx.is_interval() }
 
-pub fn is_cancelled(rx: Receiver<Int>) -> Bool Never! { rx.is_cancelled() }
+fn is_cancelled(rx: Receiver<Int>) -> Bool Never! { rx.is_cancelled() }
 
-pub fn is_ready(rx: Receiver<Int>) -> Bool Never! { rx.is_ready() }
+fn is_ready(rx: Receiver<Int>) -> Bool Never! { rx.is_ready() }
 
-pub fn delay_ms(rx: Receiver<Int>) -> Int Never! { rx.delay_ms() }
+fn delay_ms(rx: Receiver<Int>) -> Int Never! { rx.delay_ms() }
 
-pub fn timeout(delay: time.Duration) Never! -[Time]> {
+fn timeout(delay: time.Duration) Never! -[Time]> {
     _ :: recv(core.tasks.after(delay, 0))
 }
 
-pub fn sleep(ms: Int) Never! -[Time]> {
+fn sleep(ms: Int) Never! -[Time]> {
     delay := ms
     if delay < 0 -> delay = 0
     host_sleep_ms(delay)
 }
 
-pub fn try_recv(rx: Receiver<Int>) -> Int? Never! { rx.try_receive() }
+fn try_recv(rx: Receiver<Int>) -> Int? Never! { rx.try_receive() }
 
 /// Closing the receiver wakes blocked consumers and is the host cancellation
 /// operation. The returned handle remains usable for identity/ownership.
-pub fn cancel(rx: Receiver<Int>) -[Time]> Receiver<Int> Never! {
+fn cancel(rx: Receiver<Int>) -[Time]> Receiver<Int> Never! {
     rx.close()
     rx.copy()
 }
 
-pub fn is_closed(state: TaskState) -> Bool Never! { state.closed }
-pub fn is_locked(state: TaskState) -> Bool Never! { state.locked }
-pub fn size(state: TaskState) -> Int Never! { state.values.len() }
-pub fn capacity(state: TaskState) -> Int Never! { state.capacity }
-pub fn generation(state: TaskState) -> Int Never! { state.generation }
+fn is_closed(state: TaskState) -> Bool Never! { state.closed }
+fn is_locked(state: TaskState) -> Bool Never! { state.locked }
+fn size(state: TaskState) -> Int Never! { state.values.len() }
+fn capacity(state: TaskState) -> Int Never! { state.capacity }
+fn generation(state: TaskState) -> Int Never! { state.generation }
 
 pub fn spawn_name(name: String) -> String Never! {
     name.copy()

@@ -3,26 +3,26 @@
 // plan fingerprints are owner-gated.
 
 // The only host state exposed while a staged plan action emits its fragment.
-pub struct StagedPlanContext {
-    pub source_dir: String
-    pub artifact_root: String
+struct StagedPlanContext {
+    source_dir: String
+    artifact_root: String
 }
 
 // A successful staged plan publication. The artifact directory is committed
 // only after the fragment passes model validation and the complete BuildPlan
 // graph is admitted.
-pub struct StagedPlanReport {
-    pub action_identity: String
-    pub fragment_digest: String
-    pub plan_fingerprint: String
-    pub artifact_dir: String
-    pub lock: StagedPlanLock
+struct StagedPlanReport {
+    action_identity: String
+    fragment_digest: String
+    plan_fingerprint: String
+    artifact_dir: String
+    lock: StagedPlanLock
 }
 
 // A plan callback failed, was cancelled, or reached outside its declared
 // input authority; the last names the violated sandbox rule.
 #Error
-pub enum StagedPlanActionError {
+enum StagedPlanActionError {
     Cancelled
     Failed(String)
     UndeclaredAccess(String)
@@ -37,15 +37,15 @@ pub enum StagedPlanActionError {
 }
 
 // The staged plan callback: emit one typed fragment from the sandbox view.
-pub struct StagedPlanEmitter {
-    pub emit: fn(PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError!
+struct StagedPlanEmitter {
+    emit: fn(PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError!
 }
 
 // Capability-limited input view for the plan callback.
-pub struct PlanSandbox {
-    source_dir: String
-    declared_inputs: [String: String]
-    observed_inputs: [String]
+struct PlanSandbox {
+    priv source_dir: String
+    priv declared_inputs: [String: String]
+    priv observed_inputs: [String]
 
     // Read one exact declared input and verify its locked digest before the
     // callback sees its bytes.

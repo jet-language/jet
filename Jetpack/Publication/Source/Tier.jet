@@ -1,46 +1,46 @@
 // Canonical index trust carriers and review receipts: Source/Publish/Tier.rs
 // :9-232,310-337. Community/advisory gate composition is owned by publication policy.
-pub enum PublicationRegistryTier {
+enum PublicationRegistryTier {
     Core
     Community
 }
-pub enum PublicationGateState {
+enum PublicationGateState {
     Passed
     Blocked
     NotRequired
 }
-pub struct PublicationGateStatus {
-    pub signature: PublicationGateState
-    pub audit: PublicationGateState
-    pub name: PublicationGateState
-    pub liveness: PublicationGateState
-    pub review: PublicationGateState
+struct PublicationGateStatus {
+    signature: PublicationGateState
+    audit: PublicationGateState
+    name: PublicationGateState
+    liveness: PublicationGateState
+    review: PublicationGateState
 }
 
-pub fn publication_tier_label(tier: PublicationRegistryTier) -> String Never! {
+fn publication_tier_label(tier: PublicationRegistryTier) -> String Never! {
     if tier == {
         .Core -> "core"
         .Community -> "community"
     }
 }
-pub fn publication_parse_tier(value: String) -> PublicationRegistryTier? Never! {
+fn publication_parse_tier(value: String) -> PublicationRegistryTier? Never! {
     if value.trim().to_ascii_lower() == {
         "core" -> Val(PublicationRegistryTier.Core)
         "community" -> Val(PublicationRegistryTier.Community)
         else -> None
     }
 }
-pub fn publication_tier_from_environment() -[Env]> PublicationRegistryTier Never! {
+fn publication_tier_from_environment() -[Env]> PublicationRegistryTier Never! {
     publication_parse_tier(sys.get("JET_REGISTRY_TIER") ?? "") ?? PublicationRegistryTier.Core
 }
-pub fn publication_gate_label(state: PublicationGateState) -> String Never! {
+fn publication_gate_label(state: PublicationGateState) -> String Never! {
     if state == {
         .Passed -> "passed"
         .Blocked -> "blocked"
         .NotRequired -> "not-required"
     }
 }
-pub fn publication_parse_gate(value: String) -> PublicationGateState? Never! {
+fn publication_parse_gate(value: String) -> PublicationGateState? Never! {
     if value == {
         "passed" -> Val(PublicationGateState.Passed)
         "blocked" -> Val(PublicationGateState.Blocked)
@@ -48,19 +48,19 @@ pub fn publication_parse_gate(value: String) -> PublicationGateState? Never! {
         else -> None
     }
 }
-pub fn publication_core_reviewed() -> PublicationGateStatus Never! {
+fn publication_core_reviewed() -> PublicationGateStatus Never! {
     PublicationGateStatus{signature: .NotRequired, audit: .NotRequired, name: .NotRequired, liveness: .NotRequired, review: .Passed}
 }
-pub fn publication_community_with_name(signature: PublicationGateState, audit: PublicationGateState, name: PublicationGateState) -> PublicationGateStatus Never! {
+fn publication_community_with_name(signature: PublicationGateState, audit: PublicationGateState, name: PublicationGateState) -> PublicationGateStatus Never! {
     PublicationGateStatus{signature: signature, audit: audit, name: name, liveness: .Blocked, review: .NotRequired}
 }
-pub fn publication_community_open(status: PublicationGateStatus) -> Bool Never! {
+fn publication_community_open(status: PublicationGateStatus) -> Bool Never! {
     status.signature == .Passed && status.audit == .Passed && status.name == .Passed && status.liveness == .Passed
 }
-pub fn publication_gate_summary(status: PublicationGateStatus) -> String Never! {
+fn publication_gate_summary(status: PublicationGateStatus) -> String Never! {
     "signature={publication_gate_label(status.signature)};audit={publication_gate_label(status.audit)};name={publication_gate_label(status.name)};liveness={publication_gate_label(status.liveness)};review={publication_gate_label(status.review)}"
 }
-pub fn publication_parse_gate_status(summary: String) -> PublicationGateStatus? Never! {
+fn publication_parse_gate_status(summary: String) -> PublicationGateStatus? Never! {
     signature := PublicationGateState?{None}
     audit := PublicationGateState?{None}
     name := PublicationGateState?{None}
@@ -95,7 +95,7 @@ pub fn publication_parse_gate_status(summary: String) -> PublicationGateStatus? 
     }
     Val(PublicationGateStatus{signature: signature ?? return None, audit: audit ?? return None, name: name ?? return None, liveness: liveness ?? return None, review: review ?? return None})
 }
-pub fn publication_blocked_reasons(status: PublicationGateStatus) -> [String] Never! {
+fn publication_blocked_reasons(status: PublicationGateStatus) -> [String] Never! {
     reasons := [String]{}
     if status.signature != .Passed -> &reasons.push("#935 live signature chain")
     if status.audit != .Passed -> &reasons.push("#431 advisory audit")
@@ -104,10 +104,10 @@ pub fn publication_blocked_reasons(status: PublicationGateStatus) -> [String] Ne
     reasons
 }
 
-pub fn publication_require_core_review(repo: String, package: String, version: String) PublicationDiagnosticError! -[FS]> {
+fn publication_require_core_review(repo: String, package: String, version: String) PublicationDiagnosticError! -[FS]> {
     publication_require_review(repo, package, version, false)
 }
-pub fn publication_require_takeover_review(repo: String, package: String, version: String) PublicationDiagnosticError! -[FS]> {
+fn publication_require_takeover_review(repo: String, package: String, version: String) PublicationDiagnosticError! -[FS]> {
     publication_require_review(repo, package, version, true)
 }
 fn publication_require_review(repo: String, package: String, version: String, takeover: Bool) PublicationDiagnosticError! -[FS]> {

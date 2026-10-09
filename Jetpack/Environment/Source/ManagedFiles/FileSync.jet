@@ -12,7 +12,7 @@ ENV_FILES_STATE_FILE :: prep { "state" }
 ENV_FILES_STATE_HEADER :: prep { "jet-env-files-v1" }
 ENV_FILES_READ_CHUNK :: prep { 65536 }
 
-pub enum FileActionKind {
+enum FileActionKind {
     Create
     ReplaceOwned
     Preserve
@@ -27,13 +27,13 @@ pub enum FileActionKind {
     }
 }
 
-pub struct FileAction {
-    pub destination: String
-    pub digest: String
-    pub mode: FileMode
-    pub permissions: Int?
-    pub sensitive: Bool
-    pub kind: FileActionKind
+struct FileAction {
+    destination: String
+    digest: String
+    mode: FileMode
+    permissions: Int?
+    sensitive: Bool
+    kind: FileActionKind
 }
 
 // One recorded owned destination. Contents never enter the state file.
@@ -70,19 +70,19 @@ impl PlannedFile.Debug {
     }
 }
 
-pub struct FileSyncReport {
-    pub applied: Int
-    pub preserved: Int
-    pub unchanged: Int
+struct FileSyncReport {
+    applied: Int
+    preserved: Int
+    unchanged: Int
 }
 
-pub struct FilePlan {
-    pub actions: [FileAction]
-    planned: [PlannedFile]
-    state_before: ManagedFileState
-    state_after: ManagedFileState
-    state_path: String
-    objects_dir: String
+struct FilePlan {
+    actions: [FileAction]
+    priv planned: [PlannedFile]
+    priv state_before: ManagedFileState
+    priv state_after: ManagedFileState
+    priv state_path: String
+    priv objects_dir: String
 
     fn has_changes(self) -> Bool Never! {
         loop action in self.actions {
@@ -116,7 +116,7 @@ fn env_files_error(text: String) -> EnvironmentError Never! {
 
 // Resolve every managed file, including source bytes and all destination
 // conflicts, without changing the project.
-pub fn env_files_plan(project_dir: String, declarations: [ManagedFile]) -[FS, Env]> FilePlan EnvironmentError! {
+fn env_files_plan(project_dir: String, declarations: [ManagedFile]) -[FS, Env]> FilePlan EnvironmentError! {
     project_root :: files.canonicalize(project_dir) ?? return Err(env_files_error("couldn't resolve project root `{project_dir}`: {err}"))
     if !sys.is_unix() {
         loop declaration in declarations {

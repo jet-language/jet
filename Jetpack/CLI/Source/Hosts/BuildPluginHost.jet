@@ -7,7 +7,7 @@
 // instantiation instead of escaping the sandbox.
 
 // The guest world: one pure `build(request: list<u8>) -> list<u8>` export.
-pub trait BuildPluginGuest {
+trait BuildPluginGuest {
     fn build(self, request: [U8]) -> [U8]
 }
 
@@ -23,7 +23,7 @@ fn cli_guest_name(path: String) -> String Never! {
     name
 }
 
-pub fn cli_run_build_plugin_host(args: [String]) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+fn cli_run_build_plugin_host(args: [String]) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     if args.len() != 4 {
         term.eprint("build-plugin host requires manifest, component, and expected digests")
         return EXIT_USAGE

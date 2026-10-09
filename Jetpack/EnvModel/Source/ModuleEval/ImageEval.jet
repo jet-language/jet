@@ -35,7 +35,7 @@ enum EnvModelImageField {
 // is one of the four known `System` fields, `target` names a known platform,
 // `services` records carry a `Bool` `enable`, and `options` is a list of
 // `key: value` entries captured by their written source text.
-pub fn envmodel_evaluate_system(path: String, lit: SystemLit, src: String, scope: ModuleEvalScope, globals: [String: CtValue]) -> SystemPlan EnvModelEvalError! {
+fn envmodel_evaluate_system(path: String, lit: SystemLit, src: String, scope: ModuleEvalScope, globals: [String: CtValue]) -> SystemPlan EnvModelEvalError! {
     target := String?{None}
     packages := [Pkg]{}
     services := [ServicePlan]{}
@@ -97,7 +97,7 @@ fn envmodel_check_platform(os: String, arch: String, span: Span) -> String EnvMo
 // optional and, when written, must be `.Oci`. `target:` is admitted only for
 // environment images. Every other field is rejected — `Image` stays a closed
 // record (unlike the open `Service`).
-pub fn envmodel_evaluate_image(path: String, lit: ImageLit, scope: ModuleEvalScope, globals: [String: CtValue]) -> ImagePlan EnvModelEvalError! {
+fn envmodel_evaluate_image(path: String, lit: ImageLit, scope: ModuleEvalScope, globals: [String: CtValue]) -> ImagePlan EnvModelEvalError! {
     from_name := String?{None}
     from_system := false
     from_environment := false

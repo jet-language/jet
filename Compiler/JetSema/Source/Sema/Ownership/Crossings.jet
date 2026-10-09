@@ -12,7 +12,7 @@ use jet_foundation.[
     type_name,
 ]
 
-pub enum SemaSendCrossing {
+enum SemaSendCrossing {
     TaskCapture
     TaskResult
     ChannelSend
@@ -24,7 +24,7 @@ pub enum SemaSendCrossing {
     FrozenSnapshot
 }
 
-pub enum SemaSendProblemKind {
+enum SemaSendProblemKind {
     ClosureNeedsTake
     ClosureCaptures
     CallableValue
@@ -36,10 +36,10 @@ pub enum SemaSendProblemKind {
     UnknownType(name: String)
 }
 
-pub struct SemaSendabilityProblem {
-    pub root: String?
-    pub path: [String]
-    pub kind: SemaSendProblemKind
+struct SemaSendabilityProblem {
+    root: String?
+    path: [String]
+    kind: SemaSendProblemKind
 }
 
 fn sema_ownership_crossing_new_problem(kind: SemaSendProblemKind) -> SemaSendabilityProblem Never! {
@@ -343,11 +343,11 @@ pub fn sema_ownership_crossing_capture_taken(lambda: TLambda, capture: TCapture,
     facts :: sema_copy_classify(capture.ty, SemaCopyIntent.Clone, environment, program, generic_params, false)
     !facts.cloneable
 }
-pub fn sema_ownership_crossing_concurrent_write_diagnostic(value: String, boundary: String, span: Span) -> Diagnostic {
+fn sema_ownership_crossing_concurrent_write_diagnostic(value: String, boundary: String, span: Span) -> Diagnostic {
     sema_error("E1101", span, "`{value}` cannot cross the `{boundary}` boundary: the value writes shared state", "the `{boundary}` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule", "Give it with `^`, freeze it with `freeze`, or share it with `shared`")
 }
 
-pub fn sema_ownership_crossing_describe(problem: SemaSendabilityProblem) -> String Never! {
+fn sema_ownership_crossing_describe(problem: SemaSendabilityProblem) -> String Never! {
     if problem.kind == {
         .ClosureNeedsTake -> {
             if problem.root == .Val(root) && problem.path.len() > 0 -> return "`{root}` contains `{problem.path.join(".")}`, whose captures cannot cross this boundary"
@@ -371,7 +371,7 @@ fn sema_ownership_crossing_local_cell(problem: SemaSendabilityProblem) -> Bool N
     }
 }
 
-pub fn sema_ownership_crossing_diagnostic(value: String, ty: Type, problem: SemaSendabilityProblem, crossing: SemaSendCrossing, span: Span) -> Diagnostic {
+fn sema_ownership_crossing_diagnostic(value: String, ty: Type, problem: SemaSendabilityProblem, crossing: SemaSendCrossing, span: Span) -> Diagnostic {
     type_name_value := type_name(ty)
     value_text := if value == "this value" -> value else -> "`{value}`"
     description := sema_ownership_crossing_describe(problem)

@@ -226,7 +226,7 @@ fn sema_effect_leaf_check_items(leaves: [SemaEffectLeaf], items: [Item], diagnos
 
 // Validate every effect name written in the source modules against the
 // declared leaves of its root. Returns true when a diagnostic was reported.
-pub fn sema_effect_check_declared_leaves(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_effect_check_declared_leaves(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     leaves := [SemaEffectLeaf]{}
     loop name in sema_effect_builtin_leaves() -> sema_effect_leaf_add(&leaves, name)
     loop source_module in graph.modules {
@@ -259,7 +259,7 @@ fn sema_effect_trait_bound_set(bounds: &[SemaEffectTraitBound], trait_name: Stri
 // D-EFF3: the trait-method effect ceilings one module declares. The operator
 // hooks are pure; a trait method bounds its impls when it is pure or writes a
 // closed row of known effects. An un-annotated method leaves each impl free.
-pub fn sema_effect_trait_bounds(items: [Item]) -> [SemaEffectTraitBound] Never! {
+fn sema_effect_trait_bounds(items: [Item]) -> [SemaEffectTraitBound] Never! {
     bounds := [SemaEffectTraitBound]{}
     operator_traits :: [String]{"Add", "Sub", "Mul", "Div", "Equatable", "Comparable"}
     operator_methods :: [String]{"add", "sub", "mul", "div", "equal", "compare"}

@@ -55,7 +55,7 @@ use jet_foundation.[
 ]
 
 // One rule family of Docs/spec/mir-lint.md; its name is part of the ICE text.
-pub enum MIRLintRule {
+enum MIRLintRule {
     ValueTyped
     TypeWellFormed
     OperationTyping
@@ -71,15 +71,15 @@ pub enum MIRLintRule {
     SendBoundary
 }
 
-pub struct MIRLintError {
-    pub rule: MIRLintRule
-    pub function: MIRFunctionID
-    pub function_key: String
-    pub span: Span
-    pub detail: String
+struct MIRLintError {
+    rule: MIRLintRule
+    function: MIRFunctionID
+    function_key: String
+    span: Span
+    detail: String
 }
 
-pub fn mir_lint_rule_name(rule: MIRLintRule) -> String Never! {
+fn mir_lint_rule_name(rule: MIRLintRule) -> String Never! {
     if rule == {
         .ValueTyped -> "value.typed"
         .TypeWellFormed -> "type.well-formed"
@@ -97,13 +97,13 @@ pub fn mir_lint_rule_name(rule: MIRLintRule) -> String Never! {
     }
 }
 
-pub fn mir_lint_error_text(error: MIRLintError) -> String Never! {
+fn mir_lint_error_text(error: MIRLintError) -> String Never! {
     "rule {mir_lint_rule_name(error.rule)} in function `{error.function_key}`: {error.detail}"
 }
 
 // Check every function of `program` against the MIR Lint rules.
 // Rust: none (Jet-only pass)
-pub fn mir_lint_program(program: MIRProgram) -> MIRLintError? Never! {
+fn mir_lint_program(program: MIRProgram) -> MIRLintError? Never! {
     failures :: mir_lint_program_scan(program, false)
     if failures.len() == 0 -> return None
     Val(failures[0])
@@ -163,8 +163,8 @@ fn mir_lint_owned_part(index: ^MIRLintIndex, functions: &[MIRFunction], all: Boo
 
 // A broken rule before the function and span are attached.
 struct MIRLintProblem {
-    pub rule: MIRLintRule
-    pub detail: String
+    rule: MIRLintRule
+    detail: String
 }
 
 fn mir_lint_problem(rule: MIRLintRule, detail: String) -> MIRLintProblem? Never! {
@@ -222,7 +222,7 @@ struct MIRLintIndex {
     pub type_rows: [MIRLintTypeRow]
     pub fields: [U64:MIRField]
     // Generic parameter and associated-type names declared anywhere.
-    pub type_vars: [String:Bool]
+    type_vars: [String:Bool]
     // Names of `Alias`, `Distinct`, and unit-family declarations.
     pub transparent: [String:Bool]
     // Prelude route IDs of the boundary operations the safety families
@@ -533,8 +533,8 @@ fn mir_lint_is_bool(ty: MIRType) -> Bool Never! {
 // context owns that function; mir_lint_enter builds its lookup rows. Every
 // table is keyed by the raw U64 ID.
 struct MIRLintContext {
-    pub index: MIRLintIndex
-    pub function: MIRFunction
+    index: MIRLintIndex
+    function: MIRFunction
     // Value ID -> row in `function.values`.
     pub values: [U64:Int]
     // Place ID -> row in `function.places`.
@@ -542,7 +542,7 @@ struct MIRLintContext {
     // Block ID -> position in `function.blocks`.
     pub blocks: [U64:Int]
     // Block position -> predecessor block IDs.
-    pub predecessors: [[MIRBlockID]]
+    predecessors: [[MIRBlockID]]
 }
 
 fn mir_lint_context(index: ^MIRLintIndex, function: ^MIRFunction) -> MIRLintContext Never! {
@@ -1157,8 +1157,8 @@ fn mir_lint_struct_fields(ctx: MIRLintContext, type_id: MIRTypeID, fields: [MIRF
 }
 
 struct MIRLintVariantLookup {
-    pub variant: MIRVariant?
-    pub problem: MIRLintProblem?
+    variant: MIRVariant?
+    problem: MIRLintProblem?
 }
 
 // `enum.variant`: the variant is declared on the owner enum. An owner the
@@ -1440,8 +1440,8 @@ fn mir_lint_consumed(operation: MIROperation) -> [MIRValueID] Never! {
 enum MIRLintPlaceUse { Read Borrow Move Reinitialize }
 
 struct MIRLintPlaceUseRow {
-    pub place: MIRPlaceID
-    pub usage: MIRLintPlaceUse
+    place: MIRPlaceID
+    usage: MIRLintPlaceUse
 }
 
 // A consuming call's place is provenance: a defining MovePlace has already
@@ -1538,10 +1538,10 @@ struct MIRLintOwnership {
     // or move is invalid while one is set), strict-prefix bits (a write is
     // invalid while one is set), bits the place's write reinitializes, and
     // the bit its move sets (-1 when the place is never moved).
-    pub overlapping: [[Int]]
-    pub ancestors: [[Int]]
-    pub reinitialized: [[Int]]
-    pub moved: [Int]
+    overlapping: [[Int]]
+    ancestors: [[Int]]
+    reinitialized: [[Int]]
+    moved: [Int]
     // Per place row: the Bool guard slot of an unborrowed whole local, or -1.
     pub slots: [Int]
     pub slot_count: Int
@@ -1682,15 +1682,15 @@ fn mir_lint_ownership_layout(ctx: MIRLintContext, defs: ^MIRLintDefs) -> MIRLint
 
 // One block's effect on the state, and the successors its known guards allow.
 struct MIRLintStep {
-    pub successors: [MIRBlockID]
-    pub failure: MIRLintError?
+    successors: [MIRBlockID]
+    failure: MIRLintError?
 }
 
 // Only set bits are stored. Positions make clearing a bit a swap-and-pop;
 // cleared entries retain -1, never a live position, in the lookup map.
 struct MIRLintState {
-    pub bits: [Int]
-    pub positions: [Int:Int]
+    bits: [Int]
+    positions: [Int:Int]
 }
 
 // Rust: none (Jet-only pass)

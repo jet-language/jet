@@ -35,17 +35,17 @@ use jet_foundation.[
     expr_span,
 ]
 
-pub struct SemaUserDeriveProvider {
-    pub module_index: Int
-    pub definition: DeriveDef
+struct SemaUserDeriveProvider {
+    module_index: Int
+    definition: DeriveDef
 }
 
 // One member a generated method may collide with: its name, how the
 // diagnostic names it, and where it is declared.
-pub struct SemaUserMemberSite {
-    pub name: String
-    pub site: String
-    pub span: Span
+struct SemaUserMemberSite {
+    name: String
+    site: String
+    span: Span
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ fn sema_user_template_ct_values(values: [TComptimeValue]) -> [CtValue]? Never! {
     Val(converted)
 }
 
-pub fn sema_user_template_ct_value(value: TComptimeValue) -> CtValue? Never! {
+fn sema_user_template_ct_value(value: TComptimeValue) -> CtValue? Never! {
     if value == {
         .Int(number) -> Val(CtValue.Int{value: number})
         .Float(number, bits) -> Val(CtValue.Float{value: if bits == 32 -> CtFloat.F32{value: number} else -> CtFloat.F64{value: number}})
@@ -172,7 +172,7 @@ fn sema_user_template_function_info(function: Func) -> CtValue? {
 
 // Expands the root `prep loop` items of `items` in place; a list without one
 // is left untouched (not copied).
-pub fn sema_derive_expand_template_loops(items: &[Item], diagnostics: &[Diagnostic]) {
+fn sema_derive_expand_template_loops(items: &[Item], diagnostics: &[Diagnostic]) {
     has_loop :: loop item in items {
         if item == .TemplateLoop(_) -> break true
     } ?? false
@@ -457,10 +457,10 @@ fn sema_user_rule_collect_module(graph: SemaRegistrationGraph, module_index: Int
 // Declared text blocks (Rust `Bundle/Pipeline.rs` `block_source`,
 // `collect_declared_text_blocks`, `collect_item_declared_text_blocks`).
 
-pub struct SemaUserTextBlock {
-    pub name: String
-    pub text: String
-    pub span: Span
+struct SemaUserTextBlock {
+    name: String
+    text: String
+    span: Span
 }
 
 // Rust `LValue::span`.
@@ -571,7 +571,7 @@ fn sema_user_text_blocks_in_item(item: Item, source: String, block_spans: [Span]
 
 // D-META-DSL1=A: a text block is checked by its rule only when the rule's
 // first declaration has a body (Rust `marker_vocabulary.declaration`).
-pub fn sema_registration_declared_text_rule(graph: SemaRegistrationGraph, name: String) -> Bool Never! {
+fn sema_registration_declared_text_rule(graph: SemaRegistrationGraph, name: String) -> Bool Never! {
     loop module_row in graph.modules {
         loop item in module_row.program.items {
             if item == .MarkerDecl(declaration) {
@@ -594,7 +594,7 @@ fn sema_user_rule_expand_module(graph: &SemaRegistrationGraph, module_index: Int
 // every registered declaration; generated items register into the target's
 // module before any body is checked.
 
-pub fn sema_registration_expand_user_templates(graph: &SemaRegistrationGraph) {
+fn sema_registration_expand_user_templates(graph: &SemaRegistrationGraph) {
     if !graph.complete -> return
     providers := [SemaUserDeriveProvider]{}
     has_any_rule_body := false

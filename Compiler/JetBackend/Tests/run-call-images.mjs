@@ -37,7 +37,7 @@ function comptimeSchema(paths) {
   for (const path of paths) {
     const lines = read(path).split('\n');
     for (let index = 0; index < lines.length; index += 1) {
-      const match = /^(?:pub )?(?:struct|enum) (\w+)\b/.exec(lines[index]);
+      const match = /^(?:struct|enum) (\w+)\b/.exec(lines[index]);
       if (!match) continue;
       let end = index;
       if (!lines[index].trimEnd().endsWith('}')) {
@@ -64,10 +64,10 @@ function comptimeSchema(paths) {
   return [...selected.values()];
 }
 let parts = [
-  item('Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet', 'pub struct Span {'),
-  item('Compiler/JetFoundation/Source/Registry/CoreCalls.jet', 'pub enum Effect '),
-  item('Compiler/JetFoundation/Source/Types/Types.jet', 'pub enum ParamZone {'),
-  item('Compiler/JetFoundation/Source/Types/Types.jet', 'pub fn param_zone_name('),
+  item('Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet', 'struct Span {'),
+  item('Compiler/JetFoundation/Source/Registry/CoreCalls.jet', 'enum Effect '),
+  item('Compiler/JetFoundation/Source/Types/Types.jet', 'enum ParamZone {'),
+  item('Compiler/JetFoundation/Source/Types/Types.jet', 'fn param_zone_name('),
   item('Compiler/JetBackend/Source/Image/ELF.jet', 'ELF64_BASE_ADDRESS ::'),
   item('Compiler/JetBackend/Source/Image/ELF.jet', 'ELF64_HEADER_SIZE ::'),
   item('Compiler/JetBackend/Source/Image/ELF.jet', 'ELF64_PROGRAM_HEADER_SIZE ::'),

@@ -11,7 +11,7 @@ PKG_MANIFEST_SCALAR_FIELDS :: prep { [String]{MANIFEST_FIELD_NAME, MANIFEST_FIEL
 
 // The Jet declarations beside the manifest blocks in `package.jet`, with every
 // manifest block blanked, or None when no top-level `fn build` remains.
-pub fn pkg_build_entry_source(text: String) -> String? Never! {
+fn pkg_build_entry_source(text: String) -> String? Never! {
     masked := text.bytes()
     pkg_mask_manifest_blocks(text.bytes(), &masked)
     source :: String.from_bytes(masked) ?? return None
@@ -297,14 +297,14 @@ fn pkg_skip_block_comment(bytes: [U8], start: Int) -> Int Never! {
 }
 
 // The exact source spans of one contextual leading `package { … }` block.
-pub struct InlinePackageBlock {
+struct InlinePackageBlock {
     // `package { … }`, including the keyword and braces.
-    pub span: Span
-    pub keyword_span: Span
-    pub open_span: Span
+    span: Span
+    keyword_span: Span
+    open_span: Span
     // Only the bytes between the braces.
-    pub body_span: Span
-    pub close_span: Span
+    body_span: Span
+    close_span: Span
 
     // The exact package body from the original source.
     fn body(self, source: String) -> String Never! {
@@ -327,7 +327,7 @@ pub struct InlinePackageBlock {
 // Structural failures of the contextual package carrier; package field
 // failures stay `PackageParseError`.
 #Error
-pub enum InlinePackageError {
+enum InlinePackageError {
     // A package declaration appears after another top-level declaration.
     NotFirst(span: Span)
     // More than one top-level package declaration.
@@ -360,7 +360,7 @@ pub enum InlinePackageError {
 // Find the one contextual leading package block. Only whitespace and Jet
 // comments may precede it; a `package` word in a string, comment, nested
 // delimiter, or function body is not a declaration.
-pub fn pkg_extract_inline_package(source: String) -> InlinePackageBlock? InlinePackageError! {
+fn pkg_extract_inline_package(source: String) -> InlinePackageBlock? InlinePackageError! {
     bytes :: source.bytes()
     first :: pkg_skip_inline_trivia(bytes, 0)
     if pkg_inline_package_start(bytes, first) == .Val(start) {
@@ -380,12 +380,12 @@ pub fn pkg_extract_inline_package(source: String) -> InlinePackageBlock? InlineP
 }
 
 // Source for the ordinary lexer/parser plus the preserved carrier.
-pub struct MaskedInlineSource {
-    pub source: String
-    pub block: InlinePackageBlock?
+struct MaskedInlineSource {
+    source: String
+    block: InlinePackageBlock?
 }
 
-pub fn pkg_mask_inline_package_source(source: String) -> MaskedInlineSource InlinePackageError! {
+fn pkg_mask_inline_package_source(source: String) -> MaskedInlineSource InlinePackageError! {
     block :: pkg_extract_inline_package(source)
     masked :: if block == {
         .Val(found) -> found.mask_source(source)
@@ -397,7 +397,7 @@ pub fn pkg_mask_inline_package_source(source: String) -> MaskedInlineSource Inli
 // The byte where a new leading `package { … }` carrier goes: after the
 // byte-zero launch header and leading comments, before any `///` doc lines
 // of the first declaration.
-pub fn pkg_inline_package_insertion_offset(source: String) -> Int Never! {
+fn pkg_inline_package_insertion_offset(source: String) -> Int Never! {
     bytes :: source.bytes()
     first :: pkg_skip_inline_trivia(bytes, 0)
     at := pkg_line_start(bytes, first)

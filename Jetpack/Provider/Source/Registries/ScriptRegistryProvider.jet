@@ -7,7 +7,7 @@
 // PackagistRegistry.jet.
 
 // Which scripting registry a provider instance serves.
-pub enum ScriptRegistryKind {
+enum ScriptRegistryKind {
     RubyGems
     Cpan
     Packagist
@@ -96,13 +96,13 @@ pub enum ScriptRegistryKind {
 }
 
 // One dependency edge: a package name and its registry-syntax requirement.
-pub struct RegistryDependency {
-    pub name: String
-    pub requirement: String
+struct RegistryDependency {
+    name: String
+    requirement: String
 }
 
 // How a fetched archive is verified.
-pub enum RegistryIntegrity {
+enum RegistryIntegrity {
     SHA256(String)
     SHA1(String)
     // A GitHub zipball of a full commit reference whose source authority the
@@ -111,25 +111,25 @@ pub enum RegistryIntegrity {
 }
 
 // One registry release candidate.
-pub struct RegistryPackage {
-    pub name: String
-    pub version: String
-    pub url: String
-    pub integrity: RegistryIntegrity
-    pub dependencies: [RegistryDependency]
+struct RegistryPackage {
+    name: String
+    version: String
+    url: String
+    integrity: RegistryIntegrity
+    dependencies: [RegistryDependency]
     // Packagist PSR-4 prefix -> relative directories.
-    pub psr4: [String: [String]]
+    psr4: [String: [String]]
 }
 
 // A fetched archive of the resolved closure.
-pub struct RegistryArtifact {
-    pub package: RegistryPackage
-    pub path: String
-    pub sha256: String
+struct RegistryArtifact {
+    package: RegistryPackage
+    path: String
+    sha256: String
 }
 
-pub struct ScriptRegistryProvider {
-    pub kind: ScriptRegistryKind
+struct ScriptRegistryProvider {
+    kind: ScriptRegistryKind
 
     // A locked realization must still match `authority.providers`.
     fn validate_cache_authority(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env]> {
@@ -165,7 +165,7 @@ fn provider_script_authority(kind: ScriptRegistryKind, ctx: ProviderCtx) -[FS, E
     RegistryAuthority.load(ctx, kind.label(), kind.repository(), kind.fetch_authorities())
 }
 
-pub fn provider_script_registry_cache_authority(kind: ScriptRegistryKind, ctx: ProviderCtx) -[FS, Env]> RegistryAuthority ProviderError! {
+fn provider_script_registry_cache_authority(kind: ScriptRegistryKind, ctx: ProviderCtx) -[FS, Env]> RegistryAuthority ProviderError! {
     authority :: provider_script_authority(kind, ctx) ?? return Err(err.into_provider(kind.error_kind()))
     Ok(authority)
 }

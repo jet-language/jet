@@ -1,0 +1,23 @@
+// D-VIS-MODULE1: the enclosing module uses its `priv module` and the
+// type's own module uses its `priv` field; this file checks clean.
+priv module vault {
+    fn secret() -> Int { 42 }
+}
+
+priv(package) module shared {
+    fn bump(n: Int) -> Int { n + 1 }
+}
+
+struct Token {
+    priv raw: String
+    label: String
+}
+
+fn token(label: String) -> Token { Token{raw: "s3cr3t", label: label} }
+
+fn run() {
+    t :: token("api")
+    print(shared.bump(vault.secret()))
+    print(t.label)
+    print(t.raw.len())
+}

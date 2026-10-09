@@ -37,9 +37,9 @@ use jet_eval.[
 
 // Names the Jet toolchain source tree: the directory that holds `Core/`. The
 // Rust host embeds those bodies; the Jet host reads them from this tree.
-pub JET_CLI_TOOLCHAIN_ROOT_ENV :: "JET_TOOLCHAIN_ROOT"
+JET_CLI_TOOLCHAIN_ROOT_ENV :: "JET_TOOLCHAIN_ROOT"
 // Raw build identity supplied by the packaging host, never a guessed version.
-pub JET_CLI_COMPILER_IDENTITY_ENV :: "JET_COMPILER_IDENTITY"
+JET_CLI_COMPILER_IDENTITY_ENV :: "JET_COMPILER_IDENTITY"
 
 // crates/jet-foundation/src/SHA256.rs `MAX_TREE_DEPTH`.
 JET_CLI_MAX_TREE_DEPTH :: 256
@@ -60,7 +60,7 @@ JET_CLI_SKIPPED_NAMES :: [String]{"target", "build", "node_modules", "bin"}
 JET_CLI_FOREIGN_CACHE_DIRECTORIES :: [String]{".jet/bindings/c", ".jet/bindings/cpp"}
 JET_CLI_FOREIGN_CACHE_SIDECARS :: [String]{"metadata", "provenance"}
 
-pub enum JetCLICompiled {
+enum JetCLICompiled {
     // The driver ran; `snapshot` is the source snapshot it compiled, kept for
     // presenting diagnostics against the files that own them.
     Compiled(result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot)
@@ -708,12 +708,12 @@ fn jet_cli_cgroup_bytes(file: String) -[FS]> Int? Never! {
 
 // The Core library rows with their bodies, read from the toolchain tree that
 // `JET_TOOLCHAIN_ROOT` names, or the refusal that stops the request.
-pub enum JetCLICoreSources {
+enum JetCLICoreSources {
     Loaded(sources: [JetDriverCoreSource])
     Missing(what: String, fix: String)
 }
 
-pub fn jet_cli_core_sources() -> JetCLICoreSources Never! {
+fn jet_cli_core_sources() -> JetCLICoreSources Never! {
     toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return JetCLICoreSources.Missing{what: "`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the Core library sources can't be found", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
     core_sources := [JetDriverCoreSource]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
@@ -727,7 +727,7 @@ pub fn jet_cli_core_sources() -> JetCLICoreSources Never! {
 // The driver request for `snapshot` on this host: the Core rows, the
 // canonical effect source, the host facts, and at most `threads` compiler
 // threads (`None` admits threads automatically).
-pub fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sources: [JetDriverCoreSource], threads: Int?, mode: JetDriverCompileMode) -> JetDriverCompileRequest Never! {
+fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sources: [JetDriverCoreSource], threads: Int?, mode: JetDriverCompileMode) -> JetDriverCompileRequest Never! {
     os :: cli_sys.name()
     JetDriverCompileRequest{
         authorized_sources: snapshot,
@@ -949,21 +949,21 @@ fn jet_cli_build_resolve(path: String) -[FS.Read]> JetDriverBuildPath String! {
 // adapter makes dynamic calls with no effect bound), so this function and the
 // host verbs above it stay unannotated, like the bootstrap entry
 // (Compiler/Bootstrap/Host/Entry.jet).
-pub fn jet_cli_compile_file(file: String, color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
+fn jet_cli_compile_file(file: String, color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
     jet_cli_compile_entry(file, color, emit_rust, threads, mode, None)
 }
 
 // One file's bytes as a compile sees them in place of the disk copy, or as a
 // new source file beside it; nothing is written.
-pub struct JetCLIOverlay {
-    pub path: String
-    pub source: String
+struct JetCLIOverlay {
+    path: String
+    source: String
 }
 
 // `jet_cli_compile_file` with the entry file's bytes replaced by
 // `entry_source` when given (`jet fmt --explicit-copies` asks sema about a
 // policy-marked copy of the entry; nothing is written).
-pub fn jet_cli_compile_entry(file: String, color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?) -> JetCLICompiled {
+fn jet_cli_compile_entry(file: String, color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?) -> JetCLICompiled {
     overlays := [JetCLIOverlay]{}
     if entry_source == .Val(replacement) -> &overlays.push(JetCLIOverlay{path: file, source: replacement})
     jet_cli_compile_overlays(file, file, overlays, color, emit_rust, threads, mode)

@@ -86,7 +86,7 @@ fn sema_error_conversion_leaf(name: String) -> String Never! {
     parts[parts.len() - 1]
 }
 
-pub fn sema_core_error_family_member(name: String) -> Bool Never! {
+fn sema_core_error_family_member(name: String) -> Bool Never! {
     leaf :: sema_error_conversion_leaf(name)
     loop member in JET_CORE_ERROR_FAMILY {
         if member == leaf -> return true
@@ -103,8 +103,8 @@ fn sema_core_error_type(name: String) -> Bool Never! {
 }
 
 struct SemaErrorConversionEdge {
-    pub source: String
-    pub target: String
+    source: String
+    target: String
 }
 
 fn sema_error_conversion_path_exists(edges: [SemaErrorConversionEdge], from_ty: String, to_ty: String) -> Bool Never! {
@@ -194,7 +194,7 @@ fn sema_error_conversion_local_types(items: [Item]) -> [String] Never! {
 // `impl Source -> Target { body }` checks and lowers as the one routine
 // `fn errconv_Source_to_Target(self: Source) -> Target Never!`: a conversion
 // cannot itself fail, and `Err(...)` in its body builds the default error value.
-pub fn sema_error_conversion_function(from_ty: String, from_span: Span, to_ty: String, to_span: Span, source: Type, body: [Stmt], body_span: Span) -> Func Never! {
+fn sema_error_conversion_function(from_ty: String, from_span: Span, to_ty: String, to_span: Span, source: Type, body: [Stmt], body_span: Span) -> Func Never! {
     name :: sema_failure_conversion_function_name(source, Type.Named{name: to_ty})
     function := ast_func(name, from_span, Span{start: from_span.start, end: body_span.end})
     function.params = [Param]{Param{convention: AccessConvention.Move, root: false, name: "self", name_span: from_span, public_label: None, zone: ParamZone.Either, ty: source, ty_span: from_span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, declared_footprint: None}}
@@ -209,7 +209,7 @@ pub fn sema_error_conversion_function(from_ty: String, from_span: Span, to_ty: S
 // E2418 cycle and E2419 ambiguity. An accepted conversion becomes its checked
 // routine; a rejected one is removed so it never reaches lowering. `items` is
 // rewritten in place, and a list without a conversion is left untouched.
-pub fn sema_error_conversion_items(items: &[Item], diagnostics: &[Diagnostic]) {
+fn sema_error_conversion_items(items: &[Item], diagnostics: &[Diagnostic]) {
     has_conversion :: loop item in items {
         if item == .ErrorConv(_) -> break true
     } ?? false
@@ -305,9 +305,9 @@ pub fn sema_prelude_error_conversion_key(error: Type, target: Type, environment:
 }
 
 struct SemaPreludeConversionDemand {
-    pub key: String
-    pub source: Type
-    pub site: Span
+    key: String
+    source: Type
+    site: Span
 }
 
 // The demand walk's state (SemaEffectWalk.PreludeDemands): the module and its
@@ -606,8 +606,8 @@ pub fn sema_check_function_failure_contracts(func: Func, environment: SemaScopeE
 // receiver is checked without propagation and the reason must be a non-empty
 // plain string literal.
 struct SemaDropStatement {
-    pub handled: Bool
-    pub value: TStmt?
+    handled: Bool
+    value: TStmt?
 }
 
 pub fn sema_stmt_check_drop(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDropStatement {
@@ -624,9 +624,9 @@ pub fn sema_stmt_check_drop(expr: Expr, environment: SemaScopeEnvironment, progr
 }
 
 struct SemaDropReasonProblem {
-    pub what: String
-    pub why: String
-    pub fix: String
+    what: String
+    why: String
+    fix: String
 }
 
 fn sema_drop_reason_problem(args: [CallArg]) -> SemaDropReasonProblem? {
@@ -649,7 +649,7 @@ fn sema_drop_reason_problem(args: [CallArg]) -> SemaDropReasonProblem? {
 
 // D-NEVER2=B (E2424/E2425): a declared `Never` success slot has no successful
 // return; the one legal exit of `-> Never E!` is an explicit `Err(...)`.
-pub fn sema_stmt_never_return_rejected(value: Expr?, return_type: Type?, function_name: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_stmt_never_return_rejected(value: Expr?, return_type: Type?, function_name: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     declared :: return_type ?? return false
     allows_failure := false
     never_success :: if sema_expr_unwrap_tag(declared) == {
@@ -701,7 +701,7 @@ fn sema_never_expr_diverges(expr: Expr, scopes: SemaScopeTable) -> Bool Never! {
     }
 }
 
-pub fn sema_check_never_fallthrough(func: Func, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_check_never_fallthrough(func: Func, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     declared :: func.return_type ?? return true
     never_success :: if declared == {
         .Named(name) -> name == "Never"
@@ -723,7 +723,7 @@ pub fn sema_check_never_fallthrough(func: Func, scopes: SemaScopeTable, diagnost
 
 // E0408/E0409: `err` names a failure report; an optional fallback or a pure
 // pattern miss has none, so the name is denied instead of resolving outward.
-pub fn sema_fallback_err_denied(code: String, span: Span) -> Diagnostic {
+fn sema_fallback_err_denied(code: String, span: Span) -> Diagnostic {
     if code == "E0409" -> return sema_error("E0409", span, "`err` is not available after a pure pattern miss", "a shape test only reports whether the subject matched; it carries no failure value", "remove `err`, or return an explicit value from the miss route")
     sema_error("E0408", span, "`err` is not available in an optional fallback", "an optional can be absent, but it has no failure report to name", "remove `err`, or use a fallible result when the fallback needs the failure")
 }
@@ -731,7 +731,7 @@ pub fn sema_fallback_err_denied(code: String, span: Span) -> Diagnostic {
 // The `err` denial a fallback establishes for its subject carrier: a Result
 // fallback names its failure, an optional has none (E0408), and any other
 // subject is a pure shape miss (E0409).
-pub fn sema_fallback_err_denial_for(subject: Type) -> String? {
+fn sema_fallback_err_denial_for(subject: Type) -> String? {
     if sema_expr_unwrap_tag(subject) == {
         .Result(_, _) -> None
         .Option(_) -> Val("E0408")

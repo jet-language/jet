@@ -38,12 +38,12 @@ pub struct BrowserError {
     }
 }
 
-pub enum BrowserPrivacy {
+enum BrowserPrivacy {
     Default
     Isolated
 }
 
-pub enum BrowserProtocol {
+enum BrowserProtocol {
     CDP
     WebDriver
 }
@@ -57,38 +57,38 @@ pub struct BrowserProfile {
     version: String
 }
 
-pub struct BrowserAbilities {
-    pub javascript: Bool
-    pub screenshots: Bool
+struct BrowserAbilities {
+    javascript: Bool
+    screenshots: Bool
 }
 
-pub struct Browser {
-    pub id: Int
-    pub browser_profile: BrowserProfile
-    pub url: String
-    pub closed: Bool
+struct Browser {
+    id: Int
+    browser_profile: BrowserProfile
+    url: String
+    closed: Bool
 }
 
-pub struct BrowserContext {
-    pub id: Int
-    pub browser: Int
+struct BrowserContext {
+    id: Int
+    browser: Int
 }
 
-pub struct BrowserPage {
-    pub id: Int
-    pub url: String
-    pub title: String
+struct BrowserPage {
+    id: Int
+    url: String
+    title: String
 }
 
-pub struct BrowserFrame {
-    pub id: Int
-    pub page_id: Int
-    pub url: String
+struct BrowserFrame {
+    id: Int
+    page_id: Int
+    url: String
 }
 
-pub struct BrowserLocator {
-    pub selector: String
-    pub page_id: Int
+struct BrowserLocator {
+    selector: String
+    page_id: Int
 }
 
 pub struct BrowserLocked {
@@ -111,23 +111,23 @@ pub struct BrowserLocked {
     }
 }
 
-pub struct BrowserIntercept {
-    pub url: String
-    pub status: Int
+struct BrowserIntercept {
+    url: String
+    status: Int
 }
 
-pub struct BrowserEvent {
-    pub kind: String
-    pub target: String
+struct BrowserEvent {
+    kind: String
+    target: String
 }
 
-pub struct BrowserReceipt {
-    pub ok: Bool
-    pub detail: String
+struct BrowserReceipt {
+    ok: Bool
+    detail: String
 }
 
-pub struct BrowserTrace {
-    pub events: [String]
+struct BrowserTrace {
+    events: [String]
 }
 
 pub struct BrowserTestConfig {
@@ -161,15 +161,15 @@ pub struct BrowserTestConfig {
     pub fn report_path(self) -> String Never! { self.report_path }
 }
 
-pub struct BrowserTestCase {
-    pub name: String
-    pub ok: Bool
-    pub detail: String
+struct BrowserTestCase {
+    name: String
+    ok: Bool
+    detail: String
 }
 
-pub struct BrowserReport {
-    pub title: String
-    pub cases: [BrowserTestCase]
+struct BrowserReport {
+    title: String
+    cases: [BrowserTestCase]
 }
 
 // The retained child and pipe capture are the canonical host carrier, not a DTO.
@@ -288,7 +288,7 @@ pub fn connect_browser_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Bro
 
 
 
-pub fn selected(page: BrowserPage, selector: String) -> BrowserLocator Never! {
+fn selected(page: BrowserPage, selector: String) -> BrowserLocator Never! {
     BrowserLocator{selector: selector, page_id: page.id}
 }
 pub fn begin_named(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source_path: String, line: Int, column: Int) -[Net]> BrowserTestFixture BrowserError! {
@@ -297,18 +297,18 @@ pub fn begin_named(config: BrowserTestConfig, test: String, engine: String, atte
     core.web.browser.__begin_fixture(config, test, engine, attempt, source_path, source_position(line), source_position(column))
 }
 
-pub fn fixture_context(browser: Browser) -> BrowserContext Never! { BrowserContext{id: browser.id, browser: browser.id} }
+fn fixture_context(browser: Browser) -> BrowserContext Never! { BrowserContext{id: browser.id, browser: browser.id} }
 
-pub fn fixture_page(ctx: BrowserContext, url: String) -> BrowserPage Never! {
+fn fixture_page(ctx: BrowserContext, url: String) -> BrowserPage Never! {
     BrowserPage{id: ctx.id, url: url, title: ""}
 }
 
 
-pub fn fixture_source(name: String, body: String) -> String BrowserError! {
+fn fixture_source(name: String, body: String) -> String BrowserError! {
     generate_source(name, body, "")
 }
 
-pub fn generate_source(name: String, body: String, base_url: String) -> String BrowserError! {
+fn generate_source(name: String, body: String, base_url: String) -> String BrowserError! {
     if name.len() == 0 || name.len() > C_MAX_SOURCE_NAME || body.len() > C_MAX_SOURCE_BYTES || base_url.len() > C_MAX_SOURCE_BYTES {
         return Err(BrowserError{kind: "protocol"})
     }
@@ -321,16 +321,16 @@ pub fn generate_source(name: String, body: String, base_url: String) -> String B
     Ok(out)
 }
 
-pub fn report_new(title: String) -> BrowserReport Never! { BrowserReport{title: title, cases: [BrowserTestCase]{}} }
+fn report_new(title: String) -> BrowserReport Never! { BrowserReport{title: title, cases: [BrowserTestCase]{}} }
 
-pub fn report_add_case(report: BrowserReport, name: String, ok: Bool) -> BrowserReport Never! {
+fn report_add_case(report: BrowserReport, name: String, ok: Bool) -> BrowserReport Never! {
     cases := [BrowserTestCase]{}
     loop c in report.cases -> &cases.push(c)
     &cases.push(BrowserTestCase{name: name, ok: ok, detail: ""})
     BrowserReport{title: report.title, cases: cases}
 }
 
-pub fn report_html(report: BrowserReport) -> String Never! {
+fn report_html(report: BrowserReport) -> String Never! {
     out := "<!doctype html><html><head><title>{esc(report.title)}</title></head><body><h1>{esc(report.title)}</h1><ol>"
     loop c in report.cases {
         cls := "pass"
@@ -341,7 +341,7 @@ pub fn report_html(report: BrowserReport) -> String Never! {
     out
 }
 
-pub fn report_json(report: BrowserReport) -> String Never! {
+fn report_json(report: BrowserReport) -> String Never! {
     out := "{{\"title\":\"{esc_json(report.title)}\",\"passed\":{passed(report)},\"failed\":{failed(report)},\"cases\":["
     loop i in 0..<report.cases.len() {
         c :: report.cases[i]
@@ -353,7 +353,7 @@ pub fn report_json(report: BrowserReport) -> String Never! {
     "{out}]}}"
 }
 
-pub fn report_text(report: BrowserReport) -> String Never! {
+fn report_text(report: BrowserReport) -> String Never! {
     out := "{report.title}\n"
     loop c in report.cases {
         mark := "ok"
@@ -364,7 +364,7 @@ pub fn report_text(report: BrowserReport) -> String Never! {
     out
 }
 
-pub fn report_exit_code(report: BrowserReport) -> Int Never! {
+fn report_exit_code(report: BrowserReport) -> Int Never! {
     if failed(report) > 0 -> return 1
     0
 }

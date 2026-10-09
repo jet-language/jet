@@ -25,9 +25,9 @@ fn floor_div(a: Int, b: Int) -> Int {
 }
 
 
-pub fn isleap(year: Int) -> Bool Never! { time.is_leap_year(year) }
+fn isleap(year: Int) -> Bool Never! { time.is_leap_year(year) }
 
-pub fn leapdays(y1: Int, y2: Int) -> Int Never! {
+fn leapdays(y1: Int, y2: Int) -> Int Never! {
     a := y1
     b := y2
     if b < a {
@@ -56,7 +56,7 @@ fn floor_before(value: Int, divisor: Int) -> Int {
     }
     floor_div(value - 1, divisor)
 }
-pub fn weekday(year: Int, month: Int, day: Int) -> Int Never! {
+fn weekday(year: Int, month: Int, day: Int) -> Int Never! {
     // Sakamoto: 0 = Sunday. Convert to Monday = 0.
     y := year
     m := month
@@ -69,13 +69,13 @@ pub fn weekday(year: Int, month: Int, day: Int) -> Int Never! {
     (sun0 + 6) %% 7
 
 }
-pub fn monthrange(year: Int, month: Int) -> (days: Int, weekday: Int) Never! {
+fn monthrange(year: Int, month: Int) -> (days: Int, weekday: Int) Never! {
     days :: time.days_in_month(year, month)
     (days: days, weekday: weekday(year, month, 1))
 }
 
-pub fn monthcalendar(year: Int, month: Int) -> [[Int]] Never! { monthcalendar_start(year, month, 0) }
-pub fn monthcalendar_start(year: Int, month: Int, firstweekday: Int) -> [[Int]] Never! {
+fn monthcalendar(year: Int, month: Int) -> [[Int]] Never! { monthcalendar_start(year, month, 0) }
+fn monthcalendar_start(year: Int, month: Int, firstweekday: Int) -> [[Int]] Never! {
     range :: monthrange(year, month)
     first := firstweekday %% 7
     if first < 0 -> first = first + 7
@@ -101,7 +101,7 @@ pub fn monthcalendar_start(year: Int, month: Int, firstweekday: Int) -> [[Int]] 
 }
 
 
-pub fn yearcalendar(year: Int) -> [[[Int]]] Never! {
+fn yearcalendar(year: Int) -> [[[Int]]] Never! {
     months := [[[Int]]]{}
     m := 1
     loop m <= 12 {
@@ -111,7 +111,7 @@ pub fn yearcalendar(year: Int) -> [[[Int]]] Never! {
     months
 }
 
-pub fn day_name(weekday: Int) -> String Never! {
+fn day_name(weekday: Int) -> String Never! {
     i := weekday
     if i < 0 -> i = 0
     if i > 6 -> i = 6
@@ -126,7 +126,7 @@ pub fn day_name(weekday: Int) -> String Never! {
     }
 }
 
-pub fn day_abbr(weekday: Int) -> String Never! {
+fn day_abbr(weekday: Int) -> String Never! {
     i := weekday
     if i < 0 -> i = 0
     if i > 6 -> i = 6
@@ -141,7 +141,7 @@ pub fn day_abbr(weekday: Int) -> String Never! {
     }
 }
 
-pub fn month_name(month: Int) -> String Never! {
+fn month_name(month: Int) -> String Never! {
     i := month
     if i < 1 -> i = 1
     if i > 12 -> i = 12
@@ -161,7 +161,7 @@ pub fn month_name(month: Int) -> String Never! {
     }
 }
 
-pub fn month_abbr(month: Int) -> String Never! {
+fn month_abbr(month: Int) -> String Never! {
     i := month
     if i < 1 -> i = 1
     if i > 12 -> i = 12
@@ -181,7 +181,7 @@ pub fn month_abbr(month: Int) -> String Never! {
     }
 }
 
-pub fn weekheader(width: Int, firstweekday: Int) -> [String] Never! {
+fn weekheader(width: Int, firstweekday: Int) -> [String] Never! {
     w := width
     if w < 1 -> w = 1
     first := firstweekday %% 7
@@ -196,7 +196,7 @@ pub fn weekheader(width: Int, firstweekday: Int) -> [String] Never! {
     out
 }
 
-pub fn formatmonth(year: Int, month: Int, width: Int) -> String Never! {
+fn formatmonth(year: Int, month: Int, width: Int) -> String Never! {
     w := width
     if w < 2 -> w = 2
     title :: "{month_name(month)} {year}"
@@ -211,7 +211,7 @@ pub fn formatmonth(year: Int, month: Int, width: Int) -> String Never! {
     out
 }
 
-pub fn formatyear(year: Int) -> String Never! {
+fn formatyear(year: Int) -> String Never! {
     out := ""
     m := 1
     loop m <= 12 {

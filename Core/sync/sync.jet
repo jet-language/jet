@@ -74,9 +74,9 @@ pub struct SyncList {
     pub valid: Bool
 }
 
-pub struct RowPolicy {
-    pub allow: [String]
-    pub deny: [String]
+struct RowPolicy {
+    allow: [String]
+    deny: [String]
 }
 
 // ---- SyncText: an RGA sequence of single-scalar atoms --------------------
@@ -361,7 +361,7 @@ pub fn policy_deny(policy: RowPolicy, action: String) -> RowPolicy Never! {
     RowPolicy{allow: policy.allow.copy(), deny: deny}
 }
 
-pub fn policy_revoke(policy: RowPolicy, action: String) -> RowPolicy Never! {
+fn policy_revoke(policy: RowPolicy, action: String) -> RowPolicy Never! {
     allow := [String]{}
     loop item in policy.allow.copy() {
         if item != action -> &allow.push(item)
@@ -384,7 +384,7 @@ pub fn policy_allows(policy: RowPolicy, action: String) -> Bool Never! {
     false
 }
 
-pub fn policy_show(policy: RowPolicy) -> String Never! {
+fn policy_show(policy: RowPolicy) -> String Never! {
     "allow={policy.allow.len()} deny={policy.deny.len()}"
 }
 

@@ -10,7 +10,7 @@ PKG_PYTHON_TOOL_ACTION :: prep { "rejected the Python binding" }
 PKG_PYTHON_COMPILE_CHECK :: prep { "import pathlib,sys; compile(pathlib.Path(sys.argv[1]).read_text(), sys.argv[1], 'exec')" }
 
 // Bind the top-level scalar-annotated functions of the Python source.
-pub fn pkg_python_bind(source_path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ScalarBindResult ForeignBindError! {
+fn pkg_python_bind(source_path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ScalarBindResult ForeignBindError! {
     if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("{lib} is not a valid Jet library name"))
     functions :: pkg_python_parse(source)
     descriptor :: pkg_binder_descriptor_for(ForeignLanguage.Py, "Python")

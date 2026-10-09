@@ -6,18 +6,18 @@
 // IOError!: native errors pass through unchanged and callers render the
 // canonical shared IOError Display or uplift once at their own boundary.
 
-pub struct ProfileInstallReceipt {
-    pub store_root: String
-    pub package: String
-    pub version: String
-    pub reference: String
-    pub output_hash: String
-    pub executable_members: [String]
+struct ProfileInstallReceipt {
+    store_root: String
+    package: String
+    version: String
+    reference: String
+    output_hash: String
+    executable_members: [String]
 }
 
-pub struct ProfileExecutableProof {
-    pub digest: String
-    pub mode: Int
+struct ProfileExecutableProof {
+    digest: String
+    mode: Int
 }
 
 // Rust `copy_open_profile_file`: stream the leased handle into a freshly
@@ -45,7 +45,7 @@ fn store_reuse_copy_open_profile_file(source: FileReader, destination: String) -
 
 // Rust `profile_file_proof`: a projected profile file must be a regular
 // file at its path, unchanged between the path check and the open.
-pub fn store_profile_file_proof(path: String) -> ProfileExecutableProof IOError! {
+fn store_profile_file_proof(path: String) -> ProfileExecutableProof IOError! {
     at_path :: files.stat(path)
     if !at_path.is_file || at_path.is_symlink -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("profile projection is not a no-follow file")}))
     opened :: files.open(path)

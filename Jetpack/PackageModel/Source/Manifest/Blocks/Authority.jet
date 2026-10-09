@@ -3,16 +3,16 @@
 // D-JPK-PROVIDERAUTH1) and the effect-list readers they share with
 // `build.allow` (Package/Blocks.rs).
 
-pub enum TrustDecision {
+enum TrustDecision {
     Allow
     Prompt
     Deny
 }
 
 // The package's own authority bound.
-pub struct AuthorityHolds {
-    pub allow: [String]?
-    pub deny: [String]?
+struct AuthorityHolds {
+    allow: [String]?
+    deny: [String]?
 
     fn default() -> AuthorityHolds Never! {
         AuthorityHolds{allow: None, deny: None}
@@ -20,34 +20,34 @@ pub struct AuthorityHolds {
 }
 
 // One audited per-dependency grant: `grants: { "dep": [DB, Net] }`.
-pub struct PackageGrant {
-    pub package: String
-    pub rights: [String]
+struct PackageGrant {
+    package: String
+    rights: [String]
 }
 
 // One named service trust decision.
-pub struct ServiceTrust {
-    pub service: String
-    pub decision: TrustDecision
+struct ServiceTrust {
+    service: String
+    decision: TrustDecision
 }
 
-pub struct TrustPolicy {
-    pub default: TrustDecision?
-    pub ci_prompt: TrustDecision?
-    pub services: [ServiceTrust]
+struct TrustPolicy {
+    default: TrustDecision?
+    ci_prompt: TrustDecision?
+    services: [ServiceTrust]
     // D-BOUND-PROV1: optional provenance floor for dependency resolution.
-    pub require: ProvenanceRequirement?
+    require: ProvenanceRequirement?
 
 }
 
 // Rust `ProvenanceRequirement::None` is spelled `Unrequired`: `None` is
 // reserved in Jet.
-pub enum ProvenanceRequirement {
+enum ProvenanceRequirement {
     Unrequired
     Logged
     Attested
 
-    pub fn label(self) -> String Never! {
+    fn label(self) -> String Never! {
         if self == {
             .Unrequired -> AUTHORITY_TRUST_REQUIRE_NONE
             .Logged -> AUTHORITY_TRUST_REQUIRE_LOGGED
@@ -56,21 +56,21 @@ pub enum ProvenanceRequirement {
     }
 }
 
-pub struct ProviderAuthority {
-    pub provider: String
-    pub registry: String
-    pub allow: [String]
-    pub deny: [String]
+struct ProviderAuthority {
+    provider: String
+    registry: String
+    allow: [String]
+    deny: [String]
 }
 
 // One parsed authority block; `needs` is a guest declaration, not a second
 // grant store.
-pub struct AuthorityBlock {
-    pub holds: AuthorityHolds
-    pub needs: [String]
-    pub grants: [PackageGrant]
-    pub trust: TrustPolicy?
-    pub providers: [ProviderAuthority]
+struct AuthorityBlock {
+    holds: AuthorityHolds
+    needs: [String]
+    grants: [PackageGrant]
+    trust: TrustPolicy?
+    providers: [ProviderAuthority]
 
     fn default() -> AuthorityBlock Never! {
         AuthorityBlock{holds: AuthorityHolds.default(), needs: [String]{}, grants: [PackageGrant]{}, trust: None, providers: [ProviderAuthority]{}}
@@ -79,7 +79,7 @@ pub struct AuthorityBlock {
 
 // `Sema::Effect::parse(root).is_some()`: `root` is one canonical closed
 // effect root (D-EFFTREE1).
-pub fn pkg_effect_root_known(root: String) -> Bool Never! {
+fn pkg_effect_root_known(root: String) -> Bool Never! {
     if (authority_parse_root(root) ?? "") != root -> return false
     if root == {
         "Net" | "FS" | "IO" | "DB" | "Time" | "Rand" | "Env" | "Exec" | "Log" | "GPU" | "Panic" | "FFI" | "Browser" | "Secret" | "Mem" -> true
@@ -89,7 +89,7 @@ pub fn pkg_effect_root_known(root: String) -> Bool Never! {
 
 // `Sema::memory_allocation_bound(name).is_some()`: `Mem.Alloc` or
 // `Mem.Alloc(above: <positive bytes>)` (D-AUTHORITY-MEM2).
-pub fn pkg_memory_allocation_bound_valid(name: String) -> Bool Never! {
+fn pkg_memory_allocation_bound_valid(name: String) -> Bool Never! {
     if name == "Mem.Alloc" -> return true
     parts :: name.split_once("(") ?? return false
     if parts.before != "Mem.Alloc" || !parts.after.ends_with(")") -> return false
@@ -150,7 +150,7 @@ fn pkg_authority_effect_list(field: String, value: String) -> [String] PackagePa
 }
 
 // Parse the body of `authority: { … }`.
-pub fn pkg_parse_authority(body: String) -> AuthorityBlock PackageParseError! {
+fn pkg_parse_authority(body: String) -> AuthorityBlock PackageParseError! {
     authority := AuthorityBlock.default()
     seen := [String]{}
     loop entry in pkg_authority_entries(body) {
@@ -180,7 +180,7 @@ pub fn pkg_parse_authority(body: String) -> AuthorityBlock PackageParseError! {
 
 // Parse the complete `authority:` value, so a missing or non-record outer
 // value uses the same malformed-authority error as nested fields.
-pub fn pkg_parse_authority_value(value: String) -> AuthorityBlock PackageParseError! {
+fn pkg_parse_authority_value(value: String) -> AuthorityBlock PackageParseError! {
     pkg_parse_authority(pkg_authority_object_body(value, "authority"))
 }
 
@@ -308,7 +308,7 @@ fn pkg_parse_trust_decision(value: String) -> TrustDecision PackageParseError! {
 }
 
 // `grants: { "dep": [DB, Net] }` (D-EFFBUDGET1 / D-JPK-GRANTSCHEMA1).
-pub fn pkg_parse_grants(body: String) -> [PackageGrant] PackageParseError! {
+fn pkg_parse_grants(body: String) -> [PackageGrant] PackageParseError! {
     out := [PackageGrant]{}
     seen := [String]{}
     loop entry in pkg_key_value_entries(body) {

@@ -1,11 +1,11 @@
 // Compile-time values retained on AST nodes and semantic projections.
 
-pub enum CtFloat {
+enum CtFloat {
     F32(value: Float)
     F64(value: Float)
 }
 
-pub enum CtValue {
+enum CtValue {
     Int(value: Int)
     Float(value: CtFloat)
     Bool(value: Bool)
@@ -23,39 +23,39 @@ pub enum CtValue {
     Closure(value: ClosureData)
 }
 
-pub struct CtMapEntry {
-    pub key: CtKey
-    pub value: CtValue
+struct CtMapEntry {
+    key: CtKey
+    value: CtValue
 }
 
-pub struct NamedCtValue {
-    pub name: String
-    pub value: CtValue
+struct NamedCtValue {
+    name: String
+    value: CtValue
 }
 
-pub struct CtEnumArg {
-    pub label: String?
-    pub value: CtValue
+struct CtEnumArg {
+    label: String?
+    value: CtValue
 }
 
-pub enum CtReport {
+enum CtReport {
     Clean(ty: Type)
     Told(value: CtValue)
 }
 
-pub struct ClosureData {
-    pub lambda: Lambda
-    pub captured: [NamedCtValue]
-    pub return_type: Type?
-    pub opaque: CtOpaque?
+struct ClosureData {
+    lambda: Lambda
+    captured: [NamedCtValue]
+    return_type: Type?
+    opaque: CtOpaque?
 }
 
-pub struct CtOpaque {
-    pub kind: String
-    pub identity: String
+struct CtOpaque {
+    kind: String
+    identity: String
 }
 
-pub enum CtKey {
+enum CtKey {
     Int(value: Int)
     BigInt(decimal: String)
     Str(value: String)
@@ -66,12 +66,12 @@ pub enum CtKey {
     Enum(type_name: String, variant: String)
 }
 
-pub struct NamedCtKey {
-    pub name: String
-    pub value: CtKey
+struct NamedCtKey {
+    name: String
+    value: CtKey
 }
 
-pub enum FailureContract {
+enum FailureContract {
     Default(success: Type, error: Type)
     Optional(success: Type)
     DeclaredNever
@@ -88,7 +88,7 @@ pub enum FailureContract {
 
 // Rust `FailureContract::from_return_type`: the contract a written return
 // type declares.
-pub fn failure_contract_from_return_type(return_type: Type?) -> FailureContract Never! {
+fn failure_contract_from_return_type(return_type: Type?) -> FailureContract Never! {
     declared :: return_type ?? return FailureContract.Default{success: Type.Named{name: "Unit"}, error: Type.Named{name: "Err"}}
     if declared == {
         .Named(name) -> if name == "Never" -> return FailureContract.DeclaredNever
@@ -106,7 +106,7 @@ pub fn failure_contract_from_return_type(return_type: Type?) -> FailureContract 
 // declaration with no written span, so a span-less `T Never!` is the
 // inferred-empty set and a span-less typed error is an inferred union. The
 // defaulted `run` keeps its span-less `Err!` as an explicit contract.
-pub fn failure_contract_of_function(return_type: Type?, return_type_span: Span?) -> FailureContract Never! {
+fn failure_contract_of_function(return_type: Type?, return_type_span: Span?) -> FailureContract Never! {
     contract :: failure_contract_from_return_type(return_type)
     if return_type_span != None -> return contract
     if contract == {
@@ -121,7 +121,7 @@ pub fn failure_contract_of_function(return_type: Type?, return_type_span: Span?)
 }
 
 // The failure route a callable exposes to its callers.
-pub fn failure_contract_effective_type(contract: FailureContract) -> Type Never! {
+fn failure_contract_effective_type(contract: FailureContract) -> Type Never! {
     if contract == {
         .DeclaredNever -> Type.Named{name: "Never"}
         .Default(success, error) | .Explicit(success, error) | .Inferred(success, error) -> Type.Result{ok: success, err: error}
@@ -133,7 +133,7 @@ pub fn failure_contract_effective_type(contract: FailureContract) -> Type Never!
 
 // Stable tooling projection of where the effective failure route came from;
 // consumers read this fact instead of reconstructing it from the rendered type.
-pub fn failure_contract_source(contract: FailureContract) -> String Never! {
+fn failure_contract_source(contract: FailureContract) -> String Never! {
     if contract == {
         .Default(_, _) -> "implicit default !Err"
         .Optional(_) -> "optional success"
@@ -146,7 +146,7 @@ pub fn failure_contract_source(contract: FailureContract) -> String Never! {
     }
 }
 
-pub fn ast_comptime_key_type(key: CtKey) -> Type Never! {
+fn ast_comptime_key_type(key: CtKey) -> Type Never! {
     if key == {
         .Int(_) | .BigInt(_) -> Type.Int
         .Str(_) -> Type.String
@@ -161,7 +161,7 @@ pub fn ast_comptime_key_type(key: CtKey) -> Type Never! {
     }
 }
 
-pub fn ast_comptime_value_type(value: CtValue) -> Type Never! {
+fn ast_comptime_value_type(value: CtValue) -> Type Never! {
     if value == {
         .Int(_) | .BigInt(_) -> Type.Int
         .Float(number) -> if number == {
@@ -192,15 +192,15 @@ pub fn ast_comptime_value_type(value: CtValue) -> Type Never! {
 
 // One named site an expression walk visits: a call's name or an identifier
 // read, with its source span.
-pub struct ComptimeNameSite {
-    pub name: String
-    pub span: Span
+struct ComptimeNameSite {
+    name: String
+    span: Span
 }
 
 // Rust jet-comptime `walk_calls`: every direct `Call` name in an expression
 // tree, in visit order (shallow over lambda and `#Impure` bodies, crossing
 // `prep` blocks; `WalkOpts::PLAIN`).
-pub fn comptime_walk_calls(expr: Expr) -> [ComptimeNameSite] Never! {
+fn comptime_walk_calls(expr: Expr) -> [ComptimeNameSite] Never! {
     sites := [ComptimeNameSite]{}
     ast_comptime_walk_expr(expr, true, &sites)
     sites
@@ -209,7 +209,7 @@ pub fn comptime_walk_calls(expr: Expr) -> [ComptimeNameSite] Never! {
 // Rust jet-comptime `walk_identifiers`: every identifier an expression reads.
 // A syntax walk only: function and type names are identifiers too, so a
 // consumer filters the names against its own declarations.
-pub fn comptime_walk_identifiers(expr: Expr) -> [ComptimeNameSite] Never! {
+fn comptime_walk_identifiers(expr: Expr) -> [ComptimeNameSite] Never! {
     sites := [ComptimeNameSite]{}
     ast_comptime_walk_expr(expr, false, &sites)
     sites
@@ -448,7 +448,7 @@ fn ast_comptime_walk_stmt(statement: Stmt, calls: Bool, sites: &[ComptimeNameSit
 
 // Rust `CtKey::from_value`: the deterministic scalar or record key a value
 // names, or None for a value that cannot key a map.
-pub fn ast_comptime_key_from_value(value: CtValue) -> CtKey? Never! {
+fn ast_comptime_key_from_value(value: CtValue) -> CtKey? Never! {
     if value == {
         .Int(number) -> Val(ast_comptime_integer_key(number))
         .BigInt(decimal) -> {
@@ -485,7 +485,7 @@ pub fn ast_comptime_integer_key(number: Int) -> CtKey Never! {
 }
 
 // Rust `CtKey::to_value`.
-pub fn ast_comptime_key_to_value(key: CtKey) -> CtValue Never! {
+fn ast_comptime_key_to_value(key: CtKey) -> CtValue Never! {
     if key == {
         .Int(number) -> CtValue.Int{value: number}
         .BigInt(decimal) -> CtValue.BigInt{value: decimal}
@@ -508,7 +508,7 @@ fn ast_comptime_key_field_values(fields: [NamedCtKey]) -> [NamedCtValue] Never! 
 // carrier): kind rank Int, String, Bool, Char, Record; records compare their
 // field values in order, then by length; an enum key is its variant text.
 // Negative, zero, or positive as `left` sorts before, with, or after `right`.
-pub fn ast_comptime_key_compare(left: CtKey, right: CtKey) -> Int Never! {
+fn ast_comptime_key_compare(left: CtKey, right: CtKey) -> Int Never! {
     left_rank :: ast_comptime_key_rank(left)
     right_rank :: ast_comptime_key_rank(right)
     if left_rank != right_rank -> return if left_rank < right_rank -> -1 else -> 1
@@ -583,7 +583,7 @@ fn ast_comptime_memo_storage_name(field: String) -> Bool Never! {
 // Rust `CtValue::jet_show`: the Display rendering `print` and string
 // interpolation give a compile-time value. Nominal values render the
 // compiled program's derived Rust `{:?}` spelling (I2).
-pub fn ast_comptime_value_show(value: CtValue) -> String Never! {
+fn ast_comptime_value_show(value: CtValue) -> String Never! {
     if value == {
         .Int(number) -> "{number}"
         .Float(number) -> ast_comptime_float_text(number)

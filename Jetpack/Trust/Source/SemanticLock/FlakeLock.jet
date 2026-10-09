@@ -310,7 +310,7 @@ fn trust_flake_lock_node_values(nodes: [FlakeLockNode]) -> [String: Dyn] TrustEr
 
 // Rust `indirect_registry_alias`: the registry alias an `original` object
 // names when its type is `indirect`.
-pub fn trust_flake_indirect_alias(original: String) -> String? TrustError! {
+fn trust_flake_indirect_alias(original: String) -> String? TrustError! {
     tree :: trust_json_parse_or_io(original, "flake.lock original metadata is invalid")
     object :: trust_json_object(tree) ?? return Err(TrustError.IO("flake.lock original metadata is invalid: {TRUST_JSON_NOT_OBJECT}"))
     kind_value :: object.get("type") ?? return Ok(None)

@@ -20,14 +20,14 @@ LEASE_RECEIPT_BYTE_BOUND :: prep { 131072 }
 
 // A snapshot request and the owner lock that must stay held until the
 // receipt is accepted and the process handoff completes.
-pub struct PreparedLeaseSnapshot {
-    pub request: LeaseRequest
-    pub owner_lock: RuntimeLock
+struct PreparedLeaseSnapshot {
+    request: LeaseRequest
+    owner_lock: RuntimeLock
 }
 
-pub struct ExecutableLeaseProtocol {
-    root: String
-    key: TrustKey
+struct ExecutableLeaseProtocol {
+    priv root: String
+    priv key: TrustKey
 
     fn open(root: String) -[FS, Env, Rand]> ExecutableLeaseProtocol IOError! {
         store_lease_ensure_real_directory(root, "Jetpack root")

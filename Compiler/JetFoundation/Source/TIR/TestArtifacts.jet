@@ -1,92 +1,92 @@
-pub enum TTestKind { Unit Property }
+enum TTestKind { Unit Property }
 
-pub struct TTestParamFact {
-    pub index: Int
-    pub name: String
-    pub span: Span
-    pub ty: Type
-    pub convention: AccessConvention
-    pub label: String
-    pub zone: ParamZone
-    pub variadic: Bool
-    pub default_present: Bool
+struct TTestParamFact {
+    index: Int
+    name: String
+    span: Span
+    ty: Type
+    convention: AccessConvention
+    label: String
+    zone: ParamZone
+    variadic: Bool
+    default_present: Bool
 }
 
-pub struct TTestFact {
-    pub key: String
-    pub function: TFunctionRef
-    pub name: String
-    pub span: Span
-    pub kind: TTestKind
-    pub parameters: [TTestParamFact]
-    pub faults: [String]
-    pub expected_failure: Bool
-    pub contract_generated: Bool
-    pub eligibility: TFunctionRef?
-    pub generation_unavailable_reason: String?
+struct TTestFact {
+    key: String
+    function: TFunctionRef
+    name: String
+    span: Span
+    kind: TTestKind
+    parameters: [TTestParamFact]
+    faults: [String]
+    expected_failure: Bool
+    contract_generated: Bool
+    eligibility: TFunctionRef?
+    generation_unavailable_reason: String?
 }
 
-pub struct TJobArgumentFact {
-    pub name: String
-    pub label: String
-    pub ty: String
-    pub required: Bool
-    pub default: String?
-    pub variadic: Bool
-    pub zone: ParamZone
+struct TJobArgumentFact {
+    name: String
+    label: String
+    ty: String
+    required: Bool
+    default: String?
+    variadic: Bool
+    zone: ParamZone
 }
 
-pub struct TJobFact {
-    pub key: String
-    pub function: TFunctionRef?
-    pub name: String
-    pub scope: JobScope
-    pub doc: String?
-    pub arguments: [TJobArgumentFact]
-    pub schedule: EverySchedule?
-    pub after: [String]
-    pub parallel: Int
-    pub packages: [String]
-    pub working_directory: String?
-    pub input_paths: [String]
-    pub output_paths: [String]
-    pub skip: JobSkip?
-    pub cache: JobCachePolicy
-    pub limits: [StringMapEntry]
+struct TJobFact {
+    key: String
+    function: TFunctionRef?
+    name: String
+    scope: JobScope
+    doc: String?
+    arguments: [TJobArgumentFact]
+    schedule: EverySchedule?
+    after: [String]
+    parallel: Int
+    packages: [String]
+    working_directory: String?
+    input_paths: [String]
+    output_paths: [String]
+    skip: JobSkip?
+    cache: JobCachePolicy
+    limits: [StringMapEntry]
 }
 
-pub struct TOutputCheckFact {
-    pub key: String
-    pub name: String
-    pub function: TFunctionRef
+struct TOutputCheckFact {
+    key: String
+    name: String
+    function: TFunctionRef
 }
 
-pub struct TCoveragePointFact {
-    pub key: String
-    pub function: TFunctionRef
-    pub block: String?
-    pub span: Span
+struct TCoveragePointFact {
+    key: String
+    function: TFunctionRef
+    block: String?
+    span: Span
 }
 
-pub enum THarnessKind { Test Fuzz Coverage }
+enum THarnessKind { Test Fuzz Coverage }
 
-pub struct THarnessPlanFact {
-    pub key: String
-    pub kind: THarnessKind
-    pub tests: [String]
-    pub output_checks: [TOutputCheckFact]
-    pub selected_test: String?
-    pub coverage_points: [TCoveragePointFact]
-    pub command_override: Bool
+struct THarnessPlanFact {
+    key: String
+    kind: THarnessKind
+    tests: [String]
+    output_checks: [TOutputCheckFact]
+    selected_test: String?
+    coverage_points: [TCoveragePointFact]
+    command_override: Bool
 }
 
-pub fn tir_test_artifact_key(module_identity: String, test: TestDef) -> String Never! {
+fn tir_test_artifact_key(module_identity: String, test: TestDef) -> String Never! {
     name := test.name ?? "anonymous"
     local := "test::{name}@{test.span.start}..{test.span.end}"
     if module_identity == "" -> local else -> "{module_identity}::{local}"
 }
 
-pub fn tir_test_artifact_function_ref(module_identity: String, test: TestDef) -> TFunctionRef Never! {
+fn tir_test_artifact_function_ref(module_identity: String, test: TestDef) -> TFunctionRef Never! {
     key := tir_test_artifact_key(module_identity, test)
     TFunctionRef{
         key: key,
@@ -97,7 +97,7 @@ pub fn tir_test_artifact_function_ref(module_identity: String, test: TestDef) ->
     }
 }
 
-pub fn tir_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFact Never! {
+fn tir_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFact Never! {
     parameters := [TTestParamFact]{}
     index := 0
     loop parameter in test.params {
@@ -130,7 +130,7 @@ pub fn tir_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFa
     }
 }
 
-pub fn tir_job_artifact_fact(function: TFunctionRef, name: String, doc: String?, arguments: [TJobArgumentFact], schedule: EverySchedule?, metadata: JobMetadata) -> TJobFact Never! {
+fn tir_job_artifact_fact(function: TFunctionRef, name: String, doc: String?, arguments: [TJobArgumentFact], schedule: EverySchedule?, metadata: JobMetadata) -> TJobFact Never! {
     local := "job::{name}"
     key := if function.module_identity == "" -> local else -> "{function.module_identity}::{local}"
     TJobFact{

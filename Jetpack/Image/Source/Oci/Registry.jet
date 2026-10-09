@@ -9,11 +9,11 @@ IMAGE_MAX_REGISTRY_RESPONSE_BYTES :: prep { 65536 }
 IMAGE_MAX_REGISTRY_DETAIL_BYTES :: prep { 4096 }
 
 // The result of one successful push.
-pub struct RegistryPushReport {
-    pub reference: String
-    pub manifest_digest: String
-    pub blobs_uploaded: Int
-    pub bytes_uploaded: Int
+struct RegistryPushReport {
+    reference: String
+    manifest_digest: String
+    blobs_uploaded: Int
+    bytes_uploaded: Int
 }
 
 struct RegistryReference {
@@ -49,7 +49,7 @@ struct RegistryRequest {
 }
 
 // Push the layout at `layout` to `reference`.
-pub fn image_push_registry(layout: String, reference: String) -[FS, Env, Exec, Time.Wait]> RegistryPushReport ImageError! {
+fn image_push_registry(layout: String, reference: String) -[FS, Env, Exec, Time.Wait]> RegistryPushReport ImageError! {
     registry :: image_parse_registry_reference(reference)
     manifest :: image_load_registry_manifest(layout)
     blobs_uploaded := 0

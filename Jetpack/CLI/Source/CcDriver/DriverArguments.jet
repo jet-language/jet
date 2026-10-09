@@ -14,7 +14,7 @@ CC_MAX_RESPONSE_BYTES :: prep { 8388608 }
 CC_MAX_RESPONSE_ARGS :: prep { 100000 }
 
 // A standalone compiler metadata probe; it takes no flags or sources.
-pub enum DriverProbe {
+enum DriverProbe {
     DumpMachine
     PrintSysroot
     DumpVersion
@@ -22,39 +22,39 @@ pub enum DriverProbe {
 
 // One path operand in the parsed argv: its index and the attached option
 // prefix (empty when the path is a separate argument).
-pub struct DriverPathOperand {
-    pub index: Int
-    pub prefix: String
+struct DriverPathOperand {
+    index: Int
+    prefix: String
 }
 
 // The parsed driver command line. `argv` holds the compiler arguments the
 // driver forwards; the index fields point into it.
-pub struct DriverOptions {
-    pub offline: Bool
-    pub fixtures: String?
-    pub project_root: String?
-    pub build_root: String?
-    pub working_dir: String
-    pub target: String?
-    pub compile_only: Bool
-    pub output: String?
-    pub dep_mode: Bool
-    pub dep_phony: Bool
-    pub depfile: String?
-    pub dep_target: String?
-    pub probe: DriverProbe?
-    pub verbose: Bool
-    pub help: Bool
-    pub version: Bool
-    pub argv: [String]
-    pub sources: [String]
-    pub source_indices: [Int]
-    pub path_indices: [DriverPathOperand]
-    pub output_index: Int?
-    pub depfile_index: Int?
-    pub dep_target_index: Int?
-    pub dep_target_option: String?
-    pub separator_index: Int?
+struct DriverOptions {
+    offline: Bool
+    fixtures: String?
+    project_root: String?
+    build_root: String?
+    working_dir: String
+    target: String?
+    compile_only: Bool
+    output: String?
+    dep_mode: Bool
+    dep_phony: Bool
+    depfile: String?
+    dep_target: String?
+    probe: DriverProbe?
+    verbose: Bool
+    help: Bool
+    version: Bool
+    argv: [String]
+    sources: [String]
+    source_indices: [Int]
+    path_indices: [DriverPathOperand]
+    output_index: Int?
+    depfile_index: Int?
+    dep_target_index: Int?
+    dep_target_option: String?
+    separator_index: Int?
 
     fn empty() -> DriverOptions Never! {
         DriverOptions{

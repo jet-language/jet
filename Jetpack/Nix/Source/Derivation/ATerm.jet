@@ -3,13 +3,13 @@
 // input sets and the environment are key-ordered like Nix's maps, so every
 // encoder walk goes through sorted keys.
 
-pub struct NixDerivationOutput {
-    pub name: String
-    pub path: String
+struct NixDerivationOutput {
+    name: String
+    path: String
     // Empty for input-addressed; `sha256`, `r:sha256`, ... for fixed; a
     // floating output has an algorithm and an empty hash.
-    pub method_algo: String
-    pub hash_hex: String
+    method_algo: String
+    hash_hex: String
 
     fn is_fixed(self) -> Bool Never! {
         self.method_algo != "" && self.hash_hex != "impure" && self.hash_hex != ""
@@ -24,22 +24,22 @@ pub struct NixDerivationOutput {
     }
 }
 
-pub struct NixInputDrv {
-    pub path: String
+struct NixInputDrv {
+    path: String
     // Sorted and unique.
-    pub outputs: [String]
+    outputs: [String]
 }
 
-pub struct NixDerivation {
-    pub outputs: [String: NixDerivationOutput]
+struct NixDerivation {
+    outputs: [String: NixDerivationOutput]
     // Ordered by store path.
-    pub input_drvs: [NixInputDrv]
+    input_drvs: [NixInputDrv]
     // Sorted and unique.
-    pub input_srcs: [String]
-    pub platform: String
-    pub builder: String
-    pub args: [String]
-    pub env: [String: String]
+    input_srcs: [String]
+    platform: String
+    builder: String
+    args: [String]
+    env: [String: String]
 
     // Parse a stable `Derive(...)` ATerm; `DrvWithVersion` (dynamic
     // derivations) is unsupported.

@@ -31,12 +31,12 @@ use jet_foundation.[
     tir_symbol_local,
 ]
 
-pub struct SemaMethodSpecialCheck {
-    pub handled: Bool
-    pub value: TExpr?
+struct SemaMethodSpecialCheck {
+    handled: Bool
+    value: TExpr?
 }
 
-pub fn sema_call_shared_access_forbidden_diagnostic(method: String, span: Span) -> Diagnostic {
+fn sema_call_shared_access_forbidden_diagnostic(method: String, span: Span) -> Diagnostic {
     sema_error("E1116", span, "`Shared.{method}(…)` is the retired closure form for shared access.", "D-CONC-SHARE1=A made a shared value read and write like a value: a field read is one locked read, a field write is one locked write, and each statement is one atomic step. The closure per touch proved nothing the compiler did not already know.", "Read the field directly (`config.name`) and write it directly (`config.hits += 1`); group several steps under `#Transact {{ … }}`, or take an expert guard with `.guard_edit()`.")
 }
 
@@ -107,7 +107,7 @@ pub fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, met
     SemaMethodSpecialCheck{handled: true, value: checked_value}
 }
 
-pub fn sema_call_shared_access_result_type(receiver_ty: Type, method: String, result_type: Type, transaction_depth: Int) -> Type Never! {
+fn sema_call_shared_access_result_type(receiver_ty: Type, method: String, result_type: Type, transaction_depth: Int) -> Type Never! {
     if sema_shared_access_is_shared_type(receiver_ty) && method == "edit" && transaction_depth > 0 -> Type.Tuple{fields: [TypeTupleField]{}} else -> result_type
 }
 
@@ -325,7 +325,7 @@ fn sema_call_method_candidate_ready(candidate: SemaCallMethodCandidate, diagnost
     true
 }
 
-pub fn sema_call_method_candidate_with_inference(candidate: SemaCallMethodCandidate, result: SemaInferenceResult) -> SemaCallMethodCandidate? {
+fn sema_call_method_candidate_with_inference(candidate: SemaCallMethodCandidate, result: SemaInferenceResult) -> SemaCallMethodCandidate? {
     if !result.complete -> return None
     specialized := candidate
     specialized.signature = sema_inference_substitute_type_bindings(candidate.signature, result.substitutions)
@@ -681,7 +681,7 @@ pub fn sema_call_check_method_candidate(state: &SemaOwnershipState, receiver: Ex
     Val(checked.value)
 }
 
-pub fn sema_call_check_method(state: &SemaOwnershipState, receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_check_method(state: &SemaOwnershipState, receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     receiver_value :: sema_check_expression(receiver, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     routed_method :: core_source_receiver_method(if method == "bool" && args.len() == 1 -> sema_expr_receiver_nominal_identity(environment, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
     candidates := sema_call_local_method_candidates(environment, routed_method, owner_type_args, type_args)

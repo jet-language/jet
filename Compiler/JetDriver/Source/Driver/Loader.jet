@@ -30,6 +30,7 @@ use jet_foundation.[
     compiler_threads_partition,
     core_bare_source_module,
     core_module_export,
+    core_module_has_member,
     core_module_retirement,
     diagnostic_with_source_path,
     jet_ring_parse_manifest_layer,
@@ -2355,13 +2356,13 @@ fn jet_driver_check_reserved_import(declaration: ImportDecl, diagnostics: &[Diag
 // D-ECO-INLINEPACKAGE1: the one leading `package { … }` carrier of a source
 // (Rust `Package::extract_inline_package`). Offsets index the original text;
 // `error` is the E1360/E1361/E1362 structure failure.
-pub struct JetDriverInlinePackage {
-    pub found: Bool
-    pub start: Int
-    pub end: Int
-    pub body_start: Int
-    pub body_end: Int
-    pub error: Diagnostic?
+struct JetDriverInlinePackage {
+    found: Bool
+    start: Int
+    end: Int
+    body_start: Int
+    body_end: Int
+    error: Diagnostic?
 }
 
 fn jet_driver_inline_byte(bytes: [U8], at: Int) -> Int Never! {
@@ -2559,7 +2560,7 @@ fn jet_driver_inline_package_failure(code: String, start: Int, end: Int) -> JetD
     JetDriverInlinePackage{found: false, start: start, end: end, body_start: start, body_end: start, error: Val(jet_driver_row_diagnostic(code, Val(Span{start: start, end: end})))}
 }
 
-pub fn jet_driver_inline_package(source: String) -> JetDriverInlinePackage {
+fn jet_driver_inline_package(source: String) -> JetDriverInlinePackage {
     none :: JetDriverInlinePackage{found: false, start: 0, end: 0, body_start: 0, body_end: 0, error: None}
     if !source.contains("package") -> return none
     bytes :: source.bytes()
@@ -2600,7 +2601,7 @@ pub fn jet_driver_mask_inline_package(source: String, carrier: JetDriverInlinePa
 
 // Only the carrier's body, at its original offsets, for the manifest field
 // parser (Rust `InlinePackageBlock::body`).
-pub fn jet_driver_inline_package_body(source: String, carrier: JetDriverInlinePackage) -> String {
+fn jet_driver_inline_package_body(source: String, carrier: JetDriverInlinePackage) -> String {
     head :: jet_driver_blank_source_range(source, 0, carrier.body_start)
     jet_driver_blank_source_range(head, carrier.body_end, head.len())
 }
@@ -2665,9 +2666,9 @@ pub fn jet_driver_parse_user_source(text: String) -> ParseResult {
 enum JetDriverParseJob {
     // A user source file.
     Source(text: String)
-    // An embedded Core module and the public members that have crossed the
-    // Core cutover.
-    Core(text: String, owned_members: [String])
+    // An embedded Core module, its Core module name, and the declared members
+    // that have crossed the Core cutover.
+    Core(text: String, module_name: String, owned_members: [String])
     // A Core unit whose row is out of range: an empty program.
     Missing
 }
@@ -2698,13 +2699,13 @@ fn jet_driver_parse_job(request: JetDriverCompileRequest, unit: JetDriverSourceU
     }
     if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return JetDriverParseJob.Missing
     row :: request.core_sources[unit.file_index]
-    JetDriverParseJob.Core{text: row.source, owned_members: row.owned_members}
+    JetDriverParseJob.Core{text: row.source, module_name: row.module_name, owned_members: row.owned_members}
 }
 
 fn jet_driver_parse_job_bytes(job: JetDriverParseJob) -> Int Never! {
     if job == {
         .Source(text) -> text.len()
-        .Core(text, _) -> text.len()
+        .Core(text, _, _) -> text.len()
         .Missing -> 0
     }
 }
@@ -2731,7 +2732,7 @@ fn jet_driver_parse_core_source(text: String, owned_members: [String]) -> JetDri
     loop item in parsed.program.items {
         if item == {
             .Func(value) -> {
-                if value.is_pub && !owned_members.contains(value.name) -> next
+                if core_module_has_member(module_name, value.name) && !owned_members.contains(value.name) -> next
             }
             else -> {}
         }

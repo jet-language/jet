@@ -9,7 +9,7 @@ struct PackageProfileLoad {
     plan: PackageProfilePlan
 }
 
-pub fn cli_cmd_profile(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_profile(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     if (parsed.positional.get(1) ?? "") == TOOL_PROFILE_NAME && parsed.positional.len() > 1 -> return cli_cmd_tool_profile(&verification, theme, parsed)
     word :: parsed.positional.get(0) ?? {
@@ -234,7 +234,7 @@ fn cli_one_profile_name(theme: Theme, parsed: CLIParsed, verb: String) -[IO, Tim
     Val(name)
 }
 
-pub fn cli_valid_profile_name(name: String) -> Bool Never! {
+fn cli_valid_profile_name(name: String) -> Bool Never! {
     name != "" && name != "." && name != ".." && !name.contains("/") && !name.contains("\\") && !name.bytes().contains(U8{0})
 }
 

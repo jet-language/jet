@@ -7,57 +7,57 @@
 // reported, so a later publish repairs them.
 
 // A deterministic store listing entry.
-pub struct ArtifactEntryStatus {
-    pub kind: ArtifactEntryKind
-    pub key: String
-    pub namespace: String?
-    pub size_bytes: Int
-    pub last_use: Int
-    pub pinned: Bool
-    pub path: String
+struct ArtifactEntryStatus {
+    kind: ArtifactEntryKind
+    key: String
+    namespace: String?
+    size_bytes: Int
+    last_use: Int
+    pinned: Bool
+    path: String
 }
 
 // Store state suitable for status UIs and deterministic tests.
-pub struct ArtifactStoreStatus {
-    pub root: String
-    pub footprint_bytes: Int
-    pub limit_bytes: Int
-    pub reserve_bytes: Int
-    pub available_bytes: Int?
-    pub live_leases: Int
-    pub host_limit_bytes: Int?
-    pub entries: [ArtifactEntryStatus]
-    pub tiers: [String]
+struct ArtifactStoreStatus {
+    root: String
+    footprint_bytes: Int
+    limit_bytes: Int
+    reserve_bytes: Int
+    available_bytes: Int?
+    live_leases: Int
+    host_limit_bytes: Int?
+    entries: [ArtifactEntryStatus]
+    tiers: [String]
 }
 
 // The result of one deterministic prune operation.
-pub struct ArtifactPruneReport {
-    pub target_bytes: Int
-    pub before_bytes: Int
-    pub after_bytes: Int
-    pub removed: [ArtifactEntryStatus]
-    pub pinned_bytes: Int
-    pub blocked: Bool
+struct ArtifactPruneReport {
+    target_bytes: Int
+    before_bytes: Int
+    after_bytes: Int
+    removed: [ArtifactEntryStatus]
+    pinned_bytes: Int
+    blocked: Bool
 }
 
 // A verified action record that points at one immutable CAS object.
-pub struct StoredArtifact {
-    pub action: ActionHandle
-    pub object: ObjectHandle
-    pub path: String
-    pub executable: Bool
+struct StoredArtifact {
+    action: ActionHandle
+    object: ObjectHandle
+    path: String
+    executable: Bool
 }
 
 // Result of looking up a named artifact. Corrupt records and objects are
 // quarantined before `Corrupt` is returned.
-pub enum ArtifactLookup {
+enum ArtifactLookup {
     Missing
     Corrupt
     Hit(StoredArtifact)
 }
 
 // Result of restoring a named artifact to a display path.
-pub enum ArtifactRestore {
+enum ArtifactRestore {
     Missing
     Corrupt
     Hit(object: ObjectHandle, executable: Bool)
@@ -118,9 +118,9 @@ fn store_artifact_saturating_mul(left: Int, right: Int) -> Int Never! {
 // The local content-addressed artifact store. `owner` is this process's
 // identity, drawn once when the store opens and written into its lock and
 // lease files.
-pub struct ArtifactStore {
-    config_value: ArtifactStoreConfig
-    owner_value: ArtifactProcessIdentity
+struct ArtifactStore {
+    priv config_value: ArtifactStoreConfig
+    priv owner_value: ArtifactProcessIdentity
 
     fn open(config: ArtifactStoreConfig) -[FS, Env, Rand]> ArtifactStore ArtifactStoreError! {
         if config.root() == "" -> return Err(ArtifactStoreError.Config("store root cannot be empty"))

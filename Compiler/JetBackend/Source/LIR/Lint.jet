@@ -3,20 +3,20 @@
 // bugs surface here with the function and block they occur in, instead of as
 // wrong machine code.
 
-pub struct LIRLintIssue {
-    pub function: String
-    pub block: Int
-    pub message: String
+struct LIRLintIssue {
+    function: String
+    block: Int
+    message: String
 }
 
 // A definition or use site: `index` -1 is the block parameter list and
 // `index == insts.len()` is the terminator.
 struct LIRLintSite {
-    pub block: Int
-    pub index: Int
+    block: Int
+    index: Int
 }
 
-pub fn lir_lint_module(program: LIRModule) -> [LIRLintIssue] Never! {
+fn lir_lint_module(program: LIRModule) -> [LIRLintIssue] Never! {
     issues := [LIRLintIssue]{}
     loop (index, signature) in program.signatures {
         if signature.id.value != index -> &issues.push(LIRLintIssue{function: "", block: -1, message: "signature {index} carries ID {signature.id.value}"})

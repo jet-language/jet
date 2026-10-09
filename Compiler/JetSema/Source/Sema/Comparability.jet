@@ -35,9 +35,9 @@ struct SemaComparabilityQuery {
 // A comparison operator the comparability rule decided. `handled` is false when
 // the scalar operator path owns the operands; otherwise `value` is the typed
 // comparison, or None after this rule reported the rejection.
-pub struct SemaComparabilityBinary {
-    pub handled: Bool
-    pub value: TExpr?
+struct SemaComparabilityBinary {
+    handled: Bool
+    value: TExpr?
 }
 
 fn sema_comparability_query() -> SemaComparabilityQuery Never! {
@@ -360,7 +360,7 @@ pub fn sema_comparability_check_assert_eq(arguments: [TCallArg], span: Span, env
 // Rust `core.math` `min`/`max`/`clamp` (E0905, reported at the first
 // argument). Other Comparable-constrained Core members keep the canonical
 // constraint wording.
-pub fn sema_comparability_core_error(member: String, span: Span) -> Diagnostic? {
+fn sema_comparability_core_error(member: String, span: Span) -> Diagnostic? {
     why := if {
         member == "min" || member == "max" -> "min/max compare their two arguments"
         member == "clamp" -> "clamp compares the value with its lower and upper bounds"

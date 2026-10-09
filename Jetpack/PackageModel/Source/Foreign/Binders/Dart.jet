@@ -11,13 +11,13 @@ DART_TOOL_ACTION :: prep { "rejected the Dart binding input" }
 DART_SDK_SEARCH_DEPTH :: prep { 7 }
 DART_SDK_SEARCH_ENTRIES :: prep { 4096 }
 
-pub struct DartBindResult {
-    pub source: String
-    pub host_source: String
-    pub host_rust: String
-    pub bound: [String]
-    pub archive: String
-    pub provenance: String
+struct DartBindResult {
+    source: String
+    host_source: String
+    host_rust: String
+    bound: [String]
+    archive: String
+    provenance: String
 }
 
 enum DartScalar {
@@ -83,7 +83,7 @@ struct DartFunction {
 
 // Parse the Dart contract, build the callback bridge and `dart_api_dl`
 // archive, and render the Jet, Dart host, and Rust host sources.
-pub fn pkg_dart_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> DartBindResult ForeignBindError! {
+fn pkg_dart_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> DartBindResult ForeignBindError! {
     if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
     functions :: pkg_dart_parse(source)
     canonical :: pkg_binder_canonicalize(path, "could not resolve the Dart contract path")
@@ -138,7 +138,7 @@ pub fn pkg_dart_bind(path: String, source: String, lib: String, cache: String) -
 
 // Build the native Jet compute plugin as a cdylib linked against the bridge
 // archive, returning the library path.
-pub fn pkg_dart_build_compute(guest_rust: String, host_rust: String, ffi: FFILink?, clinks: [String], lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> String ForeignBindError! {
+fn pkg_dart_build_compute(guest_rust: String, host_rust: String, ffi: FFILink?, clinks: [String], lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> String ForeignBindError! {
     source :: files.join(cache, "{lib}_compute.rs")
     output :: files.join(cache, "libjet_dart_{lib}_compute{BinderHostOS.current().shared_ext()}")
     archive :: files.join(cache, "libjet_dart_{lib}.a")
@@ -178,7 +178,7 @@ pub fn pkg_dart_build_compute(guest_rust: String, host_rust: String, ffi: FFILin
 }
 
 // Extend a contract provenance record with the compute plugin identity.
-pub fn pkg_dart_bind_compute_provenance(base: String, compute_path: String, compute_source: String) -[FS, Env]> String ForeignBindError! {
+fn pkg_dart_bind_compute_provenance(base: String, compute_path: String, compute_source: String) -[FS, Env]> String ForeignBindError! {
     canonical :: pkg_binder_canonicalize(compute_path, "could not resolve the Jet compute path")
     identity := [U8]{}
     pkg_binder_append_field(&identity, DART_COMPUTE_SCHEMA.bytes())
@@ -400,9 +400,9 @@ fn pkg_dart_render_jet(lib: String, functions: [DartFunction]) -> String Never! 
     loop function in functions {
         out = "{out}    fn {function.jet}{pkg_dart_jet_params(function.params)} -> {function.result.jet()} = \"{abi}_call_{function.name}\"\n"
     }
-    out = "{out}}}\nuse c.{abi} as abi\n\npub enum DartError {{ NotInitialized CallbackUnavailable }}\n\n"
+    out = "{out}}}\nuse c.{abi} as abi\n\nenum DartError {{ NotInitialized CallbackUnavailable }}\n\n"
     loop function in functions {
-        out = "{out}pub fn {function.jet}{pkg_dart_jet_params(function.params)} -[FFI.Dart]> {function.result.jet()} DartError! {{\n    result :: abi.{function.jet}{pkg_dart_call_args(function.params)}\n    code :: abi.take_error()\n    if code == 1 {{ return Err(DartError.NotInitialized) }}\n    if code == 2 {{ return Err(DartError.CallbackUnavailable) }}\n    return Ok(result)\n}}\n\n"
+        out = "{out}fn {function.jet}{pkg_dart_jet_params(function.params)} -[FFI.Dart]> {function.result.jet()} DartError! {{\n    result :: abi.{function.jet}{pkg_dart_call_args(function.params)}\n    code :: abi.take_error()\n    if code == 1 {{ return Err(DartError.NotInitialized) }}\n    if code == 2 {{ return Err(DartError.CallbackUnavailable) }}\n    return Ok(result)\n}}\n\n"
     }
     out
 }

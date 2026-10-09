@@ -163,7 +163,7 @@ pub fn sema_copy_site_check_field(value: Expr, environment: SemaScopeEnvironment
 // A non-Copy field or payload that is neither copied nor reported is an
 // actual transfer (Rust `note_move_if_direct_ident`): record it so a later
 // read reaches the moved-value diagnostic. False when the move is invalid.
-pub fn sema_copy_site_record_move(value: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_copy_site_record_move(value: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     payload :: sema_copy_site_payload(value)
     if payload == {
         .Ident(name, _) -> {

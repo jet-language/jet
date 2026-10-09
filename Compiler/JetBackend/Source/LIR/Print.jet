@@ -11,7 +11,7 @@
 //
 // Each value is printed with its layout (and drop action) where it is defined.
 
-pub fn lir_print_module(program: LIRModule) -> String Never! {
+fn lir_print_module(program: LIRModule) -> String Never! {
     lines := [String]{}
     loop data in program.data {
         &lines.push("data d{data.id.value} = {lir_print_bytes(data.bytes)} ({data.bytes.len()} bytes, align {data.align})")
@@ -32,7 +32,7 @@ pub fn lir_print_module(program: LIRModule) -> String Never! {
     "{text}\n"
 }
 
-pub fn lir_print_layout(layout: LIRLayout) -> String Never! {
+fn lir_print_layout(layout: LIRLayout) -> String Never! {
     if layout.class == {
         .Integer -> "i{8 * layout.size}"
         .Pointer -> "ptr"

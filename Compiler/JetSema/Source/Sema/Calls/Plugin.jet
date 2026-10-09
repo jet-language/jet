@@ -22,11 +22,11 @@ use jet_foundation.[
     type_name,
 ]
 
-pub fn sema_plugin_loaded_type(interface: SemaPluginInterface) -> Type Never! {
+fn sema_plugin_loaded_type(interface: SemaPluginInterface) -> Type Never! {
     Type.Apply{name: "Plugin", args: [Type]{Type.Named{name: interface.identity}}}
 }
 
-pub fn sema_plugin_load_type(facts: SemaPluginInterfaceFacts, artifact: String) -> Type? {
+fn sema_plugin_load_type(facts: SemaPluginInterfaceFacts, artifact: String) -> Type? {
     interface :: sema_plugin_interface_by_artifact(facts, artifact) ?? return None
     Val(sema_plugin_loaded_type(interface))
 }

@@ -3,25 +3,25 @@
 
 REGEX_SYNTAX_USIZE_MAX :: prep { 0xffffffffffffffff }
 
-pub struct RegexSyntaxError {
-    pub offset: Int
-    pub reason: String
+struct RegexSyntaxError {
+    offset: Int
+    reason: String
 }
 
 struct RegexSyntaxCodepoint {
-    pub value: Int
-    pub width: Int
+    value: Int
+    width: Int
 }
 
 struct RegexSyntaxParser {
-    pub bytes: [U8]
-    pub byte_pos: Int
-    pub pos: Int
+    bytes: [U8]
+    byte_pos: Int
+    pos: Int
 }
 
 struct RegexSyntaxNumber {
-    pub value: Int
-    pub error: RegexSyntaxError?
+    value: Int
+    error: RegexSyntaxError?
 }
 
 fn regex_syntax_codepoint_at(bytes: [U8], offset: Int) -> RegexSyntaxCodepoint? {
@@ -213,8 +213,8 @@ fn regex_syntax_parse_class(parser: &RegexSyntaxParser) -> RegexSyntaxError? {
 }
 
 struct RegexSyntaxClassItem {
-    pub value: Bool
-    pub error: RegexSyntaxError?
+    value: Bool
+    error: RegexSyntaxError?
 }
 
 fn regex_syntax_parse_class_item(parser: &RegexSyntaxParser) -> RegexSyntaxClassItem Never! {
@@ -289,7 +289,7 @@ fn regex_syntax_parse_number(parser: &RegexSyntaxParser) -> RegexSyntaxNumber Ne
     RegexSyntaxNumber{value: value, error: None}
 }
 
-pub fn regex_syntax_validate(pattern: String) -> RegexSyntaxError? {
+fn regex_syntax_validate(pattern: String) -> RegexSyntaxError? {
     parser := RegexSyntaxParser{bytes: pattern.bytes(), byte_pos: 0, pos: 0}
     error :: regex_syntax_parse_alt(&parser, None)
     if error == Val(found) -> return Val(found)

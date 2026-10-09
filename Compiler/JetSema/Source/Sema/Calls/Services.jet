@@ -30,12 +30,12 @@ use jet_foundation.[
     tir_stmt_children,
 ]
 
-pub struct SemaServiceCoreMethodContract {
-    pub member: String
-    pub parameters: [Type]
-    pub result_type: Type
-    pub receiver_access: AccessConvention
-    pub argument_accesses: [AccessConvention]
+struct SemaServiceCoreMethodContract {
+    member: String
+    parameters: [Type]
+    result_type: Type
+    receiver_access: AccessConvention
+    argument_accesses: [AccessConvention]
 }
 
 fn sema_services_error_type() -> Type Never! {
@@ -527,10 +527,10 @@ pub fn sema_call_try_service_core_call(module_name: String, member: String, args
     SemaDirectSpecialCheck{handled: true, value: checked.value}
 }
 
-pub struct SemaServiceWorkerHandler {
-    pub key: String
-    pub name: String
-    pub span: Span
+struct SemaServiceWorkerHandler {
+    key: String
+    name: String
+    span: Span
 }
 
 fn sema_services_find_handlers_expr(expression: TExpr, handlers: &[SemaServiceWorkerHandler]) {
@@ -586,7 +586,7 @@ fn sema_services_worker_reaches(start: String, target: String, functions: [TFunc
     false
 }
 
-pub fn sema_validate_service_handler_graph(modules: [SemaGraphModuleResult]) -> [Diagnostic] {
+fn sema_validate_service_handler_graph(modules: [SemaGraphModuleResult]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     functions := [TFunc]{}
     handlers := [SemaServiceWorkerHandler]{}

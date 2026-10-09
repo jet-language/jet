@@ -12,17 +12,17 @@ fn nix_index_signature_message(domain: String, bytes: [U8]) -> [U8] Never! {
 }
 
 // The message the producer signs for one decoded index.
-pub fn nix_index_producer_signature_request(index_bytes: [U8]) -> [U8] Never! {
+fn nix_index_producer_signature_request(index_bytes: [U8]) -> [U8] Never! {
     nix_index_signature_message(NIX_INDEX_DOMAIN, index_bytes)
 }
 
 // The message the producer signs for one canonical channel manifest.
-pub fn nix_index_manifest_signature_request(manifest_bytes: [U8]) -> [U8] Never! {
+fn nix_index_manifest_signature_request(manifest_bytes: [U8]) -> [U8] Never! {
     nix_index_signature_message(NIX_INDEX_MANIFEST_DOMAIN, manifest_bytes)
 }
 
 // The canonical signature sidecar for `signature` under `key_id`.
-pub fn nix_index_signature_sidecar(key_id: String, signature: [U8]) -> [U8] Never! {
+fn nix_index_signature_sidecar(key_id: String, signature: [U8]) -> [U8] Never! {
     sidecar :: NixIndexSignature{schema: NIX_INDEX_SCHEMA, key_id, algorithm: NIX_INDEX_SIGNATURE_ALGORITHM, signature: base64.encode(signature)}
     sidecar.canonical_bytes()
 }

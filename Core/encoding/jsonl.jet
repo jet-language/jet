@@ -34,7 +34,7 @@ pub fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}
 }
 
 /// Parse every non-empty record as JSON. Allocates one `DataTree` per record.
-pub fn parse(text: String) -> [DataTree] EncodingError! {
+fn parse(text: String) -> [DataTree] EncodingError! {
     rows := [DataTree]{}
     cursor := reader(text)
     loop {
@@ -107,7 +107,7 @@ pub fn loads(text: String) -> [Dyn] EncodingError! { parse(text) }
 
 pub fn dumps(rows: [DataTree]) -> String EncodingError! { to_string(rows) }
 
-pub fn count_rows(text: String) -> Int Never! {
+fn count_rows(text: String) -> Int Never! {
     n := 0
     nonblank := false
     loop index in 0..<text.count_bytes() {

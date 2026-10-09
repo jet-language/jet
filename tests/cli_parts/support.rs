@@ -194,7 +194,7 @@ pub fn budget_project(tag: &str, limit: u64) -> PathBuf {
         limit: .AtMost({limit}),
     }}],
 }}
-pub fn api() {{}}
+fn api() {{}}
 fn run() {{}}
 "#),
     ).unwrap();
@@ -261,7 +261,7 @@ pub fn mixed_budget_project(tag: &str) -> PathBuf {
     ],
 }
 
-pub fn api() {}
+fn api() {}
 fn run() {}
 "#,
     ).unwrap();

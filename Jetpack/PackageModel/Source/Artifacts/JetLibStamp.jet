@@ -19,8 +19,8 @@ JETLIB_MAX_EXPORT_PARAMS :: prep { 4096 }
 
 // Why a `.jetlib` header or artifact was refused; `message` is the reference text.
 #Error
-pub struct JetLibError {
-    pub message: String
+struct JetLibError {
+    message: String
 
     fn new(message: String) -> JetLibError Never! {
         JetLibError{message: message}
@@ -28,7 +28,7 @@ pub struct JetLibError {
 }
 
 // The one scalar vocabulary D-EMBED1 admits for native Library rows.
-pub enum JetLibScalar {
+enum JetLibScalar {
     Int
     Float
     Bool
@@ -56,7 +56,7 @@ pub enum JetLibScalar {
 
 // The access convention carried with each native parameter: the C scalar
 // representation stays homogeneous while the Jet ownership contract survives.
-pub enum JetLibAccess {
+enum JetLibAccess {
     Read
     Write
     Move
@@ -81,12 +81,12 @@ pub enum JetLibAccess {
 
 // One exact C ABI row: `symbol` is the emitted foreign name; access
 // conventions stay explicit metadata, never inferred from generated code.
-pub struct JetLibExport {
-    pub name: String
-    pub symbol: String
-    pub scalar: JetLibScalar
-    pub params: Int
-    pub conventions: [JetLibAccess]
+struct JetLibExport {
+    name: String
+    symbol: String
+    scalar: JetLibScalar
+    params: Int
+    conventions: [JetLibAccess]
 
     fn new(name: String, scalar: JetLibScalar, params: Int) -> JetLibExport Never! {
         conventions := [JetLibAccess]{}
@@ -100,21 +100,21 @@ pub struct JetLibExport {
 }
 
 // The load-time identity a `.jetlib` header carries.
-pub struct JetLibStamp {
-    pub compiler_version: String
-    pub compiler_build: String
-    pub library_name: String
+struct JetLibStamp {
+    compiler_version: String
+    compiler_build: String
+    library_name: String
     // The selected manifest output entry, kept for build provenance.
-    pub entry: String?
-    pub target: String
-    pub target_triple: String
-    pub linker_identity: String
-    pub abi_identity: String
-    pub abi_version: Int
-    pub exports: [JetLibExport]
+    entry: String?
+    target: String
+    target_triple: String
+    linker_identity: String
+    abi_identity: String
+    abi_version: Int
+    exports: [JetLibExport]
     // Sorted and duplicate-free (Rust `EffectSet`).
-    pub declared_effects: [String]
-    pub payload_digest: String
+    declared_effects: [String]
+    payload_digest: String
 
     // The all-empty stamp (Rust `Default`).
     fn empty() -> JetLibStamp Never! {
@@ -284,9 +284,9 @@ pub struct JetLibStamp {
 }
 
 // A complete `.jetlib`: the checked stamp, then the opaque native payload.
-pub struct JetLibArtifact {
-    pub stamp: JetLibStamp
-    pub payload: [U8]
+struct JetLibArtifact {
+    stamp: JetLibStamp
+    payload: [U8]
 
     fn encode_bytes(self) -> [U8] Never! {
         out := JetLibWriter{bytes: self.stamp.encode_bytes()}
@@ -390,7 +390,7 @@ struct JetLibReader {
 
 // The target identity shared by artifact producer and load-time adapter:
 // Library builds are host-native, so `<os>-<arch>` is the whole identity.
-pub fn pkg_jetlib_current_target() -[Env]> String Never! {
+fn pkg_jetlib_current_target() -[Env]> String Never! {
     os :: if {
         sys.is_linux() -> "linux"
         sys.is_macos() -> "macos"
@@ -400,7 +400,7 @@ pub fn pkg_jetlib_current_target() -[Env]> String Never! {
     "{os}-{sys.arch()}"
 }
 
-pub fn pkg_jetlib_payload_digest(payload: [U8]) -> String Never! {
+fn pkg_jetlib_payload_digest(payload: [U8]) -> String Never! {
     "sha256-{pkg_sha256_hex(payload)}"
 }
 

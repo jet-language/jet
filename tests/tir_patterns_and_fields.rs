@@ -195,22 +195,22 @@ fn imported_generated_codec_runs_on_the_default_tier() {
 use core.encoding.json as json
 
 #Codable
-pub struct ListReport {
-    pub schema: String
-    pub status: String
+struct ListReport {
+    schema: String
+    status: String
 }
 
 impl ListReport {
-    pub fn label(self) -> String { self.status }
+    fn label(self) -> String { self.status }
 }
 
-pub fn list_json(status: String) -> String {
+fn list_json(status: String) -> String {
     return json.to_string(ListReport{schema: \"jet.report/v1\", status: status})
 }
 
-pub fn mk() -> ListReport { ListReport{schema: \"jet.report/v1\", status: \"ok\"} }
+fn mk() -> ListReport { ListReport{schema: \"jet.report/v1\", status: \"ok\"} }
 
-pub fn round_trip(wire: String) -> String {
+fn round_trip(wire: String) -> String {
     report :: json.decode<ListReport>(wire) ?? panic(\"declaring module decode\")
     return report.status
 }
@@ -276,7 +276,7 @@ struct ListReport {
     packages: [PackageRow]
 }
 
-pub fn list_json() -> String {
+fn list_json() -> String {
     return json.to_string(ListReport{
         schema: \"jet.report/v1\",
         packages: [PackageRow{name: \"jet\"}]
@@ -318,7 +318,7 @@ fn run() {
 /// or forced-interpreter output.
 #[test]
 fn imported_zero_arg_string_result_matches_every_tier() {
-    let plan_src = "pub fn greeting() -> String { \"hello\" }\n";
+    let plan_src = "fn greeting() -> String { \"hello\" }\n";
     let main_src = "\
 use plan
 
@@ -364,7 +364,7 @@ fn imported_byte_buffer_constructor_uses_module_root_in_aot() {
     }
 
     let plan_src = "\
-pub fn bytes() -> Int {
+fn bytes() -> Int {
     buffer := Bytes.new()
     buffer.write_u8(7)
     return buffer.len()
@@ -514,7 +514,7 @@ fn run() {
 #[test]
 fn imported_never_bool_condition_runs_on_all_tiers() {
     let helper_src = "\
-pub fn helper(value: Bool) -> Bool Never! {
+fn helper(value: Bool) -> Bool Never! {
     return value
 }
 ";

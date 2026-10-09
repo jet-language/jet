@@ -31,7 +31,7 @@ fn nix_has_zstd_magic(bytes: [U8]) -> Bool Never! {
 }
 
 // A deterministic frame of raw blocks with the content size and checksum.
-pub fn nix_index_zstd_encode(bytes: [U8]) -> [U8] Never! {
+fn nix_index_zstd_encode(bytes: [U8]) -> [U8] Never! {
     out := [U8]{}
     nix_push_le(&out, NIX_INDEX_ZSTD_MAGIC, 4)
     length :: bytes.len()
@@ -66,7 +66,7 @@ pub fn nix_index_zstd_encode(bytes: [U8]) -> [U8] Never! {
 }
 
 // Decode every frame; the decoded size may not exceed `limit`.
-pub fn nix_index_zstd_decode_bounded(bytes: [U8], limit: Int) -> [U8] NixIndexError! {
+fn nix_index_zstd_decode_bounded(bytes: [U8], limit: Int) -> [U8] NixIndexError! {
     input := 0
     output := [U8]{}
     loop input < bytes.len() {
@@ -142,7 +142,7 @@ fn nix_xxh64_merge(hash: Int, lane: Int) -> Int Never! {
 }
 
 // XXH64 with seed 0 (the Zstandard content checksum source).
-pub fn nix_xxh64(data: [U8]) -> Int Never! {
+fn nix_xxh64(data: [U8]) -> Int Never! {
     offset := 0
     hash := NIX_XXH64_P5
     if data.len() >= 32 {

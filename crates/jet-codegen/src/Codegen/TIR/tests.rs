@@ -297,7 +297,6 @@ fn checked_bundle(src: &str) -> (
             source: src.to_string(),
             core_identifier_demand: crate::Lexer::core_identifier_demand(&toks),
             web_target_ceiling: prog.web_target_ceiling,
-            pub_file: prog.pub_file,
             no_prelude: prog.no_prelude,
             default_target: prog.default_target,
             html_path: prog.html_path.clone(),
@@ -484,7 +483,6 @@ fn loaded_core_source_signatures_preserve_implicit_error_carriers() {
             script_body: std::mem::take(&mut program.script_body),
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling,
-            pub_file: program.pub_file,
             no_prelude: program.no_prelude,
             default_target: program.default_target,
             html_path: program.html_path,
@@ -503,8 +501,8 @@ fn loaded_core_source_signatures_preserve_implicit_error_carriers() {
         loaded_module(files_path.alias, "use core.files as files"),
         loaded_module(
             files.alias,
-            "pub fn read_lines(path: String) -> [String] { [String]{} }\n\
-             pub fn write_lines(path: String, lines: [String]) {}",
+            "fn read_lines(path: String) -> [String] { [String]{} }\n\
+             fn write_lines(path: String, lines: [String]) {}",
         ),
     ];
     let mut name_ledger = crate::AST::NameLedger::default();

@@ -136,7 +136,7 @@ fn web_target_accepts_fixed_list_measure_use() {
 fn symbolic_fixed_length_resolves_at_module_specialization() {
     let source = r#"
 module buffer<T>(capacity: Int) {
-    pub struct Data {
+    struct Data {
         items: [T#capacity]
     }
 }

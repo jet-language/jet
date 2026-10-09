@@ -1374,11 +1374,11 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
             function.jet_name
         ));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\n\npub enum CppError {{ Exception InvalidHandle ResourceLimit }}\n\nfn cpp_error(code: Int) -[]> CppError {{ if code == 2 {{ return CppError.InvalidHandle }} if code == 3 {{ return CppError.ResourceLimit }} return CppError.Exception }}\n\n"));
+    out.push_str(&format!("}}\nuse c.{abi} as abi\n\nenum CppError {{ Exception InvalidHandle ResourceLimit }}\n\nfn cpp_error(code: Int) -[]> CppError {{ if code == 2 {{ return CppError.InvalidHandle }} if code == 3 {{ return CppError.ResourceLimit }} return CppError.Exception }}\n\n"));
     for class in &surface.classes {
         let name = snake(&class.name);
         out.push_str(&format!(
-            "#SingleUse\npub struct {} {{ value: Int }}\n\npub fn new_{name}(",
+            "#SingleUse\nstruct {} {{ value: Int }}\n\nfn new_{name}(",
             class.name
         ));
         jet_params(&mut out, &class.ctor);
@@ -1395,7 +1395,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
             out.push_str(&format!("impl {} {{\n", class.name));
         }
         for method in &class.methods {
-            out.push_str(&format!("    pub fn {}(self", method.jet_name));
+            out.push_str(&format!("    fn {}(self", method.jet_name));
             if !method.params.is_empty() {
                 out.push_str(", ");
                 jet_params(&mut out, &method.params);
@@ -1414,10 +1414,10 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         if !class.methods.is_empty() {
             out.push_str("}\n\n");
         }
-        out.push_str(&format!("pub fn close_{name}(value: ^{}) -[FFI.Cpp]> {{\n    abi.{name}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n", class.name));
+        out.push_str(&format!("fn close_{name}(value: ^{}) -[FFI.Cpp]> {{\n    abi.{name}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n", class.name));
     }
     for function in &surface.functions {
-        out.push_str(&format!("pub fn {}(", function.jet_name));
+        out.push_str(&format!("fn {}(", function.jet_name));
         jet_params(&mut out, &function.params);
         out.push_str(&format!(
             ") -[FFI.Cpp]> {} !CppError {{\n    result_value :: abi.{}(",

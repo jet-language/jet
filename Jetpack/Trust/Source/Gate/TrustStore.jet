@@ -11,7 +11,7 @@ TRUST_GRANT_PREFIX :: prep { "grant:" }
 
 // The authority a typed grant carries. JetOS fleet/activation authorities
 // are not part of this port.
-pub enum TrustAuthority {
+enum TrustAuthority {
     Package
     Build
     Env
@@ -58,12 +58,12 @@ pub enum TrustAuthority {
     }
 }
 
-pub struct TrustGrant {
+struct TrustGrant {
     // Kept as written: a stored grant may name an authority this build
     // does not know, and must still round-trip and revoke.
-    pub authority: String
-    pub subject: String
-    pub scope: String
+    authority: String
+    subject: String
+    scope: String
 
     fn key(self) -> String Never! {
         "{self.authority}:{self.subject}"
@@ -78,7 +78,7 @@ pub struct TrustGrant {
     }
 }
 
-pub enum TrustRecord {
+enum TrustRecord {
     Hash(hash: String)
     Pattern(pattern: String)
     Grant(TrustGrant)
@@ -140,7 +140,7 @@ fn trust_hex_value(code: Int) -> Int Never! {
 }
 
 // `~/.jet/trust`; `HOME`, then `USERPROFILE`, then the working directory.
-pub fn trust_store_path() -[Env]> String {
+fn trust_store_path() -[Env]> String {
     home :: sys.get("HOME") ?? sys.get("USERPROFILE") ?? "."
     files.join(files.join(home, CONFIG_DEFAULT_DIR), TRUST_FILE)
 }
@@ -190,19 +190,19 @@ pub fn trust_add_grant(store: String, project_dir: String, grant: TrustGrant) -[
 }
 
 // `jetpack config trust list`: every stored line.
-pub fn trust_list_entries(store: String) -[FS]> [String] {
+fn trust_list_entries(store: String) -[FS]> [String] {
     trust_store_lines(store)
 }
 
 // The typed view of the store.
-pub fn trust_list_records(store: String) -[FS]> [TrustRecord] {
+fn trust_list_records(store: String) -[FS]> [TrustRecord] {
     records := [TrustRecord]{}
     loop line in trust_store_lines(store) -> &records.push(TrustRecord.parse(line))
     records
 }
 
 // `jetpack config trust remove <pattern>`; false when absent.
-pub fn trust_remove_pattern(store: String, pattern: String) -[FS]> Bool {
+fn trust_remove_pattern(store: String, pattern: String) -[FS]> Bool {
     target :: "{TRUST_PATTERN_PREFIX}{pattern}"
     lines :: trust_store_lines(store)
     if !lines.contains(target) -> return false
@@ -217,7 +217,7 @@ pub fn trust_remove_pattern(store: String, pattern: String) -[FS]> Bool {
 // Remove every hash, pattern, grant, or raw line the selector names by exact
 // text, bare value, or grant key (`service:postgres.service`, with or
 // without its scope).
-pub fn trust_revoke(store: String, selector: String) -[FS]> Bool {
+fn trust_revoke(store: String, selector: String) -[FS]> Bool {
     removed := false
     kept := [String]{}
     loop line in trust_store_lines(store) {
@@ -240,7 +240,7 @@ pub fn trust_revoke(store: String, selector: String) -[FS]> Bool {
 
 // Already trusted: an exact hash grant, or a pattern matching the project
 // by its spelled or canonical path.
-pub fn trust_is_trusted(store: String, project_dir: String, hash: String) -[FS, Env]> Bool {
+fn trust_is_trusted(store: String, project_dir: String, hash: String) -[FS, Env]> Bool {
     canonical :: files.canonicalize(project_dir) ?? ""
     target :: "{TRUST_HASH_PREFIX}{hash}"
     loop line in trust_store_lines(store) {

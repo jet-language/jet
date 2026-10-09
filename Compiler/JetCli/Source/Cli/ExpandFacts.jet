@@ -50,7 +50,7 @@ fn jet_cli_expand_memory_status(projection: SemaMemoryProjection?) -> (text: Str
         .None -> (text: "not projected", value: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("not_projected"))}))
     }
 }
-pub fn jet_cli_expand_memory(modules: [JetDriverDocModule], index: JetCLISemIndex) -> [JetCLIExpandFact] Never! {
+fn jet_cli_expand_memory(modules: [JetDriverDocModule], index: JetCLISemIndex) -> [JetCLIExpandFact] Never! {
     // Every DocModule shares this one checked graph; never duplicate its rows.
     storage :: loop unit in modules { if unit.memory_facts == .Val(value) -> break value } ?? return [JetCLIExpandFact]{}
     permit :: storage.guard_read()
@@ -140,7 +140,7 @@ fn jet_cli_expand_layout_text(layout: TComptimeValue) -> String Never! {
     }
     "{header_parts.join(" ")}{status} fields=[{fields.join(",")}]"
 }
-pub fn jet_cli_expand_layout(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
+fn jet_cli_expand_layout(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
     facts := [JetCLIExpandFact]{}
     loop unit in modules {
         loop row in unit.layout_facts {
@@ -176,7 +176,7 @@ fn jet_cli_expand_origin_receiver(source: String, span: Span) -> String Never! {
     }
     "value"
 }
-pub fn jet_cli_expand_origin(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
+fn jet_cli_expand_origin(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
     facts := [JetCLIExpandFact]{}
     fact_type :: type_name(Type.Option{inner: Type.Named{name: "OriginInfo"}})
     loop unit in modules {

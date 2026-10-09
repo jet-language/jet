@@ -35,9 +35,9 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaDirectSpecialCheck {
-    pub handled: Bool
-    pub value: TExpr?
+struct SemaDirectSpecialCheck {
+    handled: Bool
+    value: TExpr?
 }
 
 fn sema_call_special_diagnostic(name: String, span: Span) -> Diagnostic {
@@ -841,7 +841,7 @@ fn sema_call_default_err_result(expected: Type?) -> Type? {
 // This predicate is intentionally keyed to the dedicated compiler binding.
 // A source/imported function or type named Err remains the ordinary resolver
 // winner, matching native shadowing behavior.
-pub fn sema_call_default_err_candidate(call: Call, expected: Type?, scopes: SemaScopeTable) -> Bool Never! {
+fn sema_call_default_err_candidate(call: Call, expected: Type?, scopes: SemaScopeTable) -> Bool Never! {
     if call.name != "Err" -> return false
     index :: sema_scope_resolve_index(scopes, call.name) ?? return false
     sema_scope_binding_is_compiler_builtin(scopes.bindings[index], "Err")
@@ -1001,8 +1001,8 @@ fn sema_call_local_default_values(target: SemaCallDirectTarget, binding: SemaCal
 }
 
 struct SemaCallInferenceFacts {
-    pub parameter_types: [Type]
-    pub argument_types: [Type]
+    parameter_types: [Type]
+    argument_types: [Type]
 }
 
 fn sema_call_inference_needs_context(expr: Expr) -> Bool Never! {

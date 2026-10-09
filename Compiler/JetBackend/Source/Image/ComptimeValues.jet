@@ -4,14 +4,14 @@
 use core.math as math
 use jet_foundation.[MIRType, TComptimeValue]
 
-pub struct X64ComptimeWord {
-    pub word: Int
-    pub errors: [String]
+struct X64ComptimeWord {
+    word: Int
+    errors: [String]
 }
 
-pub struct X64ComptimeValue {
-    pub value: TComptimeValue?
-    pub errors: [String]
+struct X64ComptimeValue {
+    value: TComptimeValue?
+    errors: [String]
 }
 
 fn x64_comptime_word_failure(message: String) -> X64ComptimeWord Never! {
@@ -24,7 +24,7 @@ fn x64_comptime_value_failure(message: String) -> X64ComptimeValue Never! {
 
 // Preflight the value ABI before mapping/calling. This is not an effects or
 // execution-budget proof: the compiler must establish those independently.
-pub fn x64_comptime_scalar_supported(ty: MIRType) -> Bool Never! {
+fn x64_comptime_scalar_supported(ty: MIRType) -> Bool Never! {
     if ty.kind == {
         .Int | .Bool | .Char | .Float | .String -> true
         .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> x64_comptime_scalar_supported(inner)
@@ -55,7 +55,7 @@ fn x64_comptime_runtime_text(runtime: X64Runtime, text: String, symbol: String) 
 
 // Produce an owning runtime carrier (String/large Int) or scalar bits. The
 // invocation owns transferred parameters; borrowed carriers remain the host's.
-pub fn x64_comptime_encode_scalar(runtime: X64Runtime, ty: MIRType, value: TComptimeValue) -> X64ComptimeWord {
+fn x64_comptime_encode_scalar(runtime: X64Runtime, ty: MIRType, value: TComptimeValue) -> X64ComptimeWord {
     if ty.kind == .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return x64_comptime_encode_scalar(runtime, inner, value)
     if ty.kind == {
         .Int -> {
@@ -132,7 +132,7 @@ fn x64_comptime_read_string(runtime: X64Runtime, word: Int) -> X64ComptimeValue 
 
 // Borrow a returned carrier; decoding never consumes it or changes ownership.
 // The compiler must drop the native result after retaining this detached value.
-pub fn x64_comptime_decode_scalar(runtime: X64Runtime, ty: MIRType, word: Int) -> X64ComptimeValue {
+fn x64_comptime_decode_scalar(runtime: X64Runtime, ty: MIRType, word: Int) -> X64ComptimeValue {
     if ty.kind == .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return x64_comptime_decode_scalar(runtime, inner, word)
     if ty.kind == {
         .Int -> {
