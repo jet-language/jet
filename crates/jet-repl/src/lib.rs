@@ -951,7 +951,7 @@ pub(crate) fn run_stmts_turn(
     };
     let echo = check_src.starts_with(ECHO_SENTINEL)
         && !suppress
-        && !matches!(echo_ty, Some(Type::Unit));
+        && !matches!(echo_ty, Some(Type::Named(ref name)) if name == crate::Syntax::INTERNAL_UNIT_TYPE);
 
     let session_names: HashSet<String> = session.scope.keys().cloned().collect();
     let newly_moved = collect_moved_names(stmts, &session_names, &session.binding_types);

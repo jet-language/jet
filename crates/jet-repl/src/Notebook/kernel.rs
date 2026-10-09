@@ -1375,20 +1375,20 @@ fn bundle_for_eval(eval: &EvalResult) -> MimeBundle {
 /// A list of records renders as a table, read from the value's
 /// type-directed JSON (`[{"field": …}, …]`).
 fn table_mime(value: &crate::Executor::TurnValue) -> Option<String> {
-    use jet_foundation::DataTree::DataTree;
+    use jet_foundation::Dyn::Dyn;
     let tree = jet_foundation::JSON::parse(value.json.as_deref()?).ok()?;
-    let DataTree::Array(rows) = tree else {
+    let Dyn::Array(rows) = tree else {
         return None;
     };
-    let DataTree::Object(first) = rows.first()? else {
+    let Dyn::Object(first) = rows.first()? else {
         return None;
     };
-    let cell = |value: &DataTree| match value {
-        DataTree::Text(text) | DataTree::TypedText(text) | DataTree::Number(text) => text.clone(),
-        DataTree::Int(number) => number.to_string(),
-        DataTree::Float(number) => number.to_string(),
-        DataTree::Bool(flag) => flag.to_string(),
-        DataTree::Null => "null".to_string(),
+    let cell = |value: &Dyn| match value {
+        Dyn::Text(text) | Dyn::TypedText(text) | Dyn::Number(text) => text.clone(),
+        Dyn::Int(number) => number.to_string(),
+        Dyn::Float(number) => number.to_string(),
+        Dyn::Bool(flag) => flag.to_string(),
+        Dyn::Null => "null".to_string(),
         other => format!("{other:?}"),
     };
     let mut html = String::from("<table><thead><tr>");
@@ -1399,7 +1399,7 @@ fn table_mime(value: &crate::Executor::TurnValue) -> Option<String> {
     }
     html.push_str("</tr></thead><tbody>");
     for row in &rows {
-        let DataTree::Object(fields) = row else {
+        let Dyn::Object(fields) = row else {
             continue;
         };
         html.push_str("<tr>");

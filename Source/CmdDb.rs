@@ -12,7 +12,6 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use jet::AST::{CtKey, CtReport, CtValue};
 use jet::Diagnostics::{json_str, ColorChoice};
 use jet::ExitCodes;
 use jet::REPL::Sql::{SqlEval, SqlSession};
@@ -2062,13 +2061,6 @@ fn query_result_columns(source: &LoadedSource, query: &sql_kernel::JetSqlQuery) 
 
 
 
-fn result_row_count(value: &CtValue) -> Option<usize> {
-    match value {
-        CtValue::Present(value) => result_row_count(value),
-        CtValue::List(values) => Some(values.len()),
-        _ => None,
-    }
-}
 
 fn run_query(
     sql: &str,
@@ -2148,25 +2140,35 @@ fn run_query(
                 "keep the query as a SELECT expression",
             )
         })?;
-        let rendered = jet::Comptime::render_datatree_for_tir(value).map_err(|error| {
+        let rendered = value.json.clone().ok_or_else(|| {
             DbError::new(
                 "E2600",
                 "query",
                 &source.path,
-                error.reason,
+                "the checked query result has no typed JSON representation",
+                "use a typed row list that supports JSON query output",
+            )
+        })?;
+        let result_tree = parse_json(&rendered, false).map_err(|error| {
+            DbError::new(
+                "E2600",
+                "query",
+                &source.path,
+                format!("query result is not valid JSON: {}", error.message),
                 "use finite Floats and text map keys for JSON query output",
             )
         })?;
-        let rows = result_row_count(value).ok_or_else(|| {
-            DbError::new(
+        let Value::Array(values) = &result_tree else {
+            return Err(DbError::new(
                 "E2600",
                 "query",
                 &source.path,
                 "query result was not a typed row list",
                 "use the local typed-table query surface rather than a scalar expression",
-            )
-        })?;
-        let result_value = status_ct_value(value);
+            ));
+        };
+        let rows = values.len();
+        let result_value = status_data_value(&result_tree);
         (evaluated, result_value, rendered, rows)
     };
     let elapsed_ms = started.elapsed().as_millis();
@@ -2531,101 +2533,7 @@ fn status_data_value(value: &Value) -> StatusValue {
     }
 }
 
-fn status_map_key(key: &CtKey) -> String {
-    match key {
-        CtKey::Int(value) => value.to_string(),
-        CtKey::BigInt(value) => value.to_string_rep(),
-        CtKey::Str(value) => value.clone(),
-        CtKey::Bool(value) => value.to_string(),
-        CtKey::Char(value) => value.to_string(),
-        CtKey::Tuple(_) | CtKey::Struct { .. } | CtKey::Enum { .. } => {
-            key.to_value().to_json()
-        }
-    }
-}
 
-fn status_ct_value(value: &CtValue) -> StatusValue {
-    if let CtValue::Enum {
-        type_name,
-        variant,
-        args,
-    } = value
-    {
-        if matches!(
-            type_name.as_str(),
-            "Dyn" | "JSON" | "TOML" | "YAML" | "CSV"
-        ) {
-            return match variant.as_str() {
-                "Null" => StatusValue::Null,
-                "Number" => match args.first().map(|(_, value)| value) {
-                    Some(CtValue::Str(value)) => value
-                        .parse::<i128>()
-                        .map(StatusValue::Integer)
-                        .unwrap_or_else(|_| StatusValue::Float(value.clone())),
-                    _ => StatusValue::Null,
-                },
-                _ => args
-                    .first()
-                    .map(|(_, value)| status_ct_value(value))
-                    .unwrap_or(StatusValue::Null),
-            };
-        }
-    }
-    match value {
-        CtValue::Int(value) => StatusValue::from(*value),
-        CtValue::Float(value) => StatusValue::Float(value.to_json()),
-        CtValue::Bool(value) => StatusValue::from(*value),
-        CtValue::Char(value) => StatusValue::from(value.to_string()),
-        CtValue::Str(value) => StatusValue::from(value.as_str()),
-        CtValue::BigInt(value) => StatusValue::from(value.to_string_rep().as_str()),
-        CtValue::Bytes(values) => {
-            StatusValue::array(values.iter().map(|value| StatusValue::from(*value as i128)))
-        }
-        CtValue::List(values) => StatusValue::array(values.iter().map(status_ct_value)),
-        CtValue::Map(values) => StatusValue::object(
-            values.iter().fold(StatusFields::new(), |fields, (key, value)| {
-                fields.with(status_map_key(key), status_ct_value(value))
-            }),
-        ),
-        CtValue::Struct { fields, .. } => StatusValue::object(
-            fields
-                .iter()
-                .filter(|(name, _)| !jet::Syntax::is_memo_storage_name(name))
-                .fold(StatusFields::new(), |fields, (name, value)| {
-                    fields.with(name.as_str(), status_ct_value(value))
-                }),
-        ),
-        CtValue::Enum {
-            variant, args, ..
-        } if args.is_empty() => StatusValue::from(variant.as_str()),
-        CtValue::Enum {
-            variant, args, ..
-        } if args.iter().all(|(label, _)| label.is_some()) => {
-            let fields = args.iter().fold(StatusFields::new(), |fields, (label, value)| {
-                fields.with(
-                    label.as_deref().expect("checked enum label"),
-                    status_ct_value(value),
-                )
-            });
-            StatusValue::object(
-                StatusFields::new().with(variant.as_str(), StatusValue::object(fields)),
-            )
-        }
-        CtValue::Enum { variant, args, .. } => StatusValue::object(
-            StatusFields::new().with(
-                variant.as_str(),
-                StatusValue::array(args.iter().map(|(_, value)| status_ct_value(value))),
-            ),
-        ),
-        CtValue::Present(value) => status_ct_value(value),
-        CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit | CtValue::Closure(_) => {
-            StatusValue::Null
-        }
-        CtValue::Failed(CtReport::Told(value)) => {
-            StatusValue::object(StatusFields::new().with("err", status_ct_value(value)))
-        }
-    }
-}
 fn result_csv(rendered: &str, columns: &[Column], path: &str) -> Result<String, DbError> {
     let parsed = parse_json(rendered, false).map_err(|error| {
         DbError::new(

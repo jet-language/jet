@@ -131,7 +131,7 @@ fn marker(nonce: &str) -> String {
 fn items_declare_run(items: &str) -> bool {
     let (tokens, _) = crate::Lexer::lex(items);
     tokens.windows(2).any(|pair| {
-        matches!(&pair[0].kind, crate::Lexer::TokKind::Fn)
+        matches!(&pair[0].kind, crate::Lexer::TokKind::KwFn)
             && matches!(&pair[1].kind, crate::Lexer::TokKind::Ident(name) if name == "run")
     })
 }
@@ -659,11 +659,11 @@ fn refusal(stdout: &str, stderr: &str) -> TurnFailure {
 }
 
 fn field<'t>(
-    tree: &'t jet_foundation::DataTree::DataTree,
+    tree: &'t jet_foundation::Dyn::Dyn,
     name: &str,
-) -> Option<&'t jet_foundation::DataTree::DataTree> {
+) -> Option<&'t jet_foundation::Dyn::Dyn> {
     match tree {
-        jet_foundation::DataTree::DataTree::Object(fields) => fields
+        jet_foundation::Dyn::Dyn::Object(fields) => fields
             .iter()
             .find(|(key, _)| key == name)
             .map(|(_, value)| value),
@@ -671,17 +671,17 @@ fn field<'t>(
     }
 }
 
-fn array(tree: &jet_foundation::DataTree::DataTree) -> Option<&[jet_foundation::DataTree::DataTree]> {
+fn array(tree: &jet_foundation::Dyn::Dyn) -> Option<&[jet_foundation::Dyn::Dyn]> {
     match tree {
-        jet_foundation::DataTree::DataTree::Array(items) => Some(items),
+        jet_foundation::Dyn::Dyn::Array(items) => Some(items),
         _ => None,
     }
 }
 
-fn text(tree: &jet_foundation::DataTree::DataTree) -> Option<String> {
+fn text(tree: &jet_foundation::Dyn::Dyn) -> Option<String> {
     match tree {
-        jet_foundation::DataTree::DataTree::Text(value)
-        | jet_foundation::DataTree::DataTree::TypedText(value) => Some(value.clone()),
+        jet_foundation::Dyn::Dyn::Text(value)
+        | jet_foundation::Dyn::Dyn::TypedText(value) => Some(value.clone()),
         _ => None,
     }
 }

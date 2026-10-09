@@ -1,20 +1,18 @@
 //! SQL-console session seam (D-DX-SQLSHELL1=A).
 //!
 //! This module deliberately does not parse SQL or execute a second evaluator.
-//! It owns only the typed REPL session lifetime and returns the same `CtValue`
+//! It owns only the typed REPL session lifetime and returns the same `TurnValue`
 //! plus diagnostics used by the ordinary `jet repl` path. `Source/CmdDb.rs`
 //! marshals files, dot commands, and output modes around this seam.
 
-use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::Comptime::{CtValue, DevSink, REPL_FUEL_BUDGET};
+use crate::Executor::TurnValue;
 use crate::Diagnostics::Diagnostic;
-use crate::AST::{Func, StructDef};
 
-/// One deterministic evaluation result from the shared REPL interpreter.
+/// One deterministic evaluation result from the shared REPL executor.
 pub struct SqlEval {
-    pub value: Option<CtValue>,
+    pub value: Option<TurnValue>,
     pub stdout: String,
     pub stderr: String,
 }
@@ -41,7 +39,7 @@ impl SqlSession {
     }
 
     /// Evaluate one already-complete Jet input through the ordinary REPL
-    /// classifier, sema, and comptime tree-walker.
+    /// classifier, sema, and checked build-and-execute path.
     pub fn execute(&mut self, input: &str) -> Result<SqlEval, Vec<Diagnostic>> {
         jet_driver::boot_mir_eval();
         let normalized = super::normalize_repl_input(input);
@@ -62,7 +60,6 @@ impl SqlSession {
                 stdout: String::new(),
                 stderr: String::new(),
             }),
-            super::InputKind::Reject(feature) => Err(vec![super::e1802(&feature)]),
             super::InputKind::Meta(command, _) => Err(vec![Diagnostic::error(
                 "E1802",
                 format!("SQL console does not accept REPL meta-command `:{command}`"),
@@ -142,84 +139,65 @@ impl SqlSession {
         suppress: bool,
         check_src: String,
     ) -> Result<SqlEval, Vec<Diagnostic>> {
-        let (checked_stmts, checked_core_imports) =
-            super::type_check_stmts(&self.session, &parsed, self.session.step, &check_src)?;
-        let session_binding_names: HashSet<String> = self.session.scope.keys().cloned().collect();
-        let newly_moved = super::collect_moved_names(
-            &parsed,
-            &session_binding_names,
-            &self.session.scope,
-        );
-        let executable = super::repl_executable_stmts(checked_stmts.clone());
-        let mut core_imports = self.session.core_imports.clone();
-        core_imports.extend(checked_core_imports);
-        let funcs: HashMap<String, &Func> = self
-            .session
-            .func_defs
-            .iter()
-            .map(|(name, function)| (name.clone(), function))
-            .collect();
-        let structs: HashMap<String, &StructDef> = self
-            .session
-            .struct_defs
-            .iter()
-            .map(|(name, structure)| (name.clone(), structure))
-            .collect();
-        let mut sink = DevSink::new();
         let mut authorizer = self.policy.authorizer(None);
-        let mut trial_scope = self.session.scope.clone();
-        let result = crate::Comptime::run_repl_step(
-            &executable,
-            &funcs,
-            &self.base_dir,
-            &mut sink,
-            &mut trial_scope,
-            REPL_FUEL_BUDGET,
+        let result = super::run_stmts_turn(
+            &mut self.session,
+            &parsed,
             suppress,
-            &core_imports,
-            &structs,
-            &self.session.binding_types,
+            &check_src,
+            input,
+            &self.base_dir,
             &mut authorizer,
+            true,
         );
         match result {
-            Ok(value) => {
-                for name in &newly_moved {
-                    trial_scope.remove(name);
-                }
-                self.session.scope = trial_scope;
-                self.session.moved_names.extend(newly_moved);
-                let raw = input.trim_end_matches(';').trim();
-                if !raw.is_empty() && !raw.starts_with("__repl_echo__") {
-                    self.session.stmt_srcs.push(format!("{raw};"));
-                }
-                self.session.record_stmts(&checked_stmts);
-                let summary = value
-                    .as_ref()
-                    .filter(|value| !matches!(**value, CtValue::Unit))
-                    .map(super::display_value)
-                    .unwrap_or_default();
+            super::TurnResult::Done {
+                stdout,
+                stderr,
+                echo,
+                bound_name,
+                had_effect,
+                ..
+            } => {
+                let summary = echo.as_ref().map(super::echo_text).unwrap_or_default();
                 self.session.record_turn_ex(
                     input,
                     super::ReplTurnStatus::Ok,
                     summary,
-                    !sink.stdout.is_empty() || !sink.stderr.is_empty(),
-                    None,
+                    had_effect,
+                    bound_name,
                 );
                 self.session.remember_success(input);
                 Ok(SqlEval {
-                    value,
-                    stdout: sink.stdout,
-                    stderr: sink.stderr,
+                    value: echo,
+                    stdout,
+                    stderr,
                 })
             }
-            Err(diagnostic) => {
-                let diagnostic = super::restore_move_diagnostic(diagnostic, &self.session.moved_names);
-                Err(vec![if diagnostic.code == "E2202" {
-                    super::e1801(REPL_FUEL_BUDGET)
-                } else {
-                    diagnostic
-                }])
+            super::TurnResult::Failed {
+                mut diagnostics,
+                report,
+                ..
+            } => {
+                if let Some(report) = report {
+                    diagnostics.push(Diagnostic::error(
+                        "E2105",
+                        report.lines().find(|line| !line.trim().is_empty())
+                            .unwrap_or("the program stopped").trim().to_string(),
+                        report,
+                        "fix the runtime failure before running the query again".to_string(),
+                        None,
+                    ));
+                }
+                Err(diagnostics)
             }
+            super::TurnResult::Interrupted => Err(vec![Diagnostic::error(
+                "E2105",
+                "the SQL console turn was interrupted".to_string(),
+                "its child build-and-execute run was stopped".to_string(),
+                "run the query again".to_string(),
+                None,
+            )]),
         }
     }
 }
