@@ -98,7 +98,7 @@ struct DoctorReport {
     }
 
     fn to_json(self) -> String ReportError! {
-        checks := [DataTree]{}
+        checks := [Dyn]{}
         loop check in self.checks {
             fields := [String: Dyn]{}
             fields["name"] = Dyn.Text(check.name)
@@ -107,11 +107,11 @@ struct DoctorReport {
             fields["fix"] = Dyn.Text(check.fix)
             &checks.push(Dyn.Object(fields))
         }
-        document := [String: DataTree]{}
-        document["kind"] = DataTree.Text("jetpack.doctor")
-        document["status"] = DataTree.Text(self.health().word())
-        document["checks"] = DataTree.Array(checks)
-        text :: json.to_string(DataTree.Object(document)) ?? return Err(ReportError.new(err.reason))
+        document := [String: Dyn]{}
+        document["kind"] = Dyn.Text("jetpack.doctor")
+        document["status"] = Dyn.Text(self.health().word())
+        document["checks"] = Dyn.Array(checks)
+        text :: json.to_string(Dyn.Object(document)) ?? return Err(ReportError.new(err.reason))
         Ok(text)
     }
 }

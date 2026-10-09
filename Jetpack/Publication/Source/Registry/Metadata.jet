@@ -179,7 +179,7 @@ fn publication_parse_registry_dependency_descriptor(descriptor: Dyn) -> Publicat
     if descriptor == {
         .Text(requirement) -> &requirements.push(requirement.copy())
         .Object(pairs) -> {
-            fields := [String: DataTree]{}
+            fields := [String: Dyn]{}
             loop pair in pairs -> fields[pair.key] = pair.value
             // `require` wins even when malformed; `version` is fallback only
             // when `require` is absent. Unknown descriptor fields are ignored.

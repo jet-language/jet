@@ -84,9 +84,9 @@ fn pkg_r_render_jet(lib: String, functions: [String]) -> String Never! {
     &out.push(pkg_render_decode_response("RError", DecoderProtocol.StandardEnvelope))
     &out.push(PKG_R_JET_SESSION)
     loop name in functions {
-        &out.push("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RError! {{\n    payload :: json.to_string(input) ?? return Err(RError.Protocol)\n    raw :: abi.{name}(session.value, payload, deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+        &out.push("pub fn {name}(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError! {{\n    payload :: json.to_string(input) ?? return Err(RError.Protocol)\n    raw :: abi.{name}(session.value, payload, deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
         &out.push("pub fn {name}_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {{\n    payload :: json.to_string(~rows) ?? return Err(RError.Protocol)\n    raw :: abi.{name}_table(session.value, payload, deadline_ms)\n    code :: abi.take_error()\n    value :: decode_response(raw, code)\n    output_json :: json.to_string(value) ?? return Err(RError.Protocol)\n    return Ok(json.decode<[T]>(output_json) ?? return Err(RError.Protocol))\n}}\n\n")
-        &out.push("pub fn {name}_plot(session: Session, input: DataTree, deadline_ms: Int) -> String RError! {{\n    payload :: json.to_string(input) ?? return Err(RError.Protocol)\n    raw :: abi.{name}_plot(session.value, payload, deadline_ms)\n    code :: abi.take_error()\n    value :: decode_response(raw, code)\n    return Ok(value.text() ?? return Err(RError.Protocol))\n}}\n\n")
+        &out.push("pub fn {name}_plot(session: Session, input: Dyn, deadline_ms: Int) -> String RError! {{\n    payload :: json.to_string(input) ?? return Err(RError.Protocol)\n    raw :: abi.{name}_plot(session.value, payload, deadline_ms)\n    code :: abi.take_error()\n    value :: decode_response(raw, code)\n    return Ok(value.text() ?? return Err(RError.Protocol))\n}}\n\n")
     }
     out.join("")
 }

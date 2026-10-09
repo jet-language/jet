@@ -46,7 +46,7 @@ fn native_pack_test_refused(bytes: [U8]) -> Bool {
         .Ok(value) -> assert_eq(value.length(), STORE_ARTIFACT_U64_MAX)
         .Err(_) -> panic("full unsigned length rejected")
     }
-    tree :: DataTree.Object([String: DataTree]{"schema": DataTree.Text("jet.native-runtime-pack-identity/v1"), "subject": DataTree.Text("{digest}:1"), "approval": DataTree.Text("{digest}:1"), "path": DataTree.Text("native.key")})
+    tree :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-pack-identity/v1"), "subject": Dyn.Text("{digest}:1"), "approval": Dyn.Text("{digest}:1"), "path": Dyn.Text("native.key")})
     assert(native_pack_test_refused(native_pack_encode(tree) ?? panic("encode")))
 }
 
@@ -60,7 +60,7 @@ fn native_pack_test_refused(bytes: [U8]) -> Bool {
         else -> { panic("subject object") }
     }
     fields["providers"] = native_pack_roles_tree([NativeRuntimeRoleObject]{subject.providers[0], subject.providers[0]})
-    if NativeRuntimePackSubject.from_tree(DataTree.Object(fields)) == {
+    if NativeRuntimePackSubject.from_tree(Dyn.Object(fields)) == {
         .Ok(_) -> panic("duplicate provider accepted")
         .Err(_) -> {}
     }
@@ -68,25 +68,25 @@ fn native_pack_test_refused(bytes: [U8]) -> Bool {
 
 fn native_pack_test_receipt(store: ArtifactStore, id: String, invocation: ObjectHandle, inputs: [NativeRuntimeRoleObject], outputs: [NativeRuntimeRoleObject]) -[FS, Env, Exec, Time, Rand]> NativeRuntimeObservedStep {
     log :: store.publish_blob("small codec fixture log\n".bytes()) ?? panic("log")
-    tree :: DataTree.Object([String: DataTree]{"schema": DataTree.Text("jet.native-runtime-step-receipt/v1"), "id": DataTree.Text(id), "rc": DataTree.Text("0"), "invocation": native_pack_handle_tree(invocation), "inputs": native_pack_roles_tree(inputs), "outputs": native_pack_roles_tree(outputs), "log": native_pack_handle_tree(log)})
+    tree :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-step-receipt/v1"), "id": Dyn.Text(id), "rc": Dyn.Text("0"), "invocation": native_pack_handle_tree(invocation), "inputs": native_pack_roles_tree(inputs), "outputs": native_pack_roles_tree(outputs), "log": native_pack_handle_tree(log)})
     receipt :: store.publish_blob(native_pack_encode(tree) ?? panic("receipt codec")) ?? panic("receipt")
     NativeRuntimeObservedStep{id, observed_rc: "0", invocation, inputs, outputs, receipt}
 }
 
-fn native_pack_test_lifecycle_entry(symbol: String, phase: String, priority: String, section: String, provider: ObjectHandle) -> DataTree {
-    DataTree.Object([String: DataTree]{"symbol": DataTree.Text(symbol), "phase": DataTree.Text(phase), "priority": DataTree.Text(priority), "section": DataTree.Text(section), "provider": native_pack_handle_tree(provider)})
+fn native_pack_test_lifecycle_entry(symbol: String, phase: String, priority: String, section: String, provider: ObjectHandle) -> Dyn {
+    Dyn.Object([String: Dyn]{"symbol": Dyn.Text(symbol), "phase": Dyn.Text(phase), "priority": Dyn.Text(priority), "section": Dyn.Text(section), "provider": native_pack_handle_tree(provider)})
 }
 
 fn native_pack_test_lifecycle(store: ArtifactStore, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> ObjectHandle {
     // Schema fixtures only; these blobs are deliberately not real ELF evidence.
     sections :: store.publish_blob("unit fixture sections, not ELF".bytes()) ?? panic("sections")
     relocations :: store.publish_blob("unit fixture relocations, not ELF".bytes()) ?? panic("relocations")
-    entries :: [DataTree]{
+    entries :: [Dyn]{
         native_pack_test_lifecycle_entry("jet_rt_alloc_init", "init", "0", ".init_array.00000", object),
         native_pack_test_lifecycle_entry("jet_rt_host_init", "init", "1", ".init_array.00001", object),
         native_pack_test_lifecycle_entry("jet_rt_stdout_flush", "fini", "1", ".fini_array.00001", object),
     }
-    tree :: DataTree.Object([String: DataTree]{"schema": DataTree.Text("jet.native-runtime-lifecycle-evidence/v1"), "pack": native_pack_handle_tree(object), "jet_object": native_pack_handle_tree(object), "entries": DataTree.Array(entries), "sections": native_pack_handle_tree(sections), "relocations": native_pack_handle_tree(relocations)})
+    tree :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-lifecycle-evidence/v1"), "pack": native_pack_handle_tree(object), "jet_object": native_pack_handle_tree(object), "entries": Dyn.Array(entries), "sections": native_pack_handle_tree(sections), "relocations": native_pack_handle_tree(relocations)})
     store.publish_blob(native_pack_encode(tree) ?? panic("lifecycle codec")) ?? panic("lifecycle fixture")
 }
 
@@ -98,27 +98,27 @@ fn native_pack_test_fixture(store: ArtifactStore, payload: String) -[FS, Env, Ex
     generation :: store.publish_blob("{{\"final\":\"0000000000000000000000000000000000000000\",\"deterministic\":true}}".bytes()) ?? panic("generation")
     raw_frontend :: store.publish_blob("{{\"raw_exit\":101}}".bytes()) ?? panic("raw frontend")
     final_source_tree :: store.publish_blob("1111111111111111111111111111111111111111\n".bytes()) ?? panic("final tree")
-    known :: DataTree.Object([String: DataTree]{"role": DataTree.Text("provider-é"), "source": DataTree.Object([String: DataTree]{"kind": DataTree.Text("known"), "object": native_pack_handle_tree(object)})})
-    produced :: DataTree.Object([String: DataTree]{"role": DataTree.Text("pack-input"), "source": DataTree.Object([String: DataTree]{"kind": DataTree.Text("produced"), "step": DataTree.Text("build"), "output": DataTree.Text("pack")})})
-    build :: DataTree.Object([String: DataTree]{"id": DataTree.Text("build"), "expected_rc": DataTree.Text("0"), "invocation": native_pack_handle_tree(invocation), "inputs": DataTree.Array([DataTree]{known}), "outputs": DataTree.Array([DataTree]{DataTree.Text("pack"), DataTree.Text("generation"), DataTree.Text("raw_frontend"), DataTree.Text("final_source_tree")})})
-    consume :: DataTree.Object([String: DataTree]{"id": DataTree.Text("consume"), "expected_rc": DataTree.Text("0"), "invocation": native_pack_handle_tree(invocation), "inputs": DataTree.Array([DataTree]{produced}), "outputs": DataTree.Array([DataTree]{})})
-    artifacts := [DataTree]{}
+    known :: Dyn.Object([String: Dyn]{"role": Dyn.Text("provider-é"), "source": Dyn.Object([String: Dyn]{"kind": Dyn.Text("known"), "object": native_pack_handle_tree(object)})})
+    produced :: Dyn.Object([String: Dyn]{"role": Dyn.Text("pack-input"), "source": Dyn.Object([String: Dyn]{"kind": Dyn.Text("produced"), "step": Dyn.Text("build"), "output": Dyn.Text("pack")})})
+    build :: Dyn.Object([String: Dyn]{"id": Dyn.Text("build"), "expected_rc": Dyn.Text("0"), "invocation": native_pack_handle_tree(invocation), "inputs": Dyn.Array([Dyn]{known}), "outputs": Dyn.Array([Dyn]{Dyn.Text("pack"), Dyn.Text("generation"), Dyn.Text("raw_frontend"), Dyn.Text("final_source_tree")})})
+    consume :: Dyn.Object([String: Dyn]{"id": Dyn.Text("consume"), "expected_rc": Dyn.Text("0"), "invocation": native_pack_handle_tree(invocation), "inputs": Dyn.Array([Dyn]{produced}), "outputs": Dyn.Array([Dyn]{})})
+    artifacts := [Dyn]{}
     loop role in ([String]{"pack_object", "jet_object", "remaining_native_archive", "remaining_raw_leaf_archive", "runtime_sources", "runtime_exports", "runtime_imports"}) {
-        &artifacts.push(DataTree.Object([String: DataTree]{"role": DataTree.Text(role), "source": DataTree.Object([String: DataTree]{"kind": DataTree.Text("produced"), "step": DataTree.Text("build"), "output": DataTree.Text("pack")})}))
+        &artifacts.push(Dyn.Object([String: Dyn]{"role": Dyn.Text(role), "source": Dyn.Object([String: Dyn]{"kind": Dyn.Text("produced"), "step": Dyn.Text("build"), "output": Dyn.Text("pack")})}))
     }
-    evidence_roles := [DataTree]{}
+    evidence_roles := [Dyn]{}
     loop role in ([String]{"generation", "raw_frontend", "final_source_tree"}) {
-        &evidence_roles.push(DataTree.Object([String: DataTree]{"role": DataTree.Text(role), "source": DataTree.Object([String: DataTree]{"kind": DataTree.Text("produced"), "step": DataTree.Text("build"), "output": DataTree.Text(role)})}))
+        &evidence_roles.push(Dyn.Object([String: Dyn]{"role": Dyn.Text(role), "source": Dyn.Object([String: Dyn]{"kind": Dyn.Text("produced"), "step": Dyn.Text("build"), "output": Dyn.Text(role)})}))
     }
-    contract_tree :: DataTree.Object([String: DataTree]{"schema": DataTree.Text("jet.native-runtime-rail-contract/v1"), "job": native_pack_handle_tree(job), "proofq_name": DataTree.Text("unit-codec-fixture"), "steps": DataTree.Array([DataTree]{build, consume}), "artifacts": DataTree.Array(artifacts), "evidence": DataTree.Array(evidence_roles), "generators": DataTree.Array([DataTree]{known}), "abi": DataTree.Array([DataTree]{known}), "routes": DataTree.Array([DataTree]{known}), "providers": DataTree.Array([DataTree]{known})})
+    contract_tree :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-rail-contract/v1"), "job": native_pack_handle_tree(job), "proofq_name": Dyn.Text("unit-codec-fixture"), "steps": Dyn.Array([Dyn]{build, consume}), "artifacts": Dyn.Array(artifacts), "evidence": Dyn.Array(evidence_roles), "generators": Dyn.Array([Dyn]{known}), "abi": Dyn.Array([Dyn]{known}), "routes": Dyn.Array([Dyn]{known}), "providers": Dyn.Array([Dyn]{known})})
     rail_contract :: store.publish_blob(native_pack_encode(contract_tree) ?? panic("contract codec")) ?? panic("contract")
-    admission_tree :: DataTree.Object([String: DataTree]{"schema": DataTree.Text("jet.native-runtime-rail-admission/v1"), "decision": DataTree.Text("approved"), "job": native_pack_handle_tree(job), "rail_contract": native_pack_handle_tree(rail_contract)})
+    admission_tree :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-rail-admission/v1"), "decision": Dyn.Text("approved"), "job": native_pack_handle_tree(job), "rail_contract": native_pack_handle_tree(rail_contract)})
     admission :: store.publish_blob(native_pack_encode(admission_tree) ?? panic("admission codec")) ?? panic("admission")
     proof_done :: store.publish_blob("0\n".bytes()) ?? panic("done")
     first :: native_pack_test_receipt(store, "build", invocation, [NativeRuntimeRoleObject]{NativeRuntimeRoleObject{role: "provider-é", object}}, [NativeRuntimeRoleObject]{NativeRuntimeRoleObject{role: "pack", object}, NativeRuntimeRoleObject{role: "generation", object: generation}, NativeRuntimeRoleObject{role: "raw_frontend", object: raw_frontend}, NativeRuntimeRoleObject{role: "final_source_tree", object: final_source_tree}})
     second :: native_pack_test_receipt(store, "consume", invocation, [NativeRuntimeRoleObject]{NativeRuntimeRoleObject{role: "pack-input", object}}, [NativeRuntimeRoleObject]{})
     metadata :: store.publish_blob("name=unit-codec-fixture\nrc=0\nstart=10\nend=11\nkind=test\n".bytes()) ?? panic("metadata fixture")
-    terminal :: DataTree.Object([String: DataTree]{"schema": DataTree.Text("jet.native-runtime-proofq-terminal/v1"), "job": native_pack_handle_tree(job), "rail_contract": native_pack_handle_tree(rail_contract), "done": native_pack_handle_tree(proof_done), "proofq_metadata": native_pack_handle_tree(metadata), "proofq_name": DataTree.Text("unit-codec-fixture"), "runtime_source_revision": DataTree.Text("0000000000000000000000000000000000000000"), "runtime_source_tree": DataTree.Text("1111111111111111111111111111111111111111")})
+    terminal :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-proofq-terminal/v1"), "job": native_pack_handle_tree(job), "rail_contract": native_pack_handle_tree(rail_contract), "done": native_pack_handle_tree(proof_done), "proofq_metadata": native_pack_handle_tree(metadata), "proofq_name": Dyn.Text("unit-codec-fixture"), "runtime_source_revision": Dyn.Text("0000000000000000000000000000000000000000"), "runtime_source_tree": Dyn.Text("1111111111111111111111111111111111111111")})
     proof_terminal :: store.publish_blob(native_pack_encode(terminal) ?? panic("terminal codec")) ?? panic("terminal fixture")
     evidence :: NativeRuntimePackEvidence{admission, rail_contract, job, proof_done, proof_terminal, final_source_tree, generation, raw_frontend, steps: [NativeRuntimeObservedStep]{first, second}}
     subject := native_pack_test_subject(object)
@@ -127,7 +127,7 @@ fn native_pack_test_fixture(store: ArtifactStore, payload: String) -[FS, Env, Ex
 }
 
 fn native_pack_test_authorize(store: ArtifactStore, subject: ObjectHandle, evidence: NativeRuntimePackEvidence) -[FS, Env, Exec, Time, Rand]> ObjectHandle {
-    tree :: DataTree.Object([String: DataTree]{"schema": DataTree.Text("jet.native-runtime-publication-authorization/v1"), "decision": DataTree.Text("approved"), "subject": native_pack_handle_tree(subject), "rail_contract": native_pack_handle_tree(evidence.rail_contract), "admission": native_pack_handle_tree(evidence.admission)})
+    tree :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-publication-authorization/v1"), "decision": Dyn.Text("approved"), "subject": native_pack_handle_tree(subject), "rail_contract": native_pack_handle_tree(evidence.rail_contract), "admission": native_pack_handle_tree(evidence.admission)})
     store.publish_blob(native_pack_encode(tree) ?? panic("authorization codec")) ?? panic("fixture authorization")
 }
 
@@ -281,8 +281,8 @@ fn native_pack_test_authorize(store: ArtifactStore, subject: ObjectHandle, evide
     contract :: NativeRuntimeRailContract.from_bytes(native_pack_blob(store, fixture.evidence.rail_contract, &census) ?? panic("contract")) ?? panic("decode")
     produced := [String: [String]]{}
     loop pair in ([String]{"future", "build"}) {
-        input :: DataTree.Object([String: DataTree]{"role": DataTree.Text("x"), "source": DataTree.Object([String: DataTree]{"kind": DataTree.Text("produced"), "step": DataTree.Text(pair), "output": DataTree.Text("missing")})})
-        fields :: [String: DataTree]{"inputs": DataTree.Array([DataTree]{input})}
+        input :: Dyn.Object([String: Dyn]{"role": Dyn.Text("x"), "source": Dyn.Object([String: Dyn]{"kind": Dyn.Text("produced"), "step": Dyn.Text(pair), "output": Dyn.Text("missing")})})
+        fields :: [String: Dyn]{"inputs": Dyn.Array([Dyn]{input})}
         if native_pack_rail_inputs(fields, "inputs", produced) == {
             .Ok(_) -> panic("unresolved producer accepted")
             .Err(_) -> {}
@@ -302,11 +302,11 @@ fn native_pack_test_authorize(store: ArtifactStore, subject: ObjectHandle, evide
         fields := native_pack_fields(tree, [String]{"schema", "pack", "jet_object", "entries", "sections", "relocations"}) ?? panic("lifecycle fields")
         entries := native_pack_array_field(fields, "entries") ?? panic("entries")
         entry := native_pack_fields(entries[0], [String]{"symbol", "phase", "priority", "provider", "section"}) ?? panic("entry")
-        entry["section"] = DataTree.Text(spelling)
-        entries[0] = DataTree.Object(entry)
-        fields["entries"] = DataTree.Array(entries)
+        entry["section"] = Dyn.Text(spelling)
+        entries[0] = Dyn.Object(entry)
+        fields["entries"] = Dyn.Array(entries)
         changed := fixture.subject
-        changed.lifecycle = store.publish_blob(native_pack_encode(DataTree.Object(fields)) ?? panic("alias codec")) ?? panic("alias fixture")
+        changed.lifecycle = store.publish_blob(native_pack_encode(Dyn.Object(fields)) ?? panic("alias codec")) ?? panic("alias fixture")
         if native_runtime_pack_prepare(store, changed, fixture.evidence) == {
             .Ok(_) -> panic("noncanonical lifecycle section accepted")
             .Err(_) -> {}

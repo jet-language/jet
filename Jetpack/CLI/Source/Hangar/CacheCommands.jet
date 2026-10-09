@@ -79,7 +79,7 @@ fn cli_cache_remove(theme: Theme, parsed: CLIParsed, roots: HangarRoots) -[IO, F
     if !(cli_cache_confirm_apply(theme, parsed, "cache-remove") ?? return cli_status_encoding_error(err)) -> return EXIT_OK
     removed :: store_remove_cache_binding(roots, role) ?? return cli_cache_error(theme, parsed, "remove", err)
     if parsed.flags.json {
-        print(report_render_status("cache-remove", true, StatusFields.new().with("role", DataTree.Text(role)).with("removed", DataTree.Bool(removed))) ?? return cli_status_encoding_error(err))
+        print(report_render_status("cache-remove", true, StatusFields.new().with("role", Dyn.Text(role)).with("removed", Dyn.Bool(removed))) ?? return cli_status_encoding_error(err))
         if removed -> return EXIT_OK
     } else if removed {
         theme.status("removed cache role `{role}`")
@@ -143,7 +143,7 @@ fn cli_cache_report(theme: Theme, parsed: CLIParsed, action: String, report: Cac
 fn cli_cache_confirm_apply(theme: Theme, parsed: CLIParsed, action: String) -[IO, Time.Wait]> Bool ReportError! {
     if !parsed.flags.json -> return Ok(theme.confirm_apply(parsed.flags.assume_yes))
     if parsed.flags.assume_yes -> return Ok(true)
-    print(report_render_status(action, true, StatusFields.new().with("applied", DataTree.Bool(false))) ?? return Err(err))
+    print(report_render_status(action, true, StatusFields.new().with("applied", Dyn.Bool(false))) ?? return Err(err))
     Ok(false)
 }
 

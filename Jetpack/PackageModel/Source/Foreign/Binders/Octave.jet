@@ -181,9 +181,9 @@ PKG_OCTAVE_JET_FUNCTION :: prep { ```fn @@function@@(session: Session, input: Te
     loop value in compute.to_list(input) {
         data_wire.push(Dyn.Float(value))
     }
-    request :: json.to_string(DataTree.Object([
-        "shape": DataTree.Array(shape_wire),
-        "data": DataTree.Array(data_wire)
+    request :: json.to_string(Dyn.Object([
+        "shape": Dyn.Array(shape_wire),
+        "data": Dyn.Array(data_wire)
     ])) ?? return Err(OctaveError.Protocol)
     raw :: abi.@@function@@(session.value, request, deadline_ms)
     code :: abi.take_error()

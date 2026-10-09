@@ -39,11 +39,11 @@ struct NativeRuntimePackSubject {
     providers: [NativeRuntimeRoleObject]
     lifecycle: ObjectHandle
 
-    fn to_tree(self) -> DataTree Never! {
-        DataTree.Object([String: DataTree]{
-            "schema": DataTree.Text("jet.native-runtime-pack-subject/v1"),
-            "runtime_source_revision": DataTree.Text(self.runtime_source_revision),
-            "runtime_source_tree": DataTree.Text(self.runtime_source_tree),
+    fn to_tree(self) -> Dyn Never! {
+        Dyn.Object([String: Dyn]{
+            "schema": Dyn.Text("jet.native-runtime-pack-subject/v1"),
+            "runtime_source_revision": Dyn.Text(self.runtime_source_revision),
+            "runtime_source_tree": Dyn.Text(self.runtime_source_tree),
             "pack_object": native_pack_handle_tree(self.pack_object),
             "jet_object": native_pack_handle_tree(self.jet_object),
             "remaining_native_archive": native_pack_handle_tree(self.remaining_native_archive),
@@ -59,7 +59,7 @@ struct NativeRuntimePackSubject {
         })
     }
 
-    fn from_tree(tree: DataTree) -> NativeRuntimePackSubject NativeRuntimePackError! {
+    fn from_tree(tree: Dyn) -> NativeRuntimePackSubject NativeRuntimePackError! {
         fields :: native_pack_fields(tree, [String]{"schema", "runtime_source_revision", "runtime_source_tree", "pack_object", "jet_object", "remaining_native_archive", "remaining_raw_leaf_archive", "runtime_sources", "runtime_exports", "runtime_imports", "generators", "abi", "routes", "providers", "lifecycle"})
         native_pack_schema(fields, "jet.native-runtime-pack-subject/v1")
         revision :: native_pack_text_field(fields, "runtime_source_revision")
@@ -95,8 +95,8 @@ struct NativeRuntimePackIdentity {
     approval: ObjectHandle
 
     fn to_bytes(self) -> [U8] NativeRuntimePackError! {
-        native_pack_encode(DataTree.Object([String: DataTree]{
-            "schema": DataTree.Text("jet.native-runtime-pack-identity/v1"),
+        native_pack_encode(Dyn.Object([String: Dyn]{
+            "schema": Dyn.Text("jet.native-runtime-pack-identity/v1"),
             "subject": native_pack_handle_tree(self.subject),
             "approval": native_pack_handle_tree(self.approval),
         }))
@@ -127,8 +127,8 @@ struct NativeCandidateComposition {
     }
 
     fn to_bytes(self) -> [U8] NativeRuntimePackError! {
-        native_pack_encode(DataTree.Object([String: DataTree]{
-            "schema": DataTree.Text("jet.candidate-composition/v1"),
+        native_pack_encode(Dyn.Object([String: Dyn]{
+            "schema": Dyn.Text("jet.candidate-composition/v1"),
             "compiler": native_pack_handle_tree(self.compiler),
             "expected_runtime_identity": native_pack_handle_tree(self.expected_runtime_identity),
             "expected_approval": native_pack_handle_tree(self.expected_approval),
@@ -192,7 +192,7 @@ struct NativeRuntimeRailContract {
     routes: [NativeRuntimeRailInput]
     providers: [NativeRuntimeRailInput]
 
-    fn from_tree(tree: DataTree) -> NativeRuntimeRailContract NativeRuntimePackError! {
+    fn from_tree(tree: Dyn) -> NativeRuntimeRailContract NativeRuntimePackError! {
         fields :: native_pack_fields(tree, [String]{"schema", "job", "proofq_name", "steps", "artifacts", "evidence", "generators", "abi", "routes", "providers"})
         native_pack_schema(fields, "jet.native-runtime-rail-contract/v1")
         rows :: native_pack_array_field(fields, "steps")
@@ -288,23 +288,23 @@ struct NativeRuntimePackApproval {
     raw_frontend: ObjectHandle
     steps: [NativeRuntimeObservedStep]
 
-    fn to_tree(self) -> DataTree Never! {
-        rows := [DataTree]{}
+    fn to_tree(self) -> Dyn Never! {
+        rows := [Dyn]{}
         loop step in self.steps {
-            &rows.push(DataTree.Object([String: DataTree]{"id": DataTree.Text(step.id), "observed_rc": DataTree.Text(step.observed_rc), "invocation": native_pack_handle_tree(step.invocation), "inputs": native_pack_roles_tree(step.inputs), "outputs": native_pack_roles_tree(step.outputs), "receipt": native_pack_handle_tree(step.receipt)}))
+            &rows.push(Dyn.Object([String: Dyn]{"id": Dyn.Text(step.id), "observed_rc": Dyn.Text(step.observed_rc), "invocation": native_pack_handle_tree(step.invocation), "inputs": native_pack_roles_tree(step.inputs), "outputs": native_pack_roles_tree(step.outputs), "receipt": native_pack_handle_tree(step.receipt)}))
         }
-        DataTree.Object([String: DataTree]{
-            "schema": DataTree.Text("jet.native-runtime-pack-approval/v1"),
+        Dyn.Object([String: Dyn]{
+            "schema": Dyn.Text("jet.native-runtime-pack-approval/v1"),
             "subject": native_pack_handle_tree(self.subject), "admission": native_pack_handle_tree(self.admission),
             "publication_authorization": native_pack_handle_tree(self.publication_authorization),
             "rail_contract": native_pack_handle_tree(self.rail_contract), "job": native_pack_handle_tree(self.job),
             "proof_done": native_pack_handle_tree(self.proof_done), "generation": native_pack_handle_tree(self.generation),
             "proof_terminal": native_pack_handle_tree(self.proof_terminal), "final_source_tree": native_pack_handle_tree(self.final_source_tree),
-            "raw_frontend": native_pack_handle_tree(self.raw_frontend), "steps": DataTree.Array(rows),
+            "raw_frontend": native_pack_handle_tree(self.raw_frontend), "steps": Dyn.Array(rows),
         })
     }
 
-    fn from_tree(tree: DataTree) -> NativeRuntimePackApproval NativeRuntimePackError! {
+    fn from_tree(tree: Dyn) -> NativeRuntimePackApproval NativeRuntimePackError! {
         fields :: native_pack_fields(tree, [String]{"schema", "subject", "admission", "publication_authorization", "rail_contract", "job", "proof_done", "proof_terminal", "final_source_tree", "generation", "raw_frontend", "steps"})
         native_pack_schema(fields, "jet.native-runtime-pack-approval/v1")
         steps :: native_pack_observed_steps(fields)
@@ -445,16 +445,16 @@ fn native_runtime_pack_load(store: ArtifactStore, compiler: ObjectHandle) -[FS, 
     Ok(VerifiedNativeRuntimePack{composition: selected.object, identity: composition.expected_runtime_identity, approval: composition.expected_approval, subject, pack_bytes: verified.pack_bytes, objects: ^census.objects})
 }
 
-fn native_pack_encode(tree: DataTree) -> [U8] NativeRuntimePackError! { Ok(json.canonical(tree).bytes()) }
+fn native_pack_encode(tree: Dyn) -> [U8] NativeRuntimePackError! { Ok(json.canonical(tree).bytes()) }
 
-fn native_pack_decode(bytes: [U8]) -> DataTree NativeRuntimePackError! {
+fn native_pack_decode(bytes: [U8]) -> Dyn NativeRuntimePackError! {
     text :: String.from_bytes(bytes) ?? return Err(NativeRuntimePackError.Invalid("publication object is not UTF-8"))
     tree :: json.parse(text)
     if json.canonical(tree).bytes() != bytes -> return Err(NativeRuntimePackError.Invalid("publication object is not canonical JSON"))
     Ok(tree)
 }
 
-fn native_pack_fields(tree: DataTree, names: [String]) -> [String: DataTree] NativeRuntimePackError! {
+fn native_pack_fields(tree: Dyn, names: [String]) -> [String: Dyn] NativeRuntimePackError! {
     values :: if tree == {
         .Object(fields) -> fields
         else -> { return Err(NativeRuntimePackError.Invalid("publication record must be an object")) }
@@ -466,7 +466,7 @@ fn native_pack_fields(tree: DataTree, names: [String]) -> [String: DataTree] Nat
     Ok(values)
 }
 
-fn native_pack_text_field(fields: [String: DataTree], name: String) -> String NativeRuntimePackError! {
+fn native_pack_text_field(fields: [String: Dyn], name: String) -> String NativeRuntimePackError! {
     value :: fields.get(name) ?? return Err(NativeRuntimePackError.Invalid("missing publication field {name}"))
     if value == {
         .Text(text) -> Ok(text)
@@ -474,7 +474,7 @@ fn native_pack_text_field(fields: [String: DataTree], name: String) -> String Na
     }
 }
 
-fn native_pack_schema(fields: [String: DataTree], expected: String) NativeRuntimePackError! {
+fn native_pack_schema(fields: [String: Dyn], expected: String) NativeRuntimePackError! {
     if native_pack_text_field(fields, "schema") != expected -> return Err(NativeRuntimePackError.Invalid("unknown publication schema"))
 }
 
@@ -511,13 +511,13 @@ fn native_pack_handle(text: String) -> ObjectHandle NativeRuntimePackError! {
     Ok(ObjectHandle.new(digest, native_pack_decimal(fields[1])))
 }
 
-fn native_pack_handle_field(fields: [String: DataTree], name: String) -> ObjectHandle NativeRuntimePackError! {
+fn native_pack_handle_field(fields: [String: Dyn], name: String) -> ObjectHandle NativeRuntimePackError! {
     native_pack_handle(native_pack_text_field(fields, name))
 }
 
-fn native_pack_handle_tree(object: ObjectHandle) -> DataTree Never! { DataTree.Text(object.text()) }
+fn native_pack_handle_tree(object: ObjectHandle) -> Dyn Never! { Dyn.Text(object.text()) }
 
-fn native_pack_array_field(fields: [String: DataTree], name: String) -> [DataTree] NativeRuntimePackError! {
+fn native_pack_array_field(fields: [String: Dyn], name: String) -> [Dyn] NativeRuntimePackError! {
     value :: fields.get(name) ?? return Err(NativeRuntimePackError.Invalid("missing publication field {name}"))
     if value == {
         .Array(values) -> Ok(values)
@@ -531,13 +531,13 @@ fn native_pack_unique(seen: &[String: Bool], role: String) NativeRuntimePackErro
     &seen.add(role, true).drop("checked absent")
 }
 
-fn native_pack_roles_field(fields: [String: DataTree], name: String) -> [NativeRuntimeRoleObject] NativeRuntimePackError! {
+fn native_pack_roles_field(fields: [String: Dyn], name: String) -> [NativeRuntimeRoleObject] NativeRuntimePackError! {
     values :: native_pack_roles_field_empty(fields, name)
     if values.len() == 0 -> return Err(NativeRuntimePackError.Invalid("publication role list {name} is empty"))
     Ok(values)
 }
 
-fn native_pack_roles_field_empty(fields: [String: DataTree], name: String) -> [NativeRuntimeRoleObject] NativeRuntimePackError! {
+fn native_pack_roles_field_empty(fields: [String: Dyn], name: String) -> [NativeRuntimeRoleObject] NativeRuntimePackError! {
     result := [NativeRuntimeRoleObject]{}
     seen := [String: Bool]{}
     loop value in native_pack_array_field(fields, name) {
@@ -549,13 +549,13 @@ fn native_pack_roles_field_empty(fields: [String: DataTree], name: String) -> [N
     Ok(result)
 }
 
-fn native_pack_roles_tree(roles: [NativeRuntimeRoleObject]) -> DataTree Never! {
-    values := [DataTree]{}
-    loop role in roles -> &values.push(DataTree.Object([String: DataTree]{"role": DataTree.Text(role.role), "object": native_pack_handle_tree(role.object)}))
-    DataTree.Array(values)
+fn native_pack_roles_tree(roles: [NativeRuntimeRoleObject]) -> Dyn Never! {
+    values := [Dyn]{}
+    loop role in roles -> &values.push(Dyn.Object([String: Dyn]{"role": Dyn.Text(role.role), "object": native_pack_handle_tree(role.object)}))
+    Dyn.Array(values)
 }
 
-fn native_pack_output_roles(fields: [String: DataTree]) -> [String] NativeRuntimePackError! {
+fn native_pack_output_roles(fields: [String: Dyn]) -> [String] NativeRuntimePackError! {
     result := [String]{}
     seen := [String: Bool]{}
     loop value in native_pack_array_field(fields, "outputs") {
@@ -569,7 +569,7 @@ fn native_pack_output_roles(fields: [String: DataTree]) -> [String] NativeRuntim
     Ok(result)
 }
 
-fn native_pack_rail_inputs(fields: [String: DataTree], name: String, produced: [String: [String]]) -> [NativeRuntimeRailInput] NativeRuntimePackError! {
+fn native_pack_rail_inputs(fields: [String: Dyn], name: String, produced: [String: [String]]) -> [NativeRuntimeRailInput] NativeRuntimePackError! {
     result := [NativeRuntimeRailInput]{}
     seen := [String: Bool]{}
     loop value in native_pack_array_field(fields, name) {
@@ -606,7 +606,7 @@ fn native_pack_rail_inputs(fields: [String: DataTree], name: String, produced: [
     Ok(result)
 }
 
-fn native_pack_observed_steps(fields: [String: DataTree]) -> [NativeRuntimeObservedStep] NativeRuntimePackError! {
+fn native_pack_observed_steps(fields: [String: Dyn]) -> [NativeRuntimeObservedStep] NativeRuntimePackError! {
     steps := [NativeRuntimeObservedStep]{}
     loop row in native_pack_array_field(fields, "steps") {
         values :: native_pack_fields(row, [String]{"id", "observed_rc", "invocation", "inputs", "outputs", "receipt"})
@@ -730,7 +730,7 @@ fn native_pack_check_generation(bytes: [U8], subject: NativeRuntimePackSubject) 
         .Object(values) -> values
         else -> { return Err(NativeRuntimePackError.Invalid("generation receipt must be an object")) }
     }
-    if native_pack_text_field(fields, "final") != subject.runtime_source_revision || fields.get("deterministic") != Val(DataTree.Bool(true)) {
+    if native_pack_text_field(fields, "final") != subject.runtime_source_revision || fields.get("deterministic") != Val(Dyn.Bool(true)) {
         return Err(NativeRuntimePackError.Invalid("generation receipt is not deterministic at runtime FINAL"))
     }
 }
@@ -748,7 +748,7 @@ struct NativeRuntimePackEvidence {
     raw_frontend: ObjectHandle
     steps: [NativeRuntimeObservedStep]
 
-    fn from_tree(tree: DataTree) -> NativeRuntimePackEvidence NativeRuntimePackError! {
+    fn from_tree(tree: Dyn) -> NativeRuntimePackEvidence NativeRuntimePackError! {
         fields :: native_pack_fields(tree, [String]{"schema", "admission", "rail_contract", "job", "proof_done", "proof_terminal", "final_source_tree", "generation", "raw_frontend", "steps"})
         native_pack_schema(fields, "jet.native-runtime-pack-evidence/v1")
         Ok(NativeRuntimePackEvidence{
@@ -793,7 +793,7 @@ fn native_runtime_pack_prepare(store: ArtifactStore, subject: NativeRuntimePackS
 // Admitted source manifests and explicit human authorization receipts preserve
 // their ORIGINAL bytes. They are inputs, not issued canonical pack records.
 // Strict Core JSON is still the single parser (no alias/fallback reader).
-fn native_pack_input_tree(bytes: [U8]) -> DataTree NativeRuntimePackError! {
+fn native_pack_input_tree(bytes: [U8]) -> Dyn NativeRuntimePackError! {
     text :: String.from_bytes(bytes) ?? return Err(NativeRuntimePackError.Invalid("publication input is not UTF-8"))
     Ok(json.parse(text))
 }

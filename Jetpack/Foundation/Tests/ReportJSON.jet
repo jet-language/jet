@@ -4,7 +4,7 @@ use core.encoding.json as report_json_codec
 #Test("status JSON rejects non-finite fields through ReportError on every entry point") {
     numbers :: [Float]{report_json_math.nan(), report_json_math.infinity(), -report_json_math.infinity()}
     loop number in numbers {
-        fields :: StatusFields.new().with("value", DataTree.Float(number))
+        fields :: StatusFields.new().with("value", Dyn.Float(number))
         envelope :: StatusEnvelope.new("json", true).with_fields(fields)
         if envelope.json() == {
             .Ok(_) -> panic("non-finite status JSON accepted")
@@ -26,10 +26,10 @@ use core.encoding.json as report_json_codec
 }
 
 #Test("finite status JSON keeps its text and JSON-line semantics") {
-    envelope :: StatusEnvelope.new("json", true).with_field("value", DataTree.Float(1.25))
+    envelope :: StatusEnvelope.new("json", true).with_field("value", Dyn.Float(1.25))
     text :: envelope.json() ?? panic("finite status JSON")
     line :: envelope.json_line() ?? panic("finite status JSON line")
     assert_eq(line, "{text}\n")
     tree :: report_json_codec.parse(text) ?? panic("finite status JSON parses")
-    assert_eq(tree.field("value") ?? panic("status value"), DataTree.Float(1.25))
+    assert_eq(tree.field("value") ?? panic("status value"), Dyn.Float(1.25))
 }

@@ -309,34 +309,34 @@ fn image_link_new_blob(temporary: String, path: String, digest: String, data: [U
 }
 
 fn image_write_index(out_dir: String, manifest_digest: String, manifest_size: Int, ref_name: String) ImageError! -[FS, Env]> {
-    annotations := [String: DataTree]{}
-    annotations["org.opencontainers.image.ref.name"] = DataTree.Text(ref_name)
-    descriptor := [String: DataTree]{}
-    descriptor["mediaType"] = DataTree.Text(IMAGE_MEDIA_TYPE_MANIFEST)
-    descriptor["digest"] = DataTree.Text("sha256:{manifest_digest}")
-    descriptor["size"] = DataTree.Int(manifest_size)
-    descriptor["annotations"] = DataTree.Object(annotations)
-    index := [String: DataTree]{}
-    index["schemaVersion"] = DataTree.Int(2)
-    index["manifests"] = DataTree.Array([DataTree]{DataTree.Object(descriptor)})
-    text :: image_json_text(DataTree.Object(index)) ?? return Err(err)
+    annotations := [String: Dyn]{}
+    annotations["org.opencontainers.image.ref.name"] = Dyn.Text(ref_name)
+    descriptor := [String: Dyn]{}
+    descriptor["mediaType"] = Dyn.Text(IMAGE_MEDIA_TYPE_MANIFEST)
+    descriptor["digest"] = Dyn.Text("sha256:{manifest_digest}")
+    descriptor["size"] = Dyn.Int(manifest_size)
+    descriptor["annotations"] = Dyn.Object(annotations)
+    index := [String: Dyn]{}
+    index["schemaVersion"] = Dyn.Int(2)
+    index["manifests"] = Dyn.Array([Dyn]{Dyn.Object(descriptor)})
+    text :: image_json_text(Dyn.Object(index)) ?? return Err(err)
     image_write_layout_file(files.join(out_dir, "index.json"), text.bytes())
 }
 
 // The OCI image config: `architecture`/`os`/`config`/`rootfs` only. No
 // `created` or `history`, because an embedded timestamp breaks determinism.
 fn image_config_json(spec: OCIBuildSpec, diff_ids: [String], architecture: String) -> String ImageError! {
-    env := [DataTree]{}
-    loop entry in image_sorted_env(spec.env) -> &env.push(DataTree.Text("{entry.key}={entry.value}"))
-    entrypoint := [DataTree]{}
-    loop argument in spec.entrypoint -> &entrypoint.push(DataTree.Text(argument))
-    exposed := [String: DataTree]{}
-    loop port in image_sorted_unique_ints(spec.expose) -> exposed["{port}/tcp"] = DataTree.Object([String: DataTree]{})
-    container := [String: DataTree]{}
-    container["Env"] = DataTree.Array(env)
-    container["ExposedPorts"] = DataTree.Object(exposed)
-    container["Entrypoint"] = DataTree.Array(entrypoint)
-    container["User"] = DataTree.Text("{spec.user}")
+    env := [Dyn]{}
+    loop entry in image_sorted_env(spec.env) -> &env.push(Dyn.Text("{entry.key}={entry.value}"))
+    entrypoint := [Dyn]{}
+    loop argument in spec.entrypoint -> &entrypoint.push(Dyn.Text(argument))
+    exposed := [String: Dyn]{}
+    loop port in image_sorted_unique_ints(spec.expose) -> exposed["{port}/tcp"] = Dyn.Object([String: Dyn]{})
+    container := [String: Dyn]{}
+    container["Env"] = Dyn.Array(env)
+    container["ExposedPorts"] = Dyn.Object(exposed)
+    container["Entrypoint"] = Dyn.Array(entrypoint)
+    container["User"] = Dyn.Text("{spec.user}")
     if spec.healthcheck == .Val(command) {
         health := [String: Dyn]{}
         health["Test"] = Dyn.Array([Dyn]{Dyn.Text("CMD-SHELL"), Dyn.Text(command)})
@@ -356,11 +356,11 @@ fn image_config_json(spec: OCIBuildSpec, diff_ids: [String], architecture: Strin
 }
 
 fn image_manifest_json(config_digest: String, config_size: Int, layers: [OCILayerDescriptor]) -> String ImageError! {
-    config := [String: DataTree]{}
-    config["mediaType"] = DataTree.Text(IMAGE_MEDIA_TYPE_CONFIG)
-    config["digest"] = DataTree.Text("sha256:{config_digest}")
-    config["size"] = DataTree.Int(config_size)
-    descriptors := [DataTree]{}
+    config := [String: Dyn]{}
+    config["mediaType"] = Dyn.Text(IMAGE_MEDIA_TYPE_CONFIG)
+    config["digest"] = Dyn.Text("sha256:{config_digest}")
+    config["size"] = Dyn.Int(config_size)
+    descriptors := [Dyn]{}
     loop layer in layers -> &descriptors.push(layer.tree())
     manifest := [String: Dyn]{}
     manifest["schemaVersion"] = Dyn.Int(2)
@@ -528,7 +528,7 @@ fn image_object(value: Dyn, label: String) -> [String: Dyn] ImageError! {
     if value == {
         // D-DATATREE-ORDER1=A: the object's ordered pairs, indexed by name.
         .Object(fields) -> {
-            members := [String: DataTree]{}
+            members := [String: Dyn]{}
             loop pair in fields -> members[pair.key] = pair.value
             Ok(members)
         }
@@ -580,7 +580,7 @@ fn image_digest_for(bytes: [U8]) -> String Never! {
     "sha256:{pkg_sha256_hex(bytes)}"
 }
 
-fn image_json_text(value: DataTree) -> String ImageError! {
+fn image_json_text(value: Dyn) -> String ImageError! {
     text :: json.to_string(value) ?? return Err(ImageError.InvalidData(err.reason))
     Ok(text)
 }

@@ -279,7 +279,7 @@ fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! {
 ``` }
 
 // The three generated entry points per function. Hole: `name`.
-PKG_LUA_JET_FUNCTION :: prep { ```pub fn @@name@@(session: Session, input: DataTree, deadline_ms: Int) -> DataTree LuaError! {
+PKG_LUA_JET_FUNCTION :: prep { ```pub fn @@name@@(session: Session, input: Dyn, deadline_ms: Int) -> Dyn LuaError! {
     payload :: json.to_string(input) ?? return Err(LuaError.Protocol)
     raw :: abi.@@name@@(session.value, payload, deadline_ms)
     code :: abi.take_error()

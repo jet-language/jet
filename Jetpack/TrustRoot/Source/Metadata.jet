@@ -278,9 +278,9 @@ fn trust_public_trust_manifest(domain: String, bootstrap: RootBootstrap?, keys: 
     manifest["domain"] = Dyn.Text(~domain)
     manifest["status"] = Dyn.Text(status)
     manifest["root"] = root
-    manifest["keys"] = DataTree.Array(rendered)
-    manifest["rotation"] = DataTree.Text("offline threshold root rotation; publish a new manifest only after the old root verifies the new root")
-    text :: json.to_string(DataTree.Object(manifest)) ?? return Err(TrustRootError.InvalidPublisher{detail: err.reason})
+    manifest["keys"] = Dyn.Array(rendered)
+    manifest["rotation"] = Dyn.Text("offline threshold root rotation; publish a new manifest only after the old root verifies the new root")
+    text :: json.to_string(Dyn.Object(manifest)) ?? return Err(TrustRootError.InvalidPublisher{detail: err.reason})
     Ok("{text}\n")
 }
 

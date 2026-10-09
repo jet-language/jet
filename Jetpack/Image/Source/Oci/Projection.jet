@@ -55,7 +55,7 @@ fn image_write_projection_report(layout: String, manifest_digest: String, report
     document["changed"] = image_report_values(report.changed)
     document["omitted"] = image_report_values(report.omitted)
     document["rejected"] = image_report_values(report.rejected)
-    json_text :: image_json_text(DataTree.Object(document)) ?? return Err(err)
+    json_text :: image_json_text(Dyn.Object(document)) ?? return Err(err)
     temporary :: image_with_extension(path, "json.tmp-{sys.pid()}")
     node :: image_node(path) ?? OCINode.Missing
     if node != OCINode.Missing && !node.is_file() {
@@ -65,15 +65,15 @@ fn image_write_projection_report(layout: String, manifest_digest: String, report
 }
 
 fn image_render_projection_plan(manifest_digest: String, plan: ProjectionPlan) -> String ImageError! {
-    expose := [DataTree]{}
-    loop port in plan.expose -> &expose.push(DataTree.Int(port))
-    document := [String: DataTree]{}
-    document["schema"] = DataTree.Text("jet.image.plan")
-    document["version"] = DataTree.Int(1)
-    document["manifest"] = DataTree.Text(manifest_digest)
-    document["source"] = DataTree.Text(plan.source)
-    document["platform"] = DataTree.Text(plan.platform)
-    document["user"] = DataTree.Int(plan.user)
+    expose := [Dyn]{}
+    loop port in plan.expose -> &expose.push(Dyn.Int(port))
+    document := [String: Dyn]{}
+    document["schema"] = Dyn.Text("jet.image.plan")
+    document["version"] = Dyn.Int(1)
+    document["manifest"] = Dyn.Text(manifest_digest)
+    document["source"] = Dyn.Text(plan.source)
+    document["platform"] = Dyn.Text(plan.platform)
+    document["user"] = Dyn.Int(plan.user)
     document["entrypoint"] = image_json_strings(plan.entrypoint)
     document["expose"] = Dyn.Array(expose)
     document["healthcheck"] = Dyn.Bool(plan.healthcheck)
@@ -87,7 +87,7 @@ fn image_render_projection_plan(manifest_digest: String, plan: ProjectionPlan) -
 }
 
 fn image_render_projection_dossier(manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) -> String ImageError! {
-    classification := [String: DataTree]{}
+    classification := [String: Dyn]{}
     classification["included"] = image_report_values(report.included)
     classification["changed"] = image_report_values(report.changed)
     classification["omitted"] = image_report_values(report.omitted)

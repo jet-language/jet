@@ -209,14 +209,14 @@ fn cli_nix_index_verify_differential(args: [String]) CLIToolError! -[FS, IO]> {
         if expected.get(key) != actual.get(key) -> &mismatches.push(key)
     }
     status :: if mismatches.len() == 0 -> "passed" else -> "failed"
-    report :: json.to_string(DataTree.Object([
-        "schema": DataTree.Int(1),
-        "channel": DataTree.Text(channel),
-        "revision": DataTree.Text(revision),
-        "system": DataTree.Text(system),
-        "records_compared": DataTree.Int(compared.len()),
-        "mismatches": DataTree.Int(mismatches.len()),
-        "status": DataTree.Text(status)
+    report :: json.to_string(Dyn.Object([
+        "schema": Dyn.Int(1),
+        "channel": Dyn.Text(channel),
+        "revision": Dyn.Text(revision),
+        "system": Dyn.Text(system),
+        "records_compared": Dyn.Int(compared.len()),
+        "mismatches": Dyn.Int(mismatches.len()),
+        "status": Dyn.Text(status)
     ])) ?? return Err(CLIToolError.new(err.reason))
     files.write(report_path, "{report}\n") ?? return Err(CLIToolError.new("write differential report: {err}"))
     if mismatches.len() > 0 -> return Err(CLIToolError.new("differential verification failed: {mismatches.len()} mismatches; see {report_path}"))

@@ -250,7 +250,7 @@ fn services_kill_authority_now(authority: ServiceAuthority) ServicesError! -[Env
 fn services_debug_option(value: String?) -> String Never! {
     text :: value ?? return "None"
     // Text is always encodable: no Float or map-key exclusion can apply here.
-    quoted :: json.to_string(DataTree.Text(text)) ?? panic("Text must be JSON-encodable")
+    quoted :: json.to_string(Dyn.Text(text)) ?? panic("Text must be JSON-encodable")
     "Some({quoted})"
 }
 

@@ -136,7 +136,7 @@ fn trust_json_object(value: Dyn) -> [String: Dyn]? Never! {
     if value == {
         // D-DATATREE-ORDER1=A: the object's ordered pairs, indexed by name.
         .Object(fields) -> {
-            members := [String: DataTree]{}
+            members := [String: Dyn]{}
             loop pair in fields -> members[pair.key] = pair.value
             Val(members)
         }
@@ -179,20 +179,20 @@ fn trust_json_object_field(value: Dyn, key: String) -> [String: Dyn]? Never! {
 }
 
 // Rust `canonical_json`: compact JSON, object keys in document order.
-fn trust_json_canonical(value: DataTree) -> String TrustError! {
+fn trust_json_canonical(value: Dyn) -> String TrustError! {
     text :: json.to_string(value) ?? return Err(TrustError.InvalidAssignment(err.reason))
     Ok(text)
 }
 
 // Rust `canonical_object`: the field's JSON, or `{}` when absent.
-fn trust_json_canonical_field(object: [String: DataTree], key: String) -> String TrustError! {
+fn trust_json_canonical_field(object: [String: Dyn], key: String) -> String TrustError! {
     value :: object.get(key) ?? return Ok("{{}}")
     trust_json_canonical(value)
 }
 
 fn trust_json_quote(text: String) -> String Never! {
     // Text cannot contain a non-finite Float or a non-text map key.
-    json.to_string(DataTree.Text(~text)) ?? panic("Text must be JSON-encodable")
+    json.to_string(Dyn.Text(~text)) ?? panic("Text must be JSON-encodable")
 }
 
 fn trust_json_texts(values: [String]) -> Dyn Never! {
@@ -203,7 +203,7 @@ fn trust_json_texts(values: [String]) -> Dyn Never! {
 
 // An object rendered with its fields in the given order.
 fn trust_json_object_text(fields: [TrustJSONField]) -> String TrustError! {
-    object := [String: DataTree]{}
+    object := [String: Dyn]{}
     loop field in fields -> object[field.key] = field.value
     trust_json_canonical(Dyn.Object(object))
 }
