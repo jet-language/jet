@@ -181,6 +181,10 @@ Retired free namespaces have no aliases or re-exports, and there is no
 syntax.
 The compiler's checked-build projections select Core graph record types with
 `use core.build.[BuildGraphFile]` and `use core.build.[BuildGraphNode]`.
+Imported Core record types retain their source-owned associated methods:
+`EncodingError.new(...)` through a grouped import, or
+`encoding.EncodingError.new(...)`, resolves the record's method rather
+than a module member called `new`.
 
 **D-SOLVER-LIB1 — Explicit solver library**: `core.compute.solve` ships a finite
 solver API with explicit `Solver` state, deterministic insertion-order
@@ -8117,6 +8121,9 @@ with a machine-applicable fix, never an alias. Effect denials
 (`-[!Mem.Alloc]>`, `-[!Panic]>`), `?(text)`, `??`, `!x`, `!=`, patterns, and
 narrowing are unchanged, and carriers, layouts, and runtime are identical.
 Parser, formatter, type display, and diagnostics emit only the suffix form.
+An arrowless unit-fallible header normalizes to Unit success with its written
+error domain. Terminal `Ok()`, `Ok(())`, and `Err(error)` use that carrier,
+including in terminal table arms; ordinary Unit statements still fall through.
 
 **2026-09-30 — D-CALLBACK-ERR1=A shipped** *(card #3708; owner ruling that
 Core declares its failures)*: a type parameter may be a failure domain, so a

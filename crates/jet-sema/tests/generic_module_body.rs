@@ -151,6 +151,29 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
 }
 
 #[test]
+fn imported_core_record_associated_methods_precede_module_calls() {
+    let core = r#"
+#[Error]
+struct EncodingError { reason: String }
+impl EncodingError {
+    fn new(reason: String) -> EncodingError Never! {
+        EncodingError{reason: reason}
+    }
+}
+"#;
+    for source in [
+        "use core.encoding.[EncodingError]\nfn make() -> EncodingError Never! { EncodingError.new(\"invalid\") }\nfn run() {}\n",
+        "use core.encoding as encoding\nfn make() -> encoding.EncodingError Never! { encoding.EncodingError.new(\"invalid\") }\nfn run() {}\n",
+    ] {
+        let (_, diagnostics) = check_modules(&[
+            ("<corelib>/Core/encoding/encoding.jet", core, &[]),
+            ("pkg-a/src/main.jet", source, &[]),
+        ]);
+        assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    }
+}
+
+#[test]
 fn core_source_decimal_decl_and_display_impl_replace_builtin_name() {
     let (_, diagnostics) = check_modules(&[
         ("<corelib>/Core/math/math.jet",

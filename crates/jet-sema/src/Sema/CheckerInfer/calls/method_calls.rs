@@ -2297,6 +2297,23 @@ impl<'a> Checker<'a> {
                         type_args,
                         args, checked_callee_out);
                     }
+                    if let Some(owner) = self.core_source_owner_module(&ns, leaf) {
+                        if self.modules.is_some_and(|states|
+                            states[owner].registry.method(leaf, method).is_some())
+                            && jet_foundation::CoreModuleExports::core_modules().iter()
+                                .find(|declaration| declaration.module == ns)
+                                .is_some_and(|declaration|
+                                    declaration.type_exports.iter().any(|(name, _)| *name == leaf))
+                        {
+                            let source_name = self.canonical_nominal_name(owner, leaf);
+                            let ret = self.check_static_method(
+                                &source_name, method, span, owner_type_args, type_args, args, checked_callee_out,
+                            );
+                            **receiver = Expr::Ident(source_name, span);
+                            *resolved_ret_out = ret.clone();
+                            return ret;
+                        }
+                    }
                 }
             }
         }
@@ -2386,6 +2403,22 @@ impl<'a> Checker<'a> {
                     args, checked_callee_out);
                     *resolved_ret_out = ret.clone();
                     return ret;
+                }
+                // Source-owned Core records retain their ordinary associated
+                // methods; an imported type alias is not a module receiver.
+                if let Some(owner) = self.core_source_owner_module(&module, &item) {
+                    if self.modules.is_some_and(|states|
+                        states[owner].registry.method(&item, method).is_some())
+                    {
+                        let source_name = self.canonical_nominal_name(owner, &item);
+                        self.record_import_alias_reference(alias, *alias_span);
+                        let ret = self.check_static_method(
+                            &source_name, method, span, owner_type_args, type_args, args, checked_callee_out,
+                        );
+                        **receiver = Expr::Ident(source_name, span);
+                        *resolved_ret_out = ret.clone();
+                        return ret;
+                    }
                 }
                 if module == "core.crypto"
                     && item == "Secret"
