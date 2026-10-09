@@ -228,6 +228,10 @@ fn test_scope_fail(message: I64) {
 // Rust Core.rs:775-806. Remove caught+children, clear parent stops, retain
 // timeouts entered outside the caught expectation, then enqueue completion.
 #Export(c) fn jet_rt_test_expect_fail_catch_scope(output: I64) -> Bool {
+    test_scope_catch(output, false)
+}
+
+fn test_scope_catch(output: I64, native: Bool) -> Bool {
     state :: test_capture_state()
     if (state == I64{0}) -> return false
     index :: test_scope_stopped_index(state)
@@ -257,6 +261,8 @@ fn test_scope_fail(message: I64) {
     if (error != I64{0}) {
         test_text_drop(code)
         trap_store(state + I64{80}, I64{1})
+        // A mismatch replaces the original stop, not first-stop-wins rejection.
+        if native -> scheduler_control_discard_stop(scheduler_control_current())
         test_scope_fail(error)
         return false
     }

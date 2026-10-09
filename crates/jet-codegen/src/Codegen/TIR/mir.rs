@@ -5157,6 +5157,7 @@ enum ExitTarget {
     Return(Option<MirPlaceId>),
     Break(MirBlockId),
     Continue(MirBlockId),
+    Jump(MirBlockId),
     Stopped,
 }
 
@@ -6787,6 +6788,63 @@ impl<'a> LowerCtx<'a> {
         Ok(())
     }
 
+    /// Raw compiler-owned expectation control, never a Core carrier adapter.
+    pub(super) fn emit_native_test_scope_call(
+        &mut self, symbol: &str, member: &str, scope: MirScopeId, ty: Type,
+    ) -> Result<MirValueId, LowerError> {
+        let saved = self.stop_cleanup_active;
+        self.stop_cleanup_active = true;
+        let result = (|| {
+            let value = self.emit("test.scope.id", Some(Type::IntN { signed: false, bits: 64 }),
+                MirOperation::Constant(MirConstant::Int {
+                    value: scope.0 as i64, width: Some((false, 64)), spelling: None,
+                }))?;
+            let call = self.intern_prelude_route(TPreludeRoute {
+                family: MirPreludeFamily::StaticPrelude,
+                module: "core.testing".to_string(), member: member.to_string(),
+                symbol: MirSymbol::Prelude(symbol.to_string()),
+                signature: MirCallSignature { arity: 1, max_arity: 1, borrow_mask: vec![false] },
+                effect: None, fallibility: TFailureCarrier::Infallible,
+                abi: MirPreludeAbi::Value, authority: None, db_metadata: None,
+            })?;
+            self.emit("test.scope.control", Some(ty),
+                MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+                    call, args: vec![MirCallArg {
+                        value, access: MirAccess::Read, span: self.span(),
+                        label: None, source_index: None, binder_slot: None,
+                        spread: false, implicit_clone: false, shared_auto_clone: false,
+                        owned_last_use: false, authority_boundary: false, fn_coercion: None,
+                        widen_fixed_to_list: false, widen_to_union: None, box_as_trait: None,
+                        place: None,
+                    }], owner_type_args: Vec::new(), type_args: Vec::new(),
+                }))
+        })();
+        self.stop_cleanup_active = saved;
+        result
+    }
+
+    fn emit_test_stop_edges(&mut self) -> Result<(), LowerError> {
+        let scopes = self.defer_stack.iter().enumerate().rev().filter_map(|(depth, frame)| {
+            let scope = frame.owner?;
+            let row = self.scopes.iter().find(|row| row.id == scope)?;
+            let exit = row.facts.get("native_test_exit")?.parse::<u64>().ok()?;
+            Some((depth, scope, MirBlockId(exit)))
+        }).collect::<Vec<_>>();
+        for (depth, scope, exit) in scopes {
+            let caught = self.emit_native_test_scope_call(
+                "jet_rt_test_catch_for_scope", "catch_for_scope", scope, Type::Bool)?;
+            let deeper = if depth + 1 < self.defer_stack.len() {
+                self.exit_chain_entry(self.defer_stack.len() - 1, ExitTarget::Jump(exit), depth + 1)?
+            } else { exit };
+            let otherwise = self.new_block(self.span(), "test.catch.next")?;
+            self.terminate(MirTerminator::Branch {
+                condition: caught, then_target: deeper, else_target: otherwise,
+            });
+            self.current = otherwise;
+        }
+        Ok(())
+    }
+
     /// End the current path with `terminator`, running the cleanups of every
     /// frame from `from_depth` up first. Each frame's cleanups are lowered
     /// once, as a drop chain its exits share (`seal_exit_chains`), so cleanup
@@ -7033,6 +7091,7 @@ impl<'a> LowerCtx<'a> {
                 value: None,
             },
             ExitTarget::Continue(target) => MirTerminator::Continue { target },
+            ExitTarget::Jump(target) => MirTerminator::Jump { target },
             ExitTarget::Stopped => MirTerminator::Stopped,
         };
         self.terminate(terminator);
@@ -11536,6 +11595,12 @@ impl<'a> LowerCtx<'a> {
         }
         if !self.is_terminated() {
             self.emit("scope.exit", None, MirOperation::ScopeExit { scope })?;
+        }
+        if self.function_registry.stop_points && self.scopes.iter().any(|row| {
+            row.id == scope && row.kind == MirScopeKind::ScopeMember
+                && row.name.as_deref() != Some("skip") && row.name.as_deref() != Some("measure")
+        }) {
+            self.emit_poll(MirPollKind::Propagate)?;
         }
         Ok(())
     }

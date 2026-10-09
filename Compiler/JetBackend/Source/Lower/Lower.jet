@@ -50,6 +50,7 @@ use jet_foundation.[
     MIRProgram,
     MIRProjection,
     MIRScopeID,
+    MIRTestScopeMember,
     MIRSemanticOp,
     MIRSharedLifetime,
     MIRStringPart,
@@ -2117,11 +2118,8 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
             args :: lower_static_text(&m, &f, reason)
             lower_noreturn_call(&m, &f, "jet_rt_unreachable", args)
         }
-        .ScopeEnter(scope, test_member) -> {
-            if test_member != None -> return lower_fail(&m, &f, "test scope members are not lowered at O0 yet")
-            lower_scope(c, &m, &f, scope, true)
-        }
-        .ScopeExit(scope) -> lower_scope(c, &m, &f, scope, false)
+        .ScopeEnter(scope, _) -> lower_scope(p, c, &m, &f, instruction, scope, true)
+        .ScopeExit(scope) -> lower_scope(p, c, &m, &f, instruction, scope, false)
         .Drop(value, _) -> lower_drop_value(p, c, &m, &f, value)
         .RawAddressOf(place) -> lower_raw_address_of(p, c, &m, &f, instruction, place)
         .PtrFromAddr(address, _) -> lower_ptr_from_addr(p, c, &m, &f, instruction, address)
@@ -2140,12 +2138,13 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
 // session's nesting Shield depth (jet_rt_session_shield_enter/_leave, the C-ABI
 // form of jet_scheduler_shield_enter/_leave): stop points inside it are masked
 // and leaving it delivers what arrived meanwhile.
-fn lower_scope(c: LowerContext, m: &LowerModule, f: &LowerFunction, scope: MIRScopeID, enter: Bool) Never! {
+fn lower_scope(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, scope: MIRScopeID, enter: Bool) Never! {
     loop row in c.mir.scopes {
         if row.id == scope {
             label :: row.name ?? "{scope.value}"
             if row.kind == .Context && row.deadline == None -> return
             if row.kind == {
+                .ScopeMember -> return lower_test_scope(p, c, &m, &f, instruction, scope, enter)
                 .Context -> return lower_deadline_scope(c, &m, &f, row, enter)
                 .Unsafe | .Policy -> return lower_sentry_scope(c, &m, &f, row, enter)
                 .Impure | .AssumeDeterministic | .Layout | .DebugOnly | .Live | .Region | .Authority | .Reactive | .TaskGroup | .Transaction -> return
@@ -2172,6 +2171,109 @@ fn lower_forward(c: LowerContext, m: &LowerModule, f: &LowerFunction, instructio
     if lower_is_absent(f, value) -> return lower_alias_absent(&f, instruction)
     lowered :: lower_use(&m, &f, value) ?? return
     lower_alias(c, &f, instruction, lowered)
+}
+
+fn lower_test_scope_text(m: &LowerModule, f: &LowerFunction, text: String?) -> LIRValueID Never! {
+    value :: text ?? return lower_require_null(&f)
+    descriptor :: lower_static_object(&m, 24)
+    lower_require_static_text(&m, descriptor, 0, value)
+    pointer :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.DataAddress{dst: pointer, data: descriptor})
+    pointer
+}
+
+fn lower_test_scope(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, scope: MIRScopeID, enter: Bool) Never! {
+    loop block in c.mir.blocks {
+        loop candidate_instruction in block.instructions {
+            if candidate_instruction.operation == .ScopeEnter(candidate, .Val(member)) {
+                if candidate != scope -> next
+                return lower_test_scope_member(p, c, &m, &f, scope, member, enter, lower_instruction_has_stop_poll(c, f, instruction))
+            }
+        }
+    }
+    lower_fail(&m, &f, "test scope has no checked scope member")
+}
+
+fn lower_test_scope_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, scope: MIRScopeID, member: MIRTestScopeMember, enter: Bool, publishes: Bool) Never! {
+    id :: lower_const(&f, scope.value.to_int())
+    if member == {
+        .ExpectFail(code, message) -> {
+            expected :: lower_test_scope_text(&m, &f, code)
+            expected_message :: lower_test_scope_text(&m, &f, message)
+            if enter -> return lower_call_runtime(&m, &f, "jet_rt_test_expect_fail_enter_scope", [LIRValueID]{id, expected, expected_message}, None)
+            stopped :: lower_pointer(&f)
+            lower_call_runtime(&m, &f, "jet_rt_test_expect_fail_leave_scope", [LIRValueID]{id}, Val(stopped))
+            absent :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: stopped, right: lower_require_null(&f)})
+            unmet :: lower_new_block(&f)
+            completed :: lower_new_block(&f)
+            join :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(unmet, [LIRValueID]{}), else_target: lower_target(completed, [LIRValueID]{})})
+            lower_start(&f, completed, [LIRValueID]{})
+            lower_call_runtime(&m, &f, "jet_rt_string_drop", [LIRValueID]{stopped}, None)
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{})})
+            lower_start(&f, unmet, [LIRValueID]{})
+            status :: lower_word(&f)
+            lower_call_runtime(&m, &f, "jet_rt_session_status", [LIRValueID]{}, Val(status))
+            pending :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Compare{dst: pending, condition: LIRCondition.Ne, left: status, right: lower_const(&f, 0)})
+            failed :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: pending, then_target: lower_target(join, [LIRValueID]{}), else_target: lower_target(failed, [LIRValueID]{})})
+            lower_start(&f, failed, [LIRValueID]{})
+            saved :: lower_word(&f)
+            if publishes -> lower_call_runtime(&m, &f, "jet_rt_poll_call_enter", [LIRValueID]{}, Val(saved))
+            lower_call_runtime(&m, &f, "jet_rt_test_expect_fail_unmet", [LIRValueID]{expected, expected_message}, None)
+            if publishes -> lower_call_runtime(&m, &f, "jet_rt_poll_call_leave", [LIRValueID]{saved}, None)
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{})})
+            return lower_start(&f, join, [LIRValueID]{})
+        }
+        .Timeout(duration) -> {
+            if enter {
+                ty :: lower_value_type(c, duration) ?? return lower_fail(&m, &f, "test timeout has no checked Duration")
+                source :: lower_use(&m, &f, duration) ?? return
+                exact := source
+                found := false
+                loop field in lower_inline_members(p, ty) {
+                    if field.name != "ns" -> next
+                    exact = lower_word(&f)
+                    lower_emit(&f, LIRInst.Load{dst: exact, base: source, offset: field.offset})
+                    found = true
+                }
+                if !found -> return lower_fail(&m, &f, "test timeout Duration has no inline ns field")
+                nanos :: lower_word(&f)
+                lower_convert_exact(&m, &f, nanos, exact, "jet_int_owned_to_i64", false)
+                return lower_call_runtime(&m, &f, "jet_rt_test_timeout_enter", [LIRValueID]{id, nanos}, None)
+            }
+            output :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.StackSlot{dst: output, size: 16, align: 8})
+            present :: lower_flag(&f)
+            lower_call_runtime(&m, &f, "jet_rt_test_timeout_leave", [LIRValueID]{id, output}, Val(present))
+            check :: lower_new_block(&f)
+            failed :: lower_new_block(&f)
+            join :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: present, then_target: lower_target(check, [LIRValueID]{}), else_target: lower_target(join, [LIRValueID]{})})
+            lower_start(&f, check, [LIRValueID]{})
+            elapsed :: lower_word(&f)
+            limit :: lower_word(&f)
+            lower_emit(&f, LIRInst.Load{dst: elapsed, base: output, offset: 0})
+            lower_emit(&f, LIRInst.Load{dst: limit, base: output, offset: 8})
+            expired :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Compare{dst: expired, condition: LIRCondition.Gt, left: elapsed, right: limit})
+            lower_seal(&f, LIRTerminator.Branch{condition: expired, then_target: lower_target(failed, [LIRValueID]{}), else_target: lower_target(join, [LIRValueID]{})})
+            lower_start(&f, failed, [LIRValueID]{})
+            saved :: lower_word(&f)
+            if publishes -> lower_call_runtime(&m, &f, "jet_rt_poll_call_enter", [LIRValueID]{}, Val(saved))
+            lower_call_runtime(&m, &f, "jet_rt_test_timeout_failure", [LIRValueID]{elapsed, limit}, None)
+            if publishes -> lower_call_runtime(&m, &f, "jet_rt_poll_call_leave", [LIRValueID]{saved}, None)
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{})})
+            return lower_start(&f, join, [LIRValueID]{})
+        }
+        .Skip(whole_test) -> {
+            if !enter -> lower_call_runtime(&m, &f, "jet_rt_test_skip_scope", [LIRValueID]{lower_const_flag(&f, if whole_test -> 1 else -> 0)}, None)
+        }
+        // Like the reference MIR emitter, Measure has no scope runtime action.
+        .Measure -> {}
+    }
 }
 
 fn lower_constant(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, constant: MIRConstant) Never! {

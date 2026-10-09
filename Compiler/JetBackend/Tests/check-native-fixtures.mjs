@@ -70,7 +70,8 @@ function check(label, path, fixture, args = [], options = {}, compareStderr = tr
   const status = fixture.status ?? 0;
   const stderr = compareStderr ? fixture.stderr : undefined;
   const run = spawnSync(path, args, { encoding: "utf8", timeout: 10000, ...options });
-  const ok = run.status === status && run.stdout === fixture.stdout && (stderr === undefined || run.stderr === stderr);
+  const ok = run.status === status && run.stdout === fixture.stdout && (stderr === undefined || run.stderr === stderr)
+    && (!fixture.stderrContains || run.stderr.includes(fixture.stderrContains));
   if (!ok) failures += 1;
   console.log(`${label}: ${ok ? "ok" : "FAIL"} (exit ${run.status ?? run.signal})`);
   if (!ok) {
@@ -154,7 +155,9 @@ for (const fixture of process.argv.includes("--abi") ? [] : expected.filter(({ n
     check(`${fixture.name} (in-process Jet loader)`, jetRun, fixture, ["run", "load/load.jet", fixture.name, sharedRuntime], { cwd: outDir, timeout: 600000 }, false);
   }
   const program = `${outDir}/${fixture.name}.hosted`;
-  const taskHost = fixture.nativeTask ? [`${dirname(fileURLToPath(import.meta.url))}/check-trap-task.c`, "-Wl,--wrap=jet_rt_main"] : [];
+  const taskHost = fixture.nativeTask ? [`${dirname(fileURLToPath(import.meta.url))}/check-trap-task.c`, "-Wl,--wrap=jet_rt_main",
+    ...(fixture.taskPass ? ["-DJET_FX_TASK_PASS"] : []),
+    ...(fixture.taskMessage ? [`-DJET_FX_TASK_MESSAGE=${JSON.stringify(fixture.taskMessage)}`] : [])] : [];
   const link = spawnSync(process.env.CC ?? "cc", [`${outDir}/${fixture.name}.o`, ...taskHost, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
   if (link.status !== 0) {
     console.log(`${fixture.name} (compiled runtime): LINK FAILED\n${link.stderr}`);
@@ -178,7 +181,7 @@ for (const fixture of process.argv.includes("--abi") ? [] : expected.filter(({ n
 // Stop points (#4720): stop-points.o linked with the compiled runtime and a
 // scripted session rail (check-stop-points.c) that stops it at chosen polls;
 // stderr counts the program's String from static text and its drops.
-if (runtimeLib && !process.argv.includes("--abi") && existsSync(`${outDir}/stop-points.o`)) {
+if (runtimeLib && !process.argv.includes("--abi") && (only.size === 0 || only.has("stop-points")) && existsSync(`${outDir}/stop-points.o`)) {
   const rail = `${dirname(fileURLToPath(import.meta.url))}/check-stop-points.c`;
   const program = `${outDir}/stop-points.rail`;
   const link = spawnSync(process.env.CC ?? "cc", [`${outDir}/stop-points.o`, rail, runtimeLib, "-Wl,--wrap=jet_rt_string_from_static,--wrap=jet_rt_string_drop", "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });

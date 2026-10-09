@@ -335,22 +335,24 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 
 // Compiler-owned native control calls use the runtime's raw word ABI, not a
 // Core value-carrier adapter (the same rail as Poll's session imports).
-fn lower_cleanup_control_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, args: [MIRValueID]) -> Bool Never! {
+fn lower_native_control_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, args: [MIRValueID]) -> Bool Never! {
     symbol :: lower_route_symbol(row)
-    if symbol != "jet_rt_cleanup_enter" && symbol != "jet_rt_cleanup_leave" -> return false
     entering :: symbol == "jet_rt_cleanup_enter"
+    leaving :: symbol == "jet_rt_cleanup_leave" || symbol == "jet_rt_test_catch_boundary"
+    catching :: symbol == "jet_rt_test_catch_for_scope"
+    if !entering && !leaving && !catching -> return false
     if args.len() != (if entering -> 0 else -> 1) {
-        lower_fail(&m, &f, "native cleanup control call has incorrect arity")
+        lower_fail(&m, &f, "native control call has incorrect arity")
         return true
     }
     values := [LIRValueID]{}
     if !entering {
-        saved :: lower_use(&m, &f, args[0]) ?? return true
-        &values.push(saved)
+        value :: lower_use(&m, &f, args[0]) ?? return true
+        &values.push(value)
     }
-    if entering {
-        saved :: lower_result(p, c, &m, &f, instruction) ?? return true
-        lower_call_runtime(&m, &f, symbol, values, Val(saved))
+    if entering || catching {
+        result :: lower_result(p, c, &m, &f, instruction) ?? return true
+        lower_call_runtime(&m, &f, symbol, values, Val(result))
     } else {
         lower_call_runtime(&m, &f, symbol, values, None)
         lower_alias_absent(&f, instruction)

@@ -2857,11 +2857,19 @@ fn lower_scope_member_body(
     body: &[TStmt],
     expect_fail: bool,
 ) -> Result<(), LowerError> {
+    let native_exit = if expect_fail && ctx.can_emit_propagate() {
+        let exit = ctx.new_block(ctx.span(), "scope-member.exit")?;
+        ctx.set_scope_fact(scope, "native_test_exit", exit.0.to_string())?;
+        Some(exit)
+    } else { None };
     let body_entry = ctx.current_block();
     let body_block_start = ctx.blocks.len();
     lower_stmts(ctx, body)?;
     emit_scope_exits_on_early_paths(ctx, scope, body_entry, body_block_start)?;
-    let exit = ctx.new_block(ctx.span(), "scope-member.exit")?;
+    let exit = match native_exit {
+        Some(exit) => exit,
+        None => ctx.new_block(ctx.span(), "scope-member.exit")?,
+    };
     let join = ctx.new_block(ctx.span(), "scope-member.join")?;
     // An `.expect_fail` body that ends in an unconditional stop (`panic(…)`)
     // jumps to its exit after the stop. The stop never returns, so the jump
@@ -2874,6 +2882,10 @@ fn lower_scope_member_body(
         ctx.terminate(MirTerminator::Jump { target: exit });
     }
     ctx.switch_to(exit);
+    if native_exit.is_some() {
+        ctx.emit_native_test_scope_call("jet_rt_test_catch_boundary", "catch_boundary", scope,
+            Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()))?;
+    }
     ctx.exit_scope(scope)?;
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: join });

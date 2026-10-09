@@ -25,6 +25,10 @@ compiler's scoped publication capability: only a checked operation immediately
 followed by MIR `Poll(Propagate)` may arm it. Plain calls and root bodies remain
 process-fatal. Runtime-internal traps (overflow, division by zero, and list
 bounds) in task bodies are not publishable unless compiler-armed.
+The native raw-pointer Deref sentry read uses that same immediate-Propagate
+predicate; it cannot lend publication merely because another block polls.
+Sentry and ordinary traps share `trap_can_publish`; a task body alone is
+not publication authority for an unarmed raw memory fault.
 `jet_rt_poll_call_leave` restores the saved TCB64 word on a returning call.
 If a compiled callback leaves through its `Stopped` exit instead, the task
 runner restores the body word through `scheduler_body_leave(body)` after
@@ -70,11 +74,29 @@ source parsing alone is not a behavioral receipt.
 
 Native expectation probes consume only a pending panic with a recorded raw
 `E3001` or `R0801`–`R0803` stop in the innermost matching scope. A successful
-`jet_rt_test_catch_for_scope` clears the original scheduler stop and completes
-that expectation; a mismatch replaces it with `E3001` and sets unmet so no
+`jet_rt_test_catch_for_scope` completes that expectation but retains the original
+scheduler stop while deeper frames unwind. `jet_rt_test_catch_boundary` clears it
+at the canonical expectation exit, before that frame's own cleanup: the Rust
+reference `MIRRust.rs:14998–15061` catches the block closure, then dispatches this
+exit after `catch_unwind` returns. Thus a deeper cleanup panic still sees pending
+and aborts, while a panic in the expectation's own cleanup is a fresh stop.
+A mismatch replaces the original with `E3001` and sets unmet so no
 parent can catch the mismatch. Cancellation, deadlines, skips, unrecognized
 codes, and probes for another scope do not mutate the pending stop. Sentry
 records its raw fault detail before dropping it, never its rendered report.
+The bootstrap's opt-in `JET_FRONT_MIR_DUMP` observer writes canonical
+`mir_program_bytes` to its supplied path. It does not alter lowering mode;
+non-test regression proofs compare those bytes and their SHA-256 digests.
+`Tests/Fixtures/ExpectFail.jet` supplies compiled native match, mismatch,
+unmet, nested, checked/unarmed R080 and deeper/own-close witnesses through the
+real Task transport. `run-expect-producer.mjs` appends a focused proof to the
+compiler aggregate: it reuses the CLI's authorized request, selects Test mode,
+checks real MIR branch/boundary/exit-poll edges, then emits and runs that checked
+test's object. `check-expect-mir-identity.mjs` compares a fixed non-test corpus
+with stop points enabled in before/after shared compilers (the baseline needs
+the observer backported, without the expectation amendment). These execution
+and byte-identity checks belong to the composed compiler-unit proof, not the
+light source-parser lane.
 
 ## Purpose and scope
 
