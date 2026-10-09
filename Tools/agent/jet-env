@@ -169,4 +169,9 @@ else
   mkdir -p "$cache_dir"
   shell_args=(--profile "$cached_shell" "${repo}#${flake_shell}")
 fi
-exec nix develop "${shell_args[@]}" -c bash --noprofile --norc -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env ensure_command_resources); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); ensure_command_resources; exec $joined"
+# The shell hook derives JET_ROOT from its working directory (git toplevel,
+# else $PWD) and runs "$JET_ROOT/Tools/agent/clean-nix-tmp.sh", so enter the
+# shell from this checkout and return to the caller's directory for the command.
+caller_dir="$PWD"
+cd -- "$repo"
+exec nix develop "${shell_args[@]}" -c bash --noprofile --norc -c "cd -- $(printf %q "$caller_dir") || exit 64; $(declare -f check_target_dir set_default_target_dir cache_mode_env ensure_command_resources); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); ensure_command_resources; exec $joined"
