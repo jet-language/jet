@@ -12,6 +12,8 @@ use jet_foundation.[
     StrPart,
     TExpr,
     TExprKind,
+    TLetTy,
+    TStmt,
     TFailureCarrier,
     THandleOp,
     THelperKind,
@@ -311,6 +313,11 @@ fn sema_time_civil_result(owner: String, method: String, argc: Int) -> Type? {
     None
 }
 
+fn sema_time_civil_value(receiver_value: TExpr, owner: String, method: String, values: [TExpr], result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    operation :: if owner == "Duration" && method == "round" -> THandleOp.DurationRound else -> THandleOp.CivilTimeMethod{kind: owner, method: method}
+    sema_time_finish_handle(receiver_value, operation, values, result, "", "{owner}.{method}", span, expected, environment, &scopes, &context, &diagnostics)
+}
+
 fn sema_time_civil_finish(receiver: Expr, receiver_value: TExpr, owner: String, method: String, values: [TExpr], result: Type, args: [CallArg], params: [SemaCallParam], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
     ownership :: sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
@@ -327,11 +334,33 @@ fn sema_time_civil_method(receiver: Expr, receiver_value: TExpr, owner: String, 
             _ := sema_time_untyped_values(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        lowered :: sema_call_check_bound_arguments(&state, "{owner}.{method}", params, binding, &source_args, environment, &scopes, &tail_store, &context, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        result :: sema_time_civil_result(owner, method, lowered.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+        typed :: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, &source_args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        ownership :: sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, params, &source_args, scopes, span, &diagnostics)
+        if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+        lowered := sema_call_lower_bound_arguments(typed, params, &source_args, environment)
+        if !sema_call_prepare_variadic_elements(typed, params, source_args, &lowered, environment, &scopes, &state, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        pins := [TStmt]{}
+        pinned_receiver := receiver_value
+        if typed.pin_arguments {
+            borrowed :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state).len() > 0
+            pin_slot :: -typed.values.len() - 1
+            symbol :: sema_call_binder_ref_symbol(environment, sema_scope_function_owner_key(scopes), typed.binder_site, pin_slot, "receiver", receiver_value.ty, span)
+            local := tir_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
+            local.generated = true
+            local.deref = borrowed
+            init := receiver_value
+            if borrowed -> init = sema_tir_expr(init.ty, TExprKind.Borrow{place: init, access: AccessConvention.Read}, init.span)
+            &pins.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span})
+            pinned_receiver = sema_tir_expr(receiver_value.ty, TExprKind.Local{local: local}, receiver_value.span)
+        }
+        loop pin in sema_call_pin_binder_arguments(typed, params, &lowered, environment, scopes, span) -> &pins.push(pin)
+        packed :: sema_call_pack_variadic_arguments(typed, params, lowered, environment, &context, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        result :: sema_time_civil_result(owner, method, packed.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
         values := [TExpr]{}
-        loop argument in lowered -> &values.push(argument.value)
-        return sema_time_civil_finish(receiver, receiver_value, owner, method, values, result, source_args, params, span, expected, environment, &scopes, &context, &state, &diagnostics)
+        loop argument in packed -> &values.push(argument.value)
+        finished :: sema_time_civil_value(pinned_receiver, owner, method, values, result, span, expected, environment, &scopes, &context, &diagnostics)
+        value :: finished.value ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        return SemaMethodSpecialCheck{handled: true, value: Val(sema_call_with_binder_pins(^pins, ^value, span))}
     }
     SemaMethodSpecialCheck{handled: false, value: None}
 }

@@ -1,0 +1,11 @@
+// #4894: an owned variadic pack and an explicitly moved spread each drop once.
+fn join_owned(parts: ^...String) -> String { parts.join(",") }
+
+fn run() {
+    print(join_owned())
+    print(join_owned("one", "two"))
+    parts :: [String]{"three", "four"}
+    print(join_owned(^...parts))
+    fresh :: join_owned(...[String]{"five", "six"})
+    print(fresh)
+}

@@ -1,0 +1,32 @@
+// #4894: checked element carriers, not native label/type guessing.
+fn unions(parts: ...(Int | String)) -> Int { parts.len() }
+fn rows(parts: ...([Int])) -> Int {
+    total := 0
+    loop row in parts -> total += row.len()
+    total
+}
+struct StaticCounter {
+    fn count(parts: ...String) -> Int { parts.len() }
+}
+trait Counter {
+    fn count(self, parts: ...String) -> Int
+}
+struct CounterImpl {
+    impl Counter {
+        fn count(self, parts: ...String) -> Int { parts.len() }
+    }
+}
+fn dynamic_count(counter: Counter) -> Int { counter.count("one", "two") }
+fn trait_rows(parts: ...([Counter])) -> Int { parts.len() }
+fn run() {
+    union_tail :: [Int | String]{2, "three"}
+    print(unions(1, ...union_tail, "four"))
+    fixed :: [Int#2]{1, 2}
+    print(rows(fixed, [Int]{3}))
+    print(fixed.len())
+    lists :: [[Int]]{[Int]{4}, [Int]{5, 6}}
+    print(rows([Int]{0}, ...lists))
+    print(StaticCounter.count("one", "two"))
+    print(dynamic_count(CounterImpl{}))
+    print(trait_rows([Counter]{CounterImpl{}}, [Counter]{CounterImpl{}}))
+}

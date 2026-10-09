@@ -1,0 +1,27 @@
+// #4894: raw expressions run in written order before the rest slot is grouped.
+fn tap(label: String, value: ^String) -> String {
+    print("eval {label}")
+    value
+}
+fn collect(head: String{tap("default", "D")}, rest: ...String) -> String {
+    "{head}:{rest.join(",")}"
+}
+struct Logger {
+    fn collect(self, head: String, rest: ...String) -> String {
+        "{head}:{rest.join(",")}"
+    }
+}
+fn logger() -> Logger {
+    print("eval receiver")
+    Logger{}
+}
+fn select_action() -> Bool {
+    print("eval callee")
+    true
+}
+fn run() {
+    print(collect(rest: tap("tail", "R"), head: tap("head", "H")))
+    print(collect(rest: tap("tail-default", "R")))
+    print(logger().collect(rest: tap("method-tail", "R"), head: tap("method-head", "H")))
+    print((if select_action() -> collect else -> collect)(rest: tap("value-tail", "R"), head: tap("value-head", "H")))
+}
