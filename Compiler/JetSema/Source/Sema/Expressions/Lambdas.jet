@@ -10,6 +10,7 @@ use jet_foundation.[
     LValue,
     Lambda,
     NamedSpan,
+    PatSlot,
     Pattern,
     PlaceAccess,
     Span,
@@ -75,7 +76,7 @@ fn sema_expression_lambda_pattern_use_outer(pattern: Pattern, frame: Int, params
             }
             false
         }
-        .Struct(fields, _, _) -> {
+        .Struct(fields, _, _, _) -> {
             index := 0
             loop index < fields.len() {
                 if fields[index] == .Value(_, _, value) {
@@ -83,10 +84,35 @@ fn sema_expression_lambda_pattern_use_outer(pattern: Pattern, frame: Int, params
                         return true
                     }
                 }
+                if fields[index] == .Nested(_, _, nested) {
+                    if sema_expression_lambda_pattern_use_outer(nested, frame, params, &scopes) -> return true
+                }
                 index += 1
             }
             false
         }
+        .Variant(_, slots, _, _) | .List(slots, _, _) -> {
+            loop slot in slots -> if sema_expression_lambda_slot_use_outer(slot, frame, params, &scopes) -> return true
+            false
+        }
+        .Map(entries, _, _) -> {
+            loop entry in entries {
+                if sema_expression_lambda_uses_outer(entry.key, frame, params, &scopes) || sema_expression_lambda_slot_use_outer(entry.slot, frame, params, &scopes) -> return true
+            }
+            false
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) -> sema_expression_lambda_pattern_use_outer(nested, frame, params, &scopes) else -> false
+        }
+        else -> false
+    }
+}
+
+fn sema_expression_lambda_slot_use_outer(slot: PatSlot, frame: Int, params: [String], scopes: &SemaScopeTable) -> Bool {
+    if slot == {
+        .Value(value) -> sema_expression_lambda_uses_outer(value, frame, params, &scopes)
+        .Nested(inner) -> sema_expression_lambda_pattern_use_outer(inner, frame, params, &scopes)
+        .Named(_, _, inner) -> sema_expression_lambda_slot_use_outer(inner, frame, params, &scopes)
         else -> false
     }
 }

@@ -90,7 +90,8 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         // structural `PatternMatches` test.
         Expr::PatternTest {
             subject, pattern, ..
-        } if pattern.has_nested_pattern() => expr_in_subset(subject, cx, locals),
+        } if pattern.has_nested_pattern() => expr_in_subset(subject, cx, locals)
+            && !pattern.any_value_expr(&mut |value| !expr_in_subset(value, cx, locals)),
         // D-TAG1: a binding-free variant/group pattern test in EXPRESSION position
         // (`hot :: d == .Fire`, `d == .Fire.Burn` inside `&&`, …) lowers to a plain
         // Bool `matches!` (`TExprKind::PatternMatches`). Admission needs a known

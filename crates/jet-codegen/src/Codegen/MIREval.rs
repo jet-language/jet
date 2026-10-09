@@ -6641,6 +6641,22 @@ impl<'a, 'state> Machine<'a, 'state> {
                 }
                 Ok(RuntimeValue::Data(MirEvalValue::Map(output)))
             }
+            MirOperation::MapLookup { map, key, cache } => {
+                if let RuntimeValue::Result { ok: true, value } = self.read_place(frame_index, *cache, span)? {
+                    return Ok(*value);
+                }
+                let key = data_key(&runtime_to_data(self.value(frame_index, *key, span)?, span)?, span)?;
+                let MirEvalValue::Map(entries) = runtime_to_data(self.read_place(frame_index, *map, span)?, span)? else {
+                    return Err(mir_error_at("MIR map lookup requires a map window", span));
+                };
+                let index = entries.iter().position(|(candidate, _)| candidate == &key);
+                let lookup = RuntimeValue::Result {
+                    ok: index.is_some(),
+                    value: Box::new(RuntimeValue::Data(MirEvalValue::Int(index.map_or(-1, |index| index as i64)))),
+                };
+                self.write_place(frame_index, *cache, RuntimeValue::Result { ok: true, value: Box::new(lookup.clone()) }, span)?;
+                Ok(lookup)
+            }
             MirOperation::ProjectMembers { base, members } => {
                 let mut value = self.value(frame_index, *base, span)?;
                 for member in members {
@@ -23982,6 +23998,9 @@ impl<'a, 'state> Machine<'a, 'state> {
                 }
                 MirProjection::Deref { .. } => steps.push(MoveStep::Deref),
                 MirProjection::Payload { kind, .. } => steps.push(MoveStep::Payload(kind.clone())),
+                MirProjection::MapLookup { .. } => {
+                    return Err(mir_error_at("MIR map lookup window cannot be moved", span));
+                }
                 MirProjection::Range { range, .. } => {
                     let range = runtime_to_data(self.value(frame_index, *range, span)?, span)?;
                     let (start, end, exclusive) = mir_range_parts(&range, span)?;
@@ -24788,6 +24807,23 @@ impl<'a, 'state> Machine<'a, 'state> {
                     .map(RuntimeValue::Data)
             }
             MirProjection::Payload { kind, .. } => runtime_payload(value, kind, span),
+            MirProjection::MapLookup { lookup, optional, .. } => {
+                let RuntimeValue::Result { ok, value: index } = self.value(frame_index, *lookup, span)? else {
+                    return Err(mir_error_at("MIR map window has no checked lookup", span));
+                };
+                if !ok {
+                    if !optional {
+                        return Err(mir_error_at("MIR required map entry is absent", span));
+                    }
+                    return Ok(RuntimeValue::Data(MirEvalValue::Absent { element: String::new() }));
+                }
+                let index = int_value(runtime_to_data(*index, span)?, span)? as usize;
+                let MirEvalValue::Map(entries) = runtime_to_data(value, span)? else {
+                    return Err(mir_error_at("MIR map window requires a map", span));
+                };
+                let value = entries.into_iter().nth(index).ok_or_else(|| mir_error_at("MIR map lookup outlived its window", span))?.1;
+                Ok(RuntimeValue::Data(if *optional { MirEvalValue::Present(Box::new(value)) } else { value }))
+            }
             MirProjection::Range {
                 range, location, ..
             } => {
@@ -25493,6 +25529,9 @@ impl<'a, 'state> Machine<'a, 'state> {
                         parent,
                         kind: kind.clone(),
                     });
+                }
+                MirProjection::MapLookup { .. } => {
+                    return Err(mir_error_at("MIR map lookup window is read-only", span));
                 }
                 MirProjection::Range { .. } => {
                     return Err(mir_error_at(

@@ -1968,7 +1968,8 @@ pub fn jfmt_fmt_pattern(f: &JetFmt, pattern: Pattern) {
             }
         }
         // D-DESTRUCT1: struct-shaped dispatch arm head.
-        .Struct(fields, rest, _) -> {
+        .Struct(fields, rest, _, type_head) -> {
+            if type_head == .Val(head) -> jfmt_write(&f, head.name)
             jfmt_write(&f, "{{")
             loop (index, field) in fields {
                 if index > 0 -> jfmt_write(&f, ", ")
@@ -1985,6 +1986,11 @@ pub fn jfmt_fmt_pattern(f: &JetFmt, pattern: Pattern) {
                         jfmt_write(&f, ": ")
                         jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
                     }
+                    .Nested(name, _, inner) -> {
+                        jfmt_write(&f, name)
+                        jfmt_write(&f, ": ")
+                        jfmt_fmt_pattern(&f, inner)
+                    }
                 }
             }
             if rest != None {
@@ -1992,6 +1998,35 @@ pub fn jfmt_fmt_pattern(f: &JetFmt, pattern: Pattern) {
                 jfmt_write(&f, "..")
             }
             jfmt_write(&f, "}}")
+        }
+        .List(items, rest, _) -> {
+            jfmt_write(&f, "[")
+            loop (index, item) in items {
+                if index > 0 -> jfmt_write(&f, ", ")
+                jfmt_fmt_pat_slot(&f, item)
+            }
+            if rest == .Val(tail) {
+                if items.len() > 0 -> jfmt_write(&f, ", ")
+                jfmt_write(&f, "..")
+                if tail.name == .Val(name) -> jfmt_write(&f, name.name)
+            }
+            jfmt_write(&f, "]")
+        }
+        .Map(entries, rest, _) -> {
+            jfmt_write(&f, "[")
+            if entries.len() == 0 && rest == None -> jfmt_write(&f, ":")
+            loop (index, entry) in entries {
+                if index > 0 -> jfmt_write(&f, ", ")
+                jfmt_fmt_expr(&f, entry.key, JFMT_PREC_OR_FALLBACK)
+                if entry.optional -> jfmt_write(&f, "?")
+                jfmt_write(&f, ": ")
+                jfmt_fmt_pat_slot(&f, entry.slot)
+            }
+            if rest != None {
+                if entries.len() > 0 -> jfmt_write(&f, ", ")
+                jfmt_write(&f, "..")
+            }
+            jfmt_write(&f, "]")
         }
         // D-PARSESTR1: an interpolation literal used as a pattern.
         .StrMatch(parts, span) -> {
@@ -2020,6 +2055,7 @@ fn jfmt_fmt_pat_slot(f: &JetFmt, slot: PatSlot) {
         .Wildcard -> jfmt_write(&f, "_")
         .Range(lo, hi) -> jfmt_write(&f, "{lo}..{hi}")
         .Nested(inner) -> jfmt_fmt_pattern(&f, inner)
+        .Value(value) -> jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
         .Named(field, _, inner) -> {
             jfmt_write(&f, field)
             jfmt_write(&f, ": ")

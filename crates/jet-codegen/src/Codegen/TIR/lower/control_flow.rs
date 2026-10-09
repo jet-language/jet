@@ -589,12 +589,13 @@ fn lower_if_cond_atom(
             .collect();
         return (
             TIfCond::IfLet {
-                pattern: TPattern::from_ast(
+                pattern: TPattern::from_ast_with_values(
                     pattern.clone(),
                     Some(enum_type),
                     TPatternPosition::Binding,
                     false,
                     false,
+                    |value| lower_expr(value, cx, env),
                 ),
                 subj,
             },
@@ -870,12 +871,13 @@ fn lower_if_cond_atom(
             if !bindings.is_empty() {
                 return (
                     TIfCond::IfLet {
-                        pattern: TPattern::from_ast(
+                        pattern: TPattern::from_ast_with_values(
                             pattern.clone(),
                             enum_type,
                             TPatternPosition::Binding,
                             false,
                             false,
+                            |value| lower_expr(value, cx, env),
                         ),
                         subj,
                     },
@@ -906,6 +908,16 @@ fn lower_if_cond_atom(
                 Vec::new(),
                 Vec::new(),
             );
+        }
+    }
+    if let Expr::PatternTest { subject, pattern, .. } = cond {
+        if matches!(pattern, Pattern::List { .. } | Pattern::Map { .. })
+            || matches!(pattern, Pattern::Struct { .. }) && pattern.has_nested_pattern()
+        {
+            let subj = lower_if_let_subject(subject, cx, env, cached);
+            let bindings = nested_pattern_if_bindings(cx, env, pattern, &subj.ty);
+            let pattern = TPattern::binding_with_values(pattern.clone(), |value| lower_expr(value, cx, env));
+            return (TIfCond::IfLet { pattern, subj }, bindings, Vec::new());
         }
     }
     // D-DESTRUCT1: value-dispatch expression chains are represented as nested
@@ -1147,9 +1159,9 @@ fn lower_if_cond_atom(
             if pattern.has_nested_pattern() {
                 let bindings = nested_pattern_if_bindings(cx, env, pattern, &subj.ty);
                 let pattern = if matches!(&subj.ty, Type::Option(_)) {
-                    TPattern::option_binding(pattern.clone())
+                    TPattern::option_binding_with_values(pattern.clone(), |value| lower_expr(value, cx, env))
                 } else {
-                    TPattern::binding(pattern.clone())
+                    TPattern::binding_with_values(pattern.clone(), |value| lower_expr(value, cx, env))
                 };
                 return (TIfCond::IfLet { pattern, subj }, bindings, Vec::new());
             }

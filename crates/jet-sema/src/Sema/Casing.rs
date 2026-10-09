@@ -635,7 +635,26 @@ fn pattern_names(pattern: &Pattern, out: &mut Vec<Diagnostic>) {
                         local, local_span, ..
                     } => snake(local, *local_span, "pattern binding", out),
                     StructPatField::Value { value, .. } => expr_names(value, out),
+                    StructPatField::Nested { pattern, .. } => pattern_names(pattern, out),
                 }
+            }
+        }
+        Pattern::List { items, rest, .. } => {
+            for item in items {
+                slot_names(item, out);
+            }
+            if let Some(crate::AST::ListPatRest {
+                name: Some((name, span)),
+                ..
+            }) = rest
+            {
+                snake(name, *span, "pattern binding", out);
+            }
+        }
+        Pattern::Map { entries, .. } => {
+            for entry in entries {
+                expr_names(&entry.key, out);
+                slot_names(&entry.slot, out);
             }
         }
         Pattern::StrMatch { parts, .. } => {
@@ -661,6 +680,7 @@ fn slot_names(slot: &crate::AST::PatSlot, out: &mut Vec<Diagnostic>) {
         crate::AST::PatSlot::Bind { name, span } => snake(name, *span, "pattern binding", out),
         crate::AST::PatSlot::Nested(inner) => pattern_names(inner, out),
         crate::AST::PatSlot::Named { slot, .. } => slot_names(slot, out),
+        crate::AST::PatSlot::Value(value) => expr_names(value, out),
         crate::AST::PatSlot::Wildcard
         | crate::AST::PatSlot::Range { .. }
         | crate::AST::PatSlot::Rest(_) => {}

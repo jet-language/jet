@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
-    EnumLitArg, Expr, Func, LValue, LambdaBody, OrFallback, Pattern, Stmt, StrPart, StructPatField,
+    EnumLitArg, Expr, Func, LValue, LambdaBody, OrFallback, Pattern, Stmt, StrPart,
 };
 use jet_foundation::Authority::Holds;
 use jet_foundation::sema::{RightsProvenance, RightsRow};
@@ -680,28 +680,7 @@ pub fn walk_stmt_expr_nodes_for_validation(stmts: &[Stmt], f: &mut impl FnMut(&E
 }
 
 fn walk_pattern_expr_nodes(pattern: &Pattern, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
-    match pattern {
-        Pattern::Or(patterns, _) => {
-            for pattern in patterns {
-                walk_pattern_expr_nodes(pattern, opts, f);
-            }
-        }
-        Pattern::Struct { fields, .. } => {
-            for field in fields {
-                if let StructPatField::Value { value, .. } = field {
-                    walk_expr_nodes(value, opts, f);
-                }
-            }
-        }
-        Pattern::Variant { .. }
-        | Pattern::Present { .. }
-        | Pattern::Absent(_)
-        | Pattern::Ok { .. }
-        | Pattern::Err { .. }
-        | Pattern::Range { .. }
-        | Pattern::StrMatch { .. }
-        | Pattern::BinMatch { .. } => {}
-    }
+    pattern.for_each_value_expr(&mut |value| walk_expr_nodes(value, opts, f));
 }
 
 fn walk_stmt_expr_nodes(s: &Stmt, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {

@@ -15,6 +15,7 @@ use jet_foundation.[
     Item,
     LValue,
     OrFallback,
+    PatSlot,
     Pattern,
     Span,
     Stmt,
@@ -162,15 +163,47 @@ fn sema_contract_result_ident_in_pattern(value: Pattern) -> Span? {
             }
             None
         }
-        .Struct(fields, _, _) -> {
+        .Struct(fields, _, _, _) -> {
             loop field in fields {
                 if field == .Value(_, _, expression) {
                     found :: sema_contract_result_ident_in_expr(expression)
                     if found != None -> return found
                 }
+                if field == .Nested(_, _, nested) {
+                    found :: sema_contract_result_ident_in_pattern(nested)
+                    if found != None -> return found
+                }
             }
             None
         }
+        .Variant(_, slots, _, _) | .List(slots, _, _) -> {
+            loop slot in slots {
+                found :: sema_contract_result_ident_in_pattern_slot(slot)
+                if found != None -> return found
+            }
+            None
+        }
+        .Map(entries, _, _) -> {
+            loop entry in entries {
+                found :: sema_contract_result_ident_in_expr(entry.key)
+                if found != None -> return found
+                slot_found :: sema_contract_result_ident_in_pattern_slot(entry.slot)
+                if slot_found != None -> return slot_found
+            }
+            None
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) -> sema_contract_result_ident_in_pattern(nested) else -> None
+        }
+        else -> None
+    }
+}
+
+fn sema_contract_result_ident_in_pattern_slot(slot: PatSlot) -> Span? {
+    if slot == {
+        .Value(value) -> sema_contract_result_ident_in_expr(value)
+        .Nested(inner) -> sema_contract_result_ident_in_pattern(inner)
+        .Named(_, _, inner) -> sema_contract_result_ident_in_pattern_slot(inner)
         else -> None
     }
 }

@@ -4,8 +4,8 @@
 //! rest of Bundle beyond the AST types every checker function reads.
 
 use crate::AST::{
-    DeriveBodyItem, EnumLitArg, Expr, ForKind, Func, Item, LambdaBody, OrFallback, Pattern,
-    ProgramBundle, Stmt, StrPart, StructPatField,
+    DeriveBodyItem, EnumLitArg, Expr, ForKind, Func, Item, LambdaBody, OrFallback, ProgramBundle,
+    Stmt, StrPart,
 };
 
 pub fn bundle_has_comptime_evaluation(bundle: &ProgramBundle) -> bool {
@@ -241,13 +241,7 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
             subject, pattern, ..
         } => {
             expr_has_comptime_evaluation(subject)
-                || match pattern {
-                    Pattern::Struct { fields, .. } => fields.iter().any(|field| match field {
-                        StructPatField::Value { value, .. } => expr_has_comptime_evaluation(value),
-                        StructPatField::Bind { .. } => false,
-                    }),
-                    _ => false,
-                }
+                || pattern.any_value_expr(&mut |value| expr_has_comptime_evaluation(value))
         }
         Expr::OrFallback {
             value, fallback, ..

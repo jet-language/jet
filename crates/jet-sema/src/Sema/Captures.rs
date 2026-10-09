@@ -243,13 +243,9 @@ pub(crate) fn walk_expr_for_const_refs(
         }
         Expr::PatternTest { subject, pattern, .. } => {
             walk_expr_for_const_refs(subject, const_names, taken);
-            if let Pattern::Struct { fields, .. } = pattern {
-                for field in fields {
-                    if let StructPatField::Value { value, .. } = field {
-                        walk_expr_for_const_refs(value, const_names, taken);
-                    }
-                }
-            }
+            pattern.for_each_value_expr(&mut |value| {
+                walk_expr_for_const_refs(value, const_names, taken)
+            });
         }
         Expr::Binary(_, l, r, _) => {
             walk_expr_for_const_refs(l, const_names, taken);
@@ -423,13 +419,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
             subject, pattern, ..
         } => {
             expr_refs_name(subject, name)
-                || match pattern {
-                    Pattern::Struct { fields, .. } => fields.iter().any(|field| match field {
-                        StructPatField::Value { value, .. } => expr_refs_name(value, name),
-                        StructPatField::Bind { .. } => false,
-                    }),
-                    _ => false,
-                }
+                || pattern.any_value_expr(&mut |value| expr_refs_name(value, name))
         }
         Expr::Lambda(lambda) => {
             !lambda.params.iter().any(|param| param.name == name)
@@ -691,9 +681,32 @@ fn collect_pattern_bindings(pattern: &Pattern, bound: &mut HashSet<String>) {
         }
         Pattern::Struct { fields, .. } => {
             for field in fields {
-                if let StructPatField::Bind { local, .. } = field {
-                    bound.insert(local.clone());
+                match field {
+                    StructPatField::Bind { local, .. } => {
+                        bound.insert(local.clone());
+                    }
+                    StructPatField::Nested { pattern, .. } => {
+                        collect_pattern_bindings(pattern, bound)
+                    }
+                    StructPatField::Value { .. } => {}
                 }
+            }
+        }
+        Pattern::List { items, rest, .. } => {
+            for item in items {
+                collect_slot_bindings(item, bound);
+            }
+            if let Some(crate::AST::ListPatRest {
+                name: Some((name, _)),
+                ..
+            }) = rest
+            {
+                bound.insert(name.clone());
+            }
+        }
+        Pattern::Map { entries, .. } => {
+            for entry in entries {
+                collect_slot_bindings(&entry.slot, bound);
             }
         }
         Pattern::Or(alts, ..) => {
@@ -729,7 +742,8 @@ fn collect_slot_bindings(slot: &crate::AST::PatSlot, bound: &mut HashSet<String>
         crate::AST::PatSlot::Named { slot, .. } => collect_slot_bindings(slot, bound),
         crate::AST::PatSlot::Wildcard
         | crate::AST::PatSlot::Range { .. }
-        | crate::AST::PatSlot::Rest(_) => {}
+        | crate::AST::PatSlot::Rest(_)
+        | crate::AST::PatSlot::Value(_) => {}
     }
 }
 
@@ -950,13 +964,9 @@ pub(crate) fn expr_collect_captures(
         }
         Expr::PatternTest { subject, pattern, .. } => {
             expr_collect_captures(subject, bound, read, mut_cap, called);
-            if let Pattern::Struct { fields, .. } = pattern {
-                for field in fields {
-                    if let crate::AST::StructPatField::Value { value, .. } = field {
-                        expr_collect_captures(value, bound, read, mut_cap, called);
-                    }
-                }
-            }
+            pattern.for_each_value_expr(&mut |value| {
+                expr_collect_captures(value, bound, read, mut_cap, called)
+            });
         }
         Expr::Str(parts, _) => {
             for p in parts {

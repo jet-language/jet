@@ -187,6 +187,8 @@ pub enum TPatternShape {
     Range(lo: Int, hi: Int, span: Span)
     Or(alternatives: [TPatternShape], span: Span)
     Struct(fields: [TPatternField], rest: Span?, span: Span)
+    List(items: [TPatternBinding], rest: TListPatternRest?, span: Span)
+    Map(entries: [TMapPatternEntry], rest: Bool, span: Span)
     Text(parts: [TTextPatternPart], span: Span)
     Binary(parts: [TBinaryPatternPart], span: Span)
 }
@@ -225,11 +227,50 @@ pub enum TPatternBinding {
     Bind(name: String, span: Span)
     Range(lo: Int, hi: Int)
     Nested(pattern: TNestedPattern)
+    Value(value: TExpr)
 }
 
 pub enum TPatternField {
     Bind(field: String, local: String, span: Span)
     Value(field: String, value: TExpr, span: Span)
+    Nested(field: String, pattern: TNestedPattern, span: Span)
+}
+
+pub struct TListPatternRest {
+    pub name: String?
+    pub span: Span
+}
+
+pub struct TMapPatternEntry {
+    pub key: TExpr
+    pub optional: Bool
+    pub slot: TPatternBinding
+    pub span: Span
+}
+
+// Logical key identity ignores source spelling and resolved constant aliases.
+pub fn tir_pattern_key_identity(key: TExpr) -> String? Never! {
+    if key.kind == {
+        .IntLit(value, _) -> Val("int:{value}")
+        .StrLit(value) -> Val("text:{value}")
+        .BoolLit(value) -> Val("bool:{value}")
+        .CharLit(value) -> Val("char:{value}")
+        .ConstRef(symbol) -> Val("constant:{symbol.key}")
+        .EnumLit(owner, variant, _) -> Val("enum:{owner}:{variant}")
+        .Unary(op, value) -> {
+            if op == TUnaryOp.Neg && value.kind == .IntLit(number, _) -> Val("int:{-number}") else -> None
+        }
+        .CtLit(value) -> if value == {
+            .Int(number) -> Val("int:{number}")
+            .BigInt(number) -> Val("int:{number}")
+            .String(text) -> Val("text:{text}")
+            .Bool(flag) -> Val("bool:{flag}")
+            .Char(character) -> Val("char:{character}")
+            .Enum(owner, variant, _) -> Val("enum:{owner}:{variant}")
+            else -> None
+        }
+        else -> None
+    }
 }
 
 pub enum TTextPatternPart {
@@ -2074,6 +2115,16 @@ pub fn tir_pattern_children(pattern: TPattern) -> [TExpr] Never! {
 fn tir_pattern_shape_children(shape: TPatternShape) -> [TExpr] Never! {
     children := [TExpr]{}
     if shape == {
+        .Variant(_, slots, _, _) | .List(slots, _, _) -> {
+            loop slot in slots -> loop child in tir_pattern_slot_children(slot) -> &children.push(child)
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) -> loop child in tir_pattern_shape_children(nested.shape) -> &children.push(child)
+        }
+        .Map(entries, _, _) -> loop entry in entries {
+            &children.push(entry.key)
+            loop child in tir_pattern_slot_children(entry.slot) -> &children.push(child)
+        }
         .Or(alternatives, _) -> {
             loop alternative in alternatives {
                 loop child in tir_pattern_shape_children(alternative) -> &children.push(child)
@@ -2083,6 +2134,7 @@ fn tir_pattern_shape_children(shape: TPatternShape) -> [TExpr] Never! {
             loop field in fields {
                 if field == {
                     .Value(_, value, _) -> &children.push(value)
+                    .Nested(_, inner, _) -> loop child in tir_pattern_shape_children(inner.shape) -> &children.push(child)
                     else -> {}
                 }
             }
@@ -2090,6 +2142,14 @@ fn tir_pattern_shape_children(shape: TPatternShape) -> [TExpr] Never! {
         else -> {}
     }
     children
+}
+
+fn tir_pattern_slot_children(slot: TPatternBinding) -> [TExpr] Never! {
+    if slot == {
+        .Value(value) -> [TExpr]{value}
+        .Nested(inner) -> tir_pattern_shape_children(inner.shape)
+        else -> [TExpr]{}
+    }
 }
 
 pub fn tir_if_cond_children(condition: TIfCond) -> [TExpr] Never! {

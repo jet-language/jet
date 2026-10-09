@@ -2448,8 +2448,16 @@ impl<'a> Fmt<'a> {
                     self.fmt_pattern(alt);
                 }
             }
-            // D-DESTRUCT1: struct-shaped dispatch arm head.
-            Pattern::Struct { fields, rest, .. } => {
+            // D-DESTRUCT1 / D-PAT-RECORD1: struct pattern, optionally named.
+            Pattern::Struct {
+                type_name,
+                fields,
+                rest,
+                ..
+            } => {
+                if let Some((name, _)) = type_name {
+                    self.write(name);
+                }
                 self.write("{");
                 for (i, field) in fields.iter().enumerate() {
                     if i > 0 {
@@ -2469,6 +2477,11 @@ impl<'a> Fmt<'a> {
                             self.write(": ");
                             self.fmt_expr(value, Prec::OrFallback);
                         }
+                        crate::AST::StructPatField::Nested { field, pattern, .. } => {
+                            self.write(field);
+                            self.write(": ");
+                            self.fmt_pattern(pattern);
+                        }
                     }
                 }
                 if rest.is_some() {
@@ -2478,6 +2491,51 @@ impl<'a> Fmt<'a> {
                     self.write("..");
                 }
                 self.write("}");
+            }
+            // D-PAT-RECORD1: list pattern.
+            Pattern::List { items, rest, .. } => {
+                self.write("[");
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.fmt_pat_slot(item);
+                }
+                if let Some(rest) = rest {
+                    if !items.is_empty() {
+                        self.write(", ");
+                    }
+                    self.write("..");
+                    if let Some((name, _)) = &rest.name {
+                        self.write(name);
+                    }
+                }
+                self.write("]");
+            }
+            // D-PAT-MAP1: map pattern; `[:]` is the empty map.
+            Pattern::Map { entries, rest, .. } => {
+                self.write("[");
+                if entries.is_empty() && rest.is_none() {
+                    self.write(":");
+                }
+                for (i, entry) in entries.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.fmt_expr(&entry.key, Prec::OrFallback);
+                    if entry.optional {
+                        self.write("?");
+                    }
+                    self.write(": ");
+                    self.fmt_pat_slot(&entry.slot);
+                }
+                if rest.is_some() {
+                    if !entries.is_empty() {
+                        self.write(", ");
+                    }
+                    self.write("..");
+                }
+                self.write("]");
             }
             // D-PARSESTR1: an interpolation literal used as a pattern —
             // formats identically to the same text as a format literal, plus
@@ -2512,6 +2570,7 @@ impl<'a> Fmt<'a> {
                 self.fmt_pat_slot(slot);
             }
             PatSlot::Rest(_) => self.write(".."),
+            PatSlot::Value(value) => self.fmt_expr(value, Prec::OrFallback),
         }
     }
 

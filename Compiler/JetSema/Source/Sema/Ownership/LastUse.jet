@@ -4,6 +4,8 @@
 use jet_foundation.[
     Expr,
     LValue,
+    Pattern,
+    PatSlot,
     Stmt,
 ]
 
@@ -86,19 +88,7 @@ fn sema_ownership_last_use_expr(expr: Expr, name: String) -> Bool {
         }
         .PatternTest(subject, pattern, _) -> {
             if sema_ownership_last_use_expr(subject, name) -> return true
-            if pattern == {
-                .Struct(fields, _, _) -> {
-                    loop field in fields {
-                        if field == {
-                            .Value(_, _, value) -> {
-                                if sema_ownership_last_use_expr(value, name) -> return true
-                            }
-                            else -> {}
-                        }
-                    }
-                }
-                else -> {}
-            }
+            if sema_ownership_last_use_pattern(pattern, name) -> return true
         }
         .Ok(value, _) | .Err(value, _) -> return sema_ownership_last_use_expr(value, name)
         .OrFallback(value, fallback, _, _) -> {
@@ -238,4 +228,39 @@ fn sema_ownership_tail_last_read(tail_store: &SemaStatementTailStore, body_id: I
     }
     tail_store.bodies[body_id].last_reads[name] = index
     index
+}
+
+fn sema_ownership_last_use_pattern(pattern: Pattern, name: String) -> Bool Never! {
+    if pattern == {
+        .Struct(fields, _, _, _) -> loop field in fields {
+            if field == {
+                .Value(_, _, value) -> if sema_ownership_last_use_expr(value, name) -> return true
+                .Nested(_, _, nested) -> if sema_ownership_last_use_pattern(nested, name) -> return true
+                else -> {}
+            }
+        }
+        .Variant(_, slots, _, _) | .List(slots, _, _) -> loop slot in slots {
+            if sema_ownership_last_use_slot(slot, name) -> return true
+        }
+        .Map(entries, _, _) -> loop entry in entries {
+            if sema_ownership_last_use_expr(entry.key, name) || sema_ownership_last_use_slot(entry.slot, name) -> return true
+        }
+        .Or(alternatives, _) -> loop alternative in alternatives {
+            if sema_ownership_last_use_pattern(alternative, name) -> return true
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) -> return sema_ownership_last_use_pattern(nested, name)
+        }
+        else -> {}
+    }
+    false
+}
+
+fn sema_ownership_last_use_slot(slot: PatSlot, name: String) -> Bool Never! {
+    if slot == {
+        .Value(value) -> sema_ownership_last_use_expr(value, name)
+        .Nested(pattern) -> sema_ownership_last_use_pattern(pattern, name)
+        .Named(_, _, inner) -> sema_ownership_last_use_slot(inner, name)
+        else -> false
+    }
 }

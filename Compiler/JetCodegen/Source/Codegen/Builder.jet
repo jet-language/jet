@@ -433,6 +433,8 @@ struct JetCodegenBuilder {
     // Pattern subjects read through `&place`, and generated locals aliased
     // to one; their payload bindings alias the place (MIRProjection.Payload).
     pub pattern_windows: [JetCodegenPatternWindow]
+    pub pattern_lookup_head: MIRBlockID?
+    pub pattern_lookup_caches: [String:MIRPlaceID]
     pub window_aliases: [String]
     // D-MEM-COPYSEM1: window places (by place ID) rooted at a read
     // parameter. A pattern on one tests it in place and binds each payload
@@ -889,6 +891,8 @@ fn jet_codegen_new_builder(function: TFunc, program: JetCodegenProgram) -> JetCo
         switch_subject: None,
         spawn_occurrences: [String:Int]{},
         pattern_windows: [JetCodegenPatternWindow]{},
+        pattern_lookup_head: None,
+        pattern_lookup_caches: [String:MIRPlaceID]{},
         window_aliases: [String]{},
         read_windows: [U64:Bool]{},
         read_alias_places: [U64:Bool]{},
@@ -957,6 +961,8 @@ struct JetCodegenFunctionState {
     pub switch_subject: JetCodegenSwitchSubject?
     pub spawn_occurrences: [String:Int]
     pub pattern_windows: [JetCodegenPatternWindow]
+    pub pattern_lookup_head: MIRBlockID?
+    pub pattern_lookup_caches: [String:MIRPlaceID]
     pub window_aliases: [String]
     pub read_windows: [U64:Bool]
     pub read_alias_places: [U64:Bool]
@@ -1032,6 +1038,8 @@ fn jet_codegen_begin_function(builder: &JetCodegenBuilder, program: JetCodegenPr
         switch_subject: None,
         spawn_occurrences: [String:Int]{},
         pattern_windows: [JetCodegenPatternWindow]{},
+        pattern_lookup_head: None,
+        pattern_lookup_caches: [String:MIRPlaceID]{},
         window_aliases: [String]{},
         read_windows: [U64:Bool]{},
         read_alias_places: [U64:Bool]{},
@@ -1098,6 +1106,8 @@ fn jet_codegen_function_state(builder: JetCodegenBuilder, program: JetCodegenPro
         switch_subject: builder.switch_subject,
         spawn_occurrences: builder.spawn_occurrences,
         pattern_windows: builder.pattern_windows,
+        pattern_lookup_head: builder.pattern_lookup_head,
+        pattern_lookup_caches: builder.pattern_lookup_caches,
         window_aliases: builder.window_aliases,
         read_windows: builder.read_windows,
         read_alias_places: builder.read_alias_places,

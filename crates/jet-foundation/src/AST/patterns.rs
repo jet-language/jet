@@ -26,6 +26,9 @@ pub enum PatSlot {
     /// D-PAT-NAMED-NEST1=A: the trailing `..` of `.Case{field: pat, ..}`;
     /// sema fills every unnamed field with a wildcard.
     Rest(Span),
+    /// D-PAT-RECORD1=A: a literal or constant item in a list pattern
+    /// (`["add", name, ..]`); the item compares with `==`.
+    Value(Box<Expr>),
 }
 
 impl PatSlot {
@@ -93,10 +96,32 @@ pub enum Pattern {
     /// D-PATO (ratified 2026-06-19): structural or-pattern `A(x) | B(x)`.
     /// All alternatives must bind the same names at the same types (E0317).
     Or(Vec<Pattern>, Span),
-    /// D-DESTRUCT1: a struct-shaped dispatch arm head:
-    /// `.{ kind: "page", title, .. } -> ...`.
+    /// D-DESTRUCT1 / D-PAT-RECORD1=A: a struct pattern, `{kind: "page", title, ..}`
+    /// or with its type head `Point{x: 0, y}`. Exact unless it ends with `..`.
+    /// Struct patterns nest inside enum payloads, list items and other struct
+    /// fields (`StructPatField::Nested`).
     Struct {
+        /// D-PAT-RECORD1=A: the written type head, when present.
+        type_name: Option<(String, Span)>,
         fields: Vec<StructPatField>,
+        rest: Option<Span>,
+        span: Span,
+    },
+    /// D-PAT-RECORD1=A: a list pattern, `[]`, `[only]`, `[first, ..]`,
+    /// `["add", name, ..rest]`. Exact unless its last entry is `..` or
+    /// `..rest`; `rest` names the remaining items as a read-only view.
+    List {
+        items: Vec<PatSlot>,
+        rest: Option<ListPatRest>,
+        span: Span,
+    },
+    /// D-PAT-MAP1=A: a map pattern written like a map literal,
+    /// `["type": .Text(kind), "nick"?: nick, ..]`. Each plain key must be
+    /// present and its value must match; a `?:` key may be missing and its
+    /// slot sees the optional lookup result. Exact (the map holds only the
+    /// listed keys) unless it ends with `..`; `[:]` matches only an empty map.
+    Map {
+        entries: Vec<MapPatEntry>,
         rest: Option<Span>,
         span: Span,
     },
@@ -171,6 +196,25 @@ pub enum StrMatchPart {
     },
 }
 
+/// D-PAT-MAP1=A: one `key: pattern` or `key?: pattern` entry of a map pattern.
+#[derive(Debug, Clone)]
+pub struct MapPatEntry {
+    /// A literal, enum case or ALL_CAPS constant of the map's key type.
+    pub key: Box<Expr>,
+    /// `key?: slot` — the key may be missing; the slot sees `V?`.
+    pub optional: bool,
+    pub slot: PatSlot,
+    pub span: Span,
+}
+
+/// D-PAT-RECORD1=A: the trailing `..` or `..name` of a list pattern.
+#[derive(Debug, Clone)]
+pub struct ListPatRest {
+    pub span: Span,
+    /// `..rest` binds the remaining items as a read-only view.
+    pub name: Option<(String, Span)>,
+}
+
 /// D-DESTRUCT1: one field inside a struct pattern arm head.
 #[derive(Debug, Clone)]
 pub enum StructPatField {
@@ -187,20 +231,29 @@ pub enum StructPatField {
         field_span: Span,
         value: Box<Expr>,
     },
+    /// D-PAT-RECORD1=A: `field: pattern` — test the field against a nested
+    /// pattern (`pos: Point{x: 0, ..}`, `items: [first, ..]`, `kind: .Val(k)`).
+    Nested {
+        field: String,
+        field_span: Span,
+        pattern: Box<Pattern>,
+    },
 }
 
 impl StructPatField {
     pub fn field_name(&self) -> &str {
         match self {
-            StructPatField::Bind { field, .. } | StructPatField::Value { field, .. } => field,
+            StructPatField::Bind { field, .. }
+            | StructPatField::Value { field, .. }
+            | StructPatField::Nested { field, .. } => field,
         }
     }
 
     pub fn field_span(&self) -> Span {
         match self {
-            StructPatField::Bind { field_span, .. } | StructPatField::Value { field_span, .. } => {
-                *field_span
-            }
+            StructPatField::Bind { field_span, .. }
+            | StructPatField::Value { field_span, .. }
+            | StructPatField::Nested { field_span, .. } => *field_span,
         }
     }
 }
@@ -323,17 +376,21 @@ impl Pattern {
             Pattern::Absent(span) => *span,
             Pattern::Or(_, span) => *span,
             Pattern::Struct { span, .. } => *span,
+            Pattern::List { span, .. } => *span,
+            Pattern::Map { span, .. } => *span,
             Pattern::StrMatch { span, .. } => *span,
             Pattern::BinMatch { span, .. } => *span,
         }
     }
 
     /// S31: whether a payload is tested by a nested pattern (`.Err(.Low)`),
-    /// so this pattern covers only part of its head variant.
+    /// so this pattern covers only part of its head variant. D-PAT-RECORD1 /
+    /// D-PAT-MAP1: literal items, nested struct fields, list and map patterns
+    /// test inside the value too, so they take the same general route.
     pub fn has_nested_pattern(&self) -> bool {
         fn slot_nests(slot: &PatSlot) -> bool {
             match slot {
-                PatSlot::Nested(_) => true,
+                PatSlot::Nested(_) | PatSlot::Value(_) => true,
                 PatSlot::Named { slot, .. } => slot_nests(slot),
                 _ => false,
             }
@@ -344,8 +401,115 @@ impl Pattern {
             | Pattern::Ok { inner, .. }
             | Pattern::Err { inner, .. } => inner.is_some(),
             Pattern::Or(alternatives, _) => alternatives.iter().any(Pattern::has_nested_pattern),
+            Pattern::Struct { fields, .. } => fields
+                .iter()
+                .any(|field| matches!(field, StructPatField::Nested { .. })),
+            Pattern::List { .. } | Pattern::Map { .. } => true,
             _ => false,
         }
+    }
+
+    /// D-PAT-RECORD1 / D-PAT-MAP1: every value expression a pattern compares
+    /// against or looks up with (struct field values, literal items, map
+    /// keys), at any depth, in source order.
+    pub fn for_each_value_expr<'p>(&'p self, f: &mut dyn FnMut(&'p Expr)) {
+        fn slot<'p>(pattern_slot: &'p PatSlot, f: &mut dyn FnMut(&'p Expr)) {
+            match pattern_slot {
+                PatSlot::Value(value) => f(value),
+                PatSlot::Nested(inner) => inner.for_each_value_expr(f),
+                PatSlot::Named { slot: inner, .. } => slot(inner, f),
+                PatSlot::Wildcard | PatSlot::Bind { .. } | PatSlot::Range { .. } | PatSlot::Rest(_) => {}
+            }
+        }
+        match self {
+            Pattern::Variant { bindings, .. } => bindings.iter().for_each(|s| slot(s, f)),
+            Pattern::Present { inner: Some(inner), .. }
+            | Pattern::Ok { inner: Some(inner), .. }
+            | Pattern::Err { inner: Some(inner), .. } => inner.for_each_value_expr(f),
+            Pattern::Or(alternatives, _) => {
+                alternatives.iter().for_each(|alt| alt.for_each_value_expr(f))
+            }
+            Pattern::Struct { fields, .. } => {
+                for field in fields {
+                    match field {
+                        StructPatField::Value { value, .. } => f(value),
+                        StructPatField::Nested { pattern, .. } => pattern.for_each_value_expr(f),
+                        StructPatField::Bind { .. } => {}
+                    }
+                }
+            }
+            Pattern::List { items, .. } => items.iter().for_each(|s| slot(s, f)),
+            Pattern::Map { entries, .. } => {
+                for entry in entries {
+                    f(&entry.key);
+                    slot(&entry.slot, f);
+                }
+            }
+            Pattern::Present { .. }
+            | Pattern::Ok { .. }
+            | Pattern::Err { .. }
+            | Pattern::Absent(_)
+            | Pattern::Range { .. }
+            | Pattern::StrMatch { .. }
+            | Pattern::BinMatch { .. } => {}
+        }
+    }
+
+    /// Mutable sibling of [`Pattern::for_each_value_expr`].
+    pub fn for_each_value_expr_mut(&mut self, f: &mut dyn FnMut(&mut Expr)) {
+        fn slot(pattern_slot: &mut PatSlot, f: &mut dyn FnMut(&mut Expr)) {
+            match pattern_slot {
+                PatSlot::Value(value) => f(value),
+                PatSlot::Nested(inner) => inner.for_each_value_expr_mut(f),
+                PatSlot::Named { slot: inner, .. } => slot(inner, f),
+                PatSlot::Wildcard | PatSlot::Bind { .. } | PatSlot::Range { .. } | PatSlot::Rest(_) => {}
+            }
+        }
+        match self {
+            Pattern::Variant { bindings, .. } => bindings.iter_mut().for_each(|s| slot(s, f)),
+            Pattern::Present { inner: Some(inner), .. }
+            | Pattern::Ok { inner: Some(inner), .. }
+            | Pattern::Err { inner: Some(inner), .. } => inner.for_each_value_expr_mut(f),
+            Pattern::Or(alternatives, _) => alternatives
+                .iter_mut()
+                .for_each(|alt| alt.for_each_value_expr_mut(f)),
+            Pattern::Struct { fields, .. } => {
+                for field in fields {
+                    match field {
+                        StructPatField::Value { value, .. } => f(value),
+                        StructPatField::Nested { pattern, .. } => {
+                            pattern.for_each_value_expr_mut(f)
+                        }
+                        StructPatField::Bind { .. } => {}
+                    }
+                }
+            }
+            Pattern::List { items, .. } => items.iter_mut().for_each(|s| slot(s, f)),
+            Pattern::Map { entries, .. } => {
+                for entry in entries {
+                    f(&mut entry.key);
+                    slot(&mut entry.slot, f);
+                }
+            }
+            Pattern::Present { .. }
+            | Pattern::Ok { .. }
+            | Pattern::Err { .. }
+            | Pattern::Absent(_)
+            | Pattern::Range { .. }
+            | Pattern::StrMatch { .. }
+            | Pattern::BinMatch { .. } => {}
+        }
+    }
+
+    /// Whether any value expression satisfies `pred`.
+    pub fn any_value_expr(&self, pred: &mut dyn FnMut(&Expr) -> bool) -> bool {
+        let mut found = false;
+        self.for_each_value_expr(&mut |value| {
+            if !found && pred(value) {
+                found = true;
+            }
+        });
+        found
     }
 
     /// Capture names introduced when this pattern succeeds. The parser uses
@@ -361,7 +525,9 @@ impl Pattern {
                 }],
                 PatSlot::Nested(inner) => inner.binding_names(),
                 PatSlot::Named { slot, .. } => slot_names(slot),
-                PatSlot::Wildcard | PatSlot::Range { .. } | PatSlot::Rest(_) => Vec::new(),
+                PatSlot::Wildcard | PatSlot::Range { .. } | PatSlot::Rest(_) | PatSlot::Value(_) => {
+                    Vec::new()
+                }
             }
         }
         match self {
@@ -400,19 +566,39 @@ impl Pattern {
                 .unwrap_or_default(),
             Pattern::Struct { fields, .. } => fields
                 .iter()
-                .filter_map(|field| match field {
+                .flat_map(|field| match field {
                     StructPatField::Bind {
                         field,
                         field_span,
                         local,
                         local_span,
-                    } => Some(BindName {
+                    } => vec![BindName {
                         name: field.clone(),
                         span: *field_span,
                         rename: Some((local.clone(), *local_span)),
-                    }),
-                    StructPatField::Value { .. } => None,
+                    }],
+                    StructPatField::Value { .. } => Vec::new(),
+                    StructPatField::Nested { pattern, .. } => pattern.binding_names(),
                 })
+                .collect(),
+            Pattern::List { items, rest, .. } => {
+                let mut names: Vec<BindName> = items.iter().flat_map(slot_names).collect();
+                if let Some(ListPatRest {
+                    name: Some((name, span)),
+                    ..
+                }) = rest
+                {
+                    names.push(BindName {
+                        name: name.clone(),
+                        span: *span,
+                        rename: None,
+                    });
+                }
+                names
+            }
+            Pattern::Map { entries, .. } => entries
+                .iter()
+                .flat_map(|entry| slot_names(&entry.slot))
                 .collect(),
             Pattern::StrMatch { parts, .. } => parts
                 .iter()
