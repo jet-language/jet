@@ -42,20 +42,14 @@ fn diagnostic_byte_at(source: [U8], index: Int) -> Int Never! {
     Int.from_u8(source[index])
 }
 
-fn diagnostic_is_continuation(value: Int) -> Bool Never! {
-    value >= 128 && value <= 191
-}
-
 fn diagnostic_utf8_width(source: [U8], index: Int) -> Int Never! {
-    first :: diagnostic_byte_at(source, index)
-    if {
-        first < 0 -> 0
-        first < 128 -> 1
-        first >= 194 && first <= 223 && diagnostic_is_continuation(diagnostic_byte_at(source, index + 1)) -> 2
-        first >= 224 && first <= 239 && diagnostic_is_continuation(diagnostic_byte_at(source, index + 1)) && diagnostic_is_continuation(diagnostic_byte_at(source, index + 2)) -> 3
-        first >= 240 && first <= 244 && diagnostic_is_continuation(diagnostic_byte_at(source, index + 1)) && diagnostic_is_continuation(diagnostic_byte_at(source, index + 2)) && diagnostic_is_continuation(diagnostic_byte_at(source, index + 3)) -> 4
-        else -> 1
-    }
+    width := foundation_utf8_lead_width(diagnostic_byte_at(source, index))
+    if width <= 1 -> return width
+    width = foundation_utf8_width(width, diagnostic_byte_at(source, index + 1))
+    if width <= 2 -> return width
+    width = foundation_utf8_width(width, diagnostic_byte_at(source, index + 2))
+    if width <= 3 -> return width
+    foundation_utf8_width(width, diagnostic_byte_at(source, index + 3))
 }
 
 fn diagnostic_scalar_at(source: [U8], index: Int) -> String Never! {
