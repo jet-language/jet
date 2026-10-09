@@ -1107,6 +1107,9 @@ sniffing.
 UUIDs remain plain `String` values. `v4` and `v7` require the fail-closed
 random provider; `parse` validates and lowercases the canonical form; `v5`
 and `uuid5` derive a deterministic name-based value.
+`v7(clock)` reads the caller's clock in milliseconds. A manual `Clock.new`
+therefore fixes the 48-bit timestamp prefix while the tail still comes from
+the same random provider; the version and variant bits are set in Jet.
 
 ```jet
 use core.crypto.uuid as uuid
@@ -1573,6 +1576,18 @@ close, without a copied buffer or a replacement allocation. A system clock adds
 the `Time` effect. See
 [`vault_keys.jet`](../../../Examples/features/crypto/vault_keys.jet) and
 [`expiring_secret.jet`](../../../Examples/features/memory/expiring_secret.jet).
+
+The wrapper stores its optional credential and original clock observer in Jet.
+It samples that observer under the storage guard, and expires only when
+`now > deadline`; at equality the credential remains available. Expiry takes
+the payload out of its slot and ends the owned payload's scope, so its
+`Close` follows the same zeroization path as dropping still-live storage.
+The sole wipe host operation is the existing plain-byte `__zeroize` leaf.
+No observer or loan callback crosses that host boundary.
+Fields are private; `expires_at_ms()` reads the deadline and `.with(...)`
+is the fallible credential accessor. This is Main's owner-approved, veto-able
+private-field correction following Measurement/LogSpan, not a plaintext
+`secret()` accessor that bypasses expiry. Debug/Printable are opted out.
 
 ### `core.auth` — token verification and sessions
 
@@ -2588,10 +2603,32 @@ fn run() {
 | `time.Clock.system()` | `Clock -[Time]>` | Construct a clock backed by the host time source. |
 | `clock.now()` | `Int` | Read clock milliseconds. |
 | `clock.tick(milliseconds)` / `clock.advance(to_ms)` | `Int` | Advance a manual clock and return its new millisecond value. |
-| `clock.wait(duration)` | `Int -[Time]>` | Advance or wait according to the clock policy and return the new value. |
+| `clock.wait(duration)` | `Int` | Advance by whole duration milliseconds and return the new value; this does not park a task. |
 | `Duration.nanoseconds(n)` / `microseconds(n)` / `milliseconds(n)` / `seconds(n)` / `minutes(n)` / `hours(n)` | `Duration !RangeError` | Construct a checked duration from the named unit. |
 | `duration.in(unit)` / `total_in(unit)` | `Int !RangeError` / `Float` | Convert a duration to a named unit. |
 | `duration.is_zero()` / `total_seconds()` / `difference(other)` / `round(unit)` / `abs()` / `negated()` / `sign()` | varies | Inspect or transform a duration. |
+
+Ordinary `Clock` copies fork independent timelines, including copies inside
+lists and other aggregates. A system-clock copy rebases its own monotonic
+start at the original clock's current value. Internal expiry observers are
+different: they retain the caller's original clock, so later ticks on that
+clock affect its attached secret's lifetime. Clock Show and Debug retain the
+`Clock { now: N }` rendering. Manual tick/wait arithmetic saturates at `Int`'s
+millisecond bounds.
+`time.clock(seed)` stays retired (E1004); use the type-owned `Clock.new(seed)` constructor.
+
+`ExpiringValue.new(value, ttl, clock)` computes a saturating absolute
+millisecond deadline in Jet. `get(clock)` returns a copy of the payload until
+`now > deadline` (equality is still live), otherwise `Expired`. Zero and
+negative TTLs retain this same boundary. `is_valid(clock)` observes the same
+clock explicitly and returns `now <= deadline`, including a saturated
+deadline. Show retains the existing
+`Expiring(deadline=N)` rendering; Debug remains unsupported (E0112), not a
+structural payload renderer. Its fields are private, with
+`expires_at_ms()` for the deadline and fallible `get(clock)` for payload
+access: this is Main's owner-approved, veto-able private-field correction,
+following the Measurement/LogSpan rule. The retired module constructor and
+`force` diagnostics are unchanged.
 
 #### Named zones and local-time resolution
 
@@ -3241,6 +3278,17 @@ The source scheduler-channel constructors preserve the declared
 channel's fields by name, rather than returning `TaskState` or depending on
 the raw tuple's positional order. Bounded scheduler channels clamp capacities
 below one to one. Interval periods truncate to whole milliseconds and clamp to at least
+one millisecond; their first delivered tick is one.
+
+The source `Condition` extension delegates notification to the existing shared
+condition protocol, preserving parked waiters rather than fabricating state.
+The realtime stream extension likewise observes and cancels the same provider
+worker; its source callback constructor rejects nonpositive rates before
+crossing the provider boundary.
+
+The source scheduler-channel constructors preserve that pair rather than
+returning `TaskState`. Bounded scheduler channels clamp capacities below one
+to one. Interval periods truncate to whole milliseconds and clamp to at least
 one millisecond; their first delivered tick is one.
 
 The source `Condition` extension delegates notification to the existing shared

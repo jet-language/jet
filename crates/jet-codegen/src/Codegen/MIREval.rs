@@ -6540,7 +6540,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                     };
                     value = RuntimeValue::Data(mir_eval_materialize_view(data, &source_ty, result_ty, span)?);
                 }
-                fork_runtime_value_owners(&mut value);
+                value = self.semantic_copy_runtime(value, &source_ty, span)?;
                 Ok(value)
             }
             MirOperation::Move { value } => {
@@ -9835,11 +9835,6 @@ impl<'a, 'state> Machine<'a, 'state> {
                         span,
                     );
                 }
-                if route.module == "core.expiring" {
-                    let secret = route.member == "secret_new";
-                    let values = self.call_args(frame_index, args, span)?;
-                    return self.eval_expiring_new(secret, values, span);
-                }
                 let codec_member = match (route.module.as_str(), route.member.as_str()) {
                     ("core.encoding.codec", "encode") => Some("encode"),
                     ("core.encoding.codec", "decode") => Some("decode"),
@@ -9923,9 +9918,6 @@ impl<'a, 'state> Machine<'a, 'state> {
                     return self.eval_cell_host(&member, values, result_ty, span);
                 }
 
-                if module == "core.host" && member == "ExpiringSecret.with" {
-                    return self.eval_expiring_secret_with(values, span);
-                }
                 if module == "core.host" {
                     if let Some(value) =
                         self.eval_comptime_host_method(frame_index, &member, values.clone(), span)?
@@ -10484,23 +10476,6 @@ impl<'a, 'state> Machine<'a, 'state> {
                         args,
                         frame_index,
                         result_ty,
-                        span,
-                    );
-                }
-                if route.member == "expiring.get" {
-                    return self.eval_expiring_get(receiver_value, args, frame_index, span);
-                }
-                if route.module == "core.handle"
-                    && matches!(
-                        route.member.as_str(),
-                        "clock.now" | "clock.tick" | "clock.advance" | "clock.wait"
-                    )
-                {
-                    return self.eval_clock_handle(
-                        &route.member,
-                        receiver_value,
-                        args,
-                        frame_index,
                         span,
                     );
                 }
@@ -16616,28 +16591,6 @@ impl<'a, 'state> Machine<'a, 'state> {
                 }
             }
         }
-        if family == jet_foundation::MIR::MirPreludeFamily::StaticPrelude && module == "core.clock"
-        {
-            use crate::Comptime::ClockRuntime;
-            let clock = match (member_name.as_str(), args.as_slice()) {
-                ("clock_new", [value]) => {
-                    let value = self.runtime_to_ct(value.clone(), span)?;
-                    ClockRuntime::jet_std_clock_new(crate::Comptime::Builtins::as_int(
-                        &value, span,
-                    )?)
-                }
-                ("clock_system", []) => ClockRuntime::jet_std_clock_system(),
-                _ => {
-                    return Err(mir_error_at(
-                        "MIR Clock constructor has an invalid checked call",
-                        span,
-                    ))
-                }
-            };
-            return Ok(RuntimeValue::Ambient(mir_runtime_owner_value(
-                MirClock::new(clock),
-            )));
-        }
         if family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
             && module == "core.handle"
             && matches!(
@@ -21514,56 +21467,6 @@ impl<'a, 'state> Machine<'a, 'state> {
         self.invoke_http_handler(handler, args, span)
     }
 
-    fn eval_clock_handle(
-        &mut self,
-        member: &str,
-        receiver: RuntimeValue,
-        args: &[MirValueId],
-        frame_index: usize,
-        span: Span,
-    ) -> Result<RuntimeValue, Diagnostic> {
-        use crate::Comptime::ClockRuntime;
-        let receiver = self.runtime_to_ct(receiver, span)?;
-        let clock = mir_runtime_owner::<MirClock>(&receiver)
-            .ok_or_else(|| mir_error_at("MIR Clock receiver has no native owner", span))?;
-        let mut clock = clock.lock().unwrap_or_else(|error| error.into_inner());
-        let argument = match args {
-            [] => None,
-            [arg] => {
-                let value = self.value(frame_index, *arg, span)?;
-                let value = self.materialize_runtime(value, span)?;
-                Some(runtime_to_data(value, span)?)
-            }
-            _ => return Err(mir_error_at("MIR Clock method has extra arguments", span)),
-        };
-        let integer = |value: MirEvalValue| {
-            let value = crate::Comptime::MirBridge::mir_to_ct_value(value, span)?;
-            crate::Comptime::Builtins::as_int(&value, span)
-        };
-        let now = match (member, argument) {
-            ("clock.now", None) => ClockRuntime::jet_clock_now(&clock),
-            ("clock.tick", Some(value)) => {
-                ClockRuntime::jet_clock_tick(&mut clock, integer(value)?)
-            }
-            ("clock.advance", Some(value)) => {
-                ClockRuntime::jet_clock_advance(&mut clock, integer(value)?)
-            }
-            ("clock.wait", Some(value)) => {
-                let ns = mir_time_field(&value, crate::Syntax::DURATION_TYPE, "ns", span)?;
-                ClockRuntime::jet_clock_tick(
-                    &mut clock,
-                    crate::scheduler::jet_std_time_duration_to_millis(ns),
-                )
-            }
-            _ => {
-                return Err(mir_error_at(
-                    "MIR Clock method has an invalid checked call",
-                    span,
-                ))
-            }
-        };
-        Ok(RuntimeValue::Data(MirEvalValue::Int(now)))
-    }
 
     /// The place a written handle operand lives in. A borrowed operand
     /// arrives as the owner's Address; a plain read names its source place.
@@ -21662,90 +21565,6 @@ impl<'a, 'state> Machine<'a, 'state> {
         runtime_from_ct(result, span)
     }
 
-    /// D-TTLVAL1=A: `ExpiringValue.new` / `ExpiringSecret.new`. The clock is
-    /// the caller's Clock owner, so later ticks move the same clock.
-    fn eval_expiring_new(
-        &mut self,
-        secret: bool,
-        values: Vec<RuntimeValue>,
-        span: Span,
-    ) -> Result<RuntimeValue, Diagnostic> {
-        let [value, ttl, clock] = <[RuntimeValue; 3]>::try_from(values).map_err(|_| {
-            mir_error_at("MIR expiring constructor expects a value, a TTL and a Clock", span)
-        })?;
-        let value = runtime_to_data(self.materialize_runtime(value, span)?, span)?;
-        let ttl = runtime_to_data(self.materialize_runtime(ttl, span)?, span)?;
-        let ttl_ns = mir_stream_duration_ns(&ttl)
-            .and_then(|ns| i64::try_from(ns).ok())
-            .ok_or_else(|| mir_error_at("MIR expiring TTL is not a Duration", span))?;
-        let clock = self.expiring_owner(clock, span)?;
-        let now = mir_clock_now(&clock, span)?;
-        let deadline_ms =
-            now.saturating_add(crate::scheduler::jet_std_time_duration_to_millis(ttl_ns));
-        Ok(RuntimeValue::Ambient(mir_runtime_owner_value(MirExpiring {
-            value: std::sync::Mutex::new(Some(value)),
-            deadline_ms,
-            clock,
-            secret,
-        })))
-    }
-
-    /// `ExpiringValue.get(clock)`: the value while `clock` is inside the TTL.
-    fn eval_expiring_get(
-        &mut self,
-        receiver: RuntimeValue,
-        args: &[MirValueId],
-        frame_index: usize,
-        span: Span,
-    ) -> Result<RuntimeValue, Diagnostic> {
-        let receiver = self.expiring_owner(receiver, span)?;
-        let expiring = mir_runtime_owner::<MirExpiring>(&receiver)
-            .ok_or_else(|| mir_error_at("MIR ExpiringValue receiver has no native owner", span))?;
-        let [clock] = args else {
-            return Err(mir_error_at("MIR ExpiringValue.get expects one Clock", span));
-        };
-        let clock = self.value(frame_index, *clock, span)?;
-        let clock = self.expiring_owner(clock, span)?;
-        let now = mir_clock_now(&clock, span)?;
-        Ok(mir_expiring_result(expiring.live(now, span)?))
-    }
-
-    /// `ExpiringSecret.with(callback)`: loan the secret to `callback` while
-    /// its own clock is inside the TTL.
-    fn eval_expiring_secret_with(
-        &mut self,
-        values: Vec<RuntimeValue>,
-        span: Span,
-    ) -> Result<RuntimeValue, Diagnostic> {
-        let [receiver, callback] = <[RuntimeValue; 2]>::try_from(values).map_err(|_| {
-            mir_error_at("MIR ExpiringSecret.with expects a receiver and a callback", span)
-        })?;
-        let receiver = self.expiring_owner(receiver, span)?;
-        let expiring = mir_runtime_owner::<MirExpiring>(&receiver)
-            .ok_or_else(|| mir_error_at("MIR ExpiringSecret receiver has no native owner", span))?;
-        let now = mir_clock_now(&expiring.clock, span)?;
-        let Some(value) = expiring.live(now, span)? else {
-            return Ok(mir_expiring_result(None));
-        };
-        let result = self.invoke_callback(callback, RuntimeValue::Data(value), span)?;
-        Ok(RuntimeValue::Result {
-            ok: true,
-            value: Box::new(result),
-        })
-    }
-
-    /// The native owner carried by an expiring wrapper or a Clock, read
-    /// through a borrowed place when the call passes one.
-    fn expiring_owner(&mut self, value: RuntimeValue, span: Span) -> Result<CtValue, Diagnostic> {
-        let value = match value {
-            RuntimeValue::Address(address) => {
-                require_address_access(&address, MirAccess::Read, span)?;
-                self.read_place(address.frame, address.place, span)?
-            }
-            value => value,
-        };
-        self.runtime_to_ct(value, span)
-    }
 
     fn eval_channel_constructor(
         &mut self,
@@ -28315,15 +28134,6 @@ enum RuntimeValue {
     GcRoot(Rc<RefCell<MirGcRoot>>),
 }
 
-/// D-TTLVAL1=A / D-TTL-ZEROIZE1=A: the interpreter carrier behind
-/// `ExpiringValue<T>` and `ExpiringSecret<T>`. An expired secret's bytes are
-/// wiped in place before the value is released.
-struct MirExpiring {
-    value: std::sync::Mutex<Option<MirEvalValue>>,
-    deadline_ms: i64,
-    clock: CtValue,
-    secret: bool,
-}
 
 impl MirExpiring {
     fn live(&self, now_ms: i64, span: Span) -> Result<Option<MirEvalValue>, Diagnostic> {

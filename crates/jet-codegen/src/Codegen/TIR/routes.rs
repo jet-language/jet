@@ -8,7 +8,7 @@
 #![allow(dead_code)]
 use super::{
     ListRemoveMode, LowerError, TBuiltinOp, TClosureOp, TFailureCarrier, TGcEditKind, THandleOp,
-    THelperKind, TNumericOp, TPreludeRoute, TRoutePlan, TTryConvert, TTypedTextForm,
+    TNumericOp, TPreludeRoute, TRoutePlan, TTryConvert, TTypedTextForm,
     TTypedTextInterpKind,
 };
 use crate::AST::{BinOp, Type};
@@ -1797,42 +1797,6 @@ impl THandleOp {
                 None,
                 carrier,
             ),
-            ClockNow => h(
-                "clock.now",
-                "jet_clock_now",
-                1,
-                1,
-                &[true],
-                Some(Effect::Time),
-                carrier,
-            ),
-            ClockTick => h(
-                "clock.tick",
-                "jet_clock_tick",
-                2,
-                2,
-                &[true, false],
-                Some(Effect::Time),
-                carrier,
-            ),
-            ClockAdvance => h(
-                "clock.advance",
-                "jet_clock_advance",
-                2,
-                2,
-                &[true, false],
-                Some(Effect::Time),
-                carrier,
-            ),
-            ClockWait => h(
-                "clock.wait",
-                "jet_clock_wait",
-                2,
-                2,
-                &[true, true],
-                Some(Effect::Time),
-                carrier,
-            ),
             WorldNow => h(
                 "deterministic_world.now",
                 "jet_world_now",
@@ -2943,23 +2907,6 @@ impl THandleOp {
                 Some(Effect::Exec),
                 carrier,
             ),
-            ExpiringMethod { method } => match method.as_str() {
-                "get" => h(
-                    "expiring.get",
-                    "jet_expiring_get",
-                    2,
-                    2,
-                    &[true, true],
-                    Some(Effect::Time),
-                    carrier,
-                ),
-                "is_valid" => primitive(),
-                _ => {
-                    return Err(route_error(format!(
-                        "unknown checked ExpiringValue method `{method}`"
-                    )));
-                }
-            },
             HTTPServerMethod { kind, method } if kind == "WsConn" => match method.as_str() {
                 "send_text" => h(
                     "ws.send_text",
@@ -7749,32 +7696,6 @@ pub(super) fn shared_guard_split_route(
     )
 }
 
-/// Select one of the checked clock helper kernels. The legacy helper spelling
-/// is retained only by the old renderer; MIR sees this closed set.
-pub(super) fn helper_route(
-    helper: THelperKind,
-    result: &Type,
-    carrier: &TFailureCarrier,
-) -> Result<TPreludeRoute, LowerError> {
-    let _ = result;
-    let (member, symbol, arity, mask) = match helper {
-        THelperKind::ClockNew => ("clock_new", "jet_std_clock_new", 1, vec![false]),
-        THelperKind::ClockSystem => ("clock_system", "jet_std_clock_system", 0, Vec::new()),
-    };
-    prelude_route_row(
-        MirPreludeFamily::StaticPrelude,
-        "core.clock",
-        member,
-        symbol,
-        arity,
-        arity,
-        &mask,
-        None,
-        carrier,
-        MirPreludeAbi::Value,
-        "clock helper",
-    )
-}
 
 pub(super) fn memo_stats_route(
     result: &Type,
@@ -9367,33 +9288,6 @@ pub(super) fn expect_snapshot_route(
     )
 }
 
-/// Select the generic expiring-value constructor. `secret` chooses the
-/// capability-bearing wrapper while the element type remains a MIR type arg.
-pub(super) fn expiring_route(
-    secret: bool,
-    result: &Type,
-    carrier: &TFailureCarrier,
-) -> Result<TPreludeRoute, LowerError> {
-    let _ = result;
-    let (member, symbol) = if secret {
-        ("secret_new", "jet_expiring_secret_new")
-    } else {
-        ("new", "jet_expiring_new")
-    };
-    prelude_route_row(
-        MirPreludeFamily::StaticPrelude,
-        "core.expiring",
-        member,
-        symbol,
-        3,
-        3,
-        &[false, true, true],
-        Some(Effect::Time),
-        carrier,
-        MirPreludeAbi::Value,
-        "expiring constructor",
-    )
-}
 
 /// C callback construction has one runtime operand: the lowered closure.
 /// Extern symbol and return type stay as structured metadata on the MIR op.
@@ -9689,19 +9583,6 @@ pub(super) fn host_method_route(
             _ => {
                 return Err(route_error(format!(
                     "unknown checked CellEditGuard host method `{method}`"
-                )));
-            }
-        },
-        Type::Apply { name, .. } if name == "ExpiringSecret" => match method {
-            "with" => (
-                "ExpiringSecret.with",
-                "jet_expiring_secret_with",
-                2,
-                &[true, false],
-            ),
-            _ => {
-                return Err(route_error(format!(
-                    "unknown checked ExpiringSecret host method `{method}`"
                 )));
             }
         },

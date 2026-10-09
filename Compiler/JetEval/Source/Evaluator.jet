@@ -9585,12 +9585,12 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
                 jet_eval_compiler_fail(&machine, span, "MIR copy reads an unavailable SSA value")
                 return None
             }
-            value :: jet_eval_copy_value(item, &machine, span) ?? return None
+            source_ty :: jet_eval_value_type(&machine, frame_index, source, span) ?? return None
             if fact == MIRCopyFact.ViewMaterialize {
-                source_ty :: jet_eval_value_type(&machine, frame_index, source, span) ?? return None
+                value :: jet_eval_copy_value(item, &machine, span) ?? return None
                 return jet_eval_materialize_view_value(value, source_ty, result_ty, &machine, span)
             }
-            return Val(value)
+            return jet_eval_semantic_copy(item, source_ty, &machine, span)
         }
         .Move(source) -> return jet_eval_take(&machine, frame_index, source, span)
         .TraitBox(source, target) -> {

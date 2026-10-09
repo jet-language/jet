@@ -7273,23 +7273,9 @@ pub enum TStructExtra {
     HTTPRequestParams,
 }
 
-/// A checked helper with a stable Prelude identity. The legacy `helper` spelling
-/// remains only for the old emitter until #2918.
-#[derive(Clone, Copy)]
-pub enum THelperKind {
-    ClockNew,
-    ClockSystem,
-}
-
 /// Host/prelude call assembled only in emit — structured pieces, no Rust source text.
 #[derive(Clone)]
 pub enum THostCall {
-    /// A checked helper route. `helper` is retained for the old emitter only.
-    Helper {
-        helper: String,
-        kind: THelperKind,
-        args: Vec<THostArg>,
-    },
     /// `(recv).{method}({args})`; `method` is a checked Jet identity and the
     /// MIR lowerer selects its explicit Prelude row from the receiver shape.
     Method {
@@ -7395,19 +7381,6 @@ pub enum THostCall {
     },
     /// Numeric bounds constant: `{rust_type(ty)}::{member}`.
     NumericBounds { ty: Type, member: String },
-    /// `ExpiringSecret::<T>::new(value, ttl.ms, clock observer)`.
-    ExpiringSecretNew {
-        value: Box<TExpr>,
-        duration: Box<TExpr>,
-        clock: Box<TExpr>,
-        elem: Type,
-    },
-    /// `jet_expiring_new(value, duration_ms, clock_now)`.
-    ExpiringValueNew {
-        value: Box<TExpr>,
-        duration: Box<TExpr>,
-        clock: Box<TExpr>,
-    },
     /// D-CABI-CALLBACK1: `extern "C" fn` wrapper around a lowered lambda.
     CCallback {
         symbol: String,
@@ -7439,15 +7412,6 @@ pub enum TGcEditKind {
 pub enum TMatchProbe {
     IsSome,
     Unwrap,
-}
-
-#[derive(Clone)]
-pub enum THostArg {
-    Expr(TExpr),
-    /// Wrap as `&(expr)`
-    Borrow(TExpr),
-    /// Pre-lowered lambda (structured); emit uses TLambda spelling.
-    Lambda(TLambda),
 }
 
 #[derive(Clone)]
@@ -9403,22 +9367,6 @@ fn collect_cost_fn_value(
     }
 }
 
-fn collect_cost_host_arg(
-    arg: &THostArg,
-    function: &str,
-    span: crate::Diagnostics::Span,
-    loop_depth: usize,
-    sites: &mut Vec<TCostSite>,
-) {
-    match arg {
-        THostArg::Expr(value) | THostArg::Borrow(value) => {
-            collect_cost_expr(value, function, span, loop_depth, sites);
-        }
-        THostArg::Lambda(lambda) => {
-            collect_cost_lambda(lambda, function, span, loop_depth, sites);
-        }
-    }
-}
 
 fn collect_cost_call_args(
     args: &[TCallArg],
@@ -9499,11 +9447,6 @@ fn collect_cost_expr_with_state_and_context(
             }
         }
         TExprKind::HostCall(host) => match host.as_ref() {
-            THostCall::Helper { args, .. } => {
-                for arg in args {
-                    collect_cost_host_arg(arg, function, expr_span, loop_depth, sites);
-                }
-            }
             THostCall::Method { recv, args, .. } => {
                 collect_cost_expr(recv, function, expr_span, loop_depth, sites);
                 for arg in args {
@@ -9548,21 +9491,6 @@ fn collect_cost_expr_with_state_and_context(
             THostCall::EnvSet { name, value, .. } => {
                 collect_cost_expr(name, function, expr_span, loop_depth, sites);
                 collect_cost_expr(value, function, expr_span, loop_depth, sites);
-            }
-            THostCall::ExpiringSecretNew {
-                value,
-                duration,
-                clock,
-                ..
-            }
-            | THostCall::ExpiringValueNew {
-                value,
-                duration,
-                clock,
-            } => {
-                collect_cost_expr(value, function, expr_span, loop_depth, sites);
-                collect_cost_expr(duration, function, expr_span, loop_depth, sites);
-                collect_cost_expr(clock, function, expr_span, loop_depth, sites);
             }
             THostCall::CCallback { lambda, .. } => {
                 collect_cost_lambda(lambda, function, expr_span, loop_depth, sites);
@@ -14614,14 +14542,6 @@ pub enum THandleOp {
     StderrIsTty,
     /// D-CMD-OVERRIDE1=C: `TestSuite.run()` calls the installed command runner.
     TestSuiteRun,
-    /// D-DET1 Clock: `now()` → `{root}jet_clock_now(&(recv))` (current ms, no advance).
-    ClockNow,
-    /// D-DET1 Clock: `tick(ms)` → `{root}jet_clock_tick(&mut (recv), a0)` (advance + read).
-    ClockTick,
-    /// D-DET-CAPAPI Clock: `advance(to_ms)` → `{root}jet_clock_advance(&mut (recv), a0)` (absolute set + read).
-    ClockAdvance,
-    /// D-DET-CAPAPI Clock: `wait(d)` → `{root}jet_clock_wait(&mut (recv), &(a0))` (advance by a Duration + read).
-    ClockWait,
     /// D-TEST-WORLD1=A: controlled world clock read in milliseconds.
     WorldNow,
     /// D-TEST-WORLD1=A: controlled world monotonic advance by Duration.
@@ -14935,10 +14855,6 @@ pub enum THandleOp {
     /// `.loaded()` → `(recv).loaded()` → `Option<T>`.
     /// `.or_else(default)` → `(recv).or_else(a0)` → `T`.
     LoadableMethod {
-        method: String,
-    },
-    /// D-SHAPE-CTORVERB1=C: generic `ExpiringValue<T>` fallible accessors.
-    ExpiringMethod {
         method: String,
     },
     /// D-TIMEDEPTH1=A: method call on a civil-time type (Date/DateTime).

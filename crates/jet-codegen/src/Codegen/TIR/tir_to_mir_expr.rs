@@ -7773,12 +7773,6 @@ fn lower_host_call(
             ];
             emit_host_route_call(ctx, expr, route, args)
         }
-        THostCall::Helper { kind, args, .. } => {
-            let args = lower_host_args(ctx, args)?;
-            let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-            let route = super::helper_route(*kind, &expr.ty, &carrier)?;
-            emit_host_route_call(ctx, expr, route, args)
-        }
         THostCall::Method { recv, method, args } => {
             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
             let route = super::host_method_route(&recv.ty, method, args.len(), &expr.ty, &carrier)?;
@@ -8154,60 +8148,6 @@ fn lower_host_call(
             )
         }
 
-        THostCall::ExpiringSecretNew {
-            value,
-            duration,
-            clock,
-            elem,
-        } => {
-            let mut args = vec![
-                ctx.lower_plain_arg(value)?,
-                ctx.lower_plain_arg(duration)?,
-                ctx.lower_plain_arg(clock)?,
-            ];
-            let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-            let route = super::expiring_route(true, &expr.ty, &carrier)?;
-            apply_route_access(ctx, &route, &mut args)?;
-            let call = ctx.intern_prelude_route(route)?;
-            let type_args = vec![ctx.mir_type(elem)?];
-            ctx.emit(
-                "host-expiring-secret-new",
-                Some(expr.ty.clone()),
-                MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
-                    call,
-                    args,
-                    owner_type_args: Vec::new(),
-                    type_args,
-                }),
-            )
-        }
-        THostCall::ExpiringValueNew {
-            value,
-            duration,
-            clock,
-        } => {
-            let value_ty = value.ty.clone();
-            let mut args = vec![
-                ctx.lower_plain_arg(value)?,
-                ctx.lower_plain_arg(duration)?,
-                ctx.lower_plain_arg(clock)?,
-            ];
-            let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-            let route = super::expiring_route(false, &expr.ty, &carrier)?;
-            apply_route_access(ctx, &route, &mut args)?;
-            let call = ctx.intern_prelude_route(route)?;
-            let type_args = vec![ctx.mir_type(&value_ty)?];
-            ctx.emit(
-                "host-expiring-value-new",
-                Some(expr.ty.clone()),
-                MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
-                    call,
-                    args,
-                    owner_type_args: Vec::new(),
-                    type_args,
-                }),
-            )
-        }
         THostCall::CCallback {
             symbol,
             lambda,
@@ -8379,42 +8319,6 @@ fn numeric_bound_constant(ty: &Type, member: &str) -> Option<MirConstant> {
     }
 }
 
-fn lower_host_args(
-    ctx: &mut LowerCtx,
-    args: &[super::THostArg],
-) -> Result<Vec<MirCallArg>, LowerError> {
-    args.iter()
-        .map(|arg| match arg {
-            super::THostArg::Expr(value) => ctx.lower_plain_arg(value),
-            super::THostArg::Borrow(value) => {
-                let mut lowered = ctx.lower_plain_arg(value)?;
-                lowered.access = MirAccess::Read;
-                Ok(lowered)
-            }
-            super::THostArg::Lambda(lambda) => {
-                let value = ctx.lower_lambda(lambda)?;
-                Ok(MirCallArg {
-                    value,
-                    place: None,
-                    access: MirAccess::Read,
-                    span: ctx.span(),
-                    label: None,
-                    source_index: None,
-                    binder_slot: None,
-                    spread: false,
-                    implicit_clone: false,
-                    shared_auto_clone: false,
-                    owned_last_use: false,
-                    authority_boundary: false,
-                    fn_coercion: None,
-                    widen_fixed_to_list: false,
-                    widen_to_union: None,
-                    box_as_trait: None,
-                })
-            }
-        })
-        .collect()
-}
 
 fn apply_route_access(
     ctx: &LowerCtx,

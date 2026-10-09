@@ -6020,14 +6020,6 @@ impl<'a> RustEmitter<'a> {
             };
             return format!("{ffi}::{rust}<{}>", self.rust_type(&args[0]));
         }
-        // The checked `core.crypto.vault` identity names the same native
-        // carrier `ExpiringSecret.new` returns.
-        if native_name == "ExpiringSecret" && args.len() == 1 {
-            return format!("JetExpiringSecret<{}>", self.rust_type(&args[0]));
-        }
-        if name.name == crate::Syntax::EXPIRING_VALUE_TYPE && args.len() == 1 {
-            return format!("JetExpiring<{}>", self.rust_type(&args[0]));
-        }
         if let Some(email_name) = crate::Codegen::core_email_rust_type_name(&name.name) {
             if matches!(email_name, "SMTPAuth" | "DkimConfig" | "SMTPConfig") && args.is_empty() {
                 let ffi = self
@@ -9719,6 +9711,11 @@ impl<'a> RustEmitter<'a> {
                     panic!("MIR columnar layout requires a struct type definition");
                 }
             }
+        }
+        if let Some(hook) = self.source_value_hook_symbol(def, "clone") {
+            let _ = writeln!(out,
+                "impl Clone for {name} {{ fn clone(&self) -> Self {{ self.{hook}() }} }}"
+            );
         }
         self.pop_generic_scope();
     }
@@ -28575,7 +28572,6 @@ impl<'a> RustEmitter<'a> {
             // The deterministic world is lent to the test body by ownership
             // (`FnOnce(JetDeterministicWorld) -> T`).
             (_, "jet_testing_world", 0) => Some(&[false]),
-            (_, "jet_expiring_secret_with", 1) => Some(&[true]),
             // Sync event/hook listeners are host `Fn(T)` closures that receive
             // the dispatched value by ownership (receiver 0, scope 1).
             (Some("JetEvent" | "JetHook" | "JetDecisionHook"), "on" | "once", 2)

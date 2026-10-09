@@ -997,6 +997,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/time/time.jet", name: "Instant" },
     CoreSourceOwnedType { path: "Core/time/time.jet", name: "Stopwatch" },
     CoreSourceOwnedType { path: "Core/time/time.jet", name: "TimeError" },
+    CoreSourceOwnedType { path: "Core/time/time.jet", name: "__ClockObserver" },
     CoreSourceOwnedType { path: "Core/tui/tui.jet", name: "TUIColor" },
     CoreSourceOwnedType { path: "Core/tui/tui.jet", name: "TUIConstraint" },
     CoreSourceOwnedType { path: "Core/tui/tui.jet", name: "TUIDirection" },
@@ -1247,6 +1248,32 @@ pub fn core_bare_source_module(name: &str) -> Option<&'static str> {
 pub fn core_source_value_hook(name: &str, operation: &str) -> Option<&'static str> {
     if !name.strip_prefix(crate::Diagnostics::CORE_SOURCE_ROOT).is_some_and(|rest| rest.starts_with('/')) {
         return None;
+    }
+    if !name.ends_with("::Core/compute/solve.jet::Solver") {
+        return None;
+    }
+    match operation {
+        "show" => Some("__show"),
+        "debug" => Some("__debug"),
+        _ => None,
+    }
+}
+
+/// Private semantic routes for exact source declaration identities. These
+/// routes do not grant user-visible Clone, Display, or Debug implementations.
+pub fn core_source_value_hook(name: &str, operation: &str) -> Option<&'static str> {
+    if !name.strip_prefix(crate::Diagnostics::CORE_SOURCE_ROOT).is_some_and(|rest| rest.starts_with('/')) {
+        return None;
+    }
+    if name.ends_with("::Core/time/time.jet::Clock") {
+        return match operation {
+            "clone" => Some("__fork"),
+            "show" | "debug" => Some("__show"),
+            _ => None,
+        };
+    }
+    if name.ends_with("::Core/time/time.jet::ExpiringValue") {
+        return (operation == "show").then_some("__show");
     }
     if !name.ends_with("::Core/compute/solve.jet::Solver") {
         return None;

@@ -9,7 +9,7 @@ use crate::Sema::CheckerCoreLib::{
     civil_time_method_contract, civil_time_method_return, core_generic_struct_field,
     data_renamed_to_datatree, datatree_method_return, db_value_method_return, decode_error_ty,
     devserver_method_return, email_method_return, encoding_handle_method_return,
-    expiring_method_return, file_handle_method_return, http_nominal_leaf, http_type_method_return,
+    file_handle_method_return, http_nominal_leaf, http_type_method_return,
     is_allocator_type, is_db_value_type_name, is_geometry_type, is_json_type_name, is_layout_axis_type,
     is_layout_type, is_math_type,
     is_reflect_type_name, is_simd_lane_type, job_queue_method_return,
@@ -1833,10 +1833,14 @@ impl<'a> Checker<'a> {
                                         Some(args[2].expr.span()),
                                     ));
                             }
-                            let ret = Type::Apply {
-                                name: "ExpiringSecret".to_string(),
-                                args: vec![value_ty],
-                            };
+                            let owner = self.core_source_owner_module(&ns, type_name)?;
+                            let source_name = self.canonical_nominal_name(owner, type_name);
+                            let ret = self.check_static_method(
+                                &source_name, method, span, owner_type_args, type_args, args,
+                            )?;
+                            // Ordinary static lowering uses the checked source identity,
+                            // never the retired native ExpiringSecretNew carrier.
+                            *receiver = Box::new(Expr::Ident(source_name, receiver.span()));
                             let ret =
                                 if crate::Sema::Diagnostics::is_deterministic_clock_type(&clock_ty)
                                 {
@@ -1847,7 +1851,7 @@ impl<'a> Checker<'a> {
                                 } else {
                                     ret
                                 };
-                            *recv_type_out = Some("ExpiringSecret".to_string());
+                            *recv_type_out = None;
                             *resolved_ret_out = Some(ret.clone());
                             return Some(ret);
                         }
@@ -2488,41 +2492,6 @@ impl<'a> Checker<'a> {
                 }
                 *resolved_ret_out = Some(result_ty.clone());
                 return Some(result_ty);
-            }
-            if self.lookup(type_name).is_none()
-                && type_name == crate::Syntax::EXPIRING_VALUE_TYPE
-                && method == "new"
-            {
-                if args.len() != 3 {
-                    self.diags
-                        .push(wrong_core_arity("ExpiringValue.new", 3, args.len(), span));
-                    for arg in args.iter_mut() {
-                        self.infer(&mut arg.expr);
-                    }
-                    return None;
-                }
-                let value_ty = self
-                    .infer(&mut args[0].expr)
-                    .unwrap_or(Type::Named("Unknown".to_string()));
-                self.expect_core_arg(
-                    "ExpiringValue.new",
-                    1,
-                    &Type::Named(crate::Syntax::DURATION_TYPE.to_string()),
-                    &mut args[1],
-                );
-                self.expect_core_arg(
-                    "ExpiringValue.new",
-                    2,
-                    &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
-                    &mut args[2],
-                );
-                let ret = Type::Apply {
-                    name: crate::Syntax::EXPIRING_VALUE_TYPE.to_string(),
-                    args: vec![value_ty],
-                };
-                *recv_type_out = Some(crate::Syntax::EXPIRING_VALUE_TYPE.to_string());
-                *resolved_ret_out = Some(ret.clone());
-                return Some(ret);
             }
             if self.lookup(type_name).is_none()
                 && matches!(type_name.as_str(), "SigningKey" | "X25519SecretKey")
@@ -3576,7 +3545,10 @@ impl<'a> Checker<'a> {
                 if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::DeterministicClock))
                     && matches!(
                         inner.as_ref(),
-                        Type::Apply { name, .. } if name == "ExpiringSecret"
+                        Type::Apply { name, .. }
+                            if name == "ExpiringSecret"
+                                || (jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                                    && name.ends_with("::Core/crypto/vault.jet::ExpiringSecret"))
                     )
         );
         // Most fact tags are type-transparent. These compiler-owned tags
@@ -6271,30 +6243,23 @@ impl<'a> Checker<'a> {
         // The actual dispatch (`finish_pool_add` etc.) already lives in
         // `finish_builtin_method`, reached the same way Signal/Derived reach it.
         if let Type::Apply { name, .. } = &recv_ty {
-            if name == crate::Syntax::EXPIRING_VALUE_TYPE {
-                if method == "force" {
-                    self.diags.push(Diagnostic::error(
-                            "E0511",
-                            "`ExpiringValue.force` bypasses expiry checking".to_string(),
-                            "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly".to_string(),
-                            "use `match item.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead".to_string(),
-                            Some(span),
-                        ));
-                }
-                if let Some(ret) = expiring_method_return(&recv_ty, method, args.len()) {
-                    if method == "get" && args.len() == 1 {
-                        self.expect_core_arg(
-                            "get",
-                            0,
-                            &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
-                            &mut args[0],
-                        );
-                    }
-                    *recv_type_out = Some(crate::Syntax::EXPIRING_VALUE_TYPE.to_string());
-                    return ret;
-                }
+            if method == "force" && (name == crate::Syntax::EXPIRING_VALUE_TYPE
+                || (jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                    && name.ends_with("::Core/time/time.jet::ExpiringValue")))
+            {
+                self.diags.push(Diagnostic::error(
+                    "E0511",
+                    "`ExpiringValue.force` bypasses expiry checking".to_string(),
+                    "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly".to_string(),
+                    "use `match item.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead".to_string(),
+                    Some(span),
+                ));
+                return None;
             }
-            if name == "ExpiringSecret" && method == "with" {
+            let source_expiring_secret =
+                jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                    && name.ends_with("::Core/crypto/vault.jet::ExpiringSecret");
+            if (name == "ExpiringSecret" || source_expiring_secret) && method == "with" {
                 if !expiring_clock_is_deterministic {
                     self.record_effect(Effect::Time.name(), span);
                     if self.in_pure && self.det_suppress == 0 {
@@ -6307,11 +6272,17 @@ impl<'a> Checker<'a> {
                     _ => unreachable!(),
                 };
                 let result = self.finish_expiring_secret_with(&inner, args, span);
-                *recv_type_out = Some("ExpiringSecret".to_string());
-                return result.map(|ok| Type::Result {
-                    ok: Box::new(ok),
-                    err: Box::new(Type::Named("Expired".to_string())),
-                });
+                if !source_expiring_secret {
+                    *recv_type_out = Some("ExpiringSecret".to_string());
+                    return result.map(|ok| Type::Result {
+                        ok: Box::new(ok),
+                        err: Box::new(Type::Named("Expired".to_string())),
+                    });
+                }
+                // Preserve the existing non-escaping read-loan check, but
+                // let ordinary registered method inference/lowering invoke
+                // the source body (no callback crosses a Rust host leaf).
+                result?;
             }
             if name == "Pool" {
                 if let Some(ret) =

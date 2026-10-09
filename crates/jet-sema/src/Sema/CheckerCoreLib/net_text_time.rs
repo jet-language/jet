@@ -727,30 +727,6 @@ pub fn loadable_method_return(
     }
 }
 
-/// D-SHAPE-CTORVERB1=C: instance methods on generic `ExpiringValue<T>`.
-pub fn expiring_method_return(
-    type_apply: &Type,
-    method: &str,
-    _n_args: usize,
-) -> Option<Option<Type>> {
-    let val_ty = match type_apply {
-        Type::Apply { name, args }
-            if name == crate::Syntax::EXPIRING_VALUE_TYPE && args.len() == 1 =>
-        {
-            args[0].clone()
-        }
-        _ => return None,
-    };
-    match method {
-        "get" => Some(Some(Type::Result {
-            ok: Box::new(val_ty),
-            err: Box::new(Type::Named("Expired".to_string())),
-        })),
-        "is_valid" => Some(Some(Type::Bool)),
-        "force" => Some(Some(val_ty)),
-        _ => None,
-    }
-}
 
 /// D-NETDEP1=A / D-HTTPLIB1=A: method return types for HTTP types.
 pub fn http_type_method_return(

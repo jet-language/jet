@@ -61,6 +61,189 @@ pub fn unix_ns() -[Time]> Int Never! {
 }
 
 
+// Manual clocks own their timeline. Semantic copies call __fork; observers
+// deliberately retain the shared state so a caller's later tick remains live.
+enum __ClockState {
+    Manual(Int)
+    System(started_ns: Int, offset_ms: Int)
+}
+pub struct Clock { state: Shared<__ClockState> }
+pub struct __ClockObserver { state: Shared<__ClockState> }
+
+fn clock_state_now(state: __ClockState) -> Int Never! {
+    if state == {
+        .Manual(value) -> value
+        .System(started_ns, offset_ms) -> {
+            elapsed_ns :: core.time.__clock_mono_ns() - started_ns
+            elapsed_ms :: civil_clamp(elapsed_ns /% 1000000, 0, time_int_max())
+            saturating_add_ns(offset_ms, elapsed_ms)
+        }
+    }
+}
+
+impl Clock {
+    pub fn new(seed: Int) -> Clock Never! {
+        Clock{state: shared __ClockState.Manual(seed)}
+    }
+    pub fn system() -[Time]> Clock Never! {
+        Clock{state: shared __ClockState.System(core.time.__clock_mono_ns(), 0)}
+    }
+    pub fn now(self) -> Int Never! {
+        guard :: self.state.guard_read()
+        clock_state_now(guard.value)
+    }
+    fn set(&self, value: Int) Never! {
+        guard := self.state.guard_edit()
+        if guard.value == {
+            .Manual(_) -> guard.value = __ClockState.Manual(value)
+            .System(_, _) -> {
+                current :: clock_state_now(guard.value)
+                started :: core.time.__clock_mono_ns()
+                offset :: if value > current -> value else -> current
+                guard.value = __ClockState.System(started, offset)
+            }
+        }
+    }
+    pub fn tick(&self, millis: Int) -> Int Never! {
+        next :: saturating_add_ns(self.now(), millis)
+        &self.set(next)
+        self.now()
+    }
+    pub fn advance(&self, to_ms: Int) -> Int Never! {
+        &self.set(to_ms)
+        self.now()
+    }
+    pub fn wait(&self, duration: Duration) -> Int Never! {
+        next :: saturating_add_ns(self.now(), duration.ns /% 1000000)
+        &self.set(next)
+        self.now()
+    }
+    pub fn __observer(self) -> __ClockObserver Never! {
+        __ClockObserver{state: ~self.state}
+    }
+    // Borrow, do not semantically copy, the input to its own copy route.
+    // System rebase order is fresh start then original-state snapshot.
+    pub fn __fork(self) -> Clock Never! {
+        guard :: self.state.guard_read()
+        if guard.value == {
+            .Manual(now) -> Clock.new(now)
+            .System(_, _) -> {
+                started :: core.time.__clock_mono_ns()
+                offset :: clock_state_now(guard.value)
+                Clock{state: shared __ClockState.System(started, offset)}
+            }
+        }
+    }
+    pub fn __show(self) -> String Never! { "Clock {{ now: {self.now()} }}" }
+}
+impl __ClockObserver {
+    pub fn now(self) -> Int Never! {
+        guard :: self.state.guard_read()
+        clock_state_now(guard.value)
+    }
+}
+
+// Payloads remain owned; an explicit caller clock determines access.
+// Main's owner-approved private-field correction keeps deadline mutation out
+// of the public API; payload access always checks the strict expiry boundary.
+#!Debug
+pub struct ExpiringValue<T> {
+    value: T
+    deadline_ms: Int
+}
+
+impl ExpiringValue {
+    pub fn new<T>(value: T, ttl: Duration, clock: Clock) -> ExpiringValue<T> Never! {
+        ExpiringValue<T>{value: value, deadline_ms: __expiry_deadline(clock.now(), ttl)}
+    }
+
+    pub fn get(self, clock: Clock) -> T Expired! {
+        if clock.now() > self.deadline_ms -> return Err(Expired{})
+        Ok(~self.value)
+    }
+
+    pub fn is_valid(self, clock: Clock) -> Bool Never! { clock.now() <= self.deadline_ms }
+
+    pub fn expires_at_ms(self) -> Int Never! { self.deadline_ms }
+    fn __show(self) -> String Never! { "Expiring(deadline={self.deadline_ms})" }
+}
+
+// The two expiry wrappers share the same saturating millisecond policy.
+pub fn __expiry_deadline(now_ms: Int, ttl: Duration) -> Int Never! {
+    saturating_add_ns(now_ms, ttl.ns /% 1000000)
+}
+
+#Test("ExpiringValue observes original clocks and expires strictly after its deadline") {
+    clock := Clock.new(100)
+    cached :: ExpiringValue.new("fresh", Duration{ns: 2000000}, clock)
+    &clock.tick(2)
+    assert_eq(cached.get(clock) ?? panic("equality must remain valid"), "fresh")
+    assert(cached.is_valid(clock))
+    &clock.tick(1)
+    assert(!cached.is_valid(clock))
+    if cached.get(clock) == {
+        .Err(_) -> {}
+        .Ok(_) -> assert(false)
+    }
+    assert_eq(cached.expires_at_ms(), 102)
+    assert_eq("{cached}", "Expiring(deadline=102)")
+}
+
+#Test("ExpiringValue zero and negative TTL preserve open expiry boundaries") {
+    clock :: Clock.new(100)
+    zero :: ExpiringValue.new(17, Duration{ns: 0}, clock)
+    assert_eq(zero.get(clock) ?? panic("zero TTL is valid at equality"), 17)
+    negative :: ExpiringValue.new(17, Duration{ns: -1000000}, clock)
+    if negative.get(clock) == {
+        .Err(_) -> {}
+        .Ok(_) -> assert(false)
+    }
+    high :: Clock.new(time_int_max())
+    saturated :: ExpiringValue.new(17, Duration{ns: 1000000}, high)
+    assert_eq(saturated.get(high) ?? panic("saturated deadline remains valid"), 17)
+    assert(saturated.is_valid(high))
+}
+impl Clock.Equatable {
+    fn equal(self, other: Clock) -> Bool Never! { self.now() == other.now() }
+}
+
+#Test("Clock manual forks are independent while observers retain identity") {
+    original :: Clock.new(100)
+    observer :: original.__observer()
+    fork :: original.__fork()
+    assert_eq(&fork.tick(25), 125)
+    assert_eq(original.now(), 100)
+    assert_eq(observer.now(), 100)
+    assert_eq(&original.advance(-10), -10)
+    assert_eq(observer.now(), -10)
+    assert_eq(fork.now(), 125)
+    assert_eq(&original.wait(duration_ns(-1500000)), -11)
+    assert_eq(observer.now(), -11)
+    assert_eq(&original.advance(time_int_max()), time_int_max())
+    assert_eq(&original.tick(1), time_int_max())
+    assert_eq(&original.advance(time_int_min()), time_int_min())
+    assert_eq(&original.wait(duration_ns(-1000000)), time_int_min())
+    assert(original.equal(Clock.new(time_int_min())))
+    assert_eq(original.__show(), "Clock {{ now: -9223372036854775808 }}")
+}
+
+#Test("Clock ordinary and nested aggregate copies fork the timeline") {
+    original :: Clock.new(0)
+    duplicate :: ~original
+    assert_eq(&duplicate.tick(1), 1)
+    assert_eq(original.now(), 0)
+    clocks :: [Clock]{original}
+    copied :: ~clocks
+    assert_eq(&copied[0].advance(2), 2)
+    assert_eq(clocks[0].now(), 0)
+}
+
+#Test("Clock Show and Debug keep the existing nominal rendering") {
+    value :: Clock.new(5)
+    assert_eq("{value}", "Clock {{ now: 5 }}")
+    assert_eq("{value:Debug}", "Clock {{ now: 5 }}")
+}
+
 fn time_int_min() -> Int Never! { -9223372036854775808 }
 fn time_int_max() -> Int Never! { 9223372036854775807 }
 

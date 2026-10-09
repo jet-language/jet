@@ -6,6 +6,7 @@
 use core.crypto.[CryptoError, Secret, SigningKey, X25519PublicKey, X25519SecretKey]
 use core.crypto.vault as vault
 use core.text as unicode
+use core.time as time
 
 pub struct KeyRef<T> {
     pub name: String
@@ -18,9 +19,116 @@ pub enum KeyStatus {
     Revoked
 }
 
+// Main's owner-approved private-field correction: only a checked, non-escaping
+// loan exposes the credential; the original source clock observer stays live.
+#[!Debug, !Printable]
 pub struct ExpiringSecret<T> {
-    pub secret: T
-    pub expires_at_ms: Int
+    value: Shared<T?>
+    deadline_ms: Int
+    observer: time.__ClockObserver
+}
+
+impl ExpiringSecret {
+    pub fn new<T>(value: ^T, ttl: time.Duration, clock: time.Clock) -> ExpiringSecret<T> Never! {
+        observer :: clock.__observer()
+        deadline :: time.__expiry_deadline(observer.now(), ttl)
+        ExpiringSecret<T>{value: shared (T?{Val(^value)}), deadline_ms: deadline, observer: observer}
+    }
+
+    pub fn expires_at_ms(self) -> Int Never! { self.deadline_ms }
+
+    pub fn with<R>(self, callback: fn(T) -> R) -> R time.Expired! {
+        guard := self.value.guard_edit()
+        if self.observer.now() > self.deadline_ms -> __take_expired(&guard)
+        __loan_secret(guard.value, callback)
+    }
+}
+
+impl ExpiringSecret.Close {
+    fn close(^self) {
+        owner :: ^self
+        __close_secret_storage(owner.value)
+    }
+}
+
+// A Shared provider only releases its storage handle. Source takes the live
+// credential first, so provider cleanup never needs a source Close callback.
+fn __close_secret_storage<T>(value: Shared<T?>) Never! {
+    guard := value.guard_edit()
+    __take_expired(&guard)
+}
+
+// Take, reinitialize the shared slot, then end the owned payload's scope.
+// The approved general mono-time Close drop glue (#4792) owns cleanup.
+fn __take_expired<T>(guard: &SharedGuard<T?>) Never! {
+    removed :: ^guard.value
+    guard.value = None
+    if ^removed == {
+        .Val(value) -> {}
+        None -> {}
+    }
+}
+
+// A read parameter's pattern payload is an existing non-owning read window.
+// Keep the guard held in `with` until the source callback has returned.
+fn __loan_secret<T, R>(value: T?, callback: fn(T) -> R) -> R time.Expired! {
+    if value == {
+        .Val(secret) -> Ok(callback(secret))
+        None -> Err(time.Expired{})
+    }
+}
+
+struct ExpiryCloseCount { count: Int }
+struct ExpiryCloseProbe { count: Shared<ExpiryCloseCount> }
+impl ExpiryCloseProbe.Close {
+    fn close(^self) {
+        probe :: ^self
+        guard := probe.count.guard_edit()
+        guard.value.count += 1
+    }
+}
+
+// Structural twin of ExpiringSecret's Shared<T?> + Close, specialized to a
+// counted probe because the public wrapper's closed crypto family rejects it.
+struct ExpiryCloseOwner { value: Shared<ExpiryCloseProbe?> }
+impl ExpiryCloseOwner.Close {
+    fn close(^self) {
+        owner :: ^self
+        __close_secret_storage(owner.value)
+    }
+}
+
+#Test("Expired storage takes its credential and closes it exactly once") {
+    count :: shared ExpiryCloseCount{count: 0}
+    storage :: shared (ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: ~count})})
+    if true {
+        guard := storage.guard_edit()
+        __take_expired(&guard)
+        assert(guard.value == None)
+        __take_expired(&guard)
+    }
+    // Dropping still-live storage must run the same payload Close exactly once.
+    if true {
+        live :: ExpiryCloseOwner{value: shared (ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: ~count})})}
+    }
+    observed :: count.guard_read()
+    assert_eq(observed.value.count, 2)
+}
+
+#Test("ExpiringSecret loans live at equality and expires on its original source clock") {
+    clock := time.Clock.new(100)
+    wrapped :: ExpiringSecret.new(^Secret.from_text("credential"), time.Duration{ns: 0}, clock)
+    assert_eq(wrapped.expires_at_ms(), 100)
+    assert_eq(wrapped.with(secret -> 7) ?? panic("equality must remain live"), 7)
+    &clock.tick(1)
+    if wrapped.with(secret -> 7) == {
+        .Err(_) -> {}
+        .Ok(_) -> assert(false)
+    }
+    if wrapped.with(secret -> 7) == {
+        .Err(_) -> {}
+        .Ok(_) -> assert(false)
+    }
 }
 
 pub struct MutationPlan<T> {

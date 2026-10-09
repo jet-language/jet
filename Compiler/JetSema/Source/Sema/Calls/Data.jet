@@ -18,6 +18,7 @@ use jet_foundation.[
     Type,
     ast_empty_call_arg_flags,
     core_receiver_method,
+    core_source_owns_type,
     type_name,
 ]
 
@@ -303,27 +304,9 @@ pub fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: 
                     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
                 }
             }
-            if name == "ExpiringValue" && parameters.len() == 1 {
-                if method == "force" -> &diagnostics.push(sema_error("E0511", span, "`ExpiringValue.force` bypasses expiry checking", "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly", "use `.get(clock)` and handle `Expired`"))
-                if method == "get" || method == "is_valid" || method == "force" {
-                    expected_count := if method == "get" -> 1 else -> 0
-                    if args.len() != expected_count -> sema_data_arity_diagnostic("ExpiringValue.{method}", expected_count, args.len(), span, &diagnostics)
-                    if type_args.len() != 0 -> sema_data_check_explicit_type_args("ExpiringValue.{method}", type_args, 0, span, &diagnostics)
-                    typed := [TExpr]{}
-                    if method == "get" && args.len() > 0 {
-                        value :: sema_data_check_argument("ExpiringValue.get", 0, args[0], Type.Named{name: "Clock"}, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-                        if value == .Val(checked) -> &typed.push(checked)
-                    }
-                    loop index in (if method == "get" -> 1 else -> 0)..<args.len() -> _ := sema_check_expression(args[index].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-                    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-                    ret := if {
-                        method == "get" -> sema_data_result(parameters[0], Type.Named{name: "Expired"})
-                        method == "is_valid" -> Type.Bool
-                        else -> parameters[0]
-                    }
-                    value := sema_tir_expr(ret, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.ExpiringMethod{method: method}, args: typed}, span)
-                    return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
-                }
+            if parameters.len() == 1 && method == "force" && (name == "ExpiringValue" || (core_source_owns_type(name) && name.ends_with("::Core/time/time.jet::ExpiringValue"))) {
+                &diagnostics.push(sema_error("E0511", span, "`ExpiringValue.force` bypasses expiry checking", "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly", "use `.get(clock)` and handle `Expired`"))
+                return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
         else -> {}

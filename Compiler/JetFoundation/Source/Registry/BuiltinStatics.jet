@@ -29,7 +29,6 @@ pub enum BuiltinStaticLowering {
     DurationNew(unit: String)
     // A registered Core call; every value argument is a Core argument.
     CoreCall(module_name: String, member: String)
-    ExpiringValueNew
     EmptyMap
     Numeric(operation: TNumericOp)
     Precise(type_name: String, function: String)
@@ -170,7 +169,6 @@ BUILTIN_STATIC_ROWS :: prep { [BuiltinStaticRow]{
     builtin_static_duration("seconds", "Seconds"),
     builtin_static_duration("minutes", "Minutes"),
     builtin_static_duration("hours", "Hours"),
-    builtin_static_generic(builtin_static("ExpiringValue", "new", [Type]{Type.Named{name: "T"}, Type.Named{name: "Duration"}, Type.Named{name: "Clock"}}, Type.Apply{name: "ExpiringValue", args: [Type]{Type.Named{name: "T"}}}, BuiltinStaticLowering.ExpiringValueNew), [String]{"T"}, 0),
     builtin_static("Bytes", "new", [Type]{}, Type.Named{name: "Bytes"}, BuiltinStaticLowering.PreludeStatic{rooted: true, path: "JetByteBuffer", generics: [TPreludeArg]{}}),
     builtin_static("Bytes", "with_capacity", [Type]{Type.Int}, Type.Named{name: "Bytes"}, BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.ByteBufferWithCapacity}),
     builtin_static("Bytes", "from", [Type]{builtin_static_u8_list()}, Type.Named{name: "Bytes"}, BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.ByteBufferFrom}),

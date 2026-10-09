@@ -736,6 +736,9 @@ fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, walk: &mut NominalWalk<'
             walk.leave(name, key);
             result
         }
+        Type::Apply { name, .. }
+            if jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                && name.ends_with("::Core/crypto/vault.jet::ExpiringSecret") => false,
         // A task or imported Arrow batch owns one release duty.  Copying either
         // carrier would hand two bindings the same cleanup authority, so both
         // runtime carriers implement no `Clone` and neither does the language

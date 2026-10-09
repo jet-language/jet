@@ -1073,7 +1073,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
             Some(value) => CtValue::Present(Box::new(CtValue::Int(value))),
             None => CtValue::absent(Type::Int),
         }),
-        ("core.time", "__host_monotonic_ns") => {
+        ("core.time", "__host_monotonic_ns" | "__clock_mono_ns") => {
             let value = jet_foundation::Monotonic::jet_time_monotonic_host_sample();
             Ok(match i64::try_from(value) {
                 Ok(value) => CtValue::Int(value),
@@ -1186,20 +1186,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 CtValue::Int(time_kernel::jet_time_monotonic_now_ns() / 1_000_000),
             )],
         }),
-        // D-DET1: testing.fake_clock is the test-facing spelling of the
-        // caller-seeded deterministic Clock capability built by Clock.new.
-        ("core.testing", "fake_clock") => {
-            let seed = match one(0)? {
-                CtValue::Int(v) => *v,
-                _ => {
-                    return Err(unsupported("testing.fake_clock expects an Int seed", span));
-                }
-            };
-            Ok(CtValue::Struct {
-                type_name: crate::Syntax::CLOCK_TYPE.to_string(),
-                fields: vec![("now".to_string(), CtValue::Int(seed))],
-            })
-        }
         // --- core.regex / core.regex (D-REGEXENGINE1) ---
         ("core.regex", "flags") => regex_flags(args, span),
         ("core.regex", "compile" | "compile_with") => regex_compile(args, span),

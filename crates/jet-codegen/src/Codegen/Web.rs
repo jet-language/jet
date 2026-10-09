@@ -38,8 +38,6 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/TypedText.js"),
     "\n",
-    include_str!("../Prelude/Core/Expiring.js"),
-    "\n",
     include_str!("../Prelude/Core/ExactNumbers.js"),
     "\n",
     include_str!("../Prelude/Core/NumericWeb.js"),
