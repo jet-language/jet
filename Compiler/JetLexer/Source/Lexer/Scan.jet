@@ -133,6 +133,9 @@ fn scan_unit_suffix_end(source: [U8], start: Int) -> Int {
     i
 }
 
+// BEGIN GENERATED LEXER KEYWORD SPANS
+// Derived from Rust Lexer::keyword, Syntax literals and TokKind; do not hand edit.
+// No spelling ownership here: Payload still builds the exact token text.
 fn word_kind(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Never! {
     // Every keyword below is at most 8 bytes (`comptime`); a longer word is a name.
     if end - start > 8 -> return K_IDENT
@@ -176,7 +179,11 @@ fn word_kind(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Neve
         "module" -> K_MODULE
         else -> K_IDENT
     }
+    // D-TIME-IN1=C: only exact in becomes a member after a postfix dot.
+    if kind == K_IN && (previous_kind == K_DOT || previous_kind == K_QUESTION_DOT) -> return K_IDENT
+    kind
 }
+// END GENERATED LEXER KEYWORD SPANS
 
 fn scan_digits(source: [U8], start: Int) -> Int Never! {
     i := start
