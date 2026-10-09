@@ -34,3 +34,34 @@ It must match the running host4's embedded `Compiler/Bootstrap/Tests.rs` constan
 Change the compiler bootstrap files, both copies of `lib.sh`, `ladder.mjs` and
 isolated-check consumers together with the host rebuild, not independently.
 See [gates/README.md](gates/README.md) for growth and phase-profile gates.
+
+## Production native compiler
+
+`Tools/agent/native-compiler.mjs` assembles the canonical bootstrap source
+manifest and appends the existing `Compiler/JetCli/main.jet` entry. Unlike the
+private factory harness, the resulting executable accepts real CLI arguments.
+Run through `Tools/agent/jet-env`, with a fresh disk-backed output directory:
+
+```sh
+Tools/agent/jet-env node Tools/agent/native-compiler.mjs \
+  --jet /path/to/cli-capable-jetc0 --runtime-dir /path/to/jet-runtime \
+  --out /disk/native-compiler
+```
+
+The seed must execute the Jet compiler's Jet CLI code, not the Rust reference
+CLI. Plain `build` selects native O0 lowering, ELF object emission and the Jet
+static linker. The runtime directory must have `native.key`, the matching
+`KEY/jet_runtime.pack.o`, and `provenance.json` identifying a Jet-native pack
+with zero Rust/LLVM objects and its SHA-256. Every output stage receives this
+runtime beside `jet`. Stage 2 and stage 3 must have byte-identical objects and
+executables; `native-compiler.json` records successful production and comparison.
+`--stages 1` builds one successor without claiming a fixed point.
+
+`--dry-run` performs real source assembly and records the entry and command
+plan without running a compiler or manufacturing outputs. The explicit
+`--seed-build --jet /path/to/rust-host --out /disk/cli-seed` bootstrap exception
+builds the same production entry through the host's `build --release` route.
+Its `seed/jet` is a Jet-built, Rust-origin seed, **not** a Rust-free delivery;
+`seed.json` records that distinction. It uses no private `Tests.rs` main.
+Builds and full fixed-point runs still require Main's measured proofq admission.
+
