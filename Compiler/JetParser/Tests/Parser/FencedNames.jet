@@ -1,9 +1,16 @@
-fn fence_test_expand(source: String) -> ParserFenceExpansion {
-    lexed :: lex(source.bytes())
+struct FenceTestExpansion {
+    tokens: [Token]
+    fenced_statements: [FencedStatement]
+    diagnostics: [Diagnostic]
+    tables: TokenTables
+}
+
+fn fence_test_expand(source: String) -> FenceTestExpansion {
+    lexed := lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
-    expanded :: parser_prepare_tokens(lexed.tokens)
+    expanded := parser_prepare_tokens(^lexed.tokens, &lexed.tables)
     assert(expanded.diagnostics.is_empty())
-    expanded
+    FenceTestExpansion{tokens: ^expanded.tokens, fenced_statements: ^expanded.fenced_statements, diagnostics: ^expanded.diagnostics, tables: ^lexed.tables}
 }
 
 // Rust: crates/jet-parser/src/FencedNames.rs:841
@@ -34,7 +41,8 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
 `)
     names := [String]{}
     loop token in expanded.tokens {
-        if token.kind == TOKEN_IDENT && token.payload.decoded.starts_with("t") -> &names.push(token.payload.decoded)
+        name :: token_decoded(expanded.tables, token)
+        if token.kind == TOKEN_IDENT && name.starts_with("t") -> &names.push(name)
     }
     assert(names.len() >= 3)
     assert_eq(names[0..<3], [String]{"t1", "t2", "t3"})
@@ -55,9 +63,9 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
         (source: `fn run() { f() :> 1 }`, code: "E0070")
     ] {
         code :: testcase.code
-        lexed :: lex(testcase.source.bytes())
+        lexed := lex(testcase.source.bytes())
         assert(lexed.diagnostics.is_empty())
-        _ :: parser_test_diagnostic(parser_prepare_tokens(lexed.tokens).diagnostics, code)
+        _ :: parser_test_diagnostic(parser_prepare_tokens(^lexed.tokens, &lexed.tables).diagnostics, code)
     }
 }
 
@@ -124,8 +132,8 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
     prints := 0
     totals := 0
     loop token in expanded.tokens {
-        if token.kind == TOKEN_IDENT && token.payload.decoded == "print" -> prints += 1
-        if token.kind == TOKEN_IDENT && token.payload.decoded == "total" -> totals += 1
+        if token.kind == TOKEN_IDENT && token_decoded(expanded.tables, token) == "print" -> prints += 1
+        if token.kind == TOKEN_IDENT && token_decoded(expanded.tables, token) == "total" -> totals += 1
     }
     assert_eq(prints, 3)
     assert_eq(totals, 1)
@@ -139,7 +147,7 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
     assert_eq(expanded.fenced_statements[0].copies, 4)
     values := [Int]{}
     loop token in expanded.tokens {
-        if token.kind == TOKEN_INT -> &values.push(token.payload.integer ?? panic("integer payload"))
+        if token.kind == TOKEN_INT -> &values.push(token_integer(expanded.tables, token) ?? panic("integer payload"))
     }
     assert_eq(values, [Int]{0, 1, 2, 3})
 }
@@ -165,9 +173,9 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
         `fn run() { <: task1..task1000000000 :> :: work() }`,
         "fn run() {{ <: task{padding}..task4095 :> :: work() }}\n"
     ] {
-        lexed :: lex(source.bytes())
+        lexed := lex(source.bytes())
         assert(lexed.diagnostics.is_empty())
-        _ :: parser_test_diagnostic(parser_prepare_tokens(lexed.tokens).diagnostics, "E0371")
+        _ :: parser_test_diagnostic(parser_prepare_tokens(^lexed.tokens, &lexed.tables).diagnostics, "E0371")
     }
 }
 
@@ -175,18 +183,18 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
 #Test("hostile_explicit_fence_lists_are_rejected_by_the_shared_budget") {
     names :: loop index in 0..<(PARSER_FENCE_MAX_BUDGET_ENTRIES + 1) -> "name{index}"
     source :: "fn run() {{ <: {names.join(", ")} :> :: work() }}\n"
-    lexed :: lex(source.bytes())
+    lexed := lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
-    _ :: parser_test_diagnostic(parser_prepare_tokens(lexed.tokens).diagnostics, "E0371")
+    _ :: parser_test_diagnostic(parser_prepare_tokens(^lexed.tokens, &lexed.tables).diagnostics, "E0371")
 }
 
 // Rust: crates/jet-parser/src/FencedNames.rs:1084
 #Test("hostile_expanded_statement_bytes_are_rejected_by_the_shared_budget") {
     body :: "x".repeat(PARSER_FENCE_MAX_EXPANSION_BYTES.div_euclid(PARSER_FENCE_MAX_EXPANSION) + 1)
     source :: "fn run() {{ print(<:0..4095:>, \"{body}\") }}\n"
-    lexed :: lex(source.bytes())
+    lexed := lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
-    _ :: parser_test_diagnostic(parser_prepare_tokens(lexed.tokens).diagnostics, "E0371")
+    _ :: parser_test_diagnostic(parser_prepare_tokens(^lexed.tokens, &lexed.tables).diagnostics, "E0371")
 }
 
 // Rust: crates/jet-parser/src/FencedNames.rs:1099

@@ -3,7 +3,7 @@
 fn value_block_parsed(source: String) -> Program {
     lexed :: lex_payload(source.bytes(), false)
     assert(lexed.diagnostics.is_empty(), "lex diagnostics for valid source")
-    admission :: parse_tokens(lexed.tokens)
+    admission :: parse_tokens(lexed.tokens, lexed.tables)
     loop diagnostic in admission.diagnostics -> assert(diagnostic.severity != 1, "parse diagnostics")
     admission.program
 }

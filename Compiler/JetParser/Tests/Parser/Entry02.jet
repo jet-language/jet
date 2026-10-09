@@ -213,7 +213,7 @@ fn entry02_unit_result(ty: Type?, error_name: String) -> Bool {
 #Test("pub_file_section_label_emits_e0415") {
     lexed :: lex("#PubFile\n\npriv:\nfn run() {{ return }}\n".bytes())
     assert(lexed.diagnostics.is_empty())
-    parsed :: parse_tokens(lexed.tokens)
+    parsed :: parse_tokens(lexed.tokens, lexed.tables)
     _ :: parser_test_diagnostic(parsed.diagnostics, "E0415")
 }
 // Rust: crates/jet-parser/src/Parser/mod.rs:2307
@@ -287,7 +287,7 @@ fn entry02_unit_result(ty: Type?, error_name: String) -> Bool {
         lexed :: lex(word.bytes())
         assert(lexed.diagnostics.is_empty())
         assert(lexed.tokens[0].kind == TOKEN_IDENT)
-        assert(lexed.tokens[0].payload.decoded == word)
+        assert(token_decoded(lexed.tables, lexed.tokens[0]) == word)
     }
 }
 // Rust: crates/jet-parser/src/Parser/mod.rs:2631
@@ -380,4 +380,31 @@ fn entry02_unit_result(ty: Type?, error_name: String) -> Bool {
     p :: entry02_program("fn run() {{ x :: a.[b, c] }}")
     val :: entry02_binding(entry02_func(p, "run"))
     assert(if val.init == { .MemberSpread(_, _, _) -> true else -> false })
+}
+
+// Named groups keep the original expansion rules while importing table-local
+// literal and interpolation IDs from independently lexed declarations.
+#Test("named_marker_groups_preserve_imported_literal_tables") {
+    declaration :: lex(`marker Pair = #[Label("value={inner}"), Count(7)]`.bytes())
+    assert(declaration.diagnostics.is_empty())
+    groups :: named_marker_groups(declaration.tokens, declaration.tables)
+    assert_eq(groups.len(), 1)
+    use_site := lex("unrelated :: 99\n#Pair fn run() {{}}\n".bytes())
+    assert(use_site.diagnostics.is_empty())
+    expanded :: expand_named_marker_groups_with_uses(use_site.tokens, &use_site.tables, groups)
+    assert_eq(expanded.uses.len(), 1)
+    assert_eq(expanded.uses[0].name, "Pair")
+    found_integer := false
+    found_interpolation := false
+    loop token in expanded.tokens {
+        if token.kind == TOKEN_INT && token_integer(use_site.tables, token) == Val(7) -> found_integer = true
+        loop part in token_string_parts(use_site.tables, token) {
+            if part.kind != STRING_PART_INTERPOLATION -> next
+            loop nested in part.tokens {
+                if nested.kind == TOKEN_IDENT && token_decoded(use_site.tables, nested) == "inner" -> found_interpolation = true
+            }
+        }
+    }
+    assert(found_integer)
+    assert(found_interpolation)
 }

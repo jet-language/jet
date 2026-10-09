@@ -4,13 +4,13 @@ fn program(source: String) -> Program { parser_test_program(source) }
 
 // Rust: crates/jet-parser/src/Parser/mod.rs:1369
 #Test("clean_preparation_reuses_byte_identical_tokens") {
-    lexed :: lex("fn run() {{ value :: 1 }}\n".bytes())
+    lexed := lex("fn run() {{ value :: 1 }}\n".bytes())
     assert(lexed.diagnostics.is_empty())
     expected := [Token]{}
     loop token in lexed.tokens {
         if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> &expected.push(token)
     }
-    prepared :: parser_prepare_tokens(lexed.tokens)
+    prepared :: parser_prepare_tokens(^lexed.tokens, &lexed.tables)
     assert(prepared.fenced_statements.is_empty())
     assert(prepared.tokens == expected)
     // Token value equality is observable; Rust Cow pointer identity is not a Jet API.
@@ -108,7 +108,7 @@ fn program(source: String) -> Program { parser_test_program(source) }
     assert(names.contains("host_open") && names.contains("run"))
     second :: lex("fn foo() -> Int\nfn bar() {{}}\n".bytes())
     assert(second.diagnostics.is_empty())
-    recovered :: parse_tokens(second.tokens)
+    recovered :: parse_tokens(second.tokens, second.tables)
     assert(loop d in recovered.diagnostics { if d.code == "E0081" -> break true } ?? false)
     assert(loop item in recovered.program.items { if item == .Func(func) && func.name == "bar" -> break true } ?? false)
 }

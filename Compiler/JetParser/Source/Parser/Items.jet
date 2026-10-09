@@ -407,7 +407,7 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
             if parser_current_kind(&state) == TOKEN_LPAREN {
                 open :: parser_bump(&state).span
                 qualifier :: parser_current(&state)
-                package = qualifier.kind == TOKEN_IDENT && qualifier.payload.decoded == "package" && parser_kind_at(&state, 1) == TOKEN_RPAREN
+                package = qualifier.kind == TOKEN_IDENT && parser_value(state, qualifier) == "package" && parser_kind_at(&state, 1) == TOKEN_RPAREN
                 loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF -> parser_bump(&state)
                 if parser_current_kind(&state) == TOKEN_RPAREN -> marker_span = parser_cover(word.span, parser_bump(&state).span)
                 written :: Span{start: open.start, end: marker_span.end}
@@ -490,8 +490,7 @@ fn parser_expect_marker_path(state: &JetParserState, reason: String) -> Token {
     loop parser_current_kind(&state) == TOKEN_DOT {
         parser_bump(&state)
         member :: parser_expect_name(&state, "a library marker path segment")
-        name.payload.decoded = "{name.payload.decoded}.{member.payload.decoded}"
-        name.span.end = member.span.end
+        name = parser_spelled_token(&state, TOKEN_IDENT, parser_cover(name.span, member.span), "{parser_value(state, name)}.{parser_value(state, member)}")
     }
     name
 }
@@ -870,7 +869,7 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
                 loop {
                     if parser_current_kind(&state) == TOKEN_IDENT {
                         field :: parser_bump(&state)
-                        &fields.push(NamedSpan{name: field.payload.decoded, span: field.span})
+                        &fields.push(NamedSpan{name: parser_value(state, field), span: field.span})
                     } else {
                         bad :: parser_current(&state).span
                         parser_add_error_code(&state, "E0961", bad, "`.[ ]` lists member names, not calls or expressions", "member spread names fields or package names that hang off the prefix", "write bare names like `default.[cargo, ripgrep]`")
@@ -884,7 +883,7 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
             _ := parser_expect(&state, TOKEN_RBRACKET, "`]` to close a member spread `.[…]`")
         } else {
             field :: parser_expect_name(&state, "for a receiver footprint field")
-            &fields.push(NamedSpan{name: field.payload.decoded, span: field.span})
+            &fields.push(NamedSpan{name: parser_value(state, field), span: field.span})
         }
         declared_footprint = Val(fields)
     }
@@ -1007,7 +1006,7 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     // Callable declarations share the contextual `.copy(...)` spelling;
     // bare `copy value` remains a retired keyword expression.
     name :: if parser_current_kind(&state) == TOKEN_KW_COPY -> parser_bump(&state) else -> parser_expect_name(&state, "after `fn`")
-    func_name := if name.kind == TOKEN_KW_COPY -> name.payload.text else -> name.payload.decoded
+    func_name := if name.kind == TOKEN_KW_COPY -> parser_text(state, name) else -> parser_value(state, name)
     func_name_span := name.span
     external_type := NamedSpan?{None}
     // Rust `func_after_fn`: `fn Type.method(` attaches an external method;
@@ -1028,7 +1027,7 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     // and reports the missing type, not a variant head.
     head_pattern := Pattern?{None}
     params := [Param]{}
-    if parser_current_kind(&state) == TOKEN_LPAREN && parser_kind_at(&state, 1) == TOKEN_IDENT && (parser_kind_at(&state, 2) == TOKEN_LPAREN || (parser_kind_at(&state, 2) == TOKEN_RPAREN && parser_pascal_name(parser_lookahead(&state, 1).payload.decoded))) {
+    if parser_current_kind(&state) == TOKEN_LPAREN && parser_kind_at(&state, 1) == TOKEN_IDENT && (parser_kind_at(&state, 2) == TOKEN_LPAREN || (parser_kind_at(&state, 2) == TOKEN_RPAREN && parser_pascal_name(parser_value_at(&state, 1)))) {
         parser_bump(&state)
         variant :: parser_expect_name(&state, "for a multi-head variant")
         pattern_end := variant.span.end

@@ -92,7 +92,7 @@ fn parser_parse_marker_decl(state: &JetParserState, modifiers: ParsedItemModifie
         parser_bump(&state)
         group :: parser_parse_marker_group_entries(&state, true)
         return Item.MarkerDecl{value: MarkerDecl{
-            name: name.payload.decoded, name_span: name.span, is_pub: modifiers.is_pub,
+            name: parser_value(state, name), name_span: name.span, is_pub: modifiers.is_pub,
             is_package_pub: modifiers.is_package_pub, group: Val(group.markers),
             params: [MarkerDeclParam]{}, body: None, span: parser_cover(start.span, group.span),
         }}

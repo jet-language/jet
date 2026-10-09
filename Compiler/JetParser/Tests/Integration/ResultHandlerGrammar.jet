@@ -16,7 +16,7 @@ fn result_handler_binding(function: Func, name: String) -> Expr? {
     source :: "\nfn optional() -> Success? {{ None }}\nfn fallible() Err! {{ Err(\"bad\") }}\n\nfn run(value: Int Err!, optional: String) {{\n    propagated :: value\n    noted :: value?(\"context\")\n    chained :: optional?.len\n    negated :: !true\n    handled :: value ? ok -> if {{\n        !true -> ok\n        else -> ok\n    }}\n    ! error -> error\n}}\n"
     lexed :: lex_payload(source.bytes(), false)
     assert(lexed.diagnostics.is_empty(), "lexer diagnostics must be empty")
-    parsed :: parse_tokens(lexed.tokens)
+    parsed :: parse_tokens(lexed.tokens, lexed.tables)
     assert(parsed.diagnostics.is_empty(), "neighboring forms should parse")
     optional :: result_handler_function(parsed.program, "optional") ?? panic("optional")
     assert(if optional.return_type == {
@@ -71,7 +71,7 @@ fn result_handler_is_pointer_to(ty: Type, element: String) -> Bool Never! {
     source :: "\nfn from_addr<T>(addr: Int) -> *T Never! {{ todo }}\nfn either(value: *Node | Label) {{}}\n"
     lexed :: lex_payload(source.bytes(), false)
     assert(lexed.diagnostics.is_empty(), "lexer diagnostics must be empty")
-    parsed :: parse_tokens(lexed.tokens)
+    parsed :: parse_tokens(lexed.tokens, lexed.tables)
     assert(parsed.diagnostics.is_empty(), "pointer types should parse")
     from_addr :: result_handler_function(parsed.program, "from_addr") ?? panic("from_addr")
     assert(if from_addr.return_type == {
