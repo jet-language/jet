@@ -70,6 +70,15 @@ entry, rather than copying its subtree.
 The XML reader likewise binds a caller-owned byte window before handing it to
 the scanner; the read buffer is not copied into an owning slice at that boundary.
 
+HTTP response construction moves each owned body and header carrier into the
+transport exactly once. `core.http.server.json` reports serialization refusal
+as `HTTPError.InvalidFraming`, including non-finite JSON numbers, rather than
+claiming an infallible encoding operation.
+Repeated value arguments replace their existing ordered object slot. Service
+state-path grammar selects Windows versus POSIX rules at compile time.
+The private XML engine uses `UTF16Le` and `UTF16Be` consistently; incremental
+wire decoding is distinct from the type's derived `decode` constructor.
+
 Caller-owned `RNG`, `testing.RNG`, and `math.random.RNG` name one Jet nominal:
 `RNG { state: U64 }`. It is not implicitly copyable; an explicit clone creates an
 independent stream. Display is `RNG { .. }`. SplitMix64 transitions, bounded
