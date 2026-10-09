@@ -9559,20 +9559,6 @@ impl<'a> RustEmitter<'a> {
         access == MirAccess::Read && matches!(ty.kind(), MirTypeKind::String) && !self.is_core_layer()
     }
 
-    /// A read-only text parameter borrows the contents, not the allocation.
-    /// Core-layer text already has its static borrowed scalar carrier.
-    fn read_text_parameter(&self, ty: &MirType, access: MirAccess) -> bool {
-        let ty = if ty.identity.is_some() { self.canonical_type(ty) } else { ty };
-        access == MirAccess::Read && matches!(ty.kind(), MirTypeKind::String) && !self.is_core_layer()
-    }
-
-    /// A read-only text parameter borrows the contents, not the allocation.
-    /// Core-layer text already has its static borrowed scalar carrier.
-    fn read_text_parameter(&self, ty: &MirType, access: MirAccess) -> bool {
-        let ty = if ty.identity.is_some() { self.canonical_type(ty) } else { ty };
-        access == MirAccess::Read && matches!(ty.kind(), MirTypeKind::String) && !self.is_core_layer()
-    }
-
     fn callable_parameter_mode(&self, ty: &MirType, access: MirAccess) -> char {
         if access == MirAccess::Write {
             'W'
@@ -10082,27 +10068,6 @@ impl<'a> RustEmitter<'a> {
         let (line, _) = lines.line_col(&source.source, function.span.start);
         let source_line = lines
             .line_text(&source.source, line)
-            .trim_end()
-            .to_string();
-        let line = u32::try_from(line)
-            .unwrap_or_else(|_| panic!("MIR function source line {line} exceeds u32"));
-        (source.path.clone(), line, source_line)
-    }
-    fn function_stack_context(&self, function: &MirFunction) -> (String, u32, String) {
-        let module = self.module_row(function.module_id);
-        let source = self
-            .program
-            .source_files
-            .iter()
-            .find(|source| source.id == module.source_file)
-            .unwrap_or_else(|| panic!("MIR source file {:?} has no row", module.source_file));
-        let (line, _) =
-            jet_foundation::Diagnostics::span_line_col(&source.source, function.span.start);
-        let source_line = source
-            .source
-            .lines()
-            .nth(line.saturating_sub(1))
-            .unwrap_or_default()
             .trim_end()
             .to_string();
         let line = u32::try_from(line)

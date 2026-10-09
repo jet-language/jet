@@ -8556,7 +8556,6 @@ fn job_argument_record(
         compiler_builtin_error: false,
         is_pub: false,
         is_package_pub: false,
-        compiler_builtin_error: false,
         name: jet_foundation::Names::mangle_generated(&format!("job_args_{}", target.name)),
         name_span: zero,
         type_params: Vec::new(),

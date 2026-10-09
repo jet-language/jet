@@ -844,7 +844,6 @@ mod tests {
             compiler_builtin_error: false,
             is_pub: false,
             is_package_pub: false,
-            compiler_builtin_error: false,
             name: name.to_string(),
             name_span: zero(),
             type_params: vec![],
