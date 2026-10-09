@@ -499,7 +499,7 @@ fn mir_pass_lint_wave(program: &MIRProgram, pass: MIROptimizationPassID, threads
     if plan.workers <= 1 -> return mir_pass_lint(program, pass)
     shared_index :: shared mir_lint_index(program)
     slots :: mir_pass_wave_take(&program, plan)
-    failures :: mir_pass_lint_slots(slots, 0, shared_index)
+    failures :: mir_pass_lint_slots(slots, 0, shared_index) ?? panic("a MIR lint wave lost a compiler thread")
     loop slot in slots -> mir_pass_wave_restore(&program, slot)
     if failures.len() == 0 -> return None
     Val(mir_pass_lint_error(pass, failures[0]))
@@ -545,7 +545,7 @@ fn mir_pass_validate_wave(program: &MIRProgram, pass: MIROptimizationPassID, thr
     if plan.workers <= 1 -> return mir_pass_validate_program(program, pass)
     shared_inputs :: shared MIRPassLegalityInputs{tables: mir_pass_legality_tables(program), identities: mir_pass_identity_failures(program, pass), pass: pass}
     slots :: mir_pass_wave_take(&program, plan)
-    failures :: mir_pass_validate_slots(slots, plan.bounds, 0, shared_inputs)
+    failures :: mir_pass_validate_slots(slots, plan.bounds, 0, shared_inputs) ?? panic("a MIR legality wave lost a compiler thread")
     loop slot in slots -> mir_pass_wave_restore(&program, slot)
     if failures.len() == 0 -> return None
     Val(failures[0])

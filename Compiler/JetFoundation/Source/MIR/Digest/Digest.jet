@@ -78,7 +78,7 @@ MIR_DIGEST_WORD_MASK :: prep { 0xffffffffffffffff }
 // the bytes and every lane state are those of the word. A value already in
 // U64 range (every length and offset) is its own word.
 fn mir_digest_int(writer: &MIRCanonicalWriter, value: Int) Never! {
-    word :: U64.from_int(value) ?? U64.from_int(value & MIR_DIGEST_WORD_MASK) ?? U64{0}
+    word :: U64.from_int(value) ?? (U64.from_int(value & MIR_DIGEST_WORD_MASK) ?? U64{0})
     mir_digest_u64(&writer, word)
 }
 

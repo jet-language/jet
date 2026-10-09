@@ -747,7 +747,7 @@ fn jet_codegen_impl_method_matches(function: TFunc, definition: TImplDef, trait_
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_impl_rows. Only a
 // lowered function (`lowered_ids`) is an executable impl method.
-fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], trait_names: JetCodegenTraitNames, fields_by_name: [String:MIRFieldID], lowered_ids: [String:Bool]) -> MIRImplDef? {
+fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], trait_names: JetCodegenTraitNames, fields_by_name: [String:MIRFieldID], lowered_ids: [U64:Bool]) -> MIRImplDef? {
     trait_name := if definition.trait_ref == {
         Val(name) -> Val(name)
         None -> definition.trait_name
@@ -769,7 +769,7 @@ fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegen
             row = functions.next_by_name[row]
         }
         loop id in candidates {
-            if lowered_ids.get("{id.value}") == None || seen_methods.get(id.value) != None -> next
+            if lowered_ids.get(id.value) == None || seen_methods.get(id.value) != None -> next
             _ := &seen_methods.add(id.value, true)
             &method_ids.push(id)
         }

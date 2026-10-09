@@ -1704,7 +1704,8 @@ fn sema_function_check_registered_unregistered(job: SemaBodyJob, module_index: I
 }
 
 // Keep the actual environment's retained function name, not a context shadow.
-// The graph payload window permits only the disjoint context-field write.
+// The name is read from the graph first; the context-field write follows
+// once no view of the environment's graph is live.
 fn sema_function_check_registered_name(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, environment: &SemaScopeEnvironment) {
     if memory_position == .Val(position) {
         if memory_plan.functions[position].function == .Val(planned) {
@@ -1712,19 +1713,23 @@ fn sema_function_check_registered_name(job: SemaBodyJob, module_index: Int, memo
             return
         }
     }
-    if &environment.registration_graph == .Val(graph) {
+    name :: sema_function_registered_job_name(job, module_index, environment)
+    environment.function_name = name
+}
+
+// The declared name of the function `job` checks, from the registered graph.
+fn sema_function_registered_job_name(job: SemaBodyJob, module_index: Int, environment: SemaScopeEnvironment) -> String {
+    if environment.registration_graph == .Val(graph) {
         if job == {
             .TopLevel(item_index) -> {
-                if &graph.modules[module_index].program.items[item_index] == .Func(func) {
-                    environment.function_name = func.name
-                    return
+                if graph.modules[module_index].program.items[item_index] == .Func(func) {
+                    return func.name
                 }
                 panic("a selected source function lost its original item")
             }
-            .NominalMethod(_, owner, row) -> environment.function_name = graph.modules[module_index].nominals[owner].methods[row].declaration.name
-            .ImplMethod(_, owner, row) -> environment.function_name = graph.modules[module_index].impls[owner].methods[row].declaration.name
+            .NominalMethod(_, owner, row) -> return graph.modules[module_index].nominals[owner].methods[row].declaration.name
+            .ImplMethod(_, owner, row) -> return graph.modules[module_index].impls[owner].methods[row].declaration.name
         }
-        return
     }
     panic("a registered Jet body check lost its owning graph")
 }
@@ -2916,7 +2921,8 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, host
     sema_scope_environment_enter_module(&environment, module_index, sema_comptime_body_values_from_items(values))
     items_scanned := 0
     functions_checked := 0
-    count_work :: trace_sink != None
+    count_work := false
+    if trace_sink == .Val(_) -> count_work = true
     if count_work -> functions_checked = ready.bodies.len()
     method_jobs := 0
     impl_rows_scanned := 0
@@ -4026,13 +4032,14 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
     complete := graph.complete
     memory_plan := sema_function_memory_plan_from_graph(graph)
     environment := sema_check_pass_environment(~graph, [TTypeDef]{})
+    // The pass environment and memory plan move through the shared state
+    // module by module (sema_check_declarations_in_shared).
+    check_state :: shared SemaCheckShared{environments: [SemaScopeEnvironment]{}, memory_plans: [SemaFunctionMemoryPlan]{}}
+    sema_check_shared_fill(check_state, ^environment, ^memory_plan)
     module_index := 0
     loop module_index < graph.modules.len() {
         if trace_sink == .Val(sink) -> sink.begin("sema.module", graph.modules[module_index].module_path, module_index, graph.modules.len())
-        owned_check := sema_check_registration_module(^environment, None, ^memory_plan, module_index, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), None, "sema.check", trace_sink)
-        environment = ^owned_check.environment
-        memory_plan = ^owned_check.memory_plan
-        checked := ^owned_check.module_result
+        checked := sema_check_declarations_in_shared(check_state, module_index, [SemaComptimeItemValue]{}, "sema.check", trace_sink)
         if trace_sink == .Val(sink) -> sink.end("sema.module", graph.modules[module_index].declarations.len())
         loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
         if !checked.complete -> complete = false
@@ -4047,7 +4054,8 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
     source_keys := [String:Bool]{}
     hook_access :: sema_host_hook_access(host_hooks)
     shared_state :: shared SemaProbeShared{environments: [SemaScopeEnvironment]{}, sources: [[SemaComptimeItemSource]]{}}
-    sema_comptime_probe_shared_fill_environment(shared_state, ^environment)
+    probe_environment := sema_check_shared_take_environment(check_state)
+    sema_comptime_probe_shared_fill_environment(shared_state, ^probe_environment)
     loop source_module_index in 0..<graph.modules.len() {
         module_sources := sema_comptime_probe_module(shared_state, graph, source_module_index, hook_access, threads)
         // Moved onto `sources` in order, without a copy.
@@ -4096,16 +4104,27 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
 pub fn sema_comptime_modules_with_values(resolved_graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> [SemaGraphModuleResult] {
     memory_plan := sema_function_memory_plan_from_graph(resolved_graph)
     environment := sema_check_pass_environment(~resolved_graph, [TTypeDef]{})
+    check_state :: shared SemaCheckShared{environments: [SemaScopeEnvironment]{}, memory_plans: [SemaFunctionMemoryPlan]{}}
+    sema_check_shared_fill(check_state, ^environment, ^memory_plan)
     modules := [SemaGraphModuleResult]{}
     module_index := 0
     loop module_index < resolved_graph.modules.len() {
-        owned_check := sema_check_registration_module(^environment, None, ^memory_plan, module_index, values, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), None, "", None)
-        environment = ^owned_check.environment
-        memory_plan = ^owned_check.memory_plan
-        &modules.push(^owned_check.module_result)
+        &modules.push(sema_check_declarations_in_shared(check_state, module_index, values, "", None))
         module_index += 1
     }
     modules
+}
+
+// Checks one registered module's declarations (no bodies) with the pass
+// environment and memory plan of `shared_state`, which move in and back.
+fn sema_check_declarations_in_shared(shared_state: Shared<SemaCheckShared>, module_index: Int, values: [SemaComptimeItemValue], counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaGraphModuleResult {
+    environment := sema_check_shared_take_environment(shared_state)
+    memory_plan := sema_check_shared_take_memory_plan(shared_state)
+    checked := sema_check_registration_module(^environment, None, ^memory_plan, module_index, values, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), None, counter_phase, trace_sink)
+    restored_environment := ^checked.environment
+    restored_memory_plan := ^checked.memory_plan
+    sema_check_shared_fill(shared_state, ^restored_environment, ^restored_memory_plan)
+    ^checked.module_result
 }
 
 // The rows sema_comptime_modules_with_values adds for the values at `from`

@@ -88,7 +88,8 @@ pub fn parse_config_with_source(lexed: Lexed, source: [U8]) -> ParseResult {
 
 // The lexed tokens move into the parser state (field moves reset the field,
 // so no token list is copied on the way).
-fn parser_parse_lexed_lines(lexed: ^Lexed, source: [U8], line_starts: [Int], allow_environment_reads: Bool) -> ParseResult {
+fn parser_parse_lexed_lines(input: ^Lexed, source: [U8], line_starts: [Int], allow_environment_reads: Bool) -> ParseResult {
+    lexed := ^input
     source_end :: if lexed.tokens.len() > 0 -> lexed.tokens[lexed.tokens.len() - 1].span.start else -> 0
     tokens := ^lexed.tokens
     lexed.tokens = [Token]{}
@@ -116,7 +117,8 @@ pub fn parse_tokens(tokens: [Token]) -> ParseResult {
 
 // D-EACH1=C: fence expansion runs before parsing. A fence error stops the
 // parse like any token-level rejection: no partially expanded AST is built.
-fn parser_parse_prepared(prepared: ^ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool) -> ParseResult {
+fn parser_parse_prepared(input: ^ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool) -> ParseResult {
+    prepared := ^input
     if prepared.diagnostics.len() > 0 {
         diagnostics := [Diagnostic]{}
         loop diagnostic in lexer_diagnostics -> &diagnostics.push(diagnostic)
