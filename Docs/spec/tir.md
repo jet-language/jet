@@ -26,6 +26,11 @@ those fields and formats output; it does not re-run semantic decisions such as
 expression typing or overflow classification. `tir_covers` is the coverage
 proof for reachable functions.
 
+Restoring a codegen function snapshot consumes its already-owned non-Copy
+fields into the builder; only scalar Copy facts are read. Saving an enclosing
+function's independent snapshot remains a distinct operation, not a borrowed
+view that could be invalidated when the builder begins a nested function.
+
 ## Read-only fact channel
 
 The frozen TIR exposes one typed, borrowed `TFactChannel` view. It projects facts
@@ -64,6 +69,14 @@ even when no source nominal declaration exists. Import aliases preserve the
 carrier's builtin identity, and checked constructors publish that identity
 as their lowering receiver. A user module cannot acquire Core ownership merely
 by using a Core-like name.
+
+Compiler-created reflection values retain ordinary checked nominal declarations,
+including their enum tags and payloads. A compiler-owned name does not imply a
+native runtime carrier: reflection enums without one are declared by the artifact
+through the same enum emission path as source declarations.
+Typed variant comparisons resolve their owner from the checked subject's enum
+declaration and require membership in that declaration's canonical variant menu.
+This includes compiler-created reflection enums, not only source and runtime enums.
 
 Checked function parameters and explicit nominal construction type arguments
 publish their resolved identities on the AST consumed by lowering. Body locals,

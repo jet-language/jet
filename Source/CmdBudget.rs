@@ -85,7 +85,7 @@ pub(crate) fn run(raw: &[String]) -> i32 {
     let measured_start = timestamp_now();
     // Preflight owns no artifact write: parse/load/sema must finish first.
     let entry_text = entry.to_string_lossy();
-    let (diagnostics, bundle, effect_facts) =
+    let (diagnostics, bundle, effect_facts, _nominals) =
         jet::Driver::check_file_with_effect_facts(&entry_text, None, false);
     if diagnostics
         .iter()
@@ -315,7 +315,7 @@ pub(crate) fn run_build_gates(
         }
     };
     let entry_text = entry.to_string_lossy();
-    let (diagnostics, bundle, effect_facts) =
+    let (diagnostics, bundle, effect_facts, _nominals) =
         jet::Driver::check_file_with_effect_facts(&entry_text, None, false);
     if diagnostics
         .iter()
@@ -1708,7 +1708,7 @@ pub(crate) fn run_dev_refresh(
         }
     };
     let entry_text = entry.to_string_lossy();
-    let (diagnostics, bundle, effect_facts) =
+    let (diagnostics, bundle, effect_facts, _nominals) =
         jet::Driver::check_file_with_effect_facts(&entry_text, None, false);
     if diagnostics
         .iter()

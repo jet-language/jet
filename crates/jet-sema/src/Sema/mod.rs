@@ -1903,6 +1903,10 @@ pub(crate) struct ModuleState {
     /// is the producer for `Type.reflect()` and direct registered fact reads;
     /// no reflection lookup table is kept beside it.
     items: Vec<crate::AST::Item>,
+    /// Loader-authenticated embedded Core origin, not a user path/alias guess.
+    is_core_source: bool,
+    /// Actual module owning the original parsed Prelude error declarations.
+    compiler_builtin_error_owner: Option<usize>,
     /// The bundle-wide build fact snapshot, copied into each module state so
     /// the checker can fold facts without an engine or global lookup.
     build_facts: jet_foundation::Facts::BuildFactSnapshot,
@@ -1985,7 +1989,7 @@ pub(crate) struct ModuleState {
     /// state final: this module's projection as a module a fragment loads,
     /// and as the evaluating module of its own bodies.
     fragment_rows: CheckerCore::FragmentMemo<CheckerCore::FragmentModuleRows>,
-    fragment_facts: CheckerCore::FragmentMemo<crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    fragment_facts: CheckerCore::FragmentMemo<crate::AST::MirFragmentNominalFacts>,
 }
 
 /// D-INTBIG1: whether a checked type carries Jet's default exact `Int`.

@@ -1130,6 +1130,16 @@ methods where the declared API permits it; secret-bearing types must not be
 logged. `file_seal` and `file_open` take typed `Path` values at their checked
 boundary and use `FS` plus `Rand` where indicated.
 
+The native `Secret` carrier owns the canonical List header `[len, cap, data]`
+(three words, 24 bytes); `U8` elements use the canonical host U8 stride. Creating
+a Secret adopts the List buffer without copying secret material. Borrowing
+`bytes` reads or writes the actual parent's header, and permits only fixed-length
+indexed mutation, not growth, removal, clearing, or whole-List assignment.
+Close effectfully wipes cap × the host U8 stride bytes, including any slot
+padding and spare capacity, then releases that same byte count at alignment
+eight and clears the header.
+Repeated Close is harmless; final owner drop alone releases the header.
+
 Key wrapping authenticates the `JETW` header as AAD prefixed with the
 `JETW1 wrap` domain label. `wrap` and `unwrap` use the same label and header
 bytes, so the recipient can authenticate and recover the original Secret.
@@ -2007,6 +2017,19 @@ use bytes. Jet uses its pinned Unicode 17.0.0 tables, not the host's Rust, OS,
 locale, or terminal Unicode version. Empty strings are false for the
 empty-sensitive predicates. `splitn` and `rsplitn` limit the number of
 resulting parts (D-TEXTUNICODE1=A).
+
+The checksum-verifying `Tools/agent/gen-unicode-tables.mjs` owns the pinned
+mapping and property assets, including the native runtime's fixed-word
+lookup functions. Regenerate them from `tests/data/unicode/ucd`; never copy
+host Unicode tables or hand-maintain a native whitespace/casing list.
+
+The generator preserves each seed/reference boundary: Foundation's split/cut
+helpers return Rust `Option`, while the AOT prelude borrows `str` inputs and
+returns Jet's `Outcome`. Run `--check` to check all generated assets for exact
+byte identity; regenerating Unicode tables must not migrate either ABI.
+
+`String.equal` borrows both operands and uses the same native UTF-8 byte
+comparison as `==`; it does not normalize or clone either string.
 
 | Function | Returns | Description |
 | --- | --- | --- |

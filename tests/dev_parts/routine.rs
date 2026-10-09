@@ -6047,8 +6047,8 @@ fn schedule_every_dev_loop_consumer() {
     fs::write(&dispatch_file, &dispatch_src).unwrap();
     let mut dispatch_bundle = jet::Loader::load_entry(dispatch_file.to_str().unwrap())
         .unwrap_or_else(|diags| panic!("dispatch fixture failed to load: {diags:?}"));
-    let dispatch_diags =
-        jet::Sema::check_bundle(&mut dispatch_bundle, jet::Sema::CompileMode::Run);
+    let (dispatch_diags, _facts, dispatch_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut dispatch_bundle, jet::Sema::CompileMode::Run);
     assert!(
         dispatch_diags
             .iter()
@@ -6059,6 +6059,7 @@ fn schedule_every_dev_loop_consumer() {
     let policy = common::development_policy();
     match common::run_interpreter_named_job(
         &dispatch_bundle,
+        &dispatch_nominals,
         dispatch_file.to_str().unwrap(),
         "prune_sessions",
         false,

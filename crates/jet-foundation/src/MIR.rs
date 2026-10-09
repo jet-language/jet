@@ -3564,6 +3564,8 @@ pub enum MirScopeKind {
     Impure,
     Reactive,
     Shield,
+    /// Compiler-owned cleanup of an already delivered stop; not a user Shield.
+    StopCleanup,
     Region,
     Policy,
     TaskGroup,
@@ -3622,6 +3624,49 @@ pub struct MirCaptureParam {
 pub enum MirCaptureOperand {
     Value(MirValueId),
     Place(MirPlaceId),
+}
+
+/// Native roots borrow the storage cell, not the source-owned value.
+/// Each permission names its checked MIR operation rather than a host selector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirRetainedRootCellAction {
+    Read,
+    Write,
+    Move,
+    Initialize,
+    Replace,
+    Cleanup,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirRetainedRootCellGrant {
+    pub function: MirFunctionId,
+    pub operation: MirOpId,
+    pub place: MirPlaceId,
+    pub action: MirRetainedRootCellAction,
+}
+
+#[derive(Debug, Clone)]
+pub struct MirRetainedRootLivePlace {
+    pub place: MirPlaceId,
+    pub live: MirPlaceId,
+    pub value_type: MirType,
+    pub drop_kind: MirDropKind,
+}
+
+#[derive(Debug, Clone)]
+pub struct MirRetainedRootCellBinding {
+    /// The checked SymbolID key, not the binding's spelling.
+    pub declaration: String,
+    pub ty: MirType,
+    pub place: MirPlaceId,
+    pub capture_value: MirValueId,
+    pub capture_slot: usize,
+    pub access: MirAccess,
+    pub ownership: MirOwnership,
+    pub live_places: Vec<MirRetainedRootLivePlace>,
+    pub grants: Vec<MirRetainedRootCellGrant>,
+    pub cleanup_identity: String,
 }
 
 
@@ -5231,6 +5276,10 @@ impl MirSemanticOp {
 
 impl MirSemanticOp {
     pub fn prelude_calls(&self) -> Vec<MirPreludeCallId> {
+        self.prelude_call_slots().into_iter().flatten().collect()
+    }
+
+    fn prelude_call_slots(&self) -> [Option<MirPreludeCallId>; 2] {
         match self {
             Self::Print { call, .. }
             | Self::AmbientInput { call, .. }
@@ -5260,20 +5309,18 @@ impl MirSemanticOp {
             | Self::Select { call, .. }
             | Self::HostCall { call, .. }
             | Self::TextPatternMatch { call, .. }
-            | Self::BinaryPatternMatch { call, .. } => vec![*call],
+            | Self::BinaryPatternMatch { call, .. } => [Some(*call), None],
             Self::CarrierFact { call, .. }
             | Self::GcEdit { call, .. }
             | Self::TypedTextInterp { call, .. }
-            | Self::CCallback { call, .. } => vec![*call],
+            | Self::CCallback { call, .. } => [Some(*call), None],
             Self::CellGuardProject {
                 map_call,
                 split_call,
                 ..
-            } => std::iter::once(*map_call)
-                .chain(split_call.iter().copied())
-                .collect(),
-            Self::SharedGuardSplit { call, map_call, .. } => vec![*call, *map_call],
-            _ => Vec::new(),
+            } => [Some(*map_call), *split_call],
+            Self::SharedGuardSplit { call, map_call, .. } => [Some(*call), Some(*map_call)],
+            _ => [None, None],
         }
     }
 
@@ -6825,6 +6872,16 @@ pub struct MirSwitchArm {
     pub span: Span,
 }
 
+/// Stop points of the unified execution host (#4720; design doc "Stop
+/// points"). `Check` delivers a pending session interrupt where every live
+/// value is initialized; `Propagate` directly follows a can-stop operation and
+/// reads only a stop that operation already delivered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirPollKind {
+    Check,
+    Propagate,
+}
+
 #[derive(Debug, Clone)]
 pub enum MirTerminator {
     Jump { target: MirBlockId },
@@ -6838,6 +6895,10 @@ pub enum MirTerminator {
     Break { target: MirBlockId, value: Option<MirValueId> },
     Continue { target: MirBlockId },
     Unreachable { reason: String },
+    /// `resume` continues; `stop` runs canonical cleanup and ends in `Stopped`.
+    Poll { kind: MirPollKind, resume: MirBlockId, stop: MirBlockId },
+    /// Leaves the function with the stop still delivered and no result written.
+    Stopped,
 }
 
 impl MirTerminator {
@@ -6845,6 +6906,7 @@ impl MirTerminator {
         match self {
             Self::Jump { target } | Self::Continue { target } => vec![*target],
             Self::Yield { resume, cancel, .. } => vec![*resume, *cancel],
+            Self::Poll { resume, stop, .. } => vec![*resume, *stop],
             Self::Branch { then_target, else_target, .. } => vec![*then_target, *else_target],
             Self::Switch { arms, otherwise, .. } => arms
                 .iter()
@@ -6852,7 +6914,7 @@ impl MirTerminator {
                 .chain(std::iter::once(*otherwise))
                 .collect(),
             Self::Break { target, .. } => vec![*target],
-            Self::Return { .. } | Self::Unreachable { .. } => Vec::new(),
+            Self::Return { .. } | Self::Unreachable { .. } | Self::Stopped => Vec::new(),
         }
     }
 
@@ -6866,7 +6928,11 @@ impl MirTerminator {
                 value.iter().copied().collect()
             }
             Self::Yield { value, .. } => vec![*value],
-            Self::Jump { .. } | Self::Continue { .. } | Self::Unreachable { .. } => Vec::new(),
+            Self::Jump { .. }
+            | Self::Continue { .. }
+            | Self::Unreachable { .. }
+            | Self::Poll { .. }
+            | Self::Stopped => Vec::new(),
         }
     }
 }
@@ -7350,6 +7416,8 @@ fn canonical_terminator(terminator: &MirTerminator) -> &'static str {
         MirTerminator::Break { .. } => "Break",
         MirTerminator::Continue { .. } => "Continue",
         MirTerminator::Unreachable { .. } => "Unreachable",
+        MirTerminator::Poll { .. } => "Poll",
+        MirTerminator::Stopped => "Stopped",
     }
 }
 
@@ -7949,7 +8017,7 @@ impl MirProgram {
             validate_mir_type(&field.field.ty, &type_ids)?;
         }
 
-        let mut prelude_ids = HashSet::new();
+        let mut prelude_ids = HashMap::new();
         for call in &self.prelude_calls {
             validate_call_fallibility(&call.fallibility, &type_ids)?;
             if call.id.0 == 0 {
@@ -7958,7 +8026,7 @@ impl MirProgram {
                     span: None,
                 });
             }
-            if !prelude_ids.insert(call.id) {
+            if prelude_ids.insert(call.id, call).is_some() {
                 return Err(MirValidationError::DuplicateId {
                     kind: "Prelude call",
                     id: call.id.0,
@@ -8389,7 +8457,7 @@ fn validate_function(
     function_ids: &HashSet<MirFunctionId>,
     function_rows: &HashMap<MirFunctionId, &MirFunction>,
     core_ids: &HashSet<MirCoreCallId>,
-    prelude_ids: &HashSet<MirPreludeCallId>,
+    prelude_ids: &HashMap<MirPreludeCallId, &MirPreludeCall>,
     callback_ids: &HashSet<MirCallbackId>,
     foreign_ids: &HashSet<MirForeignId>,
     type_ids: &HashSet<MirTypeId>,
@@ -8456,7 +8524,7 @@ fn validate_function(
                     ..
                 } => {
                     for call in std::iter::once(call).chain(write_call.iter()) {
-                        if !prelude_ids.contains(call) {
+                        if !prelude_ids.contains_key(call) {
                             return Err(MirValidationError::MissingPreludeCall {
                                 function: function.id,
                                 call: *call,
@@ -8670,7 +8738,7 @@ fn validate_function(
                 }
             }
             for call in operation_prelude_calls(&instruction.operation) {
-                if !prelude_ids.contains(&call) {
+                if !prelude_ids.contains_key(&call) {
                     return Err(MirValidationError::MissingPreludeCall {
                         function: function.id,
                         call,
@@ -8807,6 +8875,359 @@ fn validate_function(
         if let MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) = drop.edge {
             if !blocks.contains_key(&target) {
                 return Err(MirValidationError::InvalidDropEdge { function: function.id, block: target });
+            }
+        }
+    }
+    validate_stop_points(function, &blocks, &declared_values, &place_rows, &dominators, prelude_ids)
+}
+
+/// Rust MIR stores the checked numeric policy in dispatch, not a separate
+/// overflow field. TIR routes::binary_route selects a Panic Prelude route
+/// for checked arithmetic and Primitive for proven-total arithmetic.
+pub fn mir_binary_can_trap(
+    dispatch: &MirBinaryDispatch,
+    mut effect: impl FnMut(MirPreludeCallId) -> Option<Effect>,
+) -> bool {
+    match dispatch {
+        MirBinaryDispatch::Primitive => false,
+        MirBinaryDispatch::Prelude { call, .. } => effect(*call) == Some(Effect::Panic),
+    }
+}
+
+/// Fact selectors shared by the producer, verifier, and native consumer.
+/// Registering a place or a liveness flag does not evaluate its projections.
+pub fn mir_operation_stop_operand(operation: &MirOperation) -> Option<MirValueId> {
+    match operation {
+        MirOperation::Unary { op: MirUnaryOp::Neg, value } => Some(*value),
+        _ => None,
+    }
+}
+
+pub fn mir_operation_stop_place(operation: &MirOperation) -> Option<MirPlaceId> {
+    match operation {
+        MirOperation::ReadPlace(place) | MirOperation::MovePlace { place }
+            | MirOperation::WritePlace { place, .. } | MirOperation::ReplacePlace { place, .. } => Some(*place),
+        _ => None,
+    }
+}
+
+pub fn mir_fixed_neg_can_trap(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::IntN { bits, .. } => *bits > 0 && *bits <= 64,
+        MirTypeKind::InlineRange { base, .. } | MirTypeKind::Quantity { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. } => mir_fixed_neg_can_trap(base),
+        _ => false,
+    }
+}
+
+/// Whether `operation` can stop (unified host/stop contract, #4720): it runs
+/// user or Core code, invokes a callback, or waits. Mirrors MIR.jet
+/// `mir_operation_can_stop`.
+pub fn mir_operation_can_stop(
+    operation: &MirOperation,
+    operand_type: Option<&MirType>,
+    accessed_place: Option<&MirPlace>,
+    mut effect: impl FnMut(MirPreludeCallId) -> Option<Effect>,
+) -> bool {
+    if let MirOperation::Binary { dispatch, .. } = operation {
+        return mir_binary_can_trap(dispatch, effect);
+    }
+    if mir_operation_stop_operand(operation).is_some() && operand_type.is_some_and(mir_fixed_neg_can_trap) {
+        return true;
+    }
+    if mir_operation_stop_place(operation).is_some() {
+        let writing = matches!(operation, MirOperation::WritePlace { .. } | MirOperation::ReplacePlace { .. });
+        if accessed_place.is_some_and(|place| place.projections.iter().any(|projection| {
+            let MirProjection::Index { call, write_call, .. } = projection else { return false; };
+            effect(*call) == Some(Effect::Panic)
+                || (writing && write_call.is_some_and(|call| effect(call) == Some(Effect::Panic)))
+        })) {
+            return true;
+        }
+    }
+    if operation_prelude_calls(operation).any(|call| effect(call) == Some(Effect::Panic)) {
+        return true;
+    }
+    match operation {
+        MirOperation::Call { .. } | MirOperation::IndirectCall { .. } | MirOperation::CoreCall { .. }
+            | MirOperation::ScopeExit { .. } => true,
+        MirOperation::LoopIterInit { .. } | MirOperation::LoopIterAdvance { .. } => true,
+        MirOperation::Semantic(semantic) => matches!(
+            semantic,
+            MirSemanticOp::ClosureMethod { .. }
+                | MirSemanticOp::CoreClosureCall { .. }
+                | MirSemanticOp::PluginInvoke { .. }
+                | MirSemanticOp::TaskGroup { .. }
+                | MirSemanticOp::Select { .. }
+                | MirSemanticOp::PolicyFunction { .. }
+                | MirSemanticOp::InterruptFunction { .. }
+                | MirSemanticOp::HostCall { .. }
+                | MirSemanticOp::RequireStop { .. }
+        ),
+        _ => false,
+    }
+}
+
+/// User/Core/callback operations may panic through the code they invoke;
+/// ScopeExit by itself only forwards an already-delivered stop.
+pub fn mir_operation_can_panic(
+    operation: &MirOperation,
+    operand_type: Option<&MirType>,
+    accessed_place: Option<&MirPlace>,
+    effect: impl FnMut(MirPreludeCallId) -> Option<Effect>,
+) -> bool {
+    !matches!(operation, MirOperation::ScopeExit { .. })
+        && mir_operation_can_stop(operation, operand_type, accessed_place, effect)
+}
+
+/// Stop points (mirrors JetOptimizer Legality.jet mir_pass_validate_stop_points).
+/// A Propagate poll directly follows a can-stop operation, and every read,
+/// projection or drop of that operation's result (phi inputs by their incoming
+/// edge) is dominated by the resume edge. A function that ends in Stopped has
+/// closed every Shield scope it opened on each path to it.
+fn validate_stop_points(
+    function: &MirFunction,
+    blocks: &HashMap<MirBlockId, usize>,
+    value_types: &HashMap<MirValueId, &MirType>,
+    place_rows: &HashMap<MirPlaceId, &MirPlace>,
+    dominators: &MirDominators,
+    prelude_rows: &HashMap<MirPreludeCallId, &MirPreludeCall>,
+) -> Result<(), MirValidationError> {
+    let invalid = |message: &str| MirValidationError::InvalidOperation { function: function.id, message: message.to_string() };
+    let mut stopped = false;
+    for block in &function.blocks {
+        match &block.terminator {
+            MirTerminator::Poll { kind, resume, stop } => {
+                if resume == stop {
+                    return Err(invalid("MIR poll resumes and stops on the same block"));
+                }
+                if *kind == MirPollKind::Propagate {
+                    let Some(last) = block.instructions.last().filter(|last| mir_operation_can_stop(&last.operation,
+                        mir_operation_stop_operand(&last.operation).and_then(|value| value_types.get(&value).copied()),
+                        mir_operation_stop_place(&last.operation).and_then(|place| place_rows.get(&place).copied()),
+                        |call| prelude_rows.get(&call).and_then(|row| row.effect))) else {
+                        return Err(invalid("MIR Propagate poll does not follow a can-stop operation"));
+                    };
+                    if let Some(result) = last.result {
+                        validate_resume_uses(function, place_rows, dominators, result, *resume)?;
+                    }
+                    validate_consumed_stop_uses(function, blocks, &last.operation, *stop)?;
+                }
+            }
+            MirTerminator::Stopped => stopped = true,
+            _ => {}
+        }
+    }
+    if stopped {
+        validate_stop_shields(function, blocks, value_types, place_rows, prelude_rows)?;
+    }
+    validate_stop_cleanup_scopes(function, blocks)?;
+    Ok(())
+}
+
+/// StopCleanup is a typed, LIFO owner on a stop edge, not a cancellation
+/// mask. Every path restores its token before leaving the cleanup graph.
+fn validate_stop_cleanup_scopes(
+    function: &MirFunction,
+    blocks: &HashMap<MirBlockId, usize>,
+) -> Result<(), MirValidationError> {
+    let invalid = |message: &str| MirValidationError::InvalidOperation {
+        function: function.id, message: message.to_string(),
+    };
+    let mut entries: HashMap<MirScopeId, usize> = function.scopes.iter()
+        .filter(|scope| scope.kind == MirScopeKind::StopCleanup)
+        .map(|scope| (scope.id, 0)).collect();
+    if entries.is_empty() { return Ok(()); }
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if let MirOperation::ScopeEnter { scope, test_member } = &instruction.operation {
+                if let Some(count) = entries.get_mut(scope) {
+                    *count += 1;
+                    if *count != 1 || test_member.is_some() {
+                        return Err(invalid("MIR StopCleanup must have one compiler-owned entry"));
+                    }
+                }
+            }
+        }
+    }
+    if entries.values().any(|count| *count != 1) {
+        return Err(invalid("MIR StopCleanup must have one compiler-owned entry"));
+    }
+    let mut state_at = HashMap::from([(function.entry, (false, Vec::<MirScopeId>::new()))]);
+    let mut pending = vec![function.entry];
+    while let Some(id) = pending.pop() {
+        let Some(&index) = blocks.get(&id) else { continue };
+        let block = &function.blocks[index];
+        let (unwinding, mut scopes) = state_at[&id].clone();
+        for instruction in &block.instructions {
+            match &instruction.operation {
+                MirOperation::ScopeEnter { scope, .. } if entries.contains_key(scope) => {
+                    if !unwinding {
+                        return Err(invalid("MIR StopCleanup appears outside a stop edge"));
+                    }
+                    scopes.push(*scope);
+                }
+                MirOperation::ScopeExit { scope } if entries.contains_key(scope) => {
+                    if scopes.pop() != Some(*scope) {
+                        return Err(invalid("MIR StopCleanup leave does not match its active token"));
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !scopes.is_empty() {
+            match block.terminator {
+                MirTerminator::Poll { .. } =>
+                    return Err(invalid("MIR StopCleanup recursively polls")),
+                MirTerminator::Stopped | MirTerminator::Return { .. } | MirTerminator::Yield { .. } =>
+                    return Err(invalid("MIR exit leaves a StopCleanup token open")),
+                _ => {}
+            }
+        }
+        for target in block.terminator.targets() {
+            let stopped = unwinding || matches!(&block.terminator,
+                MirTerminator::Poll { stop, .. } if *stop == target);
+            match state_at.get(&target) {
+                Some((old_stopped, old_scopes)) if *old_stopped != stopped || old_scopes != &scopes =>
+                    return Err(invalid("MIR StopCleanup state differs between paths into a block")),
+                Some(_) => {}
+                None => {
+                    state_at.insert(target, (stopped, scopes.clone()));
+                    pending.push(target);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A consuming call has already taken its arguments when it delivers a stop.
+/// Replaying that cleanup on the stop edge would close the same owner twice.
+fn validate_consumed_stop_uses(
+    function: &MirFunction,
+    blocks: &HashMap<MirBlockId, usize>,
+    operation: &MirOperation,
+    stop: MirBlockId,
+) -> Result<(), MirValidationError> {
+    let args = match operation {
+        MirOperation::Call { args, .. } | MirOperation::IndirectCall { args, .. }
+        | MirOperation::CoreCall { args, .. } => args.as_slice(),
+        _ => &[],
+    };
+    let thunk = match operation {
+        MirOperation::IndirectCall { callee, .. } => Some(*callee),
+        _ => None,
+    };
+    if thunk.is_none() && !args.iter().any(|arg| arg.access == MirAccess::Move) {
+        return Ok(());
+    }
+    let mut pending = vec![stop];
+    let mut seen = HashSet::new();
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) { continue; }
+        let Some(&index) = blocks.get(&id) else { continue };
+        let block = &function.blocks[index];
+        for instruction in &block.instructions {
+            let reused_thunk = matches!(&instruction.operation,
+                MirOperation::IndirectCall { callee, .. } if Some(*callee) == thunk);
+            if reused_thunk || args.iter().filter(|arg| arg.access == MirAccess::Move)
+                .any(|arg| instruction.operation.value_uses().contains(&arg.value)) {
+                return Err(MirValidationError::InvalidOperation {
+                    function: function.id,
+                    message: "MIR stop edge reuses an already-consumed cleanup input".to_string(),
+                });
+            }
+        }
+        pending.extend(block.terminator.targets());
+    }
+    Ok(())
+}
+
+fn validate_resume_uses(
+    function: &MirFunction,
+    place_rows: &HashMap<MirPlaceId, &MirPlace>,
+    dominators: &MirDominators,
+    result: MirValueId,
+    resume: MirBlockId,
+) -> Result<(), MirValidationError> {
+    let invalid = |message: &str| MirValidationError::InvalidOperation { function: function.id, message: message.to_string() };
+    for block in &function.blocks {
+        let resumed = dominators.dominates(resume, block.id);
+        for instruction in &block.instructions {
+            if let MirOperation::Phi { incoming } = &instruction.operation {
+                if incoming.iter().any(|(predecessor, value)| *value == result && !dominators.dominates(resume, *predecessor)) {
+                    return Err(invalid("MIR phi reads a can-stop result on an edge its resume edge does not dominate"));
+                }
+                continue;
+            }
+            if resumed {
+                continue;
+            }
+            if instruction.operation.value_uses().contains(&result) {
+                return Err(invalid("MIR reads or drops a can-stop result outside its resume edge"));
+            }
+            let projected = operation_places(&instruction.operation)
+                .into_iter()
+                .filter_map(|place| place_rows.get(&place))
+                .any(|place| place_value_uses(place).any(|value| value == result));
+            if projected {
+                return Err(invalid("MIR place projection reads a can-stop result outside its resume edge"));
+            }
+        }
+        if !resumed && block.terminator.value_uses().contains(&result) {
+            return Err(invalid("MIR terminator reads a can-stop result outside its resume edge"));
+        }
+    }
+    Ok(())
+}
+
+/// Cancellation masks contain only propagation for Panic-capable operations.
+/// All paths agree on depth; stopped exits close every mask.
+fn validate_stop_shields(function: &MirFunction, blocks: &HashMap<MirBlockId, usize>, value_types: &HashMap<MirValueId, &MirType>, place_rows: &HashMap<MirPlaceId, &MirPlace>, prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>) -> Result<(), MirValidationError> {
+    let invalid = |message: &str| MirValidationError::InvalidOperation { function: function.id, message: message.to_string() };
+    let shields: HashSet<MirScopeId> =
+        function.scopes.iter().filter(|scope| matches!(scope.kind, MirScopeKind::Shield | MirScopeKind::Transaction)).map(|scope| scope.id).collect();
+    if shields.is_empty() {
+        return Ok(());
+    }
+    let mut depth_at = HashMap::from([(function.entry, 0i64)]);
+    let mut pending = vec![function.entry];
+    while let Some(id) = pending.pop() {
+        let Some(&index) = blocks.get(&id) else { continue };
+        let block = &function.blocks[index];
+        let mut depth = depth_at[&id];
+        for instruction in &block.instructions {
+            match &instruction.operation {
+                MirOperation::ScopeEnter { scope, .. } if shields.contains(scope) => depth += 1,
+                MirOperation::ScopeExit { scope } if shields.contains(scope) => depth -= 1,
+                _ => {}
+            }
+        }
+        if depth > 0 {
+            if let MirTerminator::Poll { kind, .. } = &block.terminator {
+                if *kind == MirPollKind::Check {
+                    return Err(invalid("MIR cancellation check appears inside a cancellation mask"));
+                }
+                if !block.instructions.last().is_some_and(|last|
+                    mir_operation_can_panic(&last.operation,
+                        mir_operation_stop_operand(&last.operation).and_then(|value| value_types.get(&value).copied()),
+                        mir_operation_stop_place(&last.operation).and_then(|place| place_rows.get(&place).copied()),
+                        |call| prelude_calls.get(&call).and_then(|row| row.effect))) {
+                    return Err(invalid("MIR masked propagation does not follow a Panic-capable operation"));
+                }
+            }
+        }
+        if matches!(block.terminator, MirTerminator::Stopped) && depth != 0 {
+            return Err(invalid("MIR Stopped leaves a Shield scope open"));
+        }
+        for target in block.terminator.targets() {
+            match depth_at.get(&target) {
+                Some(&seen) if seen != depth => return Err(invalid("MIR Shield depth differs between paths into a block")),
+                Some(_) => {}
+                None => {
+                    depth_at.insert(target, depth);
+                    pending.push(target);
+                }
             }
         }
     }
@@ -9063,8 +9484,8 @@ fn operation_core_calls(operation: &MirOperation) -> Vec<MirCoreCallId> {
         _ => Vec::new(),
     }
 }
-fn operation_prelude_calls(operation: &MirOperation) -> Vec<MirPreludeCallId> {
-    match operation {
+fn operation_prelude_calls(operation: &MirOperation) -> impl Iterator<Item = MirPreludeCallId> {
+    let slots = match operation {
         MirOperation::Call {
             callee: MirCallee::Prelude(route),
             ..
@@ -9082,18 +9503,19 @@ fn operation_prelude_calls(operation: &MirOperation) -> Vec<MirPreludeCallId> {
         | MirOperation::LoopIterHasNext { call: route, .. }
         | MirOperation::LoopIterValue { call: route, .. }
         | MirOperation::LoopIterAdvance { call: route, .. }
-        => vec![*route],
+        => [Some(*route), None],
         MirOperation::Convert {
             conversion: MirConversion::Prelude { call, .. },
             ..
-        } => vec![*call],
+        } => [Some(*call), None],
         MirOperation::Binary {
             dispatch: MirBinaryDispatch::Prelude { call, .. },
             ..
-        } => vec![*call],
-        MirOperation::Semantic(operation) => operation.prelude_calls(),
-        _ => Vec::new(),
-    }
+        } => [Some(*call), None],
+        MirOperation::Semantic(operation) => operation.prelude_call_slots(),
+        _ => [None, None],
+    };
+    slots.into_iter().flatten()
 }
 
 fn operation_types(operation: &MirOperation) -> Vec<MirTypeId> {

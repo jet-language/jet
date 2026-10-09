@@ -7,7 +7,7 @@ use std::fs;
 use std::process::Command;
 
 fn check_facts(entry: &str) -> jet::Sema::SemIndexEffectFacts {
-    let (diags, _, facts) = jet::Driver::check_file_with_effect_facts(entry, None, false);
+    let (diags, _, facts, _checked_nominals) = jet::Driver::check_file_with_effect_facts(entry, None, false);
     assert!(
         !diags
             .iter()

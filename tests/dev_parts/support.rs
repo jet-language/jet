@@ -22,13 +22,17 @@ use common::{add_generated_rust, have_rustc, panic_message, test_worker_count};
 use jet::Interpreter::RunOutcome;
 use jet::JitBackend::JitBackend;
 
-fn emit_native_aot(bundle: &jet::AST::ProgramBundle, ffi: Option<&jet::AST::FfiLink>) -> String {
+fn emit_native_aot(
+    bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
+    ffi: Option<&jet::AST::FfiLink>,
+) -> String {
     let request = jet_foundation::MIR::MirArtifactRequest::new(
         jet_foundation::MIR::MirArtifactTarget::RustAot,
         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
         jet_foundation::MIR::MirArtifactBuildMode::Dev,
     );
-    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, checked_nominals, request)
         .expect("checked native artifact lowers through MIR");
     mir.validate()
         .expect("canonical MIR validates in dev support");
@@ -650,11 +654,12 @@ fn build_oracle_binary_from_bundle(
     stem: &str,
     file: &str,
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
 ) -> Result<std::path::PathBuf, OracleBuildFailure> {
     common::assert_test_environment_is_safe();
     common::assert_test_path_on_disk(dir, "AOT scratch");
     let ffi = jet::FFI::prepare(bundle).map_err(OracleBuildFailure::FrontEnd)?;
-    let rust = emit_native_aot(bundle, ffi.as_ref());
+    let rust = emit_native_aot(bundle, checked_nominals, ffi.as_ref());
     let clinks =
         jet::resolve_c_links_for_bundle(bundle, None).map_err(OracleBuildFailure::CLinks)?;
     build_oracle_binary_from_parts(dir, tag, i, stem, file, rust, ffi, clinks)
@@ -774,9 +779,10 @@ fn compiled_binary_output_from_bundle(
     stem: &str,
     file: &str,
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
 ) -> ProgramOutput {
     let dir = aot_scratch_dir(tag, stem);
-    let bin = build_oracle_binary_from_bundle(&dir, tag, i, stem, file, bundle)
+    let bin = build_oracle_binary_from_bundle(&dir, tag, i, stem, file, bundle, checked_nominals)
         .unwrap_or_else(|failure| panic!("{}", failure.describe(stem, file)));
     let run = command_output_with_timeout(
         Command::new(&bin),
@@ -1660,8 +1666,9 @@ fn run_child_stem_battery(
 
 fn check_job_runner_interpreter(root: &PathBuf, file: &str) {
     let mut bundle = jet::Loader::load_entry(file).expect("job_runner loads");
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
+    let (diagnostics, _facts, nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics.into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "job_runner front end: {errors:?}");
@@ -1674,7 +1681,7 @@ fn check_job_runner_interpreter(root: &PathBuf, file: &str) {
         )))
         .unwrap_or_else(|_| panic!("missing expected/devloop/{expected_name}.out"));
         let policy = common::development_policy();
-        match common::run_interpreter_named_job(&bundle, file, job, false, &policy) {
+        match common::run_interpreter_named_job(&bundle, &nominals, file, job, false, &policy) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(
                 stdout, expected,
                 "interpreter job `{job}` differs from golden"
@@ -1882,7 +1889,8 @@ fn assert_tier_parity(file: &str, stem: &str) {
                 .join("; ")
         )
     });
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, _facts, nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -1904,6 +1912,7 @@ fn assert_tier_parity(file: &str, stem: &str) {
             common::run_interpreter_bundle(
                 &mut backend,
                 &bundle,
+                &nominals,
                 false,
                 &common::development_policy(),
             )
@@ -1954,6 +1963,7 @@ fn assert_tier_parity(file: &str, stem: &str) {
                 stem,
                 file,
                 &bundle,
+                &nominals,
             )
         } else {
             compiled_binary_output(&dir, "jit_3way", next_oracle_index(), stem, file)
@@ -2633,15 +2643,19 @@ fn bundle_of(src: &str, tag: &str) -> jet::AST::ProgramBundle {
 const STRUCT_OLD: &str = "struct P {\n    x: Int\n}\nfn f(p: P) -> Int {\n    return p.x\n}\nfn run() {\n    print(f(P{x: 1}))\n}\n";
 
 fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
-    fn load_checked(path: &std::path::Path) -> jet::AST::ProgramBundle {
+    fn load_checked(path: &std::path::Path) -> (
+        jet::AST::ProgramBundle,
+        std::sync::Arc<[std::sync::Arc<jet::AST::MirFragmentNominalFacts>]>,
+    ) {
         let mut b = jet::Loader::load_entry(path.to_str().unwrap()).expect("bundle should load");
-        let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+        let (diags, _facts, nominals) =
+            jet::Sema::check_bundle_with_effect_facts(&mut b, jet::Sema::CompileMode::Run);
         let errors: Vec<_> = diags
             .into_iter()
             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
             .collect();
         assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
-        b
+        (b, nominals)
     }
 
     // Same on-disk path across reloads — matches `jet dev` editing one file
@@ -2654,11 +2668,11 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
     jet_foundation::Persist::shared_clear();
 
     write("#Persist counter := 0\nfn run() {\n    counter += 1\n    print(counter)\n}\n");
-    let v1 = load_checked(&path);
+    let (v1, v1_nominals) = load_checked(&path);
     write("#Persist counter := 99\nfn run() {\n    counter += 1\n    print(counter)\n}\n");
-    let v2 = load_checked(&path);
+    let (v2, v2_nominals) = load_checked(&path);
     write("#Persist counter := true\nfn run() {\n    print(counter)\n}\n");
-    let v3 = load_checked(&path);
+    let (v3, v3_nominals) = load_checked(&path);
 
     // Interpreter tier (always available): value must survive compatible reload.
     {
@@ -2667,7 +2681,7 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
         let policy = common::development_policy();
         let mut backend =
             InterpreterBackend::new(jet::Interpreter::InterpreterInvocation::DevInterpret);
-        let out1 = match common::run_interpreter_bundle(&mut backend, &v1, false, &policy) {
+        let out1 = match common::run_interpreter_bundle(&mut backend, &v1, &v1_nominals, false, &policy) {
             RunOutcome::Ran { stdout, .. } => stdout,
             RunOutcome::Problems(ds) => panic!("interp run failed: {ds:?}"),
         };
@@ -2677,6 +2691,7 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
             &mut backend,
             "run",
             &v2,
+            &v2_nominals,
             false,
             &policy,
         ) {
@@ -2693,6 +2708,7 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
             &mut backend,
             "run",
             &v3,
+            &v3_nominals,
             false,
             &policy,
         ) {
@@ -2705,7 +2721,7 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
             "incompatible shape must reinitialize from the new Bool initializer"
         );
 
-        let out4 = match common::restart_interpreter_bundle(&mut backend, &v2, false, &policy) {
+        let out4 = match common::restart_interpreter_bundle(&mut backend, &v2, &v2_nominals, false, &policy) {
             RunOutcome::Ran { stdout, .. } => stdout,
             RunOutcome::Problems(ds) => panic!("interp restart failed: {ds:?}"),
         };

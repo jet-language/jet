@@ -7,6 +7,12 @@
 // run-front-feed.mjs OUT --baseline results.tsv --rust-mir DIR --assemble
 // run-front-feed.mjs OUT --baseline results.tsv --rust-mir DIR --probe BINARY
 // run-front-feed.mjs OUT --baseline results.tsv --bootstrap JETC0
+// run-front-feed.mjs OUT --cleanup-stop --assemble|--probe BINARY
+// --cleanup-stop compiles the shared cleanup fixture through the ordinary
+// production frontend and checks its stop subgraph and Legality mutation.
+// --stop-predicate consumes the shared op table. --probe additionally requires
+// --rust-predicate-results from the Rust shared_stop_predicate_table test
+// (JET_STOP_PREDICATE_RESULTS=PATH), and compares every input/result byte.
 // --assemble writes probe/unit.jet; build it with the reference compiler at
 // --release, then run --probe with JET_RUNTIME_PACK pointing to the SAME pack
 // used for the baseline. Preparation/census never claims differential success.
@@ -25,14 +31,15 @@ const argv = process.argv.slice(2);
 const output = argv.shift();
 if (!output) throw new Error('expected OUT --baseline results.tsv [--rust-mir DIR|--rust-jet BINARY] --assemble|--probe BINARY|--bootstrap JETC0');
 const options = {};
-while (argv.length) { const flag = argv.shift(); if (flag === '--assemble') options.assemble = true; else if (['--baseline', '--rust-mir', '--rust-jet', '--probe', '--bootstrap'].includes(flag)) options[flag.slice(2)] = argv.shift(); else throw new Error(`unknown option ${flag}`); }
-if (!options.baseline || [options.assemble, options.probe, options.bootstrap].filter(Boolean).length !== 1) throw new Error('require baseline and exactly one of assemble, probe, bootstrap');
+while (argv.length) { const flag = argv.shift(); if (flag === '--assemble') options.assemble = true; else if (flag === '--cleanup-stop') options.cleanupStop = true; else if (flag === '--stop-predicate') options.stopPredicate = true; else if (['--baseline', '--rust-mir', '--rust-jet', '--probe', '--bootstrap', '--rust-predicate-results'].includes(flag)) options[flag.slice(2)] = argv.shift(); else throw new Error(`unknown option ${flag}`); }
+const focused = options.cleanupStop || options.stopPredicate;
+if ((!options.baseline && !focused) || [options.assemble, options.probe, options.bootstrap].filter(Boolean).length !== 1 || (focused && options.bootstrap) || (options.cleanupStop && options.stopPredicate)) throw new Error('require baseline (or one focused witness) and exactly one of assemble, probe, bootstrap');
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
 const entries = new Map(collectGoldenEntries(join(repo, 'Examples/features')).map(e => [e.stem, e]));
-const baselineText = readFileSync(options.baseline, 'utf8');
+const baselineText = options.baseline ? readFileSync(options.baseline, 'utf8') : '';
 const passing = baselineText.split('\n').filter(Boolean).map(row => row.split('\t')).filter(row => row[1] === 'pass').map(row => row[0]);
-if (!passing.length || new Set(passing).size !== passing.length) throw new Error('baseline must name nonempty, unique native passes');
+if ((!passing.length && !focused) || new Set(passing).size !== passing.length) throw new Error('baseline must name nonempty, unique native passes');
 const schema = loadMirSchema(repo);
 const stdinTable = loadExampleStdin();
 const gaps = new Map();
@@ -54,7 +61,7 @@ const cases = passing.map(stem => {
   const prefix = join(out, 'feeds', slug); mkdirSync(dirname(prefix), { recursive: true });
   return { stem, slug, entry, work, file, root, prefix, expected: readFileSync(join(repo, 'Examples/features/expected', `${stem}.out`)), stdin: stdinTable.get(stem) ?? '' };
 });
-writeFileSync(join(out, 'manifest.json'), JSON.stringify({ baseline: resolve(options.baseline), baseline_sha256: createHash('sha256').update(baselineText).digest('hex'), cases: cases.map(c => ({ stem: c.stem, file: c.file, prefix: c.prefix })) }, null, 2) + '\n');
+writeFileSync(join(out, 'manifest.json'), JSON.stringify({ baseline: options.baseline ? resolve(options.baseline) : null, focused_cleanup_stop: !!options.cleanupStop, focused_stop_predicate: !!options.stopPredicate, baseline_sha256: createHash('sha256').update(baselineText).digest('hex'), cases: cases.map(c => ({ stem: c.stem, file: c.file, prefix: c.prefix })) }, null, 2) + '\n');
 const results = [];
 function save(mode) {
   const ranked = [...gaps.values()].sort((a, b) => b.cases.size - a.cases.size || a.category.localeCompare(b.category) || a.key.localeCompare(b.key)).map((row, i) => ({ rank: i + 1, category: row.category, key: row.key, affected: row.cases.size, cases: [...row.cases].sort(), samples: row.samples }));
@@ -94,7 +101,7 @@ if (options.bootstrap) {
   }
   process.exitCode = results.some(r => r.verdict === 'front-error') ? 1 : 0;
 } else {
-  if (!options['rust-mir'] && !options['rust-jet']) throw new Error('differential requires --rust-mir or --rust-jet');
+  if (!focused && !options['rust-mir'] && !options['rust-jet']) throw new Error('differential requires --rust-mir or --rust-jet');
   for (const c of cases) {
     const dump = options['rust-jet'] ? `${c.prefix}.rust.mir` : join(resolve(options['rust-mir']), `${c.slug}.mir`);
     if (options['rust-jet']) {
@@ -133,6 +140,55 @@ if (options.bootstrap) {
   writeFileSync(join(probeDir, 'unit.jet'), sources.join('\n\n'));
   writeFileSync(join(probeDir, 'package.jet'), 'name: "native_front_feed"\nversion: "0.0.1"\nedition: "2028"\n');
   writeFileSync(join(probeDir, 'front-cases.txt'), cases.map(c => `${c.file}\t${c.prefix}`).join('\n') + '\n');
+  if (options.stopPredicate) {
+    const fixture = join(repo, 'tests/fixtures/mir_stop_predicate.tsv');
+    const table = readFileSync(fixture);
+    const rows = table.toString('utf8').trimEnd().split('\n').map(row => row.split('\t'));
+    if (!rows.length || rows.some(row => row.length !== 8) || new Set(rows.map(row => row[0])).size !== rows.length) throw new Error('shared predicate table must contain unique eight-column rows');
+    writeFileSync(join(probeDir, 'front-stop-predicate.tsv'), table);
+    const resultPath = join(probeDir, 'front-stop-predicate-results.tsv');
+    rmSync(resultPath, { force: true });
+    const receipt = { mode: 'shared-stop-predicate-parity', source: fixture, table_sha256: createHash('sha256').update(table).digest('hex'), rows: rows.length, verified: false };
+    if (options.probe) {
+      if (!options['rust-predicate-results']) throw new Error('predicate parity requires exercised --rust-predicate-results');
+      const rustPath = resolve(options['rust-predicate-results']);
+      const rust = readFileSync(rustPath);
+      if (!rust.equals(table)) throw new Error('Rust predicate results do not cover the exact shared input/result table');
+      receipt.rust_results = rustPath;
+      receipt.rust_sha256 = createHash('sha256').update(rust).digest('hex');
+      receipt.probe_sha256 = createHash('sha256').update(readFileSync(resolve(options.probe))).digest('hex');
+      const probe = spawnSync(resolve(options.probe), [], { cwd: probeDir, env: process.env, timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), encoding: 'utf8', maxBuffer: 1 << 27 });
+      writeFileSync(join(out, 'stop-predicate.log'), `${probe.stdout ?? ''}${probe.stderr ?? ''}`);
+      receipt.status = probe.status; receipt.signal = probe.signal;
+      const jet = existsSync(resultPath) ? readFileSync(resultPath) : null;
+      receipt.verified = probe.status === 0 && jet !== null && jet.equals(rust) && probe.stdout?.includes(`stop predicate: ${rows.length} shared rows verified`);
+      if (jet) receipt.jet_sha256 = createHash('sha256').update(jet).digest('hex');
+      writeFileSync(join(out, 'stop-predicate-result.json'), JSON.stringify(receipt, null, 2) + '\n');
+      if (!receipt.verified) throw new Error('Rust/Jet stop predicate parity failed; see stop-predicate.log');
+    } else {
+      writeFileSync(join(out, 'stop-predicate-result.json'), JSON.stringify(receipt, null, 2) + '\n');
+    }
+    process.exit(0);
+  }
+  if (options.cleanupStop) {
+    const fixture = join(repo, 'tests/fixtures/mir_cleanup_stop.jet');
+    const file = join(probeDir, 'cleanup-stop.jet');
+    const text = readFileSync(fixture, 'utf8');
+    writeFileSync(file, text);
+    writeFileSync(join(probeDir, 'front-cleanup-stop.txt'), file + '\n');
+    writeFileSync(join(out, 'cleanup-fixture.json'), JSON.stringify({ source: fixture, sha256: createHash('sha256').update(text).digest('hex') }, null, 2) + '\n');
+    if (options.probe) {
+      const version = readFileSync(join(repo, 'Cargo.toml'), 'utf8').match(/^version = "([^"]+)"$/m)?.[1];
+      if (!version) throw new Error('compiler package has no exact version');
+      const identity = createHash('sha256').update(readFileSync(resolve(options.probe))).digest('hex');
+      const probe = spawnSync(resolve(options.probe), [], { cwd: probeDir, env: { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_COMPILER_IDENTITY: `jet@${version}#${identity}` }, timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), encoding: 'utf8', maxBuffer: 1 << 27 });
+      writeFileSync(join(out, 'cleanup-stop.log'), `${probe.stdout ?? ''}${probe.stderr ?? ''}`);
+      const verified = probe.status === 0 && probe.stdout?.includes('normal cleanup: first consumed; remaining once; duplicate rejected');
+      writeFileSync(join(out, 'cleanup-stop-result.json'), JSON.stringify({ mode: 'focused-production-cleanup', status: probe.status, signal: probe.signal, verified }, null, 2) + '\n');
+      if (!verified) throw new Error('focused production cleanup witness failed; see cleanup-stop.log');
+    }
+    process.exit(0);
+  }
   if (options.assemble) { save('prepared'); } else {
     const pack = process.env.JET_RUNTIME_PACK; if (!pack || !existsSync(pack)) throw new Error('probe requires JET_RUNTIME_PACK');
     writeFileSync(join(probeDir, 'runtime-pack.txt'), resolve(pack) + '\n');

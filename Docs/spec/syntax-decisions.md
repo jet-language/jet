@@ -2723,7 +2723,11 @@ positional branches is one parse error (E1117), with no successful lowering.
 `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `task.all` uses the
 same rail: positional form returns its ordered list and named form its
 anonymous tuple/record. A joined child panic becomes `.Panicked(reason)`;
-it does not kill the process. `trace()`, `exception()`, `TaskOutcome`, and
+it does not kill the process. The reason uses the canonical task identity and
+child stop message, not its rendered diagnostic or source-location report;
+wrong-variant getters and
+numeric stops follow this same task-publication boundary. `trace()`,
+`exception()`, `TaskOutcome`, and
 `TaskStatus` are deleted from the task-handle surface. D-SERVICE1 retains
 `TaskOutcome` and `TaskStatus` as typed service-workflow facts; that domain API
 is not `TaskHandle.outcome()` or `TaskHandle.status()` and does not restore
@@ -3757,9 +3761,10 @@ jetpack providers resolved by `<lib>: <lang>@"ref"` — fetched into the
 hangar, vendored + hash-pinned, obeying U29 offline, U21 channels, U28
 no-daemon, U24 provenance, U23 honest fallback; hash-verified on arrival.
 **D-PLUGIN-EXPORT1 (=A, shipped c81)**: a `plugin` target's exported surface
-is the top-level `pub fn` items of its entry file, each with one homogeneous
-`Int`, `Float`, `Bool`, or `Text`
-(E1260) in v1, named by the manifest `export:` field (defaults to the package
+is the top-level `pub fn` items of its entry file; each parameter and the
+result is `Int`, `Float`, `Bool`, `Text`, or a recursively closed `#Codable`
+Component shape, independently per position (E1260; owner ruling 2026-10-09
+superseded the v1 homogeneous-scalar rule), named by the manifest `export:` field (defaults to the package
 name) and frozen via `Sema::ApiFreeze`'s pub-metadata semver snapshot
 (re-grounded off the retired D-CAP4 `api: stable` machinery, which D-MEM1/S2
 deleted — same intent, the still-live mechanism); the `.wit` world is

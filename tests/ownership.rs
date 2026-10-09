@@ -4698,13 +4698,14 @@ fn run() {
     let path = root.join("main.jet");
     fs::write(&path, src).unwrap();
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics.into_iter()
         .filter(|diag| diag.severity == jet::Diagnostics::Severity::Error)
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
 
-    let in_process_report = match common::run_interpreted(&bundle, &common::development_policy()) {
+    let in_process_report = match common::run_interpreted(&bundle, &checked_nominals, &common::development_policy()) {
         RunOutcome::Ran {
             stderr, exit_code, ..
         } => {

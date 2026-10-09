@@ -12,7 +12,7 @@ pub(crate) fn symbol_index(session: &Session) -> jet_semindex::SemanticSymbolInd
     if !src.trim().is_empty() {
         if let Ok(tmp_path) = write_unique_temp_file("docs", &src) {
             let path_str = tmp_path.to_string_lossy().to_string();
-            let (_, bundle, facts) = jet_driver::Driver::check_file_with_effect_facts(
+            let (_, bundle, facts, _) = jet_driver::Driver::check_file_with_effect_facts(
                 &path_str,
                 Some((&tmp_path, &src)),
                 true,

@@ -3322,9 +3322,8 @@ fn jet_eval_host_shape_node(machine: &JetEvalMachine, ty: MIRType, nodes: &[JetE
     node
 }
 
-// The native host entry has no machine, so it indexes the program per query.
-pub fn jet_eval_host_type_shape_from_program(program: &MIRProgram, checked_type: MIRType, span: Span) -> JetEvalHostTypeShape? {
-    rows :: jet_eval_program_rows(program)
+// The native host supplies one shape-only index for all its ABI queries.
+pub fn jet_eval_host_type_shape_from_program(program: &MIRProgram, rows: &JetEvalProgramRows, checked_type: MIRType, span: Span) -> JetEvalHostTypeShape? {
     jet_eval_host_type_shape_from_rows(program, rows, checked_type)
 }
 
@@ -9948,7 +9947,7 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
                 jet_eval_compiler_fail(&machine, span, "MIR scope enter references an unavailable scope")
                 return None
             }
-            if test_member != None || scope_row.deadline != None || scope_row.kind == MIRScopeKind.Shield {
+            if test_member != None || scope_row.deadline != None || scope_row.kind == MIRScopeKind.Shield || scope_row.kind == MIRScopeKind.StopCleanup {
                 jet_eval_unsupported(&machine, span, "MIR scope control requires runtime scheduler or test state")
                 return None
             }
@@ -9967,7 +9966,7 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
                 jet_eval_compiler_fail(&machine, span, "MIR scope exit references an unavailable scope")
                 return None
             }
-            if scope_row.deadline != None || scope_row.kind == MIRScopeKind.Shield {
+            if scope_row.deadline != None || scope_row.kind == MIRScopeKind.Shield || scope_row.kind == MIRScopeKind.StopCleanup {
                 jet_eval_unsupported(&machine, span, "MIR scope control requires runtime scheduler or test state")
                 return None
             }
@@ -10130,6 +10129,10 @@ fn jet_eval_terminator(machine: &JetEvalMachine, frame_index: Int, terminator: M
         .Yield(_, _) -> {
             if !jet_eval_run_drops(&machine, frame_index, MIRDropEdge.Normal, span) -> return None
             jet_eval_unsupported(&machine, span, "MIR generator yield")
+            return None
+        }
+        .Poll(_, _, _) | .Stopped -> {
+            jet_eval_unsupported(&machine, span, "MIR stop point (native execution host only)")
             return None
         }
         .Break(target, _) -> {

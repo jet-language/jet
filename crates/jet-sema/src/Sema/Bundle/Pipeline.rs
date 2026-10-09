@@ -528,7 +528,7 @@ pub(super) fn check_bundle_opts_for_output(
     gates: crate::Policy::GateSet,
     explicit_output: Option<&str>,
     incremental: Option<&mut IncrementalSemaCache>,
-) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
+) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>) {
     check_bundle_opts_for_output_with_context(
         bundle,
         mode,
@@ -570,7 +570,7 @@ pub(super) fn check_bundle_opts_for_output_with_context(
     explicit_output: Option<&str>,
     incremental: Option<&mut IncrementalSemaCache>,
     allow_compiler_api: bool,
-) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
+) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>) {
     if jet_foundation::CompilerStack::on_compiler_worker() {
         return check_bundle_opts_for_output_on_stack(
             bundle,
@@ -611,9 +611,9 @@ fn check_bundle_opts_for_output_on_stack(
     explicit_output: Option<&str>,
     incremental: Option<&mut IncrementalSemaCache>,
     allow_compiler_api: bool,
-) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
+) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>) {
     let edition = bundle.edition.clone();
-    let (diags, facts) = super::super::Edition::with_package_edition(&edition, || {
+    let (diags, facts, checked_nominals) = super::super::Edition::with_package_edition(&edition, || {
         check_bundle_opts_for_output_inner(
             bundle,
             mode,
@@ -624,7 +624,7 @@ fn check_bundle_opts_for_output_on_stack(
             allow_compiler_api,
         )
     });
-    (summarize_dependency_reports(bundle, diags), facts)
+    (summarize_dependency_reports(bundle, diags), facts, checked_nominals)
 }
 
 /// D-MOD-CYCLE1=A: a dependency package is checked as its own package, so an

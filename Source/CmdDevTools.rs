@@ -1337,7 +1337,7 @@ fn run_dev_inner(
     // by `dev_incremental_reload_enabled`. A failed seed is discarded; the
     // normal edit path will report the actual diagnostics for that source.
     let prime_incremental_cache = |cache: &mut jet::Sema::IncrementalSemaCache| {
-        let (diags, bundle, _) =
+        let (diags, bundle, _, _) =
             jet::Driver::check_file_with_effect_facts_incremental(file, None, false, cache);
         let has_errors = diags
             .iter()
@@ -2336,7 +2336,7 @@ fn load_and_check_dev_change(
     mode: OutputMode,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-) -> Option<(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts)> {
+) -> Option<(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<jet::AST::MirFragmentNominalFacts>]>)> {
     let mut new_bundle = match jet::Loader::load_entry(file) {
         Ok(mut b) => {
             if let Err(diags) =
@@ -2361,7 +2361,7 @@ fn load_and_check_dev_change(
         jet::Driver::swap_entry_point(&mut new_bundle, entry_fn);
     }
 
-    let (diags, effect_facts) = jet::Sema::check_bundle_gates_with_effect_facts(
+    let (diags, effect_facts, checked_nominals) = jet::Sema::check_bundle_gates_with_effect_facts(
         &mut new_bundle,
         jet::Sema::CompileMode::Run,
         gates,
@@ -2378,7 +2378,7 @@ fn load_and_check_dev_change(
         return None;
     }
     render_dev_lints(file, mode, &diags);
-    Some((new_bundle, effect_facts))
+    Some((new_bundle, effect_facts, checked_nominals))
 }
 
 /// Handle one detected file change: pick swap vs rerun vs restart and render.
@@ -2422,7 +2422,7 @@ fn render_dev_change(
             .map(|module| module.display.clone())
             .unwrap_or_else(|| file.to_string());
         let source = fs::read_to_string(file).unwrap_or_default();
-        let (diags, bundle, facts, decision) = jet::Driver::check_file_with_hot_swap_incremental(
+        let (diags, bundle, facts, checked_nominals, decision) = jet::Driver::check_file_with_hot_swap_incremental(
             &old.bundle,
             file,
             Some((Path::new(file), source.as_str())),
@@ -2462,7 +2462,7 @@ fn render_dev_change(
         if safe_for_run {
             render_dev_lints(file, mode, &diags);
             incremental_decision = decision;
-            bundle.map(|bundle| (bundle, facts))
+            bundle.map(|bundle| (bundle, facts, checked_nominals))
         } else {
             incremental_cache.clear();
             None
@@ -2470,7 +2470,7 @@ fn render_dev_change(
     } else {
         None
     };
-    let (new_bundle, effect_facts) = match incrementally_checked {
+    let (new_bundle, effect_facts, checked_nominals) = match incrementally_checked {
         Some(checked) => checked,
         None => load_and_check_dev_change(
             file,
@@ -2492,6 +2492,7 @@ fn render_dev_change(
 
     let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
         &new_bundle,
+        &checked_nominals,
         dev_artifact_request(
             &new_bundle,
             jet_foundation::MIR::MirArtifactTarget::Interpreter,
@@ -2603,6 +2604,7 @@ fn render_dev_change(
     Some(jet::CheckedMirSnapshot {
         bundle: new_bundle,
         facts: effect_facts,
+        checked_nominals,
         mir,
         artifact,
     })
@@ -4119,7 +4121,7 @@ pub(crate) fn run_explain_web_graph(args: &[String], mode: OutputMode) {
             .join(path)
     };
     let entry = abs.display().to_string();
-    let (diags, _bundle, facts) = jet::Driver::check_file_with_effect_facts(&entry, None, false);
+    let (diags, _bundle, facts, _nominals) = jet::Driver::check_file_with_effect_facts(&entry, None, false);
     let Some(graph) = facts.web_app.as_ref() else {
         if diags
             .iter()
@@ -4294,7 +4296,7 @@ pub(crate) fn run_explain_cost(
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let report = match jet::Codegen::TIR::cost_report(&projection.bundle) {
+    let report = match jet::Codegen::TIR::cost_report(&projection.bundle, &projection.checked_nominals) {
         Ok(report) => report,
         Err(error) => exit_cost_projection_error(file, &error),
     };
@@ -8258,7 +8260,7 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode, emit_metadata: bool) {
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let (diagnostics, bundle, _facts) =
+    let (diagnostics, bundle, _facts, checked_nominals) =
         jet::Driver::check_file_with_effect_facts_for_run(file, "dev", &BTreeMap::new());
     let (errors, lints): (Vec<_>, Vec<_>) = diagnostics
         .into_iter()
@@ -8295,6 +8297,7 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode, emit_metadata: bool) {
         };
         let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
             bundle,
+            &checked_nominals,
             jet_foundation::MIR::MirArtifactRequest::new(
                 jet_foundation::MIR::MirArtifactTarget::RustAot,
                 jet_foundation::MIR::MirArtifactKind::NativeExecutable,
@@ -8323,9 +8326,10 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode, emit_metadata: bool) {
 /// only.
 pub(crate) fn cost_diagnostics(
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     sema_diagnostics: &[jet::Diagnostics::Diagnostic],
 ) -> Result<Vec<jet::Diagnostics::Diagnostic>, jet::Codegen::TIR::TCostReportError> {
-    let report = jet::Codegen::TIR::cost_report(bundle)?;
+    let report = jet::Codegen::TIR::cost_report(bundle, checked_nominals)?;
     Ok(cost_diagnostics_from_report(&report, sema_diagnostics))
 }
 
@@ -8398,10 +8402,11 @@ fn dedup_cost_diagnostics(diagnostics: &mut Vec<jet::Diagnostics::Diagnostic>) {
 
 pub(crate) fn merge_cost_diagnostics(
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     diagnostics: &mut Vec<jet::Diagnostics::Diagnostic>,
 ) -> Result<(), jet::Codegen::TIR::TCostReportError> {
     dedup_cost_diagnostics(diagnostics);
-    let cost_diagnostics = cost_diagnostics(bundle, diagnostics)?;
+    let cost_diagnostics = cost_diagnostics(bundle, checked_nominals, diagnostics)?;
     for diagnostic in cost_diagnostics {
         if !diagnostics
             .iter()
@@ -8434,7 +8439,7 @@ pub(crate) fn run_lint_cost(file: &str, mode: OutputMode) {
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let lints = match cost_diagnostics(&projection.bundle, &projection.diagnostics) {
+    let lints = match cost_diagnostics(&projection.bundle, &projection.checked_nominals, &projection.diagnostics) {
         Ok(lints) => lints,
         Err(error) => exit_cost_projection_error(file, &error),
     };

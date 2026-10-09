@@ -12,7 +12,7 @@ use jet_foundation::MIR::{
     MirConstReport, MirCoreClosureKind, MirCliDefault, MirCliEntry, MirCliInputShape, MirEntrySpec, MirFunction, MirFunctionForm, MirFunctionKind, MirGcEditKind,
     MirConversion, MirJob, MirLayoutCompareOp, MirOperation, MirPlaceBase, MirPreludeAbi, MirPreludeCallId,
     MirPreludeFamily, MirProgram, MirProjection, MirRequireKind, MirSemanticOp, MirSelectKind,
-    MirStringPart, MirSymbol, MirTaskGroupKind, MirTerminator, MirTextHoleKind, MirTextPatternPart,
+    MirScopeKind, MirStringPart, MirSymbol, MirTaskGroupKind, MirTerminator, MirTextHoleKind, MirTextPatternPart,
     MirTraitMethodId, MirTraitRef, MirType, MirTypeDef, MirTypeDefKind, MirTypeKind, MirUnaryOp,
     MirVariantPayload, MirVisibility, MirForeignAbi, MirSerdeCodec,
     MirHttpMethod, MirOwnershipMode,
@@ -642,6 +642,11 @@ fn reject_leaked_web_hardware(program: &MirProgram) -> Result<(), MirWebError> {
 fn validate_web_facts(program: &MirProgram) -> Result<(), MirWebError> {
     reject_leaked_web_hardware(program)?;
     for function in &program.functions {
+        if function.scopes.iter().any(|scope| scope.kind == MirScopeKind::StopCleanup) {
+            return Err(MirWebError::InvalidMir {
+                message: format!("MIR function {} has a native-only StopCleanup scope", function.id.0),
+            });
+        }
         if function.target_applicability.web && function.web_bucket.is_none() {
             return Err(MirWebError::InvalidMir {
                 message: format!(
@@ -6768,6 +6773,11 @@ fn emit_js_terminator(
         .unwrap(),
         MirTerminator::Unreachable { reason } => {
             writeln!(out, "        throw new Error({});", js_string(reason)).unwrap();
+        }
+        MirTerminator::Poll { .. } | MirTerminator::Stopped => {
+            return Err(MirWebError::InvalidMir {
+                message: format!("MIR function {} has a stop point; stop points are produced only for native host compilations", function.id.0),
+            });
         }
     }
     Ok(())

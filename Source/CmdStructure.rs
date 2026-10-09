@@ -39,7 +39,7 @@ pub(crate) fn run_structure(args: &[String], json: bool, color: bool, gates: jet
     // resolves from the same working directory, while committed reports stay
     // deterministic across checkout paths.
     let entry = path;
-    let (diagnostics, bundle, facts) =
+    let (diagnostics, bundle, facts, _nominals) =
         jet::Driver::check_file_with_effect_facts(&entry, None, false);
     let has_errors = diagnostics
         .iter()

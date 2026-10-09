@@ -1021,6 +1021,7 @@ fn __jet_bootstrap_harness_entry(
     if mode == "task-roots" {
         panic!("this compiler artifact was built without the task-root fixture");
     }
+    let mut source_retirement_receipt = String::new();
     let (complete, source, callable_count, type_count, field_count, variant_count, reports, selected_tier, actual_tier) =
         if mode == "factory" {
             let compiler_image = crate::__jet_bootstrap_compiler_image_envelope()
@@ -1048,12 +1049,31 @@ fn __jet_bootstrap_harness_entry(
                 })
                 .unwrap_or_else(|error| panic!("generated Jet factory authority call failed: {error:?}"))
                 .unwrap_or_else(|error| panic!("generated Jet compiler codec failed: {error:?}"));
+            let library_resources = std::env::var_os("JET_FRONT_LIBRARY_OBJECT_OUTPUT").map(|_| {
+                result.resources.as_ref()
+                    .unwrap_or_else(|| panic!("library-object factory result has no Source resources"))
+                    .arena()
+            });
             if let Some(resources) = result.resources.take() {
                 completion_owner.set_resources(resources);
             }
             drop(result.runtime_config.take());
             completion_owner.allow_resource_retirement();
             finish_source_completion_owner(&completion_owner);
+            if let Some(resources) = library_resources {
+                let requested = resources.is_retirement_requested()
+                    .unwrap_or_else(|error| panic!("cannot inspect library-object retirement request: {error}"));
+                let retired = resources.is_retired()
+                    .unwrap_or_else(|error| panic!("cannot inspect library-object resource retirement: {error}"));
+                let roots = resources.retained_root_count()
+                    .unwrap_or_else(|error| panic!("cannot inspect library-object retained roots: {error}"));
+                assert!(requested, "library-object Source retirement was not requested");
+                assert!(retired, "library-object Source resources did not retire");
+                assert_eq!(roots, 0, "library-object retained Source roots after completion");
+                source_retirement_receipt = format!(
+                    "source_retirement_requested={requested}\nsource_resources_retired={retired}\nsource_retained_roots={roots}\n"
+                );
+            }
             let counts = result.bindings.as_ref().map_or((0, 0, 0, 0), |bindings| {
                 (
                     bindings.callables.len(),
@@ -1220,6 +1240,7 @@ fn __jet_bootstrap_harness_entry(
         reports.len(),
     );
     receipt.push_str(&format!("selected_factory_tier={selected_tier:?}\nactual_factory_tier={actual_tier:?}\n"));
+    receipt.push_str(&source_retirement_receipt);
     for report in reports {
         receipt.push_str("report_json=");
         receipt.push_str(&report.json());
@@ -1358,7 +1379,7 @@ fn emit_stage_zero_source(
     // The compiler unit has no `fn run`: the Host/Runner splice supplies the
     // Rust `main`, so the unit lowers as a `NativeLibrary` (D4), never as an
     // executable without an entry.
-    let (bundle, _lints, reference_ffi) =
+    let (bundle, _lints, reference_ffi, checked_nominals) =
         crate::Driver::check_bundle_path_with_source_closure_for_artifact(
             &compiler_snapshot.entry_path,
             crate::Sema::CompileMode::Check,
@@ -1391,7 +1412,7 @@ fn emit_stage_zero_source(
             MirArtifactBuildMode::Dev,
         );
         let mut lower_span = jet_driver::Trace::span("lower");
-        let (mir, artifact) = crate::lower_checked_semantic_mir_program_for(bundle, request);
+        let (mir, artifact) = crate::lower_checked_semantic_mir_program_for(bundle, &checked_nominals, request);
         lower_span.items(mir.functions.len());
         drop(lower_span);
         assert_evaluator_materialization_helpers_in_mir(&mir);
@@ -2412,6 +2433,82 @@ fn write_small_program(project: &Path) -> PathBuf {
         panic!("cannot write small Jet source `{}`: {error}", entry.display())
     });
     entry
+}
+
+#[test]
+fn bootstrap_completion_owner_requests_authorized_zero_root_retirement() {
+    use crate::compiler_bootstrap_runner::{
+        BootstrapRunCompletionFinish, BootstrapRunCompletionOwner,
+    };
+    let resources = jet_evalhost::SourceResources::SourceResourceSession::new();
+    let mut owner = BootstrapRunCompletionOwner::new(
+        jet_evalhost::SourceExecutionCompletionScope::new(),
+    );
+    owner.set_resources(resources.clone());
+    assert!(!resources.is_retirement_requested().unwrap());
+    assert_eq!(resources.retained_root_count().unwrap(), 0);
+    owner.allow_resource_retirement();
+    match owner.finish().expect("finish authorized Source retirement") {
+        BootstrapRunCompletionFinish::Complete { failures } => assert!(failures.is_empty()),
+        finish => panic!("authorized zero-root retirement did not complete: {finish:?}"),
+    }
+    assert!(resources.is_retirement_requested().unwrap());
+    assert!(resources.arena().is_retired().unwrap());
+}
+
+#[test]
+fn bootstrap_completion_owner_requires_retirement_permission() {
+    use crate::compiler_bootstrap_runner::{
+        BootstrapRunCompletionFinish, BootstrapRunCompletionOwner,
+    };
+    let resources = jet_evalhost::SourceResources::SourceResourceSession::new();
+    let mut owner = BootstrapRunCompletionOwner::new(
+        jet_evalhost::SourceExecutionCompletionScope::new(),
+    );
+    owner.set_resources(resources.clone());
+    assert!(matches!(
+        owner.finish().expect("inspect unauthorized Source retirement"),
+        BootstrapRunCompletionFinish::Pending {
+            retirement_requested: false,
+            retained_roots: 0,
+            open_callback_sessions: 0,
+            pending_jobs: 0,
+        }
+    ));
+    assert!(!resources.is_retirement_requested().unwrap());
+    assert!(!resources.arena().is_retired().unwrap());
+}
+
+#[test]
+fn bootstrap_completion_owner_preserves_retained_root_gate() {
+    use crate::compiler_bootstrap_runner::{
+        BootstrapRunCompletionFinish, BootstrapRunCompletionOwner,
+    };
+    let resources = jet_evalhost::SourceResources::SourceResourceSession::new();
+    let root = resources.retain_root().expect("retain Source root");
+    let mut owner = BootstrapRunCompletionOwner::new(
+        jet_evalhost::SourceExecutionCompletionScope::new(),
+    );
+    owner.set_resources(resources.clone());
+    owner.allow_resource_retirement();
+    assert!(matches!(
+        owner.finish().expect("inspect retained Source root"),
+        BootstrapRunCompletionFinish::Pending {
+            retirement_requested: false,
+            retained_roots: 1,
+            open_callback_sessions: 0,
+            pending_jobs: 0,
+        }
+    ));
+    assert!(!resources.is_retirement_requested().unwrap());
+    assert!(!resources.arena().is_retired().unwrap());
+    drop(root);
+    match owner.finish().expect("finish after Source root release") {
+        BootstrapRunCompletionFinish::Complete { failures } => assert!(failures.is_empty()),
+        finish => panic!("released Source root did not allow retirement: {finish:?}"),
+    }
+    assert!(resources.is_retirement_requested().unwrap());
+    assert!(resources.arena().is_retired().unwrap());
 }
 
 #[test]

@@ -1918,6 +1918,28 @@ pub(crate) fn check_module_bodies(
         no_prelude: module.no_prelude,
     };
     let checked_ct_funcs = stage_comptime_functions(&cx, &module.items, &ct_funcs, name_ledger);
+    if st.compiler_builtin_error_owner == Some(module_idx) {
+        // Declared defaults are checked in their original supplier context,
+        // before that module is published as immutable nominal facts.
+        let mut checker = checker_for_module(
+            module_idx, states, plugin_interfaces, devtools_registry, effect_facts,
+            &ct_funcs, &checked_ct_funcs, &st.items, &ct_externs, &ct_base_dir,
+            &ct_globals, no_os, gates, module.no_prelude, name_ledger, None, false, false,
+        );
+        for item in &mut module.items {
+            let Item::Struct(definition) = item else { continue };
+            if !definition.compiler_builtin_error { continue }
+            for field in &mut definition.fields {
+                let Some(value) = field.default.as_deref_mut() else { continue };
+                checker.expected_type = Some(field.ty.clone());
+                if let Some(actual) = checker.infer(value) {
+                    let span = value.span();
+                    checker.check_struct_field_assignable(&field.name, &field.ty, &actual, value, span);
+                }
+            }
+        }
+        diags.extend(checker.diags);
+    }
     // D-MEM-VIEWRET1=B: resolve callable view summaries before the real body
     // pass so declaration order cannot affect a public owner contract. Each
     // iteration checks pristine clones and publishes only the canonical fact;

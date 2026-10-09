@@ -8,6 +8,8 @@
 // then:  cd <outdir> && jet run unit.jet -- [--pack] <output> <input>...
 // Or: node Compiler/JetBackend/Tests/run-link.mjs <outdir> --indices
 // then: cd <outdir> && jet run unit.jet (reserved-index round-trip tests).
+// Or: node Compiler/JetBackend/Tests/run-link.mjs <outdir> --pack-roots
+// then: run unit.jet beside the inputs from run-runtime-pack-roots.mjs.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,8 +21,9 @@ if (!outDir) {
   process.exit(64);
 }
 const read = (path) => readFileSync(`${repo}/${path}`, "utf8");
-const indices = process.argv[3] === "--indices";
-if (process.argv[3] && !indices) throw new Error("unknown linker unit mode");
+const mode = process.argv[3];
+const fixture = mode === "--indices" ? "LinkIndexes" : mode === "--pack-roots" ? "LinkPackRoots" : "LinkRuntime";
+if (mode && mode !== "--indices" && mode !== "--pack-roots") throw new Error("unknown linker unit mode");
 
 // The top-level item starting at the line that begins with `head`, through its
 // closing `}` at column 0 (or the line itself for a one-line item).
@@ -64,7 +67,7 @@ const parts = [
   body("Compiler/JetBackend/Source/Image/Archive.jet"),
   body("Compiler/JetBackend/Source/Image/StaticLink.jet"),
   body("Compiler/JetBackend/Source/Image/RuntimePack.jet"),
-  body(`Compiler/JetBackend/Tests/${indices ? "LinkIndexes" : "LinkRuntime"}.jet`),
+  body(`Compiler/JetBackend/Tests/${fixture}.jet`),
 ];
 mkdirSync(outDir, { recursive: true });
 writeFileSync(`${outDir}/unit.jet`, [...coreUses, "", ...parts].join("\n"));

@@ -447,8 +447,8 @@ impl<T> Drop for JetProgressIter<T> {
 
 fn jet_std_io_progress_iter<T: 'static>(
     it: JetIter<T>,
-    description: &String,
-    format: &String,
+    description: &str,
+    format: &str,
 ) -> JetIter<T> {
     let (lower, upper) = it.0.size_hint();
     let total = upper.filter(|upper| *upper == lower);
@@ -457,8 +457,8 @@ fn jet_std_io_progress_iter<T: 'static>(
 
 fn jet_std_io_progress_iter_with_total<T: 'static>(
     it: JetIter<T>,
-    description: &String,
-    format: &String,
+    description: &str,
+    format: &str,
     total: Option<usize>,
 ) -> JetIter<T> {
     JetIter(Box::new(JetProgressIter {
@@ -792,6 +792,8 @@ mod jet_os_interrupt {
             std::thread::Builder::new()
                 .name("jet-interrupt".to_string())
                 .spawn(move || {
+                    #[cfg(jet_native_pack)]
+                    let _jet_thread = crate::JetNativeThreadAttachment::enter();
                     let mut handlers: Vec<Arc<dyn Fn() + Send + Sync + 'static>> = Vec::new();
                     loop {
                         match rx.recv_timeout(super::jet_interrupt_poll_interval()) {

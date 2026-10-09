@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Refresh the canonical C ABI and compiler-call process boundary in emitted
 // runtime Rust. Keep its paired generated routes: never mix seed/full routes.
-// Compile with rustc --crate-type cdylib for native loader/worker proofs.
+// Native packs compile with --cfg jet_native_pack and link jet_runtime_jet.o
+// first, with check-runtime-exports.mjs enforcing one definition per symbol.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,30 +26,50 @@ let prepared = [...lines.slice(0, start), canonical.slice(canonicalStart), ...li
 // Seed proofs retain their emitted, paired route set instead.
 if (mode === '--allparts') {
   for (const [module, file] of [
+    ['jet_native_meta', 'NativeMeta.rs'],
     ['jet_c_abi_routes', 'CAbiRoutes.rs'],
     ['jet_c_abi_iter', 'CAbiIter.rs'],
     ['jet_c_abi_task', 'CAbiTask.rs'],
+    ['jet_c_abi_parallel', 'CAbiParallel.rs'],
   ]) {
     const rows = prepared.split('\n');
-    const begin = rows.findIndex(line => line === `mod ${module} {` || line === `pub(crate) mod ${module} {`);
+    const begin = rows.findIndex(line => line === `mod ${module} {` || line === `pub(crate) mod ${module} {` || line === `pub mod ${module} {`);
     if (begin >= 0) {
       const close = rows.findIndex((line, index) => index > begin && line === '}');
       if (close < 0) throw new Error(`input ${module} module is unterminated`);
       // The canonical text carries its own cfg; remove the old one with it.
-      const first = begin > 0 && rows[begin - 1] === '#[cfg(not(target_arch = "wasm32"))]' ? begin - 1 : begin;
+      const first = module === 'jet_native_meta' && begin > 1 && rows[begin - 2] === '#[doc(hidden)]' && rows[begin - 1] === '#[allow(dead_code)]'
+        ? begin - 2
+        : begin > 0 && rows[begin - 1] === '#[cfg(not(target_arch = "wasm32"))]' ? begin - 1 : begin;
       prepared = [...rows.slice(0, first), ...rows.slice(close + 1)].join('\n');
     }
-    prepared += '\n' + readFileSync(resolve(repo, `crates/jet-codegen/src/Prelude/Core/${file}`), 'utf8');
+    const source = readFileSync(resolve(repo, `crates/jet-codegen/src/Prelude/Core/${file}`), 'utf8');
+    prepared += '\n' + source;
+  }
+  // Native test artifacts link the same canonical rails as Rust-emitted
+  // harnesses. A Program seed doesn't select a test artifact, so pull their
+  // unchanged shared prelude text into the all-parts pack explicitly.
+  const runtime = readFileSync(resolve(repo, 'crates/jet-codegen/src/Codegen/mod.rs'), 'utf8');
+  for (const [name, marker] of [['TEST_PRELUDE', 'fn jet_test_finish('], ['PROP_PRELUDE', 'struct JetRng {']]) {
+    if (prepared.includes(marker)) continue;
+    const text = runtime.match(new RegExp(`const ${name}: &str = r#\"([\\s\\S]*?)\"#;`))?.[1];
+    if (!text) throw new Error(`canonical ${name} missing`);
+    prepared += '\n' + text;
   }
 }
 const core = readFileSync(resolve(repo, 'crates/jet-codegen/src/Prelude/Core.rs'), 'utf8');
-const marker = '// Installed only in the isolated persistent compiler worker.';
-const contextStart = core.indexOf(marker);
+const marker = /^static JET_NATIVE_COMPTIME_ACTIVE:/gm;
+const currentContexts = [...core.matchAll(marker)];
+const oldContexts = [...prepared.matchAll(marker)];
+if (currentContexts.length !== 1 || oldContexts.length !== 1) {
+  throw new Error('expected exactly one compiler-call context declaration in canonical and emitted runtime');
+}
+const contextStart = currentContexts[0].index;
 const contextEnd = core.indexOf('struct JetRuntimeExit;', contextStart);
-const oldContext = prepared.indexOf(marker);
-const oldEnd = prepared.indexOf('struct JetRuntimeExit;', Math.max(oldContext, 0));
-if (contextStart < 0 || contextEnd < 0 || oldEnd < 0) throw new Error('compiler-call process boundary missing');
-prepared = prepared.slice(0, oldContext < 0 ? oldEnd : oldContext) + core.slice(contextStart, contextEnd) + prepared.slice(oldEnd);
+const oldContext = oldContexts[0].index;
+const oldEnd = prepared.indexOf('struct JetRuntimeExit;', oldContext);
+if (contextEnd < 0 || oldEnd < 0) throw new Error('compiler-call process boundary missing');
+prepared = prepared.slice(0, oldContext) + core.slice(contextStart, contextEnd) + prepared.slice(oldEnd);
 const prefix = 'fn jet_runtime_stop_unwind(';
 const currentStop = core.indexOf(prefix);
 const oldStop = prepared.indexOf(prefix);

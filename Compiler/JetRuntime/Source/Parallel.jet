@@ -1,0 +1,156 @@
+// CAbiParallel.rs:9-33 / Core.rs:360-420 / ParallelKernel.rs:60-90.
+// A range callback borrows env until every worker has joined. Chunk failures
+// are isolated, all chunks run, and the lowest failing chunk start wins.
+// Worker80: len0 chunks8 workers16 index24 env32 invoke40 stop48 start56
+// pthread64 save72 (save points into the caller-owned 32-byte control scope).
+fn rt_parallel_worker_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+fn parallel_limit(limit: I64, cap: I64) -> I64 {
+    // Rust's Option<i64> -> usize accepts zero, rejects negative/too-wide.
+    if int_negative(limit) || !int_fits(limit, U64{9223372036854775807}) -> return cap
+    count :: int_word(limit)
+    if (count == I64{0}) -> I64{1} else if count < cap -> count else -> cap
+}
+
+#Export(c) fn jet_rt_native_para_worker(worker: I64) -> I64 {
+    chunk := sync_load(worker + I64{24})
+    chunks :: sync_load(worker + I64{8})
+    stride :: sync_load(worker + I64{16})
+    length :: sync_load(worker)
+    save :: sync_load(worker + I64{72})
+    loop chunk < chunks {
+        start :: chunk * I64{64}
+        remaining :: length - start
+        end :: start + (if remaining < (I64{64}) -> remaining else -> I64{64})
+        control :: scheduler_control_new()
+        sync_store(control + I64{104}, SCHEDULER_SCOPE_TASK)
+        scheduler_control_enter(control, save)
+        body :: scheduler_body_enter()
+        #Unsafe("checked System V (env,start,end)->Unit callback; env remains borrowed and each range has exclusive output slots") {
+            os_call3_unit_i64(sync_load(worker + I64{40}), sync_load(worker + I64{32}), start, end)
+        }
+        scheduler_body_leave(body)
+        record :: scheduler_control_take_stop(control)
+        scheduler_control_leave(save)
+        scheduler_control_drop(control)
+        if (record != I64{0}) {
+            // This worker's cyclic chunk indices only increase.
+            if (sync_load(worker + I64{48}) == I64{0}) {
+                sync_store(worker + I64{48}, record)
+                sync_store(worker + I64{56}, start)
+            } else { scheduler_stop_drop(record) }
+        }
+        if stride >= chunks - chunk -> break
+        chunk += stride
+    }
+    I64{0}
+}
+
+fn parallel_raise(record: I64) {
+    if (record == I64{0}) {
+        return
+    }
+    if (scheduler_control_current() != I64{0}) {
+        if (sync_load(record) == I64{5}) {
+            if (jet_rt_stop_domain() != I64{0}) {
+                _ := scheduler_panic_check()
+                _ := scheduler_panic_publish_record(record)
+                return
+            }
+        } else {
+            _ := scheduler_native_publish(record)
+            return
+        }
+    }
+    // The process edge has no parent control. Replay the captured diagnostic,
+    // not a replacement panic; the owned stop is released before process exit.
+    message :: scheduler_stop_take_message(record)
+    form :: sync_load(record + I64{48})
+    scheduler_stop_drop(record)
+    if (form == I64{0}) {
+        trap_header(I64{0})
+        trap_write_handle(message)
+        trap_msg_prelude_end()
+        jet_rt_string_drop(message)
+        trap_footer(I64{0})
+    } else {
+        trap_write_handle(message)
+        jet_rt_string_drop(message)
+        trap_exit(I64{70})
+    }
+}
+
+#Export(c) fn jet_rt_native_para_walk(length: I64, limit: I64, env: I64, invoke: I64) {
+    if (length < I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
+    if (length == I64{0}) {
+        return
+    }
+    chunks :: length / I64{64} + (if (length % I64{64} == I64{0}) -> I64{0} else -> I64{1})
+    cap :: scheduler_available_parallelism(I64{1})
+    if (jet_rt_session_propagate() != I64{0}) -> return
+    limited :: parallel_limit(limit, cap)
+    count :: if limited < chunks -> limited else -> chunks
+    // Each worker owns its descriptor and its control save slot through join.
+    bytes :: count * I64{112}
+    workers :: jet_rt_alloc(bytes, I64{8})
+    if (workers == I64{0} && jet_rt_session_propagate() != I64{0}) -> return
+    thread_zero(workers, bytes)
+    at := I64{0}
+    started := I64{0}
+    spawn_failed := false
+    loop at < count {
+        worker :: workers + at * I64{112}
+        sync_store(worker, length)
+        sync_store(worker + I64{8}, chunks)
+        sync_store(worker + I64{16}, count)
+        sync_store(worker + I64{24}, at)
+        sync_store(worker + I64{32}, env)
+        sync_store(worker + I64{40}, invoke)
+        sync_store(worker + I64{72}, worker + I64{80})
+        if (count == I64{1}) { _ := jet_rt_native_para_worker(worker) } else {
+            handle :: thread_spawn(rt_parallel_worker_address(), worker)
+            if (handle < I64{0}) {
+                spawn_failed = true
+                break
+            }
+            sync_store(worker + I64{64}, handle)
+            started += I64{1}
+        }
+        at += I64{1}
+    }
+    // Rust joins in reverse creation order; no borrowed input escapes here.
+    loop started > (I64{0}) {
+        started -= I64{1}
+        handle :: sync_load(workers + started * I64{112} + I64{64})
+        if (thread_join(handle, I64{0}) != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
+    }
+    first := I64{0}
+    index := length
+    at = I64{0}
+    loop at < count {
+        worker :: workers + at * I64{112}
+        record :: sync_load(worker + I64{48})
+        start :: sync_load(worker + I64{56})
+        if (record != I64{0}) {
+            if start < index {
+                scheduler_stop_drop(first)
+                first = record
+                index = start
+            } else { scheduler_stop_drop(record) }
+        }
+        at += I64{1}
+    }
+    jet_rt_free(workers, bytes, I64{8})
+    if (jet_rt_session_propagate() != I64{0}) {
+        scheduler_stop_drop(first)
+        return
+    }
+    if spawn_failed {
+        scheduler_stop_drop(first)
+        scheduler_fatal(scheduler_msg_start_failed())
+        return
+    }
+    parallel_raise(first)
+}

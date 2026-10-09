@@ -51,9 +51,11 @@ use jet_sema.[
     SemaSourceSegment,
 ]
 use jet_codegen.[
+JetPluginArtifacts,
 JetRustEmitManifest,
 JetWebArtifacts,
 JetWebAssets,
+JetWebTimezoneAsset,
 ]
 use jet_eval.JetEvalConfig
 use jet_repl.ReplSession
@@ -92,6 +94,16 @@ pub enum JetDriverCompileTarget {
     assets: JetWebAssets,
     release_devtools_policy: JetReleaseDevtoolsPolicy,
     profile: MIRArtifactBuildMode,
+    )
+    // `--target=sandbox` (D-PLUGIN1=B): the entry module's `pub fn` rows
+    // become a WASM Component guest. `export_name` is the manifest `export:`
+    // name (the package name when absent); `frozen_interface` is the prior
+    // `.jet/cache/api/plugin__<name>.api` text the host read, if any; the
+    // guest embeds `timezone_data` because a sandbox has no host filesystem.
+    Sandbox(
+    export_name: String?,
+    frozen_interface: String?,
+    timezone_data: [JetWebTimezoneAsset],
     )
 }
 
@@ -191,6 +203,16 @@ pub struct JetDriverCompileRequest {
     // External lock/trust/forced-build writers use the canonical gate row.
     pub external_gate_entries: [GateEntry]{[GateEntry]{}}
     pub evaluation_entry: String?{None}
+    // Unified host/stop contract (#4720): the comptime lowering session
+    // produces MIR stop points (Poll/Stopped and the budget can-stop rows)
+    // for the native execution host. Only the native comptime selection sets
+    // it; the evaluator refuses stop points, so every other compile leaves it
+    // off.
+    pub comptime_stop_points: Bool{false}
+    // Ordinary native Program/Test/Doc artifacts use returning-stop MIR.
+    // This is independent of the native comptime session selection above;
+    // evaluator, Rust emission and library assembly leave it disabled.
+    pub native_stop_points: Bool{false}
 }
 
 pub struct JetDriverGatePolicy {
@@ -395,6 +417,16 @@ pub struct JetDriverCompileResult {
     pub comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
     // A Repl compile retains its checked scope and canonical MIR machine.
     pub repl_session: ReplSession?{None}
+    // A complete `Sandbox` compile: the guest artifacts plus the interface
+    // snapshot the host stores as the new frozen baseline.
+    pub sandbox: JetDriverSandboxOutput?{None}
+}
+
+pub struct JetDriverSandboxOutput {
+    pub artifacts: JetPluginArtifacts
+    // `plugin__<export name>`: the `.jet/cache/api/<package>.api` file stem.
+    pub snapshot_package: String
+    pub snapshot_text: String
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read
@@ -594,7 +626,7 @@ pub fn jet_driver_receipt_answers(receipt: JetDriverReceipt, verb: String, reque
 pub fn jet_driver_package_target_facts(request: JetDriverCompileRequest, package: JetDriverPackageInfo) -> [PackageKeyTargetFact] Never! {
     web :: if request.target == {
         .Web(_, _, _) -> "true"
-        .Native -> "false"
+        .Native | .Sandbox(_, _, _) -> "false"
     }
     [PackageKeyTargetFact]{
         PackageKeyTargetFact{name: "active_os", value: request.host_facts.active_os ?? ""},

@@ -131,7 +131,7 @@ fn prelude(
             max_arity,
             borrow_mask: borrow_mask.to_vec(),
         },
-        effect,
+        effect: jet_foundation::Effects::prelude_route_effect(module, member).or(effect),
         fallibility: carrier.clone(),
         abi,
         authority: None,
@@ -7283,7 +7283,7 @@ fn runtime(
             max_arity,
             borrow_mask: borrow_mask.to_vec(),
         },
-        effect,
+        effect: jet_foundation::Effects::prelude_route_effect(module, member).or(effect),
         fallibility: carrier.clone(),
         authority: None,
         abi,
@@ -8859,7 +8859,7 @@ pub(super) fn static_prelude_route(
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
     let _ = result;
-    let effect = (module == "::JetAtomic" && member == "try_new").then_some(Effect::Mem);
+    let effect = jet_foundation::Effects::prelude_route_effect(module, member);
     let arity = borrow_mask.len();
     let symbol = match (module, member) {
         ("::JetAuthority", "from_rights") => "jet_authority_from_rights".to_string(),

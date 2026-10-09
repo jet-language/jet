@@ -2383,11 +2383,17 @@ fn emit_bootstrap_host_factory(
     let request_trace_sink = symbols.field_symbol("JetDriverCompileRequest", "trace_sink")?;
     let request_mir_lint_every_pass =
         symbols.field_symbol("JetDriverCompileRequest", "mir_lint_every_pass")?;
+    let request_comptime_stop_points =
+        symbols.field_symbol("JetDriverCompileRequest", "comptime_stop_points")?;
     let request_compiler_threads =
         symbols.field_symbol("JetDriverCompileRequest", "compiler_threads")?;
     // #4643: the request's compile mode; the bootstrap host always compiles a program.
     let request_mode = symbols.field_symbol("JetDriverCompileRequest", "mode")?;
     let mode_program = symbols.variant_path("JetDriverCompileMode", "Program")?;
+    let request_schema_snapshots = symbols.field_symbol("JetDriverCompileRequest", "schema_snapshots")?;
+    let request_output_intent = symbols.field_symbol("JetDriverCompileRequest", "output_intent")?;
+    let request_output_address = symbols.field_symbol("JetDriverCompileRequest", "output_address")?;
+    let output_check = symbols.variant_path("SemaOutputIntent", "Check")?;
     let threads_type = symbols.type_symbol("CompilerThreads")?;
     let threads_cap = symbols.field_symbol("CompilerThreads", "cap")?;
     let threads_cores = symbols.field_symbol("CompilerThreads", "cores")?;
@@ -2516,6 +2522,9 @@ fn emit_bootstrap_host_factory(
             "        {request_eval_config}: __jet_eval_config,\n",
             "        {request_target}: __jet_target,\n",
             "        {request_record_store}: __jet_bootstrap_record_store(),\n",
+            "        {request_schema_snapshots}: Err(Default::default()),\n",
+            "        {request_output_intent}: {output_check},\n",
+            "        {request_output_address}: Err(Default::default()),\n",
             "        {request_trace_sink}: __jet_bootstrap_trace_sink(),\n",
             "        // Full verification (MIR Lint after every optimizer pass) is an\n",
             "        // explicit host opt-in for tests and verification runs.\n",
@@ -2528,6 +2537,7 @@ fn emit_bootstrap_host_factory(
             "        {request_gate_policies}: Vec::new(),\n",
             "        {request_external_gate_entries}: Vec::new(),\n",
             "        {request_evaluation_entry}: Err(Default::default()),\n",
+            "        {request_comptime_stop_points}: false,\n",
             "        // D-JOBS1=A: the bootstrap host takes no `--threads` cap, so the\n",
             "        // compiler admits threads automatically up to the reported cores\n",
             "        // and within the memory Linux reports available, lowered to the\n",
@@ -2577,8 +2587,13 @@ fn emit_bootstrap_host_factory(
         host_active_os = host_active_os,
         request_effect_source = request_effect_source,
         request_record_store = request_record_store,
+        request_schema_snapshots = request_schema_snapshots,
+        request_output_intent = request_output_intent,
+        request_output_address = request_output_address,
+        output_check = output_check,
         request_trace_sink = request_trace_sink,
         request_mir_lint_every_pass = request_mir_lint_every_pass,
+        request_comptime_stop_points = request_comptime_stop_points,
         request_compiler_threads = request_compiler_threads,
         request_mode = request_mode,
         mode_program = mode_program,
@@ -2858,6 +2873,15 @@ fn emit_bootstrap_web_asset_provider(
                     }};
                     Ok(@new.JetDriverCompileTarget.Web@(assets, release_policy, profile))
                 }}
+                @p.JetDriverCompileTarget.Sandbox@(export_name, frozen_interface, _) => {{
+                    let raw = crate::Codegen::canonical_web_raw_assets()
+                        .map_err(|error| error.to_string())?;
+                    let timezone_data = raw.timezone_data.into_iter().map(|(name, bytes)| {timezone_type} {{
+                        {timezone_name}: name,
+                        {timezone_bytes}: bytes,
+                    }}).collect();
+                    Ok(@new.JetDriverCompileTarget.Sandbox@(export_name, frozen_interface, timezone_data))
+                }}
             }}
         }}"#,
         target_type = target_type,
@@ -3036,6 +3060,10 @@ fn emit_bootstrap_manifest_adapter(
             "    }}\n",
             "    if web_artifact.is_some() || web_artifacts.is_some() {{\n",
             "        if web_artifact.is_none() || web_artifacts.is_none() || mir.is_none() || entry_function.is_none() {{ return Err(\"complete Web result has no exact artifact, artifacts, MIR, or entry function\".to_string()); }}\n",
+            "        return Ok(crate::BootstrapJetCompileResult {{ selected_factory_tier, actual_factory_tier, complete, emitted_source: None, bindings: None, source_program, runtime_config: runtime_config.take(), mir, entry_function, runtime_artifact, web_artifact, web_artifacts, comptime_stdout, comptime_stderr, soft_stop, exit_code, internal_problem, reports, resources: None }});\n",
+            "    }}\n",
+            "    // MIR-only native compilation has no Rust source or emission bindings.\n",
+            "    if mir.is_some() && ({value}).{result_manifest}.as_ref().ok().is_none() && ({value}).{result_source}.as_ref().ok().is_none() {{\n",
             "        return Ok(crate::BootstrapJetCompileResult {{ selected_factory_tier, actual_factory_tier, complete, emitted_source: None, bindings: None, source_program, runtime_config: runtime_config.take(), mir, entry_function, runtime_artifact, web_artifact, web_artifacts, comptime_stdout, comptime_stderr, soft_stop, exit_code, internal_problem, reports, resources: None }});\n",
             "    }}\n",
             "    let manifest = ({value}).{result_manifest}.as_ref().ok().ok_or_else(|| \"complete bootstrap compiler result has no Rust emission manifest\".to_string())?;\n",

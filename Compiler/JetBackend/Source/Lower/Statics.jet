@@ -260,6 +260,8 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
 // OWNER DIRECTION: unlike the Rust accessor, a read borrows frozen data and
 // only an ownership-bearing checked MIR result clones it.
 fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, name: String) Never! {
+    // jet_transaction(): a fresh #Transact handle (Transaction.jet).
+    if name == "transaction" && lower_global_definition(p, name) == None -> return lower_transaction_new(p, c, &m, &f, instruction)
     definition :: lower_global_definition(p, name) ?? return lower_fail(&m, &f, "global constant {name} without a definition is not lowered at O0 yet")
     if definition.is_storage {
         // A read of module storage: its current value (lower_static_storage).
@@ -323,7 +325,7 @@ fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
 // Places rooted at it are read and written in that memory, as a cell's are.
 // Only scalar and handle carriers: a frozen List or Map tree would be
 // mutated in place.
-fn lower_static_walk(p: MIRProgram, m: &LowerModule, f: &LowerFunction, row: MIRPlace, name: String) -> LowerFieldAddress? {
+fn lower_static_walk(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, row: MIRPlace, name: String) -> LowerFieldAddress? {
     definition :: lower_global_definition(p, name) ?? {
         lower_fail(&m, &f, "module storage {name} without a definition is not lowered at O0 yet")
         return None
@@ -331,7 +333,7 @@ fn lower_static_walk(p: MIRProgram, m: &LowerModule, f: &LowerFunction, row: MIR
     cell :: lower_static_storage(p, &m, &f, definition) ?? return None
     if row.projections.len() == 0 -> return Val(LowerFieldAddress{base: cell, offset: 0})
     root :: lower_read_at(p, &f, cell, 0, definition.ty) ?? return None
-    lower_walk_projections(p, &m, &f, root, definition.ty, row.projections)
+    lower_walk_projections(p, c, &m, &f, root, definition.ty, row.projections)
 }
 
 // The address of module storage `definition`'s value.

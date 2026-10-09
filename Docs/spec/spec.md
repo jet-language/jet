@@ -881,6 +881,14 @@ actions run in reverse declaration order, `scope.guard` closures run in reverse
 registration order, and `os.atexit` handlers run in registration order after
 scope cleanup. Work registered after the stop does not run. A host kill or an
 abort does not promise these finalizers.
+The ordinary process root follows the same rule for a runtime stop: lexical
+`Close` and deferred cleanup run before the report is delivered with exit 70.
+A non-unwinding native call boundary transports the stop to its caller for
+cleanup, without exposing a successful return value.
+If the first stop happens in an exit handler, the remaining handlers already
+registered before that stop are still owed cleanup, in registration order.
+Handlers registered after the stop do not run; their adopted captures are
+released inside stopped cleanup. A second panic during stopped cleanup aborts.
 
 ### Handling and discarding failure values
 
@@ -4104,9 +4112,11 @@ fn run() {
 
 `plugin.load(path, authority)` exposes only frozen named exports. Sema checks
 parameter and result contracts before code generation. There is no dynamic
-export lookup or missing-export fallback. Exported functions use a homogeneous
-`Int`, `Float`, `Bool`, or `Text` shape, or a recursively closed Component
-Model shape (E1260).
+export lookup or missing-export fallback. Each parameter and the result of an
+export is `Int`, `Float`, `Bool`, or `Text`, mixed freely across positions, or
+a recursively closed `#Codable` record, list, `Option`, or `Result` of those
+(E1260). A sandbox export must return a value; fixed widths, maps, tuples,
+unions, handles, and generic applications do not cross the Component boundary.
 The `packages/sandbox_mathkit` golden exercises `Bool` results and UTF-8 text
 round trips, including a non-ASCII name; its checked-in interface snapshot
 lists every named export used by the host.
@@ -4132,14 +4142,19 @@ The manifest `export:` target names the interface and defaults to the package
 name. The frozen public interface is keyed as `plugin__<export>` in
 `.jet/cache/api/`; unchanged interfaces freeze silently, while removing or
 changing an export is E1257. E1258 reports authority denial, E1259 a component
-build/toolchain failure, and E1260 an unsupported export shape
+build/toolchain failure, and E1260 an unsupported export shape on either the
+sandbox Component boundary or the native `#Export(c)` C boundary
 (D-PLUGIN1, D-PLUGIN-EXPORT1, D-PLUGIN-VERSION1, D-DEP-WASM1, D-EMBED2).
 
 ### Embedding artifacts
 
-Native and sandbox artifacts use one top-level `pub fn` export list and one
-scalar lowering table. Each exported function uses one homogeneous `Int`,
-`Float`, `Bool`, or `Text` shape; no separate `#Export` marker is required.
+A native artifact exports the entry module's `#Export(c)` functions; a sandbox
+artifact exports its top-level `pub fn` items. Each parameter and the result of
+a native `#Export(c)` function is, independently, one C primitive: `Int`
+(`int64_t`), `Float` (`double`), `Bool`, `Text` (the JetText pointer/length
+pair), `I8`–`I64` and `U8`–`U64` (`int8_t`–`uint64_t`), or `F32` (`float`); a
+unit result is `void`. A sandbox export uses the Component shapes above. Both
+boundaries publish the success value of a function's failure contract.
 
 `jet build --lib` emits a linkable native static or shared library and a C
 header. It needs no Component runtime, but the native artifact is trusted code:

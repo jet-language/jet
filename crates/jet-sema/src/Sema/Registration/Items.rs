@@ -1709,7 +1709,7 @@ pub(crate) fn register_struct(
     consts: &HashMap<String, Type>,
     target: &jet_foundation::Layout::TargetLayout,
 ) {
-    if is_reserved_type(&s.name) {
+    if is_reserved_type(&s.name) && !s.compiler_builtin_error {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", s.name),
@@ -1727,6 +1727,26 @@ pub(crate) fn register_struct(
         ));
         return;
     }
+    register_struct_fields(s, registry, diags, target);
+}
+
+/// Only the original parsed Prelude supplier registers through this entry.
+/// Stored fields and declared defaults use the ordinary registration body.
+pub(crate) fn register_builtin_error_struct(
+    s: &StructDef,
+    registry: &mut TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+    target: &jet_foundation::Layout::TargetLayout,
+) {
+    register_struct_fields(s, registry, diags, target);
+}
+
+fn register_struct_fields(
+    s: &StructDef,
+    registry: &mut TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+    target: &jet_foundation::Layout::TargetLayout,
+) {
     validate_layout_alignment(s, target, diags);
     let mut field_names = HashSet::new();
     let mut fields = Vec::new();

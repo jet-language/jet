@@ -1459,7 +1459,7 @@ fn target_machine_usage_for_file(
         .collect::<Vec<_>>();
     let mut bundle = crate::Loader::load_entry_with_overlays(file, &overlays, false)?;
     seed_build_facts(&mut bundle, profile, locked, setting_overrides)?;
-    let (diags, effect_facts) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
+    let (diags, effect_facts, _nominals) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let _lints = gate_diagnostics(&bundle, parse_teaching, diags, Vec::new())?;
     let mut usage = crate::Sema::target_machine_use(&bundle);
@@ -2576,8 +2576,18 @@ pub struct BuildCompileOutput {
     /// staging populates this from the same in-memory generated graph that its
     /// validators consume.
     pub runtime_effect_facts: Option<crate::Sema::SemIndexEffectFacts>,
+    pub runtime_checked_nominals: Option<std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>>,
 }
 impl BuildCompileOutput {
+    /// Transfer the final checked runtime graph and its original projections.
+    pub fn take_checked_runtime(&mut self) -> Option<CheckedSourceBundle> {
+        let bundle = self.runtime.take()?;
+        let facts = self.runtime_effect_facts.take()
+            .expect("a checked runtime bundle retains its semantic effect facts");
+        let nominals = self.runtime_checked_nominals.take()
+            .expect("a checked runtime bundle retains its original declarations");
+        Some(CheckedSourceBundle::new(bundle, facts, nominals))
+    }
     /// Project compiler work into the same plan returned to graph/query users.
     /// The final runtime bundle is the source of truth after generated-source
     /// staging; no path outside the project root enters node identity.
@@ -3144,6 +3154,7 @@ pub struct PreparedBuildFrontEnd {
     inputs: FrontEndInputs,
     bundle: crate::AST::ProgramBundle,
     effect_facts: crate::Sema::SemIndexEffectFacts,
+    checked_nominals: std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
     program_value: Option<crate::Comptime::CtValue>,
     lints: Vec<Diagnostic>,
     build_index: Option<usize>,
@@ -3730,7 +3741,7 @@ fn prepare_build_front_end_on_compiler_stack(
     // Build code is compiler-host code. Target restrictions apply only after
     // the selected runtime program replaces it.
     let mut sema_span = crate::Trace::span("sema.check");
-    let (diags, effect_facts) = if build_index.is_some() {
+    let (diags, effect_facts, checked_nominals) = if build_index.is_some() {
         crate::Sema::check_bundle_with_effect_facts_for_build(&mut bundle, compile_mode)
     } else {
         crate::Sema::check_bundle_with_effect_facts(&mut bundle, compile_mode)
@@ -3760,6 +3771,7 @@ fn prepare_build_front_end_on_compiler_stack(
         inputs,
         bundle,
         effect_facts,
+        checked_nominals,
         program_value: None,
         lints,
         build_index,
@@ -3789,6 +3801,7 @@ fn compile_build_from_front_end(
         inputs: _,
         mut bundle,
         effect_facts,
+        checked_nominals,
         program_value,
         mut lints,
         build_index,
@@ -4382,24 +4395,30 @@ fn compile_build_from_front_end(
     } else {
         None
     };
+    let mut runtime_checked_nominals = if !project_check && build_run.is_none() {
+        Some(checked_nominals)
+    } else {
+        None
+    };
     if project_check || (build_run.is_some() && options.execute) {
         let mut sema_span = crate::Trace::span("sema.check");
-        let (planned_diags, planned_facts) = if options.no_os {
-            let (diags, facts) =
+        let (planned_diags, planned_facts, planned_nominals) = if options.no_os {
+            let (diags, facts, nominals) =
                 crate::Sema::check_bundle_no_os_with_effect_facts(&mut bundle, compile_mode);
-            (diags, Some(facts))
+            (diags, Some(facts), nominals)
         } else if !options.gates.is_empty() {
-            let (diags, facts) = crate::Sema::check_bundle_gates_with_effect_facts(
+            let (diags, facts, nominals) = crate::Sema::check_bundle_gates_with_effect_facts(
                 &mut bundle,
                 compile_mode,
                 options.gates,
             );
-            (diags, Some(facts))
+            (diags, Some(facts), nominals)
         } else {
-            let (diags, facts) =
+            let (diags, facts, nominals) =
                 crate::Sema::check_bundle_with_effect_facts(&mut bundle, compile_mode);
-            (diags, Some(facts))
+            (diags, Some(facts), nominals)
         };
+        runtime_checked_nominals = Some(planned_nominals);
         sema_span.items(bundle.modules.len());
         drop(sema_span);
         let planned_diags = match planned_facts.as_ref() {
@@ -4480,6 +4499,7 @@ fn compile_build_from_front_end(
             runtime: Some(bundle),
             build_facts,
             runtime_effect_facts,
+            runtime_checked_nominals,
         });
     }
     if !options.execute {
@@ -4506,6 +4526,7 @@ fn compile_build_from_front_end(
             runtime: None,
             build_facts: bundle.build_facts.clone(),
             runtime_effect_facts: None,
+            runtime_checked_nominals: None,
         });
     }
 
@@ -4547,6 +4568,7 @@ fn compile_build_from_front_end(
             runtime: Some(bundle),
             build_facts,
             runtime_effect_facts,
+            runtime_checked_nominals,
         });
     }
     let plugin_name = if options.plugin_target {
@@ -4566,7 +4588,9 @@ fn compile_build_from_front_end(
         Some(name) => request.with_name(name),
         None => request,
     };
-    let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
+    let (mir, artifact) = lower_checked_mir_program_for(
+        &bundle, runtime_checked_nominals.as_deref().expect("runtime check precedes codegen"), request,
+    );
     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
     execution.ffi = ffi.as_ref();
     execution.release_devtools_policy =
@@ -4641,6 +4665,7 @@ fn compile_build_from_front_end(
         runtime: Some(bundle),
         build_facts,
         runtime_effect_facts,
+        runtime_checked_nominals,
     })
 }
 
@@ -4650,6 +4675,7 @@ fn compile_build_from_front_end(
 /// those of the native arm of `compile_build_from_front_end`.
 pub fn emit_native_rust_for_checked_bundle(
     bundle: &crate::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     profile: &str,
     ffi: Option<&crate::FFI::FfiLink>,
 ) -> String {
@@ -4661,7 +4687,7 @@ pub fn emit_native_rust_for_checked_bundle(
         false,
         false,
     );
-    let (mir, artifact) = lower_checked_mir_program_for(bundle, request);
+    let (mir, artifact) = lower_checked_mir_program_for(bundle, checked_nominals, request);
     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
     execution.ffi = ffi;
     execution.release_devtools_policy = release_devtools_policy_for_bundle(bundle, profile);
@@ -6606,16 +6632,18 @@ fn mir_artifact_request_for_build(
 
 fn lower_checked_mir_program_for(
     bundle: &crate::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     request: jet_foundation::MIR::MirArtifactRequest,
 ) -> (
     jet_foundation::MIR::MirProgram,
     jet_foundation::MIR::MirArtifactId,
 ) {
-    lower_checked_mir_program_for_with_debug(bundle, request, false)
+    lower_checked_mir_program_for_with_debug(bundle, checked_nominals, request, false)
 }
 
 fn lower_checked_mir_program_for_with_debug(
     bundle: &crate::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     request: jet_foundation::MIR::MirArtifactRequest,
     debug_linemap: bool,
 ) -> (
@@ -6626,6 +6654,7 @@ fn lower_checked_mir_program_for_with_debug(
     let (mir, artifact) =
         crate::Codegen::TIR::lower_checked_mir_program_for_with_debug(
             bundle,
+            checked_nominals,
             request,
             debug_linemap,
         )
@@ -6731,6 +6760,7 @@ pub fn check_bundle_path_with_source_closure_for_artifact(
         crate::AST::ProgramBundle,
         Vec<Diagnostic>,
         Option<crate::FFI::FfiLink>,
+        std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
     ),
     Vec<Diagnostic>,
 > {
@@ -6779,6 +6809,7 @@ fn check_bundle_for_artifact_on_compiler_stack(
         crate::AST::ProgramBundle,
         Vec<Diagnostic>,
         Option<crate::FFI::FfiLink>,
+        std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
     ),
     Vec<Diagnostic>,
 > {
@@ -6818,7 +6849,7 @@ fn check_bundle_for_artifact_on_compiler_stack(
         explicit_output
     };
     let mut sema_span = crate::Trace::span("sema.check");
-    let (diags, effect_facts) = if let Some(output) = runnable_output {
+    let (diags, effect_facts, checked_nominals) = if let Some(output) = runnable_output {
         crate::Sema::check_bundle_for_output_opts_with_effect_facts(
             &mut bundle,
             mode,
@@ -6855,7 +6886,7 @@ fn check_bundle_for_artifact_on_compiler_stack(
         }
         None => crate::FFI::prepare(&bundle),
     }?;
-    Ok((bundle, lints, ffi))
+    Ok((bundle, lints, ffi, checked_nominals))
 }
 
 fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
@@ -6878,7 +6909,7 @@ fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
     source_closure: Option<&[(std::path::PathBuf, String)]>,
     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Result<(crate::CompileOutput, crate::AST::ProgramBundle), Vec<Diagnostic>> {
-    let (mut bundle, lints, ffi) = check_bundle_for_artifact_on_compiler_stack(
+    let (mut bundle, lints, ffi, checked_nominals) = check_bundle_for_artifact_on_compiler_stack(
         file,
         mode,
         no_os,
@@ -6935,7 +6966,7 @@ fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
         request
     };
     let (mir, artifact) =
-        lower_checked_mir_program_for_with_debug(&bundle, request, debug_linemap);
+        lower_checked_mir_program_for_with_debug(&bundle, &checked_nominals, request, debug_linemap);
     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
     execution.ffi = ffi.as_ref();
     execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile);
@@ -7167,7 +7198,7 @@ fn compile_src_on_compiler_stack(
         Ok(c) => c,
         Err(diags) => return Err(diags),
     };
-    let diags = crate::Sema::check_bundle(&mut bundle, mode);
+    let (diags, _facts, checked_nominals) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
     let mut errors = Vec::new();
     let mut lints = Vec::new();
     for d in diags {
@@ -7190,7 +7221,7 @@ fn compile_src_on_compiler_stack(
     };
     let request =
         mir_artifact_request_for_build(&bundle, mode, "dev", options.web_target, false, false);
-    let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
+    let (mir, artifact) = lower_checked_mir_program_for(&bundle, &checked_nominals, request);
     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
     execution.ffi = ffi.as_ref();
     execution.emit_types = true;
@@ -7250,7 +7281,7 @@ pub fn check_file(
     overlay: Option<(&Path, &str)>,
     is_lsp: bool,
 ) -> (Vec<Diagnostic>, Option<crate::AST::ProgramBundle>) {
-    let (diags, bundle, _facts) = check_file_with_effect_facts(file, overlay, is_lsp);
+    let (diags, bundle, _facts, _nominals) = check_file_with_effect_facts(file, overlay, is_lsp);
     (diags, bundle)
 }
 
@@ -7263,6 +7294,7 @@ pub fn check_file_with_effect_facts(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     check_file_with_effect_facts_and_settings(file, overlay, is_lsp, &BTreeMap::new())
 }
@@ -7276,6 +7308,7 @@ pub fn check_file_with_effect_facts_and_settings(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     check_file_with_effect_facts_profile_and_settings(
         file,
@@ -7297,6 +7330,7 @@ pub fn check_file_with_effect_facts_profile(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     check_file_with_effect_facts_profile_and_settings(
         file,
@@ -7317,9 +7351,10 @@ pub fn check_file_with_effect_facts_profile_and_settings(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
-    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+    let (diagnostics, bundle, facts, checked_nominals, _) = check_file_with_effect_facts_impl(
         file,
         &overlays,
         is_lsp,
@@ -7329,7 +7364,7 @@ pub fn check_file_with_effect_facts_profile_and_settings(
         setting_overrides,
         None,
     );
-    (diagnostics, bundle, facts)
+    (diagnostics, bundle, facts, checked_nominals)
 }
 
 pub fn check_file_with_effect_facts_profile_and_settings_with_source_closure(
@@ -7341,12 +7376,13 @@ pub fn check_file_with_effect_facts_profile_and_settings_with_source_closure(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     let overlays = source_closure
         .iter()
         .map(|(path, source)| (path.as_path(), source.as_str()))
         .collect::<Vec<_>>();
-    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+    let (diagnostics, bundle, facts, checked_nominals, _) = check_file_with_effect_facts_impl(
         file,
         &overlays,
         false,
@@ -7356,7 +7392,7 @@ pub fn check_file_with_effect_facts_profile_and_settings_with_source_closure(
         setting_overrides,
         None,
     );
-    (diagnostics, bundle, facts)
+    (diagnostics, bundle, facts, checked_nominals)
 }
 /// Like `check_file_with_effect_facts_profile`, but retain Run-mode Output
 /// selection facts for read-only tooling that explains the selected Output.
@@ -7368,6 +7404,7 @@ pub fn check_file_with_effect_facts_for_run(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     check_file_with_effect_facts_for_run_and_entry(file, profile, setting_overrides, None)
 }
@@ -7381,10 +7418,10 @@ pub fn check_file_with_effect_facts_for_run_and_entry(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
-    let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl_for_run(file, profile, setting_overrides, entry_fn);
-    (diagnostics, bundle, facts)
+    let (diagnostics, bundle, facts, checked_nominals, _) = check_file_with_effect_facts_impl_for_run(file, profile, setting_overrides, entry_fn);
+    (diagnostics, bundle, facts, checked_nominals)
 }
 /// Run-mode effect check for an entry whose source is supplied by an in-memory
 /// overlay. The overlay is authoritative for the entry while ordinary imports
@@ -7399,16 +7436,17 @@ pub fn check_file_with_effect_facts_for_run_and_entry_with_overlay(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
-    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl_for_run_with_overlays(
+    let (diagnostics, bundle, facts, checked_nominals, _) = check_file_with_effect_facts_impl_for_run_with_overlays(
         file,
         &overlays,
         profile,
         setting_overrides,
         entry_fn,
     );
-    (diagnostics, bundle, facts)
+    (diagnostics, bundle, facts, checked_nominals)
 }
 
 pub fn check_file_with_effect_facts_for_run_and_entry_with_source_closure(
@@ -7421,19 +7459,20 @@ pub fn check_file_with_effect_facts_for_run_and_entry_with_source_closure(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     let overlays = source_closure
         .iter()
         .map(|(path, source)| (path.as_path(), source.as_str()))
         .collect::<Vec<_>>();
-    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl_for_run_with_overlays(
+    let (diagnostics, bundle, facts, checked_nominals, _) = check_file_with_effect_facts_impl_for_run_with_overlays(
         file,
         &overlays,
         profile,
         setting_overrides,
         entry_fn,
     );
-    (diagnostics, bundle, facts)
+    (diagnostics, bundle, facts, checked_nominals)
 }
 
 /// Resolve and snapshot every module in one entry closure.
@@ -7456,6 +7495,7 @@ pub fn load_immutable_source_closure(
 pub struct CheckedSourceBundle {
     pub bundle: crate::AST::ProgramBundle,
     pub effect_facts: crate::Sema::SemIndexEffectFacts,
+    pub checked_nominals: std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
     pub project_root: std::path::PathBuf,
     pub source_closure: Vec<(std::path::PathBuf, String)>,
 }
@@ -7464,6 +7504,7 @@ impl CheckedSourceBundle {
     pub fn new(
         bundle: crate::AST::ProgramBundle,
         effect_facts: crate::Sema::SemIndexEffectFacts,
+        checked_nominals: std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
     ) -> Self {
         let project_root = bundle.project_root.clone();
         let mut source_closure = bundle
@@ -7476,6 +7517,7 @@ impl CheckedSourceBundle {
         Self {
             bundle,
             effect_facts,
+            checked_nominals,
             project_root,
             source_closure,
         }
@@ -7498,14 +7540,14 @@ pub fn check_file_with_checked_source_bundle_for_run_and_entry(
     setting_overrides: &BTreeMap<String, String>,
     entry_fn: Option<&str>,
 ) -> (Vec<Diagnostic>, Option<CheckedSourceBundle>) {
-    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl_for_run_with_overlays(
+    let (diagnostics, bundle, facts, checked_nominals, _) = check_file_with_effect_facts_impl_for_run_with_overlays(
         file,
         overlays,
         profile,
         setting_overrides,
         entry_fn,
     );
-    let checked = bundle.map(|bundle| CheckedSourceBundle::new(bundle, facts));
+    let checked = bundle.map(|bundle| CheckedSourceBundle::new(bundle, facts, checked_nominals));
     (diagnostics, checked)
 }
 
@@ -7518,8 +7560,9 @@ pub fn check_file_with_effect_facts_for_output(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
-    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+    let (diagnostics, bundle, facts, checked_nominals, _) = check_file_with_effect_facts_impl(
         file,
         &[],
         false,
@@ -7529,7 +7572,7 @@ pub fn check_file_with_effect_facts_for_output(
         setting_overrides,
         Some(output),
     );
-    (diagnostics, bundle, facts)
+    (diagnostics, bundle, facts, checked_nominals)
 }
 /// Output-selection effect check from an entry source overlay.
 ///
@@ -7545,9 +7588,10 @@ pub fn check_file_with_effect_facts_for_output_with_overlay(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
-    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+    let (diagnostics, bundle, facts, checked_nominals, _) = check_file_with_effect_facts_impl(
         file,
         &overlays,
         false,
@@ -7557,7 +7601,7 @@ pub fn check_file_with_effect_facts_for_output_with_overlay(
         setting_overrides,
         Some(output),
     );
-    (diagnostics, bundle, facts)
+    (diagnostics, bundle, facts, checked_nominals)
 }
 
 pub fn check_file_with_effect_facts_for_output_with_source_closure(
@@ -7570,12 +7614,13 @@ pub fn check_file_with_effect_facts_for_output_with_source_closure(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     let overlays = source_closure
         .iter()
         .map(|(path, source)| (path.as_path(), source.as_str()))
         .collect::<Vec<_>>();
-    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+    let (diagnostics, bundle, facts, checked_nominals, _) = check_file_with_effect_facts_impl(
         file,
         &overlays,
         false,
@@ -7585,7 +7630,7 @@ pub fn check_file_with_effect_facts_for_output_with_source_closure(
         setting_overrides,
         Some(output),
     );
-    (diagnostics, bundle, facts)
+    (diagnostics, bundle, facts, checked_nominals)
 }
 
 pub fn check_file_with_effect_facts_incremental(
@@ -7597,9 +7642,10 @@ pub fn check_file_with_effect_facts_incremental(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
-    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+    let (diagnostics, bundle, facts, checked_nominals, _) = check_file_with_effect_facts_impl(
         file,
         &overlays,
         is_lsp,
@@ -7609,7 +7655,7 @@ pub fn check_file_with_effect_facts_incremental(
         &BTreeMap::new(),
         None,
     );
-    (diagnostics, bundle, facts)
+    (diagnostics, bundle, facts, checked_nominals)
 }
 
 pub fn check_file_with_effect_facts_incremental_overlays(
@@ -7621,6 +7667,7 @@ pub fn check_file_with_effect_facts_incremental_overlays(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
     Vec<std::path::PathBuf>,
 ) {
     check_file_with_effect_facts_impl(
@@ -7652,10 +7699,11 @@ pub fn check_file_with_hot_swap_incremental(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
     Option<jet_foundation::HotSwap::HotSwapDecision>,
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
-    let (diagnostics, bundle, facts, decision, _) = check_file_with_hot_swap_incremental_overlays(
+    let (diagnostics, bundle, facts, checked_nominals, decision, _) = check_file_with_hot_swap_incremental_overlays(
         old,
         file,
         &overlays,
@@ -7663,7 +7711,7 @@ pub fn check_file_with_hot_swap_incremental(
         module_name,
         cache,
     );
-    (diagnostics, bundle, facts, decision)
+    (diagnostics, bundle, facts, checked_nominals, decision)
 }
 
 /// Overlay-aware form of [`check_file_with_hot_swap_incremental`].
@@ -7678,12 +7726,12 @@ pub fn check_file_with_hot_swap_incremental_overlays(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
     Option<jet_foundation::HotSwap::HotSwapDecision>,
     Vec<std::path::PathBuf>,
 ) {
     cache.clear_measurement();
-    let (mut diagnostics, bundle, facts, source_closure) =
-        check_file_with_effect_facts_incremental_overlays(file, overlays, is_lsp, cache);
+    let (mut diagnostics, bundle, facts, checked_nominals, source_closure) = check_file_with_effect_facts_incremental_overlays(file, overlays, is_lsp, cache);
     let rechecked_items = cache.stats().recomputed_items;
     let decision =
         bundle.as_ref().and_then(|new| {
@@ -7695,7 +7743,7 @@ pub fn check_file_with_hot_swap_incremental_overlays(
                 }
             }
         });
-    (diagnostics, bundle, facts, decision, source_closure)
+    (diagnostics, bundle, facts, checked_nominals, decision, source_closure)
 }
 
 pub(crate) fn check_file_with_effect_facts_incremental_overlays_prepared(
@@ -7708,6 +7756,7 @@ pub(crate) fn check_file_with_effect_facts_incremental_overlays_prepared(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
     Vec<std::path::PathBuf>,
 ) {
     check_file_with_effect_facts_impl(
@@ -7735,6 +7784,7 @@ fn check_file_with_effect_facts_impl(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
     Vec<std::path::PathBuf>,
 ) {
     crate::run_compiler_work(|| {
@@ -7761,6 +7811,7 @@ fn check_file_with_effect_facts_impl_for_run(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
     Vec<std::path::PathBuf>,
 ) {
     check_file_with_effect_facts_impl_for_run_with_overlays(
@@ -7782,6 +7833,7 @@ fn check_file_with_effect_facts_impl_for_run_with_overlays(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
     Vec<std::path::PathBuf>,
 ) {
     crate::run_compiler_work(|| {
@@ -7814,6 +7866,7 @@ fn check_file_on_compiler_stack(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
     Vec<std::path::PathBuf>,
 ) {
     check_file_on_compiler_stack_with_entry(
@@ -7845,6 +7898,7 @@ fn check_file_on_compiler_stack_with_entry(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
     Vec<std::path::PathBuf>,
 ) {
     let (loaded, dependencies, loader_diagnostics) = match prepared_frontend {
@@ -7871,13 +7925,14 @@ fn check_file_on_compiler_stack_with_entry(
                     diags,
                     None,
                     crate::Sema::SemIndexEffectFacts::default(),
+                    std::sync::Arc::from([]),
                     dependencies,
                 );
             }
             if let Some(entry_fn) = entry_fn {
                 swap_entry_point(&mut bundle, entry_fn);
             }
-            let (check_diags, facts) = if let Some(output) = explicit_output {
+            let (check_diags, facts, checked_nominals) = if let Some(output) = explicit_output {
                 crate::Sema::check_bundle_for_output_opts_with_effect_facts(
                     &mut bundle,
                     crate::Sema::CompileMode::Run,
@@ -7920,11 +7975,11 @@ fn check_file_on_compiler_stack_with_entry(
             diags.extend(extension_diags);
             let diags = match apply_package_effect_budget(&bundle, &facts, diags) {
                 Ok(diags) => diags,
-                Err(diags) => return (diags, None, facts, dependencies),
+                Err(diags) => return (diags, None, facts, checked_nominals, dependencies),
             };
             match apply_package_lint_policy(&bundle, diags) {
-                Ok(diags) => (diags, Some(bundle), facts, dependencies),
-                Err(diags) => (diags, None, facts, dependencies),
+                Ok(diags) => (diags, Some(bundle), facts, checked_nominals, dependencies),
+                Err(diags) => (diags, None, facts, checked_nominals, dependencies),
             }
         }
         Err(diags) => {
@@ -7934,7 +7989,7 @@ fn check_file_on_compiler_stack_with_entry(
                     facts.name_ledger.record_structure_fact(fact);
                 }
             }
-            (diags, None, facts, dependencies)
+            (diags, None, facts, std::sync::Arc::from([]), dependencies)
         }
     }
 }
@@ -7949,8 +8004,9 @@ pub fn check_file_with_overlays(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
-    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+    let (diagnostics, bundle, facts, checked_nominals, _) = check_file_with_effect_facts_impl(
         file,
         overlays,
         is_lsp,
@@ -7960,7 +8016,7 @@ pub fn check_file_with_overlays(
         &BTreeMap::new(),
         None,
     );
-    (diagnostics, bundle, facts)
+    (diagnostics, bundle, facts, checked_nominals)
 }
 
 /// Structural tools check a staged file in its actual output directory and
@@ -7973,6 +8029,7 @@ pub fn check_file_with_overlays_and_import_root(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     crate::run_compiler_work(|| check_file_with_import_root_on_compiler_stack(file, overlays))
 }
@@ -7984,15 +8041,16 @@ fn check_file_with_import_root_on_compiler_stack(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     match crate::Loader::load_entry_with_overlays_and_import_root(file, overlays, false) {
         Ok(mut bundle) => {
             let mut diags = std::mem::take(&mut bundle.parse_teaching);
             if let Err(fact_diags) = seed_build_facts(&mut bundle, "dev", false, &BTreeMap::new()) {
                 diags.extend(fact_diags);
-                return (diags, None, crate::Sema::SemIndexEffectFacts::default());
+                return (diags, None, crate::Sema::SemIndexEffectFacts::default(), std::sync::Arc::from([]));
             }
-            let (check_diags, facts) = crate::Sema::check_bundle_with_effect_facts(
+            let (check_diags, facts, checked_nominals) = crate::Sema::check_bundle_with_effect_facts(
                 &mut bundle,
                 crate::Sema::CompileMode::Check,
             );
@@ -8002,14 +8060,14 @@ fn check_file_with_import_root_on_compiler_stack(
             diags.extend(extension_diags);
             let diags = match apply_package_effect_budget(&bundle, &facts, diags) {
                 Ok(diags) => diags,
-                Err(diags) => return (diags, None, facts),
+                Err(diags) => return (diags, None, facts, checked_nominals),
             };
             match apply_package_lint_policy(&bundle, diags) {
-                Ok(diags) => (diags, Some(bundle), facts),
-                Err(diags) => (diags, None, facts),
+                Ok(diags) => (diags, Some(bundle), facts, checked_nominals),
+                Err(diags) => (diags, None, facts, checked_nominals),
             }
         }
-        Err(diags) => (diags, None, crate::Sema::SemIndexEffectFacts::default()),
+        Err(diags) => (diags, None, crate::Sema::SemIndexEffectFacts::default(), std::sync::Arc::from([])),
     }
 }
 
@@ -8024,6 +8082,7 @@ pub fn check_eval_with_effect_facts(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     crate::run_compiler_work(|| check_eval_on_compiler_stack(src, file))
 }
@@ -8035,6 +8094,7 @@ fn check_eval_on_compiler_stack(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     let source_for_parse = match crate::Package::mask_inline_package_source(src) {
         Ok((masked, _)) => masked,
@@ -8043,16 +8103,17 @@ fn check_eval_on_compiler_stack(
                 vec![error.diagnostic()],
                 None,
                 crate::Sema::SemIndexEffectFacts::default(),
+                std::sync::Arc::from([]),
             );
         }
     };
     let (toks, lex_diags) = crate::Lexer::lex(&source_for_parse);
     if !lex_diags.is_empty() {
-        return (lex_diags, None, crate::Sema::SemIndexEffectFacts::default());
+        return (lex_diags, None, crate::Sema::SemIndexEffectFacts::default(), std::sync::Arc::from([]));
     }
     let mut prog = match crate::Parser::parse_with_source(&toks, &source_for_parse) {
         Ok(p) => p,
-        Err(ds) => return (ds, None, crate::Sema::SemIndexEffectFacts::default()),
+        Err(ds) => return (ds, None, crate::Sema::SemIndexEffectFacts::default(), std::sync::Arc::from([])),
     };
     let mut bundle = crate::AST::ProgramBundle {
         entry: 0,
@@ -8099,20 +8160,20 @@ fn check_eval_on_compiler_stack(
         edition: crate::Manifest::latest_edition().to_string(),
     };
     if let Err(diags) = crate::Foreign::assemble_active_namespaces(&mut bundle) {
-        return (diags, None, crate::Sema::SemIndexEffectFacts::default());
+        return (diags, None, crate::Sema::SemIndexEffectFacts::default(), std::sync::Arc::from([]));
     }
     bundle.cffi = match crate::CFFI::assemble(&mut bundle) {
         Ok(c) => c,
-        Err(diags) => return (diags, None, crate::Sema::SemIndexEffectFacts::default()),
+        Err(diags) => return (diags, None, crate::Sema::SemIndexEffectFacts::default(), std::sync::Arc::from([])),
     };
-    let (diags, facts) =
+    let (diags, facts, checked_nominals) =
         crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Eval);
-    (diags, Some(bundle), facts)
+    (diags, Some(bundle), facts, checked_nominals)
 }
 
 /// Check-only from source text (eval mode). Returns only error-severity diagnostics.
 pub fn check_eval(src: &str, file: &str) -> Vec<Diagnostic> {
-    let (diags, _, _) = check_eval_with_effect_facts(src, file);
+    let (diags, _, _, _) = check_eval_with_effect_facts(src, file);
     diags
         .into_iter()
         .filter(|d| d.severity == Severity::Error)
@@ -8151,7 +8212,7 @@ fn compile_tests_on_compiler_stack(
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
     seed_build_facts(&mut bundle, profile, false, setting_overrides)?;
     let mode = crate::Sema::CompileMode::Test;
-    let diags = crate::Sema::check_bundle(&mut bundle, mode);
+    let (diags, _facts, checked_nominals) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let lints = classify_diagnostics(
         &bundle,
@@ -8172,7 +8233,7 @@ fn compile_tests_on_compiler_stack(
         jet_foundation::MIR::MirArtifactKind::TestExecutable,
         build_mode,
     );
-    let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
+    let (mir, artifact) = lower_checked_mir_program_for(&bundle, &checked_nominals, request);
     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
     execution.ffi = ffi.as_ref();
     execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile);
@@ -8289,7 +8350,7 @@ fn compile_fuzz_on_compiler_stack(
 ) -> Result<(String, Option<crate::FFI::FfiLink>), FuzzCompileError> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)
         .map_err(FuzzCompileError::Diagnostics)?;
-    let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Test);
+    let (diags, _facts, checked_nominals) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Test);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let _lints = classify_diagnostics(
         &bundle,
@@ -8309,7 +8370,7 @@ fn compile_fuzz_on_compiler_stack(
         jet_foundation::MIR::MirArtifactBuildMode::Fuzz,
     )
     .with_name(selected_name);
-    let (mir, artifact) = crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
+    let (mir, artifact) = crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, &checked_nominals, request)
         .unwrap_or_else(|error| jet_foundation::ice!(Some(error.span), "{error}"));
     mir.validate().unwrap_or_else(|error| {
         jet_foundation::ice!(None, "canonical MIR validation failed: {error}")
@@ -8373,7 +8434,7 @@ fn compile_bundle_path_with_entry_on_compiler_stack(
     seed_build_facts(&mut bundle, profile, false, setting_overrides)?;
     swap_entry_point(&mut bundle, entry_fn);
     let mode = crate::Sema::CompileMode::Run;
-    let (diags, effect_facts) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
+    let (diags, effect_facts, checked_nominals) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
     let extension_diags =
         crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, Some(&effect_facts), &diags);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
@@ -8384,7 +8445,7 @@ fn compile_bundle_path_with_entry_on_compiler_stack(
     };
     // D-OSTARGET1=A: `jet dev`'s entry-swap path never cross-compiles — host OS.
     let request = mir_artifact_request_for_build(&bundle, mode, profile, false, false, false);
-    let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
+    let (mir, artifact) = lower_checked_mir_program_for(&bundle, &checked_nominals, request);
     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
     execution.ffi = ffi.as_ref();
     execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile);
@@ -8494,6 +8555,7 @@ fn job_argument_record(
         span: zero,
         is_pub: false,
         is_package_pub: false,
+        compiler_builtin_error: false,
         name: jet_foundation::Names::mangle_generated(&format!("job_args_{}", target.name)),
         name_span: zero,
         type_params: Vec::new(),
@@ -8728,7 +8790,7 @@ fn compile_test_override_on_compiler_stack(
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
     seed_build_facts(&mut bundle, profile, false, setting_overrides)?;
     let mode = crate::Sema::CompileMode::TestOverride;
-    let diags = crate::Sema::check_bundle(&mut bundle, mode);
+    let (diags, _facts, checked_nominals) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let lints = classify_diagnostics(
         &bundle,
@@ -8749,7 +8811,7 @@ fn compile_test_override_on_compiler_stack(
         jet_foundation::MIR::MirArtifactKind::TestOverride,
         build_mode,
     );
-    let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
+    let (mir, artifact) = lower_checked_mir_program_for(&bundle, &checked_nominals, request);
     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
     execution.ffi = ffi.as_ref();
     execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile);

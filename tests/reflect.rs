@@ -57,7 +57,7 @@ fn arithmetic_policy_is_visible_in_function_reflection() {
         "#Arithmetic(.Wrapping)\npub fn wrapped(value: U8) -> U8 { return value + U8{1} }\nfn run() {}\n",
     )
     .unwrap();
-    let (diagnostics, bundle, effect_facts) =
+    let (diagnostics, bundle, effect_facts, _) =
         jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let bundle = bundle.expect("checked bundle");
@@ -113,7 +113,7 @@ fn run() {}
 "#,
     )
     .unwrap();
-    let (diagnostics, bundle, _) =
+    let (diagnostics, bundle, _, _) =
         jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let bundle = bundle.expect("checked bundle");
@@ -339,6 +339,7 @@ fn type_info_exposes_methods_type_params_and_markers() {
         span: span(),
         is_pub: true,
         is_package_pub: false,
+        compiler_builtin_error: false,
         name: "Box".to_string(),
         name_span: span(),
         type_params: vec![TypeParam {
@@ -418,6 +419,7 @@ fn field_info_carries_visibility() {
         span: span(),
         is_pub: true,
         is_package_pub: false,
+        compiler_builtin_error: false,
         name: "Secret".to_string(),
         name_span: span(),
         type_params: Vec::new(),
@@ -474,6 +476,7 @@ fn marker_arguments_are_typed_in_the_written_view() {
         span: span(),
         is_pub: true,
         is_package_pub: false,
+        compiler_builtin_error: false,
         name: "Hot".to_string(),
         name_span: span(),
         type_params: Vec::new(),
@@ -628,6 +631,7 @@ fn registered_type_planes_reflect_as_typed_values() {
         span: span(),
         is_pub: true,
         is_package_pub: false,
+        compiler_builtin_error: false,
         name: "Planes".to_string(),
         name_span: span(),
         type_params: Vec::new(),

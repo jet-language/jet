@@ -1,0 +1,168 @@
+// Current native C route ABI, reusing E4 ownership and Unicode/search kernels.
+// Lists return count plus an owned word-column, exactly as CAbiRoutes list_out.
+#Export(c) fn jet_string_copy(value: I64) -> I64 { jet_rt_string_clone(value) }
+#Export(c) fn jet_string_count_bytes(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_len(value)) }
+
+#Export(c) fn jet_string_chars(value: I64, output: I64) -> I64 {
+    count :: jet_char_len(value)
+    if (count > I64{1152921504606846975}) {
+        rt_text_capacity_stop()
+        return I64{0}
+    }
+    words :: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{8}, I64{8})
+    rt_text_store(output, words)
+    bytes :: rt_text_data(value)
+    length :: rt_text_len(value)
+    at := I64{0}
+    index := I64{0}
+    loop at < length {
+        rt_text_store(words + index * I64{8}, rt_text_decode(bytes + at))
+        at += rt_text_width(bytes + at)
+        index += I64{1}
+    }
+    count
+}
+
+#Export(c) fn jet_string_lines(value: I64, output: I64) -> I64 {
+    // Rust str::lines: LF terminates, one preceding CR is removed; a trailing
+    // LF has no extra empty line. A bare final CR is ordinary text.
+    bytes :: rt_text_data(value)
+    length :: rt_text_len(value)
+    count := I64{0}
+    at := I64{0}
+    loop at < length {
+        if (rt_text_byte(bytes + at) == I64{10}) { count += I64{1} }
+        at += I64{1}
+    }
+    if (length != I64{0} && rt_text_byte(bytes + length - I64{1}) != I64{10}) { count += I64{1} }
+    if (count > I64{1152921504606846975}) {
+        rt_text_capacity_stop()
+        return I64{0}
+    }
+    words :: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{8}, I64{8})
+    rt_text_store(output, words)
+    start := I64{0}
+    index := I64{0}
+    at = I64{0}
+    loop at < length {
+        if (rt_text_byte(bytes + at) == I64{10}) {
+            end :: if (at > start && rt_text_byte(bytes + at - I64{1}) == I64{13}) -> at - I64{1} else -> at
+            rt_text_store(words + index * I64{8}, rt_text_slice(value, start, end))
+            index += I64{1}
+            start = at + I64{1}
+        }
+        at += I64{1}
+    }
+    if (start < length) { rt_text_store(words + index * I64{8}, rt_text_slice(value, start, length)) }
+    count
+}
+
+#Export(c) fn jet_string_repeat(value: I64, count: I64) -> I64 {
+    length :: rt_text_len(value)
+    native :: jet_int_owned_to_i64(count)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    times :: if (native < I64{0}) -> I64{0} else -> native
+    if (times == I64{0} || length == I64{0}) { return rt_text_builder_with_capacity(I64{0}) }
+    if (times > I64{9223372036854775807} /% length) {
+        rt_text_capacity_stop()
+        return I64{0}
+    }
+    total :: length * times
+    result :: rt_text_builder_with_capacity(total)
+    data :: rt_text_data(result)
+    rt_text_bytes_copy(data, rt_text_data(value), length)
+    filled := length
+    // Doubling copies already initialized bytes, avoiding per-repeat dispatch.
+    loop filled < total {
+        chunk :: if (filled < total - filled) -> filled else -> total - filled
+        rt_text_bytes_copy(data + filled, data, chunk)
+        filled += chunk
+    }
+    rt_text_store(result + I64{8}, total)
+    result
+}
+
+#Export(c) fn jet_string_replace(value: I64, from: I64, to: I64) -> I64 {
+    length :: rt_text_len(value)
+    width :: rt_text_len(from)
+    replacement :: rt_text_len(to)
+    matches := I64{0}
+    at := I64{0}
+    if (width == I64{0}) {
+        matches = jet_char_len(value) + I64{1}
+    } else {
+        loop at <= length {
+            found :: rt_text_find(value, from, at, false)
+            if (found < I64{0}) { break }
+            matches += I64{1}
+            at = found + width
+        }
+    }
+    if (matches == I64{0}) { return jet_rt_string_clone(value) }
+    remaining :: length - matches * width
+    if (replacement != I64{0} && matches > (I64{9223372036854775807} - remaining) /% replacement) {
+        rt_text_capacity_stop()
+        return I64{0}
+    }
+    result :: rt_text_builder_with_capacity(remaining + matches * replacement)
+    at = I64{0}
+    if (width == I64{0}) {
+        rt_text_append(result, rt_text_data(to), replacement)
+        loop at < length {
+            scalar :: rt_text_width(rt_text_data(value) + at)
+            rt_text_append(result, rt_text_data(value) + at, scalar)
+            rt_text_append(result, rt_text_data(to), replacement)
+            at += scalar
+        }
+    } else {
+        loop at <= length {
+            found :: rt_text_find(value, from, at, false)
+            if (found < I64{0}) { break }
+            rt_text_append(result, rt_text_data(value) + at, found - at)
+            rt_text_append(result, rt_text_data(to), replacement)
+            at = found + width
+        }
+        rt_text_append(result, rt_text_data(value) + at, length - at)
+    }
+    result
+}
+
+fn rt_text_ascii(value: I64, upper: Bool) -> I64 {
+    result :: jet_rt_string_clone(value)
+    data :: rt_text_data(result)
+    length :: rt_text_len(result)
+    at := I64{0}
+    loop at < length {
+        byte :: rt_text_byte(data + at)
+        if (upper && byte >= I64{97} && byte <= I64{122}) { rt_text_put(data + at, byte - I64{32}) }
+        if (!upper && byte >= I64{65} && byte <= I64{90}) { rt_text_put(data + at, byte + I64{32}) }
+        at += I64{1}
+    }
+    result
+}
+
+#Export(c) fn jet_text_ascii_lower(value: I64) -> I64 { rt_text_ascii(value, false) }
+#Export(c) fn jet_text_ascii_upper(value: I64) -> I64 { rt_text_ascii(value, true) }
+
+#Export(c) fn jet_string_slice(value: I64, start: I64, end: I64, file: I64, line: I64) -> I64 {
+    // CAbiRoutes fixed::<u32> decodes an exact Int then checks the width.
+    native_line :: jet_int_owned_to_i64(line)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (native_line < I64{0} || native_line > I64{4294967295}) {
+        trap_native_index_range_stop()
+        return I64{0}
+    }
+    first :: jet_int_owned_to_i64(start)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    last :: jet_int_owned_to_i64(end)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_rt_string_slice_range(value, first, last, U8{1}, rt_text_data(file), rt_text_len(file), native_line)
+}
+
+#Export(c) fn jet_string_slice_builtin(value: I64, start: I64, end: I64) -> I64 {
+    first :: jet_int_owned_to_i64(start)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    last :: jet_int_owned_to_i64(end)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    rt_text_slice_range(value, first, last, U8{1}, I64{0}, I64{0}, I64{0}, true)
+}

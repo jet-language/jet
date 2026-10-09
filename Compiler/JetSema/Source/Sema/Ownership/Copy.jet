@@ -219,7 +219,7 @@ fn sema_copy_nominal_declared_types(nominal: SemaRegistrationNominal, bindings: 
                 else -> {}
             }
         }
-        .ForeignHandle(_) -> {}
+        .ForeignHandle(_) | .CompilerBuiltinTrait(_) -> {}
     }
     loop field in nominal.fields -> &types.push(sema_inference_substitute_type_bindings(field.ty, bindings))
     loop variant in nominal.variants {
@@ -410,7 +410,7 @@ fn sema_copy_nominal_facts(
     if nominal.kind == SemaRegistrationNominalKind.ForeignHandle {
         if nominal.source == {
             .ForeignHandle(facts) -> return sema_copy_foreign_handle_facts(nominal, facts)
-            .SourceAST(_) -> return sema_copy_type_facts_known(false, false, false, false, false, false, false)
+            .SourceAST(_) | .CompilerBuiltinTrait(_) -> return sema_copy_type_facts_known(false, false, false, false, false, false, false)
         }
     }
     finished_key :: sema_copy_walk_key(key, actual)

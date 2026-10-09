@@ -109,7 +109,7 @@ pub enum MIRSerdeCodec { Encode Decode }
 
 pub enum MIROperatorMarker { Commutative }
 
-pub enum MIRScopeKind { Unsafe Impure Reactive Shield Region Policy TaskGroup Layout Authority Context Live AssumeDeterministic Transaction ScopeMember DebugOnly }
+pub enum MIRScopeKind { Unsafe Impure Reactive Shield StopCleanup Region Policy TaskGroup Layout Authority Context Live AssumeDeterministic Transaction ScopeMember DebugOnly }
 
 pub enum MIRIndexKind { List FixedListProof Map Lane Pool }
 
@@ -998,6 +998,40 @@ pub struct MIRCaptureParam { pub slot: Int, pub name: String, pub span: Span, pu
 
 pub enum MIRCaptureOperand { Value(value: MIRValueID) Place(place: MIRPlaceID) }
 
+// Retained native roots borrow storage, not the source value's ownership.
+// The producer records the exact checked operation granting access to that
+// owned place; a caller cannot turn a borrowed address into a Move permission.
+pub enum MIRRetainedRootCellAction { Read Write Move Initialize Replace Cleanup }
+
+pub struct MIRRetainedRootCellGrant {
+    pub function: MIRFunctionID
+    pub operation: MIROpID
+    pub place: MIRPlaceID
+    pub action: MIRRetainedRootCellAction
+}
+
+pub struct MIRRetainedRootLivePlace {
+    pub place: MIRPlaceID
+    pub live: MIRPlaceID
+    pub value_type: MIRType
+    pub drop_kind: MIRDropKind
+}
+
+pub struct MIRRetainedRootCellBinding {
+    pub declaration: SymbolID
+    pub ty: MIRType
+    pub place: MIRPlaceID
+    pub capture_value: MIRValueID
+    pub capture_slot: Int
+    pub access: MIRAccess
+    pub ownership: MIROwnership
+    // Root and required projection flags are the original MIR Bool places.
+    // Copy/NoDrop values still have a presence flag, but no destructor action.
+    pub live_places: [MIRRetainedRootLivePlace]
+    pub grants: [MIRRetainedRootCellGrant]
+    pub cleanup_identity: String
+}
+
 pub struct MIRLocal {
     pub id: MIRLocalID
     pub name: String
@@ -1684,6 +1718,15 @@ pub enum MIRBinaryDispatch { Primitive Prelude(call: MIRPreludeCallID, location:
 // bootstrap bridge checks this rule going out and re-derives the mode coming back.
 pub enum MIRBinaryOverflow { Unchecked Trap }
 
+// Trap is the checked policy fact; sema never puts it on a proven-total op.
+pub fn mir_binary_can_trap(op: MIRBinaryOp, overflow: MIRBinaryOverflow) -> Bool Never! {
+    if overflow != .Trap -> return false
+    if op == {
+        .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .Shl | .Shr -> true
+        else -> false
+    }
+}
+
 pub enum MIRConversion { Transparent NumericCast SendFn Prelude(call: MIRPreludeCallID, location: MIRPanicLoc, fallibility: MIRCallFallibility) }
 
 pub struct MIREnumArg { pub field: MIRFieldID?, pub value: MIRValueID, pub boxed: Bool }
@@ -1949,6 +1992,14 @@ pub struct MIRBasicBlock { pub id: MIRBlockID, pub span: Span, pub instructions:
 
 pub struct MIRSwitchArm { pub condition: MIRValueID, pub target: MIRBlockID, pub span: Span }
 
+// Stop points of the unified execution host (#4720; Docs/research/jet-backend-design-2026-10-01.md
+// "Stop points"). `Check` delivers a pending session interrupt where every live
+// value is initialized; `Propagate` directly follows a can-stop operation and
+// reads only a stop that operation already delivered. `resume` continues;
+// `stop` runs canonical cleanup and ends in `Stopped`, which leaves the
+// function with the stop still delivered and no result written.
+pub enum MIRPollKind { Check Propagate }
+
 pub enum MIRTerminator {
     Jump(target: MIRBlockID)
     Branch(condition: MIRValueID, then_target: MIRBlockID, else_target: MIRBlockID)
@@ -1958,6 +2009,8 @@ pub enum MIRTerminator {
     Break(target: MIRBlockID, value: MIRValueID?)
     Continue(target: MIRBlockID)
     Unreachable(reason: String)
+    Poll(kind: MIRPollKind, resume: MIRBlockID, stop: MIRBlockID)
+    Stopped
 }
 
 pub enum MIRDropEdge { Normal Return Failure(target: MIRBlockID) Unwind(target: MIRBlockID) }
@@ -2242,6 +2295,7 @@ pub fn mir_terminator_targets(terminator: MIRTerminator) -> [MIRBlockID] Never! 
             targets
         }
         .Yield(_, resume) -> [MIRBlockID]{resume}
+        .Poll(_, resume, stop) -> [MIRBlockID]{resume, stop}
         .Break(target, _) -> [MIRBlockID]{target}
         .Continue(target) -> [MIRBlockID]{target}
         else -> [MIRBlockID]{}
@@ -2267,6 +2321,73 @@ pub fn mir_terminator_value_uses(terminator: MIRTerminator) -> [MIRValueID] Neve
         .Yield(value, _) -> [MIRValueID]{value}
         else -> [MIRValueID]{}
     }
+}
+
+// These selectors name only facts the operation actually evaluates. Merely
+// registering a projected place or a drop flag does not check its bounds.
+pub fn mir_operation_stop_operand(operation: MIROperation) -> MIRValueID? Never! {
+    if operation == .Unary(.Neg, value) -> return Val(value)
+    None
+}
+
+pub fn mir_operation_stop_place(operation: MIROperation) -> MIRPlaceID? Never! {
+    if operation == {
+        .ReadPlace(place) | .MovePlace(place) | .WritePlace(place, _) | .ReplacePlace(place, _) -> Val(place)
+        else -> None
+    }
+}
+
+pub fn mir_fixed_neg_can_trap(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .IntN(_, bits) -> bits > 0 && bits <= 64
+        .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> mir_fixed_neg_can_trap(base)
+        else -> false
+    }
+}
+
+// User/callback/wait operations can deliver stops. For Prelude routes, Panic
+// is a checked registry fact, independent of a returned failure carrier.
+pub fn mir_operation_can_stop(operation: MIROperation, operand_type: MIRType?, accessed_place: MIRPlace?, prelude_calls: [MIRPreludeCall], prelude_positions: [U64:Int]) -> Bool Never! {
+    if operation == .Binary(op, _, overflow, _, _) {
+        if mir_binary_can_trap(op, overflow) -> return true
+    }
+    if mir_operation_stop_operand(operation) != None && operand_type == .Val(ty) {
+        if mir_fixed_neg_can_trap(ty) -> return true
+    }
+    if mir_operation_stop_place(operation) != None && accessed_place == .Val(place) {
+        writing :: if operation == .WritePlace(_, _) || operation == .ReplacePlace(_, _) -> true else -> false
+        loop projection in place.projections {
+            if projection == .Index(_, _, call, write_call, _, _, _) {
+                position :: prelude_positions.get(call.value)
+                if position == .Val(at) && prelude_calls[at].effect_kind == Val(Effect.Panic) -> return true
+                if writing && write_call == .Val(setter) {
+                    setter_position :: prelude_positions.get(setter.value)
+                    if setter_position == .Val(at) && prelude_calls[at].effect_kind == Val(Effect.Panic) -> return true
+                }
+            }
+        }
+    }
+    loop call in mir_operation_prelude_calls(operation) {
+        position :: prelude_positions.get(call.value) ?? next
+        if prelude_calls[position].effect_kind == Val(Effect.Panic) -> return true
+    }
+    if operation == {
+        .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) | .ScopeExit(_) -> true
+        .LoopIterInit(_, _, _, _, _) | .LoopIterAdvance(_, _) -> true
+        .Semantic(semantic) -> if semantic == {
+            .ClosureMethod(_, _, _) | .CoreClosureCall(_, _, _, _, _, _) | .PluginInvoke(_, _, _, _, _) | .TaskGroup(_, _, _) | .Select(_, _, _) | .PolicyFunction(_, _) | .InterruptFunction(_, _) | .HostCall(_, _) -> true
+            .RequireStop(_, _, _, _, _, _, _) -> true
+            else -> false
+        }
+        else -> false
+    }
+}
+
+// Existing user/callback/Core operations can panic through the code they invoke.
+// ScopeExit alone only forwards an already-delivered stop.
+pub fn mir_operation_can_panic(operation: MIROperation, operand_type: MIRType?, accessed_place: MIRPlace?, prelude_calls: [MIRPreludeCall], prelude_positions: [U64:Int]) -> Bool Never! {
+    if operation == .ScopeExit(_) -> return false
+    mir_operation_can_stop(operation, operand_type, accessed_place, prelude_calls, prelude_positions)
 }
 
 pub enum MIROperationUseKind { Value Place }
@@ -3191,6 +3312,131 @@ pub enum MIREntryKind { Library Command App Service Test }
 pub enum MIREntryOutput { NoOutput ReturnValue StandardOutput ExitStatus }
 
 pub struct MIRExport { pub symbol: String, pub function: MIRFunctionID, pub abi: MIRForeignABI }
+
+// The native Library C export law (owner ruling U3, 2026-10-09): every
+// parameter and the result of an `#Export(c)` function is one C primitive,
+// independently per position. Fixed widths map 1:1 to their C types; `Int` is
+// `int64_t`, `Float` is `double`, `String` is the JetText pointer/length pair.
+// The frozen Rust compiler keeps its older homogeneous Library scalar rule;
+// this law is Jet-only.
+pub enum MIRCPrimitive { Int Float Bool Text I8 I16 I32 I64 U8 U16 U32 U64 F32 }
+
+pub fn mir_c_primitive(ty: MIRType) -> MIRCPrimitive? {
+    if ty.kind == {
+        .Int -> Val(MIRCPrimitive.Int)
+        .Float -> Val(MIRCPrimitive.Float)
+        .Bool -> Val(MIRCPrimitive.Bool)
+        .String -> Val(MIRCPrimitive.Text)
+        .Float32 -> Val(MIRCPrimitive.F32)
+        .IntN(signed, bits) -> {
+            if bits == 8 -> return Val(if signed -> MIRCPrimitive.I8 else -> MIRCPrimitive.U8)
+            if bits == 16 -> return Val(if signed -> MIRCPrimitive.I16 else -> MIRCPrimitive.U16)
+            if bits == 32 -> return Val(if signed -> MIRCPrimitive.I32 else -> MIRCPrimitive.U32)
+            if bits == 64 -> return Val(if signed -> MIRCPrimitive.I64 else -> MIRCPrimitive.U64)
+            None
+        }
+        else -> None
+    }
+}
+
+// A C `void` result: the checked unit value.
+pub fn mir_c_void(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Tuple(fields) -> fields.len() == 0
+        .Apply(name, args) -> args.len() == 0 && name.name == "Unit"
+        else -> false
+    }
+}
+
+// The value an export publishes: the success value of a Result carrier (the
+// generated boundary exits on failure) or the plain return. Optional and
+// diverging carriers have no C result.
+pub fn mir_c_export_result(function: MIRFunction) -> MIRType? {
+    if function.failure == {
+        .Infallible -> Val(function.return_type)
+        .Result(success, _) -> Val(success)
+        else -> None
+    }
+}
+
+// Whether a checked top-level function satisfies the C export law.
+pub fn mir_c_export_signature(function: MIRFunction) -> Bool Never! {
+    if function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 -> return false
+    loop param in function.params {
+        if mir_c_primitive(param.ty) == None -> return false
+    }
+    result :: mir_c_export_result(function) ?? return false
+    mir_c_void(result) || mir_c_primitive(result) != None
+}
+
+// The sandbox Component export law (D-PLUGIN-EXPORT1=A): every parameter and
+// the published result of a sandbox `pub fn` is one recursively closed
+// Component Model shape, independently per position: `Int`, `Float`, `Bool`,
+// `String`, or a `List`, `Option`, `Result` or `#Codable` record of them. The
+// published result is the same `mir_c_export_result` the C law uses, so a
+// unit, Optional or diverging result has no Component value. `codable_keys`
+// names the checked record types that derive both Encode and Decode: the
+// boundary never invents a record layout from a spelling. Fixed widths,
+// maps, tuples, unions, handles and generic applications have no Component
+// shape here.
+pub fn mir_component_type_descriptor(types: [MIRTypeDef], codable_keys: [String], ty: MIRType, seen: [MIRTypeID]) -> MIRComponentTypeDescriptor? {
+    if ty.kind == {
+        .Int -> return Val(MIRComponentTypeDescriptor.Int)
+        .Float -> return Val(MIRComponentTypeDescriptor.Float)
+        .Bool -> return Val(MIRComponentTypeDescriptor.Bool)
+        .String -> return Val(MIRComponentTypeDescriptor.String)
+        .List(inner) | .FixedList(inner, _) -> return mir_component_type_descriptor(types, codable_keys, inner, seen).map(value -> MIRComponentTypeDescriptor.List{inner: value})
+        .Option(inner) -> return mir_component_type_descriptor(types, codable_keys, inner, seen).map(value -> MIRComponentTypeDescriptor.Option{inner: value})
+        .InlineRange(inner, _, _) | .Tagged(_, inner) -> return mir_component_type_descriptor(types, codable_keys, inner, seen)
+        .Result(ok, err) -> {
+            ok_descriptor :: mir_component_type_descriptor(types, codable_keys, ok, seen) ?? return None
+            err_descriptor :: mir_component_type_descriptor(types, codable_keys, err, seen) ?? return None
+            return Val(MIRComponentTypeDescriptor.Result{ok: ok_descriptor, err: err_descriptor})
+        }
+        .Apply(name, args) -> {
+            if args.len() != 0 -> return None
+            loop prior in seen {
+                if prior == name.id -> return None
+            }
+            next_seen := seen
+            &next_seen.push(name.id)
+            loop definition in types {
+                if definition.id != name.id -> next
+                if definition.kind == {
+                    .Alias(target) -> return mir_component_type_descriptor(types, codable_keys, target, next_seen)
+                    .Struct(fields, _) -> {
+                        if !codable_keys.contains(definition.key) -> return None
+                        component_fields := [MIRComponentTypeField]{}
+                        loop index in 0..<fields.len() {
+                            field :: fields[index]
+                            if field.skip || field.computed -> next
+                            descriptor :: mir_component_type_descriptor(types, codable_keys, field.ty, next_seen) ?? return None
+                            &component_fields.push(MIRComponentTypeField{index: index, name: field.shape_names.json ?? field.name, ty: descriptor})
+                        }
+                        return Val(MIRComponentTypeDescriptor.Record{name: definition.name, fields: component_fields})
+                    }
+                    else -> return None
+                }
+            }
+            return None
+        }
+        else -> return None
+    }
+}
+
+// Whether a checked top-level function satisfies the sandbox Component export
+// law, and its canonical Component signature when it does.
+pub fn mir_component_export_signature(types: [MIRTypeDef], codable_keys: [String], function: MIRFunction) -> MIRComponentSignatureDescriptor? {
+    if function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 -> return None
+    params := [MIRComponentTypeDescriptor]{}
+    loop param in function.params {
+        descriptor :: mir_component_type_descriptor(types, codable_keys, param.ty, [MIRTypeID]{}) ?? return None
+        &params.push(descriptor)
+    }
+    result :: mir_c_export_result(function) ?? return None
+    result_descriptor :: mir_component_type_descriptor(types, codable_keys, result, [MIRTypeID]{}) ?? return None
+    Val(MIRComponentSignatureDescriptor{params: params, result: result_descriptor})
+}
 
 pub struct MIREntrySpec {
     pub kind: MIREntryKind

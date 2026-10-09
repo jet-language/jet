@@ -2320,6 +2320,11 @@ pub struct RenderedDiagnostic {
 }
 
 impl DiagnosticRow {
+    /// Stages use slash-separated components, including shared sema/runtime rows.
+    pub fn has_stage(&self, stage: &str) -> bool {
+        self.stage.split('/').any(|component| component == stage)
+    }
+
     /// Fill this row's What/Why/Fix templates from named values.
     ///
     /// A value must name a hole declared by the row, and every declared hole
@@ -2739,7 +2744,7 @@ pub fn diagnostic(code: &str) -> Option<&'static DiagnosticRow> {
 /// One runtime-stop lookup. A code is user-owned at runtime only while its
 /// registered row is active and declares the runtime stage.
 pub fn active_runtime_diagnostic(code: &str) -> Option<&'static DiagnosticRow> {
-    diagnostic(code).filter(|row| row.stage == "runtime" && row.status == DiagnosticStatus::Active)
+    diagnostic(code).filter(|row| row.has_stage("runtime") && row.status == DiagnosticStatus::Active)
 }
 
 /// Every lint row in the one diagnostic registry.
@@ -3919,6 +3924,20 @@ mod tests {
             diagnostic_rows().len(),
             "every typed row must be in the shared registration table"
         );
+    }
+
+    #[test]
+    fn runtime_lookup_includes_shared_stage_rows() {
+        for code in ["E0123", "E1003"] {
+            let row = super::active_runtime_diagnostic(code).expect("shared runtime row");
+            assert!(row.has_stage("sema"));
+            assert!(row.has_stage("runtime"));
+            assert!(!row.has_stage("run"));
+            assert!(!row.has_stage("time"));
+        }
+        assert!(super::active_runtime_diagnostic("E3001").is_some());
+        assert!(super::active_runtime_diagnostic("E1004").is_none());
+        assert!(super::active_runtime_diagnostic("E0007").is_none());
     }
 
     #[test]

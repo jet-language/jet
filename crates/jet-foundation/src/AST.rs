@@ -34,6 +34,12 @@ pub use program_imports::{
     PackageGuarantees, Program, ProgramBundle, TryConvert,
 };
 
+#[path = "AST/checked_nominals.rs"]
+mod checked_nominals;
+pub use checked_nominals::{
+    MirFragmentCoreSourceModule, MirFragmentCoreSourceSignature, MirFragmentNominalFacts,
+};
+
 #[path = "AST/items.rs"]
 mod items;
 pub use items::{

@@ -98,6 +98,7 @@ fn without_package_imports(text: &str, core_imports: &mut std::collections::Hash
 /// MIR/artifact seam, keeping the target and artifact identity together.
 pub fn lower_interpreter_bundle(
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
 ) -> Result<
     (
         jet_foundation::MIR::MirProgram,
@@ -107,6 +108,7 @@ pub fn lower_interpreter_bundle(
 > {
     jet::Codegen::TIR::lower_checked_mir_program_for(
         bundle,
+        checked_nominals,
         jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::Interpreter,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
@@ -122,12 +124,14 @@ pub fn development_policy() -> jet_pkg_model::Package::ReleaseDevtoolsPolicy {
 
 pub fn run_interpreter_checked_bundle(
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     try_anyway: bool,
     invocation: jet::Interpreter::InterpreterInvocation,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> jet::Interpreter::RunOutcome {
     let (program, artifact) =
-        lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
+        lower_interpreter_bundle(bundle, checked_nominals)
+            .expect("checked bundle must lower to interpreter MIR");
     jet::Interpreter::run_checked(&program, artifact, try_anyway, invocation, policy)
 }
 
@@ -135,10 +139,12 @@ pub fn run_interpreter_checked_bundle(
 /// with no step budget.
 pub fn run_interpreted(
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> jet::Interpreter::RunOutcome {
     run_interpreter_checked_bundle(
         bundle,
+        checked_nominals,
         false,
         jet::Interpreter::InterpreterInvocation::RunInterpret,
         policy,
@@ -184,13 +190,15 @@ pub fn dev_run(file: &str, try_anyway: bool, use_interpreter: bool) -> jet::Inte
 
 pub fn run_interpreter_named_job(
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     file: &str,
     name: &str,
     try_anyway: bool,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> jet::Interpreter::RunOutcome {
     let (program, artifact) =
-        lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
+        lower_interpreter_bundle(bundle, checked_nominals)
+            .expect("checked bundle must lower to interpreter MIR");
     let args = vec![
         file.to_owned(),
         jet_evalhost::Job::JET_JOB_PRIVATE_DISPATCH_FLAG.to_owned(),
@@ -210,22 +218,26 @@ pub fn run_interpreter_named_job(
 pub fn run_interpreter_bundle(
     backend: &mut jet::JitBackend::InterpreterBackend,
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     try_anyway: bool,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> jet::Interpreter::RunOutcome {
     let (program, artifact) =
-        lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
+        lower_interpreter_bundle(bundle, checked_nominals)
+            .expect("checked bundle must lower to interpreter MIR");
     jet::JitBackend::JitBackend::run(backend, &program, artifact, try_anyway, policy)
 }
 pub fn hot_swap_interpreter_bundle(
     backend: &mut jet::JitBackend::InterpreterBackend,
     module_name: &str,
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     try_anyway: bool,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> Result<jet::Interpreter::RunOutcome, Vec<jet::Diagnostics::Diagnostic>> {
     let (program, artifact) =
-        lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
+        lower_interpreter_bundle(bundle, checked_nominals)
+            .expect("checked bundle must lower to interpreter MIR");
     jet::JitBackend::JitBackend::hot_swap(
         backend,
         module_name,
@@ -239,11 +251,13 @@ pub fn hot_swap_interpreter_bundle(
 pub fn restart_interpreter_bundle(
     backend: &mut jet::JitBackend::InterpreterBackend,
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     try_anyway: bool,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> jet::Interpreter::RunOutcome {
     let (program, artifact) =
-        lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
+        lower_interpreter_bundle(bundle, checked_nominals)
+            .expect("checked bundle must lower to interpreter MIR");
     jet::JitBackend::JitBackend::restart(backend, &program, artifact, try_anyway, policy)
 }
 

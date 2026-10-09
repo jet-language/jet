@@ -1,0 +1,163 @@
+// Linux x86-64 futex synchronization. All state words are aligned I64s;
+// futex observes their low 32 bits, while the atomic leaves publish all 64.
+// Mutex: 0 unlocked, 1 locked/uncontended, 2 locked/contended. Condvar: a
+// wrapping sequence. ParkSlot: one consumable notification, one parker.
+fn sync_load(address: I64) -> I64 {
+    #Unsafe("borrows an aligned live synchronization word") { return os_load_i64(address) }
+}
+
+fn sync_store(address: I64, value: I64) {
+    #Unsafe("publishes an aligned live synchronization word with x86 release ordering") {
+        os_store_i64(address, value)
+    }
+}
+
+fn sync_swap(address: I64, value: I64) -> I64 {
+    #Unsafe("atomic exchange on an aligned live synchronization word") {
+        return os_swap_i64(address, value)
+    }
+}
+
+fn sync_add(address: I64, value: I64) -> I64 {
+    #Unsafe("atomic fetch-add on an aligned live synchronization word") {
+        return os_fetch_add_i64(address, value)
+    }
+}
+
+fn sync_cas(address: I64, expected: I64, desired: I64) -> I64 {
+    #Unsafe("atomic compare-exchange on an aligned live synchronization word") {
+        return os_cas_i64(address, expected, desired)
+    }
+}
+
+fn sync_wake(address: I64, count: I64) {
+    #Unsafe("futex wake borrows a live aligned word and retains no pointer") {
+        _ := os_syscall_i64(I64{202}, address, I64{129}, count, I64{0}, I64{0}, I64{0})
+    }
+}
+
+// deadline_ns = -1 means unbounded. An absolute monotonic deadline survives
+// EINTR, spurious wakes and sequence changes without extending the wait.
+fn sync_wait(address: I64, expected: I64, deadline_ns: I64) -> I64 {
+    #Unsafe("futex borrows live state; timed wait uses this attached thread's reserved TCB scratch until the syscall returns") {
+        if (deadline_ns < I64{0}) {
+            return os_syscall_i64(I64{202}, address, I64{128}, expected, I64{0}, I64{0}, I64{0})
+        }
+        timeout :: os_tls_base_i64() + I64{216}
+        os_store_i64(timeout, deadline_ns /% I64{1000000000})
+        os_store_i64(timeout + I64{8}, deadline_ns % I64{1000000000})
+        return os_syscall_i64(I64{202}, address, I64{137}, expected, timeout, I64{0}, I64{4294967295})
+    }
+}
+
+fn sync_now_ns() -> I64 {
+    #Unsafe("clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes") {
+        scratch :: os_tls_base_i64() + I64{232}
+        result :: os_syscall_i64(I64{228}, I64{1}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
+        if (result != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
+        return wrapping(os_load_i64(scratch) * I64{1000000000} + os_load_i64(scratch + I64{8}))
+    }
+}
+
+fn sync_deadline(timeout_ns: I64) -> I64 {
+    if (timeout_ns < I64{0}) { return I64{-1} }
+    now :: sync_now_ns()
+    if (timeout_ns > I64{9223372036854775807} - now) { return I64{9223372036854775807} }
+    now + timeout_ns
+}
+
+fn sync_mutex_lock(address: I64) {
+    if (sync_cas(address, I64{0}, I64{1}) == I64{0}) {
+        return
+    }
+    loop {
+        if (sync_swap(address, I64{2}) == I64{0}) {
+            return
+        }
+        _ := sync_wait(address, I64{2}, I64{-1})
+    }
+}
+
+fn sync_mutex_try_lock(address: I64) -> Bool { sync_cas(address, I64{0}, I64{1}) == I64{0} }
+
+fn sync_mutex_unlock(address: I64) {
+    if (sync_swap(address, I64{0}) == I64{2}) { sync_wake(address, I64{1}) }
+}
+
+// Caller holds mutex, checks its predicate in a loop, and keeps the same
+// absolute deadline across repetitions. Mutex is held again on return.
+fn sync_cond_wait(sequence: I64, mutex: I64, deadline_ns: I64) -> Bool {
+    before :: sync_load(sequence)
+    sync_mutex_unlock(mutex)
+    result :: sync_wait(sequence, before, deadline_ns)
+    sync_mutex_lock(mutex)
+    result != I64{-110}
+}
+
+fn sync_cond_notify_one(sequence: I64) {
+    _ := sync_add(sequence, I64{1})
+    sync_wake(sequence, I64{1})
+}
+
+fn sync_cond_notify_all(sequence: I64) {
+    _ := sync_add(sequence, I64{1})
+    sync_wake(sequence, I64{2147483647})
+}
+
+// ParkSlot32: notification@0, mutex@8, sequence@16, atomic references@24.
+// There is exactly one parker; timer rows and waiter guards may retain it.
+fn sync_park_new() -> I64 {
+    slot :: alloc_required_valid(I64{32}, I64{8})
+    sync_store(slot, I64{0})
+    sync_store(slot + I64{8}, I64{0})
+    sync_store(slot + I64{16}, I64{0})
+    sync_store(slot + I64{24}, I64{1})
+    slot
+}
+
+fn sync_park_retain(slot: I64) { _ := sync_add(slot + I64{24}, I64{1}) }
+fn sync_park_drop(slot: I64) {
+    if (sync_add(slot + I64{24}, I64{-1}) == I64{1}) -> alloc_release_valid(slot, I64{32}, I64{8})
+}
+
+fn sync_park(slot: I64, timeout_ns: I64) {
+    if (sync_swap(slot, I64{0}) != I64{0}) {
+        return
+    }
+    mutex :: slot + I64{8}
+    sync_mutex_lock(mutex)
+    if (sync_swap(slot, I64{0}) != I64{0}) {
+        sync_mutex_unlock(mutex)
+        return
+    }
+    deadline :: sync_deadline(timeout_ns)
+    loop {
+        if (deadline >= I64{0} && sync_now_ns() >= deadline) { break }
+        woke :: sync_cond_wait(slot + I64{16}, mutex, deadline)
+        if (sync_swap(slot, I64{0}) != I64{0} || !woke) { break }
+    }
+    sync_mutex_unlock(mutex)
+}
+
+fn sync_park_wake(slot: I64) {
+    sync_mutex_lock(slot + I64{8})
+    sync_store(slot, I64{1})
+    sync_cond_notify_one(slot + I64{16})
+    sync_mutex_unlock(slot + I64{8})
+}
+
+// Once: 0 empty, 1 initializer running, 2 published. The initializer must not
+// unwind across Jet frames. Recursive initialization is the caller's defect.
+fn sync_once_enter(state: I64) -> Bool {
+    loop {
+        old :: sync_cas(state, I64{0}, I64{1})
+        if (old == I64{0}) { return true }
+        if (old == I64{2}) { return false }
+        _ := sync_wait(state, I64{1}, I64{-1})
+    }
+}
+
+fn sync_once_complete(state: I64) {
+    _ := sync_swap(state, I64{2})
+    sync_wake(state, I64{2147483647})
+}

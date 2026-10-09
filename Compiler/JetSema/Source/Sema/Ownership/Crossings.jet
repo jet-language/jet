@@ -143,7 +143,7 @@ fn sema_ownership_crossing_named(ty: Type, nominal: SemaRegistrationNominal, cro
                 if !facts.send -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ThreadConfined{name: nominal.symbol.name}))
                 return None
             }
-            .SourceAST(_) -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: nominal.symbol.name}))
+            .SourceAST(_) | .CompilerBuiltinTrait(_) -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: nominal.symbol.name}))
         }
     }
     type_args :: if ty == {.Apply(_, args) -> args else -> [Type]{}}
@@ -171,7 +171,7 @@ fn sema_ownership_crossing_members(nominal: SemaRegistrationNominal, type_args: 
                     else -> {}
                 }
             }
-            .ForeignHandle(_) -> {}
+            .ForeignHandle(_) | .CompilerBuiltinTrait(_) -> {}
         }
         if underlying == .Val(declared) {
             instantiated := sema_inference_substitute_type_bindings(declared, bindings)

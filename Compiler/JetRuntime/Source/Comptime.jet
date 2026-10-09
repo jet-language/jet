@@ -1,0 +1,214 @@
+// Native request budgets: Core.rs:1014-1057 and Core/CAbi.rs:244-305.
+// One host request at a time; the host joins its native work before end.
+// Process-lifetime root40: mutex0 active8 fuel16 maxDepth24 firstStop32.
+// The root owns firstStop; each current Scheduler control owns a fresh copy.
+// Unsigned order is World's existing world_unsigned_before over raw I64 bits;
+// subtraction is wrapping only AFTER that unsigned bounds check. No exact Int.
+// TCB frame/scope ownership is documented in Thread.jet (65ba90e97).
+comptime_root := I64{0}
+
+// runtime-init: 3
+#Export(c) fn jet_rt_comptime_init() {
+    if (comptime_root != I64{0}) -> return
+    comptime_root = alloc_required_valid(I64{40}, I64{8})
+    thread_zero(comptime_root, I64{40})
+}
+
+fn comptime_frame_reset() { thread_zero(thread_base() + I64{256}, I64{32}) }
+fn comptime_site(owner: I64, start: I64, end: I64) {
+    base :: thread_base()
+    sync_store(base + I64{264}, owner)
+    sync_store(base + I64{272}, start)
+    sync_store(base + I64{280}, end)
+}
+
+// Caller holds request mutex. The first exhausted thread supplies the site;
+// later threads publish precisely that first record on their own control.
+// Lock order: request -> control.mutex72. Scheduler control_publish (134-152)
+// only stores record/status, unlocks, then drops the old owned text; it never
+// invokes callbacks, waits or charges a budget. No control -> request edge.
+fn comptime_publish_locked(kind: I64, status: I64) {
+    record := sync_load(comptime_root + I64{32})
+    if (record == I64{0}) {
+        record = scheduler_stop_new(kind, scheduler_text_new(I64{0}))
+        base :: thread_base()
+        sync_store(record + I64{8}, status)
+        sync_store(record + I64{16}, sync_load(base + I64{264}))
+        sync_store(record + I64{24}, sync_load(base + I64{272}))
+        sync_store(record + I64{32}, sync_load(base + I64{280}))
+        sync_store(comptime_root + I64{32}, record)
+    }
+    sync_store(comptime_root + I64{16}, I64{0})
+    published :: scheduler_stop_new(sync_load(record), scheduler_text_new(I64{0}))
+    sync_store(published + I64{8}, sync_load(record + I64{8}))
+    sync_store(published + I64{16}, sync_load(record + I64{16}))
+    sync_store(published + I64{24}, sync_load(record + I64{24}))
+    sync_store(published + I64{32}, sync_load(record + I64{32}))
+    _ := scheduler_native_publish(published)
+}
+
+// Rust: extern "C" jet_rt_comptime_begin(fuel: u64,max_depth: u64)->bool.
+// Raw I64 parameters retain all 64 unsigned bits and the same C registers.
+#Export(c) fn jet_rt_comptime_begin(fuel: I64, max_depth: I64) -> Bool {
+    sync_mutex_lock(comptime_root)
+    if (sync_load(comptime_root + I64{8}) != I64{0}) {
+        sync_mutex_unlock(comptime_root)
+        return false
+    }
+    scheduler_stop_drop(sync_swap(comptime_root + I64{32}, I64{0}))
+    sync_store(comptime_root + I64{16}, fuel)
+    sync_store(comptime_root + I64{24}, max_depth)
+    comptime_frame_reset()
+    control :: scheduler_control_new()
+    base :: thread_base()
+    scheduler_control_enter(control, base + I64{288})
+    sync_store(base + I64{200}, I64{1})
+    sync_store(comptime_root + I64{8}, I64{1})
+    sync_mutex_unlock(comptime_root)
+    true
+}
+
+// Rust: extern "C" jet_rt_comptime_work(units: u64). A zero charge does not
+// exhaust zero fuel (checked_sub(0) succeeds), even after another stop.
+#Export(c) fn jet_rt_comptime_work(units: I64) {
+    sync_mutex_lock(comptime_root)
+    if (sync_load(comptime_root + I64{8}) != I64{0}) {
+        remaining :: sync_load(comptime_root + I64{16})
+        if world_unsigned_before(remaining, units) {
+            comptime_publish_locked(I64{3}, I64{2})
+        } else {
+            sync_store(comptime_root + I64{16}, wrapping(remaining - units))
+        }
+    }
+    sync_mutex_unlock(comptime_root)
+}
+
+// Rust: extern "C" jet_rt_comptime_step(owner: u64,start: u64,end: u64).
+#Export(c) fn jet_rt_comptime_step(owner: I64, start: I64, end: I64) {
+    comptime_site(owner, start, end)
+    jet_rt_comptime_work(I64{1})
+}
+
+// Rust: extern "C" jet_rt_comptime_enter(owner: u64,start: u64,end: u64).
+#Export(c) fn jet_rt_comptime_enter(owner: I64, start: I64, end: I64) {
+    sync_mutex_lock(comptime_root)
+    if (sync_load(comptime_root + I64{8}) != I64{0}) {
+        base :: thread_base()
+        depth := sync_load(base + I64{256})
+        if (depth != I64{-1}) -> depth = wrapping(depth + I64{1})
+        sync_store(base + I64{256}, depth)
+        comptime_site(owner, start, end)
+        if world_unsigned_before(sync_load(comptime_root + I64{24}), depth) {
+            comptime_publish_locked(I64{4}, I64{3})
+        } else if (sync_load(comptime_root + I64{32}) != I64{0}) {
+            comptime_publish_locked(I64{4}, I64{3})
+        }
+    }
+    sync_mutex_unlock(comptime_root)
+}
+
+// Rust: extern "C" jet_rt_comptime_leave(). It decrements even when inactive.
+#Export(c) fn jet_rt_comptime_leave() {
+    address :: thread_base() + I64{256}
+    depth :: sync_load(address)
+    if (depth != I64{0}) -> sync_store(address, wrapping(depth - I64{1}))
+}
+
+// Rust: extern "C" jet_rt_comptime_end(). Reset the calling frame and restore
+// its previous task scope; only the request scope's control is destroyed.
+#Export(c) fn jet_rt_comptime_end() {
+    sync_mutex_lock(comptime_root)
+    sync_store(comptime_root + I64{8}, I64{0})
+    comptime_frame_reset()
+    base :: thread_base()
+    if (sync_swap(base + I64{200}, I64{0}) != I64{0}) {
+        control :: scheduler_control_current()
+        scheduler_control_leave(base + I64{288})
+        scheduler_control_drop(control)
+    }
+    // Rust retains the first record until next begin so the host may report it.
+    sync_mutex_unlock(comptime_root)
+}
+
+// Rust: extern "C" jet_rt_comptime_stop_write()->u32 (CAbi.rs:309).
+// Scheduler.rs:889-921 framing: decimal UTF-8 byte length + '\n' + JSON.
+// Budget records always have a site and an empty message, including U64.MAX
+// (not a missing optional field). Use World's unsigned decimal helper.
+// The root's only writers are comptime_publish_locked(3,2) in work and
+// comptime_publish_locked(4,3) in enter; its status is exactly 2 or 3.
+#Export(c) fn jet_rt_comptime_stop_write() -> U32 {
+    sync_mutex_lock(comptime_root)
+    record :: sync_load(comptime_root + I64{32})
+    if (record == I64{0}) {
+        sync_mutex_unlock(comptime_root)
+        return U32{0}
+    }
+    status :: sync_load(record + I64{8})
+    owner :: sync_load(record + I64{16})
+    start :: sync_load(record + I64{24})
+    end :: sync_load(record + I64{32})
+    // Rust CAbi.rs:256-257 clones under the mutex, then channel_write may
+    // block without excluding other budget charges or the next request.
+    sync_mutex_unlock(comptime_root)
+    comptime_stop_frame_write(status, owner, start, end)
+}
+
+// Borrow actual stop metadata; Root consumption uses precisely this channel
+// frame too, without depending on a separate comptime request's first stop.
+fn comptime_stop_frame_write(status: I64, owner: I64, start: I64, end: I64) -> U32 {
+    scratch :: alloc_required_valid(I64{192}, I64{8})
+    sync_store(scratch, I64{4189021028785791611})
+    at := I64{0}
+    if (status == I64{2}) {
+        sync_store(scratch + I64{8}, I64{5076794174694834722})
+        sync_store(scratch + I64{16}, I64{7163575730237629813})
+        sync_store(scratch + I64{24}, I64{8319683848551227252})
+        sync_store(scratch + I64{32}, I64{7959953058961701410})
+        sync_store(scratch + I64{40}, I64{975336037})
+        at = I64{44}
+    } else {
+        sync_store(scratch + I64{8}, I64{4932678986618978850})
+        sync_store(scratch + I64{16}, I64{7647723643521495141})
+        sync_store(scratch + I64{24}, I64{8463496752515740771})
+        sync_store(scratch + I64{32}, I64{8606134986161660531})
+        sync_store(scratch + I64{40}, I64{249686025582})
+        at = I64{45}
+    }
+    at += world_decimal(scratch + at, owner)
+    sync_store(scratch + at, I64{2482735057479082540})
+    trap_put(scratch + at + I64{8}, I64{58})
+    at += I64{9}
+    at += world_decimal(scratch + at, start)
+    sync_store(scratch + at, I64{16363363393413676})
+    at += I64{7}
+    at += world_decimal(scratch + at, end)
+    sync_store(scratch + at, I64{7449362198107595308})
+    sync_store(scratch + at + I64{8}, I64{137585556595301})
+    at += I64{14}
+    header :: scratch + I64{160}
+    digits :: world_decimal(header, at)
+    trap_put(header + digits, I64{10})
+    // Core.rs:988-994 flushes program stdout before the private channel frame.
+    // This is the same active stdout flush used by every native process stop.
+    trap_flush_stdout()
+    // fcntl F_DUPFD_CLOEXEC borrows the compiler worker's lifetime descriptor3;
+    // failed duplicate is ignored just like protocol_channel's Option in Rust.
+    fd :: trap_syscall(I64{72}, I64{3}, I64{1030}, I64{0}, I64{0}, I64{0}, I64{0})
+    if (fd >= I64{0}) {
+        comptime_channel_write(fd, header, digits + I64{1})
+        comptime_channel_write(fd, scratch, at)
+        _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    alloc_release_valid(scratch, I64{192}, I64{8})
+    U32{status}
+}
+
+fn comptime_channel_write(fd: I64, data: I64, length: I64) {
+    at := I64{0}
+    loop at < length {
+        written :: trap_syscall(I64{1}, fd, data + at, length - at, I64{0}, I64{0}, I64{0})
+        if (written == I64{-4}) -> next
+        if (written <= I64{0}) -> return
+        at += written
+    }
+}

@@ -1676,14 +1676,16 @@ pub fn install_mir_bridge() {
 
 fn run_bundle_bridge(
     bundle: &crate::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     sink: &mut crate::Comptime::DevSink,
     gates: jet_foundation::Policy::GateSet,
 ) -> Result<CtValue, Diagnostic> {
-    run_bundle_at_stage_bridge(bundle, sink, gates, crate::Comptime::PurityStage::BuildTime)
+    run_bundle_at_stage_bridge(bundle, checked_nominals, sink, gates, crate::Comptime::PurityStage::BuildTime)
 }
 
 fn run_bundle_at_stage_bridge(
     bundle: &crate::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     sink: &mut crate::Comptime::DevSink,
     _gates: jet_foundation::Policy::GateSet,
     _stage: crate::Comptime::PurityStage,
@@ -1693,7 +1695,7 @@ fn run_bundle_at_stage_bridge(
         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
         jet_foundation::MIR::MirArtifactBuildMode::Dev,
     );
-    let (program, artifact) = crate::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+    let (program, artifact) = crate::Codegen::TIR::lower_checked_mir_program_for(bundle, checked_nominals, request)
         .map_err(|error| mir_error_at(&error.message, error.span))?;
     let config = MirEvalConfig {
         base_dir: PathBuf::from(program.facts.project_root.clone()),
@@ -1717,7 +1719,7 @@ fn fragment_context<'a>(
     globals: &'a HashMap<String, CtValue>,
     core_imports: &'a HashMap<String, String>,
     structs: &'a HashMap<String, &'a crate::AST::StructDef>,
-    checked_nominals: Option<&'a crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<&'a crate::AST::MirFragmentNominalFacts>,
     computed_fields: &'a HashMap<(String, String), &'a crate::AST::Expr>,
     distinct_ranges: &'a HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &'a HashMap<String, crate::AST::Type>,
@@ -1859,7 +1861,7 @@ fn eval_expr_bridge(
         request.globals,
         request.core_imports,
         request.structs,
-        request.checked_nominals.as_ref(),
+        request.checked_nominals.as_deref(),
         request.computed_fields,
         request.distinct_ranges,
         request.distinct_bases,
@@ -1913,7 +1915,7 @@ fn eval_block_bridge<'a, 'debug>(
         request.globals,
         request.core_imports,
         request.structs,
-        request.checked_nominals.as_ref(),
+        request.checked_nominals.as_deref(),
         request.computed_fields,
         request.distinct_ranges,
         request.distinct_bases,
@@ -6519,6 +6521,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 &format!("MIR reached an unreachable terminator: {reason}"),
                 span,
             )),
+            MirTerminator::Poll { .. } | MirTerminator::Stopped => Err(mir_error_at(
+                "MIR stop point (native execution host only)",
+                span,
+            )),
         }
     }
     fn eval_plain_list_cursor(
@@ -7831,6 +7837,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     .scopes
                     .iter()
                     .find(|candidate| candidate.id == *scope);
+                if scope_row.is_some_and(|scope| scope.kind == MirScopeKind::StopCleanup) {
+                    return Err(mir_error_at("MIR StopCleanup (native execution host only)", span));
+                }
                 let is_shield =
                     scope_row.is_some_and(|scope| scope.kind == MirScopeKind::Shield);
                 let deadline = scope_row.and_then(|scope| scope.deadline);
@@ -7871,6 +7880,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     .scopes
                     .iter()
                     .find(|candidate| candidate.id == *scope);
+                if scope_row.is_some_and(|scope| scope.kind == MirScopeKind::StopCleanup) {
+                    return Err(mir_error_at("MIR StopCleanup (native execution host only)", span));
+                }
                 let is_shield =
                     scope_row.is_some_and(|scope| scope.kind == MirScopeKind::Shield);
                 let has_deadline = scope_row.is_some_and(|scope| scope.deadline.is_some());
@@ -21579,13 +21591,27 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             values.push(self.runtime_to_ct(value, span)?);
         }
         let result_type = result_ty.map(crate::Comptime::MirBridge::mir_to_ast_type);
-        let result = crate::Comptime::apply_seeded_rng_method_with_type(
+        let result = match crate::Comptime::apply_seeded_rng_method_with_type(
             &mut state,
             method,
             &mut values,
             span,
             result_type.as_ref(),
-        )?;
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                if self.is_runtime_invocation() {
+                    if let Some(row) =
+                        jet_foundation::Registry::active_runtime_diagnostic(&error.code)
+                    {
+                        return Err(self.located_runtime_stop(
+                            row.code, "", 0, &error.what, span,
+                        ));
+                    }
+                }
+                return Err(error);
+            }
+        };
         if let Some((frame, place)) = receiver_place {
             let updated = CtValue::Struct {
                 type_name: crate::Syntax::RNG_TYPE.to_string(),
@@ -32734,7 +32760,10 @@ fn run() {
 }
 ";
 
-    fn checked_run_bundle(src: &str) -> crate::AST::ProgramBundle {
+    fn checked_run_bundle(src: &str) -> (
+        crate::AST::ProgramBundle,
+        std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
+    ) {
         let (toks, lex_diags) = crate::Lexer::lex(src);
         assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
         let mut prog = crate::Parser::parse(&toks).expect("parse failed");
@@ -32779,14 +32808,14 @@ fn run() {
             edition: "2027".to_string(),
         };
         install_mir_bridge();
-        let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
+        let (diags, _facts, nominals) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Run);
         assert!(
             !diags
                 .iter()
                 .any(|d| d.severity == crate::Diagnostics::Severity::Error),
             "sema errors: {diags:?}"
         );
-        bundle
+        (bundle, nominals)
     }
 
     /// Run `src` through the MIR interpreter on its own thread so a wait that
@@ -32798,14 +32827,14 @@ fn run() {
             .stack_size(32 * 1024 * 1024)
             .spawn(move || {
                 let outcome = jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-                    let bundle = checked_run_bundle(src);
+                    let (bundle, nominals) = checked_run_bundle(src);
                     let request = jet_foundation::MIR::MirArtifactRequest::new(
                         MirArtifactTarget::Interpreter,
                         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
                         jet_foundation::MIR::MirArtifactBuildMode::Dev,
                     );
                     let (program, artifact) =
-                        crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
+                        crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, &nominals, request)
                             .map_err(|error| format!("MIR lowering failed: {error:?}"))?;
                     evaluate_mir_program_with_config(&program, artifact, &MirEvalConfig::default())
                         .map(|result| result.stdout)

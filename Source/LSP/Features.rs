@@ -2405,7 +2405,7 @@ mod generic_instance_tests {
         std::fs::write(&path, source).unwrap();
         let shown = path.to_string_lossy().into_owned();
         let mut bundle = crate::Loader::load_entry(&shown).unwrap();
-        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+        let (diagnostics, facts, _) = crate::Sema::check_bundle_with_effect_facts(
             &mut bundle,
             crate::Sema::CompileMode::Check,
         );
@@ -2453,7 +2453,7 @@ mod generic_instance_tests {
         let shown_left = "left.jet".to_string();
         let shown_right = "right.jet".to_string();
         let mut bundle = crate::Loader::load_entry(&shown_main).unwrap();
-        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+        let (diagnostics, facts, _) = crate::Sema::check_bundle_with_effect_facts(
             &mut bundle,
             crate::Sema::CompileMode::Check,
         );
@@ -2499,7 +2499,7 @@ mod generic_instance_tests {
         std::fs::write(&main, source).unwrap();
         let shown = main.to_string_lossy().into_owned();
         let mut bundle = crate::Loader::load_entry(&shown).unwrap();
-        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+        let (diagnostics, facts, _) = crate::Sema::check_bundle_with_effect_facts(
             &mut bundle,
             crate::Sema::CompileMode::Check,
         );
@@ -2551,7 +2551,7 @@ mod generic_instance_tests {
         std::fs::write(&path, source).unwrap();
         let shown = path.to_string_lossy().into_owned();
         let mut bundle = crate::Loader::load_entry(&shown).unwrap();
-        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+        let (diagnostics, facts, _) = crate::Sema::check_bundle_with_effect_facts(
             &mut bundle,
             crate::Sema::CompileMode::Check,
         );
@@ -3631,7 +3631,7 @@ mod refactor_safety_tests {
         std::fs::write(&path, source).unwrap();
         let shown = path.to_string_lossy().into_owned();
         let mut bundle = crate::Loader::load_entry(&shown).unwrap();
-        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+        let (diagnostics, facts, _) = crate::Sema::check_bundle_with_effect_facts(
             &mut bundle,
             crate::Sema::CompileMode::Check,
         );
@@ -3675,7 +3675,7 @@ mod refactor_safety_tests {
         std::fs::write(&path, source).unwrap();
         let shown = path.to_string_lossy().into_owned();
         let mut bundle = crate::Loader::load_entry(&shown).unwrap();
-        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+        let (diagnostics, facts, _) = crate::Sema::check_bundle_with_effect_facts(
             &mut bundle,
             crate::Sema::CompileMode::Check,
         );

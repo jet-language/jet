@@ -1633,7 +1633,9 @@ fn terminator_branch_count(terminator: &MirTerminator) -> usize {
         | MirTerminator::Yield { .. }
         | MirTerminator::Break { .. }
         | MirTerminator::Continue { .. }
-        | MirTerminator::Unreachable { .. } => 0,
+        | MirTerminator::Unreachable { .. }
+        | MirTerminator::Poll { .. }
+        | MirTerminator::Stopped => 0,
     }
 }
 
@@ -4233,6 +4235,9 @@ impl<'a> RustEmitter<'a> {
         let scope = self.scope_row(function, scope_id);
         if let Some(scope) = scope {
             match scope.kind {
+                MirScopeKind::StopCleanup => {
+                    panic!("MIR StopCleanup reached the Rust emitter (native execution host only)");
+                }
                 MirScopeKind::Shield if enter => {
                     return "jet_scheduler_shield_enter()".to_string();
                 }
@@ -4528,7 +4533,9 @@ impl<'a> RustEmitter<'a> {
 
     fn native_signature_digest(&self, function: &MirFunction) -> String {
         let (params, _, ret) = self.native_dispatch_signature(function);
-        jet_foundation::SHA256::sha256_hex(format!("{params}->{ret}").as_bytes())
+        jet_foundation::SHA256::sha256_hex(
+            format!("{params},&mut JetNativeDispatchUnwind->{ret}").as_bytes(),
+        )
     }
 
     fn native_body_digest(&self, function: &MirFunction) -> String {
@@ -4537,6 +4544,17 @@ impl<'a> RustEmitter<'a> {
 
     fn emit_native_dispatch(&self, function: &MirFunction, out: &mut String) {
         let (params, args, ret) = self.native_dispatch_signature(function);
+        let root = &self.config.root_prefix;
+        let abi_params = if params.is_empty() {
+            format!("__jet_stop: &mut {root}JetNativeDispatchUnwind")
+        } else {
+            format!("{params}, __jet_stop: &mut {root}JetNativeDispatchUnwind")
+        };
+        let abi_args = if args.is_empty() {
+            "&mut __jet_stop".to_string()
+        } else {
+            format!("{args}, &mut __jet_stop")
+        };
         let implementation = format!("__jet_native_impl_{}", self.function_name(function.id));
         let entry = self.native_entry_name(function);
         let install = self.native_install_name(function);
@@ -4554,22 +4572,22 @@ impl<'a> RustEmitter<'a> {
         );
         let _ = writeln!(
             out,
-            "#[doc(hidden)]\nstatic __JET_NATIVE_SLOT_{}: ::std::sync::LazyLock<::std::sync::RwLock<extern \"C\" fn({params}) -> {ret}>> = ::std::sync::LazyLock::new(|| ::std::sync::RwLock::new({entry}));",
+            "#[doc(hidden)]\nstatic __JET_NATIVE_SLOT_{}: ::std::sync::LazyLock<::std::sync::RwLock<extern \"C\" fn({abi_params}) -> {ret}>> = ::std::sync::LazyLock::new(|| ::std::sync::RwLock::new({entry}));",
             self.function_name(function.id)
         );
         let _ = writeln!(
             out,
-            "#[inline(never)]\nfn {}({params}) -> {ret} {{\n    let __jet_call = *__JET_NATIVE_SLOT_{}.read().unwrap_or_else(|__jet_poison| __jet_poison.into_inner());\n    __jet_call({args})\n}}",
+            "#[inline(never)]\nfn {}({params}) -> {ret} {{\n    let __jet_call = *__JET_NATIVE_SLOT_{}.read().unwrap_or_else(|__jet_poison| __jet_poison.into_inner());\n    let mut __jet_stop = None;\n    let __jet_result = __jet_call({abi_args});\n    {root}jet_native_dispatch_finish(__jet_stop, __jet_result)\n}}",
             self.function_name(function.id),
             self.function_name(function.id),
         );
         let _ = writeln!(
             out,
-            "#[no_mangle]\n#[inline(never)]\npub extern \"C\" fn {entry}({params}) -> {ret} {{ {implementation}({args}) }}\n"
+            "#[no_mangle]\n#[inline(never)]\npub extern \"C\" fn {entry}({abi_params}) -> {ret} {{ {root}jet_native_dispatch_boundary(__jet_stop, || {implementation}({args})) }}\n"
         );
         let _ = writeln!(
             out,
-            "#[no_mangle]\n#[inline(never)]\npub extern \"C\" fn {install}(candidate: extern \"C\" fn({params}) -> {ret}) {{\n    *__JET_NATIVE_SLOT_{}.write().unwrap_or_else(|__jet_poison| __jet_poison.into_inner()) = candidate;\n}}\n",
+            "#[no_mangle]\n#[inline(never)]\npub extern \"C\" fn {install}(candidate: extern \"C\" fn({abi_params}) -> {ret}) {{\n    *__JET_NATIVE_SLOT_{}.write().unwrap_or_else(|__jet_poison| __jet_poison.into_inner()) = candidate;\n}}\n",
             self.function_name(function.id),
         );
     }
@@ -14097,12 +14115,8 @@ impl<'a> RustEmitter<'a> {
                 let source = format!(
                     "fn {wrapper}() -> JetTestOutcome {{\n\
                          let __jet_result = jet_test_run({expected_failure}, || {{ {body} }});\n\
-                         let __jet_stdout = jet_test_take_output();\n\
-                         let (__jet_failed, __jet_stderr) = match __jet_result {{ Ok(()) => (false, String::new()), Err(__jet_error) => (true, __jet_error) }};\n\
-                         let __jet_skipped = jet_test_take_whole_skip();\n\
-                         JetTestOutcome {{ name: {name_literal}.to_string(), ok: __jet_skipped || (__jet_failed == {}), expected_failure: {expected_failure}, skipped: __jet_skipped, stdout: __jet_stdout, stderr: __jet_stderr, property_cases: None }}\n\
+                         jet_test_unit_outcome({name_literal}.to_string(), {expected_failure}, __jet_result)\n\
                      }}\n",
-                    test.expected_failure,
                 );
                 out.push_str(&source);
             }
@@ -20614,6 +20628,11 @@ impl<'a> RustEmitter<'a> {
             }
             MirTerminator::Unreachable { reason } => {
                 let _ = writeln!(out, "{pad}unreachable!({:?});", reason);
+            }
+            // Stop points are produced only for native host compilations,
+            // never for MIR that reaches the Rust emitter.
+            MirTerminator::Poll { .. } | MirTerminator::Stopped => {
+                let _ = writeln!(out, "{pad}unreachable!(\"MIR stop point reached the Rust emitter\");");
             }
         }
     }

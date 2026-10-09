@@ -294,8 +294,12 @@ fn checked_subject_enum(cx: &Cx, subject_ty: &Type, variant: &str) -> Option<Str
         if let Some(key) = declared {
             return Some(key.to_string());
         }
-        jet_foundation::CoreModuleExports::core_enum_variants(owner)
+        // Compiler-created enum declarations share the canonical owner/menu
+        // contract even when they have no Core source or Cx enum entry.
+        (jet_foundation::CoreModuleExports::core_enum_variants(owner)
             .is_some_and(|variants| variants.contains(&variant))
+            || crate::Codegen::TIR::tir_to_mir_types::compiler_owned_enum_variants(owner)
+                .is_some_and(|variants| variants.contains(&variant)))
             .then(|| owner.to_string())
     };
     let resolved = cx.core_qualified_rust_type_name(name).unwrap_or(name.as_str());

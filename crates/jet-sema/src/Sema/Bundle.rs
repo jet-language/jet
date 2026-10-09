@@ -1770,7 +1770,7 @@ fn populate_name_ledger(
     ledger: &mut jet_foundation::Names::NameLedger,
 ) {
     for (module_idx, module) in bundle.modules.iter().enumerate() {
-        let package = jet_foundation::Names::package_scope_for(&module.path, &bundle.project_root);
+        let package = states[module_idx].package_scope.clone();
         ledger.set_module(
             module_idx,
             module.alias.clone(),
@@ -2019,7 +2019,7 @@ pub fn check_bundle_for_output_opts_with_effect_facts(
     output: &str,
     no_os: bool,
     gates: crate::Policy::GateSet,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>) {
     pipeline_check_bundle_opts_for_output(bundle, mode, no_os, gates, Some(output), None)
 }
 
@@ -2027,7 +2027,7 @@ pub fn check_bundle_for_output_opts_with_effect_facts(
 pub fn check_bundle_with_effect_facts(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>) {
     pipeline_check_bundle_opts_for_output(
         bundle,
         mode,
@@ -2046,7 +2046,7 @@ pub fn check_bundle_with_effect_facts(
 pub fn check_bundle_with_effect_facts_for_build(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>) {
     pipeline_check_bundle_opts_for_output_with_context(
         bundle,
         mode,
@@ -2138,7 +2138,7 @@ pub fn check_bundle_with_effect_facts_incremental(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
     cache: &mut IncrementalSemaCache,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>) {
     pipeline_check_bundle_opts_for_output(
         bundle,
         mode,
@@ -2166,7 +2166,7 @@ pub fn check_bundle_no_os(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<
 pub fn check_bundle_no_os_with_effect_facts(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>) {
     pipeline_check_bundle_opts_for_output(
         bundle,
         mode,
@@ -2191,7 +2191,7 @@ pub fn check_bundle_gates_with_effect_facts(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
     gates: crate::Policy::GateSet,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>) {
     pipeline_check_bundle_opts_for_output(bundle, mode, false, gates, None, None)
 }
 
@@ -2354,6 +2354,69 @@ mod structure_tests {
             edition: "2027".to_string(),
         }
     }
+    #[test]
+    fn original_error_supplier_retains_one_source_owner_and_parser_provenance() {
+        let mut bundle = incremental_bundle("struct Message { value: Int }\nfn run() {}\n");
+        let user_items = bundle.modules[0].items.len();
+        let program = crate::Sema::Prelude::error_prelude_program().unwrap();
+        let owner = crate::Sema::Prelude::retain_error_prelude_module(&mut bundle).unwrap();
+        assert_eq!(owner, 1);
+        assert_eq!(bundle.entry, 0);
+        assert_eq!(bundle.modules[0].items.len(), user_items);
+        assert!(bundle.modules[0].items.iter().all(|item|
+            !matches!(item, Item::Struct(definition) if definition.compiler_builtin_error)));
+        let source_rows = program.items.iter().filter_map(|item| match item {
+            Item::Struct(definition) => Some(definition),
+            _ => None,
+        }).collect::<Vec<_>>();
+        assert_eq!(source_rows.len(), 7, "the original supplier declares seven nominal rows");
+        assert_eq!(bundle.modules[owner].items.len(), source_rows.len());
+        for (item, original) in bundle.modules[owner].items.iter().zip(source_rows) {
+            let Item::Struct(retained) = item else { panic!("original supplier row changed kind") };
+            assert!(retained.compiler_builtin_error);
+            assert_eq!(retained.name, original.name);
+            assert_eq!(retained.span, original.span);
+            assert_eq!(retained.name_span, original.name_span);
+        }
+        assert_eq!(crate::Sema::Prelude::retain_error_prelude_module(&mut bundle).unwrap(), owner);
+        assert_eq!(bundle.modules.len(), 2, "rechecking retains the same source owner");
+    }
+
+    #[test]
+    fn original_error_supplier_rejects_changed_source_custody() {
+        let mut bundle = incremental_bundle("fn run() {}\n");
+        let owner = crate::Sema::Prelude::retain_error_prelude_module(&mut bundle).unwrap();
+        bundle.modules[owner].source.push('\n');
+        let diagnostics = crate::Sema::Prelude::retain_error_prelude_module(&mut bundle).unwrap_err();
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0003"));
+    }
+
+    #[test]
+    fn original_error_supplier_rejects_changed_alias_custody() {
+        let mut bundle = incremental_bundle("fn run() {}\n");
+        let owner = crate::Sema::Prelude::retain_error_prelude_module(&mut bundle).unwrap();
+        bundle.modules[owner].alias = crate::Syntax::generated_path("other/Errors.jet");
+        let diagnostics = crate::Sema::Prelude::retain_error_prelude_module(&mut bundle).unwrap_err();
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0003"));
+        assert_eq!(bundle.modules.len(), 2, "a changed alias does not create another owner");
+        assert!(bundle.modules[owner].items.iter().any(|item|
+            matches!(item, Item::Struct(definition) if definition.compiler_builtin_error)));
+    }
+
+    #[test]
+    fn original_private_error_names_are_denied_in_normal_source() {
+        for name in [
+            "__jet_ErrorContextFrame", "__jet_ErrorConversion", "__jet_ErrorField",
+            "__jet_ErrorSpan", "__jet_ErrorDetails", "__jet_ErrorMetadata",
+        ] {
+            let (_, diagnostics) = crate::Lexer::lex(&format!("struct {name} {{}}\n"));
+            assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0067"),
+                "{name} must not become a legal user declaration: {diagnostics:?}");
+            let (_, diagnostics) = crate::Lexer::lex(&format!("use other.[{name} as Metadata]\n"));
+            assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0067"),
+                "{name} must not become a legal nonowner alias: {diagnostics:?}");
+        }
+    }
 
 
 
@@ -2392,7 +2455,7 @@ mod structure_tests {
 
         let mut cache = IncrementalSemaCache::new();
         let mut first = incremental_bundle(before);
-        let (first_diags, _) = check_bundle_with_effect_facts_incremental(
+        let (first_diags, _, _) = check_bundle_with_effect_facts_incremental(
             &mut first,
             CompileMode::Check,
             &mut cache,
@@ -2407,7 +2470,7 @@ mod structure_tests {
         cache.clear_measurement();
 
         let mut second = incremental_bundle(after);
-        let (second_diags, _) = check_bundle_with_effect_facts_incremental(
+        let (second_diags, _, _) = check_bundle_with_effect_facts_incremental(
             &mut second,
             CompileMode::Check,
             &mut cache,
@@ -2566,7 +2629,7 @@ mod structure_tests {
     fn pending_diagnostics_have_exact_retained_byte_cost() {
         let mut bundle = incremental_bundle("fn run() {}\n");
         let mut cache = IncrementalSemaCache::new();
-        let (diagnostics, _) =
+        let (diagnostics, _, _) =
             check_bundle_with_effect_facts_incremental(&mut bundle, CompileMode::Check, &mut cache);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(cache.functions.len(), 1);

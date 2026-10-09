@@ -25,6 +25,69 @@ archived Rust bootstrap compiler does not carry the lint.
 - The lint is linear in the size of the program. Ownership uses one forward
   dataflow over flat bit rows per function, with no per-block copies of maps.
 
+Native stop-point lowering and legality verification use the same checked
+Prelude route effects. A route marked `Panic` in
+`Compiler/JetFoundation/Source/Registry/PreludeEffects.jet` needs `Propagate`
+before its result is bound or consumed; returning a `Result` is not a stop.
+Semantic Prelude operations gain polls only from checked stop facts; existing
+user, indirect, Core, callback and general-call stop classification is retained.
+Checked slice routes carry `Panic` because bounds may fail dynamically.
+Payload access selected by an enum's own discriminant remains an invariant:
+record-import glue selects the matching tag before invoking a payload getter,
+so those getters do not introduce an independent user-visible stop point.
+
+The shared `mir_binary_can_trap` predicate consumes the operation and checked
+overflow policy: `Trap` on arithmetic or shifts is stopping, while bitwise and
+proven-total (`Unchecked`) operations are not. Exact Euclidean division and
+remainder carry checked `Panic` route facts for zero-divisor failures.
+The Rust seed represents this checked policy through `MirBinaryDispatch`:
+`Codegen/TIR/routes.rs::binary_route` selects a trapping Prelude row when
+overflow is checked (and for division/remainder/power that can fail for other
+reasons), otherwise a primitive operation. Its `mir_binary_can_trap` consumes
+that dispatch's checked `Panic` effect, without reconstructing symbol names.
+
+The shared stop predicate also consumes the checked operand type for unary
+negation and the exact accessed place for projected operations. Fixed-width
+`Neg` may trap (including transparent tags, ranges, and quantities); exact
+integer negation, floating negation, `Not`, and sema-proven-total `NumericCast`
+do not gain stop points. A projected read, move, write, or replacement checks
+its getter's `Panic` fact; only a write or replacement also checks its setter.
+Total Map routes stay total. Merely registering a projected place does not
+evaluate it. `ScopeExit` can forward a stop but is not independently
+Panic-capable; `RequireStop` is explicitly stopping in both Rust and Jet.
+
+`tests/fixtures/mir_stop_predicate.tsv` is the common operation/fact table for
+the Rust `shared_stop_predicate_table` test and the Jet FrontFeed predicate
+witness. Set `JET_STOP_PREDICATE_RESULTS` when exercising the Rust test, then
+use `run-front-feed.mjs --stop-predicate --rust-predicate-results PATH --probe
+BINARY` to compare every input/result byte against the exercised Jet predicate.
+Preparation with `--assemble` does not claim parity or a successful golden.
+Shield and transaction masks suppress cancellation `Check` polls, not
+`Propagate` after Panic-capable operations. The runtime delivery contract is
+`Compiler/JetRuntime/Source/Scheduler.jet::scheduler_delivered_status`: Shield
+retains panic/fault statuses while deferring cancellation/deadline statuses.
+Legality rejects cancellation checks and non-Panic propagation under a mask.
+
+Normal-exit cleanup can publish a Panic. Its current action is consumed before
+the call, and its propagation edge runs only the remaining registered actions,
+once each. Already-run actions are not replayed; sibling exit paths retain
+their own registrations. Propagation cleanup does not introduce another poll:
+a second panic after any delivered stop is fatal in the runtime. Legality
+rejects a stop edge that reuses a consuming call's moved input or deferred thunk.
+
+Every compiler-generated propagation cleanup action has an explicit
+`MIRScopeKind.StopCleanup` owner. It is not a user `Shield`: native entry reads
+the actual raw `jet_rt_session_status`, passes that delivered kind to
+`jet_rt_session_cleanup_enter`, and holds the returned opaque flags token.
+`jet_rt_session_cleanup_leave` always restores that exact token, including
+zero, without clearing or taking a stop record. Only the genuine old kind is
+masked; entry with zero masks nothing, so the first new stop remains visible.
+Each action enters separately, allowing a later action to capture the current
+delivered kind. Runtime task/root provenance is never inferred by the compiler.
+Legality requires one static entry, matched LIFO leaves on all live exits, and
+no recursive poll within that owner. Both interpreters and Rust emission reject
+this native-only scope rather than treating it as an inert lexical scope.
+
 ## Type compatibility
 
 The lint compares types with one relation, *compatible*. Each side is first
