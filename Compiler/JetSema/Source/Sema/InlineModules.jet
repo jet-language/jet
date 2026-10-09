@@ -80,18 +80,33 @@ use jet_foundation.[
 
 // A member reached through a `use` inside a module: an inline module member
 // function, or (qualified) a member of a file module imported by this file.
-struct SemaInlineTarget {
-    module_alias: String
-    member: String
-    qualified: Bool
+pub struct SemaInlineTarget {
+    pub module_alias: String
+    pub member: String
+    pub qualified: Bool
 }
 
-struct SemaInlineModuleSurface {
-    name: String
+pub struct SemaInlineModuleSurface {
+    pub name: String
     // Member function name -> written `pub`.
-    functions: [String:Bool]
+    pub functions: [String:Bool]
     // `pub use` inside the module: re-exported local name -> its owner.
-    reexports: [String:SemaInlineTarget]
+    pub reexports: [String:SemaInlineTarget]
+}
+
+pub struct SemaInlineFunctionBinding {
+    pub semantic_name: String
+    pub module_alias: String
+    pub source_name: String
+    pub span: Span
+    pub visibility: Int
+}
+
+// The existing binder's products, retained after body rewriting for checked
+// metadata references. These contain names/spans only, never function ASTs.
+pub struct SemaInlinePreparedBindings {
+    pub imports: [String:SemaInlineFunctionBinding]
+    pub modules: [SemaInlineModuleSurface]
 }
 
 struct SemaInlineRewrite {
@@ -104,7 +119,7 @@ struct SemaInlineRewrite {
     // File-level inline modules reachable as `alias.f(...)`.
     modules: [SemaInlineModuleSurface]
     // `use bank.[f as g]`: local name -> member identity.
-    imported: [String:String]
+    imported: [String:SemaInlineFunctionBinding]
     // A module's own `use limits.[MAX]` over a file module alias.
     qualified: [String:SemaInlineTarget]
     locals: [String]
@@ -301,7 +316,7 @@ fn sema_inline_module_lowerable(definition: CodeModule) -> Bool Never! {
 // `rewrite_inline_calls_expr` and the checker's inline-module call routes).
 
 fn sema_inline_rewrite_empty() -> SemaInlineRewrite Never! {
-    SemaInlineRewrite{types: [String:Type]{}, values: [String:Expr]{}, sibling_module: "", siblings: [String:Bool]{}, modules: [SemaInlineModuleSurface]{}, imported: [String:String]{}, qualified: [String:SemaInlineTarget]{}, locals: [String]{}, diagnostics: [Diagnostic]{}}
+    SemaInlineRewrite{types: [String:Type]{}, values: [String:Expr]{}, sibling_module: "", siblings: [String:Bool]{}, modules: [SemaInlineModuleSurface]{}, imported: [String:SemaInlineFunctionBinding]{}, qualified: [String:SemaInlineTarget]{}, locals: [String]{}, diagnostics: [Diagnostic]{}}
 }
 
 fn sema_inline_is_local(rewrite: SemaInlineRewrite, name: String) -> Bool Never! {
@@ -571,7 +586,7 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
             updated := call
             if {
                 rewrite.siblings.get(call.name) != None -> updated.name = sema_inline_member_name(rewrite.sibling_module, call.name)
-                !sema_inline_is_local(rewrite, call.name) && rewrite.imported.get(call.name) != None -> updated.name = rewrite.imported.get(call.name) ?? call.name
+                !sema_inline_is_local(rewrite, call.name) && rewrite.imported.get(call.name) != None -> updated.name = (rewrite.imported.get(call.name) ?? panic("a bound inline import lost its row")).semantic_name
                 else -> {}
             }
             updated.type_args = sema_inline_rewrite_types(rewrite, call.type_args)
@@ -1132,7 +1147,7 @@ fn sema_inline_bind_imports(program: Program, surfaces: [SemaInlineModuleSurface
             }
             // A module whose functions stay in its body binds nothing here.
             members :: surface ?? next
-            loop item in items {
+            loop (item_index, item) in items {
                 local :: sema_registration_import_local(item)
                 if {
                     seen.get(local) != None -> &rewrite.diagnostics.push(sema_error("E0105", declaration.alias_span, "the import name `{local}` is used twice", "each import needs a unique namespace name in this file", "rename one with `as alias`"))
@@ -1140,7 +1155,8 @@ fn sema_inline_bind_imports(program: Program, surfaces: [SemaInlineModuleSurface
                     !(members.functions.get(item.original) ?? true) -> &rewrite.diagnostics.push(sema_error("E0609", module_alias_span, "`{item.original}` is private in module `{module_alias}`", "only `pub` items can be brought into scope with `use`", "add `pub` before `fn {item.original}` in module `{module_alias}`"))
                     else -> {
                         seen[local] = true
-                        rewrite.imported[local] = sema_inline_member_name(target, item.original)
+                        span :: if item_index < declaration.local_spans.len() -> declaration.local_spans[item_index] else -> declaration.span
+                        rewrite.imported[local] = SemaInlineFunctionBinding{semantic_name: sema_inline_member_name(target, item.original), module_alias: ~target, source_name: ~item.original, span: span, visibility: if declaration.is_pub -> 2 else -> if declaration.is_package_pub -> 1 else -> 0}
                     }
                 }
             }
@@ -1200,7 +1216,8 @@ fn sema_inline_bind_module_imports(definition: CodeModule, surfaces: [SemaInline
                 if target.qualified {
                     rewrite.qualified[local] = target
                 } else {
-                    rewrite.imported[local] = sema_inline_member_name(target.module_alias, target.member)
+                    span :: if index < declaration.local_spans.len() -> declaration.local_spans[index] else -> declaration.span
+                    rewrite.imported[local] = SemaInlineFunctionBinding{semantic_name: sema_inline_member_name(target.module_alias, target.member), module_alias: ~target.module_alias, source_name: ~target.member, span: span, visibility: if declaration.is_pub -> 2 else -> if declaration.is_package_pub -> 1 else -> 0}
                 }
                 if declaration.is_pub -> reexports[local] = target
             }
@@ -1318,14 +1335,14 @@ fn sema_program_with_items(program: Program, items: ^[Item]) -> Program Never! {
 
 // Lowers `program`'s inline modules in place; a program without one is left
 // untouched (not copied).
-pub fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) {
+pub fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> SemaInlinePreparedBindings {
     has_module := false
     loop item in program.items {
         if item == .CodeModule(definition) {
             if definition.body != None -> has_module = true
         }
     }
-    if !has_module -> return
+    if !has_module -> return SemaInlinePreparedBindings{imports: [String:SemaInlineFunctionBinding]{}, modules: [SemaInlineModuleSurface]{}}
 
     // 1. Member types, in item order, then the public qualified spellings.
     hoist := SemaInlineHoist{declarations: [Item]{}, exported: [String:Type]{}, has_exported: false}
@@ -1411,11 +1428,12 @@ pub fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) 
 
     // 3. Qualified calls and `use` bindings, in every body of the file.
     calls := sema_inline_rewrite_empty()
-    calls.modules = surfaces
     imports :: sema_inline_bind_imports(program, surfaces, inline_names, &calls)
+    calls.modules = ^surfaces
     rewritten := [Item]{}
     loop item in lowered_items -> &rewritten.push(sema_inline_rewrite_item(&calls, item))
     program.items = rewritten
     program.imports = imports
     loop diagnostic in calls.diagnostics -> &diagnostics.push(diagnostic)
+    SemaInlinePreparedBindings{imports: ^calls.imported, modules: ^calls.modules}
 }

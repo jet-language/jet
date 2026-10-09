@@ -1,4 +1,5 @@
 // Source, module, and package identities remain separate at the driver boundary.
+use jet_sema.[SemaOutputIntent]
 use jet_foundation.[
     AppAuthorizedDirectory,
     CompilerThreads,
@@ -49,6 +50,7 @@ use jet_sema.[
     SemaRegistrationImportEdge,
     SemaSourceOrigin,
     SemaSourceSegment,
+    SchemaSnapshot,
 ]
 use jet_codegen.[
 JetPluginArtifacts,
@@ -186,6 +188,9 @@ pub struct JetDriverCompileRequest {
     pub eval_config: JetEvalConfig
     pub target: JetDriverCompileTarget
     pub record_store: JetDriverRecordStore?
+    // Captured snapshots override the canonical project schema cache; absence
+    // reads that cache once through the same ordinary populated checker.
+    pub schema_snapshots: [String:SchemaSnapshot]?{None}
     // The host's streaming trace (`JET_TRACE_FILE`); `None` traces nothing.
     pub trace_sink: CompilerTraceSink?
     // Full verification: the optimizer re-verifies legality and runs MIR
@@ -198,6 +203,10 @@ pub struct JetDriverCompileRequest {
     // the same diagnostics and output bytes.
     pub compiler_threads: CompilerThreads
     pub mode: JetDriverCompileMode{JetDriverCompileMode.Program}
+    // Selection is separate from compilation/lowering mode: checking validates
+    // all links/defaults; running selects one address; testing selects Checks.
+    pub output_intent: SemaOutputIntent{SemaOutputIntent.Check}
+    pub output_address: String?{None}
     pub gate_set: GateSet{GateSet{}}
     pub gate_policies: [JetDriverGatePolicy]{[JetDriverGatePolicy]{}}
     // External lock/trust/forced-build writers use the canonical gate row.

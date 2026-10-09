@@ -2,6 +2,7 @@
 // facts. Equatable is not here: its body is the Prelude derive template that
 // JetSema expands into a compiler-generated impl (D-ONCE-DERIVE1=A).
 use jet_foundation.[
+    name_mangle,
     MIRField,
     MIRNominalRef,
     MIRType,
@@ -26,7 +27,7 @@ fn jet_codegen_auto_derives_source_name(name: String) -> String Never! {
 
 fn jet_codegen_auto_derives_type_args(definition: MIRTypeDef) -> String Never! {
     if definition.generic_params.len() == 0 -> return ""
-    names :: loop parameter in definition.generic_params -> jet_rust_emit_mangle(parameter.name)
+    names :: loop parameter in definition.generic_params -> name_mangle(parameter.name)
     "<{names.join(", ")}>"
 }
 
@@ -37,7 +38,7 @@ fn jet_codegen_auto_derives_impl_generics(ctx: &JetRustEmitContext, definition: 
         bounds := [String]{}
         loop bound in parameter.bounds -> &bounds.push(jet_rust_emit_trait_name(&ctx, bound.id))
         if !bounds.contains(rust_bound) -> &bounds.push(rust_bound)
-        &params.push("{jet_rust_emit_mangle(parameter.name)}: {bounds.join(" + ")}")
+        &params.push("{name_mangle(parameter.name)}: {bounds.join(" + ")}")
     }
     "<{params.join(", ")}>"
 }
@@ -158,7 +159,7 @@ fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: MI
             &lines.push("        match self {{")
             loop member in members {
                 member_name :: jet_rust_emit_quote(jet_codegen_auto_derives_source_name(member))
-                &lines.push("            Self::{jet_rust_emit_mangle(member)} => jet_debug_variant({member_name}, None),")
+                &lines.push("            Self::{name_mangle(member)} => jet_debug_variant({member_name}, None),")
             }
             &lines.push("        }}")
         }

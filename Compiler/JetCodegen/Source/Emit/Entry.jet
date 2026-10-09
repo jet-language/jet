@@ -6,6 +6,7 @@
 // host side of the bootstrap boundary (Compiler/Bootstrap/Runner.rs
 // prepare_bootstrap_artifact), which splices this fragment.
 use jet_foundation.[
+    name_mangle,
     MIRAccess,
     MIRArtifactKind,
     MIRArtifactPlan,
@@ -1052,7 +1053,7 @@ fn jet_rust_emit_web_exports(ctx: &JetRustEmitContext, lines: &[String]) Never! 
         decode := ""
         args := [String]{}
         loop parameter in function.params {
-            name :: jet_rust_emit_mangle(parameter.name)
+            name :: name_mangle(parameter.name)
             reconstruction := MIRWebParamReconstruction?{None}
             loop candidate in function.web_param_reconstructions {
                 if candidate.local == parameter.name && reconstruction == None -> reconstruction = Val(candidate)
@@ -1060,9 +1061,9 @@ fn jet_rust_emit_web_exports(ctx: &JetRustEmitContext, lines: &[String]) Never! 
             if reconstruction == .Val(row) {
                 fields := [String]{}
                 loop field in row.fields {
-                    flat :: jet_rust_emit_mangle(field.parameter)
+                    flat :: name_mangle(field.parameter)
                     &params.push("{flat}: {jet_rust_emit_web_abi_scalar(&ctx, field.ty)}")
-                    &fields.push("{jet_rust_emit_mangle(field.field)}: {jet_rust_emit_web_abi_decode(&ctx, field.ty, flat)}")
+                    &fields.push("{name_mangle(field.field)}: {jet_rust_emit_web_abi_decode(&ctx, field.ty, flat)}")
                 }
                 decode = "{decode}    let mut {name} = {jet_rust_emit_type(&ctx, row.ty)} {{ {jet_rust_emit_record_type_phantom_initializer(&ctx, row.ty)}{fields.join(", ")} }};\n"
             } else {

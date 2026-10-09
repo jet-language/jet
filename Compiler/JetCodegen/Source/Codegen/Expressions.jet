@@ -2245,7 +2245,9 @@ fn jet_codegen_geometry_source_target(builder: JetCodegenBuilder, program: JetCo
     selected := TFunc?{None}
     loop function in program.function_index.rows {
         if function.module_identity != owner.module_identity || function.source_file != "Core/math/math.jet" -> next
-        if function.kind != .Method(_, _) -> next
+        if function.kind == .Method(_, _) {} else {
+            next
+        }
         if function.name != operation && !function.name.ends_with("::{operation}") -> next
         target_owner :: jet_codegen_method_owner_type(function.kind) ?? next
         target_head :: jet_codegen_type_head_name(target_owner) ?? next

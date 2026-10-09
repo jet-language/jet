@@ -105,7 +105,7 @@ fn sema_expression_core_enum_name(name: String) -> Bool Never! {
         "Key" | "ProcessSignal" | "TextWidthAmbiguous" | "TextWidthControls" |
         "WatchDomain" | "WatchKind" | "DurationUnit" | "LateEventDisposition" |
         "Overflow" | "FailurePolicy" | "DispatchState" | "HookPolicy" | "HookDecision" | "HookOutcome" |
-        "NetShutdown" | "NetReadyInterest" | "NetError" | "NetDnsError" |
+        "NetShutdown" | "NetReadyInterest" | "NetError" | "NetDNSError" |
         "SMTPSecurity" | "RecipientPolicy" | "EmailError" |
         "DeliveryState" | "ServiceError" | "TaskOutcome" | "TaskStatus" -> true
         else -> false
@@ -1235,7 +1235,7 @@ fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value:
         hole_exprs := [Expr]{}
         loop text in checked.literals -> &literal_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span})
         loop part in parts {
-            if part == .Interp(value, _) -> &hole_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Interp{expr: value, format: StrFormat.Display}}, span: expr_span(value)})
+            if part == .Interp(hole, _) -> &hole_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Interp{expr: hole, format: StrFormat.Display}}, span: expr_span(hole)})
         }
         args := [CallArg]{}
         loop elements in ([ [Expr] ]{literal_exprs, hole_exprs}) {

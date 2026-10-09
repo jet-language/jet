@@ -1405,7 +1405,21 @@ fn emit_stage_zero_source(
             &source_closure,
         )
         .unwrap_or_else(|diagnostics| {
-            panic!("stage-zero Rust frontend rejected compiler sources: {diagnostics:?}")
+            // Keep every canonical report, not the Debug representation of its
+            // origin: Debug repeats the complete assembled source per report.
+            let file = jet_foundation::Report::ReportPath::from_process(
+                &compiler_snapshot.entry_path,
+            );
+            let source = fs::read_to_string(&compiler_snapshot.entry_path)
+                .expect("the rejected stage-zero entry source must remain available");
+            let clears = jet_foundation::Diagnostics::report_clear_counts(&diagnostics);
+            for (diagnostic, clears) in diagnostics.iter().zip(clears) {
+                eprintln!("{}", diagnostic.to_json_with_clears(&file, &source, clears));
+            }
+            panic!(
+                "stage-zero Rust frontend rejected compiler sources: {} diagnostics; canonical reports emitted above",
+                diagnostics.len()
+            )
         });
     source_lease
         .revalidate()

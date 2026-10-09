@@ -261,6 +261,10 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
             // The struct's fields, read at the declaration without copying
             // its methods.
             if sema_scope_declaration_struct(environment, owner_symbol.id) == .Val(struct_def) {
+                if struct_def.type_params.len() != owner_args.len() {
+                    &diagnostics.push(sema_error("E0104", span, "struct `{type_name(base.ty)}` has the wrong number of type arguments", "each declared type parameter needs one concrete argument", "provide one type argument for every generic parameter"))
+                    return None
+                }
                 names :: loop param in struct_def.type_params -> param.name
                 loop field in struct_def.fields {
                     if field.name == member {

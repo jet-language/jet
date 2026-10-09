@@ -43,7 +43,7 @@ use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::tir_address_lifetime;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::unit_type;
-#[cfg(test)]
+#[cfg(all(test, debug_assertions))]
 use crate::Codegen::build_cx;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
@@ -54,7 +54,7 @@ use crate::AST::{
     BindPattern, Expr, ForKind, IndexKind, LValue, OrFallback, Pattern, PlaceAccess, Stmt, Type,
     UnOp,
 };
-#[cfg(test)]
+#[cfg(all(test, debug_assertions))]
 use crate::Diagnostics::Span;
 use crate::Syntax;
 use std::cell::Cell;

@@ -504,7 +504,7 @@ pub fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, typ
     }
     if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && args[0].ty == Type.Float {
         identity :: sema_call_core_module_identity(environment, "core.math") ?? return None
-        if sema_call_core_source_target(environment, identity, "sqrt", type_args, span, &diagnostics) == .Val(target) {
+        if sema_call_core_source_target(environment, identity, "sqrt", type_args, span, false, &diagnostics) == .Val(target) {
             argument :: TCallArg{value: args[0], template_items: [SymbolID]{}, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
             value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
             return sema_expr_expected(value, expected, environment, &diagnostics)
@@ -515,7 +515,7 @@ pub fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, typ
         source_module := record.module_name
         source_member := member
         if member.starts_with("core.") {
-            parts := member.split(".")
+            parts := member.split(".").to_list()
             source_member = &parts.pop() ?? return None
             source_module = parts.join(".")
         }

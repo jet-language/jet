@@ -1,5 +1,6 @@
 // Callable signatures and CFG body wrappers.
 use jet_foundation.[
+    name_mangle,
     MIRAccess,
     MIRCallee,
     MIRCaptureParam,
@@ -1307,7 +1308,7 @@ fn jet_rust_emit_clone_type_params(ty: MIRType, scope: [MIRGenericParam], names:
 fn jet_rust_emit_clone_where(ctx: &JetRustEmitContext, id: MIRFunctionID) -> String Never! {
     names :: ctx.clone_bounds.get(jet_rust_emit_id_key(id.value)) ?? return ""
     rendered := [String]{}
-    loop name in names -> &rendered.push("{jet_rust_emit_mangle(name)}: Clone")
+    loop name in names -> &rendered.push("{name_mangle(name)}: Clone")
     " where {rendered.join(", ")}"
 }
 
@@ -1406,7 +1407,7 @@ fn jet_rust_emit_partial_declarations(ctx: &JetRustEmitContext, function: MIRFun
 }
 
 fn jet_rust_emit_trait_param_name(parameter: MIRParam, index: Int) -> String Never! {
-    if parameter.name.len() > 0 -> jet_rust_emit_mangle(parameter.name) else -> "arg_{index}"
+    if parameter.name.len() > 0 -> name_mangle(parameter.name) else -> "arg_{index}"
 }
 
 // MIRRust function_leaf_name: the method leaf of a possibly owner-qualified name.
@@ -1425,7 +1426,7 @@ fn jet_rust_emit_compiler_trait_method_symbol(trait_name: String, leaf: String) 
 
 // MIRRust trait_method_symbol: a user trait method takes the plain mangle.
 fn jet_rust_emit_trait_method_symbol(trait_name: String, method: MIRTraitMethod) -> String Never! {
-    if jet_rust_emit_compiler_owned_trait(trait_name) -> jet_rust_emit_compiler_trait_method_symbol(trait_name, method.name) else -> jet_rust_emit_mangle(method.name)
+    if jet_rust_emit_compiler_owned_trait(trait_name) -> jet_rust_emit_compiler_trait_method_symbol(trait_name, method.name) else -> name_mangle(method.name)
 }
 
 // The Rust method symbol of one trait method implemented or called through
@@ -1435,12 +1436,12 @@ fn jet_rust_emit_trait_impl_method_symbol(ctx: &JetRustEmitContext, trait_id: MI
     loop row in jet_rust_emit_trait_rows(ctx, trait_id) {
         if row.id == trait_id && jet_rust_emit_compiler_owned_trait(row.name) -> return jet_rust_emit_compiler_trait_method_symbol(row.name, leaf)
     }
-    jet_rust_emit_mangle(leaf)
+    name_mangle(leaf)
 }
 
 // MIRRust rust_method_symbol for an inherent method: `__jet_<leaf>`.
 fn jet_rust_emit_inherent_method_symbol(name: String) -> String Never! {
-    jet_rust_emit_mangle(jet_rust_emit_function_leaf(name))
+    name_mangle(jet_rust_emit_function_leaf(name))
 }
 
 fn jet_rust_emit_trait_method_head(ctx: &JetRustEmitContext, trait_name: String, method: MIRTraitMethod) -> String Never! {
@@ -1808,7 +1809,7 @@ fn jet_rust_emit_impl_clone_where(ctx: &JetRustEmitContext, implementation: MIRI
     }
     if names.len() == 0 -> return ""
     rendered := [String]{}
-    loop name in names -> &rendered.push("{jet_rust_emit_mangle(name)}: Clone")
+    loop name in names -> &rendered.push("{name_mangle(name)}: Clone")
     " where {rendered.join(", ")}"
 }
 
@@ -2481,7 +2482,7 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
 // `__jet_` lane, which the runtime's compiler-owned traits (`__jet_Index`'s
 // `__jet_Key`/`__jet_Value`) also declare.
 fn jet_rust_emit_associated_type_name(name: String) -> String Never! {
-    jet_rust_emit_mangle(name)
+    name_mangle(name)
 }
 
 fn jet_rust_emit_function_memoized(function: MIRFunction) -> Bool Never! {

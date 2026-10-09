@@ -261,7 +261,8 @@ pub struct CBORPull {
         name :: if width == 2 -> "Float16" else if width == 4 -> "Float32" else -> "Float64"
         bits := 0
         loop i in 0..<width {
-            byte :: Int.from_u8(&self.required(start, "truncated CBOR {name}") ?? return Err(err))
+            raw_byte :: &self.required(start, "truncated CBOR {name}") ?? return Err(err)
+            byte :: Int.from_u8(raw_byte)
             if width == 8 && i == 0 && byte >= 128 -> bits = byte - 256
             else -> bits = (bits << 8) | byte
         }
@@ -334,7 +335,10 @@ pub struct CBORPull {
             if additional == 20 -> event = DataEvent.Bool(false)
             else if additional == 21 -> event = DataEvent.Bool(true)
             else if additional == 22 -> event = DataEvent.Null
-            else if additional >= 25 && additional <= 27 -> event = DataEvent.Float(&self.float(additional, start) ?? return Err(err))
+            else if additional >= 25 && additional <= 27 {
+                number :: &self.float(additional, start) ?? return Err(err)
+                event = DataEvent.Float(number)
+            }
             else -> return Err(error(.Unsupported, start, self.path(), "unsupported CBOR simple value {additional}"))
         }
         &self.complete_parent()

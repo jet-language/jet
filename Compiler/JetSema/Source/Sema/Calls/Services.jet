@@ -619,18 +619,18 @@ pub fn sema_validate_service_handler_graph(modules: [SemaGraphModuleResult]) -> 
 // This is the same compiler-owned contract as Rust CheckerInfer/calls/
 // method_calls.rs: enqueue/delay are not string-selected public operations.
 fn sema_job_queue_nominal(environment: SemaScopeEnvironment, leaf: String) -> String Never! {
-    graph :: environment.registration_graph ?? return leaf
+    graph :: environment.registration_graph ?? return ~leaf
     loop module_index in 0..<graph.modules.len() {
         if graph.modules[module_index].module_name != "core.jobs" -> next
         loop nominal_index in 0..<graph.modules[module_index].nominals.len() {
             nominal :: graph.modules[module_index].nominals[nominal_index]
             if nominal.symbol.name == leaf {
-                if nominal.compiler_owned -> return leaf
+                if nominal.compiler_owned -> return ~leaf
                 return "{nominal.symbol.module_name}::{leaf}"
             }
         }
     }
-    leaf
+    ~leaf
 }
 
 fn sema_job_queue_function(expression: Expr, environment: SemaScopeEnvironment) -> SemaRegistrationRowRef? {

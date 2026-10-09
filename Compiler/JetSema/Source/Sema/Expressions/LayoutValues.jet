@@ -248,7 +248,7 @@ pub fn sema_expression_measurement_source_call(function: String, values: [TExpr]
     source_index :: sema_registration_module_index(graph, source_identity) ?? return None
     callee :: sema_registration_direct_symbol(graph.modules[source_index], function) ?? return None
     arguments :: loop value in values -> TCallArg{value: value, template_items: [SymbolID]{}, borrow: !sema_call_is_scalar(value.ty), mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-    Val(sema_tir_expr(result_type, TExprKind.Call{callee: callee.id, type_args: [Type]{}, args: arguments}, span))
+    Val(sema_tir_expr(result_type, TExprKind.Call{callee: callee.symbol.id, type_args: [Type]{}, args: arguments}, span))
 }
 
 pub fn sema_call_try_measurement_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {

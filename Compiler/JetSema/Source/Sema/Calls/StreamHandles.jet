@@ -323,7 +323,7 @@ pub fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr,
             &diagnostics.push(sema_error("E0003", span, "filesystem source module is not loaded", "receiver policy requires Core/files/files.jet", "load the registered Core source module"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        target :: sema_call_core_source_target(environment, identity, source_member, [Type]{}, span, &diagnostics) ?? {
+        target :: sema_call_core_source_target(environment, identity, source_member, [Type]{}, span, true, &diagnostics) ?? {
             &diagnostics.push(sema_error("E0003", span, "filesystem source receiver target is missing", "receiver policy requires its canonical source function", "load the registered Core source function"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }

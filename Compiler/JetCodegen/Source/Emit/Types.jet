@@ -1,6 +1,7 @@
 // MIR type, declaration, and constant projections. All names are derived from
 // canonical MIR identities; no source or Rust AST lookup is performed here.
 use jet_foundation.[
+    name_mangle,
     CORE_MODULE_EXPORTS,
     ByteLayout,
     FieldLayoutFacts,
@@ -897,7 +898,7 @@ fn jet_rust_emit_current_generic_parameter(ctx: &JetRustEmitContext, name: MIRNo
 }
 
 fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args: [MIRType]) -> String Never! {
-    if args.len() == 0 && jet_rust_emit_current_generic_parameter(&ctx, name) -> return jet_rust_emit_mangle(name.name)
+    if args.len() == 0 && jet_rust_emit_current_generic_parameter(&ctx, name) -> return name_mangle(name.name)
     if args.len() == 0 && ctx.current_associated_types.contains(name.name) -> return "Self::{jet_rust_emit_associated_type_name(name.name)}"
     if args.len() == 0 && name.name == "Unit" -> return "()"
     if args.len() == 0 && name.name == "Never" -> return "std::convert::Infallible"
@@ -1441,7 +1442,7 @@ fn jet_rust_emit_generic_params(ctx: &JetRustEmitContext, params: [MIRGenericPar
     loop param in params {
         bounds := [String]{}
         loop bound in param.bounds -> &bounds.push(jet_rust_emit_trait_name(&ctx, bound.id))
-        if bounds.len() == 0 -> &rendered.push(jet_rust_emit_mangle(param.name)) else -> &rendered.push("{jet_rust_emit_mangle(param.name)}: {bounds.join(" + ")}")
+        if bounds.len() == 0 -> &rendered.push(name_mangle(param.name)) else -> &rendered.push("{name_mangle(param.name)}: {bounds.join(" + ")}")
     }
     "<{rendered.join(", ")}>"
 }
@@ -1727,7 +1728,7 @@ fn jet_rust_emit_columnar_impl_generics(ctx: &JetRustEmitContext, params: [MIRGe
         bounds := [String]{}
         loop bound in parameter.bounds -> &bounds.push(jet_rust_emit_trait_name(&ctx, bound.id))
         &bounds.push("Clone")
-        &rendered.push("{jet_rust_emit_mangle(parameter.name)}: {bounds.join(" + ")}")
+        &rendered.push("{name_mangle(parameter.name)}: {bounds.join(" + ")}")
     }
     "<{rendered.join(", ")}>"
 }
@@ -1735,7 +1736,7 @@ fn jet_rust_emit_columnar_impl_generics(ctx: &JetRustEmitContext, params: [MIRGe
 fn jet_rust_emit_columnar_generic_args(params: [MIRGenericParam]) -> String Never! {
     if params.len() == 0 -> return ""
     rendered := [String]{}
-    loop parameter in params -> &rendered.push(jet_rust_emit_mangle(parameter.name))
+    loop parameter in params -> &rendered.push(name_mangle(parameter.name))
     "<{rendered.join(", ")}>"
 }
 
@@ -1823,7 +1824,7 @@ JET_RUST_EMIT_COMPILER_OWNED_ENUMS :: prep { [String]{
     "Overflow", "FailurePolicy", "HookPolicy", "HookOutcome", "HookDecision", "DispatchState", "Ordering", "RemoveBy", "TaskFailure", "TaskOutcome",
     "TaskStatus", "DeliveryState", "IOError", "Key", "IOOperation", "ProcessResourceLimit", "ProcessStreamMode", "TerminalMode", "DurationUnit", "FontStyle",
     "GlyphShaper", "WebFormValueType", "WebFormControl", "DataLoaderKind", "DataErrorKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "DataTree", "DataEvent",
-    "XMLCanonicalMode", "EmailError", "SMTPSecurity", "RecipientPolicy", "SMTPAuth", "TLSTrust", "TLSVersion", "TLSClientTrust", "NetDnsError", "NetError",
+    "XMLCanonicalMode", "EmailError", "SMTPSecurity", "RecipientPolicy", "SMTPAuth", "TLSTrust", "TLSVersion", "TLSClientTrust", "NetDNSError", "NetError",
     "NetShutdown", "WatchDomain", "WatchKind", "NetReadyInterest", "WsError",
     "PluginLimit", "PluginError",
 } }
@@ -1903,7 +1904,7 @@ fn jet_rust_emit_record_phantoms(ctx: &JetRustEmitContext) -> [U64:String] Never
                 }
                 absent := [String]{}
                 loop parameter in definition.generic_params {
-                    if !names.contains(parameter.name) -> &absent.push(jet_rust_emit_mangle(parameter.name))
+                    if !names.contains(parameter.name) -> &absent.push(name_mangle(parameter.name))
                 }
                 if absent.len() > 0 -> &markers.add(definition.id.value, "core::marker::PhantomData<({absent.join(", ")},)>").drop("type identities are unique")
             }
@@ -2123,14 +2124,14 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
         }
         .UnitFamily(members) -> {
             &lines.push("{visibility_name}enum {name}{generics} {{")
-            loop member in members -> &lines.push("    {jet_rust_emit_mangle(member)},")
+            loop member in members -> &lines.push("    {name_mangle(member)},")
             &lines.push("}}")
             &lines.push("")
         }
     }
     ctx.view_lifetime = outer_view_lifetime
-    if jet_rust_emit_source_hook_symbol(ctx, definition, "show") == .Val(symbol) {
-        debug_symbol :: jet_rust_emit_source_hook_symbol(ctx, definition, "debug") ?? {
+    if jet_rust_emit_source_hook_symbol(&ctx, definition, "show") == .Val(symbol) {
+        debug_symbol :: jet_rust_emit_source_hook_symbol(&ctx, definition, "debug") ?? {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "source Show and Debug routes must be registered together", definition.key, Val(definition.span))
             return
         }
@@ -2354,7 +2355,7 @@ fn jet_rust_emit_constant_payload_field(ctx: &JetRustEmitContext, definition: MI
             }
         }
     }
-    if jet_rust_emit_has_native_type_projection(ctx, type_name) -> ~field_name else -> jet_rust_emit_mangle(field_name)
+    if jet_rust_emit_has_native_type_projection(ctx, type_name) -> ~field_name else -> name_mangle(field_name)
 }
 
 // MIRRust Fraction constant: one exact-Int part of an intrinsic ratio.
@@ -2517,7 +2518,7 @@ fn jet_rust_emit_const_key(ctx: &JetRustEmitContext, key: MIRConstKey) -> String
         .Struct(type_name, fields) -> {
             native :: jet_rust_emit_has_native_type_projection(ctx, type_name)
             values := [String]{}
-            loop field in fields -> &values.push("{if native -> field.name else -> jet_rust_emit_mangle(field.name)}: {jet_rust_emit_const_key(&ctx, field.key)}")
+            loop field in fields -> &values.push("{if native -> field.name else -> name_mangle(field.name)}: {jet_rust_emit_const_key(&ctx, field.key)}")
             "{jet_rust_emit_named_type(&ctx, type_name)} {{ {jet_rust_emit_record_named_phantom_initializer(&ctx, type_name)}{values.join(", ")} }}"
         }
         .Enum(type_name, variant) -> "{jet_rust_emit_named_type(&ctx, type_name)}::{if jet_rust_emit_has_native_type_projection(ctx, type_name) -> variant else -> jet_rust_emit_mangle_variant(variant)}"
@@ -2602,7 +2603,7 @@ fn jet_rust_emit_net_handle_type_name(name: String) -> String? {
         "NetError" -> Val("JetNetError")
         "NetErrorDetail" -> Val("JetNetErrorDetail")
         "__ResolveError" -> Val("Jet__ResolveError")
-        "NetDnsError" -> Val("JetNetDnsError")
+        "NetDNSError" -> Val("JetNetDNSError")
         "NetShutdown" -> Val("JetNetShutdown")
         "NetReadyInterest" -> Val("JetNetReadyInterest")
         "NetReady" -> Val("JetNetReady")

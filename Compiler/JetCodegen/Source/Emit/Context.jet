@@ -1,6 +1,7 @@
 // Jet-owned Rust source emission context. The emitter consumes complete MIR and
 // never asks the Rust compiler to rediscover checked policy.
 use jet_foundation.[
+    name_mangle,
     CompilerThreads,
     JET_RUST_DEBUG_ESCAPED_RANGES,
     MIRAccess,
@@ -449,18 +450,11 @@ fn jet_rust_emit_sanitize(value: String) -> String Never! {
     if first >= (U8{48}) && first <= (U8{57}) -> "_{result}" else -> result
 }
 
-// Names::mangle: the Rust identifier of one Jet name. A comptime `$name`
-// becomes `ct_name`; every name takes the single `__jet_` machine prefix.
-fn jet_rust_emit_mangle(name: String) -> String Never! {
-    bytes :: name.bytes()
-    plain :: if name.starts_with("$") -> "ct_{String.from_bytes(~(bytes[1..<bytes.len()])) ?? ""}" else -> name
-    if plain.starts_with("__jet_") -> plain else -> "__jet_{plain}"
-}
 
 // MIRRust mangle_variant: a grouped leaf keeps its dotted identity through the
 // path encoding (`__jet_Net_dPing`); a flat variant takes the plain mangle.
 fn jet_rust_emit_mangle_variant(name: String) -> String Never! {
-    if name.contains(".") -> jet_rust_emit_generated_path(name) else -> jet_rust_emit_mangle(name)
+    if name.contains(".") -> jet_rust_emit_generated_path(name) else -> name_mangle(name)
 }
 
 fn jet_rust_emit_hex(value: Int) -> String Never! {
@@ -646,7 +640,7 @@ fn jet_rust_emit_field_name(ctx: &JetRustEmitContext, id: MIRFieldID) -> String 
 // MIRRust collect_type_fields: a native carrier keeps the Prelude field name.
 fn jet_rust_emit_register_field(ctx: &JetRustEmitContext, id: MIRFieldID, raw: String, native: Bool, span: Span) Never! {
     key :: jet_rust_emit_id_key(id.value)
-    symbol :: if native -> raw else -> jet_rust_emit_mangle(raw)
+    symbol :: if native -> raw else -> name_mangle(raw)
     prior :: ctx.field_names.get(key)
     if prior == .Val(existing) {
         if existing != symbol -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR field identity maps to conflicting symbols", "each checked field ID must retain one canonical source-emission name", Val(span))
@@ -911,7 +905,7 @@ fn jet_rust_emit_compiler_trait_symbol(name: String) -> String Never! {
         name == "Div" -> "__jet_Div"
         name == "Index" -> "__jet_Index"
         name == "IndexMut" -> "__jet_IndexMut"
-        else -> jet_rust_emit_mangle(name)
+        else -> name_mangle(name)
     }
 }
 
@@ -1198,7 +1192,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR foreign identity is duplicated", "each foreign declaration must have one stable source-emission symbol", Val(foreign.span))
             return ctx
         }
-        name :: if foreign.name.len() == 0 -> jet_rust_emit_generated_path(foreign.key) else -> jet_rust_emit_mangle(foreign.name)
+        name :: if foreign.name.len() == 0 -> jet_rust_emit_generated_path(foreign.key) else -> name_mangle(foreign.name)
         &ctx.foreign_names.add(key, name).drop("the prior lookup proved this foreign key is new")
     }
     // MIRRust RustEmitter::new: a structural tuple projects its members by

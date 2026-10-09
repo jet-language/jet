@@ -983,7 +983,7 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
                         if inferred_facts.parameter_types[index] == (Type.Named{name: parameter.name}) {
                             body_type :: inferred_facts.argument_types[index]
                             if !sema_serde_type_is_admissible(environment, body_type, SemaSerdeDirection.Encode) {
-                                sema_call_http_check_serde(SemaSerdeDirection.Encode, body_type, source_args[index].expr.span(), environment, &diagnostics)
+                                sema_call_http_check_serde(SemaSerdeDirection.Encode, body_type, expr_span(source_args[index].expr), environment, &diagnostics)
                                 return None
                             }
                         }

@@ -18,16 +18,23 @@ pub enum SemaNumericUnitConversionProof {
 // the owning thread. A check with no access at all (no registration graph) has
 // no callbacks.
 pub enum SemaHostHookAccess {
-    Callbacks(hooks: Shared<SemaRegistrationHostHooks>)
-    Withheld(wanted: Shared<SemaHostHookWanted>)
+    Callbacks(hooks: Shared<SemaRegistrationHostHooks>, observed: Shared<SemaBodyCheckReach>?)
+    Withheld(wanted: Shared<SemaHostHookWanted>, observed: Shared<SemaBodyCheckReach>?)
 }
 
 pub struct SemaHostHookWanted {
     pub wanted: Bool
 }
 
+// Sticky for one accepted logical body query, including share-site passes and
+// the owning thread's retry. A cold check has no observer and allocates none.
+pub struct SemaBodyCheckReach {
+    pub host: Bool
+    pub foreign_raw_body: Bool
+}
+
 pub fn sema_host_hook_access(hooks: Shared<SemaRegistrationHostHooks>) -> SemaHostHookAccess? {
-    Val(SemaHostHookAccess.Callbacks{hooks: hooks})
+    Val(SemaHostHookAccess.Callbacks{hooks: hooks, observed: None})
 }
 
 // The callbacks behind `access`, or None. A withheld access records that this
@@ -35,8 +42,12 @@ pub fn sema_host_hook_access(hooks: Shared<SemaRegistrationHostHooks>) -> SemaHo
 pub fn sema_host_hook_callbacks(access: SemaHostHookAccess?) -> Shared<SemaRegistrationHostHooks>? {
     row :: access ?? return None
     if row == {
-        .Callbacks(hooks) -> Val(hooks)
-        .Withheld(wanted) -> {
+        .Callbacks(hooks, observed) -> {
+            sema_body_check_mark_host(observed)
+            Val(hooks)
+        }
+        .Withheld(wanted, observed) -> {
+            sema_body_check_mark_host(observed)
             cell := wanted
             permit :: cell.guard_edit()
             permit.value.wanted = true
@@ -49,9 +60,35 @@ pub fn sema_host_hook_callbacks(access: SemaHostHookAccess?) -> Shared<SemaRegis
 pub fn sema_host_hooks_withheld(access: SemaHostHookAccess?) -> Bool {
     row :: access ?? return false
     if row == {
-        .Callbacks(_) -> false
-        .Withheld(_) -> true
+        .Callbacks(_, _) -> false
+        .Withheld(_, _) -> true
     }
+}
+
+pub fn sema_body_check_observe(access: SemaHostHookAccess?, observed: Shared<SemaBodyCheckReach>?) -> SemaHostHookAccess? {
+    if observed == None -> return ~access
+    row :: access ?? return None
+    Val(if row == {
+        .Callbacks(hooks, _) -> SemaHostHookAccess.Callbacks{hooks: hooks, observed: observed}
+        .Withheld(wanted, _) -> SemaHostHookAccess.Withheld{wanted: wanted, observed: observed}
+    })
+}
+
+fn sema_body_check_mark_host(observed: Shared<SemaBodyCheckReach>?) {
+    cell :: observed ?? return
+    permit :: cell.guard_edit()
+    permit.value.host = true
+}
+
+pub fn sema_body_check_mark_foreign_raw_body(access: SemaHostHookAccess?) {
+    row :: access ?? return
+    observed :: if row == {
+        .Callbacks(_, observer) -> observer
+        .Withheld(_, observer) -> observer
+    }
+    cell :: observed ?? return
+    permit :: cell.guard_edit()
+    permit.value.foreign_raw_body = true
 }
 
 pub fn sema_numeric_unit_conversion_exact(access: SemaHostHookAccess?, value: Float, scale: UnitRatio, offset: UnitRatio) -> SemaNumericUnitConversionProof {

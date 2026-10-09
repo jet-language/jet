@@ -155,7 +155,7 @@ pub fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallAr
                     name == "Fixed" && method == "new" -> {
                         size_value := sema_call_memory_compiletime_int(argument.expr, checked, environment, scopes)
                         if size_value == None {
-                            staged := sema_comptime_body_value_find(context.comptime_body_values, environment.module_identity, sema_scope_function_owner_key(scopes), argument.span, span)
+                            staged := sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), argument.span, span)
                             if staged == {
                                 .Val(body_value) -> {
                                     if body_value.ty != Type.Int {
