@@ -7852,7 +7852,9 @@ handler: fn(Request) -[IO]> Response
 ```
 
 Unit stays `fn run() { }` and `fn announce() -[IO]> { }`. A fallible unit keeps
-the arrowless form. A plain `->` with no type, and `-> Unit`, are illegal.
+the arrowless form; its error contract precedes an optional effect arrow:
+`fn save() IOError! -[FS]> { }` (D-FAIL-UNIT1=A). A plain `->` with no type,
+and `-> Unit`, are illegal.
 Function types read the same way. Control one-liners (`if c -> x`,
 `loop x in xs -> f(x)`, arm tables) and lambdas keep `->` as the body arrow.
 Bare type after the parameter list is a teaching diagnostic (E0068). This
