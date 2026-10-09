@@ -4269,16 +4269,17 @@ It carries no database connection or raw-SQL execution authority.
 
 `parse_sql_query` produces a `JetSQLQuery` for `SELECT`, `WHERE`, `GROUP BY`,
 `ORDER BY`, and `LIMIT`, including `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`.
-`sql_query_fields` and `validate_sql_query_schema` inspect and validate its
-field references. `execute_sql_rows` projects callback-provided `JetSQLValue`
-cells into `JetSQLResultRow` values; `select_sql_indices` selects source rows
-using string-valued cells. The projection carriers are `JetSQLAggregate`,
-`JetSQLSelectItem`, and `JetSQLGroupKey`.
+`execute_sql_rows` validates field references and projects callback-provided
+`JetSQLValue` cells into `JetSQLResultRow` values. The query's projection and
+grouping carriers are `JetSQLAggregate`, `JetSQLSelectItem`, and `JetSQLGroupKey`.
+Projection items expose `output_name` and `field`; `JetSQLValue.literal`
+constructs a scalar from an SQL literal.
 
-The tokenizer, quoted-identifier handling, scalar comparisons, aggregation,
-and result lookup share this source implementation with the compiler CLI.
-Parser cursors, fixed-wide accumulation, grouping keys, and sorting carriers
-remain in its `priv module internal`.
+Core's SQL tests also use `sql_tokens`, `unquote`, `identifier`,
+`compare_sql_cell`, `sql_aggregate_value`, and `sql_output_value`.
+Schema traversal, alternate index selection, parser cursors, numeric helpers,
+fixed-wide accumulation, grouping-key encoding, and sorting carriers remain
+in its `priv module internal`, rather than enlarging the public surface.
 
 ### `core.compute` — checked tensors and explicit devices
 
