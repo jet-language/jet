@@ -103,7 +103,7 @@ struct CBORPull {
         }
         byte :: if encoding.__read_byte(&self.input) == {
             .Ok(value) -> value
-            .Err(cause) -> return Err(io_error(self.total, self.path(), cause))
+            .Err(cause) -> { return Err(io_error(self.total, self.path(), cause)) }
         }
         if byte == None -> return Ok(None)
         if self.limits.max_total_bytes == .Val(maximum) {
@@ -355,7 +355,7 @@ struct CBORPull {
         if self.terminal == .Val(first) -> return Err(first.copy())
         value :: if &self.next_inner() == {
             .Ok(event) -> event
-            .Err(failure) -> return Err(&self.fail(^failure))
+            .Err(failure) -> { return Err(&self.fail(^failure)) }
         }
         if value == None && self.eof -> &self.discard()
         Ok(value)
