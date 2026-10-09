@@ -5,6 +5,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeF
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
+import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['--assemble', '--lower', '--run'].includes(mode) || process.argv.length !== 4) {
@@ -31,14 +32,14 @@ if (mode === '--assemble') {
         .replace('= "jet_rt_progress_state_advance"', '= "coll_stop_progress_advance"');
     writeFileSync(unit, assembled.slice(0, iterStart) + iter + assembled.slice(iterEnd));
     appendFileSync(join(out, 'Source/Fixture.jet'), '\n' + readFileSync(join(repo, 'Compiler/JetRuntime/Tests/CollectionsStopTests.jet'), 'utf8'));
-    writeFileSync(join(out, 'exports.list'), readFileSync(join(repo, 'Compiler/JetRuntime/exports.list'), 'utf8') + 'collections_stop_test\ncollections_review_test\n');
+    writeFileSync(join(out, 'lifecycle.list'), runtimeLifecycleList(parseRuntimeExports(readFileSync(unit, 'utf8'), 'Source/Fixture.jet')));
 } else if (mode === '--lower') {
     const receipt = join(out, 'front.receipt'), prefix = join(out, 'fixture');
     const result = spawnSync(candidateJetc0(), [], {
         cwd: repo, encoding: 'utf8', timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), maxBuffer: 1 << 27,
         env: { ...process.env, JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: out,
             JET_BOOTSTRAP_ENTRY: 'Source/Fixture.jet', JET_BOOTSTRAP_OUTPUT: join(out, 'unused.output'), JET_BOOTSTRAP_RECEIPT: receipt,
-            JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: join(out, 'exports.list'), JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608' },
+            JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_LIFECYCLE: join(out, 'lifecycle.list'), JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608' },
     });
     writeFileSync(join(out, 'front.log'), `${result.stdout ?? ''}${result.stderr ?? ''}`);
     const problem = frontReceipt(existsSync(receipt) ? readFileSync(receipt, 'utf8') : '', result);

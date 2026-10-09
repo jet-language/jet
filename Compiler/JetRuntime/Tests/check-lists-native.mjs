@@ -3,6 +3,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runtimeExportSignatures } from "../../../Tools/agent/runtime-route-abi.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const lower = join(root, "Compiler/JetBackend/Source/Lower");
 const ledger = readFileSync(join(root, "Compiler/JetRuntime/Tests/lists-native.tsv"), "utf8").trim().split("\n");
@@ -63,7 +64,7 @@ for (const line of ledger.slice(1)) {
 }
 const residue = read(join(root, "Compiler/JetRuntime/Tests/collections-residue.tsv")).trim().split("\n").slice(1);
 const residueSeen = new Set();
-const nativeExports = new Set(read(join(root, "Compiler/JetRuntime/exports.list")).split("\n").map(line => line.trim().split(/\s+/u)[0]));
+const nativeExports = new Set(runtimeExportSignatures(root).keys());
 let nativePaths = 0, nativeProviders = 0, liveProviders = 0;
 for (const line of residue) {
     const [symbol, status, dispatch, body, reference, remaining, routeState, semantics, limits, ...extra] = line.split("\t");

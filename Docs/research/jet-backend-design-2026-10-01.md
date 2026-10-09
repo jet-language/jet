@@ -437,17 +437,19 @@ Prelude and Core routes go through adapters that `Tools/agent/gen-c-abi-routes.m
 generates (`CAbiRoutes.rs`, with the carrier table `Lower/RuntimeRoutes.jet`).
 When a route is ported to `Compiler/JetRuntime`, its direct `#Export(c)`
 function is the adapter: it takes raw fixed-width carriers and uses the
-canonical route C symbol. `gen-runtime-exports.mjs` records that definition in
-the single `exports.list`; `gen-c-abi-routes.mjs` keeps the shared lowering
-metadata but omits its Rust adapter body. Both tools read the runtime-only
-`sources.list`. The route generator checks the Jet declaration against the
-derived C ABI, including every flattened list argument and result out-slot,
-and fails rather than silently skipping a Jet-owned route whose ABI cannot
-be derived. Exact `Int`, typed `String`, write borrows, failures, and mismatched
-parameter/result widths are not raw route signatures. `--check` validates
-ownership and signatures as well as generated-file freshness.
+canonical route C symbol. The runtime sources' `#Export(c)` declarations are
+the export set; `gen-c-abi-routes.mjs` keeps the shared lowering metadata but
+omits the Rust adapter body of every such declaration. The generators read the
+runtime-only `sources.list`; `gen-runtime-lifecycle.mjs` derives
+`lifecycle.list` from `// runtime-init|fini: N` comments. The route generator
+checks the Jet declaration against the derived C ABI, including every
+flattened list argument and result out-slot, and fails rather than silently
+skipping a Jet-owned route whose ABI cannot be derived. Exact `Int`, typed
+`String`, write borrows, failures, and mismatched parameter/result widths are
+not raw route signatures. `--check` validates signatures as well as
+generated-file freshness.
 `node Tools/agent/gen-runtime.mjs <allparts.rs> --check` checks trap literals,
-the export list, and routes in one keep-going invocation. Without `--check`
+the lifecycle list, runtime stop exports, and routes in one keep-going invocation. Without `--check`
 it regenerates them in dependency order. Narrow worker and held-job checks
 can use `Tools/agent/lane-check.sh --runtime-generators <allparts.rs>` through
 the cheap-check lane; this mode does not invoke Cargo.
@@ -1817,10 +1819,10 @@ Encoding producers own a checked reader and preserve its nested EOF result.
 `Compiler/JetRuntime` is a separate package, assembled from its own
 `sources.list`; it is never part of the compiler bootstrap inventory.
 `JetBackend/Tests/run-runtime.mjs` sends that checked library directly through
-the Jet frontend's library-object hook. The explicit `exports.list` is checked
-against adjacent `#Export(c)` declarations and scalar C signatures. I64/U64,
-U8, Bool and Float/F64 are admitted (F64 arguments/results use the System V
-xmm ABI); the annotated exact-Int bounds-index seam is the sole exception.
+the Jet frontend's library-object hook. The object exports exactly the
+checked `#Export(c)` functions, each mapped per position to one C primitive
+(I64/U64, U8, Bool, Float/F64 on the System V xmm ABI); `lifecycle.list`
+only orders their init/fini hooks.
 The runtime's private allocator root uses the shared MIR `.Global` lowering.
 `jet_rt_alloc_init` is a void/no-argument constructor in `.init_array.00000`.
 

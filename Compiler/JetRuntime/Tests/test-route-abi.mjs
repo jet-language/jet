@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { parseRuntimeExports, validateRuntimeOwnership, validateRuntimeRoute } from "../../../Tools/agent/runtime-route-abi.mjs";
+import { parseRuntimeExports, validateRuntimeRoute } from "../../../Tools/agent/runtime-route-abi.mjs";
 
 function definition(params, suffix = "") {
   return { params, suffix, path: "Source/Test.jet", lifecycle: "" };
@@ -69,7 +69,8 @@ assert.throws(() => parseRuntimeExports(source + "#Export(c) fn jet_a() {}", "So
 assert.throws(() => parseRuntimeExports("#Export(c) fn generic<T>(value: T) {}", "Source/Test.jet"), /unparsed/);
 const failing = parseRuntimeExports("#Export(c) fn failing(value: I64) -> I64 Never! {}", "Source/Test.jet").get("failing");
 assert.throws(() => validateRuntimeRoute(route([["i64"]], "i64"), failing), /does not match C ABI/);
-validateRuntimeOwnership(new Set(parsed.keys()), parsed);
-assert.throws(() => validateRuntimeOwnership(new Set(["jet_a"]), parsed), /jet_b is missing from exports.list/);
-assert.throws(() => validateRuntimeOwnership(new Set([...parsed.keys(), "jet_missing"]), parsed), /jet_missing has no #Export\(c\) declaration/);
+const lifecycle = parseRuntimeExports("// runtime-init: 3\n#Export(c) fn jet_init() { }\n// runtime-fini: 1\n#Export(c) fn jet_fini() { }\n", "Source/Test.jet");
+assert.equal(lifecycle.get("jet_init").lifecycle, "init 3");
+assert.equal(lifecycle.get("jet_fini").lifecycle, "fini 1");
+assert.throws(() => parseRuntimeExports("// runtime-init: 65536\n#Export(c) fn jet_init() { }\n", "Source/Test.jet"), /exceeds 65535/);
 console.log("runtime route ABI: CHECK OK");

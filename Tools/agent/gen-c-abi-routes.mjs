@@ -47,7 +47,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { runtimeExportSignatures, validateRuntimeOwnership, validateRuntimeRoute } from "./runtime-route-abi.mjs";
+import { runtimeExportSignatures, validateRuntimeRoute } from "./runtime-route-abi.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimePath = process.argv[2];
 const check = process.argv.includes("--check");
@@ -396,13 +396,11 @@ const handExports = new Set([...handTable.matchAll(/pub(?:\(crate\))? (?:unsafe 
 for (const m of handTable.matchAll(/exact_int_(?:binary|located)!\s*\{?\(?([^)}]*)/g)) {
   for (const name of m[1].split(",").map((s) => s.trim()).filter(Boolean)) handExports.add(name);
 }
-// The audited runtime cutover list owns these C definitions in the Jet object.
-// Keep route carrier metadata below: only Rust adapter bodies disappear.
-const jetRuntimeExports = new Set(readFileSync(`${repo}/Compiler/JetRuntime/exports.list`, "utf8")
-  .split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#"))
-  .map((line) => line.split(/\s+/u)[0]));
+// The Jet runtime object owns every `#Export(c)` of Compiler/JetRuntime's
+// sources.list (U3: the declarations are the export set). Route carrier
+// metadata below stays shared; only the Rust adapter bodies disappear.
 const jetRuntimeSignatures = runtimeExportSignatures(repo);
-validateRuntimeOwnership(jetRuntimeExports, jetRuntimeSignatures);
+const jetRuntimeExports = new Set(jetRuntimeSignatures.keys());
 const fixedInts = new Set(["u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "isize"]);
 
 // A handle type whose runtime declaration derives `Clone` also gets a clone
@@ -951,7 +949,7 @@ const handleRows = [...handles].sort((a, b) => a[0].localeCompare(b[0]));
 const rs = [];
 rs.push("// BEGIN GENERATED C-ABI ROUTES (Tools/agent/gen-c-abi-routes.mjs; do not hand-edit)");
 rs.push("// Rust adapters for Core routes with a C carrier (CAbi.rs carrier rules).");
-rs.push("// JetRuntime/exports.list owns the replaced definitions; carrier metadata");
+rs.push("// Jet runtime #Export(c) definitions replace their adapters; carrier metadata");
 rs.push("// remains shared. Routes without a C carrier are listed at the end.");
 rs.push("#[cfg(not(target_arch = \"wasm32\"))]");
 rs.push("#[allow(non_snake_case, clippy::all)]");
@@ -1289,7 +1287,7 @@ rs.push("// END GENERATED C-ABI ROUTES");
 const jet = [];
 jet.push("// BEGIN GENERATED C-ABI ROUTES (Tools/agent/gen-c-abi-routes.mjs; do not hand-edit)");
 jet.push("// Shared carriers of runtime C-ABI routes, whether their definition lives");
-jet.push("// in CAbiRoutes.rs or JetRuntime/exports.list, keyed by the route's");
+jet.push("// in CAbiRoutes.rs or a Jet runtime #Export(c), keyed by the route's");
 jet.push("// Prelude symbol; `export` is the adapter's C name (its last segment).");
 jet.push("");
 jet.push("// `HandleMut` lends the handle of the caller's Write place: the runtime");

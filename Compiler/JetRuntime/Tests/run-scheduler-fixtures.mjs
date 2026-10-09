@@ -7,6 +7,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
+import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run'].includes(mode)) throw Error('usage: run-scheduler-fixtures.mjs OUT assemble|lower|audit|link|run');
@@ -24,10 +25,7 @@ if (mode === 'assemble') {
   const complete = paths.map(path => readFileSync(join(root, path), 'utf8')).join('\n');
   writeFileSync(join(dir, 'Source/Fixture.jet'), complete);
   writeFileSync(join(dir, 'package.jet'), readFileSync(join(root, 'Compiler/JetRuntime/package.jet')));
-  const entries = readFileSync(join(root, 'Compiler/JetRuntime/exports.list'), 'utf8').split('\n').filter(x => x && !x.startsWith('#'));
-  const fixture = readFileSync(join(root, 'Compiler/JetRuntime/Tests/SchedulerTests.jet'), 'utf8');
-  for (const match of fixture.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)) entries.push(match[1]);
-  writeFileSync(join(dir, 'exports.list'), entries.sort().join('\n') + '\n');
+  writeFileSync(join(dir, 'lifecycle.list'), runtimeLifecycleList(parseRuntimeExports(complete, 'Source/Fixture.jet')));
   writeFileSync(join(dir, 'sources.receipt.json'), JSON.stringify({ paths }, null, 2) + '\n');
 } else if (mode === 'lower') {
   const prefix = join(dir, 'fixture');
@@ -36,7 +34,7 @@ if (mode === 'assemble') {
     timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 600000), env: { ...process.env,
       JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: dir,
       JET_BOOTSTRAP_ENTRY: 'Source/Fixture.jet', JET_BOOTSTRAP_OUTPUT: join(dir, 'unused.output'), JET_BOOTSTRAP_RECEIPT: receipt,
-      JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: join(dir, 'exports.list'), JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608' } });
+      JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_LIFECYCLE: join(dir, 'lifecycle.list'), JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608' } });
   writeFileSync(join(dir, 'front.log'), `${result.stdout ?? ''}${result.stderr ?? ''}`);
   if (result.error || result.status !== 0) throw Error(`candidate front failed: ${result.error?.message ?? result.status}`);
   const problem = frontReceipt(existsSync(receipt) ? readFileSync(receipt, 'utf8') : '', result);

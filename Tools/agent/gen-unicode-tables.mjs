@@ -593,7 +593,6 @@ pub fn jet_unicode_count(s: ${textReference}, needle: ${textReference}) -> i64 {
     }
     count
 }
-`;
 
 ${splitKernel("jet_unicode_split_once", "find", foundationModule)}
 

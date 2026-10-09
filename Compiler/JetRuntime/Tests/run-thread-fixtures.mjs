@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { candidateJetc0, frontReceipt } from "../../JetBackend/Tests/jet-front.mjs";
+import { parseRuntimeExports, runtimeLifecycleList } from "../../../Tools/agent/runtime-route-abi.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const [output, mode] = process.argv.slice(2);
@@ -54,31 +55,30 @@ if (mode === "assemble") {
   const sharedBlock = /(?:\/\/ Interim Shared ABI import dies at L8a-4[\s\S]*?)?^#Export\(c\) fn jet_rt_tls_shared_destructor[\s\S]*?(?=^fn thread_tls_destroy)/m;
   if (!sharedBlock.test(complete)) throw Error("missing Shared TLS source block");
   const unit = complete.replace(sharedBlock, "");
-  function exportList(text) {
+  const shared = complete + "\n" + read("Compiler/JetRuntime/Tests/SharedThreadTests.jet");
+  // Duplicate #Export(c) names are fatal in the good and shared fixture units.
+  for (const text of [unit, shared]) {
     const names = [...text.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)].map((match) => match[1]);
     if (new Set(names).size !== names.length) throw Error("duplicate fixture exports");
-    return names.sort().map((name) => name === "jet_rt_alloc_init" ? `${name} init 0` : name === "jet_rt_thread_init" ? `${name} init 2` : name).join("\n") + "\n";
   }
-  const list = exportList(unit);
-  const shared = complete + "\n" + read("Compiler/JetRuntime/Tests/SharedThreadTests.jet");
   mkdirSync(join(out, "shared/Source"), { recursive: true });
   writeFileSync(join(out, "shared/Source/Fixture.jet"), shared);
   writeFileSync(join(out, "shared/package.jet"), read("Compiler/JetRuntime/package.jet"));
-  writeFileSync(join(out, "shared/exports.list"), exportList(shared));
+  writeFileSync(join(out, "shared/lifecycle.list"), runtimeLifecycleList(parseRuntimeExports(shared, "Source/Fixture.jet")));
   writeFileSync(join(out, "good/Source/Fixture.jet"), unit);
   writeFileSync(join(out, "good/package.jet"), read("Compiler/JetRuntime/package.jet"));
-  writeFileSync(join(out, "good/exports.list"), list);
+  writeFileSync(join(out, "good/lifecycle.list"), runtimeLifecycleList(parseRuntimeExports(unit, "Source/Fixture.jet")));
   // Real malformed checked inputs: retaining the intrinsic requires the
   // driver to reject a missing C entry or an entry with a different ABI.
-  for (const [name, source, names] of [
-    ["missing", unit.replace(/^(#Export\(c\)\s+fn )jet_rt_thread_entry(?=\()/m, "$1fixture_wrong_entry"), list.replace(/^jet_rt_thread_entry\n/m, "fixture_wrong_entry\n")],
-    ["signature", unit.replace("fn jet_rt_thread_entry(start: I64)", "fn jet_rt_thread_entry(start: I64, _extra: I64)"), list],
+  for (const [name, source] of [
+    ["missing", unit.replace(/^(#Export\(c\)\s+fn )jet_rt_thread_entry(?=\()/m, "$1fixture_wrong_entry")],
+    ["signature", unit.replace("fn jet_rt_thread_entry(start: I64)", "fn jet_rt_thread_entry(start: I64, _extra: I64)")],
   ]) {
     mkdirSync(join(out, name, "Source"), { recursive: true });
     // The unused extra word stays semantically valid so refusal must come
     // from the runtime intrinsic validator, not from the ordinary checker.
     writeFileSync(join(out, name, "Source/Fixture.jet"), source);
-    writeFileSync(join(out, name, "exports.list"), names);
+    writeFileSync(join(out, name, "lifecycle.list"), runtimeLifecycleList(parseRuntimeExports(source, "Source/Fixture.jet")));
     writeFileSync(join(out, name, "package.jet"), read("Compiler/JetRuntime/package.jet"));
   }
 } else if (mode === "lower") {
@@ -90,7 +90,7 @@ if (mode === "assemble") {
         cwd: repo, encoding: "utf8", maxBuffer: 1 << 27, timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 600000),
         env: { ...process.env, JET_BOOTSTRAP_MODE: "factory", JET_BOOTSTRAP_FACTORY_TIER: "aot", JET_BOOTSTRAP_SOURCE_ROOT: dir,
           JET_BOOTSTRAP_ENTRY: "Source/Fixture.jet", JET_BOOTSTRAP_OUTPUT: join(dir, "unused.output"), JET_BOOTSTRAP_RECEIPT: receipt,
-          JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: join(dir, "exports.list"), JET_STORE_DIR: join(out, "store"), RUST_MIN_STACK: "8388608" },
+          JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_LIFECYCLE: join(dir, "lifecycle.list"), JET_STORE_DIR: join(out, "store"), RUST_MIN_STACK: "8388608" },
       });
       writeFileSync(join(dir, "front.log"), `${result.stdout ?? ""}${result.stderr ?? ""}`);
       if (name === "missing" || name === "signature") {

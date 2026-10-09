@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
+import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode, source] = process.argv.slice(2);
 const modes = ['assemble', 'assemble-stm', 'assemble-sync', 'assemble-observe', 'lower', 'prepare-native', 'prepare-seed', 'link', 'link-seed', 'link-stm', 'run-stm', 'link-sync', 'run-sync', 'link-observe', 'run-observe', 'run', 'run-seed', 'cross', 'fatal', 'perf'];
@@ -77,14 +78,12 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
   const unit = paths.map(read).join('\n');
   const names = [...unit.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)].map(m=>m[1]);
   if (new Set(names).size !== names.length) throw Error('duplicate fixture exports');
-  const init = new Map([...unit.matchAll(/^\/\/ runtime-init: (\d+)\n#Export\(c\) fn (\w+)/gm)].map(m=>[m[2],m[1]]));
-  init.set('jet_rt_alloc_init','0');
   writeFileSync(join(fixture,'Source/Fixture.jet'),unit);
-  writeFileSync(join(fixture,'exports.list'),names.sort().map(n=>n==='jet_rt_panic_list_bounds'?`${n} int-index-seam`:init.has(n)?`${n} init ${init.get(n)}`:n).join('\n')+'\n');
+  writeFileSync(join(fixture,'lifecycle.list'),runtimeLifecycleList(parseRuntimeExports(unit,'Source/Fixture.jet')));
   writeFileSync(join(fixture,'package.jet'),read('Compiler/JetRuntime/package.jet'));
 } else if (mode === 'lower') {
   const prefix=join(fixture,'fixture'),receipt=join(fixture,'front.receipt');
-  const result=spawnSync(candidateJetc0(),[],{cwd:repo,encoding:'utf8',maxBuffer:1<<27,timeout:Number(process.env.JET_FRONT_TIMEOUT_MS??600000),env:{...process.env,JET_BOOTSTRAP_MODE:'factory',JET_BOOTSTRAP_FACTORY_TIER:'aot',JET_BOOTSTRAP_SOURCE_ROOT:fixture,JET_BOOTSTRAP_ENTRY:'Source/Fixture.jet',JET_BOOTSTRAP_OUTPUT:join(fixture,'unused.output'),JET_BOOTSTRAP_RECEIPT:receipt,JET_FRONT_LIBRARY_OBJECT_OUTPUT:prefix,JET_FRONT_LIBRARY_EXPORTS:join(fixture,'exports.list'),JET_STORE_DIR:join(out,'store'),RUST_MIN_STACK:'8388608'}});
+  const result=spawnSync(candidateJetc0(),[],{cwd:repo,encoding:'utf8',maxBuffer:1<<27,timeout:Number(process.env.JET_FRONT_TIMEOUT_MS??600000),env:{...process.env,JET_BOOTSTRAP_MODE:'factory',JET_BOOTSTRAP_FACTORY_TIER:'aot',JET_BOOTSTRAP_SOURCE_ROOT:fixture,JET_BOOTSTRAP_ENTRY:'Source/Fixture.jet',JET_BOOTSTRAP_OUTPUT:join(fixture,'unused.output'),JET_BOOTSTRAP_RECEIPT:receipt,JET_FRONT_LIBRARY_OBJECT_OUTPUT:prefix,JET_FRONT_LIBRARY_LIFECYCLE:join(fixture,'lifecycle.list'),JET_STORE_DIR:join(out,'store'),RUST_MIN_STACK:'8388608'}});
   writeFileSync(join(fixture,'front.log'),`${result.stdout??''}${result.stderr??''}`);
   const problem=frontReceipt(existsSync(receipt)?readFileSync(receipt,'utf8'):'',result);
   if(problem)throw Error(problem.detail);

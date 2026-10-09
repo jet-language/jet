@@ -1,6 +1,6 @@
 // BEGIN GENERATED C-ABI ROUTES (Tools/agent/gen-c-abi-routes.mjs; do not hand-edit)
 // Rust adapters for Core routes with a C carrier (CAbi.rs carrier rules).
-// JetRuntime/exports.list owns the replaced definitions; carrier metadata
+// Jet runtime #Export(c) definitions replace their adapters; carrier metadata
 // remains shared. Routes without a C carrier are listed at the end.
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(non_snake_case, clippy::all)]

@@ -6,6 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, statSy
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
+import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run'].includes(mode)) throw Error('usage: run-world-sentry-fixtures.mjs OUT assemble|lower|audit|link|run');
@@ -23,17 +24,14 @@ if (mode === 'assemble') {
   const source = paths.map(path => readFileSync(join(root, path), 'utf8')).join('\n');
   writeFileSync(join(unit, 'Source/Fixture.jet'), source);
   writeFileSync(join(unit, 'package.jet'), readFileSync(join(root, 'Compiler/JetRuntime/package.jet')));
-  const entries = readFileSync(join(root, 'Compiler/JetRuntime/exports.list'), 'utf8').split('\n').filter(x => x && !x.startsWith('#'));
-  // Adjacent Source markers use the canonical bracket list.
-  for (const path of fixturePaths) for (const match of readFileSync(join(root, path), 'utf8').matchAll(/#(?:Export\(c\)|\[Export\(c\),\s*Unsafe\([^\n]*\)\])\s+fn\s+(\w+)\(/g)) entries.push(match[1]);
-  writeFileSync(join(unit, 'exports.list'), entries.sort().join('\n') + '\n');
+  writeFileSync(join(unit, 'lifecycle.list'), runtimeLifecycleList(parseRuntimeExports(source, 'Source/Fixture.jet')));
   writeFileSync(join(out, 'sources.receipt.json'), JSON.stringify({ paths }, null, 2) + '\n');
 } else if (mode === 'lower') {
   const prefix = join(unit, 'fixture'), receipt = join(unit, 'front.receipt');
   const result = command('front', candidateJetc0(), [], { timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 600000), env: { ...process.env,
     JET_BOOTSTRAP_MODE: 'factory', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: unit,
     JET_BOOTSTRAP_ENTRY: 'Source/Fixture.jet', JET_BOOTSTRAP_OUTPUT: join(unit, 'unused.output'), JET_BOOTSTRAP_RECEIPT: receipt,
-    JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: join(unit, 'exports.list'), JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608' } });
+    JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_LIFECYCLE: join(unit, 'lifecycle.list'), JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608' } });
   const problem = frontReceipt(existsSync(receipt) ? readFileSync(receipt, 'utf8') : '', result);
   if (problem) throw Error(`candidate front ${problem.verdict}: ${problem.detail}`);
   if (existsSync(prefix + '.issues')) throw Error(readFileSync(prefix + '.issues', 'utf8'));
