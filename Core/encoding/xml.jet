@@ -127,7 +127,11 @@ fn expanded_name(node: Dyn) -> (raw: String, prefix: String?, local: String, nam
 }
 
 fn attribute(element: Dyn, selector: String) -> String? XMLError! {
-    kernel.lookup_attribute(element, selector) ?? return Err(kernel.public_error(err))
+    if kernel.lookup_attribute(element, selector) == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(kernel.public_error(error))
+    }
 }
 
 fn content(element: Dyn) -> [Dyn] XMLError! {
@@ -164,7 +168,11 @@ struct XMLReader {
     fn next(&self) -[IO, Time.Wait]> Dyn? EncodingError! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         loop {
-            candidate :: &self.scanner.next() ?? return &self.fail(stream_error(err))
+            candidate :: if &self.scanner.next() == {
+                .Val(event) -> Val(event)
+                .None -> None
+                .Err(error) -> return &self.fail(stream_error(error))
+            }
             if candidate == .Val(event) {
                 slot :: mem.__type_size<Dyn>()
                 prospective :: (event.raw_bytes.len() + event.bom.len()) * slot

@@ -734,27 +734,79 @@ fn queue_stored(row: [String: DBValue]) -> StoredJob ServiceError! {
     payload_type :: queue_row_text(row, "payload_type") ?? return Err(err)
     payload :: queue_row_blob(row, "payload") ?? return Err(err)
     payload_public :: queue_row_bool(row, "payload_public") ?? return Err(err)
-    key :: queue_row_optional_text(row, "idempotency_key") ?? return Err(err)
-    request :: queue_row_optional_text(row, "request_id") ?? return Err(err)
+    key :: if queue_row_optional_text(row, "idempotency_key") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
+    request :: if queue_row_optional_text(row, "request_id") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
     sequence :: queue_row_int(row, "sequence") ?? return Err(err)
     state_text :: queue_row_text(row, "state") ?? return Err(err)
     state :: queue_state_parse(state_text) ?? return Err(err)
     due :: queue_row_int(row, "due_at_ms") ?? return Err(err)
     accepted :: queue_row_int(row, "accepted_at_ms") ?? return Err(err)
-    started :: queue_row_optional_int(row, "started_at_ms") ?? return Err(err)
-    finished :: queue_row_optional_int(row, "finished_at_ms") ?? return Err(err)
+    started :: if queue_row_optional_int(row, "started_at_ms") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
+    finished :: if queue_row_optional_int(row, "finished_at_ms") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
     attempts_value :: queue_row_int(row, "attempts") ?? return Err(err)
     attempts :: queue_u32(attempts_value, "attempts") ?? return Err(err)
-    lease_owner :: queue_row_optional_text(row, "lease_owner") ?? return Err(err)
-    lease_token :: queue_row_optional_text(row, "lease_token") ?? return Err(err)
-    lease_until :: queue_row_optional_int(row, "lease_until_ms") ?? return Err(err)
-    result_type :: queue_row_optional_text(row, "result_type") ?? return Err(err)
-    result :: queue_row_optional_blob(row, "result") ?? return Err(err)
+    lease_owner :: if queue_row_optional_text(row, "lease_owner") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
+    lease_token :: if queue_row_optional_text(row, "lease_token") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
+    lease_until :: if queue_row_optional_int(row, "lease_until_ms") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
+    result_type :: if queue_row_optional_text(row, "result_type") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
+    result :: if queue_row_optional_blob(row, "result") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
     result_public :: queue_row_bool(row, "result_public") ?? return Err(err)
-    error_type :: queue_row_optional_text(row, "error_type") ?? return Err(err)
-    error_reason :: queue_row_optional_text(row, "error_reason") ?? return Err(err)
-    error_detail :: queue_row_optional_text(row, "error_detail") ?? return Err(err)
-    retry :: queue_row_optional_int(row, "retry_at_ms") ?? return Err(err)
+    error_type :: if queue_row_optional_text(row, "error_type") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
+    error_reason :: if queue_row_optional_text(row, "error_reason") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
+    error_detail :: if queue_row_optional_text(row, "error_detail") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
+    retry :: if queue_row_optional_int(row, "retry_at_ms") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
     updated :: queue_row_int(row, "updated_at_ms") ?? return Err(err)
     signature :: queue_row_text(row, "signature") ?? return Err(err)
     event_sequence :: queue_row_int(row, "event_sequence") ?? return Err(err)
@@ -1030,7 +1082,11 @@ fn queue_enqueue_on_driver(driver: &db.__QueueDb, authority: String, name: Strin
     observations := [QueueTransition]{}
     loop request in requests {
         if request.idempotency_key == .Val(key) {
-            prior :: queue_find_by_key(&driver, authority, name, key) ?? return Err(err)
+            prior :: if queue_find_by_key(&driver, authority, name, key) == {
+                .Val(value) -> Val(value)
+                .None -> None
+                .Err(error) -> return Err(error)
+            }
             if prior == .Val(existing) {
                 if existing.job_type != request.job_type || existing.payload_type != request.payload.type_id || existing.payload != request.payload.bytes {
                     return Err(ServiceError.Policy("job idempotency key was already used by another job"))
@@ -1089,9 +1145,14 @@ fn queue_enqueue_on_driver(driver: &db.__QueueDb, authority: String, name: Strin
 #Test("durable queue row projections preserve typed null and exact error contexts") {
     row :: [String: DBValue]{"empty": .Null, "value": .Int(1), "bad": .Text("1")}
     assert_eq(queue_row_bool(row, "value") ?? false, true)
-    assert_eq(queue_row_optional_text(row, "empty") ?? Val("missing"), None)
+    optional_text :: if queue_row_optional_text(row, "empty") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(_) -> Val("missing")
+    }
+    assert_eq(optional_text, None)
     if queue_row_optional_int(row, "bad") == {
-        .Ok(_) -> assert(false)
+        .Val(_) | .None -> assert(false)
         .Err(.Unavailable(message)) -> assert_eq(message, "queue column `bad` is neither integer nor null")
         else -> assert(false)
     }
@@ -1331,8 +1392,18 @@ fn queue_status_on_driver(driver: &db.__QueueDb, authority: String, name: String
     dead_lettered :: queue_count(queue_row_int(row, "dead_lettered") ?? return Err(err), "dead-lettered") ?? return Err(err)
     cancelled :: queue_count(queue_row_int(row, "cancelled") ?? return Err(err), "cancelled") ?? return Err(err)
     now :: queue_now()
-    wait_ms :: queue_age(queue_row_optional_int(row, "oldest_accepted") ?? return Err(err), now)
-    freshness_ms :: queue_age(queue_row_optional_int(row, "latest_update") ?? return Err(err), now)
+    oldest_accepted :: if queue_row_optional_int(row, "oldest_accepted") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
+    latest_update :: if queue_row_optional_int(row, "latest_update") == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> return Err(error)
+    }
+    wait_ms :: queue_age(oldest_accepted, now)
+    freshness_ms :: queue_age(latest_update, now)
     metadata :: queue_query(&driver,
         "SELECT capacity, paused FROM jet_job_queue_meta WHERE authority = ? AND queue = ? LIMIT 1",
         bindings, "metadata status") ?? return Err(err)
@@ -1393,9 +1464,21 @@ fn queue_events_on_driver(driver: &db.__QueueDb, authority: String, name: String
             state: queue_state_parse(queue_row_text(row, "state") ?? return Err(err)) ?? return Err(err),
             attempts: queue_u32(queue_row_int(row, "attempts") ?? return Err(err), "event attempts") ?? return Err(err),
             timestamp_ms: queue_row_int(row, "timestamp_ms") ?? return Err(err),
-            reason: queue_row_optional_text(row, "reason") ?? return Err(err),
-            duration_ms: queue_row_optional_int(row, "duration_ms") ?? return Err(err),
-            worker: queue_row_optional_text(row, "worker") ?? return Err(err),
+            reason: if queue_row_optional_text(row, "reason") == {
+                .Val(value) -> Val(value)
+                .None -> None
+                .Err(error) -> return Err(error)
+            },
+            duration_ms: if queue_row_optional_int(row, "duration_ms") == {
+                .Val(value) -> Val(value)
+                .None -> None
+                .Err(error) -> return Err(error)
+            },
+            worker: if queue_row_optional_text(row, "worker") == {
+                .Val(value) -> Val(value)
+                .None -> None
+                .Err(error) -> return Err(error)
+            },
         })
     }
     Ok(events)
