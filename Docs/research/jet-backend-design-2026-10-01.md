@@ -1237,6 +1237,27 @@ envelope for kernels not yet instrumented. `Tests/comptime-runtime.c`
 exercises the actual exports in exec'd children, including successful scope
 reuse and fuel charged from a callback thread.
 
+The Jet runtime's execution leaves reuse that same request state:
+`jet_rt_execution_begin(fuel, depth, comptime)` enters one canonical control,
+`end()` flushes the Host-tail's real stdout and stderr streams before restoring
+the prior scope, and `stop_write()` reports the current control's record without
+consuming it (zero when absent, one when present). The one 48-byte request root
+holds mode at offset 40; a successful ordinary comptime begin resets it to true,
+and an unsuccessful execution begin leaves the active mode untouched. Budget
+sites are present only in comptime mode: `U64.MAX` remains a present value, not
+an absence sentinel. Both writers share one Stop56 JSON/framing encoder,
+preserving ordinary comptime's prior bytes. Encoding snapshots the borrowed
+record under its owner's mutex; channel writes happen after unlocking.
+
+`Tests/execution-fixture.c` compares both budget writers byte-for-byte and checks
+the historical Scheduler encoder goldens for cancellation, deadline and a real
+Task-body panic, escaped UTF-8, failed-begin mode retention, full-range sites,
+nonconsuming reads, empty records and partial stdout flushing. Its native proof
+requires a freshly composed UNIT1 **and Host-tail** pack; source parsing and
+C syntax checks alone are not runtime evidence. The runner accepts that linked
+fixture executable: `node Compiler/JetRuntime/Tests/run-execution-fixtures.mjs BIN`.
+
+
 ## In-process linking
 
 `Image/StaticLink.jet` (`x64_link_executable(names, bufs)`, #4549) links
