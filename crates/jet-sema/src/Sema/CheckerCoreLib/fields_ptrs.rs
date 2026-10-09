@@ -38,6 +38,15 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        // Native EnvError has no source enum and is a plain exported nominal
+        // in the Core catalog. Its canonical variant table still owns cases.
+        if module == "core.sys"
+            && self.core_item_imports.get(alias).is_some_and(|item| item == "EnvError")
+            && super::core_types::CORE_ENV_ERROR_VARIANT_NAMES.contains(&name)
+        {
+            self.record_import_alias_reference(alias, alias_span);
+            return Some(Type::Named("EnvError".to_string()));
+        }
         // Canonical Core enum imports (`use core.compute.[ComputeError]`,
         // etc.) keep the imported item alongside its module alias. Resolve
         // dotted variants through the generated leaf-kind/variant tables

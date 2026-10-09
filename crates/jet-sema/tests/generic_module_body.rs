@@ -193,6 +193,31 @@ fn absent() -> sys.EnvError Never! { sys.EnvError.Unavailable }\nfn run() {}\n",
 }
 
 #[test]
+fn native_core_enum_imports_use_their_variant_registry() {
+    for source in [
+        "use core.sys.[EnvError]\n\
+fn run() {\n\
+    name :: EnvError.InvalidName\n\
+    value :: EnvError.InvalidValue\n\
+    unicode :: EnvError.NonUnicode\n\
+}\n",
+        "use core.sys as sys\n\
+fn run() {\n\
+    name :: sys.EnvError.InvalidName\n\
+    value :: sys.EnvError.InvalidValue\n\
+    unicode :: sys.EnvError.NonUnicode\n\
+}\n",
+    ] {
+        let (_, diagnostics) = check(source);
+        assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    }
+    let (_, diagnostics) = check(
+        "use core.sys.[EnvError]\nfn run() { error :: EnvError.NotACase }\n",
+    );
+    assert!(!error_codes(&diagnostics).is_empty(), "unknown variants must fail");
+}
+
+#[test]
 fn arrowless_unit_failure_signature_checks_five_line_carrier_body() {
     let source = "#Error enum MyError { X }\n\
 fn f(bad: Bool) MyError! {\n\

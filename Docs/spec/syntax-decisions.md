@@ -185,9 +185,10 @@ Imported Core record types retain their source-owned associated methods:
 `EncodingError.new(...)` through a grouped import, or
 `encoding.EncodingError.new(...)`, resolves the record's method rather
 than a module member called `new`.
-Source-owned Core enums follow the same rule for unit and payload cases:
-`EnvError.InvalidValue(...)` or `sys.EnvError.InvalidValue(...)` resolves
-the enum's declaring registry before module-item lookup.
+Source-owned Core enum unit and payload cases resolve the enum's declaring
+registry before module-item lookup. Native Core enums use their canonical
+variant tables as well: grouped `EnvError.InvalidValue` and qualified
+`sys.EnvError.InvalidValue` name the case, not a `core.sys` module item.
 Within compiler-owned Core source, an import of a sealed part's catalog
 alias also joins the transitive source closure, even if that part's public
 owner was not imported. This does not expose private aliases to user code.

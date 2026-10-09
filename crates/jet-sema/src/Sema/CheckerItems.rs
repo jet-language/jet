@@ -2746,8 +2746,8 @@ impl<'a> Checker<'a> {
         if enum_name == crate::Syntax::TYPE_KEY {
             return true;
         }
-        // D-PROCESS1=A: `ProcessStreamMode` and `ProcessSignal` are core dot-literal enums.
-        if matches!(enum_name, "ProcessStreamMode" | "ProcessSignal") {
+        // Native Core dot-literal enums do not have a source declaration.
+        if matches!(enum_name, "ProcessStreamMode" | "ProcessSignal" | "EnvError") {
             return true;
         }
         // D-TEXTWIDTH1=B: `TextWidth`'s two field enums.

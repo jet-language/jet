@@ -2834,13 +2834,16 @@ pub(crate) fn core_terminal_mode_variants(
         .collect()
 }
 
+pub(crate) const CORE_ENV_ERROR_VARIANT_NAMES: &[&str] =
+    &["InvalidName", "InvalidValue", "NonUnicode"];
+
 pub(crate) fn core_env_error_variants(
 ) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
     use crate::Diagnostics::Span;
     use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
-    ["InvalidName", "InvalidValue", "NonUnicode"]
-        .into_iter()
+    CORE_ENV_ERROR_VARIANT_NAMES
+        .iter()
         .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
         .collect()
 }
