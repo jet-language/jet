@@ -6,8 +6,14 @@ use jet_foundation.[GateEntry, GateKind, GateLedger, Span, Diagnostic, gate_kind
 pub fn jet_cli_gates_entry(args: [String]) -> String? Never! {
     skip := false
     loop argument in args {
-        if skip { skip = false; next }
-        if argument == "--scope" || argument == "--kind" || argument == "--gate" { skip = true; next }
+        if skip {
+            skip = false
+            next
+        }
+        if argument == "--scope" || argument == "--kind" || argument == "--gate" {
+            skip = true
+            next
+        }
         if argument.starts_with("--scope=") || argument.starts_with("--kind=") || argument.starts_with("--gate=") -> next
         if !argument.starts_with("-") -> return Val(argument)
     }
@@ -76,7 +82,10 @@ fn jet_cli_gates_entry_json(entry: GateEntry, modules: [JetDriverSourceQueryModu
     source :: jet_cli_gates_source(modules, entry.source)
     span := JetCLIStatusValue.Null
     location := JetCLIStatusValue.Null
-    if entry.span == .Val(site) { span = jet_cli_gates_span(site); location = jet_cli_gates_location(source, site) }
+    if entry.span == .Val(site) {
+        span = jet_cli_gates_span(site)
+        location = jet_cli_gates_location(source, site)
+    }
     operations :: loop operation in entry.operations -> jet_cli_status_object([JetCLIStatusField]{
         jet_cli_status_field("kind", jet_cli_status_text(operation.kind)),
         jet_cli_status_field("span", jet_cli_gates_span(operation.span)),

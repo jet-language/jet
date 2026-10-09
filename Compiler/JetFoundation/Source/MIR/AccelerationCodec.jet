@@ -10,7 +10,12 @@ pub fn mir_acceleration_json_object(value: CanonicalJSON, label: String, keys: [
     if fields.len() != keys.len() -> return Err("{label} has missing or unknown fields")
     loop key in keys {
         found := false
-        loop field in fields { if field.key == key { found = true; break } }
+        loop field in fields {
+            if field.key == key {
+                found = true
+                break
+            }
+        }
         if !found -> return Err("{label} has missing or unknown fields")
     }
     Ok(fields)

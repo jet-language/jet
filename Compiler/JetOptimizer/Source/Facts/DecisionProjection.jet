@@ -67,7 +67,10 @@ fn mir_decision_mode_name(mode: MIRArtifactBuildMode) -> String Never! {
 pub fn mir_decision_identity(program: MIRProgram, artifact: MIRArtifactID?, profile: String, run: String) -> MIRDecisionIdentity Never! {
     plan := MIRArtifactPlan?{None}
     loop candidate in program.artifacts {
-        if artifact == (Val(candidate.id)) { plan = Val(candidate); break }
+        if artifact == (Val(candidate.id)) {
+            plan = Val(candidate)
+            break
+        }
     }
     if plan == None && program.artifacts.len() > 0 -> plan = Val(program.artifacts[0])
     files := program.source_files

@@ -243,7 +243,10 @@ fn cli_schema_put_string(out: &[U8], value: String) Never! {
 fn cli_schema_put_optional_string(out: &[U8], value: String?) Never! {
     if value == {
         None -> &out.push(U8{0})
-        .Val(text) -> { &out.push(U8{1}); cli_schema_put_string(&out, text) }
+        .Val(text) -> {
+            &out.push(U8{1})
+            cli_schema_put_string(&out, text)
+        }
     }
 }
 fn cli_schema_encode_input(out: &[U8], input: CLIInputSchema) Never! {
@@ -268,13 +271,19 @@ fn cli_schema_encode_input(out: &[U8], input: CLIInputSchema) Never! {
             if default == {
                 None -> &out.push(U8{0})
                 .Val(.TypeDefault) -> &out.push(U8{1})
-                .Val(.Recorded(text)) -> { &out.push(U8{2}); cli_schema_put_string(&out, text) }
+                .Val(.Recorded(text)) -> {
+                    &out.push(U8{2})
+                    cli_schema_put_string(&out, text)
+                }
             }
         }
     }
     if input.positional == {
         None -> &out.push(U8{0})
-        .Val(order) -> { &out.push(U8{1}); cli_schema_put_u32(&out, Int.from_u16(order)) }
+        .Val(order) -> {
+            &out.push(U8{1})
+            cli_schema_put_u32(&out, Int.from_u16(order))
+        }
     }
 }
 fn cli_schema_encode_strings(out: &[U8], values: [String]) Never! {
@@ -312,8 +321,14 @@ fn cli_schema_encode_job(out: &[U8], job: JobFact) Never! {
     cli_schema_put_optional_string(&out, job.cwd)
     if job.skip == {
         None -> &out.push(U8{0})
-        .Val(.Always(reason)) -> { &out.push(U8{1}); cli_schema_put_string(&out, reason) }
-        .Val(.UnlessPlatform(platform)) -> { &out.push(U8{2}); cli_schema_put_string(&out, platform) }
+        .Val(.Always(reason)) -> {
+            &out.push(U8{1})
+            cli_schema_put_string(&out, reason)
+        }
+        .Val(.UnlessPlatform(platform)) -> {
+            &out.push(U8{2})
+            cli_schema_put_string(&out, platform)
+        }
     }
     &out.push(if job.cache == {
         .Uncached -> U8{0}

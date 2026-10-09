@@ -50,12 +50,20 @@ fn cli_schema_usize_num(value: U64, maximum: U64) -> Int MetadataError! {
 // or byte-list allocation is needed to enforce that rule.
 fn cli_schema_c_name_is(bytes: View<U8>, expected: String) -> Bool MetadataError! {
     end := bytes.len()
-    loop index in 0..<bytes.len() { if bytes[index] == (U8{0}) { end = index; break } }
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{0}) {
+            end = index
+            break
+        }
+    }
     name :: bytes[0..<end]
     at := 0
     loop at < end {
         first :: Int.from_u8(name[at])
-        if first < 128 { at += 1; next }
+        if first < 128 {
+            at += 1
+            next
+        }
         width :: if {
             first >= 194 && first <= 223 -> 2
             first >= 224 && first <= 239 -> 3

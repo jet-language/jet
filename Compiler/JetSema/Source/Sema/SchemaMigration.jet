@@ -113,7 +113,10 @@ pub fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot]
                 converter := Bool?{None}
                 loop operation in operations {
                     if operation == .Change(changed, _, from, _, to, _, via, _, _) {
-                        if changed == field.name && type_name(from) == old_ty && type_name(to) == new_ty { converter = Val(via != None); break }
+                        if changed == field.name && type_name(from) == old_ty && type_name(to) == new_ty {
+                            converter = Val(via != None)
+                            break
+                        }
                     }
                 }
                 if converter == {
