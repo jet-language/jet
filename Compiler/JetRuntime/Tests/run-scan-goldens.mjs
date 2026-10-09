@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Consume exact-golden results for the SAME scan.cases from each applicable
-// tier, then execute the raw ABI and Float-bit witnesses against the fresh pack.
-// Results are actual harness receipts, never a synthetic supported-case census.
+// Consume the SAME scan.cases native-golden receipt, then execute the raw ABI
+// and Float-bit witnesses against the fresh pack. Optional saved tier receipts
+// are historical comparisons, never a live Rust/reference provider.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -9,16 +9,25 @@ import { fileURLToPath } from "node:url";
 import { candidateJetc0, runJetFront } from "../../JetBackend/Tests/jet-front.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const [output, native, reference, evaluator] = process.argv.slice(2);
-if (!output || !native || !reference || !evaluator || process.argv.length !== 6) {
-  throw new Error("usage: run-scan-goldens.mjs OUT NATIVE.results.tsv REFERENCE.results.tsv EVALUATOR.results.tsv");
+const [output, native, ...optional] = process.argv.slice(2);
+const frozen = new Map();
+for (let at = 0; at < optional.length; at += 2) {
+  const flag = optional[at], file = optional[at + 1];
+  if (!["--frozen-reference", "--frozen-evaluator"].includes(flag) || !file || frozen.has(flag)) {
+    throw new Error("usage: run-scan-goldens.mjs OUT NATIVE.results.tsv [--frozen-reference FILE] [--frozen-evaluator FILE]");
+  }
+  frozen.set(flag, file);
+}
+if (!output || !native) {
+  throw new Error("usage: run-scan-goldens.mjs OUT NATIVE.results.tsv [--frozen-reference FILE] [--frozen-evaluator FILE]");
 }
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
 const stems = readFileSync(join(root, "Compiler/JetRuntime/Tests/scan.cases"), "utf8").trim().split("\n");
 const failures = [];
 const tiers = {};
-for (const [tier, file] of [["native", native], ["reference", reference], ["evaluator", evaluator]]) {
+const inputs = [["native", native], ...[...frozen].map(([flag, file]) => [flag.slice("--frozen-".length), file])];
+for (const [tier, file] of inputs) {
   try {
     const rows = readFileSync(resolve(file), "utf8").trim().split("\n").map(line => line.split("\t"));
     if (new Set(rows.map(([stem]) => stem)).size !== rows.length) failures.push(`${tier}: duplicate result rows`);
@@ -96,7 +105,7 @@ else {
     }
   } catch (error) { failures.push(`raw: ${error.message}`); }
 }
-const receipt = { object, pack, tiers, failures };
+const receipt = { object, pack, tiers, retired: ["live Rust reference", "Rust MIR evaluator"], failures };
 writeFileSync(join(out, "scan-receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
 console.log(JSON.stringify(receipt, null, 2));
 if (failures.length) process.exitCode = 1;
