@@ -11,6 +11,17 @@ a stale binary is not proof. Avoid per-worker copies or private builds unless
 the worker's unintegrated change is itself what must be measured. Serialize
 writers to shared artifacts.
 
+Before admitting a shared compiler build, collect the workspace/all-target
+bootstrap check, read-only generator checks, and a frontend check of the complete
+compiler assembled by `Compiler/Bootstrap/assemble.mjs` with the frozen bootstrap
+verifier. A file-local parse receipt does not establish that the assembled
+compiler resolves its current APIs. Migrate callers to the retained one-walk
+Core collector, in-place effect graph publisher, payload-place shared writer,
+multi-root backend lowering, source-owned expiry carriers, and current owner-gated
+recipe refusal; do not restore retired providers or compatibility aliases.
+Pin the admitted build to an immutable export of the checked commit and derive
+runtime freshness checks from that build's own all-parts emission.
+
 ## Keep build output separate and bounded
 
 Keep build output outside the repository on disk-backed storage. Give each
