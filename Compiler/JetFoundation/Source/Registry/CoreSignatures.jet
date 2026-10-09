@@ -509,6 +509,41 @@ fn core_sig_text_and_testing(request: CoreCallSignatureRequest) -> CoreTypedCall
     None
 }
 
+fn core_sig_regex(module_name: String, member: String) -> CoreTypedCallSignature? {
+    if module_name != "core.regex" -> return None
+    regex := Type.Named{name: "Regex"}
+    matched := Type.Named{name: "Match"}
+    string := Type.String
+    read := AccessConvention.Read
+    if member == "flags" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Bool, read), core_sig_positional(Type.Bool, read), core_sig_positional(Type.Bool, read)}, Val(Type.Named{name: "RegexFlags"})))
+    if member == "escape" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(string)))
+    if member == "compile" || member == "regex" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(regex, string))))
+    if member == "compile_with" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(Type.Named{name: "RegexFlags"}, read)}, Val(core_sig_result(regex, string))))
+    if member == "literal" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(regex)))
+    if member == "purge" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, None))
+    if member == "join" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(regex, read)}, Val(string)))
+    if member == "expand" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(matched, read), core_sig_positional(string, read)}, Val(string)))
+    parameters := [CoreCallTypedParameter]{core_sig_positional(regex, read), core_sig_positional(string, read)}
+    result := Type?{None}
+    if member == {
+        "is_match" | "full_match" | "fullmatch" -> result = Val(Type.Bool)
+        "find" -> result = Val(Type.Option{inner: string})
+        "match" | "search" -> result = Val(Type.Option{inner: matched})
+        "find_all" | "findall" | "split" -> result = Val(Type.List{element: string})
+        "matches" | "finditer" -> result = Val(Type.List{element: matched})
+        "replace" | "replace_first" | "sub" | "subn" -> {
+            &parameters.push(core_sig_positional(string, read))
+            result = Val(if member == "subn" -> Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "text", ty: string}, TypeTupleField{name: "count", ty: Type.Int}}} else -> string)
+        }
+        "split_limit" -> {
+            &parameters.push(core_sig_positional(Type.Int, read))
+            result = Val(Type.List{element: string})
+        }
+        _ -> return None
+    }
+    Val(core_sig(module_name, member, parameters, result))
+}
+
 fn core_sig_encoding_backing(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
     module_name :: request.module_name
     member :: request.member
