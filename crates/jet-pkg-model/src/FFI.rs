@@ -6713,6 +6713,8 @@ mod tests {
     use crate::AST::{AccessConvention, Type};
     use std::collections::HashSet;
 
+    // Reuse the complete canonical supplier; this fixture needs only piped spawn/wait.
+    #[allow(dead_code)]
     mod io_error_component_observation {
         include!("IOErrorSandboxObservation.rs");
     }
