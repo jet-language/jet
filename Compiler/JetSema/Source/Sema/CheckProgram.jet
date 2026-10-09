@@ -355,7 +355,7 @@ pub fn sema_incremental_cache_new() -> SemaIncrementalCache {
 }
 
 pub fn sema_incremental_cache_clear(cache: SemaIncrementalCache) {
-    permit :: cache.state.guard_edit()
+    permit := cache.state.guard_edit()
     permit.value.frozen = ""
     permit.value.generation += 1
     permit.value.scope_inputs = [String:String]{}
@@ -368,7 +368,7 @@ pub fn sema_incremental_cache_clear(cache: SemaIncrementalCache) {
 }
 
 pub fn sema_incremental_cache_clear_measurement(cache: SemaIncrementalCache) {
-    permit :: cache.state.guard_edit()
+    permit := cache.state.guard_edit()
     permit.value.recomputed_items = [String]{}
 }
 
@@ -394,7 +394,7 @@ fn sema_incremental_evict_module(state: &SemaIncrementalState, module_identity: 
 }
 
 fn sema_incremental_freeze_scope(cache: SemaIncrementalCache, module_identity: String, input: String) -> SemaModuleMemo {
-    permit :: cache.state.guard_edit()
+    permit := cache.state.guard_edit()
     previous :: permit.value.scope_inputs.get(module_identity)
     if previous != Val(input) {
         sema_incremental_evict_module(&permit.value, module_identity)
@@ -409,7 +409,7 @@ fn sema_incremental_freeze_scope(cache: SemaIncrementalCache, module_identity: S
 }
 
 fn sema_incremental_advance_scope(memo: &SemaModuleMemo) {
-    permit :: memo.cache.state.guard_edit()
+    permit := memo.cache.state.guard_edit()
     if permit.value.generation != memo.generation -> return
     sema_incremental_evict_module(&permit.value, memo.module_identity)
     old :: permit.value.scope_inputs.get(memo.module_identity) ?? ""
@@ -450,7 +450,7 @@ fn sema_incremental_retarget(query: ^SemaBodyMemoQuery?, memo: SemaModuleMemo?) 
 }
 
 fn sema_incremental_replay(query: SemaBodyMemoQuery) -> SemaBodyMemoValue? {
-    permit :: query.module_memo.cache.state.guard_edit()
+    permit := query.module_memo.cache.state.guard_edit()
     if permit.value.generation != query.module_memo.generation || (permit.value.scope_epochs.get(query.module_memo.module_identity) ?? -1) != query.module_memo.epoch -> return None
     if !permit.value.rows.has_key(query.key) -> return None
     row :: permit.value.rows[query.key]
@@ -463,7 +463,7 @@ fn sema_incremental_replay(query: SemaBodyMemoQuery) -> SemaBodyMemoValue? {
 fn sema_incremental_accept(query: SemaBodyMemoQuery, body: SemaParallelBody) {
     // Exactly one accepted initial logical query, including failed/volatile
     // checks; worker and owning-thread retries do not add separate counters.
-    permit :: query.module_memo.cache.state.guard_edit()
+    permit := query.module_memo.cache.state.guard_edit()
     permit.value.recomputes += 1
     &permit.value.recomputed_items.push(query.key)
     if !query.eligible || body.host_reached || body.volatile -> return
@@ -733,7 +733,7 @@ fn sema_incremental_begin(cache: SemaIncrementalCache, graph: SemaRegistrationGr
     imports :: sema_incremental_import_headers(graph.imports)
     header_text :: "{headers:Debug}"
     input :: "package={graph.package_identity:Debug};entry={graph.entry_module_identity:Debug};effects={graph.canonical_effect_module_identity:Debug};target={graph.target_machine:Debug};build={graph.build_facts:Debug};headers={header_text};module_rows={graph.module_rows:Debug};edges={graph.edges:Debug};providers={graph.foreign_providers:Debug};core_owners={graph.core_builtin_owner_facts:Debug};imports={imports:Debug};units={graph.unit_facts:Debug};internal={graph.internal_problem:Debug};diagnostics={graph.diagnostics:Debug};complete={graph.complete:Debug};callables={graph.callable_rows:Debug};nominal_slots={graph.nominal_row_slots:Debug};nominal_buckets={graph.nominal_row_buckets:Debug};impl_slots={graph.impl_row_slots:Debug};impl_buckets={graph.impl_row_buckets:Debug};nominal_symbols={graph.nominal_symbol_rows:Debug};builtins={graph.compiler_builtin_rows:Debug};trait_slots={graph.impl_trait_slots:Debug};trait_buckets={graph.impl_trait_buckets:Debug};traits_indexed={graph.impl_traits_indexed:Debug};keep_going={graph.keep_going:Debug};test_mode={graph.test_mode:Debug};retain_programs={graph.retain_programs:Debug};values={values:Debug};comptime={comptime_functions:Debug};types={checked_types:Debug}"
-    permit :: cache.state.guard_edit()
+    permit := cache.state.guard_edit()
     if permit.value.frozen == input -> return
     permit.value.generation += 1
     permit.value.frozen = ^input
@@ -813,7 +813,7 @@ fn sema_incremental_registered_job_queries(memo: SemaModuleMemo?, module_index: 
     if memo == None -> return ^queries
     loop job in jobs {
         query := sema_incremental_registered_body_query(memo, job, module_index, memory_plan, environment)
-        if query != None -> queries[sema_check_body_job_index(job)] = ^query ?? panic("an admitted body query disappeared")
+        if query == .Val(_) -> queries[sema_check_body_job_index(job)] = ^query ?? panic("an admitted body query disappeared")
     }
     ^queries
 }
@@ -2890,7 +2890,7 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
     }
     function_diagnostic_start :: diagnostics.len()
     query := SemaBodyMemoQuery?{None}
-    if memo != None {
+    if memo == .Val(_) {
         query = &queries.remove(ordinal)
         if query == None -> query = sema_incremental_registered_body_query(memo, job, module_index, memory_plan, environment)
     }
@@ -3114,7 +3114,7 @@ fn sema_check_view_summaries(environment: &SemaScopeEnvironment, scopes: &SemaSc
                     summary_comptime_requests := [SemaComptimeRequest]{}
                     summary_name_references := [SemaNameReferenceFact]{}
                     memory_position :: sema_check_registered_memory_position(job, module_index, memory_plan, environment)
-                    if trace_sink != None -> summary_functions_checked += 1
+                    if trace_sink == .Val(_) -> summary_functions_checked += 1
                     checked := sema_function_check_registered(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, &environment, &scopes, host_hooks, &summary_diagnostics, &summary_calls, &summary_comptime_requests, &summary_name_references)
                     if checked.value == .Val(function) {
                         _ := sema_function_publish_return_views(&scopes, function)
@@ -3233,7 +3233,7 @@ fn sema_check_drain_body(body: ^SemaParallelBody, diagnostics: &[Diagnostic], ca
 
 fn sema_check_module_function(ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, job_index: Int, scopes_changed: Bool, job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], count_work: Bool, functions_checked: &Int) -> SemaFunctionResult {
     query := SemaBodyMemoQuery?{None}
-    if memo != None {
+    if memo == .Val(_) {
         query = &queries.remove(job_index)
         if query == None -> query = sema_incremental_registered_body_query(memo, job, module_index, memory_plan, environment)
     }
@@ -3503,7 +3503,8 @@ fn sema_check_module_summary_scopes(environment: &SemaScopeEnvironment, host_hoo
 fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, module_index: Int, scopes: ^SemaScopeTable, jobs: [SemaBodyJob], weights: [Int], workers: Int, memo: SemaModuleMemo?, owned_queries: ^[Int:SemaBodyMemoQuery]) -> SemaPreparedBodies {
     queries := ^owned_queries
     prepared := SemaPreparedBodies{scopes: [SemaScopeTable]{}, bodies: [SemaPreparedBody]{}, memo: memo, queries: [Int:SemaBodyMemoQuery]{}}
-    all_replayed := memo != None
+    has_memo :: if memo == .Val(_) -> true else -> false
+    all_replayed := has_memo
     if all_replayed {
         loop job in jobs {
             index :: sema_check_body_job_index(job)
@@ -3531,13 +3532,13 @@ fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, module_index: Int
         replay := [Bool]{}
         loop position in bounds[part]..<bounds[part + 1] {
             &items.push(jobs[position])
-            if memo != None {
+            if has_memo {
                 index :: sema_check_body_job_index(jobs[position])
                 &replay.push(queries.has_key(index) && queries[index].replay)
             }
         }
         slot :: shared SemaBodyPart{scopes: sema_scope_init(""), items: [SemaBodyJob]{}, bodies: [SemaPreparedBody]{}}
-        sema_check_body_part_fill(slot, ~scopes, ^items, ^replay, memo != None)
+        sema_check_body_part_fill(slot, ~scopes, ^items, ^replay, has_memo)
         &slots.push(slot)
     }
     _ := sema_check_body_parts(shared, slots, 0, module_index)
@@ -3635,7 +3636,7 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, host
     sema_scope_environment_enter_module(&environment, module_index, sema_comptime_body_values_from_items(values))
     items_scanned := 0
     functions_checked := 0
-    count_work :: trace_sink != None
+    count_work :: if trace_sink == .Val(_) -> true else -> false
     if count_work {
         loop prepared_body in ready.bodies {
             if prepared_body == {
