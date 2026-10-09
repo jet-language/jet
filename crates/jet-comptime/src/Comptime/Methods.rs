@@ -41,9 +41,7 @@ pub(crate) use core_calls::{
 pub use dispatch::apply_seeded_rng_method;
 pub use dispatch::apply_seeded_rng_method_with_type;
 pub(crate) use dispatch::{arg_string_literal, check_literal_embed_path, embed_path_err};
-pub(super) use dispatch::{
-    invoke_standalone_closure, invoke_standalone_closure_mut, invoke_standalone_closure_mut_args,
-};
+pub(super) use dispatch::{invoke_standalone_closure, invoke_standalone_closure_mut_args};
 pub use dispatch::{
     eval_build_embed, eval_build_time_io, eval_locked_find, eval_net_fetch, is_tier2_core_call,
     project_rejection, vault_comptime_denied,

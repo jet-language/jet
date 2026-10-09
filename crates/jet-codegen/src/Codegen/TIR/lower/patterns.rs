@@ -958,11 +958,8 @@ pub(crate) fn variant_payload_types(
                     "Array" => Ok(vec![Type::List(Box::new(Type::Named(
                         crate::Syntax::TYPE_DATA.to_string(),
                     )))]),
-                    "Object" => Ok(vec![Type::Map {
-                        key: Box::new(Type::String),
-                        key_span: None,
-                        value: Box::new(Type::Named(crate::Syntax::TYPE_DATA.to_string())),
-                    }]),
+                    "Object" => Ok(crate::Sema::core_json_pattern_types("Object")
+                        .expect("DataTree.Object has a payload type")),
                     "Number" => Ok(vec![Type::String]),
                     _ => Err("unknown data enum variant"),
                 };

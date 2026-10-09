@@ -244,7 +244,7 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span.end;
         let span = Span::new(start.start, end);
         for marker in &type_markers {
-            self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Type);
+            self.bind_rule_fact(&marker.name, marker.name_span, Some(span), crate::Policy::RuleSite::Type);
         }
         Ok(crate::AST::DistinctDef {
             is_pub,
@@ -513,6 +513,7 @@ impl<'a> Parser<'a> {
         // The closing `}` ends the item; the lexer inserts a synthetic `;`.
         let end = self.toks[self.pos - 1].span.end;
         self.bind_rule_fact(
+            &marker.name,
             marker.name_span,
             Some(Span::new(marker.span.start, end)),
             crate::Policy::RuleSite::Type,
@@ -874,6 +875,7 @@ impl<'a> Parser<'a> {
                 _ => unreachable!(),
             };
             self.bind_rule_fact(
+                Syntax::MARKER_LAYOUT,
                 marker_name_span,
                 Some(target),
                 crate::Policy::RuleSite::Type,
@@ -900,6 +902,7 @@ impl<'a> Parser<'a> {
                 _ => unreachable!(),
             };
             self.bind_rule_fact(
+                Syntax::MARKER_LAYOUT,
                 marker_name_span,
                 Some(target),
                 crate::Policy::RuleSite::Type,
@@ -974,6 +977,7 @@ impl<'a> Parser<'a> {
         let attr_span = Span::new(attr_start.start, attr_name_span.end);
         let marker = crate::AST::Marker {
             name: attr,
+            declaration: None,
             negated: false,
             name_span: attr_name_span,
             args: Vec::new(),
@@ -1049,6 +1053,7 @@ impl<'a> Parser<'a> {
         let attr_span = Span::new(attr_start.start, attr_name_span.end);
         let marker = crate::AST::Marker {
             name: attr,
+            declaration: None,
             negated: false,
             name_span: attr_name_span,
             args: Vec::new(),
@@ -1120,6 +1125,7 @@ impl<'a> Parser<'a> {
         let attr_span = Span::new(attr_start.start, attr_name_span.end);
         let marker = crate::AST::Marker {
             name: attr,
+            declaration: None,
             negated: false,
             name_span: attr_name_span,
             args: Vec::new(),
@@ -1215,6 +1221,7 @@ impl<'a> Parser<'a> {
                 let mut f = self.field()?;
                 for marker in &field_markers {
                     self.bind_rule_fact(
+                        &marker.name,
                         marker.name_span,
                         Some(f.name_span),
                         crate::Policy::RuleSite::Field,

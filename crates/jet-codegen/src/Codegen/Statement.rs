@@ -4,10 +4,10 @@ use crate::AST::{Type, VariantPayload};
 
 
 /// The payload types a variant binds, so destructured names carry their type
-/// into the body (needed so e.g. `.get` on a `Map` bound from `Object(root)`
-/// lowers to a map lookup, not list indexing — B3). Mirrors sema's
-/// `core_json_pattern_types` for the core `JSON` enum and reads `cx` for user
-/// enums. Returns `None` when the types aren't known (binding stays untyped).
+/// into the body. Mirrors sema's `core_json_pattern_types` for the core `JSON`
+/// enum (D-DATATREE-ORDER1=A: `Object` binds its ordered pair list) and reads
+/// `cx` for user enums. Returns `None` when the types aren't known (binding
+/// stays untyped).
 pub(crate) fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>> {
     if is_json_variant(variant) {
         let data = Type::Named(Syntax::TYPE_DATA.to_string());
@@ -18,11 +18,10 @@ pub(crate) fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>>
             "Float" => Some(vec![Type::Float]),
             "Text" => Some(vec![Type::String]),
             "Array" => Some(vec![Type::List(Box::new(data.clone()))]),
-            "Object" => Some(vec![Type::Map {
-                key: Box::new(Type::String),
-                key_span: None,
-                value: Box::new(data),
-            }]),
+            "Object" => Some(vec![Type::List(Box::new(Type::Tuple(vec![
+                ("key".to_string(), Box::new(Type::String)),
+                ("value".to_string(), Box::new(data)),
+            ])))]),
             "Number" => Some(vec![Type::String]),
             _ => None,
         };

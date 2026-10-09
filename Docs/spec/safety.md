@@ -1268,21 +1268,21 @@ example retains the negative unsafe-outside-vetted scan.
     {
       "package": "jet",
       "file": "Core/mem/mem.jet",
-      "line": 36,
+      "line": 34,
       "column": 1,
       "reason": "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer"
     },
     {
       "package": "jet",
       "file": "Core/mem/mem.jet",
-      "line": 40,
+      "line": 38,
       "column": 1,
       "reason": "`pointer` names a live, aligned, readable `T` for the whole access"
     },
     {
       "package": "jet",
       "file": "Core/mem/mem.jet",
-      "line": 44,
+      "line": 42,
       "column": 1,
       "reason": "`pointer` names a live, aligned, writable `T` for the whole access"
     },

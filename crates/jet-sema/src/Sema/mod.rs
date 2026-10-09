@@ -2440,6 +2440,8 @@ pub(crate) struct Checker<'a> {
     /// HTTP handlers are retained by the server and invoked on request
     /// workers, so captured state must cross the `Send + Sync` boundary.
     http_handler_depth: usize,
+    http_routes: HashSet<(String, String, String)>,
+    http_mux_aliases: HashMap<String, String>,
     /// True while checking the callback stored by `core.sys.on_interrupt`.
     /// This boundary retains a callback for asynchronous signal delivery and
     /// therefore needs stricter capture facts than an ordinary higher-order call.
@@ -2657,6 +2659,8 @@ struct ErasedScopeSnapshot {
     statement_expr_inference: bool,
     statement_expr_root_depth: Option<usize>,
     http_handler_depth: usize,
+    http_routes: HashSet<(String, String, String)>,
+    http_mux_aliases: HashMap<String, String>,
     interrupt_callback_depth: usize,
     lambda_param_mutable: bool,
     lambda_param_is_secret_loan: bool,
@@ -2788,6 +2792,8 @@ impl<'a> Checker<'a> {
             statement_expr_inference: self.statement_expr_inference,
             statement_expr_root_depth: self.statement_expr_root_depth,
             http_handler_depth: self.http_handler_depth,
+            http_routes: self.http_routes.clone(),
+            http_mux_aliases: self.http_mux_aliases.clone(),
             interrupt_callback_depth: self.interrupt_callback_depth,
             lambda_param_mutable: self.lambda_param_mutable,
             lambda_param_is_secret_loan: self.lambda_param_is_secret_loan,
@@ -2918,6 +2924,8 @@ impl<'a> Checker<'a> {
         self.statement_expr_inference = snapshot.statement_expr_inference;
         self.statement_expr_root_depth = snapshot.statement_expr_root_depth;
         self.http_handler_depth = snapshot.http_handler_depth;
+        self.http_routes = snapshot.http_routes;
+        self.http_mux_aliases = snapshot.http_mux_aliases;
         self.interrupt_callback_depth = snapshot.interrupt_callback_depth;
         self.lambda_param_mutable = snapshot.lambda_param_mutable;
         self.lambda_param_is_secret_loan = snapshot.lambda_param_is_secret_loan;
@@ -3195,6 +3203,14 @@ impl<'a> Checker<'a> {
             if in_scope && bound == crate::Generics::DECODE {
                 return false;
             }
+        }
+        // A generic codec bound uses the same structural and imported-nominal
+        // contract as an ordinary encode/decode call, not a second trait test.
+        if bound == crate::Generics::ENCODE {
+            return self.is_encodable(ty);
+        }
+        if bound == crate::Generics::DECODE {
+            return self.is_decodable(ty);
         }
         self.trait_reg.type_implements_trait(ty, bound)
     }
@@ -3539,6 +3555,7 @@ mod CheckerInline;
 mod CheckerItems;
 mod CheckerKernel;
 mod CheckerMarkers;
+pub mod MarkerModules;
 mod CheckerOwnership;
 mod CheckerPatchable;
 mod CheckerSchedule;

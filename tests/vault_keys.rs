@@ -45,3 +45,17 @@ x25519-dalek = "2"
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn source_owned_generic_key_reference_display_has_no_key_trait_bound() {
+    jet::compile(
+        r#"
+use core.crypto as crypto
+use core.crypto.vault as vault
+fn describe_signer(key: vault.KeyRef<crypto.SigningKey>) -> String { "{key}" }
+fn describe_secret(key: vault.KeyRef<crypto.Secret>) -> String { "{key}" }
+fn run() {}
+"#,
+    )
+    .expect("KeyRef<T> Display must depend only on the reference, never on T");
+}

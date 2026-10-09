@@ -1,3 +1,5 @@
+mod common;
+
 use jet_foundation::MemSentry::{jet_sentry_check, jet_sentry_reset, jet_sentry_scope};
 
 #[test]
@@ -25,4 +27,17 @@ fn dev_sentry_faults_feed_the_shared_memory_ledger_without_engine_policy() {
     assert!(witness.contains("derive the pointer from live storage inside this gate"));
 
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn numeric_address_of_lowers_the_callers_place_without_a_forwarder() {
+    let path = "Examples/features/memory/unsafe_sentries.jet";
+    let source = std::fs::read_to_string(path).unwrap();
+    let output = jet::compile_with_path(&source, path)
+        .unwrap_or_else(|diagnostics| panic!("sentry example rejected: {diagnostics:?}"));
+    let user = common::strip_vetted_prelude_modules(&output.rust);
+    assert!(user.contains("jet_mem::jet_sentry_address_of("),
+        "address_of must lower to the place-preserving memory intrinsic");
+    assert!(!user.contains("core_core_mem__address_of"),
+        "a by-value Core forwarder must not take the address of copied storage");
 }

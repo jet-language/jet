@@ -76,8 +76,11 @@ pub struct ExplainReport {
         tree :: report.to_tree()
         if tree == {
             .Object(fields) -> {
-                extended := fields
-                extended["kind"] = DataTree.Text(self.kind.label())
+                extended := [(key: String, value: DataTree)]{}
+                loop pair in fields {
+                    if pair.key != "kind" -> &extended.push(pair)
+                }
+                &extended.push((key: "kind", value: DataTree.Text(self.kind.label())))
                 DataTree.Object(extended)
             }
             else -> tree

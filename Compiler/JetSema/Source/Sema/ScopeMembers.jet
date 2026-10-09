@@ -19,6 +19,9 @@ pub struct SemaScopeMembersMarkerRule {
     pub first_parameter_is_type: Bool
     pub repeatable: Bool
     pub params: [MarkerDeclParam]
+    pub group: Bool{false}
+    pub declaration_module: String?{None}
+    pub declaration_span: Span?{None}
 }
 
 pub struct SemaScopeMembersMarkerRegistry {
@@ -112,8 +115,21 @@ fn sema_scope_members_first_parameter_is_type(declaration: MarkerDecl) -> Bool N
 }
 
 fn sema_scope_members_registry_add_declaration(registry: &SemaScopeMembersMarkerRegistry, declaration: MarkerDecl) -> Bool Never! {
+    sema_scope_members_registry_add_identity(&registry, declaration, None, None)
+}
+
+fn sema_scope_members_registry_add_identity(registry: &SemaScopeMembersMarkerRegistry, declaration: MarkerDecl, identity: String?, span: Span?) -> Bool Never! {
     loop existing in registry.marker_rules {
-        if existing.name == declaration.name -> return false
+        if existing.name == declaration.name && existing.declaration_module == identity && existing.declaration_span == span -> return identity != None
+    }
+    if declaration.group != None {
+        &registry.marker_rules.push(SemaScopeMembersMarkerRule{
+            name: declaration.name, sites: [String]{}, first_parameter_is_type: false,
+            repeatable: false, params: [MarkerDeclParam]{}, group: true,
+            declaration_module: identity, declaration_span: span,
+        })
+        sema_scope_members_append_name(&registry.known_marker_names, declaration.name)
+        return true
     }
     sites :: sema_scope_members_declared_sites(declaration) ?? return false
     repeatable :: sema_scope_members_declared_repeatable(declaration) ?? return false
@@ -123,6 +139,7 @@ fn sema_scope_members_registry_add_declaration(registry: &SemaScopeMembersMarker
         first_parameter_is_type: sema_scope_members_first_parameter_is_type(declaration),
         repeatable: repeatable,
         params: declaration.params,
+        declaration_module: identity, declaration_span: span,
     })
     sema_scope_members_append_name(&registry.known_marker_names, declaration.name)
     loop site in sites {
@@ -135,9 +152,6 @@ fn sema_scope_members_registry_add_declaration(registry: &SemaScopeMembersMarker
 fn sema_scope_members_registry_add_items(registry: &SemaScopeMembersMarkerRegistry, items: [Item]) -> Bool Never! {
     loop item in items {
         if item == {
-            .MarkerDecl(declaration) -> {
-                if !sema_scope_members_registry_add_declaration(&registry, declaration) -> return false
-            }
             .UserDerive(derive_definition) -> {
                 sema_scope_members_append_name(&registry.derive_provider_names, derive_definition.trait_name)
                 sema_scope_members_append_name(&registry.known_marker_names, derive_definition.trait_name)
@@ -155,6 +169,10 @@ fn sema_scope_members_registry_add_items(registry: &SemaScopeMembersMarkerRegist
 }
 
 fn sema_scope_members_registry_add_program(registry: &SemaScopeMembersMarkerRegistry, program: Program) -> Bool Never! {
+    loop declaration in sema_marker_module_declarations(program.items, "", false) {
+        if !sema_scope_members_registry_add_declaration(&registry, declaration) -> return false
+    }
+    // Derive providers keep their existing lexical registration path.
     sema_scope_members_registry_add_items(&registry, program.items)
 }
 
@@ -200,10 +218,29 @@ pub fn sema_scope_members_build_marker_registry(graph: SemaRegistrationGraph, mo
             current_module_found = true
             if !sema_scope_members_registry_add_program(&registry, program) -> return None
         } else {
-            if !sema_scope_members_registry_add_program(&registry, module_row.program) -> return None
+            // Derive providers retain their existing package scope; marker
+            // declarations enter only through the import-qualified rows below.
+            loop item in module_row.program.items {
+                if item == .UserDerive(provider) {
+                    sema_scope_members_append_name(&registry.derive_provider_names, provider.trait_name)
+                    sema_scope_members_append_name(&registry.known_marker_names, provider.trait_name)
+                }
+            }
         }
     }
     if !current_module_found -> return None
+    loop declaration in sema_marker_module_visible_declarations(graph, module_identity) {
+        if !sema_scope_members_registry_add_declaration(&registry, declaration) -> return None
+    }
+    // A group's members may have the same written name as caller-local rows.
+    // Their canonical identity selects the declaration, never that name.
+    loop marker in sema_marker_rules_collect_program(program) {
+        if marker.declaration_module == None -> next
+        resolved :: sema_marker_module_resolve_application(graph, module_identity, marker)
+        declaration := resolved.declaration ?? next
+        declaration.name = marker.name
+        if !sema_scope_members_registry_add_identity(&registry, declaration, marker.declaration_module, marker.declaration_span) -> return None
+    }
     Val(registry)
 }
 

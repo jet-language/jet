@@ -24,6 +24,16 @@ fn run() {
     // what binary/byte APIs work in.
     bytes :: [U8]{104, 105, 33}
     print(bytes)
+    // Every integer width can index a list; narrowing to the host index is
+    // checked rather than wrapping a wide unsigned value.
+    assert(bytes[U8{1}] == U8{105})
+    assert(bytes[I8{1}] == U8{105})
+    assert(bytes[U16{1}] == U8{105})
+    assert(bytes[I16{1}] == U8{105})
+    assert(bytes[U32{1}] == U8{105})
+    assert(bytes[I32{1}] == U8{105})
+    assert(bytes[U64{1}] == U8{105})
+    assert(bytes[I64{1}] == U8{105})
     // Safe widening is implicit. Narrowing is a destination-owned fallible
     // method (`?`/`??`) because a value might not fit.
     wide := Int{0}

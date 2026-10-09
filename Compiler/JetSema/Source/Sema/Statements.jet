@@ -81,6 +81,7 @@ use jet_foundation.[
     type_identity_equal,
     type_identity_key,
     type_name,
+    type_with_effective_fn_returns,
 ]
 
 pub struct SemaStatementResult {
@@ -3056,8 +3057,8 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     local.mutable = binding.mutable
     local.integer_bounds = bounds
     let_ty := TLetTy.Inferred
-    if binding.ty != None -> let_ty = TLetTy.Annotated{ty: binding.ty ?? init.ty, wrapper: TLetWrapper.Plain}
-    if binding.gc_promotion != None || binding.gc_transferred -> let_ty = TLetTy.Annotated{ty: binding.ty ?? init.ty, wrapper: TLetWrapper.AutomaticRoot}
+    if binding.ty != None -> let_ty = TLetTy.Annotated{ty: init.ty, wrapper: TLetWrapper.Plain}
+    if binding.gc_promotion != None || binding.gc_transferred -> let_ty = TLetTy.Annotated{ty: init.ty, wrapper: TLetWrapper.AutomaticRoot}
     // The view is a borrowed `&str` place; its source type stays `String`.
     if string_view -> let_ty = TLetTy.StrView
     gc_promotion := if binding.gc_promotion == .Val(promotion) -> Val(sema_function_memory_tir_promotion(promotion)) else -> None

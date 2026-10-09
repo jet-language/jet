@@ -582,6 +582,7 @@ fn interface_item(item: &Item, pub_file: bool) -> Option<Item> {
         Item::ProtocolDecl(def) => exported(def.is_pub, def.is_package_pub, pub_file),
         Item::GenericModule(def) => exported(def.is_pub, def.is_package_pub, pub_file),
         Item::ModuleAlias(def) => exported(def.is_pub, def.is_package_pub, pub_file),
+        Item::MarkerDecl(def) => exported(def.is_pub, def.is_package_pub, pub_file),
         Item::Test(_) => false,
         // Declarations without a visibility flag register package-wide facts
         // (effects, markers, facts, derives, migrations, conversions, foreign
@@ -594,7 +595,6 @@ fn interface_item(item: &Item, pub_file: bool) -> Option<Item> {
         | Item::Migration(_)
         | Item::UserDerive(_)
         | Item::TemplateLoop(_)
-        | Item::MarkerDecl(_)
         | Item::FactDecl(_) => true,
     };
     keep.then_some(item)

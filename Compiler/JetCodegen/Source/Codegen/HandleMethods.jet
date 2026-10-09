@@ -1317,6 +1317,7 @@ fn jet_codegen_lower_frame_schedule(schedule: FrameSchedule?) -> MIRFrameSchedul
 
 fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool Never! {
     if operation == {
+        .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent -> return true
         .HTTPClientMethod(kind, method) -> return kind == "BrowserTestServer" && method == "stop"
         else -> {}
     }

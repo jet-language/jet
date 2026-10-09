@@ -1138,3 +1138,63 @@ fn run() {
     }
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn associated_aliases_in_nested_return_types_preserve_checked_impl_abi() {
+    if !common::have_rustc() {
+        return;
+    }
+    let source = r#"
+trait Indexed {
+    type Elem
+    fn at(self, i: Int) -> Elem?
+    fn count(self) -> Elem
+}
+struct Nums {
+    values: [Int]
+    impl Indexed {
+        type Elem = Int
+        fn at(self, i: Int) -> Int? { Val(self.values[i]) }
+        fn count(self) -> Int { self.values.len() }
+    }
+}
+fn run() {
+    nums :: Nums{values: [10, 20]}
+    print(nums.at(1) ?? -1)
+    print(nums.count() ?? -1)
+}
+"#;
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_generic_abi", "associated_nested_return", source);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "20\n2\n");
+}
+
+#[test]
+fn generic_codec_bounds_follow_structural_codec_contracts() {
+    let source = r#"
+#Codable
+struct Event { id: Int }
+fn round_trip<T: [Encode, Decode]>(value: T) -> T Never! { value }
+enum Cause { Manual }
+fn mark<T>(value: T, cause: Cause) -> T Never! { value }
+fn run() {
+    events :: round_trip<[Event]>([Event{id: 1}])
+    trees :: round_trip<[DataTree]>([DataTree.Null])
+    optional :: round_trip<Event?>(Val(Event{id: 2}))
+    mapped :: round_trip<[String:Event]>(["event": Event{id: 3}])
+    marked :: mark(events, .Manual)
+}
+"#;
+    jet::compile(source)
+        .unwrap_or_else(|diagnostics| panic!("structural codec bounds failed: {diagnostics:#?}"));
+
+    let diagnostics = jet::compile(
+        r#"
+struct Uncoded { id: Int }
+fn encode_value<T: Encode>(value: T) -> T Never! { value }
+fn run() { value :: encode_value<[Uncoded]>([Uncoded{id: 1}]) }
+"#,
+    ).expect_err("a collection of non-encodable values must still fail");
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0905"));
+}

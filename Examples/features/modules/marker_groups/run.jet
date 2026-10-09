@@ -1,0 +1,19 @@
+// Fixed groups keep the original rules; imported applications name their alias.
+use policies as policy
+
+marker Checked = #[Inline(.Always), Scalar]
+
+#Checked
+fn local(value: Int) -> Int { return value + 1 }
+
+#policy.Fast
+fn imported(value: Int) -> Int { return value * 2 }
+
+#policy.inner.Traced
+fn nested(value: Int) -> Int { return value + 3 }
+
+fn run() {
+    print("local:{local(6)}")
+    print("imported:{imported(6)}")
+    print("nested:{nested(6)}")
+}

@@ -111,6 +111,16 @@ pub(super) fn check_liveness(
 ) -> Vec<Diagnostic> {
     let mut candidates = Vec::new();
     record_materialized_comptime_alias_uses(bundle, ledger);
+    // Qualified marker heads read their import just like a qualified call.
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        for marker in super::super::CheckerMarkers::markers_in(&module.items)
+            .chain(module.rule_facts.iter().map(|fact| &fact.marker))
+        {
+            if let Some(span) = super::super::MarkerModules::marker_import_span(bundle, module_idx, marker) {
+                ledger.record_alias_use(module_idx, span);
+            }
+        }
+    }
     {
         let ledger = &*ledger;
         let index = LivenessIndex::new(bundle, ledger);

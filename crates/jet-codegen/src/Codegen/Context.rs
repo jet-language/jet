@@ -576,8 +576,9 @@ pub(crate) struct Cx {
     pub(crate) boxed_edges: HashSet<(String, String)>,
     pub(crate) cloneable: HashSet<String>,
     /// D-MIGRATE4: `migration TypeName { … }` blocks per type, in source order
-    /// (the chain, oldest step first). Read by `emit_struct_migration` to lower
-    /// the runtime step functions + silent decode migration chain-walker.
+    /// (the chain, oldest step first). Read by `Items::migration_blocks` for the
+    /// TIR codec migration plans; the runtime chain-walker is the derived
+    /// `Decode`'s Jet items (jet-sema `Registration/Serde.rs::struct_migration_decode`).
     pub(crate) migrations: HashMap<String, Vec<crate::AST::MigrationDecl>>,
     /// D-SOA1 / D-SOA-TIER1=A: struct names declared `#layout(columnar)`. A `[S]`
     /// of such a struct lowers to the Prelude-owned `JetColumnList<S>` over THE
@@ -1082,6 +1083,7 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         | "JetDataPlotColumn"
         | "JetDataPlot" => Some(name),
         n if job_queue_rust_type(n).is_some() => job_queue_rust_type(n),
+        n if game_handle_rust_type(n).is_some() => game_handle_rust_type(n),
         _ => net_handle_rust_type(name),
     }
 }
@@ -1335,6 +1337,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-DBPOLICY-BIND1: the policy carrier is emitted by the shared
         // Sync/Core prelude and is re-exported from the generated crate root.
         "RowPolicy" => Some("JetRowPolicy"),
+        "LiveQuery" => Some("JetLiveQuery"),
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DBValue" => Some("DBValue"),
         "DBError" => Some("DBError"),
@@ -3306,8 +3309,22 @@ impl Cx {
         }
     }
 
+    fn email_secret_rust_type(&self) -> String {
+        let key = self.struct_fields.keys().find(|key| {
+            key.starts_with("<corelib>/Core/crypto::") && key.ends_with("::Secret")
+        }).expect("email carriers require the checked core.crypto.Secret declaration");
+        self.rust_type(&Type::Named(key.clone()))
+    }
+
     pub(crate) fn rust_type(&self, ty: &Type) -> String {
         let ty = self.expand_type_aliases(ty);
+        if let Type::Named(name) = &ty {
+            if name.starts_with("<corelib>/Core/compute::") {
+                if let Some(native) = compute_handle_rust_type(core_source_type_leaf(name)) {
+                    return format!("{}{native}", self.root_prefix);
+                }
+            }
+        }
         if let Some((base, _)) = ty.quantity_parts() {
             return self.rust_type(base);
         }
@@ -3490,8 +3507,7 @@ impl Cx {
                 format!("{}jet_email::{rust}", self.root_prefix)
             }
             Type::Named(name) if name == "SMTPAuth" && !self.type_names.contains(name) => {
-                let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                format!("{}jet_email::SMTPAuth<{}::Secret>", self.root_prefix, ffi)
+                format!("{}jet_email::SMTPAuth<{}>", self.root_prefix, self.email_secret_rust_type())
             }
             Type::Named(name)
                 if matches!(name.as_str(), "DKIMConfig" | "SMTPConfig")
@@ -5018,6 +5034,64 @@ pub(crate) fn populate_cx_from_bundle(
     cx.import_mods = import_mod_map(bundle, module_idx);
     cx.module_alias = bundle.modules[module_idx].alias.clone();
     cx.module_identity = module_identity(bundle, module_idx);
+    // Project sema's checked serde capabilities as well as source bodies for
+    // mounted callbacks. Sema materializes every Encode/Decode capability —
+    // explicit, auto-derived, or hand-written — as an impl in the finished
+    // item list, so auto-derived records carry the same endpoint schema as
+    // explicitly derived records; marker spelling is not a capability test.
+    fn register_http_metadata(cx: &mut Cx, bundle: &ProgramBundle, owner: usize, module_idx: usize, items: &[Item]) {
+        let is_codec = |trait_name: &str| trait_name == Generics::ENCODE || trait_name == Generics::DECODE;
+        let codec_impls: HashSet<&str> = items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Impl(implementation) if implementation.trait_name.as_deref().is_some_and(is_codec) => {
+                    Some(implementation.type_name.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        for item in items {
+            match item {
+                Item::Struct(definition) => {
+                    if codec_impls.contains(definition.name.as_str())
+                        || definition.trait_impls.iter().any(|block| is_codec(&block.trait_name))
+                    {
+                        if let Some(identity) = bundle.name_ledger.nominal_identity(owner, &definition.name) {
+                            let mut fields = jet_foundation::Reflection::fields(definition);
+                            for field in &mut fields {
+                                field.ty = super::Imports::qualify_imported_call_type(bundle, owner, "", &field.ty);
+                            }
+                            cx.codable_types.insert(identity.clone());
+                            cx.reflection_fields.insert(identity, fields);
+                        }
+                        if owner == module_idx {
+                            cx.codable_types.insert(definition.name.clone());
+                        }
+                    }
+                    for method in &definition.methods {
+                        let route_source = method.markers.iter().any(|marker| {
+                            let crate::Sema::MarkerModules::MarkerResolution::Found(resolved) =
+                                crate::Sema::MarkerModules::resolve_marker_application(bundle, owner, marker)
+                                else { return false; };
+                            jet_foundation::CoreModuleExports::core_source_module("core.http.server")
+                                .is_some_and(|source| bundle.modules[resolved.module].alias == source.alias)
+                        });
+                        if !route_source { continue; }
+                        if let Some(identity) = bundle.name_ledger.nominal_identity(owner, &definition.name) {
+                            cx.fn_bodies.insert(format!("{identity}::{}", method.name), method.body.clone());
+                        }
+                    }
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body { register_http_metadata(cx, bundle, owner, module_idx, body); }
+                }
+                _ => {}
+            }
+        }
+    }
+    for (owner, module) in bundle.modules.iter().enumerate() {
+        register_http_metadata(cx, bundle, owner, module_idx, &module.items);
+    }
     // Match `qualified_key` used when constructing `TirConstantDef.key`.
     let module = cx.module_identity.clone();
     cx.const_ref_keys = cx
@@ -6654,9 +6728,8 @@ pub(crate) fn build_cx_items(
             // D-QUAL2: a tag erases — it contributes no codegen names.
             Item::Tag(_) => {}
             // D-MIGRATE4: collect migration blocks per type (source order = the
-            // chain, oldest step first) so `emit_struct_migration` can emit the
-            // runtime step functions + chain-walker for decodable
-            // `#PublishedSchema` types. Types without blocks get nothing.
+            // chain, oldest step first) for the TIR codec migration plans of
+            // decodable `#PublishedSchema` types. Types without blocks get nothing.
             Item::Migration(m) => {
                 cx.migrations
                     .entry(m.type_name.clone())

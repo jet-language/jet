@@ -163,6 +163,7 @@ pub fn update(hasher: &Hasher, bytes: [U8]) Never! { &hasher.update(bytes) }
 
 pub fn digest(hasher: ^Hasher) -> String Never! { hasher.digest() }
 
+#!Encode
 pub struct Secret {
     pub bytes: [U8]
 
@@ -170,6 +171,15 @@ pub struct Secret {
     pub fn from_text(text: String) -> Secret Never! { Secret{bytes: text.bytes()} }
 
     pub fn from_bytes(bytes: [U8]) -> Secret Never! { Secret{bytes: bytes} }
+}
+
+// D-CONFIG-ENV1: configuration codecs construct the nominal secret from text.
+// There is deliberately no Encode implementation that could reveal its bytes.
+impl Secret.Decode {
+    fn decode(tree: DataTree) -> Secret [FieldError]! {
+        if tree == .Text(text) -> return Ok(Secret.from_text(text))
+        return Err([FieldError{path: "", reason: "expected a string"}])
+    }
 }
 
 // Secret-bearing values wipe their bytes when they close (D-SHAPE-RESOURCE1=A).

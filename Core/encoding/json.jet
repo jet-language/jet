@@ -633,6 +633,7 @@ impl Parser {
                     _ :: &self.path.pop()
                     return Err(error)
                 }
+                // parse_allow_duplicates: the later value, at the first name's position.
                 later :: &self.parse_value()
                 entries[position].value = later
             } else {
@@ -1089,7 +1090,7 @@ fn pointer_select(node: DataTree, segments: [String], depth: Int) -> DataTree En
     at :: pointer_text(segments, depth + 1)
     if node == {
         .Object(entries) -> {
-            child :: entries.get(segment) ?? return Err(value_error(EncodingErrorKind.Syntax, at, "no object member named `{segment}`"))
+            child :: object_member(entries, segment) ?? return Err(value_error(EncodingErrorKind.Syntax, at, "no object member named `{segment}`"))
             return pointer_select(child, segments, depth + 1)
         }
         .Array(items) -> {
@@ -1135,12 +1136,20 @@ struct PatchOp {
     value: DataTree
 }
 
-fn patch_field(members: [String: DataTree], index: Int, name: String) -> DataTree EncodingError! {
-    value :: members.get(name) ?? return Err(value_error(EncodingErrorKind.Syntax, "/{index}", "operation {index} needs a `{name}` member"))
+// The first member named `name`, scanning the object's ordered pairs.
+fn object_member(members: [(key: String, value: DataTree)], name: String) -> DataTree? {
+    loop pair in members {
+        if pair.key == name -> return Val(pair.value)
+    }
+    None
+}
+
+fn patch_field(members: [(key: String, value: DataTree)], index: Int, name: String) -> DataTree EncodingError! {
+    value :: object_member(members, name) ?? return Err(value_error(EncodingErrorKind.Syntax, "/{index}", "operation {index} needs a `{name}` member"))
     Ok(value)
 }
 
-fn patch_pointer_field(members: [String: DataTree], index: Int, name: String, limits: EncodingLimits) -> [String] EncodingError! {
+fn patch_pointer_field(members: [(key: String, value: DataTree)], index: Int, name: String, limits: EncodingLimits) -> [String] EncodingError! {
     raw :: patch_field(members, index, name)
     text := ""
     valid := false
@@ -1171,7 +1180,7 @@ fn patch_operations(ops: DataTree, limits: EncodingLimits) -> [PatchOp] Encoding
     if !is_array -> return Err(value_error(EncodingErrorKind.Syntax, "", "a JSON Patch document is an array of operation objects"))
     list := [PatchOp]{}
     loop index in 0..<items.len() {
-        members := [String: DataTree]{}
+        members := [(key: String, value: DataTree)]{}
         is_object := false
         if items[index] == {
             .Object(fields) -> {
@@ -1220,24 +1229,24 @@ fn patch_edit(node: DataTree, segments: [String], depth: Int, kind: Int, value: 
     last :: depth + 1 == segments.len()
     if node == {
         .Object(entries) -> {
-            out := [String: DataTree]{}
+            out := [(key: String, value: DataTree)]{}
             found := false
             loop pair in entries {
                 if pair.key != segment {
-                    _ :: &out.add(pair.key, pair.value)
+                    &out.push((key: pair.key, value: pair.value))
                     next
                 }
                 found = true
                 if !last {
                     child :: patch_edit(pair.value, segments, depth + 1, kind, value)
-                    _ :: &out.add(pair.key, child)
+                    &out.push((key: pair.key, value: child))
                     next
                 }
-                if kind != PATCH_REMOVE -> _ :: &out.add(pair.key, value)
+                if kind != PATCH_REMOVE -> &out.push((key: pair.key, value: value))
             }
             if !found {
                 if !last || kind != PATCH_ADD -> return Err(value_error(EncodingErrorKind.Syntax, at, "no object member named `{segment}`"))
-                _ :: &out.add(segment, value)
+                &out.push((key: segment, value: value))
             }
             return Ok(DataTree.Object(out))
         }
@@ -1327,7 +1336,7 @@ fn json_equal(left: DataTree, right: DataTree) -> Bool Never! {
                 .Object(b) -> {
                     if a.len() != b.len() -> return false
                     loop pair in a {
-                        other :: b.get(pair.key) ?? return false
+                        other :: object_member(b, pair.key) ?? return false
                         if !json_equal(pair.value, other) -> return false
                     }
                     return true

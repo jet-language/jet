@@ -1109,7 +1109,7 @@ fn marker_info(
     // marker-only table beside it. A marker is the row whose target is written
     // code, so its signature rides on the row.
     let row = jet_foundation::Registry::row(&marker.name).and_then(|row| row.rule);
-    let declaration = vocabulary.and_then(|vocabulary| vocabulary.declaration(&marker.name));
+    let declaration = vocabulary.and_then(|vocabulary| vocabulary.declaration_for(marker));
     let bindings = row.and_then(|row| row.signature.marker_argument_bindings(marker));
     let args = marker
         .args
@@ -1117,7 +1117,7 @@ fn marker_info(
         .enumerate()
         .map(|(index, argument)| {
             let declaration_parameter = vocabulary
-                .and_then(|vocabulary| vocabulary.declaration(&marker.name))
+                .and_then(|vocabulary| vocabulary.declaration_for(marker))
                 .and_then(|declaration| {
                     marker
                         .arg_labels

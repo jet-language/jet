@@ -12,37 +12,8 @@ package {
 // core.game — canonical scene/replay/backend handles.
 //
 // The runtime owns frame scheduling, input snapshots, and presentation.
-// Source constructors remain useful in the portable model and never invent
-// a successful frame when a provider is unavailable.
+// Scene, Replay, and Backend are opaque compiler-owned handles. Their
+// registered constructors retain scene assets, input, replay, and scheduling
+// state; a plain source record cannot represent those runtime identities.
 module raylib
 
-pub struct Scene {
-    pub name: String
-    pub max_frames: Int
-    pub tick: Int
-}
-
-pub struct Replay {
-    pub path: String
-}
-
-pub struct Backend {
-    pub name: String
-    pub running: Bool
-}
-
-impl Scene {
-    pub fn new(name: String) -> Scene Never! {
-        Scene{name: name, max_frames: 0, tick: 0}
-    }
-}
-
-impl Replay {
-    pub fn record(path: String) -> Replay Never! { Replay{path: path} }
-}
-
-impl Backend {
-    pub fn headless() -> Backend Never! {
-        Backend{name: "headless", running: true}
-    }
-}

@@ -1497,7 +1497,7 @@ impl<'a> Interp<'a> {
     }
 
     /// One migration block's ops, rewriting `pairs` from shape v<i> to v<i+1>
-    /// — mirrors `Codegen/Items.rs::emit_migration_step_fns`.
+    /// — mirrors jet-sema `Registration/Serde.rs::struct_migration_decode`.
     fn apply_migration_step(
         &mut self,
         s: &StructDef,
@@ -1585,12 +1585,12 @@ impl<'a> Interp<'a> {
         Ok(())
     }
 
-    /// The typed decoder's full entry point — mirrors the generated canonical
-    /// `jet_decode` path's default (try current shape) plus, for a
-    /// `#PublishedSchema` type with `migration { }` blocks, the runtime
-    /// chain-walker (`emit_migration_chain_walker`): on failure, detect which
-    /// historical shape the data's key set matches (newest first) and walk
-    /// the step functions forward.
+    /// The typed decoder's full entry point — mirrors the derived `decode`
+    /// default (try current shape) plus, for a `#PublishedSchema` type with
+    /// `migration { }` blocks, the derived chain-walker (jet-sema
+    /// `Registration/Serde.rs::struct_migration_decode`): on failure, detect
+    /// which historical shape the data's key set matches (newest first) and
+    /// walk the step functions forward.
     pub(super) fn typed_decode_top(
         &mut self,
         ty: &Type,

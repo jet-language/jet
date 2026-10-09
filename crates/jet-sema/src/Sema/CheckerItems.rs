@@ -2853,9 +2853,6 @@ impl<'a> Checker<'a> {
         if let Some(v) = core_late_event_disposition_variants(enum_name) {
             return Some(v);
         }
-        if let Some(v) = core_declared_enum_variants(enum_name) {
-            return Some(v);
-        }
         // D-TERM1 (ratified 2026-06-22): `Key` is a core enum (not in user registry).
         // Synthesise its variant table here so `Key.Char(c)` / `Key.Enter` literals work.
         if enum_name == crate::Syntax::TYPE_KEY {

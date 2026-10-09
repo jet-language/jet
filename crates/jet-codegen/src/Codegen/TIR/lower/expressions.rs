@@ -4506,7 +4506,7 @@ pub(crate) fn core_call_expr(
 /// reads, unless a local shadows the constant. Sema wraps a non-Copy field
 /// read in the implicit `Copy` node; the copied value is the same constant.
 fn prepared_constant_path_value<'a>(
-    expr: &Expr,
+    expr: &'a Expr,
     cx: &'a Cx,
     env: &LowerEnv,
 ) -> Option<&'a CtValue> {
@@ -4515,6 +4515,7 @@ fn prepared_constant_path_value<'a>(
             prepared_constant_path_value(inner, cx, env)
         }
         Expr::Ident(name, _) if !env.locals.contains_key(name) => cx.fact_const_values(name),
+        Expr::ComptimeName { value, .. } => value.as_ref(),
         // Optional facts (`$exactness`, `$unit_scale_provenance`) prepare a
         // present carrier; a field read goes through it to the fact record.
         Expr::Field(base, field, _) => match prepared_constant_path_value(base, cx, env)? {
@@ -6179,13 +6180,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     && call.args.len() == 1
                 {
                     return in_own_frame(|| {
-                        return core_call_expr(
-                            Type::Named(Syntax::TYPE_REGEX.to_string()),
-                            "core.regex",
-                            "literal",
-                            vec![lower_expr(&call.args[0].expr, cx, env)],
-                            call.name_span,
-                            vec![false],
+                        return super::method_calls::lower_regex_literal(
+                            &call.args[0].expr, call.name_span, cx, env,
                         );
                     });
                 }
@@ -8657,7 +8653,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     env.fallback_subject = fallback_subject;
                     inner_t
                 };
-                if matches!(&inner_t.ty, Type::Named(name) if name == Syntax::TYPE_NEVER) {
+                // The failure solve can erase an inferred carrier after sema
+                // installed this automatic propagation node. Its checked
+                // operand then already is the success value.
+                if !inner_t.ty.is_fallible() {
                     return inner_t;
                 }
                 let note_t = note
@@ -8815,13 +8814,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 if head == Type::Named(Syntax::TYPE_REGEX.to_string()) {
                     if let TypedLitBody::Value(pattern) = body {
                         return in_own_frame(|| {
-                            return core_call_expr(
-                                head,
-                                "core.regex",
-                                "literal",
-                                vec![lower_expr(pattern, cx, env)],
-                                *span,
-                                vec![false],
+                            return super::method_calls::lower_regex_literal(
+                                pattern, *span, cx, env,
                             );
                         });
                     }

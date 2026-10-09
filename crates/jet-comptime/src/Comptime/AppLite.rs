@@ -68,6 +68,8 @@ mod web_kernel {
         pub(crate) mod jet_std {
             use super::JetShow;
             pub(crate) use jet_foundation::Outcome::{jet_outcome_of, JetTaskFailure};
+            use crate::Comptime::SyncLite::jet_int_to_string;
+            use jet_foundation::EncodingJson::quote_json;
             pub(crate) use crate::Comptime::UrlLite::url_percent_decode_str
                 as jet_url_percent_decode_str;
             pub(crate) use crate::Comptime::UrlLite::url_percent_encode
@@ -3745,8 +3747,8 @@ pub fn apply_suite(
             let action = web_string(one(1)?, "store action", span)?;
             let fields = web_strings(one(2)?, "store changed fields", span)?;
             let callback = one(3)?.clone();
-            let update = move |state: &mut CtValue| {
-                super::Methods::invoke_standalone_closure_mut(&callback, state, span)
+            let update = move || {
+                super::Methods::invoke_standalone_closure(&callback, Vec::new(), span)
                     .unwrap_or_else(|error| std::panic::panic_any(error));
             };
             match method {

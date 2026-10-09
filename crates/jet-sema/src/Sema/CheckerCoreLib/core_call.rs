@@ -1,6 +1,6 @@
 use super::alloc_ptrs::{db_row_ty, e3101, io_error_ty, ptr_elem, result_ty};
 use super::core_types::{decode_error_ty, encoding_error_ty, json_ty, u8_ty, unit_ty};
-use super::fixed_sigs::{core_fixed_sig, core_fixed_sig_for_row};
+use super::fixed_sigs::{core_fixed_sig, core_fixed_sig_for_row, web_nullary_callback};
 use super::serde_diags::{
     is_no_os_forbidden, literal_string_value, module_short_name, no_os_hint, reactive_derived_unit,
     reactive_lambda_arity, reactive_not_lambda, unknown_core_item, wrong_core_arity,
@@ -1893,7 +1893,7 @@ impl<'a> Checker<'a> {
                 web_expect!(0, web_apply("WebTable", row.clone()));
                 web_expect!(1, web_callback(
                     Type::Named("WebTableState".to_string()),
-                    web_apply("WebTablePage", row.clone()),
+                    web_result(web_apply("WebTablePage", row.clone())),
                 ));
                 Some(web_apply("WebTable", row))
             }
@@ -2140,7 +2140,7 @@ impl<'a> Checker<'a> {
                 web_expect!(0, web_apply("WebStore", value.clone()));
                 web_expect!(1, Type::String);
                 web_expect!(2, Type::List(Box::new(Type::String)));
-                web_expect!(3, web_callback(value.clone(), unit_ty()));
+                web_expect!(3, web_nullary_callback());
                 Some(web_apply("WebStoreTransaction", value))
             }
             ("core.web.store", "update" | "batch") => {
@@ -2148,7 +2148,7 @@ impl<'a> Checker<'a> {
                 web_expect!(0, web_apply("WebStore", value.clone()));
                 web_expect!(1, Type::String);
                 web_expect!(2, Type::List(Box::new(Type::String)));
-                web_expect!(3, web_callback(value.clone(), unit_ty()));
+                web_expect!(3, web_nullary_callback());
                 Some(web_apply("WebStoreTransaction", value))
             }
             ("core.web.store", "set" | "set_state") => {
@@ -2162,7 +2162,7 @@ impl<'a> Checker<'a> {
                 web_expect!(0, web_apply("WebStore", value.clone()));
                 web_expect!(1, Type::String);
                 web_expect!(2, Type::List(Box::new(Type::String)));
-                web_expect!(3, web_callback(value.clone(), unit_ty()));
+                web_expect!(3, web_nullary_callback());
                 Some(web_apply("WebStorePatch", value))
             }
             ("core.web.store", "patch_generation" | "patch_transaction" | "patch_active"
@@ -2186,7 +2186,7 @@ impl<'a> Checker<'a> {
                 web_expect!(0, web_apply("WebStore", value.clone()));
                 Some(match name {
                     "value" => value,
-                    "signal" | "state_signal" => Type::String,
+                    "signal" | "state_signal" => web_apply("Signal", value),
                     "back" | "forward" => Type::Option(Box::new(value)),
                     "history" => Type::List(Box::new(web_apply("WebStoreTransaction", value))),
                     "events" => Type::List(Box::new(Type::Named("WebStoreEvent".to_string()))),
@@ -2617,6 +2617,23 @@ impl<'a> Checker<'a> {
         }
         if let Some(alias) = alias.filter(|_| core_call_is_known(module, name)) {
             self.record_import_alias_reference(alias, alias_span);
+        }
+        if module == "core.web" && name == "openapi" {
+            if args.len() != 1 {
+                self.diags.push(wrong_core_arity("openapi", 1, args.len(), span));
+                return None;
+            }
+            let ty = self.infer(&mut args[0].expr)?;
+            let generic = matches!(&ty, Type::Named(name) if self.type_param_scope.iter().any(|parameter| &parameter.name == name));
+            if !generic && !matches!(&ty, Type::Named(name) if matches!(name.as_str(), "HTTPRouter" | "HTTPMux")) {
+                self.diags.push(Diagnostic::error("E0112",
+                    format!("web.openapi needs an HTTPRouter or HTTPMux, not {}", ty.show()),
+                    "OpenAPI reads the checked route facts of the value the program serves".to_string(),
+                    "pass your router or mux to web.openapi".to_string(), Some(args[0].expr.span())));
+                return None;
+            }
+            *resolved_ret_out = Some(Type::String);
+            return Some(Type::String);
         }
         let fixed_sig =
             resolved_core_fixed_sig(module, name, type_args, span, &mut self.diags);

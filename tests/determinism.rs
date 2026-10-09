@@ -58,6 +58,28 @@ fn run() {
     assert!(res.is_ok(), "injected RNG should compile: {:?}", res.err());
 }
 
+#[test]
+fn rng_int_native_word_boundary_preserves_wide_ranges() {
+    if !common::have_rustc() {
+        return;
+    }
+    let src = r#"
+use core.math.random as random
+fn run() {
+    first := random.rng(7)
+    replay := random.rng(7)
+    a :: &first.int(-3000000000000000000, 6000000000000000000)
+    b :: &replay.int(-3000000000000000000, 6000000000000000000)
+    print(a == b)
+    print(a >= -3000000000000000000 && a <= 6000000000000000000)
+    print(&first.int(6000000000000000000, 6000000000000000000))
+}
+"#;
+    let (code, stdout, stderr) = common::build_and_run("rng_native_words", "main", src);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "true\ntrue\n6000000000000000000\n");
+}
+
 /// The deterministic capability constructors (`Clock.new`, `random.rng`) are
 /// themselves usable inside a `#Pure fn` — they carry no ambient effect.
 #[test]

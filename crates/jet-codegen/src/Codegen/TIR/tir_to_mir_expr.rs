@@ -991,6 +991,25 @@ pub(super) fn lower_receiver_place(
             return Ok(None);
         }
         TExprKind::Local(local) => Some(lower_local_place(ctx, local, access)?),
+        // Dereferencing an allocator view or raw pointer still names its
+        // owner's storage. Reading the pointee into an SSA value would make
+        // address_of point at a copy and lose the allocator's provenance.
+        TExprKind::Deref(pointer) => {
+            let value = ctx.lower_child(pointer)?;
+            let id = ctx.place_id("temporary.deref", &format!("{}", value.0))?;
+            let span = ctx.span();
+            let ty = ctx.mir_type(&pointer.ty)?;
+            ctx.places.push(MirPlace {
+                id,
+                span,
+                ty,
+                base: MirPlaceBase::Temporary(value),
+                projections: Vec::new(),
+                access,
+                persist_key: None,
+            });
+            Some(ctx.project_deref_place(id, expr.ty.clone(), span)?)
+        }
         // An element of a list, map, or pool is never moved out of its
         // container: there is no checked move kernel for an index, and sema
         // keeps the slot readable after a consuming use (`f(list[i])` into a
@@ -4601,6 +4620,7 @@ pub(super) fn lower_expr(
                         | THandleOp::TLSStreamClose
                         | THandleOp::TLSStreamCloseWrite
                 ),
+                route.signature.borrow_mask.first().copied().unwrap_or(false),
             )?;
             let source_args = args;
             let mut args = lower_handle_method_args(ctx, source_args)?;
@@ -4629,7 +4649,6 @@ pub(super) fn lower_expr(
                     },
                 )?);
             }
-            let route = op.prelude_route(&recv.ty, &carrier)?;
             let call = ctx.intern_prelude_route(route)?;
             ctx.emit(
                 "handle-method",
@@ -8782,7 +8801,7 @@ fn http_text_method_receiver(recv: &Type, op: &THandleOp) -> Option<&'static str
     match recv.without_user_tags() {
         Type::Named(name) if name == "HTTPRequest" => Some("HTTPRequest"),
         Type::Named(name) if name == "HTTPResponse" => Some("HTTPResponse"),
-        Type::Named(name) if name == "Body" => Some("Body"),
+        Type::Named(name) if matches!(name.as_str(), "Body" | "core.http.Body") => Some("Body"),
         _ => None,
     }
 }
@@ -8912,7 +8931,7 @@ fn http_json_method_receiver(recv: &Type, op: &THandleOp) -> Option<&'static str
     match recv.without_user_tags() {
         Type::Named(name) if name == "HTTPRequest" => Some("HTTPRequest"),
         Type::Named(name) if name == "HTTPResponse" => Some("HTTPResponse"),
-        Type::Named(name) if name == "Body" => Some("Body"),
+        Type::Named(name) if matches!(name.as_str(), "Body" | "core.http.Body") => Some("Body"),
         _ => None,
     }
 }
@@ -10064,10 +10083,7 @@ fn typed_codec_target(ty: &Type) -> bool {
                     | "U32"
                     | "U64"
                     | "U128"
-            ) || name == "Secret"
-                || name
-                    .rsplit_once('.')
-                    .is_some_and(|(_, leaf)| leaf == "Secret")
+            )
         }
         Type::Tagged { inner, .. } => typed_codec_target(inner),
         _ => false,
@@ -10733,26 +10749,6 @@ pub(super) fn lower_pattern(
         TPatternPosition::OptionBinding => MirPatternPosition::OptionBinding,
         TPatternPosition::Arm => MirPatternPosition::Arm,
         TPatternPosition::VariantPath => MirPatternPosition::VariantPath,
-        TPatternPosition::DataEntries { temp } => {
-            let owner = owner.ok_or_else(|| {
-                ctx.error(
-                    ctx.span(),
-                    "checked data-entry pattern is missing its owner",
-                )
-            })?;
-            let variant = match &pattern.shape {
-                TPatternShape::Variant { variant, .. } => variant,
-                _ => {
-                    return Err(ctx.error(
-                        ctx.span(),
-                        "checked data-entry pattern is missing its enum variant",
-                    ));
-                }
-            };
-            let local = super::TLocal::generated(temp);
-            let temp_id = ctx.bind_data_entries_temp(&local, owner, variant)?;
-            MirPatternPosition::DataEntries { temp: temp_id }
-        }
     };
     let shape = lower_pattern_shape(ctx, &pattern.shape, owner)?;
     Ok(MirPattern {

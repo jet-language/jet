@@ -403,6 +403,9 @@ pub struct LambdaMeta {
     pub escapes: bool,
     /// Sema checked this lambda inside an erased scope; it has no runtime row.
     pub runtime_erased: bool,
+    /// D-HTTP-ROUTE-EXPOSE1: checked method identity whose source body defines
+    /// the endpoint contract of a synthesized mounting callback.
+    pub http_route_source: Option<String>,
     pub needs_fn_mut: bool,
     pub mut_captures: Vec<String>,
     pub cloned_captures: Vec<String>,

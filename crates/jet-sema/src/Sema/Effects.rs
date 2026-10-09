@@ -1846,7 +1846,11 @@ pub fn check_inferred_purity(
             .map(str::to_owned)
             .unwrap_or_else(|| super::effect_key(owner, &f.name));
         let key = format!("{module_alias}::{identity}");
-        if solved.get(&key).map_or(true, EffectSet::is_empty) {
+        let ambient = solved
+            .get(&key)
+            .map(|effects| effects_uncovered(effects, &EffectSet::new()))
+            .unwrap_or_default();
+        if ambient.is_empty() {
             return;
         }
         let row = if f.is_comptime {

@@ -1799,6 +1799,69 @@ pub(super) fn lower_checked_core_source_expr(mut expr: TExpr, cx: &Cx) -> TExpr 
 }
 
 
+/// Checked regex literals use the same source engine as dynamic compilation.
+/// Sema has already discharged the syntax failure before this lowering runs.
+pub(super) fn lower_regex_literal(
+    pattern: &Expr,
+    span: Span,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    let Some(signature) = cx
+        .core_source_sigs
+        .get(&("core.regex".to_string(), "compile".to_string()))
+    else {
+        return invariant_method_expr(span, "source Regex literal producer is not loaded");
+    };
+    let Some(return_type) = signature.return_type.as_ref() else {
+        return invariant_method_expr(span, "source Regex literal producer has no return type");
+    };
+    let ty = cx.canonicalize_checked_type(return_type, std::iter::empty());
+    let Type::Result { ok, .. } = &ty else {
+        return invariant_method_expr(span, "source Regex compile producer is not fallible");
+    };
+    let regex_ty = (**ok).clone();
+    let target_return = match module_call_target_return(cx, Some(&ty)) {
+        Ok(target) => Some(target),
+        Err(error) => return invariant_method_expr(span, error),
+    };
+    let compiled = TExpr {
+        ty,
+        kind: TExprKind::ModuleCall {
+            form: core_source_module_target(signature, "compile"),
+            target_return,
+            type_args: Vec::new(),
+            args: vec![TCallArg {
+                value: lower_expr(pattern, cx, env),
+                template_items: None,
+                borrow: true,
+                mut_borrow: false,
+                clone: false,
+                arc_clone: false,
+                fn_coerce: None,
+                widen_to_vec: false,
+                widen_to_union: None,
+                box_as_trait: None,
+            }],
+        },
+    };
+    TExpr {
+        ty: regex_ty,
+        kind: TExprKind::OrFallback {
+            value: Box::new(compiled),
+            fallback: crate::Codegen::TIR::TOrFallback::Panic {
+                msg: Box::new(TExpr {
+                    ty: Type::String,
+                    kind: TExprKind::StrLit(vec![crate::Codegen::TIR::TStrPart::Lit(
+                        "compiler-checked regex failed to compile".to_string(),
+                    )]),
+                }),
+                loc: super::panic::capture_panic_loc(&span, cx, env),
+            },
+        },
+    }
+}
+
 /// Lower a compiler-private String receiver method as a typed call into the
 /// reserved source-part module. This gate is intentionally separate from the
 /// ordinary Core-source path: the private part has no public module row and
@@ -3248,8 +3311,10 @@ fn route_handler_contract(
     line: usize,
     is_mux: bool,
 ) -> Option<String> {
-    let pattern = route_static_string(path_expr, cx)?;
-    Syntax::validate_http_route_pattern(&pattern).ok()?;
+    let static_pattern = route_static_string(path_expr, cx);
+    let dynamic = static_pattern.is_none() && is_mux;
+    let pattern = if dynamic { String::new() } else { static_pattern? };
+    if !dynamic { Syntax::validate_http_route_pattern(&pattern).ok()?; }
     let mut path = String::new();
     let mut parameters = Vec::new();
     if pattern == "/" {
@@ -3293,9 +3358,13 @@ fn route_handler_contract(
                 .map(|param| param.ty.clone())
                 .collect::<Option<Vec<_>>>()?;
             (
-                match &lambda.body {
-                    LambdaBody::Expr(expr) => LambdaBody::Expr(expr.clone()),
-                    LambdaBody::Block(stmts) => LambdaBody::Block(stmts.clone()),
+                if let Some(source) = &lambda.meta.http_route_source {
+                    LambdaBody::Block(cx.fn_bodies.get(source)?.clone())
+                } else {
+                    match &lambda.body {
+                        LambdaBody::Expr(expr) => LambdaBody::Expr(expr.clone()),
+                        LambdaBody::Block(stmts) => LambdaBody::Block(stmts.clone()),
+                    }
                 },
                 params,
             )
@@ -3345,7 +3414,6 @@ fn route_handler_contract(
     {
         return None;
     }
-    if !is_mux {
         for parameter in &mut parameters {
             if parameter.location != jet_foundation::MIR::MirHttpParameterLocation::Path {
                 continue;
@@ -3363,7 +3431,6 @@ fn route_handler_contract(
             let mut active = HashSet::new();
             parameter.schema = route_schema_type(&matches[0].1, cx, &mut active)?;
         }
-    }
     let path_names = parameters
         .iter()
         .filter(|parameter| {
@@ -3374,7 +3441,7 @@ fn route_handler_contract(
     if matches!(
         method,
         jet_foundation::MIR::MirHttpMethod::Get | jet_foundation::MIR::MirHttpMethod::Head
-    ) {
+    ) || dynamic {
         for (name, ty) in &handler_param_names {
             if path_names.contains(name)
                 || matches!(ty, Type::Named(request) if request == "HTTPRequest")
@@ -3390,7 +3457,7 @@ fn route_handler_contract(
                 schema: route_schema_type(ty, cx, &mut active)?,
             });
         }
-    } else if handler_param_names.iter().any(|(name, ty)| {
+    } else if !dynamic && handler_param_names.iter().any(|(name, ty)| {
         !path_names.contains(name)
             && !matches!(ty, Type::Named(request) if request == "HTTPRequest")
     }) {
@@ -4747,23 +4814,7 @@ fn lower_method_call_impl(
                 span,
             } = &arg.expr
             {
-                let record = match checked_core_record("core.regex", "literal", 1, *span) {
-                    Ok(record) => record,
-                    Err(expr) => return expr,
-                };
-                let regex_ty = Type::Named(Syntax::TYPE_REGEX.to_string());
-                return TExpr {
-                    ty: regex_ty.clone(),
-                    kind: TExprKind::CoreCall {
-                        record,
-                        args: vec![lower_expr(pattern, cx, env)],
-                        source_span: *span,
-                        type_args: Vec::new(),
-                        widen_to_vec: vec![false],
-                        data_plan: None,
-                        fallibility: TFailureCarrier::from_checked_type(&regex_ty),
-                    },
-                };
+                return lower_regex_literal(pattern, *span, cx, env);
             }
         }
 
@@ -5742,9 +5793,11 @@ fn lower_method_call_impl(
                 let arg = args.first().map(|a| {
                     let mut value = lower_expr(&a.expr, cx, env);
                     if method == "Object" && matches!(&value.kind, TExprKind::MapLit(_)) {
-                        value.ty = crate::Sema::core_json_pattern_types(method)
-                            .and_then(|types| types.into_iter().next())
-                            .expect("checked DataTree.Object payload type");
+                        value.ty = Type::Map {
+                            key: Box::new(Type::String),
+                            key_span: None,
+                            value: Box::new(Type::Named(Syntax::TYPE_DATA.to_string())),
+                        };
                     }
                     let value = if method == "Array" {
                         let payload =
@@ -6418,8 +6471,7 @@ fn lower_method_call_impl(
                         env.note_stack_address();
                     }
                     let ty = match resolved_ret.cloned().or_else(|| {
-                        crate::Sema::core_call_semantic_signature(&module, method)
-                            .map(|(_, ret)| ret)
+                        super::core_calls::checked_core_return_type(&module, method, &targs, cx)
                     }) {
                         Some(ty) => ty,
                         None if module == "core.term" && method == "eprint" => unit_type(),
@@ -6563,8 +6615,7 @@ fn lower_method_call_impl(
                         env.note_stack_address();
                     }
                     let Some(ty) = resolved_ret.cloned().or_else(|| {
-                        crate::Sema::core_call_semantic_signature(&submodule, method)
-                            .map(|(_, ret)| ret)
+                        super::core_calls::checked_core_return_type(&submodule, method, &targs, cx)
                     }) else {
                         return invariant_method_expr(
                             method_span,
@@ -10386,7 +10437,7 @@ fn lower_method_call_impl(
                     kind: TExprKind::HandleMethod {
                         recv: Box::new(recv_t),
                         op: THandleOp::PluginInvoke {
-                            export_name: method.to_string(),
+                            export_name: method.replace('_', "-"),
                             signature,
                         },
                         args: targs,

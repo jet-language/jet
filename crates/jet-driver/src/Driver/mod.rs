@@ -7131,11 +7131,10 @@ fn compile_src_on_compiler_stack(
     generated: bool,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     crate::boot_mir_eval();
-    let source_for_parse = if generated {
-        src.to_string()
+    let (source_for_parse, inline_package) = if generated {
+        (src.to_string(), None)
     } else {
         crate::Package::mask_inline_package_source(src)
-            .map(|(masked, _)| masked)
             .map_err(|error| vec![error.diagnostic()])?
     };
     let (toks, lex_diags) = if generated {
@@ -8098,8 +8097,8 @@ fn check_eval_on_compiler_stack(
     crate::Sema::SemIndexEffectFacts,
     std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
-    let source_for_parse = match crate::Package::mask_inline_package_source(src) {
-        Ok((masked, _)) => masked,
+    let (source_for_parse, inline_package) = match crate::Package::mask_inline_package_source(src) {
+        Ok(input) => input,
         Err(error) => {
             return (
                 vec![error.diagnostic()],

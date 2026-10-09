@@ -64,6 +64,21 @@ one exists instead of adding another spelling for the same job.
 | `JET_UPDATE_SNAPSHOTS` | `1` | Updates compiler-owned snapshot output in explicitly supported workflows; review the diff immediately. |
 | `JET_VERIFY_TMPDIR` | path | Overrides the temporary root used by verification scenarios. |
 
+Golden stdout remains exact except for probes whose subject is a real host
+observation. `foundations/realtime` checks the callback request, cancellation,
+completed-frame accounting, and missed-deadline/jitter aggregate invariants.
+`foundations/text` keeps every non-timing byte exact and parses only the two
+non-negative `elapsed_ms` observations. Their expected files retain stdout
+from successful real executions; they do not substitute invented timings or
+normalize arbitrary numbers.
+
+The capabilities foundation golden builds its guest Component from canonical
+Jet source with the test's compiler before running the host. Its repository-
+relative authority root and guest paths are mirrored under disk-backed scratch;
+no checkout build artifact or precompiled canned guest can satisfy this probe.
+Missing or failed sandbox tools are reported as fixture-build failures, never
+as a successful skipped capability boundary.
+
 Canvas verification can receive explicit paths for its browser and driver
 processes:
 

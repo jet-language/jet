@@ -53,6 +53,25 @@ pub struct WebQuery {
     pub subscribers: Int
 }
 
+impl WebQuery {
+    pub fn get(self) -> String Never! { self.data }
+    pub fn show(self) -> String Never! { "{self.key}={self.data}" }
+    pub fn state(self) -> WebQueryState Never! { state(self) }
+    pub fn state_signal(self) -> String Never! { state_signal(self) }
+    pub fn mutation_state(self) -> WebMutationState Never! { mutation_state(self) }
+    pub fn mutation_signal(self) -> String Never! { mutation_signal(self) }
+    pub fn facts(self) -> String Never! { facts(self) }
+    pub fn invalidate(&self) -> Int Never! { invalidate(&self) }
+    pub fn refresh(&self) WebQueryError! { refresh(&self) }
+    pub fn cancel(&self) -> Bool Never! { cancel(&self) }
+    pub fn queue(&self, data: String) -> Int WebQueryError! { queue(&self, data) }
+    pub fn retry(&self, replay: fn(String)) -> Int WebQueryError! { retry(&self, replay) }
+    pub fn set_online(&self, online: Bool) Never! { set_online(&self, online) }
+    pub fn set_mode(&self, mode: WebQueryNetworkMode) Never! { set_mode(&self, mode) }
+    pub fn mutate<E>(&self, key: String, expected: String?, mutation: fn(String) -> String E!) -> WebMutationState E! { mutate<E>(&self, key, expected, mutation) }
+    pub fn mutate_with_invalidations<E>(&self, key: String, expected: String?, invalidations: [String], mutation: fn(String) -> String E!) -> WebMutationState E! { mutate_with_invalidations<E>(&self, key, expected, invalidations, mutation) }
+}
+
 pub struct WebMutationState {
     pub status: WebMutationStatus
     pub data: String

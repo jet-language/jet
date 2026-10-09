@@ -2700,14 +2700,13 @@ fn load_entry_with_overlays_mode_on_stack(
             .unwrap_or_else(|| panic!("Core source module `{}` has no body text", source_module.module))
             .to_string();
         let display = source_module.path.to_string();
-        let source_for_parse = crate::Package::mask_inline_package_source(&source)
+        let (source_for_parse, inline_package) = crate::Package::mask_inline_package_source(&source)
             .map_err(|error| {
                 record_loader_error(
                     &mut sink,
                     LoaderError::at(&display, &source, vec![error.diagnostic()]),
                 )
-            })?
-            .0;
+            })?;
         // Embedded Core sources are vetted stdlib internals (I1): they may
         // spell the reserved `__name` namespace, e.g. `core.crypto.__zeroize`.
         // Only this embedded-Core path lexes that way; a user file, even one
@@ -2795,6 +2794,7 @@ fn load_entry_with_overlays_mode_on_stack(
         bundle.modules.push(LoadedModule {
             path: PathBuf::from(core_path),
             display,
+            frontend_source: inline_package.map(|_| source_for_parse),
             source,
             core_identifier_demand: Lexer::core_identifier_demand(&tokens),
             alias,
@@ -4461,11 +4461,8 @@ fn load_file_located(
             return Err(LoaderError::at(display, &source, diagnostics));
         }
         None => {
-            let source_for_parse =
-                crate::Package::mask_inline_package_source(&source)
-                    .map_err(|error| LoaderError::at(display, &source, vec![error.diagnostic()]))?
-                    .0;
-            let (tokens, lex_diags) = Lexer::lex(&source_for_parse);
+            // Reuse the exact masked input retained for semantic replay.
+            let (tokens, lex_diags) = Lexer::lex(source_for_parse);
             if !lex_diags.is_empty() {
                 return Err(LoaderError::at(display, &source, lex_diags));
             }
@@ -5274,8 +5271,11 @@ fn namespace_root(path: &Path, cache: &mut HashMap<PathBuf, Option<PathBuf>>) ->
 /// excluding its manifest and the files of nested packages, in path order.
 fn package_member_files(root: &Path) -> Result<Vec<PathBuf>, Diagnostic> {
     let resolver = AuthorityResolver::open(root).map_err(|error| error.diagnostic())?;
-    let files = resolver
-        .discover_source_files()
+    let facts = package_facts_for_root(root)
+        .map_err(|diagnostics| diagnostics.into_iter().next().expect("package error diagnostic"))?
+        .expect("a namespace root has package facts");
+    let files = facts
+        .source_files_checked(&resolver)
         .map_err(|error| error.diagnostic())?;
     Ok(files
         .into_iter()
@@ -5841,6 +5841,26 @@ mod stale_manifest_name_tests {
         ));
         std::fs::create_dir_all(&p).unwrap();
         p
+    }
+
+    #[test]
+    fn package_namespace_excludes_declared_config_inputs() {
+        let root = tempdir("namespace-config");
+        fs::create_dir_all(root.join("config")).unwrap();
+        fs::write(
+            root.join(Syntax::PACKAGE_FILE),
+            "name: \"namespace_config\"\nversion: \"0.1.0\"\nconfigs: [\"config/build.jet\"]\n",
+        ).unwrap();
+        fs::write(
+            root.join("config/build.jet"),
+            "pub build :: Config{ outputs: { app: Executable{ entry: run } } }\n",
+        ).unwrap();
+        fs::write(root.join("run.jet"), "fn build() {}\nfn run() {}\n").unwrap();
+        assert_eq!(
+            package_member_files(&root).unwrap(),
+            vec![normalize_path(&root.join("run.jet"))],
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

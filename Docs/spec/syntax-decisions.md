@@ -22,6 +22,9 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | `:=` | mutable binding | `D-BIND1` |
 | `#` | attached marker; #[A, B] stacks | `D-VERDICT-732-1; D-MARK-STACK1` |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring | `D-TEST-STOPMSG1=A` |
+| `marker Name = #[A, B]` | fixed named marker-group declaration; expands at each use without hiding gates or refusals | `D-MARKER-GROUP1=A` |
+| `#module.Marker / #[module.Marker, Other]` | library marker through the import's local name; pub exports its declaration | `D-MARKER-MODULE1=A` |
+| `#Inline / #Scalar / #Kernel / #Static` | separate callable promise, scalar hint, kernel proof and constant storage rules | `D-CODEGEN-HINTS1=A` |
 | `#DevPanel` | exported typed devtools panel marker | `D-DX-PLUGIN1=D` |
 | `web.form(Model, action: handler)` | struct-derived headless form with progressive action | `D-DX-FORM1` |
 | `#Layout(c, align(N)) / #Layout(c, align(target, N))` | C layout with portable or target-supported explicit alignment | `D-PLACE1=A; D-LAYOUT-ALIGN1=A` |
@@ -421,6 +424,10 @@ Values accepted by Jet's ordinary copy law are copied at closure creation, so
 the source binding remains available. Owned values that cannot be copied move.
 Mutable and borrowed captures remain subject to sema's ownership checks. No
 `take(...)` capture prefix or preparatory copy binding is required.
+The native send-safe callable ABI remains reusable `Fn + Sync`: mutable
+environments are lent under one invocation lock, while read-only environments
+need no lock. A checked consuming capture is held in an owned optional slot
+and transferred once, rather than moving directly out of a Rust `Fn` closure.
 
 **D-CALLVALUE1=B — function values use `.call(...)`** *(ratified
 2026-08-05)*: a direct named or method call keeps its ordinary spelling
@@ -1263,6 +1270,11 @@ and resident execution use the same conversion mechanism. For an unknown
 unrestricted `Float`-backed value, only an identity scale and offset proves
 exact finite conversion over the complete source domain; integral coefficients
 alone are not proof.
+At the native boundary, the emitters unwrap a source unit's Float storage,
+borrow the exact rational metadata, map the checked mode to the shared kernel's
+rounding enum, and narrow `digits` through the checked exact-Int adapter. Kernel
+success values regain the destination unit identity; reason text stays in the
+checked String failure carrier.
 
 Per D-PACKAGE-POLICY-SCOPE1, `policy: .{ explicit_units: true }` in
 `package.jet` restores explicit-only conversion at package scope, and
@@ -1788,8 +1800,10 @@ retires S80's arrow-and-unit form.
 **D-FAIL-BIND1=A — `err` is ambient inside a fallible fallback** *(ratified
 2026-08-06, card #1535; amended by D-ERR-DECON1=A)*: inside a `??` fallback
 for a fallible value, `err` names the report. It is in scope only in that
-fallback. Optional fallbacks reject `err`. No lambda, binder, or parentheses
-are added. The `?? (next)` value form in D-ORRETURN-CANON1 is unchanged;
+fallback. Optional fallbacks reject `err`, including the shared fallback of
+`Result<Option<T>, E>`: `Ok(None)` owns no failure report. Handle its Result
+and Option routes separately when the failure handler needs `err`. No lambda,
+binder, or parentheses are added. The `?? (next)` value form in D-ORRETURN-CANON1 is unchanged;
 D-ERR-DECON1 owns the one bare-value-or-diverging-tail rule for fallback
 blocks.
 
@@ -2034,6 +2048,12 @@ spellings — inside the type body (`impl Serialize { … }`) or top-level
 attaches traits; `::` exists only inside `extern rust` path strings. Orphan
 rule applies. v1: signatures plus D-LIB2's associated types and default
 bodies.
+Checked implementation ABIs substitute the impl's `Self` and associated
+aliases before comparing parameter and result types with the trait declaration.
+The substitution applies inside containers, callable signatures, and the
+success/error payloads of failure carriers; parameter names, access modes, and
+carrier kinds stay exact. A trait method's key retains its declaring module,
+while its method name is the source leaf used by implementations.
 
 **S48 — Dynamic dispatch**: a trait name in type position (`[Shape]`,
 `fn f(s: Shape)`) means automatic boxing + dynamic dispatch; `<T: Shape>`
@@ -2172,6 +2192,49 @@ the same row.
 share one `#[A, B]` list. A one-item list or adjacent bare stack is E0999 with
 the canonical rewrite. `jet fmt` performs that rewrite and preserves order.
 Scoped block rules do not stack.
+
+**D-MARKER-GROUP1=A — Fixed named marker groups**: `marker Fast =
+#[Inline(.Always), Scalar]` names two or more fixed applications. Use it as
+`#Fast` or as a member of an ordinary application list. A group has no
+parameters; its declaration is not a callable marker signature. Fewer than
+two members is E0999. Gates, refusals, retired markers, unknown members and
+other named groups are E0400: audit-sensitive authority must stay visible at
+the use, and groups are not a second policy language. Argument types and legal
+sites are checked at each use, and overlap with another group or a directly
+written member follows the ordinary E0999 duplicate rule. The formatter
+preserves the authored declaration and group use rather than printing expanded
+members.
+Expansion preserves ordinary file projections: a fixed `#[PubFile, NoPrelude]`
+group sets those file flags before following declarations are checked. It
+does not widen legal sites; mixing module `Policy` and file `PubFile` remains
+the same E0355 rejection as the ordinary written list.
+
+**D-MARKER-MODULE1=A — Markers belong to modules**: marker identity is its
+declaring module and declaration, not a process-wide short name. A module may
+write its own marker bare. An imported marker always uses the import's local
+name: `use core.http.server as web` followed by `#web.Get(...)`. Nested exports
+retain their path, such as `#library.inner.LibraryNote`. Bare imported markers teach
+E0085; an ambiguous qualified path is E0086. Unknown names remain E0927 and
+private exports remain E0605. Group members resolve lexically in the group's
+declaring module, so a caller's marker or alias cannot capture them. A public
+group containing a private member is E0605; publishing a group cannot leak
+module-private authority.
+Qualified members of fixed groups count as import uses in their declaring
+scope, even when a caller receives the expanded member's local spelling.
+Nested scopes use their nearest declaration or import alias. Once an import
+alias binds a qualified head, a missing member is an error in that module,
+not permission to retry an outer alias with the same name.
+
+**D-CODEGEN-HINTS1=A — Distinct codegen and storage controls**: keep `Inline`,
+`Scalar`, `Kernel` and `Static` separate; no fused marker replaces them.
+`#Inline` is a soft inlining hint and `#Inline(.Always)` is the checked inline
+promise, with E0917/E0918/E0919 for failed promises. `#Scalar` selects scalar
+codegen rather than changing inlining. `#Kernel(.parallel)` requests the
+checked worker-boundary proof, rather than merely suggesting optimization.
+`#Static` gives a constant stable-address storage, not an optimization mode.
+Each independent intent remains readable and independently checked; an
+ordinary fixed group may bundle applications without inventing a new fused
+semantic rule.
 
 **D-INLINE-PARAM1=A — One inline rule** *(ratified 2026-07-23, card #762)*:
 `#Inline` is the soft function hint and `#Inline(Always)` is the checked
@@ -3052,6 +3115,10 @@ hash-checked inputs such as `embed_file(path) -> String`,
 enter `.jet/lock`. Ambient effects are Tier 2 and keep the explicit
 `#Impure("reason")` plus the `--gate impure=allow` gate. **D-STRPARSE1**:
 comptime evaluation may pass through `Result`/`Option` for pure parse paths.
+Preparation uses the checked call's result carrier. Before AST return facts
+are materialized, a concrete Core surface signature supplies that result only
+when every checked argument matches its parameter type; it must not substitute
+the default overload's result for another floating-point width.
 
 **D-CTEFFECT1 — Comptime effect tiers**: Tier 0 pure always-on; Tier 1
 hashed-reproducible recorded into `.jet/lock` (`@embed`, `find`,
@@ -3332,6 +3399,11 @@ the portable ceiling but still requires a positive power of two supported by
 the selected target. Effective alignment is the maximum of the requested and
 natural alignments; C field order and padding rules remain unchanged, with
 trailing size and stride padded to the effective alignment.
+Native C-layout storage does not by itself create a foreign boundary. A
+physical Copy wire mirror is emitted only for types reachable from an
+applicable C signature, including nested records and enum payloads. Thus a
+native aligned record may contain safe atomic cells without requiring those
+cells to have a by-value C representation.
 
 **D-ATOMIC-WIDTH1=A — One exact atomic value family** *(ratified)*:
 `Atomic<T>` is safe Core for `Bool`, `I32`, `U32`, `I64`, `Int`, and `U64`.
@@ -3343,6 +3415,9 @@ ordinary operations are sequentially consistent, while `publish` and
 `observe` are the intent-named release/acquire pair. No method accepts a
 memory-order argument or exposes a relaxed operation. Unsupported targets
 reject the declaration rather than silently using a lock fallback.
+These operations borrow the cell in its checked place. A borrow-only MIR read
+and its synthetic cleanup do not materialize or destroy a second cell; an
+explicit consuming or copying operation keeps its separate ownership meaning.
 
 **D-LAYOUT-ALIGN1=A — Portable and target alignment modes** *(ratified)*:
 `align(N)` is the portable profile rule; `align(target, N)` is source-local
@@ -4026,7 +4101,24 @@ everywhere. `.field` and `.at` fill `path` from the segment they read; scalar
 accessors leave it empty and a containing decoder uses `FieldError.under`, so
 `?` chains inside a hand `decode` remain direct; hand-built object
 nodes take the map literal — `DataTree.Object({ "name": v, … })` —
-insertion-ordered, and the pair-list form is not accepted.
+insertion-ordered. *Amended by D-DATATREE-ORDER1 = A:* `DataTree.Object` also
+accepts the ordered pair list `[(key: String, value: DataTree)]` for
+programmatic building (list order is kept), and a `[String: DataTree]` Map
+value contributes its sorted iteration order.
+
+**D-DATATREE-ORDER1 = A** *(ratified 2026-10-05)*: a `DataTree` object keeps its
+fields in arrival order; ordinary Maps stay sorted. The `Object` payload is the
+ordered pair list `[(key: String, value: DataTree)]` on every tier, so
+`if tree == .Object(fields)` binds that list and `.field(name)` scans it.
+Parsers build the pair list and reject a repeated name (strict JSON, TOML
+including inline tables, YAML, text-key CBOR) with a temporary key set;
+`json.parse_allow_duplicates` keeps the later value at the first name's
+position. Canonical writers (`json.canonical`, canonical CBOR) sort a borrowed
+view and never change the object. `==` compares objects field by field in
+order; `equal_unordered` ignores field order. A Map filled by `add` in one
+function and then passed to `DataTree.Object` draws a warning whose
+machine-applicable fix builds the pair list instead, and `jet fix` rewrites a
+direct `==`/`!=` between `DataTree` values to `equal_unordered`.
 
 **D-SERDE16 = A** *(ratified 2026-07-11, card #131)*: decode an arbitrary
 subtree through its target's public protocol with `tree.decode<T>()`. The

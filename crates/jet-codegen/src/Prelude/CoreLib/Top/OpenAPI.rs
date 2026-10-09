@@ -1616,10 +1616,37 @@ fn jet_openapi_router_inputs(
     Ok(inputs)
 }
 
-/// Generate OpenAPI from HTTPRouter's checked route facts. Visual WebRouter
-/// routes are intentionally not accepted: they have no HTTP contract.
-pub fn jet_web_openapi(router: &JetHTTPRouter) -> String {
-    let inputs = match jet_openapi_router_inputs(router) {
+pub trait JetHTTPRouteSource {
+    fn checked_http_routes(&self) -> Result<Vec<JetOpenApiRouteInput>, String>;
+}
+
+impl JetHTTPRouteSource for JetHTTPRouter {
+    fn checked_http_routes(&self) -> Result<Vec<JetOpenApiRouteInput>, String> {
+        jet_openapi_router_inputs(self)
+    }
+}
+
+impl JetHTTPRouteSource for JetHTTPMux {
+    fn checked_http_routes(&self) -> Result<Vec<JetOpenApiRouteInput>, String> {
+        self.checked_routes(|routes| {
+            let mut inputs = Vec::with_capacity(routes.len());
+            for route in routes {
+                let input = jet_openapi_contract_input(&route.contract_json)?;
+                if !input.method.as_str().eq_ignore_ascii_case(&route.method)
+                    || input.pattern != jet_http_route_pattern(&route.pattern)? {
+                    return Err(format!("checked OpenAPI contract does not match route `{} {}`", route.method, route.pattern));
+                }
+                inputs.push(input);
+            }
+            Ok(inputs)
+        })
+    }
+}
+
+/// Generate OpenAPI from the checked facts of the served route value.
+/// Visual WebRouter routes have no HTTP contract and are not accepted.
+pub fn jet_web_openapi<T: JetHTTPRouteSource>(router: &T) -> String {
+    let inputs = match router.checked_http_routes() {
         Ok(inputs) => inputs,
         Err(error) => jet_runtime_stop("E2805", "", 0, &error),
     };

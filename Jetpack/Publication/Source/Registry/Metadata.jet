@@ -178,7 +178,9 @@ fn publication_parse_registry_dependency_descriptor(descriptor: DataTree) -> Pub
     enabled_by_default := false
     if descriptor == {
         .Text(requirement) -> &requirements.push(~requirement)
-        .Object(fields) -> {
+        .Object(pairs) -> {
+            fields := [String: DataTree]{}
+            loop pair in pairs -> fields[pair.key] = pair.value
             // `require` wins even when malformed; `version` is fallback only
             // when `require` is absent. Unknown descriptor fields are ignored.
             value := fields.get("require")
