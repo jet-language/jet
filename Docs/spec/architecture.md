@@ -266,6 +266,12 @@ checks that boundary; the
 [`MIR schema grammar guard`](../../Compiler/JetBackend/Tests/mir-schema.test.mjs)
 keeps observation aligned with public-by-default declarations and private fields.
 
+Core's declaration twin distinguishes exported names from source-owned bodies.
+A source-module `owns` row names an actual Jet implementation, not an intrinsic,
+native carrier, or retired helper; source receiver impls may still extend native
+nominals. Generated Core tables preserve that distinction rather than inventing
+source shadows for compiler-provided operations.
+
 Proof chains use one shared
 [`git-archive source export`](../../Tools/agent/proof-source.mjs) per full commit,
 not a moving checkout. `node Tools/agent/proof-source.mjs <full-sha> [repository]`
