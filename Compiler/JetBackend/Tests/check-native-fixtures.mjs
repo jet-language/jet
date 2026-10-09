@@ -254,5 +254,16 @@ if (existsSync(`${outDir}/lists-swap-oob.elf`)) {
   if (!same) failures += 1;
   console.log(`lists-swap ordinary-index stop parity: ${same ? "ok" : "FAIL"}`);
 }
+if (runtimeLib && !process.argv.includes("--abi")) {
+  const source = `${dirname(fileURLToPath(import.meta.url))}/check-record-sequences.c`;
+  const program = `${outDir}/record-sequences.hosted`;
+  const link = spawnSync(process.env.CC ?? "cc", [source, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
+  if (link.status !== 0) {
+    console.log(`record-sequences: LINK FAILED\n${link.stderr}`);
+    failures += 1;
+  } else {
+    check("record-sequences (borrowed storage, duplicate order)", program, { stdout: "", status: 0 });
+  }
+}
 console.log(failures === 0 ? "all native fixtures match" : `${failures} native fixture check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

@@ -54,6 +54,20 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_Address(value: *mut crate::jet_email::Address) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_Address(value: *mut crate::jet_email::Address) -> *mut crate::jet_email::Address {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_AllocError(value: *mut crate::AllocError) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -63,6 +77,20 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_AllocError(value: *mut crate::AllocError) -> *mut crate::AllocError {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_Attachment(value: *mut crate::jet_email::Attachment) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_Attachment(value: *mut crate::jet_email::Attachment) -> *mut crate::jet_email::Attachment {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -618,6 +646,20 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_Envelope(value: *mut crate::jet_email::Envelope) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_Envelope(value: *mut crate::jet_email::Envelope) -> *mut crate::jet_email::Envelope {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_EnvError(value: *mut crate::jet_std::EnvError) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -627,6 +669,20 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_EnvError(value: *mut crate::jet_std::EnvError) -> *mut crate::jet_std::EnvError {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_Error(value: *mut crate::jet_email::Error) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_Error(value: *mut crate::jet_email::Error) -> *mut crate::jet_email::Error {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -2624,7 +2680,7 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetMod(value: *mut crate::JetMod) {
+    pub extern "C" fn jet_rt_handle_drop_JetMIME(value: *mut crate::jet_std::JetMIME) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
             drop(unsafe { Box::from_raw(value) });
@@ -2632,15 +2688,7 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetModGrant(value: *mut crate::JetModGrant) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetModGrant(value: *mut crate::JetModGrant) -> *mut crate::JetModGrant {
+    pub extern "C" fn jet_rt_handle_clone_JetMIME(value: *mut crate::jet_std::JetMIME) -> *mut crate::jet_std::JetMIME {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -4314,6 +4362,20 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_Limits(value: *mut crate::jet_email::Limits) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_Limits(value: *mut crate::jet_email::Limits) -> *mut crate::jet_email::Limits {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_LinExpr(value: *mut crate::jet_layout::LinExpr) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -4353,6 +4415,14 @@ mod jet_c_abi_routes {
     pub extern "C" fn jet_rt_handle_clone_LogSpan(value: *mut crate::jet_std::LogSpan) -> *mut crate::jet_std::LogSpan {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_Mailer(value: *mut crate::jet_email::Mailer) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
     }
 
     #[no_mangle]
@@ -4594,6 +4664,34 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_RecipientPolicy(value: *mut crate::jet_email::RecipientPolicy) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_RecipientPolicy(value: *mut crate::jet_email::RecipientPolicy) -> *mut crate::jet_email::RecipientPolicy {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_RecipientReport(value: *mut crate::jet_email::RecipientReport) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_RecipientReport(value: *mut crate::jet_email::RecipientReport) -> *mut crate::jet_email::RecipientReport {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_RegexFlags(value: *mut crate::jet_std::RegexFlags) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -4617,6 +4715,34 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_Rng(value: *mut crate::jet_std::Rng) -> *mut crate::jet_std::Rng {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_SendReport(value: *mut crate::jet_email::SendReport) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_SendReport(value: *mut crate::jet_email::SendReport) -> *mut crate::jet_email::SendReport {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_SMTPSecurity(value: *mut crate::jet_email::SMTPSecurity) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_SMTPSecurity(value: *mut crate::jet_email::SMTPSecurity) -> *mut crate::jet_email::SMTPSecurity {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -4757,6 +4883,20 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_TextWidthControls(value: *mut crate::jet_std::TextWidthControls) -> *mut crate::jet_std::TextWidthControls {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_TLSTrust(value: *mut crate::jet_email::TLSTrust) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_TLSTrust(value: *mut crate::jet_email::TLSTrust) -> *mut crate::jet_email::TLSTrust {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -6006,6 +6146,24 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_JetMIME(value: *mut crate::jet_std::JetMIME) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::JetMIME as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_JetMIME(value: *mut crate::jet_std::JetMIME) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::JetMIME as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_JetMIME(value: *mut crate::jet_std::JetMIME) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::JetMIME as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_handle_display_JetNetError(value: *mut crate::JetNetError) -> JetCString {
         // SAFETY: `value` is a live handle the caller lends for this call.
         guard(|| handle(<crate::JetNetError as crate::JetDisplay>::jet_display(unsafe { &*value })))
@@ -6798,7 +6956,19 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_Address(left: *mut crate::jet_email::Address, right: *mut crate::jet_email::Address) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_AllocError(left: *mut crate::AllocError, right: *mut crate::AllocError) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_Attachment(left: *mut crate::jet_email::Attachment, right: *mut crate::jet_email::Attachment) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
     }
@@ -7020,7 +7190,19 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_Envelope(left: *mut crate::jet_email::Envelope, right: *mut crate::jet_email::Envelope) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_EnvError(left: *mut crate::jet_std::EnvError, right: *mut crate::jet_std::EnvError) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_Error(left: *mut crate::jet_email::Error, right: *mut crate::jet_email::Error) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
     }
@@ -7626,6 +7808,12 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_JetMIME(left: *mut crate::jet_std::JetMIME, right: *mut crate::jet_std::JetMIME) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_JetNetDnsError(left: *mut crate::JetNetDnsError, right: *mut crate::JetNetDnsError) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
@@ -8046,6 +8234,12 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_Limits(left: *mut crate::jet_email::Limits, right: *mut crate::jet_email::Limits) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_LogField(left: *mut crate::jet_std::LogField, right: *mut crate::jet_std::LogField) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
@@ -8142,6 +8336,18 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_RecipientPolicy(left: *mut crate::jet_email::RecipientPolicy, right: *mut crate::jet_email::RecipientPolicy) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_RecipientReport(left: *mut crate::jet_email::RecipientReport, right: *mut crate::jet_email::RecipientReport) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_RegexFlags(left: *mut crate::jet_std::RegexFlags, right: *mut crate::jet_std::RegexFlags) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
@@ -8149,6 +8355,18 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_Rng(left: *mut crate::jet_std::Rng, right: *mut crate::jet_std::Rng) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_SendReport(left: *mut crate::jet_email::SendReport, right: *mut crate::jet_email::SendReport) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_SMTPSecurity(left: *mut crate::jet_email::SMTPSecurity, right: *mut crate::jet_email::SMTPSecurity) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
     }
@@ -8203,6 +8421,12 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_TextWidthControls(left: *mut crate::jet_std::TextWidthControls, right: *mut crate::jet_std::TextWidthControls) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_TLSTrust(left: *mut crate::jet_email::TLSTrust, right: *mut crate::jet_email::TLSTrust) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
     }
@@ -11673,65 +11897,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetWebVirtualWindow_total_count(value: *mut crate::JetWebVirtualWindow) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.total_count) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetWebVirtualWindow_scroll_offset(value: *mut crate::JetWebVirtualWindow) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.scroll_offset) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetWebVirtualWindow_viewport_size(value: *mut crate::JetWebVirtualWindow) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.viewport_size) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetWebVirtualWindow_estimated_item_size(value: *mut crate::JetWebVirtualWindow) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.estimated_item_size) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetWebVirtualWindow_overscan(value: *mut crate::JetWebVirtualWindow) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.overscan) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetWebVirtualWindow_start(value: *mut crate::JetWebVirtualWindow) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.start) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetWebVirtualWindow_end(value: *mut crate::JetWebVirtualWindow) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.end) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetWebVirtualWindow_total_size(value: *mut crate::JetWebVirtualWindow) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.total_size) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetWebVirtualWindow_measured_count(value: *mut crate::JetWebVirtualWindow) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.measured_count) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_JetWebVirtualWindow(m0: i64, m1: i64, m2: i64, m3: i64, m4: i64, m5: i64, m6: i64, m7: i64, m8: i64) -> *mut crate::JetWebVirtualWindow {
-        guard(|| Box::into_raw(Box::new(crate::JetWebVirtualWindow { total_count: native(m0), scroll_offset: native(m1), viewport_size: native(m2), estimated_item_size: native(m3), overscan: native(m4), start: native(m5), end: native(m6), total_size: native(m7), measured_count: native(m8) })))
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_record_get_Limits_max_reply_line_bytes(value: *mut crate::jet_email::Limits) -> i64 {
         // SAFETY: `value` is a live handle the caller lends for this call.
         guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.max_reply_line_bytes) })
@@ -11905,17 +12070,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_RaylibSound_path(value: *mut crate::RaylibSound) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; handle(value.path.clone()) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_RaylibSound(m0: JetCString) -> *mut crate::RaylibSound {
-        guard(|| Box::into_raw(Box::new(crate::RaylibSound { path: view(m0).to_owned() })))
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_record_get_RaylibWindow_width(value: *mut crate::RaylibWindow) -> i64 {
         // SAFETY: `value` is a live handle the caller lends for this call.
         guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.width) })
@@ -12058,65 +12212,6 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_rt_record_new_Solver(m0: i64, m1: i64, m2: i64) -> *mut crate::jet_std::Solver {
         guard(|| Box::into_raw(Box::new(crate::jet_std::Solver { seed: native(m0), checked: native(m1), failures: native(m2) })))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_Stat_size(value: *mut crate::jet_std::Stat) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.size) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_Stat_modified_ms(value: *mut crate::jet_std::Stat) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.modified_ms) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_Stat_created_ms(value: *mut crate::jet_std::Stat) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.created_ms) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_Stat_readonly(value: *mut crate::jet_std::Stat) -> bool {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; value.readonly })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_Stat_is_file(value: *mut crate::jet_std::Stat) -> bool {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; value.is_file })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_Stat_is_dir(value: *mut crate::jet_std::Stat) -> bool {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; value.is_dir })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_Stat_is_symlink(value: *mut crate::jet_std::Stat) -> bool {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; value.is_symlink })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_Stat_kind(value: *mut crate::jet_std::Stat) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; handle(value.kind.clone()) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_Stat_mode(value: *mut crate::jet_std::Stat) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.mode) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_Stat(m0: i64, m1: i64, m2: i64, m3: u8, m4: u8, m5: u8, m6: u8, m7: JetCString, m8: i64) -> *mut crate::jet_std::Stat {
-        guard(|| Box::into_raw(Box::new(crate::jet_std::Stat { size: native(m0), modified_ms: native(m1), created_ms: native(m2), readonly: m3 != 0, is_file: m4 != 0, is_dir: m5 != 0, is_symlink: m6 != 0, kind: view(m7).to_owned(), mode: native(m8) })))
     }
 
     #[no_mangle]
@@ -14143,12 +14238,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_data_snapshot_reusable(unsafe { &*a0 }, unsafe { &*a1 }))
     }
 
-    /// core.data.status
-    #[no_mangle]
-    pub extern "C" fn jet_data_status(data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_data_status().into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), data))
-    }
-
     /// core.data.stream.cancel
     #[no_mangle]
     pub extern "C" fn jet_data_stream_cancel(a0: *mut crate::jet_std::DataStream) {
@@ -14525,33 +14614,6 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_enc_cbor_writer_write(a0: *mut crate::jet_std::CBORWriter, a1: *mut crate::jet_std::DataEvent, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
         guard(|| match crate::jet_enc_cbor_writer_write(unsafe { &mut *a0 }, unsafe { &*a1 }.clone()) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.handle.csv_writer.finish
-    #[no_mangle]
-    pub extern "C" fn jet_enc_csv_writer_finish(a0: *mut crate::jet_std::CSVWriter, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
-        guard(|| match crate::jet_enc_csv_writer_finish(unsafe { &mut *a0 }) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.handle.csv_writer.flush
-    #[no_mangle]
-    pub extern "C" fn jet_enc_csv_writer_flush(a0: *mut crate::jet_std::CSVWriter, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
-        guard(|| match crate::jet_enc_csv_writer_flush(unsafe { &mut *a0 }) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.handle.csv_writer.write
-    #[no_mangle]
-    pub extern "C" fn jet_enc_csv_writer_write(a0: *mut crate::jet_std::CSVWriter, a1_0: *const u64, a1_1: i64, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
-        guard(|| match crate::jet_enc_csv_writer_write(unsafe { &mut *a0 }, list_in(a1_0, a1_1, |w| view(w as JetCString).to_owned())) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15418,46 +15480,28 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_journey_reset())
     }
 
-    /// core.log.__disabled_load
+    /// TIR/routes.rs
     #[no_mangle]
-    pub extern "C" fn jet_log_disabled_load() -> bool {
-        guard(|| crate::jet_log_disabled_load())
+    pub extern "C" fn Handle_conflict(a0: *mut crate::jet_layout::Handle, data: *mut *mut u64) -> i64 {
+        guard(|| list_out(crate::jet_layout::Handle::conflict(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
-    /// core.log.__disabled_store
+    /// TIR/routes.rs
     #[no_mangle]
-    pub extern "C" fn jet_log_disabled_store(a0: u8) {
-        guard(|| crate::jet_log_disabled_store(a0 != 0))
+    pub extern "C" fn Handle_is_feasible(a0: *mut crate::jet_layout::Handle) -> bool {
+        guard(|| crate::jet_layout::Handle::is_feasible(unsafe { &*a0 }))
     }
 
-    /// core.log.__format_store
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_loop_iter_advance(a0: *mut crate::JetLoopIterCursor) {
         guard(|| crate::jet_loop_iter_advance(unsafe { &mut *a0 }))
     }
 
-    /// core.log.__level_store
+    /// TIR/routes.rs
     #[no_mangle]
-    pub extern "C" fn jet_log_level_store(a0: i64) {
-        guard(|| crate::jet_log_level_store(a0))
-    }
-
-    /// core.log.__sample_count_store
-    #[no_mangle]
-    pub extern "C" fn jet_log_sample_count_store(a0: i64) {
-        guard(|| crate::jet_log_sample_count_store(a0))
-    }
-
-    /// core.log.__sample_store
-    #[no_mangle]
-    pub extern "C" fn jet_log_sample_store(a0: i64) {
-        guard(|| crate::jet_log_sample_store(a0))
-    }
-
-    /// core.log.__sink_store
-    #[no_mangle]
-    pub extern "C" fn jet_log_sink_store(a0: JetCString) {
-        guard(|| crate::jet_log_sink_store(unsafe { &*a0 }))
+    pub extern "C" fn jet_loop_iter_has_next(a0: *mut crate::JetLoopIterCursor) -> bool {
+        guard(|| crate::jet_loop_iter_has_next(unsafe { &*a0 }))
     }
 
     /// core.math.CameraDelta_add
@@ -18079,6 +18123,12 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_ring_log_enabled(&borrowed(a0)))
     }
 
+    /// core.log.debug_fields
+    #[no_mangle]
+    pub extern "C" fn jet_ring_log_debug_fields(a0: JetCString, a1_0: *const u64, a1_1: i64) {
+        guard(|| crate::jet_ring_log_debug_fields(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::LogField) }.clone())))
+    }
+
     /// core.log.enter
     #[no_mangle]
     pub extern "C" fn jet_ring_log_enter(a0: *mut crate::jet_std::LogSpan) {
@@ -18277,21 +18327,453 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_rt_receipt(unsafe { &*a0 }))))
     }
 
-    /// core.tasks.__task_cancelled
+    /// core.service.append_event
     #[no_mangle]
-    pub extern "C" fn jet_scheduler_task_cancelled_state(some: *mut bool) -> i64 {
-        guard(|| match crate::jet_scheduler_task_cancelled_state() {
-            Some(value) => { unsafe { some.write(value) }; 1 }
-            None => 0,
+    pub extern "C" fn jet_services_append_event(a0: *mut crate::JetServiceTree, a1: JetCString, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_append_event(unsafe { &mut *a0 }, view(a1).to_owned()) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
-    /// core.tasks.__task_paused
+    /// core.service.chaos_fail
     #[no_mangle]
-    pub extern "C" fn jet_scheduler_task_paused(some: *mut bool) -> i64 {
-        guard(|| match crate::jet_scheduler_task_paused() {
-            Some(value) => { unsafe { some.write(value) }; 1 }
-            None => 0,
+    pub extern "C" fn jet_services_chaos_fail(a0: *mut crate::JetServiceTree, ok: *mut i64, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_chaos_fail(unsafe { &mut *a0 }) {
+            Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.commit_snapshot
+    #[no_mangle]
+    pub extern "C" fn jet_services_commit_snapshot(a0: *mut crate::JetServiceTree, a1: JetCString, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_commit_snapshot(unsafe { &mut *a0 }, view(a1).to_owned()) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.dead_letter_count
+    #[no_mangle]
+    pub extern "C" fn jet_services_dead_letter_count(a0: *mut crate::JetServiceTree) -> i64 {
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_services_dead_letter_count(unsafe { &*a0 })))
+    }
+
+    /// core.service.delivery_at_most_once
+    #[no_mangle]
+    pub extern "C" fn jet_services_delivery_at_most_once() -> *mut crate::JetServiceDelivery {
+        guard(|| Box::into_raw(Box::new(crate::jet_services_delivery_at_most_once())))
+    }
+
+    /// core.service.delivery_cancel
+    #[no_mangle]
+    pub extern "C" fn jet_services_delivery_cancel(a0: *mut crate::JetDelivery, ok: *mut *mut crate::JetDelivery, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_delivery_cancel(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.delivery_durable
+    #[no_mangle]
+    pub extern "C" fn jet_services_delivery_durable() -> *mut crate::JetServiceDelivery {
+        guard(|| Box::into_raw(Box::new(crate::jet_services_delivery_durable())))
+    }
+
+    /// core.service.delivery_events
+    #[no_mangle]
+    pub extern "C" fn jet_services_delivery_events(a0: *mut crate::JetDelivery, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_delivery_events(unsafe { &*a0 }) {
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.delivery_receipt
+    #[no_mangle]
+    pub extern "C" fn jet_services_delivery_receipt(a0: *mut crate::JetDelivery, ok: *mut *mut crate::JetDeliveryReceipt, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_delivery_receipt(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.delivery_retry
+    #[no_mangle]
+    pub extern "C" fn jet_services_delivery_retry(a0: *mut crate::JetDelivery, ok: *mut *mut crate::JetDelivery, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_delivery_retry(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.delivery_state_show
+    #[no_mangle]
+    pub extern "C" fn jet_services_delivery_state_show(a0: i64) -> JetCString {
+        guard(|| handle(crate::jet_services_delivery_state_show(&match a0 { 0 => crate::JetDeliveryState::Pending, 1 => crate::JetDeliveryState::Accepted, 2 => crate::JetDeliveryState::Delivering, 3 => crate::JetDeliveryState::Delivered, 4 => crate::JetDeliveryState::DeadLettered, 5 => crate::JetDeliveryState::Cancelled, _ => range_stop() })))
+    }
+
+    /// core.service.delivery_status
+    #[no_mangle]
+    pub extern "C" fn jet_services_delivery_status(a0: *mut crate::JetDelivery, ok: *mut *mut crate::JetDeliveryState, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_delivery_status(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.delivery_wait
+    #[no_mangle]
+    pub extern "C" fn jet_services_delivery_wait(a0: *mut crate::JetDelivery, ok: *mut *mut crate::JetDeliveryState, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_delivery_wait(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.directory_generation
+    #[no_mangle]
+    pub extern "C" fn jet_services_directory_generation(a0: *mut crate::JetServiceTree) -> i64 {
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_services_directory_generation(unsafe { &*a0 })))
+    }
+
+    /// core.service.directory_register
+    #[no_mangle]
+    pub extern "C" fn jet_services_directory_register(a0: *mut crate::JetServiceTree, a1: JetCString, a2: *mut crate::JetServiceEndpoint, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_directory_register(unsafe { &mut *a0 }, view(a1).to_owned(), unsafe { &*a2 }.clone()) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.directory_resolve
+    #[no_mangle]
+    pub extern "C" fn jet_services_directory_resolve(a0: *mut crate::JetServiceTree, a1: JetCString, ok: *mut *mut crate::JetServiceEndpoint, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_directory_resolve(unsafe { &*a0 }, unsafe { &*a1 }) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.drain_dead_letters
+    #[no_mangle]
+    pub extern "C" fn jet_services_drain_dead_letters(a0: *mut crate::JetServiceTree, ok: *mut i64, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_drain_dead_letters(unsafe { &mut *a0 }) {
+            Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.drain_worker
+    #[no_mangle]
+    pub extern "C" fn jet_services_drain_worker(a0: *mut crate::JetServiceTree, a1: *mut crate::JetServiceEndpoint, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_drain_worker(unsafe { &mut *a0 }, unsafe { &*a1 }) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.endpoint_receive
+    #[no_mangle]
+    pub extern "C" fn jet_services_endpoint_receive(a0: *mut crate::JetServiceEndpoint, ok: *mut JetCString, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_endpoint_receive(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.endpoint_send
+    #[no_mangle]
+    pub extern "C" fn jet_services_endpoint_send(a0: *mut crate::JetServiceEndpoint, a1: JetCString, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_endpoint_send(unsafe { &*a0 }, view(a1).to_owned()) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.endpoint_show
+    #[no_mangle]
+    pub extern "C" fn jet_services_endpoint_show(a0: *mut crate::JetServiceEndpoint) -> JetCString {
+        guard(|| handle(crate::jet_services_endpoint_show(unsafe { &*a0 })))
+    }
+
+    /// core.service.event_count
+    #[no_mangle]
+    pub extern "C" fn jet_services_event_count(a0: *mut crate::JetServiceTree) -> i64 {
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_services_event_count(unsafe { &*a0 })))
+    }
+
+    /// core.service.fail_worker
+    #[no_mangle]
+    pub extern "C" fn jet_services_fail_worker(a0: *mut crate::JetServiceTree, a1: *mut crate::JetServiceEndpoint, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_fail_worker(unsafe { &mut *a0 }, unsafe { &*a1 }) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.group
+    #[no_mangle]
+    pub extern "C" fn jet_services_group(a0: *mut crate::JetServiceTree, a1: JetCString, a2_0: *const u64, a2_1: i64, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_group(unsafe { &mut *a0 }, view(a1).to_owned(), list_in(a2_0, a2_1, |w| view(w as JetCString).to_owned())) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.handoff_generation
+    #[no_mangle]
+    pub extern "C" fn jet_services_handoff_generation(a0: *mut crate::JetServiceTree, ok: *mut i64, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_handoff_generation(unsafe { &mut *a0 }) {
+            Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.mailbox_depth
+    #[no_mangle]
+    pub extern "C" fn jet_services_mailbox_depth(a0: *mut crate::JetServiceTree, a1: *mut crate::JetServiceEndpoint, ok: *mut i64, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_mailbox_depth(unsafe { &*a0 }, unsafe { &*a1 }) {
+            Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.observe
+    #[no_mangle]
+    pub extern "C" fn jet_services_observe(a0: *mut crate::JetServiceTree) -> JetCString {
+        guard(|| handle(crate::jet_services_observe(unsafe { &*a0 })))
+    }
+
+    /// core.service.partition_worker
+    #[no_mangle]
+    pub extern "C" fn jet_services_partition_worker(a0: *mut crate::JetServiceTree, a1: *mut crate::JetServiceEndpoint, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_partition_worker(unsafe { &mut *a0 }, unsafe { &*a1 }) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.receive
+    #[no_mangle]
+    pub extern "C" fn jet_services_receive(a0: *mut crate::JetServiceTree, a1: *mut crate::JetServiceEndpoint, ok: *mut JetCString, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_receive(unsafe { &mut *a0 }, unsafe { &*a1 }) {
+            Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.reconcile_worker
+    #[no_mangle]
+    pub extern "C" fn jet_services_reconcile_worker(a0: *mut crate::JetServiceTree, a1: *mut crate::JetServiceEndpoint, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_reconcile_worker(unsafe { &mut *a0 }, unsafe { &*a1 }) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.replay_events
+    #[no_mangle]
+    pub extern "C" fn jet_services_replay_events(a0: *mut crate::JetServiceTree) -> JetCString {
+        guard(|| handle(crate::jet_services_replay_events(unsafe { &*a0 })))
+    }
+
+    /// TIR/lower/method_calls.rs
+    #[no_mangle]
+    pub extern "C" fn jet_services_restart_one_for_all() -> *mut crate::JetServiceRestart {
+        guard(|| Box::into_raw(Box::new(crate::jet_services_restart_one_for_all())))
+    }
+
+    /// TIR/lower/method_calls.rs
+    #[no_mangle]
+    pub extern "C" fn jet_services_restart_one_for_one() -> *mut crate::JetServiceRestart {
+        guard(|| Box::into_raw(Box::new(crate::jet_services_restart_one_for_one())))
+    }
+
+    /// TIR/lower/method_calls.rs
+    #[no_mangle]
+    pub extern "C" fn jet_services_restart_rest_for_one() -> *mut crate::JetServiceRestart {
+        guard(|| Box::into_raw(Box::new(crate::jet_services_restart_rest_for_one())))
+    }
+
+    /// core.service.restarts
+    #[no_mangle]
+    pub extern "C" fn jet_services_restarts(a0: *mut crate::JetServiceTree, a1: *mut crate::JetServiceEndpoint, ok: *mut i64, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_restarts(unsafe { &*a0 }, unsafe { &*a1 }) {
+            Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.restore_snapshot
+    #[no_mangle]
+    pub extern "C" fn jet_services_restore_snapshot(a0: *mut crate::JetServiceTree, ok: *mut JetCString, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_restore_snapshot(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.rollback_generation
+    #[no_mangle]
+    pub extern "C" fn jet_services_rollback_generation(a0: *mut crate::JetServiceTree, ok: *mut i64, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_rollback_generation(unsafe { &mut *a0 }) {
+            Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.runtime
+    #[no_mangle]
+    pub extern "C" fn jet_services_runtime(a0: JetCString, a1: i64) -> *mut crate::JetServiceRuntime {
+        guard(|| Box::into_raw(Box::new(crate::jet_services_runtime(view(a0).to_owned(), a1))))
+    }
+
+    /// core.service.send
+    #[no_mangle]
+    pub extern "C" fn jet_services_send(a0: *mut crate::JetServiceTree, a1: *mut crate::JetServiceEndpoint, a2: JetCString, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_send(unsafe { &mut *a0 }, unsafe { &*a1 }, view(a2).to_owned()) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.send_durable
+    #[no_mangle]
+    pub extern "C" fn jet_services_send_durable(a0: *mut crate::JetServiceTree, a1: *mut crate::JetServiceEndpoint, a2: JetCString, a3: JetCString, ok: *mut *mut crate::JetDelivery, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_send_durable(unsafe { &mut *a0 }, unsafe { &*a1 }, view(a2).to_owned(), view(a3).to_owned()) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.set_delivery
+    #[no_mangle]
+    pub extern "C" fn jet_services_set_delivery(a0: *mut crate::JetServiceTree, a1: *mut crate::JetServiceDelivery, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_set_delivery(unsafe { &mut *a0 }, unsafe { &*a1 }.clone()) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.set_restart
+    #[no_mangle]
+    pub extern "C" fn jet_services_set_restart(a0: *mut crate::JetServiceTree, a1: *mut crate::JetServiceRestart, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_set_restart(unsafe { &mut *a0 }, unsafe { &*a1 }.clone()) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.set_state_empty
+    #[no_mangle]
+    pub extern "C" fn jet_services_set_state_empty(a0: *mut crate::JetServiceTree, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_set_state_empty(unsafe { &mut *a0 }) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.set_state_event_log
+    #[no_mangle]
+    pub extern "C" fn jet_services_set_state_event_log(a0: *mut crate::JetServiceTree, a1: *mut crate::JetServiceStateStore, a2: JetCString, a3: i64, a4: JetCString, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_set_state_event_log(unsafe { &mut *a0 }, unsafe { &*a1 }.clone(), view(a2).to_owned(), a3, view(a4).to_owned()) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.set_state_snapshot
+    #[no_mangle]
+    pub extern "C" fn jet_services_set_state_snapshot(a0: *mut crate::JetServiceTree, a1: *mut crate::JetServiceStateStore, a2: JetCString, a3: i64, a4: JetCString, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_set_state_snapshot(unsafe { &mut *a0 }, unsafe { &*a1 }.clone(), view(a2).to_owned(), a3, view(a4).to_owned()) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.start
+    #[no_mangle]
+    pub extern "C" fn jet_services_start(a0: *mut crate::JetServiceTree, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_start(unsafe { &mut *a0 }) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.state_store
+    #[no_mangle]
+    pub extern "C" fn jet_services_state_store(a0: JetCString, ok: *mut *mut crate::JetServiceStateStore, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_state_store(view(a0).to_owned()) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.stop
+    #[no_mangle]
+    pub extern "C" fn jet_services_stop(a0: *mut crate::JetServiceTree, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_stop(unsafe { &mut *a0 }) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.tree
+    #[no_mangle]
+    pub extern "C" fn jet_services_tree(a0: JetCString) -> *mut crate::JetServiceTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_services_tree(view(a0).to_owned()))))
+    }
+
+    /// core.service.tree_show
+    #[no_mangle]
+    pub extern "C" fn jet_services_tree_show(a0: *mut crate::JetServiceTree) -> JetCString {
+        guard(|| handle(crate::jet_services_tree_show(unsafe { &*a0 })))
+    }
+
+    /// core.service.upgrade_receipt
+    #[no_mangle]
+    pub extern "C" fn jet_services_upgrade_receipt(a0: *mut crate::JetServiceTree, ok: *mut *mut crate::JetServiceUpgradeReceipt, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_upgrade_receipt(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.workflow_activity_wait
+    #[no_mangle]
+    pub extern "C" fn jet_services_workflow_activity_wait(a0: *mut crate::JetWorkflowHandle, a1: JetCString, a2: JetCString, ok: *mut JetCString, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_workflow_activity_wait(unsafe { &*a0 }, view(a1).to_owned(), view(a2).to_owned()) {
+            Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.workflow_all
+    #[no_mangle]
+    pub extern "C" fn jet_services_workflow_all(a0: *mut crate::JetWorkflowHandle, a1_0: *const u64, a1_1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_workflow_all(unsafe { &*a0 }, list_in(a1_0, a1_1, |w| view(w as JetCString).to_owned())) {
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| handle(e) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.workflow_sleep
+    #[no_mangle]
+    pub extern "C" fn jet_services_workflow_sleep(a0: *mut crate::JetWorkflowHandle, a1: i64, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_workflow_sleep(unsafe { &*a0 }, a1) {
+            Ok(()) => 1,
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.service.workflow_start
+    #[no_mangle]
+    pub extern "C" fn jet_services_workflow_start(a0: *mut crate::JetServiceTree, a1: JetCString, a2: i64, ok: *mut *mut crate::JetWorkflowHandle, err: *mut *mut crate::JetServiceError) -> i64 {
+        guard(|| match crate::jet_services_workflow_start(unsafe { &mut *a0 }, view(a1).to_owned(), a2) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
@@ -19360,6 +19842,12 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_std_clock_new(a0))))
     }
 
+    /// TIR/routes.rs
+    #[no_mangle]
+    pub extern "C" fn jet_std_clock_system() -> *mut crate::jet_std::Clock {
+        guard(|| Box::into_raw(Box::new(crate::jet_std_clock_system())))
+    }
+
     /// core.sys.current_dir
     #[no_mangle]
     pub extern "C" fn jet_std_env_current_dir(ok: *mut JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
@@ -19408,24 +19896,6 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_std_file_reader_path(unsafe { &*a0 })))
     }
 
-    /// core.handle.file_reader.read
-    #[no_mangle]
-    pub extern "C" fn jet_std_file_reader_read(a0: *mut crate::JetFileReader, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_file_reader_read(unsafe { &mut *a0 }, unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.files.__reader_stat
-    #[no_mangle]
-    pub extern "C" fn jet_std_file_reader_stat(a0: *mut crate::JetFileReader, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_file_reader_stat(unsafe { &*a0 }) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
     /// core.handle.file_writer.flush
     #[no_mangle]
     pub extern "C" fn jet_std_file_writer_flush(a0: *mut crate::JetFileWriter, err: *mut *mut crate::jet_std::IOError) -> i64 {
@@ -19435,46 +19905,10 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.handle.file_writer.fsync
-    #[no_mangle]
-    pub extern "C" fn jet_std_file_writer_fsync(a0: *mut crate::JetFileWriter, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_file_writer_fsync(unsafe { &mut *a0 }) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
     /// core.handle.file_writer.path
     #[no_mangle]
     pub extern "C" fn jet_std_file_writer_path(a0: *mut crate::JetFileWriter) -> JetCString {
         guard(|| handle(crate::jet_std_file_writer_path(unsafe { &*a0 })))
-    }
-
-    /// core.files.__writer_set_mode
-    #[no_mangle]
-    pub extern "C" fn jet_std_file_writer_set_mode(a0: *mut crate::JetFileWriter, a1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_file_writer_set_mode(unsafe { &*a0 }, a1) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.files.__writer_stat
-    #[no_mangle]
-    pub extern "C" fn jet_std_file_writer_stat(a0: *mut crate::JetFileWriter, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_file_writer_stat(unsafe { &*a0 }) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.handle.file_writer.write_all
-    #[no_mangle]
-    pub extern "C" fn jet_std_file_writer_write_all(a0: *mut crate::JetFileWriter, a1_0: *const u64, a1_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_file_writer_write_all(unsafe { &mut *a0 }, &list_in(a1_0, a1_1, |w| w as u8)) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
     }
 
     /// core.handle.file_writer.write_line
@@ -20896,28 +21330,10 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_std_process_spec_under(unsafe { &*a0 }.clone(), unsafe { &*a1 }))))
     }
 
-    /// core.math.random
-    #[no_mangle]
-    pub extern "C" fn jet_std_random_float() -> f64 {
-        guard(|| crate::jet_std_random_float())
-    }
-
-    /// core.math.random.getrandbits
-    #[no_mangle]
-    pub extern "C" fn jet_std_random_getrandbits(a0: i64) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_random_getrandbits(a0)))
-    }
-
     /// core.math.random.seed
     #[no_mangle]
     pub extern "C" fn jet_std_random_seed(a0: i64) {
         guard(|| crate::jet_std_random_seed(a0))
-    }
-
-    /// core.math.random.split
-    #[no_mangle]
-    pub extern "C" fn jet_std_random_split(a0: i64) -> *mut crate::jet_std::Rng {
-        guard(|| Box::into_raw(Box::new(crate::jet_std_random_split(a0))))
     }
 
     /// core.testing.fake_rng, core.math.random.rng
@@ -21127,6 +21543,69 @@ mod jet_c_abi_routes {
         })
     }
 
+    /// TIR/tir_to_mir_expr.rs
+    #[no_mangle]
+    pub extern "C" fn DataLimits_safe() -> *mut crate::jet_std::DataLimits {
+        guard(|| Box::into_raw(Box::new(crate::jet_std::DataLimits::safe())))
+    }
+
+    /// TIR/tir_to_mir_expr.rs
+    #[no_mangle]
+    pub extern "C" fn DBValue_blob(a0: *mut crate::jet_std::DBValue, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+        guard(|| match crate::jet_std::DBValue::blob(unsafe { &*a0 }) {
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
+        })
+    }
+
+    /// TIR/tir_to_mir_expr.rs
+    #[no_mangle]
+    pub extern "C" fn DBValue_bool(a0: *mut crate::jet_std::DBValue, ok: *mut bool, err: *mut JetCString) -> i64 {
+        guard(|| match crate::jet_std::DBValue::bool(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value) }; 1 }
+            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
+        })
+    }
+
+    /// TIR/tir_to_mir_expr.rs
+    #[no_mangle]
+    pub extern "C" fn DBValue_float(a0: *mut crate::jet_std::DBValue, ok: *mut f64, err: *mut JetCString) -> i64 {
+        guard(|| match crate::jet_std::DBValue::float(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value) }; 1 }
+            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
+        })
+    }
+
+    /// TIR/tir_to_mir_expr.rs
+    #[no_mangle]
+    pub extern "C" fn DBValue_int(a0: *mut crate::jet_std::DBValue, ok: *mut i64, err: *mut JetCString) -> i64 {
+        guard(|| match crate::jet_std::DBValue::int(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
+            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
+        })
+    }
+
+    /// TIR/tir_to_mir_expr.rs
+    #[no_mangle]
+    pub extern "C" fn DBValue_is_null(a0: *mut crate::jet_std::DBValue) -> bool {
+        guard(|| crate::jet_std::DBValue::is_null(unsafe { &*a0 }))
+    }
+
+    /// TIR/tir_to_mir_expr.rs
+    #[no_mangle]
+    pub extern "C" fn DBValue_text(a0: *mut crate::jet_std::DBValue, ok: *mut JetCString, err: *mut JetCString) -> i64 {
+        guard(|| match crate::jet_std::DBValue::text(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
+            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
+        })
+    }
+
+    /// TIR/tir_to_mir_expr.rs
+    #[no_mangle]
+    pub extern "C" fn EncodingLimits_safe() -> *mut crate::jet_std::EncodingLimits {
+        guard(|| Box::into_raw(Box::new(crate::jet_std::EncodingLimits::safe())))
+    }
+
     /// core.builtin.float_parse
     #[no_mangle]
     pub extern "C" fn jet_float_parse(a0: JetCString, ok: *mut f64, err: *mut JetCString) -> i64 {
@@ -21136,100 +21615,10 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.files.__close_directory
+    /// TIR/routes.rs
     #[no_mangle]
-    pub extern "C" fn jet_fs_directory_close(a0: i64) {
-        guard(|| crate::jet_std::jet_fs_directory_close(a0))
-    }
-
-    /// core.files.__create_directory
-    #[no_mangle]
-    pub extern "C" fn jet_fs_directory_create(a0: i64, a1: JetCString, a2: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std::jet_fs_directory_create(a0, unsafe { &*a1 }, a2) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.files.__fsync_directory
-    #[no_mangle]
-    pub extern "C" fn jet_fs_directory_fsync(a0: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std::jet_fs_directory_fsync(a0) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.files.__open_directory
-    #[no_mangle]
-    pub extern "C" fn jet_fs_directory_open(a0: i64, a1: JetCString, ok: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std::jet_fs_directory_open(a0, unsafe { &*a1 }) {
-            Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.files.__flock
-    #[no_mangle]
-    pub extern "C" fn jet_fs_flock(a0: i64, a1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std::jet_fs_flock(a0, a1) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.files.__read_link_at
-    #[no_mangle]
-    pub extern "C" fn jet_fs_read_link_at(a0: i64, a1: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std::jet_fs_read_link_at(a0, unsafe { &*a1 }) {
-            Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.files.__remove_at
-    #[no_mangle]
-    pub extern "C" fn jet_fs_remove_at(a0: i64, a1: JetCString, a2: u8, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std::jet_fs_remove_at(a0, unsafe { &*a1 }, a2 != 0) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.files.__rename_at
-    #[no_mangle]
-    pub extern "C" fn jet_fs_rename_at(a0: i64, a1: JetCString, a2: i64, a3: JetCString, a4: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std::jet_fs_rename_at(a0, unsafe { &*a1 }, a2, unsafe { &*a3 }, a4) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.files.__stat_at
-    #[no_mangle]
-    pub extern "C" fn jet_fs_stat_at(a0: i64, a1: JetCString, a2: u8, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std::jet_fs_stat_at(a0, unsafe { &*a1 }, a2 != 0) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.files.__xattr_names
-    #[no_mangle]
-    pub extern "C" fn jet_fs_xattr_names(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std::jet_fs_xattr_names(unsafe { &*a0 }) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| handle(e) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.files.__xattr_set
-    #[no_mangle]
-    pub extern "C" fn jet_fs_xattr_set(a0: JetCString, a1: JetCString, a2_0: *const u64, a2_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std::jet_fs_xattr_set(unsafe { &*a0 }, unsafe { &*a1 }, &list_in(a2_0, a2_1, |w| w as u8)) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
+    pub extern "C" fn jet_int_abs(a0: i64) -> i64 {
+        guard(|| (crate::jet_std::jet_int_owned_abs(&unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a0) })).into_raw())
     }
 
     /// core.numeric.checked_widen
@@ -22573,6 +22962,30 @@ mod jet_c_abi_routes {
     }
 
 
+    /// TIR/routes.rs
+    #[no_mangle]
+    pub extern "C" fn jet_typed_html_raw(a0: JetCString) -> JetCString {
+        guard(|| handle(crate::jet_typed_html_raw(view(a0).to_owned())))
+    }
+
+    /// TIR/routes.rs
+    #[no_mangle]
+    pub extern "C" fn jet_typed_html_text(a0: JetCString) -> JetCString {
+        guard(|| handle(crate::jet_typed_html_text(view(a0).to_owned())))
+    }
+
+    /// TIR/routes.rs
+    #[no_mangle]
+    pub extern "C" fn jet_typed_sh_raw(a0: JetCString, data: *mut *mut u64) -> i64 {
+        guard(|| list_out(crate::jet_typed_sh_raw(view(a0).to_owned()).into_iter().map(|e| handle(e) as u64).collect(), data))
+    }
+
+    /// core.ui.box
+    #[no_mangle]
+    pub extern "C" fn jet_ui_box(a0_0: *const u64, a0_1: i64) -> *mut crate::JetUiNode {
+        guard(|| Box::into_raw(Box::new(crate::jet_ui_box(list_in(a0_0, a0_1, |w| unsafe { &*(w as *const crate::JetUiNode) }.clone())))))
+    }
+
     /// core.ui.button
     #[no_mangle]
     pub extern "C" fn jet_ui_button(a0: JetCString) -> *mut crate::JetUiNode {
@@ -22889,12 +23302,6 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn JetByteBuffer_with_capacity(a0: i64) -> *mut crate::JetByteBuffer {
         guard(|| Box::into_raw(Box::new(crate::JetByteBuffer::with_capacity(a0))))
-    }
-
-    /// core.data.sketch.cms.new
-    #[no_mangle]
-    pub extern "C" fn JetCountMinSketch_new() -> *mut crate::JetCountMinSketch {
-        guard(|| Box::into_raw(Box::new(crate::JetCountMinSketch::new())))
     }
 
     /// TIR/routes.rs
@@ -23305,12 +23712,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.data.sketch.hll.new
-    #[no_mangle]
-    pub extern "C" fn JetHyperLogLog_new() -> *mut crate::JetHyperLogLog {
-        guard(|| Box::into_raw(Box::new(crate::JetHyperLogLog::new())))
-    }
-
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetInstant_compare_value(a0: *mut crate::JetInstant, a1: *mut crate::JetInstant) -> i64 {
@@ -23525,18 +23926,6 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn JetPeriod_years_value(a0: *mut crate::JetPeriod) -> i64 {
         guard(|| crate::jet_std::jet_int_from_i64(crate::JetPeriod::years_value(unsafe { &*a0 })))
-    }
-
-    /// core.data.sketch.reservoir.new
-    #[no_mangle]
-    pub extern "C" fn JetReservoirSampler_new(a0: i64) -> *mut crate::JetReservoirSampler {
-        guard(|| Box::into_raw(Box::new(crate::JetReservoirSampler::new(a0))))
-    }
-
-    /// core.data.sketch.tdigest.new
-    #[no_mangle]
-    pub extern "C" fn JetTDigest_new() -> *mut crate::JetTDigest {
-        guard(|| Box::into_raw(Box::new(crate::JetTDigest::new())))
     }
 
     /// TIR/routes.rs
@@ -23988,6 +24377,8 @@ mod jet_c_abi_routes {
 //   jet_atomic_publish (TIR/routes.rs): generic
 //   jet_atomic_store (TIR/routes.rs): generic
 //   jet_atomic_try_add (TIR/routes.rs): generic
+//   jet_auth_store_load (core.auth.__store_load): no runtime function
+//   jet_auth_store_replace (core.auth.__store_replace): no runtime function
 //   jet_bag_add (core.builtin.bag_add): generic
 //   jet_bag_any (TIR/routes.rs): generic
 //   jet_bag_count (core.builtin.bag_count): generic
@@ -23995,8 +24386,9 @@ mod jet_c_abi_routes {
 //   jet_bag_is_empty (TIR/routes.rs): generic
 //   jet_bag_len (TIR/routes.rs): generic
 //   jet_bag_remove (core.builtin.bag_remove): generic
-//   jet_bitset_add (core.builtin.bitset_add): no runtime function
-//   jet_bitset_remove (core.builtin.bitset_remove): no runtime function
+//   jet_binary_pattern_match (TIR/routes.rs): parameter types  subject: &[u8], parts: &[JetBinMatchPart<'_>], 
+//   jet_codec_decode_typed (TIR/tir_to_mir_expr.rs): generic
+//   jet_codec_encode (TIR/tir_to_mir_expr.rs): generic
 //   jet_coll_heappop (core.collections.heappop): result type ( Vec<jet_foundation::Numeric::JetInt>, JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>, )
 //   jet_coll_heappushpop (core.collections.heappushpop): result type ( Vec<jet_foundation::Numeric::JetInt>, jet_foundation::Numeric::JetInt, )
 //   jet_coll_heapreplace (core.collections.heapreplace): result type ( Vec<jet_foundation::Numeric::JetInt>, JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>, )
@@ -24204,26 +24596,12 @@ mod jet_c_abi_routes {
 //   jet_devserver_app (core.web.devserver.app): no runtime function
 //   jet_devserver_for_app (core.web.devserver.for_app): no runtime function
 //   jet_devtools_publish (core.devtools.publish): generic
-//   jet_duration_divide (core.handle.duration.divide): parameter types d: &jet_std::Duration, factor: &i64
-//   jet_duration_round (core.handle.duration.round): parameter types  d: &jet_std::Duration, unit: &String, increment: &i64, mode: &String, 
-//   jet_duration_scale (core.handle.duration.scale): parameter types d: &jet_std::Duration, factor: &i64
-//   jet_email::address (core.email.address): no runtime function
-//   jet_email::attachment (core.email.attachment): no runtime function
-//   jet_email::envelope (core.email.envelope): no runtime function
-//   jet_email::Limits::safe (core.email.limits_safe): no runtime function
-//   jet_email::message (core.email.message): no runtime function
-//   jet_email::serialize (core.email.serialize): no runtime function
+//   jet_edit_disjoint (TIR/routes.rs): generic
 //   jet_enc_cbor_reader (core.encoding.cbor.reader): parameter types input: JetFileReader, limits: jet_std::EncodingLimits
 //   jet_enc_cbor_reader_next (core.handle.cbor_reader.next): result type Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError>
-//   jet_enc_cbor_to_bytes (core.encoding.cbor.to_bytes): generic
-//   jet_enc_cbor_to_bytes_canonical (core.encoding.cbor.to_bytes_canonical): generic
 //   jet_enc_cbor_writer (core.encoding.cbor.writer): parameter types output: JetFileWriter, limits: jet_std::EncodingLimits
 //   jet_enc_csv_decode (core.encoding.csv.decode): generic
 //   jet_enc_csv_query (core.encoding.csv.query): generic
-//   jet_enc_csv_reader (core.encoding.csv.reader): parameter types  input: JetFileReader, limits: jet_std::EncodingLimits, delimiter: String, header: bool, skip_blank: bool, 
-//   jet_enc_csv_reader_next (core.handle.csv_reader.next): result type Result<JetOutcome<jet_std::CSVRow, JetAbsent>, jet_std::EncodingError>
-//   jet_enc_csv_to_string (core.encoding.csv.to_string): generic
-//   jet_enc_csv_writer (core.encoding.csv.writer): parameter types output: JetFileWriter, limits: jet_std::EncodingLimits
 //   jet_enc_json_reader (core.encoding.json.reader): parameter types  input: JetFileReader, limits: jet_std::EncodingLimits, 
 //   jet_enc_json_reader_next (core.handle.json_reader.next): result type Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError>
 //   jet_enc_json_writer (core.encoding.json.writer): parameter types  output: JetFileWriter, limits: jet_std::EncodingLimits, canonical: bool, 
@@ -24231,12 +24609,10 @@ mod jet_c_abi_routes {
 //   jet_enc_jsonl_reader_next (core.handle.jsonl_reader.next): result type Result<JetOutcome<jet_std::DataTree, JetAbsent>, jet_std::EncodingError>
 //   jet_enc_jsonl_writer (core.encoding.jsonl.writer): parameter types  output: JetFileWriter, limits: jet_std::EncodingLimits, 
 //   jet_enc_toml_decode (TIR/lower/method_calls.rs): generic
-//   jet_enc_toml_to_string (core.encoding.toml.to_string): generic
 //   jet_enc_xml_decode (core.encoding.xml.decode): generic
 //   jet_enc_xml_reader (core.encoding.xml.reader): parameter types  input: JetFileReader, limits: jet_std::EncodingLimits, xml: jet_std::XMLParseOptions, 
 //   jet_enc_xml_reader_next (core.handle.xml_reader.next): result type Result<JetOutcome<jet_std::DataTree, JetAbsent>, jet_std::EncodingError>
 //   jet_enc_yaml_decode (TIR/lower/method_calls.rs): generic
-//   jet_enc_yaml_to_string (core.encoding.yaml.to_string): generic
 //   jet_eq (TIR/routes.rs): generic
 //   jet_expect_snapshot (core.test.expect_snapshot): no runtime function
 //   jet_expiring_get (core.handle.expiring.get): generic
@@ -24454,6 +24830,14 @@ mod jet_c_abi_routes {
 //   jet_loadable_idle (core.reactive.loadable.idle): result type JetLoadable<(), ()>
 //   jet_loadable_loaded (core.reactive.loadable.loaded): generic
 //   jet_loadable_loading (core.reactive.loadable.loading): result type JetLoadable<(), ()>
+//   jet_log_disabled_load (core.log.__disabled_load): no runtime function
+//   jet_log_disabled_store (core.log.__disabled_store): no runtime function
+//   jet_log_format_store (core.log.__format_store): no runtime function
+//   jet_log_level_load (core.log.__level_load): no runtime function
+//   jet_log_level_store (core.log.__level_store): no runtime function
+//   jet_log_sample_count_store (core.log.__sample_count_store): no runtime function
+//   jet_log_sample_store (core.log.__sample_store): no runtime function
+//   jet_log_sink_store (core.log.__sink_store): no runtime function
 //   jet_loop_iter_init (TIR/routes.rs): generic
 //   jet_loop_iter_value (TIR/routes.rs): generic
 //   jet_lru_add_new (core.builtin.lru_add_new): generic
@@ -24514,13 +24898,9 @@ mod jet_c_abi_routes {
 //   jet_math_Vec3_to_array (core.math.Vec3_to_array): result type [f64; 3]
 //   jet_math_Vec4_from_array (core.math.Vec4_from_array): parameter types a: [f64; 4]
 //   jet_math_Vec4_to_array (core.math.Vec4_to_array): result type [f64; 4]
-//   jet_mime_parse (core.net.mime.parse): no runtime function
-//   jet_net_dns_a (core.net.dns_a): result type Result<Vec<JetIpAddr>, String>
-//   jet_net_dns_a_at (core.net.dns_a_at): result type Result<Vec<JetIpAddr>, String>
-//   jet_net_dns_aaaa (core.net.dns_aaaa): result type Result<Vec<JetIpAddr>, String>
-//   jet_net_dns_aaaa_at (core.net.dns_aaaa_at): result type Result<Vec<JetIpAddr>, String>
-//   jet_net_dns_srv (core.net.dns_srv): result type Result<Vec<JetDNSSrv>, String>
-//   jet_net_dns_srv_at (core.net.dns_srv_at): result type Result<Vec<JetDNSSrv>, String>
+//   jet_mem::JetFixed::over (TIR/routes.rs): parameter types bytes: &mut [u8]
+//   jet_memo_stats (core.memo.stats): generic
+//   jet_mod_load (core.mod.load): no runtime function
 //   jet_net_tcp_reply (core.net.tcp_reply): parameter types  mut stream: JetTCPStream, status: &String, body: &String, 
 //   jet_net_tls_client (core.net.tls.client): no runtime function
 //   jet_net_unix_accept (core.net.unix_accept): platform-gated
@@ -24559,6 +24939,24 @@ mod jet_c_abi_routes {
 //   jet_process_spec_abilities (core.handle.process.spec.abilities): result type std::collections::HashSet<String>
 //   jet_process_stdin_close (core.handle.process.stdin_close): parameter types  handle: &std::rc::Rc<std::cell::RefCell<Option<jet_std::ProcessStdin>>>, 
 //   jet_process_stdin_write (core.handle.process.stdin_write): platform-gated
+//   jet_random_os_entropy (core.crypto.random.__os_entropy): no runtime function
+//   jet_random_state_raw (core.math.random.__rng_state): no runtime function
+//   jet_random_try_update_raw (core.math.random.__rng_try_update): no runtime function
+//   jet_raw_bytes_into_text (core.encoding.__bytes_into_text): no runtime function
+//   jet_raw_encoding_flush (core.encoding.__flush): no runtime function
+//   jet_raw_encoding_read_byte (core.encoding.__read_byte): no runtime function
+//   jet_raw_encoding_write_bytes (core.encoding.__write_bytes): no runtime function
+//   jet_raw_encoding_write_text (core.encoding.__write_text): no runtime function
+//   jet_raw_list_capacity (core.mem.__list_capacity): no runtime function
+//   jet_raw_list_reserve_exact (core.mem.__list_reserve_exact): no runtime function
+//   jet_raw_object_entries_view (core.encoding.__object_entries_view): no runtime function
+//   jet_raw_object_from_entries (core.encoding.__object_from_entries): no runtime function
+//   jet_raw_object_into_entries (core.encoding.__object_into_entries): no runtime function
+//   jet_raw_string_byte (core.encoding.__string_byte): no runtime function
+//   jet_raw_text_into_bytes (core.encoding.__text_into_bytes): no runtime function
+//   jet_raw_tree_tag (core.encoding.__tree_tag): no runtime function
+//   jet_raw_type_size (core.mem.__type_size): no runtime function
+//   jet_raw_typed_text (core.encoding.__typed_text): no runtime function
 //   jet_reader_read_f32_be (core.handle.reader.read_f32_be): result type Result<f32, String>
 //   jet_reader_read_f32_le (core.handle.reader.read_f32_le): result type Result<f32, String>
 //   jet_receipt_attach (receipt.attach): generic
@@ -24568,6 +24966,8 @@ mod jet_c_abi_routes {
 //   jet_rng_shuffle (core.handle.rng.shuffle): generic
 //   jet_rng_weighted_pick (core.handle.rng.weighted_pick): generic
 //   jet_rt_callback (core.rt.callback): generic
+//   jet_scheduler_task_cancelled_state (core.tasks.__task_cancelled): no runtime function
+//   jet_scheduler_task_paused (core.tasks.__task_paused): no runtime function
 //   jet_scope_guard (TIR/routes.rs): generic
 //   jet_services_worker (core.service.worker): parameter types  tree: &mut JetServiceTree, name: String, handler: JetServiceWorkerHandler, handler_name: String, capacity: i64, 
 //   jet_services_workflow_activity (core.service.workflow_activity): generic
@@ -24630,7 +25030,15 @@ mod jet_c_abi_routes {
 //   jet_split_write (core.builtin.split_write): generic
 //   jet_std_binary_iter_unpack (core.encoding.binary.iter_unpack): result type Result<Vec<Vec<i64>>, String>
 //   jet_std_env_decode (core.sys.decode): generic
+//   jet_std_file_reader_read (core.handle.file_reader.read): no runtime function
 //   jet_std_file_reader_read_line (core.handle.file_reader.read_line): result type Result<Option<String>, jet_std::IOError>
+//   jet_std_file_reader_stat (core.files.__reader_stat): no runtime function
+//   jet_std_file_writer_fsync (core.handle.file_writer.fsync): no runtime function
+//   jet_std_file_writer_set_mode (core.files.__writer_set_mode): no runtime function
+//   jet_std_file_writer_stat (core.files.__writer_stat): no runtime function
+//   jet_std_file_writer_write_all (core.handle.file_writer.write_all): no runtime function
+//   jet_std_files_open_reader (core.files.__open_reader): no runtime function
+//   jet_std_files_open_writer (core.files.__open_writer): no runtime function
 //   jet_std_fs_map_lines_view (core.handle.mapped_file.lines): generic
 //   jet_std_fs_map_window_len_view (core.handle.mapped_file.window_len): result type Result<&[u8], jet_std::IOError>
 //   jet_std_fs_map_window_view (core.handle.mapped_file.window): result type Result<&[u8], jet_std::IOError>
@@ -24648,8 +25056,19 @@ mod jet_c_abi_routes {
 //   jet_std::after_value (core.tasks.after): generic
 //   jet_std::FieldError::under (core.encoding.decode_under): generic
 //   jet_std::interval (core.tasks.interval): result type JetReceiver<i64>
-//   jet_std::jet_fs_directory_list (core.files.__list_directory): result type Result<Vec<Vec<u8>>, IOError>
-//   jet_std::jet_fs_xattr_get (core.files.__xattr_get): result type Result<Option<Vec<u8>>, IOError>
+//   jet_std::jet_fs_directory_close (core.files.__close_directory): no runtime function
+//   jet_std::jet_fs_directory_create (core.files.__create_directory): no runtime function
+//   jet_std::jet_fs_directory_fsync (core.files.__fsync_directory): no runtime function
+//   jet_std::jet_fs_directory_list (core.files.__list_directory): no runtime function
+//   jet_std::jet_fs_directory_open (core.files.__open_directory): no runtime function
+//   jet_std::jet_fs_flock (core.files.__flock): no runtime function
+//   jet_std::jet_fs_read_link_at (core.files.__read_link_at): no runtime function
+//   jet_std::jet_fs_remove_at (core.files.__remove_at): no runtime function
+//   jet_std::jet_fs_rename_at (core.files.__rename_at): no runtime function
+//   jet_std::jet_fs_stat_at (core.files.__stat_at): no runtime function
+//   jet_std::jet_fs_xattr_get (core.files.__xattr_get): no runtime function
+//   jet_std::jet_fs_xattr_names (core.files.__xattr_names): no runtime function
+//   jet_std::jet_fs_xattr_set (core.files.__xattr_set): no runtime function
 //   jet_std::jet_int_try_from_checked (core.numeric.int_try_from): result type Result<i128, String>
 //   jet_std::jet_pool_get (TIR/routes.rs): generic
 //   jet_std::jet_pool_get_mut (TIR/routes.rs): generic
@@ -24666,7 +25085,6 @@ mod jet_c_abi_routes {
 //   jet_std::jet_task_join_result (TIR/routes.rs): generic; Jet runtime #Export(c) jet_task_join_result owns the lowered ABI
 //   jet_std::jet_task_race (TIR/tir_to_mir_expr.rs): generic
 //   jet_std::jet_task_race_result (TIR/tir_to_mir_expr.rs): generic
-//   jet_std::jet_typed_url_literal (TIR/routes.rs): parameter types literals: &[&str], holes: Vec<String>
 //   jet_std::jet_unit_conversion_exact_measurement (core.units.conversion_exact_measurement): result type Option<JetMeasurement<f64>>
 //   jet_std::jet_unit_conversion_rounded_measurement (core.units.conversion_rounded_measurement): result type Result<JetMeasurement<f64>, &'static str>
 //   jet_std::JetAsyncEvent::new (core.event.async_result): no runtime function
@@ -24674,7 +25092,6 @@ mod jet_c_abi_routes {
 //   jet_std::JetEvent::new (core.event.new): no runtime function
 //   jet_std::JetEvent::with_policy (core.event.with_policy): no runtime function
 //   jet_std::JetHook::new (core.event.hook): no runtime function
-//   jet_std::JetMIME::params (TIR/routes.rs): result type Vec<Vec<String>>
 //   jet_std::JetReceiver::delay_ms (core.channels.receiver.delay_ms): no runtime function
 //   jet_std::JetReceiver::is_cancelled (core.channels.receiver.is_cancelled): no runtime function
 //   jet_std::JetReceiver::is_interval (core.channels.receiver.is_interval): no runtime function
@@ -24697,6 +25114,7 @@ mod jet_c_abi_routes {
 //   jet_string_after_view (core.builtin.string_after_view): generic
 //   jet_string_before_view (core.builtin.string_before_view): generic
 //   jet_string_try_push (core.builtin.string_try_push): parameter types text: &mut String, addition: &str
+//   jet_string_validate_utf8 (core.encoding.__utf8_validate): no runtime function
 //   jet_sync_counter_merge (core.sync.counter_merge): no runtime function
 //   jet_sync_counter_value (core.sync.counter_value): no runtime function
 //   jet_sync_list_merge (core.sync.list_merge): no runtime function
@@ -24711,6 +25129,13 @@ mod jet_c_abi_routes {
 //   jet_sync_text_merge (core.sync.text_merge): no runtime function
 //   jet_sync_text_metadata (core.sync.text_metadata): no runtime function
 //   jet_sync_text_show (core.sync.text_show): no runtime function
+//   jet_sys_getegid_raw (core.sys.__getegid): no runtime function
+//   jet_sys_geteuid_raw (core.sys.__geteuid): no runtime function
+//   jet_sys_getgid_raw (core.sys.__getgid): no runtime function
+//   jet_sys_getpgrp_raw (core.sys.__getpgrp): no runtime function
+//   jet_sys_getppid_raw (core.sys.__getppid): no runtime function
+//   jet_sys_getuid_raw (core.sys.__getuid): no runtime function
+//   jet_sys_host_env_raw (core.sys.__host_env): no runtime function
 //   jet_testing_compare (core.testing.compare): parameter types  cases: &Vec<jet_std::DataTree>, reference: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>, candidate: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>, relation: &String, 
 //   jet_testing_histories (core.testing.histories): generic
 //   jet_testing_world (core.testing.world): generic; Jet runtime #Export(c) jet_testing_world owns the lowered ABI
@@ -24719,6 +25144,15 @@ mod jet_c_abi_routes {
 //   jet_text_line_views (core.text.line_views): generic
 //   jet_text_pattern_match (TIR/routes.rs): parameter types  subject: &str, parts: &[JetTextMatchPart<'_>], 
 //   jet_text_word_views (core.text.word_views): generic
+//   jet_time_raw_controlled_monotonic_ns (core.time.__controlled_monotonic_ns): no runtime function
+//   jet_time_raw_embedded_zone_bytes (core.time.__embedded_zone_bytes): no runtime function
+//   jet_time_raw_host_monotonic_ns (core.time.__host_monotonic_ns): no runtime function
+//   jet_time_raw_wall_override_ms (core.time.__wall_override_ms): no runtime function
+//   jet_time_raw_wall_sample (core.time.__wall_sample): no runtime function
+//   jet_time_raw_world_monotonic_ns (core.time.__world_monotonic_ns): no runtime function
+//   jet_time_raw_world_wall_ms (core.time.__world_wall_ms): no runtime function
+//   jet_time_raw_zone_env (core.time.__zone_env): no runtime function
+//   jet_time_raw_zone_file_bytes (core.time.__zone_file_bytes): no runtime function
 //   jet_tls_client_identity_from_pem (core.handle.tls.client_identity_from_pem): parameter types  cert_chain: &Vec<u8>, private_key: &Vec<u8>, validate: fn(&Vec<u8>, &Vec<u8>) -> Result<(), String>, 
 //   jet_tls_root_certificates_from_pem (core.handle.tls.root_certificates_from_pem): parameter types  pem: &Vec<u8>, validate: fn(&Vec<u8>) -> Result<(), String>, 
 //   jet_transaction_on_commit (TIR/routes.rs): parameter types transaction: &mut JetTransaction, callback: Box<dyn FnOnce()>
@@ -24759,7 +25193,6 @@ mod jet_c_abi_routes {
 //   jet_unicode_split_once (core.builtin.string_split_once): result type jet_foundation::Outcome::JetOutcome< (String, String), jet_foundation::Outcome::JetAbsent, >
 //   jet_unicode_trim_view (core.builtin.string_trim_view): result type &str
 //   jet_unit_conversion_rounded (core.units.conversion_rounded): result type Result<f64, &'static str>
-//   jet_url_data (core.net.url.data): no runtime function
 //   jet_url_from_parts (core.net.url.from_parts): parameter types  scheme: &String, host: &String, path: &String, query: &Vec<Vec<String>>, fragment: &String, 
 //   jet_url_parse_qsl (core.net.url.parse_qsl): result type Vec<Vec<String>>
 //   jet_url_query (core.net.url.query): parameter types pairs: &Vec<Vec<String>>
@@ -24796,10 +25229,15 @@ mod jet_c_abi_routes {
 //   jet_view_map (TIR/routes.rs): generic
 //   jet_view_mut_new (core.builtin.view_mut_new): generic
 //   jet_view_new (core.builtin.view_new): generic
-//   JetByteBuffer::capacity (core.builtin.byte_buffer_capacity): no runtime function
-//   JetByteBuffer::from (core.builtin.byte_buffer_from): no runtime function
-//   JetByteBuffer::to_bytes (core.builtin.byte_buffer_to_bytes): no runtime function
-//   JetByteBuffer::with_capacity (core.builtin.byte_buffer_with_capacity): no runtime function
-//   JetDate::parse_iso_week_date (core.time.parse_iso_week_date): no runtime function
-//   JetLocalTime::new (core.time.time): no runtime function
+//   jet_view_try_filter (TIR/routes.rs): generic
+//   jet_view_try_map (TIR/routes.rs): generic
+//   jet_web_storage_local_clear (core.web.storage.local.clear): no runtime function
+//   jet_web_storage_local_get (core.web.storage.local.get): no runtime function
+//   jet_web_storage_local_remove (core.web.storage.local.remove): no runtime function
+//   jet_web_storage_local_set (core.web.storage.local.set): no runtime function
+//   jet_web_storage_session_clear (core.web.storage.session.clear): no runtime function
+//   jet_web_storage_session_get (core.web.storage.session.get): no runtime function
+//   jet_web_storage_session_remove (core.web.storage.session.remove): no runtime function
+//   jet_web_storage_session_set (core.web.storage.session.set): no runtime function
+//   JetPeriod::total_in_value (TIR/routes.rs): generic
 // END GENERATED C-ABI ROUTES
