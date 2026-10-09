@@ -21,7 +21,7 @@ fn sentry_ledger_parent(path: I64, scratch: I64) -> Bool {
     status :: sentry_ledger_stat(parent, scratch)
     valid := false
     if {
-        (status == I64{0}) -> valid = (sync_load(scratch + I64{24}) & I64{61440}) == I64{16384}
+        (status == I64{0}) -> valid = ((sync_load(scratch + I64{24})).bit_and(I64{61440})) == I64{16384}
         (status == I64{-2}) -> {
             valid = true
             at = I64{1}
@@ -66,7 +66,7 @@ fn sentry_ledger_write(path: I64, row: I64) {
     if allowed {
         status :: sentry_ledger_stat(name, scratch)
         if {
-            (status == I64{0}) -> allowed = (sync_load(scratch + I64{24}) & I64{61440}) == I64{32768} && sync_load(scratch + I64{48}) <= I64{4194304} - rt_text_len(row)
+            (status == I64{0}) -> allowed = ((sync_load(scratch + I64{24})).bit_and(I64{61440})) == I64{32768} && sync_load(scratch + I64{48}) <= I64{4194304} - rt_text_len(row)
             (status != I64{-2}) -> allowed = false
         }
     }

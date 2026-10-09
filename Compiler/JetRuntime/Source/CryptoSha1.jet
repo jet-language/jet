@@ -43,11 +43,11 @@ fn rt_crypto_sha1(input: I64, length: I64, output: I64, scratch: I64) {
             k := I64{0}
             if {
                 (t < I64{20}) -> {
-                    f = (b & c) | ((b ~| I64{0xffffffff}) & d)
+                    f = (b.bit_and(c)).bit_or((b.bit_xor(I64{0xffffffff})).bit_and(d))
                     k = I64{0x5a827999}
                 }
                 (t < I64{40}) -> {
-                    f = b ~| c ~| d
+                    f = b.bit_xor(c).bit_xor(d)
                     k = I64{0x6ed9eba1}
                 }
                 (t < I64{60}) -> {

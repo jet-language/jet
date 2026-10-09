@@ -247,7 +247,7 @@ fn shared_count_release(shared: I64, pin: Bool) {
     meta := I64{0}
     payload := I64{0}
     drop_code := I64{0}
-    if (next & I64{4294967295}) == (I64{0}) && sync_load(shared + I64{72}) == (I64{0}) {
+    if (next.bit_and(I64{4294967295})) == (I64{0}) && sync_load(shared + I64{72}) == (I64{0}) {
         meta = sync_load(shared + I64{56})
         payload = sync_load(shared + I64{64})
         drop_code = sync_load(shared + I64{80})

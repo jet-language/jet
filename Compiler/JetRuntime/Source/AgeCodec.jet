@@ -137,11 +137,11 @@ fn rt_age_hrp(i: I64) -> I64 {
 fn rt_age_polymod(chk: I64, value: I64) -> I64 {
     top :: chk >> I64{25}
     next := ((chk.bit_and(I64{0x1ffffff})) << I64{5}).bit_xor(value)
-    next = next ~| (I64{0x3b6a57b2}.bit_and((I64{0} - (top.bit_and(I64{1})))))
-    next = next ~| (I64{0x26508e6d}.bit_and((I64{0} - ((top >> I64{1}).bit_and(I64{1})))))
-    next = next ~| (I64{0x1ea119fa}.bit_and((I64{0} - ((top >> I64{2}).bit_and(I64{1})))))
-    next = next ~| (I64{0x3d4233dd}.bit_and((I64{0} - ((top >> I64{3}).bit_and(I64{1})))))
-    next ~| (I64{0x2a1462b3}.bit_and((I64{0} - ((top >> I64{4}).bit_and(I64{1})))))
+    next = next.bit_xor(I64{0x3b6a57b2}.bit_and((I64{0} - (top.bit_and(I64{1})))))
+    next = next.bit_xor(I64{0x26508e6d}.bit_and((I64{0} - ((top >> I64{1}).bit_and(I64{1})))))
+    next = next.bit_xor(I64{0x1ea119fa}.bit_and((I64{0} - ((top >> I64{2}).bit_and(I64{1})))))
+    next = next.bit_xor(I64{0x3d4233dd}.bit_and((I64{0} - ((top >> I64{3}).bit_and(I64{1})))))
+    next.bit_xor(I64{0x2a1462b3}.bit_and((I64{0} - ((top >> I64{4}).bit_and(I64{1})))))
 }
 fn rt_age_hrp_checksum(hrp_len: I64) -> I64 {
     chk := I64{1}

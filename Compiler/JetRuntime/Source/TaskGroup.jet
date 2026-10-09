@@ -280,7 +280,7 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
     if (winner >= I64{0}) {
         chosen :: sync_load(data + winner * I64{8})
         if {
-            (kind != I64{0} || task_result_failed(chosen, (flatten & I64{255}) != I64{0})) -> {
+            (kind != I64{0} || task_result_failed(chosen, (flatten.bit_and(I64{255})) != I64{0})) -> {
                 success = task_take_outcome(chosen, (flatten.bit_and(I64{255})) != I64{0}, out)
                 sync_store(data + winner * I64{8}, I64{0})
                 task_selection_drain(data, count, true)
@@ -323,7 +323,7 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
     if (winner >= I64{0}) {
         chosen :: sync_load(owned_handles + winner * I64{8})
         if {
-            task_result_failed(chosen, (flatten & I64{255}) != I64{0}) -> {
+            task_result_failed(chosen, (flatten.bit_and(I64{255})) != I64{0}) -> {
                 success = task_take_outcome(chosen, (flatten.bit_and(I64{255})) != I64{0}, out)
                 sync_store(owned_handles + winner * I64{8}, I64{0})
                 task_selection_drain(owned_handles, count, true)

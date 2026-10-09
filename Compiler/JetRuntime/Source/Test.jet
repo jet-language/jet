@@ -398,10 +398,10 @@ fn test_report_text(record: I64, capture: I64) {
     test_write(I64{1}, trap_word(record + I64{8}), trap_word(record + I64{16}))
     test_write_word(I64{1}, I64{8250}, I64{2})
     if {
-        ((flags & I64{4}) != I64{0}) -> test_msg_skip(I64{1})
-        ((flags & I64{2}) != I64{0}) -> {
+        ((flags.bit_and(I64{4})) != I64{0}) -> test_msg_skip(I64{1})
+        ((flags.bit_and(I64{2})) != I64{0}) -> {
             if {
-                ((flags & I64{1}) != I64{0}) -> test_msg_expected(I64{1})
+                ((flags.bit_and(I64{1})) != I64{0}) -> test_msg_expected(I64{1})
                 else -> test_msg_unexpected(I64{1})
             }
         }
@@ -429,8 +429,8 @@ fn test_report_text(record: I64, capture: I64) {
         test_parse_record(data, end, at, record)
         flags :: trap_word(record)
         if {
-            ((flags & I64{4}) != I64{0}) -> skipped += I64{1}
-            ((flags & I64{2}) != I64{0}) -> {
+            ((flags.bit_and(I64{4})) != I64{0}) -> skipped += I64{1}
+            ((flags.bit_and(I64{2})) != I64{0}) -> {
                 if ((flags.bit_and(I64{1})) != I64{0}) -> expected += I64{1} else -> unexpected += I64{1}
             }
             else -> {
