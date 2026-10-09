@@ -270,14 +270,14 @@ fn endpoint_show(endpoint: ServiceEndpoint) -> String Never! {
 fn set_delivery(tree: &ServiceTree, delivery: ServiceDelivery) ServiceError! {
     #Unsafe("Services3081: check started before the single delivery-field write") {
         if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change delivery after start"))
-        core.service.__tree_write_delivery(&tree, ^delivery.copy())
+        core.service.__tree_write_delivery(&tree, delivery.copy())
     }
 }
 
 fn set_restart(tree: &ServiceTree, restart: ServiceRestart) ServiceError! {
     #Unsafe("Services1415: root policy write precedes each declared group policy write") {
         if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change restart policy after start"))
-        core.service.__tree_write_restart(&tree, ^restart.copy())
+        core.service.__tree_write_restart(&tree, restart.copy())
         count :: core.service.__tree_group_count(tree)
         loop i in 0..<count -> core.service.__group_write_restart(&tree, i)
     }
@@ -325,7 +325,7 @@ fn select_state_adapter(tree: &ServiceTree, store: ServiceStateStore, schema: St
         if !valid_service_text(schema, 256) -> return Err(ServiceError.Policy("service state schema is empty, too long, or contains control characters"))
         if version < 1 -> return Err(ServiceError.Policy("service state schema version must be positive"))
         core.service.__tree_write_state_adapter(&tree, event_log)
-        core.service.__tree_write_state_authority(&tree, ^store.path.copy(), ^schema.copy(), version, ^migration.copy(), event_log)
+        core.service.__tree_write_state_authority(&tree, store.path.copy(), schema.copy(), version, migration.copy(), event_log)
     }
 }
 
@@ -545,7 +545,7 @@ fn tree(name: String) -> ServiceTree Never! {
     #Unsafe("Allocation only: source supplies every Services.rs initializer field at 2d9953adf:1293-1319, in native evaluation order") {
         return core.service.__tree_allocate(
             ^"", // native 1295: authority
-            ^name.copy(), // native 1296: name
+            name.copy(), // native 1296: name
             I64{1}, // native 1297: generation
             ^ServiceDelivery.AtMostOnce, // native 1298: delivery
             ^ServiceRestart.OneForOne, // native 1299: restart
@@ -563,7 +563,7 @@ fn tree(name: String) -> ServiceTree Never! {
             ^[String]{}, // native 1311: draining
             ^[String]{}, // native 1312: partitioned
             ^[__TreeWorkflowState]{}, // native 1313: workflows
-            ^core.service.__tree_task_group_new(), // native 1314: existing task runtime allocation
+            core.service.__tree_task_group_new(), // native 1314: existing task runtime allocation
             ^[__TreeSupervisorState]{}, // native 1315: supervisor_tasks
             I64{0}, // native 1316: chaos_fails
             I64{0}, // native 1317: previous_generation
@@ -1202,7 +1202,7 @@ fn group(tree: &ServiceTree, name: String, workers: [String]) ServiceError! {
                 .Ok(_) -> {}
             }
         }
-        core.service.__group_push(&tree, ^name.copy(), ^workers.copy())
+        core.service.__group_push(&tree, name.copy(), workers.copy())
     }
 }
 
@@ -1310,6 +1310,14 @@ fn valid_record_payload(text: String) -> Bool Never! {
     assert(if commit_snapshot(&fresh, "snapshot") == {.Err(.NotStarted(message)) -> message == "service tree is not started" else -> false})
     assert(directory_generation(fresh) == 1)
     assert(event_count(fresh) == 0)
+    delivery :: delivery_durable()
+    restart :: restart_one_for_all()
+    set_delivery(&fresh, delivery) ?? panic("pre-start delivery")
+    set_restart(&fresh, restart) ?? panic("pre-start restart")
+    assert(delivery == delivery_durable())
+    assert(restart == restart_one_for_all())
+    assert(tree_show(fresh).contains("restart=OneForAll"))
+    assert(tree_show(fresh).contains("delivery=DurableAtLeastOnce"))
 }
 
 fn validate_tree_endpoint(tree: ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
@@ -1384,7 +1392,7 @@ fn send(tree: &ServiceTree, endpoint: ServiceEndpoint, message: String) ServiceE
         }
         worker :: core.service.__worker_route(tree, endpoint) ?? return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
         if !worker.running || draining -> return Err(ServiceError.NotStarted("worker `{worker.name}` is not running"))
-        if core.service.__authority_try_send(endpoint, ^message.copy()) == {
+        if core.service.__authority_try_send(endpoint, message.copy()) == {
             .Err(.Full(_)) -> return Err(full_tree_mailbox(worker.name, worker.capacity))
             .Err(error) -> return Err(error)
             .Ok(_) -> {}
@@ -1726,7 +1734,7 @@ fn send_durable(tree: &ServiceTree, endpoint: ServiceEndpoint, message: String, 
             loop record in records {
                 if record.key == idempotency_key -> seen = true
             }
-            if !seen -> core.service.__idempotency_push(&tree, ^idempotency_key.copy(), endpoint, ^message.copy())
+            if !seen -> core.service.__idempotency_push(&tree, idempotency_key.copy(), endpoint, message.copy())
         }
         return delivery
     }
@@ -1778,10 +1786,10 @@ fn receive(tree: &ServiceTree, endpoint: ServiceEndpoint) -> String ServiceError
                             2 -> ServiceError.NotStarted("service authority worker mailbox is closed")
                             else -> ServiceError.Policy("service channel returned an invalid send result")
                         }
-                        return Err(pending_delivery_rollback(&tree, endpoint, target.index, ^pending.slice(i, pending.len()), ^before, draining, error))
+                        return Err(pending_delivery_rollback(&tree, endpoint, target.index, pending.slice(i, pending.len()), ^before, draining, error))
                     }
                     if core.service.__mark_delivered(record.store, record.id) == {
-                        .Err(error) -> return Err(pending_delivery_rollback(&tree, endpoint, target.index, ^pending.slice(i, pending.len()), ^before, draining, error))
+                        .Err(error) -> return Err(pending_delivery_rollback(&tree, endpoint, target.index, pending.slice(i, pending.len()), ^before, draining, error))
                         .Ok(_) -> {}
                     }
                 }
@@ -1905,9 +1913,9 @@ fn worker(tree: &ServiceTree, name: String, handler: __WorkerHandler, handler_na
                     return Err(error)
                 }
             }
-            core.service.__tree_write_authority(&tree, ^authority.copy())
+            core.service.__tree_write_authority(&tree, authority.copy())
         }
-        unchecked :: if core.service.__endpoint_unchecked(^route.name.copy(), ^name.copy(), route.generation, ^authority) == {
+        unchecked :: if core.service.__endpoint_unchecked(route.name.copy(), name.copy(), route.generation, ^authority) == {
             .Ok(value) -> value
             .Err(error) -> {
                 return Err(error)
@@ -1933,7 +1941,7 @@ fn worker(tree: &ServiceTree, name: String, handler: __WorkerHandler, handler_na
             else -> {}
         }
         // Mailbox must move: native Mailbox::clone forks its channel.
-        core.service.__worker_push(&tree, ^name.copy(), handler, ^handler_name.copy(), ^endpoint.copy(), ^mailbox, ^[I64]{}, false, U64{0}, U64{0}, ^worker_task)
+        core.service.__worker_push(&tree, name.copy(), handler, handler_name.copy(), endpoint.copy(), ^mailbox, ^[I64]{}, false, U64{0}, U64{0}, ^worker_task)
         return endpoint
     }
 }
@@ -2056,10 +2064,10 @@ fn fail_worker(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
                 reason :: "worker `{topology.workers[index]}` spent its restart budget of {max} per {per}ms; the supervisor escalates to its parent group"
                 // Identical ignored Results: native2989,2992.
                 loop worker in facts.workers {
-                    _ :: core.service.__task_escalate(worker.task, ^reason.copy())
+                    _ :: core.service.__task_escalate(worker.task, reason.copy())
                 }
                 loop supervisor in facts.supervisors {
-                    _ :: core.service.__task_escalate(supervisor, ^reason.copy())
+                    _ :: core.service.__task_escalate(supervisor, reason.copy())
                 }
                 loop i in 0..<facts.workers.len() {
                     core.service.__worker_write_running(&tree, i, false) // native2995
@@ -2121,7 +2129,7 @@ fn fail_worker(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
             mailbox :: core.service.__worker_route(tree, facts.workers[index].endpoint) ?? panic("physical worker route must exist")
             messages :: if preserve -> core.service.__mailbox_snapshot(tree, index) else -> [String]{}
             core.service.__mailbox_close(tree, index) // native2000
-            replacement :: core.service.__worker_mailbox_new(^facts.workers[index].endpoint.copy(), I64{mailbox.capacity}, ^messages) ?? panic("validated service mailbox must restart with its bounded queue")
+            replacement :: core.service.__worker_mailbox_new(facts.workers[index].endpoint.copy(), I64{mailbox.capacity}, ^messages) ?? panic("validated service mailbox must restart with its bounded queue")
             core.service.__worker_write_mailbox(&tree, index, ^replacement) // MOVE, native2001-2006
             // Native2007-2012 ignores both Results; clamp its u64 time identically.
             at :: U64{if now < 0 -> 0 else -> now}
