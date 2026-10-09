@@ -2277,7 +2277,8 @@ Numeric arithmetic methods need no import (D-SIGIL-ALGEBRA1=B):
 | `value.bit_not()` | Int and each fixed-width integer | Flip every bit, keeping the width; exact Int returns `-value - 1`. |
 | `value.pow(exponent)` | Int and Float | Numeric power with the existing exactness and negative-exponent rules. A written negative Int exponent produces Fraction; a dynamic negative Int exponent stops with the existing arithmetic fault. |
 
-These intrinsic methods call the same numeric runtime on every tier.
+These intrinsic methods lower to the ordinary typed numeric operations, not
+user function calls, and call the same numeric runtime on every tier.
 An update writes `value = value.bit_xor(other)`. `!value` is Boolean
 negation only. Shifts retain `<<` and `>>`.
 
@@ -3259,6 +3260,9 @@ against the inferred schema before materializing a result (D-SQL-SURFACE1).
 Both typed list queries and CSV queries receive the complete checked `SQL`
 carrier. A scalar hole in the bounded `WHERE` value is bound after parsing;
 quoted text stays a value and cannot become query syntax.
+`SUM` retains an integer result only when its wide accumulated value fits
+`I64`; an out-of-range sum uses the accumulated floating result rather than
+propagating a numeric-conversion failure from the aggregate.
 
 `DataStatus.clone_value` is the copy-related field. Bridge rows remain separate
 from native rows, and `require_bridge` returns `DataErrorKind.Bridge` instead
@@ -3753,6 +3757,9 @@ records. The registered constructors and App builder methods retain the checked
 route graph and its typed handlers across both compiler implementations.
 The selected Apps runtime part emits their native implementations together with
 the development-server and shared web-router dependencies.
+`openapi` remains infallible at its public boundary: failures while collecting
+checked route facts or rendering the document stop at the existing contract
+boundary. The renderer consumes those facts instead of copying the route list.
 
 | Signature | Result | Description |
 |---|---|---|
