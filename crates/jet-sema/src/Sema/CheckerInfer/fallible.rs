@@ -45,6 +45,11 @@ impl<'a> Checker<'a> {
             self.infer_owning_value(inner)?
         };
         if let Some((ok_ty, err_ty)) = expected_result {
+            // The success payload is a fixed slot, including after an absent
+            // guard has refined its Optional binding to the plain payload.
+            let payload = self
+                .lift_optional_slot(&ok_ty, &payload, inner.as_mut())
+                .unwrap_or(payload);
             let ok_payload = payload == ok_ty
                 || matches!(&ok_ty, Type::Union(members) if members.iter().any(|m| m == &payload));
             if !ok_payload {

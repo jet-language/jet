@@ -1478,6 +1478,32 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        // An imported type is a namespace owner, not a runtime field receiver.
+        // Use the ordinary declaration-owned associated-method checker so
+        // visibility, generics and the checked callee remain unchanged.
+        if let Expr::Field(base, leaf, _) = receiver.as_ref() {
+            if let Expr::Ident(alias, alias_span) = base.as_ref() {
+                if self.lookup(alias).is_none() && self.imports.contains_key(alias) {
+                    if let Some(owner) = self.struct_owner_module(leaf, Some(alias)) {
+                        if self.modules.is_some_and(|modules| {
+                            modules[owner].registry.method(leaf, method).is_some()
+                        }) {
+                            let type_name = self.canonical_nominal_name(owner, leaf);
+                            if !self.name_ledger.visible(self.module_idx, owner, leaf) {
+                                self.diags.push(crate::Sema::Diagnostics::private_item(leaf, span));
+                            }
+                            self.record_import_alias_reference(alias, *alias_span);
+                            let ret = self.check_static_method(
+                                &type_name, method, span, owner_type_args, type_args, args,
+                                checked_callee_out,
+                            );
+                            *resolved_ret_out = ret.clone();
+                            return ret;
+                        }
+                    }
+                }
+            }
+        }
         // D-FOUND-RECEIPT1: `receipt` is one compiler-owned ambient handle.
         // The payload is checked against its declaration-owned #Receipt/#Codable
         // fact; no source constructor or `core.receipt` module exists.
