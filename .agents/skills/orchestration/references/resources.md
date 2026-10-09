@@ -65,6 +65,9 @@ Closed native enum metadata must retain the current declaration's complete case
 list: `Dyn` has Null, Bool, Int, Float, Number, Text, Bytes, DateTime, Array, and
 Object. Restore a lost declaration row from history before regenerating; do not
 extend a source-owned enum merely because an older native projection listed it.
+Restore lost hidden dispatcher rows with their original authority: Clock's
+`__clock_mono_ns` retains its pure route and the host epoch; substituting the
+effectful `__host_monotonic_ns` route changes the existing public Clock contract.
 
 Use fresh artifacts for runtime claims. A source check, worker receipt, or stale
 binary cannot establish runtime, tier, snapshot, golden, or I9 evidence.
