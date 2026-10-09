@@ -1362,6 +1362,21 @@ impl CoreCallRecord {
         self.module == module && target == member
     }
 
+    pub const fn with_source_target(mut self, target: &'static str) -> Self {
+        self.source_target = Some(target);
+        self
+    }
+
+    pub const fn source_member(self) -> Option<&'static str> {
+        if !matches!(self.symbol, CoreCallSymbol::SourceOwned) {
+            return None;
+        }
+        match self.source_target {
+            Some(target) => Some(target),
+            None => Some(self.member),
+        }
+    }
+
     /// Construct a row with an explicit consumer projection set. Use this for
     /// fixtures and deliberate exceptions so a tier omission is reviewable at
     /// the table edit instead of being hidden by a universal marker.

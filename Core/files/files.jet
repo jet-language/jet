@@ -2426,3 +2426,57 @@ fn trim_file_line(bytes: &[U8]) Never! {
     assert_eq(walk_error(.Read, 7, None, Val("unsupported"), "pattern"),
         IOError.Unsupported(IOContext{operation: .Read, resource: Val("pattern"), os_code: None, cause: Val("unsupported")}))
 }
+
+#Test("filesystem u32 policy preserves chown and permission boundaries") {
+    assert(!files8_u32(-1))
+    assert(files8_u32(0))
+    assert(files8_u32(4294967295))
+    assert(!files8_u32(4294967296))
+    assert((4096 & 61440) == 4096)
+    assert((8192 & 61440) != 4096)
+    assert((32768 & 61440) != 4096)
+}
+
+#Test("walk owns zero-based depth, path sorting and inherited ignore rules") {
+    directory :: core.files.temp_dir("walk_source").expect("temporary walk directory")
+    child :: join(directory.path, "nested")
+    core.files.create_dir(child).expect("nested directory")
+    core.files.write(join(directory.path, "visible"), "root").expect("root file")
+    core.files.write(join(directory.path, "hidden"), "hidden").expect("ignored file")
+    core.files.write(join(directory.path, ".gitignore"), "hidden\n").expect("root rules")
+    core.files.write(join(child, "visible"), "nested").expect("nested file")
+    core.files.write(join(child, "hidden"), "hidden").expect("inherited ignored file")
+    rows :: walk(directory.path, Val(".gitignore")).expect("walk")
+    assert_eq(rows.len(), 3)
+    assert_eq(rows[0].relative, "nested")
+    assert_eq(rows[0].depth, 0)
+    assert(rows[0].is_dir)
+    assert_eq(rows[1].relative, join("nested", "visible"))
+    assert_eq(rows[1].depth, 1)
+    assert_eq(rows[2].relative, "visible")
+    assert_eq(rows[2].depth, 0)
+    files :: walk_files(directory.path, Val(".gitignore")).expect("walk files")
+    assert_eq(files.len(), 2)
+    loop entry in files -> assert(!entry.is_dir)
+}
+
+#Test("walk validates an empty spelling but reads the actual empty root") {
+    if walk("", None) == {
+        .Ok(_) -> assert(false)
+        .Err(_) -> {}
+    }
+}
+
+#Test("walk rejects regular-file roots with the native cause") {
+    file :: temp_file("walk_root").expect("temporary walk root")
+    if walk(file.path, None) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> {
+            if error == {
+                .Other(context) -> assert_eq(context.cause, Val("filesystem walk root is not a directory: {file.path}"))
+                else -> assert(false)
+            }
+        }
+    }
+}
+
