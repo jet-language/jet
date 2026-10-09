@@ -1876,12 +1876,12 @@ function validateDispatcherIdentity(module, member, expression, sourceLine) {
 function ownedWrapperRuntimeUnit(source, module, member) {
   const lines = source.split(/\r?\n/);
   const start = lines.findIndex(function (line) {
-    return new RegExp("^pub\\s+fn\\s+" + member + "\\b").test(line);
+    return new RegExp("^\\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\\(\"(?:[^\"\\\\]|\\\\.)*\"\\))?\\s+)*fn\\s+" + member + "\\b").test(line);
   });
   if (start < 0) return null;
   let end = start + 1;
   while (end < lines.length &&
-      !/^(?:pub\s+)?(?:fn|struct|enum|type|impl|mod|const|trait)\b|^#/.test(lines[end])) {
+      !/^(?:priv\s+)?(?:fn|struct|enum|alias|impl|module|trait)\b|^#/.test(lines[end])) {
     end += 1;
   }
   const body = lines.slice(start, end).join("\n");
@@ -2209,7 +2209,7 @@ function parseCoreSource(source, root = ROOT) {
   }
   for (const sourceModule of sourceModules) {
     const sourceFunctions = new Set(Array.from(
-      read(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+      read(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
     ).map(function (match) { return match[1]; }));
     for (const member of sourceModule.ownedMembers) {
       const target = sourceTargets.get(sourceModule.module + "." + member) ?? member;
@@ -2219,7 +2219,7 @@ function parseCoreSource(source, root = ROOT) {
       }
     }
     const sourceTypes = new Set(Array.from(
-      read(sourceModule.path).matchAll(/^(?:pub\s+)?(?:struct|enum|alias)\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+      read(sourceModule.path).matchAll(/^(?:struct|enum|alias)\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
     ).map(function (match) { return match[1]; }));
     for (const type of sourceModule.ownedTypes) {
       if (!sourceTypes.has(type)) {
@@ -2269,7 +2269,7 @@ function parseCoreSource(source, root = ROOT) {
     const unit = ownedWrapperRuntimeUnit(read(owner.path), owner.module, row.member);
     if (unit) {
       throw new Error("dispatcher row `" + row.module + "." + row.member + "` (Core.jet line " +
-        row.sourceLine + ") is dead: its owned wrapper `pub fn " + row.member + "` in " + owner.path +
+        row.sourceLine + ") is dead: its owned wrapper `fn " + row.member + "` in " + owner.path +
         " (owns at Core.jet line " + owner.sourceLine + ") calls runtime unit `" + unit +
         "` instead of the provider; delete the row and the Rust symbol it names");
     }
