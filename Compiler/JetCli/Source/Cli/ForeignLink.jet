@@ -12,7 +12,7 @@ struct JetCLIForeignInputs {
     paths: [String]
 }
 
-fn jet_cli_foreign_add(inputs: &JetCLIForeignInputs, path: String) -[FS]> String! {
+fn jet_cli_foreign_add(inputs: &JetCLIForeignInputs, path: String) String! -[FS]> {
     if inputs.paths.contains(path) -> return Ok(())
     bytes :: cli_files.read_bytes(path) ?? return Err("couldn't read C link input `{path}`: {err}")
     &inputs.paths.push(path)
@@ -68,7 +68,7 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
     identity := [U8]{}
     jet_cli_foreign_hash_field(&identity, "schema", "jet-native-c-v1".bytes())
     jet_cli_foreign_hash_field(&identity, "target", target.output.bytes())
-    loop (index, tool) in [String]{compiler, archiver} {
+    loop (index, tool) in ([String]{compiler, archiver}) {
         content :: cli_files.read_bytes(tool) ?? return Err("couldn't read C tool `{tool}`: {err}")
         jet_cli_foreign_hash_field(&identity, if index == 0 -> "compiler" else -> "archiver", content)
     }
@@ -86,7 +86,7 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
     loop source in sources {
         argv := [String]{compiler}
         loop flag in flags -> &argv.push(flag)
-        loop flag in [String]{"-ffile-prefix-map={directory}=/jet/c", "-I", directory, "-E", "-P", source} -> &argv.push(flag)
+        loop flag in ([String]{"-ffile-prefix-map={directory}=/jet/c", "-I", directory, "-E", "-P", source}) -> &argv.push(flag)
         receipt :: cli_process.cmd(argv).run() ?? return Err("couldn't preprocess C dependency `{lib}`: {err}")
         if !receipt.success -> return Err("C compiler rejected `{source}`: {receipt.errors}")
         jet_cli_foreign_hash_field(&identity, "preprocessed", receipt.output.bytes())
@@ -109,7 +109,7 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
         object :: "{temporary}/{index}.o"
         argv := [String]{compiler}
         loop flag in flags -> &argv.push(flag)
-        loop flag in [String]{"-c", staged_source, "-o", object} -> &argv.push(flag)
+        loop flag in ([String]{"-c", staged_source, "-o", object}) -> &argv.push(flag)
         receipt :: cli_process.cmd(argv).run() ?? return Err("couldn't compile C dependency `{lib}`: {err}")
         if !receipt.success -> return Err("C compiler rejected `{sources[index]}`: {receipt.errors}")
         &objects.push(object)
@@ -174,7 +174,7 @@ fn jet_cli_native_c_closure(program: MIRProgram, sources: JetCLIForeignSources, 
     libraries = jet_cli_sorted_set(libraries)
     loop lib in libraries {
         // These names select the program's one implicit musl platform below.
-        if [String]{"c", "m", "pthread", "dl", "rt", "util"}.contains(lib) -> next
+        if ([String]{"c", "m", "pthread", "dl", "rt", "util"}).contains(lib) -> next
         directories := [String]{}
         declared_system := false
         loop declaration in declarations {
@@ -225,7 +225,7 @@ fn jet_cli_native_c_closure(program: MIRProgram, sources: JetCLIForeignSources, 
         }
         if names.len() == 0 -> &names.push(lib)
         loop name in names {
-            if [String]{"c", "m", "pthread", "dl", "rt", "util"}.contains(name) -> next
+            if ([String]{"c", "m", "pthread", "dl", "rt", "util"}).contains(name) -> next
             path :: jet_cli_foreign_static_archive(name, directories, cache, false) ?? return Err(err)
             jet_cli_foreign_add(&inputs, path) ?? return Err(err)
         }

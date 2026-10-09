@@ -18,7 +18,7 @@ fn jet_cli_perf_digest(value: String) -> Bool Never! {
 fn jet_cli_perf_browser_symbol(value: String) -> Bool Never! {
     if value == "" || value.bytes().len() > 128 -> return false
     loop byte in value.bytes() {
-        if !(byte >= U8{48} && byte <= U8{57}) && !(byte >= U8{65} && byte <= U8{90}) && !(byte >= U8{97} && byte <= U8{122}) && byte != U8{95} && byte != U8{36} -> return false
+        if !(byte >= U8{48} && byte <= U8{57}) && !(byte >= U8{65} && byte <= U8{90}) && !(byte >= U8{97} && byte <= U8{122}) && byte != (U8{95}) && byte != (U8{36}) -> return false
     }
     true
 }
@@ -35,14 +35,14 @@ fn jet_cli_perf_browser_decode(text: String, pid: Int, started: String) -> JetCL
     header :: perf_json.parse(lines[0]) ?? return Err(jet_cli_read_error("browser relay header is not JSON"))
     jet_cli_perf_browser_status(header, "browser.relay", [String]{"nonce", "pid", "started", "sources"}, [String]{"source_map"})
     nonce :: jet_cli_perf_text(jet_cli_perf_field(header, "nonce"))
-    if nonce == "" || jet_cli_perf_uint(jet_cli_perf_field(header, "pid")) != U64{pid} || jet_cli_perf_text(jet_cli_perf_field(header, "started")) != started -> return Err(jet_cli_read_error("browser relay process identity mismatch"))
+    if nonce == "" || jet_cli_perf_uint(jet_cli_perf_field(header, "pid")) != (U64{pid}) || jet_cli_perf_text(jet_cli_perf_field(header, "started")) != started -> return Err(jet_cli_read_error("browser relay process identity mismatch"))
     sources_text :: jet_cli_perf_hex_text(jet_cli_perf_text(jet_cli_perf_field(header, "sources")))
     sources := [SourceIdentity]{}
     paths := [String:Int]{}
     symbols := [String:String]{}
     // Definitions precede symbols in the producer's canonical TSV carrier.
     loop line in sources_text.split("\n") {
-        if line == "" -> continue
+        if line == "" -> next
         fields :: line.split("\t").to_list()
         if fields.len() == 3 && fields[0] == "source" {
             path :: jet_cli_perf_hex_text(fields[1])
@@ -71,7 +71,7 @@ fn jet_cli_perf_browser_decode(text: String, pid: Int, started: String) -> JetCL
     loop index in 1..<lines.len() {
         if lines[index] == "" {
             if index != lines.len() - 1 -> return Err(jet_cli_read_error("browser relay has an empty interior row"))
-            continue
+            next
         }
         row :: perf_json.parse(lines[index]) ?? return Err(jet_cli_read_error("browser relay row is not JSON"))
         action :: jet_cli_perf_text(jet_cli_perf_field(row, "action"))
@@ -79,13 +79,13 @@ fn jet_cli_perf_browser_decode(text: String, pid: Int, started: String) -> JetCL
             jet_cli_perf_browser_status(row, action, [String]{}, [String]{})
             if truncated -> return Err(jet_cli_read_error("browser relay repeats its truncation marker"))
             truncated = true
-            continue
+            next
         }
         if truncated -> return Err(jet_cli_read_error("browser relay rows follow its truncation marker"))
         jet_cli_perf_browser_status(row, "browser.relay.row", [String]{"class", "duration_ns", "start_ns", "symbol"}, [String]{})
         class :: jet_cli_perf_text(jet_cli_perf_field(row, "class"))
         name :: jet_cli_perf_text(jet_cli_perf_field(row, "symbol"))
-        if ![String]{"event", "wasm", "dom"}.contains(class) || !symbols.has_key(name) -> return Err(jet_cli_read_error("browser relay row has no checked compiler attribution"))
+        if !([String]{"event", "wasm", "dom"}).contains(class) || !symbols.has_key(name) -> return Err(jet_cli_read_error("browser relay row has no checked compiler attribution"))
         if rows.len() >= 4096 -> return Err(jet_cli_read_error("browser relay exceeds its row bound"))
         &rows.push(TraceBrowser{class: class, duration_ns: jet_cli_perf_uint(jet_cli_perf_field(row, "duration_ns")), start_ns: jet_cli_perf_uint(jet_cli_perf_field(row, "start_ns")), symbol: JetSymbolRef{path: symbols[name], name: name}})
     }
@@ -114,7 +114,7 @@ fn jet_cli_perf_browser_request(pid: Int) -[FS, Env, Time.Wait]> String JetCLIRe
     writer.flush() ?? return Err(jet_cli_read_error("cannot flush browser trace request"))
     Ok(started)
 }
-fn jet_cli_perf_browser_cancel_request(pid: Int) -[FS.Write, Env]> JetCLIReadError! {
+fn jet_cli_perf_browser_cancel_request(pid: Int) JetCLIReadError! -[FS.Write, Env]> {
     if pid <= 0 || pid > 4294967295 -> return Err(jet_cli_read_error("process id must be a nonzero u32"))
     path :: perf_files.join(perf_sys.temp_dir(), "jet-browser-trace-{pid}.request")
     if perf_files.remove(path) == {
