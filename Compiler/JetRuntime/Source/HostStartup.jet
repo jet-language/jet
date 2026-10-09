@@ -2,7 +2,7 @@
 // Entryless hosts call this explicit entry before starting runtime threads.
 // argv arrays/bytes remain borrowed for the runtime lifetime. Environment
 // arrays/bytes are lent only during capture, then copied into one owned block.
-// Only Core's Shared overlay owns logical environment writes.
+// The native logical cell alone owns environment writes; this index is startup.
 // All storage uses the one MIR .Global mechanism, never foreign data imports.
 host_argc := I64{-1}
 
@@ -91,6 +91,7 @@ fn host_environment_split(bytes: I64) -> I64 {
     host_env_length = valid
     host_argv = argv
     host_envp = envp
+    logical_environment_startup()
     host_argc = count
 }
 
