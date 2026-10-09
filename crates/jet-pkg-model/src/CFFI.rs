@@ -1786,16 +1786,16 @@ pub struct CffiDiagnostic {
 }
 
 struct AssemblyOrigins {
-    spans: HashMap<Span, Vec<(String, String)>>,
-    headers: Vec<(String, String)>,
-    duplicate_uses: Vec<(String, String)>,
-    invalid_bindgen: Vec<(String, String)>,
-    incompatible_overrides: Vec<(String, String)>,
+    spans: HashMap<Span, Vec<(String, std::sync::Arc<str>)>>,
+    headers: Vec<(String, std::sync::Arc<str>)>,
+    duplicate_uses: Vec<(String, std::sync::Arc<str>)>,
+    invalid_bindgen: Vec<(String, std::sync::Arc<str>)>,
+    incompatible_overrides: Vec<(String, std::sync::Arc<str>)>,
 }
 
 struct OriginSurface {
-    bindgen: Vec<(ExternFn, (String, String))>,
-    overlay: Vec<(ExternFn, (String, String))>,
+    bindgen: Vec<(ExternFn, (String, std::sync::Arc<str>))>,
+    overlay: Vec<(ExternFn, (String, std::sync::Arc<str>))>,
 }
 
 pub fn assemble_with_provenance(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<CffiDiagnostic>> {
@@ -1889,7 +1889,7 @@ fn map_diagnostics(
                         None
                     }
                 })
-                .unwrap_or_else(|| (fallback_file.clone(), String::new()));
+                .unwrap_or_else(|| (fallback_file.clone(), std::sync::Arc::default()));
             CffiDiagnostic {
                 file: origin.0,
                 source: origin.1,
@@ -1899,7 +1899,7 @@ fn map_diagnostics(
         .collect()
 }
 
-fn take_origin(origins: &[(String, String)], next: &mut usize) -> Option<(String, String)> {
+fn take_origin(origins: &[(String, std::sync::Arc<str>)], next: &mut usize) -> Option<(String, std::sync::Arc<str>)> {
     let origin = origins.get(*next).cloned();
     if origin.is_some() {
         *next += 1;
@@ -1918,9 +1918,9 @@ fn assembly_origins(bundle: &ProgramBundle) -> AssemblyOrigins {
     let mut surfaces: HashMap<String, OriginSurface> = HashMap::new();
     let mut order = Vec::new();
     let mut library_order = Vec::new();
-    let mut header_origins_by_lib: HashMap<String, (String, String)> = HashMap::new();
+    let mut header_origins_by_lib: HashMap<String, (String, std::sync::Arc<str>)> = HashMap::new();
     for module in &bundle.modules {
-        let origin = (module.display.clone(), module.source.clone());
+        let origin = (module.display.clone(), std::sync::Arc::<str>::from(module.source.as_str()));
         let generated_language = generated_cache_language(&module.path.to_string_lossy());
         let generated = generated_language.is_some();
         let mut seen: HashMap<(Option<String>, String), (bool, String)> = HashMap::new();
