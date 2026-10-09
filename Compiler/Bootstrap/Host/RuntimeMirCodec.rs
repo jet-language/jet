@@ -630,7 +630,7 @@ fn host_shape_empty_field(field: &Field) -> Option<&'static str> {
     }
     match parse_type(&field.ty) {
         Ok(TypeExpr::List(_)) => Some("::std::vec::Vec::new().into()"),
-        Ok(TypeExpr::Map(..)) => Some("::std::collections::HashMap::new()"),
+        Ok(TypeExpr::Map(..)) => Some("::std::iter::empty().collect()"),
         _ => None,
     }
 }

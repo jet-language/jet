@@ -145,7 +145,8 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
              let template = bindings.create_object(()).map_err(|error| error.to_string())?;\n\
              // Reuse the identity checked once by the immutable image owner.\n\
              let artifact = image.header.artifact;\n\
-             let execution = image.header.identity.clone();\n"
+             let execution = image.header.identity.clone();\n\
+             let program: &::jet_foundation::MIR::MirProgram = image.program.as_ref();\n"
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
 
