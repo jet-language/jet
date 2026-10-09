@@ -1400,6 +1400,16 @@ mod tests {
         assert!(core_source_owns("core.math", "is_even"));
     }
 
+    #[test]
+    fn compiler_views_keep_the_compile_time_provider_route() {
+        for (member, argc) in [
+            ("lex", 1), ("parse", 1), ("check", 1), ("source_map", 1),
+            ("manifest", 0), ("package", 0), ("lock", 0), ("profiles", 0),
+        ] {
+            assert!(!core_source_owns_call("core.compiler", member, argc));
+        }
+    }
+
     /// Criterion #2: a brand-new Core module needs one data row, not a new
     /// Rust match arm. `lookup` is the one function every module (production
     /// or, here, a module added purely for this test) resolves through.
