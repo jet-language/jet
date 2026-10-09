@@ -950,6 +950,17 @@ Retired infix arithmetic and compounds produce E0398 naming the method, with
 a precedence-preserving structured repair. Updates explicitly assign the
 method result back. `core.math.xor` and `core.math.pow` are removed.
 
+Migration tooling: `Tools/agent/migrate-bit-operators.mjs --check` reports value
+operators in Compiler, Core, Jetpack, Tools/testkit, and Examples; `--write`
+rewrites clean files only, with per-area receipts and dirty-owner handoffs in
+`~/.cache/jet-dev/scratch/BitOpsMigration/`. `--self-test` covers precedence and
+non-value grammar. Arithmetic `&`, `|`, and `~|` become `bit_and`, `bit_or`, and
+`bit_xor`; arithmetic `^` becomes `pow`. Historical Rust-origin `^` sites require
+individual semantic review: bit mixing becomes `bit_xor`, not `pow`. Ownership
+marks, pattern/type alternatives, effect rows, strings, prep/templates, foreign
+bodies, and generator templates are not migration inputs. Compound updates
+assign the method result back explicitly.
+
 **D-CHAINCMP1 — Chained comparisons**: `0 <= sev < 10` desugars to
 `0 <= sev && sev < 10`, middle operand evaluated once. Same-direction chains
 of `<`/`<=`/`>`/`>=` only; mixed direction is a compile error (E0333);
