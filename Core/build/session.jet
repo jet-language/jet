@@ -173,13 +173,13 @@ fn build_session_diag(state: BuildSessionState, what: String) -> BuildSessionDia
 }
 
 fn build_session_fail(state: BuildSessionState, what: String) -> BuildSessionReply {
-    .Failure(build_session_diag(state, what))
+    return .Failure(build_session_diag(state, what))
 }
 
 // runtime_bridge.rs `eval_session_method`: an ambient build call outside
 // `#Impure` is its own E3502 report, not an invalid-plan fact.
 fn build_session_impure(state: BuildSessionState, method: String) -> BuildSessionReply {
-    .Failure({code: "E3502", what: "`b.{method}` touches the ambient world and must be inside `#Impure(\"reason\")`", why: "build effects must be declared exactly where an auditor can see them", fix: "wrap the `b.{method}` call in `#Impure(\"why it is needed\")`", start: state.start, end: state.end})
+    return .Failure({code: "E3502", what: "`b.{method}` touches the ambient world and must be inside `#Impure(\"reason\")`", why: "build effects must be declared exactly where an auditor can see them", fix: "wrap the `b.{method}` call in `#Impure(\"why it is needed\")`", start: state.start, end: state.end})
 }
 
 fn build_session_text(args: [BuildSessionValue], index: Int) -> String? {
@@ -684,5 +684,5 @@ fn build_session_error_diag(state: BuildSessionState, error: BuildSessionError) 
     diagnostic
 }
 fn build_session_error_fail(state: BuildSessionState, error: BuildSessionError) -> BuildSessionReply Never! {
-    .Failure(build_session_error_diag(state, error))
+    return .Failure(build_session_error_diag(state, error))
 }
