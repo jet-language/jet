@@ -735,7 +735,7 @@ fn sema_function_generic_params(func: Func, graph_option: SemaRegistrationGraph?
                 next
             }
             graph :: graph_option
-            resolved :: sema_type_graph_lookup_symbol(graph, module_identity, bound) ?? {
+            resolved :: sema_type_graph_bound_symbol(graph, module_identity, bound) ?? {
                 if graph.complete -> &diagnostics.push(sema_error("E0301", parameter.name_span, "the generic bound `{bound}` is not registered", "checked generic declarations need a trait identity", "import or declare the trait before using it as a bound"))
                 complete = false
                 bound_index += 1
@@ -810,7 +810,7 @@ fn sema_function_owner_generic_params(graph: SemaRegistrationGraph, owner_type: 
         }
         bounds := [SymbolID]{}
         loop bound in parameter.bounds {
-            resolved := sema_type_graph_lookup_symbol(graph, owner_module.module_identity, bound)
+            resolved := sema_type_graph_bound_symbol(graph, owner_module.module_identity, bound)
             if resolved == None {
                 if graph.complete {
                     &diagnostics.push(sema_error("E0301", parameter.span, "the generic bound `{bound}` is not registered", "checked generic declarations need a trait identity", "import or declare the trait before using it as a bound"))

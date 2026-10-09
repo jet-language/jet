@@ -38,6 +38,7 @@ use jet_foundation.[
     core_enum_payload_variants,
     core_enum_variant_payload,
     core_enum_variants,
+    core_module_enum_variants,
     core_record_literal_fields,
     core_call,
     expr_span,
@@ -66,6 +67,19 @@ fn sema_expression_type_symbol(scopes: &SemaScopeTable, environment: SemaScopeEn
     if resolved.symbol.kind == SymbolKind.Type -> Val(resolved.symbol) else -> None
 }
 
+// A type the Core export ledger owns without a source declaration
+// (`use core.encoding.[DataEvent]`, `encoding.DataEvent`): the registered
+// exporting module's catalog row authenticates the enum and its variants; a
+// user module with a Core-like leaf or name never takes this path.
+fn sema_expression_core_export_variants(environment: SemaScopeEnvironment, symbol: Symbol) -> [String]? {
+    if symbol.kind != SymbolKind.Type || !symbol.module_name.starts_with("<corelib>/") -> return None
+    if sema_scope_declaration_site(environment, symbol.id) != None -> return None
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return None
+    module_index :: sema_registration_module_index(graph, symbol.module_name) ?? return None
+    core_module_enum_variants(graph.modules[module_index].module_name, symbol.name)
+}
+
 // Rust `infer_field` (`is_known_enum`): `Name.Variant` reads a variant when
 // `Name` is a declared enum, a compiler-owned enum menu (`Ordering`,
 // `RemoveBy`, the fact enums) or a Core enum, and no value binding shadows it.
@@ -76,6 +90,7 @@ fn sema_expression_names_enum(name: String, environment: SemaScopeEnvironment, s
     owner := sema_expression_type_symbol(&scopes, environment, name)
     if owner == .Val(symbol) {
         if sema_scope_declaration_is(environment, symbol.id, SemaScopeDeclarationKind.Enum) -> return true
+        if sema_expression_core_export_variants(environment, symbol) != None -> return true
     }
     sema_expression_core_enum_name(name)
 }
@@ -497,10 +512,17 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
     if fact_enum.handled -> return fact_enum.value
     // A Core enum with no source declaration (`IOError`, `ProcessStreamMode`)
     // builds its variant from the generated Core enum rows.
-    if sema_expression_type_symbol(&scopes, environment, resolved_name) == None {
+    owner_symbol :: sema_expression_type_symbol(&scopes, environment, resolved_name)
+    if owner_symbol == None {
         core_variants := core_enum_payload_variants(resolved_name)
         if core_variants == None -> core_variants = core_enum_variants(resolved_name)
         if core_variants == .Val(variants) -> return sema_expression_core_enum_literal(resolved_name, variants, variant, args, variant_span, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
+    if owner_symbol == .Val(core_owner) {
+        if sema_expression_core_export_variants(environment, core_owner) == .Val(variants) {
+            &context.name_references.push(SemaNameReferenceFact{span: span, symbol: core_owner, kind: "type"})
+            return sema_expression_core_enum_literal(core_owner.name, variants, variant, args, variant_span, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
     }
     if type_name == "" {
         inferred_owner :: sema_expression_type_symbol(&scopes, environment, resolved_name)

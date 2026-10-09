@@ -28,6 +28,7 @@ use jet_foundation.[
     Type,
     core_call,
     core_call_typed_signature,
+    diagnostic_registry_row,
     diagnostic_with_edit,
     expr_span,
     tir_generated_local,
@@ -269,13 +270,106 @@ pub fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment:
 pub fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.name == {
+        "freeze" -> sema_call_check_freeze(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         "print" -> sema_call_check_ambient_print(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         "input" -> sema_call_check_ambient_input(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         "panic" -> sema_call_check_ambient_panic(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         "assert" -> sema_call_check_ambient_assert(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         "assert_eq" -> sema_call_check_ambient_assert_eq(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        else -> SemaDirectSpecialCheck{handled: false, value: None}
+        "Decimal" -> sema_call_check_value_constructor(call, "Decimal", [Type]{Type.String}, false, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        "Complex" -> sema_call_check_value_constructor(call, "Complex", [Type]{Type.Float, Type.Float}, false, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        else -> {
+            if !sema_expr_is_math_type_name(call.name) -> return SemaDirectSpecialCheck{handled: false, value: None}
+            components := [Type]{}
+            loop _ in 0..<sema_call_math_arity(call.name) -> &components.push(sema_call_math_scalar_type(call.name))
+            sema_call_check_value_constructor(call, call.name, components, true, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
     }
+}
+
+// D-SIMD2 / D-LINALG1: the scalar slots of a built-in math value type's
+// positional constructor (Rust `math_arity`): a lane type's lane count, a
+// vector's dimension, a square matrix's N*N column-major components.
+fn sema_call_math_arity(name: String) -> Int Never! {
+    if name == {
+        "Vec2" -> return 2
+        "Vec3" -> return 3
+        "Vec4" -> return 4
+        "Mat3" -> return 9
+        "Mat4" -> return 16
+        else -> {}
+    }
+    lanes :: name.split("x").to_list()
+    if lanes.len() != 2 -> return 0
+    Int.parse(lanes[1]) ?? 0
+}
+
+// Rust `math_scalar_ty`: a lane type's component width; linear-algebra types
+// are Float.
+fn sema_call_math_scalar_type(name: String) -> Type Never! {
+    if name.starts_with("F32x") -> return Type.Float32
+    if name.starts_with("I8x") -> return Type.IntN{signed: true, bits: 8}
+    if name.starts_with("I16x") -> return Type.IntN{signed: true, bits: 16}
+    if name.starts_with("I32x") -> return Type.IntN{signed: true, bits: 32}
+    if name.starts_with("I64x") -> return Type.IntN{signed: true, bits: 64}
+    if name.starts_with("U8x") -> return Type.IntN{signed: false, bits: 8}
+    if name.starts_with("U16x") -> return Type.IntN{signed: false, bits: 16}
+    if name.starts_with("U32x") -> return Type.IntN{signed: false, bits: 32}
+    if name.starts_with("U64x") -> return Type.IntN{signed: false, bits: 64}
+    Type.Float
+}
+
+// `Decimal("12.34")` (D-DECIMAL1), `Complex(re, im)` (D-TYPE2-IMAG1=A) and
+// `Vec3(x, y, z)`-style math constructors (D-SIMD2 / D-LINALG1): each argument
+// is checked against its component type in order and the call becomes the
+// type's precise or math builtin, as Rust TIR lowering builds it.
+fn sema_call_check_value_constructor(call: Call, type_name_value: String, components: [Type], math: Bool, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if call.args.len() != components.len() {
+        what := if {
+            type_name_value == "Decimal" -> "`Decimal` takes exactly one argument, got {call.args.len()}"
+            type_name_value == "Complex" -> "`Complex` takes exactly two arguments, got {call.args.len()}"
+            else -> "`{type_name_value}` takes exactly {components.len()} component{if components.len() == 1 -> "" else -> "s"}, got {call.args.len()}"
+        }
+        why := if {
+            type_name_value == "Decimal" -> "`Decimal` parses an exact base-10 decimal from a `String`"
+            type_name_value == "Complex" -> "`Complex` takes the real part first and the imaginary part second"
+            else -> "`{type_name_value}` is a built-in {if type_name_value.starts_with("Vec") || type_name_value.starts_with("Mat") -> "linear-algebra" else -> "SIMD lane"} type — construct it from its {components.len()} components"
+        }
+        fix := if {
+            type_name_value == "Decimal" -> "write `Decimal(\"12.34\")`"
+            type_name_value == "Complex" -> "write `Complex(real, imaginary)`"
+            else -> {
+                slots := [String]{}
+                loop _ in components -> &slots.push("…")
+                "write `{type_name_value}({slots.join(", ")})`"
+            }
+        }
+        &diagnostics.push(sema_error("E0103", call.name_span, what, why, fix))
+        loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    values := [TExpr]{}
+    complete := true
+    loop index in 0..<components.len() {
+        component :: components[index]
+        checked :: sema_check_expression(call.args[index].expr, Val(component), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+            complete = false
+            next
+        }
+        coerced :: sema_expr_expected(checked, Val(component), environment, &diagnostics) ?? {
+            complete = false
+            next
+        }
+        &values.push(coerced)
+    }
+    if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
+    result_ty :: Type.Named{name: type_name_value}
+    kind :: if {
+        math -> TExprKind.MathBuiltin{type_name: type_name_value, function: "new", args: values}
+        type_name_value == "Decimal" -> TExprKind.PreciseBuiltin{type_name: type_name_value, function: "from_str", args: values}
+        else -> TExprKind.PreciseBuiltin{type_name: type_name_value, function: "from_parts", args: values}
+    }
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(sema_tir_expr(result_ty, kind, call.name_span), expected, environment, &diagnostics)}
 }
 
 // An ambient row's IO effect, recorded as its call-site fact so the effect
@@ -970,3 +1064,47 @@ pub fn sema_call_check_direct(state: &SemaOwnershipState, call: Call, expected: 
     Val(checked.value)
 }
 
+
+fn sema_call_check_freeze(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if call.args.len() != 1 {
+        sema_stream_handle_infer_args(call.args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        &diagnostics.push(sema_error("E0104", call.name_span, "`freeze` takes exactly one value, got {call.args.len()}", "`freeze(x)` creates one deeply immutable owned snapshot for a crossing", "write `freeze(value)` with exactly one value"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    source := call.args[0].expr
+    previous_borrow := context.borrow_ctx
+    previous_string_view_read := context.allow_string_view_read
+    context.borrow_ctx = true
+    context.allow_string_view_read = true
+    checked_source := sema_check_expression(source, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    context.borrow_ctx = previous_borrow
+    context.allow_string_view_read = previous_string_view_read
+    checked :: checked_source ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    string_view := sema_expr_copy_string_view(source, &scopes)
+    facts := sema_copy_classify(checked.ty, SemaCopyIntent.Clone, environment, context.generic_params, string_view)
+    problem := sema_ownership_crossing_problem(facts.target, SemaSendCrossing.FrozenSnapshot, true, environment, scopes, context)
+    reason := String?{None}
+    if problem == .Val(found) && found.kind == SemaSendProblemKind.SharedMutation -> reason = Val(sema_ownership_crossing_describe(found))
+    if reason == None && facts.resource -> reason = Val("a resource has one cleanup owner and cannot be duplicated into a snapshot")
+    if reason == None && (!facts.complete || !facts.cloneable) -> reason = Val("the value contains a resource, function, trait value, or mutable view that Jet cannot duplicate")
+    if reason == .Val(explanation) {
+        row :: diagnostic_registry_row("E1114") ?? panic("E1114 has no registry row")
+        what := row.what.replace("{{ty}}", type_name(checked.ty)).replace("{{reason}}", explanation)
+        &diagnostics.push(sema_error("E1114", expr_span(source), what, row.why, row.fix))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    if problem == .Val(found) {
+        &diagnostics.push(sema_ownership_crossing_diagnostic("this frozen value", facts.target, found, SemaSendCrossing.TaskCapture, expr_span(source)))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    already_frozen := sema_ownership_frozen_expr_site(state, source, scopes) != None
+    result := checked
+    if !already_frozen {
+        if sema_copy_memory_operation(facts) != None || sema_copy_effect_name(facts) != None -> &context.copy_events.push(SemaCopyEvent{span: call.name_span, facts: facts})
+        kind := if facts.materializes_view -> TExprKind.MaterializeView{value: checked} else -> TExprKind.Clone{value: checked, fact: MIRCopyFact.Explicit}
+        result = sema_tir_expr(facts.target, kind, call.name_span)
+    }
+    &state.freeze_sites.push(SemaOwnershipFreezeSite{span: call.name_span, line: sema_source_line_at(environment.source_segments, call.name_span) ?? 1, column: sema_source_column_at(environment.source_segments, call.name_span) ?? 1})
+    checked_result := sema_expression_call_expected(result, expected, environment, context, &diagnostics)
+    SemaDirectSpecialCheck{handled: true, value: checked_result}
+}

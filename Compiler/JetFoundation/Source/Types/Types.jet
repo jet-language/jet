@@ -179,6 +179,53 @@ pub struct Dimension {
     pub axes: [DimensionAxis]
 }
 
+// Rust AST/types.rs Dimension::base/multiply/divide/combine. Axes stay sorted
+// by base identity with zero exponents removed (Rust BTreeMap), so equality is
+// stable; an exponent outside i32 makes the combination unrepresentable.
+pub fn dimension_base(identity: String) -> Dimension Never! {
+    Dimension{axes: [DimensionAxis]{DimensionAxis{name: identity, exponent: Measure.SignedLiteral{kind: "dimension", value: 1}}}}
+}
+
+pub fn dimension_multiply(left: Dimension, right: Dimension) -> Dimension? {
+    dimension_combine(left, right, false)
+}
+
+pub fn dimension_divide(left: Dimension, right: Dimension) -> Dimension? {
+    dimension_combine(left, right, true)
+}
+
+fn dimension_combine(left: Dimension, right: Dimension, subtract: Bool) -> Dimension? {
+    axes := ~left.axes
+    loop axis in right.axes {
+        exponent :: measure_signed_value(axis.exponent) ?? return None
+        delta :: if subtract -> -exponent else -> exponent
+        found := false
+        index := 0
+        loop index < axes.len() {
+            if axes[index].name == axis.name {
+                found = true
+                break
+            }
+            index += 1
+        }
+        current := 0
+        if found -> current = measure_signed_value(axes[index].exponent) ?? return None
+        next :: current + delta
+        if next < -2147483648 || next > 2147483647 -> return None
+        if found {
+            if next == 0 {
+                _ := &axes.remove(index, .Slot)
+            } else {
+                axes[index].exponent = Measure.SignedLiteral{kind: "dimension", value: next}
+            }
+        } else {
+            if next != 0 -> &axes.push(DimensionAxis{name: axis.name, exponent: Measure.SignedLiteral{kind: "dimension", value: next}})
+        }
+    }
+    &axes.sort_by((a: DimensionAxis, b: DimensionAxis) -> a.name <=> b.name)
+    Val(Dimension{axes: axes})
+}
+
 pub fn dimension_identity(dimension: Dimension) -> String Never! {
     parts := [String]{}
     loop axis in dimension.axes {
