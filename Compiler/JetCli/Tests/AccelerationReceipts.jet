@@ -5,6 +5,15 @@ use core.sys as cli_sys
 use core.process as cli_process
 use jet_foundation.[canonical_json_parse, MIR_ACCELERATION_RECEIPT_SCHEMA_DIGEST, MIR_ACCELERATION_RECEIPT_TYPE_NAME]
 
+struct JetCLIAccelerationFixtureRoot {
+    path: String
+}
+impl JetCLIAccelerationFixtureRoot.Close {
+    fn close(^self) -[FS]> {
+        cli_files.remove_all(self.path).drop("remove receipt fixture")
+    }
+}
+
 fn acceleration_receipt_require(ok: Bool, label: String) Never! {
     if !ok -> panic("authenticated acceleration receipts: {label}")
 }
@@ -24,7 +33,8 @@ fn run() {
     base :: cli_sys.get("JET_CLI_FMT_TEST_ROOT") ?? panic("set disk-backed JET_CLI_FMT_TEST_ROOT")
     root :: "{base}/accel-{cli_process.current_pid()}"
     cli_files.create_dir_all(root) ?? panic("create receipt fixture")
-    defer { cli_files.rmtree(root).drop("remove receipt fixture") }
+    owner :: JetCLIAccelerationFixtureRoot{path: root}
+    defer close(^owner)
     file :: "{root}/run.jet"
     cli_files.write(file, "fn run() {{}}\n") ?? panic("create real source")
     cache := WorkspaceDeclarationCache.new()
@@ -59,19 +69,20 @@ fn run() {
     acceleration_receipt_require(sorted[0].decision.measurement.sample_nanos == U64.MAX && sorted[0].decision.measurement.required_serial_nanos == None, "full u64 and optional null measurements")
     duplicate := older
     duplicate.sections = [JetCLIReceiptSection]{acceleration_receipt_section("1", payload), acceleration_receipt_section("01", payload)}
-    acceleration_receipt_require(jet_cli_acceleration_receipt_rows(duplicate, U64{1}, JET_COMPILER_TARGET_USIZE_MAX) == .Err("duplicate acceleration receipt sequence"), "duplicate numeric sequence rejected")
+    duplicate_rows :: jet_cli_acceleration_receipt_rows(duplicate, U64{1}, JET_COMPILER_TARGET_USIZE_MAX)
+    acceleration_receipt_require(if duplicate_rows == {.Err(error) -> error.message == "duplicate acceleration receipt sequence" else -> false}, "duplicate numeric sequence rejected with typed error")
     wide_payload :: payload.replace("\"start\":2", "\"start\":18446744073709551614").replace("\"end\":9", "\"end\":18446744073709551615")
     wide := older
     wide.sections = [JetCLIReceiptSection]{acceleration_receipt_section("1", wide_payload)}
     wide_rows :: jet_cli_acceleration_receipt_rows(wide, U64{1}, U64.MAX) ?? panic("wide source range")
     acceleration_receipt_require(jet_cli_status_json(jet_cli_optimization_runtime(wide_rows[0])).contains("\"end\":18446744073709551615"), "runtime spans never narrow to signed Int")
     truncated :: jet_cli_acceleration_receipt_rows(wide, U64{1}, U64{4294967295})
-    acceleration_receipt_require(if truncated == {.Err(_) -> true else -> false}, "host pointer width constrains usize source ranges")
-    loop invalid in [String]{payload.replace("\"pin\":null", "\"pin\":\"#Scalar\""), payload.replace("\"selected\"", "\"unknown\""), payload.replace("\"loop_header\":7", "\"loop_header\":4294967296"), payload.replace("\"start\":2", "\"start\":10"), payload.replace("\"floor_nanos\":1", "\"floor_nanos\":1,\"unknown\":0")} {
+    acceleration_receipt_require(if truncated == {.Err(error) -> error.message == "acceleration field `start` is out of range" else -> false}, "host pointer width error propagates from foundation codec")
+    loop invalid in ([String]{payload.replace("\"pin\":null", "\"pin\":\"#Scalar\""), payload.replace("\"selected\"", "\"unknown\""), payload.replace("\"loop_header\":7", "\"loop_header\":4294967296"), payload.replace("\"start\":2", "\"start\":10"), payload.replace("\"floor_nanos\":1", "\"floor_nanos\":1,\"unknown\":0")}) {
         bad := older
         bad.sections = [JetCLIReceiptSection]{acceleration_receipt_section("1", invalid)}
         rejected :: jet_cli_acceleration_receipt_rows(bad, U64{1}, U64.MAX)
-        acceleration_receipt_require(if rejected == {.Err(_) -> true else -> false}, "malformed typed payload rejected")
+        acceleration_receipt_require(if rejected == {.Err(error) -> error.message != "" else -> false}, "malformed payload rejected with typed error message")
     }
     malformed_claim :: jet_cli_receipt_claim("build", paths, [String]{"build", file, "--profile", "malformed"}, terminal) ?? panic("malformed-row claim")
     malformed :: jet_cli_receipt_prepare(malformed_claim, 0, [], [], [JetCLIReceiptSection]{acceleration_receipt_section("1", acceleration_receipt_payload("unknown"))}, [], [], []) ?? panic("authenticated malformed typed payload")

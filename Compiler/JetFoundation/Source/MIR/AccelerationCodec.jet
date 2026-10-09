@@ -1,13 +1,15 @@
 // MIROptimization/Acceleration.rs runtime receipt contract. This decodes facts;
 // it never recomputes the recorded gate decision from current measurements.
-use jet_foundation.[CanonicalJSON, CanonicalJSONField, MIRAccelerationDecision, MIRAccelerationTransform, MIRAccelerationPin, MIRAccelerationGateStatus, MIRAccelerationMeasurement]
+// Shape and value refusals share CanonicalJSONError with the canonical parser;
+// callers propagate the typed error and render its message only at the boundary.
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, CanonicalJSONError, canonical_json_error, MIRAccelerationDecision, MIRAccelerationTransform, MIRAccelerationPin, MIRAccelerationGateStatus, MIRAccelerationMeasurement]
 MIR_ACCELERATION_RECEIPT_TYPE_NAME :: "AccelerationDecision"
 MIR_ACCELERATION_RECEIPT_SECTION_PREFIX :: "jet.acceleration."
 MIR_ACCELERATION_RECEIPT_SCHEMA_DIGEST :: "20e12f682eae102174b015d816a7170a9c6042b87ec67722cbee3bf3f0eae388"
 
-fn mir_acceleration_json_object(value: CanonicalJSON, label: String, keys: [String]) -> [CanonicalJSONField] String! {
-    fields :: if value == .Object(found) -> found else -> { return Err("{label} must be a canonical object") }
-    if fields.len() != keys.len() -> return Err("{label} has missing or unknown fields")
+fn mir_acceleration_json_object(value: CanonicalJSON, label: String, keys: [String]) -> [CanonicalJSONField] CanonicalJSONError! {
+    fields :: if value == .Object(found) -> found else -> { return Err(canonical_json_error("{label} must be a canonical object")) }
+    if fields.len() != keys.len() -> return Err(canonical_json_error("{label} has missing or unknown fields"))
     loop key in keys {
         found := false
         loop field in fields {
@@ -16,58 +18,58 @@ fn mir_acceleration_json_object(value: CanonicalJSON, label: String, keys: [Stri
                 break
             }
         }
-        if !found -> return Err("{label} has missing or unknown fields")
+        if !found -> return Err(canonical_json_error("{label} has missing or unknown fields"))
     }
     Ok(fields)
 }
-fn mir_acceleration_json_field(fields: [CanonicalJSONField], key: String) -> CanonicalJSON String! {
+fn mir_acceleration_json_field(fields: [CanonicalJSONField], key: String) -> CanonicalJSON CanonicalJSONError! {
     loop field in fields { if field.key == key -> return Ok(field.value) }
-    Err("acceleration field `{key}` is missing")
+    Err(canonical_json_error("acceleration field `{key}` is missing"))
 }
-fn mir_acceleration_json_string(fields: [CanonicalJSONField], key: String) -> String String! {
+fn mir_acceleration_json_string(fields: [CanonicalJSONField], key: String) -> String CanonicalJSONError! {
     value :: mir_acceleration_json_field(fields, key)
     if value == .String(text) -> return Ok(text)
-    Err("acceleration field `{key}` must be a string")
+    Err(canonical_json_error("acceleration field `{key}` must be a string"))
 }
-fn mir_acceleration_json_u64(fields: [CanonicalJSONField], key: String) -> U64 String! {
+fn mir_acceleration_json_u64(fields: [CanonicalJSONField], key: String) -> U64 CanonicalJSONError! {
     value :: mir_acceleration_json_field(fields, key)
-    if value == .Integer(text) -> return Ok(U64.parse(text) ?? return Err("acceleration field `{key}` is out of range"))
-    Err("acceleration field `{key}` must be an integer")
+    if value == .Integer(text) -> return Ok(U64.parse(text) ?? return Err(canonical_json_error("acceleration field `{key}` is out of range")))
+    Err(canonical_json_error("acceleration field `{key}` must be an integer"))
 }
-fn mir_acceleration_json_optional_u64(fields: [CanonicalJSONField], key: String) -> U64? String! {
+fn mir_acceleration_json_optional_u64(fields: [CanonicalJSONField], key: String) -> U64? CanonicalJSONError! {
     value :: mir_acceleration_json_field(fields, key)
     if value == .Null -> return Ok(None)
-    if value == .Integer(text) -> return Ok(Val(U64.parse(text) ?? return Err("acceleration field `{key}` is out of range")))
-    Err("acceleration field `{key}` must be an integer or null")
+    if value == .Integer(text) -> return Ok(Val(U64.parse(text) ?? return Err(canonical_json_error("acceleration field `{key}` is out of range"))))
+    Err(canonical_json_error("acceleration field `{key}` must be an integer or null"))
 }
-fn mir_acceleration_json_usize(fields: [CanonicalJSONField], key: String, usize_max: U64) -> U64 String! {
+fn mir_acceleration_json_usize(fields: [CanonicalJSONField], key: String, usize_max: U64) -> U64 CanonicalJSONError! {
     value :: mir_acceleration_json_u64(fields, key)
-    if value > usize_max -> return Err("acceleration field `{key}` is out of range")
+    if value > usize_max -> return Err(canonical_json_error("acceleration field `{key}` is out of range"))
     Ok(value)
 }
 
-fn mir_acceleration_decision_read(value: CanonicalJSON, usize_max: U64) -> MIRAccelerationDecision String! {
+fn mir_acceleration_decision_read(value: CanonicalJSON, usize_max: U64) -> MIRAccelerationDecision CanonicalJSONError! {
     fields :: mir_acceleration_json_object(value, "acceleration decision", [String]{"measurement", "pin", "status", "transform"})
     name :: mir_acceleration_json_string(fields, "transform")
     transform :: if name == {
         "column-copy" -> MIRAccelerationTransform.TransientColumnCopy
         "parallel" -> MIRAccelerationTransform.PooledParallelChunks
-        else -> { return Err("unknown acceleration transform `{name}`") }
+        else -> { return Err(canonical_json_error("unknown acceleration transform `{name}`")) }
     }
     pin_value :: mir_acceleration_json_field(fields, "pin")
     pin := MIRAccelerationPin?{None}
     if pin_value != .Null {
-        text :: if pin_value == .String(found) -> found else -> { return Err("acceleration field `pin` must be a string or null") }
+        text :: if pin_value == .String(found) -> found else -> { return Err(canonical_json_error("acceleration field `pin` must be a string or null")) }
         pin = Val(if text == {
             "#Scalar" -> MIRAccelerationPin.Scalar
             "#Local" -> MIRAccelerationPin.Local
-            else -> { return Err("unknown acceleration pin `{text}`") }
+            else -> { return Err(canonical_json_error("unknown acceleration pin `{text}`")) }
         })
     }
     status_name :: mir_acceleration_json_string(fields, "status")
     status :: if status_name == {
         "below-static-floor" -> MIRAccelerationGateStatus.BelowStaticFloor
-        "pinned" -> MIRAccelerationGateStatus.Pinned{pin: pin ?? return Err("pinned acceleration decision is missing pin")}
+        "pinned" -> MIRAccelerationGateStatus.Pinned{pin: pin ?? return Err(canonical_json_error("pinned acceleration decision is missing pin"))}
         "not-release-build" -> MIRAccelerationGateStatus.NotReleaseBuild
         "cross-mode-parity-missing" -> MIRAccelerationGateStatus.CrossModeParityMissing
         "column-copy-not-applicable" -> MIRAccelerationGateStatus.ColumnCopyNotApplicable
@@ -78,9 +80,9 @@ fn mir_acceleration_decision_read(value: CanonicalJSON, usize_max: U64) -> MIRAc
         "invalid-measurement" -> MIRAccelerationGateStatus.InvalidMeasurement
         "projected-gain-below-threshold" -> MIRAccelerationGateStatus.ProjectedGainBelowThreshold
         "selected" -> MIRAccelerationGateStatus.Selected
-        else -> { return Err("unknown acceleration gate status `{status_name}`") }
+        else -> { return Err(canonical_json_error("unknown acceleration gate status `{status_name}`")) }
     }
-    if pin != None && status_name != "pinned" -> return Err("un-pinned acceleration decision carries a pin")
+    if pin != None && status_name != "pinned" -> return Err(canonical_json_error("un-pinned acceleration decision carries a pin"))
     measurement :: mir_acceleration_json_object(mir_acceleration_json_field(fields, "measurement"), "acceleration measurement", [String]{"bandwidth_floor_nanos", "floor_nanos", "items", "projected_serial_nanos", "required_serial_nanos", "sample_items", "sample_nanos", "spawn_nanos"})
     Ok(MIRAccelerationDecision{transform: transform, status: status, measurement: MIRAccelerationMeasurement{
         bandwidth_floor_nanos: mir_acceleration_json_u64(measurement, "bandwidth_floor_nanos"),
