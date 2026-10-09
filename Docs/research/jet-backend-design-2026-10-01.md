@@ -987,6 +987,11 @@ keys. `DataEntriesToMap` copies borrowed entries into the ordinary native Map
 in source order, so the last duplicate wins without changing the original
 DataTree. Record getters lend collection and nested-element storage while
 rebuilding native values; constructors consume the freshly built holders.
+The vetted `encoding.__bytes_view` leaf projects `DataTree.Bytes` directly
+from its checked native enum payload into a borrowed `[len, 0, data]` header.
+It allocates nothing and copies no byte elements; native U8 elements retain
+their word stride. Parameter-zero provenance keeps the owner borrowed until
+the view dies. Dropping a view never frees the owner's payload.
 
 The route generator discovers declarations produced by invoked non-repeating
 runtime macros, retaining their invocation's module and platform guards.
