@@ -716,6 +716,7 @@ fn jet_target_layout_type_inner(engine: TargetLayoutEngine, ty: Type, owner_qual
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_target_layout_type_inner(engine, base, owner_qualified_name, &query)
         .Named(name) -> jet_target_layout_named_type(engine, name, [Type]{}, owner_qualified_name, &query)
         .Apply(name, args) -> {
+            if name == "Ptr" && args.len() == 1 -> return Val(ByteLayout{size: engine.target.pointer_size, alignment: engine.target.pointer_alignment, stride: engine.target.pointer_size})
             if jet_target_layout_is_atomic_name(name) -> return jet_target_layout_atomic_layout(engine, args)
             jet_target_layout_named_type(engine, name, args, owner_qualified_name, &query)
         }

@@ -2968,6 +2968,10 @@ Arenas are the safe fast-allocation primitive; raw pointers and volatile access
 are separate unsafe operations. The source is
 [`Core/mem/mem.jet`](../../../Core/mem/mem.jet).
 
+Raw `*T` fields in physical aggregates use the selected target's pointer size,
+alignment, and pointer-sized stride, even when the pointee's layout is opaque;
+these facts do not grant dereference access or change the `#Unsafe` rules.
+
 An allocation view borrows its allocator's storage. It cannot be returned,
 stored, sent, or used after the allocator resets or closes: the checker reports
 **E0631** for an escaping view and **E0632** for a view used after invalidation.
