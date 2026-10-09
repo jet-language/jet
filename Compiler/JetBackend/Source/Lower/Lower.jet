@@ -694,6 +694,7 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if lower_is_stm(ty) -> return LowerRepr.Handle{drop: "jet_rt_native_stm_rollback", clone: ""}
             if lower_is_condition(ty) && lower_type_def(p, ty) == None -> return LowerRepr.Handle{drop: "jet_rt_native_condition_drop", clone: "jet_rt_native_condition_clone"}
             if lower_lazy_element(ty) == .Val(elem) -> return lower_lazy_repr(p, ty, elem)
+            if lower_queue_element(ty) == .Val(elem) -> return lower_queue_repr(p, elem)
             if lower_task_handle_repr(ty) == .Val(handle) -> return handle
             // Ptr<T>: a raw word address (Pointers.jet).
             if lower_ptr_element(ty) != None -> return LowerRepr.Word
@@ -771,6 +772,14 @@ fn lower_repr_layout(repr: LowerRepr) -> LIRLayout? {
         .Handle(_, _) -> Val(lir_layout_pointer())
         .Boxed(_) | .Inline(_) -> Val(lir_layout_pointer())
         else -> None
+    }
+}
+
+// An owned runtime handle (its drop/clone are runtime exports).
+fn lower_repr_is_handle(repr: LowerRepr) -> Bool Never! {
+    if repr == {
+        .Handle(_, _) -> true
+        else -> false
     }
 }
 
@@ -3066,6 +3075,10 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
     if lower_condition_of(op) == .Val(condition) {
         if left_layout != lower_value_layout(f, right_value) -> return lower_fail(&m, &f, "comparison operands {left.value} and {right.value} differ in layout")
         if exact -> return lower_exact_compare(&m, &f, dst, condition, left_value, right_value)
+        if lower_order_runtime(p, left_ty) != None {
+            order :: lower_map_key_order(p, &m, &f, left_ty, left_value, right_value)
+            return lower_order_condition(&f, dst, condition, order)
+        }
         if lower_text_type(left_ty) {
             if condition != .Eq && condition != .Ne -> return lower_string_compare(&m, &f, dst, condition, left_value, right_value)
             equal :: lower_flag(&f)
@@ -3627,6 +3640,7 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
         if lower_codec_call(p, c, &m, &f, instruction, call, args, type_args) -> return
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "call names missing Prelude call {call.value}")
         symbol :: lower_runtime_symbol(row)
+        if lower_typed_call(p, c, &m, &f, instruction, symbol, args) -> return
         if args.len() == 1 {
             if symbol == "jet_fmt_display" -> return lower_prelude_render(p, c, &m, &f, instruction, args[0].value, LowerRenderMode.Display)
             if symbol == "jet_fmt_debug" -> return lower_prelude_render(p, c, &m, &f, instruction, args[0].value, LowerRenderMode.Debug)

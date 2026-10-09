@@ -36,8 +36,8 @@ fn lower_task_handle_repr(ty: MIRType) -> LowerRepr? {
 // The result a task body of closure type `ty` produces.
 fn lower_task_body_result(ty: MIRType) -> MIRType? {
     if ty.kind == {
-        .SendFn(params, ret, _) -> if params.len() == 0 -> ret else -> None
-        .Fn(signature) -> if signature.params.len() == 0 -> signature.ret else -> None
+        .SendFn(params, ret, _) -> if params.len() == 0 -> Val(ret ?? mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: []})) else -> None
+        .Fn(signature) -> if signature.params.len() == 0 -> Val(signature.ret ?? mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: []})) else -> None
         else -> None
     }
 }

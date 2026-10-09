@@ -11,6 +11,7 @@ use jet_foundation.[
 ]
 
 fn lower_list_element(ty: MIRType) -> MIRType? {
+    if lower_typed_nominal(ty, "Sh") -> return Val(mir_type_from_kind(MIRTypeKind.String))
     if ty.kind == {
         .List(elem) -> Val(elem)
         // A fixed `[T#N]` (MIRRust.rs `[T; N]`) is carried as a List of N
