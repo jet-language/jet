@@ -2500,6 +2500,14 @@ fn register_type_methods_inner(
                 }
                 continue;
             }
+            if trait_name.is_some_and(is_operator_trait) {
+                if methods.iter().any(|(other, other_trait, _)| {
+                    other.name == m.name && !other_trait.is_some_and(is_operator_trait)
+                }) {
+                    diags.push(method_defined_twice(&m.name, type_name, m.name_span, false));
+                }
+                continue;
+            }
             if methods_map.contains_key(&m.name) {
                 if !error_on_duplicate {
                     continue;

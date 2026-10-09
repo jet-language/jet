@@ -8174,6 +8174,22 @@ mod tests {
     }
 
     #[test]
+    fn synthesized_named_tuples_use_canonical_field_order() {
+        let (_, line) = core_fixed_sig("core.term", "__terminal8_line").unwrap();
+        let Type::Tuple(fields) = line.unwrap() else { panic!("line tuple"); };
+        assert_eq!(fields.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
+            ["cause", "eof", "line"]);
+        let (_, size) = core_fixed_sig("core.term", "__terminal8_stty").unwrap();
+        let Type::Option(inner) = size.unwrap() else { panic!("optional size"); };
+        let Type::Tuple(fields) = *inner else { panic!("nested size tuple"); };
+        assert_eq!(fields.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["h", "w"]);
+        let (_, failure) = core_fixed_sig("core.sys", "__dotenv_read").unwrap();
+        let Type::Result { err, .. } = failure.unwrap() else { panic!("fallible dotenv"); };
+        let Type::Tuple(fields) = *err else { panic!("tuple failure domain"); };
+        assert_eq!(fields.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["cause", "not_found"]);
+    }
+
+    #[test]
     fn ui_host_result_signatures_are_structural_results() {
         let ui_error = Type::Named("UIHostError".to_string());
         let expected = [
