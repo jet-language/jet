@@ -14,6 +14,7 @@
 // Named XML event payloads use the language's labeled brace construction.
 // Token markers borrow text; encoding sniffing compares bounded wire bytes,
 // avoiding temporary owning arrays where a View is required.
+// Optional failures return from value match arms; borrowed BOM access is total.
 use core.encoding.[Dyn]
 use core.encoding as encoding
 use core.text as unicode
@@ -892,7 +893,7 @@ fn optional_text_field(value: Dyn, key: String) -> String? XMLFault! {
     if item == {
         .Text(s) -> Val(s.copy())
         .Null -> String?{None}
-        else -> Err(XMLFault.shape("XML {key} must be text or null"))
+        else -> { return Err(XMLFault.shape("XML {key} must be text or null")) }
     }
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:1559
@@ -1934,7 +1935,7 @@ impl ByteLexer {
     // Rust: crates/jet-foundation/src/XmlPull.rs:4931
     fn encoding(self: ByteLexer) -> WireEncoding? Never! { self.encoding }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4934
-     fn bom(self: ByteLexer) -> View<U8> from self { self.bom[0..<self.bom.len()] }
+     fn bom(self: ByteLexer) -> View<U8> Never! from self { self.bom[0..<self.bom.len()] }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4937
     fn fail(self: &ByteLexer, kind: Reason, reason: String) -> XMLFault Never! {
         error :: XMLFault.at_kind(self.wire_offset, kind, reason)
@@ -2700,8 +2701,8 @@ impl Scanner {
         kind :: self.declared_entities.get(name) ?? return Err(self.fail("undeclared entity reference `&{name};`"))
         if kind == DeclaredEntityKind.External -> return Err(XMLFault.at_kind(self.offset, Reason.Unsupported, "external entity reference `&{name};` is unsupported"))
         if self.options.entities == {
-            .Preserve -> None
-            .Reject -> Err(XMLFault.at_kind(self.offset, Reason.Entity, "entity reference `&{name};` rejected by XML entity policy"))
+            .Preserve -> String?{None}
+            .Reject -> { return Err(XMLFault.at_kind(self.offset, Reason.Entity, "entity reference `&{name};` rejected by XML entity policy")) }
             .Resolve(values) -> {
                 value :: values.get(name) ?? return None
                 if self.options.limits.max_entity_depth < 1 -> return Err(self.limit("XML entity replacement exceeds max_entity_depth (0)"))

@@ -16,8 +16,8 @@ fn validate_tree(value: Dyn) xml.XMLFault! {
         .Null | .Bool(_) | .Int(_) | .Text(_) -> {}
         .Array(values) -> { loop item in values -> validate_tree(item) ?? return Err(err) }
         .Object(_) -> { loop entry in stream.object_entries(value) -> validate_tree(entry.value) ?? return Err(err) }
-        .Float(_) | .Bytes(_) -> {
-            return Err(shape_error("XML tree cannot contain Float or Bytes values"))
+        .Number(_) | .Bytes(_) -> {
+            return Err(shape_error("XML tree cannot contain non-integer numbers or Bytes values"))
         }
         else -> return Err(shape_error("internal JSON carrier escaped typed decode"))
     }
