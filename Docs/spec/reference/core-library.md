@@ -2330,6 +2330,11 @@ compiler builtin records: only the canonical loaded Core module may declare them
 Their `Display` implementations use the canonical `fn display(self) -> String`
 contract: rendering borrows the value and keeps the exact text policy above.
 
+Float math wrappers widen `F32` with `Float.from_f32`, not a typed literal.
+Typed transforms retain phantom scalar/space parameters with Float storage;
+their source affine constructor accepts the widened Float coefficients, like
+`Point2.new` accepts Float coordinates.
+
 #### Measurement propagation
 
 A measured value stores a numeric value and a nonnegative standard uncertainty.

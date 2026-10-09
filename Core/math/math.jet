@@ -193,7 +193,7 @@ fn is_nan(n: Float) -> Bool Never! { n != n }
 fn is_inf(n: Float) -> Bool Never! { fabs(n) == infinity() }
 fn is_finite(n: Float) -> Bool Never! { fabs(n) < infinity() }
 // #4747: preserve the existing F32 call contract without changing Float policy.
-fn __is_finite_f32(n: F32) -> Bool Never! { is_finite(Float{n}) }
+fn __is_finite_f32(n: F32) -> Bool Never! { is_finite(Float.from_f32(n)) }
 fn isnan(n: Float) -> Bool Never! { is_nan(n) }
 fn isinf(n: Float) -> Bool Never! { is_inf(n) }
 fn isfinite(n: Float) -> Bool Never! { is_finite(n) }
@@ -461,7 +461,7 @@ fn cmp(a: Float, b: Float) -> Int Never! {
     if is_nan(a) -> return 1
     return -1
 }
-fn __cmp_f32(a: F32, b: F32) -> Int Never! { cmp(Float{a}, Float{b}) }
+fn __cmp_f32(a: F32, b: F32) -> Int Never! { cmp(Float.from_f32(a), Float.from_f32(b)) }
 
 fn abs_diff(a: Int, b: Int) -> Int Never! {
     if a >= b -> return a - b
@@ -1773,11 +1773,11 @@ impl Transform {
     }
     fn point_at_depth<P: GeometryPoint>(self, point: P, depth: Float) -> Point2<Float, To> TransformError! {
         if !is_finite(depth) -> return Err(TransformError{message: "perspective depth must be finite"})
-        origin :: self.point(point) ?? return Err(TransformError{message: "coordinate point belongs to a stale frame"})
+        origin :: self.point<P>(point) ?? return Err(TransformError{message: "coordinate point belongs to a stale frame"})
         Ok(Point2<Float, To>{x: origin.x + self.m00 * depth, y: origin.y + self.m10 * depth, frame_id: origin.frame_id})
     }
     fn ray<P: GeometryPoint>(self, point: P) -> Ray2<Float, From, To> TransformError! {
-        origin :: self.point(point) ?? return Err(TransformError{message: "coordinate point belongs to a stale frame"})
+        origin :: self.point<P>(point) ?? return Err(TransformError{message: "coordinate point belongs to a stale frame"})
         Ok(Ray2<Float, From, To>{origin: origin, direction: Delta2<Float, To>{x: self.m00, y: self.m10, frame_id: self.to_frame}})
     }
 }
@@ -1786,8 +1786,8 @@ struct Transform2<T, From, To> {
     from_frame: Int, to_frame: Int
 }
 impl Transform2 {
-    fn affine(m00: T, m01: T, m10: T, m11: T, tx: T, ty: T, from_frame: Int, to_frame: Int) -> Transform2<T, From, To> Never! {
-        Transform2<T, From, To>{m00: Float{m00}, m01: Float{m01}, m10: Float{m10}, m11: Float{m11}, tx: Float{tx}, ty: Float{ty}, from_frame: from_frame, to_frame: to_frame}
+    fn affine(m00: Float, m01: Float, m10: Float, m11: Float, tx: Float, ty: Float, from_frame: Int, to_frame: Int) -> Transform2<T, From, To> Never! {
+        Transform2<T, From, To>{m00: m00, m01: m01, m10: m10, m11: m11, tx: tx, ty: ty, from_frame: from_frame, to_frame: to_frame}
     }
     fn then<Next>(self, next: Transform2<T, To, Next>) -> Transform2<T, From, Next> TransformError! {
         if self.to_frame != 0 && next.from_frame != 0 && self.to_frame != next.from_frame -> return Err(TransformError{message: "transform composition has mismatched frame identity"})
@@ -1824,11 +1824,11 @@ impl Transform2 {
     }
     fn point_at_depth<P: GeometryPoint>(self, point: P, depth: Float) -> Point2<T, To> TransformError! {
         if !is_finite(depth) -> return Err(TransformError{message: "perspective depth must be finite"})
-        origin :: self.point(point) ?? return Err(TransformError{message: "coordinate point belongs to a stale frame"})
+        origin :: self.point<P>(point) ?? return Err(TransformError{message: "coordinate point belongs to a stale frame"})
         Ok(Point2<T, To>{x: origin.x + self.m00 * depth, y: origin.y + self.m10 * depth, frame_id: origin.frame_id})
     }
     fn ray<P: GeometryPoint>(self, point: P) -> Ray2<T, From, To> TransformError! {
-        origin :: self.point(point) ?? return Err(TransformError{message: "coordinate point belongs to a stale frame"})
+        origin :: self.point<P>(point) ?? return Err(TransformError{message: "coordinate point belongs to a stale frame"})
         Ok(Ray2<T, From, To>{origin: origin, direction: Delta2<T, To>{x: self.m00, y: self.m10, frame_id: self.to_frame}})
     }
 }
@@ -1873,7 +1873,7 @@ impl Transform2 {
     assert_eq((narrow.point_at_depth(ScreenPoint.new(1.0, 2.0), 4.0) ?? panic("F32 depth")).x, 7.0)
     assert_eq(Float{9007199254740993}, 9007199254740992.0)
     assert_eq(Float{-9007199254740993}, -9007199254740992.0)
-    assert_eq(Float{F32{-0.0}}.to_bits(), (-0.0).to_bits())
+    assert_eq(Float.from_f32(F32{-0.0}).to_bits(), (-0.0).to_bits())
 }
 
 fn __decimal_to_string(value: Decimal) -> String Never! {
