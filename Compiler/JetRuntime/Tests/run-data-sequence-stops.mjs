@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Real DataTree C client linked to composed Jet objects, including c39d89b6b's
+// Real Dyn C client linked to composed Jet objects, including c39d89b6b's
 // shared index helper. These files are canonical expected bytes, not receipts.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -27,4 +27,4 @@ for (const [mode, golden] of cases) {
     rows.push(`${mode}\tpass\texit=101\tstderr-byte-identical=true`);
 }
 writeFileSync(join(out, 'data-sequence-results.tsv'), rows.join('\n') + '\n');
-console.log('8 DataTree List/Entries std Vec bounds/capacity process goldens passed');
+console.log('8 Dyn List/Entries std Vec bounds/capacity process goldens passed');

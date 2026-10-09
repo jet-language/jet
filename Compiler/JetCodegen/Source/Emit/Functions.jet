@@ -3395,7 +3395,7 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
                 if variant.payload == {
                     .Unit -> {
                         pattern :: if jet_rust_emit_core_native_probe_name(definition.key) == "ComputeError" -> "{head}(_)" else -> head
-                        &arms.push("{pattern} => {root}jet_std::DataTree::Text({wire}.to_string()),")
+                        &arms.push("{pattern} => {root}jet_std::Dyn::Text({wire}.to_string()),")
                     }
                     .Single(_) -> {
                         value :: if jet_rust_emit_equality_edge_boxed(definition, variant.name) -> "__jet_value.as_ref()" else -> "__jet_value"

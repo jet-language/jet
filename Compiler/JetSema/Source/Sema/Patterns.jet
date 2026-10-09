@@ -533,10 +533,10 @@ fn sema_pattern_validate_variant(subject_ty: Type, variant: String, written_slot
     if fact_enum == .Val(validation) -> return validation
     private_carrier := false
     if sema_pattern_base_name(carrier) == .Val(carrier_name) {
-        private_carrier = (carrier_name == "DataTree" || carrier_name == "JSON") && (variant == "Bytes" || variant == "TypedText")
+        private_carrier = (carrier_name == "Dyn" || carrier_name == "JSON") && (variant == "Bytes" || variant == "TypedText")
     }
     if private_carrier && !(context.unsafe_depth > 0 && (env.source_file.starts_with("<corelib>/") || env.module_name == "__core_encoding_stream")) {
-        &diagnostics.push(sema_error("E0510", span, "private DataTree carrier pattern", "native carrier payloads may be borrowed only by vetted Core internals inside #Unsafe", "use the public DataTree variants"))
+        &diagnostics.push(sema_error("E0510", span, "private Dyn carrier pattern", "native carrier payloads may be borrowed only by vetted Core internals inside #Unsafe", "use the public Dyn variants"))
         return SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: [TPatternBinding]{}, leading_dot: leading_dot, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
     }
     payload :: sema_pattern_payload(subject_ty, variant, env, span, &diagnostics)

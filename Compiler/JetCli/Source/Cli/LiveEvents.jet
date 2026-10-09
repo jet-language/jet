@@ -1,6 +1,6 @@
 // jet-debug EventObservation.rs: exact closed, payload-free event projection.
 // The snapshot codec calls this validator; transports cannot skip it.
-fn jet_cli_live_event_integer(event: DataTree, key: String, minimum: Int?) -> Int JetCLIReadError! {
+fn jet_cli_live_event_integer(event: Dyn, key: String, minimum: Int?) -> Int JetCLIReadError! {
     if jet_cli_live_field(event, key) == .Val(.Int(number)) {
         if minimum == .Val(bound) && number < bound {
             message :: if bound == 0 -> "runtime event observation has negative `{key}`" else -> "runtime event observation has invalid `{key}`"
@@ -10,14 +10,14 @@ fn jet_cli_live_event_integer(event: DataTree, key: String, minimum: Int?) -> In
     }
     Err(jet_cli_read_error("runtime event observation has invalid `{key}`"))
 }
-fn jet_cli_live_event_closed(event: DataTree, key: String, allowed: [String]) -> String JetCLIReadError! {
+fn jet_cli_live_event_closed(event: Dyn, key: String, allowed: [String]) -> String JetCLIReadError! {
     if jet_cli_live_field(event, key) == .Val(.Text(value)) {
         if !allowed.contains(value) -> return Err(jet_cli_read_error("runtime event observation has unknown `{key}` value"))
         return Ok(value)
     }
     Err(jet_cli_read_error("runtime event observation has invalid `{key}`"))
 }
-fn jet_cli_live_event_render(sequence: DataTree?) -> String JetCLIReadError! {
+fn jet_cli_live_event_render(sequence: Dyn?) -> String JetCLIReadError! {
     events :: if sequence == .Val(.Array(rows)) -> rows else -> { return Err(jet_cli_read_error("runtime observation has no event sequence")) }
     if events.len() > 256 -> return Err(jet_cli_read_error("runtime event observation exceeds the 256-record limit"))
     keys :: [String]{"sequence", "source", "event_id", "owner_id", "subscription_id", "dispatch_id", "lifecycle", "queued", "blocked", "running", "capacity", "overflow", "priority", "failure", "terminal"}

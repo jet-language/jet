@@ -69,11 +69,11 @@ fn bundle_test_build_error(options: JetCLIBundleOptions, host: &BundleTestTransp
     _ :: jet_cli_bundle_build<BundleTestTransport>(options, &host) ?? return err.message
     panic("expected build refusal")
 }
-fn bundle_test_json_field(tree: DataTree, name: String) -> DataTree Never! {
+fn bundle_test_json_field(tree: Dyn, name: String) -> Dyn Never! {
     if tree == .Object(fields) -> return fields[name]
     panic("expected object")
 }
-fn bundle_test_tree_eq(actual: DataTree, expected: DataTree) Never! {
+fn bundle_test_tree_eq(actual: Dyn, expected: Dyn) Never! {
     assert_eq(json.to_string(actual), json.to_string(expected))
 }
 
@@ -183,11 +183,11 @@ fn bundle_test_tree_eq(actual: DataTree, expected: DataTree) Never! {
         assert_eq(receipt.artifact_sha256, pkg_sha256_hex("native transport fixture".bytes()))
         assert(receipt.installability() == BundleInstallability.Installable)
         tree :: json.parse(result.stdout) ?? panic("report JSON")
-        _ :: bundle_test_tree_eq(bundle_test_json_field(tree, "ok"), DataTree.Bool(true))
-        _ :: bundle_test_tree_eq(bundle_test_json_field(tree, "execution"), DataTree.Text("materialized"))
-        _ :: bundle_test_tree_eq(bundle_test_json_field(tree, "receipt_digest"), DataTree.Text("fixture-store-receipt"))
+        _ :: bundle_test_tree_eq(bundle_test_json_field(tree, "ok"), Dyn.Bool(true))
+        _ :: bundle_test_tree_eq(bundle_test_json_field(tree, "execution"), Dyn.Text("materialized"))
+        _ :: bundle_test_tree_eq(bundle_test_json_field(tree, "receipt_digest"), Dyn.Text("fixture-store-receipt"))
         materialization :: bundle_test_json_field(tree, "materialization")
-        _ :: bundle_test_tree_eq(bundle_test_json_field(materialization, "bytes"), DataTree.Int(24))
+        _ :: bundle_test_tree_eq(bundle_test_json_field(materialization, "bytes"), Dyn.Int(24))
     }
 }
 #Test("icon provenance and updater remain canonical in the desktop receipt") {
@@ -221,14 +221,14 @@ fn bundle_test_tree_eq(actual: DataTree, expected: DataTree) Never! {
     machine :: jet_cli_bundle_error_output("denied", true)
     assert_eq(machine.exit_code, 1)
     assert_eq(machine.stderr, "")
-    _ :: bundle_test_tree_eq(bundle_test_json_field(json.parse(machine.stdout) ?? panic("JSON"), "ok"), DataTree.Bool(false))
+    _ :: bundle_test_tree_eq(bundle_test_json_field(json.parse(machine.stdout) ?? panic("JSON"), "ok"), Dyn.Bool(false))
 }
 #Test("planned report never promotes logical artifact facts to transport evidence") {
     host := bundle_test_transport()
     built := jet_cli_bundle_build<BundleTestTransport>(bundle_test_options(bundle_test_args("linux")), &host) ?? panic(err.message)
     logical := built.plan.emit()
     tree :: json.parse(jet_cli_bundle_report(&logical, &built.plan, built.output, "", true, true)) ?? panic("JSON")
-    _ :: bundle_test_tree_eq(bundle_test_json_field(tree, "artifact_status"), DataTree.Text("planned"))
+    _ :: bundle_test_tree_eq(bundle_test_json_field(tree, "artifact_status"), Dyn.Text("planned"))
     materialization :: bundle_test_json_field(tree, "materialization")
     assert(bundle_test_json_field(materialization, "artifact_sha256") == .Null)
     assert(bundle_test_json_field(materialization, "bytes") == .Null)

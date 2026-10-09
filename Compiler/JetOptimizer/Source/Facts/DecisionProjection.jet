@@ -274,17 +274,17 @@ fn mir_decision_ledger_json(ledger: MIRDecisionLedger) -> String Never! {
 fn mir_decision_payload_error(message: String) -> MIRDecisionPayloadError Never! {
     MIRDecisionPayloadError{message: message}
 }
-fn mir_decision_object(value: DataTree, keys: [String], label: String) -> [String:DataTree] MIRDecisionPayloadError! {
+fn mir_decision_object(value: Dyn, keys: [String], label: String) -> [String:Dyn] MIRDecisionPayloadError! {
     fields :: if value == .Object(rows) -> rows else -> { return Err(mir_decision_payload_error("{label} must be an object")) }
     if fields.len() != keys.len() -> return Err(mir_decision_payload_error("{label} has missing or unsafe fields"))
     loop key in keys { if fields.get(key) == None -> return Err(mir_decision_payload_error("{label} has missing or unsafe fields")) }
     Ok(fields)
 }
-fn mir_decision_text(fields: [String:DataTree], key: String) -> String MIRDecisionPayloadError! {
+fn mir_decision_text(fields: [String:Dyn], key: String) -> String MIRDecisionPayloadError! {
     value :: fields.get(key) ?? return Err(mir_decision_payload_error("decision field `{key}` is missing"))
     if value == .Text(text) -> Ok(text) else -> Err(mir_decision_payload_error("decision field `{key}` must be text"))
 }
-fn mir_decision_number(value: DataTree, label: String) -> U64 MIRDecisionPayloadError! {
+fn mir_decision_number(value: Dyn, label: String) -> U64 MIRDecisionPayloadError! {
     if value == .Text(text) {
         number := U64{0}
         if text.len() == 0 -> return Err(mir_decision_payload_error("{label} is out of range"))
@@ -299,11 +299,11 @@ fn mir_decision_number(value: DataTree, label: String) -> U64 MIRDecisionPayload
     if value == .Int(number) -> return Ok(U64.from_int(number) ?? return Err(mir_decision_payload_error("{label} is out of range")))
     Err(mir_decision_payload_error("{label} must be an integer"))
 }
-fn mir_decision_parse_identity(value: DataTree) -> MIRDecisionIdentity MIRDecisionPayloadError! {
+fn mir_decision_parse_identity(value: Dyn) -> MIRDecisionIdentity MIRDecisionPayloadError! {
     fields :: mir_decision_object(value, ["artifact", "configuration", "implementation", "profile", "run", "source", "target"], "decision identity")
     Ok(MIRDecisionIdentity{artifact: mir_decision_text(fields, "artifact"), configuration: mir_decision_text(fields, "configuration"), implementation: mir_decision_text(fields, "implementation"), profile: mir_decision_text(fields, "profile"), run: mir_decision_text(fields, "run"), source: mir_decision_text(fields, "source"), target: mir_decision_text(fields, "target")})
 }
-fn mir_decision_parse_span(value: DataTree) -> Span MIRDecisionPayloadError! {
+fn mir_decision_parse_span(value: Dyn) -> Span MIRDecisionPayloadError! {
     fields :: mir_decision_object(value, ["start", "end"], "decision span")
     raw_start :: mir_decision_number(fields["start"], "span start")
     raw_end :: mir_decision_number(fields["end"], "span end")
@@ -324,7 +324,7 @@ fn mir_decision_parse_disposition(text: String) -> MIRDecisionDisposition MIRDec
     }
     Err(mir_decision_payload_error("decision row has unsupported disposition `{text}`"))
 }
-fn mir_decision_parse_method(value: DataTree) -> MIRDerivationMethod? MIRDecisionPayloadError! {
+fn mir_decision_parse_method(value: Dyn) -> MIRDerivationMethod? MIRDecisionPayloadError! {
     if value == .Null -> return Ok(None)
     text :: if value == .Text(text) -> text else -> { return Err(mir_decision_payload_error("decision row has invalid `evidence_method`")) }
     loop method in [MIRDerivationMethod.StaticDerivation, .FormalProof, .RecordedExecution, .SampledAgreement, .ExternalAssumption] {
@@ -332,7 +332,7 @@ fn mir_decision_parse_method(value: DataTree) -> MIRDerivationMethod? MIRDecisio
     }
     Err(mir_decision_payload_error("decision row has unsupported `evidence_method`"))
 }
-fn mir_decision_parse_row(value: DataTree) -> MIRDecisionRow MIRDecisionPayloadError! {
+fn mir_decision_parse_row(value: Dyn) -> MIRDecisionRow MIRDecisionPayloadError! {
     fields :: mir_decision_object(value, ["derivation_disposition", "derivation_ref", "disposition", "edit", "evidence", "evidence_method", "function", "function_id", "function_name", "id", "identity", "kind", "producer", "reason", "rule", "span"], "decision row")
     function := MIRFunctionID?{None}
     if fields["function_id"] != .Null -> function = Val(MIRFunctionID{value: mir_decision_number(fields["function_id"], "function id")})

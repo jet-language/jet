@@ -29,36 +29,36 @@ struct JetCLIGcTrace {
     sites: [JetCLIGcSite]
 }
 fn jet_cli_gc_error(kind: String, detail: String) -> JetCLIGcError Never! { JetCLIGcError{kind: kind, detail: detail} }
-fn jet_cli_gc_object(value: DataTree, name: String) JetCLIGcError! {
+fn jet_cli_gc_object(value: Dyn, name: String) JetCLIGcError! {
     if value != .Object(_) -> return Err(jet_cli_gc_error("malformed", "{name} is not an object"))
 }
-fn jet_cli_gc_field(value: DataTree, name: String) -> DataTree JetCLIGcError! {
+fn jet_cli_gc_field(value: Dyn, name: String) -> Dyn JetCLIGcError! {
     if value == .Object(fields) {
         return Ok(fields.get(name) ?? return Err(jet_cli_gc_error("malformed", "GC trace is missing `{name}`")))
     }
     Err(jet_cli_gc_error("malformed", "GC trace root is not an object"))
 }
-fn jet_cli_gc_text(value: DataTree, name: String) -> String JetCLIGcError! {
+fn jet_cli_gc_text(value: Dyn, name: String) -> String JetCLIGcError! {
     field :: jet_cli_gc_field(value, name)
     if field == .Text(text) -> return Ok(text)
     Err(jet_cli_gc_error("malformed", "GC trace `{name}` is not text"))
 }
-fn jet_cli_gc_safe_text(value: DataTree, name: String) -> String JetCLIGcError! {
+fn jet_cli_gc_safe_text(value: Dyn, name: String) -> String JetCLIGcError! {
     text :: jet_cli_gc_text(value, name)
     if text == "" || text.bytes().len() > 4096 || status_text.has_control(text) -> return Err(jet_cli_gc_error("malformed", "GC trace `{name}` is empty, unsafe, or too long"))
     Ok(text)
 }
-fn jet_cli_gc_uint(value: DataTree, name: String) -> Int JetCLIGcError! {
+fn jet_cli_gc_uint(value: Dyn, name: String) -> Int JetCLIGcError! {
     field :: jet_cli_gc_field(value, name)
     if field == .Int(number) && number >= 0 -> return Ok(number)
     Err(jet_cli_gc_error("malformed", "GC trace `{name}` is not a non-negative integer"))
 }
-fn jet_cli_gc_bool(value: DataTree, name: String) -> Bool JetCLIGcError! {
+fn jet_cli_gc_bool(value: Dyn, name: String) -> Bool JetCLIGcError! {
     field :: jet_cli_gc_field(value, name)
     if field == .Bool(flag) -> return Ok(flag)
     Err(jet_cli_gc_error("malformed", "GC trace `{name}` is not Bool"))
 }
-fn jet_cli_gc_array(value: DataTree, name: String) -> [DataTree] JetCLIGcError! {
+fn jet_cli_gc_array(value: Dyn, name: String) -> [Dyn] JetCLIGcError! {
     field :: jet_cli_gc_field(value, name)
     if field == .Array(items) -> return Ok(items)
     Err(jet_cli_gc_error("malformed", "GC trace `{name}` is not a list"))

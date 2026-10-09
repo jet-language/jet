@@ -85,9 +85,9 @@ fn is_source_owned_core_web_query_shape() {}
   put("Core/units/units.jet", "pub struct Measurement<T> { value: T, uncertainty: T }\npub struct Pair<A,B> { first: A, second: B }\n");
   const registry = (extra) => `CoreCallRecord::new("core.fixture", "scalar", "jet_fixture_scalar", true)\nCoreCallRecord::new("core.fixture", "plain", "jet_fixture_plain", true)\n${extra}`;
   // Canonical scalar codec adapters also require the real FieldError Clone
-  // declaration (Prelude/CoreLib/JetStd/DataTree.rs:11-15), even in this
+  // declaration (Prelude/CoreLib/JetStd/Dyn.rs:11-15), even in this
   // metadata-only fixture. Do not weaken that production ownership gate.
-  const fieldErrorSource = readFileSync(join(root, "crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs"), "utf8");
+  const fieldErrorSource = readFileSync(join(root, "crates/jet-codegen/src/Prelude/CoreLib/JetStd/Dyn.rs"), "utf8");
   const fieldErrorDeclaration = /#\[derive\(Clone, Debug, PartialEq\)\]\npub struct FieldError \{[^]*?\n\}/.exec(fieldErrorSource)?.[0];
   assert.ok(fieldErrorDeclaration, "canonical FieldError declaration must be present");
   const declarations = `

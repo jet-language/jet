@@ -1,5 +1,5 @@
 // Pure DB input rows and output codecs, Rust Source/CmdDb.rs.
-use core.encoding.[DataTree, EncodingLimits, EncodingErrorKind]
+use core.encoding.[Dyn, EncodingLimits, EncodingErrorKind]
 use core.encoding.json as db_rows_json
 use core.encoding.csv as db_rows_csv
 use core.db.runtime.kernel_sql_query as db_rows_sql
@@ -44,7 +44,7 @@ fn jet_cli_db_rows_append(out: &[U8], text: String) Never! {
 fn jet_cli_db_rows_string(out: [U8]) -> String Never! {
     String.from_bytes(out) ?? panic("DB row output is UTF-8")
 }
-fn jet_cli_db_rows_quote(text: String) -> String Never! { db_rows_json.to_string(DataTree.Text(~text)) }
+fn jet_cli_db_rows_quote(text: String) -> String Never! { db_rows_json.to_string(Dyn.Text(~text)) }
 // Rust parse_json(_, false), MAX_JSON_DEPTH = 64; input bytes were bounded by the caller.
 fn jet_cli_db_rows_limits(bytes: Int) -> EncodingLimits Never! {
     EncodingLimits{buffer_bytes: 65536, max_depth: 64, max_item_bytes: bytes,
@@ -67,19 +67,19 @@ fn jet_cli_db_load_csv_source(name: String, path: String, text: String, max_rows
         if !jet_cli_db_valid_column_name(column) || seen.has_key(column) -> return Err(jet_cli_db_error_new("E2701", "source", path, "CSV header has an invalid or duplicate column `{column}`", "use unique ASCII identifier column names"))
         _ :: &seen.add(column, true)
     }
-    values := [DataTree]{}
+    values := [Dyn]{}
     loop index in 1..<records.len() {
         record :: records[index]
         if record.fields.len() != header.len() -> return Err(jet_cli_db_error_new("E2701", "source", path, "CSV row {index + 1} has {record.fields.len()} fields, expected {header.len()}", "make every row match the header width"))
-        entries := [String: DataTree]{}
-        loop field_index in 0..<header.len() -> _ :: &entries.add(header[field_index], DataTree.Text(~record.fields[field_index]))
-        &values.push(DataTree.Object(entries))
+        entries := [String: Dyn]{}
+        loop field_index in 0..<header.len() -> _ :: &entries.add(header[field_index], Dyn.Text(~record.fields[field_index]))
+        &values.push(Dyn.Object(entries))
     }
-    jet_cli_db_normalize_json_source(name, path, DataTree.Array(values), text.bytes().len(), max_rows)
+    jet_cli_db_normalize_json_source(name, path, Dyn.Array(values), text.bytes().len(), max_rows)
 }
 // Rust load_jsonl_source (1552-1584), preserving str::lines physical indices.
 fn jet_cli_db_load_jsonl_source(name: String, path: String, text: String, max_rows: Int) -> JetCLIDBLoadedSource JetCLIDBError! {
-    values := [DataTree]{}
+    values := [Dyn]{}
     raw :: text.bytes()
     start := 0
     line_index := 0
@@ -96,13 +96,13 @@ fn jet_cli_db_load_jsonl_source(name: String, path: String, text: String, max_ro
         value :: db_rows_json.parse_allow_duplicates_with_limits(line, jet_cli_db_rows_limits(line.bytes().len())) ?? return Err(jet_cli_db_error_new("E2701", "source", path, "invalid JSONL value on line {line_index}: {err.reason}", "repair the line or use a valid JSONL object"))
         &values.push(value)
     }
-    jet_cli_db_normalize_json_source(name, path, DataTree.Array(values), raw.len(), max_rows)
+    jet_cli_db_normalize_json_source(name, path, Dyn.Array(values), raw.len(), max_rows)
 }
 // Rust normalize_json_source (1586-1680); sort names once for BTreeMap order.
 // Core maps make Rust's repeated-column branch unreachable (JSON also keeps last).
 // #4306: Dyn ordered objects must preserve nested object and result-key order;
 // ordinary Map currently sorts keys. No reparse or CLI-side value-tree sidecar.
-fn jet_cli_db_normalize_json_source(name: String, path: String, value: DataTree, input_bytes: Int, max_rows: Int) -> JetCLIDBLoadedSource JetCLIDBError! {
+fn jet_cli_db_normalize_json_source(name: String, path: String, value: Dyn, input_bytes: Int, max_rows: Int) -> JetCLIDBLoadedSource JetCLIDBError! {
     if value == {
         .Array(rows) -> {
             if rows.len() > max_rows -> return Err(jet_cli_db_error_new("E2603", "source", path, "source has {rows.len()} rows, over the {max_rows}-row limit", "raise `--max-rows` explicitly or split the source"))
@@ -154,7 +154,7 @@ fn jet_cli_db_normalize_json_source(name: String, path: String, value: DataTree,
 }
 fn jet_cli_db_rows_i64(value: Int) -> Bool Never! { value >= -9223372036854775808 && value <= 9223372036854775807 }
 // Rust value_kind (1682-1700). Core's exact out-of-i64 Int is Rust Number.
-fn jet_cli_db_value_kind(value: DataTree) -> JetCLIDBColumnKind? Never! {
+fn jet_cli_db_value_kind(value: Dyn) -> JetCLIDBColumnKind? Never! {
     if value == {
         .Null -> None
         .Bool(_) -> Val(JetCLIDBColumnKind.Bool)
@@ -175,7 +175,7 @@ fn jet_cli_db_merge_kind(left: JetCLIDBColumnKind, right: JetCLIDBColumnKind) ->
     if left_numeric && right_numeric -> JetCLIDBColumnKind.Float else -> JetCLIDBColumnKind.String
 }
 // Rust normalized_row_json (1714-1729).
-fn jet_cli_db_normalized_row_json(row: DataTree, columns: [JetCLIDBColumn]) -> String JetCLIDBError! {
+fn jet_cli_db_normalized_row_json(row: Dyn, columns: [JetCLIDBColumn]) -> String JetCLIDBError! {
     if row == {
         .Object(entries) -> {
             out := [U8]{U8{123}}
@@ -193,7 +193,7 @@ fn jet_cli_db_normalized_row_json(row: DataTree, columns: [JetCLIDBColumn]) -> S
     }
 }
 // Rust normalized_cell (1731-1764).
-fn jet_cli_db_normalized_cell(cell: DataTree?, column: JetCLIDBColumn) -> String Never! {
+fn jet_cli_db_normalized_cell(cell: Dyn?, column: JetCLIDBColumn) -> String Never! {
     value :: cell ?? return if column.nullable -> "null" else -> jet_cli_db_default_cell(column.kind)
     if value == {
         .Null -> return if column.nullable -> "null" else -> jet_cli_db_default_cell(column.kind)
@@ -226,7 +226,7 @@ fn jet_cli_db_default_cell(kind: JetCLIDBColumnKind) -> String Never! {
     }
 }
 // Rust value_text (1775-1804); Null is empty only at the outer cell.
-fn jet_cli_db_value_text(value: DataTree) -> String Never! {
+fn jet_cli_db_value_text(value: Dyn) -> String Never! {
     if value == {
         .Null -> ""
         .Text(text) -> ~text
@@ -234,12 +234,12 @@ fn jet_cli_db_value_text(value: DataTree) -> String Never! {
     }
 }
 // Rust render_json_value (1806-1831); one output buffer for all nested values.
-fn jet_cli_db_render_json_value(value: DataTree) -> String Never! {
+fn jet_cli_db_render_json_value(value: Dyn) -> String Never! {
     out := [U8]{}
     jet_cli_db_rows_write_json(&out, value)
     jet_cli_db_rows_string(out)
 }
-fn jet_cli_db_rows_write_json(out: &[U8], value: DataTree) Never! {
+fn jet_cli_db_rows_write_json(out: &[U8], value: Dyn) Never! {
     if value == {
         .Null -> jet_cli_db_rows_append(&out, "null")
         .Bool(n) -> jet_cli_db_rows_append(&out, "{n}")
@@ -320,18 +320,6 @@ fn jet_cli_db_float_display(value: Float, require_fraction: Bool) -> String Neve
     }
     jet_cli_db_rows_string(out)
 }
-// Rust generated_row_item (1853-1867), ROW_TYPE_NAME = DbConsoleRow.
-fn jet_cli_db_generated_row_item(columns: [JetCLIDBColumn]) -> String Never! {
-    out := [U8]{}
-    jet_cli_db_rows_append(&out, "#Codable\nstruct DbConsoleRow {{\n")
-    loop column in columns {
-        jet_cli_db_rows_append(&out, "    {column.name}: {jet_cli_db_column_kind_name(column.kind)}")
-        if column.nullable -> &out.push(U8{63})
-        &out.push(U8{10})
-    }
-    jet_cli_db_rows_append(&out, "}}\n")
-    jet_cli_db_rows_string(out)
-}
 // Rust columns_json (2464-2480).
 fn jet_cli_db_columns_json(columns: [JetCLIDBColumn]) -> String Never! {
     out := [U8]{U8{91}}
@@ -403,7 +391,7 @@ struct JetCLIDBQueryResult {
     rows: [db_rows_sql.JetSQLResultRow]
     rendered: String
 }
-fn jet_cli_db_sql_cell(value: DataTree) -> db_rows_sql.JetSQLValue Never! {
+fn jet_cli_db_sql_cell(value: Dyn) -> db_rows_sql.JetSQLValue Never! {
     if value == {
         .Null -> .Null
         .Bool(flag) -> .Bool(flag)

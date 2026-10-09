@@ -70,7 +70,7 @@ function matcher(root) {
   if (/Task|task |stop-and-cancellation|native frames|Select/.test(root)) return { mode: taxonomies[13][2], regex: taxonomies[13][1] };
   if (/callee kind/.test(root)) return { mode: "foreign-declaration-candidate", regex: /\bFFI\s*\(\s*(?:asm|c)\s*\)/g };
   if (/DataEntriesToMap/.test(root)) return { mode: "MIR-tag-reference-NOT-use-of-that-operation-by-compiler", regex: reference("DataEntriesToMap") };
-  if (/DataTree/.test(root)) return { mode: "nominal-type-reference", regex: reference("DataTree") };
+  if (/Dyn/.test(root)) return { mode: "nominal-type-reference", regex: reference("Dyn") };
   if (/Browser/.test(root)) return { mode: "Browser-reference-NOT-proven-entry-initialization", regex: reference("Browser") };
   if (/field ID is not a stored field of/.test(root)) return { mode: "nominal-type-reference", regex: reference(root.split(" of ").at(-1)) };
   if (/Core operation|Core\.compute operation/.test(root)) {

@@ -15,16 +15,16 @@ struct JetCLILiveSnapshot {
     revision: String, world_id: String, pid: Int, start_id: String, captured_ms: Int,
     values: [JetCLILiveValue], tasks: [JetCLILiveTask], channels: [JetCLILiveChannel],
     effects: [String:Int], resources: [String:Int], runtime: JetCLILiveRuntime?,
-    decisions: MIRDecisionLedger?, raw_events: DataTree?, events: String?
+    decisions: MIRDecisionLedger?, raw_events: Dyn?, events: String?
 }
 
-fn jet_cli_live_field(value: DataTree, key: String) -> DataTree? Never! {
+fn jet_cli_live_field(value: Dyn, key: String) -> Dyn? Never! {
     if value == .Object(fields) -> return fields.get(key)
     None
 }
 // JSON.rs::json_int also accepts Float, using Rust's saturating i64 cast.
 // EventObservation's integer validator deliberately does NOT call this.
-fn jet_cli_live_json_int(value: DataTree) -> Int? Never! {
+fn jet_cli_live_json_int(value: Dyn) -> Int? Never! {
     if value == {
         .Int(number) -> Val(number)
         .Float(number) -> {
@@ -36,7 +36,7 @@ fn jet_cli_live_json_int(value: DataTree) -> Int? Never! {
         else -> None
     }
 }
-fn jet_cli_live_object(value: DataTree, required: [String], optional: [String], label: String) JetCLIReadError! {
+fn jet_cli_live_object(value: Dyn, required: [String], optional: [String], label: String) JetCLIReadError! {
     if value == .Object(fields) {
         seen := [String:Bool]{}
         loop field in fields {
@@ -48,7 +48,7 @@ fn jet_cli_live_object(value: DataTree, required: [String], optional: [String], 
     }
     Err(jet_cli_read_error("{label} must be an object"))
 }
-fn jet_cli_live_int(value: DataTree, key: String, label: String, nonnegative: Bool) -> Int JetCLIReadError! {
+fn jet_cli_live_int(value: Dyn, key: String, label: String, nonnegative: Bool) -> Int JetCLIReadError! {
     field :: jet_cli_live_field(value, key) ?? return Err(jet_cli_read_error("{label} has invalid `{key}`"))
     if jet_cli_live_json_int(field) == .Val(number) {
         if nonnegative && number < 0 -> return Err(jet_cli_read_error("{label} has negative `{key}`"))
@@ -56,24 +56,24 @@ fn jet_cli_live_int(value: DataTree, key: String, label: String, nonnegative: Bo
     }
     Err(jet_cli_read_error("{label} has invalid `{key}`"))
 }
-fn jet_cli_live_optional_int(value: DataTree, key: String, label: String) -> Int? JetCLIReadError! {
+fn jet_cli_live_optional_int(value: Dyn, key: String, label: String) -> Int? JetCLIReadError! {
     if jet_cli_live_field(value, key) == {
         None | .Val(.Null) -> Ok(None)
         .Val(field) -> Ok(Val(jet_cli_live_json_int(field) ?? return Err(jet_cli_read_error("{label} has invalid `{key}`"))))
     }
 }
-fn jet_cli_live_string(value: DataTree, key: String, label: String) -> String JetCLIReadError! {
+fn jet_cli_live_string(value: Dyn, key: String, label: String) -> String JetCLIReadError! {
     if jet_cli_live_field(value, key) == .Val(.Text(text)) {
         if live_text.has_control(text) -> return Err(jet_cli_read_error("{label} has control characters in `{key}`"))
         return Ok(text)
     }
     Err(jet_cli_read_error("{label} has invalid `{key}`"))
 }
-fn jet_cli_live_bool(value: DataTree, key: String, label: String) -> Bool JetCLIReadError! {
+fn jet_cli_live_bool(value: Dyn, key: String, label: String) -> Bool JetCLIReadError! {
     if jet_cli_live_field(value, key) == .Val(.Bool(flag)) -> return Ok(flag)
     Err(jet_cli_read_error("{label} has invalid `{key}`"))
 }
-fn jet_cli_live_array(value: DataTree, key: String) -> [DataTree] JetCLIReadError! {
+fn jet_cli_live_array(value: Dyn, key: String) -> [Dyn] JetCLIReadError! {
     if jet_cli_live_field(value, key) == .Val(.Array(items)) {
         if items.len() > 4096 -> return Err(jet_cli_read_error("live runtime snapshot has too many {key}"))
         return Ok(items)
@@ -82,7 +82,7 @@ fn jet_cli_live_array(value: DataTree, key: String) -> [DataTree] JetCLIReadErro
 }
 // LiveInspect canonical_json_value sorts object keys before handing the exact
 // transport to the existing canonical decision-ledger reader.
-fn jet_cli_live_json(value: DataTree) -> String JetCLIReadError! {
+fn jet_cli_live_json(value: Dyn) -> String JetCLIReadError! {
     if value == {
         .Null -> Ok("null")
         .Bool(flag) -> Ok("{flag}")
@@ -110,7 +110,7 @@ fn jet_cli_live_json(value: DataTree) -> String JetCLIReadError! {
         }
     }
 }
-fn jet_cli_live_decisions(root: DataTree) -> MIRDecisionLedger? JetCLIReadError! {
+fn jet_cli_live_decisions(root: Dyn) -> MIRDecisionLedger? JetCLIReadError! {
     value :: jet_cli_live_field(root, "decisions") ?? return Ok(None)
     if value == .Null -> return Ok(None)
     payload :: jet_cli_live_json(value)
@@ -118,7 +118,7 @@ fn jet_cli_live_decisions(root: DataTree) -> MIRDecisionLedger? JetCLIReadError!
     ledger :: mir_decision_ledger_read(payload) ?? return Err(jet_cli_read_error(err.message))
     Ok(Val(ledger))
 }
-fn jet_cli_live_counts(root: DataTree, key: String, keys: [String], label: String) -> [String:Int] JetCLIReadError! {
+fn jet_cli_live_counts(root: Dyn, key: String, keys: [String], label: String) -> [String:Int] JetCLIReadError! {
     value :: jet_cli_live_field(root, key) ?? return Err(jet_cli_read_error("live runtime snapshot has no {key}"))
     jet_cli_live_object(value, keys, [String]{}, label)
     counts := [String:Int]{}

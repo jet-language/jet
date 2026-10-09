@@ -300,22 +300,22 @@ fn jet_cli_flash_safe_openocd_image_name(name: String) -> Bool Never! {
     }
     true
 }
-// Rust status_value (CmdFlash.rs:1253-1272); Report uses Core DataTree.
-fn jet_cli_flash_status_value(value: CanonicalJSON) -> DataTree Never! {
+// Rust status_value (CmdFlash.rs:1253-1272); Report uses Core Dyn.
+fn jet_cli_flash_status_value(value: CanonicalJSON) -> Dyn Never! {
     if value == {
-        .Null -> DataTree.Null
-        .Bool(flag) -> DataTree.Bool(flag)
-        .Integer(text) -> DataTree.Int(Int.parse(text) ?? panic("canonical flash integer must fit status integer"))
-        .String(text) -> DataTree.Text(~text)
+        .Null -> Dyn.Null
+        .Bool(flag) -> Dyn.Bool(flag)
+        .Integer(text) -> Dyn.Int(Int.parse(text) ?? panic("canonical flash integer must fit status integer"))
+        .String(text) -> Dyn.Text(~text)
         .Array(values) -> {
-            rows := [DataTree]{}
+            rows := [Dyn]{}
             loop row in values -> &rows.push(jet_cli_flash_status_value(row))
-            DataTree.Array(rows)
+            Dyn.Array(rows)
         }
         .Object(values) -> {
-            fields := [String:DataTree]{}
+            fields := [String:Dyn]{}
             loop row in values -> fields[row.key] = jet_cli_flash_status_value(row.value)
-            DataTree.Object(fields)
+            Dyn.Object(fields)
         }
     }
 }
@@ -337,6 +337,6 @@ fn jet_cli_flash_programmer_json(facts: MIRTargetProgrammerFacts) -> CanonicalJS
 }
 fn jet_cli_flash_optional_json(value: String?) -> CanonicalJSON Never! { if value == .Val(text) -> CanonicalJSON.String(~text) else -> CanonicalJSON.Null }
 // Rust programmer_value (CmdFlash.rs:1303-1336).
-fn jet_cli_flash_programmer_value(facts: MIRTargetProgrammerFacts) -> DataTree Never! { jet_cli_flash_status_value(jet_cli_flash_programmer_json(facts)) }
+fn jet_cli_flash_programmer_value(facts: MIRTargetProgrammerFacts) -> Dyn Never! { jet_cli_flash_status_value(jet_cli_flash_programmer_json(facts)) }
 // Rust plan_value (CmdFlash.rs:1274-1301).
-fn jet_cli_flash_plan_value(plan: JetCLIFlashPlan) -> DataTree Never! { jet_cli_flash_status_value(jet_cli_flash_plan_json(plan)) }
+fn jet_cli_flash_plan_value(plan: JetCLIFlashPlan) -> Dyn Never! { jet_cli_flash_status_value(jet_cli_flash_plan_json(plan)) }

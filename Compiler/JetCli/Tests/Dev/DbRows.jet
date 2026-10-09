@@ -1,5 +1,5 @@
 // Behavioral row/codecs contracts from Source/CmdDb.rs (no inline Rust tests).
-fn db_rows_test_parse(text: String) -> DataTree Never! {
+fn db_rows_test_parse(text: String) -> Dyn Never! {
     db_rows_json.parse_allow_duplicates_with_limits(text, jet_cli_db_rows_limits(text.bytes().len())) ?? panic("fixture JSON: {err.reason}")
 }
 fn db_rows_test_load(text: String, max_rows: Int{100}) -> JetCLIDBLoadedSource Never! {
@@ -21,7 +21,7 @@ fn db_rows_test_csv_error(text: String, max_rows: Int{100}) -> JetCLIDBError Nev
 fn db_rows_test_jsonl_error(text: String, max_rows: Int{100}) -> JetCLIDBError Never! {
     if jet_cli_db_load_jsonl_source("items", "fixture.jsonl", text, max_rows) == { .Err(e) -> e; .Ok(_) -> panic("bad JSONL accepted") }
 }
-fn db_rows_test_normalize_error(value: DataTree, max_rows: Int{100}) -> JetCLIDBError Never! {
+fn db_rows_test_normalize_error(value: Dyn, max_rows: Int{100}) -> JetCLIDBError Never! {
     if jet_cli_db_normalize_json_source("items", "fixture.json", value, 0, max_rows) == { .Err(e) -> e; .Ok(_) -> panic("bad rows accepted") }
 }
 fn db_rows_test_cr() -> String Never! { String.from_bytes([U8]{U8{13}}) ?? panic("CR is UTF-8") }
@@ -95,11 +95,11 @@ fn db_rows_test_cr() -> String Never! { String.from_bytes([U8]{U8{13}}) ?? panic
 }
 
 #Test("DB normalization rejects roots row limits nonobjects and invalid names in order") {
-    db_rows_test_error(db_rows_test_normalize_error(DataTree.Null), "E2701", "source", "fixture.json", "source root must be an array of objects", "use `[ {{ \"column\": value }} ]` or convert the source to CSV/JSONL")
+    db_rows_test_error(db_rows_test_normalize_error(Dyn.Null), "E2701", "source", "fixture.json", "source root must be an array of objects", "use `[ {{ \"column\": value }} ]` or convert the source to CSV/JSONL")
     db_rows_test_error(db_rows_test_normalize_error(db_rows_test_parse("[1,2]"), 1), "E2603", "source", "fixture.json", "source has 2 rows, over the 1-row limit", "raise `--max-rows` explicitly or split the source")
     db_rows_test_error(db_rows_test_normalize_error(db_rows_test_parse("[{{}},false]")), "E2701", "source", "fixture.json", "row 2 is not an object", "make every row an object with named columns")
     db_rows_test_error(db_rows_test_normalize_error(db_rows_test_parse("[{{\"9bad\":1}}]")), "E2701", "source", "fixture.json", "row 1 has invalid column `9bad`", "use unique ASCII identifier column names")
-    if jet_cli_db_normalized_row_json(DataTree.Null, [JetCLIDBColumn]{}) == {
+    if jet_cli_db_normalized_row_json(Dyn.Null, [JetCLIDBColumn]{}) == {
         .Err(e) -> db_rows_test_error(e, "E2701", "source", "", "row is not an object", "use an object row")
         .Ok(_) -> panic("non-object accepted")
     }
@@ -127,7 +127,7 @@ fn db_rows_test_cr() -> String Never! { String.from_bytes([U8]{U8{13}}) ?? panic
             }
         }
     }
-    assert(jet_cli_db_value_kind(DataTree.Null) == None)
+    assert(jet_cli_db_value_kind(Dyn.Null) == None)
     assert((jet_cli_db_value_kind(db_rows_test_parse("9223372036854775807")) ?? panic("kind")) == JetCLIDBColumnKind.Int)
     assert((jet_cli_db_value_kind(db_rows_test_parse("9223372036854775808")) ?? panic("kind")) == JetCLIDBColumnKind.Float)
     assert((jet_cli_db_value_kind(db_rows_test_parse("-9223372036854775809")) ?? panic("kind")) == JetCLIDBColumnKind.Float)
@@ -141,20 +141,20 @@ fn db_rows_test_cr() -> String Never! { String.from_bytes([U8]{U8{13}}) ?? panic
         column :: db_rows_test_column("x", kinds[index])
         assert_eq(jet_cli_db_default_cell(kinds[index]), defaults[index])
         assert_eq(jet_cli_db_normalized_cell(None, column), defaults[index])
-        assert_eq(jet_cli_db_normalized_cell(Val(DataTree.Null), column), defaults[index])
+        assert_eq(jet_cli_db_normalized_cell(Val(Dyn.Null), column), defaults[index])
         nullable :: db_rows_test_column("x", kinds[index], true)
         assert_eq(jet_cli_db_normalized_cell(None, nullable), "null")
-        assert_eq(jet_cli_db_normalized_cell(Val(DataTree.Null), nullable), "null")
+        assert_eq(jet_cli_db_normalized_cell(Val(Dyn.Null), nullable), "null")
     }
-    assert_eq(jet_cli_db_normalized_cell(Val(DataTree.Text("3")), db_rows_test_column("x", JetCLIDBColumnKind.Int)), "0")
-    assert_eq(jet_cli_db_normalized_cell(Val(DataTree.Bool(true)), db_rows_test_column("x", JetCLIDBColumnKind.Float)), "0.0")
-    assert_eq(jet_cli_db_normalized_cell(Val(DataTree.Int(1)), db_rows_test_column("x", JetCLIDBColumnKind.Bool)), "false")
+    assert_eq(jet_cli_db_normalized_cell(Val(Dyn.Text("3")), db_rows_test_column("x", JetCLIDBColumnKind.Int)), "0")
+    assert_eq(jet_cli_db_normalized_cell(Val(Dyn.Bool(true)), db_rows_test_column("x", JetCLIDBColumnKind.Float)), "0.0")
+    assert_eq(jet_cli_db_normalized_cell(Val(Dyn.Int(1)), db_rows_test_column("x", JetCLIDBColumnKind.Bool)), "false")
     nested :: db_rows_test_load("[{{\"x\":[null,1,2.0,\"é\"],\"y\":{{\"k\":true}}}}]")
     assert_eq(nested.json, "[{{\"x\":\"[null,1,2.0,\\\"é\\\"]\",\"y\":\"{{\\\"k\\\":true}}\"}}]")
-    assert_eq(jet_cli_db_value_text(DataTree.Null), "")
-    assert_eq(jet_cli_db_render_json_value(DataTree.Null), "null")
-    assert_eq(jet_cli_db_value_text(DataTree.Text("raw\ntext")), "raw\ntext")
-    assert_eq(jet_cli_db_render_json_value(DataTree.Text("raw\ntext")), "\"raw\\ntext\"")
+    assert_eq(jet_cli_db_value_text(Dyn.Null), "")
+    assert_eq(jet_cli_db_render_json_value(Dyn.Null), "null")
+    assert_eq(jet_cli_db_value_text(Dyn.Text("raw\ntext")), "raw\ntext")
+    assert_eq(jet_cli_db_render_json_value(Dyn.Text("raw\ntext")), "\"raw\\ntext\"")
 }
 
 #Test("DB f64 Display rendering has no scientific notation and preserves negative zero") {
@@ -234,9 +234,9 @@ fn db_rows_test_cr() -> String Never! { String.from_bytes([U8]{U8{13}}) ?? panic
 #Test("DB column names reject padding punctuation and leading digits without rewriting") {
     invalid :: [String]{" id", "id ", "9id", "id.name", "id$name", "id-name", "é"}
     loop name in invalid {
-        fields := [String: DataTree]{}
-        _ :: &fields.add(name, DataTree.Int(1))
-        error :: db_rows_test_normalize_error(DataTree.Array([DataTree]{DataTree.Object(fields)}))
+        fields := [String: Dyn]{}
+        _ :: &fields.add(name, Dyn.Int(1))
+        error :: db_rows_test_normalize_error(Dyn.Array([Dyn]{Dyn.Object(fields)}))
         assert_eq(error.message, "row 1 has invalid column `{name}`")
     }
     loaded :: db_rows_test_load("[{{\"_id\":1,\"A9\":true}}]")
@@ -245,9 +245,9 @@ fn db_rows_test_cr() -> String Never! { String.from_bytes([U8]{U8{13}}) ?? panic
 }
 
 // tests/db_policy.rs::sqlite_blob_round_trip_preserves_bytes_across_tiers
-// row-level byte rendering (306-321); Core DataTree represents bytes as Int arrays.
+// row-level byte rendering (306-321); Core Dyn represents bytes as Int arrays.
 #Test("DB byte row text preserves all byte values in compact JSON order") {
-    bytes :: DataTree.Array([DataTree]{DataTree.Int(0), DataTree.Int(1), DataTree.Int(2), DataTree.Int(127), DataTree.Int(128), DataTree.Int(255)})
+    bytes :: Dyn.Array([Dyn]{Dyn.Int(0), Dyn.Int(1), Dyn.Int(2), Dyn.Int(127), Dyn.Int(128), Dyn.Int(255)})
     assert_eq(jet_cli_db_value_text(bytes), "[0,1,2,127,128,255]")
     kind :: jet_cli_db_value_kind(bytes)
     assert((kind ?? panic("kind")) == JetCLIDBColumnKind.String)

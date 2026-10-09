@@ -110,4 +110,4 @@ for (const [site, seed, defect] of [
 ]) rows.push(`${site}\tSEED-DEFECT\t${seed}\t${defect}; native E3010 root unchanged`);
 rows.push('task\tpass\tjoined=Panicked(reason)\tprocess-survived=true\troot-exit=70\troot-stderr-byte-identical=true');
 writeFileSync(join(out, 'record-variant-results.tsv'), rows.join('\n') + '\n');
-console.log('DataTree/DataEvent/checked-op roots: exit 70 and byte-identical stderr; tasks: joined Panicked(reason), process survives; double panic: SIGABRT');
+console.log('Dyn/DataEvent/checked-op roots: exit 70 and byte-identical stderr; tasks: joined Panicked(reason), process survives; double panic: SIGABRT');
