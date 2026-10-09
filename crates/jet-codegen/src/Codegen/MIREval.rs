@@ -15463,6 +15463,40 @@ impl<'a, 'state> Machine<'a, 'state> {
             });
         }
 
+        if type_name == crate::Syntax::TYPE_MEASUREMENT && func == "new" {
+            let [value, uncertainty] = values else {
+                return Some(Err(mir_error_at(
+                    "Measurement.new requires value and uncertainty",
+                    span,
+                )));
+            };
+            let value = match value {
+                CtValue::Float(value) => value.as_f64(),
+                _ => return Some(Err(mir_error_at(
+                    "Measurement.new requires a Float value",
+                    span,
+                ))),
+            };
+            let uncertainty = match uncertainty {
+                CtValue::Float(uncertainty) => uncertainty.as_f64(),
+                _ => return Some(Err(mir_error_at(
+                    "Measurement.new requires a Float uncertainty",
+                    span,
+                ))),
+            };
+            let (value, uncertainty) =
+                mir_measurement_prelude::jet_measurement_kernel_new(value, uncertainty);
+            return Some(Ok(CtValue::Struct {
+                type_name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
+                fields: vec![
+                    ("value".to_string(), CtValue::Float(CtFloat::f64(value))),
+                    (
+                        "uncertainty".to_string(),
+                        CtValue::Float(CtFloat::f64(uncertainty)),
+                    ),
+                ],
+            }));
+        }
         let constructor = match (type_name, func) {
             (_, "from_str") if type_name == crate::Syntax::TYPE_DECIMAL => Some("decimal"),
             (_, "from_parts" | "new") if type_name == crate::Syntax::TYPE_FRACTION => {
