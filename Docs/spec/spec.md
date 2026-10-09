@@ -1818,8 +1818,12 @@ repeats a dependency's reports; when the dependency has errors, the importer
 reports one **E0626** naming the dependency and the `jet check` that owns
 them. A path dependency declared by a dependency must stay below that
 dependency's directory (**E1206**) unless the root package declares the same
-directory itself, which lets sibling packages such as `Compiler/JetLexer` and
-`Compiler/JetFoundation` share a dependency (D-MOD-CYCLE1). The UI fixture is
+directory itself, or reaches its sibling directory through an explicit
+out-of-tree path dependency. This lets sibling packages such as
+`Compiler/JetLexer` and `Compiler/JetFoundation` share a dependency
+(D-MOD-CYCLE1). The host reads only the declared, reachable path-dependency
+closure; opening that closure never fetches a source or contacts the network.
+The UI fixture is
 `tests/ui/dependency_package_errors/`.
 
 A package is one namespace (D-MOD-CYCLE1=A). A package is a directory with a
