@@ -6,7 +6,8 @@
 mod jet_c_abi_task {
     use super::*;
     use super::jet_c_abi::{guard, native, view, JetCString};
-    use super::jet_c_abi_iter::{allocate, list_value, Failure, Header, Meta, NativeMeta, NativeValue};
+    use super::jet_c_abi_iter::{allocate, list_value, Failure, Header, NativeValue};
+    use super::jet_native_meta::{Meta, NativeMeta};
     use crate::jet_std::{jet_task_flatten_result, jet_task_flatten_results};
     use std::ptr;
     use std::sync::Arc;

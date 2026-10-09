@@ -7837,6 +7837,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     .scopes
                     .iter()
                     .find(|candidate| candidate.id == *scope);
+                if scope_row.is_some_and(|scope| scope.kind == MirScopeKind::StopCleanup) {
+                    return Err(mir_error_at("MIR StopCleanup (native execution host only)", span));
+                }
                 let is_shield =
                     scope_row.is_some_and(|scope| scope.kind == MirScopeKind::Shield);
                 let deadline = scope_row.and_then(|scope| scope.deadline);
@@ -7877,6 +7880,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     .scopes
                     .iter()
                     .find(|candidate| candidate.id == *scope);
+                if scope_row.is_some_and(|scope| scope.kind == MirScopeKind::StopCleanup) {
+                    return Err(mir_error_at("MIR StopCleanup (native execution host only)", span));
+                }
                 let is_shield =
                     scope_row.is_some_and(|scope| scope.kind == MirScopeKind::Shield);
                 let has_deadline = scope_row.is_some_and(|scope| scope.deadline.is_some());

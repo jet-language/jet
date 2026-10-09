@@ -3658,6 +3658,15 @@ fn push_corelib_prelude_body(
     // gets when it uses them. They are never part of a generated Rust program:
     // Compiler/JetBackend/Tests/prepare-call-runtime.mjs --allparts appends
     // them to an all-parts runtime crate (mirrors Emit/RuntimePrefix.jet).
+    // Canonical native metadata is shared by the retained-child host and by
+    // the full native runtime; all-parts assembly must not invent a mirror.
+    out.push_str(
+        "\n// JET_VETTED_UNSAFE_BEGIN: jet_native_meta\n\
+         // AUDIT: image-bound native metadata owns the canonical nine-word\n\
+         // descriptor layout and copies only admitted live metadata pointers.\n",
+    );
+    out.push_str(include_str!("../Prelude/Core/NativeMeta.rs"));
+    out.push_str("\n// JET_VETTED_UNSAFE_END: jet_native_meta\n");
     out.push_str(
         "\n// JET_VETTED_UNSAFE_BEGIN: jet_c_abi\n\
          // AUDIT: D-EXEC1 keeps the raw handle, byte-slice and allocator\n\

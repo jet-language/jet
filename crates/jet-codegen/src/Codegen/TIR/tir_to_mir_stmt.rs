@@ -1685,7 +1685,7 @@ fn lower_loop_with_exit(
     let exit = ctx.new_block(ctx.span(), "loop.exit")?;
     ctx.terminate(MirTerminator::Jump { target: header });
     ctx.switch_to(header);
-    ctx.emit_poll(MirPollKind::Check)?;
+    ctx.emit_poll(MirPollKind::Check, false)?;
     ctx.terminate(MirTerminator::Jump { target: body_block });
     ctx.switch_to(body_block);
     ctx.push_loop(label.map(str::to_string), exit, header);
@@ -1711,7 +1711,7 @@ fn lower_while(
     let exit = ctx.new_block(ctx.span(), "while.exit")?;
     ctx.terminate(MirTerminator::Jump { target: header });
     ctx.switch_to(header);
-    ctx.emit_poll(MirPollKind::Check)?;
+    ctx.emit_poll(MirPollKind::Check, false)?;
     let condition = lower_expr(ctx, cond)?;
     ctx.terminate(MirTerminator::Branch {
         condition,
@@ -1767,7 +1767,7 @@ fn lower_counted_loop(
         ctx.terminate(MirTerminator::Jump { target: step_block });
     }
     ctx.switch_to(step_block);
-    ctx.emit_poll(MirPollKind::Check)?;
+    ctx.emit_poll(MirPollKind::Check, false)?;
     if let Some(step) = step {
         lower_stmt(ctx, step)?;
     }
@@ -1910,7 +1910,7 @@ fn lower_range_loop(
         ctx.terminate(MirTerminator::Jump { target: advance });
     }
     ctx.switch_to(advance);
-    ctx.emit_poll(MirPollKind::Check)?;
+    ctx.emit_poll(MirPollKind::Check, false)?;
     if iterator {
         ctx.emit(
             "range.iter-advance",
@@ -2259,7 +2259,7 @@ fn lower_for_in(
         ctx.terminate(MirTerminator::Jump { target: advance });
     }
     ctx.switch_to(advance);
-    ctx.emit_poll(MirPollKind::Check)?;
+    ctx.emit_poll(MirPollKind::Check, false)?;
     ctx.emit(
         "for-in.advance",
         None,

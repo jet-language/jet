@@ -4235,6 +4235,9 @@ impl<'a> RustEmitter<'a> {
         let scope = self.scope_row(function, scope_id);
         if let Some(scope) = scope {
             match scope.kind {
+                MirScopeKind::StopCleanup => {
+                    panic!("MIR StopCleanup reached the Rust emitter (native execution host only)");
+                }
                 MirScopeKind::Shield if enter => {
                     return "jet_scheduler_shield_enter()".to_string();
                 }

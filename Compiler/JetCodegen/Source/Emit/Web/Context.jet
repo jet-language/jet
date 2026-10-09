@@ -20,6 +20,7 @@ use jet_foundation.[
     MIRPreludeCallID,
     MIRProgram,
     MIRRuntimePartID,
+    MIRScopeKind,
     MIRSourceFileID,
     MIRType,
     MIRTypeDef,
@@ -357,6 +358,9 @@ fn program_has_module(program: MIRProgram, id: MIRModuleID) -> Bool Never! {
 }
 
 fn jet_web_validate_partition(ctx: &JetWebEmitContext, function: MIRFunction) Never! {
+    loop scope in function.scopes {
+        if scope.kind == MIRScopeKind.StopCleanup -> jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR StopCleanup reached the web emitter", "StopCleanup is produced only for native host compilations", Val(scope.span))
+    }
     if function.target_applicability.web && function.web_bucket == None {
         jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "Web-applicable MIR function has no Web bucket", "partition selection must be a checked MIR fact before emission", Val(function.span))
     }

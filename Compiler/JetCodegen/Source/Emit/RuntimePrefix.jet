@@ -93,7 +93,7 @@ JET_RUST_PREFIX_PRELUDE_FILES :: [String]{
     "CoreLib/JetStd/ReactiveEventWatch.rs", "CoreLib/JetStd/FfiCallbacks.rs",
     "CoreLib/JetStd/JSONDataTree.rs", "CoreLib/JetStd/TOML.rs", "CoreLib/JetStd/YAML.rs",
     "CoreLib/Top/SharedRoutes.rs", "Core/LazyTablePlan.rs", "CoreLib/Top/CommandSuite.rs", "Core/Fmt.rs",
-    "Core/FmtAot.rs", "Core/CAbi.rs", "TerminalDefault.rs", "Core/Raylib.rs",
+    "Core/FmtAot.rs", "Core/NativeMeta.rs", "Core/CAbi.rs", "TerminalDefault.rs", "Core/Raylib.rs",
     "Core/CAbiSession.rs",
     "Core/CAbiHost.rs",
     "CoreLib/Top/HandlesRaylib.rs", "CoreLib/Top/DbPool.rs", "CoreLib/Top/UnicodeTables.rs",
@@ -995,6 +995,9 @@ fn jet_rust_prefix_corelib_body(state: &JetRustPrefixState, out: &[String], mapp
     &out.push("\npub use crate::jet_std::JetDataTreeAccess;\n")
     &out.push(jet_rust_prefix_prelude(&state, "Core/Fmt.rs"))
     &out.push(jet_rust_prefix_prelude(&state, "Core/FmtAot.rs"))
+    &out.push("\n// JET_VETTED_UNSAFE_BEGIN: jet_native_meta\n// AUDIT: image-bound native metadata owns the canonical nine-word\n// descriptor layout and copies only admitted live metadata pointers.\n")
+    &out.push(jet_rust_prefix_prelude(&state, "Core/NativeMeta.rs"))
+    &out.push("\n// JET_VETTED_UNSAFE_END: jet_native_meta\n")
     &out.push("\n// JET_VETTED_UNSAFE_BEGIN: jet_c_abi\n// AUDIT: D-EXEC1 keeps the raw handle, byte-slice and allocator\n// adapters of the Jet-native backend's runtime ABI in this module.\n")
     &out.push(jet_rust_prefix_prelude(&state, "Core/CAbi.rs"))
     &out.push("\n// JET_VETTED_UNSAFE_END: jet_c_abi\n")

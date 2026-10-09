@@ -96,14 +96,72 @@ fn lower_numeric_location(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
 
 // The same branch-and-stop as lower_check, with the source location retained.
 // Core.rs:jet_arithmetic_stop and RuntimeDiagnosticCore.rs:jet_write_runtime_stop.
-fn lower_numeric_check(m: &LowerModule, f: &LowerFunction, failed: LIRValueID, location: [LIRValueID], message: String) Never! {
+fn lower_numeric_check(p: MIRProgram, c: LowerContext?, m: &LowerModule, f: &LowerFunction, failed: LIRValueID, location: [LIRValueID], message: String) Never! {
     stop :: lower_new_block(&f)
     next_block :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(next_block, [LIRValueID]{})})
     lower_start(&f, stop, [LIRValueID]{})
     text :: lower_static_text(&m, &f, message)
-    lower_noreturn_call(&m, &f, "jet_rt_numeric_stop", [LIRValueID]{location[0], location[1], location[2], text[0], text[1]})
+    lower_call_runtime(&m, &f, "jet_rt_numeric_stop", [LIRValueID]{location[0], location[1], location[2], text[0], text[1]}, None)
+    lower_numeric_stopped(p, c, &m, &f)
     lower_start(&f, next_block, [LIRValueID]{})
+}
+
+// The enclosing Propagate edge is the one checked stop contract. Numeric
+// failure branches enter it directly, before any payload can be consumed.
+// Propagation cleanup has no Poll: cd28da09a's rt_task_panic_publish aborts
+// on a nonzero delivered status, so its returning continuation is unreachable.
+fn lower_numeric_stopped(p: MIRProgram, context: LowerContext?, m: &LowerModule, f: &LowerFunction) Never! {
+    c :: context ?? {
+        // Generated numeric helpers return an unwritten word; their caller
+        // checks delivered status before using it, just like runtime helpers.
+        layout :: m.signatures[f.builder.signature.value].result ?? return lower_seal(&f, LIRTerminator.Return{value: None})
+        zero :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
+        lower_emit(&f, LIRInst.Const{dst: zero, value: 0})
+        return lower_seal(&f, LIRTerminator.Return{value: Val(zero)})
+    }
+    position :: c.block_index.get(f.mir_block.value) ?? return lower_seal(&f, LIRTerminator.Unreachable)
+    block :: c.mir.blocks[position]
+    if block.terminator == .Poll(kind, _, stop) {
+        if kind == .Propagate && block.instructions.len() > 0 {
+            last :: block.instructions[block.instructions.len() - 1]
+            if lower_operation_can_stop(p, c, m, last.operation) {
+                edge :: lower_edge(p, c, &m, &f, stop) ?? return
+                return lower_seal(&f, LIRTerminator.Jump{target: edge})
+            }
+        }
+    }
+    lower_seal(&f, LIRTerminator.Unreachable)
+}
+
+// A helper that publishes internally can return an unwritten carrier. Check
+// its delivered status on the slow path, before merging or reading the carrier.
+fn lower_numeric_propagate(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction) Never! {
+    status :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_session_propagate", [LIRValueID]{}, Val(status))
+    zero :: lower_const(&f, 0)
+    stopped :: lower_numeric_compare(&f, LIRCondition.Ne, status, zero)
+    stop :: lower_new_block(&f)
+    resume :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: stopped, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(resume, [LIRValueID]{})})
+    lower_start(&f, stop, [LIRValueID]{})
+    lower_numeric_stopped(p, Val(c), &m, &f)
+    lower_start(&f, resume, [LIRValueID]{})
+}
+
+// FixedArithmetic.rs::ShiftOutOfRange owns the dynamic count/type wording;
+// the runtime formats it, and this branch never resumes a failed shift.
+fn lower_numeric_shift_check(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, failed: LIRValueID, op: LIRBinaryOp, count: LIRValueID, unsigned: Bool, bits: Int, location: [LIRValueID]) Never! {
+    stop :: lower_new_block(&f)
+    resume :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(resume, [LIRValueID]{})})
+    lower_start(&f, stop, [LIRValueID]{})
+    direction :: lower_const(&f, if op == .Shl -> 0 else -> 1)
+    signedness :: lower_const(&f, if unsigned -> 1 else -> 0)
+    width :: lower_const(&f, bits)
+    lower_call_runtime(&m, &f, "jet_rt_fixed_shift_stop", [LIRValueID]{direction, count, signedness, width, location[0], location[1], location[2]}, None)
+    lower_numeric_stopped(p, Val(c), &m, &f)
+    lower_start(&f, resume, [LIRValueID]{})
 }
 
 fn lower_numeric_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, receiver: MIRValueID) Never! {
@@ -147,7 +205,7 @@ fn lower_numeric_euclid(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     lower_start(&f, fast_block, [LIRValueID]{})
     zero :: lower_const(&f, 0)
     is_zero :: lower_numeric_compare(&f, LIRCondition.Eq, right, zero)
-    lower_numeric_check(&m, &f, is_zero, location, "divided by zero")
+    lower_numeric_check(p, Val(c), &m, &f, is_zero, location, "divided by zero")
     rest :: lower_numeric_binary(&f, LIRBinaryOp.Rem, left, right)
     initial :: if remainder -> rest else -> lower_numeric_binary(&f, LIRBinaryOp.Div, left, right)
     negative :: lower_numeric_compare(&f, LIRCondition.Lt, rest, zero)
@@ -173,6 +231,7 @@ fn lower_numeric_euclid(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     lower_start(&f, slow_block, [LIRValueID]{})
     slow :: lower_word(&f)
     lower_call_runtime(&m, &f, symbol, [LIRValueID]{left, right, location[0], location[1], location[2]}, Val(slow))
+    lower_numeric_propagate(p, c, &m, &f)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{slow})})
     lower_start(&f, merge, [LIRValueID]{dst})
 }
@@ -210,7 +269,7 @@ fn lower_numeric_guard(f: &LowerFunction, failed: LIRValueID, absent: LIRBlockID
     lower_start(&f, success, [LIRValueID]{})
 }
 
-fn lower_numeric_product(m: &LowerModule, f: &LowerFunction, op: LIRBinaryOp, operation: String, mode: String, unsigned: Bool, left: LIRValueID, right: LIRValueID, absent: LIRBlockID, location: [LIRValueID]) -> LIRValueID Never! {
+fn lower_numeric_product(p: MIRProgram, c: LowerContext?, m: &LowerModule, f: &LowerFunction, op: LIRBinaryOp, operation: String, mode: String, unsigned: Bool, left: LIRValueID, right: LIRValueID, absent: LIRBlockID, location: [LIRValueID]) -> LIRValueID Never! {
     value :: lower_numeric_binary(&f, op, left, right)
     if mode == "wrapping" -> return value
     overflowed :: lower_flag(&f)
@@ -220,7 +279,7 @@ fn lower_numeric_product(m: &LowerModule, f: &LowerFunction, op: LIRBinaryOp, op
         return value
     }
     if mode == "checked_policy" {
-        lower_numeric_check(&m, &f, overflowed, location, lower_numeric_overflow_message(operation))
+        lower_numeric_check(p, c, &m, &f, overflowed, location, lower_numeric_overflow_message(operation))
         return value
     }
     if unsigned {
@@ -284,7 +343,7 @@ fn lower_numeric_overflow(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
         zero :: lower_const(&f, 0)
         if !unsigned {
             negative :: lower_numeric_compare(&f, LIRCondition.Lt, b, zero)
-            lower_numeric_check(&m, &f, negative, loc, "A rotation count cannot be negative")
+            lower_numeric_check(p, Val(c), &m, &f, negative, loc, "A rotation count cannot be negative")
         }
         mask :: lower_const(&f, 63)
         count :: lower_numeric_binary(&f, LIRBinaryOp.And, b, mask)
@@ -297,12 +356,12 @@ fn lower_numeric_overflow(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
         value = rotated
     } else if operation == "add" || operation == "sub" || operation == "mul" {
         op :: if operation == "add" -> LIRBinaryOp.Add else if operation == "sub" -> LIRBinaryOp.Sub else -> LIRBinaryOp.Mul
-        value = lower_numeric_product(&m, &f, op, operation, mode, unsigned, a, b, absent, loc)
+        value = lower_numeric_product(p, Val(c), &m, &f, op, operation, mode, unsigned, a, b, absent, loc)
     } else {
         zero :: lower_const(&f, 0)
         is_zero :: lower_numeric_compare(&f, LIRCondition.Eq, b, zero)
         if checked -> lower_numeric_guard(&f, is_zero, absent)
-        else -> lower_numeric_check(&m, &f, is_zero, loc, "divided by zero")
+        else -> lower_numeric_check(p, Val(c), &m, &f, is_zero, loc, "divided by zero")
         ordinary :: lower_new_block(&f)
         special :: lower_new_block(&f)
         joined :: lower_new_block(&f)
@@ -318,7 +377,7 @@ fn lower_numeric_overflow(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
         // FixedArithmetic.rs widens to i128: rem(MIN,-1) is Some(0),
         // including checked_rem; division's +2^63 is still out of I64 range.
         if operation == "div" && checked -> lower_numeric_guard(&f, is_special, absent)
-        if operation == "div" && mode == "checked_policy" -> lower_numeric_check(&m, &f, is_special, loc, lower_numeric_overflow_message("div"))
+        if operation == "div" && mode == "checked_policy" -> lower_numeric_check(p, Val(c), &m, &f, is_special, loc, lower_numeric_overflow_message("div"))
         lower_seal(&f, LIRTerminator.Branch{condition: is_special, then_target: lower_target(special, [LIRValueID]{}), else_target: lower_target(ordinary, [LIRValueID]{})})
         lower_start(&f, special, [LIRValueID]{})
         special_value :: lower_const(&f, if operation == "rem" -> 0 else if mode == "saturating" -> 9223372036854775807 else -> -9223372036854775808)
@@ -380,7 +439,7 @@ fn lower_narrow_overflow(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     } else if mode == "checked" {
         lower_numeric_guard(&f, out, absent)
     } else if mode == "checked_policy" {
-        lower_numeric_check(&m, &f, out, loc, lower_numeric_overflow_message(operation))
+        lower_numeric_check(p, Val(c), &m, &f, out, loc, lower_numeric_overflow_message(operation))
     } else if signed {
         clamped :: lower_numeric_choose(&f, below, minimum, exact)
         value = lower_numeric_choose(&f, above, maximum, clamped)
@@ -454,12 +513,12 @@ fn lower_helper_numeric_pow(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
     if !unsigned {
         negative :: lower_numeric_compare(&f, LIRCondition.Lt, exponent, zero)
         if checked -> lower_numeric_guard(&f, negative, absent)
-        else -> lower_numeric_check(&m, &f, negative, location, "A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)")
+        else -> lower_numeric_check(p, None, &m, &f, negative, location, "A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)")
     }
     exponent_limit :: lower_const(&f, 4294967295)
     too_large :: lower_numeric_compare(&f, LIRCondition.UGt, exponent, exponent_limit)
     if checked -> lower_numeric_guard(&f, too_large, absent)
-    else -> lower_numeric_check(&m, &f, too_large, location, lower_numeric_overflow_message("pow"))
+    else -> lower_numeric_check(p, None, &m, &f, too_large, location, lower_numeric_overflow_message("pow"))
     one :: lower_const(&f, 1)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(top, [LIRValueID]{one, base, exponent})})
     result :: lower_word(&f)
@@ -474,7 +533,7 @@ fn lower_helper_numeric_pow(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
     odd :: lower_numeric_compare(&f, LIRCondition.Ne, low_bit, zero)
     lower_seal(&f, LIRTerminator.Branch{condition: odd, then_target: lower_target(multiply, [LIRValueID]{}), else_target: lower_target(after_multiply, [LIRValueID]{result})})
     lower_start(&f, multiply, [LIRValueID]{})
-    product :: lower_numeric_product(&m, &f, LIRBinaryOp.Mul, "pow", mode, unsigned, result, current, absent, location)
+    product :: lower_numeric_product(p, None, &m, &f, LIRBinaryOp.Mul, "pow", mode, unsigned, result, current, absent, location)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(after_multiply, [LIRValueID]{product})})
     accumulated :: lower_word(&f)
     lower_start(&f, after_multiply, [LIRValueID]{accumulated})
@@ -482,7 +541,7 @@ fn lower_helper_numeric_pow(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
     last :: lower_numeric_compare(&f, LIRCondition.Eq, remaining, zero)
     lower_seal(&f, LIRTerminator.Branch{condition: last, then_target: lower_target(done, [LIRValueID]{accumulated}), else_target: lower_target(square, [LIRValueID]{})})
     lower_start(&f, square, [LIRValueID]{})
-    squared :: lower_numeric_product(&m, &f, LIRBinaryOp.Mul, "pow", mode, unsigned, current, current, absent, location)
+    squared :: lower_numeric_product(p, None, &m, &f, LIRBinaryOp.Mul, "pow", mode, unsigned, current, current, absent, location)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(top, [LIRValueID]{accumulated, squared, remaining})})
     answer :: lower_word(&f)
     lower_start(&f, done, [LIRValueID]{answer})
@@ -537,17 +596,17 @@ fn lower_narrow_max(signed: Bool, bits: Int) -> Int Never! {
 
 // Stop with the overflow report when `value` is outside the type's range. An
 // unsigned range test is one unsigned compare: negative words read as huge.
-fn lower_narrow_check(m: &LowerModule, f: &LowerFunction, value: LIRValueID, signed: Bool, bits: Int) Never! {
+fn lower_narrow_check(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: LIRValueID, signed: Bool, bits: Int, location: [LIRValueID], message: String) Never! {
     maximum :: lower_const(&f, lower_narrow_max(signed, bits))
-    if !signed -> return lower_narrow_stop_if(&m, &f, LIRCondition.UGt, value, maximum, "jet_rt_panic_overflow")
-    lower_narrow_stop_if(&m, &f, LIRCondition.Gt, value, maximum, "jet_rt_panic_overflow")
+    if !signed -> return lower_narrow_stop_if(p, c, &m, &f, LIRCondition.UGt, value, maximum, location, message)
+    lower_narrow_stop_if(p, c, &m, &f, LIRCondition.Gt, value, maximum, location, message)
     minimum :: lower_const(&f, -1 - lower_narrow_max(signed, bits))
-    lower_narrow_stop_if(&m, &f, LIRCondition.Lt, value, minimum, "jet_rt_panic_overflow")
+    lower_narrow_stop_if(p, c, &m, &f, LIRCondition.Lt, value, minimum, location, message)
 }
 
-fn lower_narrow_stop_if(m: &LowerModule, f: &LowerFunction, condition: LIRCondition, left: LIRValueID, right: LIRValueID, symbol: String) Never! {
+fn lower_narrow_stop_if(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, condition: LIRCondition, left: LIRValueID, right: LIRValueID, location: [LIRValueID], message: String) Never! {
     failed :: lower_numeric_compare(&f, condition, left, right)
-    lower_check(&m, &f, failed, symbol)
+    lower_numeric_check(p, Val(c), &m, &f, failed, location, message)
 }
 
 // The low `bits` of `value`, sign- or zero-extended back to the word.
@@ -560,18 +619,23 @@ fn lower_narrow_wrap(f: &LowerFunction, dst: LIRValueID, value: LIRValueID, sign
 // A word operator on two canonical narrow operands. Division keeps the 64-bit
 // rules of lower_binary (a zero divisor stops, `x % -1` is 0); a shift count
 // outside 0..<bits stops, as Rust's checked shift on the narrow type does.
-fn lower_narrow_binary(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: LIRBinaryOp, overflow: MIRBinaryOverflow, signed: Bool, bits: Int, left: LIRValueID, right: LIRValueID) Never! {
+fn lower_narrow_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: LIRBinaryOp, overflow: MIRBinaryOverflow, signed: Bool, bits: Int, left: LIRValueID, right: LIRValueID, location: [LIRValueID]) Never! {
     if op == .And || op == .Or || op == .Xor -> return lower_emit(&f, LIRInst.Binary{dst: dst, op: op, left: left, right: right})
     if op == .Shl || op == .Shr {
-        width :: lower_const(&f, bits)
-        lower_narrow_stop_if(&m, &f, LIRCondition.UGe, right, width, "jet_rt_panic_overflow")
+        if overflow == .Trap {
+            width :: lower_const(&f, bits)
+            failed :: lower_numeric_compare(&f, LIRCondition.UGe, right, width)
+            lower_numeric_shift_check(p, c, &m, &f, failed, op, right, !signed, bits, location)
+        }
         if op == .Shr -> return lower_emit(&f, LIRInst.Binary{dst: dst, op: if signed -> LIRBinaryOp.Shr else -> LIRBinaryOp.UShr, left: left, right: right})
         shifted :: lower_numeric_binary(&f, LIRBinaryOp.Shl, left, right)
         return lower_narrow_wrap(&f, dst, shifted, signed, bits)
     }
     if op == .Div || op == .Rem {
-        zero :: lower_const(&f, 0)
-        lower_narrow_stop_if(&m, &f, LIRCondition.Eq, right, zero, "jet_rt_panic_division_by_zero")
+        if overflow == .Trap {
+            zero :: lower_const(&f, 0)
+            lower_narrow_stop_if(p, c, &m, &f, LIRCondition.Eq, right, zero, location, "divided by zero")
+        }
         if op == .Rem {
             // A -1 divisor never reaches IDIV here (only MIN / -1 of the
             // word faults, and narrow operands never hold it), and its
@@ -580,12 +644,13 @@ fn lower_narrow_binary(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: 
         }
         quotient :: lower_numeric_binary(&f, LIRBinaryOp.Div, left, right)
         // Signed MIN / -1 is the one quotient outside the range.
-        if signed -> lower_narrow_check(&m, &f, quotient, signed, bits)
+        if signed && overflow == .Trap -> lower_narrow_check(p, c, &m, &f, quotient, signed, bits, location, lower_numeric_overflow_message("div"))
         return lower_emit(&f, LIRInst.Move{dst: dst, src: quotient})
     }
     exact :: lower_numeric_binary(&f, op, left, right)
     if overflow == .Trap {
-        lower_narrow_check(&m, &f, exact, signed, bits)
+        operation :: if op == .Add -> "add" else if op == .Sub -> "sub" else -> "mul"
+        lower_narrow_check(p, c, &m, &f, exact, signed, bits, location, lower_numeric_overflow_message(operation))
         return lower_emit(&f, LIRInst.Move{dst: dst, src: exact})
     }
     lower_narrow_wrap(&f, dst, exact, signed, bits)

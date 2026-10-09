@@ -26,21 +26,25 @@ let prepared = [...lines.slice(0, start), canonical.slice(canonicalStart), ...li
 // Seed proofs retain their emitted, paired route set instead.
 if (mode === '--allparts') {
   for (const [module, file] of [
+    ['jet_native_meta', 'NativeMeta.rs'],
     ['jet_c_abi_routes', 'CAbiRoutes.rs'],
     ['jet_c_abi_iter', 'CAbiIter.rs'],
     ['jet_c_abi_task', 'CAbiTask.rs'],
     ['jet_c_abi_parallel', 'CAbiParallel.rs'],
   ]) {
     const rows = prepared.split('\n');
-    const begin = rows.findIndex(line => line === `mod ${module} {` || line === `pub(crate) mod ${module} {`);
+    const begin = rows.findIndex(line => line === `mod ${module} {` || line === `pub(crate) mod ${module} {` || line === `pub mod ${module} {`);
     if (begin >= 0) {
       const close = rows.findIndex((line, index) => index > begin && line === '}');
       if (close < 0) throw new Error(`input ${module} module is unterminated`);
       // The canonical text carries its own cfg; remove the old one with it.
-      const first = begin > 0 && rows[begin - 1] === '#[cfg(not(target_arch = "wasm32"))]' ? begin - 1 : begin;
+      const first = module === 'jet_native_meta' && begin > 1 && rows[begin - 2] === '#[doc(hidden)]' && rows[begin - 1] === '#[allow(dead_code)]'
+        ? begin - 2
+        : begin > 0 && rows[begin - 1] === '#[cfg(not(target_arch = "wasm32"))]' ? begin - 1 : begin;
       prepared = [...rows.slice(0, first), ...rows.slice(close + 1)].join('\n');
     }
-    prepared += '\n' + readFileSync(resolve(repo, `crates/jet-codegen/src/Prelude/Core/${file}`), 'utf8');
+    const source = readFileSync(resolve(repo, `crates/jet-codegen/src/Prelude/Core/${file}`), 'utf8');
+    prepared += '\n' + source;
   }
   // Native test artifacts link the same canonical rails as Rust-emitted
   // harnesses. A Program seed doesn't select a test artifact, so pull their

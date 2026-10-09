@@ -5,52 +5,11 @@
 pub(crate) mod jet_c_abi_iter {
     use super::*;
     use super::jet_c_abi::{guard, JetCString, view};
+    use super::jet_native_meta::{Meta, NativeMeta};
     use std::cmp::Ordering;
     use std::ptr;
     use std::sync::Arc;
 
-    // SAFETY boundary: descriptors and slots originate in checked native
-    // lowering. Descriptors are copied recursively during the call; callbacks
-    // belong to the loaded code image, which must outlive all returned owners.
-    #[repr(C)]
-    pub struct NativeMeta {
-        stride: usize,
-        clone: usize,
-        drop: usize,
-        show: usize,
-        equal: usize,
-        compare: usize,
-        kind: u64,
-        child0: *const NativeMeta,
-        child1: *const NativeMeta,
-    }
-    pub(crate) struct Meta {
-        stride: usize,
-        clone: usize,
-        drop: usize,
-        show: usize,
-        equal: usize,
-        compare: usize,
-        kind: u64,
-        child0: Option<Arc<Meta>>,
-        child1: Option<Arc<Meta>>,
-    }
-    impl Meta {
-        pub(crate) unsafe fn copy(raw: *const NativeMeta) -> Arc<Self> {
-            let row = &*raw;
-            Arc::new(Self {
-                stride: row.stride, clone: row.clone, drop: row.drop,
-                show: row.show, equal: row.equal, compare: row.compare,
-                kind: row.kind,
-                child0: (!row.child0.is_null()).then(|| Self::copy(row.child0)),
-                child1: (!row.child1.is_null()).then(|| Self::copy(row.child1)),
-            })
-        }
-        pub(crate) fn tag(&self) -> u32 { self.kind as u32 }
-        pub(crate) fn payload_size(&self) -> usize { match self.tag() { 11 => 0, 9 => 1, _ => self.stride } }
-        pub(crate) fn first(&self) -> Arc<Meta> { self.child0.as_ref().expect("native child descriptor").clone() }
-        pub(crate) fn second(&self) -> Arc<Meta> { self.child1.as_ref().expect("native error descriptor").clone() }
-    }
 
     // Lists and most inline records fit without a heap allocation per element.
     enum Slot { Inline([std::mem::MaybeUninit<u64>; 3]), Heap(Box<[std::mem::MaybeUninit<u64>]>) }

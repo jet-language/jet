@@ -4115,6 +4115,7 @@ fn jet_rust_emit_scope_is_debug_only(ctx: JetRustEmitContext, function: MIRFunct
 fn jet_rust_emit_scope_enter(ctx: &JetRustEmitContext, function: MIRFunction, id: MIRScopeID, member: MIRTestScopeMember?) -> String Never! {
     scope_value :: jet_rust_emit_scope_row(&ctx, function, id)
     if scope_value == .Val(scope) {
+        if scope.kind == MIRScopeKind.StopCleanup -> panic("MIR StopCleanup reached the Rust emitter (native execution host only)")
         if scope.kind == MIRScopeKind.Shield -> return "jet_scheduler_shield_enter()"
         if scope.kind == MIRScopeKind.Context && scope.deadline != None -> return "__jet_deadline_scopes.push(jet_ctx_push_deadline({jet_rust_emit_value_transfer(ctx, function, scope.deadline ?? MIRValueID{value: 0})}))"
         if scope.kind == MIRScopeKind.Unsafe {
@@ -4192,6 +4193,7 @@ fn jet_rust_emit_scope_member(ctx: JetRustEmitContext, function: MIRFunction, id
 fn jet_rust_emit_scope_exit(ctx: &JetRustEmitContext, function: MIRFunction, id: MIRScopeID) -> String Never! {
     scope_value :: jet_rust_emit_scope_row(&ctx, function, id)
     if scope_value == .Val(scope) {
+        if scope.kind == MIRScopeKind.StopCleanup -> panic("MIR StopCleanup reached the Rust emitter (native execution host only)")
         if scope.kind == MIRScopeKind.Transaction && scope.name != None {
             local_name :: scope.name ?? ""
             local := MIRLocal?{None}

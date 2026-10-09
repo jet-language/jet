@@ -109,7 +109,7 @@ pub enum MIRSerdeCodec { Encode Decode }
 
 pub enum MIROperatorMarker { Commutative }
 
-pub enum MIRScopeKind { Unsafe Impure Reactive Shield Region Policy TaskGroup Layout Authority Context Live AssumeDeterministic Transaction ScopeMember DebugOnly }
+pub enum MIRScopeKind { Unsafe Impure Reactive Shield StopCleanup Region Policy TaskGroup Layout Authority Context Live AssumeDeterministic Transaction ScopeMember DebugOnly }
 
 pub enum MIRIndexKind { List FixedListProof Map Lane Pool }
 
@@ -998,6 +998,40 @@ pub struct MIRCaptureParam { pub slot: Int, pub name: String, pub span: Span, pu
 
 pub enum MIRCaptureOperand { Value(value: MIRValueID) Place(place: MIRPlaceID) }
 
+// Retained native roots borrow storage, not the source value's ownership.
+// The producer records the exact checked operation granting access to that
+// owned place; a caller cannot turn a borrowed address into a Move permission.
+pub enum MIRRetainedRootCellAction { Read Write Move Initialize Replace Cleanup }
+
+pub struct MIRRetainedRootCellGrant {
+    pub function: MIRFunctionID
+    pub operation: MIROpID
+    pub place: MIRPlaceID
+    pub action: MIRRetainedRootCellAction
+}
+
+pub struct MIRRetainedRootLivePlace {
+    pub place: MIRPlaceID
+    pub live: MIRPlaceID
+    pub value_type: MIRType
+    pub drop_kind: MIRDropKind
+}
+
+pub struct MIRRetainedRootCellBinding {
+    pub declaration: SymbolID
+    pub ty: MIRType
+    pub place: MIRPlaceID
+    pub capture_value: MIRValueID
+    pub capture_slot: Int
+    pub access: MIRAccess
+    pub ownership: MIROwnership
+    // Root and required projection flags are the original MIR Bool places.
+    // Copy/NoDrop values still have a presence flag, but no destructor action.
+    pub live_places: [MIRRetainedRootLivePlace]
+    pub grants: [MIRRetainedRootCellGrant]
+    pub cleanup_identity: String
+}
+
 pub struct MIRLocal {
     pub id: MIRLocalID
     pub name: String
@@ -1684,6 +1718,15 @@ pub enum MIRBinaryDispatch { Primitive Prelude(call: MIRPreludeCallID, location:
 // bootstrap bridge checks this rule going out and re-derives the mode coming back.
 pub enum MIRBinaryOverflow { Unchecked Trap }
 
+// Trap is the checked policy fact; sema never puts it on a proven-total op.
+pub fn mir_binary_can_trap(op: MIRBinaryOp, overflow: MIRBinaryOverflow) -> Bool Never! {
+    if overflow != .Trap -> return false
+    if op == {
+        .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .Shl | .Shr -> true
+        else -> false
+    }
+}
+
 pub enum MIRConversion { Transparent NumericCast SendFn Prelude(call: MIRPreludeCallID, location: MIRPanicLoc, fallibility: MIRCallFallibility) }
 
 pub struct MIREnumArg { pub field: MIRFieldID?, pub value: MIRValueID, pub boxed: Bool }
@@ -2280,10 +2323,54 @@ pub fn mir_terminator_value_uses(terminator: MIRTerminator) -> [MIRValueID] Neve
     }
 }
 
-// Whether `operation` can stop (unified host/stop contract, #4720): it runs
-// user or Core code, invokes a callback, or waits, so a stop may be delivered
-// before it returns. Only such an operation may precede a Propagate poll.
-pub fn mir_operation_can_stop(operation: MIROperation) -> Bool Never! {
+// These selectors name only facts the operation actually evaluates. Merely
+// registering a projected place or a drop flag does not check its bounds.
+pub fn mir_operation_stop_operand(operation: MIROperation) -> MIRValueID? Never! {
+    if operation == .Unary(.Neg, value) -> return Val(value)
+    None
+}
+
+pub fn mir_operation_stop_place(operation: MIROperation) -> MIRPlaceID? Never! {
+    if operation == {
+        .ReadPlace(place) | .MovePlace(place) | .WritePlace(place, _) | .ReplacePlace(place, _) -> Val(place)
+        else -> None
+    }
+}
+
+pub fn mir_fixed_neg_can_trap(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .IntN(_, bits) -> bits > 0 && bits <= 64
+        .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> mir_fixed_neg_can_trap(base)
+        else -> false
+    }
+}
+
+// User/callback/wait operations can deliver stops. For Prelude routes, Panic
+// is a checked registry fact, independent of a returned failure carrier.
+pub fn mir_operation_can_stop(operation: MIROperation, operand_type: MIRType?, accessed_place: MIRPlace?, prelude_calls: [MIRPreludeCall], prelude_positions: [U64:Int]) -> Bool Never! {
+    if operation == .Binary(op, _, overflow, _, _) {
+        if mir_binary_can_trap(op, overflow) -> return true
+    }
+    if mir_operation_stop_operand(operation) != None && operand_type == .Val(ty) {
+        if mir_fixed_neg_can_trap(ty) -> return true
+    }
+    if mir_operation_stop_place(operation) != None && accessed_place == .Val(place) {
+        writing :: if operation == .WritePlace(_, _) || operation == .ReplacePlace(_, _) -> true else -> false
+        loop projection in place.projections {
+            if projection == .Index(_, _, call, write_call, _, _, _) {
+                position :: prelude_positions.get(call.value)
+                if position == .Val(at) && prelude_calls[at].effect_kind == Val(Effect.Panic) -> return true
+                if writing && write_call == .Val(setter) {
+                    setter_position :: prelude_positions.get(setter.value)
+                    if setter_position == .Val(at) && prelude_calls[at].effect_kind == Val(Effect.Panic) -> return true
+                }
+            }
+        }
+    }
+    loop call in mir_operation_prelude_calls(operation) {
+        position :: prelude_positions.get(call.value) ?? next
+        if prelude_calls[position].effect_kind == Val(Effect.Panic) -> return true
+    }
     if operation == {
         .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) | .ScopeExit(_) -> true
         .LoopIterInit(_, _, _, _, _) | .LoopIterAdvance(_, _) -> true
@@ -2294,6 +2381,13 @@ pub fn mir_operation_can_stop(operation: MIROperation) -> Bool Never! {
         }
         else -> false
     }
+}
+
+// Existing user/callback/Core operations can panic through the code they invoke.
+// ScopeExit alone only forwards an already-delivered stop.
+pub fn mir_operation_can_panic(operation: MIROperation, operand_type: MIRType?, accessed_place: MIRPlace?, prelude_calls: [MIRPreludeCall], prelude_positions: [U64:Int]) -> Bool Never! {
+    if operation == .ScopeExit(_) -> return false
+    mir_operation_can_stop(operation, operand_type, accessed_place, prelude_calls, prelude_positions)
 }
 
 pub enum MIROperationUseKind { Value Place }

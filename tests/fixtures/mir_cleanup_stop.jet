@@ -1,0 +1,17 @@
+// Normal-exit cleanup: first publishes Panic; remaining closes exactly once.
+// The same source is the Rust and Jet frontend witness.
+struct First { label: String }
+struct Remaining { label: String }
+impl First.Close {
+    fn close(^self) {
+        print(self.label)
+        panic("first cleanup panic")
+    }
+}
+impl Remaining.Close {
+    fn close(^self) { print(self.label) }
+}
+fn run() {
+    remaining := Remaining{label: "remaining once"}
+    first := First{label: "first once"}
+}

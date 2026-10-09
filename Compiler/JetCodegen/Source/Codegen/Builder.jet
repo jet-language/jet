@@ -55,6 +55,8 @@ use jet_foundation.[
     Type,
     mir_copy_ownership,
     mir_operation_can_stop,
+    mir_operation_stop_operand,
+    mir_operation_stop_place,
     mir_copy_fact_for_ownership,
     mir_function_id,
     mir_owned_ownership,
@@ -439,8 +441,8 @@ struct JetCodegenBuilder {
     // (`jet_codegen_plain_try_identity`), and whether that call took it.
     pub plain_try_operand: String?
     pub plain_try_taken: Bool
-    // True while a cleanup action is emitted: cleanup is Shield-masked, so it
-    // carries no stop points (jet_codegen_emit_poll).
+    // True only on propagation cleanup: normal-exit cleanup can panic and
+    // propagates through the not-yet-run suffix.
     pub stop_cleanup_active: Bool
 }
 
@@ -1056,52 +1058,54 @@ fn jet_codegen_function_state(builder: JetCodegenBuilder, program: JetCodegenPro
 }
 
 // Rust: none (Jet-only pass)
+// The parameter owns this state. Transfer every non-Copy field out of that
+// owner instead of cloning it into the builder and dropping the snapshot.
 fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, program: JetCodegenProgram, state: ^JetCodegenFunctionState) Never! {
-    builder.function = state.function
+    builder.function = ^state.function
     builder.current_span = state.current_span
     builder.current_line = state.current_line
-    builder.generic_type_names = state.generic_type_names
+    builder.generic_type_names = ^state.generic_type_names
     builder.current = state.current
     builder.entry = state.entry
     builder.next_identity = state.next_identity
     builder.scope_depth = state.scope_depth
-    builder.blocks = state.blocks
-    builder.block_positions = state.block_positions
-    builder.locals = state.locals
-    builder.local_positions = state.local_positions
-    builder.values = state.values
-    builder.value_positions = state.value_positions
-    builder.places = state.places
-    builder.place_positions = state.place_positions
-    builder.scopes = state.scopes
-    builder.contract_scopes = state.contract_scopes
-    builder.params = state.params
-    builder.capture_params = state.capture_params
-    builder.capture_facts = state.capture_facts
-    builder.bindings = state.bindings
-    builder.loops = state.loops
-    builder.prelude_calls = state.prelude_calls
-    builder.prelude_call_positions = state.prelude_call_positions
-    builder.core_calls = state.core_calls
-    builder.used_core = state.used_core
+    builder.blocks = ^state.blocks
+    builder.block_positions = ^state.block_positions
+    builder.locals = ^state.locals
+    builder.local_positions = ^state.local_positions
+    builder.values = ^state.values
+    builder.value_positions = ^state.value_positions
+    builder.places = ^state.places
+    builder.place_positions = ^state.place_positions
+    builder.scopes = ^state.scopes
+    builder.contract_scopes = ^state.contract_scopes
+    builder.params = ^state.params
+    builder.capture_params = ^state.capture_params
+    builder.capture_facts = ^state.capture_facts
+    builder.bindings = ^state.bindings
+    builder.loops = ^state.loops
+    builder.prelude_calls = ^state.prelude_calls
+    builder.prelude_call_positions = ^state.prelude_call_positions
+    builder.core_calls = ^state.core_calls
+    builder.used_core = ^state.used_core
     builder.nested_functions = ^state.nested_functions
-    builder.callbacks = state.callbacks
-    builder.checked_vector_facts = state.checked_vector_facts
-    builder.transactions = state.transactions
+    builder.callbacks = ^state.callbacks
+    builder.checked_vector_facts = ^state.checked_vector_facts
+    builder.transactions = ^state.transactions
     builder.transaction_cleanup_active = state.transaction_cleanup_active
-    builder.drop_live_places = state.drop_live_places
-    builder.drop_live_all = state.drop_live_all
-    builder.cleanup_frames = state.cleanup_frames
-    builder.exit_tails = state.exit_tails
-    builder.exit_value_slots = state.exit_value_slots
-    builder.switch_subject = state.switch_subject
-    builder.spawn_occurrences = state.spawn_occurrences
-    builder.pattern_windows = state.pattern_windows
-    builder.window_aliases = state.window_aliases
-    builder.read_windows = state.read_windows
-    builder.read_alias_places = state.read_alias_places
-    builder.stable_element_lets = state.stable_element_lets
-    builder.plain_try_operand = state.plain_try_operand
+    builder.drop_live_places = ^state.drop_live_places
+    builder.drop_live_all = ^state.drop_live_all
+    builder.cleanup_frames = ^state.cleanup_frames
+    builder.exit_tails = ^state.exit_tails
+    builder.exit_value_slots = ^state.exit_value_slots
+    builder.switch_subject = ^state.switch_subject
+    builder.spawn_occurrences = ^state.spawn_occurrences
+    builder.pattern_windows = ^state.pattern_windows
+    builder.window_aliases = ^state.window_aliases
+    builder.read_windows = ^state.read_windows
+    builder.read_alias_places = ^state.read_alias_places
+    builder.stable_element_lets = ^state.stable_element_lets
+    builder.plain_try_operand = ^state.plain_try_operand
     builder.plain_try_taken = state.plain_try_taken
 }
 
@@ -1129,7 +1133,7 @@ fn jet_codegen_switch_block(builder: &JetCodegenBuilder, program: JetCodegenProg
     loop row in builder.loops {
         if row.continue_target == block {
             jet_codegen_emit_budget_site(&builder, program, "step", "jet_rt_comptime_step")
-            return jet_codegen_emit_poll(&builder, program, MIRPollKind.Check)
+            return jet_codegen_emit_poll(&builder, program, MIRPollKind.Check, false)
         }
     }
 }
@@ -1141,17 +1145,22 @@ fn jet_codegen_switch_block(builder: &JetCodegenBuilder, program: JetCodegenProg
 // each loop continue target, where every live value is owned by a cleanup
 // frame; `Propagate` directly follows each can-stop operation, before its
 // result is bound, so the stop path never drops a result the operation may
-// have left uninitialized. Cleanup, Shield and transaction regions are
-// masked: they carry no stop points.
-fn jet_codegen_emit_poll(builder: &JetCodegenBuilder, program: JetCodegenProgram, kind: MIRPollKind) Never! {
-    if !program.stop_points || builder.stop_cleanup_active || builder.transactions.len() > 0 -> return
-    if !jet_codegen_current_is_open(builder, program) || jet_codegen_in_shield(builder) -> return
+// have left uninitialized. Shield and transaction masks defer cancellation,
+// never Panic. Only propagation cleanup is already unwinding.
+fn jet_codegen_emit_poll(builder: &JetCodegenBuilder, program: JetCodegenProgram, kind: MIRPollKind, panic_capable: Bool) Never! {
+    if !program.stop_points || builder.stop_cleanup_active -> return
+    if !panic_capable && (builder.transactions.len() > 0 || jet_codegen_in_shield(builder)) -> return
+    if !jet_codegen_current_is_open(builder, program) -> return
     span := builder.current_span
     resume :: jet_codegen_new_block(&builder, program, span, "poll-resume")
     stop :: jet_codegen_new_block(&builder, program, span, "poll-stop")
     jet_codegen_terminate(&builder, program, MIRTerminator.Poll{kind: kind, resume: resume, stop: stop})
     builder.current = stop
-    _ := jet_codegen_terminate_with_owned_cleanup(&builder, program, MIRTerminator.Stopped, -1)
+    builder.stop_cleanup_active = true
+    jet_codegen_emit_cleanups_from_frame_depth(&builder, program, 0)
+    builder.stop_cleanup_active = false
+    jet_codegen_emit_budget_leave(&builder, program, MIRTerminator.Stopped)
+    jet_codegen_terminate(&builder, program, MIRTerminator.Stopped)
     builder.current = resume
 }
 
@@ -1159,7 +1168,7 @@ fn jet_codegen_emit_poll(builder: &JetCodegenBuilder, program: JetCodegenProgram
 // compiler callable first enters one level of comptime depth, then the Check.
 fn jet_codegen_emit_entry_check(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
     jet_codegen_emit_budget_site(&builder, program, "enter", "jet_rt_comptime_enter")
-    jet_codegen_emit_poll(&builder, program, MIRPollKind.Check)
+    jet_codegen_emit_poll(&builder, program, MIRPollKind.Check, false)
 }
 
 fn jet_codegen_in_shield(builder: JetCodegenBuilder) -> Bool Never! {
@@ -1194,6 +1203,18 @@ fn jet_codegen_terminate(builder: &JetCodegenBuilder, program: JetCodegenProgram
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::emit
+fn jet_codegen_operation_can_stop(builder: JetCodegenBuilder, operation: MIROperation) -> Bool Never! {
+    operand_type := MIRType?{None}
+    if mir_operation_stop_operand(operation) == .Val(value) {
+        if builder.value_positions.get(value.value) == .Val(at) -> operand_type = Val(builder.values[at].ty)
+    }
+    accessed_place := MIRPlace?{None}
+    if mir_operation_stop_place(operation) == .Val(place) {
+        if builder.place_positions.get(place.value) == .Val(at) -> accessed_place = Val(builder.places[at])
+    }
+    mir_operation_can_stop(operation, operand_type, accessed_place, builder.prelude_calls, builder.prelude_call_positions)
+}
+
 fn jet_codegen_emit(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, ty: Type?, requested: MIROperation) -> MIRValueID? {
     // D-MEM-COPYSEM1: a read parameter's place has no storage to give up,
     // and neither has an element of a container (Rust `lower_receiver_place`
@@ -1225,7 +1246,11 @@ fn jet_codegen_emit(builder: &JetCodegenBuilder, program: JetCodegenProgram, spa
         .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, program, place, true)
         else -> {}
     }
-    if mir_operation_can_stop(operation) -> jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate)
+    if jet_codegen_operation_can_stop(builder, operation) {
+        panic_capable := true
+        if operation == .ScopeExit(_) -> panic_capable = false
+        jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate, panic_capable)
+    }
     result
 }
 
@@ -1249,7 +1274,11 @@ fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, program: JetCodegenPro
         .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, program, place, true)
         else -> {}
     }
-    if mir_operation_can_stop(operation) -> jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate)
+    if jet_codegen_operation_can_stop(builder, operation) {
+        panic_capable := true
+        if operation == .ScopeExit(_) -> panic_capable = false
+        jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate, panic_capable)
+    }
     value
 }
 
@@ -1434,10 +1463,20 @@ fn jet_codegen_emit_drop_cleanup(builder: &JetCodegenBuilder, program: JetCodege
     jet_codegen_switch_block(&builder, program, next_block)
 }
 
+// This owner is deliberately not a lexical cleanup frame: the consumed action
+// and its arguments must not be registered again on a sibling stop path.
+fn jet_codegen_begin_stop_cleanup(builder: &JetCodegenBuilder, program: JetCodegenProgram) -> MIRScopeID Never! {
+    span :: builder.current_span
+    identity :: jet_codegen_identity(&builder, program, "scope", span, "StopCleanup", "")
+    scope :: MIRScopeID{value: stable_id("mir-scope", identity)}
+    &builder.scopes.push(MIRScope{id: scope, kind: MIRScopeKind.StopCleanup, span: span, name: None, deadline: None, facts: [MIRScopeFact]{}})
+    _ := jet_codegen_emit(&builder, program, span, None, MIROperation.ScopeEnter{scope: scope, test_member: None})
+    scope
+}
+
 fn jet_codegen_emit_cleanup_action(builder: &JetCodegenBuilder, program: JetCodegenProgram, action: JetCodegenCleanupAction) Never! {
     if !jet_codegen_current_is_open(builder, program) -> return
-    masked :: builder.stop_cleanup_active
-    builder.stop_cleanup_active = true
+    cleanup_scope :: if builder.stop_cleanup_active -> Val(jet_codegen_begin_stop_cleanup(&builder, program)) else -> MIRScopeID?{None}
     if action == {
         .DeferredCall(thunk) -> {
             current_span := builder.current_span
@@ -1445,7 +1484,9 @@ fn jet_codegen_emit_cleanup_action(builder: &JetCodegenBuilder, program: JetCode
         }
         .DropPlace(record) -> jet_codegen_emit_drop_cleanup(&builder, program, record)
     }
-    builder.stop_cleanup_active = masked
+    if cleanup_scope == .Val(scope) && jet_codegen_current_is_open(builder, program) {
+        _ := jet_codegen_emit(&builder, program, builder.current_span, None, MIROperation.ScopeExit{scope: scope})
+    }
 }
 
 fn jet_codegen_cleanup_action_is_drop(action: JetCodegenCleanupAction) -> Bool {
@@ -1458,6 +1499,22 @@ fn jet_codegen_cleanup_action_is_drop(action: JetCodegenCleanupAction) -> Bool {
 /// D-SHAPE-RESOURCE1=A: explicit deferred actions run first in reverse
 /// registration order; the automatic safety net then closes or releases every
 /// still-live local in reverse declaration order.
+// Current and already-run actions are absent before the operation is emitted.
+// Saved registrations are restored for sibling paths, never this stop edge.
+fn jet_codegen_emit_cleanup_suffix(builder: &JetCodegenBuilder, program: JetCodegenProgram, depth: Int, remaining: [JetCodegenCleanupAction], action: JetCodegenCleanupAction) Never! {
+    saved := builder.cleanup_frames
+    active := [JetCodegenCleanupFrame]{}
+    loop index in 0...depth -> &active.push(saved[index])
+    active[depth].actions = remaining
+    active[depth].explicit = 0
+    loop item in remaining {
+        if !jet_codegen_cleanup_action_is_drop(item) -> active[depth].explicit += 1
+    }
+    builder.cleanup_frames = active
+    jet_codegen_emit_cleanup_action(&builder, program, action)
+    builder.cleanup_frames = saved
+}
+
 fn jet_codegen_emit_cleanup_frame(builder: &JetCodegenBuilder, program: JetCodegenProgram, frame_index: Int) Never! {
     if frame_index < 0 || frame_index >= builder.cleanup_frames.len() -> panic("MIR cleanup frame index is outside the active stack")
     frame := builder.cleanup_frames[frame_index]
@@ -1467,7 +1524,15 @@ fn jet_codegen_emit_cleanup_frame(builder: &JetCodegenBuilder, program: JetCodeg
             index -= 1
             action := frame.actions[index]
             if jet_codegen_cleanup_action_is_drop(action) != automatic -> next
-            jet_codegen_emit_cleanup_action(&builder, program, action)
+            remaining := [JetCodegenCleanupAction]{}
+            loop (at, item) in frame.actions {
+                if {
+                    !automatic && jet_codegen_cleanup_action_is_drop(item) -> &remaining.push(item)
+                    at < index && jet_codegen_cleanup_action_is_drop(item) == automatic -> &remaining.push(item)
+                    else -> {}
+                }
+            }
+            jet_codegen_emit_cleanup_suffix(&builder, program, frame_index, remaining, action)
             if !jet_codegen_current_is_open(builder, program) -> return
         }
     }
@@ -1730,10 +1795,14 @@ fn jet_codegen_seal_exit_chains(builder: &JetCodegenBuilder, program: JetCodegen
             if deepest > explicit.len() -> panic("drop chain entry outlives its explicit cleanup")
             block := jet_codegen_exit_chain_block(&builder, program, pending, row.key, 0)
             jet_codegen_switch_block(&builder, program, block)
+            masked :: builder.stop_cleanup_active
+            if row.terminator == .Stopped -> builder.stop_cleanup_active = true
             index := automatic.len()
             loop index > 0 {
                 index -= 1
-                jet_codegen_emit_cleanup_action(&builder, program, automatic[index])
+                remaining := [JetCodegenCleanupAction]{}
+                loop at in 0..<index -> &remaining.push(automatic[at])
+                jet_codegen_emit_cleanup_suffix(&builder, program, depth, remaining, automatic[index])
             }
             if frame.owner != None && jet_codegen_current_is_open(builder, program) {
                 scope :: frame.owner ?? panic("owned cleanup frame lost its MIR scope")
@@ -1746,10 +1815,13 @@ fn jet_codegen_seal_exit_chains(builder: &JetCodegenBuilder, program: JetCodegen
                 previous := block
                 block = jet_codegen_exit_chain_block(&builder, program, pending, row.key, count)
                 jet_codegen_switch_block(&builder, program, block)
-                jet_codegen_emit_cleanup_action(&builder, program, explicit[count - 1])
+                remaining := automatic
+                loop at in 0..<count - 1 -> &remaining.push(explicit[at])
+                jet_codegen_emit_cleanup_suffix(&builder, program, depth, remaining, explicit[count - 1])
                 if jet_codegen_current_is_open(builder, program) -> jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: previous})
                 count += 1
             }
+            builder.stop_cleanup_active = masked
         }
     }
     jet_codegen_switch_block(&builder, program, resume_block)
@@ -1772,6 +1844,7 @@ fn jet_codegen_enter_scope(builder: &JetCodegenBuilder, program: JetCodegenProgr
         .Impure -> "Impure"
         .Reactive -> "Reactive"
         .Shield -> "Shield"
+        .StopCleanup -> "StopCleanup"
         .Region -> "Region"
         .Policy -> "Policy"
         .TaskGroup -> "TaskGroup"

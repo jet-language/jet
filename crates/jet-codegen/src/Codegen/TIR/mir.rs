@@ -58,7 +58,7 @@ use jet_foundation::MIR::{
     MirVectorFact, MirVectorLayout, MirVectorRule, MirVisibility, MirWebParamField,
     MirWebParamReconstruction, stable_id,
 };
-use jet_foundation::MIR::{MirPollKind, mir_operation_can_stop};
+use jet_foundation::MIR::{MirPollKind, mir_operation_can_stop, mir_operation_stop_operand, mir_operation_stop_place};
 /// Keep only derive requests whose implementation is part of this target's
 /// checked program. Type-site markers are broader than Rust trait conformance:
 /// a user derive provider (for example `#Summarize`) contributes inherent
@@ -4410,7 +4410,7 @@ fn lower_function(
     for (offset, (name, ty, access)) in f.params.iter().enumerate() {
         ctx.bind_parameter(param_index + offset, name, ty, *access)?;
     }
-    ctx.emit_poll(MirPollKind::Check)?;
+    ctx.emit_poll(MirPollKind::Check, false)?;
     match body {
         Some(TLambdaBody::Expr(expr)) => {
             let value = ctx.lower_child(expr)?;
@@ -6717,13 +6717,13 @@ impl<'a> LowerCtx<'a> {
 
     /// Never read a can-stop result on the stop edge. Only the resume edge
     /// binds it into a lexical frame; Stopped exits through that frame's
-    /// ordinary drop chain. Cleanup, Shield and transaction bodies are masked.
-    pub(super) fn emit_poll(&mut self, kind: MirPollKind) -> Result<(), LowerError> {
-        if !self.function_registry.stop_points || self.stop_cleanup_active
-            || !self.transaction_restores.is_empty() || self.is_terminated()
+    /// ordinary drop chain. Shield/transaction masks defer cancellation only.
+    pub(super) fn emit_poll(&mut self, kind: MirPollKind, panic_capable: bool) -> Result<(), LowerError> {
+        if !self.function_registry.stop_points || self.stop_cleanup_active || self.is_terminated()
+            || !panic_capable && (!self.transaction_restores.is_empty()
             || self.defer_stack.iter().filter_map(|frame| frame.owner).any(|owner| {
                 self.scopes.iter().any(|scope| scope.id == owner && scope.kind == MirScopeKind::Shield)
-            })
+            }))
         {
             return Ok(());
         }
@@ -6731,7 +6731,13 @@ impl<'a> LowerCtx<'a> {
         let stop = self.new_block(self.span(), "poll.stop")?;
         self.terminate(MirTerminator::Poll { kind, resume, stop });
         self.current = stop;
-        self.terminate_with_cleanup(MirTerminator::Stopped, 0)?;
+        // A propagation edge owes only the actions still registered here.
+        // Never share an entry whose explicit count predates consumption.
+        self.stop_cleanup_active = true;
+        let cleanup = self.emit_deferred_cleanups_from(0, false);
+        self.stop_cleanup_active = false;
+        cleanup?;
+        self.terminate(MirTerminator::Stopped);
         self.current = resume;
         Ok(())
     }
@@ -7032,8 +7038,10 @@ impl<'a> LowerCtx<'a> {
                 };
                 let mut block = entry(0, self)?;
                 self.switch_to(block);
-                for action in automatic.iter().rev() {
-                    self.emit_cleanup_action(*action, false)?;
+                let propagating = exit.target == ExitTarget::Stopped;
+                for index in (0..automatic.len()).rev() {
+                    self.emit_cleanup_suffix(depth, &[], &automatic[..index],
+                        automatic[index], propagating)?;
                 }
                 self.terminate(MirTerminator::Jump { target: next });
                 let deepest = entries.last().map_or(0, |last| last.explicit);
@@ -7044,7 +7052,8 @@ impl<'a> LowerCtx<'a> {
                     let action = explicit.get(count - 1).copied().ok_or_else(|| {
                         self.error(self.span(), "drop chain entry outlives its explicit cleanup")
                     })?;
-                    self.emit_cleanup_action(action, false)?;
+                    self.emit_cleanup_suffix(depth, &explicit[..count - 1], &automatic,
+                        action, propagating)?;
                     self.terminate(MirTerminator::Jump { target: following });
                 }
             }
@@ -7158,11 +7167,64 @@ impl<'a> LowerCtx<'a> {
             let (automatic, explicit): (Vec<_>, Vec<_>) = actions
                 .into_iter()
                 .partition(|action| matches!(action, DeferredCleanup::DropPlace { .. }));
-            for action in explicit.into_iter().rev().chain(automatic.into_iter().rev()) {
-                self.emit_cleanup_action(action, stop_path)?;
+            for index in (0..explicit.len()).rev() {
+                self.emit_cleanup_suffix(depth, &explicit[..index], &automatic,
+                    explicit[index], stop_path)?;
+            }
+            for index in (0..automatic.len()).rev() {
+                self.emit_cleanup_suffix(depth, &[], &automatic[..index],
+                    automatic[index], stop_path)?;
+            }
+            if self.stop_cleanup_active {
+                if let Some(scope) = self.defer_stack[depth].owner {
+                    self.emit("stop.scope.exit", None, MirOperation::ScopeExit { scope })?;
+                }
             }
         }
         Ok(())
+    }
+
+    /// Present only the not-yet-run suffix to a cleanup's propagation edge.
+    /// The saved registrations belong to sibling paths, not this exit.
+    fn emit_cleanup_suffix(
+        &mut self,
+        depth: usize,
+        explicit: &[DeferredCleanup],
+        automatic: &[DeferredCleanup],
+        action: DeferredCleanup,
+        stop_path: bool,
+    ) -> Result<(), LowerError> {
+        let deeper = self.defer_stack.split_off(depth + 1);
+        let saved = std::mem::take(&mut self.defer_stack[depth].actions);
+        let count = self.defer_stack[depth].explicit;
+        self.defer_stack[depth].actions.extend_from_slice(automatic);
+        self.defer_stack[depth].actions.extend_from_slice(explicit);
+        self.defer_stack[depth].explicit = explicit.len();
+        let result = self.emit_cleanup_action(action, stop_path);
+        self.defer_stack[depth].actions = saved;
+        self.defer_stack[depth].explicit = count;
+        self.defer_stack.extend(deeper);
+        result
+    }
+
+    /// A typed owner without a new lexical frame: the current action has
+    /// already been consumed from the frame's pending cleanup suffix.
+    fn begin_stop_cleanup(&mut self) -> Result<MirScopeId, LowerError> {
+        let span = self.span();
+        let identity = self.reserve_identity("scope", span, "StopCleanup", "")?;
+        let scope = MirScopeId(stable_id("mir-scope", &identity));
+        self.scopes.push(MirScope {
+            id: scope,
+            kind: MirScopeKind::StopCleanup,
+            span,
+            name: None,
+            deadline: None,
+            facts: Default::default(),
+        });
+        self.emit("stop.cleanup.enter", None, MirOperation::ScopeEnter {
+            scope, test_member: None,
+        })?;
+        Ok(scope)
     }
 
     /// Lower one cleanup action into the current block. On a stop path a
@@ -7173,7 +7235,18 @@ impl<'a> LowerCtx<'a> {
         stop_path: bool,
     ) -> Result<(), LowerError> {
         let masked = self.stop_cleanup_active;
-        self.stop_cleanup_active = true;
+        self.stop_cleanup_active = masked || stop_path;
+        let cleanup_scope = if self.stop_cleanup_active {
+            match self.begin_stop_cleanup() {
+                Ok(scope) => Some(scope),
+                Err(error) => {
+                    self.stop_cleanup_active = masked;
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
         let result = (|| {
         match action {
             DeferredCleanup::Close(index) => self.emit_deferred_close(index)?,
@@ -7214,6 +7287,12 @@ impl<'a> LowerCtx<'a> {
         }
             Ok(())
         })();
+        let result = result.and_then(|()| {
+            if let Some(scope) = cleanup_scope.filter(|_| !self.is_terminated()) {
+                self.emit("stop.cleanup.exit", None, MirOperation::ScopeExit { scope })?;
+            }
+            Ok(())
+        });
         self.stop_cleanup_active = masked;
         result
     }
@@ -7916,7 +7995,14 @@ impl<'a> LowerCtx<'a> {
         let identity = self.reserve_identity("operation", span, role, &detail)?;
         let value = MirValueId(stable_id("mir-value", &identity));
         let op_id = jet_foundation::MIR::MirOpId(stable_id("mir-op", &identity));
-        let can_stop = mir_operation_can_stop(&operation);
+        let operand_type = mir_operation_stop_operand(&operation)
+            .and_then(|value| self.values.iter().find(|(id, ..)| *id == value).map(|(_, ty, ..)| ty));
+        let accessed_place = mir_operation_stop_place(&operation)
+            .and_then(|place| self.places.iter().find(|row| row.id == place));
+        let can_stop = mir_operation_can_stop(&operation, operand_type, accessed_place, |call| {
+            self.prelude_call_positions.get(&call).and_then(|position| self.prelude_calls[*position].effect)
+        });
+        let panic_capable = can_stop && !matches!(&operation, MirOperation::ScopeExit { .. });
         if let Some(value_type) = &value_type {
             let ownership = match forced_ownership {
                 Some(ownership) => ownership,
@@ -7966,7 +8052,7 @@ impl<'a> LowerCtx<'a> {
             )?;
         }
         if can_stop {
-            self.emit_poll(MirPollKind::Propagate)?;
+            self.emit_poll(MirPollKind::Propagate, panic_capable)?;
         }
         Ok(value)
     }
