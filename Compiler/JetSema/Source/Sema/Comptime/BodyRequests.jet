@@ -38,11 +38,9 @@ fn sema_comptime_body_sources_index(context: &SemaCheckContext) Never! {
 }
 
 // Lambda merges append every canonical row, including duplicates, in order.
-// Only capture deduplicates; its index always names the first existing row.
+// Only capture deduplicates, returning the first existing row.
 fn sema_comptime_body_source_append(context: &SemaCheckContext, source: SemaComptimeBodySource) Never! {
-    row :: context.comptime_body_sources.len()
     &context.comptime_body_sources.push(source)
-    sema_comptime_body_source_index(&context, row)
 }
 
 fn sema_comptime_body_sources_truncate(context: &SemaCheckContext, length: Int) Never! {
@@ -227,21 +225,20 @@ pub fn sema_comptime_body_capture(
 ) -> SemaComptimeBodySource Never! {
     function_key := sema_scope_function_owner_key(scopes)
     destination_key := sema_comptime_body_destination_key(function_key, source_span, site_span)
-    key :: "{environment.module_identity}::{destination_key}"
-    if context.comptime_body_source_modules.get(environment.module_identity) == .Val(slot) {
-        if context.comptime_body_source_rows[slot].get(key) == .Val(row) -> return context.comptime_body_sources[row]
-    }
     source := SemaComptimeBodySource{
         module_identity: environment.module_identity,
         function_key: function_key,
         source_file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, source_span),
-        key: key,
+        key: "{environment.module_identity}::{destination_key}",
         destination_key: destination_key,
         name: name,
         expression: expression,
         expected_type: expected_type,
         span: source_span,
         site_span: site_span,
+    }
+    loop previous in context.comptime_body_sources {
+        if previous.module_identity == source.module_identity && previous.key == source.key -> return previous
     }
     sema_comptime_body_source_append(&context, source)
     source
