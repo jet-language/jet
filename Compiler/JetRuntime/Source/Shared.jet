@@ -1,8 +1,9 @@
 // Native Shared<NativeValue>. SharedProtocol.rs:280-330 is the policy:
 // concurrent readers, exclusive writer, waiting writers precede new readers.
 // Recursive acquisition has no special exception (it blocks as in Rust).
-// Cell80: atomic refs0, mutex8, condition sequence16, readers24, writer32,
-// writers-waiting40, revision48, owned descriptor56, payload64, borrows72.
+// Cell88: atomic refs0, mutex8, condition sequence16, readers24, writer32,
+// writers-waiting40, revision48, owned descriptor56, payload64, borrows72,
+// monomorphized payload drop function80 (slot address -> Unit; zero is trivial).
 // Handles are opaque owned references to the cell; callbacks borrow the payload.
 fn shared_retain(shared: I64) { _ := sync_add(shared, I64{1}) }
 
@@ -52,15 +53,16 @@ fn shared_revision_stop() {
     jet_rt_string_drop(message)
 }
 
-#Export(c) fn jet_rt_native_shared_new(slot: I64, meta: I64) -> I64 {
-    shared :: jet_rt_alloc(I64{80}, I64{8})
-    thread_zero(shared, I64{80})
+#Export(c) fn jet_rt_native_shared_new(slot: I64, meta: I64, drop_code: I64) -> I64 {
+    shared :: jet_rt_alloc(I64{88}, I64{8})
+    thread_zero(shared, I64{88})
     owned_meta :: coll_meta_copy(meta)
     payload :: coll_slot_new(owned_meta)
     coll_copy(slot, payload, coll_payload(owned_meta))
     sync_store(shared, I64{1})
     sync_store(shared + I64{56}, owned_meta)
     sync_store(shared + I64{64}, payload)
+    sync_store(shared + I64{80}, drop_code)
     shared
 }
 
@@ -184,12 +186,17 @@ fn shared_guard_payload(guard: I64) -> I64 {
         return
     }
     meta :: sync_load(shared + I64{56})
-    // Finalization runs outside every payload/protocol lock and is shielded.
-    jet_rt_session_shield_enter()
-    coll_slot_free(sync_load(shared + I64{64}), meta)
+    payload :: sync_load(shared + I64{64})
+    drop_code :: sync_load(shared + I64{80})
+    // Like Arc<T>'s final strong release, payload drop runs exactly once in
+    // the releasing caller's context, outside every payload/protocol lock.
+    // MIR cleanup frames, not this provider, mask cleanup invocations.
+    if (drop_code != I64{0}) { _ := coll_call1(drop_code, payload) }
+    // The glue owns Close and field destruction. Never also use meta.drop.
+    // A callback returning a pending stop still releases the allocation.
+    jet_rt_free(payload, coll_size(meta), I64{8})
     coll_meta_drop(meta)
-    jet_rt_free(shared, I64{80}, I64{8})
-    jet_rt_session_shield_leave()
+    jet_rt_free(shared, I64{88}, I64{8})
 }
 
 // Process-pinned publication registry, shared with World-lifetime site reset.

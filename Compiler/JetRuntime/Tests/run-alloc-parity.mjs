@@ -1,30 +1,28 @@
 #!/usr/bin/env node
-// Cross-tier allocator failure witness; no Cargo harness or runtime rebuild.
-// The supplied pack rlib must be built with --cfg jet_native_pack.
+// Cross-tier allocator failure witness; real supplied C-linkable runtime inputs.
+// The seed is a comparison oracle only, never part of the native link group.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const [output, rustRlib, packRlib, jetObject, ...dependencyDirs] = process.argv.slice(2);
-if (!output || !rustRlib || !packRlib || !jetObject) {
-  throw new Error('usage: run-alloc-parity.mjs OUT RUST_TIER_RLIB PACK_RLIB JET_OBJECT [DEPENDENCY_DIR...]');
+const [output, ...inputs] = process.argv.slice(2);
+const divider = inputs.indexOf('--native');
+if (!output || divider <= 0 || divider === inputs.length - 1) {
+  throw new Error('usage: run-alloc-parity.mjs OUT SEED_OBJECT_OR_ARCHIVE... [LINK_ARG...] --native NATIVE_OBJECT_OR_ARCHIVE... [LINK_ARG...]');
 }
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
-const fixture = join(root, 'tests/fixtures/runtime_c_abi_driver.rs');
+const fixture = join(root, 'Compiler/JetRuntime/Tests/CAbiDriver.c');
 const binaries = {};
 const errors = [];
-for (const [tier, rlib] of [['rust', rustRlib], ['pack', packRlib]]) {
+const groups = [['seed', inputs.slice(0, divider)], ['native', inputs.slice(divider + 1)]];
+for (const [tier, links] of groups) {
   const binary = join(out, `alloc-${tier}`);
-  const args = ['--edition=2021', '--cfg', 'runtime_alloc_failure_only', fixture,
-    '--extern', `jet_runtime=${resolve(rlib)}`, '-o', binary];
-  for (const directory of new Set([dirname(resolve(rlib)), ...dependencyDirs.map((path) => resolve(path))])) {
-    args.push('-L', `dependency=${directory}`);
-  }
-  if (tier === 'pack') args.push('--cfg', 'jet_native_pack', '-C', `link-arg=${resolve(jetObject)}`);
-  const built = spawnSync(process.env.RUSTC ?? 'rustc', args);
+  const args = ['-std=c11', '-Wall', '-Wextra', '-Werror', '-pedantic', '-DC_ABI_ALLOC_ONLY=1', fixture,
+    ...links.map(input => input.startsWith('-') ? input : resolve(input)), '-o', binary];
+  const built = spawnSync(process.env.CC ?? 'cc', args);
   writeFileSync(join(out, `${tier}.build.stdout`), built.stdout ?? Buffer.alloc(0));
   writeFileSync(join(out, `${tier}.build.stderr`), built.stderr ?? Buffer.alloc(0));
   if (built.error || built.signal || built.status !== 0) {
@@ -43,7 +41,7 @@ for (const test of [
 ]) {
   const captures = {};
   const before = errors.length;
-  for (const tier of ['rust', 'pack']) {
+  for (const tier of ['seed', 'native']) {
     if (!binaries[tier]) {
       errors.push(`${test.name}/${tier}: build failed`);
       continue;
@@ -59,7 +57,7 @@ for (const test of [
     if (test.prefix && !result.stderr?.subarray(0, test.prefix.length).equals(test.prefix)) errors.push(`${test.name}/${tier}: invalid-layout diagnostic prefix differs`);
     captures[tier] = result;
   }
-  if (captures.pack && captures.rust && !captures.pack.stderr?.equals(captures.rust.stderr)) errors.push(`${test.name}: Rust/Jet stderr bytes differ`);
+  if (captures.native && captures.seed && !captures.native.stderr?.equals(captures.seed.stderr)) errors.push(`${test.name}: seed/Jet stderr bytes differ`);
   results.push(`${test.name}\t${errors.length === before ? 'PASS' : 'FAIL'}\t${test.status ?? ''}\t${test.signal ?? ''}`);
 }
 writeFileSync(join(out, 'alloc-parity.tsv'), 'case\tresult\tstatus\tsignal\n' + results.join('\n') + '\n');

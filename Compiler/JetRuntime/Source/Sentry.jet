@@ -306,16 +306,30 @@ fn sentry_range_end(start: I64, length: I64) -> I64 {
         at += I64{3}
     }
     sync_mutex_unlock(sentry_root)
-    if live -> return if (sentry_remainder(start, align) != I64{0}) -> I64{3} else -> I64{0}
-    if (expired != I64{0}) -> return expired
-    if starts_live -> return I64{5}
-    if (strict != I64{0} || start == I64{0} || overflow) -> return I64{1}
-    if (sentry_remainder(start, align) != I64{0}) -> I64{3} else -> I64{0}
+    fault :: if {
+        live -> (if (sentry_remainder(start, align) != I64{0}) -> I64{3} else -> I64{0})
+        (expired != I64{0}) -> expired
+        starts_live -> I64{5}
+        (strict != I64{0} || start == I64{0} || overflow) -> I64{1}
+        else -> (if (sentry_remainder(start, align) != I64{0}) -> I64{3} else -> I64{0})
+    }
+    sentry_checked_fault(fault, start, align)
+}
+// MemSentry.rs:704-717 observes each detected fault, even if the caller returns
+// it instead of stopping. Classification is complete and its lock is released.
+fn sentry_checked_fault(fault: I64, start: I64, alignment: I64) -> I64 {
+    if (fault == I64{0}) -> return fault
+    gate :: sentry_gate_name()
+    detail :: sentry_detail(fault, start, alignment)
+    sentry_ledger(fault, gate, detail)
+    jet_rt_string_drop(gate)
+    jet_rt_string_drop(detail)
+    fault
 }
 #Export(c) fn jet_rt_sentry_read(start: I64, bytes: I64, alignment: I64) -> I64 {
     fault :: jet_rt_sentry_check(start, bytes, alignment, I64{1})
     if (fault != I64{0}) {
-        sentry_stop(fault, start, alignment, I64{0}, false)
+        sentry_stop(fault, I64{0}, false)
         return I64{0}
     }
     start
@@ -501,17 +515,14 @@ fn sentry_report(fault: I64, operation: I64, obligation: I64, component: I64, fe
     sentry_append_owned(report, footer)
     report
 }
-fn sentry_stop(fault: I64, start: I64, alignment: I64, component: I64, fenced: Bool) {
+fn sentry_stop(fault: I64, component: I64, fenced: Bool) {
     operation :: services_msg_sentry_read()
     obligation :: services_msg_sentry_valid_ptr()
     gate :: sentry_gate_name()
-    detail :: sentry_detail(fault, start, alignment)
-    sentry_ledger(fault, gate, detail)
     report :: sentry_report(fault, operation, obligation, component, fenced, gate)
     jet_rt_string_drop(operation)
     jet_rt_string_drop(obligation)
     jet_rt_string_drop(gate)
-    jet_rt_string_drop(detail)
     if (scheduler_control_current() != I64{0} && sync_load(thread_base() + I64{64}) != I64{0}) {
         record :: scheduler_stop_new(I64{5}, report)
         sync_store(record + I64{48}, I64{1})

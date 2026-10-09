@@ -5,28 +5,58 @@
 // typedDeadline184 ownedWorld192. Result initializes only after Propagate == 0.
 // JetTaskFailure: Outcome.rs:2185-2188 / TaskGroup.rs:77-82 ordinals 0/1/2.
 fn task_failure_new(kind: I64, owned_reason: I64) -> I64 {
-    failure :: jet_rt_alloc(I64{16}, I64{8})
-    sync_store(failure, kind)
-    sync_store(failure + I64{8}, owned_reason)
+    failure :: jet_rt_alloc(TASK_FAILURE_BYTES, I64{8})
+    sync_store(failure + TASK_FAILURE_TAG, kind)
+    sync_store(failure + TASK_FAILURE_REASON, owned_reason)
     failure
 }
-#Export(c) fn jet_rt_record_tag_JetTaskFailure(failure: I64) -> I64 { sync_load(failure) }
+#Export(c) fn jet_rt_record_tag_JetTaskFailure(failure: I64) -> I64 { sync_load(failure + TASK_FAILURE_TAG) }
 #Export(c) fn jet_rt_record_get_JetTaskFailure_Panicked(failure: I64) -> I64 {
-    if (sync_load(failure) != I64{2}) -> jet_rt_unreachable(I64{0}, I64{0})
-    jet_rt_string_clone(sync_load(failure + I64{8}))
+    if sync_load(failure + TASK_FAILURE_TAG) != TASK_FAILURE_PANICKED -> rt_record_variant_panic()
+    jet_rt_string_clone(sync_load(failure + TASK_FAILURE_REASON))
 }
-#Export(c) fn jet_rt_record_new_JetTaskFailure_Cancelled() -> I64 { task_failure_new(I64{0}, I64{0}) }
-#Export(c) fn jet_rt_record_new_JetTaskFailure_DeadlineBlown() -> I64 { task_failure_new(I64{1}, I64{0}) }
-#Export(c) fn jet_rt_record_new_JetTaskFailure_Panicked(reason: I64) -> I64 { task_failure_new(I64{2}, jet_rt_string_clone(reason)) }
+#Export(c) fn jet_rt_record_new_JetTaskFailure_Cancelled() -> I64 { task_failure_new(TASK_FAILURE_CANCELLED, I64{0}) }
+#Export(c) fn jet_rt_record_new_JetTaskFailure_DeadlineBlown() -> I64 { task_failure_new(TASK_FAILURE_DEADLINE, I64{0}) }
+#Export(c) fn jet_rt_record_new_JetTaskFailure_Panicked(reason: I64) -> I64 { task_failure_new(TASK_FAILURE_PANICKED, jet_rt_string_clone(reason)) }
 #Export(c) fn jet_rt_handle_clone_JetTaskFailure(failure: I64) -> I64 {
-    reason :: sync_load(failure + I64{8})
-    task_failure_new(sync_load(failure), if (reason == I64{0}) -> I64{0} else -> jet_rt_string_clone(reason))
+    kind :: sync_load(failure + TASK_FAILURE_TAG)
+    reason :: if kind == TASK_FAILURE_PANICKED -> jet_rt_string_clone(sync_load(failure + TASK_FAILURE_REASON)) else -> I64{0}
+    task_failure_new(kind, reason)
 }
 #Export(c) fn jet_rt_handle_drop_JetTaskFailure(failure: I64) {
     if (failure == I64{0}) -> return
-    jet_rt_string_drop(sync_load(failure + I64{8}))
-    jet_rt_free(failure, I64{16}, I64{8})
+    if sync_load(failure + TASK_FAILURE_TAG) == TASK_FAILURE_PANICKED -> jet_rt_string_drop(sync_load(failure + TASK_FAILURE_REASON))
+    jet_rt_free(failure, TASK_FAILURE_BYTES, I64{8})
 }
+#Export(c) fn jet_rt_handle_eq_JetTaskFailure(left: I64, right: I64) -> Bool {
+    kind :: sync_load(left + TASK_FAILURE_TAG)
+    if kind != sync_load(right + TASK_FAILURE_TAG) -> return false
+    if kind != TASK_FAILURE_PANICKED -> return true
+    jet_rt_string_eq(sync_load(left + TASK_FAILURE_REASON), sync_load(right + TASK_FAILURE_REASON))
+}
+// Values.rs:454-460/TextValues.rs:212-227: Panicked is raw in show/display
+// but Rust str Debug quoted in debug. Extend the existing carrier in place.
+fn task_failure_render(failure: I64, debug: Bool) -> I64 {
+    kind :: sync_load(failure + TASK_FAILURE_TAG)
+    result :: jet_rt_string_builder_new()
+    if kind == TASK_FAILURE_CANCELLED {
+        rt_text_push_word(result, I64{7308335478031147331}, I64{8})
+        rt_text_push_word(result, I64{100}, I64{1})
+    } else if kind == TASK_FAILURE_DEADLINE {
+        rt_text_push_word(result, I64{7308895159530382660}, I64{8})
+        rt_text_push_word(result, I64{474450193474}, I64{5})
+    } else {
+        rt_text_push_word(result, I64{7234306451155345744}, I64{8})
+        rt_text_push_word(result, I64{40}, I64{1})
+        reason :: sync_load(failure + TASK_FAILURE_REASON)
+        if debug { rt_text_push_rust_debug_str(result, reason) } else { jet_rt_string_builder_push(result, reason) }
+        rt_text_push_word(result, I64{41}, I64{1})
+    }
+    result
+}
+#Export(c) fn jet_rt_handle_show_JetTaskFailure(failure: I64) -> I64 { task_failure_render(failure, false) }
+#Export(c) fn jet_rt_handle_display_JetTaskFailure(failure: I64) -> I64 { task_failure_render(failure, false) }
+#Export(c) fn jet_rt_handle_debug_JetTaskFailure(failure: I64) -> I64 { task_failure_render(failure, true) }
 
 fn task_retain(child: I64) { _ := sync_add(child, I64{1}) }
 fn task_drop(child: I64) {

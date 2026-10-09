@@ -146,6 +146,28 @@ before dropping its retained cell owner, so final payload cleanup runs outside
 the lock. An edit guard commits one revision on drop even without a write or
 on an already-delivered stop rail. Generation exhaustion also releases both
 permit and owner before delivering its stop.
+
+Native `Shared<T>` construction supplies `(payload slot, NativeMeta descriptor,
+monomorphized payload-drop function)` to `jet_rt_native_shared_new`. Its 88-byte
+cell stores the function pointer at byte 80; the thunk borrows the owned slot
+address and returns `Unit`. Only the atomic `1 -> 0` strong-release transition
+invokes it, exactly once, outside all Shared locks. The glue performs the complete
+typed destruction, including `T.Close` and owned fields. The provider must not
+also invoke the descriptor's drop callback. A null function is reserved for
+trivial payloads and means plain free, not a descriptor-drop fallback.
+
+Like Rust's `Arc<T>` releasing its final strong owner, the callback runs in the
+releasing caller's context. The provider adds neither a cleanup mask nor a
+session shield; releases inside a MIR cleanup frame inherit that frame's
+bracket. A callback that returns with pending stop still permits the provider
+to free the payload allocation, descriptor and cell before the caller propagates
+it. Reclamation on a pending stop is explicit, not unwind-dependent.
+The seed-only C fixture retains its separate
+two-argument Rust-provider declaration for comparison; it is not a native alias
+and retires at cutover. Native runtime fixtures pass explicit drop functions,
+including two threads each racing 100,000 clone/drop pairs and a null-glue
+case that must not fall back to the descriptor callback.
+
 ### Exact integer carrier
 
 An exact `Int` crosses the scalar ABI in one 64-bit word. Values whose two
@@ -382,6 +404,148 @@ Use semantic fixtures for first-pass comparison. A coherent surface may compare
 directly with valid Rust behavior. A redesigned surface maps valid Rust inputs
 to the new Jet contract and compares semantic values and errors. Do not keep a
 runtime compatibility layer merely to make that comparison.
+
+TLS root-certificate and trust data use native carriers independently of the
+TLS transport engine. `TLSCarriers.jet` transfers consumed list/root headers
+without copying their buffers; cloning creates independent byte storage using
+the canonical host U8 stride. The root PEM field is a borrowed list header,
+whereas a trust-variant projection returns an owned root clone. System trust
+has no active root buffer. These ownership operations do not perform certificate
+validation or a TLS handshake. `TLSRootsWitness.c` pins their ownership and
+wrong-variant contracts against the composed Jet object.
+Certificate and peer snapshots also use independent native data storage: cloning
+recurses through byte lists, DNS text lists, and the certificate chain without
+duplicating an inline record's header. The chain stores inline certificates;
+growth moves their owned children, and a sequence projection borrows its slot.
+Certificate subject/issuer and peer name/cipher projections lend caller-owned
+E4 descriptors, which must not be freed, grown, or consumed. Signed validity
+timestamps remain raw i64 facts. `TLSCertificateWitness.c` exercises deep clones,
+parent lifetimes, list growth, and these borrowed projections.
+
+Native client identity owns its inline PEM byte-list header and a native
+Secret handle. Cloning copies only initialized U8 elements into independent
+buffers; dropping delegates private-key erasure and release to the canonical
+Secret provider, including its entire capacity and host U8 stride. Client
+configuration owns inline trust, optional identity, raw protocol-version tags,
+and an ALPN text list. Its trust projection borrows the parent's inline field.
+`TLSClientWitness.c` checks independence, optional identity, all trust variants,
+ALPN ownership, null drops, and private-key capacity erasure before deallocation.
+This data-provider contract does not claim TLS engine or certificate validation.
+
+`DataSequences.jet` owns the shared native List header constants
+`DATA_SEQUENCE_BYTES`, `DATA_SEQUENCE_LENGTH`, `DATA_SEQUENCE_CAPACITY`, and
+`DATA_SEQUENCE_DATA`, plus `data_sequence_new`, `data_sequence_slot`, and
+`data_sequence_reserve`. DataTree and TLS certificate sequences use those
+unchanged helpers. TLS byte-list children use `data_u8_list_copy_into` and
+`data_u8_list_drop_fields` from the same provider; their old private TLS
+definitions are removed. The shared sequence index and capacity failure
+providers still require composition before native caller admission.
+
+Native mail attachment data uses `MailAttachment.jet`'s 40-byte carrier:
+two owned E4 text pointers followed by an inline native U8 list header.
+Construction clones borrowed filename/MIME text and transfers the consumed
+byte-list buffer without copying it, releasing only the donor list shell.
+Text projections return independent owned clones; the bytes projection borrows
+the parent's inline header. Cloning uses the shared `DataSequences.jet` U8
+ownership helpers and the packed `RT_HOST_U8_STRIDE`; equality compares text
+and initialized bytes, ignoring capacity. Null drops are harmless. The
+`AttachmentWitness.c` composed-object client pins binary text/bytes, ownership,
+capacity-sized frees, mutation independence, and projection lifetimes. These
+data operations make no claim about SMTP transport or MIME serialization.
+`attachment_copy_into` and `attachment_drop_fields` in that same provider
+single-source field ownership for both heap handles and inline sequence slots;
+callers own their respective shells, so inline children never allocate a
+temporary attachment shell or free their enclosing sequence slot.
+
+Native network readiness snapshots use two normalized Bool words in
+`NetReadiness.jet`. Getters, clone and equality interpret the low byte of each
+slot, not unrelated upper-byte padding; constructors normalize C U8 inputs.
+Ready-interest and shutdown handles use the canonical scalar-enum ownership
+helpers from `EncodingErrors.jet` (declaration order Read/Write/ReadWrite and
+Read/Write/Both respectively). They do not own socket resources. Null drops
+release nothing. `NetReadinessWitness.c` covers all boolean/ordinal combinations,
+low-byte normalization, independent clones and exact-sized shell deallocation.
+
+The native DB connection handle is a move-only 8-byte backend ID wrapper.
+As in the seed's `HandlesRaylib.rs` definition, it has no implicit close action;
+connection close remains explicit. `DbConnectionHandle.jet` releases only the
+wrapper allocation and ignores null handles. `DbConnectionHandleWitness.c`
+pins that shell-only deallocation for zero, ordinary and maximal u64 IDs;
+it does not claim admission of a database transport engine.
+
+The held native TLS stream handle is 112 bytes: ID, owned canonical FD72,
+optional timeout facts, seven borrowed callback pointers and one nullable
+owned peer snapshot. The seventh callback is the seed's `peer_snapshot`,
+distinct from its optional `peer_identity` owner. Drop releases the descriptor
+through `HostFiles.jet`'s canonical `jet_fd_drop_raw` (dependency `047fb460b`),
+then the peer snapshot in field declaration order, then the stream shell.
+It never invokes a TLS-close or other borrowed callback, matching the absence
+of a custom seed destructor. Show is exactly `TLSStream(<signed ID>)`.
+`TLSStreamHandleWitness.c` checks real descriptor closure before snapshot
+release, optional ownership and untouched callbacks. This does not claim a
+native TLS handshake engine or transport callback admission.
+
+The held native DB scope is 48 bytes: a raw backend ID, inline canonical
+24-byte row policy, owned user text and a nullable request-ID text owner.
+`RowPolicyHandles.jet` single-sources `row_policy_copy_into` and
+`row_policy_drop_fields`; both standalone row-policy handles and inline
+scope fields use them without temporary owner shells. Clone preserves the
+compiled policy and raw ID while independently cloning every text child.
+Drop releases the inline policy fields, user and optional request text, then
+the scope shell; it does not close the backend ID. Policy projection borrows
+the inline field, and user projection fills a caller-owned read/clone-only
+E4 descriptor. `DbScopeHandleWitness.c` checks those lifetimes, both compiled
+policies, absent versus present-empty requests and exact-once destruction.
+
+The native delivery handle owns three independent text children in a 40-byte
+carrier, plus normalized duplicate Bool and raw signed generation facts.
+Construction borrows/clones text and range-converts borrowed exact Int before
+allocation; text getters return owned clones and generation returns a fresh
+exact Int. Clone and equality interpret the duplicate slot's low byte.
+Show preserves exactly `Delivery(` plus the raw ID bytes plus `)`, with no
+debug escaping or additional fields. `DeliveryHandleWitness.c` covers all
+equality fields, binary and empty text, independent projections, i64 edges
+and exact-sized deallocation. Its `native-overflow` mode requires the shared
+native-Int range stop (exit 70, empty stdout); process execution is separate
+from parser and C syntax receipts.
+
+The generated musl error-text provider exposes `host_errno_append` and
+`host_errno_cause_append` for callers that already own a text builder.
+`gen-runtime-host-errors.mjs` single-sources the same pinned errno ladder;
+the existing owned `host_errno_text`/`host_errno_cause` entry points allocate
+one builder and delegate. Composite renderers can therefore append exact
+error text without allocating and copying an intermediate Text owner.
+
+TCP stream field projections are borrowed Bool-slot addresses, not snapshots
+or independent owners. `TCPStreamFields.jet` uses the held Host carrier:
+closed projects the retained FD72's canonical closed slot, while read/write
+shutdown project the parent's Stream56 slots. Their lifetime is the stream's
+lifetime; logical close and shutdown remain visible through those aliases.
+`TCPStreamFieldsWitness.c` uses real canonical owners and tests pointer
+identity, low-byte reads, live shutdown/close updates and parent-only release.
+
+Native mail messages use `MailMessage.jet`'s 160-byte owner: inline Address16,
+two inline Address lists, three owned text pointers, an inline Attachment40
+list, inline Envelope40 and a raw wire bound. `MailAddress.jet` and
+`MailEnvelope.jet` own the canonical inline copying, destruction and equality
+helpers; attachment lists reuse `MailAttachment.jet`'s existing field owners.
+Clones allocate only initialized list elements, without temporary child or
+list shells; destruction releases buffers by their actual capacities.
+Equality includes every field and the wire bound, but not capacities.
+
+The generator-derived `message_parts` ABI takes twelve raw arguments:
+borrowed Address/Envelope handles, borrowed text descriptors, three borrowed
+pointer-to-handle slot arrays with lengths, and a borrowed exact Int wire bound.
+It clones every input owner and only performs the source-checked native range
+conversion. Like the canonical C ABI list input adapter, null slot arrays or
+nonpositive lengths mean an empty list. Source-owned validation, private views
+and MIME serialization remain outside this carrier provider. Field projections
+borrow inline Address/Envelope storage or fill read/clone-only text descriptors.
+`MailMessageWitness.c` links the real composed object and covers bcc and
+attachment stack arguments, binary and empty data, optional display states,
+deep ownership, every equality field, exact wire edges, projection lifetimes
+and capacity-sized frees. Runtime execution and route enrollment are separate
+admission steps; the witness source alone does not establish execution parity.
 
 ## Dependency order
 

@@ -245,6 +245,16 @@ discriminant is its index. Unions and trait objects are not lowered yet and
 are reported; generic instances lower as their concrete instances
 (above). Function values are closure boxes ("Closures" below).
 
+Native `Secret` owns a 24-byte, align-8 native List header `[len, cap, data]`.
+Adoption clears the moved input header, borrowed byte access aliases the real
+parent, and growth remains forbidden. Close wipes the entire capacity before
+clearing the header and freeing the buffer; final drop frees the header once.
+`RT_HOST_U8_STRIDE` in `JetRuntime/Source/Collections.jet` selects the shared
+U8 element width, independently of buffer alignment. Wipe and free share the
+same cap × the host U8 stride byte count, with buffer alignment 8. Changing
+the canonical list epoch changes Secret's byte count with it; there is no
+private Secret stride to drift from the actual List allocation.
+
 Inline aggregates. A `Struct`/`Tuple` builds into a fresh `StackSlot`. The
 storage's holder owns it: the value never frees it, and MIR `Drop`/`Copy` of an
 inline value call its drop glue (`drop.<key>`, `(ptr)`, drops the owned members,
@@ -2194,3 +2204,587 @@ memory/provenance/TLS contracts remain separate target rows, not native-pointer
 casts. Date/time formatting and Pool construction are Core source-owner rows,
 not String/allocator runtime aliases. The private image-runtime stop/String
 allocator and L1/L3 canonical allocator/split providers are existing Jet bodies.
+
+### Native DataTree ownership boundary
+
+`JetBackend/Source/DataABI.jet` single-sources the native DataTree variant
+words and payload offsets; these are never the layout of a Rust DataTree.
+`JetRuntime/Source/DataTree.jet` provides the recursive ownership boundary
+using the existing native List `[length, capacity, data]` header. Constructors
+clone borrowed text, consume sequence holders, and preserve ordered Object
+entries, including duplicate keys. Int constructors borrow an exact Int,
+range-check through `jet_int_owned_to_i64`, and store raw i64, matching
+`CAbiRoutes.rs:9118-9126`. Int getters rebuild a fresh exact owner through
+`jet_int_owned_from_i64`; clone/drop have no Int owner to retain/release.
+Sequence getters lend children and clone keys; text getters clone their owner.
+
+Equality follows `jet-foundation/src/DataTree.rs:8-22`: compare variant first,
+then ordered payloads, with IEEE Float equality (NaN unequal even to itself,
+signed zeros equal). Drop frees children before their storage, exactly once.
+Show/display/debug share the compact JSON behavior of
+`JetStd/JSONDataTree.rs:27-94`, including quoted text/control escapes, lexical
+Number preservation, byte arrays, decimal Float debug spelling and the
+non-finite Float stop. Raw i64 Int uses `jet_rt_i64_to_string`'s signed decimal
+formatter, including both i64 edges (the decimal intent of
+`JSONDataTree.rs:31`). Delimiters stream into one existing text builder.
+
+`JetRuntime/Tests/DataTreeWitness.c` requires the real Jet object and
+`--wrap=jet_rt_free`; it asserts that interception actually ran, child/key/text
+clone independence, ordered equality and exact-once frees. The Int edge cases
+check raw storage and independently owned getters after the borrowed argument
+is dropped. `nonfinite` exercises the JSON stop separately; `native-overflow`
+supplies `i64::MAX + 1` as an exact Int and must stop with the existing native
+conversion's `native Int argument exceeds host range` message at
+`<core.prelude>:0`. These new cases have not been executed. Earlier parse and C
+syntax receipts do not admit native caller layouts or prove execution:
+source-root/MIR ownership and the generator's provider ABI validation remain
+required before pack cutover.
+
+
+### Shared record-variant panic parity
+
+DataTree and TLS wrong-variant payload getters call the single internal
+`rt_record_variant_panic()` in `JetRuntime/Source/Trap.jet`. It specializes the
+existing `jet_panic("<core.prelude>", 0, "record variant index out of range")`
+path without allocating file/message text: the same `trap_header(0)`,
+33 message bytes, `trap_msg_prelude_end()`, and `trap_footer(0)`.
+`trap_msg_prelude_end()` is the message terminator plus
+`trap_context("<core.prelude>", 0, empty function/source)` bytes.
+
+The reference is `PortableCore.rs:109-110` and
+`Trap.jet:195-200,263-265` before this insertion. The existing native
+`jet_panic`/`trap_simple` path does not publish to task state; this specialization
+preserves that fatal behavior rather than inventing a separate transport.
+Rust task-unwind versus native fatal-stop parity is a pre-existing shared
+Trap issue, not a task-parity claim for these data providers. Any shared Trap
+task/publication change must cover this specialization as well.
+
+### DataTree sequence foreign-stop parity
+
+The List/Entries `_get` exports follow
+`CAbiRoutes.rs:8240-8241,8253-8254`: `vec[index as usize]` is a plain foreign
+Vec panic under guard, not a language `#require` stop. `data_sequence_slot`
+calls the shared `rt_seq_index_oob_stop(length,index)` from held
+`c39d89b6b` before computing a data pointer or cloning an entry key. The
+helper flushes stdout, prints the exact bounds body with the index as u64,
+and exits 101 without task publication, diagnostic footer or atexit.
+
+`data_sequence_new` rejects negative capacity and capacity times the native
+stride exceeding i64::MAX before multiplication/allocation. Growth at the
+same byte-capacity limit follows the same shared
+`rt_seq_capacity_overflow_stop()` in Trap: flush stdout, raw
+`capacity overflow\n`, exit 101. This replaces the former language overflow
+stop and is shared by all native List/Entries constructors.
+
+The C witness has eight List/Entries modes: index0/index-1 on an empty list,
+capacity-1, and capacity `i64::MAX / stride + 1`. The three
+`DataSequence*.stderr` files are canonical expected bytes;
+`Tests/run-data-sequence-stops.mjs OUT DATA_TREE_WITNESS` requires empty stdout,
+exact stderr and exact exit101 for each mode. These native process cases
+have not been executed. The composed source unit must include the index helper
+from c39d89b6b as well as the capacity helper before caller/import admission.
+
+### Native encoding error ownership boundary
+
+`JetBackend/Source/EncodingABI.jet` single-sources the private enum8, Cause32
+and Error80 carriers. `JetRuntime/Source/EncodingErrors.jet` supplies each
+complete HAND family for EncodingFormat, EncodingErrorKind, EncodingCause
+and EncodingError; it does not supply generator-owned DERIVABLE routes or
+EncodingLimits. Enum handle operations use pointers; record enum fields use
+raw declaration-order tags, checked against EncodingTypes.rs:29-61.
+
+The C ABI follows `CAbiRoutes.rs:9394-9466`: constructors clone borrowed
+texts and range-convert borrowed exact-Int inputs to raw i64 before allocation
+or consuming any payload. Option Int inputs lend a nullable pointer-to-word;
+getters publish fresh exact owners only when present. Error construction
+consumes the optional Cause handle, unlike its borrowed Text arguments.
+Clone recursively duplicates text and cause owners; drop releases each once.
+Equality follows EncodingTypes.rs:63-80 field order, ignoring absent payload
+words but including the cause snapshot.
+
+Show/display/debug share the exact `Core/EncodingError.rs:8-28` projection,
+as delegated by `JetStd/CommonTypes.rs:182-217`: format, kind and byte offset,
+independent optional line/column, nonempty path, then reason; cause is omitted
+from render but not equality. The existing text builder and signed i64
+formatter are reused, including negative offsets and i64::MIN. Invalid enum
+ordinals use the same native-range stop as CAbiRoutes.rs:11-13.
+
+`JetRuntime/Tests/EncodingErrorsWitness.c` is a real-object client, requiring
+`--wrap=jet_rt_free` with asserted interception and exact-once recursive frees.
+It exercises all exported families, constructor transfer/borrow ownership,
+fresh getters, deep-clone independence, every equality field, absent versus
+present-zero options, both i64 edges and all format/kind render combinations.
+The separate `format-range`, `kind-range` and `native-overflow` modes require
+the canonical native arithmetic range diagnostic. The expected normal output
+is `EncodingErrors ownership/equality/render OK`. Native execution remains
+unexercised until the integrator composes the fresh green E2 FINAL runtime;
+parser and strict C11 syntax receipts alone do not establish runtime parity.
+
+### Memo statistics, mail limits and watcher C ownership
+
+`MemoABI.jet`, `MailLimitsABI.jet` and `WatchABI.jet` define native layouts,
+not Rust layouts. Their runtime providers preserve the field types in
+`Prelude/Memo.rs:74-80`, `CoreLib/Email.rs:156-164` and
+`CoreLib/JetStd/CommonTypes.rs:640-665`. The C boundary borrows exact Int
+arguments, converts to raw i64 before allocation, and returns freshly owned
+exact Int getters (`CAbiRoutes.rs:10703-10728,11668-11705,12158-12195`).
+Borrowed text is cloned on construction, getters and handle clone; drop
+releases each owned text and carrier. Watch enums are native ordinal words;
+event construction range-stops invalid domain/kind ordinals. WatchDomain's
+separate generated glue is not duplicated by this provider.
+
+Equality follows the Rust derives in field order. WatchEvent's custom show
+(`CommonTypes.rs:6772-6777`) deliberately omits pid/port and emits unquoted,
+unescaped path/detail, unlike a derived debug representation. It uses the
+existing text builder. `RecordGlueWitness.c` links the real Jet object with
+`--wrap=jet_rt_free`, asserts interception, clone/getter independence,
+exact-once destruction, per-field inequality and enum/render goldens. Its
+invalid-ordinal and exact-Int overflow modes exercise the established stops.
+Native execution remains unexercised until composed source-root ownership
+admission and generator ABI validation; syntax checks alone do not prove it.
+
+### Plugin records, log spans and asynchronous policy carriers
+
+`PluginABI.jet` defines inline 24-byte frames in the existing native List24
+header, and native faults owning that header. Frame sequence push moves the
+frame's text owners into inline storage and frees only its source shell;
+sequence get lends inline storage, never an independently droppable frame.
+Fault construction consumes the sequence holder; clone recursively copies its
+text owners and drop releases its children, buffer, holder and fault once.
+These contracts mirror `CAbiRoutes.rs:8496-8505,11755-11797` and the ordered
+derive equality in `jet-foundation/src/PluginWire.rs:28-43`.
+
+`LogABI.jet` stores LogSpan's raw i64 and owned name
+(`CommonTypes.rs:2704-2708`, `CAbiRoutes.rs:11738-11751`). `AsyncPolicyABI.jet`
+stores raw i64 capacity and overflow ordinal, with separately owned ordinal
+handles for overflow. Codec construction checks the ordinal but intentionally
+does not call policy validation: `CAbiRoutes.rs:9545-9558` permits zero and
+negative capacities; `ReactiveEventWatch.rs:808-841` distinguishes construction
+from validation. Exact Int arguments are borrowed and converted before
+allocation; Int getters return freshly owned exact values.
+
+`PluginPolicyWitness.c` requires real Jet exports and asserts free wrapping
+actually ran. It covers shell consumption, List growth, lent getters, recursive
+clone independence, exact-once destruction, ordered field/sequence equality,
+i64 edges, all unit enum values and invalid-ordinal/index stop modes. Its
+stdout fixture is an expected result, not an execution receipt. Native
+execution remains unexercised pending pack composition and ownership admission.
+
+### Exact borrowed String debug rendering
+
+`TextDebug.jet` appends the Rust reference's `str` debug representation into
+the existing native text builder, borrowing a distinct E4 UTF-8 input. It
+quotes the result, escapes NUL/tab/CR/LF/backslash/double quote, leaves single
+quotes unchanged, and emits lowercase minimal `\u{hex}` for Grapheme_Extend
+or non-printable scalars. Combining marks are escaped at any position.
+Plain runs append without temporary allocations; this is not JSON escaping.
+The shared core also serves `jet_rt_require_debug_string`, retaining Jet's
+D-STR-ESCAPE1 NUL spelling `\u{0}`; Rust-derived debug uses `\0`. Both modes
+reuse the existing `trap_scalar`, `trap_debug_short` and `trap_debug_escaped`
+helpers and canonical `TRAP_DEBUG_RANGES`, rather than a second decoder/table.
+
+The reference is rustc 1.97.1, commit
+`8bab26f4f68e0e26f0bb7960be334d5b520ea452`, with Unicode 17.0.0:
+`library/core/src/fmt/mod.rs:2916-2960`,
+`library/core/src/char/methods.rs:474-487`,
+`library/core/src/unicode/printable.rs` and
+`library/core/src/unicode/unicode_data.rs::grapheme_extend`.
+The source tarball SHA-256 is
+`622c2b429c53cbfdc0dd3a51d03554e91cd63ebec1912c1f5709640cdfef1a9d`.
+`Tools/agent/gen-text-debug-tables.mjs` checks both Unicode input checksums
+and compares their exact classification with the existing Trap table;
+it emits only C witness goldens, never a second runtime table. Generation is
+offline and normal builds need neither Rust nor network access.
+
+`TextDebugGoldens.h` contains 36 expected vectors produced by that exact
+rustc's `{:?}` for `str`, including embedded controls, combining marks at
+start/mid, ZWJ, soft hyphen, BOM, astral printable/unassigned characters,
+variation selectors and printability range edges. An exhaustive reference
+comparison found zero classification differences on 1,111,936 valid
+non-ASCII scalars. `TextDebugWitness.c` links real Jet exports, exercises
+borrowed input preservation and repeated builder appends, and requires
+free interception and exact-once destruction. Its stdout fixture is expected,
+not a native execution receipt; native execution remains unexercised.
+
+### Plugin failure debug and ownership
+
+`PluginError.jet` implements all handle routes for the native carrier in
+`PluginABI.jet`. Clone owns an independent recursive fault; drop releases it
+once. Equality follows `PluginWire.rs:46-50`: variant first, then Budget's
+limit before its fault, ignoring the inactive limit word for other variants.
+Display/show clone the message only (`PluginWire.rs:65-68`,
+`DBPluginWire.rs:4-11`); debug streams the complete derived enum, nested fault
+and ordered inline frame list into one existing builder. String fields use
+the shared Rust-debug mode, not Jet's NUL spelling, and raw i64 offsets use
+the existing signed-decimal builder helper.
+
+`PluginErrorGoldens.h` contains sixteen outputs of the real PluginWire Rust
+derives compiled with pinned rustc 1.97.1
+(`8bab26f4f68e0e26f0bb7960be334d5b520ea452`): all variants, all Budget limits,
+empty/two-frame faults and text/control/Unicode escapes. The offline
+`Tools/agent/gen-plugin-debug-goldens.mjs` packages those oracle outputs for
+`PluginErrorWitness.c`. The C client uses valid native allocations, requires
+free interception, checks recursive clone independence, inactive-word
+behavior, derived equality and separately owned render results. Expected
+stdout is not an execution receipt; native execution remains unexercised.
+
+### Shared enum and foreign sequence-stop leaves
+
+WatchKind, PluginLimit and EventOverflow handle glue uses the shared
+`EncodingABI.jet` owner through `encoding_enum_clone/drop/eq`; their record
+fields remain raw ordinals. Family files no longer duplicate the unit enum
+layout or its allocation/equality policy.
+
+PluginFrame's sequence getter preserves `CAbiRoutes.rs:8501`'s foreign
+`Vec[index as usize]` failure, calling shared `rt_seq_index_oob_stop` rather
+than a Jet language panic. Valid access lends inline frame storage directly.
+The foreign stop prints the standard length/index body, interpreting negative
+indices as unsigned, flushes stdout and exits 101 without task publication
+or atexit. The existing witness stop mode remains unexercised. These callsites
+require the shared Encoding and Trap leaves in the composed runtime unit;
+source parsing alone does not resolve those dependencies or prove execution.
+
+### Environment, websocket, task failure and SIMD handle families
+
+EnvError and TaskStatus reuse the shared unit enum owner. Their three render
+routes preserve the custom text in `CommonTypes.rs:6631-6645,6678-6681` and
+`Services.rs:1080-1087,1111-1120`. `WsABI.jet` stores websocket error and
+message variants from `WsClient.rs:10-19,57-61`. IO errors own operation text;
+MessageTooLarge stores raw i64; Text/Binary/Close messages own their text,
+byte list or close reason. Every binary clone, comparison and drop uses the
+existing byte-list helpers and `RT_HOST_U8_STRIDE`, never a literal word
+stride. Websocket error rendering follows the custom show (`WsClient.rs:22-52`),
+including raw operation text and signed limits rather than derived debug.
+
+TaskFailure extends the existing `Task.jet` carrier in place. Its layout is
+single-sourced by `TaskFailureABI.jet`; no competing task failure carrier is
+introduced. Equality follows `Outcome.rs:2185-2188`. Show/display render a
+raw Panicked reason (`Values.rs:454-460`, `TextValues.rs:212-218`), while
+debug quotes it with the shared Rust String escaper (`TextValues.rs:221-227`).
+Wrong-variant access uses the shared record-variant language panic.
+
+`SimdLaneABI.jet` defines four raw IEEE f64 lane words for F64x4. Clone copies
+those words, equality compares lanes in order without a pointer shortcut,
+and all renders follow the array-backed debug tuple in
+`MathTaskMem.rs:397-423`, using the existing shortest f64 debug formatter.
+NaN is unequal even to itself; signed zero lanes compare equal.
+
+`HandleFamiliesWitness.c` requires the real Jet runtime and free wrapping.
+It covers all variant render/equality tables, deep text/byte/failure clones,
+exact-once destruction, raw i64 edges, inactive payload independence, byte
+list empty/nonempty cases and IEEE lane truth tables. Lane render goldens
+were produced by pinned rustc 1.97.1's debug tuple/array formatting. The C
+byte-list expectation derives from `WS_MESSAGE_U8_STRIDE`, which must match
+the composed runtime's canonical one-byte stride. Its wrong-variant mode and
+expected stdout remain unexercised; native ownership admission and execution
+are not established by parse or C syntax receipts.
+
+### Byte buffer, POSIX path, row policy and event unit glue
+
+`ByteHandlesABI.jet` defines the native ByteBuffer (owned byte-list pointer,
+raw unsigned cursor), Path (owned byte-list pointer) and RowPolicy (owned
+table/expression Text pointers and the compiled closed-policy ordinal).
+These are native layouts, not Rust struct layouts or generated carrier aliases.
+ByteBuffer copies the complete byte list and cursor; its three renders ignore
+the cursor and print decimal bytes with comma-space separators, matching
+`Collections.rs:191-204`. Decimal U8 output creates no temporary Int/Text or
+heap scratch. Path preserves arbitrary POSIX path bytes across clone, then
+uses the shared UTF8-lossy decoder only when rendering (`PathFiles.rs:6-18`).
+The canonical packed byte stride renders directly without staging; legacy
+word-stride composition packs through `host_u8_get`. Byte clone/drop uses
+the existing stride-aware DataTree helpers, never a private byte stride.
+
+RowPolicy retains the compiled `AllowAll`/`OwnerEqualsUser` form as well as its
+canonical text (`Sync.rs:65-68`, `RowPolicy.rs:18-21`). Its two field routes
+preserve the actual two-argument, void C ABI in `CAbiRoutes.rs:12832-12840`:
+they fill the caller's stack `[data, length, capacity]` descriptor borrowing
+the owner's bytes. They do not return fresh Text owners. The descriptor must
+never be grown, consumed or dropped; callers may explicitly clone it.
+
+FailurePolicy, DispatchState, EventConfigError and LateEventDisposition
+delegate clone/drop/equality to the shared Encoding unit-enum owner.
+JetBitSet's five existing native providers in `Collections.jet` are reused
+unchanged (external-provider precedent `814254e43`), not duplicated.
+All-ref searches found no existing Jet providers for the other new families.
+Fraction is intentionally not given a hand carrier: CoreReview4's ruling
+retires it to Core-source structural glue on the CoreNumerics7 composition
+(`9cea21818` through `4bf243903`).
+
+`ByteHandleWitness.c` requires real Jet exports and free interception. It
+covers all 256 byte values, empty/full lists, raw cursor high bits, clone
+independence, exact-once frees, arbitrary path bytes including NUL and malformed
+UTF8, borrowed policy descriptor lifetime, both compiled policies, every valid
+unit-enum equality pair, and reused BitSet sorting/duplicate/negative behavior.
+Its byte-list expectations use `BYTE_HANDLE_U8_STRIDE`, which must match the
+composed runtime. Its stdout fixture is an expectation, not an execution
+receipt. Source parsing and strict C11 syntax do not establish native
+ownership admission, runtime linking or execution.
+
+### Native DataLimits and EncodingLimits ownership boundary
+
+`JetRuntime/Source/DataLimits.jet` ports the 19 existing clone/drop/eq,
+constructor and field-getter exports. The unchanged C boundary follows
+`CAbiRoutes.rs:8838-8869,9470-9507`: borrowed exact Int arguments are checked
+through `jet_int_owned_to_i64`, while getters return a fresh exact Int owner
+through `jet_int_owned_from_i64`. Overflow uses the shared native conversion's
+`native Int argument exceeds host range` stop at `<core.prelude>:0`.
+
+The private native layouts in `JetBackend/Source/DataABI.jet` do not describe
+Rust allocations or nominal Core/MIR layouts. EncodingLimits occupies 56 bytes:
+raw i64 buffer/depth/item at 0/8/16, optional-total presence/value at 24/32,
+and expansion depth/bytes at 40/48. It has no child or Int owners. DataLimits
+occupies 40 bytes: an owned EncodingLimits pointer at 0 followed by raw i64
+groups/sort/join/output at 8/16/24/32. Its constructor consumes the encoding
+handle; clone and the encoding getter deep-clone it; drop frees the child and
+then the shell. Equality follows the Rust declaration order in
+`EncodingTypes.rs:4-11` and `CommonTypes.rs:797-803`, including optional-total
+presence and comparing its payload only when present.
+Conversions happen before allocating the destination carrier. The shared stop
+is fatal: if a DataLimits scalar argument exceeds native range, its transferred
+encoding handle is not freed before process exit.
+
+The optional total constructor accepts a null pointer for absent, or a
+borrowed pointer to an exact Int word. Its getter returns raw presence 0/1 and
+writes a newly owned Int into the caller's out slot only when present.
+`JetRuntime/Tests/DataLimitsWitness.c` requires the real Jet object and
+`--wrap=jet_rt_free`. It checks every getter, both i64 edges, absent/present-zero
+totals, fresh boxed owners, nested clone/getter independence, equality field
+participation and exact-once carrier frees. `encoding-overflow`,
+`encoding-field-overflow`, and `data-overflow` independently exercise native
+conversion stops. The `.stdout` file is expected output, not an execution
+receipt. This provider is held: native caller-layout/import admission and
+execution, plus whole-unit suppression of its Rust seed bodies, remain
+required before pack cutover.
+
+### Native DataEvent ownership boundary
+
+`JetRuntime/Source/DataEvent.jet` ports the 23 existing clone/drop/eq, tag,
+constructor and payload-getter exports, with no additional rendering surface.
+Its 16-byte native hand layout in `JetBackend/Source/DataABI.jet` is
+`[tag, payload]`, not a Rust or nominal Core/MIR enum layout. The 12 tags follow
+`CommonTypes.rs:282-295`: Null, Bool, Int, Float, Number, Text, Bytes,
+ArrayStart, ArrayEnd, ObjectStart, Key, ObjectEnd.
+
+`CAbiRoutes.rs:8730-8835` defines the unchanged ABI ownership. Bool normalizes
+the incoming u8 to 0/1. Int borrows the exact input and checks native i64 range
+before allocating, stores raw i64, and returns a fresh exact owner on get.
+Float preserves bits and uses IEEE equality, including unequal NaN and equal
+signed zeros; it has no JSON rendering finite-value restriction. Number, Text
+and Key clone borrowed strings on construction, clone owned strings on
+get/clone, and drop them with the event. Bytes consumes the native List holder;
+its getter lends the stored pointer, while clone duplicates its U8 data and
+drop frees data then holder. Units store zero payload. A wrong-variant getter
+uses the existing panic path with `record variant index out of range`.
+
+`JetRuntime/Tests/DataEventWitness.c` requires the real Jet object,
+`--wrap=jet_rt_free`, and `DATA_EVENT_U8_STRIDE` matching the runtime's single
+U8 epoch (canonical packed 1). It covers all variants and getters, boxed i64 edges,
+fresh-owner getters, Float NaN/infinity/signed-zero equality, independent
+strings and byte holders, borrowed byte getters, and exact-once frees.
+Separate `native-overflow` and `wrong-variant` modes must stop through the
+existing runtime paths. Its `.stdout` is expected output, not a native
+execution receipt. Native layout/import admission and whole-unit Rust seed
+suppression are still required before pack cutover.
+
+Both C witnesses have `panic-reference` (real `jet_panic` with heap text,
+line 0) and `wrong-variant` modes.
+`Tests/run-record-variant-panic.mjs OUT DATA_TREE_WITNESS DATA_EVENT_WITNESS`
+runs the real linked clients serially, requires exact exit 70 and empty
+stdout, saves the direct reference's stderr as the process-mode golden,
+asserts message/location, and byte-compares the wrong-variant output.
+This runner has not been executed; parser/C syntax receipts alone do not
+prove native panic-byte parity or native execution.
+
+DataTree/DataEvent runtime byte paths use `RT_HOST_U8_STRIDE` and host U8
+accessors; their C witnesses default to canonical packed stride1 and keep all
+byte indexing/allocation expectations derived from their stride constant.
+
+
+### Native Process value enums
+
+`JetRuntime/Source/ProcessEnums.jet` supplies the complete ResourceLimit6 and
+StreamMode3 families. They reuse `EncodingErrors.jet`'s eight-byte enum owner
+helpers, not a second ownership implementation. Native tags are declaration
+order in `DataABI.jet`: WallTime/CpuTime/Memory/OpenFiles/Output and
+Stream/Inherit/Capture. These private native handles do not describe Rust boxes
+or establish source/MIR admission.
+
+ResourceLimit show/display use `wall time`, `CPU time`, `memory`,
+`open file handles`, `output`; Debug uses the variant names. StreamMode has
+no renderer or constructor export. The real-object C client
+`Tests/ProcessEnumsWitness.c` checks every legal tag, cross-tag inequality,
+clone independence, all three ResourceLimit renders and exact-once frees
+with `--wrap=jet_rt_free`. Its `.stdout` file is expected output, not an
+execution receipt. Whole-unit seed suppression and native caller/import/layout
+admission remain composition gates.
+
+### Native UI scalar and record carriers
+
+`UiCarriersABI.jet` in JetBackend/Source defines opaque native-private
+TerminalSize, TerminalPolicy, TextWidth and Browser metadata carriers.
+It is not the layout of a Rust allocation or a checked-MIR source record.
+The Lower-facing Node/Accessibility/Shortcut contract remains the shared
+`UiABI.jet` precedent; these scalar carriers do not introduce another Node
+layout or closure convention.
+
+Rust `i64` fields (TerminalSize cols/rows, BrowserTimeout milliseconds and
+BrowserLocked size) remain raw signed words. Constructors checked-narrow
+exact Int inputs; getters return fresh exact Int owners. Clone/equality/drop
+never retain or destroy an Int owner for those stored words. Browser text
+fields own independent E4 headers and buffers, and text getters clone them.
+Record enum fields are raw declaration-order tags; unit handle traits own
+separate 8-byte carriers.
+
+TerminalPolicy24 embeds the byte-identical TerminalSize16 at offset zero.
+Its constructor copies the two raw size words and frees the consumed Size
+via its canonical drop exactly once, before checking the mode as the pinned
+constructor does. Policy clone allocates only its own 24-byte carrier; the
+Size getter returns a fresh 16-byte owner. Equality compares cols, rows and
+mode, with no pointer-identity shortcut.
+
+`UiCarriersBasicWitness.c` targets the real Jet providers with allocation/free
+wrapping: clone independence, exact-once release, signed extrema, enum
+ordinals, embedded NUL/UTF-8 text and distinct record fields. Separate
+`width-stop` and `policy-stop` process modes expect the existing E3010 footer
+and exit 70. Syntax/ABI receipts do not claim linking, process execution,
+checked caller layout or native-only admission.
+
+### Native civil-time ownership boundary
+
+`TimeGlueABI.jet` defines private Date24, Period24, LocalTime32, Duration8
+and DurationUnit8 carriers. It does not define Core Instant: that source
+value owns an exact Int field by value, as the Realtime deadline route
+already returns (`Realtime.jet:144-155`). Instant carrier admission belongs
+to the generator, not a Rust-pointer interpretation.
+
+Date/Period/Duration record constructors borrow and check exact Int inputs
+before allocation, store raw i64 and return fresh exact owners on get
+(`CAbiRoutes.rs:9382-9390,10174-10194,10982-11002`). These record constructors
+do not add civil-calendar validation. Clone/drop own only the shell.
+Equality follows declaration order (`Time.rs:4-9,303-309,484-489`,
+`CommonTypes.rs:2840-2843,2866-2874`). LocalTime nanos is u32, not signed
+i64; clone clears native upper-word padding and equality ignores it.
+There is no LocalTime record ctor/getter in this HAND family.
+
+All modes preserve the seed formats (`Time.rs:280-286,472-480,619-620`,
+`Duration.rs:195-197`), using existing decimal digit counting/emission and
+the existing text builder. Date years have minimum four digits and a
+separate negative sign; the seed's saturating absolute value makes i64::MIN
+render with magnitude i64::MAX (`Time.rs:1760-1765`). LocalTime emits
+unsigned nanos only when nonzero, padded to at least nine digits.
+Periods retain signed components without normalization; durations append
+`ns` to signed nanoseconds.
+
+`TimeGlueWitness.c` is a real-object client requiring `--wrap=jet_rt_free`
+with asserted interception and exact-once frees. It exercises boxed Int
+borrow/getter ownership, every equality field, nanos padding independence
+and civil/duration render goldens at raw integer boundaries.
+`date-overflow`, `period-overflow` and `duration-overflow` must stop at the
+existing native-range boundary. Native execution and MIR/caller/layout
+admission remain unexercised; parse/C11 syntax receipts are not parity proof.
+### Native ProcessSpec value and pure producers
+
+`ProcessSpec.jet` implements the six existing handle exports and the existing
+pure C ABI builders over the single private Spec128 layout in `DataABI.jet`.
+`jet_std_process_cmd` clones borrowed argv into the internal owned producer;
+every `jet_process_spec_*` C builder borrows the parent and returns a deep
+clone. It never mutates or consumes the caller's spec. Command and removed-name
+lists own E4 text; environment pairs use ordered 16-byte tuples, preserving
+duplicates. Nullable text/policy pointers own their nested carriers; nullable
+raw-i64 boxes preserve absent versus present-zero for stdin and limits.
+
+The defaults and transitions follow `ProcessSpec.rs:12-103` and
+`Process.rs:56-101,170-187`. Exact Int limits clamp to 0..i64::MAX without a
+native-conversion stop. Duration arguments remain borrowed handles using the
+canonical `TimeGlueABI.jet` ns word and truncating division by 1,000,000 before
+max(0). Raw stream ordinals are checked with the frozen C ABI's range stop,
+not Int conversion. Terminal defaults are 80x24 Cooked and use the canonical
+TerminalPolicy24 provider. Borrowed Bool field helpers return the address of
+the live normalized byte and allocate nothing. Equality masks the low byte
+of each Bool slot; clone normalizes it to a full-word 0/1, ignoring padding.
+
+Show exposes only `ProcessSpec([cmd...])`, using the shared Rust `str` Debug
+renderer (including NUL `\0`), not JSON or Jet string escaping. Equality still
+includes every stored field, including policy wire and environment secrets.
+`ProcessSpecWitness.c` uses real producers, verifies defaults, each builder,
+borrow preservation, optional presence, ordered pairs, recursive independence,
+all equality fields and omitted secrets, limit clamps above both i64 bounds,
+Duration edges, all stream modes, exact render bytes and exact-once frees.
+Separate stdin/stdout/stderr range modes require the native-index stop.
+The expected `.stdout` is not an execution receipt. Native layout/import
+admission and whole-unit seed suppression are required before pack cutover;
+this does not supply Plan/Receipt spawning or public Child lifecycle providers.
+
+### Rust-free C ABI conformance clients
+
+`JetRuntime/Tests/CAbiDriver.c` replaces the native test runner's Rust driver.
+It calls only real runtime exports: `jet_rt_main`, text and terminal output,
+Euclidean Int division/remainder, numeric stop and require stop. Missing
+exports are link failures, not substitutes or skipped tests. The same client
+has allocator-only process modes for comparison with a supplied seed oracle.
+
+Run `node Compiler/JetRuntime/Tests/run-cabi-driver.mjs OUT OBJECT_OR_ARCHIVE...
+[LINK_ARG...]` with the complete real native link group. The runner builds
+with `CC` (default `cc`), not rustc or a Rust rlib, captures compiler exit/signal
+and each process status and bytes, then checks all seven original modes:
+values, text-carriers, euclid-by-zero, numeric-stop, require, require-eq, panic.
+Values match `CAbiDriver.stdout`; normal stderr is empty. Stops retain the
+original required diagnostic prefixes, locations, descriptor source/function
+context, locals and Why heading; stdout must be empty and exit must be 70.
+The eleven-word descriptor and mode behavior follow the seed driver
+`tests/fixtures/runtime_c_abi_driver.rs:60-156`. Text24 coverage includes
+embedded NUL/UTF-8, deep clone after input drop, empty sentinel, aliased
+builder appends with and without growth, and same-header finish.
+
+Run `node Compiler/JetRuntime/Tests/run-alloc-parity.mjs OUT SEED_LINK_INPUT...
+--native NATIVE_LINK_INPUT...`. It builds the same C client with
+`C_ABI_ALLOC_ONLY`, once for each explicitly separate real link group. The
+native group must contain no seed Rust artifact. Invalid layout requires the
+original panic prefix and exit 70; exhaustion requires SIGABRT and exact
+`memory allocation of 9223372036854775800 bytes failed\n`. Both modes compare
+the complete seed/native stderr, with empty stdout and no spawn error.
+The seed group is an external comparison oracle, not a shipping dependency.
+
+These runners no longer consume `runtime_c_abi_driver.rs`. The Rust reference
+integration test's fixture remains seed-only until that test tier is removed;
+TestLead1 retired its native contract from the Jet test kit and assigned
+this successor to the runtime line. C11/Node syntax checks do not establish
+native linking, runtime execution or stop-byte parity; those require a
+composed real runtime link group and actual runner receipts.
+
+### Sentry fault-detection ledger parity
+
+The shared checker observes a nonzero fault immediately after classification
+releases its lock, before returning the fault tag. This matches
+`MemSentry.rs:607-617,704-717`; a successful or disabled check writes nothing.
+The stop/report path no longer records the same fault a second time
+(`Mem.rs:78-88` and `Core.rs:1482-1517` likewise only report after detection).
+The existing gate/release/hardened/fence rules and observational ledger writer
+are unchanged. `JET_MEMORY_LEDGER` selects a nonempty explicit path; otherwise
+the normal default remains `.jet/memory/ledger-v1.jsonl`.
+
+The world/sentry runner supplies fresh, per-run ledger paths for every raw
+check fixture so tests never write the checkout's default ledger. Its return
+and stop modes both use an actual expired-frame pointer classification,
+require exactly one JSONL row, and compare their complete bytes with each
+other and the existing canonical reference writer. Syntax receipts do not
+establish executed fault-detection parity.
+
+### Source-gate memory ledger test port
+
+`SentryTests.jet::jet_rt_sentry_fixture_source_gate` ports
+`tests/unsafe_sentries.rs:3-28` using the real native scope and checker.
+It enables the `unsafe.jet:12` gate with reason `reads raw storage`, checks
+address 1 for eight bytes/alignment 1 under strict provenance, and requires
+R0801 with the source metadata retained before scope leave/reset.
+
+`node Compiler/JetRuntime/Tests/run-sentry-source-gate.mjs OUT REAL_FIXTURE`
+runs the composed `world-sentry-fixture` client's `source-gate` mode with a
+fresh isolated ledger path. It requires exit 0 and empty stdout/stderr, then
+the original six ledger substring predicates: schema, kind sentry, code
+R0801, source unsafe.jet, source-Unsafe-gate provenance, and the derive-from-live-
+storage repair. It additionally requires exactly one row to guard the
+fault-detection/stop separation. The client must be composed with the actual
+SentryTests source; no Rust driver or fabricated ledger writer is used.
+Native execution is not established by the syntax receipt.
+

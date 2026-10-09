@@ -244,8 +244,34 @@ fn trap_native_index_range_stop() {
     trap_exit(I64{101})
 }
 
+// Vec::with_capacity(capacity as usize) and growth overflow are foreign
+// Rust String panics under CAbi guard: body + newline, exit 101, not a Jet stop.
+fn rt_seq_capacity_overflow_stop() {
+    trap_flush_stdout()
+    trap_write_word(I64{8751735851445150051}, I64{8})
+    trap_write_word(I64{8028904877209317152}, I64{8})
+    trap_write_word(I64{119}, I64{1})
+    trap_msg_newline()
+    trap_exit(I64{101})
+}
+
 #Export(c) fn jet_panic(file: I64, line: I64, message: I64) {
     trap_simple(I64{0}, trap_word(file), trap_word(file + I64{8}), trap_line(line), trap_word(message), trap_word(message + I64{8}))
+}
+
+// Zero-allocation specialization of jet_panic("<core.prelude>", 0, message).
+// trap_simple above does not task-publish; retain that same fatal path.
+// These 33 message bytes + prelude_end equal message_end + trap_context
+// with that 14-byte file, line 0, and empty function/source.
+fn rt_record_variant_panic() {
+    trap_header(I64{0})
+    trap_write_word(I64{8511913738388071794}, I64{8})
+    trap_write_word(I64{7575182590666699361}, I64{8})
+    trap_write_word(I64{8391735665924334702}, I64{8})
+    trap_write_word(I64{7453001576142499616}, I64{8})
+    trap_write_word(I64{101}, I64{1})
+    trap_msg_prelude_end()
+    trap_footer(I64{0})
 }
 
 fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, caret: I64, message: I64, locals: I64) {
@@ -388,61 +414,11 @@ fn trap_debug_short(code: I64) -> I64 Never! {
     I64{-1}
 }
 
-// Rust str::Debug quoting, including non-printable/grapheme-extending scalars.
-// The owned result is an E4 header and buffer allocated by the one Jet heap.
-// Worst case is one ten-byte escape per input byte. One pass avoids repeatedly
-// growing and copying the result; the actual byte length is recorded separately.
+// D-STR-ESCAPE1 Jet text quoting shares the exact Rust debug escaper, except
+// NUL is \u{0} here rather than Rust's \0. One table, decoder and escape loop.
 #Export(c) fn jet_rt_require_debug_string(value: I64) -> I64 {
-    input :: trap_word(value)
-    length :: trap_word(value + I64{8})
-    capacity :: length * I64{10} + I64{2}
-    output :: jet_rt_alloc(capacity, I64{1})
-    at := I64{0}
-    used := I64{1}
-    trap_put(output, I64{34})
-    loop at < length {
-        scalar :: trap_scalar(input + at)
-        short :: trap_debug_short(scalar.code)
-        if {
-            (short >= I64{0}) -> {
-                trap_put(output + used, I64{92})
-                trap_put(output + used + I64{1}, short)
-                used += I64{2}
-            }
-            (scalar.code < I64{32} || scalar.code == I64{127} || (scalar.code >= I64{128} && trap_debug_escaped(scalar.code))) -> {
-                trap_put(output + used, I64{92})
-                trap_put(output + used + I64{1}, I64{117})
-                trap_put(output + used + I64{2}, I64{123})
-                used += I64{3}
-                divisor := I64{1}
-                // Unicode scalar codes and the power-of-16 divisor are nonnegative.
-                loop scalar.code /% divisor >= (I64{16}) -> divisor *= I64{16}
-                loop {
-                    digit :: scalar.code /% divisor % I64{16}
-                    trap_put(output + used, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
-                    used += I64{1}
-                    divisor = divisor /% I64{16}
-                    if (divisor == I64{0}) -> break
-                }
-                trap_put(output + used, I64{125})
-                used += I64{1}
-            }
-            else -> {
-                byte := I64{0}
-                loop byte < scalar.width {
-                    trap_put(output + used, trap_byte(input + at + byte))
-                    used += I64{1}
-                    byte += I64{1}
-                }
-            }
-        }
-        at += scalar.width
-    }
-    trap_put(output + used, I64{34})
-    used += I64{1}
-    header :: jet_rt_alloc(I64{24}, I64{8})
-    trap_store(header, output)
-    trap_store(header + I64{8}, used)
-    trap_store(header + I64{16}, capacity)
-    header
+    capacity :: rt_text_len(value) * I64{10} + I64{2}
+    result :: rt_text_builder_with_capacity(capacity)
+    rt_text_push_debug_str(result, value, false)
+    result
 }
