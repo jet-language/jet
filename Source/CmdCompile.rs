@@ -16178,3 +16178,7 @@ mod web_rustc_incremental_session_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
+
+#[cfg(test)]
+#[path = "IOErrorComponentObservation.rs"]
+mod io_error_component_observation;
