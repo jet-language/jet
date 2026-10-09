@@ -2169,7 +2169,9 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
     if sema_registration_module_index(graph, caller_module) == .Val(caller_index) -> caller_package = graph.modules[caller_index].package_identity
     trait_candidates := sema_call_trait_method_candidates(graph, receiver_type, method, type_args, caller_module, caller_package, environment.generic_params, span, &diagnostics)
     if trait_candidates.len() > 0 -> return trait_candidates
-    receiver_name :: sema_expr_type_base_name(receiver_type) ?? return candidates
+    // Fact tags remain on the checked value, not on declaration lookup.
+    lookup_type :: sema_expr_unwrap_tag(receiver_type)
+    receiver_name :: sema_expr_type_base_name(lookup_type) ?? return candidates
     // Native carrier methods live on registered impls, never fake nominals.
     loop owner_row in graph.modules {
         if !sema_registration_source_owns_impl(owner_row, receiver_name) -> next
@@ -2178,7 +2180,7 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
             loop function in implementation.methods {
                 if function.symbol.name != method || function.parameters.len() == 0 -> next
                 method_ref :: TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
-                candidate :: sema_call_method_candidate_from_registration(function.signature, function.generic_params, environment.registration_graph, caller_module, caller_package, environment.generic_params, Val(receiver_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
+                candidate :: sema_call_method_candidate_from_registration(function.signature, function.generic_params, environment.registration_graph, caller_module, caller_package, environment.generic_params, Val(lookup_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
                 &candidates.push(candidate)
             }
         }
@@ -2196,7 +2198,7 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
         found_owner = true
         inference_ty := nominal.ty
         if receiver_canonical -> inference_ty = sema_type_resolve_declared(graph, nominal.ty, graph.modules[owner_index].module_identity)
-        owner_inference :: sema_infer_registered_nominal(nominal, inference_ty, program.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, owner_type_args, None, span, &diagnostics) ?? next
+        owner_inference :: sema_infer_registered_nominal(nominal, inference_ty, program.registration_graph, caller_module, caller_package, environment.generic_params, lookup_type, owner_type_args, None, span, &diagnostics) ?? next
         if !owner_inference.complete || !owner_inference.compatible -> next
         owner_type := sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
         written_before :: candidates.len()
