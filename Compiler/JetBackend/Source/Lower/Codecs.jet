@@ -64,8 +64,8 @@ fn lower_codec_method_call(p: MIRProgram, m: &LowerModule, f: &LowerFunction, me
     target :: lower_instance_id(method.function, lower_call_bindings(Val(method.owner), [MIRType]{}))
     index :: lower_function_index(m, target)
     if index < 0 -> return lower_fail(&m, &f, "selected codec method {target.value} was not reached")
-    signature :: ~m.mir_signatures[index]
-    result_bytes :: ~m.mir_results[index]
+    signature :: m.mir_signatures[index].copy()
+    result_bytes :: m.mir_results[index].copy()
     if result_bytes > 0 {
         lower_emit(&f, LIRInst.StackSlot{dst: dst, size: result_bytes, align: 8})
         lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: [LIRValueID]{dst, source}})
@@ -295,11 +295,11 @@ fn lower_helper_codec_csv_decode(p: MIRProgram, m: &LowerModule, glue: LowerGlue
     errors :: if glue.ty.kind == .Result(_, err) -> err else -> panic("CSV callback needs its checked failures")
     tree :: lower_dyn_program_type(p) ?? panic("CSV callback needs its checked Dyn")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer(), lir_layout_pointer(), lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_word()))
-    borrowed :: ~f.open_params[0]
-    output :: ~f.open_params[1]
-    status_out :: ~f.open_params[2]
-    errors_out :: ~f.open_params[3]
-    length_out :: ~f.open_params[4]
+    borrowed :: f.open_params[0].copy()
+    output :: f.open_params[1].copy()
+    status_out :: f.open_params[2].copy()
+    errors_out :: f.open_params[3].copy()
+    length_out :: f.open_params[4].copy()
     owned :: lower_pointer(&f)
     lower_call_runtime(&m, &f, "jet_rt_handle_clone_Dyn", [LIRValueID]{borrowed}, Val(owned))
     native :: lower_pointer(&f)

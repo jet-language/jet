@@ -1287,7 +1287,7 @@ fn jet_rust_emit_selected_user_capability_impl(ctx: &JetRustEmitContext, ty: MIR
     }
     nominal_id :: target_id ?? return false
     expected_trait_ref :: jet_rust_emit_capability_trait_ref(&ctx, trait_name) ?? return false
-    rows :: ~(ctx.impls_by_trait.get(expected_trait_ref.id.value) ?? [Int]{})
+    rows :: (ctx.impls_by_trait.get(expected_trait_ref.id.value) ?? [Int]{}).copy()
     // Rows are read in place; only a matching row is copied for the target check.
     loop row in rows {
         if ctx.program.impls[row].compiler_generated -> next
@@ -1778,7 +1778,7 @@ fn jet_rust_emit_validate_derived_trait(ctx: &JetRustEmitContext, definition: MI
     }
     implementation := MIRImplDef?{None}
     // Only the impls of this trait, in program order (first match wins as before).
-    rows :: ~(ctx.impls_by_trait.get(trait_id.value) ?? [Int]{})
+    rows :: (ctx.impls_by_trait.get(trait_id.value) ?? [Int]{}).copy()
     loop row in rows {
         candidate :: ctx.program.impls[row].copy()
         if jet_rust_emit_derived_impl_matches_type(candidate, definition, trait_id, trait_key) && jet_rust_emit_impl_target_enabled(&ctx, candidate) {
@@ -2125,7 +2125,7 @@ fn jet_rust_emit_alias_parameter_uses(definition: MIRTypeDef) -> [Bool]? Never! 
 
 // A transparent alias declares only the parameters its target names.
 fn jet_rust_emit_declared_generic_params(definition: MIRTypeDef) -> [MIRGenericParam] Never! {
-    uses :: jet_rust_emit_alias_parameter_uses(definition) ?? return ~definition.generic_params
+    uses :: jet_rust_emit_alias_parameter_uses(definition) ?? return definition.generic_params.copy()
     kept := [MIRGenericParam]{}
     loop (index, parameter) in definition.generic_params {
         if uses[index] -> &kept.push(parameter)
@@ -2528,7 +2528,7 @@ fn jet_rust_emit_constant_payload_field(ctx: &JetRustEmitContext, definition: MI
             }
         }
     }
-    if jet_rust_emit_has_native_type_projection(ctx, type_name) -> ~field_name else -> name_mangle(field_name)
+    if jet_rust_emit_has_native_type_projection(ctx, type_name) -> field_name.copy() else -> name_mangle(field_name)
 }
 
 // MIRRust Fraction constant: one exact-Int part of an intrinsic ratio.
@@ -2737,7 +2737,7 @@ fn jet_rust_emit_qualified_leaf_under(name: String, owners: [String]) -> String?
 }
 
 fn jet_rust_emit_core_native_probe_name(name: String) -> String Never! {
-    if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy")) || core_source_owns_type(name) -> return ~name
+    if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy")) || core_source_owns_type(name) -> return name.copy()
     jet_rust_emit_core_source_type_leaf(name)
 }
 
@@ -2934,10 +2934,10 @@ fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
     coords :: [String]{"Point2", "Delta2", "ScreenPoint", "WorldPoint", "ViewPoint", "CameraPoint", "DevicePoint", "ScreenDelta", "WorldDelta", "ViewDelta", "CameraDelta", "DeviceDelta"}
     if coords.contains(name) -> return Val("JetCoord2")
     // Carriers whose Rust name equals the Jet name.
-    if name == "PluginFrame" || name == "PluginFault" || name == "PluginLimit" || name == "PluginError" -> return Val(~name)
-    if name == "__QueryRead" -> return Val(~name)
+    if name == "PluginFrame" || name == "PluginFault" || name == "PluginLimit" || name == "PluginError" -> return Val(name.copy())
+    if name == "__QueryRead" -> return Val(name.copy())
     same :: [String]{"IOError", "IOContext", "IOOperation", "ProcessResourceLimit", "EnvError", "UTF8Error", "ProcessPlan", "ProcessSpec", "ProcessChild", "ProcessStreamMode", "TerminalPolicy", "TerminalSize", "TerminalMode", "TerminalSession", "TextWidth", "TextWidthAmbiguous", "TextWidthControls", "TextError", "DataGroupedQuery", "DataJoin", "TestSuite", "Clock", "Duration", "DurationUnit", "RangeError", "DataLoaderKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "DataAuthority", "DataSourceIdentity", "DataProvenance", "DataSnapshotIdentity", "DataLoaderStatus", "DataLoader", "DataSnapshot", "RegexFlags", "Closed", "DirEntry", "Stat", "WalkEntry", "WatchEvent", "WatchDomain", "WatchKind", "WatchHandle", "WatchSet", "TempDir", "TempFile", "FileLock", "DataLineOptions", "DataColumn", "DataStatus", "DataSummary", "DataLimits", "DataError", "DataErrorKind", "DataPivotCell", "DataStream", "DataTracked", "DataWatch", "DataWatchStatus", "LogField", "LogSpan", "EncodingLimits", "EncodingError", "EncodingCause", "EncodingFormat", "EncodingErrorKind", "FieldError", "CBOROptions", "CBORError", "CBORErrorKind", "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLEncoding", "XMLLexicalPolicy", "XMLCanonical", "XMLCanonicalMode", "XMLError", "XMLReason", "XMLEntityPolicy", "DataEvent", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "CSVRow", "XMLReader", "XMLWriter", "DBValue", "DBError", "RaylibWindow", "RaylibColor", "RaylibTextureAtlas", "SQL", "HTML", "Sh"}
-    if same.contains(name) -> return Val(~name)
+    if same.contains(name) -> return Val(name.copy())
     if name == {
         "ProcessResult" | "ProcessReceipt" -> Val("ProcessReceipt")
         "Query" -> Val("DataQuery")

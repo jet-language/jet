@@ -79,9 +79,9 @@ fn lower_runtime_argument_name(p: MIRProgram, ty: MIRType) -> String? {
             runtime :: lower_runtime_handle_type(p, ty) ?? return None
             // Alias spellings of a runtime declaration share one argument key.
             loop row in LOWER_RUNTIME_HANDLES {
-                if row.runtime == runtime.runtime && row.jet_name.starts_with("<corelib>/") -> return Val(~row.jet_name)
+                if row.runtime == runtime.runtime && row.jet_name.starts_with("<corelib>/") -> return Val(row.jet_name.copy())
             }
-            return Val(~runtime.jet_name)
+            return Val(runtime.jet_name.copy())
         }
         else -> {}
     }
@@ -578,8 +578,8 @@ fn lower_record_list_from_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFunct
 // a payload enum's box pointer).
 fn lower_helper_record_in(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
-    handle :: ~f.open_params[0]
-    target :: ~f.open_params[1]
+    handle :: f.open_params[0].copy()
+    target :: f.open_params[1].copy()
     if m.native_pack && lower_native_record_source(p, glue.ty) {
         if lower_repr(p, glue.ty) == .Boxed(_) {
             cloned :: lower_pointer(&f)
@@ -785,7 +785,7 @@ fn lower_record_load_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ha
 // the borrowed native record.
 fn lower_helper_record_out(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
-    value :: ~f.open_params[0]
+    value :: f.open_params[0].copy()
     if m.native_pack && lower_native_record_source(p, glue.ty) {
         target :: lower_pointer(&f)
         if lower_repr(p, glue.ty) == .Boxed(_) -> lower_call_clone_glue(&m, &f, glue.ty, value, target)

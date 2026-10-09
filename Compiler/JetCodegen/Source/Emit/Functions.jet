@@ -211,7 +211,7 @@ fn jet_rust_emit_slot_mentions(line: String, prefix: String) -> [JetRustEmitSlot
         if index > 0 {
             digits := 0
             loop digits < bytes.len() && bytes[digits] >= (U8{48}) && bytes[digits] <= (U8{57}) -> digits += 1
-            if digits > 0 && !joined -> &mentions.push(JetRustEmitSlotMention{id: String.from_bytes(~(bytes[0..<digits])) ?? "", column: column - 8})
+            if digits > 0 && !joined -> &mentions.push(JetRustEmitSlotMention{id: String.from_bytes((bytes[0..<digits]).copy()) ?? "", column: column - 8})
         }
         joined = if bytes.len() > 0 -> jet_rust_emit_identifier_byte(bytes[bytes.len() - 1]) else -> index > 0
         column += bytes.len() + 8
@@ -240,15 +240,15 @@ fn jet_rust_emit_lent_slots(lines: [String], body: [String], prefix: String, typ
             bytes :: line.bytes()
             start := 0
             loop start < bytes.len() && Int.from_u8(bytes[start]) == 32 -> start += 1
-            content :: String.from_bytes(~(bytes[start..<bytes.len()])) ?? ""
+            content :: String.from_bytes((bytes[start..<bytes.len()]).copy()) ?? ""
             if !content.starts_with("let ") || !content.ends_with(" = None;") -> next
             start += 4
             if content.starts_with("let mut ") -> start += 4
             end := start
             loop end < bytes.len() && jet_rust_emit_identifier_byte(bytes[end]) -> end += 1
-            tail :: String.from_bytes(~(bytes[end..<bytes.len()])) ?? ""
+            tail :: String.from_bytes((bytes[end..<bytes.len()]).copy()) ?? ""
             if !tail.starts_with(": ") -> next
-            if tail.contains("&") || tail.contains("'") -> references[String.from_bytes(~(bytes[start..<end])) ?? ""] = true
+            if tail.contains("&") || tail.contains("'") -> references[String.from_bytes((bytes[start..<end]).copy()) ?? ""] = true
         }
     }
     lent := [String:Bool]{}
@@ -259,8 +259,8 @@ fn jet_rust_emit_lent_slots(lines: [String], body: [String], prefix: String, typ
         loop indent < bytes.len() && Int.from_u8(bytes[indent]) == 32 -> indent += 1
         target := indent
         loop target < bytes.len() && jet_rust_emit_identifier_byte(bytes[target]) -> target += 1
-        name :: String.from_bytes(~(bytes[indent..<target])) ?? ""
-        tail :: String.from_bytes(~(bytes[target..<bytes.len()])) ?? ""
+        name :: String.from_bytes((bytes[indent..<target]).copy()) ?? ""
+        tail :: String.from_bytes((bytes[target..<bytes.len()]).copy()) ?? ""
         if !tail.starts_with(" = ") || references.get(name) == None -> next
         loop mention in jet_rust_emit_slot_mentions(line, prefix) {
             if types.get(mention.id) != None -> lent[mention.id] = true
@@ -280,7 +280,7 @@ fn jet_rust_emit_lent_slots(lines: [String], body: [String], prefix: String, typ
 // indented less), becomes `let mut slot: Option<T> = Some(..);` there; a
 // candidate the body never mentions loses its declaration.
 fn jet_rust_emit_localize_slots(lines: [String], decl_start: Int, decl_end: Int, prefix: String, ids: [String], types: [String:String]) -> JetRustEmitLocalizedSlots Never! {
-    if types.len() == 0 -> return JetRustEmitLocalizedSlots{lines: ~lines, body_start: decl_end}
+    if types.len() == 0 -> return JetRustEmitLocalizedSlots{lines: lines.copy(), body_start: decl_end}
     declared := [String:Int]{}
     loop (index, entry) in lines {
         if index < decl_start -> next
@@ -343,14 +343,14 @@ fn jet_rust_emit_localize_slots(lines: [String], decl_start: Int, decl_end: Int,
         }
         bytes :: body[line].bytes()
         indent :: indents[line]
-        rest :: if indent < bytes.len() -> String.from_bytes(~(bytes[indent..<bytes.len()])) ?? "" else -> ""
+        rest :: if indent < bytes.len() -> String.from_bytes((bytes[indent..<bytes.len()]).copy()) ?? "" else -> ""
         defines :: (on_first_line.get(id) ?? 0) == 1 && (first_column.get(id) ?? -1) == indent && rest.starts_with("{prefix}{id} = Some(")
         if defines && (last_line.get(id) ?? body.len()) < scope_end[line] && pinned.get(id) == None {
             &localized.add(line, id).drop("one definition per line")
             &dropped.add(id, true).drop("slot ids are unique")
         }
     }
-    if dropped.len() == 0 -> return JetRustEmitLocalizedSlots{lines: ~lines, body_start: decl_end}
+    if dropped.len() == 0 -> return JetRustEmitLocalizedSlots{lines: lines.copy(), body_start: decl_end}
     rebuilt := [String]{}
     loop (index, entry) in lines {
         if index >= decl_end -> break
@@ -370,8 +370,8 @@ fn jet_rust_emit_localize_slots(lines: [String], decl_start: Int, decl_end: Int,
         bytes :: body[index].bytes()
         indent :: indents[index]
         width :: "{prefix}{id} = ".bytes().len()
-        pad :: String.from_bytes(~(bytes[0..<indent])) ?? ""
-        tail :: String.from_bytes(~(bytes[indent + width..<bytes.len()])) ?? ""
+        pad :: String.from_bytes((bytes[0..<indent]).copy()) ?? ""
+        tail :: String.from_bytes((bytes[indent + width..<bytes.len()]).copy()) ?? ""
         &rebuilt.push("{pad}let mut {prefix}{id}: Option<{types.get(id) ?? ""}> = {tail}")
     }
     JetRustEmitLocalizedSlots{lines: rebuilt, body_start: body_start}
@@ -414,13 +414,13 @@ fn jet_rust_emit_unmentioned_slot_declaration(prefixes: [[U8]], line: String, me
     bytes :: line.bytes()
     indent := 0
     loop indent < bytes.len() && Int.from_u8(bytes[indent]) == 32 -> indent += 1
-    content :: String.from_bytes(~(bytes[indent..<bytes.len()])) ?? ""
+    content :: String.from_bytes((bytes[indent..<bytes.len()]).copy()) ?? ""
     if !content.starts_with("let mut ") || !content.ends_with("> = None;") -> return false
     content_bytes :: content.bytes()
     len :: jet_rust_emit_numbered_slot_len(prefixes, content_bytes, 8)
     if len == 0 -> return false
-    name :: String.from_bytes(~(content_bytes[8..<8 + len])) ?? ""
-    rest :: String.from_bytes(~(content_bytes[8 + len..<content_bytes.len()])) ?? ""
+    name :: String.from_bytes((content_bytes[8..<8 + len]).copy()) ?? ""
+    rest :: String.from_bytes((content_bytes[8 + len..<content_bytes.len()]).copy()) ?? ""
     rest.starts_with(": Option<") && (mentions.get(name) ?? 0) == 1
 }
 
@@ -455,7 +455,7 @@ fn jet_rust_emit_drop_unmentioned_slots(lines: [String], start: Int) -> [String]
         }
         attributed = jet_rust_emit_attribute_line(line)
     }
-    if !removed -> return ~lines
+    if !removed -> return lines.copy()
     rebuilt := [String]{}
     loop (index, entry) in lines {
         if index >= start -> break
@@ -983,7 +983,7 @@ fn jet_rust_emit_fold_reads(line: String) -> JetRustEmitFoldReads Never! {
             digits := 0
             loop digits < part_bytes.len() && part_bytes[digits] >= (U8{48}) && part_bytes[digits] <= (U8{57}) -> digits += 1
             if digits > 0 {
-                id :: String.from_bytes(~(part_bytes[0..<digits])) ?? ""
+                id :: String.from_bytes((part_bytes[0..<digits]).copy()) ?? ""
                 at :: column - 8
                 name :: "__jet_v_{id}"
                 &mentions.push(JetRustEmitSlotMention{id: id, column: at})
@@ -1013,11 +1013,11 @@ fn jet_rust_emit_fold_apply(line: String, reads: JetRustEmitFoldReads, edits: [I
     loop mention in reads.mentions {
         edit :: edits.get(mention.column) ?? next
         if edit.start < from -> panic("overlapping Rust emitter slot folds")
-        &pieces.push(String.from_bytes(~(bytes[from..<edit.start])) ?? "")
+        &pieces.push(String.from_bytes((bytes[from..<edit.start]).copy()) ?? "")
         &pieces.push(edit.text)
         from = edit.end
     }
-    &pieces.push(String.from_bytes(~(bytes[from..<bytes.len()])) ?? "")
+    &pieces.push(String.from_bytes((bytes[from..<bytes.len()]).copy()) ?? "")
     pieces.join("")
 }
 
@@ -1160,8 +1160,8 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
         }
         // Only a '|' can open a closure.
         if at < 0 || (body[consumer].contains("|") && jet_rust_emit_fold_inside_closure(bytes, at)) -> next
-        before :: String.from_bytes(~(bytes[0..<at])) ?? ""
-        after :: String.from_bytes(~(bytes[at + form.bytes().len()..<bytes.len()])) ?? ""
+        before :: String.from_bytes((bytes[0..<at]).copy()) ?? ""
+        after :: String.from_bytes((bytes[at + form.bytes().len()..<bytes.len()]).copy()) ?? ""
         rest :: "{before}{after}"
         rest_bytes :: rest.bytes()
         target := ""
@@ -1356,22 +1356,22 @@ struct JetRustEmitOptionSlot {
 // `E` that fills it.
 fn jet_rust_emit_option_slot_declaration(line: String) -> JetRustEmitOptionSlot? Never! {
     bytes :: line.bytes()
-    statement :: String.from_bytes(~(bytes[jet_rust_emit_fold_indent(bytes)..<bytes.len()])) ?? ""
+    statement :: String.from_bytes((bytes[jet_rust_emit_fold_indent(bytes)..<bytes.len()]).copy()) ?? ""
     if !statement.starts_with("let mut ") -> return None
     statement_bytes :: statement.bytes()
     split :: jet_rust_emit_fold_find(statement_bytes, ": Option<".bytes(), 0)
     if split < 8 -> return None
-    name :: String.from_bytes(~(statement_bytes[8..<split])) ?? ""
+    name :: String.from_bytes((statement_bytes[8..<split]).copy()) ?? ""
     if !jet_rust_emit_fold_numbered(name, "__jet_l_", "") && !jet_rust_emit_fold_numbered(name, "__jet_v_", "") -> return None
     if statement.ends_with("> = None;") {
         type_end :: statement_bytes.len() - "> = None;".bytes().len()
         if type_end < split + 9 -> return None
-        return Val(JetRustEmitOptionSlot{name: name, ty: String.from_bytes(~(statement_bytes[split + 9..<type_end])) ?? "", initial: None})
+        return Val(JetRustEmitOptionSlot{name: name, ty: String.from_bytes((statement_bytes[split + 9..<type_end]).copy()) ?? "", initial: None})
     }
     fill :: jet_rust_emit_fold_find(statement_bytes, "> = Some(".bytes(), split + 9)
     if fill < 0 -> return None
-    payload :: jet_rust_emit_option_slot_write_payload(String.from_bytes(~(statement_bytes[fill + 1..<statement_bytes.len()])) ?? "") ?? return None
-    Val(JetRustEmitOptionSlot{name: name, ty: String.from_bytes(~(statement_bytes[split + 9..<fill])) ?? "", initial: Val(payload)})
+    payload :: jet_rust_emit_option_slot_write_payload(String.from_bytes((statement_bytes[fill + 1..<statement_bytes.len()]).copy()) ?? "") ?? return None
+    Val(JetRustEmitOptionSlot{name: name, ty: String.from_bytes((statement_bytes[split + 9..<fill]).copy()) ?? "", initial: Val(payload)})
 }
 
 // MIRRust option_slot_write_payload: the payload `E` of a whole-line
@@ -1402,7 +1402,7 @@ fn jet_rust_emit_option_slot_write_payload(rest: String) -> String? Never! {
         }
     }
     if depth != 0 || quoted -> return None
-    Val(String.from_bytes(~(bytes[8..<end])) ?? "")
+    Val(String.from_bytes((bytes[8..<end]).copy()) ?? "")
 }
 
 // MIRRust unwrap_slot_options: for each line, the first later line indented
@@ -1541,7 +1541,7 @@ fn jet_rust_emit_unwrap_slot_options(lines: [String], start: Int) -> [String] Ne
         &types.add(slot.name, slot.ty).drop("a repeated declaration is skipped below")
         if slot.initial != None -> &filled.add(slot.name, true).drop("a repeated declaration is skipped below")
     }
-    if names.len() == repeated.len() -> return ~lines
+    if names.len() == repeated.len() -> return lines.copy()
     blank :: 9223372036854775807
     indents := [Int]{}
     loop line in body {
@@ -1583,10 +1583,10 @@ fn jet_rust_emit_unwrap_slot_options(lines: [String], start: Int) -> [String] Ne
                 loop end < bytes.len() && Int.from_u8(bytes[end]) >= 48 && Int.from_u8(bytes[end]) <= 57 -> end += 1
                 joined :: (at > 0 && jet_rust_emit_identifier_byte(bytes[at - 1])) || (end < bytes.len() && jet_rust_emit_identifier_byte(bytes[end]))
                 if end == at + width || joined -> next
-                name :: String.from_bytes(~(bytes[at..<end])) ?? ""
+                name :: String.from_bytes((bytes[at..<end]).copy()) ?? ""
                 declared_at :: declared.get(name) ?? next
                 if repeated.get(name) != None || declared_at == index -> next
-                rest :: String.from_bytes(~(bytes[end..<bytes.len()])) ?? ""
+                rest :: String.from_bytes((bytes[end..<bytes.len()]).copy()) ?? ""
                 expect :: ".expect(\"{label}\")"
                 access := JetRustEmitSlotAccess.Write
                 if in_closure[index] || jet_rust_emit_fold_inside_closure(bytes, at) {
@@ -1637,7 +1637,7 @@ fn jet_rust_emit_unwrap_slot_options(lines: [String], start: Int) -> [String] Ne
             &plain_names.push(name)
         }
     }
-    if plain_names.len() == 0 -> return ~lines
+    if plain_names.len() == 0 -> return lines.copy()
     rebuilt := [String]{}
     loop (index, entry) in lines {
         if index >= start -> break
@@ -1646,8 +1646,8 @@ fn jet_rust_emit_unwrap_slot_options(lines: [String], start: Int) -> [String] Ne
     loop line in body {
         bytes :: line.bytes()
         indent :: jet_rust_emit_fold_indent(bytes)
-        pad :: String.from_bytes(~(bytes[0..<indent])) ?? ""
-        statement :: String.from_bytes(~(bytes[indent..<bytes.len()])) ?? ""
+        pad :: String.from_bytes((bytes[0..<indent]).copy()) ?? ""
+        statement :: String.from_bytes((bytes[indent..<bytes.len()]).copy()) ?? ""
         updated := line
         declared_slot := false
         if jet_rust_emit_option_slot_declaration(line) == .Val(slot) {
@@ -1661,7 +1661,7 @@ fn jet_rust_emit_unwrap_slot_options(lines: [String], start: Int) -> [String] Ne
             loop name in plain_names {
                 if !statement.starts_with(name) -> next
                 statement_bytes :: statement.bytes()
-                payload :: jet_rust_emit_option_slot_write_payload(String.from_bytes(~(statement_bytes[name.bytes().len()..<statement_bytes.len()])) ?? "") ?? next
+                payload :: jet_rust_emit_option_slot_write_payload(String.from_bytes((statement_bytes[name.bytes().len()..<statement_bytes.len()]).copy()) ?? "") ?? next
                 updated = "{pad}{name} = {payload};"
                 break
             }
@@ -2782,7 +2782,7 @@ fn jet_rust_emit_impl_owner_declared(ctx: &JetRustEmitContext, implementation: M
     }
     identity :: owner_id ?? return false
     position :: jet_rust_emit_type_index(ctx, identity) ?? return false
-    definition :: ~ctx.program.types[position]
+    definition :: ctx.program.types[position].copy()
     definition.id == identity && jet_rust_emit_module_selected(ctx, definition.module_id) && jet_rust_emit_declares_type_definition(&ctx, definition)
 }
 
@@ -3513,7 +3513,7 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     }
     memo_header := [String]{}
     if jet_rust_emit_function_memoized(function) {
-        root :: ~ctx.config.root_prefix
+        root :: ctx.config.root_prefix.copy()
         key :: jet_rust_emit_memo_key_type(&ctx, function)
         value :: jet_rust_emit_callable_return(&ctx, function)
         bound :: jet_rust_emit_memo_bound(function)

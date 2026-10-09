@@ -44,7 +44,7 @@ fn jet_cli_db_rows_append(out: &[U8], text: String) Never! {
 fn jet_cli_db_rows_string(out: [U8]) -> String Never! {
     String.from_bytes(out) ?? panic("DB row output is UTF-8")
 }
-fn jet_cli_db_rows_quote(text: String) -> String Never! { db_rows_json.to_string(Dyn.Text(~text)) }
+fn jet_cli_db_rows_quote(text: String) -> String Never! { db_rows_json.to_string(Dyn.Text(text.copy())) }
 // Rust parse_json(_, false), MAX_JSON_DEPTH = 64; input bytes were bounded by the caller.
 fn jet_cli_db_rows_limits(bytes: Int) -> EncodingLimits Never! {
     EncodingLimits{buffer_bytes: 65536, max_depth: 64, max_item_bytes: bytes,
@@ -72,7 +72,7 @@ fn jet_cli_db_load_csv_source(name: String, path: String, text: String, max_rows
         record :: records[index]
         if record.fields.len() != header.len() -> return Err(jet_cli_db_error_new("E2701", "source", path, "CSV row {index + 1} has {record.fields.len()} fields, expected {header.len()}", "make every row match the header width"))
         entries := [String: Dyn]{}
-        loop field_index in 0..<header.len() -> _ :: &entries.add(header[field_index], Dyn.Text(~record.fields[field_index]))
+        loop field_index in 0..<header.len() -> _ :: &entries.add(header[field_index], Dyn.Text(record.fields[field_index].copy()))
         &values.push(Dyn.Object(entries))
     }
     jet_cli_db_normalize_json_source(name, path, Dyn.Array(values), text.bytes().len(), max_rows)
@@ -169,7 +169,7 @@ fn jet_cli_db_value_kind(value: Dyn) -> JetCLIDBColumnKind? Never! {
 }
 // Rust merge_kind (1702-1712).
 fn jet_cli_db_merge_kind(left: JetCLIDBColumnKind, right: JetCLIDBColumnKind) -> JetCLIDBColumnKind Never! {
-    if left == right -> return ~left
+    if left == right -> return left.copy()
     left_numeric :: left == JetCLIDBColumnKind.Int || left == JetCLIDBColumnKind.Float
     right_numeric :: right == JetCLIDBColumnKind.Int || right == JetCLIDBColumnKind.Float
     if left_numeric && right_numeric -> JetCLIDBColumnKind.Float else -> JetCLIDBColumnKind.String
@@ -229,7 +229,7 @@ fn jet_cli_db_default_cell(kind: JetCLIDBColumnKind) -> String Never! {
 fn jet_cli_db_value_text(value: Dyn) -> String Never! {
     if value == {
         .Null -> ""
-        .Text(text) -> ~text
+        .Text(text) -> text.copy()
         else -> jet_cli_db_render_json_value(value)
     }
 }
@@ -400,7 +400,7 @@ fn jet_cli_db_sql_cell(value: Dyn) -> db_rows_sql.JetSQLValue Never! {
             if I64.from_int(number) == .Val(integer) -> return .Int(integer)
             db_rows_sql.JetSQLValue.literal("{number}")
         }
-        .Text(text) -> .Text(~text)
+        .Text(text) -> .Text(text.copy())
         else -> .Text(jet_cli_db_value_text(value))
     }
 }
@@ -417,13 +417,13 @@ fn jet_cli_db_query_result_columns(source: JetCLIDBLoadedSource, query: db_rows_
     columns := [JetCLIDBColumn]{}
     loop item in query.projection {
         if item == .Wildcard {
-            loop column in source.columns -> &columns.push(~column)
+            loop column in source.columns -> &columns.push(column.copy())
             next
         }
         input := JetCLIDBColumn?{None}
         if item.field() == .Val(field) {
             loop column in source.columns {
-                if column.name == field { input = Val(~column); break }
+                if column.name == field { input = Val(column.copy()); break }
             }
         }
         kind := if input == .Val(column) -> column.kind else -> JetCLIDBColumnKind.String
@@ -447,7 +447,7 @@ fn jet_cli_db_run_dynamic_query(source: JetCLIDBLoadedSource, query: db_rows_sql
         return Err(jet_cli_db_error_new("E2600", "query", source.path, "normalized source is not a row array", "reload a local JSON, JSONL, or CSV source"))
     }
     fields := [String]{}
-    loop column in source.columns -> &fields.push(~column.name)
+    loop column in source.columns -> &fields.push(column.name.copy())
     count :: U64.from_int(values.len()) ?? panic("normalized row count fits U64")
     rows :: db_rows_sql.execute_sql_rows(fields, count, query, (index: U64, field: String) -> {
         offset :: Int.from_u64(index)

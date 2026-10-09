@@ -775,7 +775,7 @@ fn jet_rust_emit_exact_int_binary(ctx: &JetRustEmitContext, function: MIRFunctio
     if !jet_rust_emit_exact_int_arithmetic(&ctx, function, op, left, right) -> return None
     owned :: jet_rust_emit_exact_int_helper(op) ?? return None
     contextual :: op == MIRBinaryOp.Div || op == MIRBinaryOp.FloorDiv || op == MIRBinaryOp.Mod || op == MIRBinaryOp.Rem || op == MIRBinaryOp.Pow || op == MIRBinaryOp.Shl || op == MIRBinaryOp.Shr
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     left_text :: jet_rust_emit_inspected_value_reference(&ctx, function, left)
     right_text :: jet_rust_emit_inspected_value_reference(&ctx, function, right)
     context := ""
@@ -5759,7 +5759,7 @@ fn jet_rust_emit_prelude_receiver_call(ctx: &JetRustEmitContext, function: MIRFu
 // Dyn routes retain logical operands in MIR: receiver, checked arguments,
 // then operator/site constants. Only this host crossing packs path steps.
 fn jet_rust_emit_dyn_values(ctx: &JetRustEmitContext, function: MIRFunction, row: MIRPreludeCall, values: [MIRValueID]) -> String Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     symbol :: "{root}jet_std::{mir_symbol_name(row.symbol)}"
     receiver :: if row.member == "remove" || row.member == "set_path" -> jet_rust_emit_mutable_receiver_reference(&ctx, function, values[0]) else -> jet_rust_emit_borrowed_value_reference(&ctx, function, values[0], MIRAccess.Read)
     if row.member == "set_path" {
@@ -5851,7 +5851,7 @@ fn jet_rust_emit_handle_method_values(ctx: &JetRustEmitContext, function: MIRFun
         if frame_schedule == .Val(facts) -> schedule = "Some({jet_rust_emit_quote(derivation_payload_json(DerivationPayload.FrameSchedule(facts)))})"
         derivation := "None"
         if frame_schedule_derivation == .Val(reference) -> derivation = "Some({jet_rust_emit_quote(reference.id)})"
-        invocation :: if jet_rust_emit_indirect_failure(~ctx, function, args[0]) == MIRCallFallibility.Infallible -> "__jet_frame_callback(frame)" else -> "__jet_frame_callback(frame).unwrap_or_else(|error| match error {{}})"
+        invocation :: if jet_rust_emit_indirect_failure(ctx.copy(), function, args[0]) == MIRCallFallibility.Infallible -> "__jet_frame_callback(frame)" else -> "__jet_frame_callback(frame).unwrap_or_else(|error| match error {{}})"
         wrapped :: "{{ let mut __jet_frame_callback = {callback}; Box::new(move |frame| {invocation}) }}"
         return jet_rust_emit_route_call(&ctx, call, [String]{scene, wrapped, schedule, derivation})
     }

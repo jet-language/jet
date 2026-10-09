@@ -264,7 +264,7 @@ fn jet_rust_emit_constant_definition(ctx: &JetRustEmitContext, definition: MIRCo
     name :: jet_rust_emit_generated_path(definition.key)
     // A constant's views can only borrow static data (D-MEM-VIEWRET1).
     ty :: jet_rust_emit_type_with_view_lifetime(&ctx, definition.ty, "'static")
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     if definition.value == .SharedSite(site) {
         initialize :: jet_rust_emit_function_name(&ctx, site.initializer)
         process_or_world :: if site.lifetime == {
@@ -760,7 +760,7 @@ fn jet_rust_emit_slots(slots: [Shared<JetRustEmitSlot>], from: Int, shared_ctx: 
 // program order.
 fn jet_rust_emit_slot(slot: Shared<JetRustEmitSlot>, shared_ctx: Shared<JetRustEmitContext>) -> Int {
     // A copy: every worker reads the one shared context, so none may move it out.
-    worker := ~shared_ctx.guard_read().value
+    worker := shared_ctx.guard_read().value.copy()
     worker.failure = None
     worker.kept_failures = [JetRustEmitKeptFailure]{}
     permit :: slot.guard_edit()
