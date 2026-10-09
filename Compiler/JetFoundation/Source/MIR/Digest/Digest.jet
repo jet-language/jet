@@ -13,22 +13,22 @@ use core.math as math
 struct MIRCanonicalWriter {
     pub bytes: [U8]
     pub hashing: Bool
-    pub lanes: [Int]
+    pub lanes: [U64]
 }
 
 fn mir_digest_writer() -> MIRCanonicalWriter Never! {
-    MIRCanonicalWriter{bytes: [U8]{}, hashing: false, lanes: [Int]{}}
+    MIRCanonicalWriter{bytes: [U8]{}, hashing: false, lanes: [U64]{}}
 }
 
 fn mir_digest_hash_writer() -> MIRCanonicalWriter Never! {
-    MIRCanonicalWriter{bytes: [U8]{}, hashing: true, lanes: [Int]{0xcbf29ce484222325, 0x84222325cbf29ce4, 0x9e3779b185ebca87, 0xd6e8feb86659fd93}}
+    MIRCanonicalWriter{bytes: [U8]{}, hashing: true, lanes: [U64]{U64{0xcbf29ce484222325}, U64{0x84222325cbf29ce4}, U64{0x9e3779b185ebca87}, U64{0xd6e8feb86659fd93}}}
 }
 
 fn mir_digest_u8(writer: &MIRCanonicalWriter, value: U8) Never! {
     if writer.hashing {
-        byte :: Int.from_u8(value)
+        byte :: U64.from_u8(value)
         loop index in 0..<writer.lanes.len() {
-            writer.lanes[index] = mir_digest_wrap64((writer.lanes[index] ^ byte) * 0x100000001b3)
+            writer.lanes[index] = (writer.lanes[index] ~| byte).wrapping_mul(U64{0x100000001b3})
         }
     } else {
         &writer.bytes.push(value)
@@ -4668,10 +4668,6 @@ fn mir_program_write(writer: &MIRCanonicalWriter, program: MIRProgram) {
     loop row in unreachable -> mir_digest_unreachable(&writer, row)
 }
 
-fn mir_digest_wrap64(value: Int) -> Int Never! {
-    value & 0xffffffffffffffff
-}
-
 fn mir_digest_hex_digit(value: Int) -> String Never! {
     if value < 10 -> String.from_bytes([U8{48 + value}]) ?? "0"
     else -> String.from_bytes([U8{87 + value}]) ?? "0"
@@ -4694,7 +4690,8 @@ pub fn mir_program_digest(program: MIRProgram) -> String {
     writer := mir_digest_hash_writer()
     mir_program_write(&writer, program)
     output := [U8]{}
-    loop hash in writer.lanes {
+    loop lane in writer.lanes {
+        hash :: Int.from_u64(lane)
         loop index in 0..<8 {
             &output.push(U8{(hash >> (8 * index)) & 255})
         }

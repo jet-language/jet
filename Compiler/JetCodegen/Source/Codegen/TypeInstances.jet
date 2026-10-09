@@ -36,7 +36,10 @@ fn jet_codegen_function_type_rows(function: MIRFunction) -> [MIRType] Never! {
     if function.declared_return != None -> &rows.push(function.declared_return ?? function.return_type)
     &rows.push(function.return_type)
     if function.failure == {
-        .Result(success, error) -> { &rows.push(success); &rows.push(error) }
+        .Result(success, error) -> {
+            &rows.push(success)
+            &rows.push(error)
+        }
         .Optional(value) | .Diverges(value) -> &rows.push(value)
         .Infallible -> {}
     }
@@ -66,7 +69,10 @@ fn jet_codegen_trait_method_type_rows(method: MIRTraitMethod) -> [MIRType] Never
     if method.declared_return != None -> &rows.push(method.declared_return ?? method.return_type)
     &rows.push(method.return_type)
     if method.failure == {
-        .Result(success, error) -> { &rows.push(success); &rows.push(error) }
+        .Result(success, error) -> {
+            &rows.push(success)
+            &rows.push(error)
+        }
         .Optional(value) | .Diverges(value) -> &rows.push(value)
         .Infallible -> {}
     }

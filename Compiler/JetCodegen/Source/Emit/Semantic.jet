@@ -239,7 +239,7 @@ fn jet_rust_emit_require_locals(ctx: &JetRustEmitContext, function: MIRFunction,
     values := [String]{}
     loop local in context.locals {
         &names.push("{local.name} = {{}}")
-        read :: jet_rust_emit_place_local(function, local.local, false)
+        read :: jet_rust_emit_place_local(&ctx, local.local, false)
         if portable -> &values.push("({read})") else -> &values.push("({read}).jet_debug()")
     }
     format_string :: jet_rust_emit_quote(names.join(", "))

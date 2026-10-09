@@ -27,6 +27,7 @@ use jet_lexer.[
     TOKEN_KW_IMPL,
     TOKEN_KW_PUB,
     TOKEN_KW_STRUCT,
+    TOKEN_KW_TAG,
     TOKEN_IDENT,
     TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
@@ -77,6 +78,15 @@ pub struct JetParserState {
     pub abort_position: Int{0}
     // Depth of one-statement `->` bodies; their statement may end before `else`.
     pub adjacent_if_body_depth: Int{0}
+    // Rust `block_depth`: braced statement lists entered so far. Value
+    // blocks read their lines at the enclosing depth, as in Rust.
+    pub block_depth: Int{0}
+    // Rust `callable_tail_block_depth`: the block depth of the innermost
+    // callable body (-1 = none). Its last line may be a bare value.
+    pub callable_tail_depth: Int{-1}
+    // Rust `retired_step`: the whole span of the last retired `++`/`--`
+    // step. E0160 covers it, so its recovered operand is no second error.
+    pub retired_step: Span?{None}
 }
 
 // One authored piece of a classic branch chain: an arm's condition and body,
@@ -309,6 +319,15 @@ fn parser_expect(state: &JetParserState, kind: Int, context: String) -> Token {
 
 fn parser_expect_name(state: &JetParserState, context: String) -> Token {
     if parser_current_kind(&state) == TOKEN_IDENT -> return parser_bump(&state)
+    // Rust `expect_ident`: the `tag` keyword also spells an ordinary name
+    // (a field, a variant field, a parameter).
+    if parser_current_kind(&state) == TOKEN_KW_TAG {
+        keyword :: parser_bump(&state)
+        name := parser_synthetic_token(TOKEN_IDENT, keyword.span)
+        name.payload.text = "tag"
+        name.payload.decoded = "tag"
+        return name
+    }
     token :: parser_current(&state)
     parser_add_error(
         &state,
@@ -609,6 +628,8 @@ fn parser_rewind(state: &JetParserState, position: Int, diagnostics: Int, blocks
     state.position = position
     loop state.diagnostics.len() > diagnostics -> _ := &state.diagnostics.pop()
     loop state.block_spans.len() > blocks -> _ := &state.block_spans.pop()
+    // An abort raised inside the undone parse is undone with it.
+    if state.abort_mark > diagnostics -> state.abort_mark = 0
     loop state.else_arms.len() > else_arms -> _ := &state.else_arms.pop()
 }
 

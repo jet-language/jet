@@ -36,10 +36,11 @@ struct SemaWindowCandidate {
 // The proven-set key of the callee parameter an onward pass reaches. Calls
 // name a function by its plain name, optionally module-qualified; a name
 // declared more than once in the bundle is ambiguous and is never proven.
-fn sema_window_edge_key(functions: [Func], edge: SemaWindowEdge) -> String Never! {
+fn sema_window_edge_key(functions: [Func], positions: [String:[Int]], edge: SemaWindowEdge) -> String Never! {
     name :: sema_window_plain_name(edge.callee)
-    loop func in functions {
-        if func.name == name && edge.index < func.params.len() -> return sema_window_param_key(func.name, func.params[edge.index].name)
+    rows :: positions.get(name) ?? return "#unknown"
+    loop index in rows {
+        if edge.index < functions[index].params.len() -> return sema_window_param_key(functions[index].name, functions[index].params[edge.index].name)
     }
     "#unknown"
 }
@@ -71,22 +72,22 @@ fn sema_window_collect_functions(items: [Item], functions: &[Func]) {
     }
 }
 
-fn sema_window_declared_count(functions: [Func], name: String) -> Int Never! {
-    count := 0
-    loop func in functions {
-        if func.name == name -> count += 1
-    }
-    count
-}
-
 // `items` holds every module of the bundle, so the fact covers calls into
 // other modules, inline or file, exactly like the Rust bundle-wide fact.
 pub fn sema_fixed_length_write_params(items: [Item]) -> [String] Never! {
     functions := [Func]{}
     sema_window_collect_functions(items, &functions)
+    // Name -> declaration positions in bundle order: one census answers both
+    // the ambiguity count and every onward-edge lookup.
+    positions := [String:[Int]]{}
+    loop (index, func) in functions {
+        rows := positions.get(func.name) ?? [Int]{}
+        &rows.push(index)
+        positions[func.name] = rows
+    }
     candidates := [SemaWindowCandidate]{}
     loop func in functions {
-        if sema_window_declared_count(functions, func.name) > 1 -> next
+        if (positions.get(func.name) ?? [Int]{}).len() > 1 -> next
         loop param in func.params {
             if param.convention != AccessConvention.Write -> next
             is_list := if param.ty == { .List(_) -> true else -> false }
@@ -94,31 +95,44 @@ pub fn sema_fixed_length_write_params(items: [Item]) -> [String] Never! {
             scan := SemaWindowScan{resizes: false, marks: 0, accounted: 0, onward: [SemaWindowEdge]{}}
             sema_window_scan_body(func.body, param.name, &scan)
             if scan.resizes || scan.marks != scan.accounted -> next
-            onward :: loop edge in scan.onward -> sema_window_edge_key(functions, edge)
+            onward :: loop edge in scan.onward -> sema_window_edge_key(functions, positions, edge)
             &candidates.push(SemaWindowCandidate{key: sema_window_param_key(func.name, param.name), onward: onward})
         }
     }
-    proven := [String]{}
-    loop candidate in candidates -> &proven.push(candidate.key)
-    changed := true
-    loop changed {
-        changed = false
-        next_proven := [String]{}
-        loop candidate in candidates {
-            if !sema_window_contains(proven, candidate.key) -> next
-            all_proven := true
-            loop target in candidate.onward {
-                if !sema_window_contains(proven, target) -> all_proven = false
-            }
-            if all_proven {
-                &next_proven.push(candidate.key)
-            } else {
-                changed = true
+    // Greatest fixed point by worklist: a candidate falls once an onward
+    // target is not proven, and each fall revisits only the candidates that
+    // pass onward to it, instead of rechecking every candidate per round.
+    slots := [String:Int]{}
+    loop (index, candidate) in candidates {
+        if slots.get(candidate.key) == None -> slots[candidate.key] = index
+    }
+    proven := (loop _ in candidates -> true)
+    dependents := (loop _ in candidates -> [Int]{})
+    pending := [Int]{}
+    loop (index, candidate) in candidates {
+        loop target in candidate.onward {
+            if slots.get(target) == .Val(slot) {
+                &dependents[slot].push(index)
+            } else if proven[index] {
+                proven[index] = false
+                &pending.push(index)
             }
         }
-        proven = next_proven
     }
-    proven
+    loop pending.len() > 0 {
+        fallen :: &pending.pop() ?? break
+        loop dependent in dependents[fallen] {
+            if proven[dependent] {
+                proven[dependent] = false
+                &pending.push(dependent)
+            }
+        }
+    }
+    result := [String]{}
+    loop (index, candidate) in candidates {
+        if proven[index] -> &result.push(candidate.key)
+    }
+    result
 }
 
 pub fn sema_window_contains(keys: [String], key: String) -> Bool Never! {

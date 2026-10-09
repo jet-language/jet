@@ -166,24 +166,55 @@ fn record_canonical_value(value: RecordValue, problems: &[String]) -> RecordValu
             RecordValue.List{values: canonical}
         }
         .Map(fields) -> {
+            // Canonicalize in input order (a repeated name is reported where
+            // it recurs), then one stable merge sort by name bytes.
             canonical := [RecordField]{}
-            order := [Int]{}
+            names := [[U8]]{}
+            seen := [String:Bool]{}
             loop field in fields {
                 &canonical.push(RecordField{name: field.name, value: record_canonical_value(field.value, &problems)})
-                &order.push(canonical.len() - 1)
-                position := order.len() - 1
-                loop position > 0 && record_bytes_before(field.name.bytes(), canonical[order[position - 1]].name.bytes()) {
-                    order[position] = order[position - 1]
-                    order[position - 1] = canonical.len() - 1
-                    position -= 1
+                &names.push(field.name.bytes())
+                if seen.get(field.name) != None {
+                    &problems.push("record map key `{field.name}` is duplicated")
+                } else {
+                    seen[field.name] = true
                 }
-                if position > 0 && canonical[order[position - 1]].name == field.name -> &problems.push("record map key `{field.name}` is duplicated")
             }
-            sorted :: loop index in order -> canonical[index]
+            sorted :: loop index in record_sorted_order(names) -> canonical[index]
             RecordValue.Map{fields: sorted}
         }
         else -> value
     }
+}
+
+// Row order of `names` sorted by bytes; equal names keep their input order.
+fn record_sorted_order(names: [[U8]]) -> [Int] Never! {
+    order := [Int]{}
+    loop index in 0..<names.len() -> &order.push(index)
+    width := 1
+    loop width < order.len() {
+        merged := [Int]{}
+        start := 0
+        loop start < order.len() {
+            middle :: if start + width < order.len() -> start + width else -> order.len()
+            end :: if start + 2 * width < order.len() -> start + 2 * width else -> order.len()
+            left := start
+            right := middle
+            loop left < middle || right < end {
+                if right >= end || (left < middle && !record_bytes_before(names[order[right]], names[order[left]])) {
+                    &merged.push(order[left])
+                    left += 1
+                } else {
+                    &merged.push(order[right])
+                    right += 1
+                }
+            }
+            start = end
+        }
+        order = merged
+        width = width * 2
+    }
+    order
 }
 
 struct RecordStringTable {

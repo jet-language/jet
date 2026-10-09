@@ -958,7 +958,7 @@ fn sema_genmod_project_types(rewrite: &SemaInlineRewrite, alias: String, canonic
     generated_names :: nominals.get(canonical) ?? [String]{}
     loop generated in generated_names {
         if !generated.starts_with(prefix) -> next
-        suffix :: String.from_bytes(generated.bytes()[prefix.bytes().len()..generated.bytes().len()]) ?? next
+        suffix :: String.from_bytes(generated.bytes()[prefix.bytes().len()..<generated.bytes().len()]) ?? next
         rewrite.types["{alias}.{suffix}"] = Type.Named{name: generated}
         rewrite.types[sema_inline_type_name(alias, suffix)] = Type.Named{name: generated}
     }
@@ -1043,7 +1043,7 @@ fn sema_genmod_value_name(alias: String, name: String) -> String {
     loop end > 0 && Int.from_u8(bytes[end - 1]) == 95 {
         end -= 1
     }
-    trimmed :: String.from_bytes(bytes[0..end]) ?? ~alias
+    trimmed :: String.from_bytes(bytes[0..<end]) ?? ~alias
     "{trimmed}_{sema_inline_trim_leading_underscores(name)}"
 }
 

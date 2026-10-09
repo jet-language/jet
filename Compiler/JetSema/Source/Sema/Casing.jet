@@ -791,17 +791,4 @@ pub fn sema_casing_program(program: Program, diagnostics: &[Diagnostic]) {
         }
     }
     loop item in program.items -> sema_casing_item(item, &diagnostics)
-    // D-MODULE-BIND1: a file-scope `name :: value` / `name := value` declares a
-    // module global, which this parser keeps in the script body.
-    loop statement in program.script_body {
-        if statement == .Val(binding) {
-            if binding.pattern == None {
-                if {
-                    binding.mutable -> sema_casing_snake(binding.name, binding.name_span, "module variable", &diagnostics)
-                    else -> sema_casing_screaming(binding.name, binding.name_span, "constant", &diagnostics)
-                }
-                sema_casing_expr(binding.init, &diagnostics)
-            }
-        }
-    }
 }

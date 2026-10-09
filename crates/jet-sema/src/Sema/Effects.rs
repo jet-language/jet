@@ -1430,14 +1430,6 @@ fn add_seed(seeds: &mut BTreeMap<String, BTreeSet<String>>, node: &str, fact: &s
         .insert(fact.to_string());
 }
 
-fn resolve_seed_nodes(graph: &BTreeMap<String, BTreeSet<String>>, name: &str) -> Vec<String> {
-    let suffix = format!("::{name}");
-    graph
-        .keys()
-        .filter(move |candidate| candidate.as_str() == name || candidate.ends_with(&suffix))
-        .cloned()
-        .collect()
-}
 
 /// Project effects, panic, taint, secret, and the `calls-exec` proof row from
 /// one edge set. New reachability facts belong as seed rows here; they do not
@@ -1476,13 +1468,33 @@ pub fn solve_reachability(
     // reachability, but Panic is not recorded as an ordinary direct effect.
     add_seed(&mut effects, "__jet_panic__", Effect::Panic.name());
 
+    // Resolve exact keys and every qualified suffix once, rather than scanning
+    // the whole graph for each seed. Iterating graph keys retains the previous
+    // sorted match order; the index borrows keys until the projection finishes.
+    let mut seed_nodes: HashMap<&str, Vec<&str>> = HashMap::new();
+    if !taint_seeds.is_empty() {
+        for candidate in graph.keys() {
+            seed_nodes
+                .entry(candidate.as_str())
+                .or_default()
+                .push(candidate.as_str());
+            for (offset, _) in candidate.char_indices() {
+                if candidate[offset..].starts_with("::") {
+                    seed_nodes
+                        .entry(&candidate[offset + 2..])
+                        .or_default()
+                        .push(candidate.as_str());
+                }
+            }
+        }
+    }
     let mut taint = BTreeMap::new();
     for (name, facts) in taint_seeds {
-        for node in resolve_seed_nodes(&graph, name) {
+        for node in seed_nodes.get(name.as_str()).into_iter().flatten() {
             taint
-                .entry(node)
+                .entry((*node).to_string())
                 .or_insert_with(BTreeSet::new)
-                .extend(facts.clone());
+                .extend(facts.iter().cloned());
         }
     }
 
@@ -1687,6 +1699,46 @@ mod reachability_tests {
         assert!(result.nodes_with("panic", "panic").contains("root"));
         assert!(result.nodes_with("taint", "Credential").contains("root"));
         assert!(result.nodes_with("calls-exec", "Exec").contains("root"));
+    }
+
+    #[test]
+    fn qualified_taint_seed_matches_preserve_exact_and_suffix_identity() {
+        let summaries = [
+            "leaf",
+            "Type::leaf",
+            "a::Type::leaf",
+            "b::leaf",
+            "λ::leaf",
+            "unrelated",
+        ]
+        .into_iter()
+        .map(|key| (key.to_string(), EffectSummary::default()))
+        .collect();
+        let taint = HashMap::from([
+            ("leaf".to_string(), BTreeSet::from(["Credential".to_string()])),
+            ("Type::leaf".to_string(), BTreeSet::from(["Token".to_string()])),
+            ("λ::leaf".to_string(), BTreeSet::from(["UnicodeSecret".to_string()])),
+        ]);
+        let result = solve_reachability(&summaries, &taint);
+
+        assert_eq!(
+            result.nodes_with("taint", "Credential"),
+            BTreeSet::from([
+                "leaf".to_string(),
+                "Type::leaf".to_string(),
+                "a::Type::leaf".to_string(),
+                "b::leaf".to_string(),
+                "λ::leaf".to_string(),
+            ])
+        );
+        assert_eq!(
+            result.nodes_with("taint", "Token"),
+            BTreeSet::from(["Type::leaf".to_string(), "a::Type::leaf".to_string()])
+        );
+        assert_eq!(
+            result.nodes_with("taint", "UnicodeSecret"),
+            BTreeSet::from(["λ::leaf".to_string()])
+        );
     }
 }
 

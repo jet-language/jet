@@ -118,9 +118,9 @@ fn sema_expression_absent(span: Span, expected: Type?, diagnostics: &[Diagnostic
 // of a match or decision table) whose every arm is a bare `None`; the parser's
 // `NoElse` tail of an else-less table adds no arm.
 fn sema_expression_bare_absent_arm(value: Expr, nested: Bool) -> Bool Never! {
+    if sema_expression_absent_none(value) -> return true
     if value == {
         .Paren(inner, _) -> sema_expression_bare_absent_arm(inner, nested)
-        .Absent(_) -> true
         .If(_, _, then_value, _, else_value, _) -> nested && sema_expression_bare_absent_arm(then_value, true) && (else_value == .NoElse(_) || sema_expression_bare_absent_arm(else_value, true))
         else -> false
     }
@@ -142,6 +142,30 @@ fn sema_expression_absent_sibling(sibling: TExpr?) -> Type? Never! {
         .Option(_) -> Val(checked.ty)
         else -> None
     }
+}
+
+// Result constructors stay calls in the parsed AST so a user declaration
+// can shadow them. Classify only the unshadowed contextual spellings, as
+// Rust `normalize_contextual_expr` does before checking their payloads.
+// The flag selects success (`Ok`) or failure (`Err`) without building a
+// throwaway AST node when a return-carrier predicate asks the same question.
+fn sema_expression_contextual_result_call(call: Call, expected: Type?, scopes: SemaScopeTable) -> Bool? Never! {
+    if call.name != "Ok" && call.name != "Err" -> return None
+    if sema_scope_resolve_index(scopes, call.name) == .Val(index) {
+        if !sema_scope_binding_is_compiler_builtin(scopes.bindings[index], "Err") -> return None
+    }
+    result_expected :: sema_expr_unwrap_tag(expected ?? Type.Named{name: "Never"})
+    if call.name == "Ok" && call.args.len() == 0 {
+        if result_expected == .Result(ok, _) && ok == (Type.Named{name: "Unit"}) {
+            return Val(true)
+        }
+        return None
+    }
+    if call.args.len() != 1 || call.args[0].label != None -> return None
+    // Outside a Result slot, `Err(...)` builds the Prelude error value
+    // through the existing default-error constructor rather than a carrier.
+    if call.name == "Err" && !(result_expected == .Result(_, _)) -> return None
+    Val(call.name == "Ok")
 }
 
 fn sema_expression_default_err_struct(value: Expr) -> Bool Never! {
@@ -900,6 +924,24 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
             fallback_reaches_merge = checked.ty != Type.Named{name: "Never"}
         }
         .Block(body, tail, block_span) -> {
+            // Rust `parse_or_fallback_block` (binary_unary.rs:229-259): a
+            // block with no value line must end in a real exit, which then
+            // needs no value of the success payload's type.
+            if tail == None {
+                last_exits := false
+                last_span := Span{start: block_span.end - 1, end: block_span.end}
+                seen := 0
+                loop statement in body {
+                    seen += 1
+                    if seen < body.len() -> next
+                    last_exits = sema_stmt_refutable_statement_exits(statement)
+                    last_span = sema_compiler_index_stmt_span(statement)
+                }
+                if !last_exits {
+                    if body.len() == 0 -> &diagnostics.push(sema_error("E0003", last_span, "a `??` fallback block needs a final value or exit", "a fallback block runs its statements and then produces one value or leaves control", "add a final value or exit, such as `{{ log(err); default_value }}` or `{{ log(err); return }}`")) else -> &diagnostics.push(sema_error("E0114", last_span, "this fallback ends with a statement instead of a value", "a value-expected fallback block must end with one unadorned expression; statements yield unit", "put one unadorned expression last, or use `return ...` for an early exit"))
+                    return None
+                }
+            }
             // The block's own frame is rolled back after it, as its copy was.
             block_mark :: sema_scope_mark(&scopes)
             sema_scope_enter(&scopes, &fallback_state, "or.fallback@{block_span.start}")
@@ -909,21 +951,14 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
                 return None
             }
             tail_value := TExpr?{None}
-            if {
-                tail != None -> {
-                    fallback_expected :: if payload == (Type.Named{name: "Never"}) -> None else -> Val(payload)
-                    tail_value = sema_check_expression(tail, fallback_expected, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
-                    if tail_value == None {
-                        sema_scope_leave(&scopes, &fallback_state)
-                        return None
-                    }
-                    if payload == (Type.Named{name: "Never"}) -> fallback_payload = (tail_value ?? sema_tir_expr(Type.Named{name: "Never"}, TExprKind.Never{reason: "missing fallback value"}, block_span)).ty
-                }
-                payload != (Type.Named{name: "Unit"}) && payload != (Type.Named{name: "Never"}) -> {
+            if tail != None {
+                fallback_expected :: if payload == (Type.Named{name: "Never"}) -> None else -> Val(payload)
+                tail_value = sema_check_expression(tail, fallback_expected, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
+                if tail_value == None {
                     sema_scope_leave(&scopes, &fallback_state)
-                    &diagnostics.push(sema_error("E0405", block_span, "the fallback block needs a value", "this `or` expression must produce the success payload on its fallback path", "add a final value expression or use `or return`"))
                     return None
                 }
+                if payload == (Type.Named{name: "Never"}) -> fallback_payload = (tail_value ?? sema_tir_expr(Type.Named{name: "Never"}, TExprKind.Never{reason: "missing fallback value"}, block_span)).ty
             }
             sema_single_use_leave_scope(&scopes, &fallback_state, &diagnostics)
             sema_scope_rollback(&scopes, block_mark)
@@ -940,7 +975,7 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
             }
             // Both block shapes reach the merge unless the body or its tail
             // value diverges.
-            fallback_reaches_merge = !sema_stmt_block_has_no_fallthrough(body)
+            fallback_reaches_merge = !sema_stmt_block_has_no_fallthrough(body) && !sema_stmt_refutable_block_exits(body)
             if tail_value != None && (tail_value ?? sema_tir_expr(Type.Named{name: "Never"}, TExprKind.Never{reason: "missing fallback value"}, block_span)).ty == (Type.Named{name: "Never"}) -> fallback_reaches_merge = false
         }
         .Return(return_value, return_span) -> {

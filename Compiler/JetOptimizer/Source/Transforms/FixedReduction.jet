@@ -86,8 +86,8 @@ fn mir_pass_fixed_reduction_normalize(program: &MIRProgram) -> MIRPassFixedReduc
     MIRPassFixedReductionCounts{normalized: total, blocks_removed: blocks_removed, dead_values_removed: dead_values_removed}
 }
 
-fn mir_pass_fixed_loop_shape(function: MIRFunction, header: MIRBlockID) -> MIRPassLoopShape? {
-    shapes :: mir_pass_loop_shapes(function)
+fn mir_pass_fixed_loop_shape(function: MIRFunction, analysis: MIRPassLoopAnalysis, header: MIRBlockID) -> MIRPassLoopShape? {
+    shapes :: mir_pass_loop_shapes(function, analysis)
     loop shape in shapes { if shape.header == header -> return Val(shape) }
     None
 }
@@ -317,16 +317,18 @@ fn mir_pass_fixed_reduction_lane_place_matches(first: MIRPlace, candidate: MIRPl
 }
 
 fn mir_pass_fixed_reduction_attempt(program: &MIRProgram, function_index: Int, function: MIRFunction, vector: MIRVectorFact) -> MIRVectorFact? {
-    shape :: mir_pass_fixed_loop_shape(function, vector.loop_header) ?? return None
-    reduction :: mir_pass_loop_reduction(function, shape) ?? return None
+    analysis :: mir_pass_loop_analysis(function)
+    shape :: mir_pass_fixed_loop_shape(function, analysis, vector.loop_header) ?? return None
+    reduction :: mir_pass_loop_reduction(function, analysis, shape) ?? return None
     fixed :: vector.fixed_reduction ?? return None
-    mir_pass_fixed_reduction_rewrite(&program, function_index, function, vector, shape, reduction, fixed)
+    mir_pass_fixed_reduction_rewrite(&program, function_index, function, analysis, vector, shape, reduction, fixed)
 }
 
 fn mir_pass_fixed_reduction_rewrite(
     program: &MIRProgram,
     function_index: Int,
     function: MIRFunction,
+    analysis: MIRPassLoopAnalysis,
     vector: MIRVectorFact,
     shape: MIRPassLoopShape,
     reduction: MIRPassLoopReduction,
@@ -334,12 +336,12 @@ fn mir_pass_fixed_reduction_rewrite(
 ) -> MIRVectorFact? {
     if shape.form != .Counted || !shape.canonical || shape.early_exit || shape.body_blocks.len() < 1 || shape.body_blocks.len() > 2 -> return None
     induction :: shape.induction ?? return None
-    induction_model :: mir_pass_loop_induction_model(function, shape)
+    induction_model :: mir_pass_loop_induction_model(function, analysis, shape)
     if !induction_model.supported -> return None
     cursor :: shape.cursor ?? return None
     exit :: shape.exit ?? return None
     element_type :: vector.element_type ?? return None
-    range :: mir_pass_fixed_reduction_range(function, shape, fixed, program.prelude_calls) ?? return None
+    range :: mir_pass_fixed_reduction_range(function, analysis, shape, fixed, program.prelude_calls) ?? return None
     if !mir_type_is_float(element_type) || fixed.accumulator != reduction.accumulator || fixed.addend != reduction.addend || fixed.order.seed_lane != 0 || fixed.order.tree != .AdjacentPairsThenRoot -> return None
 
     header_index :: mir_pass_fixed_block_index(function.blocks, shape.header)
@@ -350,7 +352,7 @@ fn mir_pass_fixed_reduction_rewrite(
     if header.terminator == {
         .Branch(condition, then_target, else_target) -> {
             if !((then_target == body_id && else_target == exit) || (else_target == body_id && then_target == exit)) -> return None
-            condition_instruction :: mir_pass_instruction_for_value(function, condition) ?? return None
+            condition_instruction :: analysis.definitions.get(condition.value) ?? return None
             condition_in_header := false
             loop header_instruction in header.instructions { if header_instruction.id == condition_instruction.id -> condition_in_header = true }
             if !condition_in_header -> return None
@@ -458,7 +460,7 @@ fn mir_pass_fixed_reduction_rewrite(
     if !mir_type_is_float(input_fact.ty) || input_fact.ty != accumulator.ty || accumulator_read_fact.ty != accumulator.ty || sum_fact.ty != accumulator.ty -> return None
     if accumulator_read_fact.ownership.mode != .Copy || input_fact.ownership.mode != .Copy || sum_fact.ownership.mode != .Copy -> return None
     seed_fact :: mir_pass_find_value(function.values, fixed.seed) ?? return None
-    if seed_fact.ownership.mode != .Copy || accumulator_read_value != reduction.seed || !mir_pass_fixed_reduction_body_supported(function, program.prelude_calls, induction_model, shape, reduction, addition_value_id, addition_instruction) -> return None
+    if seed_fact.ownership.mode != .Copy || accumulator_read_value != reduction.seed || !mir_pass_fixed_reduction_body_supported(function, analysis, program.prelude_calls, induction_model, shape, reduction, addition_value_id, addition_instruction) -> return None
 
     used_values := [Int]{}
     used_operations := [Int]{}
@@ -590,6 +592,7 @@ fn mir_pass_fixed_reduction_without_init(instructions: [MIRInstruction], cursor:
 
 fn mir_pass_fixed_reduction_body_supported(
     function: MIRFunction,
+    analysis: MIRPassLoopAnalysis,
     prelude_calls: [MIRPreludeCall],
     induction_model: MIRPassLoopInduction,
     shape: MIRPassLoopShape,
@@ -630,7 +633,7 @@ fn mir_pass_fixed_reduction_body_supported(
                             accumulator_read_count += 1
                         }
                         else -> {
-                            addend :: mir_pass_instruction_for_value(function, reduction.addend) ?? return false
+                            addend :: analysis.definitions.get(reduction.addend.value) ?? return false
                             if instruction.result != Val(reduction.addend) || addend.operation != (MIROperation.ReadPlace{place: place}) -> return false
                             addend_read_count += 1
                         }
@@ -674,28 +677,27 @@ fn mir_pass_fixed_reduction_input_place(place: MIRPlace, induction_values: [MIRV
     saw_index
 }
 
-fn mir_pass_fixed_reduction_range(function: MIRFunction, shape: MIRPassLoopShape, fixed: MIRFixedReductionFact, prelude_calls: [MIRPreludeCall]) -> MIRPassFixedReductionRange? {
+fn mir_pass_fixed_reduction_range(function: MIRFunction, analysis: MIRPassLoopAnalysis, shape: MIRPassLoopShape, fixed: MIRFixedReductionFact, prelude_calls: [MIRPreludeCall]) -> MIRPassFixedReductionRange? {
     if fixed.order.lanes < 2 || fixed.order.lanes > 16 || shape.trip_count != Val(fixed.order.lanes) -> return None
     cursor :: shape.cursor ?? return None
     induction :: shape.induction ?? return None
-    init :: mir_pass_loop_init(function, cursor, .Counted) ?? return None
+    init :: mir_pass_loop_init(analysis, cursor, .Counted) ?? return None
     if init.operation == {
         .LoopRangeInit(call, start, end, step, exclusive) -> {
             if !mir_pass_prelude_is_pure(prelude_calls, call) -> return None
-            constants :: mir_pass_collect_scalar_constants(function)
-            start_fact :: mir_pass_constant_for(constants, start) ?? return None
+            start_fact :: mir_pass_constant_for(analysis.constants, start) ?? return None
             first :: if start_fact == {
                 .Int(value, _, _) -> value
                 else -> { return None }
             }
-            end_fact :: mir_pass_constant_for(constants, end) ?? return None
+            end_fact :: mir_pass_constant_for(analysis.constants, end) ?? return None
             last :: if end_fact == {
                 .Int(value, _, _) -> value
                 else -> { return None }
             }
             step_value :: if step == {
                 .Val(step_id) -> {
-                    step_fact :: mir_pass_constant_for(constants, step_id) ?? return None
+                    step_fact :: mir_pass_constant_for(analysis.constants, step_id) ?? return None
                     if step_fact == {
                         .Int(value, _, _) -> value
                         else -> { return None }

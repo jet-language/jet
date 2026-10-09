@@ -909,7 +909,12 @@ pub fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: 
         if request_names.len() > 1 -> handler_issue = "HTTP route `{pattern}` has more than one HTTPRequest input"
         seen := [String]{}
         loop parameter in handler_shape.params {
-            loop existing in seen { if existing == parameter.name { handler_issue = "HTTP route `{pattern}` has ambiguous handler input `{parameter.name}`"; break } }
+            loop existing in seen {
+                if existing == parameter.name {
+                    handler_issue = "HTTP route `{pattern}` has ambiguous handler input `{parameter.name}`"
+                    break
+                }
+            }
             &seen.push(parameter.name)
         }
         loop field in path_fields {

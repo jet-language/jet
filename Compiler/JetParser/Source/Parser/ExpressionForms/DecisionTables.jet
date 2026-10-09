@@ -19,8 +19,6 @@ use jet_foundation.[
 ]
 use jet_lexer.[
     TOKEN_AND_AND,
-    TOKEN_COLON_EQ,
-    TOKEN_COMMA,
     TOKEN_EOF,
     TOKEN_EQ_EQ,
     TOKEN_GE,
@@ -28,8 +26,6 @@ use jet_lexer.[
     TOKEN_IDENT,
     TOKEN_KW_ELSE,
     TOKEN_KW_IF,
-    TOKEN_KW_IN,
-    TOKEN_KW_IT,
     TOKEN_KW_LOOP,
     TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
@@ -72,7 +68,8 @@ fn parser_expression_form_if_ahead(state: &JetParserState) -> Bool Never! {
     braces := 0
     loop {
         kind :: parser_kind_at(&state, offset)
-        if kind == TOKEN_EOF || kind == TOKEN_SEMI || kind == TOKEN_RBRACE -> return false
+        if kind == TOKEN_EOF -> return false
+        if (kind == TOKEN_SEMI || kind == TOKEN_RBRACE) && parens == 0 && brackets == 0 && braces == 0 -> return false
         if kind == TOKEN_LPAREN -> parens += 1
         if kind == TOKEN_RPAREN && parens > 0 -> parens -= 1
         if kind == TOKEN_LBRACKET -> brackets += 1
@@ -92,40 +89,10 @@ fn parser_expression_form_if_ahead(state: &JetParserState) -> Bool Never! {
     }
 }
 
-fn parser_expression_form_loop_ahead(state: &JetParserState) -> Bool Never! {
-    if parser_current_kind(&state) != TOKEN_KW_LOOP -> return false
-    first_kind :: parser_kind_at(&state, 1)
-    if first_kind == TOKEN_LBRACE -> return false
-    if first_kind != TOKEN_LPAREN && first_kind != TOKEN_IDENT && first_kind != TOKEN_KW_IT -> return false
-    if first_kind != TOKEN_LPAREN {
-        second_kind :: parser_kind_at(&state, 2)
-        if second_kind != TOKEN_COLON_EQ && second_kind != TOKEN_COMMA && second_kind != TOKEN_SEMI && second_kind != TOKEN_KW_IN && second_kind != TOKEN_KW_IF && second_kind != TOKEN_UNIFIED_ARROW -> return false
-    }
-    offset := 1
-    parens := 0
-    brackets := 0
-    braces := 0
-    loop {
-        kind :: parser_kind_at(&state, offset)
-        if kind == TOKEN_EOF || kind == TOKEN_RBRACE -> return false
-        if kind == TOKEN_RPAREN && parens > 0 -> parens -= 1
-        if kind == TOKEN_LPAREN -> parens += 1
-        if kind == TOKEN_LBRACKET -> brackets += 1
-        if kind == TOKEN_LBRACE {
-            if parens == 0 && brackets == 0 && braces == 0 -> return true
-            braces += 1
-        }
-        if kind == TOKEN_RBRACE && braces > 0 -> braces -= 1
-        if parens == 0 && brackets == 0 && braces == 0 && kind == TOKEN_UNIFIED_ARROW -> return true
-        offset += 1
-    }
-}
-
 // `allow_bare_lambda` is false inside a control header, where a trailing
 // `->` introduces the body (`if ready -> stmt`), so `name ->` is no lambda.
+// `if` and `loop` reach `parser_parse_expression_form` from the prefix parser.
 pub fn parser_expression_form_ahead(state: &JetParserState, allow_bare_lambda: Bool) -> Bool Never! {
-    if parser_expression_form_if_ahead(&state) -> return true
-    if parser_expression_form_loop_ahead(&state) -> return true
     allow_bare_lambda && parser_current_kind(&state) == TOKEN_IDENT && (parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW || parser_kind_at(&state, 1) == TOKEN_LAMBDA_ARROW)
 }
 
@@ -165,11 +132,6 @@ fn parser_expression_form_same_dispatch_subject(left: Expr, right: Expr) -> Bool
     }
 }
 
-fn parser_expression_form_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
-    if parser_pattern_rhs_ahead(&state) -> return true
-    parser_current_kind(&state) == TOKEN_IDENT && (parser_kind_at(&state, 1) == TOKEN_LPAREN || parser_kind_at(&state, 1) == TOKEN_LBRACE)
-}
-
 fn parser_expression_form_pattern_condition(state: &JetParserState, subject: Expr, pattern: ParsedPattern, op: BinOp) -> Expr {
     if op != BinOp.Eq {
         parser_expression_form_error(&state, "E0366", pattern.span, "pattern arms need `==` — this table uses `{op}`", "structural patterns compare by shape under `if subject == {{ … }}` only", "write `if subject == {{ … }}` for pattern arms, or use a Bool head")
@@ -182,7 +144,7 @@ fn parser_expression_form_dispatch_atom(state: &JetParserState, depth: Int) -> P
     lhs :: parser_parse_expression_dispatch_atom(&state, depth + 1)
     comparator_op :: parser_expression_form_dispatch_op(parser_current_kind(&state)) ?? return lhs
     parser_bump(&state)
-    if comparator_op == BinOp.Eq && parser_expression_form_pattern_rhs_ahead(&state) {
+    if comparator_op == BinOp.Eq && parser_pattern_rhs_ahead(&state) {
         pattern :: parser_parse_pattern(&state, depth + 1, true)
         span :: parser_cover(lhs.span, pattern.span)
         return ParsedExpr{expr: parser_expression_form_pattern_condition(&state, lhs.expr, pattern, comparator_op), span: span}
@@ -202,10 +164,6 @@ fn parser_expression_form_arm_atom(state: &JetParserState, subject: Expr, op: Bi
         inner :: parser_expression_form_dispatch_condition(&state, subject, op, depth + 1)
         parser_expect(&state, TOKEN_RPAREN, "to close the arm head group")
         return inner
-    }
-    if parser_expression_form_pattern_rhs_ahead(&state) {
-        pattern :: parser_parse_pattern(&state, depth + 1, true)
-        return parser_expression_form_pattern_condition(&state, subject, pattern, op)
     }
     raw :: parser_expression_form_dispatch_atom(&state, depth + 1)
     is_predicate :: if raw.expr == {
@@ -278,6 +236,8 @@ fn parser_expression_form_value_block(state: &JetParserState, depth: Int, result
     open :: parser_expect(&state, TOKEN_LBRACE, "to open a value branch")
     statements := [Stmt]{}
     loop {
+        // As in `parser_parse_body_block`: stop under an enclosing abort.
+        if parser_aborting(&state) -> return ParserExpressionFormValueBranch{body: statements, value: Expr.NoElse{span: parser_current(&state).span}, span: parser_cover(open.span, parser_current(&state).span)}
         parser_skip_semicolons(&state)
         kind :: parser_current_kind(&state)
         if kind == TOKEN_RBRACE {
@@ -294,40 +254,45 @@ fn parser_expression_form_value_block(state: &JetParserState, depth: Int, result
             if result_handler -> parser_expression_form_result_error(&state, token.span, "expected `}}` to close this Result handler branch", "every `{{` needs a matching `}}`", "add a closing `}}`") else -> parser_expression_form_error(&state, "E0003", token.span, "expected `}}` to close this value branch", "every `{{` needs a matching `}}`", "add `}}` after the branch value")
             return ParserExpressionFormValueBranch{body: statements, value: Expr.NoElse{span: token.span}, span: parser_cover(open.span, token.span)}
         }
-        saved_position := state.position
-        saved_diagnostics :: state.diagnostics.len()
-        parsed :: parser_parse_expression(&state, 1, depth + 1)
-        if parser_current_kind(&state) == TOKEN_SEMI {
-            semi :: parser_current(&state)
-            if parser_kind_at(&state, 1) == TOKEN_RBRACE {
-                // S6-R: the lexer ends a tail value's line with a zero-width
-                // terminator before `}`; that value is still the branch value.
-                // An authored `;` makes it a unit statement unless it diverges.
-                if semi.span.start != semi.span.end && !parser_expression_definitely_diverges(parsed.expr) {
-                    if result_handler -> parser_expression_form_result_error(&state, parsed.span, "this Result handler branch ends with a semicolon-terminated expression", "a value-expected block must end with one unadorned expression; a semicolon-terminated expression yields unit", "remove the semicolon, or use `return ...` for an early exit") else -> parser_expression_form_error(&state, "E0114", parsed.span, "this value branch ends with a semicolon-terminated expression", "a value branch produces its result only from an unadorned final expression", "remove the semicolon or use an early exit")
+        // As in Rust's value blocks: a line that reaches the closing `}` is
+        // tried as the branch value and kept when it parses cleanly; any
+        // other line, or a failed try, is an ordinary statement.
+        before :: state.position
+        if parser_value_tail_ahead(state) {
+            saved_position :: state.position
+            saved_diagnostics :: state.diagnostics.len()
+            saved_blocks :: state.block_spans.len()
+            saved_else_arms :: state.else_arms.len()
+            parsed :: parser_parse_expression(&state, 1, depth + 1)
+            if !parser_error_since(state, saved_diagnostics) {
+                if parser_current_kind(&state) == TOKEN_SEMI && parser_kind_at(&state, 1) == TOKEN_RBRACE {
+                    semi :: parser_current(&state)
+                    // S6-R: the lexer ends a tail value's line with a zero-width
+                    // terminator before `}`; that value is still the branch value.
+                    // An authored `;` makes it a unit statement unless it diverges.
+                    if semi.span.start != semi.span.end && !parser_expression_definitely_diverges(parsed.expr) {
+                        if result_handler -> parser_expression_form_result_error(&state, parsed.span, "this Result handler branch ends with a semicolon-terminated expression", "a value-expected block must end with one unadorned expression; a semicolon-terminated expression yields unit", "remove the semicolon, or use `return ...` for an early exit") else -> parser_expression_form_error(&state, "E0114", parsed.span, "this value branch ends with a semicolon-terminated expression", "a value branch produces its result only from an unadorned final expression", "remove the semicolon or use an early exit")
+                        parser_bump(&state)
+                        &statements.push(Stmt.Expr{expr: parsed.expr})
+                        next
+                    }
                     parser_bump(&state)
-                    &statements.push(Stmt.Expr{expr: parsed.expr})
-                    next
                 }
-                parser_bump(&state)
-            } else {
-                parser_bump(&state)
-                &statements.push(Stmt.Expr{expr: parsed.expr})
-                next
+                if parser_current_kind(&state) == TOKEN_RBRACE {
+                    close :: parser_bump(&state)
+                    &state.block_spans.push(Span{start: open.span.end, end: close.span.start})
+                    if parser_expression_definitely_diverges(parsed.expr) {
+                        &statements.push(Stmt.Expr{expr: parsed.expr})
+                        return ParserExpressionFormValueBranch{body: statements, value: Expr.NoElse{span: Span{start: close.span.start, end: close.span.start}}, span: parser_cover(open.span, close.span)}
+                    }
+                    return ParserExpressionFormValueBranch{body: statements, value: parsed.expr, span: parser_cover(open.span, close.span)}
+                }
             }
+            parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
         }
-        if parser_current_kind(&state) == TOKEN_RBRACE {
-            close :: parser_bump(&state)
-            &state.block_spans.push(Span{start: open.span.end, end: close.span.start})
-            if parser_expression_definitely_diverges(parsed.expr) {
-                &statements.push(Stmt.Expr{expr: parsed.expr})
-                return ParserExpressionFormValueBranch{body: statements, value: Expr.NoElse{span: Span{start: close.span.start, end: close.span.start}}, span: parser_cover(open.span, close.span)}
-            }
-            return ParserExpressionFormValueBranch{body: statements, value: parsed.expr, span: parser_cover(open.span, close.span)}
-        }
-        state.position = saved_position
-        loop state.diagnostics.len() > saved_diagnostics -> _ := &state.diagnostics.pop()
         &statements.push(parser_parse_statement(&state))
+        parser_recover_aborted_statement(&state, before)
+        if state.position == before -> parser_bump(&state)
     }
 }
 
@@ -480,6 +445,10 @@ fn parser_expression_form_parse_if(state: &JetParserState, depth: Int, lint_styl
     condition :: parser_parse_expression_no_struct_lit(&state, depth + 1)
     cond_span :: Span{start: cond_start, end: parser_prev_token_end(state)}
     parser_expect_unified_arrow(&state, "after the condition of a value-producing `if`")
+    // As Rust's `?`: once the arrow is missing (a classic `if c {` statement
+    // read as a value), the value form ends here. A speculative parse that
+    // is about to be rewound then never reads the statement's body.
+    if parser_aborting(&state) -> return ParsedExpr{expr: condition.expr, span: parser_cover(start.span, condition.span)}
     then_start :: parser_current(&state).span.start
     then_branch :: parser_expression_form_selected_value(&state, depth + 1)
     &parts.push(ParserBranchPart{is_else: false, cond: cond_span, body: Span{start: then_start, end: parser_prev_token_end(state)}})

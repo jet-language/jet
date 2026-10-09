@@ -422,7 +422,13 @@ fn sema_taskgroup_callable_effects(signature: Type) -> TEffectFacts Never! {
 fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span) -> TLambda? {
     params := [Type]{}
     ret := Type?{None}
-    if signature == {.Fn(source_params, source_ret, _, _, _, _) -> {params = source_params; ret = source_ret} else -> return None}
+    if signature == {
+        .Fn(source_params, source_ret, _, _, _, _) -> {
+            params = source_params
+            ret = source_ret
+        }
+        else -> return None
+    }
     result_ty := ret ?? Type.Named{name: "Unit"}
     captures := [TCapture]{}
     capture_facts := TCaptureFacts{escapes: true, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}}

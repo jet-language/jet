@@ -40,8 +40,9 @@ pub struct SemaInferenceBoundEvidence {
     pub source: Span
 }
 
+// The registration graph is not part of the context: solver entry points take
+// it as a read parameter, so building a context never copies the graph.
 pub struct SemaInferenceContext {
-    pub graph: SemaRegistrationGraph?
     pub caller_module_identity: String
     pub caller_package_identity: String
     pub type_params: [SemaInferenceTypeParam]
@@ -75,8 +76,8 @@ pub fn sema_inference_bindings_for_type_args(parameters: [SemaInferenceTypeParam
     result
 }
 
-pub fn sema_inference_context(graph: SemaRegistrationGraph?, caller_module_identity: String, caller_package_identity: String, type_params: [SemaInferenceTypeParam], lexical_generic_params: [TGenericParam], expected: Type?) -> SemaInferenceContext Never! {
-    SemaInferenceContext{graph: ~graph, caller_module_identity: caller_module_identity, caller_package_identity: caller_package_identity, type_params: type_params, lexical_generic_params: lexical_generic_params, expected: expected}
+pub fn sema_inference_context(caller_module_identity: String, caller_package_identity: String, type_params: [SemaInferenceTypeParam], lexical_generic_params: [TGenericParam], expected: Type?) -> SemaInferenceContext Never! {
+    SemaInferenceContext{caller_module_identity: caller_module_identity, caller_package_identity: caller_package_identity, type_params: type_params, lexical_generic_params: lexical_generic_params, expected: expected}
 }
 
 pub fn sema_inference_binding_at(bindings: [SemaInferenceBinding], name: String) -> SemaInferenceBinding? {

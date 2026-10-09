@@ -88,16 +88,12 @@ fn sema_type_metadata_has_trait_block(blocks: [TraitImplBlock], trait_name: Stri
     false
 }
 
-fn sema_type_metadata_has_explicit_impl(module_items: [Item], type_name: String, trait_name: String) -> Bool Never! {
-    loop item in module_items {
-        if item == {
-            .Impl(definition) -> {
-                if definition.type_name == type_name && definition.trait_name == (Val(trait_name)) -> return true
-            }
-            else -> {}
-        }
-    }
-    false
+pub fn sema_type_metadata_impl_key(type_name: String, trait_name: String) -> String Never! {
+    "{type_name.len()}:{type_name}:{trait_name}"
+}
+
+fn sema_type_metadata_has_explicit_impl(declared_trait_impls: [String:Bool], type_name: String, trait_name: String) -> Bool Never! {
+    declared_trait_impls.get(sema_type_metadata_impl_key(type_name, trait_name)) != None
 }
 
 fn sema_type_metadata_select_trait(markers: [Marker], package_default: Bool, structurally_eligible: Bool, explicit_block: Bool, explicit_impl: Bool, trait_name: String) -> Bool Never! {
@@ -105,25 +101,26 @@ fn sema_type_metadata_select_trait(markers: [Marker], package_default: Bool, str
 }
 
 // `definition` supplies the complete type-marker sequence, package default,
-// fields/variants, and inline trait blocks. `module_items` supplies only that
-// same module's top-level impl declarations, so unrelated modules cannot
-// suppress this type's selection.
-pub fn sema_type_metadata_auto_derives(definition: Item, module_items: [Item]) -> SemaTypeMetadataAutoDerives Never! {
+// fields/variants, and inline trait blocks. `declared_trait_impls` holds only
+// that same module's top-level trait impl declarations (see
+// `sema_registration_push_declaration`), so unrelated modules cannot suppress
+// this type's selection.
+pub fn sema_type_metadata_auto_derives(definition: Item, declared_trait_impls: [String:Bool]) -> SemaTypeMetadataAutoDerives Never! {
     if definition == {
         .Struct(value) -> {
             eligible :: sema_type_metadata_struct_auto_ok(value)
             SemaTypeMetadataAutoDerives{
-                printable: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Printable"), sema_type_metadata_has_explicit_impl(module_items, value.name, "Printable"), "Printable"),
-                debug: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Debug"), sema_type_metadata_has_explicit_impl(module_items, value.name, "Debug"), "Debug"),
-                equatable: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Equatable"), sema_type_metadata_has_explicit_impl(module_items, value.name, "Equatable"), "Equatable"),
+                printable: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Printable"), sema_type_metadata_has_explicit_impl(declared_trait_impls, value.name, "Printable"), "Printable"),
+                debug: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Debug"), sema_type_metadata_has_explicit_impl(declared_trait_impls, value.name, "Debug"), "Debug"),
+                equatable: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Equatable"), sema_type_metadata_has_explicit_impl(declared_trait_impls, value.name, "Equatable"), "Equatable"),
             }
         }
         .Enum(value) -> {
             eligible :: sema_type_metadata_enum_auto_ok(value)
             SemaTypeMetadataAutoDerives{
-                printable: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Printable"), sema_type_metadata_has_explicit_impl(module_items, value.name, "Printable"), "Printable"),
-                debug: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Debug"), sema_type_metadata_has_explicit_impl(module_items, value.name, "Debug"), "Debug"),
-                equatable: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Equatable"), sema_type_metadata_has_explicit_impl(module_items, value.name, "Equatable"), "Equatable"),
+                printable: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Printable"), sema_type_metadata_has_explicit_impl(declared_trait_impls, value.name, "Printable"), "Printable"),
+                debug: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Debug"), sema_type_metadata_has_explicit_impl(declared_trait_impls, value.name, "Debug"), "Debug"),
+                equatable: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Equatable"), sema_type_metadata_has_explicit_impl(declared_trait_impls, value.name, "Equatable"), "Equatable"),
             }
         }
         else -> SemaTypeMetadataAutoDerives{printable: false, debug: false, equatable: false}

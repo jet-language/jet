@@ -316,7 +316,7 @@ fn sema_data_argument_is_borrowed(argument: Expr, scopes: SemaScopeTable) -> Boo
     if argument == {
         .Ident(name, _) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return false
-            return scopes.bindings[index].access == AccessConvention.Read || scopes.bindings[index].access == AccessConvention.Write
+            return sema_ownership_binding_is_borrowed_param(scopes.bindings[index])
         }
         .Field(base, _, _) | .Index(base, _, _, _) | .Paren(base, _) -> return sema_data_argument_is_borrowed(base, scopes)
         else -> false

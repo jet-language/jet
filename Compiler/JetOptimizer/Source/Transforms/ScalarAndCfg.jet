@@ -28,35 +28,39 @@ fn mir_pass_eliminate_unreachable(program: &MIRProgram) Never! {
 
 fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
     reachable :: mir_pass_reachable(function)
+    reachable_rows := [Int:Bool]{}
+    loop id in reachable -> &reachable_rows.add(id.value, true).drop("a block id may repeat")
     kept_blocks := [MIRBasicBlock]{}
     loop block in function.blocks {
-        if mir_pass_block_id_seen(reachable, block.id) -> &kept_blocks.push(block)
+        if reachable_rows.get(block.id.value) != None -> &kept_blocks.push(block)
     }
     function.blocks = kept_blocks
-    live_values := [MIRValueID]{}
+    // Live values and predecessors are keyed once per function instead of
+    // rescanned per value and per block.
+    live_values := [Int:Bool]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
-            if instruction.result == .Val(result) -> &live_values.push(result)
+            if instruction.result == .Val(result) -> &live_values.add(result.value, true).drop("a value id may repeat")
         }
     }
+    place_rows :: mir_pass_place_rows(function)
     loop place in function.places {
-        loop value in mir_pass_place_value_uses(function.places, place.id) {
-            if !mir_pass_value_id_seen(live_values, value) -> &live_values.push(value)
-        }
+        loop value in mir_pass_place_value_uses(function.places, place_rows, place.id) -> &live_values.add(value.value, true).drop("a value id may repeat")
     }
     loop scope in function.scopes {
         value :: scope.deadline ?? next
-        if !mir_pass_value_id_seen(live_values, value) -> &live_values.push(value)
+        &live_values.add(value.value, true).drop("a value id may repeat")
     }
     kept_values := [MIRValueFact]{}
     loop value in function.values {
-        if mir_pass_value_id_seen(live_values, value.id) -> &kept_values.push(value)
+        if live_values.get(value.id.value) != None -> &kept_values.push(value)
     }
     function.values = kept_values
+    // Only phi operands change below, so the predecessor map stays exact.
+    predecessors :: mir_pass_predecessor_map(function)
     block_index := 0
     loop block_index < function.blocks.len() {
-        block_id :: function.blocks[block_index].id
-        expected :: mir_pass_predecessors(function, block_id)
+        expected :: predecessors.get(function.blocks[block_index].id.value) ?? [MIRBlockID]{}
         instructions := function.blocks[block_index].instructions
         instruction_index := 0
         loop instruction_index < instructions.len() {
@@ -116,8 +120,9 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
         }
     }
     uses := [String:Int]{}
+    place_rows :: mir_pass_place_rows(function)
     loop place in function.places {
-        loop used in mir_pass_place_value_uses(function.places, place.id) -> mir_pass_count_use(&uses, used)
+        loop used in mir_pass_place_value_uses(function.places, place_rows, place.id) -> mir_pass_count_use(&uses, used)
     }
     loop scope in function.scopes {
         if scope.deadline == .Val(deadline) -> mir_pass_count_use(&uses, deadline)
@@ -129,7 +134,7 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
         loop instruction in block.instructions {
             loop used in mir_operation_value_uses(instruction.operation) -> mir_pass_count_use(&uses, used)
             loop place in mir_pass_operation_place_refs(instruction.operation) {
-                loop used in mir_pass_place_value_uses(function.places, place) -> mir_pass_count_use(&uses, used)
+                loop used in mir_pass_place_value_uses(function.places, place_rows, place) -> mir_pass_count_use(&uses, used)
             }
         }
         loop used in mir_terminator_value_uses(block.terminator) -> mir_pass_count_use(&uses, used)
@@ -281,7 +286,7 @@ fn mir_pass_jump_target(terminator: MIRTerminator) -> MIRBlockID? Never! {
     }
 }
 
-fn mir_pass_simplified_terminator(terminator: MIRTerminator, constants: [MIRPassConstantFact]) -> MIRTerminator? {
+fn mir_pass_simplified_terminator(terminator: MIRTerminator, constants: [Int:MIRConstant]) -> MIRTerminator? {
     if terminator == {
         .Branch(condition, then_target, else_target) -> {
             if then_target == else_target -> return Val(MIRTerminator.Jump{target: then_target})
@@ -322,6 +327,11 @@ fn mir_pass_fold_function_constants(function: &MIRFunction) -> Int Never! {
                         function.blocks[block_index].instructions[instruction_index].operation = MIROperation.Constant{value: constant}
                         changed = true
                         folded += 1
+                        // The folded value feeds later operands of this sweep
+                        // instead of waiting for the next census.
+                        if instruction.result == .Val(result) {
+                            if mir_pass_scalar_constant(constant) == .Val(scalar) -> mir_pass_constant_put(&constants, result, scalar)
+                        }
                     }
                     instruction.result == .Val(result) -> {
                         if instruction.operation == {
@@ -341,7 +351,7 @@ fn mir_pass_fold_function_constants(function: &MIRFunction) -> Int Never! {
     folded
 }
 
-fn mir_pass_fold_operation(operation: MIROperation, constants: [MIRPassConstantFact], ty: MIRType?) -> MIRConstant? {
+fn mir_pass_fold_operation(operation: MIROperation, constants: [Int:MIRConstant], ty: MIRType?) -> MIRConstant? {
     if operation == {
         .Phi(incoming) -> mir_pass_fold_phi(incoming, constants)
         .Unary(op, value) -> {
@@ -360,8 +370,8 @@ fn mir_pass_fold_operation(operation: MIROperation, constants: [MIRPassConstantF
     }
 }
 
-fn mir_pass_collect_scalar_constants(function: MIRFunction) -> [MIRPassConstantFact] Never! {
-    constants := [MIRPassConstantFact]{}
+fn mir_pass_collect_scalar_constants(function: MIRFunction) -> [Int:MIRConstant] Never! {
+    constants := [Int:MIRConstant]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
             if instruction.result == .Val(result) {
@@ -382,23 +392,12 @@ fn mir_pass_collect_scalar_constants(function: MIRFunction) -> [MIRPassConstantF
     constants
 }
 
-fn mir_pass_constant_for(constants: [MIRPassConstantFact], value: MIRValueID) -> MIRConstant? {
-    loop fact in constants {
-        if fact.value == value -> return Val(fact.constant)
-    }
-    None
+fn mir_pass_constant_for(constants: [Int:MIRConstant], value: MIRValueID) -> MIRConstant? {
+    constants.get(value.value)
 }
 
-fn mir_pass_constant_put(constants: &[MIRPassConstantFact], value: MIRValueID, constant: MIRConstant) Never! {
-    index := 0
-    loop index < constants.len() {
-        if constants[index].value == value {
-            constants[index].constant = constant
-            return
-        }
-        index += 1
-    }
-    &constants.push(MIRPassConstantFact{value: value, constant: constant})
+fn mir_pass_constant_put(constants: &[Int:MIRConstant], value: MIRValueID, constant: MIRConstant) Never! {
+    &constants.add(value.value, constant).drop("a later fact for the value replaces the prior one")
 }
 
 fn mir_pass_scalar_constant(constant: MIRConstant) -> MIRConstant? {
@@ -434,7 +433,7 @@ fn mir_pass_same_scalar(left: MIRConstant, right: MIRConstant) -> Bool Never! {
     }
 }
 
-fn mir_pass_fold_phi(incoming: [MIRPhiIncoming], constants: [MIRPassConstantFact]) -> MIRConstant? {
+fn mir_pass_fold_phi(incoming: [MIRPhiIncoming], constants: [Int:MIRConstant]) -> MIRConstant? {
     if incoming.len() == 0 -> return None
     first :: mir_pass_constant_for(constants, incoming[0].value) ?? return None
     loop index in 1..<incoming.len() {

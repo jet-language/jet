@@ -39,23 +39,37 @@ use jet_foundation.[
     type_name,
 ]
 
-fn sema_expression_type_symbol(scopes: &SemaScopeTable, name: String) -> Symbol? {
-    index :: sema_scope_resolve_index(scopes, name) ?? return None
-    symbol :: scopes.bindings[index].symbol
-    if symbol.kind == SymbolKind.Type -> Val(symbol) else -> None
-}
-
-// D-MOD2: an enum named through a module alias (`types.Kind`) or by the
-// canonical identity a declared type resolves to (`module::Kind`) is the
-// imported enum itself, so constructors and leading-dot variants resolve it
-// through the registration graph when no local binding has that name.
-fn sema_expression_enum_owner(scopes: &SemaScopeTable, environment: SemaScopeEnvironment, name: String) -> Symbol? {
-    local :: sema_expression_type_symbol(&scopes, name)
-    if local != None -> return local
+// D-MOD2: a type named by a local binding, through a module alias
+// (`types.Kind`), or by the canonical identity a declared type resolves to
+// (`module::Kind`, the form declared types carry after resolution) is the
+// declared type itself, so constructors, leading-dot variants and field reads
+// resolve it through the registration graph when no local type binding has
+// that name.
+fn sema_expression_type_symbol(scopes: &SemaScopeTable, environment: SemaScopeEnvironment, name: String) -> Symbol? {
+    index := sema_scope_resolve_index(scopes, name)
+    if index == .Val(found) {
+        symbol :: scopes.bindings[found].symbol
+        if symbol.kind == SymbolKind.Type -> return Val(symbol)
+    }
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
     resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return None
     if resolved.symbol.kind == SymbolKind.Type -> Val(resolved.symbol) else -> None
+}
+
+// Rust `infer_field` (`is_known_enum`): `Name.Variant` reads a variant when
+// `Name` is a declared enum or a compiler-owned enum menu (`Ordering`,
+// `RemoveBy`, the fact enums) and no value binding shadows it.
+fn sema_expression_names_enum(name: String, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> Bool {
+    index := sema_scope_resolve_index(scopes, name)
+    if index == .Val(found) && scopes.bindings[found].symbol.kind != SymbolKind.Type -> return false
+    if sema_fact_enum_menu(Type.Named{name: name}, environment) != None -> return true
+    owner :: sema_expression_type_symbol(&scopes, environment, name) ?? return false
+    declaration :: sema_scope_resolve_declaration(environment, owner.id) ?? return false
+    if declaration == {
+        .Enum(_) -> true
+        else -> false
+    }
 }
 
 struct SemaExpressionResolvedType {
@@ -63,7 +77,7 @@ struct SemaExpressionResolvedType {
     owner: Symbol
 }
 
-fn sema_expression_struct_type(type_name: String, type_args: [Type], expected: Type?, span: Span, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaExpressionResolvedType? {
+fn sema_expression_struct_type(type_name: String, type_args: [Type], expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaExpressionResolvedType? {
     if type_name == "" {
         expected_ty :: expected ?? {
             &diagnostics.push(sema_error("E0119", span, "an inferred struct literal needs an expected type", "the `{{ ... }}` form uses the surrounding type to choose its fields", "write the struct name or add a type annotation"))
@@ -72,14 +86,14 @@ fn sema_expression_struct_type(type_name: String, type_args: [Type], expected: T
         normalized :: sema_expr_unwrap_tag(expected_ty)
         if normalized == {
             .Named(name) -> {
-                owner :: sema_expression_type_symbol(&scopes, name) ?? {
+                owner :: sema_expression_type_symbol(&scopes, environment, name) ?? {
                     &diagnostics.push(sema_error("E0119", span, "the expected type is not a registered struct", "inferred construction needs declaration metadata for its fields", "name a declared struct type"))
                     return None
                 }
                 return Val(SemaExpressionResolvedType{ty: normalized, owner: owner})
             }
             .Apply(name, args) -> {
-                owner :: sema_expression_type_symbol(&scopes, name) ?? {
+                owner :: sema_expression_type_symbol(&scopes, environment, name) ?? {
                     &diagnostics.push(sema_error("E0119", span, "the expected type is not a registered struct", "inferred construction needs declaration metadata for its fields", "name a declared struct type"))
                     return None
                 }
@@ -91,7 +105,7 @@ fn sema_expression_struct_type(type_name: String, type_args: [Type], expected: T
             }
         }
     }
-    owner :: sema_expression_type_symbol(&scopes, type_name) ?? {
+    owner :: sema_expression_type_symbol(&scopes, environment, type_name) ?? {
         &diagnostics.push(sema_unknown_name(type_name, span))
         return None
     }
@@ -106,7 +120,7 @@ fn sema_expression_struct_type(type_name: String, type_args: [Type], expected: T
 }
 
 fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields: [ExprField], inferred: Bool, as_trait: String?, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    resolved :: sema_expression_struct_type(struct_name, type_args, expected, span, &scopes, &diagnostics) ?? return None
+    resolved :: sema_expression_struct_type(struct_name, type_args, expected, span, environment, &scopes, &diagnostics) ?? return None
     owner := resolved.owner
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner, kind: "type"})
     result_ty := resolved.ty
@@ -223,6 +237,17 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
     if type_name == "" && contextual_allowed && variant == "None" && args.len() == 0 {
         return sema_expression_absent(span, expected, &diagnostics)
     }
+    // Leading-dot Result cases are contextual only when the expected type
+    // is a Result; a declared enum's `.Ok` / `.Err` remains its own case.
+    if type_name == "" && leading_dot && sema_expr_unwrap_tag(expected ?? Type.Named{name: "Never"}) == .Result(_, _) && args.len() == 1 {
+        if args[0] == .Positional(value) {
+            if variant == "Ok" -> return sema_expression_result_payload(value, true, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            if variant == "Err" {
+                &context.failure_edges.push("")
+                return sema_expression_result_payload(value, false, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            }
+        }
+    }
     resolved_name := type_name
     if resolved_name == "" {
         expected_ty :: expected ?? {
@@ -252,7 +277,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
     fact_enum :: sema_fact_enum_literal(resolved_name, variant, args, span, variant_span, expected, environment, &diagnostics)
     if fact_enum.handled -> return fact_enum.value
     if type_name == "" {
-        inferred_owner :: sema_expression_enum_owner(&scopes, environment, resolved_name)
+        inferred_owner :: sema_expression_type_symbol(&scopes, environment, resolved_name)
         inferred_declaration := Item?{None}
         if inferred_owner == .Val(owner_symbol) {
             inferred_declaration = sema_scope_resolve_declaration(environment, owner_symbol.id)
@@ -269,7 +294,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
             return None
         }
     }
-    owner :: sema_expression_enum_owner(&scopes, environment, resolved_name) ?? {
+    owner :: sema_expression_type_symbol(&scopes, environment, resolved_name) ?? {
         &diagnostics.push(sema_unknown_name(resolved_name, span))
         return None
     }
@@ -492,7 +517,7 @@ struct SemaExpressionCheckedTextLiteral {
 
 fn sema_expression_checked_text_target(head: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> SemaExpressionCheckedTextTarget? {
     name :: if head == {.Named(value) -> value else -> { return None }}
-    owner :: sema_expression_type_symbol(&scopes, name) ?? return None
+    owner :: sema_expression_type_symbol(&scopes, environment, name) ?? return None
     if owner.kind != SymbolKind.Type -> return None
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
@@ -551,9 +576,8 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
         &diagnostics.push(sema_error("E0907", method_span, "`{type_name}.{method_name}` must be pure", "CheckedText methods are evaluated through the canonical pure Source evaluator", "declare this CheckedText method pure"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    graph_option :: environment.registration_graph
-    graph :: graph_option ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    direct :: sema_call_direct_target_from_registration(function, graph, environment.module_identity, environment.package_identity, type_args, method_span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if environment.registration_graph == None -> return SemaMethodSpecialCheck{handled: true, value: None}
+    direct :: sema_call_direct_target_from_registration(function, environment.registration_graph, environment.module_identity, environment.package_identity, type_args, method_span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     call := Call{
         name: "{type_name}.{method_name}",
         name_span: method_span,
@@ -939,7 +963,7 @@ fn sema_expression_variant_head(head: Type, environment: SemaScopeEnvironment, s
     }
     parts :: path.split(".").to_list()
     if parts.len() != 2 -> return None
-    owner :: sema_expression_type_symbol(&scopes, parts[0]) ?? return None
+    owner :: sema_expression_type_symbol(&scopes, environment, parts[0]) ?? return None
     declaration :: sema_scope_resolve_declaration(environment, owner.id) ?? return None
     declares_variant :: if declaration == {
         .Enum(value) -> loop candidate in value.variants {
@@ -1075,7 +1099,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             // `use core.regex` resolves the bare name to its source-owned record.
             regex_head :: Type.Named{name: "Regex"}
             if result_head == regex_head || sema_expr_unwrap_tag(written_head) == regex_head -> return sema_expression_typed_literal_regex(regex_head, value, span, expected, environment, &diagnostics)
-            checked_optional := if sema_expression_list_element_needs_expected_type(value) -> sema_check_expression(value, Val(result_head), environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
             checked :: checked_optional ?? return None
             converted := checked
             value_span :: expr_span(value)
@@ -1090,7 +1114,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
         }
         .Elements(elements) -> if elements.len() == 1 {
             value := elements[0]
-            checked_optional := if sema_expression_list_element_needs_expected_type(value) -> sema_check_expression(value, Val(result_head), environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
             checked :: checked_optional ?? return None
             converted := checked
             value_span :: expr_span(value)
@@ -1106,4 +1130,11 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
         else -> {}
     }
     sema_expression_typed_literal_mismatch(result_head, span, &diagnostics)
+}
+
+// `Float{0.5}` / `F32{-1.5}`: the machine-float head is the decimal literal's
+// expected carrier, as in Rust's typed-literal inference.
+fn sema_expression_typed_literal_value_needs_head(value: Expr, head: Type) -> Bool Never! {
+    if sema_expression_list_element_needs_expected_type(value) -> return true
+    sema_expr_decimal_literal_operand(value, true) && sema_expr_expects_machine_float(Val(head))
 }

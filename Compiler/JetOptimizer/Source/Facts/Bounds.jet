@@ -18,6 +18,10 @@ fn mir_pass_derive_bounds(program: &MIRProgram) -> Int Never! {
 
 fn mir_pass_function_bounds_facts(function: MIRFunction) -> [MIRBoundsFact] Never! {
     facts := [MIRBoundsFact]{}
+    place_rows := [Int:Int]{}
+    loop (position, place) in function.places {
+        if place_rows.get(place.id.value) == None -> &place_rows.add(place.id.value, position).drop("checked absent above")
+    }
     loop block in function.blocks {
         loop instruction in block.instructions {
             if instruction.operation == {
@@ -28,17 +32,15 @@ fn mir_pass_function_bounds_facts(function: MIRFunction) -> [MIRBoundsFact] Neve
                 else -> {}
             }
             loop place_id in mir_operation_place_uses(instruction.operation) {
-                loop place in function.places {
-                    if place.id == place_id {
-                        loop projection in place.projections {
-                            if projection == {
-                                .Index(kind, index, _, _, _, _, span) -> {
-                                    fact :: MIRBoundsFact{operation: instruction.id, place: Val(place_id), index: Val(index), kind: kind, proven: kind == .FixedListProof, elided: kind == .FixedListProof, failure_preserved: true, span: span}
-                                    mir_pass_bounds_insert(&facts, fact)
-                                }
-                                else -> {}
-                            }
+                // Checked MIR place IDs are unique, so one keyed row replaces the full place scan.
+                position :: place_rows.get(place_id.value) ?? next
+                loop projection in function.places[position].projections {
+                    if projection == {
+                        .Index(kind, index, _, _, _, _, span) -> {
+                            fact :: MIRBoundsFact{operation: instruction.id, place: Val(place_id), index: Val(index), kind: kind, proven: kind == .FixedListProof, elided: kind == .FixedListProof, failure_preserved: true, span: span}
+                            mir_pass_bounds_insert(&facts, fact)
                         }
+                        else -> {}
                     }
                 }
             }

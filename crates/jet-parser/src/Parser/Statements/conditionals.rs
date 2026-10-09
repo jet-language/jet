@@ -807,12 +807,41 @@ impl<'a> Parser<'a> {
                 return false;
             }
         }
+        // An arm head is followed by an arrow on its own line, outside any
+        // group. Without one the line is a statement, and the speculative
+        // parse would read a nested body (`if c {`, `loop x in xs {`) only to
+        // undo it: nested `if`/`loop` bodies would parse 2^depth times.
+        if !self.line_arrow_ahead() {
+            return false;
+        }
         let save = self.pos;
         let saved_diags = self.diags.len();
         let is_arm = matches!(self.expr_no_struct_lit(), Ok(_)) && self.at_unified_arrow();
         self.pos = save;
         self.diags.truncate(saved_diags);
         is_arm
+    }
+
+    /// Pure token scan: does the line at the cursor hold an arrow outside its
+    /// groups before the line ends?
+    fn line_arrow_ahead(&self) -> bool {
+        let mut depth = 0usize;
+        for tok in &self.toks[self.pos.min(self.toks.len())..] {
+            match tok.kind {
+                TokKind::Eof => return false,
+                TokKind::UnifiedArrow | TokKind::LambdaArrow if depth == 0 => return true,
+                TokKind::Semi if depth == 0 => return false,
+                TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
+                TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
+                    if depth == 0 {
+                        return false;
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
+        }
+        false
     }
 
     /// D-IF3 / D-IFDIST1: parse the arms of an `if subject OP { … }` dispatch

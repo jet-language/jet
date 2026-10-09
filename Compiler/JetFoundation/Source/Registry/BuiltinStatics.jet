@@ -50,6 +50,9 @@ pub struct BuiltinStaticRow {
     pub owner_type_params: Int
     pub owner_rule: BuiltinStaticOwnerRule
     pub parameters: [Type]
+    // How every argument passes: Read, or Move for a row that owns its
+    // payload (`shared expr`).
+    pub parameter_convention: AccessConvention
     pub return_type: Type
     pub lowering: BuiltinStaticLowering
     pub arity_code: String
@@ -79,6 +82,7 @@ fn builtin_static(owner: String, method: String, parameters: [Type], return_type
         owner_type_params: 0,
         owner_rule: BuiltinStaticOwnerRule.Inferred,
         parameters: parameters,
+        parameter_convention: AccessConvention.Read,
         return_type: return_type,
         lowering: lowering,
         arity_code: "E0104",
@@ -109,6 +113,13 @@ fn builtin_static_atomic(row: ^BuiltinStaticRow) -> BuiltinStaticRow Never! {
 fn builtin_static_arity_code(row: ^BuiltinStaticRow, arity_code: String) -> BuiltinStaticRow Never! {
     updated := row
     updated.arity_code = arity_code
+    updated
+}
+
+// The row owns its arguments: each one moves into the constructed value.
+fn builtin_static_owned(row: ^BuiltinStaticRow) -> BuiltinStaticRow Never! {
+    updated := row
+    updated.parameter_convention = AccessConvention.Move
     updated
 }
 
@@ -149,6 +160,9 @@ BUILTIN_STATIC_ROWS :: prep { [BuiltinStaticRow]{
     builtin_static_atomic(builtin_static("Atomic", "new", [Type]{Type.Named{name: "T"}}, Type.Apply{name: "Atomic", args: [Type]{Type.Named{name: "T"}}}, BuiltinStaticLowering.PreludeStatic{rooted: true, path: "JetAtomic", generics: builtin_static_owner_t()})),
     builtin_static_atomic(builtin_static("Atomic", "try_new", [Type]{Type.Named{name: "T"}}, Type.Result{ok: Type.Apply{name: "Atomic", args: [Type]{Type.Named{name: "T"}}}, err: Type.Named{name: "AllocError"}}, BuiltinStaticLowering.PreludeStatic{rooted: true, path: "JetAtomic", generics: builtin_static_owner_t()})),
     builtin_static("Condition", "new", [Type]{}, Type.Named{name: "Condition"}, BuiltinStaticLowering.PreludeStatic{rooted: true, path: "jet_std::JetCondition", generics: [TPreludeArg]{}}),
+    // D-CONC-SHARE1=A: `shared expr` (the parser's `Shared.new` call shape)
+    // moves its payload into a `JetShared<T>`; T is the payload's own type.
+    builtin_static_owned(builtin_static_generic(builtin_static("Shared", "new", [Type]{Type.Named{name: "T"}}, Type.Shared{inner: Type.Named{name: "T"}}, BuiltinStaticLowering.PreludeStatic{rooted: true, path: "jet_std::JetShared", generics: builtin_static_owner_t()}), [String]{"T"}, 0)),
     builtin_static("Authority", "workspace", [Type]{}, Type.Named{name: "Authority"}, BuiltinStaticLowering.PreludeStatic{rooted: true, path: "JetAuthority", generics: [TPreludeArg]{}}),
     builtin_static_duration("nanoseconds", "Nanoseconds"),
     builtin_static_duration("microseconds", "Microseconds"),

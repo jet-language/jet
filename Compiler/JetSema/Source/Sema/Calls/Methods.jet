@@ -330,8 +330,8 @@ pub fn sema_call_infer_method_candidate_from_types(candidate: SemaCallMethodCand
         .Val(graph) -> graph.package_identity
         else -> ""
     }
-    context := sema_inference_context(environment.registration_graph, caller_module, caller_package, candidate.generic_params, environment.generic_params, expected)
-    result :: sema_infer_callable(&context, parameter_types, return_type, arg_types, candidate.type_args, span, &diagnostics) ?? return None
+    context := sema_inference_context(caller_module, caller_package, candidate.generic_params, environment.generic_params, expected)
+    result :: sema_infer_callable(environment.registration_graph, &context, parameter_types, return_type, arg_types, candidate.type_args, span, &diagnostics) ?? return None
     sema_call_method_candidate_with_inference(candidate, result)
 }
 

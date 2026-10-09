@@ -130,16 +130,16 @@ fn sema_call_static_function_target(symbol: Symbol, signature: Type, generic_par
     if type_args.len() == 0 {
         return Val(SemaCallDirectTarget{symbol: symbol, signature: signature, type_args: [Type]{}, generic_params: generic_params, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}})
     }
-    context := sema_inference_context(environment.registration_graph, environment.module_identity, environment.package_identity, generic_params, environment.generic_params, None)
-    result :: sema_infer_validate_explicit(&context, type_args, span, &diagnostics) ?? return None
+    context := sema_inference_context(environment.module_identity, environment.package_identity, generic_params, environment.generic_params, None)
+    result :: sema_infer_validate_explicit(environment.registration_graph, &context, type_args, span, &diagnostics) ?? return None
     specialized :: sema_inference_substitute_type_bindings(signature, result.substitutions)
     Val(SemaCallDirectTarget{symbol: symbol, signature: specialized, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence})
 }
 
 fn sema_call_static_owner_resolution(owner_params: [SemaInferenceTypeParam], owner_type_args: [Type], signature: Type, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {
     explicit_args :: loop ty in owner_type_args -> sema_call_resolved_type(ty, environment)
-    inference_context := sema_inference_context(environment.registration_graph, environment.module_identity, environment.package_identity, owner_params, environment.generic_params, expected)
-    if owner_type_args.len() > 0 -> return sema_infer_validate_explicit(&inference_context, explicit_args, span, &diagnostics)
+    inference_context := sema_inference_context(environment.module_identity, environment.package_identity, owner_params, environment.generic_params, expected)
+    if owner_type_args.len() > 0 -> return sema_infer_validate_explicit(environment.registration_graph, &inference_context, explicit_args, span, &diagnostics)
     if owner_params.len() == 0 -> return Val(SemaInferenceResult{substitutions: [SemaInferenceBinding]{}, type_args: [Type]{}, parameters: [Type]{}, return_type: None, evidence: [SemaInferenceBoundEvidence]{}, complete: true, compatible: true})
 
     params :: sema_call_params_from_type(signature) ?? return None
@@ -148,7 +148,7 @@ fn sema_call_static_owner_resolution(owner_params: [SemaInferenceTypeParam], own
     binding :: sema_call_bind_direct("static method", signature, &probe_args, span, &probe_diagnostics) ?? return None
     facts :: sema_call_collect_inference_facts(params, binding, args, environment, &scopes, &state, &tail_store, &context)
     return_type :: sema_call_signature_return(signature)
-    result :: sema_infer_callable(&inference_context, facts.parameter_types, return_type, facts.argument_types, [Type]{}, span, &probe_diagnostics) ?? return None
+    result :: sema_infer_callable(environment.registration_graph, &inference_context, facts.parameter_types, return_type, facts.argument_types, [Type]{}, span, &probe_diagnostics) ?? return None
     if !result.complete -> return None
     Val(result)
 }
@@ -555,7 +555,7 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
     }
     params := [SemaCallParam]{}
     loop index in 0..<values.len() {
-        &params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(values[index].ty), variadic: false})
+        &params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: row.parameter_convention, ty: Val(values[index].ty), variadic: false})
     }
     ownership_args := args
     ownership := sema_ownership_check_call_arguments(&state, callee, params, &ownership_args, scopes, &diagnostics)

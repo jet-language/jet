@@ -84,3 +84,61 @@ pub enum OrFallback {
     BreakLabel(name: String, span: Span)
     ContinueLabel(name: String, span: Span)
 }
+
+// Rust `Pattern::binding_names`: the capture names a successful match
+// introduces. The parser turns a pattern test with a diverging fallback into
+// a binding of exactly these names (D-CHOOSE-TEST1); sema types each one.
+pub fn pattern_binding_names(pattern: Pattern) -> [BindName] Never! {
+    names := [BindName]{}
+    pattern_collect_binding_names(pattern, &names)
+    names
+}
+
+fn pattern_collect_binding_names(pattern: Pattern, names: &[BindName]) Never! {
+    if pattern == {
+        .Variant(_, bindings, _, _) -> loop slot in bindings -> pattern_collect_slot_names(slot, &names)
+        .Present(binding, binding_span, inner, _) -> pattern_collect_payload_names(binding, binding_span, inner, &names)
+        .Ok(binding, binding_span, inner, _) -> pattern_collect_payload_names(binding, binding_span, inner, &names)
+        .Err(binding, binding_span, inner, _) -> pattern_collect_payload_names(binding, binding_span, inner, &names)
+        .Or(alternatives, _) -> {
+            if alternatives.len() > 0 -> pattern_collect_binding_names(alternatives[0], &names)
+        }
+        .Struct(fields, _, _) -> {
+            loop field in fields {
+                if field == .Bind(name, field_span, local, local_span) -> &names.push(BindName{name: name, span: field_span, rename: Val(BindNameRename{name: local, span: local_span})})
+            }
+        }
+        .StrMatch(parts, _) -> {
+            loop part in parts {
+                if part == .Hole(name, _, span) -> &names.push(BindName{name: name, span: span, rename: None})
+            }
+        }
+        .BinMatch(parts, _) -> {
+            loop part in parts {
+                if part == .Hole(name, spec, span) {
+                    if spec == .Bits(_, _) -> &names.push(BindName{name: name, span: span, rename: None})
+                }
+            }
+        }
+        .Absent(_) -> {}
+        .Range(_, _, _) -> {}
+    }
+}
+
+// A payload pattern binds its nested pattern's names, else its own name.
+fn pattern_collect_payload_names(binding: String, binding_span: Span, inner: Pattern?, names: &[BindName]) Never! {
+    if inner == .Val(nested) {
+        pattern_collect_binding_names(nested, &names)
+        return
+    }
+    &names.push(BindName{name: binding, span: binding_span, rename: None})
+}
+
+fn pattern_collect_slot_names(slot: PatSlot, names: &[BindName]) Never! {
+    if slot == {
+        .Bind(name, span) -> &names.push(BindName{name: name, span: span, rename: None})
+        .Nested(pattern) -> pattern_collect_binding_names(pattern, &names)
+        .Named(_, _, inner) -> pattern_collect_slot_names(inner, &names)
+        else -> {}
+    }
+}

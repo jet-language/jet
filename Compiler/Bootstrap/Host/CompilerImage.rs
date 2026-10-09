@@ -176,16 +176,26 @@ pub(crate) fn archive_compiler_image<SourceProgram>(
     source_authority: &AuthorizedSourceSnapshot,
     source_to_native: impl FnOnce(&SourceProgram) -> Result<MirProgram, String>,
 ) -> Result<Vec<u8>, CompilerImageError> {
-    let identity = checked_identity(program, artifact, entry_function)?;
+    program
+        .validate()
+        .map_err(|error| CompilerImageError(format!("invalid compiler-image MIR: {error}")))?;
+    check_factory_root(program, artifact, entry_function)?;
+    let identity = program
+        .execution_identity(Some(artifact))
+        .map_err(|error| CompilerImageError(format!("invalid compiler-image identity: {error}")))?;
     let source_native = source_to_native(source_program).map_err(CompilerImageError)?;
     let payload =
         jet_foundation::MIR::mir_program_image_bytes(&source_native).map_err(CompilerImageError)?;
     let native_payload =
         jet_foundation::MIR::mir_program_image_bytes(program).map_err(CompilerImageError)?;
     if payload != native_payload {
-        return Err(CompilerImageError(
-            "Source MIR compiler image does not match the canonical native MIR image".into(),
-        ));
+        let differences = mir_program_field_differences(program, &source_native);
+        return Err(CompilerImageError(format!(
+            "Source MIR compiler image does not preserve every canonical native MIR field \
+             ({} differing field paths; `path xCOUNT: first sample: native | restored`):\n{}",
+            differences.len(),
+            differences.join("\n")
+        )));
     }
     let header = CompilerImageHeader {
         format_version: FORMAT_VERSION,
@@ -200,13 +210,18 @@ pub(crate) fn archive_compiler_image<SourceProgram>(
 
 /// Restore one private compiler image for the exact source authority, artifact,
 /// and checked factory root selected by the caller.
+///
+/// The image was legality-checked, identity-sealed and Source-round-trip
+/// checked when it was archived, and its SHA-256 checksum covers every byte,
+/// so restore verifies the checksum (linear in the bytes) and the factory
+/// root, takes the program digest from the optimizer seal, and never
+/// re-verifies, re-encodes or re-digests the whole compiler program.
 pub(crate) fn restore_compiler_image<SourceProgram>(
     bytes: &[u8],
     expected_source_authority_digest: [u8; 32],
     expected_artifact: MirArtifactId,
     expected_entry_function: MirFunctionId,
     native_to_source: impl FnOnce(&MirProgram) -> Result<SourceProgram, String>,
-    source_to_native: impl FnOnce(&SourceProgram) -> Result<MirProgram, String>,
 ) -> Result<RestoredCompilerImage<SourceProgram>, CompilerImageError> {
     let (raw_header, payload, identity_bytes) = decode_archive(bytes)?;
     if raw_header.mir_schema_version != MIR_SCHEMA_VERSION {
@@ -232,28 +247,16 @@ pub(crate) fn restore_compiler_image<SourceProgram>(
     }
     let program =
         jet_foundation::MIR::mir_program_from_image_bytes(payload).map_err(CompilerImageError)?;
-    let identity = checked_identity(&program, expected_artifact, expected_entry_function)?;
+    check_factory_root(&program, expected_artifact, expected_entry_function)?;
+    let identity = program
+        .sealed_execution_identity(Some(expected_artifact))
+        .map_err(|error| CompilerImageError(format!("invalid compiler-image identity: {error}")))?;
     if encode_identity(&identity)? != identity_bytes {
         return Err(CompilerImageError(
             "compiler-image execution identity does not match its MIR payload".into(),
         ));
     }
-    let native_payload =
-        jet_foundation::MIR::mir_program_image_bytes(&program).map_err(CompilerImageError)?;
-    if native_payload.as_slice() != payload {
-        return Err(CompilerImageError(
-            "compiler-image payload is not canonical native MIR encoding".into(),
-        ));
-    }
     let source_program = native_to_source(&program).map_err(CompilerImageError)?;
-    let source_projection = source_to_native(&source_program).map_err(CompilerImageError)?;
-    let source_payload =
-        jet_foundation::MIR::mir_program_image_bytes(&source_projection).map_err(CompilerImageError)?;
-    if source_payload != native_payload {
-        return Err(CompilerImageError(
-            "restored Source MIR does not preserve every canonical native MIR field".into(),
-        ));
-    }
     let header = CompilerImageHeader {
         format_version: raw_header.format_version,
         mir_schema_version: raw_header.mir_schema_version,
@@ -269,14 +272,11 @@ pub(crate) fn restore_compiler_image<SourceProgram>(
     })
 }
 
-fn checked_identity(
+fn check_factory_root(
     program: &MirProgram,
     artifact: MirArtifactId,
     entry_function: MirFunctionId,
-) -> Result<MirExecutionIdentity, CompilerImageError> {
-    program
-        .validate()
-        .map_err(|error| CompilerImageError(format!("invalid compiler-image MIR: {error}")))?;
+) -> Result<(), CompilerImageError> {
     let artifact_plan = program
         .artifacts
         .iter()
@@ -358,9 +358,7 @@ fn checked_identity(
                 .into(),
         ));
     }
-    program
-        .execution_identity(Some(artifact))
-        .map_err(|error| CompilerImageError(format!("invalid compiler-image identity: {error}")))
+    Ok(())
 }
 
 /// Content identity of an authorized compiler source snapshot: which bytes
@@ -584,3 +582,279 @@ fn write_u64_values(
     Ok(())
 }
 
+
+/// Every field path where `restored` differs from `native`, one line per
+/// index-free path with its occurrence count and the first concrete sample,
+/// so one failed restore names the whole lossy set instead of a bool.
+/// Elements are compared through their `Debug` rendering (streamed into a
+/// digest; only differing elements are rendered and walked).
+fn mir_program_field_differences(native: &MirProgram, restored: &MirProgram) -> Vec<String> {
+    let MirProgram {
+        cffi,
+        schema_version,
+        package_identity,
+        facts,
+        names,
+        modules,
+        imports,
+        types,
+        traits,
+        core_owners,
+        impls,
+        constants,
+        fields,
+        source_files,
+        functions,
+        foreign,
+        links,
+        callbacks,
+        handles,
+        jobs,
+        tests,
+        harnesses,
+        artifacts,
+        core_calls,
+        prelude_calls,
+        type_instances,
+        codec_migrations,
+        unreachable,
+    } = native;
+    let mut diff = DebugFieldDiff::default();
+    diff.value("cffi".into(), cffi, &restored.cffi);
+    diff.value("schema_version".into(), schema_version, &restored.schema_version);
+    diff.value("package_identity".into(), package_identity, &restored.package_identity);
+    diff.value("facts".into(), facts, &restored.facts);
+    diff.value("names".into(), names, &restored.names);
+    diff.list("modules", modules, &restored.modules, |row| row.name.clone());
+    diff.list("imports", imports, &restored.imports, |_| String::new());
+    diff.list("types", types, &restored.types, |row| row.name.clone());
+    diff.list("traits", traits, &restored.traits, |row| row.name.clone());
+    diff.list("core_owners", core_owners, &restored.core_owners, |_| String::new());
+    diff.list("impls", impls, &restored.impls, |_| String::new());
+    diff.list("constants", constants, &restored.constants, |row| row.name.clone());
+    diff.list("fields", fields, &restored.fields, |_| String::new());
+    diff.list("source_files", source_files, &restored.source_files, |_| String::new());
+    diff.list("functions", functions, &restored.functions, |row| row.name.clone());
+    diff.list("foreign", foreign, &restored.foreign, |_| String::new());
+    diff.list("links", links, &restored.links, |_| String::new());
+    diff.list("callbacks", callbacks, &restored.callbacks, |_| String::new());
+    diff.list("handles", handles, &restored.handles, |_| String::new());
+    diff.list("jobs", jobs, &restored.jobs, |_| String::new());
+    diff.list("tests", tests, &restored.tests, |_| String::new());
+    diff.list("harnesses", harnesses, &restored.harnesses, |_| String::new());
+    diff.list("artifacts", artifacts, &restored.artifacts, |row| row.name.clone());
+    diff.list("core_calls", core_calls, &restored.core_calls, |_| String::new());
+    diff.list("prelude_calls", prelude_calls, &restored.prelude_calls, |_| String::new());
+    diff.list("type_instances", type_instances, &restored.type_instances, |_| String::new());
+    let native_migrations = codec_migrations.iter().collect::<std::collections::BTreeMap<_, _>>();
+    let restored_migrations =
+        restored.codec_migrations.iter().collect::<std::collections::BTreeMap<_, _>>();
+    diff.value("codec_migrations".into(), &native_migrations, &restored_migrations);
+    diff.list("unreachable", unreachable, &restored.unreachable, |_| String::new());
+    diff.finish()
+}
+
+#[derive(Default)]
+struct DebugFieldDiff {
+    /// Index-free path -> (occurrences, first concrete sample).
+    classes: std::collections::BTreeMap<String, (usize, String)>,
+    /// Total recorded differences, so a value can tell whether its walk found any.
+    records: usize,
+}
+
+struct DebugDigest(std::collections::hash_map::DefaultHasher);
+
+impl std::fmt::Write for DebugDigest {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        std::hash::Hasher::write(&mut self.0, text.as_bytes());
+        Ok(())
+    }
+}
+
+fn debug_digest<T: std::fmt::Debug>(value: &T) -> u64 {
+    let mut digest = DebugDigest(Default::default());
+    let _ = std::fmt::Write::write_fmt(&mut digest, format_args!("{value:?}"));
+    std::hash::Hasher::finish(&digest.0)
+}
+
+/// One node of a pretty `{:#?}` rendering: a leaf line or an opened
+/// struct/tuple/list/map with its children keyed by field name or position.
+struct DebugNode<'a> {
+    label: &'a str,
+    compound: bool,
+    children: Vec<(String, DebugNode<'a>)>,
+}
+
+impl DebugNode<'_> {
+    fn summary(&self) -> String {
+        let mut text = if self.compound {
+            format!("{} {{{} children}}", self.label, self.children.len())
+        } else {
+            self.label.to_string()
+        };
+        if text.len() > 200 {
+            let mut end = 200;
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            text.truncate(end);
+            text.push('…');
+        }
+        text
+    }
+}
+
+/// Split `key: rest` where key is a field name or a quoted map key.
+fn split_debug_key(line: &str) -> (Option<&str>, &str) {
+    let bytes = line.as_bytes();
+    let end = if bytes.first() == Some(&b'"') {
+        let mut index = 1;
+        while index < bytes.len() && bytes[index] != b'"' {
+            index += if bytes[index] == b'\\' { 2 } else { 1 };
+        }
+        (index < bytes.len()).then_some(index + 1)
+    } else {
+        let length = bytes
+            .iter()
+            .take_while(|byte| byte.is_ascii_alphanumeric() || **byte == b'_')
+            .count();
+        (length > 0 && !bytes[0].is_ascii_uppercase()).then_some(length)
+    };
+    match end {
+        Some(end) if line[end..].starts_with(": ") => (Some(&line[..end]), &line[end + 2..]),
+        _ => (None, line),
+    }
+}
+
+fn parse_debug_children<'a>(lines: &mut std::str::Lines<'a>) -> Vec<(String, DebugNode<'a>)> {
+    let mut children = Vec::new();
+    while let Some(raw) = lines.next() {
+        let line = raw.trim();
+        if line.starts_with(['}', ']', ')']) {
+            break;
+        }
+        let (key, rest) = split_debug_key(line);
+        let key = key.map_or_else(|| format!("[{}]", children.len()), |key| format!(".{key}"));
+        let node = match rest.strip_suffix(['{', '(', '[']) {
+            Some(label) => DebugNode {
+                label: label.trim_end(),
+                compound: true,
+                children: parse_debug_children(lines),
+            },
+            None => DebugNode {
+                label: rest.strip_suffix(',').unwrap_or(rest),
+                compound: false,
+                children: Vec::new(),
+            },
+        };
+        children.push((key, node));
+    }
+    children
+}
+
+fn parse_debug_tree(text: &str) -> DebugNode<'_> {
+    let mut lines = text.lines();
+    let mut root = parse_debug_children(&mut lines);
+    if root.len() == 1 {
+        root.pop().expect("one root").1
+    } else {
+        DebugNode { label: "", compound: true, children: root }
+    }
+}
+
+impl DebugFieldDiff {
+    fn record(&mut self, path: String, native: String, restored: String) {
+        let mut class = String::with_capacity(path.len());
+        let mut in_index = false;
+        for character in path.chars() {
+            match character {
+                '[' => {
+                    in_index = true;
+                    class.push_str("[*]");
+                }
+                ']' => in_index = false,
+                _ if !in_index => class.push(character),
+                _ => {}
+            }
+        }
+        let entry = self
+            .classes
+            .entry(class)
+            .or_insert_with(|| (0, format!("{path}: {native} | {restored}")));
+        entry.0 += 1;
+        self.records += 1;
+    }
+
+    fn value<T: std::fmt::Debug>(&mut self, path: String, native: &T, restored: &T) {
+        if debug_digest(native) == debug_digest(restored) {
+            return;
+        }
+        let native_text = format!("{native:#?}");
+        let restored_text = format!("{restored:#?}");
+        let before = self.records;
+        self.node(&path, &parse_debug_tree(&native_text), &parse_debug_tree(&restored_text));
+        if self.records == before && native_text != restored_text {
+            self.record(path, "<Debug text differs>".into(), "<unparsed>".into());
+        }
+    }
+
+    fn list<T: std::fmt::Debug>(
+        &mut self,
+        path: &str,
+        native: &[T],
+        restored: &[T],
+        name: impl Fn(&T) -> String,
+    ) {
+        if native.len() != restored.len() {
+            self.record(
+                format!("{path}.len"),
+                native.len().to_string(),
+                restored.len().to_string(),
+            );
+        }
+        for (index, (native, restored)) in native.iter().zip(restored).enumerate() {
+            self.value(format!("{path}[{index} {}]", name(native)), native, restored);
+        }
+    }
+
+    fn node(&mut self, path: &str, native: &DebugNode<'_>, restored: &DebugNode<'_>) {
+        if native.compound != restored.compound || native.label != restored.label {
+            self.record(path.to_string(), native.summary(), restored.summary());
+            return;
+        }
+        if !native.compound {
+            return;
+        }
+        if native.children.len() != restored.children.len() {
+            self.record(
+                format!("{path}.len"),
+                native.children.len().to_string(),
+                restored.children.len().to_string(),
+            );
+        }
+        for ((native_key, native_child), (restored_key, restored_child)) in
+            native.children.iter().zip(&restored.children)
+        {
+            if native_key != restored_key {
+                self.record(format!("{path}{native_key}"), native_key.clone(), restored_key.clone());
+                continue;
+            }
+            self.node(&format!("{path}{native_key}"), native_child, restored_child);
+        }
+    }
+
+    fn finish(self) -> Vec<String> {
+        let mut lines = self
+            .classes
+            .into_iter()
+            .map(|(class, (count, sample))| format!("  {class} x{count}: {sample}"))
+            .collect::<Vec<_>>();
+        if lines.is_empty() {
+            lines.push(
+                "  <none>: every field renders equal; the canonical image bytes differ only in encoding"
+                    .to_string(),
+            );
+        }
+        lines
+    }
+}

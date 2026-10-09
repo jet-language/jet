@@ -1729,8 +1729,11 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             }
             checked_block :: sema_check_statements(statement_body, statement_return, environment, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics, 0)
             sema_single_use_check_scope_end(lambda_state, &diagnostics)
-            if !checked_block.complete -> return None
-            if !inline_loop && body_expected != None && (body_expected ?? Type.Named{name: "Unit"}) != (Type.Named{name: "Unit"}) && tail_source == None && !sema_stmt_block_has_no_fallthrough(statements) {
+            if !checked_block.complete {
+                loop reason in lambda_context.incomplete_reasons -> sema_check_unsupported(&context, "closure body: {reason}")
+                return None
+            }
+            if !inline_loop && body_expected != None && (body_expected ?? Type.Named{name: "Unit"}) != (Type.Named{name: "Unit"}) && tail_source == None && sema_stmt_tir_block_can_fall_through(checked_block.value) && !sema_stmt_block_definitely_returns(statements) {
                 &diagnostics.push(sema_error("E0113", lambda.span, "this block closure can fall through without returning its value", "a non-Unit closure needs a return on every reachable path", "return a value from every path or make the closure return Unit"))
                 return None
             }

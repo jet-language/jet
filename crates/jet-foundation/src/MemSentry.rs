@@ -7,6 +7,7 @@
 //! or policy.
 
 use std::cell::{Cell, RefCell};
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write as IOWrite;
 use std::path::PathBuf;
 use std::sync::{
@@ -22,16 +23,91 @@ struct Gate {
     reason: String,
 }
 
+/// Heap or owned storage, in registration order. `seq` is the registration
+/// counter shared with stack records, so the newest expired record naming an
+/// address is found across both tables.
 #[derive(Clone, Copy)]
 struct Allocation {
     start: usize,
     len: usize,
     live: bool,
     owner: Option<usize>,
-    stack_frame: Option<usize>,
+    seq: u64,
 }
 
-static ALLOCATIONS: OnceLock<Mutex<Vec<Allocation>>> = OnceLock::new();
+#[derive(Clone, Copy)]
+struct StackAllocation {
+    start: usize,
+    len: usize,
+    seq: u64,
+}
+
+/// Every registration the sentry knows. Stack storage is held per live frame,
+/// so a frame's expiry touches only its own records; a frame registering the
+/// same range again keeps one record. An expired stack range keeps only its
+/// newest registration: stack addresses repeat, so that table stays bounded by
+/// the distinct ranges the run's stacks used, while a later access through an
+/// expired address still reports R0802.
+#[derive(Default)]
+struct SentryRecords {
+    next_seq: u64,
+    heap: Vec<Allocation>,
+    frames: HashMap<usize, Vec<StackAllocation>>,
+    expired_stack: BTreeMap<(usize, usize), u64>,
+    max_expired_len: usize,
+}
+
+impl SentryRecords {
+    fn next_seq(&mut self) -> u64 {
+        self.next_seq += 1;
+        self.next_seq
+    }
+
+    fn expire_stack(&mut self, record: StackAllocation) {
+        let seq = self.expired_stack.entry((record.start, record.len)).or_insert(0);
+        *seq = (*seq).max(record.seq);
+        self.max_expired_len = self.max_expired_len.max(record.len);
+    }
+
+    fn live_ranges(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.heap
+            .iter()
+            .filter(|allocation| allocation.live)
+            .map(|allocation| (allocation.start, allocation.len))
+            .chain(self.frames.values().flatten().map(|record| (record.start, record.len)))
+    }
+
+    /// The newest expired registration containing `start`: `Some(true)` when
+    /// it was stack storage whose frame ended, `Some(false)` for quarantined
+    /// heap storage.
+    fn newest_expired(&self, start: usize) -> Option<bool> {
+        let heap = self
+            .heap
+            .iter()
+            .rev()
+            .find(|allocation| {
+                !allocation.live
+                    && start >= allocation.start
+                    && start < allocation.start.saturating_add(allocation.len)
+            })
+            .map(|allocation| allocation.seq);
+        let lowest = start.saturating_sub(self.max_expired_len.saturating_sub(1));
+        let stack = self
+            .expired_stack
+            .range((lowest, 0)..=(start, usize::MAX))
+            .filter(|((range_start, len), _)| start < range_start.saturating_add(*len))
+            .map(|(_, seq)| *seq)
+            .max();
+        match (heap, stack) {
+            (Some(heap), Some(stack)) => Some(stack > heap),
+            (None, Some(_)) => Some(true),
+            (Some(_), None) => Some(false),
+            (None, None) => None,
+        }
+    }
+}
+
+static ALLOCATIONS: OnceLock<Mutex<SentryRecords>> = OnceLock::new();
 static HARDENED: AtomicBool = AtomicBool::new(false);
 static NEXT_SENTRY_FRAME: AtomicUsize = AtomicUsize::new(1);
 const MAX_MEMORY_LEDGER_BYTES: u64 = 4 * 1024 * 1024;
@@ -168,8 +244,8 @@ thread_local! {
     static SENTRY_FRAMES: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
 }
 
-fn allocations() -> &'static Mutex<Vec<Allocation>> {
-    ALLOCATIONS.get_or_init(|| Mutex::new(Vec::new()))
+fn allocations() -> &'static Mutex<SentryRecords> {
+    ALLOCATIONS.get_or_init(|| Mutex::new(SentryRecords::default()))
 }
 
 fn gate_name(gate: &Gate) -> String {
@@ -220,9 +296,10 @@ impl Drop for JetSentryFrame {
         let mut records = allocations()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        for allocation in records.iter_mut() {
-            if allocation.live && allocation.stack_frame == Some(id) {
-                allocation.live = false;
+        // Only this frame's own records: its expiry never rescans the run.
+        if let Some(stack) = records.frames.remove(&id) {
+            for record in stack {
+                records.expire_stack(record);
             }
         }
     }
@@ -301,10 +378,9 @@ pub fn jet_sentry_reset() {
     FENCE_DEPTH.with(|depth| depth.set(0));
     SENTRY_FRAMES.with(|frames| frames.borrow_mut().clear());
     HARDENED.store(false, Ordering::Relaxed);
-    allocations()
+    *allocations()
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clear();
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = SentryRecords::default();
 }
 
 pub fn jet_sentry_register_allocation(start: usize, bytes: usize) {
@@ -352,16 +428,26 @@ fn jet_sentry_register_allocation_inner(
     if !runtime_available() || start == 0 {
         return;
     }
-    allocations()
+    let mut records = allocations()
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .push(Allocation {
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let seq = records.next_seq();
+    let len = bytes.max(1);
+    let Some(frame) = stack_frame else {
+        records.heap.push(Allocation {
             start,
-            len: bytes.max(1),
+            len,
             live: true,
             owner,
-            stack_frame,
+            seq,
         });
+        return;
+    };
+    let stack = records.frames.entry(frame).or_default();
+    match stack.iter().position(|record| record.start == start && record.len == len) {
+        Some(index) => stack[index].seq = seq,
+        None => stack.push(StackAllocation { start, len, seq }),
+    }
 }
 
 pub fn jet_sentry_quarantine(start: usize, bytes: usize) {
@@ -372,11 +458,25 @@ pub fn jet_sentry_quarantine(start: usize, bytes: usize) {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut poisoned = false;
-    for allocation in records.iter_mut().rev() {
+    for allocation in records.heap.iter_mut() {
         if allocation.live && allocation.start == start {
             allocation.live = false;
             poisoned = true;
         }
+    }
+    let mut expired = Vec::new();
+    for stack in records.frames.values_mut() {
+        stack.retain(|record| {
+            if record.start != start {
+                return true;
+            }
+            expired.push(*record);
+            false
+        });
+    }
+    poisoned |= !expired.is_empty();
+    for record in expired {
+        records.expire_stack(record);
     }
     if poisoned && bytes != 0 {
         // SAFETY: the caller releases the exact allocation previously
@@ -392,7 +492,7 @@ pub fn jet_sentry_quarantine_owner(owner: usize) {
     let mut records = allocations()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    for allocation in records.iter_mut() {
+    for allocation in records.heap.iter_mut() {
         if allocation.live && allocation.owner == Some(owner) {
             allocation.live = false;
         }
@@ -513,10 +613,7 @@ fn jet_sentry_check_inner(
     require_provenance: bool,
     foreign_component: Option<&str>,
 ) -> Option<JetSentryFault> {
-    let gate = GATE.with(|gate| gate.borrow().clone())?;
-    if !gate.enabled {
-        return None;
-    }
+    let gate = GATE.with(|gate| gate.borrow().as_ref().filter(|gate| gate.enabled).cloned())?;
     let bytes = bytes.max(1);
     let alignment = alignment.max(1);
     let end = start.checked_add(bytes);
@@ -524,17 +621,13 @@ fn jet_sentry_check_inner(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let live = end.is_some_and(|end| {
-        records.iter().rev().any(|allocation| {
-            allocation.live
-                && start >= allocation.start
-                && end <= allocation.start.saturating_add(allocation.len)
-        })
+        records
+            .live_ranges()
+            .any(|(range_start, len)| start >= range_start && end <= range_start.saturating_add(len))
     });
-    let starts_in_live = records.iter().rev().any(|allocation| {
-        allocation.live
-            && start >= allocation.start
-            && start <= allocation.start.saturating_add(allocation.len)
-    });
+    let starts_in_live = records
+        .live_ranges()
+        .any(|(range_start, len)| start >= range_start && start <= range_start.saturating_add(len));
     // Provenance classification precedes alignment for raw accesses: an
     // untracked address is R0801. A foreign borrowed reference may be
     // untracked, but a tracked allocation that does not contain the complete
@@ -549,13 +642,9 @@ fn jet_sentry_check_inner(
             None
         }
     } else {
-        let freed = records.iter().rev().find(|allocation| {
-            !allocation.live
-                && start >= allocation.start
-                && start < allocation.start.saturating_add(allocation.len)
-        });
-        if let Some(freed) = freed {
-            let detail = if freed.stack_frame.is_some() {
+        let freed = records.newest_expired(start);
+        if let Some(stack) = freed {
+            let detail = if stack {
                 "the owning Jet frame has expired"
             } else {
                 "the address belongs to quarantined storage"
@@ -720,6 +809,60 @@ mod tests {
                 .join()
                 .expect("task frame test");
         });
+        drop(gate);
+        jet_sentry_reset();
+    }
+
+    #[test]
+    fn repeated_frames_keep_dangling_stack_writes_exact_and_memory_bounded() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        jet_sentry_reset();
+        jet_sentry_set_hardened(true);
+        let mut value = 23i64;
+        let address = (&mut value as *mut i64) as usize;
+        let gate = jet_sentry_scope(true, "dangling.jet", 1, "dangling-write");
+        // A long run re-borrows the same stack slot in many frames, and many
+        // times within one frame (a parser passing `&state` in a loop).
+        for _ in 0..10_000 {
+            let frame = jet_sentry_frame();
+            for _ in 0..4 {
+                jet_sentry_register_stack_allocation(address, 8);
+            }
+            assert!(jet_sentry_check(address, 8, 8, "write", "valid_ptr").is_none());
+            drop(frame);
+        }
+        {
+            let records = allocations().lock().unwrap();
+            assert!(records.frames.is_empty(), "expired frames keep no live records");
+            assert_eq!(records.expired_stack.len(), 1, "one expired range per distinct slot");
+            assert!(records.heap.is_empty());
+        }
+        // A write through the dangling address is still caught, inside and
+        // past the slot's first byte; an address beside it stays untracked.
+        let fault = jet_sentry_check(address, 8, 8, "write", "valid_ptr")
+            .expect("a write through an expired stack slot must fault");
+        assert_eq!(fault.code, "R0802");
+        assert_eq!(fault.detail, "the owning Jet frame has expired");
+        let inner = jet_sentry_check(address + 4, 4, 4, "write", "valid_ptr")
+            .expect("a write inside an expired stack slot must fault");
+        assert_eq!(inner.code, "R0802");
+        let beside = jet_sentry_check(address + 8, 8, 8, "write", "valid_ptr")
+            .expect("an untracked address is a provenance fault");
+        assert_eq!(beside.code, "R0801");
+
+        // The newest registration names the cause: heap storage registered
+        // after the slot expired, then quarantined, reports quarantine...
+        jet_sentry_register_allocation(address, 8);
+        jet_sentry_quarantine(address, 0);
+        let fault = jet_sentry_check(address, 8, 8, "write", "valid_ptr").expect("quarantined");
+        assert_eq!(fault.detail, "the address belongs to quarantined storage");
+        // ...and a newer frame's expired registration reports the frame.
+        let frame = jet_sentry_frame();
+        jet_sentry_register_stack_allocation(address, 8);
+        assert!(jet_sentry_check(address, 8, 8, "write", "valid_ptr").is_none());
+        drop(frame);
+        let fault = jet_sentry_check(address, 8, 8, "write", "valid_ptr").expect("expired");
+        assert_eq!(fault.detail, "the owning Jet frame has expired");
         drop(gate);
         jet_sentry_reset();
     }

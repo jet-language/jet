@@ -405,7 +405,7 @@ fn jet_driver_parse_dependency_entries(source: String, source_path: String, toke
                     cursor == value_index + 1 && jet_driver_is_manifest_string(tokens[value_index].kind) -> tokens[value_index].payload.decoded
                     else -> {
                         value_start :: tokens[value_index].span.start
-                        if value_start >= 0 && value_end >= value_start && value_end <= source_bytes.len() -> (String.from_bytes(source_bytes[value_start..value_end]) ?? "").trim() else -> ""
+                        if value_start >= 0 && value_end >= value_start && value_end <= source_bytes.len() -> (String.from_bytes(source_bytes[value_start..<value_end]) ?? "").trim() else -> ""
                     }
                 }
                 duplicate :: loop existing in dependencies {
@@ -459,7 +459,7 @@ fn jet_driver_manifest_field_value(source: String, tokens: [Token], start_index:
             start :: token.span.start
             end :: token.span.end
             if start >= 0 && end >= start && end <= source_bytes.len() {
-                text = "{text}{String.from_bytes(source_bytes[start..end]) ?? ""}"
+                text = "{text}{String.from_bytes(source_bytes[start..<end]) ?? ""}"
             }
         }
     }
@@ -519,7 +519,7 @@ fn jet_driver_parse_program_allocator(value: String, span: Span, diagnostics: &[
     if compact.starts_with(prefix) && compact.ends_with(")") {
         bytes :: compact.bytes()
         prefix_len :: prefix.bytes().len()
-        inner :: String.from_bytes(bytes[prefix_len..bytes.len() - 1]) ?? ""
+        inner :: String.from_bytes(bytes[prefix_len..<bytes.len() - 1]) ?? ""
         args :: inner.split(",").to_list()
         if args.len() == 0 || args[0] != "mem.Heap" || args.len() > 2 {
             &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`mem.Counting.over` wraps `mem.Heap` and accepts only the optional `cap:` argument", "use `allocator: mem.Heap` or `mem.Counting.over(mem.Heap, cap: 2.gb)`"))
@@ -1390,11 +1390,15 @@ fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, 
             if segment.line_starts.len() == 0 || segment.line_starts[0] != 0 {
                 &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "source provenance has no line-zero byte offset", "line starts are fragment-local UTF-8 byte offsets", "provide line_starts beginning with zero"))
             }
-            loop line_index in 1..<segment.line_starts.len() {
-                if segment.line_starts[line_index] <= segment.line_starts[line_index - 1] || segment.line_starts[line_index] > segment_length {
+            // One pass over the starts (indexing `segment.line_starts[i]` copied
+            // the whole list per index in emitted code: quadratic per segment).
+            previous_line_start := -1
+            loop line_start in segment.line_starts {
+                if previous_line_start >= 0 && (line_start <= previous_line_start || line_start > segment_length) {
                     &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "source provenance line starts are outside the exact generated fragment", "line starts are increasing fragment-local UTF-8 byte offsets", "regenerate line_starts from the exact source fragment"))
                     break
                 }
+                previous_line_start = line_start
             }
             if segment.origin == {
                 .Snapshot -> {

@@ -144,15 +144,29 @@ pub fn sema_fact_enum_variants(enum_name: String) -> [String]? {
     }
 }
 
-// The fact-enum menu for `ty`, unless a declared enum of that name is in scope
-// (the compiler's own sources declare a `ParamZone`).
+// Rust `builtin_type_registry` (Bundle.rs): the compiler-owned runtime enums
+// every module sees without a declaration. `<=>` and `compare` produce an
+// `Ordering`; checked removals select by `RemoveBy`. They share the closed
+// menu checks below, but they are runtime values, so codegen never folds them.
+pub fn sema_compiler_enum_variants(enum_name: String) -> [String]? {
+    if {
+        enum_name == "Ordering" -> Val([String]{"Less", "Equal", "Greater"})
+        enum_name == "RemoveBy" -> Val([String]{"Val", "Slot"})
+        else -> None
+    }
+}
+
+// The fact-enum or compiler-owned enum menu for `ty`, unless a declared enum
+// of that name is in scope (the compiler's own sources declare a `ParamZone`).
 fn sema_fact_enum_menu(ty: Type, environment: SemaScopeEnvironment) -> [String]? {
     name := ""
     if sema_expr_unwrap_tag(ty) == {
         .Named(value) -> name = value
         else -> return None
     }
-    variants :: sema_fact_enum_variants(name) ?? return None
+    found := sema_fact_enum_variants(name)
+    if found == None -> found = sema_compiler_enum_variants(name)
+    variants :: found ?? return None
     if environment.registration_graph == .Val(graph) {
         if sema_type_resolve_nominal(graph, Type.Named{name: name}, environment.module_identity) != None -> return None
     }
@@ -160,6 +174,7 @@ fn sema_fact_enum_menu(ty: Type, environment: SemaScopeEnvironment) -> [String]?
 }
 
 fn sema_fact_enum_unknown_variant(owner: String, variant: String, variants: [String], span: Span) -> Diagnostic {
+    if sema_fact_enum_variants(owner) == None -> return sema_error("E0302", span, "`{owner}` has no variant `{variant}`", "enum constructors must name a declared variant", "use one of the declared variants")
     sema_error("E0302", span, "`{owner}` has no variant `{variant}`", "`{owner}` is a closed compiler fact menu: {variants.join(", ")}", "use one of the listed variants")
 }
 

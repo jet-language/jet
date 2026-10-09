@@ -137,20 +137,19 @@ fn sema_call_core_source_target(environment: SemaScopeEnvironment, module_identi
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
     module_index :: sema_registration_module_index(graph, module_identity) ?? return None
-    source_module := graph.modules[module_index]
-    if (source_module.module_name == "core.http.client" && member == "request") || (source_module.module_name == "core.http.server" && member == "response") -> return None
+    // Module rows are read in place; binding one would copy its whole program.
+    source_name :: graph.modules[module_index].module_name
+    if (source_name == "core.http.client" && member == "request") || (source_name == "core.http.server" && member == "response") -> return None
     caller_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
-    caller_module := graph.modules[caller_index]
     // Only the source module itself keeps the host row for its own members
     // (Rust core_call.rs: by registered identity, never by file name, so a
     // user `perf.jet` is not `Core/perf/perf.jet`).
-    if source_module.module_identity == caller_module.module_identity -> return None
+    if graph.modules[module_index].module_identity == graph.modules[caller_index].module_identity -> return None
     export :: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? return None
     owner_index :: sema_registration_module_index(graph, export.source_module_identity) ?? return None
-    owner := graph.modules[owner_index]
-    loop function in owner.functions {
+    loop function in graph.modules[owner_index].functions {
         if function.symbol.id.key == export.symbol.id.key {
-            return sema_call_direct_target_from_registration(function, graph, environment.module_identity, environment.package_identity, type_args, span, &diagnostics)
+            return sema_call_direct_target_from_registration(function, environment.registration_graph, environment.module_identity, environment.package_identity, type_args, span, &diagnostics)
         }
     }
     &diagnostics.push(sema_call_not_callable(member, export.symbol.ty ?? Type.Named{name: "Unknown"}, span))
@@ -477,15 +476,15 @@ fn sema_call_core_parameter_records(signature: CoreTypedCallSignature, type_args
 fn sema_call_core_infer_type_args(signature: CoreTypedCallSignature, params: [SemaCallParam], binding: SemaCallBinding, source_args: [CallArg], explicit_type_args: [Type], expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [Type]? {
     if signature.type_parameters.len() == 0 -> return Val([Type]{})
     inference_parameters :: sema_call_core_inference_parameters(signature, span)
-    inference_context := sema_inference_context(environment.registration_graph, environment.module_identity, environment.package_identity, inference_parameters, environment.generic_params, expected)
+    inference_context := sema_inference_context(environment.module_identity, environment.package_identity, inference_parameters, environment.generic_params, expected)
     if explicit_type_args.len() > 0 {
-        result :: sema_infer_validate_explicit(&inference_context, explicit_type_args, span, &diagnostics) ?? return None
+        result :: sema_infer_validate_explicit(environment.registration_graph, &inference_context, explicit_type_args, span, &diagnostics) ?? return None
         return Val(result.type_args)
     }
     facts := sema_call_collect_inference_facts(params, binding, source_args, environment, &scopes, &state, &tail_store, &context)
     sema_call_lambda_failure_facts(&facts, inference_parameters, params, binding, source_args, environment, &scopes, &state, &tail_store, &context)
     inferred_arguments :: loop ty in facts.argument_types -> sema_call_core_inference_type(signature, ty)
-    inference :: sema_infer_callable(&inference_context, facts.parameter_types, signature.return_type, inferred_arguments, [Type]{}, span, &diagnostics) ?? return None
+    inference :: sema_infer_callable(environment.registration_graph, &inference_context, facts.parameter_types, signature.return_type, inferred_arguments, [Type]{}, span, &diagnostics) ?? return None
     if !inference.complete || !inference.compatible {
         &diagnostics.push(sema_error("E0904", span, "cannot infer the type arguments for `{signature.module_name}.{signature.member}`", "the fixed Core signature must resolve each declared type parameter from its checked arguments or expected result", "provide enough arguments to determine the Core call's type"))
         return None

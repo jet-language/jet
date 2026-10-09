@@ -1,6 +1,10 @@
 // Statement blocks, bindings, assignments, and control flow.
 use jet_foundation.[
+    AccessConvention,
     BinOp,
+    BindPattern,
+    Binding,
+    Call,
     CallArg,
     CallLabel,
     Expr,
@@ -18,57 +22,81 @@ use jet_foundation.[
     Type,
     TypedLitBody,
     ast_binding,
+    ast_empty_call_arg_flags,
     diagnostic_from_registry,
     diagnostic_with_edit,
     expr_span,
+    pattern_binding_names,
 ]
 use jet_lexer.[
+    TOKEN_AMP,
     TOKEN_AMP_EQ,
     TOKEN_AND_AND,
     TOKEN_AT,
     TOKEN_BANG,
     TOKEN_BREAK,
+    TOKEN_CARET,
     TOKEN_CARET_EQ,
+    TOKEN_CHAR,
     TOKEN_COLON,
     TOKEN_COLON_COLON,
     TOKEN_COLON_EQ,
     TOKEN_COMMA,
+    TOKEN_DOLLAR,
+    TOKEN_DOT,
     TOKEN_DOT_DOT,
     TOKEN_DOT_DOT_LT,
     TOKEN_EOF,
     TOKEN_EQ,
     TOKEN_EQ_EQ,
+    TOKEN_FALSE,
+    TOKEN_FLOAT,
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_INT,
+    TOKEN_KW_COMPTIME,
     TOKEN_KW_ELSE,
     TOKEN_KW_FN,
+    TOKEN_KW_COPY,
     TOKEN_KW_IF,
     TOKEN_KW_IN,
+    TOKEN_KW_IT,
     TOKEN_KW_LOOP,
+    TOKEN_KW_MOVE,
     TOKEN_KW_YIELD,
     TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LPAREN,
+    TOKEN_MINUS,
     TOKEN_MINUS_EQ,
+    TOKEN_MINUS_MINUS,
+    TOKEN_NULL,
     TOKEN_OR_OR,
     TOKEN_PERCENT_EQ,
     TOKEN_PERCENT_PERCENT_EQ,
     TOKEN_PIPE_EQ,
     TOKEN_PLUS_EQ,
+    TOKEN_PLUS_PLUS,
+    TOKEN_RAW_STRING,
     TOKEN_RBRACE,
     TOKEN_RBRACKET,
     TOKEN_RETURN,
     TOKEN_RPAREN,
     TOKEN_SEMI,
+    TOKEN_SELF,
     TOKEN_SHL_EQ,
     TOKEN_SHR_EQ,
     TOKEN_SLASH_EQ,
     TOKEN_SLASH_PERCENT_EQ,
+    TOKEN_STAR,
     TOKEN_STAR_EQ,
+    TOKEN_STRING,
+    TOKEN_TILDE,
     TOKEN_TILDE_PIPE_EQ,
+    TOKEN_TRUE,
     TOKEN_UNIFIED_ARROW,
+    TOKEN_UNIT_NUMBER,
     Token,
 ]
 
@@ -89,6 +117,33 @@ fn parser_statement_is_keyword(state: &JetParserState) -> Bool Never! {
         if next_kind == TOKEN_COLON -> return true
     }
     false
+}
+
+// Can the line at the cursor be a value block's tail? An expression never
+// spans a `;` outside its groups, so only a line that runs to the closing
+// `}` (or to one `;` right before it) can end there. A `;` before `else`
+// may still continue an `if` value, so the scan reads on past it. Value
+// blocks parse every other line straight as a statement, as Rust's failed
+// tail speculation does, without parsing it twice.
+fn parser_value_tail_ahead(state: JetParserState) -> Bool Never! {
+    depth := 0
+    index := state.position
+    loop index < state.tokens.len() {
+        kind :: state.tokens[index].kind
+        if kind == TOKEN_EOF -> return true
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
+        if (kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET) && depth > 0 -> depth -= 1
+        if kind == TOKEN_RBRACE {
+            if depth == 0 -> return true
+            depth -= 1
+        }
+        if kind == TOKEN_SEMI && depth == 0 {
+            following :: parser_lookahead_forward(state, index + 1, 0).kind
+            if following != TOKEN_KW_ELSE -> return following == TOKEN_RBRACE || following == TOKEN_EOF
+        }
+        index += 1
+    }
+    true
 }
 
 fn parser_expression_definitely_diverges(expr: Expr) -> Bool Never! {
@@ -205,14 +260,35 @@ fn parser_parse_block(state: &JetParserState) -> ParsedBlock {
     parser_parse_body_block(&state, false)
 }
 
-// D-TAIL-RETURN1=A: `value_tail` marks the body of a callable with a declared
-// result. Its final line is in value position, where a finite source loop
-// with `->` keeps its collecting meaning (D-LOOP-STMT-ARROW1=C).
+// Rust `callable_tail_block_depth` (#18): the last line of a callable body
+// may be a bare value. `value_tail` marks the body of a callable with a
+// declared result (D-TAIL-RETURN1=A): its final line is in value position,
+// where a finite source loop with `->` keeps its collecting meaning
+// (D-LOOP-STMT-ARROW1=C).
+fn parser_parse_callable_body(state: &JetParserState, value_tail: Bool) -> ParsedBlock {
+    saved_tail_depth :: state.callable_tail_depth
+    state.callable_tail_depth = state.block_depth + 1
+    block :: parser_parse_body_block(&state, value_tail)
+    state.callable_tail_depth = saved_tail_depth
+    block
+}
+
+// Rust `block_stmts`: every braced statement list is one block level deeper.
 fn parser_parse_body_block(state: &JetParserState, value_tail: Bool) -> ParsedBlock {
+    state.block_depth += 1
+    block :: parser_parse_body_lines(&state, value_tail)
+    state.block_depth -= 1
+    block
+}
+
+fn parser_parse_body_lines(state: &JetParserState, value_tail: Bool) -> ParsedBlock {
     open :: parser_expect(&state, TOKEN_LBRACE, "`{{` to begin the block")
     statements := [Stmt]{}
     parser_skip_semicolons(&state)
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        // An abort still pending here was raised by an enclosing construct;
+        // its recovery rescans from the error, so reading on is wasted work.
+        if parser_aborting(&state) -> return ParsedBlock{span: parser_cover(open.span, parser_current(&state).span), statements: statements, tail: None}
         before := state.position
         kind :: parser_current_kind(&state)
         statement :: if {
@@ -287,6 +363,18 @@ fn parser_expression_is_collecting_loop(expr: Expr) -> Bool Never! {
 // statement or declaration instead of nesting every later prepared binding
 // inside the first one without bound.
 fn parser_parse_value_block(state: &JetParserState, depth: Int, prepared_value: Bool) -> ParsedBlock {
+    if !prepared_value -> return parser_parse_value_lines(&state, depth, false)
+    // Rust reads a prepared value's lines as a callable body (#18).
+    saved_tail_depth :: state.callable_tail_depth
+    state.block_depth += 1
+    state.callable_tail_depth = state.block_depth
+    block :: parser_parse_value_lines(&state, depth, true)
+    state.block_depth -= 1
+    state.callable_tail_depth = saved_tail_depth
+    block
+}
+
+fn parser_parse_value_lines(state: &JetParserState, depth: Int, prepared_value: Bool) -> ParsedBlock {
     open :: parser_expect(&state, TOKEN_LBRACE, "`{{` to begin the value block")
     statements := [Stmt]{}
     tail := Expr?{None}
@@ -294,6 +382,8 @@ fn parser_parse_value_block(state: &JetParserState, depth: Int, prepared_value: 
     // next value-block item; authored semicolons stay visible to diagnostics.
     parser_skip_synthetic_semicolons(&state)
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        // As in `parser_parse_body_block`: stop under an enclosing abort.
+        if parser_aborting(&state) -> return ParsedBlock{span: parser_cover(open.span, parser_current(&state).span), statements: statements, tail: tail}
         before := state.position
         if prepared_value && parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON && parser_prep_verb_ahead(&state, 2, TOKEN_LBRACE) {
             binding :: parser_current(&state)
@@ -303,7 +393,7 @@ fn parser_parse_value_block(state: &JetParserState, depth: Int, prepared_value: 
             return ParsedBlock{span: Span{start: open.span.start, end: binding.span.start}, statements: [Stmt]{}, tail: Val(Expr.Unit{span: open.span})}
         }
         if {
-            parser_statement_is_keyword(&state) -> &statements.push(parser_parse_statement(&state))
+            parser_statement_is_keyword(&state) || !parser_value_tail_ahead(state) -> &statements.push(parser_parse_statement(&state))
             else -> {
                 // As in Rust's value blocks: speculate on a tail value (a zero-width
                 // line terminator may sit before `}`), else reparse as a statement.
@@ -313,7 +403,7 @@ fn parser_parse_value_block(state: &JetParserState, depth: Int, prepared_value: 
                 saved_else_arms :: state.else_arms.len()
                 value :: parser_parse_expression(&state, 1, depth + 1)
                 current :: parser_current(&state)
-                if current.kind == TOKEN_RBRACE || (current.kind == TOKEN_SEMI && current.span.start == current.span.end && parser_kind_at(&state, 1) == TOKEN_RBRACE) {
+                if !parser_error_since(state, saved_diagnostics) && (current.kind == TOKEN_RBRACE || (current.kind == TOKEN_SEMI && current.span.start == current.span.end && parser_kind_at(&state, 1) == TOKEN_RBRACE)) {
                     if current.kind == TOKEN_SEMI -> parser_bump(&state)
                     tail = Val(value.expr)
                     break
@@ -358,9 +448,11 @@ fn parser_parse_statement(state: &JetParserState) -> Stmt {
             Stmt.Yield{value: value.expr, span: parser_cover(start.span, value.span)}
         }
         TOKEN_HASH -> parser_parse_marked_statement(&state)
+        TOKEN_KW_COMPTIME -> parser_parse_retired_comptime_statement(&state)
         TOKEN_IDENT -> {
             if parser_next_statement_ahead(&state) -> return parser_parse_next_statement(&state)
             if token.payload.decoded == "defer" -> return parser_parse_defer_statement(&state)
+            if token.payload.decoded == "assert" && parser_kind_at(&state, 1) == TOKEN_IDENT -> return parser_parse_assert_names(&state)
             if parser_prep_verb_ahead(&state, 0, TOKEN_KW_IF) -> return parser_parse_prep_if(&state)
             if parser_prep_verb_ahead(&state, 0, TOKEN_KW_LOOP) -> return parser_parse_prep_loop(&state)
             if parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) -> return parser_parse_prep_block(&state)
@@ -644,14 +736,38 @@ fn parser_if_body_is_arms(state: &JetParserState) -> Bool {
         if third.kind == TOKEN_IDENT && third.payload.decoded == "step" && parser_kind_at(&state, 5) == TOKEN_UNIFIED_ARROW -> return true
         return parser_kind_at(&state, 2) == TOKEN_EQ && parser_kind_at(&state, 4) == TOKEN_UNIFIED_ARROW
     }
+    // An arm head is followed by `->` on its own line, outside any group.
+    // Without one the line is a statement, and the expression parse below
+    // would read a nested body (`if c {`, `loop x in xs {`) only to undo it.
+    if !parser_line_arrow_ahead(state) -> return false
     saved_position :: state.position
     saved_diagnostics :: state.diagnostics.len()
     saved_blocks :: state.block_spans.len()
     saved_else_arms :: state.else_arms.len()
     _ := parser_parse_expression_no_struct_lit(&state, 1)
-    is_arm :: !parser_error_since(state, saved_diagnostics) && parser_current_kind(&state) == TOKEN_UNIFIED_ARROW
+    is_arm :: !parser_error_since(state, saved_diagnostics) && parser_at_unified_arrow(&state)
     parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
     is_arm
+}
+
+// Pure token scan: does the line at the cursor hold an arrow (`->`, or the
+// retired `=>`) outside its groups before the line ends?
+fn parser_line_arrow_ahead(state: JetParserState) -> Bool Never! {
+    depth := 0
+    index := state.position
+    loop index < state.tokens.len() {
+        kind :: state.tokens[index].kind
+        if kind == TOKEN_EOF -> return false
+        if depth == 0 && (kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LAMBDA_ARROW) -> return true
+        if depth == 0 && kind == TOKEN_SEMI -> return false
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
+        if parser_is_closer(kind) {
+            if depth == 0 -> return false
+            depth -= 1
+        }
+        index += 1
+    }
+    false
 }
 
 // D-IF3 / D-IFDIST1: the arms of `if subject OP { … }` (cursor just past
@@ -700,12 +816,15 @@ fn parser_parse_if_arms(state: &JetParserState, subject: Expr, start: Span, op: 
 fn parser_parse_if_arm_head(state: &JetParserState, subject: Expr, pattern_subject: Expr, op: BinOp) -> Expr {
     range :: parser_parse_range_arm_head(&state, pattern_subject)
     if range == .Val(head) -> return head
-    if parser_expression_form_pattern_rhs_ahead(&state) {
+    if parser_pattern_rhs_ahead(&state) {
         saved_position :: state.position
         saved_diagnostics :: state.diagnostics.len()
         saved_blocks :: state.block_spans.len()
         saved_else_arms :: state.else_arms.len()
         pattern :: parser_parse_pattern(&state, 1, true)
+        // Rust `try_pattern_rhs(true)?`: a fatal error inside the pattern
+        // ends the arm; only a complete pattern without `->` is reread.
+        if state.abort_mark > saved_diagnostics -> return parser_expression_form_pattern_condition(&state, pattern_subject, pattern, op)
         after :: parser_current_kind(&state)
         if after == TOKEN_UNIFIED_ARROW -> return parser_expression_form_pattern_condition(&state, pattern_subject, pattern, op)
         if after == TOKEN_AND_AND || after == TOKEN_OR_OR {
@@ -1057,6 +1176,24 @@ fn parser_parse_comptime_binding(state: &JetParserState) -> Stmt {
     Stmt.Val{binding: binding}
 }
 
+// Rust `KwComptime` statements: the retired keyword teaches E0374 and the
+// statement recovers as `prep if`, `prep { … }`, or the retired compile-time
+// binding `comptime name = value`.
+fn parser_parse_retired_comptime_statement(state: &JetParserState) -> Stmt {
+    keyword :: parser_current(&state)
+    parser_add_error_code(&state, "E0374", keyword.span, "`comptime` is retired", "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane", "remove the keyword; a build-time value is written `name :: prep {{ … }}`, and `prep {{ … }}` runs other work while building")
+    if parser_kind_at(&state, 1) == TOKEN_KW_IF -> return parser_parse_prep_if(&state)
+    if parser_kind_at(&state, 1) == TOKEN_LBRACE -> return parser_parse_prep_block(&state)
+    parser_bump(&state)
+    name :: parser_expect_name(&state, "for the compile-time binding")
+    parser_expect(&state, TOKEN_EQ, "`=` in the retired comptime binding")
+    value :: parser_parse_expression(&state, 1, 0)
+    binding := ast_binding(name.payload.decoded, name.span, false, value.expr, None)
+    binding.is_comptime = true
+    parser_finish_statement(&state)
+    Stmt.Val{binding: binding}
+}
+
 // D-PREP-BRANCH1=A / D-PREP-FN1=A: `prep` leads a build-time verb only when
 // the verb keyword follows it on the same line; everywhere else `prep` is an
 // ordinary name, so the lexer never reserves it.
@@ -1276,21 +1413,60 @@ fn parser_parse_retired_typed_binding(state: &JetParserState, name: Token) -> St
     Val(Stmt.Val{binding: binding})
 }
 
+// Rust `KW_DEFER`: `defer close(^resource)` keeps the whole close call; any
+// other shape is fatal at the statement.
 fn parser_parse_defer_statement(state: &JetParserState) -> Stmt {
     start :: parser_bump(&state)
-    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "close" {
-        parser_bump(&state)
-        close :: parser_parse_expression(&state, 1, 0)
-        parser_finish_statement(&state)
-        return Stmt.DeferClose{close: close.expr, span: parser_cover(start.span, close.span)}
+    close :: parser_parse_expression(&state, 1, 0)
+    valid :: if close.expr == {
+        .Call(call) -> call.name == "close" && call.args.len() == 1 && call.args[0].convention == AccessConvention.Move && call.args[0].expr == .Ident(_, _)
+        else -> false
     }
-    parser_add_error(&state, start.span, "expected `close` after `defer`", "deferred resource cleanup uses the consuming close operation", "write `defer close(^resource)`")
+    span :: parser_cover(start.span, close.span)
+    if !valid {
+        parser_add_error(&state, span, "`defer` only schedules a consuming resource close", "Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked through the move marker `^`", "write `defer close(^resource)` with the move marker `^`")
+        return Stmt.Expr{expr: Expr.Unit{span: start.span}}
+    }
     parser_finish_statement(&state)
-    Stmt.Expr{expr: Expr.Unit{span: start.span}}
+    Stmt.DeferClose{close: close.expr, span: span}
 }
 
+// Rust `KW_ASSERT`: `assert a, b` records unsafe-evidence names as the
+// internal assertion call that sema removes before TIR.
+fn parser_parse_assert_names(state: &JetParserState) -> Stmt {
+    start :: parser_bump(&state)
+    args := [CallArg]{}
+    loop {
+        name :: parser_expect_name(&state, "after `assert`")
+        &args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Ident{name: name.payload.decoded, span: name.span}, span: name.span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+        if parser_current_kind(&state) != TOKEN_COMMA -> break
+        parser_bump(&state)
+        if parser_current_kind(&state) == TOKEN_RPAREN -> break
+    }
+    parser_finish_statement(&state)
+    Stmt.Expr{expr: Expr.Call{call: Call{name: "__jet_unsafe_assert", name_span: start.span, type_args: [Type]{}, args: args, resolved_ret: None, range_checked: false, widen_approx: false}}}
+}
+
+// Rust `stmt`, its name/`self` arm and its general expression arm (#18): a
+// line must do something. A computed value is allowed only as the bare last
+// line of a callable body; any other unused value is fatal E0003.
 fn parser_parse_assignment_or_expression(state: &JetParserState) -> Stmt {
+    start :: parser_current(&state)
+    if start.kind == TOKEN_KW_IN {
+        parser_bump(&state)
+        parser_add_error(&state, start.span, "`in` is reserved as the source-loop keyword", "the `in` keyword marks the boundary between a loop binding and its source", "choose a different identifier name, or use `in` in a source loop; after `.` it is allowed as a member name")
+        return Stmt.Expr{expr: Expr.Unit{span: start.span}}
+    }
+    named :: start.kind == TOKEN_IDENT || start.kind == TOKEN_SELF
+    if !named && !parser_starts_expression(start.kind) {
+        parser_report_not_a_statement(&state, start)
+        return Stmt.Expr{expr: Expr.Unit{span: start.span}}
+    }
     left :: parser_parse_expression(&state, 1, 0)
+    if parser_refutable_test_binding(left.expr) == .Val(binding) {
+        parser_finish_statement(&state)
+        return Stmt.Val{binding: binding}
+    }
     operator :: parser_current_kind(&state)
     if parser_is_assignment_operator(operator) {
         op_token :: parser_bump(&state)
@@ -1299,8 +1475,100 @@ fn parser_parse_assignment_or_expression(state: &JetParserState) -> Stmt {
         target :: parser_expression_lvalue(&state, left.expr, left.span, op_token)
         return Stmt.Assign{target: target, op: parser_assignment_binop(operator), op_span: op_token.span, value: right.expr}
     }
+    if named && !parser_named_line_does_work(&state, left.expr) {
+        parser_add_error(&state, expr_span(left.expr), "this line computes a value but doesn't do anything with it", "only calls, bindings, assignments, and `return` are allowed here", "use the value, e.g. `x :: ...` or `print(...)`")
+        return Stmt.Expr{expr: left.expr}
+    }
+    if !named && !parser_marked_line_does_work(&state, left.expr, start.kind) {
+        parser_report_not_a_statement(&state, start)
+        return Stmt.Expr{expr: left.expr}
+    }
     parser_finish_statement(&state)
     Stmt.Expr{expr: left.expr}
+}
+
+fn parser_report_not_a_statement(state: &JetParserState, start: Token) {
+    parser_add_error(&state, start.span, "expected a call, binding, assignment, or `return`, found {parser_describe_token(start)}", "inside a function body, write a call, binding, assignment, or `return`", "e.g. print(\"hello\") or x :: 1")
+}
+
+// Rust `starts_expr`: the tokens that can open an expression line.
+fn parser_starts_expression(kind: Int) -> Bool Never! {
+    if kind == TOKEN_IDENT || kind == TOKEN_INT || kind == TOKEN_FLOAT || kind == TOKEN_UNIT_NUMBER || kind == TOKEN_RAW_STRING || kind == TOKEN_STRING || kind == TOKEN_CHAR -> return true
+    if kind == TOKEN_TRUE || kind == TOKEN_FALSE || kind == TOKEN_NULL || kind == TOKEN_KW_IT || kind == TOKEN_SELF || kind == TOKEN_KW_LOOP || kind == TOKEN_KW_IF || kind == TOKEN_KW_MOVE || kind == TOKEN_KW_COPY -> return true
+    if kind == TOKEN_LPAREN || kind == TOKEN_LBRACE || kind == TOKEN_LBRACKET || kind == TOKEN_HASH || kind == TOKEN_DOLLAR || kind == TOKEN_DOT -> return true
+    kind == TOKEN_MINUS || kind == TOKEN_BANG || kind == TOKEN_TILDE || kind == TOKEN_STAR || kind == TOKEN_AMP || kind == TOKEN_CARET || kind == TOKEN_PLUS_PLUS || kind == TOKEN_MINUS_MINUS
+}
+
+// A line that starts with a name or `self` works when it calls, names a
+// field place, propagates or falls back (`?`, `??`), names a compile-time
+// value, or is the compact Result handler. `x?.m()` is Rust's `CallValue`
+// on an `OptField`.
+fn parser_named_line_does_work(state: &JetParserState, expr: Expr) -> Bool Never! {
+    works :: if expr == {
+        .Call(_) | .Field(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _) | .ComptimeName(_, _, _) | .Try(_, _, _, _) | .OrFallback(_, _, _, _) -> true
+        .CallValue(callee, _, _) -> callee == .OptField(_, _, _, _, _)
+        .If(_, _, _, _, _, _) -> parser_is_result_handler_expr(expr)
+        else -> false
+    }
+    works || parser_at_callable_tail(&state) || parser_recovered_retired_step(&state, expr)
+}
+
+// D-CAP-RECEIVER1=D: any other line works when it starts with the `&`/`^`
+// mark of the call that writes or takes that place (`&buf.push(x)`).
+fn parser_marked_line_does_work(state: &JetParserState, expr: Expr, start_kind: Int) -> Bool Never! {
+    if start_kind == TOKEN_AMP || start_kind == TOKEN_CARET {
+        call :: if expr == {
+            .Call(_) | .MethodCall(_, _, _, _, _, _, _, _, _, _) | .Try(_, _, _, _) | .OrFallback(_, _, _, _) -> true
+            else -> false
+        }
+        if call -> return true
+    }
+    parser_recovered_retired_step(&state, expr) || parser_at_callable_tail(&state)
+}
+
+// The line ends the innermost callable body (before its `}`).
+fn parser_at_callable_tail(state: &JetParserState) -> Bool Never! {
+    if state.callable_tail_depth != state.block_depth -> return false
+    kind :: parser_current_kind(&state)
+    kind == TOKEN_RBRACE || (kind == TOKEN_SEMI && parser_kind_at(&state, 1) == TOKEN_RBRACE)
+}
+
+// Rust `recovered_retired_step`: the operand of a retired `++`/`--` step
+// that ends right here; E0160 already covers the line.
+fn parser_recovered_retired_step(state: &JetParserState, expr: Expr) -> Bool Never! {
+    previous_end :: parser_lookahead(&state, -1).span.end
+    whole :: state.retired_step ?? return false
+    span :: expr_span(expr)
+    whole.end == previous_end && whole.start <= span.start && span.end <= whole.end
+}
+
+// Rust `is_result_handler_expr`: `value ? ok -> … ! err -> …` is the one
+// value `if` allowed as an effect line.
+fn parser_is_result_handler_expr(expr: Expr) -> Bool Never! {
+    if expr == .If(cond, _, _, _, else_value, _) {
+        if cond == .PatternTest(_, ok_pattern, _) {
+            if else_value == .If(err_cond, _, _, _, terminal, _) {
+                if err_cond == .PatternTest(_, err_pattern, _) -> return ok_pattern == .Ok(_, _, _, _) && err_pattern == .Err(_, _, _, _) && terminal == .NoElse(_)
+            }
+        }
+    }
+    false
+}
+
+// Rust `try_refutable_test_binding` (D-CHOOSE-TEST1=A): a pattern test with
+// a diverging fallback that captures names is a statement binding; the
+// tested subject is the binding's value.
+fn parser_refutable_test_binding(expr: Expr) -> Binding? {
+    if expr == .OrFallback(value, fallback, _, span) {
+        if value == .PatternTest(subject, pattern, pattern_span) {
+            names :: pattern_binding_names(pattern)
+            if names.len() == 0 -> return None
+            binding := ast_binding("", pattern_span, false, subject, None)
+            binding.pattern = Val(BindPattern.Refutable{pattern: pattern, fallback: fallback, names: names, span: span})
+            return Val(binding)
+        }
+    }
+    None
 }
 
 fn parser_is_assignment_operator(kind: Int) -> Bool Never! {

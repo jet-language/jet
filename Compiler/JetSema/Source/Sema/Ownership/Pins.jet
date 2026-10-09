@@ -37,10 +37,13 @@ fn sema_pin_type(ty: Type) -> Bool Never! {
 }
 
 // Rust `ViewKind::Pin`: a view fact is a pin when its carrier holds a `Pin<T>`.
+// The carrier key was resolved from the carrier's name, so only that name's
+// binding positions can hold it; the scan stays off the module-wide table.
 pub fn sema_pin_view_fact(fact: SemaOwnershipViewFact, scopes: SemaScopeTable) -> Bool Never! {
-    loop binding in scopes.bindings {
-        if binding.symbol.id.key == fact.carrier_key {
-            ty :: binding.symbol.ty ?? return false
+    slot :: scopes.name_slots.get(fact.carrier) ?? return false
+    loop position in scopes.name_positions[slot] {
+        if scopes.bindings[position].symbol.id.key == fact.carrier_key {
+            ty :: scopes.bindings[position].symbol.ty ?? return false
             return sema_pin_type(ty)
         }
     }

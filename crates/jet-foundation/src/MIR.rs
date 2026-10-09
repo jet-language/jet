@@ -3528,6 +3528,35 @@ impl MirOptimizationFacts {
         self.fusion_facts.clear();
         self.acceleration_facts.clear();
     }
+
+    /// The optimizer pipeline seal (`derived_from_digest`) as lowercase hex,
+    /// the spelling Source MIR (`JetFoundation` `mir_program_digest`) carries.
+    /// The bootstrap's Source MIR conversion round-trips the seal through
+    /// these two accessors instead of re-digesting the whole program.
+    pub fn pipeline_seal_hex(&self) -> Option<String> {
+        self.derived_from_digest
+            .map(|digest| digest.iter().map(|byte| format!("{byte:02x}")).collect())
+    }
+
+    pub fn set_pipeline_seal_hex(&mut self, seal: Option<&str>) -> Result<(), String> {
+        self.derived_from_digest = match seal {
+            None => None,
+            Some(hex) => {
+                let bytes = hex.as_bytes();
+                if bytes.len() != 64 {
+                    return Err(format!("MIR pipeline seal `{hex}` is not 64 hex digits"));
+                }
+                let mut digest = [0u8; 32];
+                for (index, pair) in bytes.chunks_exact(2).enumerate() {
+                    let text = std::str::from_utf8(pair).map_err(|_| "MIR pipeline seal is not ASCII hex".to_string())?;
+                    digest[index] = u8::from_str_radix(text, 16)
+                        .map_err(|_| format!("MIR pipeline seal `{hex}` is not hex"))?;
+                }
+                Some(digest)
+            }
+        };
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7449,6 +7478,14 @@ impl MirProgram {
     ) -> Result<MirArtifactIdentity, MirIdentityError> {
         let program_digest = crate::MIROptimization::canonical_mir_digest(self)
             .map_err(|error| MirIdentityError::Unoptimized(error.to_string()))?;
+        self.artifact_identity_with_digest(id, program_digest)
+    }
+
+    fn artifact_identity_with_digest(
+        &self,
+        id: MirArtifactId,
+        program_digest: [u8; 32],
+    ) -> Result<MirArtifactIdentity, MirIdentityError> {
         let artifact = self
             .artifacts
             .iter()
@@ -7562,15 +7599,39 @@ impl MirProgram {
         &self,
         artifact: Option<MirArtifactId>,
     ) -> Result<MirExecutionIdentity, MirIdentityError> {
-        let artifact = match artifact {
-            Some(id) => self.artifact_identity(id)?,
-            None if self.artifacts.len() == 1 => self.artifact_identity(self.artifacts[0].id)?,
-            None => return Err(MirIdentityError::AmbiguousArtifact),
-        };
+        let id = self.single_artifact(artifact)?;
         Ok(MirExecutionIdentity {
             schema_version: MIR_IDENTITY_SCHEMA_VERSION,
-            artifact,
+            artifact: self.artifact_identity(id)?,
         })
+    }
+
+    /// [`Self::execution_identity`] of a program from a trusted, checksummed
+    /// compiler image: the digest is the optimizer pipeline seal every function
+    /// carries, not a fresh whole-program legality check and re-digest (which
+    /// verification builds would otherwise run over the entire compiler).
+    pub fn sealed_execution_identity(
+        &self,
+        artifact: Option<MirArtifactId>,
+    ) -> Result<MirExecutionIdentity, MirIdentityError> {
+        let id = self.single_artifact(artifact)?;
+        let program_digest = crate::MIROptimization::sealed_mir_digest(self).ok_or_else(|| {
+            MirIdentityError::Unoptimized(
+                "MIR does not carry one complete optimizer pipeline seal".to_string(),
+            )
+        })?;
+        Ok(MirExecutionIdentity {
+            schema_version: MIR_IDENTITY_SCHEMA_VERSION,
+            artifact: self.artifact_identity_with_digest(id, program_digest)?,
+        })
+    }
+
+    fn single_artifact(&self, artifact: Option<MirArtifactId>) -> Result<MirArtifactId, MirIdentityError> {
+        match artifact {
+            Some(id) => Ok(id),
+            None if self.artifacts.len() == 1 => Ok(self.artifacts[0].id),
+            None => Err(MirIdentityError::AmbiguousArtifact),
+        }
     }
 
     pub fn frame_identity(

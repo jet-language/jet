@@ -913,7 +913,7 @@ fn jet_codegen_for_in_owns_source(builder: JetCodegenBuilder, source_kind: MIRLo
         .Chars -> return false
         .LinesFile | .LinesStdin | .LinesProcessStream | .ChannelReceiver | .EncodingReader(_) -> return true
         .Iterable(_, _, iter_symbol, _) -> {
-            function :: jet_codegen_find_function(builder.functions, iter_symbol) ?? panic("checked Iterable iter method has no reachable TFunc")
+            function :: jet_codegen_find_function(builder.function_index, iter_symbol) ?? panic("checked Iterable iter method has no reachable TFunc")
             if function.kind == {
                 .Method(convention, _) | .TraitMethod(_, convention, _, _, _) -> {
                     if convention == None -> panic("checked Iterable iter method has no receiver convention")
@@ -969,7 +969,7 @@ fn jet_codegen_for_in_tuple_field_id(builder: JetCodegenBuilder, ty: Type, membe
 // when `collection` is not such a list. A columnar list (D-SOA1) stores one
 // column per field, so its slots are not places an alias can name; the caller
 // keeps the gathered-record iteration for it.
-fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?, variable: String, collection: TExpr, body: [TStmt], span: Span) -> Bool {
+fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?, variable: TLocal, collection: TExpr, body: [TStmt], span: Span) -> Bool {
     listed := Type?{None}
     if jet_codegen_builtin_untag(collection.ty) == .List(inner) -> listed = Val(inner)
     element :: listed ?? return false
@@ -996,7 +996,7 @@ fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?,
     index_expr := TExpr{ty: Type.Int, kind: TExprKind.Local{local: index_local}, span: span, integer_bounds: None, cost: None}
     location := jet_codegen_assignment_panic_location(&builder, span, false)
     item_place := jet_codegen_index_place(&builder, collection, index_expr, TIndexKind.List, element, MIRAccess.Read, location, span)
-    _ := jet_codegen_bind_local_alias(&builder, tir_user_local(variable, span), element, item_place, false)
+    _ := jet_codegen_bind_local_alias(&builder, variable, element, item_place, false)
     jet_codegen_lower_block(&builder, body)
     if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MIRTerminator.Jump{target: advance_block})
     jet_codegen_switch_block(&builder, advance_block)
@@ -1011,7 +1011,7 @@ fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?,
     true
 }
 
-fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, label: String?, variable: String, variable_two: String?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, body: [TStmt], span: Span) {
+fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, label: String?, variable: TLocal, variable_two: TLocal?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, body: [TStmt], span: Span) {
     if method_kind == None && variable_two == None && step == None && !by_value && !columnar && jet_codegen_lower_read_list_walk(&builder, label, variable, collection, body, span) -> return
     iter_init_call := jet_codegen_add_loop_prelude_call(&builder, "loop_iter_init", "jet_loop_iter_init", 5, [Bool]{false, false, false, false, false})
     iter_has_next_call := jet_codegen_add_loop_prelude_call(&builder, "loop_iter_has_next", "jet_loop_iter_has_next", 1, [Bool]{true})
@@ -1089,14 +1089,9 @@ fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, label: String?, variabl
             }
         }
     }
-    first_local := tir_user_local(variable, span)
-    first_place := jet_codegen_bind_local(&builder, first_local, first_type, false, None, None, false)
+    first_place := jet_codegen_bind_local(&builder, variable, first_type, false, None, None, false)
     second_place := MIRPlaceID?{None}
-    if variable_two != None {
-        second_name :: variable_two
-        second_local := tir_user_local(second_name, span)
-        second_place = Val(jet_codegen_bind_local(&builder, second_local, second_type, false, None, None, false))
-    }
+    if variable_two == .Val(second_local) -> second_place = Val(jet_codegen_bind_local(&builder, second_local, second_type, false, None, None, false))
     condition_block := jet_codegen_new_block(&builder, span, "for-in-condition")
     body_block := jet_codegen_new_block(&builder, span, "for-in-body")
     advance_block := jet_codegen_new_block(&builder, span, "for-in-advance")
@@ -1388,7 +1383,7 @@ fn jet_codegen_index_hook_function(builder: JetCodegenBuilder, owner_type: Type,
         }
     }
     method_key :: exact_method_key ?? (fallback_method_key ?? panic("checked {trait_name} receiver has no registered {method_name} implementation"))
-    Val(jet_codegen_find_function(builder.functions, method_key) ?? panic("checked {trait_name}::{method_name} function is not reachable"))
+    Val(jet_codegen_find_function(builder.function_index, method_key) ?? panic("checked {trait_name}::{method_name} function is not reachable"))
 }
 
 fn jet_codegen_index_hook_trait_method(builder: JetCodegenBuilder, owner_type: Type, required_symbol: SymbolID?, trait_name: String, method_name: String) -> JetCodegenIndexHookTraitMethod Never! {
@@ -1824,7 +1819,7 @@ fn jet_codegen_is_unit_type(ty: Type) -> Bool Never! {
 }
 
 fn jet_codegen_transaction_method_expr(builder: JetCodegenBuilder, local: TLocal, owner: Type, method_ref: TMethodRef, args: [TCallArg], span: Span) -> TExpr Never! {
-    function :: jet_codegen_find_function(builder.functions, method_ref.symbol.key) ?? panic("checked Rollback::{method_ref.name} method has no reachable TFunc")
+    function :: jet_codegen_find_function(builder.function_index, method_ref.symbol.key) ?? panic("checked Rollback::{method_ref.name} method has no reachable TFunc")
     if function.key != method_ref.symbol.key -> panic("checked Rollback method SymbolId resolved to a different TFunc")
     return_type := function.ret ?? Type.Named{name: "Unit"}
     receiver := TExpr{ty: owner, kind: TExprKind.Local{local: local}, span: span, integer_bounds: None, cost: None}
@@ -2192,7 +2187,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
         }
         .CountedLoop(label, init, condition, step, vectorization, body, span) -> jet_codegen_lower_counted_loop(&builder, label, init, condition, step, vectorization, body, span)
         .ForRange(label, local, start, end, step, exclusive, body, vectorization, span) -> jet_codegen_lower_range_loop(&builder, label, local, None, start, end, step, exclusive, vectorization, body, span)
-        .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> jet_codegen_lower_range_loop(&builder, label, tir_user_local(variable, span), source, start, end, step, exclusive, vectorization, body, span)
+        .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> jet_codegen_lower_range_loop(&builder, label, variable, source, start, end, step, exclusive, vectorization, body, span)
         .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, body, span) -> jet_codegen_lower_for_in(&builder, label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, body, span)
         .Loop(label, body, span) -> {
             body_block := jet_codegen_new_block(&builder, span, "loop-body")

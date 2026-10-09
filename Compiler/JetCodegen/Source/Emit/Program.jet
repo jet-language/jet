@@ -163,7 +163,7 @@ fn jet_rust_emit_foreign(ctx: &JetRustEmitContext, foreign: MIRForeign) -> [Stri
     if transport == "managed" || transport == "managed-close" || transport == "emit-task" -> return lines
     params := [String]{}
     loop parameter in foreign.params {
-        name :: jet_rust_emit_sanitize(parameter.name)
+        name :: jet_rust_emit_mangle(parameter.name)
         &params.push("{name}: {jet_rust_emit_foreign_param_type(&ctx, foreign, parameter)}")
     }
     if transport == "native-start" -> &params.push("__jet_callback_ctx: *mut core::ffi::c_void")
@@ -181,7 +181,7 @@ fn jet_rust_emit_foreign(ctx: &JetRustEmitContext, foreign: MIRForeign) -> [Stri
 // const expressions. A folded list over 16 KB of rows is cached instead.
 fn jet_rust_emit_constant_definition(ctx: &JetRustEmitContext, definition: MIRConstantDef) -> String Never! {
     visibility :: jet_rust_emit_visibility(definition.visibility)
-    name :: jet_rust_emit_symbol("__jet_const_", definition.name, definition.id.value)
+    name :: jet_rust_emit_generated_path(definition.key)
     ty :: jet_rust_emit_type(&ctx, definition.ty)
     listed :: if definition.ty.kind == {
         .List(_) -> !definition.is_storage && !jet_rust_emit_is_no_os(&ctx)
@@ -277,7 +277,16 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> 
     lines := [String]{}
     jet_rust_emit_program_header(&ctx, &lines)
     jet_rust_emit_hardware_facts(&ctx, &lines)
-    if ctx.config.emit_foreign -> jet_rust_emit_c_abi_type_definitions(&ctx, &lines)
+    // MIRRust module_selected: only the selected artifact's modules emit items.
+    selected := [String:Bool]{}
+    artifact :: jet_rust_emit_selected_artifact(&ctx)
+    if artifact == .Val(plan) {
+        loop module_id in plan.modules -> selected[jet_rust_emit_id_key(module_id.value)] = true
+    }
+    all_selected :: artifact == None
+    // MIRRust emit_mir_program_items order: types, traits and constants (all
+    // under emit_types), link closure, C ABI records, foreign items, callback
+    // trampolines, impls, then top-level functions.
     if ctx.config.emit_types {
         loop handle in ctx.program.handles {
             handle_lines := [String]{}
@@ -286,26 +295,53 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> 
             if handle_lines.len() > 0 -> &lines.push("")
         }
         loop definition in ctx.program.types {
+            if !all_selected && selected.get(jet_rust_emit_id_key(definition.module_id.value)) == None -> next
             start :: lines.len()
             jet_rust_emit_type_definition(&ctx, definition, &lines)
-            &lines.push("")
             if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_module_unit(units, definition.module_id, definition.span.start), start, lines.len())
         }
         jet_rust_emit_period_anchor_impls(&ctx, &lines)
+        loop definition in ctx.program.traits {
+            if !all_selected && selected.get(jet_rust_emit_id_key(definition.module_id.value)) == None -> next
+            // MIRRust: the cached runtime declares compiler-owned traits; only
+            // Rollback keeps a per-program declaration.
+            if definition.name != "Rollback" && (jet_rust_emit_compiler_owned_trait(definition.name) || jet_rust_emit_compiler_owned_trait(definition.key)) -> next
+            start :: lines.len()
+            trait_lines := [String]{}
+            jet_rust_emit_trait_definition(&ctx, definition, &trait_lines)
+            loop line in trait_lines -> &lines.push(line)
+            &lines.push("")
+            if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_module_unit(units, definition.module_id, definition.span.start), start, lines.len())
+        }
+        loop constant in ctx.program.constants {
+            if !all_selected && selected.get(jet_rust_emit_id_key(constant.module_id.value)) == None -> next
+            start :: lines.len()
+            &lines.push(jet_rust_emit_constant_definition(&ctx, constant))
+            &lines.push("")
+            if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_module_unit(units, constant.module_id, constant.span.start), start, lines.len())
+        }
     }
-    loop definition in ctx.program.traits {
-        // MIRRust: the cached runtime declares compiler-owned traits; only
-        // Rollback keeps a per-program declaration.
-        if definition.name != "Rollback" && (jet_rust_emit_compiler_owned_trait(definition.name) || jet_rust_emit_compiler_owned_trait(definition.key)) -> next
-        start :: lines.len()
-        trait_lines := [String]{}
-        jet_rust_emit_trait_definition(&ctx, definition, &trait_lines)
-        loop line in trait_lines -> &lines.push(line)
-        &lines.push("")
-        if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_module_unit(units, definition.module_id, definition.span.start), start, lines.len())
+    jet_rust_emit_link_closure(&ctx, &lines)
+    jet_rust_emit_c_abi_type_definitions(&ctx, &lines)
+    if ctx.config.emit_foreign {
+        loop foreign in ctx.program.foreign {
+            if !all_selected && selected.get(jet_rust_emit_id_key(foreign.module_id.value)) == None -> next
+            if jet_rust_emit_foreign_target_enabled(&ctx, foreign) {
+                start :: lines.len()
+                foreign_lines :: jet_rust_emit_foreign(&ctx, foreign)
+                loop line in foreign_lines -> &lines.push(line)
+                &lines.push("")
+                if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_module_unit(units, foreign.module_id, foreign.span.start), start, lines.len())
+            }
+        }
     }
+    jet_rust_emit_callback_trampolines(&ctx, &lines)
     codec_keep :: mir_demanded_codec_impls(ctx.program)
     loop (index, implementation) in ctx.program.impls {
+        if !all_selected && selected.get(jet_rust_emit_id_key(implementation.module_id.value)) == None {
+            loop method_id in implementation.methods -> ctx.skipped_methods[jet_rust_emit_id_key(method_id.value)] = true
+            next
+        }
         if !codec_keep[index] {
             loop method_id in implementation.methods -> ctx.skipped_methods[jet_rust_emit_id_key(method_id.value)] = true
             next
@@ -319,25 +355,8 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> 
             if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_impl_unit(&ctx, units, implementation), start, lines.len())
         }
     }
-    loop constant in ctx.program.constants {
-        start :: lines.len()
-        &lines.push(jet_rust_emit_constant_definition(&ctx, constant))
-        if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_module_unit(units, constant.module_id, constant.span.start), start, lines.len())
-    }
-    jet_rust_emit_link_closure(&ctx, &lines)
-    if ctx.config.emit_foreign {
-        loop foreign in ctx.program.foreign {
-            if jet_rust_emit_foreign_target_enabled(&ctx, foreign) {
-                start :: lines.len()
-                foreign_lines :: jet_rust_emit_foreign(&ctx, foreign)
-                loop line in foreign_lines -> &lines.push(line)
-                &lines.push("")
-                if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_module_unit(units, foreign.module_id, foreign.span.start), start, lines.len())
-            }
-        }
-    }
-    jet_rust_emit_callback_trampolines(&ctx, &lines)
     loop function in ctx.program.functions {
+        if !all_selected && selected.get(jet_rust_emit_id_key(function.module_id.value)) == None -> next
         if jet_rust_emit_function_target_enabled(ctx.config, function) && ctx.skipped_methods.get(jet_rust_emit_id_key(function.id.value)) == None {
             start :: lines.len()
             function_lines :: jet_rust_emit_function(&ctx, function)

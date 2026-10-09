@@ -200,7 +200,7 @@ fn jet_codegen_inline_assembly_rust_source(row: SemaCheckedForeignFunction, inli
 
 pub fn jet_codegen_prepare_inline_assembly_artifact(function: Func, function_identity: String, row: SemaCheckedForeignFunction, selected_target: String) -> JetCodegenInlineAssemblyArtifact Never! {
     inline :: function.inline_foreign ?? panic("checked inline assembly function lost its InlineForeign payload")
-    contract :: inline.asm_contract ?? panic("checked inline assembly function lost its normalized operand contract")
+    contract :: row.asm_contract ?? panic("checked inline assembly row lost its normalized operand contract")
     if function.name != row.name || function_identity != row.symbol_id.key || row.owner != SemaCheckedForeignOwner.Inline || inline.lang != "asm" || row.language != "asm" -> panic("inline assembly artifact identity does not match its checked function")
     if contract.target != selected_target -> panic("checked inline assembly target differs from the selected artifact target")
     if row.path != "jet_ffi_{function.name}" || row.symbol != "jet_inline_{row.path}" -> panic("checked inline assembly wrapper identity is not canonical")

@@ -38,8 +38,13 @@ fn mir_pass_eliminate_dead_pure(program: &MIRProgram) -> Int Never! {
 }
 
 fn mir_pass_dead_pure_sweep(function: MIRFunction, prelude_calls: [MIRPreludeCall]) -> MIRPassDeadSweep Never! {
-    analysis :: mir_optimizer_analyze_function(function)
-    uses :: analysis.def_use
+    // Counts and value metadata are keyed once per sweep; a value without a
+    // metadata row is never removable, whatever its count.
+    uses :: mir_pass_value_use_counts(function)
+    value_rows := [Int:Int]{}
+    loop (position, value) in function.values {
+        if value_rows.get(value.id.value) == None -> &value_rows.add(value.id.value, position).drop("checked absent above")
+    }
     removed := 0
     kept_blocks := [MIRBasicBlock]{}
     loop block in function.blocks {
@@ -47,11 +52,9 @@ fn mir_pass_dead_pure_sweep(function: MIRFunction, prelude_calls: [MIRPreludeCal
         loop instruction in block.instructions {
             removable := false
             if instruction.result == .Val(result) {
-                use_count :: mir_pass_use_count_from_rows(uses, result)
-                if use_count == 0 {
-                    metadata :: mir_pass_find_value(function.values, result)
-                    if metadata == .Val(fact) {
-                        removable = mir_pass_removable_dead(instruction.operation, instruction.ty, fact.ownership, prelude_calls)
+                if (uses.get(result.value) ?? 0) == 0 {
+                    if value_rows.get(result.value) == .Val(position) {
+                        removable = mir_pass_removable_dead(instruction.operation, instruction.ty, function.values[position].ownership, prelude_calls)
                     }
                 }
             }
@@ -66,30 +69,22 @@ fn mir_pass_dead_pure_sweep(function: MIRFunction, prelude_calls: [MIRPreludeCal
 }
 
 fn mir_pass_defined_values(function: MIRFunction) -> [MIRValueFact] Never! {
+    defined := [Int:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.result == .Val(result) -> &defined.add(result.value, true).drop("a result may repeat")
+        }
+    }
     kept_values := [MIRValueFact]{}
     loop value in function.values {
-        if mir_pass_value_defined(function, value.id) -> &kept_values.push(value)
+        if defined.get(value.id.value) != None -> &kept_values.push(value)
     }
     kept_values
-}
-
-fn mir_pass_use_count_from_rows(rows: [MIROptimizationDefUseRow], value: MIRValueID) -> Int Never! {
-    loop row in rows { if row.value == value -> return row.use_count }
-    0
 }
 
 fn mir_pass_find_value(values: [MIRValueFact], value: MIRValueID) -> MIRValueFact? {
     loop row in values { if row.id == value -> return Val(row) }
     None
-}
-
-fn mir_pass_value_defined(function: MIRFunction, value: MIRValueID) -> Bool Never! {
-    loop block in function.blocks {
-        loop instruction in block.instructions {
-            if Val(value) == instruction.result -> return true
-        }
-    }
-    false
 }
 
 fn mir_pass_removable_dead(operation: MIROperation, ty: MIRType?, ownership: MIROwnership, prelude_calls: [MIRPreludeCall]) -> Bool Never! {

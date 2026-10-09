@@ -4550,7 +4550,7 @@ pub fn require_canonical_mir_optimization(
 /// with that seal; anything else takes the full check for its exact error.
 pub fn canonical_mir_digest(program: &MirProgram) -> Result<[u8; 32], MirOptimizationError> {
     if !mir_verification_enabled() && !CanonicalPass::enabled() {
-        if let Some(seal) = sealed_digest(program) {
+        if let Some(seal) = sealed_mir_digest(program) {
             return Ok(seal);
         }
     }
@@ -4585,7 +4585,9 @@ pub fn canonical_mir_digest(program: &MirProgram) -> Result<[u8; 32], MirOptimiz
 
 /// The seal shared by every function once the pipeline completed, or `None`
 /// when a function lacks the complete pass order or the seals disagree.
-fn sealed_digest(program: &MirProgram) -> Option<[u8; 32]> {
+/// Callers that trust the program's producer (a checksummed compiler image)
+/// use it as the program digest without re-verifying or re-digesting.
+pub fn sealed_mir_digest(program: &MirProgram) -> Option<[u8; 32]> {
     let mut seal = None;
     for function in &program.functions {
         if function.optimization.pass_ids.as_slice() != MIR_OPTIMIZATION_PASS_ORDER.as_slice() {
@@ -5035,44 +5037,64 @@ pub fn decision_ledger(
 /// the cloned body keeps every branch, cleanup operation, failure edge, and
 /// early return visible to all later adapters.
 fn expand_inline_always(program: &mut MirProgram) {
+    let mut function_indices = HashMap::new();
+    let mut eligible = HashSet::new();
+    for (index, function) in program.functions.iter().enumerate() {
+        if let std::collections::hash_map::Entry::Vacant(entry) = function_indices.entry(function.id) {
+            entry.insert(index);
+            if function.is_inline_always {
+                eligible.insert(function.id);
+            }
+        }
+    }
+    if eligible.is_empty() {
+        return;
+    }
+    // Only changed bodies need discovery again. Positions retain the original
+    // function/block/instruction order, including newly cloned nested calls.
+    let mut pending = program
+        .functions
+        .iter()
+        .map(|function| inline_candidates(function, &eligible))
+        .collect::<Vec<_>>();
+    // Only callers with an initial candidate can gain cloned candidates.
+    let callers = pending
+        .iter()
+        .enumerate()
+        .filter_map(|(index, candidates)| (!candidates.is_empty()).then_some(index))
+        .collect::<Vec<_>>();
     loop {
         let mut changed = false;
-        'search: for caller_index in 0..program.functions.len() {
+        // Earlier blocked candidates can become legal after CFG changes.
+        'search: for &caller_index in &callers {
             let caller_id = program.functions[caller_index].id;
             let mut site = None;
-            for (block_index, block) in program.functions[caller_index].blocks.iter().enumerate() {
-                for (instruction_index, instruction) in block.instructions.iter().enumerate() {
-                    let Some(target_id) = inline_target_id(&instruction.operation) else {
-                        continue;
-                    };
-                    let Some(callee) = program.functions.iter().find(|function| function.id == target_id)
-                    else {
-                        continue;
-                    };
-                    if !callee.is_inline_always
-                        || callee.id == caller_id
-                        || inline_path(program, callee.id, caller_id, &mut HashSet::new())
-                        || inline_path(program, callee.id, callee.id, &mut HashSet::new())
-                    {
-                        continue;
-                    }
-                    if inline_has_return_drop(callee) {
-                        continue;
-                    }
-                    site = Some((block_index, instruction_index, instruction.clone(), target_id));
-                    break;
+            for &(block_index, instruction_index) in &pending[caller_index] {
+                let instruction = &program.functions[caller_index].blocks[block_index]
+                    .instructions[instruction_index];
+                let Some(target_id) = inline_target_id(&instruction.operation) else {
+                    continue;
+                };
+                let Some(&callee_index) = function_indices.get(&target_id) else {
+                    continue;
+                };
+                let callee = &program.functions[callee_index];
+                if callee.id == caller_id
+                    || inline_path(program, &function_indices, &eligible, callee.id, caller_id, &mut HashSet::new())
+                    || inline_path(program, &function_indices, &eligible, callee.id, callee.id, &mut HashSet::new())
+                {
+                    continue;
                 }
-                if site.is_some() {
-                    break;
+                if inline_has_return_drop(callee) {
+                    continue;
                 }
+                site = Some((block_index, instruction_index, instruction.clone(), callee_index));
+                break;
             }
-            let Some((block_index, instruction_index, instruction, target_id)) = site else {
+            let Some((block_index, instruction_index, instruction, callee_index)) = site else {
                 continue;
             };
-            let Some(callee) = program.functions.iter().find(|function| function.id == target_id).cloned()
-            else {
-                continue;
-            };
+            let callee = program.functions[callee_index].clone();
             if inline_call(
                 &mut program.functions[caller_index],
                 &callee,
@@ -5092,6 +5114,7 @@ fn expand_inline_always(program: &mut MirProgram) {
                     "mir.inline",
                     "canonical-cfg-transform",
                 ));
+                pending[caller_index] = inline_candidates(caller, &eligible);
                 changed = true;
                 break 'search;
             }
@@ -5100,6 +5123,21 @@ fn expand_inline_always(program: &mut MirProgram) {
             break;
         }
     }
+}
+
+fn inline_candidates(
+    caller: &MirFunction,
+    eligible: &HashSet<MirFunctionId>,
+) -> Vec<(usize, usize)> {
+    let mut pending = Vec::new();
+    for (block_index, block) in caller.blocks.iter().enumerate() {
+        for (instruction_index, instruction) in block.instructions.iter().enumerate() {
+            if inline_target_id(&instruction.operation).is_some_and(|id| eligible.contains(&id)) {
+                pending.push((block_index, instruction_index));
+            }
+        }
+    }
+    pending
 }
 
 fn inline_has_return_drop(callee: &MirFunction) -> bool {
@@ -5123,6 +5161,8 @@ fn inline_target_id(operation: &MirOperation) -> Option<MirFunctionId> {
 
 fn inline_path(
     program: &MirProgram,
+    function_indices: &HashMap<MirFunctionId, usize>,
+    eligible: &HashSet<MirFunctionId>,
     current: MirFunctionId,
     wanted: MirFunctionId,
     seen: &mut HashSet<MirFunctionId>,
@@ -5130,23 +5170,20 @@ fn inline_path(
     if !seen.insert(current) {
         return false;
     }
-    let Some(function) = program.functions.iter().find(|function| function.id == current) else {
+    let Some(&index) = function_indices.get(&current) else {
         return false;
     };
+    let function = &program.functions[index];
     for target in function
         .blocks
         .iter()
         .flat_map(|block| block.instructions.iter())
         .filter_map(|instruction| inline_target_id(&instruction.operation))
     {
-        let Some(target_function) = program.functions.iter().find(|function| function.id == target)
-        else {
-            continue;
-        };
-        if !target_function.is_inline_always {
+        if !eligible.contains(&target) {
             continue;
         }
-        if target == wanted || inline_path(program, target, wanted, seen) {
+        if target == wanted || inline_path(program, function_indices, eligible, target, wanted, seen) {
             return true;
         }
     }
