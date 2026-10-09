@@ -4208,6 +4208,7 @@ fn lower_mir_fragment(
         let tuple_shape = params
             .iter()
             .map(|(binding, ty, _)| (binding.clone(), ty.clone()))
+            .chain(extras)
             .collect::<Vec<_>>();
         let tuple_ty = crate::AST::Type::Tuple(
             tuple_shape

@@ -1489,7 +1489,7 @@ fn lower_guest_import_foreign(
         raw_scalar_abi: true,
         return_type: function.return_type.clone(),
         abi: "C".to_string(),
-        language: "c".to_string(),
+        language,
         applicability: target_applicability_for(target),
         effect_root: None,
         callback_transport: wraps_default_failure.then(|| "guest-import-result".to_string()),
