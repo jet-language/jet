@@ -2267,7 +2267,7 @@ fn jet_driver_comptime_stage(
         staged_modules := [SemaGraphModuleResult]{}
         if &environment.registration_graph == {
             None -> return Val(jet_driver_comptime_lost_graph(values, checked_functions, trace))
-            .Val(staged_graph) -> staged_modules = sema_comptime_modules_with_values(staged_graph, values)
+            .Val(staged_graph) -> staged_modules = sema_comptime_modules_with_values(staged_graph, values) ?? panic("staging the comptime modules lost the shared pass environment")
         }
         if staged_modules.len() != graph.modules.len() {
             &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, head.module_identity, "E0003", head.span, "the staged comptime declaration graph lost a registered module", "temporary interpreter MIR retains every module identity from the registered graph", "preserve the complete resolved module set while applying staged values"))
