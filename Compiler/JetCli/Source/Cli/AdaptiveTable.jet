@@ -80,13 +80,13 @@ pub fn jet_cli_table(input_columns: ^[JetCLITableColumn], input_rows: ^[JetCLITa
     truncated := columns.len() > JET_CLI_TABLE_MAX_COLUMNS || rows.len() > JET_CLI_TABLE_MAX_ROWS
     loop columns.len() > JET_CLI_TABLE_MAX_COLUMNS -> _ :: &columns.pop()
     loop rows.len() > JET_CLI_TABLE_MAX_ROWS -> _ :: &rows.pop()
-    // An indexed element cannot be moved out of its container. Exchange it
-    // with the last whole slot, pop that owner, then restore the same position.
-    // This reuses the existing buffer, preserves order, and leaves no logical
-    // hole in a live list while normalization may allocate/Stop.
-    loop index in 0..<columns.len() {
-        last :: columns.len() - 1
-        &columns.__swap(index, last)
+    // Reverse each retained input once so pop transfers whole owners in their
+    // original forward order. The growing output and remaining input stay
+    // fully owned while normalization may allocate/Stop; no indexed hole,
+    // cloning, or repeated tail shifts are needed.
+    normalized_columns := [JetCLITableColumn]{}
+    &columns.reverse()
+    loop columns.len() > 0 {
         column := &columns.pop() ?? panic("nonempty table column owner disappeared")
         kind :: column.kind
         alignment :: column.alignment
@@ -96,27 +96,26 @@ pub fn jet_cli_table(input_columns: ^[JetCLITableColumn], input_rows: ^[JetCLITa
         name :: ^column.name
         column.name = ^replacement
         normalized :: JetCLITableColumn{name: jet_cli_table_bound_text(^name), kind: kind, alignment: alignment}
-        &columns.push(^normalized)
-        &columns.__swap(index, last)
+        &normalized_columns.push(^normalized)
     }
-    loop index in 0..<rows.len() {
-        last :: rows.len() - 1
-        &rows.__swap(index, last)
+    columns = ^normalized_columns
+    normalized_rows := [JetCLITableRow]{}
+    &rows.reverse()
+    loop rows.len() > 0 {
         row := &rows.pop() ?? panic("nonempty table row owner disappeared")
         if row.cells.len() > columns.len() -> truncated = true
         loop row.cells.len() > columns.len() -> _ :: &row.cells.pop()
-        loop position in 0..<row.cells.len() {
-            cell_last :: row.cells.len() - 1
-            &row.cells.__swap(position, cell_last)
+        normalized_cells := [JetCLITableCell]{}
+        &row.cells.reverse()
+        loop row.cells.len() > 0 {
             cell :: &row.cells.pop() ?? panic("nonempty table cell owner disappeared")
             normalized :: jet_cli_table_normalize_cell(^cell)
-            &row.cells.push(^normalized)
-            &row.cells.__swap(position, cell_last)
+            &normalized_cells.push(^normalized)
         }
-        &rows.push(^row)
-        &rows.__swap(index, last)
+        row.cells = ^normalized_cells
+        &normalized_rows.push(^row)
     }
-    JetCLIAdaptiveTable{columns: ^columns, rows: ^rows, truncated: truncated}
+    JetCLIAdaptiveTable{columns: ^columns, rows: ^normalized_rows, truncated: truncated}
 }
 pub fn jet_cli_table_structured(table: JetCLIAdaptiveTable) -> JetCLIStructuredTable Never! {
     JetCLIStructuredTable{columns: ~table.columns, rows: ~table.rows, truncated: table.truncated}
