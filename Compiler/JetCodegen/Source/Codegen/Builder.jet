@@ -1432,16 +1432,24 @@ fn jet_codegen_operation_ownership(builder: JetCodegenBuilder, program: JetCodeg
         .MovePlace(_) | .Move(_) -> return mir_ownership_from_access(MIRAccess.Move)
         .AddressOf(_, access) -> return mir_ownership_from_access(access)
         .RawAddressOf(_) -> return MIROwnership{mode: MIROwnershipMode.ReadBorrow, drop: MIRDropKind.NoDrop, moved: false, last_use: false, gc_root: false}
-        .AttachTag(value, _) | .Convert(value, _, _, MIRConversion.Transparent) | .Convert(value, _, _, MIRConversion.SendFn) -> {
-            row :: builder.value_positions.get(value.value) ?? panic("checked carrier transfer has no source ownership fact")
-            ownership := builder.values[row].ownership
-            ownership.moved = false
-            ownership.last_use = false
-            return ownership
+        .AttachTag(value, _) -> return jet_codegen_carrier_transfer_ownership(builder, value)
+        .Convert(value, _, _, conversion) -> {
+            if conversion == {
+                .Transparent | .SendFn -> return jet_codegen_carrier_transfer_ownership(builder, value)
+                else -> return jet_codegen_ownership(ty)
+            }
         }
         .Phi(incoming) -> return jet_codegen_phi_ownership(builder, program, incoming)
         else -> return jet_codegen_ownership(ty)
     }
+}
+
+fn jet_codegen_carrier_transfer_ownership(builder: JetCodegenBuilder, value: MIRValueID) -> MIROwnership Never! {
+    row :: builder.value_positions.get(value.value) ?? panic("checked carrier transfer has no source ownership fact")
+    ownership := builder.values[row].ownership
+    ownership.moved = false
+    ownership.last_use = false
+    return ownership
 }
 
 fn jet_codegen_phi_ownership(builder: JetCodegenBuilder, program: JetCodegenProgram, incoming: [MIRPhiIncoming]) -> MIROwnership Never! {
@@ -1997,7 +2005,7 @@ fn jet_codegen_cleanup_action_is_drop(action: JetCodegenCleanupAction) -> Bool {
 fn jet_codegen_emit_cleanup_suffix(builder: &JetCodegenBuilder, program: JetCodegenProgram, depth: Int, remaining: [JetCodegenCleanupAction], action: JetCodegenCleanupAction) Never! {
     saved := builder.cleanup_frames
     active := [JetCodegenCleanupFrame]{}
-    loop index in 0...depth -> &active.push(saved[index])
+    loop index in 0..depth -> &active.push(saved[index])
     active[depth].actions = remaining
     active[depth].explicit = 0
     loop item in remaining {

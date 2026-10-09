@@ -3118,10 +3118,22 @@ fn jet_rust_emit_place_base(ctx: &JetRustEmitContext, function: MIRFunction, bas
     }
     native_option := false
     loop projection in remaining {
-        if skip_option_payload && projection == .Payload(MIRPayloadKind.Option, _) {
-            expression = "**({expression}).as_ref().expect(\"checked map entry\")"
-            skip_option_payload = false
-            next
+        if skip_option_payload {
+            payload_option := false
+            if projection == {
+                .Payload(kind, _) -> {
+                    if kind == {
+                        .Option -> payload_option = true
+                        else -> {}
+                    }
+                }
+                else -> {}
+            }
+            if payload_option {
+                expression = "**({expression}).as_ref().expect(\"checked map entry\")"
+                skip_option_payload = false
+                next
+            }
         }
         if projection == {
             .MapLookup(lookup, optional, _) -> {
@@ -3130,7 +3142,9 @@ fn jet_rust_emit_place_base(ctx: &JetRustEmitContext, function: MIRFunction, bas
                 if optional {
                     expression = "({reference}).as_ref().map(|value| *value).map_err(|_| {ctx.config.root_prefix}JetAbsent)"
                     skip_option_payload = true
-                } else -> expression = "**({reference}).as_ref().expect(\"checked map entry\")"
+                } else {
+                    expression = "**({reference}).as_ref().expect(\"checked map entry\")"
+                }
             }
             // A boxed recursive edge names the boxed value, so every borrow,
             // read, write and index through it sees `T` (MIRRust place_base).
@@ -3235,8 +3249,14 @@ fn jet_rust_emit_place_read(ctx: &JetRustEmitContext, function: MIRFunction, id:
     }
     loop row in function.places {
         if row.id == id && row.projections.len() > 0 {
-            if row.projections[row.projections.len() - 1] == .MapLookup(lookup, true, _) {
-                return "({jet_rust_emit_value_reference(ctx, lookup, false)}).as_ref().map(|value| (**value).clone()).map_err(|_| {ctx.config.root_prefix}JetAbsent)"
+            projection := row.projections[row.projections.len() - 1]
+            if projection == {
+                .MapLookup(lookup, optional, _) -> {
+                    if optional {
+                        return "({jet_rust_emit_value_reference(ctx, lookup, false)}).as_ref().map(|value| (**value).clone()).map_err(|_| {ctx.config.root_prefix}JetAbsent)"
+                    }
+                }
+                else -> {}
             }
         }
     }

@@ -6649,7 +6649,9 @@ fn jet_codegen_pattern_projection_identity(builder: JetCodegenBuilder, value: MI
             if instruction.result != Val(value) -> next
             if instruction.operation == {
                 .MapLookup(_, _, cache) -> return "m{cache.value}"
-                .Constant(constant) -> if constant == .Int(number, _, _) -> return "i{number}"
+                .Constant(constant) -> {
+                    if constant == .Int(number, _, _) -> return "i{number}"
+                }
                 else -> {}
             }
         }
@@ -6670,9 +6672,21 @@ fn jet_codegen_pattern_lookup_cache(builder: &JetCodegenBuilder, program: JetCod
         }
         optional_map_payload := false
         loop projection in place.projections {
-            if optional_map_payload && projection == .Payload(MIRPayloadKind.Option, _) {
-                optional_map_payload = false
-                next
+            if optional_map_payload {
+                payload_option := false
+                if projection == {
+                    .Payload(kind, _) -> {
+                        if kind == {
+                            .Option -> payload_option = true
+                            else -> {}
+                        }
+                    }
+                    else -> {}
+                }
+                if payload_option {
+                    optional_map_payload = false
+                    next
+                }
             }
             part :: if projection == {
                 .Field(field, _) -> "f{field.value}"

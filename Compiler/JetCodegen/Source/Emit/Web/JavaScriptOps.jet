@@ -888,7 +888,9 @@ fn jet_web_js_read_place(ctx: &JetWebEmitContext, function: MIRFunction, place: 
     loop projection in place_row.projections {
         if projection == {
             .MapLookup(_, _, _) | .Range(_, _, _) -> return expression
-            .Index(kind, _, _, write_call, _, _, _) -> if kind == MIRIndexKind.List && write_call == None -> return expression
+            .Index(kind, _, _, write_call, _, _, _) -> {
+                if kind == MIRIndexKind.List && write_call == None -> return expression
+            }
             else -> {}
         }
     }
