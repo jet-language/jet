@@ -38,7 +38,7 @@ See [gates/README.md](gates/README.md) for growth and phase-profile gates.
 ## Production native compiler
 
 `Tools/agent/native-compiler.mjs` assembles the canonical bootstrap source
-manifest and appends the existing `Compiler/JetCli/main.jet` entry. Unlike the
+manifest and appends the existing `Compiler/JetCli/run.jet` entry. Unlike the
 private factory harness, the resulting executable accepts real CLI arguments.
 Run through `Tools/agent/jet-env`, with a fresh disk-backed output directory:
 

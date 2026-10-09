@@ -21,7 +21,7 @@ function dryRun(extra, inspect) {
         assert.match(source, /process\.exit\(jet_cli_main\(process\.args\(\)\)\)/);
         assert.equal((source.match(/^use core\.process as process$/gm) ?? []).length, 1);
         assert.doesNotMatch(readFileSync(join(out, 'compiler/package.jet'), 'utf8'), /^deps:/m);
-        assert.equal(JSON.parse(readFileSync(join(out, 'compiler.map.json'))).source_segments.at(-1).source_file, 'Compiler/JetCli/main.jet');
+        assert.equal(JSON.parse(readFileSync(join(out, 'compiler.map.json'))).source_segments.at(-1).source_file, 'Compiler/JetCli/run.jet');
         assert.equal(existsSync(join(out, 'seed/jet')), false, 'dry-run must not manufacture a compiler');
         inspect(JSON.parse(readFileSync(join(out, 'plan.json'))));
     } finally { rmSync(root, { recursive: true, force: true }); }
@@ -47,7 +47,7 @@ test('bootstrap seed exception emits production CLI, never private Tests.rs main
     dryRun(() => ['--seed-build'], plan => {
         assert.equal(plan.bootstrap, 'rust-emission');
         assert.deepEqual(plan.command.slice(-3), ['build', '--release', plan.source]);
-        assert.equal(plan.entry, 'Compiler/JetCli/main.jet');
+        assert.equal(plan.entry, 'Compiler/JetCli/run.jet');
         assert.match(plan.jet, /seed\/jet$/);
     });
 });

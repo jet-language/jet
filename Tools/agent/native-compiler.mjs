@@ -56,7 +56,7 @@ const bootstrap = join(home, '.cache/jet-luna/compiler-bootstrap');
 const aggregate = readFileSync(join(bootstrap, 'project/src/compiler.jet'), 'utf8');
 // Preserve the actual canonical entry bytes. Its Core import already appears
 // in the aggregate (Cache.jet); deduplicate exactly as assemble.mjs does.
-const entryPath = 'Compiler/JetCli/main.jet';
+const entryPath = 'Compiler/JetCli/run.jet';
 const entry = readFileSync(join(repo, entryPath), 'utf8');
 if (!/^fn run\(\)/m.test(entry) || !entry.includes('jet_cli_main(')) throw Error(`${entryPath} is not the production CLI entry`);
 const existingCoreImports = new Set([...aggregate.matchAll(/^use core\.[^\[\n]*$/gm)].map(match => match[0].trimEnd()));
