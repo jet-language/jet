@@ -1538,7 +1538,7 @@ fn jsonl_reader(input: ^FileReader, limits: EncodingLimits, typed_numbers: Bool)
     Ok(JSONLinesPull{parser: parser, record_index: 0, terminal: None})
 }
 
-fn write_tree(writer: &JSONPush, value: Dyn) -[IO]> () EncodingError! {
+fn write_tree(writer: &JSONPush, value: Dyn) EncodingError! -[IO]> {
     if value == {
         .Null -> &writer.write(DataEvent.Null)
         .Bool(v) -> &writer.write(DataEvent.Bool(v))
@@ -1671,7 +1671,7 @@ struct JSONLinesPush {
     record_index: Int
     pending_lf: Bool
 
-    fn write(&self, value: ^Dyn) -[IO]> () EncodingError! {
+    fn write(&self, value: ^Dyn) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return &self.fail(self.writer.state_error("write called after finish"))
         if self.pending_lf {
@@ -1707,12 +1707,12 @@ struct JSONLinesPush {
         return Err(first)
     }
 
-    fn flush(&self) -[IO]> () EncodingError! {
+    fn flush(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         &self.writer.flush() ?? return &self.fail(err)
     }
 
-    fn finish(&self) -[IO]> () EncodingError! {
+    fn finish(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return
         if self.pending_lf {
