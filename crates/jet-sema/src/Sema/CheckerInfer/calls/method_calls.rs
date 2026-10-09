@@ -788,6 +788,7 @@ impl<'a> Checker<'a> {
             receiver: Box::new(receiver), method, method_span,
             owner_type_args: Vec::new(), type_args: Vec::new(), args,
             recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false,
+            checked_callee: None,
         };
         let mut body = vec![binding(mux_name.clone(), (**receiver).clone()),
             binding(value_name.clone(), args[0].expr.clone())];
@@ -1360,6 +1361,7 @@ impl<'a> Checker<'a> {
         recv_type_out: &mut Option<String>,
         resolved_ret_out: &mut Option<Type>,
         operator_rhs_out: &mut Option<Type>,
+        checked_callee_out: &mut Option<String>,
     ) -> Option<Type> {
         *checked_callee_out = None;
         if let Some(path) = checker_hardware_path(receiver, &self.core_imports) {
@@ -2042,10 +2044,10 @@ impl<'a> Checker<'a> {
                                         Some(args[2].expr.span()),
                                     ));
                             }
-                            let owner = self.core_source_owner_module(&ns, type_name)?;
-                            let source_name = self.canonical_nominal_name(owner, type_name);
+                            let owner = self.core_source_owner_module(&ns, &type_name)?;
+                            let source_name = self.canonical_nominal_name(owner, &type_name);
                             let ret = self.check_static_method(
-                                &source_name, method, span, owner_type_args, type_args, args,
+                                &source_name, method, span, owner_type_args, type_args, args, checked_callee_out,
                             )?;
                             // Ordinary static lowering uses the checked source identity,
                             // never the retired native ExpiringSecretNew carrier.
@@ -8024,7 +8026,7 @@ impl<'a> Checker<'a> {
                 || self.has_source_operator_left(&recv_ty, trait_name) {
                 let rhs_place_type = self.place_expr_type(&args[0].expr).unwrap_or(Type::Bool);
                 let rhs = self.with_call_access(&mut call_access, |checker| {
-                    checker.check_call_argument_access(&args[0], AccessConvention::Read, &rhs_place_type, true);
+                    checker.check_call_argument_access(&mut args[0], AccessConvention::Read, &rhs_place_type, true);
                     checker.borrow_ctx = true;
                     let inferred = checker.infer(&mut args[0].expr);
                     checker.check_call_argument_captures(&args[0].expr);

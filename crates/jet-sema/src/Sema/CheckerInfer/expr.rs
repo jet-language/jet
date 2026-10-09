@@ -1890,6 +1890,7 @@ impl<'a> Checker<'a> {
                 resolved_ret: None,
                 operator_rhs: None,
                 checked_widen: false,
+                checked_callee: None,
             };
             return self.infer(e);
         }
@@ -1941,6 +1942,7 @@ impl<'a> Checker<'a> {
             resolved_ret,
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         };
         ty
     }
@@ -2387,6 +2389,7 @@ impl<'a> Checker<'a> {
                 owner_type_args: Vec::new(), type_args: Vec::new(), args: Vec::new(),
                 recv_type: Some("__SerdeEncode__".to_string()), resolved_ret: Some(json_ty()),
                 operator_rhs: None, checked_widen: false,
+                checked_callee: None,
             }
         };
         Some(json_ty())
@@ -4770,7 +4773,35 @@ impl<'a> Checker<'a> {
                 span,
                 kind,
             } => {
-                let result = self.infer_index(base, index, span, kind);
+                *kind = IndexKind::List;
+                self.borrow_ctx = true;
+                let saved = self.expected_type.take();
+                let base_ty = self.infer(base);
+                self.expected_type = saved;
+                let base_ty = base_ty?;
+                if crate::Sema::CheckerCoreLib::is_dyn_type(&base_ty) {
+                    let saved = self.expected_type.take();
+                    let index_ty = self.infer(index);
+                    self.expected_type = saved;
+                    let method = match index_ty? {
+                        Type::String => "__dyn_index_key",
+                        Type::Int => "__dyn_index_at",
+                        other => {
+                            self.diags.push(Diagnostic::error("E0505",
+                                format!("Dyn index must be String or Int, not {}", other.show()),
+                                "Dyn indexes object keys and array positions".to_string(),
+                                "use a String key or an Int index".to_string(), Some(index.span())));
+                            return None;
+                        }
+                    };
+                    let span = *span;
+                    let site = self.dyn_site(span);
+                    let receiver = *std::mem::replace(base, Box::new(Expr::Absent(span)));
+                    let key = *std::mem::replace(index, Box::new(Expr::Absent(span)));
+                    *e = crate::Sema::CheckerCoreLib::dyn_call(receiver, method, vec![key, site], json_ty(), span);
+                    return Some(json_ty());
+                }
+                let result = self.infer_index_with_base_type(index, span, kind, base_ty);
                 // A subrange of a declared `View`/`ViewMut` reborrows the same
                 // owner; it never copies, so the slicing-copy lint does not apply.
                 let view_subrange = matches!(kind, IndexKind::Range)
@@ -5616,6 +5647,7 @@ impl<'a> Checker<'a> {
                     recv_type,
                     resolved_ret,
                     operator_rhs,
+                    checked_callee,
                 );
                 // Callable-field normalization uses the existing `.call` head
                 // as well as its checked value route, so rechecking is stable.

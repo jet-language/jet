@@ -130,7 +130,7 @@ fn fragment_identity(
                 program.items.iter().any(|item| matches!(item,
                     crate::AST::Item::Struct(definition) if definition.name == name))
             }) {
-                return struct_identities.get(&(error_owner, name.to_string())).cloned();
+                return struct_identities.get(error_owner, name).map(str::to_owned);
             }
         }
     }
@@ -859,7 +859,7 @@ fn project_comptime_nominals(
             facts.enums.insert(row.name.clone(), row);
         }
         if let crate::AST::Item::Struct(def) = item {
-            let Some(identity) = struct_identities.get(&(module_idx, def.name.clone())) else {
+            let Some(identity) = struct_identities.get(module_idx, &def.name).map(str::to_owned) else {
                 continue;
             };
             let mut row = def.clone();
@@ -874,7 +874,6 @@ fn project_comptime_nominals(
                     modules,
                     &source_paths,
                     &struct_identities,
-                    &known_identities,
                 );
             }
             facts.foreign_modules.insert(identity.clone(), current.module_alias.clone());

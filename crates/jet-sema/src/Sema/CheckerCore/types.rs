@@ -65,19 +65,6 @@ impl<'a> Checker<'a> {
         None
     }
 
-    /// A raw projection uses the base registered by the declaring module, not
-    /// a same-spelled type in the reader's registry.
-    pub(crate) fn distinct_base_for_reader(&self, name: &str) -> Option<Type> {
-        let (namespace, leaf) = Self::split_type_name(name);
-        let owner = self.struct_owner_module(leaf, namespace)?;
-        let registry = if owner == self.module_idx {
-            self.registry
-        } else {
-            &self.modules?.get(owner)?.registry
-        };
-        let base = registry.distinct_base(leaf)?;
-        Some(self.qualify_method_type(owner, base, &HashSet::new()))
-    }
     /// D-TEXTHEAD-TYPE1=A: resolve a library-defined checked text through the
     /// ordinary nominal and trait registries. The returned name is canonical
     /// for imported types; the error comes from the ordinary trait impl.
