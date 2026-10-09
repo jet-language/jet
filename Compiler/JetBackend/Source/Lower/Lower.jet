@@ -441,6 +441,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     if shared_sites_dynamic && !wrap_entry && m.static_fixups.len() > 0 -> m.static_live = Val(lower_static_object(&m, 8))
     callables := [U64:LIRFunctionID]{}
     loop root in roots {
+        if !shared_sites_dynamic -> break
         if callables.get(root.value) != None -> next
         concrete :: prepared.roots.get(root.value) ?? {
             &m.issues.push(LIRLoweringIssue{function: "entry preparation", message: "requested root {root.value} has no concrete monomorphization"})
@@ -471,7 +472,6 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
             source :: lower_row_source(program, m, row)
             if lower_has_narrow_params(source) -> lowered = lower_closure_helper_id(&m, "export.entry", row, source)
         }
-        &callables.add(root.value, lowered).drop("duplicate root has the same concrete callable")
         if lowered_entry == None -> lowered_entry = Val(lowered)
     }
     if test_serial != None -> lowered_entry = Val(lower_helper_id(&m, "test.main", lower_test_unit_type()))
