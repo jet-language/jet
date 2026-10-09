@@ -64,10 +64,15 @@ pub fn x64_fits_i32(value: Int) -> Bool Never! { value >= -2147483648 && value <
 // REX prefix: W selects 64-bit operands; R, X and B extend ModRM.reg, SIB.index
 // and ModRM.rm (or the opcode register) to r8-r15.
 fn x64_rex(code: &[U8], wide: Bool, reg: Int, rm: Int) Never! {
+    x64_rex_indexed(&code, wide, reg, rm, -1)
+}
+
+fn x64_rex_indexed(code: &[U8], wide: Bool, reg: Int, base: Int, index: Int) Never! {
     value := 0x40
     if wide -> value = value | 8
     if reg >= 8 -> value = value | 4
-    if rm >= 8 -> value = value | 1
+    if index >= 8 -> value = value | 2
+    if base >= 8 -> value = value | 1
     x64_byte(&code, value)
 }
 
@@ -77,13 +82,24 @@ fn x64_modrm_reg(code: &[U8], reg: Int, rm: Int) Never! {
 
 // [base + disp]: rsp/r12 need a SIB byte, and rbp/r13 have no disp-free form.
 fn x64_modrm_mem(code: &[U8], reg: Int, base: Int, disp: Int) Never! {
+    x64_modrm_indexed(&code, reg, base, -1, 1, disp)
+}
+
+// `index == -1` means no index. rsp is not an index, but r12 (REX.X + 4)
+// is. rbp/r13 need disp8 zero; rsp/r12 always need a SIB.
+fn x64_modrm_indexed(code: &[U8], reg: Int, base: Int, index: Int, scale: Int, disp: Int) Never! {
+    assert(index != X64_RSP)
     mode :: if {
         disp == 0 && (base & 7) != 5 -> 0
         x64_fits_i8(disp) -> 1
         else -> 2
     }
-    x64_byte(&code, (mode << 6) | ((reg & 7) << 3) | (base & 7))
-    if (base & 7) == 4 -> x64_byte(&code, 0x24)
+    sib :: index >= 0 || (base & 7) == 4
+    x64_byte(&code, (mode << 6) | ((reg & 7) << 3) | (if sib -> 4 else -> base & 7))
+    if sib {
+        shift :: if scale == 1 -> 0 else if scale == 2 -> 1 else if scale == 4 -> 2 else -> 3
+        x64_byte(&code, (shift << 6) | ((if index < 0 -> 4 else -> index & 7) << 3) | (base & 7))
+    }
     if mode == 1 -> x64_byte(&code, disp)
     if mode == 2 -> x64_u32(&code, disp)
 }
@@ -193,6 +209,41 @@ pub fn x64_store(code: &[U8], base: Int, disp: Int, src: Int) Never! {
     x64_rex(&code, true, src, base)
     x64_byte(&code, 0x89)
     x64_modrm_mem(&code, src, base, disp)
+}
+
+// mov dst32, [base + disp] (REX 8B /r): four bytes, zero-extended into dst.
+pub fn x64_load32(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
+    x64_rex(&code, false, dst, base)
+    x64_byte(&code, 0x8b)
+    x64_modrm_mem(&code, dst, base, disp)
+}
+
+// mov [base + disp], src32 (REX 89 /r): the low four bytes of src.
+pub fn x64_store32(code: &[U8], base: Int, disp: Int, src: Int) Never! {
+    x64_rex(&code, false, src, base)
+    x64_byte(&code, 0x89)
+    x64_modrm_mem(&code, src, base, disp)
+}
+
+pub fn x64_load_indexed(code: &[U8], dst: Int, base: Int, index: Int, scale: Int, disp: Int, size: Int) Never! {
+    wide :: size != 4
+    if wide || dst >= 8 || base >= 8 || index >= 8 -> x64_rex_indexed(&code, wide, dst, base, index)
+    if size == 1 -> x64_byte(&code, 0x0f)
+    x64_byte(&code, if size == 1 -> 0xb6 else -> 0x8b)
+    x64_modrm_indexed(&code, dst, base, index, scale, disp)
+}
+
+pub fn x64_store_indexed(code: &[U8], base: Int, index: Int, scale: Int, disp: Int, src: Int, size: Int) Never! {
+    wide :: size == 8
+    if wide || src >= 8 || base >= 8 || index >= 8 || (size == 1 && src >= 4) -> x64_rex_indexed(&code, wide, src, base, index)
+    x64_byte(&code, if size == 1 -> 0x88 else -> 0x89)
+    x64_modrm_indexed(&code, src, base, index, scale, disp)
+}
+
+pub fn x64_lea_indexed(code: &[U8], dst: Int, base: Int, index: Int, scale: Int, disp: Int) Never! {
+    x64_rex_indexed(&code, true, dst, base, index)
+    x64_byte(&code, 0x8d)
+    x64_modrm_indexed(&code, dst, base, index, scale, disp)
 }
 
 // lea dst, [base + disp] (REX.W 8D /r)
@@ -417,12 +468,10 @@ pub fn x64_patch_rel32(code: &[U8], at: Int, target: Int) Never! {
     loop shift in 0..<4 -> code[at + shift] = U8{(relative >> (8 * shift)) & 255}
 }
 
-// SSE2 scalar double. Float values live in general registers as their bits;
-// selection moves them through xmm0-xmm7 around each operation. Encoding:
-// mandatory prefix (66 or F2), REX when W or an extended register is needed,
-// then 0F opcode /r.
+// SSE scalar double/single and register bit moves. Mandatory prefix precedes
+// REX; REX.R/B extend xmm as well as general-register operands.
 fn x64_sse(code: &[U8], prefix: Int, wide: Bool, opcode: Int, reg: Int, rm: Int) Never! {
-    x64_byte(&code, prefix)
+    if prefix != 0 -> x64_byte(&code, prefix)
     if wide || reg >= 8 || rm >= 8 -> x64_rex(&code, wide, reg, rm)
     x64_byte(&code, 0x0f)
     x64_byte(&code, opcode)
@@ -435,24 +484,89 @@ pub fn x64_movq_to_xmm(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 
 // movq r64, xmm (66 REX.W 0F 7E /r)
 pub fn x64_movq_from_xmm(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0x66, true, 0x7e, xmm, dst) }
 
+// movd r32, xmm (66 0F 7E /r): the low 32 bits, zero-extended into the r64.
+pub fn x64_movd_from_xmm(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0x66, false, 0x7e, xmm, dst) }
+
+// movd xmm, r32 (66 0F 6E /r).
+pub fn x64_movd_to_xmm(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 0x66, false, 0x6e, xmm, src) }
+
+// movapd/movaps dst, src: copy an xmm register without a GPR round trip.
+pub fn x64_float_move(code: &[U8], single: Bool, dst: Int, src: Int) Never! {
+    x64_sse(&code, if single -> 0 else -> 0x66, false, 0x28, dst, src)
+}
+
+// movsd/movss xmm, [base + disp], or the reverse store (0F 10/11).
+pub fn x64_float_load(code: &[U8], single: Bool, dst: Int, base: Int, disp: Int) Never! {
+    x64_byte(&code, if single -> 0xf3 else -> 0xf2)
+    if dst >= 8 || base >= 8 -> x64_rex(&code, false, dst, base)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0x10)
+    x64_modrm_mem(&code, dst, base, disp)
+}
+
+pub fn x64_float_store(code: &[U8], single: Bool, base: Int, disp: Int, src: Int) Never! {
+    x64_byte(&code, if single -> 0xf3 else -> 0xf2)
+    if src >= 8 || base >= 8 -> x64_rex(&code, false, src, base)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0x11)
+    x64_modrm_mem(&code, src, base, disp)
+}
+
+pub fn x64_float_load_indexed(code: &[U8], single: Bool, dst: Int, base: Int, index: Int, scale: Int, disp: Int) Never! {
+    x64_byte(&code, if single -> 0xf3 else -> 0xf2)
+    if dst >= 8 || base >= 8 || index >= 8 -> x64_rex_indexed(&code, false, dst, base, index)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0x10)
+    x64_modrm_indexed(&code, dst, base, index, scale, disp)
+}
+
+pub fn x64_float_store_indexed(code: &[U8], single: Bool, base: Int, index: Int, scale: Int, disp: Int, src: Int) Never! {
+    x64_byte(&code, if single -> 0xf3 else -> 0xf2)
+    if src >= 8 || base >= 8 || index >= 8 -> x64_rex_indexed(&code, false, src, base, index)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0x11)
+    x64_modrm_indexed(&code, src, base, index, scale, disp)
+}
+
+// xorpd/xorps preserves the sign-mask bit operation used for negation.
+pub fn x64_float_xor(code: &[U8], single: Bool, dst: Int, src: Int) Never! {
+    x64_sse(&code, if single -> 0 else -> 0x66, false, 0x57, dst, src)
+}
+
 pub enum X64FloatOp { Add Sub Mul Div }
 
-// addsd/subsd/mulsd/divsd dst, src (F2 0F 58|5C|59|5E /r)
-pub fn x64_float_op(code: &[U8], op: X64FloatOp, dst: Int, src: Int) Never! {
+// addsd/subsd/mulsd/divsd dst, src (F2 0F 58|5C|59|5E /r), or with `single`
+// addss/subss/mulss/divss (F3 0F 58|5C|59|5E /r).
+pub fn x64_float_op(code: &[U8], op: X64FloatOp, single: Bool, dst: Int, src: Int) Never! {
     opcode :: if op == {
         .Add -> 0x58
         .Sub -> 0x5c
         .Mul -> 0x59
         .Div -> 0x5e
     }
-    x64_sse(&code, 0xf2, false, opcode, dst, src)
+    x64_sse(&code, if single -> 0xf3 else -> 0xf2, false, opcode, dst, src)
 }
 
 // ucomisd left, right (66 0F 2E /r): ZF, PF and CF all set when unordered.
 pub fn x64_ucomisd(code: &[U8], left: Int, right: Int) Never! { x64_sse(&code, 0x66, false, 0x2e, left, right) }
 
+// ucomiss left, right (0F 2E /r): the single-precision ucomisd.
+pub fn x64_ucomiss(code: &[U8], left: Int, right: Int) Never! { x64_sse(&code, 0, false, 0x2e, left, right) }
+
 // cvtsi2sd xmm, r64 (F2 REX.W 0F 2A /r)
 pub fn x64_cvtsi2sd(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 0xf2, true, 0x2a, xmm, src) }
 
+// cvtsi2ss xmm, r64 (F3 REX.W 0F 2A /r): rounds to nearest (MXCSR default).
+pub fn x64_cvtsi2ss(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 0xf3, true, 0x2a, xmm, src) }
+
 // cvttsd2si r64, xmm (F2 REX.W 0F 2C /r): truncates; NaN and out-of-range give the minimum.
 pub fn x64_cvttsd2si(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0xf2, true, 0x2c, dst, xmm) }
+
+// cvttss2si r64, xmm (F3 REX.W 0F 2C /r): the single-precision cvttsd2si.
+pub fn x64_cvttss2si(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0xf3, true, 0x2c, dst, xmm) }
+
+// cvtss2sd xmm, xmm (F3 0F 5A /r): exact widening.
+pub fn x64_cvtss2sd(code: &[U8], dst: Int, src: Int) Never! { x64_sse(&code, 0xf3, false, 0x5a, dst, src) }
+
+// cvtsd2ss xmm, xmm (F2 0F 5A /r): rounds to nearest (MXCSR default).
+pub fn x64_cvtsd2ss(code: &[U8], dst: Int, src: Int) Never! { x64_sse(&code, 0xf2, false, 0x5a, dst, src) }
