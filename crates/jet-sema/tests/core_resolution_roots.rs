@@ -4,8 +4,11 @@ use jet_sema::Sema::{check_bundle, CompileMode};
 use jet_sema::{Lexer, Parser, Syntax};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Once;
 
 fn check_sources(sources: &[(&str, &str, &str, &[(&str, usize)])]) -> Vec<String> {
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(jet_codegen::Codegen::MIREval::install_mir_bridge);
     let mut modules = Vec::new();
     let mut name_ledger = jet_sema::AST::NameLedger::default();
     for (index, (path, alias, source, targets)) in sources.iter().enumerate() {
