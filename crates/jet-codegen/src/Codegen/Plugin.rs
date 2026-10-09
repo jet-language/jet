@@ -1397,6 +1397,8 @@ fn plugin_host_io_wit_definitions() -> &'static str {
      \x20 protocol(io-context),\n\
      \x20 other(io-context),\n\
      \x20 resource-limit(process-resource-limit),\n\
+     \x20 already-exists(io-context),\n\
+     \x20 unsupported(io-context),\n\
      }\n"
 }
 
@@ -1633,7 +1635,7 @@ const PLUGIN_IO_ERROR_HELPERS: &str = r#"
 // alignment 8. The io-error payload is a variant of size 56/alignment 8.
 fn JET_PLUGIN_READ_IO_ERROR(ptr: i32) -> jet_std::IOError {
     let tag = unsafe { std::ptr::read_unaligned(ptr as *const u8) };
-    if tag <= 7 {
+    if tag <= 7 || tag == 9 || tag == 10 {
         // io-context: operation @0; option<string> resource @4; option<s64>
         // os-code @16; option<string> cause @32; total size 48/alignment 8.
         let context_ptr = (ptr as usize + 8) as i32;
@@ -1707,6 +1709,8 @@ fn JET_PLUGIN_READ_IO_ERROR(ptr: i32) -> jet_std::IOError {
             5 => jet_std::IOError::Closed(context),
             6 => jet_std::IOError::Protocol(context),
             7 => jet_std::IOError::Other(context),
+            9 => jet_std::IOError::AlreadyExists(context),
+            10 => jet_std::IOError::Unsupported(context),
             _ => unreachable!(),
         }
     } else if tag == 8 {
@@ -1728,7 +1732,7 @@ fn JET_PLUGIN_READ_IO_ERROR(ptr: i32) -> jet_std::IOError {
 
 fn JET_PLUGIN_FREE_IO_ERROR(ptr: i32) {
     let tag = unsafe { std::ptr::read_unaligned(ptr as *const u8) };
-    if tag <= 7 {
+    if tag <= 7 || tag == 9 || tag == 10 {
         let context_ptr = (ptr as usize + 8) as i32;
         let resource_tag = unsafe {
             std::ptr::read_unaligned((context_ptr as usize + 4) as *const u8)
@@ -1901,3 +1905,92 @@ fn JET_PLUGIN_POST_TEXT(ret_ptr: i32) {
     }
 }
 "#;
+
+#[cfg(test)]
+mod io_error_generation_tests {
+    use super::{plugin_host_io_wit_definitions, plugin_io_error_helpers, PLUGIN_IO_ERROR_HELPERS};
+    use crate::Syntax;
+
+    #[test]
+    fn host_io_wit_matches_canonical_variant_order_and_payloads() {
+        assert_eq!(Syntax::IO_ERROR_VARIANTS.len(), 11);
+        assert_eq!(Syntax::IO_ERROR_VARIANTS[8], "ResourceLimit");
+        assert_eq!(Syntax::IO_ERROR_VARIANTS[9], "AlreadyExists");
+        assert_eq!(Syntax::IO_ERROR_VARIANTS[10], "Unsupported");
+        let wit = plugin_host_io_wit_definitions();
+        let actual = wit
+            .split_once("variant io-error {\n")
+            .expect("canonical IO error WIT")
+            .1
+            .split_once("}\n")
+            .expect("closed IO error WIT")
+            .0
+            .lines()
+            .map(str::trim)
+            .collect::<Vec<_>>();
+        let expected = Syntax::IO_ERROR_VARIANTS
+            .iter()
+            .map(|name| {
+                let variant = Syntax::to_snake_acronym(name).replace('_', "-");
+                let payload = if *name == "ResourceLimit" {
+                    "process-resource-limit"
+                } else {
+                    "io-context"
+                };
+                format!("{variant}({payload}),")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn generated_io_decode_and_free_share_all_context_variant_guards() {
+        let (read, free) = PLUGIN_IO_ERROR_HELPERS
+            .split_once("fn JET_PLUGIN_FREE_IO_ERROR")
+            .expect("existing canonical free helper");
+        let guard = "if tag <= 7 || tag == 9 || tag == 10 {";
+        assert!(read.contains(guard));
+        assert!(free.contains(guard));
+        for (tag, variant) in [(9, "AlreadyExists"), (10, "Unsupported")] {
+            assert!(read.contains(&format!("{tag} => jet_std::IOError::{variant}(context),")));
+        }
+        assert!(read.contains("else if tag == 8 {"));
+        assert!(read.contains("jet_std::IOError::ResourceLimit(limit)"));
+        assert!(free.contains("else if tag == 8 {"));
+        assert!(free.contains("if limit > 4"));
+        assert!(read.contains("panic!(\"invalid canonical io-error discriminant\")"));
+        assert!(free.contains("panic!(\"invalid canonical io-error discriminant\")"));
+        assert_eq!(
+            free.matches("JET_PLUGIN_CABI_REALLOC_IMPL(value_ptr, value_len, 1, 0);")
+                .count(),
+            2,
+            "resource and cause retain their separate existing conditional releases",
+        );
+        let generated = plugin_io_error_helpers();
+        assert!(!generated.contains("JET_PLUGIN_"));
+        assert!(generated.contains(guard));
+    }
+}
+
+#[cfg(test)]
+mod io_error_bridge_generation_tests {
+    use super::{mangle_generated, plugin_host_import_bridge};
+
+    #[test]
+    fn host_error_bridges_decode_before_one_payload_free() {
+        let bridge = plugin_host_import_bridge(&["FS.Read", "FS.Write"]);
+        let read = mangle_generated("plugin_read_io_error");
+        let free = mangle_generated("plugin_free_io_error");
+        let sequence = format!(
+            "let value = {read}((ret_ptr as usize + 8) as i32);\n            \
+             {free}((ret_ptr as usize + 8) as i32);\n            \
+             Err(value)"
+        );
+        assert_eq!(
+            bridge.matches(&sequence).count(),
+            2,
+            "each canonical FS read/write error arm copies context before its one payload release",
+        );
+        assert_eq!(bridge.matches(&format!("{free}(")).count(), 2);
+    }
+}

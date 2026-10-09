@@ -60,6 +60,10 @@ mod jet_std {
         Protocol(IOContext),
         Other(IOContext),
         ResourceLimit(ProcessResourceLimit),
+        // D-CORE-FILEERROR1=A: an existing target the call refused to replace,
+        // and a request this system or file system cannot perform.
+        AlreadyExists(IOContext),
+        Unsupported(IOContext),
     }
 
     impl IOError {

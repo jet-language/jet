@@ -2712,7 +2712,12 @@ fn jet_foundation_mounts(
 
 /// Hand-written application plugin-loader runtime emitted into the bridge
 /// crate when `core.plugin` is used (D-PLUGIN1 / D-DEP-WASM1=A).
-const PLUGIN_RUNTIME: &str = include_str!("Prelude/Plugin.rs");
+const PLUGIN_RUNTIME: &str = concat!(
+    include_str!("Prelude/Plugin.rs"),
+    "\n#[cfg(test)] mod io_error_ownership_tests {\n",
+    include_str!("Prelude/PluginIOErrorOwnershipTests.rs"),
+    "\n}\n",
+);
 
 /// Hand-written compiler-extension host runtime (D-DX5-HOOK1=A). Same
 /// wasmtime Component Model substrate as `PLUGIN_RUNTIME`, distinct WIT
@@ -2815,6 +2820,29 @@ pub fn cached_crypto_helper_path() -> PathBuf {
         None,
     );
     bridge_paths(&key, &target, &[]).crypto_helper
+}
+
+// Forward only the existing explicit Cargo worker bound. Restoring the ambient
+// environment would weaken the canonical build sandbox's declared input law.
+fn cargo_bridge_sandbox_env() -> BTreeMap<String, String> {
+    let mut env = BTreeMap::from([
+        (
+            "CARGO_HOME".to_string(),
+            "/work/output/cargo-home".to_string(),
+        ),
+        ("CARGO_TARGET_DIR".to_string(), "/work/output".to_string()),
+        ("HOME".to_string(), "/work/output/home".to_string()),
+        ("SOURCE_DATE_EPOCH".to_string(), "0".to_string()),
+    ]);
+    if let Some(path) = std::env::var_os("PATH") {
+        if !path.is_empty() {
+            env.insert("PATH".to_string(), path.to_string_lossy().into_owned());
+        }
+    }
+    if let Ok(jobs) = std::env::var("CARGO_BUILD_JOBS") {
+        env.insert("CARGO_BUILD_JOBS".to_string(), jobs);
+    }
+    env
 }
 
 fn build_bridge_full(
@@ -3279,20 +3307,7 @@ fn build_bridge_full(
         "--manifest-path".to_string(),
         "/work/source/Cargo.toml".to_string(),
     ];
-    let mut sandbox_env = BTreeMap::from([
-        (
-            "CARGO_HOME".to_string(),
-            "/work/output/cargo-home".to_string(),
-        ),
-        ("CARGO_TARGET_DIR".to_string(), "/work/output".to_string()),
-        ("HOME".to_string(), "/work/output/home".to_string()),
-        ("SOURCE_DATE_EPOCH".to_string(), "0".to_string()),
-    ]);
-    if let Some(path) = std::env::var_os("PATH") {
-        if !path.is_empty() {
-            sandbox_env.insert("PATH".to_string(), path.to_string_lossy().into_owned());
-        }
-    }
+    let mut sandbox_env = cargo_bridge_sandbox_env();
 
     let cargo_home = std::env::var_os("CARGO_HOME")
         .map(PathBuf::from)
@@ -6697,6 +6712,10 @@ mod tests {
     use super::*;
     use crate::AST::{AccessConvention, Type};
     use std::collections::HashSet;
+
+    mod io_error_component_observation {
+        include!("IOErrorSandboxObservation.rs");
+    }
 
     #[test]
     fn data_provider_requires_direct_call_not_dependency_closure() {
