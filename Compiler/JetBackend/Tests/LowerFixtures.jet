@@ -734,6 +734,11 @@ fn run() {
         print("issue observe-address: checked callback address/export contract failed")
         clean = false
     }
+    if !fx_static_text_checks() {
+        print("issue static-text: literal view/export or non-literal refusal contract failed")
+        clean = false
+    }
+    if !fx_report_lir("static-text", fx_static_text_module()) -> clean = false
     if !fx_runtime_o1_effects_check() {
         print("issue runtime-o1-effects: OS effects or runtime intrinsic operations changed order/count")
         clean = false
