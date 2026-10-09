@@ -20,5 +20,12 @@ Bound disk and memory use before starting work, account for peak allocations,
 and reclaim idle output promptly after integration. Never remove source,
 protected evidence, or artifacts still in use to make room for another job.
 
+`jet-env` preserves caller-selected Cargo wrappers; it does not select sccache
+based on whether a debug output directory exists. Set `JET_NO_SCCACHE=1` to
+clear both Rust wrapper variables after shell imports, including for release
+builds and immutable source exports. Generator freshness checks use `--check`
+without rewriting their outputs; diagnostic row generation follows this same
+contract.
+
 Use fresh artifacts for runtime claims. A source check, worker receipt, or stale
 binary cannot establish runtime, tier, snapshot, golden, or I9 evidence.
