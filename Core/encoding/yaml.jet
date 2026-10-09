@@ -29,6 +29,11 @@ pub fn to_string<T: Encode>(value: T) -> String Never! {
     if text == "" -> "{{}}" else -> text
 }
 
+pub fn to_string<T: Encode>(value: T) -> String Never! {
+    text :: render_yaml(value.encode(), 0).trim_end()
+    if text == "" -> "{{}}" else -> text
+}
+
 fn parse_yaml(text: String) -> DataTree EncodingError! {
     trimmed :: trim_yaml(text)
     if trimmed.len() == 0 -> return Ok(Dyn.Null)

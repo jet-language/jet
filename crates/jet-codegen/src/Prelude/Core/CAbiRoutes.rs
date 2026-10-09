@@ -18373,6 +18373,12 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_ring_log_debug_fields(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::LogField) }.clone())))
     }
 
+    /// core.log.debug_fields
+    #[no_mangle]
+    pub extern "C" fn jet_ring_log_debug_fields(a0: JetCString, a1_0: *const u64, a1_1: i64) {
+        guard(|| crate::jet_ring_log_debug_fields(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::LogField) }.clone())))
+    }
+
     /// core.log.enter
     #[no_mangle]
     pub extern "C" fn jet_ring_log_enter(a0: *mut crate::jet_std::LogSpan) {
@@ -23199,6 +23205,30 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_tui_capabilities())))
     }
 
+
+    /// TIR/routes.rs
+    #[no_mangle]
+    pub extern "C" fn jet_typed_html_raw(a0: JetCString) -> JetCString {
+        guard(|| handle(crate::jet_typed_html_raw(view(a0).to_owned())))
+    }
+
+    /// TIR/routes.rs
+    #[no_mangle]
+    pub extern "C" fn jet_typed_html_text(a0: JetCString) -> JetCString {
+        guard(|| handle(crate::jet_typed_html_text(view(a0).to_owned())))
+    }
+
+    /// TIR/routes.rs
+    #[no_mangle]
+    pub extern "C" fn jet_typed_sh_raw(a0: JetCString, data: *mut *mut u64) -> i64 {
+        guard(|| list_out(crate::jet_typed_sh_raw(view(a0).to_owned()).into_iter().map(|e| handle(e) as u64).collect(), data))
+    }
+
+    /// core.ui.box
+    #[no_mangle]
+    pub extern "C" fn jet_ui_box(a0_0: *const u64, a0_1: i64) -> *mut crate::JetUiNode {
+        guard(|| Box::into_raw(Box::new(crate::jet_ui_box(list_in(a0_0, a0_1, |w| unsafe { &*(w as *const crate::JetUiNode) }.clone())))))
+    }
 
     /// TIR/routes.rs
     #[no_mangle]
