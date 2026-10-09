@@ -1,0 +1,13 @@
+// Native O1 cell map_filter_collect (closures; Tools/perf/function-boundary
+// map-filter-collect with n fixed): an eager map/filter/map chain over
+// 100000 Ints collected per round.
+fn run() {
+    xs := [Int]{}
+    loop i in 0..<100000 -> &xs.push(i)
+    acc := 0
+    loop r in 0..<100 {
+        ys :: xs.map(x -> x * 3 + r).filter(x -> x % 2 == 0).map(x -> x + 1)
+        loop y in ys -> acc += y
+    }
+    print(acc)
+}

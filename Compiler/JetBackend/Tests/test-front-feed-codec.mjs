@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Converter, encode, jetDecoder, loadMirSchema, parseJetSchema, parseRustDebug } from './mir-debug.mjs';
 import { decodeStream, jetWriter } from './front-feed-codec.mjs';
 import { frontReceipt } from './jet-front.mjs';
+import { selfInventory } from './run-self-front.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const schema = loadMirSchema(repo);
 // Receipt parsing is strict: lints do not fail compilation, but errors,
@@ -87,6 +88,12 @@ assert.equal(variant(interpolation, 'MIRStringPartKind'), 'Interpolation');
 assert.equal(variant(interpolation.fields[1], 'MIRStringFormat'), 'Display');
 const imported = convert('Unqualified { module: MirModuleId(42), items: [] }', 'MIRImportKind');
 assert.equal(imported.fields[0].fields[0].int, '42');
+const pointerVariant = schema.get('MIROperation').variants.find(v => v.name === 'PtrFromAddr');
+const pointer = { k: 'struct', name: 'PtrFromAddr', fields: pointerVariant.fields.map(f => [f.name === 'address' ? 'addr' : f.name, f.name === 'address' ? parseRustDebug('MirValueId(73)') : node(f.type)]) };
+const convertedPointer = new Converter(schema).convert(pointer, named('MIROperation'), 'test');
+assert.equal(variant(convertedPointer, 'MIROperation'), 'PtrFromAddr');
+assert.equal(convertedPointer.fields[0].fields[0].int, '73');
+assert.throws(() => new Converter(schema).convert({ ...pointer, fields: pointer.fields.filter(([key]) => key !== 'addr') }, named('MIROperation'), 'test'), /missing checked Rust field/);
 for (const fact of schema.get('MIRCopyFact').variants) {
   const copy = convert(`Copy { value: MirValueId(19), fact: ${fact.name} }`, 'MIROperation');
   assert.equal(variant(copy.fields[1], 'MIRCopyFact'), fact.name);
@@ -119,4 +126,42 @@ assert.throws(() => decodeStream(tokens.concat('trailing').join('\n'), schema), 
 const writer = jetWriter(schema);
 assert.match(writer, /fn mirw_mir_program\(/);
 assert.match(writer, /mirw_mir_copy_fact\(v1, &out\)/);
-console.log('front-feed codec: all six checked schema mappings and strict observation passed');
+assert.match(writer, /\.PtrFromAddr\(v0, v1\)/);
+// Shape-only transport coverage, not valid executable MIR: every operation
+// variant must survive the schema stream and have a generated Jet writer arm.
+function blank(type) {
+  if (type.k === 'opt') return { opt: null };
+  if (type.k === 'list') return [];
+  if (type.k === 'map') return { map: [] };
+  if (type.name === 'String') return '';
+  if (type.name === 'Bool') return false;
+  if (['Int','U64','U8','U16','U32','I8','I16','I32','I64','Float','Char'].includes(type.name)) return { int: '0' };
+  const def = schema.get(type.name);
+  return def.kind === 'struct' ? { fields: def.fields.map(f => blank(f.type)) } : { tag: 0, fields: def.variants[0].fields.map(f => blank(f.type)) };
+}
+const operations = schema.get('MIROperation').variants;
+const allProgram = blank(named('MIRProgram')), allFunction = blank(named('MIRFunction')), allBlock = blank(named('MIRBasicBlock'));
+const replace = (value, owner, name, item) => { value.fields[schema.get(owner).fields.findIndex(f => f.name === name)] = item; };
+replace(allBlock, 'MIRBasicBlock', 'instructions', operations.map((operation, tag) => {
+  const instruction = blank(named('MIRInstruction'));
+  replace(instruction, 'MIRInstruction', 'operation', { tag, fields: operation.fields.map(f => blank(f.type)) });
+  assert.ok(writer.includes(`.${operation.name}${operation.fields.length ? '(' : ' ->'}`), `missing Jet writer arm ${operation.name}`);
+  return instruction;
+}));
+replace(allFunction, 'MIRFunction', 'blocks', [allBlock]);
+replace(allProgram, 'MIRProgram', 'functions', [allFunction]);
+const allTokens = ['0']; encode(allProgram, named('MIRProgram'), schema, allTokens);
+const observedOperations = decodeStream(allTokens.join('\n'), schema).program.functions[0].blocks[0].instructions.map(instruction => instruction.operation.$variant);
+assert.deepEqual(observedOperations, operations.map(operation => operation.name));
+const observedProgram = decodeStream(allTokens.join('\n'), schema).program;
+assert.equal(observedProgram.functions[0].blocks[0].instructions.find(instruction => instruction.operation.$variant === 'EnumIs').operation.variant, '');
+observedProgram.source_files = [{ id: { value: '0' }, path: '/unit/selfhost.jet', source: '' }];
+const inventoryMap = { source_segments: [{ generated: { start: 0, end: 100 }, source_file: 'Compiler/JetLexer/Source/Lexer.jet' }], mir_observer: { generated: { start: 100, end: 200 } } };
+assert.equal(selfInventory(observedProgram, inventoryMap, '/unit/selfhost.jet').packages.get('JetLexer').length, 1);
+observedProgram.functions[0].span.start = '100';
+assert.equal(selfInventory(observedProgram, inventoryMap, '/unit/selfhost.jet').packages.get('Bootstrap').length, 1);
+observedProgram.source_files[0].path = '/unit/external.jet';
+const externalInventory = selfInventory(observedProgram, inventoryMap, '/unit/selfhost.jet');
+assert.equal(externalInventory.packages.get('Unmapped').length, 1);
+assert.equal(externalInventory.operations.size, operations.length);
+console.log(`front-feed codec: checked schema mappings (including PtrFromAddr), ${operations.length} operation variants and strict observation passed`);

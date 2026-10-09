@@ -149,6 +149,7 @@ use jet_foundation.[
     TypeTupleField,
     mir_authority_plugin_call,
     mir_field_id,
+    mir_module_id,
     mir_ownership_from_access,
     mir_source_file_id,
     mir_type_id,
@@ -5069,11 +5070,9 @@ fn jet_codegen_close_function(builder: JetCodegenBuilder, program: JetCodegenPro
     selected ?? panic("checked close method has no reachable function")
 }
 
-/// D-SHAPE-RESOURCE1=A: the nominal `Close` implementation that scope-end
-/// cleanup runs for a still-live local of `ty`. Inside that implementation's
-/// own `close` body the receiver is the value being closed, so values of the
-/// type are released there without re-entering `close`.
-fn jet_codegen_scope_end_close_function(builder: JetCodegenBuilder, program: JetCodegenProgram, ty: Type) -> TFunc? Never! {
+// The nominal hook, before applying the consuming receiver's cleanup exemption.
+// Projected-move lowering must still refuse an indivisible Close owner there.
+fn jet_codegen_nominal_close_function(builder: JetCodegenBuilder, program: JetCodegenProgram, ty: Type) -> TFunc? Never! {
     name := ""
     if jet_codegen_unwrap_pattern_tags(ty) == {
         .Named(value) | .Apply(value, _) -> name = value
@@ -5092,10 +5091,17 @@ fn jet_codegen_scope_end_close_function(builder: JetCodegenBuilder, program: Jet
         function_owner_name :: jet_codegen_type_head_name(jet_codegen_unwrap_pattern_tags(function_owner)) ?? next
         identity :: jet_codegen_find_nominal_identity(program.modules, function.module_identity, function_owner_name, [String]{}) ?? next
         if identity.key != owner.key -> next
-        if jet_codegen_function_id(function) == jet_codegen_function_id(builder.function) -> return None
         return Val(function)
     }
     None
+}
+
+/// D-SHAPE-RESOURCE1=A: scope-end cleanup does not re-enter the consuming
+/// receiver's Close implementation. The nominal ownership rule is separate.
+fn jet_codegen_scope_end_close_function(builder: JetCodegenBuilder, program: JetCodegenProgram, ty: Type) -> TFunc? Never! {
+    function :: jet_codegen_nominal_close_function(builder, program, ty) ?? return None
+    if jet_codegen_function_id(function) == jet_codegen_function_id(builder.function) -> return None
+    Val(function)
 }
 
 /// Close a moved-out scope-end value through the same consuming receiver
@@ -5221,6 +5227,24 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
             jet_codegen_emit_value(&builder, program, expression.span, read_type, MIROperation.ReadPlace{place: local_place})
         }
         .ConstRef(symbol) -> jet_codegen_lower_constant_reference(&builder, program, expression, symbol)
+        .GlobalShared(initializer, lifetime) -> {
+            row :: jet_codegen_find_function_row(program.function_index, initializer.key) ?? panic("checked Shared initializer has no function row")
+            init_id :: jet_codegen_function_id(program.function_index.rows[row])
+            key :: "shared-site:{init_id.value}"
+            site :: MIRConstantDef{
+                id: MIRConstantID{value: stable_id("mir-constant", key)},
+                module_id: mir_module_id(program.function_index.rows[row].module_identity),
+                key: key,
+                name: key,
+                span: program.function_index.rows[row].source_span,
+                visibility: MIRVisibility.Private,
+                ty: jet_codegen_lower_type_with_modules(expression.ty, program.modules, builder.function.module_identity, builder.generic_type_names),
+                is_storage: false,
+                value: MIRConstant.SharedSite{site: MIRSharedSite{initializer: init_id, lifetime: lifetime}},
+            }
+            jet_codegen_merge_shared_sites(&builder.shared_sites, [MIRConstantDef]{site})
+            jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Global{name: key})
+        }
         .Field(receiver, field) -> jet_codegen_lower_field_expr(&builder, program, expression, receiver, field)
         .OptField(base, member, flatten) -> jet_codegen_lower_optional_field(&builder, program, expression, base, member, flatten)
         .OptMethodCall(base, binding, call, flatten) -> jet_codegen_lower_optional_method_call(&builder, program, expression, base, binding, call, flatten)

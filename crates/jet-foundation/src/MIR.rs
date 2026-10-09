@@ -4032,6 +4032,8 @@ pub enum MirConstant {
     String(String),
     Bytes(Vec<u8>),
     Unit,
+    /// A lazy, typed Shared owner, not a literal handle or user storage word.
+    SharedSite(MirSharedSite),
     BigInt(String),
     List(Vec<MirConstant>),
     Map(BTreeMap<MirConstKey, MirConstant>),

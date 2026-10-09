@@ -99,6 +99,36 @@ Make mutation visible: a mutating function takes `&T`, while ownership
 transfer takes `^T`. Document the invariant enforced by every `#SingleUse`
 type.
 
+### Internal Core Shared publication
+
+Core source can retain an existing `Shared<T>` owner with
+`core.mem.__process_shared(init)`, `__world_shared(init)`,
+`__thread_shared(init)`, or `__attempt_shared(init)`. These are reserved
+Core-only operations, not public constructors. The same-module initializer
+must be a direct, non-generic, zero-argument, infallible module function
+returning `Shared<T>`; its inferred transitive effects may contain only `Mem`.
+Every use of one initializer must select the same lifetime.
+
+Sema publishes that checked identity and lifetime. Lowering creates one typed
+MIR `Global` site per initializer, not a special initializer-name table or a
+per-caller cache. A getter returns an owning clone; retiring a site releases
+its owner without invalidating outstanding clones. Process sites survive
+world reloads, World sites retire at an explicit quiescent world boundary,
+Thread sites survive session/lease changes until their OS thread retires, and
+Attempt sites retire after the selected ordinary unit attempt has discharged
+its tasks and guards, including failure/unwind paths.
+
+All native site cells belong to one pinned Core image. Dynamic images import
+its getters and never own or register cells; the host must execute the image's
+no-argument `Unit` startup, which performs frozen-static fixups only, before
+publishing getters. Process/World first publication calls the canonical
+runtime `jet_rt_shared_site_publish`; the common read is an ordinary typed
+`Global` load. Thread/Attempt use host TLS projection of the same site identity.
+Source evaluation receives a host-retained typed process segment and explicit
+boundary resets, never a compiler-global root. The browser continues to support
+ordinary `Shared`; only existing env/auth/fault APIs without browser providers
+are refused in sema with `E-WEB-TIR-UNSUPPORTED`.
+
 ## Law 4 — Effects
 
 Declare I/O with the corresponding effect row, such as `-[FS]>`, `-[Net]>`, or

@@ -216,6 +216,13 @@ runtime's ABI, error behavior, or observable output. Report an unsupported
 construct before producing an executable; do not marshal an unproved carrier
 or run a backend-local approximation. A focused same-program regression must
 exercise either the shared meaning or that explicit refusal.
+
+Pattern adapters preserve typed captures, binary bit widths and byte order, and
+advance a cursor or reader only according to the canonical scan's success and
+failure contract. A sequence of scalar reader calls is not a replacement for a
+pattern scan. When that scan/capture boundary is unavailable, lowering refuses
+the semantic operation rather than emitting a partial parser.
+
 Module scalar storage has one local data cell per checked declaration. Global
 reads and writes through static-rooted places address that same cell, including
 when the shared object writer packages a runtime library. Atomic values still

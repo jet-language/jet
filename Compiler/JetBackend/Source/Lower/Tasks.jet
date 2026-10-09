@@ -229,7 +229,7 @@ fn lower_task_tuple_all(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 }
 
 // A runtime outcome `export(args..., out) -> verdict` as the instruction's native
-// Result box (1 = Ok at offset 8). The error crosses as a runtime handle: a
+// Result box using the ordinary Result payload offset. The error crosses as a runtime handle: a
 // Core record (TaskFailure) is rebuilt in its native layout (Records.jet); an
 // opaque runtime handle error type is kept as the handle; any other error
 // layout is reported instead of reinterpreting runtime bytes.
@@ -246,7 +246,7 @@ fn lower_task_outcome(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     }
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     lower_alloc(&m, &f, dst, lower_box_size(p, result_ty))
-    out :: lower_address(&f, dst, 8)
+    out :: lower_address(&f, dst, lower_result_payload_offset())
     call_args := [LIRValueID]{}
     loop arg in args -> &call_args.push(arg)
     &call_args.push(out)
@@ -270,13 +270,13 @@ fn lower_task_outcome(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     }
     lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: verdict})
     if runtime == .Val(record) {
-        zero :: lower_const(&f, 0)
+        zero :: lower_const(&f, lower_result_selector(false))
         failed :: lower_flag(&f)
         lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: verdict, right: zero})
         failure :: lower_new_block(&f)
         lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(failure, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
         lower_start(&f, failure, [LIRValueID]{})
-        lower_record_store_from_slot(p, &m, &f, err_ty, record, out, dst, 8)
+        lower_record_store_from_slot(p, &m, &f, err_ty, record, out, dst, lower_result_payload_offset())
     }
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, done, [LIRValueID]{})
@@ -541,7 +541,11 @@ fn lower_shared_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     slot :: lower_shared_taken_slot(p, c, &m, &f, args[0], inner_ty) ?? return true
     meta :: lower_lazy_meta(p, &m, &f, inner_ty)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return true
-    lower_call_runtime(&m, &f, "jet_rt_native_shared_new", [LIRValueID]{slot, meta}, Val(dst))
+    // The runtime owns this exact typed destructor, including a consuming
+    // Close implementation. Do not invent zero or a second cleanup callback.
+    drop_code :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: drop_code, base: meta, offset: 16})
+    lower_call_runtime(&m, &f, "jet_rt_native_shared_new", [LIRValueID]{slot, meta, drop_code}, Val(dst))
     true
 }
 

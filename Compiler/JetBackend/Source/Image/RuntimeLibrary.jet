@@ -7,10 +7,11 @@ use jet_foundation.[MIRProgram, MIRExport, MIRFunction, MIRFunctionID, MIRType, 
 struct X64RuntimeLibraryResult {
     object: X64ExecutableResult
     exports: [MIRExport]
+    export_abis: [CoreSharedRuntimeExportABI]
 }
 
 fn runtime_export_error(message: String) -> X64RuntimeLibraryResult Never! {
-    X64RuntimeLibraryResult{object: X64ExecutableResult{bytes: [U8]{}, errors: [String]{message}}, exports: [MIRExport]{}}
+    X64RuntimeLibraryResult{object: X64ExecutableResult{bytes: [U8]{}, errors: [String]{message}}, exports: [MIRExport]{}, export_abis: [CoreSharedRuntimeExportABI]{}}
 }
 
 // The C primitives the native object writer lowers: integer words of every
@@ -234,13 +235,19 @@ fn x64_runtime_library(program: MIRProgram, lifecycle_rows: [String]) -> X64Runt
     lowered :: lir_lower_runtime_callables(program, roots, ^intrinsics)
     if lowered.issues.len() > 0 {
         errors :: loop issue in lowered.issues -> "{issue.function}\t{issue.message}"
-        return X64RuntimeLibraryResult{object: X64ExecutableResult{bytes: [U8]{}, errors: errors}, exports: exports}
+        return X64RuntimeLibraryResult{object: X64ExecutableResult{bytes: [U8]{}, errors: errors}, exports: exports, export_abis: [CoreSharedRuntimeExportABI]{}}
     }
     globals := [X64RuntimeExport]{}
+    export_abis := [CoreSharedRuntimeExportABI]{}
     loop entry_row in exports {
         function :: lowered.callables.get(entry_row.function.value) ?? return runtime_export_error("export {entry_row.symbol} has no lowered callable")
         hook :: lifecycle.get(entry_row.symbol) ?? RuntimeLifecycle{init_priority: -1, fini_priority: -1}
         &globals.push(X64RuntimeExport{function: function, symbol: entry_row.symbol, init_priority: hook.init_priority, fini_priority: hook.fini_priority})
     }
-    X64RuntimeLibraryResult{object: x64_runtime_object(lowered.lir, globals), exports: exports}
+    &export_abis.sort_by((a: CoreSharedRuntimeExportABI, b: CoreSharedRuntimeExportABI) -> a.symbol <=> b.symbol)
+    // The shared runtime is a build artifact: use the canonical O1 pipeline.
+    // It preserves callable IDs/signatures, so audited exports still name the
+    // same functions. x64_runtime_object lints the optimized module again.
+    optimized :: lir_optimize_module(lowered.lir, 1)
+    X64RuntimeLibraryResult{object: x64_runtime_object(optimized, globals), exports: exports, export_abis: export_abis}
 }

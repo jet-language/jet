@@ -20,12 +20,41 @@ const WASIP2_UNSUPPORTED_SURFACES: &[&str] = &[
     "core.email",
 ];
 
+// Exact registered APIs without a browser host provider. Keep the Jet-half
+// list in CheckProgram.jet identical; the compiler witness pins both lists.
+const WEB_HOST_UNSUPPORTED_CORE_APIS: &[&str] = &[
+    "core.auth::magic_link_consume",
+    "core.auth::magic_link_issue",
+    "core.auth::oauth_begin",
+    "core.auth::oauth_finish",
+    "core.auth::password_login",
+    "core.auth::register_user",
+    "core.auth::session_validate",
+    "core.sys::decode",
+    "core.sys::expand",
+    "core.sys::get",
+    "core.sys::getenv",
+    "core.sys::home_dir",
+    "core.sys::set",
+    "core.sys::temp_dir",
+    "core.sys::unset",
+    "core.sys::vars",
+];
+
 /// D-WASISRV1=A: reject a reachable Core socket surface before codegen when
 /// the selected target has no socket runtime that the Prelude can use.
 pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnostic> {
     let socket_target = socket_target_supported(target);
     let web_target =
         target == Syntax::BUILD_TARGET_WEB || bundle.web_partition_enforced;
+    let web_unsupported = if web_target {
+        bundle.used_core.iter().filter_map(|usage| {
+            WEB_HOST_UNSUPPORTED_CORE_APIS.contains(&usage.as_str())
+                .then(|| usage.replace("::", "."))
+        }).collect::<BTreeSet<_>>()
+    } else {
+        BTreeSet::new()
+    };
     // D-PLUGIN-AUTHORITY1: the browser web backend cannot host the native
     // Wasmtime Component Model boundary. Reachability comes from sema's
     // canonical Core-use set, not from an unused import.
@@ -49,12 +78,22 @@ pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnos
         && wasip2_unsupported.is_empty()
         && wasip2_unsupported_surfaces.is_empty()
         && !plugin_reachable
+        && web_unsupported.is_empty()
     {
         return Vec::new();
     }
 
     let mut seen = BTreeSet::<(String, usize, usize, String)>::new();
     let mut diagnostics = Vec::new();
+    for operation in &web_unsupported {
+        diagnostics.push(Diagnostic::error(
+            "E-WEB-TIR-UNSUPPORTED",
+            format!("Web output cannot compile `{operation}` yet."),
+            "this Core operation needs a host provider that the browser target does not supply".into(),
+            "move this operation behind a native or server boundary".into(),
+            None,
+        ));
+    }
     if plugin_reachable {
         let mut anchored = false;
         for module in &bundle.modules {

@@ -38,12 +38,12 @@ fn lower_render_impl_selected(p: MIRProgram, implementation: MIRImplDef, ty: MIR
         }
         if os_name != p.facts.active_os -> return false
     }
-    mir_type_same_checked_type(implementation.self_type, ty) || lower_render_template(p, implementation.self_type, ty)
+    mir_type_same_checked_type(implementation.self_type, ty) || lower_nominal_impl_template(p, implementation.self_type, ty)
 }
 
 // A generic implementation `impl Printable for Box<T>` renders every
 // instance of Box: its receiver applies the declaration to its own parameters.
-fn lower_render_template(p: MIRProgram, self_type: MIRType, ty: MIRType) -> Bool Never! {
+fn lower_nominal_impl_template(p: MIRProgram, self_type: MIRType, ty: MIRType) -> Bool Never! {
     if self_type.kind == .Apply(name, args) {
         if ty.kind == .Apply(other, _) {
             if name.id != other.id || args.len() == 0 -> return false
@@ -180,6 +180,7 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
         }
         .Flag -> "jet_rt_bool_to_string"
         .FloatBits -> if mode == .Debug -> "jet_rt_float_debug" else -> "jet_rt_float_to_string"
+        .Float32Bits -> if mode == .Debug -> "jet_rt_float32_debug" else -> "jet_rt_float32_to_string"
         .Boxed(_) | .Inline(_) | .Discriminant -> ""
         else -> {
             lower_fail(&m, &f, "displaying {mir_type_display_name(ty)} is not lowered at O0 yet")
@@ -273,10 +274,29 @@ fn lower_render_payload_info(p: MIRProgram, definition: MIRTypeDef, variant_name
 }
 
 fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if lower_trait_ref(p, glue.ty) != None -> return lower_helper_trait_render(p, &m, glue)
+    if lower_set_element(glue.ty) != None -> return lower_helper_set_render(p, &m, glue)
+    if lower_queue_element(glue.ty) != None -> return lower_helper_queue(p, &m, glue)
+    if lower_priority_queue_element(glue.ty) != None -> return lower_helper_priority_queue_render(p, &m, glue)
     layout :: lower_repr_layout(lower_repr(p, glue.ty)) ?? lir_layout_pointer()
     f := lower_helper_start(&m, glue, [LIRLayout]{layout}, Val(lir_layout_pointer()))
     operand :: ~f.open_params[0]
     mode :: if glue.helper == "show" -> LowerRenderMode.Show else if glue.helper == "debug" -> LowerRenderMode.Debug else -> LowerRenderMode.Display
+    // List.join requests show<String>, independently of the lazy iterator's
+    // scalar callback. Both use the ordinary renderer and return an owner.
+    if lower_text_type(glue.ty) {
+        rendered :: lower_render_value(p, &m, &f, glue.ty, Val(operand), mode) ?? {
+            lower_seal(&f, LIRTerminator.Unreachable)
+            return lir_builder_finish(f.builder)
+        }
+        result := rendered.value
+        if !rendered.owned {
+            result = lower_render_string(&f)
+            lower_call_runtime(&m, &f, "jet_rt_string_clone", [LIRValueID]{rendered.value}, Val(result))
+        }
+        lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+        return lir_builder_finish(f.builder)
+    }
     builder :: lower_pointer(&f)
     lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
     done :: lower_new_block(&f)
@@ -300,7 +320,7 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
     } else if glue.ty.kind == .Result(ok_ty, err_ty) {
         verdict :: lower_word(&f)
         lower_emit(&f, LIRInst.Load{dst: verdict, base: operand, offset: 0})
-        zero :: lower_const(&f, 0)
+        zero :: lower_const(&f, lower_result_selector(false))
         failed :: lower_flag(&f)
         lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: verdict, right: zero})
         err_block :: lower_new_block(&f)
@@ -311,14 +331,14 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
         if clean -> lower_render_static(&m, &f, builder, if mode == .Debug -> "None" else -> "null")
         else {
             lower_render_static(&m, &f, builder, "Err(")
-            error_value :: lower_render_load(p, &f, operand, 8, err_ty, false)
+            error_value :: lower_render_load(p, &f, operand, lower_result_payload_offset(), err_ty, false)
             lower_render_push(p, &m, &f, builder, err_ty, error_value, mode)
             lower_render_static(&m, &f, builder, ")")
         }
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
         lower_start(&f, ok_block, [LIRValueID]{})
         if !clean || mode == .Debug -> lower_render_static(&m, &f, builder, if clean -> "Val(" else -> "Ok(")
-        ok_value :: lower_render_load(p, &f, operand, 8, ok_ty, false)
+        ok_value :: lower_render_load(p, &f, operand, lower_result_payload_offset(), ok_ty, false)
         lower_render_push(p, &m, &f, builder, ok_ty, ok_value, mode)
         if !clean || mode == .Debug -> lower_render_static(&m, &f, builder, ")")
     } else if glue.ty.kind == .List(elem) {

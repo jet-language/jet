@@ -53,7 +53,8 @@ export function decodeStream(text, schema) {
     const d = schema.get(t.name);
     if (d.kind === 'struct') return Object.fromEntries(d.fields.map(f => [f.name, read(f.type)]));
     const tag = count(); const variant = d.variants[tag]; if (!variant) throw new Error(`bad ${t.name} tag ${tag}`);
-    return { variant: variant.name, ...Object.fromEntries(variant.fields.map(f => [f.name, read(f.type)])) };
+    // `$` is not a Jet field identifier; payload fields named `variant` survive.
+    return { $variant: variant.name, ...Object.fromEntries(variant.fields.map(f => [f.name, read(f.type)])) };
   };
   const entry = next();
   const program = read({ k: 'named', name: 'MIRProgram' });

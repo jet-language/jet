@@ -45,7 +45,7 @@ fn lower_ptr_from_addr(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
 fn lower_ptr_deref(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID) Never! {
     ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "dereferenced value has no checked type")
     elem :: lower_ptr_element(ty) ?? return lower_fail(&m, &f, "dereferencing {mir_type_display_name(ty)} is not lowered at O0 yet")
-    if lower_needs_drop(p, elem) -> return lower_fail(&m, &f, "dereferencing a pointer to {mir_type_display_name(elem)} is not lowered at O0 yet")
+    if lower_needs_drop(p, m, elem) -> return lower_fail(&m, &f, "dereferencing a pointer to {mir_type_display_name(elem)} is not lowered at O0 yet")
     address :: lower_use(&m, &f, value) ?? return
     size :: lower_size(p, elem)
     bytes :: lower_const(&f, size.size)

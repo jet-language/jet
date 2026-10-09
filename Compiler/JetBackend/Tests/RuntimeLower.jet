@@ -14,6 +14,7 @@ fn runtime_lower(program: MIRProgram) {
     files.write_bytes("jet_runtime_jet.o", library.object.bytes) ?? panic("cannot write jet_runtime_jet.o")
     names :: loop entry_row in library.exports -> entry_row.symbol
     files.write("jet_runtime_jet.exports", names.join("\n")) ?? panic("cannot write runtime export receipt")
+    files.write("jet_runtime_jet.abi.json", x64_runtime_export_abi_json(library.export_abis)) ?? panic("cannot write checked runtime export ABI receipt")
 }
 
 fn run() {

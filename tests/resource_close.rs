@@ -505,3 +505,125 @@ fn deferred_close_agrees_on_interpreter_and_native() {
         }
     }
 }
+
+const CLOSE_CONTAINERS: &str =
+    include_str!("../Examples/features/memory/resource_close_containers.jet");
+const CLOSE_CONTAINERS_EXPECTED: &str =
+    include_str!("../Examples/features/expected/memory/resource_close_containers.out");
+
+#[test]
+fn generic_container_close_runs_once_on_rust_aot() {
+    assert!(common::have_rustc(), "resource-close runtime proof needs rustc");
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_close_containers_aot", "main", CLOSE_CONTAINERS);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, CLOSE_CONTAINERS_EXPECTED);
+}
+
+#[test]
+fn generic_container_close_runs_once_on_interpreter_mir() {
+    use jet::Interpreter::RunOutcome;
+
+    let root = common::unique_tmp("jet_close_containers_interpreter");
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("main.jet");
+    fs::write(&path, CLOSE_CONTAINERS).unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    match common::run_interpreted(&bundle, &common::development_policy()) {
+        RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, CLOSE_CONTAINERS_EXPECTED),
+        RunOutcome::Problems(diags) => {
+            panic!("instantiated Close cleanup failed on the interpreter: {diags:?}");
+        }
+    }
+}
+
+#[test]
+fn projected_move_from_close_owner_is_explicitly_refused() {
+    let src = r#"
+struct ClosePair { first: String, second: String }
+impl ClosePair.Close {
+    fn close(^self) { print(self.second) }
+}
+fn run() {
+    held :: ClosePair{first: "first", second: "second"}
+    taken :: ^held.first
+    print(taken)
+}
+"#;
+    let diagnostics = match jet::compile(src) {
+        Err(diagnostics) => diagnostics,
+        Ok(_) => panic!("a non-receiver Close owner was partially moved"),
+    };
+    let rendered = jet::render_diagnostics("close_pair.jet", src, &diagnostics);
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "E0222"
+            && diagnostic.why.contains("ClosePair")
+            && diagnostic.why.contains("own Close implementation")
+    }), "{rendered}");
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.span.is_some_and(|span| {
+        src[span.start..span.end].contains("held.first")
+    })), "refusal must point at the projected move, not the binding: {rendered}");
+}
+
+#[test]
+fn projected_move_below_atomic_close_leaf_is_explicitly_refused() {
+    let src = r#"
+struct ClosePair { first: String, second: String }
+impl ClosePair.Close {
+    fn close(^self) { print(self.second) }
+}
+struct Holder { value: ClosePair, spare: String }
+fn run() {
+    held :: Holder{value: ClosePair{first: "first", second: "second"}, spare: "kept"}
+    taken :: ^held.value.first
+    print(taken)
+}
+"#;
+    let diagnostics = match jet::compile(src) {
+        Err(diagnostics) => diagnostics,
+        Ok(_) => panic!("a move below an atomic Close leaf was silently lowered"),
+    };
+    let rendered = jet::render_diagnostics("close_leaf.jet", src, &diagnostics);
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "E0222"
+            && diagnostic.why.contains("ClosePair")
+            && diagnostic.why.contains("own Close implementation")
+    }), "{rendered}");
+}
+
+#[test]
+fn consuming_close_receiver_does_not_exempt_nested_close_owners() {
+    let src = include_str!("ui/E0222_close_receiver_nested.jet");
+    let diagnostics = jet::compile(src)
+        .expect_err("the Close receiver exemption must not extend into a nested Close owner");
+    let rendered = jet::render_diagnostics("close_receiver_nested.jet", src, &diagnostics);
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "E0222"
+            && diagnostic.what.contains("self.value.first")
+            && diagnostic.why.contains("ClosePair")
+    }), "{rendered}");
+}
+
+#[test]
+fn borrowed_close_owner_keeps_the_borrowed_move_diagnostic() {
+    let src = r#"
+struct ClosePair { first: String, second: String }
+impl ClosePair.Close {
+    fn close(^self) { print(self.second) }
+}
+fn borrowed(held: ClosePair) {
+    taken :: ^held.first
+    print(taken)
+}
+fn run() {}
+"#;
+    let diagnostics = jet::compile(src).expect_err("a borrowed field cannot move");
+    let rendered = jet::render_diagnostics("borrowed_close.jet", src, &diagnostics);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0201"), "{rendered}");
+    assert!(!diagnostics.iter().any(|diagnostic| diagnostic.code == "E0222"), "{rendered}");
+}

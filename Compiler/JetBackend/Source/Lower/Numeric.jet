@@ -44,6 +44,80 @@ fn lower_binary_route(p: MIRProgram, m: &LowerModule, f: &LowerFunction, dst: LI
     lower_call_runtime(&m, &f, symbol, args, Val(dst))
 }
 
+// Duration's canonical add/sub kernels (Duration.rs179–190; historical Jet
+// kernel_duration.add/sub) use saturated I64 nanoseconds. Only marshaling is
+// emitted here: arithmetic and construction remain shared runtime calls.
+fn lower_duration_nanoseconds(m: &LowerModule, f: &LowerFunction, handle: LIRValueID) -> LIRValueID Never! {
+    exact :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+    lower_call_runtime(&m, &f, "jet_duration_ns_value", [LIRValueID]{handle}, Val(exact))
+    raw :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_int_owned_to_i64", [LIRValueID]{exact}, Val(raw))
+    lower_emit(&f, LIRInst.Drop{value: exact})
+    raw
+}
+
+fn lower_duration_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, op: MIRBinaryOp, left_ty: MIRType, right: MIRValueID, left: LIRValueID, right_value: LIRValueID, dst: LIRValueID) -> Bool Never! {
+    duration :: LowerRouteCarrier.Handle{name: "Duration"}
+    if !lower_route_carrier_matches(p, left_ty, duration) -> return false
+    right_ty :: lower_value_type(c, right) ?? return true
+    paired :: lower_route_carrier_matches(p, right_ty, duration)
+    if !paired || (op != .Add && op != .Sub && lower_condition_of(op) == None) -> return false
+    if lower_runtime_route("jet_rt_int_drop") == None {
+        lower_fail(&m, &f, "Duration arithmetic requires the canonical exact-Int lifetime runtime ABI")
+        return true
+    }
+    borrowed := [LIRValueID]{}
+    left_handle := left
+    right_handle := right_value
+    if lower_record_handle(p, left_ty) != None {
+        left_handle = lower_record_to_runtime(p, &m, &f, left_ty, "Duration", left)
+        &borrowed.push(left_handle)
+    }
+    if lower_record_handle(p, right_ty) != None {
+        right_handle = lower_record_to_runtime(p, &m, &f, right_ty, "Duration", right_value)
+        &borrowed.push(right_handle)
+    }
+    if lower_condition_of(op) == .Val(condition) {
+        compare_left :: lower_duration_nanoseconds(&m, &f, left_handle)
+        compare_right :: lower_duration_nanoseconds(&m, &f, right_handle)
+        lower_emit(&f, LIRInst.Compare{dst: dst, condition: condition, left: compare_left, right: compare_right})
+    } else {
+        result_ty :: lower_checked_type(c, instruction) ?? return true
+        if !lower_route_carrier_matches(p, result_ty, duration) {
+            lower_fail(&m, &f, "Duration arithmetic result does not match its canonical carrier")
+            return true
+        }
+        handle :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_Duration"}, None)
+        if op == .Sub {
+            lower_call_runtime(&m, &f, "jet_duration_difference", [LIRValueID]{left_handle, right_handle}, Val(handle))
+        } else {
+            route :: lower_runtime_route("jet_i64_saturating_add") ?? {
+                lower_fail(&m, &f, "Duration addition requires the canonical raw I64 saturated-add runtime ABI")
+                return true
+            }
+            add_left :: lower_duration_nanoseconds(&m, &f, left_handle)
+            add_right :: lower_duration_nanoseconds(&m, &f, right_handle)
+            sum :: lower_word(&f)
+            lower_call_runtime(&m, &f, route.export, [LIRValueID]{add_left, add_right}, Val(sum))
+            exact :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+            lower_call_runtime(&m, &f, "jet_int_owned_from_i64", [LIRValueID]{sum}, Val(exact))
+            // Every I64 nanosecond value is representable: from_int's scale
+            // is exactly one for the canonical Nanoseconds variant ordinal.
+            unit :: lower_const(&f, 0)
+            out :: lower_route_result_call(&m, &f, "jet_duration_from_int", [LIRValueID]{exact, unit}, duration, LowerRouteCarrier.Handle{name: "RangeError"})
+            lower_emit(&f, LIRInst.Drop{value: exact})
+            lower_emit(&f, LIRInst.Load{dst: handle, base: out.slot, offset: 0})
+        }
+        if lower_record_handle(p, result_ty) != None {
+            lower_record_from_runtime(p, &m, &f, result_ty, handle, Val(dst))
+        } else {
+            lower_emit(&f, LIRInst.Move{dst: dst, src: handle})
+        }
+    }
+    loop temporary in borrowed -> lower_emit(&f, LIRInst.Drop{value: temporary})
+    true
+}
+
 fn lower_numeric_compare(f: &LowerFunction, condition: LIRCondition, left: LIRValueID, right: LIRValueID) -> LIRValueID Never! {
     dst :: lower_flag(&f)
     lower_emit(&f, LIRInst.Compare{dst: dst, condition: condition, left: left, right: right})

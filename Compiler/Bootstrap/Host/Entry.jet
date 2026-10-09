@@ -16,6 +16,7 @@
 // assembler keeps once.
 use core.sys as cli_sys
 use core.files as cli_files
+use jet_backend.[CoreSharedParentGetterResult, CoreSharedParentRuntime, CoreSharedRuntimeExportABI, core_shared_runtime_export_abis_decode]
 use jet_driver.[
     JetDriverCompileRequest,
     JetDriverCompileResult,
@@ -24,8 +25,30 @@ use jet_driver.[
     jet_driver_compile_mir,
     jet_driver_compile_escaped_failure,
     jet_driver_compile_keep_going,
+    JetDriverCoreLibraryPreparation,
+    jet_driver_prepare_core_library,
+    JetDriverCoreSource,
+    jet_driver_core_library_request,
+    JetDriverCoreSourceParentHost,
+    jet_driver_core_source_parent_new,
+    jet_driver_core_source_parent_attach,
+    jet_driver_core_source_parent_getter,
 ]
-use jet_backend.[lir_lower_entry, lir_print_module, x64_relocatable_object, x64_link_executable, x64_runtime_library]
+use jet_backend.[lir_lower_entry, lir_print_module, x64_relocatable_object, x64_link_executable, x64_runtime_library, x64_runtime_export_abi_json]
+
+// Self-host inventories observe Jet's checked MIR without entering Rust emit.
+fn jet_bootstrap_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult Never! {
+    result := jet_driver_compile_mir(^request) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
+    if cli_sys.get("JET_FRONT_MIR_OUTPUT") == .Val(path) {
+        if !result.complete || result.internal_problem != None -> return result
+        program :: result.mir ?? return jet_driver_compile_escaped_failure("the native front end finished without MIR")
+        entry :: result.entry_function ?? return jet_driver_compile_escaped_failure("the native front end finished without an entry")
+        stream := [String]{"{entry.value}"}
+        mirw_mir_program(program, &stream)
+        cli_files.write(path, stream.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write checked Jet MIR observation")
+    }
+    result
+}
 
 // The library-object feed: the same checked driver's in-process MIR becomes
 // one relocatable runtime object. Neither an emitted Rust program nor a Rust
@@ -54,7 +77,7 @@ fn jet_bootstrap_library_object(request: ^JetDriverCompileRequest, prefix: Strin
 // Native-feed probes use the same checked driver and linker as the Jet host.
 // Neither an emitted Rust program nor a Rust MIR conversion enters this path.
 fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> JetDriverCompileResult Never! {
-    result := jet_driver_compile_mir(^request) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
+    result := jet_bootstrap_mir(^request) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
     if !result.complete || result.internal_problem != None -> return result
     program :: result.mir ?? return jet_driver_compile_escaped_failure("the native front end finished without MIR")
     entry_id :: result.entry_function ?? return jet_driver_compile_escaped_failure("the native front end finished without an entry")
@@ -87,6 +110,7 @@ fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> Je
 fn jet_bootstrap_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult Never! {
     if cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") == .Val(prefix) -> return jet_bootstrap_library_object(^request, prefix)
     if cli_sys.get("JET_FRONT_NATIVE_OUTPUT") == .Val(prefix) -> return jet_bootstrap_native(^request, prefix)
+    if cli_sys.get("JET_FRONT_MIR_OUTPUT") != None -> return jet_bootstrap_mir(^request)
     if cli_sys.get("JET_KEEP_GOING") != Val("1") {
         return jet_driver_compile(^request) ?? jet_driver_compile_escaped_failure("the compiler driver failed outside every compile stage")
     }
@@ -101,4 +125,31 @@ fn jet_bootstrap_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileR
     &lines.push("")
     cli_files.write(report, lines.join("\n")) ?? return result
     result
+}
+
+// Checked private accessor, invoked by the outer static host using this
+// factory's callable metadata. A factory may not reuse the base's schema walk.
+fn jet_bootstrap_core_prepare(request: ^JetDriverCompileRequest) -> JetDriverCoreLibraryPreparation Never! {
+    jet_driver_prepare_core_library(^request) ?? JetDriverCoreLibraryPreparation.CompileRefused{compilation: jet_driver_compile_escaped_failure("the canonical Core library producer failed outside every compile stage")}
+}
+
+
+fn jet_bootstrap_core_request(template: JetDriverCompileRequest, rows: [JetDriverCoreSource]) -> JetDriverCompileRequest Never! {
+    jet_driver_core_library_request(template, rows)
+}
+
+fn jet_bootstrap_core_parent_new(rows: ^[JetDriverCoreSource], runtime: ^CoreSharedParentRuntime) -> JetDriverCoreSourceParentHost Never! {
+    jet_driver_core_source_parent_new(^rows, ^runtime)
+}
+
+fn jet_bootstrap_core_attach(host: &JetDriverCoreSourceParentHost, preparation: JetDriverCoreLibraryPreparation) -> String Never! {
+    jet_driver_core_source_parent_attach(&host, preparation)
+}
+
+fn jet_bootstrap_core_getter(host: &JetDriverCoreSourceParentHost, site_key: String) -> CoreSharedParentGetterResult Never! {
+    jet_driver_core_source_parent_getter(&host, site_key)
+}
+
+fn jet_bootstrap_core_runtime_abis(tree: DataTree) -> [String:CoreSharedRuntimeExportABI]? Never! {
+    core_shared_runtime_export_abis_decode(tree)
 }

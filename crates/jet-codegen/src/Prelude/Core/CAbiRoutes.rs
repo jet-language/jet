@@ -22,8 +22,8 @@ mod jet_c_abi_routes {
         u32::try_from(value).ok().and_then(char::from_u32).unwrap_or(char::REPLACEMENT_CHARACTER)
     }
 
-    /// A List argument's `len` eight-byte slots at `data`, as Rust values.
-    fn list_in<T>(data: *const u64, len: i64, item: impl Fn(u64) -> T) -> Vec<T> {
+    /// A List argument uses its declared fixed-integer width or word carrier.
+    fn list_in<S: Copy, T>(data: *const S, len: i64, item: impl Fn(S) -> T) -> Vec<T> {
         if len <= 0 || data.is_null() {
             return Vec::new();
         }
@@ -33,7 +33,7 @@ mod jet_c_abi_routes {
 
     /// A List result: a slot buffer from the allocator `jet_rt_free` returns
     /// to (null when empty), written to `data`; returns the length.
-    fn list_out(words: Vec<u64>, data: *mut *mut u64) -> i64 {
+    fn list_out<S: Copy>(words: Vec<S>, data: *mut *mut S) -> i64 {
         let len = words.len();
         let buffer = if len == 0 {
             std::ptr::null_mut()
@@ -683,6 +683,118 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_Handle(value: *mut crate::jet_layout::Handle) -> *mut crate::jet_layout::Handle {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_I16x16(value: *mut crate::jet_std::I16x16) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_I16x16(value: *mut crate::jet_std::I16x16) -> *mut crate::jet_std::I16x16 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_I16x8(value: *mut crate::jet_std::I16x8) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_I16x8(value: *mut crate::jet_std::I16x8) -> *mut crate::jet_std::I16x8 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_I32x4(value: *mut crate::jet_std::I32x4) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_I32x4(value: *mut crate::jet_std::I32x4) -> *mut crate::jet_std::I32x4 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_I32x8(value: *mut crate::jet_std::I32x8) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_I32x8(value: *mut crate::jet_std::I32x8) -> *mut crate::jet_std::I32x8 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_I64x2(value: *mut crate::jet_std::I64x2) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_I64x2(value: *mut crate::jet_std::I64x2) -> *mut crate::jet_std::I64x2 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_I64x4(value: *mut crate::jet_std::I64x4) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_I64x4(value: *mut crate::jet_std::I64x4) -> *mut crate::jet_std::I64x4 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_I8x16(value: *mut crate::jet_std::I8x16) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_I8x16(value: *mut crate::jet_std::I8x16) -> *mut crate::jet_std::I8x16 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_I8x32(value: *mut crate::jet_std::I8x32) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_I8x32(value: *mut crate::jet_std::I8x32) -> *mut crate::jet_std::I8x32 {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -5240,6 +5352,60 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_F32x4(value: *mut crate::jet_std::F32x4) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::F32x4 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_F32x4(value: *mut crate::jet_std::F32x4) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::F32x4 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_F32x4(value: *mut crate::jet_std::F32x4) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::F32x4 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_F32x8(value: *mut crate::jet_std::F32x8) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::F32x8 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_F32x8(value: *mut crate::jet_std::F32x8) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::F32x8 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_F32x8(value: *mut crate::jet_std::F32x8) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::F32x8 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_F64x2(value: *mut crate::jet_std::F64x2) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::F64x2 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_F64x2(value: *mut crate::jet_std::F64x2) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::F64x2 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_F64x2(value: *mut crate::jet_std::F64x2) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::F64x2 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_handle_display_F64x4(value: *mut crate::jet_std::F64x4) -> JetCString {
         // SAFETY: `value` is a live handle the caller lends for this call.
         guard(|| handle(<crate::jet_std::F64x4 as crate::JetDisplay>::jet_display(unsafe { &*value })))
@@ -5279,6 +5445,150 @@ mod jet_c_abi_routes {
     pub extern "C" fn jet_rt_handle_debug_FieldError(value: *mut crate::jet_std::FieldError) -> JetCString {
         // SAFETY: `value` is a live handle the caller lends for this call.
         guard(|| handle(<crate::jet_std::FieldError as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_I16x16(value: *mut crate::jet_std::I16x16) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I16x16 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_I16x16(value: *mut crate::jet_std::I16x16) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I16x16 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_I16x16(value: *mut crate::jet_std::I16x16) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I16x16 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_I16x8(value: *mut crate::jet_std::I16x8) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I16x8 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_I16x8(value: *mut crate::jet_std::I16x8) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I16x8 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_I16x8(value: *mut crate::jet_std::I16x8) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I16x8 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_I32x4(value: *mut crate::jet_std::I32x4) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I32x4 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_I32x4(value: *mut crate::jet_std::I32x4) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I32x4 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_I32x4(value: *mut crate::jet_std::I32x4) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I32x4 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_I32x8(value: *mut crate::jet_std::I32x8) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I32x8 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_I32x8(value: *mut crate::jet_std::I32x8) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I32x8 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_I32x8(value: *mut crate::jet_std::I32x8) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I32x8 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_I64x2(value: *mut crate::jet_std::I64x2) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I64x2 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_I64x2(value: *mut crate::jet_std::I64x2) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I64x2 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_I64x2(value: *mut crate::jet_std::I64x2) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I64x2 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_I64x4(value: *mut crate::jet_std::I64x4) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I64x4 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_I64x4(value: *mut crate::jet_std::I64x4) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I64x4 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_I64x4(value: *mut crate::jet_std::I64x4) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I64x4 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_I8x16(value: *mut crate::jet_std::I8x16) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I8x16 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_I8x16(value: *mut crate::jet_std::I8x16) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I8x16 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_I8x16(value: *mut crate::jet_std::I8x16) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I8x16 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_I8x32(value: *mut crate::jet_std::I8x32) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I8x32 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_I8x32(value: *mut crate::jet_std::I8x32) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I8x32 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_I8x32(value: *mut crate::jet_std::I8x32) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::I8x32 as crate::JetDebug>::jet_debug(unsafe { &*value })))
     }
 
     #[no_mangle]
@@ -6296,6 +6606,150 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_U16x16(value: *mut crate::jet_std::U16x16) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U16x16 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_U16x16(value: *mut crate::jet_std::U16x16) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U16x16 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_U16x16(value: *mut crate::jet_std::U16x16) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U16x16 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_U16x8(value: *mut crate::jet_std::U16x8) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U16x8 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_U16x8(value: *mut crate::jet_std::U16x8) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U16x8 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_U16x8(value: *mut crate::jet_std::U16x8) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U16x8 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_U32x4(value: *mut crate::jet_std::U32x4) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U32x4 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_U32x4(value: *mut crate::jet_std::U32x4) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U32x4 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_U32x4(value: *mut crate::jet_std::U32x4) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U32x4 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_U32x8(value: *mut crate::jet_std::U32x8) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U32x8 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_U32x8(value: *mut crate::jet_std::U32x8) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U32x8 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_U32x8(value: *mut crate::jet_std::U32x8) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U32x8 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_U64x2(value: *mut crate::jet_std::U64x2) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U64x2 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_U64x2(value: *mut crate::jet_std::U64x2) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U64x2 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_U64x2(value: *mut crate::jet_std::U64x2) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U64x2 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_U64x4(value: *mut crate::jet_std::U64x4) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U64x4 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_U64x4(value: *mut crate::jet_std::U64x4) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U64x4 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_U64x4(value: *mut crate::jet_std::U64x4) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U64x4 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_U8x16(value: *mut crate::jet_std::U8x16) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U8x16 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_U8x16(value: *mut crate::jet_std::U8x16) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U8x16 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_U8x16(value: *mut crate::jet_std::U8x16) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U8x16 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_display_U8x32(value: *mut crate::jet_std::U8x32) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U8x32 as crate::JetDisplay>::jet_display(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_show_U8x32(value: *mut crate::jet_std::U8x32) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U8x32 as crate::JetShow>::jet_show(unsafe { &*value })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_debug_U8x32(value: *mut crate::jet_std::U8x32) -> JetCString {
+        // SAFETY: `value` is a live handle the caller lends for this call.
+        guard(|| handle(<crate::jet_std::U8x32 as crate::JetDebug>::jet_debug(unsafe { &*value })))
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_handle_display_UTF8Error(value: *mut crate::jet_std::UTF8Error) -> JetCString {
         // SAFETY: `value` is a live handle the caller lends for this call.
         guard(|| handle(<crate::jet_std::UTF8Error as crate::JetDisplay>::jet_display(unsafe { &*value })))
@@ -6585,6 +7039,54 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_FieldError(left: *mut crate::jet_std::FieldError, right: *mut crate::jet_std::FieldError) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_I16x16(left: *mut crate::jet_std::I16x16, right: *mut crate::jet_std::I16x16) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_I16x8(left: *mut crate::jet_std::I16x8, right: *mut crate::jet_std::I16x8) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_I32x4(left: *mut crate::jet_std::I32x4, right: *mut crate::jet_std::I32x4) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_I32x8(left: *mut crate::jet_std::I32x8, right: *mut crate::jet_std::I32x8) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_I64x2(left: *mut crate::jet_std::I64x2, right: *mut crate::jet_std::I64x2) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_I64x4(left: *mut crate::jet_std::I64x4, right: *mut crate::jet_std::I64x4) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_I8x16(left: *mut crate::jet_std::I8x16, right: *mut crate::jet_std::I8x16) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_I8x32(left: *mut crate::jet_std::I8x32, right: *mut crate::jet_std::I8x32) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
     }
@@ -13556,7 +14058,7 @@ mod jet_c_abi_routes {
 
     /// core.crypto.__zeroize
     #[no_mangle]
-    pub extern "C" fn jet_crypto_zeroize(a0_0: *const u64, a0_1: i64) {
+    pub extern "C" fn jet_crypto_zeroize(a0_0: *const u8, a0_1: i64) {
         guard(|| crate::jet_crypto_zeroize(list_in(a0_0, a0_1, |w| w as u8)))
     }
 
@@ -13952,7 +14454,7 @@ mod jet_c_abi_routes {
 
     /// core.email.attachment
     #[no_mangle]
-    pub extern "C" fn attachment(a0: JetCString, a1: JetCString, a2_0: *const u64, a2_1: i64, ok: *mut *mut crate::jet_email::Attachment, err: *mut *mut crate::jet_email::Error) -> i64 {
+    pub extern "C" fn attachment(a0: JetCString, a1: JetCString, a2_0: *const u8, a2_1: i64, ok: *mut *mut crate::jet_email::Attachment, err: *mut *mut crate::jet_email::Error) -> i64 {
         guard(|| match crate::jet_email::attachment(&borrowed(a0), &borrowed(a1), &list_in(a2_0, a2_1, |w| w as u8)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -13985,16 +14487,16 @@ mod jet_c_abi_routes {
 
     /// core.email.serialize
     #[no_mangle]
-    pub extern "C" fn serialize(a0: *mut crate::jet_email::Message, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_email::Error) -> i64 {
+    pub extern "C" fn serialize(a0: *mut crate::jet_email::Message, ok: *mut *mut u8, ok_len: *mut i64, err: *mut *mut crate::jet_email::Error) -> i64 {
         guard(|| match crate::jet_email::serialize(unsafe { &*a0 }) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
     /// core.encoding.cbor.parse
     #[no_mangle]
-    pub extern "C" fn jet_enc_cbor_parse(a0_0: *const u64, a0_1: i64, a1: *mut crate::jet_std::CBOROptions, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut crate::jet_std::CBORError) -> i64 {
+    pub extern "C" fn jet_enc_cbor_parse(a0_0: *const u8, a0_1: i64, a1: *mut crate::jet_std::CBOROptions, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut crate::jet_std::CBORError) -> i64 {
         guard(|| match crate::jet_enc_cbor_parse(&list_in(a0_0, a0_1, |w| w as u8), unsafe { &*a1 }.clone()) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -14480,9 +14982,9 @@ mod jet_c_abi_routes {
 
     /// TIR/routes.rs
     #[no_mangle]
-    pub extern "C" fn jet_http_body_bytes(a0: *mut crate::JetHTTPBody, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetHTTPError) -> i64 {
+    pub extern "C" fn jet_http_body_bytes(a0: *mut crate::JetHTTPBody, a1: i64, ok: *mut *mut u8, ok_len: *mut i64, err: *mut *mut crate::JetHTTPError) -> i64 {
         guard(|| match crate::jet_http_body_bytes(unsafe { &*a0 }, a1) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
@@ -15054,6 +15556,96 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_math_DevicePoint_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
     }
 
+    /// core.math.F32x4_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_F32x4_add(a0: *mut crate::jet_std::F32x4, a1: *mut crate::jet_std::F32x4) -> *mut crate::jet_std::F32x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F32x4_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.F32x4_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_F32x4_div(a0: *mut crate::jet_std::F32x4, a1: *mut crate::jet_std::F32x4) -> *mut crate::jet_std::F32x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F32x4_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.F32x4_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_F32x4_mul(a0: *mut crate::jet_std::F32x4, a1: *mut crate::jet_std::F32x4) -> *mut crate::jet_std::F32x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F32x4_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.F32x4_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_F32x4_sub(a0: *mut crate::jet_std::F32x4, a1: *mut crate::jet_std::F32x4) -> *mut crate::jet_std::F32x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F32x4_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.F32x8_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_F32x8_add(a0: *mut crate::jet_std::F32x8, a1: *mut crate::jet_std::F32x8) -> *mut crate::jet_std::F32x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F32x8_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.F32x8_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_F32x8_div(a0: *mut crate::jet_std::F32x8, a1: *mut crate::jet_std::F32x8) -> *mut crate::jet_std::F32x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F32x8_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.F32x8_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_F32x8_mul(a0: *mut crate::jet_std::F32x8, a1: *mut crate::jet_std::F32x8) -> *mut crate::jet_std::F32x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F32x8_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.F32x8_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_F32x8_sub(a0: *mut crate::jet_std::F32x8, a1: *mut crate::jet_std::F32x8) -> *mut crate::jet_std::F32x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F32x8_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.F64x2_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_F64x2_add(a0: *mut crate::jet_std::F64x2, a1: *mut crate::jet_std::F64x2) -> *mut crate::jet_std::F64x2 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F64x2_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.F64x2_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_F64x2_div(a0: *mut crate::jet_std::F64x2, a1: *mut crate::jet_std::F64x2) -> *mut crate::jet_std::F64x2 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F64x2_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.F64x2_lane_set
+    #[no_mangle]
+    pub extern "C" fn jet_math_F64x2_lane_set(a0: *mut crate::jet_std::F64x2, a1: i64, a2: f64, a3: JetCString, a4: i64) {
+        guard(|| crate::jet_math_F64x2_lane_set(unsafe { &mut *a0 }, a1, a2, view(a3), fixed::<u32>(a4)))
+    }
+
+    /// core.math.F64x2_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_F64x2_mul(a0: *mut crate::jet_std::F64x2, a1: *mut crate::jet_std::F64x2) -> *mut crate::jet_std::F64x2 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F64x2_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.F64x2_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_F64x2_sub(a0: *mut crate::jet_std::F64x2, a1: *mut crate::jet_std::F64x2) -> *mut crate::jet_std::F64x2 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F64x2_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.F64x4_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_F64x4_add(a0: *mut crate::jet_std::F64x4, a1: *mut crate::jet_std::F64x4) -> *mut crate::jet_std::F64x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F64x4_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.F64x4_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_F64x4_div(a0: *mut crate::jet_std::F64x4, a1: *mut crate::jet_std::F64x4) -> *mut crate::jet_std::F64x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F64x4_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
     /// core.math.F64x4_lane
     #[no_mangle]
     pub extern "C" fn jet_math_F64x4_lane(a0: *mut crate::jet_std::F64x4, a1: i64, a2: JetCString, a3: i64) -> f64 {
@@ -15070,6 +15662,12 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_math_F64x4_min(a0: *mut crate::jet_std::F64x4) -> f64 {
         guard(|| crate::jet_math_F64x4_min(unsafe { &*a0 }))
+    }
+
+    /// core.math.F64x4_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_F64x4_mul(a0: *mut crate::jet_std::F64x4, a1: *mut crate::jet_std::F64x4) -> *mut crate::jet_std::F64x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F64x4_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
     }
 
     /// core.math.F64x4_new
@@ -15126,10 +15724,208 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_math_F64x4_sqrt(unsafe { &*a0 }))))
     }
 
+    /// core.math.F64x4_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_F64x4_sub(a0: *mut crate::jet_std::F64x4, a1: *mut crate::jet_std::F64x4) -> *mut crate::jet_std::F64x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_F64x4_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
     /// core.math.F64x4_sum
     #[no_mangle]
     pub extern "C" fn jet_math_F64x4_sum(a0: *mut crate::jet_std::F64x4) -> f64 {
         guard(|| crate::jet_math_F64x4_sum(unsafe { &*a0 }))
+    }
+
+    /// core.math.I16x16_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_I16x16_add(a0: *mut crate::jet_std::I16x16, a1: *mut crate::jet_std::I16x16) -> *mut crate::jet_std::I16x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I16x16_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I16x16_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_I16x16_div(a0: *mut crate::jet_std::I16x16, a1: *mut crate::jet_std::I16x16) -> *mut crate::jet_std::I16x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I16x16_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I16x16_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_I16x16_mul(a0: *mut crate::jet_std::I16x16, a1: *mut crate::jet_std::I16x16) -> *mut crate::jet_std::I16x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I16x16_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I16x16_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_I16x16_sub(a0: *mut crate::jet_std::I16x16, a1: *mut crate::jet_std::I16x16) -> *mut crate::jet_std::I16x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I16x16_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I16x8_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_I16x8_add(a0: *mut crate::jet_std::I16x8, a1: *mut crate::jet_std::I16x8) -> *mut crate::jet_std::I16x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I16x8_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I16x8_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_I16x8_div(a0: *mut crate::jet_std::I16x8, a1: *mut crate::jet_std::I16x8) -> *mut crate::jet_std::I16x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I16x8_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I16x8_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_I16x8_mul(a0: *mut crate::jet_std::I16x8, a1: *mut crate::jet_std::I16x8) -> *mut crate::jet_std::I16x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I16x8_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I16x8_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_I16x8_sub(a0: *mut crate::jet_std::I16x8, a1: *mut crate::jet_std::I16x8) -> *mut crate::jet_std::I16x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I16x8_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I32x4_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_I32x4_add(a0: *mut crate::jet_std::I32x4, a1: *mut crate::jet_std::I32x4) -> *mut crate::jet_std::I32x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I32x4_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I32x4_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_I32x4_div(a0: *mut crate::jet_std::I32x4, a1: *mut crate::jet_std::I32x4) -> *mut crate::jet_std::I32x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I32x4_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I32x4_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_I32x4_mul(a0: *mut crate::jet_std::I32x4, a1: *mut crate::jet_std::I32x4) -> *mut crate::jet_std::I32x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I32x4_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I32x4_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_I32x4_sub(a0: *mut crate::jet_std::I32x4, a1: *mut crate::jet_std::I32x4) -> *mut crate::jet_std::I32x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I32x4_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I32x8_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_I32x8_add(a0: *mut crate::jet_std::I32x8, a1: *mut crate::jet_std::I32x8) -> *mut crate::jet_std::I32x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I32x8_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I32x8_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_I32x8_div(a0: *mut crate::jet_std::I32x8, a1: *mut crate::jet_std::I32x8) -> *mut crate::jet_std::I32x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I32x8_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I32x8_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_I32x8_mul(a0: *mut crate::jet_std::I32x8, a1: *mut crate::jet_std::I32x8) -> *mut crate::jet_std::I32x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I32x8_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I32x8_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_I32x8_sub(a0: *mut crate::jet_std::I32x8, a1: *mut crate::jet_std::I32x8) -> *mut crate::jet_std::I32x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I32x8_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I64x2_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_I64x2_add(a0: *mut crate::jet_std::I64x2, a1: *mut crate::jet_std::I64x2) -> *mut crate::jet_std::I64x2 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I64x2_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I64x2_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_I64x2_div(a0: *mut crate::jet_std::I64x2, a1: *mut crate::jet_std::I64x2) -> *mut crate::jet_std::I64x2 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I64x2_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I64x2_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_I64x2_mul(a0: *mut crate::jet_std::I64x2, a1: *mut crate::jet_std::I64x2) -> *mut crate::jet_std::I64x2 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I64x2_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I64x2_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_I64x2_sub(a0: *mut crate::jet_std::I64x2, a1: *mut crate::jet_std::I64x2) -> *mut crate::jet_std::I64x2 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I64x2_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I64x4_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_I64x4_add(a0: *mut crate::jet_std::I64x4, a1: *mut crate::jet_std::I64x4) -> *mut crate::jet_std::I64x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I64x4_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I64x4_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_I64x4_div(a0: *mut crate::jet_std::I64x4, a1: *mut crate::jet_std::I64x4) -> *mut crate::jet_std::I64x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I64x4_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I64x4_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_I64x4_mul(a0: *mut crate::jet_std::I64x4, a1: *mut crate::jet_std::I64x4) -> *mut crate::jet_std::I64x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I64x4_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I64x4_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_I64x4_sub(a0: *mut crate::jet_std::I64x4, a1: *mut crate::jet_std::I64x4) -> *mut crate::jet_std::I64x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I64x4_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I8x16_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_I8x16_add(a0: *mut crate::jet_std::I8x16, a1: *mut crate::jet_std::I8x16) -> *mut crate::jet_std::I8x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I8x16_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I8x16_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_I8x16_div(a0: *mut crate::jet_std::I8x16, a1: *mut crate::jet_std::I8x16) -> *mut crate::jet_std::I8x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I8x16_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I8x16_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_I8x16_mul(a0: *mut crate::jet_std::I8x16, a1: *mut crate::jet_std::I8x16) -> *mut crate::jet_std::I8x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I8x16_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I8x16_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_I8x16_sub(a0: *mut crate::jet_std::I8x16, a1: *mut crate::jet_std::I8x16) -> *mut crate::jet_std::I8x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I8x16_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I8x32_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_I8x32_add(a0: *mut crate::jet_std::I8x32, a1: *mut crate::jet_std::I8x32) -> *mut crate::jet_std::I8x32 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I8x32_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I8x32_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_I8x32_div(a0: *mut crate::jet_std::I8x32, a1: *mut crate::jet_std::I8x32) -> *mut crate::jet_std::I8x32 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I8x32_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I8x32_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_I8x32_mul(a0: *mut crate::jet_std::I8x32, a1: *mut crate::jet_std::I8x32) -> *mut crate::jet_std::I8x32 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I8x32_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.I8x32_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_I8x32_sub(a0: *mut crate::jet_std::I8x32, a1: *mut crate::jet_std::I8x32) -> *mut crate::jet_std::I8x32 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_I8x32_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
     }
 
     /// core.math.Mat3_add
@@ -15378,6 +16174,198 @@ mod jet_c_abi_routes {
         })
     }
 
+    /// core.math.U16x16_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_U16x16_add(a0: *mut crate::jet_std::U16x16, a1: *mut crate::jet_std::U16x16) -> *mut crate::jet_std::U16x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U16x16_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U16x16_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_U16x16_div(a0: *mut crate::jet_std::U16x16, a1: *mut crate::jet_std::U16x16) -> *mut crate::jet_std::U16x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U16x16_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U16x16_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_U16x16_mul(a0: *mut crate::jet_std::U16x16, a1: *mut crate::jet_std::U16x16) -> *mut crate::jet_std::U16x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U16x16_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U16x16_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_U16x16_sub(a0: *mut crate::jet_std::U16x16, a1: *mut crate::jet_std::U16x16) -> *mut crate::jet_std::U16x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U16x16_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U16x8_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_U16x8_add(a0: *mut crate::jet_std::U16x8, a1: *mut crate::jet_std::U16x8) -> *mut crate::jet_std::U16x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U16x8_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U16x8_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_U16x8_div(a0: *mut crate::jet_std::U16x8, a1: *mut crate::jet_std::U16x8) -> *mut crate::jet_std::U16x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U16x8_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U16x8_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_U16x8_mul(a0: *mut crate::jet_std::U16x8, a1: *mut crate::jet_std::U16x8) -> *mut crate::jet_std::U16x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U16x8_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U16x8_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_U16x8_sub(a0: *mut crate::jet_std::U16x8, a1: *mut crate::jet_std::U16x8) -> *mut crate::jet_std::U16x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U16x8_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U32x4_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_U32x4_add(a0: *mut crate::jet_std::U32x4, a1: *mut crate::jet_std::U32x4) -> *mut crate::jet_std::U32x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U32x4_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U32x4_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_U32x4_div(a0: *mut crate::jet_std::U32x4, a1: *mut crate::jet_std::U32x4) -> *mut crate::jet_std::U32x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U32x4_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U32x4_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_U32x4_mul(a0: *mut crate::jet_std::U32x4, a1: *mut crate::jet_std::U32x4) -> *mut crate::jet_std::U32x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U32x4_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U32x4_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_U32x4_sub(a0: *mut crate::jet_std::U32x4, a1: *mut crate::jet_std::U32x4) -> *mut crate::jet_std::U32x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U32x4_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U32x8_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_U32x8_add(a0: *mut crate::jet_std::U32x8, a1: *mut crate::jet_std::U32x8) -> *mut crate::jet_std::U32x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U32x8_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U32x8_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_U32x8_div(a0: *mut crate::jet_std::U32x8, a1: *mut crate::jet_std::U32x8) -> *mut crate::jet_std::U32x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U32x8_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U32x8_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_U32x8_mul(a0: *mut crate::jet_std::U32x8, a1: *mut crate::jet_std::U32x8) -> *mut crate::jet_std::U32x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U32x8_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U32x8_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_U32x8_sub(a0: *mut crate::jet_std::U32x8, a1: *mut crate::jet_std::U32x8) -> *mut crate::jet_std::U32x8 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U32x8_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U64x2_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_U64x2_add(a0: *mut crate::jet_std::U64x2, a1: *mut crate::jet_std::U64x2) -> *mut crate::jet_std::U64x2 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U64x2_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U64x2_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_U64x2_div(a0: *mut crate::jet_std::U64x2, a1: *mut crate::jet_std::U64x2) -> *mut crate::jet_std::U64x2 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U64x2_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U64x2_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_U64x2_mul(a0: *mut crate::jet_std::U64x2, a1: *mut crate::jet_std::U64x2) -> *mut crate::jet_std::U64x2 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U64x2_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U64x2_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_U64x2_sub(a0: *mut crate::jet_std::U64x2, a1: *mut crate::jet_std::U64x2) -> *mut crate::jet_std::U64x2 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U64x2_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U64x4_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_U64x4_add(a0: *mut crate::jet_std::U64x4, a1: *mut crate::jet_std::U64x4) -> *mut crate::jet_std::U64x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U64x4_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U64x4_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_U64x4_div(a0: *mut crate::jet_std::U64x4, a1: *mut crate::jet_std::U64x4) -> *mut crate::jet_std::U64x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U64x4_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U64x4_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_U64x4_mul(a0: *mut crate::jet_std::U64x4, a1: *mut crate::jet_std::U64x4) -> *mut crate::jet_std::U64x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U64x4_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U64x4_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_U64x4_sub(a0: *mut crate::jet_std::U64x4, a1: *mut crate::jet_std::U64x4) -> *mut crate::jet_std::U64x4 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U64x4_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U8x16_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_U8x16_add(a0: *mut crate::jet_std::U8x16, a1: *mut crate::jet_std::U8x16) -> *mut crate::jet_std::U8x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U8x16_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U8x16_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_U8x16_div(a0: *mut crate::jet_std::U8x16, a1: *mut crate::jet_std::U8x16) -> *mut crate::jet_std::U8x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U8x16_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U8x16_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_U8x16_mul(a0: *mut crate::jet_std::U8x16, a1: *mut crate::jet_std::U8x16) -> *mut crate::jet_std::U8x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U8x16_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U8x16_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_U8x16_sub(a0: *mut crate::jet_std::U8x16, a1: *mut crate::jet_std::U8x16) -> *mut crate::jet_std::U8x16 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U8x16_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U8x32_add
+    #[no_mangle]
+    pub extern "C" fn jet_math_U8x32_add(a0: *mut crate::jet_std::U8x32, a1: *mut crate::jet_std::U8x32) -> *mut crate::jet_std::U8x32 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U8x32_add(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U8x32_div
+    #[no_mangle]
+    pub extern "C" fn jet_math_U8x32_div(a0: *mut crate::jet_std::U8x32, a1: *mut crate::jet_std::U8x32) -> *mut crate::jet_std::U8x32 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U8x32_div(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U8x32_mul
+    #[no_mangle]
+    pub extern "C" fn jet_math_U8x32_mul(a0: *mut crate::jet_std::U8x32, a1: *mut crate::jet_std::U8x32) -> *mut crate::jet_std::U8x32 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U8x32_mul(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// core.math.U8x32_sub
+    #[no_mangle]
+    pub extern "C" fn jet_math_U8x32_sub(a0: *mut crate::jet_std::U8x32, a1: *mut crate::jet_std::U8x32) -> *mut crate::jet_std::U8x32 {
+        guard(|| Box::into_raw(Box::new(crate::jet_math_U8x32_sub(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
     /// core.math.Vec2_add
     #[no_mangle]
     pub extern "C" fn jet_math_Vec2_add(a0: *mut crate::jet_std::Vec2, a1: *mut crate::jet_std::Vec2) -> *mut crate::jet_std::Vec2 {
@@ -15394,6 +16382,12 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_math_Vec2_lane(a0: *mut crate::jet_std::Vec2, a1: i64, a2: JetCString, a3: i64) -> f64 {
         guard(|| crate::jet_math_Vec2_lane(unsafe { &*a0 }, a1, view(a2), fixed::<u32>(a3)))
+    }
+
+    /// core.math.Vec2_lane_set
+    #[no_mangle]
+    pub extern "C" fn jet_math_Vec2_lane_set(a0: *mut crate::jet_std::Vec2, a1: i64, a2: f64, a3: JetCString, a4: i64) {
+        guard(|| crate::jet_math_Vec2_lane_set(unsafe { &mut *a0 }, a1, a2, view(a3), fixed::<u32>(a4)))
     }
 
     /// core.math.Vec2_length
@@ -15468,6 +16462,12 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_math_Vec3_lane(unsafe { &*a0 }, a1, view(a2), fixed::<u32>(a3)))
     }
 
+    /// core.math.Vec3_lane_set
+    #[no_mangle]
+    pub extern "C" fn jet_math_Vec3_lane_set(a0: *mut crate::jet_std::Vec3, a1: i64, a2: f64, a3: JetCString, a4: i64) {
+        guard(|| crate::jet_math_Vec3_lane_set(unsafe { &mut *a0 }, a1, a2, view(a3), fixed::<u32>(a4)))
+    }
+
     /// core.math.Vec3_length
     #[no_mangle]
     pub extern "C" fn jet_math_Vec3_length(a0: *mut crate::jet_std::Vec3) -> f64 {
@@ -15520,6 +16520,12 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_math_Vec4_lane(a0: *mut crate::jet_std::Vec4, a1: i64, a2: JetCString, a3: i64) -> f64 {
         guard(|| crate::jet_math_Vec4_lane(unsafe { &*a0 }, a1, view(a2), fixed::<u32>(a3)))
+    }
+
+    /// core.math.Vec4_lane_set
+    #[no_mangle]
+    pub extern "C" fn jet_math_Vec4_lane_set(a0: *mut crate::jet_std::Vec4, a1: i64, a2: f64, a3: JetCString, a4: i64) {
+        guard(|| crate::jet_math_Vec4_lane_set(unsafe { &mut *a0 }, a1, a2, view(a3), fixed::<u32>(a4)))
     }
 
     /// core.math.Vec4_length
@@ -16133,18 +17139,18 @@ mod jet_c_abi_routes {
 
     /// core.handle.tcp_stream.read_bytes
     #[no_mangle]
-    pub extern "C" fn jet_net_tcp_read_bytes(a0: *mut crate::JetTCPStream, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
+    pub extern "C" fn jet_net_tcp_read_bytes(a0: *mut crate::JetTCPStream, a1: i64, ok: *mut *mut u8, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_tcp_read_bytes(unsafe { &mut *a0 }, a1) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
     /// core.handle.tcp_stream.read_bytes_deadline
     #[no_mangle]
-    pub extern "C" fn jet_net_tcp_read_bytes_deadline(a0: *mut crate::JetTCPStream, a1: i64, a2: *mut crate::jet_std::Duration, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
+    pub extern "C" fn jet_net_tcp_read_bytes_deadline(a0: *mut crate::JetTCPStream, a1: i64, a2: *mut crate::jet_std::Duration, ok: *mut *mut u8, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_tcp_read_bytes_deadline(unsafe { &mut *a0 }, a1, unsafe { &*a2 }) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
@@ -16196,7 +17202,7 @@ mod jet_c_abi_routes {
 
     /// core.handle.tcp_stream.write_all_bytes
     #[no_mangle]
-    pub extern "C" fn jet_net_tcp_write_all_bytes(a0: *mut crate::JetTCPStream, a1_0: *const u64, a1_1: i64, err: *mut *mut crate::JetNetError) -> i64 {
+    pub extern "C" fn jet_net_tcp_write_all_bytes(a0: *mut crate::JetTCPStream, a1_0: *const u8, a1_1: i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_tcp_write_all_bytes(unsafe { &mut *a0 }, &list_in(a1_0, a1_1, |w| w as u8)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -16205,7 +17211,7 @@ mod jet_c_abi_routes {
 
     /// core.handle.tcp_stream.write_all_bytes_deadline
     #[no_mangle]
-    pub extern "C" fn jet_net_tcp_write_all_bytes_deadline(a0: *mut crate::JetTCPStream, a1_0: *const u64, a1_1: i64, a2: *mut crate::jet_std::Duration, err: *mut *mut crate::JetNetError) -> i64 {
+    pub extern "C" fn jet_net_tcp_write_all_bytes_deadline(a0: *mut crate::JetTCPStream, a1_0: *const u8, a1_1: i64, a2: *mut crate::jet_std::Duration, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_tcp_write_all_bytes_deadline(unsafe { &mut *a0 }, &list_in(a1_0, a1_1, |w| w as u8), unsafe { &*a2 }) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -16214,7 +17220,7 @@ mod jet_c_abi_routes {
 
     /// core.handle.tcp_stream.write_bytes
     #[no_mangle]
-    pub extern "C" fn jet_net_tcp_write_bytes(a0: *mut crate::JetTCPStream, a1_0: *const u64, a1_1: i64, ok: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
+    pub extern "C" fn jet_net_tcp_write_bytes(a0: *mut crate::JetTCPStream, a1_0: *const u8, a1_1: i64, ok: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_tcp_write_bytes(unsafe { &mut *a0 }, &list_in(a1_0, a1_1, |w| w as u8)) {
             Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -16223,7 +17229,7 @@ mod jet_c_abi_routes {
 
     /// core.handle.tcp_stream.write_bytes_deadline
     #[no_mangle]
-    pub extern "C" fn jet_net_tcp_write_bytes_deadline(a0: *mut crate::JetTCPStream, a1_0: *const u64, a1_1: i64, a2: *mut crate::jet_std::Duration, ok: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
+    pub extern "C" fn jet_net_tcp_write_bytes_deadline(a0: *mut crate::JetTCPStream, a1_0: *const u8, a1_1: i64, a2: *mut crate::jet_std::Duration, ok: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_tcp_write_bytes_deadline(unsafe { &mut *a0 }, &list_in(a1_0, a1_1, |w| w as u8), unsafe { &*a2 }) {
             Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -16274,18 +17280,18 @@ mod jet_c_abi_routes {
 
     /// core.net.tls.read
     #[no_mangle]
-    pub extern "C" fn jet_net_tls_read_bytes(a0: *mut crate::JetTLSStream, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
+    pub extern "C" fn jet_net_tls_read_bytes(a0: *mut crate::JetTLSStream, a1: i64, ok: *mut *mut u8, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
         guard(|| match crate::jet_net_tls_read_bytes(unsafe { &mut *a0 }, a1) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
     /// core.handle.tls_stream.read_deadline
     #[no_mangle]
-    pub extern "C" fn jet_net_tls_read_bytes_deadline(a0: *mut crate::JetTLSStream, a1: i64, a2: *mut crate::jet_std::Duration, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
+    pub extern "C" fn jet_net_tls_read_bytes_deadline(a0: *mut crate::JetTLSStream, a1: i64, a2: *mut crate::jet_std::Duration, ok: *mut *mut u8, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
         guard(|| match crate::jet_net_tls_read_bytes_deadline(unsafe { &mut *a0 }, a1, unsafe { &*a2 }) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
@@ -16301,7 +17307,7 @@ mod jet_c_abi_routes {
 
     /// core.net.tls.write_all
     #[no_mangle]
-    pub extern "C" fn jet_net_tls_write_all_bytes(a0: *mut crate::JetTLSStream, a1_0: *const u64, a1_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
+    pub extern "C" fn jet_net_tls_write_all_bytes(a0: *mut crate::JetTLSStream, a1_0: *const u8, a1_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
         guard(|| match crate::jet_net_tls_write_all_bytes(unsafe { &mut *a0 }, &list_in(a1_0, a1_1, |w| w as u8)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -16310,7 +17316,7 @@ mod jet_c_abi_routes {
 
     /// core.handle.tls_stream.write_all_deadline
     #[no_mangle]
-    pub extern "C" fn jet_net_tls_write_all_bytes_deadline(a0: *mut crate::JetTLSStream, a1_0: *const u64, a1_1: i64, a2: *mut crate::jet_std::Duration, err: *mut *mut crate::jet_std::IOError) -> i64 {
+    pub extern "C" fn jet_net_tls_write_all_bytes_deadline(a0: *mut crate::JetTLSStream, a1_0: *const u8, a1_1: i64, a2: *mut crate::jet_std::Duration, err: *mut *mut crate::jet_std::IOError) -> i64 {
         guard(|| match crate::jet_net_tls_write_all_bytes_deadline(unsafe { &mut *a0 }, &list_in(a1_0, a1_1, |w| w as u8), unsafe { &*a2 }) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -16319,7 +17325,7 @@ mod jet_c_abi_routes {
 
     /// core.net.tls.write
     #[no_mangle]
-    pub extern "C" fn jet_net_tls_write_bytes(a0: *mut crate::JetTLSStream, a1_0: *const u64, a1_1: i64, ok: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
+    pub extern "C" fn jet_net_tls_write_bytes(a0: *mut crate::JetTLSStream, a1_0: *const u8, a1_1: i64, ok: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
         guard(|| match crate::jet_net_tls_write_bytes(unsafe { &mut *a0 }, &list_in(a1_0, a1_1, |w| w as u8)) {
             Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -16388,8 +17394,8 @@ mod jet_c_abi_routes {
 
     /// core.net.udp_packet_bytes
     #[no_mangle]
-    pub extern "C" fn jet_net_udp_packet_bytes(a0: *mut crate::JetUDPPacket, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_net_udp_packet_bytes(unsafe { &*a0 }).into_iter().map(|e| e as u64).collect(), data))
+    pub extern "C" fn jet_net_udp_packet_bytes(a0: *mut crate::JetUDPPacket, data: *mut *mut u8) -> i64 {
+        guard(|| list_out(crate::jet_net_udp_packet_bytes(unsafe { &*a0 }).into_iter().map(|e| e).collect(), data))
     }
 
     /// core.net.udp_packet_data
@@ -16448,7 +17454,7 @@ mod jet_c_abi_routes {
 
     /// core.net.udp_send_bytes_to
     #[no_mangle]
-    pub extern "C" fn jet_net_udp_send_bytes_to(a0: *mut crate::JetUDPSocket, a1_0: *const u64, a1_1: i64, a2: *mut crate::JetSocketAddr, ok: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
+    pub extern "C" fn jet_net_udp_send_bytes_to(a0: *mut crate::JetUDPSocket, a1_0: *const u8, a1_1: i64, a2: *mut crate::JetSocketAddr, ok: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_udp_send_bytes_to(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| w as u8), unsafe { &*a2 }) {
             Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -16457,7 +17463,7 @@ mod jet_c_abi_routes {
 
     /// core.handle.udp_socket.send_to_deadline
     #[no_mangle]
-    pub extern "C" fn jet_net_udp_send_bytes_to_deadline(a0: *mut crate::JetUDPSocket, a1_0: *const u64, a1_1: i64, a2: *mut crate::JetSocketAddr, a3: *mut crate::jet_std::Duration, ok: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
+    pub extern "C" fn jet_net_udp_send_bytes_to_deadline(a0: *mut crate::JetUDPSocket, a1_0: *const u8, a1_1: i64, a2: *mut crate::JetSocketAddr, a3: *mut crate::jet_std::Duration, ok: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_udp_send_bytes_to_deadline(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| w as u8), unsafe { &*a2 }, unsafe { &*a3 }) {
             Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -16565,7 +17571,7 @@ mod jet_c_abi_routes {
 
     /// core.handle.path.write_atomic
     #[no_mangle]
-    pub extern "C" fn jet_path_write_atomic(a0: *mut crate::JetPath, a1_0: *const u64, a1_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
+    pub extern "C" fn jet_path_write_atomic(a0: *mut crate::JetPath, a1_0: *const u8, a1_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
         guard(|| match crate::jet_path_write_atomic(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| w as u8)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -16582,6 +17588,18 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_perf_write_bits(a0: i64) {
         guard(|| crate::jet_perf_write_bits(a0))
+    }
+
+    /// TIR/routes.rs
+    #[no_mangle]
+    pub extern "C" fn jet_plugin_call(a0: i64, a1: JetCString, a2: JetCString) -> JetCString {
+        guard(|| handle(crate::jet_plugin_call(fixed::<u64>(a0), view(a1), view(a2))))
+    }
+
+    /// core.plugin.load
+    #[no_mangle]
+    pub extern "C" fn jet_plugin_load(a0: JetCString, a1: JetCString) -> *mut crate::JetPlugin {
+        guard(|| Box::into_raw(Box::new(crate::jet_plugin_load(unsafe { &*a0 }, unsafe { &*a1 }))))
     }
 
     /// core.handle.process.child.exited
@@ -16796,13 +17814,13 @@ mod jet_c_abi_routes {
 
     /// core.handle.reader.over
     #[no_mangle]
-    pub extern "C" fn jet_reader_over(a0_0: *const u64, a0_1: i64) -> *mut crate::JetReader {
+    pub extern "C" fn jet_reader_over(a0_0: *const u8, a0_1: i64) -> *mut crate::JetReader {
         guard(|| Box::into_raw(Box::new(crate::jet_reader_over(&list_in(a0_0, a0_1, |w| w as u8)))))
     }
 
     /// core.handle.reader.over
     #[no_mangle]
-    pub extern "C" fn jet_reader_over_owned(a0_0: *const u64, a0_1: i64) -> *mut crate::JetReader {
+    pub extern "C" fn jet_reader_over_owned(a0_0: *const u8, a0_1: i64) -> *mut crate::JetReader {
         guard(|| Box::into_raw(Box::new(crate::jet_reader_over_owned(list_in(a0_0, a0_1, |w| w as u8)))))
     }
 
@@ -16985,9 +18003,9 @@ mod jet_c_abi_routes {
 
     /// core.handle.reader.take
     #[no_mangle]
-    pub extern "C" fn jet_reader_take(a0: *mut crate::JetReader, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_reader_take(a0: *mut crate::JetReader, a1: i64, ok: *mut *mut u8, ok_len: *mut i64, err: *mut JetCString) -> i64 {
         guard(|| match crate::jet_reader_take(unsafe { &mut *a0 }, a1) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
     }
@@ -17195,8 +18213,8 @@ mod jet_c_abi_routes {
 
     /// core.handle.rng.bytes
     #[no_mangle]
-    pub extern "C" fn jet_rng_bytes(a0: *mut crate::jet_std::Rng, a1: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_rng_bytes(unsafe { &mut *a0 }, a1).into_iter().map(|e| e as u64).collect(), data))
+    pub extern "C" fn jet_rng_bytes(a0: *mut crate::jet_std::Rng, a1: i64, data: *mut *mut u8) -> i64 {
+        guard(|| list_out(crate::jet_rng_bytes(unsafe { &mut *a0 }, a1).into_iter().map(|e| e).collect(), data))
     }
 
     /// core.handle.rng.exponential
@@ -18095,31 +19113,31 @@ mod jet_c_abi_routes {
 
     /// core.encoding.base64.decode
     #[no_mangle]
-    pub extern "C" fn jet_std_b64_decode(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_std_b64_decode(a0: JetCString, ok: *mut *mut u8, ok_len: *mut i64, err: *mut JetCString) -> i64 {
         guard(|| match crate::jet_std_b64_decode(&borrowed(a0)) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
     }
 
     /// core.encoding.hex.a2b_base64, core.encoding.base64.decodebytes
     #[no_mangle]
-    pub extern "C" fn jet_std_b64_decodebytes(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_std_b64_decodebytes(a0: JetCString, ok: *mut *mut u8, ok_len: *mut i64, err: *mut JetCString) -> i64 {
         guard(|| match crate::jet_std_b64_decodebytes(&borrowed(a0)) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
     }
 
     /// core.encoding.hex.b2a_base64, core.encoding.base64.encode
     #[no_mangle]
-    pub extern "C" fn jet_std_b64_encode(a0_0: *const u64, a0_1: i64) -> JetCString {
+    pub extern "C" fn jet_std_b64_encode(a0_0: *const u8, a0_1: i64) -> JetCString {
         guard(|| handle(crate::jet_std_b64_encode(&list_in(a0_0, a0_1, |w| w as u8))))
     }
 
     /// core.encoding.base64.encodebytes
     #[no_mangle]
-    pub extern "C" fn jet_std_b64_encodebytes(a0_0: *const u64, a0_1: i64) -> JetCString {
+    pub extern "C" fn jet_std_b64_encodebytes(a0_0: *const u8, a0_1: i64) -> JetCString {
         guard(|| handle(crate::jet_std_b64_encodebytes(&list_in(a0_0, a0_1, |w| w as u8))))
     }
 
@@ -18137,27 +19155,27 @@ mod jet_c_abi_routes {
 
     /// core.encoding.base64.decode_url
     #[no_mangle]
-    pub extern "C" fn jet_std_b64url_decode(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_std_b64url_decode(a0: JetCString, ok: *mut *mut u8, ok_len: *mut i64, err: *mut JetCString) -> i64 {
         guard(|| match crate::jet_std_b64url_decode(&borrowed(a0)) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
     }
 
     /// core.encoding.base32.b32decode
     #[no_mangle]
-    pub extern "C" fn jet_std_base32_decode(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_std_base32_decode(a0: JetCString, ok: *mut *mut u8, ok_len: *mut i64, err: *mut JetCString) -> i64 {
         guard(|| match crate::jet_std_base32_decode(&borrowed(a0)) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
     }
 
     /// core.encoding.base32.b32hexdecode
     #[no_mangle]
-    pub extern "C" fn jet_std_base32hex_decode(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_std_base32hex_decode(a0: JetCString, ok: *mut *mut u8, ok_len: *mut i64, err: *mut JetCString) -> i64 {
         guard(|| match crate::jet_std_base32hex_decode(&borrowed(a0)) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
     }
@@ -18173,71 +19191,71 @@ mod jet_c_abi_routes {
 
     /// core.encoding.binary.pack
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_pack(a0: JetCString, a1_0: *const u64, a1_1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_std_binary_pack(a0: JetCString, a1_0: *const u64, a1_1: i64, ok: *mut *mut u8, ok_len: *mut i64, err: *mut JetCString) -> i64 {
         guard(|| match crate::jet_std_binary_pack(&borrowed(a0), &list_in(a1_0, a1_1, |w| w as i64)) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
     }
 
     /// core.encoding.binary.pack_f64be
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_pack_f64be(a0: f64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_std_binary_pack_f64be(a0).into_iter().map(|e| e as u64).collect(), data))
+    pub extern "C" fn jet_std_binary_pack_f64be(a0: f64, data: *mut *mut u8) -> i64 {
+        guard(|| list_out(crate::jet_std_binary_pack_f64be(a0).into_iter().map(|e| e).collect(), data))
     }
 
     /// core.encoding.binary.pack_f64le
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_pack_f64le(a0: f64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_std_binary_pack_f64le(a0).into_iter().map(|e| e as u64).collect(), data))
+    pub extern "C" fn jet_std_binary_pack_f64le(a0: f64, data: *mut *mut u8) -> i64 {
+        guard(|| list_out(crate::jet_std_binary_pack_f64le(a0).into_iter().map(|e| e).collect(), data))
     }
 
     /// core.encoding.binary.pack_i8
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_pack_i8(a0: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_std_binary_pack_i8(a0).into_iter().map(|e| e as u64).collect(), data))
+    pub extern "C" fn jet_std_binary_pack_i8(a0: i64, data: *mut *mut u8) -> i64 {
+        guard(|| list_out(crate::jet_std_binary_pack_i8(a0).into_iter().map(|e| e).collect(), data))
     }
 
     /// core.encoding.binary.pack_u16be
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_pack_u16be(a0: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_std_binary_pack_u16be(a0).into_iter().map(|e| e as u64).collect(), data))
+    pub extern "C" fn jet_std_binary_pack_u16be(a0: i64, data: *mut *mut u8) -> i64 {
+        guard(|| list_out(crate::jet_std_binary_pack_u16be(a0).into_iter().map(|e| e).collect(), data))
     }
 
     /// core.encoding.binary.pack_u16le
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_pack_u16le(a0: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_std_binary_pack_u16le(a0).into_iter().map(|e| e as u64).collect(), data))
+    pub extern "C" fn jet_std_binary_pack_u16le(a0: i64, data: *mut *mut u8) -> i64 {
+        guard(|| list_out(crate::jet_std_binary_pack_u16le(a0).into_iter().map(|e| e).collect(), data))
     }
 
     /// core.encoding.binary.pack_u32be
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_pack_u32be(a0: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_std_binary_pack_u32be(a0).into_iter().map(|e| e as u64).collect(), data))
+    pub extern "C" fn jet_std_binary_pack_u32be(a0: i64, data: *mut *mut u8) -> i64 {
+        guard(|| list_out(crate::jet_std_binary_pack_u32be(a0).into_iter().map(|e| e).collect(), data))
     }
 
     /// core.encoding.binary.pack_u32le
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_pack_u32le(a0: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_std_binary_pack_u32le(a0).into_iter().map(|e| e as u64).collect(), data))
+    pub extern "C" fn jet_std_binary_pack_u32le(a0: i64, data: *mut *mut u8) -> i64 {
+        guard(|| list_out(crate::jet_std_binary_pack_u32le(a0).into_iter().map(|e| e).collect(), data))
     }
 
     /// core.encoding.binary.pack_u64be
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_pack_u64be(a0: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_std_binary_pack_u64be(a0).into_iter().map(|e| e as u64).collect(), data))
+    pub extern "C" fn jet_std_binary_pack_u64be(a0: i64, data: *mut *mut u8) -> i64 {
+        guard(|| list_out(crate::jet_std_binary_pack_u64be(a0).into_iter().map(|e| e).collect(), data))
     }
 
     /// core.encoding.binary.pack_u64le
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_pack_u64le(a0: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_std_binary_pack_u64le(a0).into_iter().map(|e| e as u64).collect(), data))
+    pub extern "C" fn jet_std_binary_pack_u64le(a0: i64, data: *mut *mut u8) -> i64 {
+        guard(|| list_out(crate::jet_std_binary_pack_u64le(a0).into_iter().map(|e| e).collect(), data))
     }
 
     /// core.encoding.binary.pack_u8
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_pack_u8(a0: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_std_binary_pack_u8(a0).into_iter().map(|e| e as u64).collect(), data))
+    pub extern "C" fn jet_std_binary_pack_u8(a0: i64, data: *mut *mut u8) -> i64 {
+        guard(|| list_out(crate::jet_std_binary_pack_u8(a0).into_iter().map(|e| e).collect(), data))
     }
 
     /// core.encoding.binary.sign_extend
@@ -18248,7 +19266,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.binary.unpack
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_unpack(a0: JetCString, a1_0: *const u64, a1_1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_std_binary_unpack(a0: JetCString, a1_0: *const u8, a1_1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
         guard(|| match crate::jet_std_binary_unpack(&borrowed(a0), &list_in(a1_0, a1_1, |w| w as u8)) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
@@ -18257,7 +19275,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.binary.unpack_f64be
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_unpack_f64be(a0_0: *const u64, a0_1: i64, a1: i64, some: *mut f64) -> i64 {
+    pub extern "C" fn jet_std_binary_unpack_f64be(a0_0: *const u8, a0_1: i64, a1: i64, some: *mut f64) -> i64 {
         guard(|| match crate::jet_std_binary_unpack_f64be(&list_in(a0_0, a0_1, |w| w as u8), a1) {
             Some(value) => { unsafe { some.write(value) }; 1 }
             None => 0,
@@ -18266,7 +19284,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.binary.unpack_f64le
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_unpack_f64le(a0_0: *const u64, a0_1: i64, a1: i64, some: *mut f64) -> i64 {
+    pub extern "C" fn jet_std_binary_unpack_f64le(a0_0: *const u8, a0_1: i64, a1: i64, some: *mut f64) -> i64 {
         guard(|| match crate::jet_std_binary_unpack_f64le(&list_in(a0_0, a0_1, |w| w as u8), a1) {
             Some(value) => { unsafe { some.write(value) }; 1 }
             None => 0,
@@ -18275,7 +19293,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.binary.unpack_u16be
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_unpack_u16be(a0_0: *const u64, a0_1: i64, a1: i64, some: *mut i64) -> i64 {
+    pub extern "C" fn jet_std_binary_unpack_u16be(a0_0: *const u8, a0_1: i64, a1: i64, some: *mut i64) -> i64 {
         guard(|| match crate::jet_std_binary_unpack_u16be(&list_in(a0_0, a0_1, |w| w as u8), a1) {
             Some(value) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             None => 0,
@@ -18284,7 +19302,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.binary.unpack_u16le
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_unpack_u16le(a0_0: *const u64, a0_1: i64, a1: i64, some: *mut i64) -> i64 {
+    pub extern "C" fn jet_std_binary_unpack_u16le(a0_0: *const u8, a0_1: i64, a1: i64, some: *mut i64) -> i64 {
         guard(|| match crate::jet_std_binary_unpack_u16le(&list_in(a0_0, a0_1, |w| w as u8), a1) {
             Some(value) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             None => 0,
@@ -18293,7 +19311,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.binary.unpack_u32be
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_unpack_u32be(a0_0: *const u64, a0_1: i64, a1: i64, some: *mut i64) -> i64 {
+    pub extern "C" fn jet_std_binary_unpack_u32be(a0_0: *const u8, a0_1: i64, a1: i64, some: *mut i64) -> i64 {
         guard(|| match crate::jet_std_binary_unpack_u32be(&list_in(a0_0, a0_1, |w| w as u8), a1) {
             Some(value) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             None => 0,
@@ -18302,7 +19320,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.binary.unpack_u32le
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_unpack_u32le(a0_0: *const u64, a0_1: i64, a1: i64, some: *mut i64) -> i64 {
+    pub extern "C" fn jet_std_binary_unpack_u32le(a0_0: *const u8, a0_1: i64, a1: i64, some: *mut i64) -> i64 {
         guard(|| match crate::jet_std_binary_unpack_u32le(&list_in(a0_0, a0_1, |w| w as u8), a1) {
             Some(value) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             None => 0,
@@ -18311,7 +19329,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.binary.unpack_u64be
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_unpack_u64be(a0_0: *const u64, a0_1: i64, a1: i64, some: *mut i64) -> i64 {
+    pub extern "C" fn jet_std_binary_unpack_u64be(a0_0: *const u8, a0_1: i64, a1: i64, some: *mut i64) -> i64 {
         guard(|| match crate::jet_std_binary_unpack_u64be(&list_in(a0_0, a0_1, |w| w as u8), a1) {
             Some(value) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             None => 0,
@@ -18320,7 +19338,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.binary.unpack_u64le
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_unpack_u64le(a0_0: *const u64, a0_1: i64, a1: i64, some: *mut i64) -> i64 {
+    pub extern "C" fn jet_std_binary_unpack_u64le(a0_0: *const u8, a0_1: i64, a1: i64, some: *mut i64) -> i64 {
         guard(|| match crate::jet_std_binary_unpack_u64le(&list_in(a0_0, a0_1, |w| w as u8), a1) {
             Some(value) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             None => 0,
@@ -18329,7 +19347,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.binary.unpack_u8
     #[no_mangle]
-    pub extern "C" fn jet_std_binary_unpack_u8(a0_0: *const u64, a0_1: i64, a1: i64, some: *mut i64) -> i64 {
+    pub extern "C" fn jet_std_binary_unpack_u8(a0_0: *const u8, a0_1: i64, a1: i64, some: *mut i64) -> i64 {
         guard(|| match crate::jet_std_binary_unpack_u8(&list_in(a0_0, a0_1, |w| w as u8), a1) {
             Some(value) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             None => 0,
@@ -18689,18 +19707,18 @@ mod jet_c_abi_routes {
 
     /// core.files.read_at
     #[no_mangle]
-    pub extern "C" fn jet_std_fs_read_at(a0: JetCString, a1: i64, a2: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
+    pub extern "C" fn jet_std_fs_read_at(a0: JetCString, a1: i64, a2: i64, ok: *mut *mut u8, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
         guard(|| match crate::jet_std_fs_read_at(&borrowed(a0), a1, a2) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
     /// core.files.read_bytes
     #[no_mangle]
-    pub extern "C" fn jet_std_fs_read_bytes(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
+    pub extern "C" fn jet_std_fs_read_bytes(a0: JetCString, ok: *mut *mut u8, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
         guard(|| match crate::jet_std_fs_read_bytes(view(a0)) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
@@ -18830,7 +19848,7 @@ mod jet_c_abi_routes {
 
     /// core.files.write_at
     #[no_mangle]
-    pub extern "C" fn jet_std_fs_write_at(a0: JetCString, a1: i64, a2_0: *const u64, a2_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
+    pub extern "C" fn jet_std_fs_write_at(a0: JetCString, a1: i64, a2_0: *const u8, a2_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
         guard(|| match crate::jet_std_fs_write_at(&borrowed(a0), a1, &list_in(a2_0, a2_1, |w| w as u8)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -18839,7 +19857,7 @@ mod jet_c_abi_routes {
 
     /// core.files.write_atomic
     #[no_mangle]
-    pub extern "C" fn jet_std_fs_write_atomic(a0: JetCString, a1_0: *const u64, a1_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
+    pub extern "C" fn jet_std_fs_write_atomic(a0: JetCString, a1_0: *const u8, a1_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
         guard(|| match crate::jet_std_fs_write_atomic(&borrowed(a0), &list_in(a1_0, a1_1, |w| w as u8)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -18848,7 +19866,7 @@ mod jet_c_abi_routes {
 
     /// core.files.write_bytes
     #[no_mangle]
-    pub extern "C" fn jet_std_fs_write_bytes(a0: JetCString, a1_0: *const u64, a1_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
+    pub extern "C" fn jet_std_fs_write_bytes(a0: JetCString, a1_0: *const u8, a1_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
         guard(|| match crate::jet_std_fs_write_bytes(&borrowed(a0), &list_in(a1_0, a1_1, |w| w as u8)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -18857,34 +19875,34 @@ mod jet_c_abi_routes {
 
     /// core.encoding.hex.decode
     #[no_mangle]
-    pub extern "C" fn jet_std_hex_decode(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_std_hex_decode(a0: JetCString, ok: *mut *mut u8, ok_len: *mut i64, err: *mut JetCString) -> i64 {
         guard(|| match crate::jet_std_hex_decode(&borrowed(a0)) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
     }
 
     /// core.encoding.hex.dump
     #[no_mangle]
-    pub extern "C" fn jet_std_hex_dump(a0_0: *const u64, a0_1: i64) -> JetCString {
+    pub extern "C" fn jet_std_hex_dump(a0_0: *const u8, a0_1: i64) -> JetCString {
         guard(|| handle(crate::jet_std_hex_dump(&list_in(a0_0, a0_1, |w| w as u8))))
     }
 
     /// core.encoding.hex.encode
     #[no_mangle]
-    pub extern "C" fn jet_std_hex_encode(a0_0: *const u64, a0_1: i64) -> JetCString {
+    pub extern "C" fn jet_std_hex_encode(a0_0: *const u8, a0_1: i64) -> JetCString {
         guard(|| handle(crate::jet_std_hex_encode(&list_in(a0_0, a0_1, |w| w as u8))))
     }
 
     /// core.encoding.hex.encode_sep
     #[no_mangle]
-    pub extern "C" fn jet_std_hex_encode_sep(a0_0: *const u64, a0_1: i64, a1: JetCString) -> JetCString {
+    pub extern "C" fn jet_std_hex_encode_sep(a0_0: *const u8, a0_1: i64, a1: JetCString) -> JetCString {
         guard(|| handle(crate::jet_std_hex_encode_sep(&list_in(a0_0, a0_1, |w| w as u8), &borrowed(a1))))
     }
 
     /// core.encoding.hex.encode_upper
     #[no_mangle]
-    pub extern "C" fn jet_std_hex_encode_upper(a0_0: *const u64, a0_1: i64) -> JetCString {
+    pub extern "C" fn jet_std_hex_encode_upper(a0_0: *const u8, a0_1: i64) -> JetCString {
         guard(|| handle(crate::jet_std_hex_encode_upper(&list_in(a0_0, a0_1, |w| w as u8))))
     }
 
@@ -18902,16 +19920,16 @@ mod jet_c_abi_routes {
 
     /// core.term.binread
     #[no_mangle]
-    pub extern "C" fn jet_std_io_binread(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
+    pub extern "C" fn jet_std_io_binread(a0: JetCString, ok: *mut *mut u8, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
         guard(|| match crate::jet_std_io_binread(view(a0)) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
     /// core.term.binwrite
     #[no_mangle]
-    pub extern "C" fn jet_std_io_binwrite(a0: JetCString, a1_0: *const u64, a1_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
+    pub extern "C" fn jet_std_io_binwrite(a0: JetCString, a1_0: *const u8, a1_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
         guard(|| match crate::jet_std_io_binwrite(&borrowed(a0), &list_in(a1_0, a1_1, |w| w as u8)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -18943,6 +19961,15 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_std_io_eprint(a0: JetCString) {
         guard(|| crate::jet_std_io_eprint(&borrowed(a0)))
+    }
+
+    /// core.term.input, core.term.input
+    #[no_mangle]
+    pub extern "C" fn jet_std_io_input(a0: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
+        guard(|| match crate::jet_std_io_input((!a0.is_null()).then(|| borrowed(a0)).as_ref()) {
+            Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
     }
 
     /// core.term.input_secret
@@ -19010,9 +20037,9 @@ mod jet_c_abi_routes {
 
     /// core.term.take
     #[no_mangle]
-    pub extern "C" fn jet_std_io_take(a0: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
+    pub extern "C" fn jet_std_io_take(a0: i64, ok: *mut *mut u8, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
         guard(|| match crate::jet_std_io_take(a0) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
@@ -19976,9 +21003,9 @@ mod jet_c_abi_routes {
 
     /// core.encoding.xml.to_bytes
     #[no_mangle]
-    pub extern "C" fn jet_std_xml_to_bytes(a0: *mut crate::jet_std::DataTree, a1: *mut crate::jet_std::XMLRenderOptions, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::XMLError) -> i64 {
+    pub extern "C" fn jet_std_xml_to_bytes(a0: *mut crate::jet_std::DataTree, a1: *mut crate::jet_std::XMLRenderOptions, ok: *mut *mut u8, ok_len: *mut i64, err: *mut *mut crate::jet_std::XMLError) -> i64 {
         guard(|| match crate::jet_std_xml_to_bytes(unsafe { &*a0 }, unsafe { &*a1 }.clone()) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
@@ -20000,9 +21027,9 @@ mod jet_c_abi_routes {
 
     /// TIR/tir_to_mir_expr.rs
     #[no_mangle]
-    pub extern "C" fn DBValue_blob(a0: *mut crate::jet_std::DBValue, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn DBValue_blob(a0: *mut crate::jet_std::DBValue, ok: *mut *mut u8, ok_len: *mut i64, err: *mut JetCString) -> i64 {
         guard(|| match crate::jet_std::DBValue::blob(unsafe { &*a0 }) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
     }
@@ -20606,13 +21633,13 @@ mod jet_c_abi_routes {
 
     /// core.builtin.bytes, core.builtin.bytes
     #[no_mangle]
-    pub extern "C" fn jet_string_bytes(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_string_bytes(&borrowed(a0)).into_iter().map(|e| e as u64).collect(), data))
+    pub extern "C" fn jet_string_bytes(a0: JetCString, data: *mut *mut u8) -> i64 {
+        guard(|| list_out(crate::jet_string_bytes(&borrowed(a0)).into_iter().map(|e| e).collect(), data))
     }
 
     /// core.builtin.string_from_bytes
     #[no_mangle]
-    pub extern "C" fn jet_string_from_bytes(a0_0: *const u64, a0_1: i64, ok: *mut JetCString, err: *mut *mut crate::jet_std::UTF8Error) -> i64 {
+    pub extern "C" fn jet_string_from_bytes(a0_0: *const u8, a0_1: i64, ok: *mut JetCString, err: *mut *mut crate::jet_std::UTF8Error) -> i64 {
         guard(|| match crate::jet_string_from_bytes(&list_in(a0_0, a0_1, |w| w as u8)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -20621,7 +21648,7 @@ mod jet_c_abi_routes {
 
     /// core.builtin.string_from_bytes_lossy
     #[no_mangle]
-    pub extern "C" fn jet_string_from_bytes_lossy(a0_0: *const u64, a0_1: i64) -> JetCString {
+    pub extern "C" fn jet_string_from_bytes_lossy(a0_0: *const u8, a0_1: i64) -> JetCString {
         guard(|| handle(crate::jet_string_from_bytes_lossy(&list_in(a0_0, a0_1, |w| w as u8))))
     }
 
@@ -20762,8 +21789,8 @@ mod jet_c_abi_routes {
 
     /// core.text.parse.encode
     #[no_mangle]
-    pub extern "C" fn jet_text_encode(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_encode(&borrowed(a0)).into_iter().map(|e| e as u64).collect(), data))
+    pub extern "C" fn jet_text_encode(a0: JetCString, data: *mut *mut u8) -> i64 {
+        guard(|| list_out(crate::jet_text_encode(&borrowed(a0)).into_iter().map(|e| e).collect(), data))
     }
 
     /// core.text.ends_any
@@ -21681,7 +22708,7 @@ mod jet_c_abi_routes {
 
     /// core.net.url.quote_from_bytes
     #[no_mangle]
-    pub extern "C" fn jet_url_quote_from_bytes(a0_0: *const u64, a0_1: i64) -> JetCString {
+    pub extern "C" fn jet_url_quote_from_bytes(a0_0: *const u8, a0_1: i64) -> JetCString {
         guard(|| handle(crate::jet_url_quote_from_bytes(&list_in(a0_0, a0_1, |w| w as u8))))
     }
 
@@ -21727,9 +22754,9 @@ mod jet_c_abi_routes {
 
     /// core.net.url.unquote_to_bytes
     #[no_mangle]
-    pub extern "C" fn jet_url_unquote_to_bytes(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_url_unquote_to_bytes(a0: JetCString, ok: *mut *mut u8, ok_len: *mut i64, err: *mut JetCString) -> i64 {
         guard(|| match crate::jet_url_unquote_to_bytes(&borrowed(a0)) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
     }
@@ -21839,14 +22866,14 @@ mod jet_c_abi_routes {
 
     /// core.builtin.byte_buffer_from
     #[no_mangle]
-    pub extern "C" fn JetByteBuffer_from(a0_0: *const u64, a0_1: i64) -> *mut crate::JetByteBuffer {
+    pub extern "C" fn JetByteBuffer_from(a0_0: *const u8, a0_1: i64) -> *mut crate::JetByteBuffer {
         guard(|| Box::into_raw(Box::new(crate::JetByteBuffer::from(&list_in(a0_0, a0_1, |w| w as u8)))))
     }
 
     /// core.builtin.byte_buffer_to_bytes
     #[no_mangle]
-    pub extern "C" fn JetByteBuffer_to_bytes(a0: *mut crate::JetByteBuffer, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::JetByteBuffer::to_bytes(unsafe { &*a0 }).into_iter().map(|e| e as u64).collect(), data))
+    pub extern "C" fn JetByteBuffer_to_bytes(a0: *mut crate::JetByteBuffer, data: *mut *mut u8) -> i64 {
+        guard(|| list_out(crate::JetByteBuffer::to_bytes(unsafe { &*a0 }).into_iter().map(|e| e).collect(), data))
     }
 
     /// core.builtin.byte_buffer_with_capacity
@@ -22694,6 +23721,234 @@ mod jet_c_abi_routes {
     pub extern "C" fn JetZonedDateTime_zone(a0: *mut crate::JetZonedDateTime) -> *mut crate::JetZone {
         guard(|| Box::into_raw(Box::new(crate::JetZonedDateTime::zone(unsafe { &*a0 }))))
     }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_Int(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a0) })))))
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_Int(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<crate::jet_foundation::Numeric::JetInt>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value.into_raw()) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_Bool(a0: u8) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 != 0)))))
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_Bool(a0: *mut crate::jet_std::DataTree, ok: *mut u8, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<bool>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as u8) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_Float(a0: f64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0)))))
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_Float(a0: *mut crate::jet_std::DataTree, ok: *mut f64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<f64>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_String(a0: JetCString) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, unsafe { &*a0 }))))
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_String(a0: *mut crate::jet_std::DataTree, ok: *mut JetCString, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<String>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_Char(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(scalar(a0))))))
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_Char(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<char>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_U8(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as u8)))))
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_U8(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<u8>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_U16(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as u16)))))
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_U16(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<u16>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_U32(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as u32)))))
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_U32(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<u32>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_U64(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as u64)))))
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_U64(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<u64>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_I8(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as i8)))))
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_I8(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<i8>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_I16(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as i16)))))
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_I16(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<i16>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_I32(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as i32)))))
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_I32(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<i32>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_I64(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as i64)))))
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_I64(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<i64>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_parse_json(a0: JetCString, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_enc_json_decode::<crate::jet_std::DataTree>(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(len) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_parse_toml(a0: JetCString, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_enc_toml_decode::<crate::jet_std::DataTree>(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(len) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_parse_yaml(a0: JetCString, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_enc_yaml_decode::<crate::jet_std::DataTree>(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(len) }; 0 }
+        })
+    }
+
+    ///
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_under(a0: JetCString, a1_0: *const u64, a1_1: i64, data: *mut *mut u64) -> i64 {
+        guard(|| list_out(crate::jet_std::FieldError::under_errors(view(a0), list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::FieldError) }.clone())).into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), data))
+    }
 }
 // Skipped routes (no C carrier yet):
 //   jet_app_sync (app.sync): no runtime function
@@ -23234,6 +24489,7 @@ mod jet_c_abi_routes {
 //   jet_map_update_all (core.builtin.map_update): generic
 //   jet_map_update_string (TIR/routes.rs): generic
 //   jet_map_values (core.builtin.map_values): generic
+//   jet_math_F32x4_lane_set (core.math.F32x4_lane_set): parameter types v: &mut jet_std::F32x4, i: i64, value: f32, file: &str, line: u32
 //   jet_math_F64x4_from_array (core.math.F64x4_from_array): parameter types a: [f64; 4]
 //   jet_math_F64x4_gather_lane (core.math.F64x4_gather_lane): generic
 //   jet_math_F64x4_lane_const (core.math.F64x4_lane_const): generic
@@ -23283,7 +24539,6 @@ mod jet_c_abi_routes {
 //   jet_parsed_positional (core.handle.parsed.positional): no runtime function
 //   jet_parsed_subcommand (core.handle.parsed.subcommand): no runtime function
 //   jet_partial (TIR/routes.rs): generic
-//   jet_plugin_load (core.plugin.load): no runtime function
 //   jet_priority_queue_from (core.builtin.priority_queue_from): generic
 //   jet_priority_queue_is_empty (TIR/routes.rs): generic
 //   jet_priority_queue_len (TIR/routes.rs): generic
@@ -23373,7 +24628,6 @@ mod jet_c_abi_routes {
 //   jet_std_fs_walk (core.files.walk): parameter types  path: &String, ignore_name: JetOutcome<String, JetAbsent>, 
 //   jet_std_fs_walk_files (core.files.walk_files): parameter types  path: &String, ignore_name: JetOutcome<String, JetAbsent>, 
 //   jet_std_fs_walk_parallel (core.files.walk_parallel): parameter types  path: &String, ignore_name: JetOutcome<String, JetAbsent>, 
-//   jet_std_io_input (core.term.input): parameter types prompt: Option<&String>
 //   jet_std_io_progress_iter (core.term.progress_iter): generic
 //   jet_std_io_stdin_read_line (core.handle.stdin.read_line): result type Result<Option<String>, jet_std::IOError>
 //   jet_std_jsonl_first (core.encoding.jsonl.first): result type Result<Option<jet_std::DataTree>, jet_std::EncodingError>

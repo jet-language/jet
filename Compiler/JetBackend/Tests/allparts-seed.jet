@@ -45,6 +45,17 @@ use core.service as service
 use core.jobs as jobs
 use core.mod as mods
 
+// Importing a module selects its runtime part, but the host bridge macros are
+// selected by actual route demand. These seed bodies retain that demand in
+// emitted MIR; they are not executed by the all-parts seed.
+fn allparts_http_bridge(url: String) {
+    client.get(url).drop("all-parts HTTP bridge demand")
+}
+
+fn allparts_db_bridge(path: String) {
+    db.open(path).drop("all-parts database bridge demand")
+}
+
 fn run() {
     print("hello")
 }

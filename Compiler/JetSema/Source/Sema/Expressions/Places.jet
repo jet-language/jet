@@ -373,6 +373,7 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
     }
     sema_scope_commit(&scopes, base_scope_mark)
     checked_base :: checked_base_value ?? return None
+    sema_ownership_note_close_owner(&state, base, checked_base.ty, environment, scopes)
     if !sema_expression_secret_exposure_allowed(checked_base.ty, member, span, environment, &context, &diagnostics) -> return None
     if checked_base.ty == .Named(math_name) {
         swizzle :: sema_expression_math_swizzle(checked_base, math_name, member, span, &diagnostics)

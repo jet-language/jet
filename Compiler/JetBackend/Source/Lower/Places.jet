@@ -44,7 +44,7 @@ fn lower_enum_payload_info(p: MIRProgram, definition: MIRTypeDef, variant: MIRVa
 fn lower_payload_info(p: MIRProgram, ty: MIRType, kind: MIRPayloadKind) -> LowerPayloadInfo? {
     if kind == {
         .Option -> if ty.kind == .Option(inner) -> Val(LowerPayloadInfo{offset: 0, ty: inner, boxed: false}) else -> None
-        .Result(ok) -> if ty.kind == .Result(success, failure) -> Val(LowerPayloadInfo{offset: 8, ty: if ok -> success else -> failure, boxed: false}) else -> None
+        .Result(ok) -> if ty.kind == .Result(success, failure) -> Val(LowerPayloadInfo{offset: lower_result_payload_offset(), ty: if ok -> success else -> failure, boxed: false}) else -> None
         .Enum(owner, variant, index) -> {
             definition :: lower_owned_def(p, owner, Val(ty)) ?? return None
             found :: lower_variant(definition, variant) ?? return None
@@ -292,6 +292,10 @@ fn lower_drop_stored(p: MIRProgram, m: &LowerModule, f: &LowerFunction, base: LI
         address :: lower_address(&f, base, offset)
         return lower_inline_drop(p, &m, &f, address, ty)
     }
+    if lower_close_method(p, m.close_methods, ty) != None {
+        value :: lower_read_at(p, &f, base, offset, ty) ?? return
+        return lower_map_drop_value(p, &m, &f, value, ty)
+    }
     layout :: lower_repr_layout(repr) ?? return
     drop :: lower_drop(&m, repr, true)
     if drop == .Trivial -> return
@@ -310,6 +314,22 @@ fn lower_drop_stored(p: MIRProgram, m: &LowerModule, f: &LowerFunction, base: LI
     lower_start(&f, done, [LIRValueID]{})
 }
 
+// A replacement transfers the old bits into an owning slot before publishing
+// the new owner. Close may re-enter the destination; it must never find an old
+// owner whose lifetime has already been consumed.
+fn lower_detach_stored(p: MIRProgram, f: &LowerFunction, base: LIRValueID, offset: Int, ty: MIRType) -> LIRValueID Never! {
+    detached :: lower_new_storage(p, &f, ty)
+    lower_copy_bytes(&f, detached, 0, base, offset, lower_size(p, ty).size)
+    detached
+}
+
+fn lower_replace_stored(p: MIRProgram, m: &LowerModule, f: &LowerFunction, base: LIRValueID, offset: Int, value: LIRValueID, ty: MIRType) Never! {
+    if !lower_needs_drop(p, m, ty) -> return lower_write_at(p, &f, base, offset, value, ty)
+    detached :: lower_detach_stored(p, &f, base, offset, ty)
+    lower_write_at(p, &f, base, offset, value, ty)
+    lower_drop_stored(p, &m, &f, detached, 0, ty)
+}
+
 fn lower_glue_drop_fields(p: MIRProgram, m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, fields: [LowerGlueField]) Never! {
     loop field in fields -> lower_drop_stored(p, &m, &f, boxed, field.offset, field.ty)
 }
@@ -321,7 +341,7 @@ fn lower_glue_clone_fields(p: MIRProgram, m: &LowerModule, f: &LowerFunction, so
         repr :: lower_repr(p, field.ty)
         if repr == .Unsupported(reason) -> return lower_fail(&m, &f, "clone glue field of {reason} is not lowered at O0 yet")
         if repr == .Inline(_) {
-            if lower_needs_drop(p, field.ty) {
+            if lower_needs_drop(p, m, field.ty) {
                 from :: lower_address(&f, source, field.offset)
                 to :: lower_address(&f, target, field.offset)
                 lower_inline_clone(p, &m, &f, from, to, field.ty)

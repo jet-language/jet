@@ -7,8 +7,9 @@
 // process exit; callable owners live until image finalization. An
 // ownership-bearing Global read clones them.
 use jet_foundation.[
-    MIRConstant, MIRConstantDef, MIRInstruction, MIRPlace, MIRProgram, MIRType, MIRValueID,
+    MIRConstant, MIRConstantDef, MIRInstruction, MIRPlace, MIRProgram, MIRSharedLifetime, MIRType, MIRValueID,
     mir_type_display_name,
+    mir_shared_site_getter_symbol,
 ]
 use core.math as math
 
@@ -215,8 +216,8 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
                 }
                 .Result(ok, err) -> {
                     id :: lower_static_object(&m, lower_result_box_size(p, ok, err))
-                    lower_static_store(&m, id, 0, lower_static_word(1))
-                    lower_static_child(p, &m, &f, id, 8, ok, value)
+                    lower_static_store(&m, id, 0, lower_static_word(lower_result_selector(true)))
+                    lower_static_child(p, &m, &f, id, lower_result_payload_offset(), ok, value)
                     if f.failed -> return None
                     return Val(lower_static_pointer(id))
                 }
@@ -229,7 +230,8 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
         .Failed(report) -> {
             if ty.kind == .Result(ok, err) && report == .Told(value) {
                 id :: lower_static_object(&m, lower_result_box_size(p, ok, err))
-                lower_static_child(p, &m, &f, id, 8, err, value)
+                lower_static_store(&m, id, 0, lower_static_word(lower_result_selector(false)))
+                lower_static_child(p, &m, &f, id, lower_result_payload_offset(), err, value)
                 if f.failed -> return None
                 return Val(lower_static_pointer(id))
             }
@@ -252,6 +254,7 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
             return Val(lower_static_runtime(&m, decimal, "jet_rt_int_from_static"))
         }
         .Bytes(_) -> lower_fail(&m, &f, "Bytes constants are not lowered at O0 yet")
+        .SharedSite(_) -> lower_fail(&m, &f, "Shared publication sites must be read through their checked getter, not frozen as constant payloads")
         .Map(_) -> lower_fail(&m, &f, "Map constants are not lowered at O0 yet")
     }
     None
@@ -264,13 +267,20 @@ fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     // jet_transaction(): a fresh #Transact handle (Transaction.jet).
     if name == "transaction" && lower_global_definition(p, name) == None -> return lower_transaction_new(p, c, &m, &f, instruction)
     definition :: lower_global_definition(p, name) ?? return lower_fail(&m, &f, "global constant {name} without a definition is not lowered at O0 yet")
+    if definition.value == .SharedSite(site) {
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        if m.shared_sites_dynamic {
+            return lower_call_runtime(&m, &f, mir_shared_site_getter_symbol(site.initializer), [LIRValueID]{}, Val(dst))
+        }
+        return lower_call_helper(&m, &f, definition.key, definition.ty, [LIRValueID]{}, Val(dst))
+    }
     if definition.is_storage {
         // A read of module storage: its current value (lower_static_storage).
         if lower_repr(p, definition.ty) == .Absent -> return lower_alias_absent(&f, instruction)
         cell :: lower_static_storage(p, &m, &f, definition) ?? return
         dst :: lower_result(p, c, &m, &f, instruction) ?? return
         owned :: lower_value_owned(c, instruction.result ?? MIRValueID{value: U64.MAX})
-        if owned && lower_needs_drop(p, definition.ty) {
+        if owned && lower_needs_drop(p, m, definition.ty) {
             held :: lower_read_at(p, &f, cell, 0, definition.ty) ?? return
             return lower_clone_into(p, &m, &f, held, dst, definition.ty)
         }
@@ -339,6 +349,8 @@ fn lower_static_walk(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
 
 // The address of module storage `definition`'s value.
 fn lower_static_storage(p: MIRProgram, m: &LowerModule, f: &LowerFunction, definition: MIRConstantDef) -> LIRValueID? {
+    shared_site :: if definition.value == {.SharedSite(_) -> true else -> false}
+    if shared_site && m.shared_sites_dynamic -> panic("dynamic image attempted to emit a Core publication cell")
     if lower_repr(p, definition.ty) == {
         .Word | .Flag | .FloatBits | .Discriminant | .Handle(_, _) -> {}
         else -> {
@@ -352,7 +364,9 @@ fn lower_static_storage(p: MIRProgram, m: &LowerModule, f: &LowerFunction, defin
         object = LIRDataID{value: index}
     } else {
         object = lower_static_object(&m, 8)
-        lower_static_child(p, &m, &f, object, 0, definition.ty, definition.value)
+        if !shared_site {
+            lower_static_child(p, &m, &f, object, 0, definition.ty, definition.value)
+        }
         if f.failed -> return None
         &m.static_rows.add(key, object.value).drop("checked absent above")
     }
@@ -416,4 +430,65 @@ fn lower_static_list_drop_guard(f: &LowerFunction, cap: LIRValueID, data: LIRVal
     owned :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: frozen, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(owned, [LIRValueID]{})})
     lower_start(&f, owned, [LIRValueID]{})
+}
+
+// The sole getter body for a pinned Core publication site. Every local read
+// calls this helper; dynamic images import its stable symbol instead.
+fn lower_shared_site_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    definition :: lower_global_definition(p, glue.helper) ?? panic("publication helper has no checked site row")
+    site :: if definition.value == {.SharedSite(value) -> value else -> panic("publication helper names an ordinary constant")}
+    f := lower_helper_start(&m, glue, [LIRLayout]{}, Val(lir_layout_pointer()))
+    if m.shared_sites_dynamic -> panic("dynamic image attempted to emit a Core publication getter")
+    f.builder.name = mir_shared_site_getter_symbol(site.initializer)
+    f.name = ~f.builder.name
+    loop exported in m.shared_sites {
+        if exported.initializer == site.initializer || exported.symbol == f.builder.name {
+            message :: "duplicate or colliding Core publication getter {f.builder.name}"
+            lower_fail(&m, &f, message)
+            return lir_builder_finish(f.builder)
+        }
+    }
+    &m.shared_sites.push(LIRSharedSiteExport{initializer: site.initializer, site_key: definition.key, function: glue.id, symbol: ~f.builder.name, lifetime: site.lifetime, ty: definition.ty})
+    cell :: lower_static_storage(p, &m, &f, definition) ?? return lir_builder_finish(f.builder)
+    tls :: site.lifetime == MIRSharedLifetime.Thread || site.lifetime == MIRSharedLifetime.Attempt
+    key := LIRValueID{value: -1}
+    if tls {
+        scope :: lower_const(&f, if site.lifetime == MIRSharedLifetime.Attempt -> 1 else -> 0)
+        key = lower_word(&f)
+        lower_call_runtime(&m, &f, "jet_rt_tls_shared_key", [LIRValueID]{cell, scope}, Val(key))
+    }
+    existing :: lower_pointer(&f)
+    if tls -> lower_call_runtime(&m, &f, "jet_rt_tls_get", [LIRValueID]{key}, Val(existing))
+    else {
+        // Native lowering currently targets x64 only: this naturally aligned
+        // word load has acquire ordering under TSO. An AArch64/native target
+        // must introduce an acquire LIR load before enabling publication sites.
+        lower_emit(&f, LIRInst.Load{dst: existing, base: cell, offset: 0})
+    }
+    zero :: lower_const(&f, 0)
+    initialized :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: initialized, condition: LIRCondition.Ne, left: existing, right: zero})
+    slow :: lower_new_block(&f)
+    joined :: lower_new_block(&f)
+    winner :: lower_pointer(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: initialized, then_target: lower_target(joined, [LIRValueID]{existing}), else_target: lower_target(slow, [LIRValueID]{})})
+    lower_start(&f, slow, [LIRValueID]{})
+    row :: lower_function_index(m, site.initializer)
+    if row < 0 -> panic("pinned Core publication initializer was pruned")
+    candidate :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Call{dst: Val(candidate), signature: m.mir_signatures[row], callee: LIRCallee.Function{id: LIRFunctionID{value: row}}, args: [LIRValueID]{}})
+    published := candidate
+    if tls {
+        lower_call_runtime(&m, &f, "jet_rt_tls_set", [LIRValueID]{key, candidate}, None)
+    } else {
+        lifetime :: lower_const(&f, if site.lifetime == MIRSharedLifetime.World -> 1 else -> 0)
+        published = lower_pointer(&f)
+        lower_call_runtime(&m, &f, "jet_rt_shared_site_publish", [LIRValueID]{cell, candidate, lifetime}, Val(published))
+    }
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(joined, [LIRValueID]{published})})
+    lower_start(&f, joined, [LIRValueID]{winner})
+    result :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_native_shared_clone", [LIRValueID]{winner}, Val(result))
+    lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+    lir_builder_finish(f.builder)
 }

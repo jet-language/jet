@@ -44,6 +44,7 @@ fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     if lower_lazy_cursor_init(p, c, &m, &f, instruction, call, collection, step, by_value, source_kind) -> return
     if lower_channel_cursor_init(p, c, &m, &f, instruction, call, collection, step, by_value, source_kind) -> return
     if source_kind == .Chars -> return lower_chars_cursor_init(p, c, &m, &f, instruction, call, collection, step, by_value)
+    if source_kind == .LinesProcessStream -> return lower_pipe_cursor_init(p, c, &m, &f, instruction, call, collection, step, by_value)
     if source_kind == .Iterable(_, _, iter_symbol, next_symbol) -> return lower_iterable_cursor_init(p, c, &m, &f, instruction, call, collection, step, by_value, iter_symbol, next_symbol)
     if source_kind != .Plain -> return lower_fail(&m, &f, "this iterator source kind is not lowered at O0 yet")
     if !lower_iter_route(p, &m, &f, call, "jet_loop_iter_init", 5) -> return
@@ -56,7 +57,7 @@ fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     // A View's snapshot is its borrowed header: the cursor must never drop
     // (or move out) elements the window does not own.
     if lower_view_element(ty) == .Val(elem) {
-        if lower_needs_drop(p, elem) -> return lower_fail(&m, &f, "iteration over a View of owning elements is not lowered at O0 yet")
+        if lower_needs_drop(p, m, elem) -> return lower_fail(&m, &f, "iteration over a View of owning elements is not lowered at O0 yet")
     }
     cursor_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "iterator cursor without a checked type is not lowered at O0 yet")
     if !lower_is_iter_cursor(cursor_ty) -> return lower_fail(&m, &f, "this iterator cursor type is not lowered at O0 yet")
@@ -179,7 +180,7 @@ fn lower_iter_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 }
 
 fn lower_iter_drop_range(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list: LIRValueID, elem: MIRType, first: LIRValueID, last: LIRValueID) Never! {
-    if !lower_needs_drop(p, elem) -> return
+    if !lower_needs_drop(p, m, elem) -> return
     data :: lower_list_data(&f, list)
     head :: lower_new_block(&f)
     body :: lower_new_block(&f)

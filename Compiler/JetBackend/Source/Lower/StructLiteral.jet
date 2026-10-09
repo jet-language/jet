@@ -6,6 +6,7 @@ use jet_foundation.[
     MIRInstruction,
     MIRProgram,
     MIRStructExtra,
+    MIRType,
     MIRTypeDef,
     MIRTypeID,
 ]
@@ -28,6 +29,10 @@ fn lower_struct_construct(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     ty :: instruction.ty ?? return lower_fail(&m, &f, "struct literal has no checked type")
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     lower_storage_into(p, &f, dst, ty)
+    lower_struct_fields(p, c, &m, &f, definition, ty, dst, fields, boxed_fields)
+}
+
+fn lower_struct_fields(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, definition: MIRTypeDef, ty: MIRType, dst: LIRValueID, fields: [MIRFieldValue], boxed_fields: [MIRFieldID]) Never! {
     loop value in fields {
         found :: lower_struct_field(p, ty, value.field) ?? return lower_fail(&m, &f, "field {value.field.value} is not a stored field of {definition.name}")
         indirect := found.boxed

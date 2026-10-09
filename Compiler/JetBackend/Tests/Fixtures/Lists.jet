@@ -12,8 +12,8 @@ fn fx_list_type(elem: MIRType) -> MIRType Never! {
 
 fn fx_list_program(b: FxBuilder) -> MIRProgram Never! {
     p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
-    members :: [String]{"len", "is_empty", "list_push", "list_pop"}
-    symbols :: [String]{"jet_list_len", "jet_list_is_empty", "jet_list_push", "jet_list_pop_kernel"}
+    members :: [String]{"len", "is_empty", "list_push", "list_pop", "list_clear"}
+    symbols :: [String]{"jet_list_len", "jet_list_is_empty", "jet_list_push", "jet_list_pop_kernel", "jet_list_clear"}
     loop (index, member) in members {
         row := fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", member, symbols[index], if index == 2 -> 2 else -> 1, MIRPreludeABI.Value)
         row.signature.borrow_mask[0] = true
@@ -160,6 +160,36 @@ fn fx_lists_oob() -> MIRProgram Never! {
     invalid :: fx_list_index(&b, xs, one, fx_int(), false)
     fx_print(&b, invalid)
     fx_do(&b, MIROperation.Drop{value: xs, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_program(b)
+}
+
+// Clear drops owned elements, preserves the buffer for a following push,
+// and can be repeated when already empty. The final drop owns only "new".
+// expect-stdout lists-clear: "0\n0\nnew\n1\n"
+fn fx_lists_clear() -> MIRProgram Never! {
+    b := fx_builder()
+    strings :: fx_list_type(fx_string())
+    root :: fx_local(&b, "strings", strings, mir_owned_ownership())
+    first :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "first"}})
+    second :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "second"}})
+    initial :: fx_owned(&b, strings, MIROperation.BuildList{values: [MIRValueID]{first, second}, trait_coercion: None})
+    fx_do(&b, MIROperation.WritePlace{place: root, value: initial})
+    lent :: fx_value(&b, strings, mir_ownership_from_access(MIRAccess.Write), MIROperation.AddressOf{place: root, access: MIRAccess.Write})
+    loop iteration in 0..<2 {
+        _ := fx_list_method(&b, "list_clear", lent, Val(root), [MIRValueID]{}, fx_unit(), false)
+        length :: fx_list_method(&b, "len", lent, None, [MIRValueID]{}, fx_int(), false)
+        fx_print(&b, length)
+    }
+    fresh :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "new"}})
+    _ := fx_list_method(&b, "list_push", lent, Val(root), [MIRValueID]{fresh}, fx_unit(), false)
+    zero :: fx_int_const(&b, 0)
+    kept :: fx_list_index(&b, lent, zero, fx_string(), false)
+    fx_print(&b, kept)
+    length :: fx_list_method(&b, "len", lent, None, [MIRValueID]{}, fx_int(), false)
+    fx_print(&b, length)
+    gone :: fx_owned(&b, strings, MIROperation.MovePlace{place: root})
+    fx_do(&b, MIROperation.Drop{value: gone, kind: MIRDropKind.Value})
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     fx_list_program(b)
 }

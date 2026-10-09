@@ -51,6 +51,20 @@ pub(crate) mod jet_c_abi_iter {
         pub(crate) fn word(&self) -> u64 {
             match self.meta.tag() {
                 11 => 0,
+                2 | 3 => {
+                    let bits = self.meta.kind >> 32;
+                    let word = match bits {
+                        1..=8 => unsafe { ptr::read_unaligned(self.slot.data()) as u64 },
+                        9..=16 => unsafe { ptr::read_unaligned(self.slot.data().cast::<u16>()) as u64 },
+                        17..=32 => unsafe { ptr::read_unaligned(self.slot.data().cast::<u32>()) as u64 },
+                        _ => unsafe { ptr::read_unaligned(self.slot.data().cast::<u64>()) },
+                    };
+                    if self.meta.tag() == 2 && bits < 64 {
+                        ((word << (64 - bits)) as i64 >> (64 - bits)) as u64
+                    } else {
+                        word
+                    }
+                }
                 9 => unsafe { ptr::read_unaligned(self.slot.data()) as u64 },
                 _ => unsafe { ptr::read_unaligned(self.slot.data().cast()) },
             }
@@ -99,7 +113,11 @@ pub(crate) mod jet_c_abi_iter {
     }
     impl Drop for NativeValue {
         fn drop(&mut self) {
-            if self.owned && self.meta.drop != 0 {
+            if !self.owned { return; }
+            // The consuming callback owns cleanup, including a typed Stop.
+            // Never replay it while releasing the surrounding Rust container.
+            self.owned = false;
+            if self.meta.drop != 0 {
                 let drop: unsafe extern "C" fn(*mut u8) = unsafe { std::mem::transmute(self.meta.drop) };
                 unsafe { drop(self.slot.data_mut()) };
             }

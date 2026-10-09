@@ -4,6 +4,8 @@ import { readdir, readFile, realpath, stat, writeFile, mkdir } from "node:fs/pro
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadMirSchema } from "../JetBackend/Tests/mir-debug.mjs";
+import { jetWriter } from "../JetBackend/Tests/front-feed-codec.mjs";
 
 const bootstrapDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(bootstrapDir, "../..");
@@ -179,9 +181,14 @@ if (unlisted.length > 0) {
   fail(`Jet compiler sources are not in ${relative(repoRoot, manifestPath)}; add them in explicit order:\n${unlisted.map((path) => `  ${path}`).join("\n")}`);
 }
 
-let output = "";
-let generatedByte = 0;
-let nextLine = 1;
+// Private host provenance is a file header, never an incidental source comment.
+// Account for it in the map without changing any original source byte range.
+const privateHostHeader = entries.some(({ sourcePath }) => sourcePath === "Compiler/Bootstrap/Host/Entry.jet")
+  ? "// [jet-bootstrap private host: Compiler/Bootstrap/Host/Entry.jet]\n"
+  : "";
+let output = privateHostHeader;
+let generatedByte = Buffer.byteLength(privateHostHeader, "utf8");
+let nextLine = privateHostHeader === "" ? 1 : 2;
 const mappedSources = [];
 for (const { sourcePath, bytes, text } of entries) {
   // Keep source offsets unchanged; provenance markers are outside each byte range.
@@ -219,6 +226,17 @@ for (const { sourcePath, bytes, text } of entries) {
     generated_end_line: generatedStartLine + sourceLineCount - 1,
   });
 }
+// Diagnostic observation only; native lowering still consumes the live MIR.
+// Keep generated helper spans separate from original-source provenance.
+const observer = jetWriter(loadMirSchema(sourceRootDir));
+const observerMarker = "// [jet-bootstrap generated: MIR observation writer]\n";
+const observerStart = generatedByte + Buffer.byteLength(observerMarker, "utf8");
+output += observerMarker + observer;
+const observerMap = {
+  generator: "Compiler/JetBackend/Tests/front-feed-codec.mjs",
+  generated: { start: observerStart, end: observerStart + Buffer.byteLength(observer, "utf8") },
+  sha256: createHash("sha256").update(observer).digest("hex"),
+};
 
 await mkdir(sourceDir, { recursive: true });
 await writeFile(unitPath, output, "utf8");
@@ -226,6 +244,7 @@ await writeFile(packagePath, packageSource, "utf8");
 await writeFile(mapPath, `${JSON.stringify({
   schema: "jet-bootstrap-source-map/v2",
   module: "Compiler",
+  mir_observer: observerMap,
   fallback_source_file: "Compiler",
   // `generated` uses aggregate Parser spans; line starts are fragment-local byte offsets.
   source_segments: mappedSources.map(({ path, generated_start_byte, generated_end_byte_exclusive, line_starts }) => ({

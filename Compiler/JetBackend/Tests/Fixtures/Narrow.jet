@@ -162,3 +162,59 @@ fn fx_narrow_shift_range() -> MIRProgram Never! {
 fn fx_narrow_neg_overflow() -> MIRProgram Never! {
     fx_narrow_failure(fx_narrow_unary_function("operation", true, 8, MIRUnaryOp.Neg), true, 8, [Int]{-128})
 }
+
+// Adjacent packed elements exercise sign extension without reading an
+// uninitialized word or clobbering the next element on a narrow store.
+// expect-stdout narrow-storage: "-128\n127\n-32768\n32767\n-2147483648\n2147483647\n255\n0\n65535\n0\n4294967295\n0\n"
+fn fx_narrow_storage() -> MIRProgram Never! {
+    b := fx_builder()
+    signs :: [Bool]{true, false}
+    widths :: [Int]{8, 16, 32}
+    indexes :: [Int]{0, 1}
+    loop signed in signs {
+        loop bits in widths {
+            ty :: fx_narrow(signed, bits)
+            maximum :: if signed -> (1 << (bits - 1)) - 1 else -> (1 << bits) - 1
+            minimum :: if signed -> -1 - maximum else -> 0
+            a :: fx_narrow_const(&b, signed, bits, if signed -> minimum else -> maximum)
+            z :: fx_narrow_const(&b, signed, bits, if signed -> maximum else -> minimum)
+            list_ty :: fx_list_type(ty)
+            list :: fx_owned(&b, list_ty, MIROperation.BuildList{values: [MIRValueID]{a, z}, trait_coercion: None})
+            loop index in indexes {
+                at :: fx_int_const(&b, index)
+                item :: fx_list_index(&b, list, at, ty, false)
+                fx_print(&b, item)
+            }
+            fx_do(&b, MIROperation.Drop{value: list, kind: .Value})
+        }
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_program(b)
+}
+
+// Located fixed routes retain the raw source-slice ABI; no String-handle
+// adapter may silently replace it.
+// expect-stdout fixed-located-routes: "-3\n4\n81\n"
+// expect-runtime-only fixed-located-routes
+fn fx_fixed_located_routes() -> MIRProgram Never! {
+    b := fx_builder()
+    signedness :: [Bool]{true, false, false}
+    widths :: [Int]{32, 8, 16}
+    members :: [String]{"i32.trap.div", "u8.trap.div", "u16.trap.pow"}
+    symbols :: [String]{"jet_i32_trap_div", "jet_u8_trap_div", "jet_u16_trap_pow"}
+    operations :: [MIRBinaryOp]{MIRBinaryOp.Div, MIRBinaryOp.Div, MIRBinaryOp.Pow}
+    lefts :: [Int]{-10, 9, 3}
+    rights :: [Int]{3, 2, 4}
+    loop index in 0..<3 {
+        ty :: fx_narrow(signedness[index], widths[index])
+        left :: fx_narrow_const(&b, signedness[index], widths[index], lefts[index])
+        right :: fx_narrow_const(&b, signedness[index], widths[index], rights[index])
+        dispatch :: MIRBinaryDispatch.Prelude{call: fx_prelude_id("core.numeric", members[index]), location: Val(MIRPanicLoc{file: fx_source_file(), line: 1, column: 1})}
+        value :: fx_copy(&b, ty, MIROperation.Binary{op: operations[index], dispatch: dispatch, overflow: MIRBinaryOverflow.Trap, left: left, right: right})
+        fx_print(&b, value)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_list_program(b)
+    loop index in 0..<3 -> &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.Overflow, "core.numeric", members[index], symbols[index], 4, MIRPreludeABI.Value))
+    p
+}

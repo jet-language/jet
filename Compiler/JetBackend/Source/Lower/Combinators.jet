@@ -148,7 +148,7 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     if updates -> return lower_closure_update_first(p, c, &m, &f, instruction, receiver, elem, closure_arg, closure_ty, args[1])
     if symbol == "jet_list_group_by" -> return lower_closure_group_by(p, c, &m, &f, instruction, receiver, elem, closure_arg, closure_ty, result_ty)
     if symbol == "jet_list_max_by" || symbol == "jet_list_min_by" -> return lower_closure_extreme_by(p, c, &m, &f, instruction, receiver, elem, closure_arg, closure_ty, symbol == "jet_list_max_by")
-    if folds && (lower_needs_drop(p, result_ty) || lower_is_inline(p, result_ty)) -> return lower_closure_fold_owned(p, c, &m, &f, instruction, receiver, elem, args[0], closure_arg, closure_ty, result_ty)
+    if folds && (lower_needs_drop(p, m, result_ty) || lower_is_inline(p, result_ty)) -> return lower_closure_fold_owned(p, c, &m, &f, instruction, receiver, elem, args[0], closure_arg, closure_ty, result_ty)
     if symbol == "jet_list_flat_map" -> return lower_closure_flat_map(p, c, &m, &f, instruction, receiver, elem, closure_arg, closure_ty, result_ty)
     if symbol == "jet_list_filter" || symbol == "jet_list_map" || symbol == "jet_view_map" {
         produced :: lower_list_element(result_ty) ?? return lower_fail(&m, &f, unsupported)
@@ -173,7 +173,7 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
             lower_seal(&f, LIRTerminator.Branch{condition: keep, then_target: lower_target(kept, [LIRValueID]{}), else_target: lower_target(skip, [LIRValueID]{})})
             lower_start(&f, kept, [LIRValueID]{})
             kept_value := item
-            if lower_needs_drop(p, elem) {
+            if lower_needs_drop(p, m, elem) {
                 layout :: lower_value_layout(f, item)
                 kept_value = lower_new_value(&f, layout, LIRDrop.Trivial, None)
                 lower_clone_into(p, &m, &f, item, kept_value, elem)
@@ -297,7 +297,7 @@ fn lower_closure_search(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 // Map callbacks receive the borrowed key and value separately, in key order.
 // Explicit Move parameters get their own copies, not the Map's stored owners.
 fn lower_map_callback_input(p: MIRProgram, m: &LowerModule, f: &LowerFunction, closure_ty: MIRType, index: Int, value: LIRValueID, ty: MIRType) -> LIRValueID Never! {
-    if !lower_closure_param_moves(closure_ty, index) || !lower_needs_drop(p, ty) -> return ~value
+    if !lower_closure_param_moves(closure_ty, index) || !lower_needs_drop(p, m, ty) -> return ~value
     copied :: lower_new_like(&f, value)
     lower_clone_into(p, &m, &f, value, copied, ty)
     copied
@@ -305,13 +305,15 @@ fn lower_map_callback_input(p: MIRProgram, m: &LowerModule, f: &LowerFunction, c
 
 fn lower_map_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg], row: MIRPreludeCall) -> Bool Never! {
     symbol :: lower_runtime_symbol(row)
-    searching :: symbol == "jet_map_any" || symbol == "jet_map_all"
+    tally :: symbol == "jet_bag_any"
+    searching :: tally || symbol == "jet_map_any" || symbol == "jet_map_all"
     filtering :: symbol == "jet_map_filter"
     mapping :: symbol == "jet_map_map_values"
     folding :: symbol == "jet_map_fold"
     if !searching && !filtering && !mapping && !folding -> return false
     receiver_ty :: lower_value_type(c, receiver) ?? return false
     shape :: lower_map_shape(p, receiver_ty) ?? return false
+    if tally && lower_tally_element(receiver_ty) == None -> return false
     if args.len() != (if folding -> 2 else -> 1) {
         lower_fail(&m, &f, "Map {row.member} has no checked callback")
         return true
@@ -330,17 +332,28 @@ fn lower_map_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
         all :: symbol == "jet_map_all"
         start :: lower_const_flag(&f, if all -> 1 else -> 0)
         each :: lower_each_begin(p, &f, map, shape.entry, [LIRValueID]{start})
-        key :: lower_read_at(p, &f, each.address, shape.key_offset, shape.key) ?? return true
-        value :: lower_read_at(p, &f, each.address, shape.value_offset, shape.value) ?? return true
-        key_arg :: lower_map_callback_input(p, &m, &f, closure_ty, 0, key, shape.key)
-        value_arg :: lower_map_callback_input(p, &m, &f, closure_ty, 1, value, shape.value)
-        keep :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{key_arg, value_arg}, mir_type_from_kind(MIRTypeKind.Bool)) ?? return true
         next_block :: lower_new_block(&f)
+        if tally {
+            count :: lower_list_word(&f, each.address, shape.value_offset)
+            zero :: lower_const(&f, 0)
+            nonzero :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Compare{dst: nonzero, condition: LIRCondition.Ne, left: count, right: zero})
+            invoke :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: nonzero, then_target: lower_target(invoke, [LIRValueID]{}), else_target: lower_target(next_block, [LIRValueID]{})})
+            lower_start(&f, invoke, [LIRValueID]{})
+        }
+        key :: lower_read_at(p, &f, each.address, shape.key_offset, shape.key) ?? return true
+        callback_args := [LIRValueID]{lower_map_callback_input(p, &m, &f, closure_ty, 0, key, shape.key)}
+        if !tally {
+            value :: lower_read_at(p, &f, each.address, shape.value_offset, shape.value) ?? return true
+            &callback_args.push(lower_map_callback_input(p, &m, &f, closure_ty, 1, value, shape.value))
+        }
+        keep :: lower_call_closure_box(p, &m, &f, closure, callback_args, mir_type_from_kind(MIRTypeKind.Bool)) ?? return true
         done :: lower_target(each.done, [LIRValueID]{keep})
         next_target :: lower_target(next_block, [LIRValueID]{})
         lower_seal(&f, LIRTerminator.Branch{condition: keep, then_target: if all -> next_target else -> done, else_target: if all -> done else -> next_target})
         lower_start(&f, next_block, [LIRValueID]{})
-        lower_each_end(&f, each, [LIRValueID]{keep})
+        lower_each_end(&f, each, [LIRValueID]{if tally -> each.state[0] else -> keep})
         lower_emit(&f, LIRInst.Move{dst: dst, src: each.exit[0]})
     } else {
         output :: lower_map_shape(p, result_ty) ?? return true
@@ -484,7 +497,7 @@ fn lower_closure_extreme_by(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
     chosen_data :: lower_list_data(&f, list)
     address :: lower_list_address(&f, chosen_data, chosen, lower_list_stride(p, elem))
     value := lower_read_at(p, &f, address, 0, elem) ?? return
-    if lower_needs_drop(p, elem) {
+    if lower_needs_drop(p, m, elem) {
         copied :: lower_new_like(&f, value)
         lower_clone_into(p, &m, &f, value, copied, elem)
         value = copied
@@ -508,10 +521,8 @@ fn lower_closure_flat_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     if closure_ty.kind == .Fn(signature) -> ret = signature.ret
     part_ty :: ret ?? return lower_fail(&m, &f, unsupported)
     if lower_list_element(part_ty) == None || lower_view_element(part_ty) != None || !lower_is_inline(p, part_ty) -> return lower_fail(&m, &f, "flat_map with a {mir_type_display_name(part_ty)} step is not lowered at O0 yet")
-    // An owning aggregate returned from a borrowed eager callback can alias
-    // the source slot. Its destruction invalidates later uses of the list.
-    // Lazy adapters have their separate owned NativeValue callback boundary.
-    if lower_is_inline(p, elem) && lower_needs_drop(p, elem) -> return lower_fail(&m, &f, "List.flat_map over owning aggregate elements is not lowered at O0 yet")
+    // Checked MIR materializes an owned callback return from borrowed elements;
+    // lower_copy uses typed inline clone glue before this temporary is dropped.
     list :: lower_use(&m, &f, receiver) ?? return
     closure :: lower_use(&m, &f, closure_arg.value) ?? return
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
@@ -525,14 +536,14 @@ fn lower_closure_flat_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     part :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, part_ty) ?? return lower_fail(&m, &f, unsupported)
     inner :: lower_each_begin(p, &f, part, produced, [LIRValueID]{})
     value := lower_read_at(p, &f, inner.address, 0, produced) ?? return
-    if lower_needs_drop(p, produced) {
+    if lower_needs_drop(p, m, produced) {
         copied :: lower_new_like(&f, value)
         lower_clone_into(p, &m, &f, value, copied, produced)
         value = copied
     }
     lower_call_helper(&m, &f, "list.push", result_ty, [LIRValueID]{dst, value}, None)
     lower_each_end(&f, inner, [LIRValueID]{})
-    lower_inline_drop(p, &m, &f, part, part_ty)
+    lower_map_drop_value(p, &m, &f, part, part_ty)
     lower_each_end(&f, outer, [LIRValueID]{})
     if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
 }
@@ -549,11 +560,7 @@ fn lower_closure_each(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
     item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
     if lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, ret) == .Val(out) {
-        if lower_is_inline(p, ret) {
-            lower_inline_drop(p, &m, &f, out, ret)
-        } else {
-            lower_map_drop_value(p, &m, &f, out, ret)
-        }
+        lower_map_drop_value(p, &m, &f, out, ret)
     }
     lower_each_end(&f, each, [LIRValueID]{})
     if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
@@ -643,7 +650,7 @@ fn lower_closure_group_by(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     entry :: lower_list_address(&f, data, index, shape.stride)
     group :: lower_address(&f, entry, shape.value_offset)
     appended := item
-    if lower_needs_drop(p, elem) || lower_is_inline(p, elem) {
+    if lower_needs_drop(p, m, elem) || lower_is_inline(p, elem) {
         appended = lower_new_like(&f, item)
         lower_clone_into(p, &m, &f, item, appended, elem)
     }
@@ -675,8 +682,8 @@ fn lower_closure_fold_owned(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
         each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
         item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
         out :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{dst, item}, result_ty) ?? return
-        if !consumed -> lower_inline_drop(p, &m, &f, dst, result_ty)
-        lower_write_at(p, &f, dst, 0, out, result_ty)
+        if consumed -> lower_write_at(p, &f, dst, 0, out, result_ty)
+        else -> lower_replace_stored(p, &m, &f, dst, 0, out, result_ty)
         lower_each_end(&f, each, [LIRValueID]{})
     } else {
         each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{start})
@@ -867,12 +874,13 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
         lower_sort_callback_guard(p, c, &m, &f, order, keys, None, length, fill.at, key_ty, by_key, closure, closure_ty, closure_arg.access == .Move)
         key_slot :: lower_list_address(&f, keys, fill.at, key_stride)
         if key_err == .Val(err_ty) {
-            // A Result box: tag 1 Ok / 0 Err at 0, payload at 8.
+            // The callback and method result use the ordinary Result layout.
             shell_size :: lower_result_box_size(p, key_ty, err_ty)
             outcome_tag :: lower_word(&f)
             lower_emit(&f, LIRInst.Load{dst: outcome_tag, base: computed, offset: 0})
             failed :: lower_flag(&f)
-            lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: outcome_tag, right: zero})
+            err_selector :: lower_const(&f, lower_result_selector(false))
+            lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: outcome_tag, right: err_selector})
             stop :: lower_new_block(&f)
             keep :: lower_new_block(&f)
             lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(keep, [LIRValueID]{})})
@@ -881,9 +889,9 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             lower_sort_release_guard(p, c, &m, &f, Val(computed), ret)
             failure :: lower_pointer(&f)
             lower_alloc(&m, &f, failure, outcome_size)
-            lower_emit(&f, LIRInst.Store{base: failure, offset: 0, value: zero})
-            moved_from :: lower_address(&f, computed, 8)
-            moved_to :: lower_address(&f, failure, 8)
+            lower_store_word(&f, failure, 0, lower_result_selector(false))
+            moved_from :: lower_address(&f, computed, lower_result_payload_offset())
+            moved_to :: lower_address(&f, failure, lower_result_payload_offset())
             lower_list_move(p, &f, moved_to, moved_from, err_ty)
             lower_free_shell(&m, &f, computed, shell_size)
             lower_seal(&f, LIRTerminator.Jump{target: lower_target(finish, [LIRValueID]{failure})})
@@ -1062,7 +1070,7 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     }
     success :: lower_pointer(&f)
     lower_alloc(&m, &f, success, outcome_size)
-    lower_emit(&f, LIRInst.Store{base: success, offset: 0, value: one})
+    lower_store_word(&f, success, 0, lower_result_selector(true))
     // The join parameter is the result itself (its drop glue included); a
     // plain pointer moved into it would change its drop glue.
     dst :: lower_result(p, c, &m, &f, instruction) ?? return

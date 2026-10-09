@@ -1,0 +1,33 @@
+// Exercise the production aggregate Web host gate and diagnostic builder.
+// The assembler extracts these exact functions from CheckProgram/Diagnostics.
+fn wh_expect(usage: String) Never! {
+    diagnostics := [Diagnostic]{}
+    if sema_web_host_check_core_usage("wasm.browser", [String]{usage}, &diagnostics) -> panic("host API admitted on browser: {usage}")
+    if diagnostics.len() != 1 -> panic("host refusal diagnostic count: {usage}")
+    diagnostic :: diagnostics[0]
+    operation :: usage.replace("::", ".")
+    if diagnostic.code != "E-WEB-TIR-UNSUPPORTED" || diagnostic.span != None -> panic("wrong host refusal identity: {usage}")
+    if diagnostic.what != "Web output cannot compile `{operation}` yet." -> panic("wrong host refusal operation: {usage}")
+    if diagnostic.why != "this Core operation needs a host provider that the browser target does not supply" -> panic("wrong host refusal reason: {usage}")
+    if diagnostic.fix != "move this operation behind a native or server boundary" -> panic("wrong host refusal repair: {usage}")
+}
+
+fn run() {
+    names :: [String]{
+        "core.auth::magic_link_consume", "core.auth::magic_link_issue",
+        "core.auth::oauth_begin", "core.auth::oauth_finish",
+        "core.auth::password_login", "core.auth::register_user", "core.auth::session_validate",
+        "core.sys::decode", "core.sys::expand", "core.sys::get", "core.sys::getenv",
+        "core.sys::home_dir", "core.sys::set", "core.sys::temp_dir", "core.sys::unset", "core.sys::vars",
+    }
+    if sema_web_host_unsupported_core_apis() != names -> panic("Web host refusal inventory differs")
+    loop name in names -> wh_expect(name)
+    diagnostics := [Diagnostic]{}
+    if sema_web_host_check_core_usage("wasm.browser", names, &diagnostics) -> panic("aggregate host closure admitted")
+    if diagnostics.len() != 16 -> panic("aggregate host closure lost diagnostics")
+    native_diagnostics := [Diagnostic]{}
+    if !sema_web_host_check_core_usage("native", names, &native_diagnostics) || native_diagnostics.len() != 0 -> panic("native host APIs refused")
+    supported_diagnostics := [Diagnostic]{}
+    if !sema_web_host_check_core_usage("wasm.browser", [String]{"core.prelude::identity_int"}, &supported_diagnostics) || supported_diagnostics.len() != 0 -> panic("pure Core API refused")
+    print("Web host refusal diagnostics: 16 exact APIs + aggregate/native/pure cases passed")
+}

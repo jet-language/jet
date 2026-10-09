@@ -249,6 +249,193 @@ impl SourceResourceHandle {
     }
 }
 
+/// Release-only transport emitted from the checked Source ingress. The hook
+/// captures the canonical parent and a plain native owned-slot descriptor,
+/// never a factory, evaluator, projector or callback root.
+pub struct SourceNativeSharedOwnedSlot {
+    owning_thread: Option<std::thread::ThreadId>,
+    release: Option<Box<dyn FnOnce() -> Result<(), String> + Send + Sync>>,
+}
+
+impl SourceNativeSharedOwnedSlot {
+    pub fn checked_ingress(
+        owning_thread: Option<std::thread::ThreadId>,
+        release: impl FnOnce() -> Result<(), String> + Send + Sync + 'static,
+    ) -> Self {
+        Self { owning_thread, release: Some(Box::new(release)) }
+    }
+
+    fn preflight(&self) -> Result<(), String> {
+        if self.owning_thread.is_some_and(|thread| thread != std::thread::current().id()) {
+            return Err("CoreSharedNativeWrongThread".to_string());
+        }
+        if self.release.is_none() {
+            return Err("CoreSharedNativeReleaseReplayed".to_string());
+        }
+        Ok(())
+    }
+
+    fn release(&mut self) -> Result<(), String> {
+        self.preflight()?;
+        self.release.take().expect("preflight proved the release hook is live")()
+    }
+}
+
+impl Drop for SourceNativeSharedOwnedSlot {
+    fn drop(&mut self) {
+        // Guard40 slots are removed only by Source-owned explicit release.
+        // Retirement keeps a live guard slot and returns a retryable refusal.
+        // Only thread-neutral pin/alias hooks have an automatic drop path.
+        if self.owning_thread.is_none() && self.release.is_some() {
+            self.release().expect("checked native Shared owned-slot cleanup failed");
+        }
+    }
+}
+
+/// Ingress refusal retains the original staged owner for Source rollback.
+pub struct SourceNativeSharedIngressRefusal<T> {
+    pub refusal: String,
+    pub staged: T,
+}
+
+impl<T> std::fmt::Debug for SourceNativeSharedIngressRefusal<T> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("SourceNativeSharedIngressRefusal")
+            .field("refusal", &self.refusal)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A Source descriptor erased solely for transport through this existing arena.
+/// Its physical identity is the actual native owner, not the Arc or capability.
+pub struct SourceNativeSharedRoot {
+    type_identity: u64,
+    physical_identity: usize,
+    manifest_digest: String,
+    runtime_identity: String,
+    descriptor: MirNativeOwned,
+    active_borrows: usize,
+    owned: SourceNativeSharedOwnedSlot,
+}
+
+impl SourceNativeSharedRoot {
+    pub fn checked_ingress(
+        type_identity: u64,
+        physical_identity: usize,
+        manifest_digest: String,
+        runtime_identity: String,
+        descriptor: MirNativeOwned,
+        owned: SourceNativeSharedOwnedSlot,
+    ) -> Result<Self, SourceNativeSharedIngressRefusal<Self>> {
+        let staged = Self { type_identity, physical_identity, manifest_digest,
+            runtime_identity, descriptor, active_borrows: 0, owned };
+        let refusal = if staged.type_identity == 0 || staged.physical_identity == 0
+            || staged.manifest_digest.is_empty() || staged.runtime_identity.is_empty()
+        {
+            Some("CoreSharedNativeDescriptorMalformed".to_string())
+        } else {
+            staged.owned.preflight().err()
+        };
+        match refusal {
+            Some(refusal) => Err(SourceNativeSharedIngressRefusal { refusal, staged }),
+            None => Ok(staged),
+        }
+    }
+}
+
+pub struct SourceNativeSharedAlias {
+    physical_identity: usize,
+    token_id: i64,
+    owned: SourceNativeSharedOwnedSlot,
+}
+
+impl SourceNativeSharedAlias {
+    pub fn checked_ingress(
+        physical_identity: usize,
+        token_id: i64,
+        owned: SourceNativeSharedOwnedSlot,
+    ) -> Result<Self, SourceNativeSharedIngressRefusal<Self>> {
+        let staged = Self { physical_identity, token_id, owned };
+        let refusal = if staged.physical_identity == 0 || staged.token_id <= 0
+            || staged.owned.owning_thread.is_some()
+        {
+            Some("CoreSharedNativeAliasTokenMissing".to_string())
+        } else {
+            staged.owned.preflight().err()
+        };
+        match refusal {
+            Some(refusal) => Err(SourceNativeSharedIngressRefusal { refusal, staged }),
+            None => Ok(staged),
+        }
+    }
+}
+
+/// Closed Source-produced actions. Each action names one existing arena
+/// registration, alias registration or release primitive. All targets are
+/// validated as one packet before any arena mutation or release-hook call.
+pub enum SourceNativeSharedAction {
+    RegisterRoot { root: SourceNativeSharedRoot, alias: SourceNativeSharedAlias },
+    RegisterPhysical { root: SourceNativeSharedRoot },
+    RegisterAlias { capability: SourceResourceHandle, alias: SourceNativeSharedAlias },
+    ReleaseAlias { capability: SourceResourceHandle, token_id: i64 },
+    ReleaseRoot { capability: SourceResourceHandle },
+}
+
+/// A refused packet still owns every staged native slot. Its caller must
+/// perform the Source rollback, particularly for thread-confined Guard40 slots.
+pub enum SourceNativeSharedPacketError {
+    Rejected { refusal: String, actions: Vec<SourceNativeSharedAction> },
+    Release { refusal: String },
+}
+
+impl SourceNativeSharedPacketError {
+    pub fn refusal_key(&self) -> &str {
+        match self {
+            Self::Rejected { refusal, .. } | Self::Release { refusal } => refusal,
+        }
+    }
+
+    pub fn into_rejected_actions(self) -> Option<Vec<SourceNativeSharedAction>> {
+        match self {
+            Self::Rejected { actions, .. } => Some(actions),
+            Self::Release { .. } => None,
+        }
+    }
+}
+
+impl std::fmt::Debug for SourceNativeSharedPacketError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("SourceNativeSharedPacketError")
+            .field("refusal", &self.refusal_key())
+            .finish_non_exhaustive()
+    }
+}
+
+enum SharedInteropOwnerAlias {
+    Bootstrap(crate::SourceSharedInterop::SourceSharedInteropOwnerAlias),
+    Native(SourceNativeSharedAlias),
+}
+
+pub struct SourceNativeSharedBorrow {
+    descriptor: MirNativeOwned,
+    owner: Arc<Mutex<BackendOwner>>,
+    _lease: SourceResourceLease,
+}
+
+impl SourceNativeSharedBorrow {
+    pub fn descriptor(&self) -> &MirNativeOwned { &self.descriptor }
+}
+
+impl Drop for SourceNativeSharedBorrow {
+    fn drop(&mut self) {
+        let mut owner = self.owner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let BackendOwner::NativeSharedInteropRoot(root) = &mut *owner else {
+            unreachable!("a borrowed native slot cannot change flavor");
+        };
+        root.active_borrows -= 1;
+    }
+}
+
 /// An arena-issued, invocation-scoped capability.  `generation` is retained
 /// for diagnostics and stale-lease checks; the raw slot is never recycled.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1180,6 +1367,7 @@ enum BackendOwner {
     ChannelReceiver(jet_codegen::scheduler::JetSchedulerChannel<MirRuntimeValue>),
     ChannelSender(jet_codegen::scheduler::JetSchedulerSender<MirRuntimeValue>),
     SharedInteropRoot(crate::SourceSharedInterop::SourceSharedInterop),
+    NativeSharedInteropRoot(SourceNativeSharedRoot),
     SharedInteropWeakRoot {
         type_identity: u64,
         root: Arc<crate::SourceSharedInterop::SourceSharedInteropWeak>
@@ -1201,6 +1389,9 @@ impl BackendOwner {
             Self::NativeBinding(_) => SourceResourceKind::NativeBinding,
             Self::SharedInteropRoot(root) => SourceResourceKind::SharedInteropRoot {
                 type_identity: root.type_id()
+            },
+            Self::NativeSharedInteropRoot(root) => SourceResourceKind::SharedInteropRoot {
+                type_identity: root.type_identity
             },
             Self::SharedInteropWeakRoot {
                 type_identity,
@@ -1262,7 +1453,7 @@ struct ArenaState {
     /// `None` marks an alias whose owner token is being dropped outside this
     /// mutex; retirement must wait until the release guard removes that entry.
     shared_interop_aliases:
-        HashMap<(i64, i64), Option<crate::SourceSharedInterop::SourceSharedInteropOwnerAlias>>,
+        HashMap<(i64, i64), Option<SharedInteropOwnerAlias>>,
     /// New roots are rejected once retirement has been requested.
     retirement_requested: bool,
     /// Explicit Source callback/task roots, never inferred from Arc clones.
@@ -2105,6 +2296,9 @@ impl SourceResourceArena {
                 Vec::new(),
             ));
         }
+        if let Err(error) = Self::native_shared_retirement_preflight(&state, false) {
+            return Err(self.retryable_retirement_error_with_completions(error, Vec::new(), Vec::new()));
+        }
         state.finalizing = true;
         Ok(Some((receivers, finalizer)))
     }
@@ -2174,6 +2368,9 @@ impl SourceResourceArena {
                 completions,
             ));
         }
+        if let Err(error) = Self::native_shared_retirement_preflight(&state, false) {
+            return Err(self.retryable_retirement_error_with_completions(error, values, completions));
+        }
         state.finalizing = true;
         Ok((values, completions, receivers, finalizer))
     }
@@ -2211,6 +2408,10 @@ impl SourceResourceArena {
                 Vec::new(),
                 completions,
             ));
+        }
+        if let Err(error) = Self::native_shared_retirement_preflight(&state, true) {
+            state.finalizing = false;
+            return Err(self.retryable_retirement_error_with_completions(error, Vec::new(), completions));
         }
         let slots = std::mem::take(&mut state.slots);
         state.retired = true;
@@ -2936,6 +3137,16 @@ impl SourceResourceArena {
         state: &ArenaState,
         raw: i64,
     ) -> Result<(), String> {
+        let (slot_id, _) = Self::decode_raw(raw)?;
+        if let Some(Slot { entry: SlotEntry::Backend(owner), .. }) = state.slots.get(&slot_id) {
+            let owner = owner.lock().map_err(|_| "Source resource owner lock is poisoned")?;
+            if let BackendOwner::NativeSharedInteropRoot(root) = &*owner {
+                if root.owned.owning_thread.is_some() {
+                    root.owned.preflight()?;
+                    return Err("CoreSharedNativeGuardSourceReleaseRequired".to_string());
+                }
+            }
+        }
         if state
             .shared_interop_aliases
             .keys()
@@ -2944,6 +3155,262 @@ impl SourceResourceArena {
             return Err("Shared interop root still has pending owner aliases".to_string());
         }
         Ok(())
+    }
+
+    fn native_shared_retirement_preflight(state: &ArenaState, require_guard_release: bool) -> Result<(), String> {
+        for slot in state.slots.values() {
+            let SlotEntry::Backend(owner) = &slot.entry else { continue };
+            let owner = owner.lock().map_err(|_| "Source resource owner lock is poisoned")?;
+            if let BackendOwner::NativeSharedInteropRoot(root) = &*owner {
+                if root.owned.owning_thread.is_some() {
+                    root.owned.preflight()?;
+                    if require_guard_release {
+                        return Err("CoreSharedNativeGuardSourceReleaseRequired".to_string());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn native_shared_owner_locked(
+        state: &ArenaState,
+        capability: &SourceResourceHandle,
+    ) -> Result<Arc<Mutex<BackendOwner>>, String> {
+        Self::shared_interop_root_type_identity(capability)
+            .map_err(|error| format!("CoreSharedNativeCapabilityMismatch: {error}"))?;
+        Self::validate_shared_interop_root_locked(state, capability)
+            .map_err(|error| format!("CoreSharedNativeCapabilityMismatch: {error}"))?;
+        let (slot_id, _) = Self::decode_raw(capability.raw)?;
+        let SlotEntry::Backend(owner) = &state.slots[&slot_id].entry else {
+            return Err("CoreSharedNativeDescriptorMalformed".to_string());
+        };
+        {
+            let owner = owner.lock().map_err(|_| "Source resource owner lock is poisoned")?;
+            let BackendOwner::NativeSharedInteropRoot(root) = &*owner else {
+                return Err("CoreSharedNativeRootFlavorMismatch".to_string());
+            };
+            root.owned.preflight()?;
+        }
+        Ok(owner.clone())
+    }
+
+    pub fn borrow_native_shared_slot(
+        &self,
+        capability: &SourceResourceHandle,
+        manifest_digest: &str,
+        runtime_identity: &str,
+        physical_identity: usize,
+    ) -> Result<SourceNativeSharedBorrow, String> {
+        let lease = self.retain_callback_lease()?;
+        let state = self.lock()?;
+        let owner = Self::native_shared_owner_locked(&state, capability)?;
+        let descriptor = {
+            let mut locked = owner.lock().map_err(|_| "Source resource owner lock is poisoned")?;
+            let BackendOwner::NativeSharedInteropRoot(root) = &mut *locked else {
+                unreachable!("validated native root changed flavor");
+            };
+            if root.manifest_digest != manifest_digest || root.runtime_identity != runtime_identity
+                || root.physical_identity != physical_identity
+            {
+                return Err("CoreSharedNativeDescriptorProvenanceMismatch".to_string());
+            }
+            root.active_borrows = root.active_borrows.checked_add(1)
+                .ok_or("CoreSharedNativeBorrowCountOverflow")?;
+            root.descriptor.clone()
+        };
+        Ok(SourceNativeSharedBorrow { descriptor, owner, _lease: lease })
+    }
+
+    /// Validation and table mutation share the arena lock. Native releases run
+    /// afterwards, outside every arena/owner lock, in packet order. A guard's
+    /// owning-thread refusal leaves both its slot and its hook untouched.
+    pub fn apply_native_shared_packet(
+        &self,
+        actions: Vec<SourceNativeSharedAction>,
+    ) -> Result<Vec<SourceResourceHandle>, SourceNativeSharedPacketError> {
+        let active_lease = active_source_resource_lease_snapshot();
+        let mut registrations = Vec::new();
+        let mut removed_roots = Vec::new();
+        let mut removed_aliases = Vec::new();
+        let mut state = match self.lock() {
+            Ok(state) => state,
+            Err(refusal) => return Err(SourceNativeSharedPacketError::Rejected { refusal, actions }),
+        };
+        let prepared = (|| -> Result<(), String> {
+        let deferred = self.validate_deferred_execution_authority(&state, active_lease.as_ref())?;
+        let mut released_roots = std::collections::HashSet::new();
+        let mut changed_aliases = std::collections::HashSet::new();
+        let mut release_aliases = std::collections::HashSet::new();
+        let mut registration_count = 0u32;
+        for action in &actions {
+            match action {
+                SourceNativeSharedAction::RegisterRoot { root, alias } => {
+                    root.owned.preflight()?;
+                    alias.owned.preflight()?;
+                    if root.owned.owning_thread.is_some()
+                        || root.physical_identity != alias.physical_identity
+                    {
+                        return Err("CoreSharedNativeDescriptorMalformed".to_string());
+                    }
+                    registration_count = registration_count.checked_add(1)
+                        .ok_or("Source resource slot space exhausted")?;
+                }
+                SourceNativeSharedAction::RegisterPhysical { root } => {
+                    root.owned.preflight()?;
+                    registration_count = registration_count.checked_add(1)
+                        .ok_or("Source resource slot space exhausted")?;
+                }
+                SourceNativeSharedAction::RegisterAlias { capability, alias } => {
+                    let owner = Self::native_shared_owner_locked(&state, capability)?;
+                    let owner = owner.lock().map_err(|_| "Source resource owner lock is poisoned")?;
+                    let BackendOwner::NativeSharedInteropRoot(root) = &*owner else {
+                        unreachable!("validated native root changed flavor");
+                    };
+                    alias.owned.preflight()?;
+                    let key = (capability.raw, alias.token_id);
+                    if root.physical_identity != alias.physical_identity
+                        || state.shared_interop_aliases.contains_key(&key)
+                        || !changed_aliases.insert(key)
+                    {
+                        return Err("CoreSharedNativeAliasTokenMismatch".to_string());
+                    }
+                }
+                SourceNativeSharedAction::ReleaseAlias { capability, token_id } => {
+                    Self::native_shared_owner_locked(&state, capability)?;
+                    let key = (capability.raw, *token_id);
+                    if !changed_aliases.insert(key) {
+                        return Err("CoreSharedNativeReleaseReplayed".to_string());
+                    }
+                    match state.shared_interop_aliases.get(&key) {
+                        Some(Some(SharedInteropOwnerAlias::Native(alias))) => alias.owned.preflight()?,
+                        _ => return Err("CoreSharedNativeAliasTokenMissing".to_string()),
+                    }
+                    release_aliases.insert(key);
+                }
+                SourceNativeSharedAction::ReleaseRoot { capability } => {
+                    let owner = Self::native_shared_owner_locked(&state, capability)?;
+                    let owner = owner.lock().map_err(|_| "Source resource owner lock is poisoned")?;
+                    let BackendOwner::NativeSharedInteropRoot(root) = &*owner else {
+                        unreachable!("validated native root changed flavor");
+                    };
+                    if root.active_borrows != 0 {
+                        return Err("CoreSharedNativeSlotBorrowed".to_string());
+                    }
+                    if !released_roots.insert(capability.raw) {
+                        return Err("CoreSharedNativeReleaseReplayed".to_string());
+                    }
+                }
+            }
+        }
+        for raw in &released_roots {
+            if state.shared_interop_aliases.keys()
+                .any(|key| key.0 == *raw && !release_aliases.contains(key))
+                || actions.iter().any(|action| matches!(action,
+                    SourceNativeSharedAction::RegisterAlias { capability, .. } if capability.raw == *raw))
+            {
+                return Err("CoreSharedNativeRootHasAliases".to_string());
+            }
+        }
+        if registration_count != 0 {
+            if state.finalizer.is_none() || state.finalization_handler.is_none() {
+                return Err("CoreSharedNativeOriginFinalizerMissing".to_string());
+            }
+            if state.retired || state.finalizing || (state.retirement_requested && !deferred) {
+                return Err("Source resource arena is retired, finalizing, or retiring".to_string());
+            }
+            state.next_slot.checked_add(registration_count)
+                .ok_or("Source resource slot space exhausted")?;
+        }
+        // Reserve all capabilities before inserting anything. An exhausted
+        // global generation allocator may burn nonces but cannot partially
+        // apply a Source packet or consume a native release hook.
+        let next_slot = state.next_slot;
+        for action in &actions {
+            let root = match action {
+                SourceNativeSharedAction::RegisterRoot { root, .. }
+                | SourceNativeSharedAction::RegisterPhysical { root } => root,
+                _ => continue,
+            };
+            let kind = SourceResourceKind::SharedInteropRoot { type_identity: root.type_identity };
+            match Self::reserve_slot_handle(&mut state, shared_interop_root_handle_id(), kind, deferred) {
+                Ok(capability) => registrations.push(capability),
+                Err(error) => { state.next_slot = next_slot; return Err(error); }
+            }
+        }
+        Ok(())
+        })();
+        if let Err(refusal) = prepared {
+            return Err(SourceNativeSharedPacketError::Rejected { refusal, actions });
+        }
+        let mut registered = registrations.iter();
+        for action in actions {
+            match action {
+                SourceNativeSharedAction::RegisterRoot { root, alias } => {
+                    let capability = registered.next().expect("all registration capabilities reserved");
+                    state.shared_interop_aliases.insert(
+                        (capability.raw, alias.token_id), Some(SharedInteropOwnerAlias::Native(alias)));
+                    Self::insert_reserved_slot(&mut state, capability.clone(),
+                        SlotEntry::Backend(Arc::new(Mutex::new(BackendOwner::NativeSharedInteropRoot(root)))));
+                }
+                SourceNativeSharedAction::RegisterPhysical { root } => {
+                    let capability = registered.next().expect("all registration capabilities reserved");
+                    Self::insert_reserved_slot(&mut state, capability.clone(),
+                        SlotEntry::Backend(Arc::new(Mutex::new(BackendOwner::NativeSharedInteropRoot(root)))));
+                }
+                SourceNativeSharedAction::RegisterAlias { capability, alias } => {
+                    state.shared_interop_aliases.insert(
+                        (capability.raw, alias.token_id), Some(SharedInteropOwnerAlias::Native(alias)));
+                }
+                SourceNativeSharedAction::ReleaseAlias { capability, token_id } => {
+                    let key = (capability.raw, token_id);
+                    let alias = state.shared_interop_aliases.get_mut(&key)
+                        .expect("validated native alias is registered").take()
+                        .expect("validated native alias is live");
+                    removed_aliases.push((key, alias));
+                }
+                SourceNativeSharedAction::ReleaseRoot { capability } => {
+                    let (slot_id, _) = Self::decode_raw(capability.raw).expect("validated capability");
+                    removed_roots.push(state.slots.remove(&slot_id).expect("validated native root"));
+                }
+            }
+        }
+        drop(state);
+        let mut failure = None;
+        for (key, alias) in removed_aliases {
+            let release_guard = SharedInteropAliasReleaseGuard { arena: self, key };
+            let SharedInteropOwnerAlias::Native(mut alias) = alias else {
+                unreachable!("validated native alias changed flavor");
+            };
+            if let Err(error) = alias.owned.release() { failure.get_or_insert(error); }
+            drop(release_guard);
+        }
+        for slot in removed_roots {
+            let SlotEntry::Backend(owner) = slot.entry else {
+                unreachable!("validated native root changed flavor");
+            };
+            // Passive pins remain retained by already-borrowed owners. Guard
+            // hooks are consumed here only, by explicit Source-owned release.
+            let release = {
+                let mut owner = owner.lock().map_err(|_| SourceNativeSharedPacketError::Release {
+                    refusal: "Source resource owner lock is poisoned".to_string(),
+                })?;
+                let BackendOwner::NativeSharedInteropRoot(root) = &mut *owner else {
+                    unreachable!("validated native root changed flavor");
+                };
+                if root.owned.owning_thread.is_some() {
+                    root.owned.preflight().map_err(|refusal| SourceNativeSharedPacketError::Release { refusal })?;
+                    root.owned.release.take()
+                } else { None }
+            };
+            if let Some(release) = release {
+                if let Err(error) = release() { failure.get_or_insert(error); }
+            }
+        }
+        match failure {
+            Some(refusal) => Err(SourceNativeSharedPacketError::Release { refusal }),
+            None => Ok(registrations),
+        }
     }
 
     /// Register one checked physical Source Shared root under a fresh arena
@@ -2994,8 +3461,10 @@ impl SourceResourceArena {
             let owner = owner
                 .lock()
                 .map_err(|_| "Source resource owner lock is poisoned".to_string())?;
-            let BackendOwner::SharedInteropRoot(registered) = &*owner else {
-                return Err("Shared interop root capability payload mismatch".to_string());
+            let registered = match &*owner {
+                BackendOwner::SharedInteropRoot(root) => root,
+                BackendOwner::NativeSharedInteropRoot(_) => continue,
+                _ => return Err("Shared interop root capability payload mismatch".to_string()),
             };
             if registered.identity() != root.identity() {
                 continue;
@@ -3080,13 +3549,7 @@ impl SourceResourceArena {
         let removed = {
             let mut state = self.lock()?;
             Self::validate_shared_interop_root_locked(&state, capability)?;
-            if state
-                .shared_interop_aliases
-                .keys()
-                .any(|(raw, _)| *raw == capability.raw)
-            {
-                return Err("Shared interop root still has pending owner aliases".to_string());
-            }
+            Self::ensure_no_shared_interop_aliases_locked(&state, capability.raw)?;
             let (slot_id, _) = Self::decode_raw(capability.raw)?;
             state
                 .slots
@@ -3111,7 +3574,7 @@ impl SourceResourceArena {
         if state.shared_interop_aliases.contains_key(&key) {
             return Err("Shared interop owner alias token is already registered".to_string());
         }
-        state.shared_interop_aliases.insert(key, Some(alias));
+        state.shared_interop_aliases.insert(key, Some(SharedInteropOwnerAlias::Bootstrap(alias)));
         Ok(())
     }
 
@@ -3167,7 +3630,9 @@ impl SourceResourceArena {
             Self::validate_shared_interop_root_locked(&state, capability)?;
             self.validate_deferred_execution_authority(&state, active_lease.as_ref())?;
             match state.shared_interop_aliases.get(&key) {
-                Some(Some(_)) => {}
+                Some(Some(SharedInteropOwnerAlias::Bootstrap(_))) => {}
+                Some(Some(SharedInteropOwnerAlias::Native(_))) =>
+                    return Err("CoreSharedNativeRequiresSourceDispatcher".to_string()),
                 Some(None) => {
                     return Err("Shared interop owner alias release is in progress".to_string())
                 }
@@ -3178,6 +3643,9 @@ impl SourceResourceArena {
                 .remove(&key)
                 .and_then(|alias| alias)
                 .expect("validated Shared interop owner alias remains registered")
+        };
+        let SharedInteropOwnerAlias::Bootstrap(alias) = alias else {
+            unreachable!("validated bootstrap alias changed flavor while locked");
         };
         let carrier = root.with_owner_alias_lease(alias)?;
         drop(lease);
@@ -3202,7 +3670,10 @@ impl SourceResourceArena {
             let mut state = self.lock()?;
             Self::validate_shared_interop_root_locked(&state, capability)?;
             match state.shared_interop_aliases.get_mut(&key) {
-                Some(entry) if entry.is_some() => entry.take().expect("alias entry is present"),
+                Some(entry @ Some(SharedInteropOwnerAlias::Bootstrap(_))) =>
+                    entry.take().expect("bootstrap alias entry is present"),
+                Some(Some(SharedInteropOwnerAlias::Native(_))) =>
+                    return Err("CoreSharedNativeRequiresSourceDispatcher".to_string()),
                 Some(_) => {
                     return Err("Shared interop owner alias release is already in progress".to_string())
                 }
@@ -3210,6 +3681,9 @@ impl SourceResourceArena {
             }
         };
         let release = SharedInteropAliasReleaseGuard { arena: self, key };
+        let SharedInteropOwnerAlias::Bootstrap(alias) = alias else {
+            unreachable!("validated bootstrap alias changed flavor while locked");
+        };
         let outcome = alias.release();
         drop(alias);
         drop(release);
@@ -3875,6 +4349,7 @@ impl SourceResourceArena {
                     | BackendOwner::Encoding(_)
                     | BackendOwner::EncodingWriter(_)
                     | BackendOwner::SharedInteropRoot(_)
+                    | BackendOwner::NativeSharedInteropRoot(_)
                     | BackendOwner::SharedInteropWeakRoot { .. } => Vec::new()
                 }
             }
@@ -6283,6 +6758,185 @@ mod tests {
             }),
             Arc::new(|outcome| panic!("unexpected automatic Shared finalization: {outcome:?}")),
         )
+    }
+
+    fn test_native_shared_root(thread: Option<std::thread::ThreadId>, released: &Arc<AtomicUsize>) -> SourceNativeSharedRoot {
+        let released = released.clone();
+        SourceNativeSharedRoot::checked_ingress(0x51, 0x9600, "manifest".to_string(),
+            "runtime".to_string(), MirNativeOwned::new(0x9600usize),
+            SourceNativeSharedOwnedSlot::checked_ingress(thread, move || {
+                released.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })).expect("checked transport test descriptor")
+    }
+
+    fn test_native_shared_register(arena: &SourceResourceArena, thread: Option<std::thread::ThreadId>, released: &Arc<AtomicUsize>) -> SourceResourceHandle {
+        arena.apply_native_shared_packet(vec![SourceNativeSharedAction::RegisterPhysical {
+            root: test_native_shared_root(thread, released),
+        }]).expect("register checked transport descriptor").remove(0)
+    }
+
+    #[test]
+    fn native_shared_malformed_ingress_preserves_thread_confined_rollback_owner() {
+        let released = Arc::new(AtomicUsize::new(0));
+        let calls = released.clone();
+        let owned = SourceNativeSharedOwnedSlot::checked_ingress(Some(std::thread::current().id()), move || {
+            calls.fetch_add(1, Ordering::SeqCst); Ok(())
+        });
+        let mut error = SourceNativeSharedRoot::checked_ingress(0, 0x9600,
+            "manifest".to_string(), "runtime".to_string(), MirNativeOwned::new(0x9600usize),
+            owned).err().expect("missing checked type identity refuses ingress");
+        assert_eq!(error.refusal, "CoreSharedNativeDescriptorMalformed");
+        assert_eq!(released.load(Ordering::SeqCst), 0);
+        error.staged.owned.release().expect("Source still owns the refused guard's rollback");
+        drop(error);
+        assert_eq!(released.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn native_shared_packet_refusal_preserves_staged_guard_and_existing_slots() {
+        let session = test_shared_interop_session();
+        let arena = session.arena();
+        let released = Arc::new(AtomicUsize::new(0));
+        let existing = test_native_shared_register(arena, None, &released);
+        let staged_released = Arc::new(AtomicUsize::new(0));
+        let error = arena.apply_native_shared_packet(vec![
+            SourceNativeSharedAction::RegisterPhysical { root: test_native_shared_root(Some(std::thread::current().id()), &staged_released) },
+            SourceNativeSharedAction::ReleaseRoot { capability: existing.clone() },
+            SourceNativeSharedAction::ReleaseRoot { capability: existing.clone() },
+        ]).expect_err("duplicate release refuses the entire packet");
+        assert_eq!(error.refusal_key(), "CoreSharedNativeReleaseReplayed");
+        assert_eq!(released.load(Ordering::SeqCst), 0);
+        assert_eq!(staged_released.load(Ordering::SeqCst), 0);
+        assert_eq!(arena.lookup_capability(existing.handle, existing.raw).unwrap(), existing);
+        let mut actions = error.into_rejected_actions().expect("caller retains rollback ownership");
+        let SourceNativeSharedAction::RegisterPhysical { root } = &mut actions[0] else { panic!("staged guard lost"); };
+        root.owned.release().expect("explicit Source rollback on owning thread");
+        assert_eq!(staged_released.load(Ordering::SeqCst), 1);
+        drop(actions);
+        arena.apply_native_shared_packet(vec![SourceNativeSharedAction::ReleaseRoot { capability: existing }]).unwrap();
+        assert_eq!(released.load(Ordering::SeqCst), 1);
+        session.retire().unwrap();
+    }
+
+    #[test]
+    fn native_shared_wrong_thread_refuses_before_release_hook_consumption() {
+        let session = test_shared_interop_session();
+        let arena = session.arena();
+        let released = Arc::new(AtomicUsize::new(0));
+        let capability = test_native_shared_register(arena, Some(std::thread::current().id()), &released);
+        let foreign_arena = arena.clone();
+        let foreign_capability = capability.clone();
+        let refusal = std::thread::spawn(move || {
+            foreign_arena.apply_native_shared_packet(vec![SourceNativeSharedAction::ReleaseRoot {
+                capability: foreign_capability,
+            }]).expect_err("foreign thread cannot touch Guard40").refusal_key().to_string()
+        }).join().expect("named refusal, not UB or panic");
+        assert_eq!(refusal, "CoreSharedNativeWrongThread");
+        assert_eq!(released.load(Ordering::SeqCst), 0);
+        assert_eq!(arena.lookup_capability(capability.handle, capability.raw).unwrap(), capability);
+        arena.apply_native_shared_packet(vec![SourceNativeSharedAction::ReleaseRoot { capability }]).unwrap();
+        assert_eq!(released.load(Ordering::SeqCst), 1);
+        session.retire().unwrap();
+    }
+
+    #[test]
+    fn native_shared_live_loan_refuses_release_until_descriptor_borrow_ends() {
+        let session = test_shared_interop_session();
+        let arena = session.arena();
+        let released = Arc::new(AtomicUsize::new(0));
+        let capability = test_native_shared_register(arena, Some(std::thread::current().id()), &released);
+        let borrowed = arena.borrow_native_shared_slot(&capability, "manifest", "runtime", 0x9600).unwrap();
+        let error = arena.apply_native_shared_packet(vec![SourceNativeSharedAction::ReleaseRoot {
+            capability: capability.clone(),
+        }]).expect_err("live loan forbids native-pointer release");
+        assert_eq!(error.refusal_key(), "CoreSharedNativeSlotBorrowed");
+        assert_eq!(released.load(Ordering::SeqCst), 0);
+        drop(error);
+        drop(borrowed);
+        arena.apply_native_shared_packet(vec![SourceNativeSharedAction::ReleaseRoot { capability }]).unwrap();
+        assert_eq!(released.load(Ordering::SeqCst), 1);
+        session.retire().unwrap();
+    }
+
+    #[test]
+    fn native_shared_foreign_arena_and_descriptor_provenance_refuse_without_hooks() {
+        let session = test_shared_interop_session();
+        let other_session = test_shared_interop_session();
+        let arena = session.arena();
+        let released = Arc::new(AtomicUsize::new(0));
+        let capability = test_native_shared_register(arena, None, &released);
+        let other_released = Arc::new(AtomicUsize::new(0));
+        let other = test_native_shared_register(other_session.arena(), None, &other_released);
+        let error = other_session.arena().apply_native_shared_packet(vec![SourceNativeSharedAction::ReleaseRoot {
+            capability: capability.clone(),
+        }]).expect_err("matching slot indexes cannot forge foreign arena roots");
+        assert!(error.refusal_key().starts_with("CoreSharedNativeCapabilityMismatch:"));
+        for (manifest, runtime, physical) in [("other", "runtime", 0x9600), ("manifest", "other", 0x9600), ("manifest", "runtime", 0x9601)] {
+            assert_eq!(arena.borrow_native_shared_slot(&capability, manifest, runtime, physical).err().unwrap(),
+                "CoreSharedNativeDescriptorProvenanceMismatch");
+        }
+        assert_eq!(released.load(Ordering::SeqCst), 0);
+        assert_eq!(other_released.load(Ordering::SeqCst), 0);
+        arena.apply_native_shared_packet(vec![SourceNativeSharedAction::ReleaseRoot { capability }]).unwrap();
+        other_session.arena().apply_native_shared_packet(vec![SourceNativeSharedAction::ReleaseRoot { capability: other }]).unwrap();
+        session.retire().unwrap();
+        other_session.retire().unwrap();
+    }
+
+    #[test]
+    fn native_shared_real_bootstrap_root_is_never_a_native_fallback() {
+        let session = test_shared_interop_session();
+        let arena = session.arena();
+        let root = crate::SourceSharedInterop::SourceSharedInterop::from_value(0x51, MirRuntimeValue::Int(1));
+        let capability = arena.register_shared_interop_root(0x51, &root).unwrap();
+        assert_eq!(arena.borrow_native_shared_slot(&capability, "manifest", "runtime", 0x9600).err().unwrap(),
+            "CoreSharedNativeRootFlavorMismatch");
+        arena.release_shared_interop_root(&capability).unwrap();
+        session.retire().unwrap();
+    }
+
+    #[test]
+    fn native_shared_alias_token_replay_refuses_and_alias_releases_before_pin() {
+        let session = test_shared_interop_session();
+        let arena = session.arena();
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let pin_order = order.clone();
+        let alias_order = order.clone();
+        let mut root = test_native_shared_root(None, &Arc::new(AtomicUsize::new(0)));
+        root.owned = SourceNativeSharedOwnedSlot::checked_ingress(None, move || {
+            pin_order.lock().unwrap().push("pin"); Ok(())
+        });
+        let alias = SourceNativeSharedAlias::checked_ingress(0x9600, 71,
+            SourceNativeSharedOwnedSlot::checked_ingress(None, move || {
+                alias_order.lock().unwrap().push("alias"); Ok(())
+            })).unwrap();
+        let capability = arena.apply_native_shared_packet(vec![SourceNativeSharedAction::RegisterRoot { root, alias }]).unwrap().remove(0);
+        let error = arena.apply_native_shared_packet(vec![
+            SourceNativeSharedAction::ReleaseAlias { capability: capability.clone(), token_id: 71 },
+            SourceNativeSharedAction::ReleaseAlias { capability: capability.clone(), token_id: 71 },
+        ]).expect_err("duplicate alias release leaves owner token live");
+        assert_eq!(error.refusal_key(), "CoreSharedNativeReleaseReplayed");
+        assert!(order.lock().unwrap().is_empty());
+        arena.apply_native_shared_packet(vec![
+            SourceNativeSharedAction::ReleaseRoot { capability: capability.clone() },
+            SourceNativeSharedAction::ReleaseAlias { capability, token_id: 71 },
+        ]).unwrap();
+        assert_eq!(*order.lock().unwrap(), ["alias", "pin"]);
+        session.retire().unwrap();
+    }
+
+    #[test]
+    fn native_shared_consumed_hook_is_not_replayed_even_after_release_refusal() {
+        let released = Arc::new(AtomicUsize::new(0));
+        let calls = released.clone();
+        let mut owned = SourceNativeSharedOwnedSlot::checked_ingress(None, move || {
+            calls.fetch_add(1, Ordering::SeqCst); Err("SourceReleaseRefused".to_string())
+        });
+        assert_eq!(owned.release(), Err("SourceReleaseRefused".to_string()));
+        assert_eq!(owned.release(), Err("CoreSharedNativeReleaseReplayed".to_string()));
+        drop(owned);
+        assert_eq!(released.load(Ordering::SeqCst), 1);
     }
 
     #[test]

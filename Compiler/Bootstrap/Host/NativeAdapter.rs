@@ -87,6 +87,7 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
              shared_payload_shapes: ::std::collections::BTreeMap<String, crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape>,\n\
              completion_scope: ::jet_evalhost::SourceExecutionCompletionScopeWeak,\n\
              callback_jobs: ::std::sync::Weak<dyn ::jet_evalhost::SourceCallbacks::SourceCallbackJobOwner>,\n\
+             runtime_admission: Option<crate::compiler_bootstrap_runner::HostBootstrapRuntimeAdmission>,\n\
              resources_weak: ::jet_evalhost::SourceResources::SourceResourceLeaseWeak,\n\
              artifact: ::jet_foundation::MIR::MirArtifactId,
              receiver_type: ::jet_foundation::MIR::MirType,
@@ -230,6 +231,7 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
                      shared_payload_shapes,\n\
                      completion_scope: completion_scope.downgrade(),\n\
                      callback_jobs: ::std::sync::Arc::downgrade(&callback_jobs),\n\
+                     runtime_admission,\n\
                      resources_weak: resources.downgrade(),\n\
                      artifact: image.header.artifact,\n\
                      execution,\n\
