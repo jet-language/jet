@@ -1866,7 +1866,9 @@ fn data_loader_quote(out: &[U8], text: String) Never! {
             // Rust char::is_control includes the C1 scalars U+0080..U+009F.
             index += 1
             data_loader_put_control(&out, Int.from_u8(encoding_stream.byte_at(text, index)))
-        } else -> &out.push(byte)
+        } else {
+            &out.push(byte)
+        }
         index += 1
     }
     &out.push(U8{34})
