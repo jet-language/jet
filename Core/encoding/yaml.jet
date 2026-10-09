@@ -29,10 +29,6 @@ fn to_string<T: Encode>(value: T) -> String Never! {
     if text == "" -> "{{}}" else -> text
 }
 
-fn to_string<T: Encode>(value: T) -> String Never! {
-    text :: render_yaml(value.encode(), 0).trim_end()
-    if text == "" -> "{{}}" else -> text
-}
 
 fn parse_yaml(text: String) -> Dyn EncodingError! {
     trimmed :: trim_yaml(text)
@@ -300,7 +296,7 @@ fn parse_scalar(text: String) -> Dyn EncodingError! {
         }
         return Ok(Dyn.DateTime(z))
     }
-    if clean == "{}" -> return Ok(Dyn.object())
+    if clean == "{{}}" -> return Ok(Dyn.object())
     if clean.starts_with("\"") || clean.starts_with("'") -> return Ok(Dyn.Text(unquote(clean)))
     stamp :: Dyn.Text(clean)
     if stamp.decode<ZonedDateTime>() == {

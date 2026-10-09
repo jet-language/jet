@@ -960,24 +960,6 @@ fn write_json_bytes(out: &[U8], bytes: [U8]) Never! {
     }
     &out.push(U8{93})
 }
-// Bytes render as their byte values, `[1,255]`, the same text every tier writes.
-fn write_json_bytes(out: &[U8], bytes: [U8]) Never! {
-    &out.push(U8{91})
-    loop i in 0..<bytes.len() {
-        if i > 0 -> &out.push(U8{44})
-        write_ascii(&out, "{Int.from_u8(bytes[i])}")
-    }
-    &out.push(U8{93})
-}
-// Bytes render as their byte values, `[1,255]`, the same text every tier writes.
-fn write_json_bytes(out: &[U8], bytes: [U8]) Never! {
-    &out.push(U8{91})
-    loop i in 0..<bytes.len() {
-        if i > 0 -> &out.push(U8{44})
-        write_ascii(&out, "{Int.from_u8(bytes[i])}")
-    }
-    &out.push(U8{93})
-}
 
 fn write_ascii(out: &[U8], text: String) Never! {
     loop b in text.bytes() -> &out.push(b)

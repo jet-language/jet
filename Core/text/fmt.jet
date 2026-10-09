@@ -5,8 +5,8 @@ use core.math as math
 // shared Prelude kernel crates/jet-codegen/src/Prelude/Core/Fmt.rs, which takes
 // the same steps, so both give one meaning (owner rows, card #4588). Radix
 // helpers use lowercase digits; text padding counts UTF-8 scalars.
-// Fixed-precision rounding is half away from zero and never prints a negative
-// zero; non-finite Floats keep their ordinary display.
+// Fixed-precision formats preserve the exact binary Float's ties-to-even
+// rounding and signed zero; non-finite Floats keep their ordinary display.
 fn number(n: Int) -> String Never! { grouped_int(n) }
 fn bin(n: Int) -> String Never! { radix_signed_width(n, 2, 0) }
 fn oct(n: Int) -> String Never! { radix_signed_width(n, 8, 0) }
@@ -32,13 +32,9 @@ fn plural(n: Int, singular: String, many: String) -> String Never! {
 }
 
 /// An empty `fill` pads with spaces; the fill pattern restarts on each side.
-fn pad_left(text: String, width: Int, fill: String) -> String Never! { "{pad_fill(fill, pad_need(text, width))}{text}" }
-fn pad_right(text: String, width: Int, fill: String) -> String Never! { "{text}{pad_fill(fill, pad_need(text, width))}" }
-fn pad_center(text: String, width: Int, fill: String) -> String Never! {
-    need :: pad_need(text, width)
-    left :: need /% 2
-    "{pad_fill(fill, left)}{text}{pad_fill(fill, need - left)}"
-}
+fn pad_left(text: String, width: Int, fill: String) -> String Never! { pad_mode(text, width, fill, 0) }
+fn pad_right(text: String, width: Int, fill: String) -> String Never! { pad_mode(text, width, fill, 1) }
+fn pad_center(text: String, width: Int, fill: String) -> String Never! { pad_mode(text, width, fill, 2) }
 fn pad(text: String, width: Int, fill: String) -> String Never! { pad_right(text, width, fill) }
 
 fn grouped(n: Float, frac: Int) -> String Never! { group_decimal(float_fixed(n, frac)) }
@@ -376,125 +372,6 @@ fn grouped_digits(text: String) -> String Never! {
     String.from_bytes(out) ?? text.copy()
 }
 
-fn pad_need(text: String, width: Int) -> Int Never! {
-    need :: width - unicode.scalar_count(text)
-    if need < 0 -> 0 else -> need
-}
-
-// `len` scalars of `fill` repeated; an empty fill is one space.
-fn pad_fill(fill: String, len: Int) -> String Never! {
-    units :: unicode.scalars(if fill == "" -> " " else -> fill)
-    parts :: loop i in 0..<len -> units[i % units.len()]
-    parts.join("")
-}
-
-fn close_for(open: String) -> String? Never! {
-    if open == {
-        "{{" -> Val("}}")
-        "[" -> Val("]")
-        "(" -> Val(")")
-        else -> None
-    }
-}
-
-// Scalar index of the first opener outside a quoted string.
-fn first_structure(cps: [String]) -> Int? Never! {
-    quoted := false
-    escaped := false
-    loop i in 0..<cps.len() {
-        ch :: cps[i]
-        if quoted {
-            if {
-                escaped -> escaped = false
-                ch == "\\" -> escaped = true
-                ch == "\"" -> quoted = false
-            }
-            next
-        }
-        if {
-            ch == "\"" -> quoted = true
-            close_for(ch) != None -> return Val(i)
-        }
-    }
-    None
-}
-
-// Index of the closer that balances the first `open` scalar.
-fn matching_close(cps: [String], open: String) -> Int? Never! {
-    stack := [String]{close_for(open) ?? return None}
-    quoted := false
-    escaped := false
-    seen_start := false
-    loop i in 0..<cps.len() {
-        ch :: cps[i]
-        if !seen_start {
-            if ch == open -> seen_start = true
-            next
-        }
-        if quoted {
-            if {
-                escaped -> escaped = false
-                ch == "\\" -> escaped = true
-                ch == "\"" -> quoted = false
-            }
-            next
-        }
-        if {
-            ch == "\"" -> quoted = true
-            close_for(ch) == .Val(close) -> &stack.push(close)
-            stack.len() > 0 && stack[stack.len() - 1] == ch -> {
-                _ :: &stack.pop()
-                if stack.len() == 0 -> return Val(i)
-            }
-        }
-    }
-    None
-}
-
-fn joined(cps: [String], start: Int, end: Int) -> String Never! {
-    parts :: loop i in start..<end -> cps[i]
-    parts.join("")
-}
-
-// Top-level comma-separated items, trimmed, empty items dropped.
-fn split_top_level(cps: [String]) -> [String] Never! {
-    items := [String]{}
-    start := 0
-    stack := [String]{}
-    quoted := false
-    escaped := false
-    loop i in 0..<cps.len() {
-        ch :: cps[i]
-        if quoted {
-            if {
-                escaped -> escaped = false
-                ch == "\\" -> escaped = true
-                ch == "\"" -> quoted = false
-            }
-            next
-        }
-        if {
-            ch == "\"" -> quoted = true
-            close_for(ch) == .Val(close) -> &stack.push(close)
-            stack.len() > 0 && stack[stack.len() - 1] == ch -> _ :: &stack.pop()
-            ch == "," && stack.len() == 0 -> {
-                item :: joined(cps, start, i).trim()
-                if item != "" -> &items.push(item)
-                start = i + 1
-            }
-        }
-    }
-    item :: joined(cps, start, cps.len()).trim()
-    if item != "" -> &items.push(item)
-    items
-}
-
-fn ascii_lower(text: String) -> String Never! {
-    raw :: text.bytes()
-    out := [U8]{}
-    loop byte in raw -> &out.push(if byte >= 65 && byte <= 90 -> byte + U8{32} else -> byte)
-    String.from_bytes(out) ?? text.copy()
-}
 
 // Core/Fmt.rs:389-419: empty fill means space, and each centered side
 // begins its own fill cycle.
