@@ -3863,3 +3863,234 @@ execution receipt. Composition must admit fresh layout/MIR/imports and suppress
 obsolete seed exports before linking/running; syntax checks do not establish
 runtime parity or Rust/toolchain retirement.
 
+### Raw file and process host boundary
+
+`JetRuntime/Source/HostFiles.jet` owns the Linux descriptor transport. Its
+canonical FD72 header has the futex mutex at 0, descriptor at 8, closed flag
+at 16, owned E4 path at 24, buffer at 32, capacity at 40 (negative for
+writes, zero for raw readers), filled bytes at 48, position at 56, and refs at 64.
+Explicit close affects aliases; last release frees the state. Portable stat
+facts hide the kernel's stat layout, and statx reports birth-time availability
+instead of assuming it is absent. Held-directory operations never reopen a
+source inode or substitute an ambient pathname.
+
+Core owns validation, fault injection and IOError construction. Private leaves
+report ErrorOut32 (domain/stage U32, code I64, kind/pad U32, owned E4 message)
+and a separate WriteZero fact on write/flush/seek/close. Linux syscall errors
+have POSIX domain 1 and zero kind/message. Read and descriptor dup first flush
+pending writer bytes; their flush WriteZero error uses custom domain 4, Other
+kind and the owned canonical cause because those ABIs have no Bool output.
+Reads then make a single kernel read into caller-owned compact bytes, never
+consume the write buffer, and preserve Interrupted. A dup owns a fresh empty
+buffer and sees the flushed shared kernel offset. Historical
+`958047768^:crates/jet-codegen/src/Prelude/CoreLib/JetStd/FileHandles.rs`
+owns unbuffered `std::fs::File` descriptors, so private native buffering must
+not hide preceding writes from either operation. Its `jet_fs_link_fd_at_raw`
+calls AT_EMPTY_PATH once with no pathname or `/proc/self/fd` fallback.
+Linux [link(2)](https://man7.org/linux/man-pages/man2/link.2.html) requires
+CAP_DAC_READ_SEARCH for that flag and reports ENOENT without it; the transport
+returns that fact unchanged.
+
+Explicit `jet_std_process_exit` keeps the canonical exact-Int-to-signed-i32
+conversion and calls `jet_rt_process_exit`; it no longer independently flushes
+stdout and invokes `exit_group`. The common runtime process boundary owns the
+process-wide winner claim, atexit handling and final output flush. This caller
+requires the separately linked Jet Main provider of `jet_rt_process_exit`.
+
+The six-argument process launch
+borrows ExecCandidates32 (count, NUL candidate column, script-fallback bit,
+searched bit) and Core-prepared argv and effective environment bytes. This
+preserves non-Unicode PATH entries without an independent environment. Source
+computes the exact reference route's PATH and ENOEXEC policy. The runtime parent
+prepares allocations, descriptor copies, limits and `/bin/sh` argv before fork.
+The child uses only raw syscalls: stdio mapping, cwd, source-prepared group
+setup, SIGPIPE reset, held-directory mapping/chdir, limits/session/PTY setup,
+then ordered execve. GNU retry facts remember EACCES, continue past ENOENT,
+ESTALE, ENOTDIR, ENODEV and ETIMEDOUT, and stop on all other errors; an explicit
+fallback bit alone permits the preallocated `/bin/sh` argv. Child72 has its mutex at 0,
+pid/reap-status at 8/16/24, stdin/stdout/stderr/PTY at 32/40/48/56, and refs at
+64. Taking a stream transfers an independently owned FD72; terminal input and
+output duplicate the master while taking terminal control transfers the
+original. Stream aliases may outlive the child. Windows-only PTY control
+carriers use capacity I64.MIN and dispatch resize/close to the OS console
+handle; Linux and macOS never produce that tag. Native carrier fixtures link
+against the complete composed runtime object, not an allocator-only seed.
+`realpath` into a Jet-owned fixed 4096-byte buffer preserves exact OS symlink,
+`..`, and non-Unicode canonicalization, with the real OS errno on failure;
+this ledgered mechanical import is not a pathname-policy replacement.
+
+Owner directive #33 defines an empty exec-candidate set as ENOENT, without an
+execve attempt. This is the intentional I9 delta from glibc's oversized-PATH
+case that otherwise returns whichever stale errno happened to be present.
+Child setup retains its reference error precedence: an invalid cwd or descriptor
+still fails at its own stage before the empty candidate set reports exec ENOENT.
+
+The remaining held-file calls reuse this boundary, without exporting a second
+set of public-policy adapters:
+
+| Core seed route | Jet raw transport |
+| --- | --- |
+| `jet_std_files_open_writer` | `jet_fd_open_raw` / `jet_fd_open_at_raw` |
+| `jet_fs_directory_close` | `jet_fd_close_raw` |
+| `jet_fs_directory_create` | `jet_fd_mkdir_at_raw` |
+| `jet_fs_rename_at` | `jet_fd_rename_at_raw` |
+| `jet_fs_read_link_at` | `jet_fd_readlink_at_raw` |
+| `jet_std_file_reader_stat` | `jet_fd_stat_raw` |
+| `jet_std_file_writer_set_mode` | `jet_fd_chmod_raw` |
+| `jet_fs_directory_fd_raw` | `jet_fd_number_raw` |
+| `jet_fs_stat_at` | `jet_fd_stat_at_raw` |
+| `jet_fs_xattr_get` | `jet_fs_xattr_get_raw` |
+
+`jet_fd_stat_at_raw(directory, name, StatFacts128*, ErrorOut32*)` follows
+FileHandles.rs:711–758: an empty name stats the held directory; a final entry
+opens with `O_PATH|O_NOFOLLOW|O_CLOEXEC`, stats the owned descriptor, and closes
+it, including stat failure. The source resolves/validates intermediate names.
+Ambient path stat continues to use `jet_fs_stat_raw`, not a fake directory.
+`jet_fs_xattr_get_raw(path, attribute, compact_bytes, length, ErrorOut32*)`
+performs one `lgetxattr` syscall, returning the byte count or -1. A null buffer
+with zero length queries size. FileHandles.rs:988–1031's absent/unsupported
+mapping, allocation and ERANGE retry remain source policy. Descriptor numbers
+are borrowed facts: source retains the directory until the consuming leaf
+duplicates it; they are not independent owned handles.
+
+### Remaining native String routes
+
+`TextRoutes.jet` supplies the C route ABI for chars, copy, byte count, lines,
+repeat, replace, both explicit slice forms and ASCII case conversion, reusing
+E4 ownership, UTF-8 scalar decoding, constant-storage substring search and the
+existing character-range failure report. Chars/lines return an owned word
+column plus its count, with null for empty columns, matching generated
+`list_out`. Byte count returns the canonical exact-Int word. Lines match
+Rust `str::lines`: remove LF and its optional preceding CR, preserve bare CR,
+and omit the extra line after a final LF. Replace uses nonoverlapping matches;
+an empty pattern inserts at each Unicode-scalar boundary including both ends.
+Repeat clamps negative counts to zero and copies into one exact allocation.
+ASCII casing leaves every non-ASCII byte unchanged. Slice bounds are character
+indices and exclude the end, including an empty slice at the character count.
+The generated route exporter removes replaced Rust definitions while retaining
+shared carrier metadata; no second String carrier is introduced.
+
+The x64 runtime-pack census excludes wasm32-only allocation exports (WebAbi,
+font/HarfBuzz scratch, numeric Web buffers and Web D-FRED). Those U32 linear-
+memory/provenance/TLS contracts remain separate target rows, not native-pointer
+casts. Date/time formatting and Pool construction are Core source-owner rows,
+not String/allocator runtime aliases. The private image-runtime stop/String
+allocator and L1/L3 canonical allocator/split providers are existing Jet bodies.
+
+The inherited 42-row disposition ledger retains every row: ten String route
+ports and four entry/Err ports are source-complete with light receipts only;
+four image/allocator rows and two canonical split replacements already have
+Jet bodies; five time-format rows belong to the Core time owner, Pool to Core
+Mem, the comptime-stop writer to its runtime owner, and fifteen wasm allocation
+rows remain separate target contracts. `jet_err_from_message` is Err88 source
+`453a68026`; the three entry exits are `JourneyTLS.jet` source `695b6dc40`.
+No row is discarded or promoted to native behavioral proof by a parse receipt.
+
+### Native shared process pipe holder
+
+`HostPipe.jet` owns `Pipe24`: non-atomic reference count at 0, RefCell mutable
+borrow state at 8, and an owned reader FD72 pointer at 16 (`0` means `None`).
+The source facts are `CommonTypes.rs:162–165`'s
+`Rc<RefCell<Option<BufReader<ProcessReader>>>>` and `Process.rs:3325–3343`'s
+shared mutable buffered position. Clone returns the same holder and increments
+its count; only the last drop releases the FD72 and frees the holder. The FD
+is taken from `jet_process_take_stream_raw`, not borrowed from or retained
+through Child. Shared close takes the optional reader, so every clone sees EOF.
+No Rust Box/Rc/RefCell offset and no independently duplicated fd is involved.
+
+The four `jet_rt_handle_{clone,drop}_Process{Stdout,Stderr}Stream` exports use
+the canonical handle symbol convention. `jet_process_stream_line_bytes_raw`
+borrows the holder and returns `Result<[U8], IOError>` as a native tag plus
+owned compact data/length or an owned error. It shares FD72's refill buffer,
+includes LF, preserves malformed UTF-8 and bare CR, and retries Interrupted
+as `BufRead::read_until` does. Checked Core `__stdout_next_line` and
+`__stderr_next_line` own empty-byte EOF, UTF-8 decoding and the one-LF/one-CR
+terminator policy. No fixed host next-line iterator substitutes for them.
+
+When TAKE supplies a writer-mode FD72, the first buffered read flushes pending
+output under the FD lock before converting its buffer to reader refill mode
+and resetting both cursors. Flush failures leave the writer suffix intact and
+return through the fallible read edge (TAKE itself has no error result).
+Writes through retained reader-mode aliases bypass refill storage and use a
+kernel write, so they cannot corrupt unread lines and a pipe read-end write
+returns EBADF.
+
+A conflicting mutable borrow panics with `RefCell already borrowed`, matching
+the seed's observed rustc 1.97.1 commit `8bab26f4f` and that commit's
+`library/core/src/cell.rs:902,912–917`. Its trap path does not allocate.
+`Tests/process-pipe.c` plants real-descriptor, shared-refill, interleaved-clone,
+shared-close, actual comptime-stop release and signal-reentrant borrow
+witnesses. Execution and allocation-ledger-zero remain unexercised; the latter
+requires the ProgramAllocator counting/facts provider, not a fake allocator.
+
+### Native default error carrier
+
+`JetBackend/Source/ErrLayout.jet` defines the native-pack Err88 ABI. It is not
+the legacy Rust seed layout or the source-visible three-field MIR record:
+identity, context, conversions and typed details remain owned by the opaque
+native handle. `JetRuntime/Source/Err.jet` clones every child independently;
+the C record constructor clones borrowed message/code but takes the cause,
+matching `CAbi.rs:372–377`. Getters return owned projections. Display/show/debug
+return message only (`Values.rs:317–330`); `ErrReport.jet` separately ports
+Outcome's recursive root report and ordered `jet.err/v1` serialization,
+including Unicode C1 control escapes and raw canonical typed field JSON.
+`Tests/err-report.c` exercises the real carrier and allocator LIVE BYTES fact
+(index 2), not historical allocation count, for a deep-clone/drop ledger.
+The native-pack source batch depends on G1f's `135db4321` generated-adapter
+guard: `exports.list` selects each same-name Rust adapter's
+`cfg(not(jet_native_pack))`. Hand-written `CAbi.rs` Err constructors/getters
+carry the same guard explicitly, so the seed tier remains unchanged while
+native packs contain only the canonical Jet implementation.
+`run-host-fixtures.mjs audit` requires exactly one strong pack definition for
+every Err/report export rather than accepting a mixed Rust fallback.
+`JourneyReport.jet` ports Outcome's scalar-column terminal policy without
+intermediate rendered measurement strings. Its goldens reuse literal expected
+bytes from `Outcome.rs:2066–2172`, covering stream/80-column/40-column,
+independent ANSI coloring, path-segment elision, note truncation and repeated
+hop counts.
+`Journey.jet` owns the pure Journey32 accumulator over an explicit caller slot:
+new-origin resets old handled state, only consecutive equal function/file/line
+sites collapse, the first site's column/note remain, clone copies all children,
+take drains once, and adopt transfers carried children. The real
+`jet_rt_journey_destructor(header,value)` has the Closure24 callback signature.
+`JourneyTLS.jet` uses one dynamic key registered after thread initialization
+with that real Closure24 destructor. E2 FINAL `d52672e62` supplies the reviewed
+checked named-FunctionAddress mechanism; `7c69104b7` adds its Journey row and
+`05bc3fac3` tests missing-export/wrong-arity refusal and the actual target.
+Origin/frame/reset routes and report/entry exports join this same source unit.
+There are no Journey-private TCB offsets. Taking a journey clears the dynamic
+slot once; adopting a carried origin discards handled state.
+
+The report edge resolves live process wire mode and stderr facts once:
+NO_COLOR presence overrides FORCE_COLOR presence (including non-UTF8 values),
+columns are positive trimmed COLUMNS on a terminal only, otherwise 80 for a
+terminal or no budget for a stream. Root leads trail, trailing root newlines
+collapse to one, and typed JSON retains the original Err88 metadata. Every
+entry-error exit writes that report and uses the shared `jet_rt_process_exit`
+boundary with status 1. `journey-tls.c` witnesses real thread isolation,
+registered teardown, take/adopt/reset, ledger balance, and process status/bytes.
+N=1000 owned getter/drop cycles also preserve Err88 LIVE BYTES; Lower's separate
+borrowed hand-MIR witness requires no getter, clone, or allocation Call.
+These behavioral/ledger/object witnesses require the composed proof; light
+parse/C-syntax receipts alone do not establish them.
+Presence is read allocation-free under the logical environment cell's Shared
+reader lock; COLUMNS uses that cell's strict Unicode getter. Runtime set/remove
+mutations therefore affect subsequent reports rather than freezing startup
+environment state. The fixture toggles NO_COLOR after initialization and tests
+FORCE_COLOR, invalid-UTF8 presence, changed COLUMNS and unsigned-width overflow.
+Initialization order is explicit: allocator priority 0, Host priority 1, Thread
+priority 2 (registry publication and main attach), then Journey priority 3.
+
+`LogicalEnvironment.jet` replaces the executable-local Rust environment cell
+with one owned native reader/writer cell using the existing Shared protocol.
+Host argument registration seeds it from owned startup bytes before publishing
+argc; reads and writes never mutate libc's environment or the immutable startup
+index. Unix byte equality, startup duplicate replacement, and remove-then-append
+updates follow `EnvInit.rs:6-35` and `FSIoEnvOsTesting.rs:688-715`.
+The strict getter deliberately collapses absent and non-Unicode to zero because
+the reference `jet_std_env_get` signature is `Option<String>` (569-570).
+The OS getter preserves arbitrary startup bytes and returns presence separately:
+absent is `(0,0,0)`, present empty `(1,0,0)`, nonempty `(1,owned data,length)`;
+callers free nonempty data with exactly length bytes and alignment 1.
+Set returns 0 / -1 InvalidName / -2 InvalidValue; unset returns 0 absent /
+1 removed / -1 InvalidName. These are raw leaf statuses, not guessed enum tags.

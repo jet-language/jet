@@ -128,50 +128,6 @@ extern "C" fn text_carriers() {
     }
 }
 
-/// Build a carrier the way a Jet runtime layer does, not through Rust String.
-extern "C" fn text_carriers() {
-    unsafe {
-        assert_eq!(std::mem::size_of::<TextCarrier>(), 24);
-        let input = "hé\0😀";
-        let ptr = jet_rt_alloc(input.len(), 1);
-        std::ptr::copy_nonoverlapping(input.as_ptr(), ptr, input.len());
-        let carrier = jet_rt_alloc(24, 8) as Text;
-        carrier.write(TextCarrier { ptr, len: input.len(), cap: input.len() });
-        assert_eq!(jet_rt_string_data(carrier), ptr);
-        assert_eq!(jet_rt_string_byte_len(carrier), input.len());
-        assert_eq!(jet_char_len(carrier), 4);
-        let clone = jet_rt_string_clone(carrier);
-        jet_rt_string_drop(carrier);
-        let bytes = std::slice::from_raw_parts((*clone).ptr, (*clone).len);
-        assert_eq!(bytes, input.as_bytes());
-        jet_rt_string_drop(clone);
-
-        let empty = jet_rt_string_builder_new();
-        assert_eq!(((*empty).ptr as usize, (*empty).len, (*empty).cap), (1, 0, 0));
-        assert!(jet_string_is_empty(empty));
-        let seed = input.repeat(2);
-        jet_rt_string_builder_push_static(empty, seed.as_ptr(), seed.len());
-        let first = (*empty).ptr;
-        jet_rt_string_builder_push(empty, empty); // aliases and grows
-        assert_ne!((*empty).ptr, first);
-        assert_eq!((*empty).len, seed.len() * 2);
-        let window = (*empty).ptr.add(input.len());
-        jet_rt_string_builder_push_static(empty, window, input.len()); // aliases and grows
-        let grown = (*empty).ptr;
-        let window = (*empty).ptr.add(input.len());
-        jet_rt_string_builder_push_static(empty, window, input.len()); // aliases, no growth
-        assert_eq!((*empty).ptr, grown);
-        let window = (*empty).ptr;
-        let count = (*empty).len;
-        jet_rt_string_builder_push_static(empty, window, count); // aliases and grows
-        let finished = jet_rt_string_builder_finish(empty);
-        assert_eq!(finished, empty);
-        assert_eq!(std::slice::from_raw_parts((*finished).ptr, (*finished).len), input.repeat(12).as_bytes());
-        jet_rt_string_drop(finished);
-        jet_rt_string_drop(std::ptr::null_mut());
-    }
-}
-
 extern "C" fn euclid_by_zero() {
     unsafe { jet_int_rem_euclid(1, 0, FILE.as_ptr(), FILE.len(), 6) };
 }
