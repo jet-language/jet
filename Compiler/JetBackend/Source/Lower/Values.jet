@@ -128,6 +128,7 @@ fn lower_inline_members(p: MIRProgram, ty: MIRType) -> [LowerMember] Never! {
 // View<T> window the same header borrowing its buffer.
 fn lower_inline_size(p: MIRProgram, ty: MIRType) -> Int Never! {
     if lower_atomic_scalar(p, ty) != None -> return 8
+    if lower_wide_signed(p, ty) != None -> return 16
     if ty.kind == .List(_) | .Map(_, _) | .FixedList(_, _) -> return 24
     if lower_view_element(ty) != None -> return 24
     if lower_set_element(ty) != None -> return 24
