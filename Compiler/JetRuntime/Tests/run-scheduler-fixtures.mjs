@@ -1,9 +1,8 @@
 #!/usr/bin/env node
-// Real runtime source + Jet fixture callbacks; C only transports code pointers.
-// The remaining Observe implementation is the freshly composed runtime pack,
-// not a test observer, fake stop rail or alternate scheduler.
+// Real runtime source + Jet fixture callbacks in one library object.
+// C only transports code pointers; no Rust provider or substitute scheduler.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
@@ -53,9 +52,7 @@ if (mode === 'assemble') {
   }
   writeFileSync(join(out, 'disassembly.txt'), command('objdump', ['-dr', object]).stdout);
 } else if (mode === 'link') {
-  const library = process.env.JET_RUNTIME_C_LIB;
-  if (!library || !existsSync(library)) throw Error('JET_RUNTIME_C_LIB must name the freshly built composed runtime; no historical/provider-only substitute');
-  command(process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/scheduler-fixture.c'), join(dir, 'fixture.o'), library,
+  command(process.env.CC ?? 'cc', [join(root, 'Compiler/JetRuntime/Tests/scheduler-fixture.c'), join(dir, 'fixture.o'),
     '-lpthread', '-ldl', '-lm', '-o', join(out, 'scheduler-fixture')]);
 } else {
   const failures = [];

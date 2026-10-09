@@ -53,6 +53,10 @@ The scheduler fixture writes its complete root-panic golden beside its proof
 receipts, checks exact stderr, exit 70, no signal and no stdout, and does not
 depend on a Rust-tier reference producer. Task-local panics still require
 process survival and empty stderr.
+An aggregate fixture object already contains the full Jet runtime and links
+without a second provider. Standalone C witnesses use `jet_runtime_jet.o`
+exactly once; the startup-bearing `jet_runtime.pack.o` is a program-link input,
+not an additional runtime object for a C program that defines its own `main`.
 
 The compiler frontend receipt must retain the full foreign Cargo diagnostics,
 including cached bridge fingerprint output when an inline-FFI error hides
