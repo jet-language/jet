@@ -8,7 +8,9 @@
         );
         // D-CORE-FILEERROR1=A: EEXIST/ERROR_FILE_EXISTS/ERROR_ALREADY_EXISTS
         // are AlreadyExists; ENOTSUP/EOPNOTSUPP/ENOSYS/ERROR_NOT_SUPPORTED are
-        // Unsupported. Rust already sorts all but ENOTSUP into these kinds.
+        // Unsupported by Core law. Rust's decoder is not the authority for
+        // every ratified code; source-owned lock policy projects Windows 50
+        // explicitly, while this bridge retains its existing behavior.
         let not_supported = matches!(
             e.raw_os_error(),
             Some(code) if (cfg!(target_os = "linux") && code == 95)
