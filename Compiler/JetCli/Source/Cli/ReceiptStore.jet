@@ -12,7 +12,7 @@ fn jet_cli_receipt_merge_sections(receipt: ^JetCLIReceipt, claim: JetCLIReceiptC
     receipt := ^receipt
     loop record in published_sections {
         if record.claim_key != claim.key || record.parent_digest != receipt.digest {
-            return Err("published receipt section has a different parent identity")
+            return Err(jet_cli_read_error("published receipt section has a different parent identity"))
         }
         section :: record.section
         jet_cli_receipt_section_validate(section)
@@ -23,7 +23,7 @@ fn jet_cli_receipt_merge_sections(receipt: ^JetCLIReceipt, claim: JetCLIReceiptC
                 same = true
                 break
             }
-            return Err("receipt section `{section.name}` conflicts with the immutable receipt")
+            return Err(jet_cli_read_error("receipt section `{section.name}` conflicts with the immutable receipt"))
         }
         if !same -> &receipt.sections.push(section)
     }
@@ -43,7 +43,7 @@ fn jet_cli_receipt_section(receipt: JetCLIReceipt, name: String) -> JetCLIReceip
 // replacements, including non-UTF8 command output, before its digest is made.
 fn jet_cli_receipt_redact_bytes(bytes: [U8], secret_values: [String]) -> [U8] String! {
     if bytes.len() > JET_CLI_RECEIPT_MAX_FIELD {
-        return Err("receipt output exceeds its size limit")
+        return Err(jet_cli_read_error("receipt output exceeds its size limit"))
     }
     redacted := bytes
     marker :: "<redacted>".bytes()
@@ -72,7 +72,7 @@ fn jet_cli_receipt_redact_bytes(bytes: [U8], secret_values: [String]) -> [U8] St
         redacted = ^output
     }
     if redacted.len() > JET_CLI_RECEIPT_MAX_FIELD {
-        return Err("redacted receipt output exceeds its size limit")
+        return Err(jet_cli_read_error("redacted receipt output exceeds its size limit"))
     }
     Ok(redacted)
 }
