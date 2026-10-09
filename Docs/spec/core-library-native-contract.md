@@ -242,6 +242,14 @@ declarations as the native-backend adapters, without importing optional wrappers
 File-handle kernels have one owner in the CommonTypes dependency closure;
 selecting mapped-file operations must not emit a second copy.
 
+Bootstrap Dyn operations use the helpers embedded in `jet_std`; generated
+calls retain that namespace and the helpers' checked text-borrow contracts.
+A callback's declared parameter ABI must agree with both its generated closure
+and the callable body, including borrowed String parameters.
+Default `Err` construction retains every source-declared field and its checked
+default, including the private memoized error metadata. The native projection
+must not reconstruct a shortened error record from only message, code, and cause.
+
 Native record-sequence provider symbols use `jet_rt_record_seq_` followed by
 the checked sequence kind with dots replaced by underscores. The lowering
 computes that suffix before interpolating the symbol, preserving the same
