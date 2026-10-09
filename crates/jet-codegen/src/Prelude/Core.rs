@@ -894,6 +894,7 @@ fn jet_runtime_should_unwind() -> bool {
     jet_scheduler_in_task()
         || jet_scheduler_native_task_body_active()
         || jet_interrupt_handler_should_unwind()
+        || jet_runtime_process_should_unwind()
         || JET_TEST_EXPECT_FAIL.with(|frames| !frames.borrow().is_empty())
 }
 
