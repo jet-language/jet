@@ -400,8 +400,12 @@ fn sema_pattern_slot_facts(slots: [PatSlot], expected: [Type], variant: String, 
                             complete = false
                         }
                         &tir_bindings.push(TPatternBinding.Value{value: typed})
-                    } else -> complete = false
-                } else -> complete = false
+                    } else {
+                        complete = false
+                    }
+                } else {
+                    complete = false
+                }
             }
             // Sema places named entries before collecting slot facts.
             .Named(_, _, _) | .Rest(_) -> complete = false
@@ -720,7 +724,9 @@ fn sema_pattern_map_key_written(key: Expr) -> Bool Never! {
     if key == {
         .Int(_, _, _, _) | .Bool(_, _) | .Char(_, _) | .EnumLit(_, _, _, _, _, _) -> true
         .Str(parts, _) -> {
-            loop part in parts -> if part == .Interp(_, _) -> return false
+            loop part in parts {
+                if part == .Interp(_, _) -> return false
+            }
             true
         }
         .Ident(name, _) -> sema_pattern_constant_name(name)

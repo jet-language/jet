@@ -340,7 +340,9 @@ fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, 
     }
     subject_ty :: sema_pattern_unwrap_tags(table.subject.ty)
     matrix := false
-    loop shape in table.shapes -> if sema_pattern_matrix_needed(shape) -> matrix = true
+    loop shape in table.shapes {
+        if sema_pattern_matrix_needed(shape) -> matrix = true
+    }
     if matrix {
         rows :: loop shape in table.shapes -> SemaPatternCoverageRow{cells: [SemaPatternCoverageCell]{SemaPatternCoverageCell.Shape{shape: shape}}}
         if sema_pattern_matrix_complete(rows, [Type]{subject_ty}, environment) -> return
@@ -577,20 +579,26 @@ fn sema_pattern_matrix_expand(rows: [SemaPatternCoverageRow]) -> [SemaPatternCov
                 cells[0] = SemaPatternCoverageCell.Shape{shape: alternative}
                 loop subrow in sema_pattern_matrix_expand([SemaPatternCoverageRow]{SemaPatternCoverageRow{cells: cells}}) -> &expanded.push(subrow)
             }
-        } else -> &expanded.push(row)
+        } else {
+            &expanded.push(row)
+        }
     }
     expanded
 }
 
 fn sema_pattern_matrix_tail(types: [Type]) -> [Type] Never! {
     tail := [Type]{}
-    loop (index, ty) in types -> if index > 0 -> &tail.push(ty)
+    loop (index, ty) in types {
+        if index > 0 -> &tail.push(ty)
+    }
     tail
 }
 
 fn sema_pattern_matrix_append_tail(cells: [SemaPatternCoverageCell], row: SemaPatternCoverageRow) -> SemaPatternCoverageRow Never! {
     result := cells
-    loop (index, cell) in row.cells -> if index > 0 -> &result.push(cell)
+    loop (index, cell) in row.cells {
+        if index > 0 -> &result.push(cell)
+    }
     SemaPatternCoverageRow{cells: result}
 }
 
@@ -616,7 +624,9 @@ fn sema_pattern_matrix_list_rows(rows: [SemaPatternCoverageRow], length: Int, lo
                 loop index in 0..<length {
                     &cells.push(if index < items.len() -> sema_pattern_matrix_slot(items[index]) else -> SemaPatternCoverageCell.Any)
                 }
-            } else -> next
+            } else {
+                next
+            }
             .Refutable -> next
         }
         &specialized.push(sema_pattern_matrix_append_tail(cells, row))
@@ -757,11 +767,13 @@ fn sema_pattern_matrix_complete(written_rows: [SemaPatternCoverageRow], types: [
                 if row.cells.len() == 0 -> next
                 cells := loop _ in field_types -> SemaPatternCoverageCell.Any
                 if row.cells[0] == .Shape(shape) && shape == .Struct(written, _, _) {
-                    loop (index, declared) in nominal.fields -> loop field in written {
+                    loop (index, declared) in nominal.fields {
+                        loop field in written {
                         if field == {
                             .Bind(_, _, _) -> {}
                             .Value(name, _, _) -> if name == declared.symbol.name -> cells[index] = SemaPatternCoverageCell.Refutable
                             .Nested(name, nested, _) -> if name == declared.symbol.name -> cells[index] = SemaPatternCoverageCell.Shape{shape: nested.shape}
+                        }
                         }
                     }
                 } else if row.cells[0] != SemaPatternCoverageCell.Any -> next
@@ -800,12 +812,16 @@ fn sema_pattern_matrix_needed(shape: TPatternShape) -> Bool Never! {
     if shape == {
         .Struct(_, _, _) | .List(_, _, _) | .Map(_, _, _) -> true
         .Variant(_, slots, _, _) -> {
-            loop slot in slots -> if slot == .Nested(inner) && sema_pattern_matrix_needed(inner.shape) -> return true
+            loop slot in slots {
+                if slot == .Nested(inner) && sema_pattern_matrix_needed(inner.shape) -> return true
+            }
             false
         }
         .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> if inner == .Val(nested) -> sema_pattern_matrix_needed(nested.shape) else -> false
         .Or(alternatives, _) -> {
-            loop alternative in alternatives -> if sema_pattern_matrix_needed(alternative) -> return true
+            loop alternative in alternatives {
+                if sema_pattern_matrix_needed(alternative) -> return true
+            }
             false
         }
         else -> false
