@@ -464,3 +464,16 @@ fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] {
     assert_eq(pretty("Point {{x: 1, y: [2, 3]}}"), "Point {{\n  x: 1\n  y: [\n    2\n    3\n  ]\n}}")
     assert_eq(pretty("\"quoted [1, 2]\""), "\"quoted [1, 2]\"")
 }
+
+#Test("Compiler-only formatting helpers retain exact lexical policy") {
+    assert_eq(quantity(Float{-0.0}), "-0")
+    assert_eq(quantity(Float{0.1}), "0.1")
+    assert_eq(fixed_int(-123456789012345678901234567890, 2), "-123456789012345678901234567890.00")
+    assert_eq(grouped_int_fixed(123456789012345678901234567890, 1), "123,456,789,012,345,678,901,234,567,890.0")
+    assert_eq(hex_decimal(" +000255 ", 4), "00ff")
+    assert_eq(bin_decimal("-00010"), "-1010")
+    assert_eq(oct_decimal(" 10 "), "12")
+    assert_eq(hex_decimal("-0000", 0), "0")
+    assert_eq(bin_decimal(" 1_0 "), "1_0")
+    assert_eq(oct_decimal("+"), "+")
+}

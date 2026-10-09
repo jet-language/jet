@@ -3336,6 +3336,12 @@ parenthesis fragment, recursively splitting only its top-level commas;
 quoted delimiters, redacted lists, incomplete fragments, and trailing text
 remain unchanged.
 
+Exact integer formatting also uses the public `Fixed`, `Grouped`, `Hex`,
+`Bin`, and `Oct` interpolation selectors. The `quantity`, `fixed_int`,
+`grouped_int_fixed`, and `*_decimal` source helpers support compiler lowering;
+they are not exported application APIs. Their lexical-policy witnesses live
+with the source helpers, while application examples use public formatting.
+
 | Signature | Result | Description |
 |---|---|---|
 | `number(value: Int) -> String` | text | Format an integer with grouping separators. |
