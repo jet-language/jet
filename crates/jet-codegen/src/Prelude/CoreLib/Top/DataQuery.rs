@@ -367,7 +367,7 @@ pub fn jet_data_query_indices(
 }
 
 fn jet_data_query_indices_spec(
-    rows: &[jet_std::DataTree],
+    rows: &[jet_std::Dyn],
     spec: &JetAnalyticsQuery,
 ) -> Result<Vec<usize>, Vec<jet_std::FieldError>> {
     let plan = jet_analytics_plan(rows, spec).map_err(jet_analytics_query_error)?;
@@ -382,7 +382,7 @@ fn jet_data_query_indices_spec(
         ));
     }
     let selected = jet_sql_query::select_sql_indices(rows.len(), spec, |index, field| {
-        jet_std::datatree_get(&rows[index], field).map(jet_analytics_cell_text)
+        jet_std::dyn_get(&rows[index], field).map(jet_analytics_cell_text)
     });
     Ok(selected)
 }

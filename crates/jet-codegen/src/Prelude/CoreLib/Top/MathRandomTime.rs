@@ -1375,10 +1375,10 @@ fn jet_decimal_to_float(a: &jet_std::JetDecimal) -> f64 {
 }
 
 // D-ENC-DYN1=A+: the dynamic `parse` returns the one rich `Data` value (the
-// user-facing face of `DataTree`). JSON text parses directly to the canonical
-// ordered `DataTree` carrier.
-fn jet_std_json_parse(text: &str) -> Result<jet_std::DataTree, jet_std::EncodingError> {
-    jet_std::parse_json_datatree(text)
+// user-facing face of `Dyn`). JSON text parses directly to the canonical
+// ordered `Dyn` carrier.
+fn jet_std_json_parse(text: &str) -> Result<jet_std::Dyn, jet_std::EncodingError> {
+    jet_std::parse_json_dyn(text)
 }
 fn jet_std_json_render(d: &jet_std::Dyn) -> String {
     jet_std::render_dyn_json(d, false, 0)
@@ -1454,7 +1454,7 @@ fn jet_std_json_events(d: &jet_std::Dyn) -> String {
     walk(String::new(), d, &mut out);
     out.join("\n")
 }
-fn jet_std_jsonl_parse(text: &str) -> Result<Vec<jet_std::DataTree>, jet_std::EncodingError> {
+fn jet_std_jsonl_parse(text: &str) -> Result<Vec<jet_std::Dyn>, jet_std::EncodingError> {
     let mut out = Vec::new();
     for (idx, line) in text.lines().enumerate() {
         let trimmed = line.trim();
@@ -1488,7 +1488,7 @@ fn jet_std_jsonl_count_rows(text: &str) -> jet_foundation::Numeric::JetInt {
         text.lines().filter(|line| !line.trim().is_empty()).count() as i64,
     )
 }
-fn jet_std_jsonl_append_line(text: &str, value: &jet_std::DataTree) -> String {
+fn jet_std_jsonl_append_line(text: &str, value: &jet_std::Dyn) -> String {
     let rendered = jet_std_json_render_canonical(value);
     if text.is_empty() {
         return format!("{rendered}\n");
@@ -1499,7 +1499,7 @@ fn jet_std_jsonl_append_line(text: &str, value: &jet_std::DataTree) -> String {
         format!("{text}\n{rendered}\n")
     }
 }
-fn jet_std_jsonl_first(text: &str) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
+fn jet_std_jsonl_first(text: &str) -> Result<Option<jet_std::Dyn>, jet_std::EncodingError> {
     for (idx, line) in text.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -1515,15 +1515,6 @@ fn jet_std_jsonl_first(text: &str) -> Result<Option<jet_std::DataTree>, jet_std:
         }
     }
     Ok(None)
-}
-
-// D-JSON1-decode + D-JSON3: lenient JSON decode with coercion surfacing. The
-// walk, the coercion message and the audit-line shape are ONE policy in
-// `CoreLib/JetStd/JSONDataTree.rs`, shared with the resident JIT host that
-// used to carry a byte-equivalent copy (I8/I9). AOT supplies only the sink it
-// owns: the process's own stderr.
-fn jet_std_json_decode_lenient(text: &str) -> Result<jet_std::DataTree, jet_std::EncodingError> {
-    jet_std::jet_std_json_decode_lenient(text, &mut |line| eprintln!("{}", line))
 }
 
 fn jet_string_bytes(s: &str) -> Vec<u8> {
