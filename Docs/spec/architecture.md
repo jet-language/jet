@@ -291,6 +291,12 @@ whole installed catalog; program loading begins with the selected real entry.
 [`RuntimeUnitImports.jet`](../../Compiler/JetDriver/Tests/RuntimeUnitImports.jet)
 records these loader contracts independently of backend linking.
 
+Keep-going compilation preserves the caller's emission choice. Its explicit
+`emit_rust` argument reaches the same staged compiler as ordinary compilation;
+checks and native library objects use `false`, so collecting diagnostics never
+silently selects the retired Rust emitter. The historical Bootstrap host passes
+`true` only while its Rust-emitting bootstrap entry remains installed.
+
 Proof chains use one shared
 [`git-archive source export`](../../Tools/agent/proof-source.mjs) per full commit,
 not a moving checkout. `node Tools/agent/proof-source.mjs <full-sha> [repository]`

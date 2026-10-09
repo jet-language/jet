@@ -119,7 +119,7 @@ fn jet_bootstrap_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileR
     loop entry in (cli_sys.get("JET_KEEP_GOING_SKIP") ?? "").split(",").to_list() {
         if entry.trim().len() > 0 -> &skip.push(entry.trim())
     }
-    result := jet_driver_compile_keep_going(^request, JetDriverKeepGoing{skip: skip}) ?? jet_driver_compile_escaped_failure("the compiler driver failed outside every compile stage")
+    result := jet_driver_compile_keep_going(^request, JetDriverKeepGoing{skip: skip}, true) ?? jet_driver_compile_escaped_failure("the compiler driver failed outside every compile stage")
     report :: cli_sys.get("JET_KEEP_GOING_REPORT") ?? return result
     lines := [String]{"phase\titem\tcode\tmessage\tspan"}
     loop row in result.keep_going_rows -> &lines.push(row)

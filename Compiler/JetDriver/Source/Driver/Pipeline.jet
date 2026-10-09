@@ -4649,10 +4649,11 @@ fn jet_driver_compile_core_library_mir(request: ^JetDriverCompileRequest) -> Jet
 // The result keeps every error report, so a compile with any row never
 // passes; a crash later in the run still leaves the rows already streamed to
 // the trace sink.
-fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options: JetDriverKeepGoing) -> JetDriverCompileResult {
+// Emission is the caller's existing backend choice, not a keep-going side effect.
+fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options: JetDriverKeepGoing, emit_rust: Bool) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(Val(options))
     capture := JetDriverCheckedProjectionCapture{}
-    result := jet_driver_compile_stages(^request, &kg, true, false, &capture)
+    result := jet_driver_compile_stages(^request, &kg, emit_rust, false, &capture)
     if result.internal_problem == .Val(problem) -> jet_driver_keep_going_row(&kg, "internal", "-", "ICE", problem, "-")
     // Reports of a stage that returned early; recorded rows are not repeated.
     kg.diagnostic_mark = 0
