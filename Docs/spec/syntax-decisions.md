@@ -8078,6 +8078,9 @@ the final expression. `Core/sys/sys.jet` follows this form for selected-target
 pointer size and `usize_max()`, keeping layout facts inside preparation rather
 than reading them in an ordinary function. Multi-statement value blocks,
 mutable `:= prep` bindings, and expression-nested `prep` still teach E0391.
+Its width validation and maximum calculation form one ordered value `if`
+table inside `prep`, not an adjacent statement `if` or a chain of statement
+`else` bodies. The full-width arm avoids shifting the U64 carrier by 64.
 
 **2026-09-28 — D-PREP-BRANCH1=A, D-PREP-FN1=A, D-CONSTGEN2=A shipped**
 *(card #3662)*: `prep if` and `prep loop` replace `@if` and `@loop` in
