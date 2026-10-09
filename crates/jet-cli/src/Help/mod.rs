@@ -453,25 +453,26 @@ mod tests {
         // Planning vocabulary only. "decision" is product vocabulary now: the
         // ratified `inspect decisions` plane shows compiler decisions, and
         // `explain --verbose` names a token's owning decision (cli.md).
-        let forbidden = [
-            "D-",
-            "U19",
-            "c77",
-            "E2-M",
-            "milestone",
-            "requirement",
-            "epoch",
-            "ratified",
-        ];
+        // Planning identifiers keep their case (`D-` is a decision ID, never
+        // the `d-` inside `read-view`); planning words match any case.
+        let forbidden_ids = ["D-", "U19", "c77", "E2-M"];
+        let forbidden_words = ["milestone", "requirement", "epoch", "ratified"];
         for entry in build_index() {
             let copy = std::iter::once(entry.symbol.summary.as_str())
                 .chain(entry.flags.iter().map(|(_, help)| *help))
                 .collect::<Vec<_>>()
-                .join(" ")
-                .to_lowercase();
-            for term in forbidden {
+                .join(" ");
+            let lower = copy.to_lowercase();
+            for term in forbidden_ids {
                 assert!(
-                    !copy.contains(&term.to_lowercase()),
+                    !copy.contains(term),
+                    "help for `{}` exposes internal planning term `{term}`: {copy}",
+                    entry.symbol.name
+                );
+            }
+            for term in forbidden_words {
+                assert!(
+                    !lower.contains(term),
                     "help for `{}` exposes internal planning term `{term}`: {copy}",
                     entry.symbol.name
                 );
