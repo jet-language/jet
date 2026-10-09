@@ -7,6 +7,8 @@ enum Home<'a> {
     Runtime(&'a RuntimeValue),
     Data(&'a MirEvalValue),
     Ambient(&'a CtValue),
+    OptionalData(&'a MirEvalValue),
+    OptionalAmbient(&'a CtValue),
 }
 
 // A stack-linked path avoids allocating/copying projection lists when an SSA
@@ -23,7 +25,7 @@ struct HomePath<'a> {
     tail: Option<&'a HomePath<'a>>,
 }
 
-impl Machine<'_, '_, '_> {
+impl Machine<'_, '_> {
     pub(super) fn eval_string_home_call(&self, frame: usize, id: MirCoreCallId, route: MirPreludeCallId, args: &[jet_foundation::MIR::MirCallArg], span: Span) -> Result<Option<RuntimeValue>, Diagnostic> {
         let row = self.program.core_calls.iter().find(|row| row.id == id)
             .ok_or_else(|| mir_error_at("MIR String loan Core row is absent", span))?;
@@ -190,9 +192,30 @@ impl Machine<'_, '_, '_> {
             HomeStep::Place(frame, MirProjection::Index { index, .. }) => {
                 let value = self.frames[frame].values.get(index).ok_or_else(|| mir_error_at("MIR String loan index is absent", span))?;
                 let RuntimeValue::Data(value) = value else { return Err(mir_error_at("MIR String loan index is not data", span)); };
-                home_index(home, value, span)?
+                home_index(home, &value, span)?
             }
             HomeStep::Alias(MoveStep::Index { value, .. }) => home_index(home, value, span)?,
+            HomeStep::Place(frame, MirProjection::MapLookup { lookup, optional, .. }) => {
+                let value = self.frames[frame].values.get(lookup)
+                    .ok_or_else(|| mir_error_at("MIR String loan map lookup is absent", span))?;
+                let RuntimeValue::Result { ok: true, value } = value else {
+                    return Err(mir_error_at("MIR String loan map entry is absent", span));
+                };
+                let RuntimeValue::Data(MirEvalValue::Int(index)) = value.as_ref() else {
+                    return Err(mir_error_at("MIR String loan map lookup is not an index", span));
+                };
+                let index = usize::try_from(*index)
+                    .map_err(|_| mir_error_at("MIR String loan map lookup is out of bounds", span))?;
+                match home {
+                    Home::Data(MirEvalValue::Map(entries)) => entries.iter().nth(index).map(|(_, value)| {
+                        if *optional { Home::OptionalData(value) } else { Home::Data(value) }
+                    }),
+                    Home::Ambient(CtValue::Map(entries)) => entries.iter().nth(index).map(|(_, value)| {
+                        if *optional { Home::OptionalAmbient(value) } else { Home::Ambient(value) }
+                    }),
+                    _ => None,
+                }.ok_or_else(|| mir_error_at("MIR String loan map lookup outlived its window", span))?
+            }
             HomeStep::Place(_, MirProjection::Payload { kind, .. }) | HomeStep::Alias(MoveStep::Payload(kind)) => {
                 match (home, kind) {
                     (Home::Runtime(RuntimeValue::Result { ok, value }), kind) if payload_result_side(kind) == Some(*ok) => Some(Home::Runtime(value)),
@@ -200,6 +223,8 @@ impl Machine<'_, '_, '_> {
                     (Home::Data(MirEvalValue::FailedTold(value)), MirPayloadKind::Result { ok: false }) => Some(Home::Data(value)),
                     (home, MirPayloadKind::Enum { variant, index, .. }) => Some(home_enum(home, variant, *index, span)?),
                     (Home::Ambient(CtValue::Present(value)), MirPayloadKind::Option | MirPayloadKind::Result { ok: true }) => Some(Home::Ambient(value)),
+                    (Home::OptionalData(value), MirPayloadKind::Option) => Some(Home::Data(value)),
+                    (Home::OptionalAmbient(value), MirPayloadKind::Option) => Some(Home::Ambient(value)),
                     _ => None,
                 }.ok_or_else(|| mir_error_at("MIR String loan payload does not match its variant", span))?
             }

@@ -4,6 +4,9 @@
 //! source syntax, inspect TIR, or rediscover checker policy.  The MIR rows are
 //! the executable contract; this tier only marshals values and selects the
 //! canonical Core/Prelude dispatcher named by each row.
+//! Owning copies dispatch checked source clone hooks, including stored fields
+//! and container elements. Measurement and expiry policy remain in Core Jet
+//! source; the machine does not retain their retired native carriers.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
@@ -6599,7 +6602,7 @@ impl<'a, 'state> Machine<'a, 'state> {
                         MirStringPart::Value(value) => {
                             let ty = self.value_type(frame_index, *value, span)?.clone();
                             let value = self.value(frame_index, *value, span)?;
-                            if self.contains_source_render_hook(&ty, false, &mut Vec::new()) {
+                            if self.contains_source_value_hook(&ty, "show", &mut Vec::new()) {
                                 output.push_str(&self.render_source_value(value, &ty, false, span)?);
                             } else {
                                 output.push_str(&mir_show(&runtime_to_data(value, span)?));
@@ -13734,50 +13737,266 @@ impl<'a, 'state> Machine<'a, 'state> {
         self.eval_prelude_runtime(call, args, result_ty, span)
     }
 
-    fn contains_source_render_hook(
+    fn contains_source_value_hook(
         &self,
         ty: &MirType,
-        debug: bool,
+        operation: &str,
         visiting: &mut Vec<jet_foundation::MIR::MirTypeId>,
     ) -> bool {
-        let operation = if debug { "debug" } else { "show" };
         if jet_foundation::MIR::mir_source_value_hook(self.program, ty, operation).is_some() {
             return true;
         }
         match ty.kind() {
+            MirTypeKind::Shared(_) if operation == "clone" => false,
             MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. }
             | MirTypeKind::Shared(inner) | MirTypeKind::Option(inner)
-            | MirTypeKind::Tagged { inner, .. } => self.contains_source_render_hook(inner, debug, visiting),
-            MirTypeKind::Map { key, value } => self.contains_source_render_hook(key, debug, visiting)
-                || self.contains_source_render_hook(value, debug, visiting),
-            MirTypeKind::Result { ok, err } => self.contains_source_render_hook(ok, debug, visiting)
-                || self.contains_source_render_hook(err, debug, visiting),
+            | MirTypeKind::Tagged { inner, .. } => self.contains_source_value_hook(inner, operation, visiting),
+            MirTypeKind::Map { key, value } => self.contains_source_value_hook(key, operation, visiting)
+                || self.contains_source_value_hook(value, operation, visiting),
+            MirTypeKind::Result { ok, err } => self.contains_source_value_hook(ok, operation, visiting)
+                || self.contains_source_value_hook(err, operation, visiting),
+            MirTypeKind::Tuple(fields) => fields.iter().any(|(_, ty)| self.contains_source_value_hook(ty, operation, visiting)),
             _ => {
-                let Some(def) = self.native_printable_type_def(ty) else { return false };
+                let Some(def) = ty.nominal_id().and_then(|id| self.program.types.iter().find(|def| def.id == id)) else { return false };
                 if visiting.contains(&def.id) { return false; }
                 visiting.push(def.id);
                 let substitutions = self.native_print_substitutions(def, ty);
                 let found = match &def.kind {
                     MirTypeDefKind::Struct { fields, .. } => fields.iter().any(|field| {
-                        !field.computed && self.contains_source_render_hook(
-                            &substitute_print_type(&field.ty, &substitutions), debug, visiting,
+                        !field.computed && self.contains_source_value_hook(
+                            &substitute_print_type(&field.ty, &substitutions), operation, visiting,
                         )
                     }),
                     MirTypeDefKind::Enum { variants, .. } => variants.iter().any(|variant| match &variant.payload {
                         MirVariantPayload::Unit => false,
-                        MirVariantPayload::Single(inner) => self.contains_source_render_hook(
-                            &substitute_print_type(inner, &substitutions), debug, visiting,
+                        MirVariantPayload::Single(inner) => self.contains_source_value_hook(
+                            &substitute_print_type(inner, &substitutions), operation, visiting,
                         ),
                         MirVariantPayload::Named(fields) => fields.iter().any(|field| {
-                            self.contains_source_render_hook(&substitute_print_type(&field.ty, &substitutions), debug, visiting)
+                            self.contains_source_value_hook(&substitute_print_type(&field.ty, &substitutions), operation, visiting)
                         }),
                     }),
+                    MirTypeDefKind::Alias { target: inner } => self.contains_source_value_hook(
+                        &substitute_print_type(inner, &substitutions), operation, visiting,
+                    ),
                     _ => false,
                 };
                 visiting.pop();
                 found
             }
         }
+    }
+
+    /// Owning MIR Copy invokes source policy; address/frame retention does not.
+    fn source_copy_alias(&self, ty: &MirType) -> Option<MirType> {
+        let id = ty.nominal_id()?;
+        let def = self.program.types.iter().find(|def| def.id == id)?;
+        let MirTypeDefKind::Alias { target } = &def.kind else { return None };
+        Some(self.source_copy_substitute(ty, target))
+    }
+
+    fn semantic_copy_runtime(
+        &mut self,
+        mut value: RuntimeValue,
+        ty: &MirType,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        if let Some(hook) = jet_foundation::MIR::mir_source_value_hook(self.program, ty, "clone") {
+            return self.invoke_function(hook, vec![value], Vec::new(), span);
+        }
+        if let MirTypeKind::Tagged { inner, .. } = ty.kind() {
+            return self.semantic_copy_runtime(value, inner, span);
+        }
+        if let Some(inner) = self.source_copy_alias(ty) {
+            return self.semantic_copy_runtime(value, &inner, span);
+        }
+        if !self.contains_source_value_hook(ty, "clone", &mut Vec::new()) {
+            fork_runtime_value_owners(&mut value);
+            return Ok(value);
+        }
+        match value {
+            RuntimeValue::Aggregate(mut fields) => {
+                for (id, child) in &mut fields {
+                    let (_, child_ty) = checked_field_for_type(self.program, ty, *id, span)?;
+                    let child_ty = self.source_copy_substitute(ty, &child_ty);
+                    *child = self.semantic_copy_runtime(std::mem::replace(child, RuntimeValue::Moved), &child_ty, span)?;
+                }
+                Ok(RuntimeValue::Aggregate(fields))
+            }
+            RuntimeValue::Result { ok, value } => {
+                let child_ty = match ty.kind() {
+                    MirTypeKind::Option(inner) => inner,
+                    MirTypeKind::Result { ok: inner, err } => if ok { inner } else { err },
+                    _ => return Err(mir_error_at("source copy result has no checked child type", span)),
+                };
+                let value = self.semantic_copy_runtime(*value, child_ty, span)?;
+                Ok(RuntimeValue::Result { ok, value: Box::new(value) })
+            }
+            RuntimeValue::Data(mut data) => {
+                self.semantic_copy_data(&mut data, ty, span)?;
+                Ok(RuntimeValue::Data(data))
+            }
+            RuntimeValue::Ambient(mut value) => {
+                self.semantic_copy_ct(&mut value, ty, span)?;
+                Ok(RuntimeValue::Ambient(value))
+            }
+            _ => Err(mir_error_at("source copy value has no checked aggregate representation", span)),
+        }
+    }
+
+    fn source_copy_substitute(&self, owner: &MirType, child: &MirType) -> MirType {
+        let Some(def) = owner.nominal_id().and_then(|id| self.program.types.iter().find(|def| def.id == id)) else {
+            return child.clone();
+        };
+        substitute_print_type(child, &self.native_print_substitutions(def, owner))
+    }
+
+    fn source_copy_child_type(
+        &self, ty: &MirType, label: Option<&str>, index: usize, variant: Option<&str>, span: Span,
+    ) -> Result<MirType, Diagnostic> {
+        if let MirTypeKind::Tuple(fields) = ty.kind() {
+            return fields.get(index).map(|(_, ty)| ty.clone())
+                .ok_or_else(|| mir_error_at("source copy tuple field is missing", span));
+        }
+        let def = ty.nominal_id().and_then(|id| self.program.types.iter().find(|def| def.id == id))
+            .ok_or_else(|| mir_error_at("source copy nominal type is missing", span))?;
+        let fields = match &def.kind {
+            MirTypeDefKind::Struct { fields, .. } => fields,
+            MirTypeDefKind::Enum { variants, .. } => {
+                let row = variants.iter().find(|row| variant.is_some_and(|name| print_names_match(name, &row.name)))
+                    .ok_or_else(|| mir_error_at("source copy variant is missing", span))?;
+                match &row.payload {
+                    MirVariantPayload::Single(child) => return Ok(self.source_copy_substitute(ty, child)),
+                    MirVariantPayload::Named(fields) => fields,
+                    MirVariantPayload::Unit => return Err(mir_error_at("source copy unit variant has a payload", span)),
+                }
+            }
+            _ => return Err(mir_error_at("source copy nominal has no stored fields", span)),
+        };
+        let field = fields.iter().filter(|field| !field.computed).find(|field| label.is_some_and(|name| print_names_match(name, &field.name)))
+            .or_else(|| fields.iter().filter(|field| !field.computed).nth(index))
+            .ok_or_else(|| mir_error_at("source copy stored field is missing", span))?;
+        Ok(self.source_copy_substitute(ty, &field.ty))
+    }
+
+    fn semantic_copy_data(&mut self, value: &mut MirEvalValue, ty: &MirType, span: Span) -> Result<(), Diagnostic> {
+        if jet_foundation::MIR::mir_source_value_hook(self.program, ty, "clone").is_some() {
+            let source = std::mem::replace(value, MirEvalValue::Moved);
+            *value = runtime_to_data(self.semantic_copy_runtime(RuntimeValue::Data(source), ty, span)?, span)?;
+            return Ok(());
+        }
+        if let MirTypeKind::Tagged { inner, .. } = ty.kind() {
+            return self.semantic_copy_data(value, inner, span);
+        }
+        if let Some(inner) = self.source_copy_alias(ty) {
+            return self.semantic_copy_data(value, &inner, span);
+        }
+        if !self.contains_source_value_hook(ty, "clone", &mut Vec::new()) {
+            return Ok(());
+        }
+        match value {
+            MirEvalValue::List(values) => {
+                let inner = match ty.kind() {
+                    MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => inner,
+                    _ => return Err(mir_error_at("source copy list has no checked element type", span)),
+                };
+                for child in values { self.semantic_copy_data(child, inner, span)?; }
+            }
+            MirEvalValue::Map(values) => {
+                let MirTypeKind::Map { value: inner, .. } = ty.kind() else {
+                    return Err(mir_error_at("source copy map has no checked value type", span));
+                };
+                for (_, child) in values { self.semantic_copy_data(child, inner, span)?; }
+            }
+            MirEvalValue::Struct { fields, .. } => {
+                for (index, (label, child)) in fields.iter_mut().enumerate() {
+                    let child_ty = self.source_copy_child_type(ty, Some(label), index, None, span)?;
+                    self.semantic_copy_data(child, &child_ty, span)?;
+                }
+            }
+            MirEvalValue::Enum { variant, args, .. } => {
+                for (index, (label, child)) in args.iter_mut().enumerate() {
+                    let child_ty = self.source_copy_child_type(ty, label.as_deref(), index, Some(variant), span)?;
+                    self.semantic_copy_data(child, &child_ty, span)?;
+                }
+            }
+            MirEvalValue::Present(child) => {
+                let inner = match ty.kind() {
+                    MirTypeKind::Option(inner) | MirTypeKind::Result { ok: inner, .. } => inner,
+                    _ => return Err(mir_error_at("source copy option has no checked child type", span)),
+                };
+                self.semantic_copy_data(child, inner, span)?;
+            }
+            MirEvalValue::FailedTold(child) => {
+                let MirTypeKind::Result { err, .. } = ty.kind() else {
+                    return Err(mir_error_at("source copy error has no checked child type", span));
+                };
+                self.semantic_copy_data(child, err, span)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn semantic_copy_ct(&mut self, value: &mut CtValue, ty: &MirType, span: Span) -> Result<(), Diagnostic> {
+        if jet_foundation::MIR::mir_source_value_hook(self.program, ty, "clone").is_some() {
+            let source = std::mem::replace(value, CtValue::Unit);
+            let copied = self.semantic_copy_runtime(runtime_from_ct(source, span)?, ty, span)?;
+            *value = self.runtime_to_ct(copied, span)?;
+            return Ok(());
+        }
+        if let MirTypeKind::Tagged { inner, .. } = ty.kind() {
+            return self.semantic_copy_ct(value, inner, span);
+        }
+        if let Some(inner) = self.source_copy_alias(ty) {
+            return self.semantic_copy_ct(value, &inner, span);
+        }
+        if !self.contains_source_value_hook(ty, "clone", &mut Vec::new()) {
+            fork_ct_value_owners(value);
+            return Ok(());
+        }
+        match value {
+            CtValue::List(values) => {
+                let inner = match ty.kind() {
+                    MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => inner,
+                    _ => return Err(mir_error_at("source copy list has no checked element type", span)),
+                };
+                for child in values { self.semantic_copy_ct(child, inner, span)?; }
+            }
+            CtValue::Map(values) => {
+                let MirTypeKind::Map { value: inner, .. } = ty.kind() else {
+                    return Err(mir_error_at("source copy map has no checked value type", span));
+                };
+                for child in values.values_mut() { self.semantic_copy_ct(child, inner, span)?; }
+            }
+            CtValue::Struct { fields, .. } => {
+                for (index, (label, child)) in fields.iter_mut().enumerate() {
+                    let child_ty = self.source_copy_child_type(ty, Some(label), index, None, span)?;
+                    self.semantic_copy_ct(child, &child_ty, span)?;
+                }
+            }
+            CtValue::Enum { variant, args, .. } => {
+                for (index, (label, child)) in args.iter_mut().enumerate() {
+                    let child_ty = self.source_copy_child_type(ty, label.as_deref(), index, Some(variant), span)?;
+                    self.semantic_copy_ct(child, &child_ty, span)?;
+                }
+            }
+            CtValue::Present(child) => {
+                let inner = match ty.kind() {
+                    MirTypeKind::Option(inner) | MirTypeKind::Result { ok: inner, .. } => inner,
+                    _ => return Err(mir_error_at("source copy option has no checked child type", span)),
+                };
+                self.semantic_copy_ct(child, inner, span)?;
+            }
+            CtValue::Failed(CtReport::Told(child)) => {
+                let MirTypeKind::Result { err, .. } = ty.kind() else {
+                    return Err(mir_error_at("source copy error has no checked child type", span));
+                };
+                self.semantic_copy_ct(child, err, span)?;
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Shared private Core render hooks also run in the comptime MIR machine.
@@ -13923,7 +14142,7 @@ impl<'a, 'state> Machine<'a, 'state> {
         }
         let debug = row.member == "debug";
         let ty = self.value_type(frame_index, arg.value, span)?.clone();
-        if !self.contains_source_render_hook(&ty, debug, &mut Vec::new()) {
+        if !self.contains_source_value_hook(&ty, if debug { "debug" } else { "show" }, &mut Vec::new()) {
             if debug || !self.displays_through_plain_enum(&ty) {
                 return Ok(None);
             }
@@ -13962,7 +14181,7 @@ impl<'a, 'state> Machine<'a, 'state> {
         ty: &MirType,
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
-        if self.contains_source_render_hook(ty, false, &mut Vec::new()) {
+        if self.contains_source_value_hook(ty, "show", &mut Vec::new()) {
             let text = self.render_source_value(value, ty, false, span)?;
             return Ok(RuntimeValue::Data(MirEvalValue::String(text)));
         }
@@ -15463,40 +15682,6 @@ impl<'a, 'state> Machine<'a, 'state> {
             });
         }
 
-        if type_name == crate::Syntax::TYPE_MEASUREMENT && func == "new" {
-            let [value, uncertainty] = values else {
-                return Some(Err(mir_error_at(
-                    "Measurement.new requires value and uncertainty",
-                    span,
-                )));
-            };
-            let value = match value {
-                CtValue::Float(value) => value.as_f64(),
-                _ => return Some(Err(mir_error_at(
-                    "Measurement.new requires a Float value",
-                    span,
-                ))),
-            };
-            let uncertainty = match uncertainty {
-                CtValue::Float(uncertainty) => uncertainty.as_f64(),
-                _ => return Some(Err(mir_error_at(
-                    "Measurement.new requires a Float uncertainty",
-                    span,
-                ))),
-            };
-            let (value, uncertainty) =
-                mir_measurement_prelude::jet_measurement_kernel_new(value, uncertainty);
-            return Some(Ok(CtValue::Struct {
-                type_name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
-                fields: vec![
-                    ("value".to_string(), CtValue::Float(CtFloat::f64(value))),
-                    (
-                        "uncertainty".to_string(),
-                        CtValue::Float(CtFloat::f64(uncertainty)),
-                    ),
-                ],
-            }));
-        }
         let constructor = match (type_name, func) {
             (_, "from_str") if type_name == crate::Syntax::TYPE_DECIMAL => Some("decimal"),
             (_, "from_parts" | "new") if type_name == crate::Syntax::TYPE_FRACTION => {
@@ -24856,7 +25041,16 @@ impl<'a, 'state> Machine<'a, 'state> {
                     if !optional {
                         return Err(mir_error_at("MIR required map entry is absent", span));
                     }
-                    return Ok(RuntimeValue::Data(MirEvalValue::Absent { element: String::new() }));
+                    let pointer = self.value_type(frame_index, *lookup, span)?
+                        .option_inner()
+                        .ok_or_else(|| mir_error_at("MIR map lookup has no checked pointer type", span))?;
+                    let MirTypeKind::Apply { args, .. } = pointer.kind() else {
+                        return Err(mir_error_at("MIR map lookup is not a checked pointer", span));
+                    };
+                    let element = args.first()
+                        .ok_or_else(|| mir_error_at("MIR map lookup pointer has no element type", span))?
+                        .clone();
+                    return Ok(RuntimeValue::Data(MirEvalValue::Absent { element }));
                 }
                 let index = int_value(runtime_to_data(*index, span)?, span)? as usize;
                 let MirEvalValue::Map(entries) = runtime_to_data(value, span)? else {
@@ -28406,57 +28600,6 @@ enum RuntimeValue {
     GcRoot(Rc<RefCell<MirGcRoot>>),
 }
 
-
-impl MirExpiring {
-    fn live(&self, now_ms: i64, span: Span) -> Result<Option<MirEvalValue>, Diagnostic> {
-        let mut slot = self.value.lock().unwrap_or_else(|error| error.into_inner());
-        if now_ms <= self.deadline_ms {
-            return Ok(slot.clone());
-        }
-        if let Some(mut expired) = slot.take() {
-            if self.secret {
-                mir_zeroize_secret_record(&mut expired, span)?;
-            }
-        }
-        Ok(None)
-    }
-}
-
-fn mir_expiring_result(value: Option<MirEvalValue>) -> RuntimeValue {
-    match value {
-        Some(value) => RuntimeValue::Result {
-            ok: true,
-            value: Box::new(RuntimeValue::Data(value)),
-        },
-        None => RuntimeValue::Result {
-            ok: false,
-            value: Box::new(RuntimeValue::Data(MirEvalValue::Struct {
-                type_name: "Expired".to_string(),
-                fields: Vec::new(),
-            })),
-        },
-    }
-}
-
-fn mir_clock_now(clock: &CtValue, span: Span) -> Result<i64, Diagnostic> {
-    let clock = mir_runtime_owner::<MirClock>(clock)
-        .ok_or_else(|| mir_error_at("MIR expiring clock has no native Clock owner", span))?;
-    let clock = clock.lock().unwrap_or_else(|error| error.into_inner());
-    Ok(crate::Comptime::ClockRuntime::jet_clock_now(&clock))
-}
-
-/// A Core secret (`Secret`, `SigningKey`, `X25519SecretKey`) is a record whose
-/// `bytes` field holds the key material.
-fn mir_zeroize_secret_record(value: &mut MirEvalValue, span: Span) -> Result<(), Diagnostic> {
-    let MirEvalValue::Struct { fields, .. } = value else {
-        return Err(mir_error_at("MIR expiring secret is not a secret record", span));
-    };
-    let (_, bytes) = fields
-        .iter_mut()
-        .find(|(name, _)| name == "bytes")
-        .ok_or_else(|| mir_error_at("MIR expiring secret has no bytes field", span))?;
-    mir_zeroize_bytes(bytes, span)
-}
 
 type MirClock = std::sync::Mutex<crate::Comptime::ClockRuntime::jet_std::Clock>;
 type MirPool = std::sync::Mutex<crate::Comptime::PoolRuntime::jet_std::JetPool<CtValue>>;
@@ -33314,7 +33457,7 @@ fn run() {
     }
 
     #[test]
-    fn mir_expiring_secret_zeroize_preserves_original_record_storage() {
+    fn mir_zeroize_preserves_original_record_storage() {
         for bytes in [
             MirEvalValue::Bytes(vec![0x11, 0x22, 0x33]),
             MirEvalValue::List(vec![
@@ -33332,8 +33475,11 @@ fn run() {
                 type_name: "Secret".into(),
                 fields: vec![("bytes".into(), bytes)],
             };
-            mir_zeroize_secret_record(&mut secret, Span::new(0, 0))
-                .expect("expiry must wipe the resident secret record");
+            let MirEvalValue::Struct { fields, .. } = &mut secret else {
+                unreachable!();
+            };
+            mir_zeroize_bytes(&mut fields[0].1, Span::new(0, 0))
+                .expect("zeroize must wipe the resident secret record");
             let MirEvalValue::Struct { fields, .. } = &secret else {
                 panic!("zeroize replaced the secret record");
             };
@@ -33389,6 +33535,7 @@ fn run() {
                 span,
                 ty: ty.clone(),
                 place: MirPlaceId(1),
+                ssa_value: None,
                 mutable: true,
                 ownership: MirOwnership::Owned,
                 comptime: false,
@@ -33462,6 +33609,7 @@ fn run() {
             };
             let program = MirProgram {
                 cffi: MirCffiFacts::default(),
+                native_pack: false,
                 schema_version: MIR_SCHEMA_VERSION,
                 package_identity: "zeroize-witness".into(),
                 facts: MirPackageFacts::default(),
