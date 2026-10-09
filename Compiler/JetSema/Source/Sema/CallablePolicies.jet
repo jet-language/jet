@@ -145,7 +145,9 @@ fn sema_policy_wrap(callee: TExpr, target: SemaCallDirectTarget, policy: Call, e
 fn sema_policy_direct_value(target: SemaCallDirectTarget, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     declaration :: if environment.registration_graph == .Val(graph) -> sema_registration_callable_declaration(graph, target.symbol.id) ?? return None else -> {
         item :: sema_scope_resolve_declaration(environment, target.symbol.id) ?? return None
-        if item == .Func(function) -> function else -> return None
+        if item == .Func(function) -> function else -> {
+            return None
+        }
     }
     policies :: sema_policy_calls(declaration)
     if policies.len() == 0 -> return None

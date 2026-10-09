@@ -77,8 +77,12 @@ fn jet_cli_perf_capture_observations(capture: &JetCLIPerfCapture, observations: 
             &capture.samples.push(TraceSample{domain: "cpu", duration_ns: cpu, symbol: symbol})
             if root != None -> &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: Val(cpu), observed_at_ns: latest.at_ns, reason: "", status: "captured", symbol: symbol, target: target, task_id: root})
             else -> &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "root task causality was not observable", status: "unavailable", symbol: symbol, target: target, task_id: None})
-        } else -> &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "the runtime did not publish process CPU timing", status: "unavailable", symbol: symbol, target: target, task_id: None})
-    } else -> &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "the runtime did not publish process CPU timing", status: "unavailable", symbol: symbol, target: target, task_id: None})
+        } else {
+            &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "the runtime did not publish process CPU timing", status: "unavailable", symbol: symbol, target: target, task_id: None})
+        }
+    } else {
+        &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "the runtime did not publish process CPU timing", status: "unavailable", symbol: symbol, target: target, task_id: None})
+    }
 }
 fn jet_cli_perf_capture_source(path: String, text: String, observations: [JetCLIPerfObservation], target: String) -> JetCLIPerfCapture JetCLIReadError! {
     if observations.len() == 0 -> return Err(jet_cli_read_error("source sampling requires a live runtime snapshot"))
