@@ -2714,9 +2714,18 @@ function generatedCoreEnumRows(source, declarations) {
     "// naming a type is its canonical variant list.",
     "pub CORE_ENUM_ROWS :: [CoreModuleTypeExport]{",
   ];
+  // `core_module_enum_variants` authenticates the exporting module through its
+  // catalog row and reads the leaf's variants here, so every module that
+  // exports one enum leaf must declare the same variants.
+  const seen = new Map();
   for (const module of declarations.modules) {
     for (const type of module.types) {
       if (type.genericArity || !(type.variants && type.variants.length)) continue;
+      const variants = type.variants.join("|");
+      if (seen.has(type.name) && seen.get(type.name) !== variants) {
+        throw new Error(CORE_SOURCE_PATH + ": Core enum leaf " + type.name + " has different variants in " + module.module);
+      }
+      seen.set(type.name, variants);
       lines.push(
         "    CoreModuleTypeExport{name: " + jetStringExpression(type.name) +
         ", kind: CoreLeafKind.Enum{variants: [String]{" +
@@ -2787,6 +2796,12 @@ function rustPayloadType(expression, constants, rel) {
   const text = expression.replace(/\s+/g, "");
   const scalar = { "Type::Int": "Type.Int", "Type::Bool": "Type.Bool", "Type::String": "Type.String", "Type::Char": "Type.Char", "Type::Float": "Type.Float" };
   if (scalar[text]) return scalar[text];
+  if (text === "u8_ty()") {
+    const body = rustFunctionBody(read(CORE_TYPES_RS_PATH), "u8_ty", CORE_TYPES_RS_PATH);
+    const integer = /Type::IntN\s*\{\s*signed:\s*(true|false),\s*bits:\s*(\d+),?\s*\}/.exec(body);
+    if (!integer) throw new Error(rel + ": u8_ty payload factory changed shape");
+    return "Type.IntN{signed: " + integer[1] + ", bits: " + integer[2] + "}";
+  }
   const named = /^Type::Named\((.+)\.to_string\(\)\)$/.exec(text);
   if (named) return "Type.Named{name: " + jetStringExpression(rustSyntaxString(named[1], constants, rel)) + "}";
   const list = /^Type::List\(Box::new\((.+)\)\)$/.exec(text);
@@ -2887,6 +2902,25 @@ function rustTaskFailureVariantFamily(source, constants) {
   return { name: "TaskFailure", rows };
 }
 
+// D-ENCSTREAM-SURFACE1=A: the canonical twelve `DataEvent` variants come from
+// `DATA_EVENT_VARIANTS` in catalog order, each payload from the one
+// `data_event_payload` table every Rust checker and lowerer reads.
+function rustDataEventVariantFamily(source, constants) {
+  const menu = /pub const DATA_EVENT_VARIANTS: \[&str; (\d+)\] = \[([^\]]*)\];/.exec(source);
+  const body = rustFunctionBody(source, "data_event_payload", CORE_TYPES_RS_PATH);
+  if (!menu) throw new Error(CORE_TYPES_RS_PATH + ": DATA_EVENT_VARIANTS changed shape");
+  const names = Array.from(menu[2].matchAll(/"[^"]*"|Syntax::\w+/g), (match) => rustSyntaxString(match[0], constants, CORE_TYPES_RS_PATH));
+  const payloads = new Map();
+  for (const arm of body.matchAll(/((?:(?:"[^"]*"|Syntax::\w+)\s*\|?\s*)+)=> Some\((None|Some\(([\s\S]*?)\))\),/g)) {
+    const payload = arm[2] === "None" ? [] : [rustPayloadType(arm[3], constants, CORE_TYPES_RS_PATH)];
+    for (const name of arm[1].matchAll(/"[^"]*"|Syntax::\w+/g)) payloads.set(rustSyntaxString(name[0], constants, CORE_TYPES_RS_PATH), payload);
+  }
+  if (names.length !== Number(menu[1]) || payloads.size !== names.length || names.some((name) => !payloads.has(name))) {
+    throw new Error(CORE_TYPES_RS_PATH + ": DataEvent payload projection is incomplete");
+  }
+  return { name: "DataEvent", rows: names.map((variant) => ({ variant, payload: payloads.get(variant) })) };
+}
+
 function coreEnumPayloadFamilies(declarations) {
   const constants = rustSyntaxConstants();
   const coreTypes = read(CORE_TYPES_RS_PATH);
@@ -2904,6 +2938,8 @@ function coreEnumPayloadFamilies(declarations) {
   families.push(...rustIOVariantFamilies(coreTypes, constants));
   if (!/core_plugin_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": plugin enum resolver is missing");
   families.push(...rustPluginVariantFamilies(coreTypes, constants));
+  if (!/core_encoding_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": resolve_enum_variants_cloned no longer consults core_encoding_variants");
+  families.push(rustDataEventVariantFamily(coreTypes, constants));
   const declared = new Set();
   for (const module of declarations.modules) {
     for (const type of module.types) {

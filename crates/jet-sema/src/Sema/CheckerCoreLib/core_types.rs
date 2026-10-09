@@ -4393,6 +4393,39 @@ pub(crate) fn core_tls_variants(
     Some(variants)
 }
 
+/// D-ENCSTREAM-SURFACE1=A: the canonical twelve `core.encoding.DataEvent`
+/// variants in catalog and runtime order (`CoreModuleExports`, `jet_std::DataEvent`).
+/// Every checker and lowerer reads this one table and `data_event_payload`.
+pub const DATA_EVENT_VARIANTS: [&str; 12] = [
+    "Null",
+    "Bool",
+    "Int",
+    "Float",
+    "Number",
+    "Text",
+    Syntax::TYPE_BYTES,
+    "ArrayStart",
+    "ArrayEnd",
+    "ObjectStart",
+    "Key",
+    "ObjectEnd",
+];
+
+/// The payload of one `DataEvent` variant: `Some(None)` for a unit variant,
+/// `Some(Some(ty))` for a single payload, `None` for a name that is not a
+/// `DataEvent` variant. `Number` carries the exact lexical number as text.
+pub fn data_event_payload(variant: &str) -> Option<Option<Type>> {
+    match variant {
+        "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd" => Some(None),
+        "Bool" => Some(Some(Type::Bool)),
+        "Int" => Some(Some(Type::Int)),
+        "Float" => Some(Some(Type::Float)),
+        "Number" | "Text" | "Key" => Some(Some(Type::String)),
+        Syntax::TYPE_BYTES => Some(Some(Type::List(Box::new(u8_ty())))),
+        _ => None,
+    }
+}
+
 /// D-ENCSTREAM-SURFACE1=A: closed shared stream enums.
 pub(crate) fn core_encoding_variants(
     enum_name: &str,
@@ -4421,7 +4454,16 @@ pub(crate) fn core_encoding_variants(
             "StaleRevision",
             "InvalidValue",
         ],
-        "DataEvent" => &["Null", "ArrayStart", "ArrayEnd", "ObjectStart", "ObjectEnd"],
+        "DataEvent" => {
+            for name in DATA_EVENT_VARIANTS {
+                let payload = match data_event_payload(name) {
+                    Some(Some(ty)) => VariantPayload::Single(ty, zero),
+                    _ => VariantPayload::Unit,
+                };
+                variants.insert(name.to_string(), (zero, payload));
+            }
+            return Some(variants);
+        }
         "DataFormat" => &["CSV", "JSON", "JSONL", "Parquet", "Arrow"],
         "DataLoaderKind" => &["File", "URL", "Database", "Value"],
         "DataFreshness" => &["Pending", "Fresh", "Stale", "Error", "Offline", "Cancelled"],
@@ -4477,18 +4519,6 @@ pub(crate) fn core_encoding_variants(
     };
     for name in units {
         variants.insert((*name).to_string(), (zero, VariantPayload::Unit));
-    }
-    if enum_name == "DataEvent" {
-        for (name, ty) in [
-            ("Bool", Type::Bool),
-            ("Int", Type::Int),
-            ("Float", Type::Float),
-            ("Text", Type::String),
-            (Syntax::TYPE_BYTES, Type::List(Box::new(u8_ty()))),
-            ("Key", Type::String),
-        ] {
-            variants.insert(name.to_string(), (zero, VariantPayload::Single(ty, zero)));
-        }
     }
     Some(variants)
 }

@@ -976,17 +976,9 @@ pub(crate) fn variant_payload_types(
                 };
             }
             if resolved == "DataEvent" {
-                return match variant {
-                    "Bool" => Ok(vec![Type::Bool]),
-                    "Int" => Ok(vec![Type::Int]),
-                    "Float" => Ok(vec![Type::Float]),
-                    "Text" | "Key" => Ok(vec![Type::String]),
-                    "Bytes" => Ok(vec![Type::List(Box::new(Type::Int))]),
-                    "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd" => {
-                        Ok(Vec::new())
-                    }
-                    _ => Err("unknown data-event enum variant"),
-                };
+                return crate::Sema::data_event_payload(variant)
+                    .map(|payload| payload.into_iter().collect())
+                    .ok_or("unknown data-event enum variant");
             }
             variant_binding_types_for_enum(cx, &resolved, variant)
                 .ok_or("enum variant payload type")

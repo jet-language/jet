@@ -201,6 +201,16 @@ pub fn core_enum_variant_payload(name: String, variant: String) -> [Type]? {
     declared :: core_enum_variants(name) ?? return None
     if declared.contains(variant) -> Val([Type]{}) else -> None
 }
+
+// The variants of the enum `name` that the Core module `module_name` exports:
+// the module's catalog row authenticates the export, and the generator keeps
+// every enum leaf's variant list identical across the modules that export it.
+// `None` when that module does not export `name` or `name` is not an enum.
+pub fn core_module_enum_variants(module_name: String, name: String) -> [String]? {
+    if !core_module_has_type(module_name, name) -> return None
+    if core_enum_payload_variants(name) == .Val(variants) -> return Val(variants)
+    core_enum_variants(name)
+}
 fn core_module_source_declaration_line(source_text: String, module_name: String) -> String? {
     prefix := "module {module_name} "
     source_bytes := source_text.bytes()

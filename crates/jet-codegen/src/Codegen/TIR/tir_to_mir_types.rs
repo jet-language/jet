@@ -2308,22 +2308,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
             "Object",
         ],
     ),
-    (
-        "DataEvent",
-        &[
-            "Null",
-            "ArrayStart",
-            "ArrayEnd",
-            "ObjectStart",
-            "ObjectEnd",
-            "Bool",
-            "Int",
-            "Float",
-            "Text",
-            "Bytes",
-            "Key",
-        ],
-    ),
+    ("DataEvent", &crate::Sema::DATA_EVENT_VARIANTS),
     ("XMLCanonicalMode", &["Inclusive11", "Exclusive10"]),
     ("PluginLimit", &["Fuel", "Memory", "Table", "Time", "Wire"]),
     ("PluginError", &["Guest", "Denied", "Budget", "Defect"]),
@@ -3633,17 +3618,8 @@ fn compiler_owned_type_defs<'a>(
                                 _ => TirVariantPayload::Unit,
                             }
                         } else if *name == "DataEvent" {
-                            match *variant {
-                                "Bool" => TirVariantPayload::Single(Type::Bool),
-                                "Int" => TirVariantPayload::Single(Type::Int),
-                                "Float" => TirVariantPayload::Single(Type::Float),
-                                "Text" | "Key" => TirVariantPayload::Single(Type::String),
-                                "Bytes" => {
-                                    TirVariantPayload::Single(Type::List(Box::new(Type::IntN {
-                                        signed: false,
-                                        bits: 8,
-                                    })))
-                                }
+                            match crate::Sema::data_event_payload(variant) {
+                                Some(Some(ty)) => TirVariantPayload::Single(ty),
                                 _ => TirVariantPayload::Unit,
                             }
                         } else if *name == "DataTree" {
