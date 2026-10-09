@@ -1,9 +1,8 @@
-// Allocation channel of the shared test-fault schedule, not an Alloc effect.
+// Allocation channel of the ONE test-fault schedule, not an Alloc effect.
 // FaultInjection.rs60-72/102-114: observe every scheduled allocation, inject
 // exactly the selected fail_nth, and retain injected until schedule cleanup.
-// The arming edge mirrors FaultInjection.rs170-176 for this one channel. The
-// effect-path scheduler supplies active=false on its own injected iterations.
-// One dynamic TLS key owns [failNth,count,active,injected]; no TCB slot is added.
+// FaultSchedule extends this same TLS owner with effect selectors; both rails
+// share failNth and injected. State56 starts [failNth,count,active,injected].
 fault_allocation_key := I64{0}
 
 fn rt_fault_allocation_drop_address() -> I64 {
@@ -23,7 +22,8 @@ fn rt_fault_allocation_drop_address() -> I64 {
 }
 
 #Export(c) fn jet_rt_fault_allocation_drop(_closure: I64, state: I64) -> I64 {
-    jet_rt_free(state, I64{32}, I64{8})
+    fault_schedule_release_selectors(state)
+    jet_rt_free(state, I64{56}, I64{8})
     I64{0}
 }
 
@@ -36,11 +36,8 @@ fn fault_allocation_state() -> I64 {
 // fallible rail. A clean pass has active=false or fail_nth=0. Machine words
 // carry the unsigned source ordinal bits, including ordinals above isize::MAX.
 #Export(c) fn jet_rt_fault_allocation_arm(fail_nth: I64, active: Bool) {
-    state := fault_allocation_state()
-    if (state == I64{0}) {
-        state = jet_rt_alloc(I64{32}, I64{8})
-        jet_rt_tls_set(fault_allocation_key, state)
-    }
+    state :: fault_schedule_ensure()
+    fault_schedule_release_selectors(state)
     trap_store(state, fail_nth)
     trap_store(state + I64{8}, I64{0})
     trap_store(state + I64{16}, if active -> I64{1} else -> I64{0})

@@ -1,0 +1,24 @@
+// Real-runtime caller passes argc/argv/envp with JET_LEAF_EMPTY= and
+// JET_LEAF_INVALID=<one byte FF>; JET_LEAF_MISSING must be absent.
+#Export(c) fn jet_rt_environment_leaves_fixture(argc: I64, argv: I64, envp: I64) -> I64 {
+    jet_rt_host_arguments(argc, argv, envp)
+    empty :: rt_static_text("JET_LEAF_EMPTY")
+    invalid :: rt_static_text("JET_LEAF_INVALID")
+    missing :: rt_static_text("JET_LEAF_MISSING")
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    rt_text_store(slot, I64{723})
+    if (jet_std_env_get(missing, slot) != I64{0} || rt_text_word(slot) != I64{723} || jet_rt_env_present(missing)) -> return I64{1}
+    if (jet_std_env_get(invalid, slot) != I64{0} || rt_text_word(slot) != I64{723} || !jet_rt_env_present(invalid)) -> return I64{2}
+    if (jet_std_env_get(empty, slot) != I64{1} || !jet_rt_env_present(empty)) -> return I64{3}
+    value :: rt_text_word(slot)
+    if (value == I64{0} || rt_text_len(value) != I64{0}) -> return I64{4}
+    jet_rt_string_drop(value)
+    if (jet_rt_logical_env_set(missing, rt_static_text("overlay")) != I64{0}) -> return I64{5}
+    if (jet_std_env_get(missing, slot) != I64{1} || jet_rt_env_present(missing)) -> return I64{6}
+    value :: rt_text_word(slot)
+    if !jet_rt_string_eq(value, rt_static_text("overlay")) -> return I64{7}
+    jet_rt_string_drop(value)
+    _ := jet_rt_logical_env_unset(missing)
+    jet_rt_free(slot, I64{8}, I64{8})
+    I64{0}
+}

@@ -1,0 +1,14 @@
+// CAbiRoutes.rs:20088-20092 reads the mutable logical environment, decoding
+// UTF-8. None leaves the caller's output untouched; empty is an owned E4 text.
+#Export(c) fn jet_std_env_get(key: I64, some: I64) -> I64 {
+    value :: jet_rt_logical_env_get(key)
+    if (value == I64{0}) -> return I64{0}
+    rt_text_store(some, value)
+    I64{1}
+}
+
+// Core/CAbi.rs:1264-1265 uses std::env::var_os, NOT the logical overlay.
+// Preserve raw host presence for non-Unicode and empty values without copying.
+#Export(c) fn jet_rt_env_present(key: I64) -> Bool {
+    host_environment_value(key) != I64{0}
+}
