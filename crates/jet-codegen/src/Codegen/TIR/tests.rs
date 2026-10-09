@@ -4789,6 +4789,34 @@ fn run() {
     });
 }
 
+#[test]
+fn optional_never_return_keeps_optional_match_subject() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = r#"
+fn first_even(xs: [Int]) -> Int? Never! {
+    loop x in xs {
+        if x % 2 == 0 -> return Val(x)
+    }
+    None
+}
+fn run() {
+    if first_even([Int]{7, 8}) == {
+        Val(found) -> print("found {found}")
+        None -> print("none")
+    }
+}
+"#;
+        let (mir, _) = emitted_rust(source);
+        let function = mir.functions.iter().find(|function| function.name == "first_even")
+            .expect("first_even MIR function");
+        assert!(matches!(
+            &function.return_type.kind,
+            jet_foundation::MIR::MirTypeKind::Option(inner)
+                if matches!(inner.kind, jet_foundation::MIR::MirTypeKind::Int)
+        ));
+    });
+}
+
 /// I3: all/race/any add a TaskFailure rail around the checked worker element,
 /// rather than guessing a flattening route from the element's Result shape.
 #[test]

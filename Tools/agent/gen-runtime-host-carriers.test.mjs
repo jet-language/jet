@@ -76,3 +76,14 @@ test('generated Jet helpers have one declaration per function', () => fixture((t
   assert.equal(new Set(names).size, names.length);
   assert.equal(names.filter(name => name === 'host_arguments_refused').length, 1);
 }));
+
+test('generated Rust retains the TaskFailure16 carrier and paired ownership helpers', () => fixture((tree, run) => {
+  success(run());
+  const source = readFileSync(join(tree, outputs[1]), 'utf8');
+  assert.match(source, /struct JetCTaskFailure \{\s*pub\(crate\) tag: i64,\s*pub\(crate\) reason: JetCString,\s*\}/);
+  assert.match(source, /jet_rt_alloc\(16, 8\)/);
+  assert.match(source, /jet_rt_free\(pointer\.cast\(\), 16, 8\)/);
+  for (const helper of ['failure_handle', 'failure_view', 'failure_drop', 'failure_take']) {
+    assert.equal([...source.matchAll(new RegExp(`fn ${helper}\\(`, 'g'))].length, 1);
+  }
+}));

@@ -569,10 +569,6 @@ mod jet_c_abi {
         if boxed.is_null() { Err(super::JetAbsent) } else { Ok(view(unsafe { *boxed }).to_owned()) }
     }
 
-    fn option_int(boxed: *const i64) -> super::JetOutcome<i64, super::JetAbsent> {
-        // SAFETY: a non-null Option box holds an exact-Int word first.
-        if boxed.is_null() { Err(super::JetAbsent) } else { Ok(native(unsafe { *boxed })) }
-    }
 
     fn some_text(some: *mut JetCString, value: &super::JetOutcome<String, super::JetAbsent>) -> i64 {
         match value {
@@ -638,80 +634,26 @@ mod jet_c_abi {
             if text.is_null() { std::ptr::null_mut() } else { text_handle(view(text)) }
         }
 
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_IOContext(operation: i64, resource: *const JetCString, os_code: *const i64, cause: *const JetCString) -> *mut crate::jet_std::IOContext {
-        guard(|| {
-            record(crate::jet_std::IOContext {
-                operation: io_operation(operation),
-                resource: option_text(resource),
-                os_code: option_int(os_code),
-                cause: option_text(cause),
-            })
-        })
-    }
+        fn option_clone(boxed: *const JetCString) -> JetCString {
+            // SAFETY: a present option lends its initialized text word.
+            if boxed.is_null() { std::ptr::null_mut() } else { clone_text(unsafe { *boxed }) }
+        }
 
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_IOContext_operation(context: *mut crate::jet_std::IOContext) -> i64 {
-        // SAFETY: `context` is a live handle the caller lends for this call.
-        guard(|| unsafe { &*context }.operation as i64)
-    }
+        fn text_out(text: JetCString, some: *mut JetCString) -> i64 {
+            if text.is_null() { return 0; }
+            unsafe { some.write(clone_text(text)) };
+            1
+        }
 
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_IOContext_resource(context: *mut crate::jet_std::IOContext, some: *mut JetCString) -> i64 {
-        // SAFETY: `context` is a live handle the caller lends for this call.
-        guard(|| some_text(some, &unsafe { &*context }.resource))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_IOContext_os_code(context: *mut crate::jet_std::IOContext, some: *mut i64) -> i64 {
-        // SAFETY: `context` is a live handle the caller lends; `some` is its zeroed out slot.
-        guard(|| match unsafe { &*context }.os_code {
-            Ok(code) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(code)) }; 1 }
-            Err(_) => 0,
-        })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_IOContext_cause(context: *mut crate::jet_std::IOContext, some: *mut JetCString) -> i64 {
-        // SAFETY: `context` is a live handle the caller lends for this call.
-        guard(|| some_text(some, &unsafe { &*context }.cause))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_tag_IOError(error: *mut crate::jet_std::IOError) -> i64 {
-        use crate::jet_std::IOError::*;
-        // SAFETY: `error` is a live handle the caller lends for this call.
-        guard(|| match unsafe { &*error } {
-            InvalidInput(_) => 0,
-            NotFound(_) => 1,
-            PermissionDenied(_) => 2,
-            TimedOut(_) => 3,
-            Cancelled(_) => 4,
-            Closed(_) => 5,
-            Protocol(_) => 6,
-            Other(_) => 7,
-            ResourceLimit(_) => 8,
-            AlreadyExists(_) => 9,
-            Unsupported(_) => 10,
-        })
-    }
-
-    // The IOContext payload of each context variant: its getter (a clone)
-    // and its constructor (taking the context handle).
-    macro_rules! io_error_context_variants {
-        ($($variant:ident: $get:ident, $new:ident;)*) => {$(
-            #[no_mangle]
-            pub extern "C" fn $get(error: *mut crate::jet_std::IOError) -> *mut crate::jet_std::IOContext {
-                // SAFETY: `error` is a live handle the caller lends for this call.
-                guard(|| match unsafe { &*error } {
-                    crate::jet_std::IOError::$variant(context) => record(context.clone()),
-                    _ => record_index_stop(),
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_new_IOContext(operation: i64, resource: *const JetCString, os_code: *const i64, cause: *const JetCString) -> *mut JetCIOContext {
+            guard(|| {
+                if !(0..8).contains(&operation) { record_index_stop(); }
+                carrier(JetCIOContext {
+                    operation, resource: option_clone(resource),
+                    has_os_code: i64::from(!os_code.is_null()),
+                    os_code: if os_code.is_null() { 0 } else { native(unsafe { *os_code }) },
+                    cause: option_clone(cause),
                 })
             })
         }
@@ -788,6 +730,8 @@ mod jet_c_abi {
             5: jet_rt_record_get_IOError_Closed, jet_rt_record_new_IOError_Closed;
             6: jet_rt_record_get_IOError_Protocol, jet_rt_record_new_IOError_Protocol;
             7: jet_rt_record_get_IOError_Other, jet_rt_record_new_IOError_Other;
+            9: jet_rt_record_get_IOError_AlreadyExists, jet_rt_record_new_IOError_AlreadyExists;
+            10: jet_rt_record_get_IOError_Unsupported, jet_rt_record_new_IOError_Unsupported;
         }
 
         #[no_mangle]
@@ -840,72 +784,6 @@ mod jet_c_abi {
         }
     }
 
-    #[cfg(not(jet_native_pack))]
-    io_error_context_variants! {
-        InvalidInput: jet_rt_record_get_IOError_InvalidInput, jet_rt_record_new_IOError_InvalidInput;
-        NotFound: jet_rt_record_get_IOError_NotFound, jet_rt_record_new_IOError_NotFound;
-        PermissionDenied: jet_rt_record_get_IOError_PermissionDenied, jet_rt_record_new_IOError_PermissionDenied;
-        TimedOut: jet_rt_record_get_IOError_TimedOut, jet_rt_record_new_IOError_TimedOut;
-        Cancelled: jet_rt_record_get_IOError_Cancelled, jet_rt_record_new_IOError_Cancelled;
-        Closed: jet_rt_record_get_IOError_Closed, jet_rt_record_new_IOError_Closed;
-        Protocol: jet_rt_record_get_IOError_Protocol, jet_rt_record_new_IOError_Protocol;
-        Other: jet_rt_record_get_IOError_Other, jet_rt_record_new_IOError_Other;
-        AlreadyExists: jet_rt_record_get_IOError_AlreadyExists, jet_rt_record_new_IOError_AlreadyExists;
-        Unsupported: jet_rt_record_get_IOError_Unsupported, jet_rt_record_new_IOError_Unsupported;
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_IOError_ResourceLimit(error: *mut crate::jet_std::IOError) -> i64 {
-        // SAFETY: `error` is a live handle the caller lends for this call.
-        guard(|| match unsafe { &*error } {
-            crate::jet_std::IOError::ResourceLimit(limit) => *limit as i64,
-            _ => record_index_stop(),
-        })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_IOError_ResourceLimit(limit: i64) -> *mut crate::jet_std::IOError {
-        guard(|| record(crate::jet_std::IOError::ResourceLimit(resource_limit(limit))))
-    }
-
-    // TaskFailure through the canonical task-failure ABI (TaskGroup.rs
-    // jet_task_failure_abi: Cancelled 0, DeadlineBlown 1, Panicked(reason) 2).
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_tag_JetTaskFailure(failure: *mut super::JetTaskFailure) -> i64 {
-        // SAFETY: `failure` is a live handle the caller lends for this call.
-        guard(|| crate::jet_std::jet_task_failure_abi(unsafe { &*failure }.clone()).0)
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetTaskFailure_Panicked(failure: *mut super::JetTaskFailure) -> JetCString {
-        // SAFETY: `failure` is a live handle the caller lends for this call.
-        guard(|| match crate::jet_std::jet_task_failure_abi(unsafe { &*failure }.clone()) {
-            (2, Some(reason)) => handle(reason),
-            _ => record_index_stop(),
-        })
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_JetTaskFailure_Cancelled() -> *mut super::JetTaskFailure {
-        guard(|| record(crate::jet_std::jet_task_failure_from_code("TASK_CANCELLED", String::new())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_JetTaskFailure_DeadlineBlown() -> *mut super::JetTaskFailure {
-        guard(|| record(crate::jet_std::jet_task_failure_from_code("E3003", String::new())))
-    }
-
-    #[cfg(not(jet_native_pack))]
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_JetTaskFailure_Panicked(reason: JetCString) -> *mut super::JetTaskFailure {
-        guard(|| record(super::JetTaskFailure::Panicked(view(reason).to_owned())))
-    }
 
     // One decimal digit needs at most one bit, so this stack bound covers the
     // complete usize range on every target without a heap-backed formatter.

@@ -587,6 +587,17 @@ gate/fence state in caller-owned frame storage. Normal and stopped cleanup
 edges restore that state exactly once, including nested policy scopes; file
 and reason strings remain borrowed module literals at the ABI boundary. The
 temporary Rust sentry marshal seam retires with the Jet sentry/TLS layer.
+
+The seed `IOContext`, `IOError`, and `TaskFailure` record adapters use the same
+reviewed C headers as their native records, not Rust `Box` or enum layouts:
+`IOContext` is 40 bytes and `TaskFailure` is 16 bytes (`tag`, owned nullable
+reason). Their generator and Rust projection retain the paired allocation,
+borrow, and release helpers.
+
+A `T? Never!` call has no outer failure alternative. Outcome matching consumes
+the checked empty-error carrier once and matches the optional success value;
+it must not treat that carrier as a fallible subject for `Val`/`None` patterns.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

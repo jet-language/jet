@@ -420,6 +420,23 @@ pub(crate) fn lower_fallible_match<'a>(
         env.fallback_subject = fallback_subject;
         subject_t
     };
+    // A Never! call has no failure alternative. Preserve an optional success
+    // value for its patterns, not the checked outer Result<T?, Never> carrier.
+    if let Some(success) = super::super::mir::never_carrier_success(&subject_t.ty).cloned() {
+        let (line, column) = cx.src_line_col(subject.span().start);
+        subject_t = TExpr {
+            ty: success,
+            kind: TExprKind::Try {
+                inner: Box::new(subject_t),
+                note: None,
+                convert: crate::Codegen::TIR::TTryConvert::Never,
+                file: crate::Codegen::escape_rust_str(&cx.file),
+                line,
+                column,
+                fn_name: crate::Codegen::escape_rust_str(&env.fn_name),
+            },
+        };
+    }
     let subject_ty = match subject_t.ty.without_user_tags() {
         Type::Option(_) | Type::Result { .. } => subject_t.ty.clone(),
         _ => {
