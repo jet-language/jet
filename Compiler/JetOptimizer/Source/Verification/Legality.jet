@@ -719,7 +719,7 @@ fn mir_pass_validate_function_legality(
             if !mir_runtime_owned_ownership(fact.ownership) -> return Val("SSA-bound local does not name a physical owner")
             if !mir_type_same_checked_type(local.ty, fact.ty) || local.ownership.mode != fact.ownership.mode || local.ownership.drop != fact.ownership.drop -> return Val("SSA-bound local changes its definition's type or ownership")
             root :: definitions.places.get(local.place.value) ?? return Val("SSA-bound local has no root place")
-            if function.places[root].base != .Local(local.id) || function.places[root].projections.len() != 0 -> return Val("SSA-bound local does not name its whole local cell")
+            if function.places[root].base != (.Local{local: local.id}) || function.places[root].projections.len() != 0 -> return Val("SSA-bound local does not name its whole local cell")
             if local.uninit || local.is_comptime || local.arena_view || local.string_view -> return Val("SSA-bound owner uses another storage mechanism")
             _ := &bound_values.add(value.value, true)
             _ := &bound_locals.add(local.id.value, value)

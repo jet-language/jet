@@ -563,6 +563,8 @@ D-ONELINE-BODY1=B)*: curly braces `{ }` give every multi-statement or scoped
 effect `if`, `else`, and `loop` body a visible parse boundary. A legal one-line
 effect body uses `->` followed by one statement. Arrow arm bodies remain
 expressions. Braces do not determine whether a construct returns a value.
+A final `else` after a braced statement `if` also has a braced body.
+An `else if` link can use either body shape; expression arm bodies are separate.
 
 **S19 — Loops** *(D-LOOP-HEADER2=A, D-LOOP-ADVANCE2=A,
 D-LOOPEVAL1=A, D-COMPREHENSION1=A, D-LOOP-COMMA1=A, amended by
