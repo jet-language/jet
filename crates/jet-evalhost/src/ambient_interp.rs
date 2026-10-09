@@ -18,7 +18,7 @@ use jet_codegen::Comptime::{
 use jet_codegen::embedded_hardware::{
     JetHardwareHost, JetHardwareReplayHost as SharedHardwareReplayHost,
 };
-use jet_foundation::AST::{CtValue, Type};
+use jet_foundation::AST::{CtFloat, CtValue, Type};
 use jet_foundation::Diagnostics::{Diagnostic, Span};
 use jet_foundation::MIR::{
     MirConstKey, MirCoreClosureKind, MirForeign, MirPreludeCallId, MirRuntimeValue, MirSiteId,
@@ -1998,6 +1998,7 @@ fn sys_getpid_ambient_core_call(
 /// (`CoreHost::jit_env_*`, the host copy of the Prelude `EnvInit` overlay), so
 /// `set`/`unset`/`vars`/`get` agree with each other and with spawned children,
 /// and `executable` is the Prelude `jet_std_os_executable` kernel.
+/// Host load-average samples retain their original 64-bit Float payloads.
 fn sys_env_ambient_core_call(
     module: &str,
     method: &str,
@@ -2076,7 +2077,7 @@ fn sys_env_ambient_core_call(
         ("__loadavg", []) => {
             let (available, count, first, second, third) = crate::CoreHost::os_rt::jet_sys_loadavg_raw();
             Some(Ok(sys_tuple(&["available", "count", "first", "second", "third"], vec![
-                CtValue::Bool(available), sys_exact(count), CtValue::Float(first), CtValue::Float(second), CtValue::Float(third),
+                CtValue::Bool(available), sys_exact(count), CtValue::Float(CtFloat::f64(first)), CtValue::Float(CtFloat::f64(second)), CtValue::Float(CtFloat::f64(third)),
             ])))
         }
         ("__times", []) => {
@@ -2376,4 +2377,36 @@ fn dispatch_mir_extern(
         index += 1;
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loadavg_ambient_preserves_named_tuple_and_float64_carriers() {
+        let row = sys_env_ambient_core_call(
+            "core.sys",
+            "__loadavg",
+            Vec::new(),
+            Span::new(0, 0),
+            None,
+            None,
+        )
+        .expect("load-average producer is registered")
+        .expect("raw OS load-average sample is marshalled");
+        let CtValue::Struct { type_name, fields } = row else {
+            panic!("load-average producer must return its named tuple");
+        };
+        assert_eq!(type_name, "(available,count,first,second,third)");
+        assert_eq!(fields.len(), 5);
+        for ((name, _), expected) in fields.iter().zip(["available", "count", "first", "second", "third"]) {
+            assert_eq!(name, expected);
+        }
+        assert!(matches!(&fields[0].1, CtValue::Bool(_)));
+        assert!(matches!(&fields[1].1, CtValue::Int(_)));
+        for (_, value) in &fields[2..] {
+            assert!(matches!(value, CtValue::Float(CtFloat::F64(_))));
+        }
+    }
 }
