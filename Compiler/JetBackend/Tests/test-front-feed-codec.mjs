@@ -83,6 +83,14 @@ for (const [raw, bound, unbounded] of [['None', null, false], ['Some(None)', nul
 }
 const local = node(named('MIRLocal')); set(local, 'comptime', { k: 'bool', v: true });
 assert.equal(field(new Converter(schema).convert(local, named('MIRLocal'), 'test'), 'MIRLocal', 'is_comptime'), true);
+for (const [raw, expected] of [['None', null], ['Some(MirValueId(23))', '23']]) {
+  const bound = node(named('MIRLocal')); set(bound, 'ssa_value', parseRustDebug(raw));
+  const value = new Converter(schema).convert(bound, named('MIRLocal'), 'test');
+  assert.equal(field(value, 'MIRLocal', 'ssa_value').opt?.fields[0].int ?? null, expected);
+}
+const missingSsa = node(named('MIRLocal'));
+missingSsa.fields = missingSsa.fields.filter(([name]) => name !== 'ssa_value');
+assert.throws(() => new Converter(schema).convert(missingSsa, named('MIRLocal'), 'test'), /MIRLocal\.ssa_value: missing checked Rust field/);
 const interpolation = convert('Value(MirValueId(23))', 'MIRStringPartKind');
 assert.equal(variant(interpolation, 'MIRStringPartKind'), 'Interpolation');
 assert.equal(variant(interpolation.fields[1], 'MIRStringFormat'), 'Display');
@@ -130,6 +138,18 @@ assert.notDeepEqual(nativeTokens, tokens);
 set(program, 'native_pack', parseRustDebug('false'));
 assert.throws(() => decodeStream(tokens.slice(0, -1).join('\n'), schema), /truncated/);
 assert.throws(() => decodeStream(tokens.concat('trailing').join('\n'), schema), /trailing/);
+for (const [raw, expected] of [['None', null], ['Some(MirValueId(23))', { value: '23' }]]) {
+  const bound = node(named('MIRLocal')); set(bound, 'ssa_value', parseRustDebug(raw));
+  const fn = node(named('MIRFunction')); set(fn, 'locals', { k: 'list', items: [bound] });
+  const observed = node(named('MIRProgram'));
+  set(observed, 'schema_version', { k: 'num', v: '7' });
+  set(observed, 'functions', { k: 'list', items: [fn] });
+  const stream = ['0'];
+  encode(new Converter(schema).convert(observed, named('MIRProgram'), 'test'), named('MIRProgram'), schema, stream);
+  const decoded = decodeStream(stream.join('\n'), schema).program;
+  assert.equal(decoded.schema_version, '7');
+  assert.deepEqual(decoded.functions[0].locals[0].ssa_value, expected);
+}
 const writer = jetWriter(schema);
 assert.match(writer, /fn mirw_mir_program\(/);
 assert.match(writer, /mirw_bool\(v\.native_pack, &out\)/);

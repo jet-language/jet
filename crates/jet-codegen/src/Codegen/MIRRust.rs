@@ -1767,6 +1767,8 @@ struct FunctionIndex {
     definitions: HashMap<MirValueId, (usize, usize)>,
     /// Position of each value's `function.values` row.
     values: HashMap<MirValueId, usize>,
+    /// Locals that name the existing SSA value slot, without separate storage.
+    bound_local_values: HashMap<MirLocalId, MirValueId>,
     /// Every use of each value in body order: (block position, instruction
     /// position), or `None` for the block's terminator. One row per user.
     uses: HashMap<MirValueId, Vec<(usize, Option<usize>)>>,
@@ -1861,6 +1863,16 @@ impl FunctionIndex {
         let mut uses: HashMap<MirValueId, Vec<(usize, Option<usize>)>> = HashMap::new();
         let mut test_members = HashMap::new();
         let mut capture_values = HashMap::new();
+        let bound_local_values: HashMap<MirLocalId, MirValueId> = function.locals.iter()
+            .filter_map(|local| local.ssa_value.map(|value| (local.id, value))).collect();
+        let bound_place_values: HashMap<MirPlaceId, MirValueId> = if bound_local_values.is_empty() {
+            HashMap::new()
+        } else {
+            function.places.iter().filter_map(|place| match place.base {
+                MirPlaceBase::Local(local) => bound_local_values.get(&local).map(|value| (place.id, *value)),
+                _ => None,
+            }).collect()
+        };
         let mut add_use = |value: MirValueId, at: (usize, Option<usize>)| {
             let rows = uses.entry(value).or_default();
             if rows.last() != Some(&at) {
@@ -1894,6 +1906,11 @@ impl FunctionIndex {
                 }
                 for value in instruction.operation.value_uses() {
                     add_use(value, (block_position, Some(position)));
+                }
+                if let MirOperation::ReadPlace(place) | MirOperation::MovePlace { place } = &instruction.operation {
+                    if let Some(value) = bound_place_values.get(place) {
+                        add_use(*value, (block_position, Some(position)));
+                    }
                 }
             }
             for value in block.terminator.value_uses() {
@@ -2065,6 +2082,7 @@ impl FunctionIndex {
         Self {
             definitions,
             values,
+            bound_local_values,
             uses,
             test_members,
             scopes,
@@ -23894,6 +23912,12 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn partial_move_root(&self, function: &MirFunction, base: &MirPlaceBase) -> Option<&PartialMoveNode> {
+        let bound_base = match base {
+            MirPlaceBase::Local(local) => self.function_index(function).bound_local_values
+                .get(local).map(|value| MirPlaceBase::Temporary(*value)),
+            _ => None,
+        };
+        let base = bound_base.as_ref().unwrap_or(base);
         self.partial_moves.get(&function.id)?.iter()
             .find(|root| &root.base == base).map(|root| &root.node)
     }

@@ -121,6 +121,7 @@ use jet_foundation.[
     MIR_SCHEMA_VERSION,
     Span,
     mir_copy_ownership,
+    mir_copy_value_ownership,
     mir_empty_optimization_facts,
     mir_field_id,
     mir_function_id,
@@ -204,8 +205,24 @@ fn fx_value(b: &FxBuilder, ty: MIRType, ownership: MIROwnership, operation: MIRO
     id
 }
 
+// Same scalar ownership pattern as Source/Rust TIR: exact Int is semantic Copy
+// but its carrier owns a reference; transparent canonical wrappers preserve it.
+fn fx_copy_ownership(ty: MIRType) -> MIROwnership Never! {
+    if ty.kind == {
+        .Int -> mir_copy_value_ownership()
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> fx_copy_ownership(inner)
+        else -> mir_copy_ownership()
+    }
+}
+
+fn fx_physical_ownership(ty: MIRType, ownership: MIROwnership) -> MIROwnership Never! {
+    physical := ownership
+    if ownership.mode == MIROwnershipMode.Copy -> physical.drop = fx_copy_ownership(ty).drop
+    physical
+}
+
 fn fx_copy(b: &FxBuilder, ty: MIRType, operation: MIROperation) -> MIRValueID Never! {
-    fx_value(&b, ty, mir_copy_ownership(), operation)
+    fx_value(&b, ty, fx_copy_ownership(ty), operation)
 }
 
 fn fx_owned(b: &FxBuilder, ty: MIRType, operation: MIROperation) -> MIRValueID Never! {
@@ -243,8 +260,9 @@ fn fx_field_place(b: &FxBuilder, root: MIRPlaceID, field: String, ty: MIRType) -
 
 fn fx_param(b: &FxBuilder, name: String, ty: MIRType, ownership: MIROwnership) -> MIRValueID Never! {
     index :: b.params.len()
-    &b.params.push(MIRParam{index: index, name: name, span: fx_span(), ty: ty, access: MIRAccess.Read, ownership: ownership, public_label: name, variadic: false, default_present: false})
-    fx_value(&b, ty, ownership, MIROperation.Parameter{index: index, name: name})
+    physical :: fx_physical_ownership(ty, ownership)
+    &b.params.push(MIRParam{index: index, name: name, span: fx_span(), ty: ty, access: MIRAccess.Read, ownership: physical, public_label: name, variadic: false, default_present: false})
+    fx_value(&b, ty, physical, MIROperation.Parameter{index: index, name: name})
 }
 
 fn fx_arg(value: MIRValueID, access: MIRAccess) -> MIRCallArg Never! {
@@ -935,6 +953,13 @@ fn run() {
     if !fx_report("tuple-members", fx_tuple_members()) -> clean = false
     if !fx_report("struct-literal", fx_struct_literal()) -> clean = false
     if !fx_report("values-inline", fx_values_inline()) -> clean = false
+    if !fx_report("dropless-inline-snapshots", fx_dropless_inline_snapshots()) -> clean = false
+    if !fx_ssa_storage_checks() {
+        print("issue ssa-storage: owning local and original SSA do not share one slot")
+        clean = false
+    }
+    if !fx_report("ssa-storage-temporary-first", fx_ssa_bound_storage(true)) -> clean = false
+    if !fx_report("ssa-storage-local-first", fx_ssa_bound_storage(false)) -> clean = false
     if !fx_report("values-loop", fx_values_loop()) -> clean = false
     if !fx_report("values-phi", fx_values_phi()) -> clean = false
     if !fx_report("values-payload", fx_values_payload()) -> clean = false

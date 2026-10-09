@@ -299,8 +299,8 @@ fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     if value.data == .Val(data) {
         owned := false
         if instruction.result == .Val(result) -> owned = lower_value_owned(c, result)
-        source :: if owned -> (if repr == .Word -> lower_word(&f) else -> lower_pointer(&f)) else -> dst
-        if repr == .Handle(_, _) || (repr == .Word && lower_is_exact_int(definition.ty)) {
+        source :: if owned -> (if repr == .ExactInt || repr == .Word -> lower_word(&f) else -> lower_pointer(&f)) else -> dst
+        if repr == .Handle(_, _) || repr == .ExactInt {
             // Runtime-owned constants point at the cell filled by their fixup.
             cell :: lower_pointer(&f)
             lower_emit(&f, LIRInst.DataAddress{dst: cell, data: data})
@@ -310,7 +310,7 @@ fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         }
         if owned {
             if repr == {
-                .Word -> lower_call_runtime(&m, &f, "jet_rt_int_clone", [LIRValueID]{source}, Val(dst))
+                .ExactInt -> lower_call_runtime(&m, &f, "jet_rt_int_clone", [LIRValueID]{source}, Val(dst))
                 .Handle(_, clone) -> lower_call_runtime(&m, &f, clone, [LIRValueID]{source}, Val(dst))
                 .Boxed(ty) -> lower_call_clone_glue(&m, &f, ty, source, dst)
                 .Inline(aggregate) -> {

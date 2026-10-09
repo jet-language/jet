@@ -103,6 +103,13 @@ fn x64_memory_function_image(program: LIRModule, entry: LIRFunctionID, finalizer
     entry_at := -1
     loop (index, function) in compiled.functions { if function.id == entry -> entry_at = linked.offsets[index] }
     if entry_at < 0 -> return x64_memory_image_failure([String]{"entry function {entry.value} was not compiled"})
+    finalizer_at := Int?{None}
+    if finalizer == .Val(id) {
+        loop (index, function) in compiled.functions {
+            if function.id == id -> finalizer_at = Val(linked.offsets[index])
+        }
+        if finalizer_at == None -> return x64_memory_image_failure([String]{"finalizer function {id.value} was not compiled"})
+    }
     slots := [Int]{}
     loop at in linked.runtime_offsets -> &slots.push(at + X64_IMPORT_SLOT_AT)
     finalizer_at := Int?{None}

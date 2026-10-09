@@ -122,6 +122,9 @@ fn lower_convert_numeric(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     to_float :: destination == .Float
     from_char :: source == .Char
     to_char :: destination == .Char
+    // Numeric casts inspect their input; an exact identity cast still returns
+    // an independent owner, unlike a transparent carrier transfer.
+    if from_exact && to_exact -> return lower_copy(p, c, &m, &f, instruction, value)
     if source != .Other && source == destination -> return lower_forward(c, &m, &f, instruction, value)
     // MIRRust.rs NumericCast is Rust `as`: F32 -> Float widens exactly; Float
     // and a narrow or I64 word -> F32 round to nearest (SSE's default mode).

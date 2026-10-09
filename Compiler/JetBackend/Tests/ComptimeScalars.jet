@@ -1,6 +1,7 @@
 // Detached compiler values round-trip through native argument/result carriers.
 // With a compiled runtime library argument, String and exact-Int use that same
 // library's constructor/projection exports, including UTF-8 and embedded NUL.
+use core.math as math
 use core.process as process
 use jet_foundation.[MIRTypeKind, TComptimeValue, mir_type_from_kind]
 use jet_backend.[x64_comptime_encode_scalar, x64_comptime_decode_scalar, x64_comptime_drop_scalar, x64_comptime_scalar_supported, x64_runtime_open]
@@ -37,6 +38,7 @@ fn ci_comptime_scalars() {
     ci_scalar(MIRTypeKind.IntN{signed: true, bits: 64}, TComptimeValue.Int{value: -9223372036854775808}, lir_layout_word(), runtime)
     ci_scalar(MIRTypeKind.IntN{signed: false, bits: 64}, TComptimeValue.BigInt{decimal: "18446744073709551615"}, lir_layout_word(), runtime)
     ci_scalar(MIRTypeKind.Bool, TComptimeValue.Bool{value: true}, lir_layout_bool(), runtime)
+    ci_scalar(MIRTypeKind.Float, TComptimeValue.Float{value: math.from_bits(9221120237041090561), bits: 64}, lir_layout_float(), runtime)
     ci_scalar(MIRTypeKind.Char, TComptimeValue.Char{value: 128512}, lir_layout_word(), runtime)
     ci_scalar(MIRTypeKind.Float, TComptimeValue.Float{value: -0.0, bits: 64}, lir_layout_float(), runtime)
     ci_require(!x64_comptime_scalar_supported(mir_type_from_kind(MIRTypeKind.Float32)), "Float32 requires native backend coverage")

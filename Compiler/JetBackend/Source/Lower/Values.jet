@@ -519,7 +519,7 @@ fn lower_needs_drop(p: MIRProgram, m: LowerModule, ty: MIRType) -> Bool Never! {
 fn lower_needs_drop_index(p: MIRProgram, close_methods: [U64:[LowerCloseImpl]], ty: MIRType) -> Bool Never! {
     if lower_close_method(p, close_methods, ty) != None -> return true
     if lower_repr(p, ty) == {
-        .Handle(_, _) -> true
+        .ExactInt | .Handle(_, _) -> true
         .Boxed(_) -> true
         .Inline(aggregate) -> {
             // A List or Map always owns its buffer.
