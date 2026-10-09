@@ -1035,7 +1035,7 @@ mod parsed_core_record_tests {
             core_identifier_demand: crate::Lexer::core_identifier_demand(&tokens),
             alias: alias.to_string(), imports: program.imports, items: program.items,
             script_body: program.script_body, block_spans: program.block_spans,
-            web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file,
+            web_target_ceiling: program.web_target_ceiling,
             no_prelude: program.no_prelude, default_target: program.default_target,
             html_path: program.html_path, policy_declarations: program.policy_declarations,
             user_policy_declarations: program.user_policy_declarations, rule_facts: program.rule_facts,

@@ -10,7 +10,7 @@ use jet_foundation::MIR::{
     mir_view_copy_kind, MirAccess, MirArtifactKind, MirArtifactPlan, MirArtifactTarget, MirBasicBlock, MirBinaryDispatch,
     MirBinaryOp, MirBinaryPatternPart, MirCallee, MirCaptureOperand, MirConstant, MirConstKey,
     MirConstReport, MirCoreClosureKind, MirCliDefault, MirCliEntry, MirCliInputShape, MirEntrySpec, MirFunction, MirFunctionForm, MirFunctionKind, MirGcEditKind,
-    MirConversion, MirJob, MirLayoutCompareOp, MirOperation, MirPlaceBase, MirPreludeAbi, MirPreludeCallId,
+    MirConversion, MirIndexKind, MirJob, MirLayoutCompareOp, MirOperation, MirPlaceBase, MirPreludeAbi, MirPreludeCallId,
     MirPreludeFamily, MirProgram, MirProjection, MirRequireKind, MirSemanticOp, MirSelectKind,
     MirScopeKind, MirStringPart, MirSymbol, MirTaskGroupKind, MirTerminator, MirTextHoleKind, MirTextPatternPart,
     MirTraitMethodId, MirTraitRef, MirType, MirTypeDef, MirTypeDefKind, MirTypeKind, MirUnaryOp,

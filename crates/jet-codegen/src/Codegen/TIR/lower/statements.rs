@@ -80,10 +80,6 @@ impl<F: FnMut(&TExpr) -> bool> TirExprWalk<'_, F> {
                 super::super::TStrPart::Lit(_) => false,
             }),
             TExprKind::HostCall(host) => match host.as_ref() {
-                super::super::THostCall::Helper { args, .. } => args.iter().any(|arg| match arg {
-                    super::super::THostArg::Expr(value) | super::super::THostArg::Borrow(value) => self.expr(value),
-                    super::super::THostArg::Lambda(_) => false,
-                }),
                 super::super::THostCall::Method { recv, args, .. } => {
                     self.expr(recv) || args.iter().any(|arg| self.expr(arg))
                 }
@@ -102,10 +98,6 @@ impl<F: FnMut(&TExpr) -> bool> TirExprWalk<'_, F> {
                     self.expr(edit) || index_temp.as_ref().is_some_and(|(_, index)| self.expr(index))
                 }
                 super::super::THostCall::TypedTextInterp { holes, .. } => holes.iter().any(|arg| self.expr(arg)),
-                super::super::THostCall::ExpiringSecretNew { value, duration, clock, .. }
-                | super::super::THostCall::ExpiringValueNew { value, duration, clock } => {
-                    self.expr(value) || self.expr(duration) || self.expr(clock)
-                }
                 super::super::THostCall::FnName(_)
                 | super::super::THostCall::MemoStats { .. }
                 | super::super::THostCall::GcRead { .. }
@@ -279,7 +271,6 @@ impl<F: FnMut(&TExpr) -> bool> TirExprWalk<'_, F> {
             | TExprKind::Uninit
             | TExprKind::CtLit(_)
             | TExprKind::ConstRef(_)
-            | TExprKind::DataEntriesToMap(_)
             | TExprKind::ResourceTake(_)
             | TExprKind::Todo { .. }
             | TExprKind::InvariantViolation { .. }
@@ -2508,7 +2499,7 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
             continue;
         }
         let source = std::mem::replace(elem, TExpr {
-            ty: Type::Unit,
+            ty: unit_type(),
             kind: TExprKind::Absent,
         });
         let target = Type::TraitObject(vec![trait_name.clone()]);

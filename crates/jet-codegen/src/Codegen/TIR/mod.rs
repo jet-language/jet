@@ -4186,7 +4186,6 @@ fn lower_mir_fragment(
         let tuple_shape = params
             .iter()
             .map(|(binding, ty, _)| (binding.clone(), ty.clone()))
-            .chain(extras)
             .collect::<Vec<_>>();
         let tuple_ty = crate::AST::Type::Tuple(
             tuple_shape
@@ -10885,6 +10884,17 @@ fn checked_core_source_call_edges(
                 }
                 }
                 match expression {
+                Expr::Str(parts, _) => {
+                    for part in parts {
+                        if let crate::AST::StrPart::Interp(_, format) = part {
+                            if let Some(target) = source_format_member(format)
+                                .and_then(|member| format_targets.get(member))
+                            {
+                                edges.push((caller_index, *target));
+                            }
+                        }
+                    }
+                }
                 Expr::Call(call) if core_modules.contains(&callable.module) => {
                     if let Some(target) = checked_local_function_call_target(
                         bundle,
@@ -10909,6 +10919,12 @@ fn checked_core_source_call_edges(
                         // A checked executable identity cannot be re-resolved
                         // through a receiver spelling or a template offset.
                         // Missing bodies retain the existing lowering refusal.
+                        return;
+                    }
+                    // Private source-part receiver functions have no authored
+                    // method declaration, but still contribute call-graph edges.
+                    if let Some(target) = private_part_method_target(&part_targets, expression) {
+                        edges.push((caller_index, target));
                         return;
                     }
                     let Some(module) = checked_core_module_path_from_receiver(
@@ -11522,6 +11538,128 @@ fn reachable_core_source_callables(
             return reachable;
         }
         reachable = reachable_from_roots(&callees, &rooted);
+    }
+}
+
+// Formatting holes synthesize calls after the AST call graph is built. Their
+// source functions must be reached even when no authored fmt.member call exists.
+fn source_format_member(format: &crate::AST::StrFormat) -> Option<&'static str> {
+    use crate::AST::StrFormat;
+    Some(match format {
+        StrFormat::Grouped(_) => "grouped",
+        StrFormat::Hex(_) => "hex",
+        StrFormat::Sci(_) => "sci",
+        StrFormat::Percent(_) => "percent",
+        StrFormat::Pad { .. } => "pad",
+        StrFormat::PadLeft { .. } => "pad_left",
+        StrFormat::Bin => "bin",
+        StrFormat::Oct => "oct",
+        _ => return None,
+    })
+}
+
+fn source_format_callables<'a>(bundle: &'a ProgramBundle, index: &CostCallableIndex) -> std::collections::HashMap<&'a str, usize> {
+    let mut targets = std::collections::HashMap::new();
+    let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.text.fmt") else {
+        return targets;
+    };
+    let Some((module, data)) = bundle.modules.iter().enumerate().find(|(_, data)| data.alias == source.alias) else {
+        return targets;
+    };
+    for item in &data.items {
+        let Item::Func(function) = item else { continue };
+        if source.owned_members.contains(&function.name.as_str())
+            && Syntax::core_call("core.text.fmt", &function.name).is_none()
+        {
+            if let Some(target) = index.named(module, None, &function.name) {
+                targets.insert(function.name.as_str(), target);
+            }
+        }
+    }
+    targets
+}
+
+/// Receiver functions of compiler-private Core source parts, indexed by the
+/// checked receiver spelling and member name. These bodies stay prunable;
+/// only checked calls to them add edges or enabled-test roots.
+type PartReceiverCallables = std::collections::HashMap<String, std::collections::HashMap<String, usize>>;
+
+fn private_part_receiver_callables(bundle: &ProgramBundle, index: &CostCallableIndex) -> PartReceiverCallables {
+    let mut targets = PartReceiverCallables::new();
+    for (module, data) in bundle.modules.iter().enumerate() {
+        let is_part = jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS
+            .iter()
+            .any(|part| part.source.alias == data.alias && part.source.path == data.display.as_str());
+        if !is_part {
+            continue;
+        }
+        for item in &data.items {
+            let Item::Func(function) = item else { continue };
+            if function.is_pub {
+                continue;
+            }
+            let receiver = match function.params.first().map(|param| &param.ty) {
+                Some(Type::String) => crate::Syntax::TYPE_STRING,
+                Some(Type::Named(name)) => name.as_str(),
+                _ => continue,
+            };
+            if let Some(callable) = index.named(module, None, &function.name) {
+                targets
+                    .entry(receiver.to_string())
+                    .or_default()
+                    .entry(function.name.clone())
+                    .or_insert(callable);
+            }
+        }
+    }
+    targets
+}
+
+fn private_part_method_target(targets: &PartReceiverCallables, expression: &Expr) -> Option<usize> {
+    let Expr::MethodCall { method, recv_type: Some(receiver), .. } = expression else {
+        return None;
+    };
+    targets.get(receiver)?.get(method).copied()
+}
+
+/// Enabled tests have no callable row, so their implicit receiver and
+/// formatting calls contribute roots rather than call-graph edges.
+fn root_test_private_part_methods(
+    items: &[Item],
+    include_tests: bool,
+    targets: &PartReceiverCallables,
+    format_targets: &std::collections::HashMap<&str, usize>,
+    rooted: &mut [TCostCallable],
+) {
+    for item in items {
+        match item {
+            Item::Test(test) if include_tests && test.name.is_some() => {
+                for statement in &test.body {
+                    statement.for_each_expr(|expression| {
+                        if let Some(target) = private_part_method_target(targets, expression) {
+                            rooted[target].root = true;
+                        }
+                        if let Expr::Str(parts, _) = expression {
+                            for part in parts {
+                                if let crate::AST::StrPart::Interp(_, format) = part {
+                                    if let Some(target) = source_format_member(format)
+                                        .and_then(|member| format_targets.get(member))
+                                    {
+                                        rooted[*target].root = true;
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+            Item::CodeModule(code_module) => {
+                if let Some(body) = &code_module.body {
+                    root_test_private_part_methods(body, include_tests, targets, format_targets, rooted);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -12268,9 +12406,6 @@ pub enum TExprKind {
         initializer: String,
         lifetime: jet_foundation::MIR::MirSharedLifetime,
     },
-    /// D-ENC-DYN1: collect the ordered `Data` object entries a
-    /// `TPatternPosition::DataEntries` test captured into the user-visible map.
-    DataEntriesToMap(TLocal),
     /// Call to a plain top-level function. Each arg carries its emit decisions.
     Call {
         name: String,

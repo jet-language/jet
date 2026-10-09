@@ -6812,34 +6812,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         };
                     });
                 }
-                // D-CALLPOLICY1=E: the declared `#Policy` chain is the default
-                // for every direct call of its target, so the call runs through
-                // the same policy value `apply` builds.
-                if let Some((wrapper, policy)) = declared_user_policy(call, cx, env) {
-                    return in_own_frame(|| {
-                        let policy = bind_declared_policy_args(policy, &wrapper, &call.name, cx);
-                        let target = Expr::Ident(call.name.clone(), call.name_span);
-                        let value = lower_user_policy_value(&target, &policy, wrapper, cx, env);
-                        let lowered = lower_fn_value_call(
-                            None,
-                            value,
-                            &call.args,
-                            call.name_span.start as u32,
-                            cx,
-                            env,
-                        );
-                        let resolved_ret = call.resolved_ret.clone().or_else(|| {
-                            crate::Codegen::TIR::mir::never_carrier_success(&lowered.ty).cloned()
-                        });
-                        consume_plain_helper_route(
-                            resolved_ret.as_ref(),
-                            call.name_span,
-                            lowered,
-                            cx,
-                            env,
-                        )
-                    });
-                }
                 // Resolve the callee's signature so each arg's borrow/clone/fn-coercion is
                 // decided here, totally — via the shared `lower_one_call_arg` (the single
                 // `emit_call_args` reproduction). c109 Phase 13: a callee with a Fn-typed
