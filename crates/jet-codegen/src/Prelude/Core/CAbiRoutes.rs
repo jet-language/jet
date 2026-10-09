@@ -12374,7 +12374,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-
     pub extern "C" fn jet_rt_handle_field_CBORWriter_output(value: *mut crate::jet_std::CBORWriter) -> *const crate::JetFileWriter {
         // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).output) }
@@ -12627,7 +12626,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-
     pub extern "C" fn jet_rt_handle_field_JetDateTime_leap_second(value: *mut crate::JetDateTime) -> *const bool {
         // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).leap_second) }
@@ -12790,7 +12788,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-
     pub extern "C" fn jet_rt_handle_field_JetJobQueueClaim_receipt(value: *mut crate::JetJobQueueClaim) -> *const crate::JetJobQueueReceipt {
         // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).receipt) }
@@ -22658,6 +22655,15 @@ mod jet_c_abi_routes {
         guard(|| match crate::jet_unit_conversion_exact(a0, view(a1), view(a2), view(a3), view(a4)) {
             Some(value) => { unsafe { some.write(value) }; 1 }
             None => 0,
+        })
+    }
+
+    /// core.units.conversion_rounded
+    #[no_mangle]
+    pub extern "C" fn jet_unit_conversion_rounded(a0: f64, a1: JetCString, a2: JetCString, a3: JetCString, a4: JetCString, a5: i64, a6: i64, ok: *mut f64, err: *mut JetCString) -> i64 {
+        guard(|| match crate::jet_unit_conversion_rounded(a0, view(a1), view(a2), view(a3), view(a4), match a5 { 0 => crate::UnitRoundingMode::TowardZero, 1 => crate::UnitRoundingMode::Floor, 2 => crate::UnitRoundingMode::Ceiling, 3 => crate::UnitRoundingMode::NearestEven, _ => range_stop() }, a6) {
+            Ok(value) => { unsafe { ok.write(value) }; 1 }
+            Err(error) => { unsafe { err.write(text_handle(error)) }; 0 }
         })
     }
 

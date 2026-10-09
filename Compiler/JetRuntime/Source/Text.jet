@@ -153,8 +153,11 @@ fn rt_text_reserve_extra(target: I64, old: I64, used: I64, extra: I64) -> I64 {
     rt_text_store(target + I64{16}, capacity)
     data
 }
+
 fn rt_text_append(target: I64, ptr: I64, len: I64) {
-    if (len == I64{0}) -> return
+    if (len == I64{0}) {
+        return
+    }
     old :: rt_text_data(target)
     used :: rt_text_len(target)
     aliases :: ptr >= old && ptr < old + used

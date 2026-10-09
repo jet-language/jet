@@ -103,6 +103,66 @@ static int64_t owned_binary(int64_t env, int64_t a, int64_t b, int64_t output) {
     assert(!"zip callback must not run after either source stops");
     return 0;
 }
+extern int64_t jet_rt_alloc(int64_t size, int64_t alignment);
+extern void jet_rt_progress_state_advance(int64_t state);
+extern void collections_review_test(int64_t family, int64_t unary, int64_t binary,
+                                    int64_t clone, int64_t drop, int64_t box_drop);
+static int review_family, clones, drops, binaries, hooks, advances;
+static int64_t armed;
+void coll_stop_arm(int64_t address) { assert(!armed); armed = address; }
+void coll_stop_after_free(int64_t address) {
+    if (armed && address == armed) {
+        armed = 0;
+        ++hooks;
+        jet_rt_comptime_work(UINT64_C(1000001));
+    }
+}
+void coll_stop_progress_advance(int64_t state) {
+    jet_rt_progress_state_advance(state);
+    ++advances;
+    jet_rt_comptime_work(UINT64_C(1000001));
+}
+static int64_t owned_clone(int64_t input, int64_t output) {
+    int64_t payload = jet_rt_alloc(8, 8);
+    *(int64_t *)(intptr_t)payload = **(int64_t **)(intptr_t)input;
+    *(int64_t *)(intptr_t)output = payload;
+    ++clones;
+    return 0;
+}
+static int64_t owned_drop(int64_t slot) {
+    int64_t *word = (int64_t *)(intptr_t)slot;
+    assert(*word);
+    jet_rt_free(*word, 8, 8);
+    *word = 0;
+    ++drops;
+    return 0;
+}
+static int64_t boxed_drop(int64_t slot) {
+    int64_t box = *(int64_t *)(intptr_t)slot;
+    assert(*(int64_t *)(intptr_t)box == 0);
+    owned_drop(box + 8);
+    jet_rt_free(box, 16, 8);
+    return 0;
+}
+static int64_t owned_unary(int64_t env, int64_t input, int64_t output) {
+    (void)env;
+    if (review_family == 7 || review_family == 8) {
+        int64_t box = jet_rt_alloc(16, 8);
+        *(int64_t *)(intptr_t)box = 0;
+        *(int64_t *)(intptr_t)(box + 8) = jet_rt_alloc(8, 8);
+        *(int64_t *)(intptr_t)output = box;
+        coll_stop_arm(box);
+    } else if (!stopped()) {
+        owned_clone(input, output);
+    }
+    return 0;
+}
+static int64_t owned_binary(int64_t env, int64_t a, int64_t b, int64_t output) {
+    (void)env; (void)a; (void)b; (void)output;
+    ++binaries;
+    assert(!"zip callback must not run after either source stops");
+    return 0;
+}
 int main(void) {
     for (int family = 0; family != 13; ++family) {
         calls = releases = lists_dropped = 0;
