@@ -702,7 +702,8 @@ fn lower_lazy_cursor_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     lower_call_runtime(&m, &f, "jet_rt_native_iter_cursor_value", [LIRValueID]{handle, slot, owned}, None)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, list, [LIRValueID]{})
-    if lower_repr(p, ty) == .Word {
+    repr :: lower_repr(p, ty)
+    if repr == .Word || repr == .ExactInt {
         // A Range value's cursor yields its current native word as an Int.
         ranged :: lower_iter_range_test(&f, cursor)
         range_block :: lower_new_block(&f)

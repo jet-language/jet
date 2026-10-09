@@ -55,10 +55,12 @@ fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     if lower_sequence_element(ty) == .Val(elem) {
         if lower_task_element(elem) != None && !by_value -> return lower_fail(&m, &f, "borrowed iteration over owning Task handles is not lowered at O0 yet")
     }
-    // A View's snapshot is its borrowed header: the cursor must never drop
-    // (or move out) elements the window does not own.
+    // A View owns neither its buffer nor its elements. The slice loop source
+    // snapshots with `to_vec()` (Collections.rs JetLoopSource for &mut &[T]),
+    // including owning fields: Trace/Validate.jet:6,389 walks JSON field views.
+    snapshot_ty := ty
     if lower_view_element(ty) == .Val(elem) {
-        if lower_needs_drop(p, m, elem) -> return lower_fail(&m, &f, "iteration over a View of owning elements is not lowered at O0 yet")
+        snapshot_ty = mir_type_from_kind(MIRTypeKind.List{inner: elem})
     }
     cursor_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "iterator cursor without a checked type is not lowered at O0 yet")
     if !lower_is_iter_cursor(cursor_ty) -> return lower_fail(&m, &f, "this iterator cursor type is not lowered at O0 yet")
@@ -84,14 +86,15 @@ fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     lower_iter_check(&m, &f, invalid, "iterator loop stride must be positive")
     if range == .Val(members) -> return lower_range_cursor_init(p, c, &m, &f, instruction, ty, source, members, stride)
     list := source
-    if !by_value {
-        // The snapshot's header lives in this frame's storage.
-        list = lower_new_storage(p, &f, ty)
-        lower_inline_clone(p, &m, &f, source, list, ty)
+    if !by_value || lower_view_element(ty) != None {
+        // Materialize a View with List clone glue, as lower_copy does. Cloning
+        // a View header would leave Advance/Drop destroying the source owners.
+        list = lower_new_storage(p, &f, snapshot_ty)
+        lower_inline_clone(p, &m, &f, source, list, snapshot_ty)
     }
     // Register every typed release while lowering user MIR, before generic glue
     // is generated. Its function ID is a stable dispatch key, not a code pointer.
-    release :: lower_helper_id(&m, "iter.release", ty)
+    release :: lower_helper_id(&m, "iter.release", snapshot_ty)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     lower_alloc(&m, &f, dst, 48)
     lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: list})
@@ -368,7 +371,11 @@ fn lower_range_members(p: MIRProgram, ty: MIRType) -> [LowerMember]? {
         if index < 0 -> return None
         &found.push(members[index])
     }
-    if lower_repr(p, found[0].ty) != .Word || lower_repr(p, found[1].ty) != .Word || lower_repr(p, found[2].ty) != .Flag -> return None
+    loop index in 0..<2 {
+        repr :: lower_repr(p, found[index].ty)
+        if repr != .Word && repr != .ExactInt -> return None
+    }
+    if lower_repr(p, found[2].ty) != .Flag -> return None
     Val(found)
 }
 
