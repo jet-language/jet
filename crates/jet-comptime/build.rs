@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
 fn main() {
+    // Prelude generators and directly included kernels share the native-pack
+    // cutover cfg with jet-codegen; register it for every generated fragment.
+    println!("cargo:rustc-check-cfg=cfg(jet_native_pack)");
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     write_web_kernel_std(&manifest);
     write_native_scheduler(&manifest);

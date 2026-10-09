@@ -1,0 +1,63 @@
+// CollectionIoSources.rs owns file/stdin line policy and shared process state;
+// CollectionSources.rs owns encoding next/error/EOF policy. Lower supplies Jet
+// callbacks to those source methods, never a Rust Box or an FD72 projection.
+// Borrowed adapter32: payload0, next8, release16, clone24. Copied before return.
+// next(payload, output) returns 0 EOF, 1 moved value, -1 stopped (out unwritten).
+// Errors render/panic at <core.prelude>:0 exactly as the source kernels do;
+// no runtime retry, decoding, line trimming or fault checkpoint is added here.
+// clone(payload) is needed only for a borrowed shared process stream.
+fn iter_source_node(adapter: I64, by_value: I64, meta: I64, shared: Bool) -> I64 {
+    node :: iter_new(I64{28}, meta)
+    payload := trap_word(adapter)
+    owned :: by_value != I64{0} || shared
+    if (shared && by_value == I64{0}) {
+        payload = coll_call1(trap_word(adapter + I64{24}), payload)
+        if (jet_rt_session_propagate() != I64{0}) {
+            jet_rt_native_iter_drop(node)
+            return I64{0}
+        }
+    }
+    trap_store(node + I64{48}, payload)
+    trap_store(node + I64{56}, trap_word(adapter + I64{8}))
+    trap_store(node + I64{64}, if owned -> trap_word(adapter + I64{16}) else -> I64{0})
+    // L5 jet_rt_native_iter_drop calls release@64(payload@48) once under
+    // Shield. source@16 is zero, so no recursive iterator drop touches payload.
+    node
+}
+
+fn iter_source_pull(node: I64, output: I64) -> Bool {
+    state :: coll_call2(trap_word(node + I64{56}), trap_word(node + I64{48}), output)
+    // Return code is authoritative: 1 owns a moved output even if a stop is
+    // already pending; iter_pull/its consumer owns that slot's cleanup.
+    if (state != I64{1}) {
+        trap_store(node + I64{144}, I64{1})
+        return false
+    }
+    true
+}
+
+fn iter_line_source(adapter: I64, by_value: I64, meta: I64) -> I64 {
+    node :: iter_source_node(adapter, by_value, meta, false)
+    // CollectionIoSources.rs:35-59,100-123 drains a borrowed reader at init;
+    // owned sources stay lazy. iter_collect_node cleans partials on stop.
+    if (by_value == I64{0}) { return iter_collect_node(node) }
+    node
+}
+
+#Export(c) fn jet_rt_native_iter_file_lines(source: I64, by_value: I64, meta: I64) -> I64 {
+    iter_line_source(source, by_value, meta)
+}
+
+#Export(c) fn jet_rt_native_iter_stdin_lines(source: I64, by_value: I64, meta: I64) -> I64 {
+    iter_line_source(source, by_value, meta)
+}
+
+#Export(c) fn jet_rt_native_iter_process_lines(source: I64, by_value: I64, meta: I64) -> I64 {
+    // CollectionIoSources.rs:136-163 retains the shared pipe, not the Child.
+    iter_source_node(source, by_value, meta, true)
+}
+
+#Export(c) fn jet_rt_native_iter_encoding_reader(source: I64, by_value: I64, meta: I64) -> I64 {
+    // Checked lowering admits only an owned reader (CollectionSources.rs).
+    iter_source_node(source, by_value, meta, false)
+}

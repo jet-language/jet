@@ -1,0 +1,175 @@
+// MemSentry.rs:728-868: the four seed unit tests, against the Jet kernel.
+fn sentry_test_require(ok: Bool) {
+    if ok -> return
+    trap_exit(I64{1})
+}
+fn sentry_test_reset() {
+    sentry_test_require(sync_load(sentry_root + I64{88}) == I64{0})
+    at := I64{40}
+    loop at <= (I64{88}) {
+        header :: sentry_root + at
+        capacity :: sync_load(header + I64{8})
+        if (capacity != I64{0}) -> jet_rt_free(sync_load(header + I64{16}), capacity * I64{8}, I64{8})
+        thread_zero(header, I64{24})
+        at += I64{24}
+    }
+    jet_rt_sentry_set_hardened(I64{1})
+}
+fn sentry_test_gate(save: I64) {
+    file :: scheduler_text_new(I64{9})
+    sync_store(rt_text_data(file), I64{7307704384125760627})
+    trap_put(rt_text_data(file) + I64{8}, I64{116})
+    reason :: scheduler_text_new(I64{10})
+    sync_store(rt_text_data(reason), I64{8026385599716745587})
+    trap_put(rt_text_data(reason) + I64{8}, I64{112})
+    trap_put(rt_text_data(reason) + I64{9}, I64{101})
+    // Owned labels outlive the borrowed gate and are freed by fixture leave.
+    sync_store(save + I64{64}, file)
+    sync_store(save + I64{72}, reason)
+    jet_rt_sentry_scope_enter(save, I64{1}, I64{0}, rt_text_data(file), rt_text_len(file), I64{1}, rt_text_data(reason), rt_text_len(reason))
+}
+fn sentry_test_leave(save: I64) {
+    jet_rt_sentry_scope_leave(save)
+    jet_rt_string_drop(sync_load(save + I64{64}))
+    jet_rt_string_drop(sync_load(save + I64{72}))
+}
+#Export(c) fn jet_rt_sentry_fixture_worker(arguments: I64) -> I64 {
+    // Parent gate is thread-confined, just like Rust thread_local GATE.
+    sentry_test_require(jet_rt_sentry_check(I64{0}, I64{8}, I64{8}, I64{1}) == I64{0})
+    save :: jet_rt_alloc(I64{80}, I64{8})
+    sentry_test_gate(save)
+    value :: jet_rt_alloc(I64{8}, I64{8})
+    sync_store(value, I64{13})
+    frame :: jet_rt_sentry_frame_enter()
+    sentry_test_require(sync_load(frame) != sync_load(arguments))
+    jet_rt_sentry_register_stack_allocation(value, I64{8})
+    sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{0})
+    jet_rt_sentry_frame_leave(frame)
+    sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{4})
+    sentry_test_leave(save)
+    jet_rt_free(value, I64{8}, I64{8})
+    jet_rt_free(save, I64{80}, I64{8})
+    I64{0}
+}
+#Export(c) fn jet_rt_sentry_fixture_run(worker: I64) -> I64 {
+    save :: jet_rt_alloc(I64{80}, I64{8})
+    value :: jet_rt_alloc(I64{16}, I64{8})
+    // stack_registration_is_live_only_inside_its_frame
+    sentry_test_reset()
+    sync_store(value, I64{7})
+    frame := jet_rt_sentry_frame_enter()
+    sentry_test_gate(save)
+    jet_rt_sentry_register_stack_allocation(value, I64{8})
+    sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{0})
+    jet_rt_sentry_frame_leave(frame)
+    sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{4})
+    sentry_test_leave(save)
+    // frame_expiry_does_not_expire_heap_or_foreign_storage
+    sentry_test_reset()
+    sync_store(value, I64{17})
+    frame = jet_rt_sentry_frame_enter()
+    sentry_test_gate(save)
+    jet_rt_sentry_register_allocation(value, I64{8})
+    jet_rt_sentry_frame_leave(frame)
+    sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{0})
+    sentry_test_require(jet_rt_sentry_check(I64{4096}, I64{8}, I64{8}, I64{0}) == I64{0})
+    jet_rt_sentry_quarantine(value, I64{8})
+    sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{2})
+    sentry_test_leave(save)
+    // nested_and_thread_frames_have_distinct_lifetimes
+    sentry_test_reset()
+    sync_store(value, I64{11})
+    sentry_test_gate(save)
+    outer :: jet_rt_sentry_frame_enter()
+    outer_id :: sync_load(outer)
+    jet_rt_sentry_register_stack_allocation(value, I64{8})
+    inner :: jet_rt_sentry_frame_enter()
+    sentry_test_require(sync_load(inner) != outer_id)
+    jet_rt_sentry_register_stack_allocation(value, I64{8})
+    jet_rt_sentry_frame_leave(inner)
+    sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{0})
+    jet_rt_sentry_frame_leave(outer)
+    sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{4})
+    arguments :: jet_rt_alloc(I64{8}, I64{8})
+    sync_store(arguments, outer_id)
+    thread :: thread_spawn(worker, arguments)
+    sentry_test_require(thread > I64{0})
+    sentry_test_require(thread_join(thread, I64{0}) == I64{0})
+    jet_rt_free(arguments, I64{8}, I64{8})
+    sentry_test_leave(save)
+    // repeated_frames_keep_dangling_stack_writes_exact_and_memory_bounded
+    sentry_test_reset()
+    sync_store(value, I64{23})
+    sentry_test_gate(save)
+    round := I64{0}
+    loop round < (I64{10000}) {
+        frame = jet_rt_sentry_frame_enter()
+        repeat := I64{0}
+        loop repeat < (I64{4}) {
+            jet_rt_sentry_register_stack_allocation(value, I64{8})
+            repeat += I64{1}
+        }
+        sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{0})
+        jet_rt_sentry_frame_leave(frame)
+        round += I64{1}
+    }
+    sentry_test_require(sync_load(sentry_root + I64{88}) == I64{0})
+    sentry_test_require(sync_load(sentry_root + I64{64}) == I64{3})
+    sentry_test_require(sync_load(sentry_root + I64{40}) == I64{0})
+    sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{4})
+    sentry_test_require(jet_rt_sentry_check(value + I64{4}, I64{4}, I64{4}, I64{1}) == I64{4})
+    sentry_test_require(jet_rt_sentry_check(value + I64{8}, I64{8}, I64{8}, I64{1}) == I64{1})
+    jet_rt_sentry_register_allocation(value, I64{8})
+    jet_rt_sentry_quarantine(value, I64{0})
+    sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{2})
+    frame = jet_rt_sentry_frame_enter()
+    jet_rt_sentry_register_stack_allocation(value, I64{8})
+    sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{0})
+    jet_rt_sentry_frame_leave(frame)
+    sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{4})
+    // Additional boundary/alignment/release/fence parity facts.
+    jet_rt_sentry_register_allocation(value, I64{8})
+    sentry_test_require(jet_rt_sentry_check(value, I64{9}, I64{8}, I64{0}) == I64{5})
+    sentry_test_require(jet_rt_sentry_check(value + I64{1}, I64{1}, I64{8}, I64{1}) == I64{3})
+    sentry_test_require(sentry_remainder(I64{-1}, I64{3}) == I64{0})
+    sentry_test_require(jet_rt_sentry_check(I64{-1}, I64{2}, I64{1}, I64{0}) == I64{1})
+    sentry_test_leave(save)
+    sentry_test_reset()
+    jet_rt_free(value, I64{16}, I64{8})
+    jet_rt_free(save, I64{80}, I64{8})
+    I64{0}
+}
+#Export(c) fn jet_rt_sentry_fixture_ledger() -> I64 {
+    save :: jet_rt_alloc(I64{80}, I64{8})
+    sentry_test_gate(save)
+    gate :: sentry_gate_name()
+    detail :: sentry_detail(I64{4}, I64{0}, I64{8})
+    sentry_ledger(I64{4}, gate, detail)
+    jet_rt_string_drop(gate)
+    jet_rt_string_drop(detail)
+    sentry_test_leave(save)
+    jet_rt_free(save, I64{80}, I64{8})
+    I64{0}
+}
+
+#Export(c) fn jet_rt_sentry_fixture_inline(callback: I64) -> I64 {
+    sentry_test_reset()
+    root :: scheduler_control_new()
+    save :: jet_rt_alloc(I64{32}, I64{8})
+    scheduler_control_enter(root, save)
+    body :: scheduler_body_enter()
+    #Unsafe("the checked Source callback uses the exact two-word native ABI") {
+        _ := os_call_i64_2(callback, I64{0}, I64{0})
+    }
+    sentry_test_require(jet_rt_session_status() == I64{5})
+    sentry_test_require(sync_load(sentry_root + I64{88}) == I64{0})
+    sentry_test_require(sentry_current_frame() == I64{0})
+    record :: scheduler_control_take_stop(root)
+    sentry_test_require(sync_load(record + I64{48}) == I64{1})
+    scheduler_stop_drop(record)
+    scheduler_body_leave(body)
+    scheduler_control_leave(save)
+    scheduler_control_drop(root)
+    jet_rt_free(save, I64{32}, I64{8})
+    I64{0}
+}

@@ -35,7 +35,12 @@ fn jet_bootstrap_library_object(request: ^JetDriverCompileRequest, prefix: Strin
     result := jet_driver_compile_mir(^request) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
     if !result.complete || result.internal_problem != None -> return result
     program :: result.mir ?? return jet_driver_compile_escaped_failure("the native front end finished without MIR")
-    library :: x64_runtime_library(program)
+    lifecycle := [String]{}
+    if cli_sys.get("JET_FRONT_LIBRARY_LIFECYCLE") == .Val(lifecycle_path) {
+        lifecycle_text :: cli_files.read(lifecycle_path) ?? return jet_driver_compile_escaped_failure("cannot read the runtime lifecycle list")
+        lifecycle = lifecycle_text.split("\n").to_list()
+    }
+    library :: x64_runtime_library(program, lifecycle)
     if library.object.errors.len() > 0 {
         cli_files.write("{prefix}.issues", library.object.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library findings")
         return jet_driver_compile_escaped_failure("runtime library object failed; see {prefix}.issues")

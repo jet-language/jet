@@ -1,6 +1,7 @@
 // The library feed consumes checked MIR in-process. Its exports are exactly
 // the checked NativeLibrary artifact's `#Export(c)` rows; no list, name
-// heuristic or source scan selects them.
+// heuristic or source scan selects them. Compiler/JetRuntime/lifecycle.list
+// only orders the constructor/destructor hooks among those exports.
 use jet_foundation.[MIRProgram, MIRExport, MIRFunction, MIRFunctionID, MIRType, MIRCPrimitive, mir_c_primitive, mir_c_void, mir_type_display_name]
 
 struct X64RuntimeLibraryResult {
@@ -64,7 +65,13 @@ fn runtime_intrinsic_specs() -> [RuntimeIntrinsicSpec] Never! {
         RuntimeIntrinsicSpec{name: "rt_tls_shared_destructor_address", shape: .FunctionAddress{symbol: "jet_rt_tls_shared_destructor", arity: 2}},
         RuntimeIntrinsicSpec{name: "rt_scheduler_worker_address", shape: .FunctionAddress{symbol: "jet_rt_scheduler_worker", arity: 1}},
         RuntimeIntrinsicSpec{name: "rt_scheduler_timer_address", shape: .FunctionAddress{symbol: "jet_rt_scheduler_timer", arity: 1}},
+        RuntimeIntrinsicSpec{name: "rt_parallel_worker_address", shape: .FunctionAddress{symbol: "jet_rt_native_para_worker", arity: 1}},
+        RuntimeIntrinsicSpec{name: "rt_task_exit_destructor_address", shape: .FunctionAddress{symbol: "jet_rt_task_exit_destructor", arity: 2}},
         RuntimeIntrinsicSpec{name: "rt_test_capture_abort_address", shape: .FunctionAddress{symbol: "jet_rt_test_capture_abort", arity: 2}},
+        RuntimeIntrinsicSpec{name: "rt_fault_allocation_drop_address", shape: .FunctionAddress{symbol: "jet_rt_fault_allocation_drop", arity: 2}},
+        RuntimeIntrinsicSpec{name: "rt_world_monotonic_provider_address", shape: .FunctionAddress{symbol: "jet_rt_world_monotonic_provider", arity: 1}},
+        RuntimeIntrinsicSpec{name: "rt_net_resolver_worker_address", shape: .FunctionAddress{symbol: "jet_rt_net_resolver_worker", arity: 1}},
+        RuntimeIntrinsicSpec{name: "rt_net_poller_worker_address", shape: .FunctionAddress{symbol: "jet_rt_net_poller_worker", arity: 1}},
     }
 }
 
@@ -107,7 +114,36 @@ fn runtime_address_target_signature(function: MIRFunction, arity: Int) -> Bool N
     output_word
 }
 
-fn x64_runtime_library(program: MIRProgram) -> X64RuntimeLibraryResult Never! {
+// Ordered process-lifecycle hooks of the runtime object. Each row is
+// `<symbol> init <priority>` or `<symbol> fini <priority>`; the symbol must be
+// one of the checked `#Export(c)` rows and take no parameters and return
+// nothing. The rows order constructors/destructors; they never select exports.
+struct RuntimeLifecycle {
+    init_priority: Int
+    fini_priority: Int
+}
+
+fn runtime_lifecycle_rows(lines: [String], lifecycle: &[String:RuntimeLifecycle]) -> String? {
+    loop line in lines {
+        text :: line.trim()
+        if text == "" || text.starts_with("#") -> next
+        fields := [String]{}
+        loop field in text.split(" ").to_list() {
+            if field != "" -> &fields.push(field)
+        }
+        if fields.len() != 3 || (fields[1] != "init" && fields[1] != "fini") {
+            return Val("invalid runtime lifecycle row `{text}`")
+        }
+        priority :: Int.parse(fields[2]) ?? return Val("invalid runtime lifecycle priority in `{text}`")
+        if priority < 0 || priority > 65535 -> return Val("runtime lifecycle priority must be in 0..65535 in `{text}`")
+        if lifecycle.get(fields[0]) != None -> return Val("duplicate runtime lifecycle row `{fields[0]}`")
+        row :: if fields[1] == "init" -> RuntimeLifecycle{init_priority: priority, fini_priority: -1} else -> RuntimeLifecycle{init_priority: -1, fini_priority: priority}
+        &lifecycle.add(fields[0], row).drop("checked absent above")
+    }
+    None
+}
+
+fn x64_runtime_library(program: MIRProgram, lifecycle_rows: [String]) -> X64RuntimeLibraryResult Never! {
     exports := [MIRExport]{}
     library := false
     loop artifact in program.artifacts {
@@ -140,6 +176,19 @@ fn x64_runtime_library(program: MIRProgram) -> X64RuntimeLibraryResult Never! {
         }
         &roots.push(entry_row.function)
     }
+    lifecycle := [String:RuntimeLifecycle]{}
+    if runtime_lifecycle_rows(lifecycle_rows, &lifecycle) == .Val(problem) -> return runtime_export_error(problem)
+    hooked := 0
+    loop entry_row in exports {
+        if lifecycle.get(entry_row.symbol) == None -> next
+        hooked += 1
+        index :: rows.get(entry_row.function.value) ?? return runtime_export_error("runtime lifecycle export {entry_row.symbol} is missing")
+        function :: program.functions[index]
+        if function.params.len() != 0 || !mir_c_void(function.return_type) {
+            return runtime_export_error("runtime lifecycle export {entry_row.symbol} must take no parameters and return nothing")
+        }
+    }
+    if hooked != lifecycle.len() -> return runtime_export_error("a runtime lifecycle row names no checked #Export(c) function")
     intrinsics := [U64:LowerRuntimeIntrinsic]{}
     bits := MIRFunctionID?{None}
     from_bits := MIRFunctionID?{None}
@@ -190,7 +239,8 @@ fn x64_runtime_library(program: MIRProgram) -> X64RuntimeLibraryResult Never! {
     globals := [X64RuntimeExport]{}
     loop entry_row in exports {
         function :: lowered.callables.get(entry_row.function.value) ?? return runtime_export_error("export {entry_row.symbol} has no lowered callable")
-        &globals.push(X64RuntimeExport{function: function, symbol: entry_row.symbol})
+        hook :: lifecycle.get(entry_row.symbol) ?? RuntimeLifecycle{init_priority: -1, fini_priority: -1}
+        &globals.push(X64RuntimeExport{function: function, symbol: entry_row.symbol, init_priority: hook.init_priority, fini_priority: hook.fini_priority})
     }
     X64RuntimeLibraryResult{object: x64_runtime_object(lowered.lir, globals), exports: exports}
 }

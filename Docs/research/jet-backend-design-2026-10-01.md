@@ -195,6 +195,44 @@ Result boxes reserve at least one eight-byte payload word after the tag,
 including zero-sized payloads. Runtime marshaling uses the same minimum,
 alignment and size as native construction and drop glue.
 
+`Compiler/JetRuntime/Source/Text.jet` owns the native text exports. Headers are
+24-byte allocations aligned to 8; buffers are allocated with alignment 1 and
+freed with their recorded capacity. Empty buffers have pointer 1 and capacity
+0. Builders transfer their header unchanged on finish and preserve self-append
+when growing. Static bytes use Rust-compatible lossy UTF-8 conversion; range
+slices count Unicode scalars, not bytes. Split iterators clone their borrowed
+input once and produce owned pieces lazily; nonempty `rsplit` materializes
+rightmost nonoverlapping matches, then yields the pieces left-to-right.
+Borrowing `jet_rt_string_concat` returns an independent owner with one exact
+buffer allocation and capacity equal to the two byte lengths' sum. Empty
+concatenation retains pointer 1/capacity 0; size overflow uses the existing text
+capacity panic. Raw witnesses cover ASCII, multibyte UTF-8, empty sides, aliased
+inputs, interior NUL, exact capacity, and allocator-class balance after dropping
+the inputs before the result, plus the capacity-stop edge.
+The raw `TextTests` library exposes `text_tests`, not an executable entry.
+Its runner adds `run` in a sibling executable directory, outside the runtime
+package manifest, before compiling the ownership and UTF-8 witnesses.
+C foreign String arguments use a separate byte buffer with a trailing NUL;
+the caller frees it with its length including that terminator. Unpacking
+validates UTF-8 while finding the terminator and copies into an owned E4
+header before argument buffers are freed, including interior-pointer returns.
+Interior NUL, null results and invalid UTF-8 use the exact Rust panic messages
+through the shared panic stop path; raw text witnesses cover all three stops.
+
+`Bits` owns a sorted unique sequence of nonnegative native I64 indices in an
+L5 `[len, cap, data]` header. Its eight public route exports retain their names,
+but allocate no Rust handle. `count` is membership size; `len` is one past the
+largest member (zero when empty), with the seed's native I64 overflow stop.
+Public Word inputs borrow exact-Int carriers and convert through the shared
+Int seam. `to_list` transfers fresh exact-Int slots through the route's out
+pointer and returns a native length. Copy/clone and rendering never consume
+the source; clear/drop free only this set's storage. All three render modes
+match `Core/Collections.rs:175-187`: sorted list text with comma-space
+separators (`[]` for empty). Constructor/clear use the native Bits providers;
+no native set may be passed to a seed Rust handle function. Raw ownership
+witnesses cover sparse len/count, negative rejection, duplicates, ordered
+output, independent copy/clone, both Int seams, exact rendering, and balance.
+
 Sizes: a word, handle or box pointer is 8 bytes (align 8), a Bool 1 byte, Unit
 0. An inline aggregate is 8-aligned and padded to whole words, so copies move
 words; a member sits at the next multiple of its alignment, and a recursive
@@ -299,7 +337,7 @@ function parameters and jumps to it (LIR forbids jumps to the entry).
 | `ResultOk` / `ResultErr` | box, word at 0 = 1 / 0, payload at 8 |
 | `ResultIsOk` / `ResultValue` | `Load` offset 0 and `Compare Ne 0` / read at offset 8 |
 | `BuildString(parts)` | `jet_rt_string_builder_new`, `..._push_static(b, ptr, len)` per literal, `..._push(b, text)` per Display or Debug interpolation, `..._finish(b) -> String` |
-| `Semantic(Print(call, v))` | Display text of v (the String itself, or `jet_rt_int_to_string` / `jet_rt_i64_to_string` / `jet_rt_char_to_string` / `jet_rt_bool_to_string`, dropped after the call), then the route's symbol (`jet_term_write_stdout_line`) with `(text, flush = 1)` |
+| `Semantic(Print(call, v))` | Display text of v (the String itself, or `jet_rt_int_to_string` / `jet_rt_i64_to_string` / `jet_rt_char_to_string` / `jet_rt_bool_to_string`, dropped after the call), then the route's symbol (`jet_term_write_stdout_line`) with `(text, flush = 0)`; the shared runtime owns terminal-line versus file/pipe buffering |
 | `Call` of a user function, method or associated function | `Call Function(id)` with the callee's signature; Unit arguments are omitted |
 | `Call` of a Prelude route | `Call Runtime(symbol)` |
 | `LoopRangeInit/HasNext/Value/Advance` | the route's symbols; init takes `(start, end, step, has_step, exclusive)` |
@@ -417,6 +455,137 @@ marshaling continues to use `jet_rt_string_data`/`jet_rt_string_byte_len`,
 never Rust layout. This contract applies to the linked runtime pack; the
 standalone freestanding image runtime is separate and retires with L3.
 
+The Jet runtime-only source manifest is assembled by the runtime-object path,
+never the compiler bootstrap unit. Adjacent `// runtime-init: N` and
+`// runtime-fini: N` comments on `#Export(c)` declarations produce explicit
+`symbol init N` / `symbol fini N` export-list rows. Lifecycle functions take
+no arguments and return nothing; the object writer emits the corresponding
+priority-suffixed ELF init/fini arrays, without special-casing function names.
+Allocator initialization has priority zero; host stdio initializes after it.
+Equal priorities use lexical export-symbol order, matching the canonical
+exports list rather than source declarations. Same-priority initializers
+must be independent and idempotent; an initializer with a dependency uses
+a later priority. Programs and entryless libraries consume this one inventory.
+
+D-STDOUT-BUFFER1=A gives stdout one locked 8192-byte process-wide buffer:
+newline flushing on terminals, full-buffer flushing on files and pipes.
+stderr drains stdout first and writes immediately. The shared
+`jet_rt_stdout_flush` hook is also a fini entry and is called at input,
+blocking, child-launch, error-report and explicit-exit boundaries. Print
+borrows the E4 text and appends its newline without allocating a second frame.
+IOError crosses host C boundaries as seven eight-byte fields: kind, operation,
+nullable owned resource text, OS-code presence, OS code, nullable owned cause
+text, and resource-limit tag. Tags are generated from the canonical Core enum
+registry; no Rust enum or String layout is inspected.
+IOContext uses a 40-byte owner: operation, nullable resource text, OS-code
+presence, raw i64 OS code, nullable cause text. It is the contiguous payload
+at IOError+8; variant getters deep-clone it, while constructors consume its
+header and transfer the text owners. The OS-code projection encodes exact Int
+through the canonical numeric seam, never by treating a boxed Int as i64.
+Core stdio wrappers check `IO.Write`/`IO.Flush` faults before entering the
+raw transport. Runtime print, panic and abort do not consult those switches.
+stderr text lines use a borrowed text iovec and a stack-local LF, avoiding a
+temporary line allocation; byte lists compact eight-byte slots into bounded
+mapping-owned scratch. A zero write keeps a distinct WriteZero sentinel,
+not a fabricated errno. OS causes use pinned musl 1.2.5 wording from
+`JetRuntime/Assets/MuslErrno1_2_5`, with source hashes and MIT attribution.
+
+The native main wrapper captures argc/argv/envp through the explicit
+`jet_rt_host_arguments` entry before user code. Runtime-private module globals
+are the sole raw startup snapshot, not foreign data imports or a second
+environment map. Entryless hosts must call that entry explicitly before
+argument/environment access. Core owns the once-published logical Shared
+environment and all subsequent writes; raw startup bytes remain immutable.
+Entryless hosts lend environment arrays only during capture: valid entries
+are copied once into a single runtime-owned NUL-terminated byte block and the
+index points into it. Later host `setenv`/`putenv` cannot invalidate the
+snapshot. argv remains borrowed for the runtime lifetime. Zero-sized process
+stream tokens are the constant non-null word 1 and have no allocation/drop.
+Startup indexing follows Rust 1.90 `sys/env/unix.rs`: skip empty/malformed
+entries and search `=` after byte zero, preserving names beginning with `=`,
+non-UTF-8 bytes, duplicate rows and host order. Core transfers use owned
+List<U8> headers with eight-byte slots. Runtime-only scheduler/deadline flags
+read this immutable snapshot through an internal helper; Core overlay writes
+do not alter those flags. No overlay-provider callback is registered.
+
+Network addresses have explicit C layouts, independent of Rust enums:
+IPAddr is a 24-byte family/octet carrier; SocketAddr is 56 bytes with the
+IPAddr inline, followed by port, IPv6 flow/scope and a zero reserved word.
+Resolver transfers are inline arrays of those 56-byte rows, in platform
+order without sorting or deduplication. `__ResolveError` is a 32-byte owner
+with exact-Int kind/code words and an owned E4 message. Its projections and
+clone/drop use the canonical numeric ownership seam.
+TCP and Unix stream holders are 56 bytes: the FD72 pointer, one reserved
+word, separate shutdown flags, read/write timeout milliseconds, and a
+metadata mutex. They do not keep another closed flag. TCP listener copies
+duplicate the descriptor into a new FD72; Unix listener copies retain the
+shared FD72, matching the Rust Arc lifetime. UDP's eight-byte holder points
+to one shared 32-byte state containing refs, mutex, FD72 and a single timeout
+used for both directions. All timeout projections transfer canonical exact
+Int owners, while the source alone validates durations and chooses deadlines.
+The resolver uses platform `getaddrinfo` with zeroed hints except SOCK_STREAM
+and a null service, then applies the port. All returned chains are released
+with `freeaddrinfo`, including empty results. EAI_SYSTEM preserves errno;
+other failures preserve the platform message prefixed as Rust's lookup does.
+The lookup worker holds its own reference to the input/output job, so a
+deadline or cancellation can abandon a lookup without joining or freeing data
+still borrowed by libc. The musl imports are the ledgered interim platform
+floor, not a hosts-only fallback; hosted CLI cutover requires glibc dynamic
+linking under D-NETDNS2 and D-OS-FLOOR1.
+
+Native socket waits share one epoll worker and scheduler ParkSlots. Kernel
+events carry monotonically allocated IDs, resolved under the poller mutex;
+they never carry pointers to wait nodes that may have been freed. Each waiter
+retains the FD72 state until it has been deregistered, unlinked, and dropped.
+Explicit close unregisters the descriptor and wakes every waiter as closed,
+then defers physical close while network references remain, preventing fd
+reuse from retargeting a parked operation. Waits hold no runtime mutex across
+scheduler yield, and do not allocate a worker thread or duplicate a descriptor
+per operation.
+Raw socket syscalls are nonblocking single attempts over the canonical FD72
+owner. Socket creation and accept atomically set CLOEXEC and NONBLOCK. The
+existing host mapping lends bounded address/option scratch under its mutex,
+after the stdout buffer, so address conversion adds no temporary allocation.
+Core distinguishes EINPROGRESS from completion and consults SO_ERROR after
+writable readiness; the raw connect leaf never reports it as success.
+Network close marks the descriptor state closed and unregisters waits, while
+the socket owner retains the physical descriptor until final drop. This
+matches the Rust TCP/UDP logical-close lifetime and preserves descriptor
+ownership even when an operation has already observed closed.
+Stream reads and writes make one nonblocking attempt; source alone chooses
+retry and wait behavior. Socket writes use MSG_NOSIGNAL, independently of the
+embedding host's signal disposition. UDP receives expose the original
+datagram length through MSG_TRUNC while initializing at most the borrowed
+buffer length; Core constructs the packet and truncation fields.
+Unix path refusal statuses are distinct from OS errno: -4098 means interior
+NUL and -4097 means too long for sun_path. The leaf checks NUL first, then the
+108-byte bound, matching Rust 1.90 `os/unix/net/addr.rs` sockaddr_un. Core maps
+those facts to the exact std InvalidInput messages with no OS code. An empty
+path preserves std's two-byte address length rather than inventing a name.
+
+Raw clock samples carry exact Int words, not truncated i64 timestamps. Wall
+samples preserve the unsigned duration magnitude and an independent
+before-epoch flag, including normalized negative POSIX timespecs. Host
+monotonic samples use one lazily published process-relative origin, mirroring
+Rust's `TimeMonotonic.rs` static `OnceLock<Instant>`, rather than substituting
+the scheduler's absolute monotonic clock. Clock syscalls borrow the calling
+thread's existing timespec scratch and read both words before any other call
+can reuse it. Core alone selects world, replay or host samples and clamps
+the public Instant scalar.
+The reserved Core Clock `__clock_mono_ns` seam samples that same host epoch
+without controlled, world or replay selection; it preserves the existing
+hidden Clock implementation, not a new user-callable pure clock operation.
+Controlled monotonic callbacks live in the existing dynamic TLS registry;
+the clock root owns just the registry key, not another thread-context slot.
+Private TUI capability inputs sample the real stdout tty and owned immutable
+startup environment values through two narrow host-fact exports. TCGETS
+continues to borrow host scratch only while the host mutex is held.
+Time-zone environment reads lend the immutable startup snapshot and decode
+invalid UTF-8 lossily, matching `var_os(...).to_string_lossy()` independently
+of the logical environment overlay. File-zone reads transfer owned native
+byte lists; native embedded-zone absence is the platform seed's actual fact
+(the embedded TZif table is a wasm fact), not a file-system fallback.
+
 A Jet type that generated Rust holds as a native runtime type crosses as an owned
 `Box<T>` handle. The generator reads Context.rs and predicates.rs name tables and the
 explicit names in MIRRust `rust_apply_type`, using the same canonical-Core probe as
@@ -498,6 +667,40 @@ successful values into the checked tuple's field offsets. Readiness tables
 normalize to owned receiver/timer Lists; blocking and else-arm waits delegate
 to the canonical selector and initialize their arm/payload tuple only after
 the runtime returns normally.
+
+The Jet channel state owns a homogeneous payload descriptor and a ring buffer;
+ordinary send/receive moves need no per-message owner allocation. Bounded sends
+count both queued values and prepared-send reservations against capacity.
+Reservations retain physical queue state across preparation, and commit checks
+close again before transferring a payload. Single sender/receiver wakeups are
+LIFO; close wakes all registrations in insertion order. The selector probes
+receiver arms first in source order, then timer arms, and rechecks readiness
+after registering its park slot. An `else` probe reports arm -1 without parking.
+`jet_rt_native_receiver_iter(receiver, by_value, meta)` copies the supplied
+descriptor before its first pull; a receiver iterator can therefore be created
+before any sender initializes the channel descriptor. Iterator kind 28 delegates
+pull and drop to the channel owner, including closed and stopped pulls.
+
+Shared cells retain their payload and recursive descriptor independently of
+endpoint handles. Callback reads can run concurrently; edits are exclusive,
+and waiting writers precede new readers. No recursive-lock exception is added.
+Callback environments are borrowed, and callback outputs remain unread on a
+delivered stop. Every callback releases its permit even when stopped; payload
+destructors run outside the permit lock. Process/World site publication returns
+the borrowed winning cell, drops losing candidates through the uniform Shared
+drop door, and registers only World sites for quiescent reset. Reset preserves
+outstanding clones and retains registry nodes for later republishing.
+Revision exhaustion is checked before invoking an edit callback and becomes a
+task panic inside a task body, not an initialized callback result. The runtime
+fixtures exercise prepared-send rollback, stopped iterator/output ownership,
+failed-send payload disposal, simultaneous read permits, writer priority and
+revision exhaustion. Their Closed crossing uses the actual Rust Prelude enum,
+and their paired one-million-message ping-pong records Jet and Rust timings.
+Once selection has transferred a payload/arm to the caller, a later stop does
+not discard that completed selection. Select deregistration returns a consumed
+wake to another receiver when an earlier arm won but this channel still holds
+a queued item. Paired private-kernel witnesses exercise the same handoff in
+Jet and the Rust seed; no tier-specific wake-stealing policy remains.
 Opaque runtime-owned enums do not expose a native discriminant or payload
 layout. Their construction, variant tests and payload projections report a
 native unsupported issue unless an explicit record adapter supplies that layout.
@@ -1419,6 +1622,186 @@ provides a front-end diagnostic census before the probe can be built.
 Preparation and a receipt-only census never establish differential parity;
 only `summary.json` with `differential_verified: true` does.
 
+### Native collection runtime
+
+The runtime-only collection unit implements the current
+`jet_rt_native_iter_*` slot ABI, not the Rust generic `jet_iter_*` names.
+List and Map operations already emitted as typed LIR retain that lowering;
+there is no unused parallel set of generic C exports.
+
+Lists carry an inline `[len, cap, data]` header. Element descriptors have nine
+words: stride, clone, drop, show, equality, comparison, kind, and two child
+descriptors. Iterator owners copy the descriptors because the caller's
+descriptor storage may expire. Pulls use reusable payload slots; Bool copies
+one byte and Unit copies none. Moves, borrowed snapshots, closure release,
+early termination, and buffered cursor stride have the same ownership rules
+at the slot boundary. Collection buffers crossing that boundary belong to
+`jet_rt_alloc`/`jet_rt_free`, including buffers from remaining Rust adapters.
+
+Laziness remains operation-specific. Map/filter/take/skip and cursor pulls are
+lazy; repeat/cycle/shuffle, fallible map/filter, keyed dedup/sorted checks, and
+chunk-while retain the reference kernels' eager consumption. Integer averages
+sum fixed-width values in a signed two-word accumulator before one binary64
+rounding; exact-Int averages borrow the numeric layer.
+
+The remaining progress-state and comptime-fuel leaves are opaque policy seams
+owned by the host/session layers, not Rust iterator owners. Their Rust bodies
+are seed/verification paths scheduled to die at cutover. The collection exit
+harness checks the Jet object's definitions, unresolved pack imports, all
+selected baseline stems, raw slot witnesses, and the count of newly passing
+collection stems; preparation is not behavioral proof.
+
+For the combined Text/collection exit proof, both runners first write their
+`--plan` selections. Run the union once, then pass that fresh `results.tsv` to
+each runner with `--results FILE`. This still requires every selected baseline
+and focused stem to pass and runs each layer's raw ownership, stopped-result,
+and symbol witnesses; the receipts record the shared result file.
+
+Stopped splits discard both partial lists; owned search needles, zip inputs,
+chunks, progress outputs, and unboxed failure payloads are also released before
+returning their neutral stopped result. Zip checks the stop rail before padding
+or reporting unequal lengths. A partially consumed step-by hint counts only
+remaining complete steps, and Float averaging preserves the reference sum's
+negative-zero identity.
+The focused collection review fixture checks allocator-class balance for split,
+owned-needle, chunks, both stopped zip inputs (strict and padded), all three
+try-error drains, and stopped progress output. Test-only wrappers delegate the
+real free or progress advance exactly once before triggering the real comptime
+budget rail; they are absent from the production runtime. Raw witnesses check
+fresh and partially consumed step-by hints and the Float average sign bit.
+The shared native goldens require strict-zip task cancellation and the exact
+`-0.0` average output, not merely numeric equality with zero.
+Bits extent at the maximum I64 index stops on overflow: the checked seed
+profile explicitly retains overflow checks (`Compiler/Bootstrap/Tests.rs:68-83`);
+the unchecked `opt-level=1` pack build (`Tools/packaging/prebuild-runtime.sh:70-71`)
+is not the semantic oracle for the plain `v + 1` in `JetBitSet::len`.
+
+The generic Rust symbol census also includes List operations already emitted
+directly as Jet-authored LIR, rather than imported runtime functions.
+`Compiler/JetRuntime/Tests/lists-native.tsv` records each audited symbol's
+dispatcher, concrete body, Rust reference, ownership behavior and supported
+type limits. The first batch reuses the existing `Lower/Lists.jet` implementation
+(all-ref search finds its introduction in `1e7f948f3`), not a second runtime
+kernel. `check-lists-native.mjs` checks source/dispatch/helper consistency;
+its receipt is not native execution or unrestricted type-coverage proof.
+The second batch records 22 more List bodies in `Combinators.jet`,
+`Parallel.jet` and `Lists.jet`, including eager callback ordering, first-error
+cleanup and explicit unsupported callback/type shapes. The joined
+`jet_rt_native_para_walk` provider is Jet-authored in runtime `Parallel.jet`.
+It uses the existing Thread and Scheduler control primitives: fixed 64-item
+chunks are assigned cyclically, all workers join before any failure is
+published, and the lowest failing chunk start selects the original stop record
+(`CAbiParallel.rs:9-33`, `Core.rs:360-420`, `ParallelKernel.rs:60-90`).
+Zero worker limit means one worker; negative or outside-I64 exact limits
+mean unrestricted capacity. The shared affinity probe uses fallback one,
+without the scheduler pool's environment override. `ParallelTests.jet` and
+`run-parallel-fixtures.mjs` exercise empty/serial/tail walks, joined multiple
+failures, stop-form preservation and allocator-class balance when run against
+the freshly composed runtime; source parsing alone is not behavioral proof.
+The last census List route, `jet_list_para_fold_add_fixed_f64`, is implemented
+in `IterNumeric.jet` with the existing `(Float slots, length, seed)` C ABI.
+It preserves 64-element indexed chunks, the seed in lane zero of every chunk,
+the eight-lane finish tree and adjacent-pair merges with zero seed/odd carry
+(`ParallelKernel.rs:95-124`, `SimdLanes.rs:683-717,785-794`), without callbacks
+or scheduling-dependent results. Single chunks need no scratch allocation;
+larger inputs use one compacted partial buffer. Raw witnesses distinguish
+per-chunk seeding, tree versus serial rounding, odd-partial association and
+empty negative-zero seed, and require allocator-class balance.
+
+The legacy nine heap/bisection routes now use Jet implementations in
+`Collections.jet`, preserving their existing native signed-I64 input slots,
+exact-Int scalar index results and transferred output buffers
+(`CAbiRoutes.rs:14034-14239`, `MathLibPure.rs:1287-1438`). Binary bounds keep
+duplicate left/right placement; heap operations preserve strict child ties;
+sorted merge takes the left equal item first. Top-N selection uses only an
+N-element heap and sorts its selected output, avoiding a full input copy for
+small N. The raw witnesses cover duplicates, empty input, immutable borrowed
+inputs, growth, signed extrema, ordering and per-class allocator balance.
+
+The eight OrderedMap routes and their clone/drop/three rendering rails now
+own paired native List headers containing independent E4 strings. Updates
+preserve insertion order and return fresh owners; lookup and key/value lists
+clone borrowed strings. The raw fixture checks replacement position, missing
+lookup/removal, independent clone, NUL text surviving all input/container drops,
+exact bytes for all three rendering modes and allocator-class balance.
+The retirement predicate fails for these rows: the compiler still pins
+Counter/OrderedMap/Layer/Chain to native carriers (`Emit/Types.jet:2637-2640`),
+so the Jet runtime replaces the existing ABI rather than deleting live routes.
+
+Counter's fourteen routes and five owning/rendering rails use the same paired
+header with native signed-I64 counts. Zero deltas do not introduce keys; zero
+totals remove entries; negative counts survive but contribute no elements.
+Most-common keeps insertion order for ties and negative K means all entries.
+Merge/subtract update one fresh owner with reserved capacity, preserving the
+reference's checked arithmetic and ordering without repeated full copies.
+Decimal rendering handles I64::MIN through unsigned magnitude. Raw witnesses
+exercise all routes, three exact render strings, wide boxed return ownership,
+independent clones and per-class balance. Ambient dispatcher rows remain
+(`Core.jet:504-517`); these are live ABI replacements, not row retirements.
+
+Chain's four routes and the Chain/Layer clone/drop/rendering rails own a native
+list of inline paired Layer headers. Push deep-copies the new front layer and
+all old layers once; get returns an independent string from the first matching
+key in the first matching layer. Contains performs the same checked borrowed
+lookup without allocating a discarded get result. Chain rendering writes
+layers directly into one builder rather than allocating intermediate strings.
+Raw witnesses cover duplicate keys, front precedence, empty layers, unequal
+input lengths, NUL keys/values, independent clone/output ownership, three exact
+rendering modes and allocator-class balance. Separate get/contains witnesses
+require the checked bounds stop for a matched key beyond the value array.
+
+The native ABI follows the Rust provider (`Core/Collections.rs:3524-3555`):
+push retains both complete input arrays, and a matched unpaired key panics.
+This differs from the source Core `layer_from` normalization
+(`Core/collections/collections.jet:593-605`) which truncates to the smaller
+length. The native provider preserves the existing checked ABI rather than
+changing Core emission policy or silently normalizing its input.
+
+The remaining 21-row collection census is tracked per symbol in
+`JetRuntime/Tests/collections-residue.tsv`. Thirteen paths already lower
+directly: three typed LoopIter operations, Option.map, three slices, two view
+combinators and four view constructors. Slice/view bounds use the Jet-owned
+`jet_rt_slice_end`/`jet_rt_view_end`; the original generic providers are not
+called by these paths. Two LoopIter adapter metadata rows still exist, so this
+is path provenance, not proof that every generated adapter has been retired.
+
+Six formerly live providers now have Jet exports: the RangeCursor destructor,
+four numeric LoopRange operations and inline range_contains. The LoopRange
+boundary retains borrowed exact-Int inputs and fresh exact-Int value results;
+the private cursor keeps native current/end/step plus exclusive/done words.
+Both stride directions and inclusive extrema are preserved. Checked step
+overflow ends iteration without replacing current or raising an overflow stop.
+The Rust seed's five handwritten cursor C exports are excluded from native
+packs in the same ownership cutover as their Jet definitions.
+
+Named Range.contains and Regex.count remain live generated adapters until a
+canonical native handle input contract is available. The true Regex count
+kernel is `CoreLib/JetStd/Regex.rs:486`, not the older inventory's accidental
+match of Bits::count at `Core/Collections.rs:147`. No Rust Arc<RegexProgram>
+layout or guessed source Range offsets are interpreted by a Jet provider.
+The direct Range-value iterator in `Lower/Iter.jet` is a different path from
+legacy LoopRange instructions in `Lower/Lower.jet:1750-1771`. Zero literal calls
+alone cannot prove closure: dynamic symbols and Runtime drop descriptors are
+tracked explicitly by the consistency checker.
+
+Lazy cursor initialization and advancement may invoke user callbacks. Both
+are can-stop MIR operations: their results are usable only on the immediately
+following Propagate poll's resume edge. Prefetched HasNext/Value operations
+remain non-stopping. A cancelled map callback must report task cancellation,
+never return a short successful collection or silently end a for-loop.
+
+File and stdin line producers keep the three-argument native ABI
+`(source, by_value, element_meta) -> NativeIter`. The source argument is a
+borrowed four-word Jet callback adapter `[payload, next, release, clone]`,
+not a Rust owner or an OS descriptor. Lowering supplies typed source-method
+callbacks, preserving source buffering, UTF-8 validation, CR/LF handling,
+fault checkpoints and `<core.prelude>:0` error rendering. The runtime copies
+callbacks into a kind-28 iterator's existing closure fields; no second
+producer/context allocation is required. A pull returns EOF (0), a moved slot
+(1), or a stopped rail (-1, with an unwritten output). Borrowed file/stdin
+sources are eagerly snapshotted; owned sources are lazy. Process producers
+retain the shared pipe through its clone callback, independently of the child.
+Encoding producers own a checked reader and preserve its nested EOF result.
 ### Jet-authored runtime object
 
 `Compiler/JetRuntime` is a separate package, assembled from its own
@@ -1437,6 +1820,37 @@ The runtime's private allocator root uses the shared MIR `.Global` lowering.
 after `jet_runtime_jet.o`; the strong-definition check rejects any replaced
 Rust export. Rust-tier allocator bodies are seed/verification inputs only,
 recorded for deletion at cutover, not a second native-pack implementation.
+
+Controlled clocks use the native World128 state in `Source/World.jet`.
+The active capability is borrowed at TCB offset 104; zero means no World.
+`world_wall_ms(out)` and `world_monotonic_ns(out)` return presence separately
+from the raw I64 sample, so a controlled epoch of zero never falls through to
+the host. World state survives task boundaries and ends only with its owning
+World lease. Wall time is the saturating sum of the fixed origin and virtual
+monotonic milliseconds, matching the Rust seed.
+
+MemSentry is native in `Source/Sentry.jet`, with the same R0801/R0802/R0803
+diagnostic rows and observational 4-MiB JSONL ledger as the Rust-tier seed.
+Gate/fence saves remain caller-owned 64-byte frames; the saved native gate is
+56 bytes at TCB128..184. Frame-owned raw ranges expire at the frame boundary,
+not at a gate boundary, and the newest expired registration determines whether
+a dangling address refers to a Jet frame or quarantined heap storage. Native
+packing excludes the five former Rust pointer/scope exports. Ledger failures
+never alter the delivered fault.
+Raw-addressed native functions hold a distinct sentry allocation-frame token
+through normal and stopped cleanup; the gate save is not its lifetime owner.
+An instrumented raw read skips its native load after a delivered fault and
+leaves its payload unwritten for the MIR Propagate cleanup edge.
+Shield defers cancellation/deadline/interrupt-class stops but never suppresses
+a panic or runtime fault; both Check and Propagate expose those immediately.
+Raw Deref is a can-stop MIR operation. Its Propagate is emitted before the
+result is bound into a lexical cleanup frame, including inside Shield; MIR
+legality requires all result reads, projections and drops to be dominated by
+the resume edge. Cleanup never reads or drops an unwritten raw-read result.
+`run-world-sentry-fixtures.mjs` drives real controlled-thread timer ordering,
+all four MemSentry seed unit witnesses, a trivially copied inline Source read
+whose stopped frame is observed as released, and byte-for-byte JSONL parity
+with `jet_mem::jet_memory_ledger_record` from the freshly composed Rust seed.
 
 `JetRuntime/Tests/check-object.mjs` checks exact exports and the audited
 `imports.list`, including the allocator constructor relocation.
@@ -1460,3 +1874,323 @@ declares a program `run` entry. C exports have no failure-row annotation.
 The C ABI route generator reads every canonical `CAbi*.rs` except generated
 `CAbiRoutes.rs`, including unsafe C exports. Hand-owned exports do not get
 generated adapter bodies; canonical signatures still supply ownership checks.
+
+### Native arena resource counters
+
+`MemRegistry.jet` is the single native owner of the seven memory observation
+words from `Prelude/Observe.rs`: outstanding arenas, allocations and bytes,
+retained block capacity, high-water bytes, and the two allocation-probe totals.
+Its priority-1 runtime initializer allocates its own state after the heap is
+ready; it does not share allocator policy cells or count ordinary heap blocks
+as arenas. The provider uses the existing `Sync.jet` atomic leaves.
+
+Core's Arena/Bump/Fixed/Pool implementations call the open/alloc/reset/close
+hooks, and their RawBlock owners call retain/release. Zero-sized values count
+as allocations with zero bytes. Counters carry unsigned machine-word bits,
+wrap on fetch-add/subtract, and snapshot independently with relaxed loads,
+matching the reference rather than promising a transactional metric snapshot.
+The high-water candidate alone saturates on unsigned overflow. Probe reset
+and take use sequentially consistent exchanges and never clear live facts.
+
+`jet_rt_mem_resources(out)` writes three words (arenas, allocations, bytes)
+into caller-owned 24-byte aligned storage for the Observe live writer.
+`MemRegistryWitness.c` links the real native provider and covers lifecycle,
+zero-size, unsigned wrapping, probe isolation and concurrent allocation totals.
+Compile it with `cc -pthread` against the composed runtime object; its success
+line is `MemRegistry: lifecycle, zero-size, probe isolation, unsigned wrap,
+concurrent totals ok`. Source/syntax checks do not establish native parity.
+### Native display runtime
+
+`Compiler/JetRuntime/Source/Display.jet` owns the scalar C display leaves.
+The generic `jet_fmt_display`, `jet_fmt_debug`, and `jet_fmt_show` calls are
+resolved by checked type in native lowering, not erased into untyped runtime
+functions. Text results use the shared E4 `{ptr, len, cap}` UTF-8 carrier.
+Exact Int formatting borrows the canonical base-1e9 limb carrier; fixed
+signed/unsigned words never enter arbitrary-precision arithmetic.
+
+Today's `JetDisplay`, `JetShow`, and `JetDebug` implementations for binary64
+all use Rust's shortest Debug spelling: signed zero is `-0.0`, integral
+decimals keep `.0`, exponent notation applies below `1e-4` and at/above
+`1e16`, and NaN ignores its sign and payload. `FloatShortest.jet` reuses
+the pinned Dragon digit algorithm, with one bounded workspace released
+before returning. Rust-tier scalar C bodies remain seed/verification paths
+under `cfg(not(jet_native_pack))`; they do not define symbols in native packs.
+
+Binary32 has two raw-word C leaves, `jet_rt_float32_to_string(bits: I64)`
+and `jet_rt_float32_debug(bits: I64)`, returning the same owned E4 text.
+Only low32 is interpreted; upper32 is ignored. Its 24-bit decoder (bias
+127, subnormal unit 2^-149) feeds the shared bounded Dragon core, without
+widening to binary64. Display follows Rust f32 `{}`: fixed decimal, `-0`,
+and no mandatory `.0`. Debug follows Rust f32 `{:?}`: `-0.0`, integral
+`.0`, scientific notation below f32(1e-4) or at/above f32(1e16). Those
+binary32 bounds are `0x38d1b717` and `0x5a0e1bca`; the binary64 bounds
+are not reused. Rust 1.90 `core/src/fmt/float.rs` and
+`core/src/num/flt2dec/decoder.rs` define these spelling/decoder rules.
+
+`FloatBits.jet` contains ordinary Core-backed reference functions. Only the
+runtime-object driver may replace their validated checked IDs with internal
+LIR `Bitcast` operations; normal program lowering executes their bodies.
+The same private table handles the thread-entry address relocation. Its
+signatures reject generics, captures, failure carriers, writable parameters,
+and mismatched scalar types. Bitcasts preserve all 64 bits and require
+trivial Integer/Float/Pointer layouts; they are pure operations, not optimizer
+copy aliases. There is no MIR, language, or Float-assembly extension.
+
+The optional ABI witnesses are selected with `run-runtime.mjs OUT --test
+FloatBits`, using the shared single-fixture selector. Their additional export
+list is confined to that test object, never the production runtime manifest.
+
+`Compiler/JetRuntime/Tests/run-display-goldens.mjs` prepares all binary
+exponents with mantissa edges, decimal-power neighbors, signed zero,
+NaN payloads, infinities, subnormals, one million deterministic random bit
+patterns, decimal ties, integer transitions around 2^53, and every floating
+literal in the registered golden corpus. Its freestanding
+client calls the real Jet exports in the native pack and compares both
+float leaves byte for byte with a separately compiled Rust Debug oracle.
+It also checks scalar limits, UTF-8 boundaries, the boxed Int limb layout,
+Jet-owned exports, and that every Jet-object import resolves in the pack.
+The binary32 differential additionally covers every finite exponent with
+mantissa edges, decimal powers, threshold neighborhoods, decimal ties,
+2^24 integer transitions, signed zero, subnormals, NaN payloads and
+infinities, upper32-poisoned edge words, and one million deterministic
+random32 samples. The real native C witness compares both leaves against
+independent Rust f32 Display/Debug bytes; `binary32_byte_equal` is recorded
+separately from binary64 parity.
+The same runner executes the selected passing print/format goldens against
+that pack and records a one-million-float formatting cell for native Jet and
+the Rust reference, including a digest comparison and measured timing ratio.
+The runtime-object path currently has no optimizer; its timing is labelled
+“runtime object unoptimized” and is not an O1 performance verdict.
+These checks are behavioral proof only when executed against the composed
+runtime object and pack; corpus preparation alone is not a pass.
+
+### Unit-test runtime in Jet
+
+`Compiler/JetRuntime/Source/Test.jet` owns native unit outcome classification,
+lossless outcome wire encoding, and text/JSON reporting. Its opaque outcome
+contains four machine words: flags and owned E4 name/stdout/stderr handles.
+Wire records retain the producer protocol:
+`flags name_bytes stdout_bytes stderr_bytes -\n` followed by those three UTF-8
+payloads. The producer, not the runtime reporter, owns test selection/order
+and the `JET_NATIVE_TEST` framing. Capture policies and summary counts retain
+the canonical `TEST_PRELUDE` behavior, including expected failures, unexpected
+passes, skips, control-character JSON escaping, and full-width shuffle seeds.
+
+Only the native runtime archive uses `jet_native_pack`: its test adapters
+transfer owned E4 text to Jet outcomes and hold outcomes opaquely across task
+spawn/join/cancellation. Ordinary Rust-tier harnesses retain their Rust
+outcome and reporting bodies. The native reporter's raw environment-presence
+import belongs to the remaining host layer; presence must not disappear when
+an environment value is not UTF-8.
+
+`TestCapture.jet` owns per-thread capture over the scheduler's generic TLS
+key mechanism. Its idempotent `.init_array` initializer runs at priority 3,
+after thread initialization at priority 2. A private module global holds the
+process-lifetime key. Its one 136-byte per-thread state owns the capture
+builder/tagged frame list and the `Core.rs:678-860` test cells:
+expectations at 32, completed expectations at 56, unmet at 80, timeouts at 88,
+whole-skip at 112, and failure message/detail at 120/128. No second TLS key
+or reserved TCB test slot is introduced. `TestScope.jet` implements the
+matching expectation, timeout, skip and failure APIs; all stored text is E4
+owned, borrowed inputs are cloned, and take transfers ownership. Timeout
+samples use host `CLOCK_MONOTONIC`, like Rust's `Instant`, even inside World.
+Nested begin/take operations preserve outer captures. The TLS destructor
+reclaims abandoned captures and every test cell on thread detach. Compiler
+print syntax appends bytes and one LF while capturing; raw `stdout.write`
+bypasses capture, as it does in the Rust test prelude.
+
+Invocation still depends on L8a-2's task-control/stop-record helpers.
+Replacing `jet_rt_test_unit`'s remaining Rust `jet_test_run` boundary requires
+installing an inner control, taking its diagnostic, cleaning up capture,
+and restoring/propagating the parent's cancellation or deadline. The callback
+environment is borrowed; the outer task adapter releases it exactly once.
+Property generation remains a named gap, not an emulated or empty engine.
+The unit-only wire consumer refuses property records.
+
+`Compiler/JetRuntime/Tests/test-unit-runtime.c` links against the composed
+Jet object and fresh remaining native archive, exercising ownership, flags,
+and wire round trips without duplicate test providers. Capture fixtures cover
+32-level nesting, detach cleanup, and eight pthreads with isolated output.
+The `scopes` case covers borrowed-input ownership, replacement/take/clear
+failure pairs, first-stop-wins, nested/duplicate/zero expectation IDs,
+ordinary-failure exclusion, completed precedence, parent stop reset,
+timeout-depth pruning, skip reset, and full detach cleanup across eight
+pthreads. `TestScopeTests.jet` in the World/Sentry fixture unit additionally
+witnesses mismatch/unmet publication into the real task stop record and
+Instant saturation/backwards-clock arithmetic. These fixtures require the
+fresh composed object; syntax/parse receipts alone do not prove behavior.
+`test-unit-runtime.mjs FIXTURE_EXE` compares exact status/stdout/stderr across
+capture policies, text/JSON reports, empty reports, UTF-8/control characters,
+shuffle boundaries, and malformed/property records. Runtime admission also
+requires native `jet test` parity on `features/basics/onboarding/run.jet`,
+`features/tooling/test_members.jet`, and `features/tooling/expected_fail.jet`,
+using the native runner's same-head host/reference protocol checks.
+`run-test-runtime.mjs OUT NATIVE_STATICLIB JET_OBJECT HOSTED_JET REFERENCE_JET`
+checks the object's audited undefined-symbol set, builds/runs that fixture,
+and runs the three-example native CLI parity checks with the fresh pack.
+
+### Raw file and process host boundary
+
+`JetRuntime/Source/HostFiles.jet` owns the Linux descriptor transport. Its
+canonical FD72 header has the futex mutex at 0, descriptor at 8, closed flag
+at 16, owned E4 path at 24, buffer at 32, capacity at 40 (negative for
+writes, zero for raw readers), filled bytes at 48, position at 56, and refs at 64.
+Explicit close affects aliases; last release frees the state. Portable stat
+facts hide the kernel's stat layout, and statx reports birth-time availability
+instead of assuming it is absent. Held-directory operations never reopen a
+source inode or substitute an ambient pathname.
+
+Core owns validation, fault injection and IOError construction. Private leaves
+report ErrorOut32 (domain/stage U32, code I64, kind/pad U32, owned E4 message)
+and a separate WriteZero fact on write/flush/seek/close. Linux syscall errors
+have POSIX domain 1 and zero kind/message. Read and descriptor dup first flush
+pending writer bytes; their flush WriteZero error uses custom domain 4, Other
+kind and the owned canonical cause because those ABIs have no Bool output.
+Reads then make a single kernel read into caller-owned compact bytes, never
+consume the write buffer, and preserve Interrupted. A dup owns a fresh empty
+buffer and sees the flushed shared kernel offset. Historical
+`958047768^:crates/jet-codegen/src/Prelude/CoreLib/JetStd/FileHandles.rs`
+owns unbuffered `std::fs::File` descriptors, so private native buffering must
+not hide preceding writes from either operation. Its `jet_fs_link_fd_at_raw`
+calls AT_EMPTY_PATH once with no pathname or `/proc/self/fd` fallback.
+Linux [link(2)](https://man7.org/linux/man-pages/man2/link.2.html) requires
+CAP_DAC_READ_SEARCH for that flag and reports ENOENT without it; the transport
+returns that fact unchanged. The six-argument process launch
+borrows ExecCandidates32 (count, NUL candidate column, script-fallback bit,
+searched bit) and Core-prepared argv and effective environment bytes. This
+preserves non-Unicode PATH entries without an independent environment. Source
+computes the exact reference route's PATH and ENOEXEC policy. The runtime parent
+prepares allocations, descriptor copies, limits and `/bin/sh` argv before fork.
+The child uses only raw syscalls: stdio mapping, cwd, source-prepared group
+setup, SIGPIPE reset, held-directory mapping/chdir, limits/session/PTY setup,
+then ordered execve. GNU retry facts remember EACCES, continue past ENOENT,
+ESTALE, ENOTDIR, ENODEV and ETIMEDOUT, and stop on all other errors; an explicit
+fallback bit alone permits the preallocated `/bin/sh` argv. Child72 has its mutex at 0,
+pid/reap-status at 8/16/24, stdin/stdout/stderr/PTY at 32/40/48/56, and refs at
+64. Taking a stream transfers an independently owned FD72; terminal input and
+output duplicate the master while taking terminal control transfers the
+original. Stream aliases may outlive the child. Windows-only PTY control
+carriers use capacity I64.MIN and dispatch resize/close to the OS console
+handle; Linux and macOS never produce that tag. Native carrier fixtures link
+against the complete composed runtime object, not an allocator-only seed.
+`realpath` into a Jet-owned fixed 4096-byte buffer preserves exact OS symlink,
+`..`, and non-Unicode canonicalization, with the real OS errno on failure;
+this ledgered mechanical import is not a pathname-policy replacement.
+
+Owner directive #33 defines an empty exec-candidate set as ENOENT, without an
+execve attempt. This is the intentional I9 delta from glibc's oversized-PATH
+case that otherwise returns whichever stale errno happened to be present.
+Child setup retains its reference error precedence: an invalid cwd or descriptor
+still fails at its own stage before the empty candidate set reports exec ENOENT.
+
+The remaining held-file calls reuse this boundary, without exporting a second
+set of public-policy adapters:
+
+| Core seed route | Jet raw transport |
+| --- | --- |
+| `jet_std_files_open_writer` | `jet_fd_open_raw` / `jet_fd_open_at_raw` |
+| `jet_fs_directory_close` | `jet_fd_close_raw` |
+| `jet_fs_directory_create` | `jet_fd_mkdir_at_raw` |
+| `jet_fs_rename_at` | `jet_fd_rename_at_raw` |
+| `jet_fs_read_link_at` | `jet_fd_readlink_at_raw` |
+| `jet_std_file_reader_stat` | `jet_fd_stat_raw` |
+| `jet_std_file_writer_set_mode` | `jet_fd_chmod_raw` |
+| `jet_fs_directory_fd_raw` | `jet_fd_number_raw` |
+| `jet_fs_stat_at` | `jet_fd_stat_at_raw` |
+| `jet_fs_xattr_get` | `jet_fs_xattr_get_raw` |
+
+`jet_fd_stat_at_raw(directory, name, StatFacts128*, ErrorOut32*)` follows
+FileHandles.rs:711–758: an empty name stats the held directory; a final entry
+opens with `O_PATH|O_NOFOLLOW|O_CLOEXEC`, stats the owned descriptor, and closes
+it, including stat failure. The source resolves/validates intermediate names.
+Ambient path stat continues to use `jet_fs_stat_raw`, not a fake directory.
+`jet_fs_xattr_get_raw(path, attribute, compact_bytes, length, ErrorOut32*)`
+performs one `lgetxattr` syscall, returning the byte count or -1. A null buffer
+with zero length queries size. FileHandles.rs:988–1031's absent/unsupported
+mapping, allocation and ERANGE retry remain source policy. Descriptor numbers
+are borrowed facts: source retains the directory until the consuming leaf
+duplicates it; they are not independent owned handles.
+
+### Native shared process pipe holder
+
+`HostPipe.jet` owns `Pipe24`: non-atomic reference count at 0, RefCell mutable
+borrow state at 8, and an owned reader FD72 pointer at 16 (`0` means `None`).
+The source facts are `CommonTypes.rs:162–165`'s
+`Rc<RefCell<Option<BufReader<ProcessReader>>>>` and `Process.rs:3325–3343`'s
+shared mutable buffered position. Clone returns the same holder and increments
+its count; only the last drop releases the FD72 and frees the holder. The FD
+is taken from `jet_process_take_stream_raw`, not borrowed from or retained
+through Child. Shared close takes the optional reader, so every clone sees EOF.
+No Rust Box/Rc/RefCell offset and no independently duplicated fd is involved.
+
+The four `jet_rt_handle_{clone,drop}_Process{Stdout,Stderr}Stream` exports use
+the canonical handle symbol convention. `jet_process_stream_line_bytes_raw`
+borrows the holder and returns `Result<[U8], IOError>` as a native tag plus
+owned compact data/length or an owned error. It shares FD72's refill buffer,
+includes LF, preserves malformed UTF-8 and bare CR, and retries Interrupted
+as `BufRead::read_until` does. Checked Core `__stdout_next_line` and
+`__stderr_next_line` own empty-byte EOF, UTF-8 decoding and the one-LF/one-CR
+terminator policy. No fixed host next-line iterator substitutes for them.
+
+When TAKE supplies a writer-mode FD72, the first buffered read flushes pending
+output under the FD lock before converting its buffer to reader refill mode
+and resetting both cursors. Flush failures leave the writer suffix intact and
+return through the fallible read edge (TAKE itself has no error result).
+Writes through retained reader-mode aliases bypass refill storage and use a
+kernel write, so they cannot corrupt unread lines and a pipe read-end write
+returns EBADF.
+
+A conflicting mutable borrow panics with `RefCell already borrowed`, matching
+the seed's observed rustc 1.97.1 commit `8bab26f4f` and that commit's
+`library/core/src/cell.rs:902,912–917`. Its trap path does not allocate.
+`Tests/process-pipe.c` plants real-descriptor, shared-refill, interleaved-clone,
+shared-close, actual comptime-stop release and signal-reentrant borrow
+witnesses. Execution and allocation-ledger-zero remain unexercised; the latter
+requires the ProgramAllocator counting/facts provider, not a fake allocator.
+
+The native Shared transaction log retains each participating cell and runs each
+edit callback once against a private working value. Nested commit transfers
+the child's stage to its parent; outer commit acquires all permits in physical
+owner order, prepares every clone and revision, then publishes all participants
+before releasing permits. The commit clone is observable and matches
+`MathTaskMem.rs`'s commit hook. Failure disposes prepared stages without
+publication. The process-wide outer gate covers begin through commit or
+rollback; generated scope/drop glue must close that authority on every exit.
+The actual-kernel clients are `JetRuntime/Tests/StmTests.jet` and
+`sync-fixture.c`, assembled separately by `run-channel-fixtures.mjs`
+(`assemble-stm`, `link-stm`, `run-stm`).
+
+Condition wait registers its FIFO ParkSlot before releasing an edit permit.
+Notify-one consumes the oldest registration; notify-all drains the queue;
+notifications without waiters become pending notifications for later waits.
+The owned guard's mutable token records whether reacquisition succeeded:
+`cell` is held and `cell|1` is unheld but still retains the cell. An unheld
+access delivers the named invalid-guard stop; dropping it releases only its
+retained owner, never another writer's permit or revision. The wait callback
+writes a single Bool byte; its error output transfers one E4 String owner only
+on a non-stopping error return. `assemble-sync`, `link-sync`, and `run-sync`
+include the Condition queue and cancellation-cleanup witnesses.
+
+### Remaining native String routes
+
+`TextRoutes.jet` supplies the C route ABI for chars, copy, byte count, lines,
+repeat, replace, both explicit slice forms and ASCII case conversion, reusing
+E4 ownership, UTF-8 scalar decoding, constant-storage substring search and the
+existing character-range failure report. Chars/lines return an owned word
+column plus its count, with null for empty columns, matching generated
+`list_out`. Byte count returns the canonical exact-Int word. Lines match
+Rust `str::lines`: remove LF and its optional preceding CR, preserve bare CR,
+and omit the extra line after a final LF. Replace uses nonoverlapping matches;
+an empty pattern inserts at each Unicode-scalar boundary including both ends.
+Repeat clamps negative counts to zero and copies into one exact allocation.
+ASCII casing leaves every non-ASCII byte unchanged. Slice bounds are character
+indices and exclude the end, including an empty slice at the character count.
+The generated route exporter removes replaced Rust definitions while retaining
+shared carrier metadata; no second String carrier is introduced.
+
+The x64 runtime-pack census excludes wasm32-only allocation exports (WebAbi,
+font/HarfBuzz scratch, numeric Web buffers and Web D-FRED). Those U32 linear-
+memory/provenance/TLS contracts remain separate target rows, not native-pointer
+casts. Date/time formatting and Pool construction are Core source-owner rows,
+not String/allocator runtime aliases. The private image-runtime stop/String
+allocator and L1/L3 canonical allocator/split providers are existing Jet bodies.

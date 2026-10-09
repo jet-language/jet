@@ -1,10 +1,12 @@
 // Library-object driver using the shared checked-MIR library feed. Export
-// roots are exactly the checked NativeLibrary artifact's `#Export(c)` rows.
+// roots are exactly the checked NativeLibrary artifact's `#Export(c)` rows;
+// runtime.lifecycle (Compiler/JetRuntime/lifecycle.list) orders their hooks.
 use jet_backend.x64_runtime_library
 use core.files as files
 
 fn runtime_lower(program: MIRProgram) {
-    library :: x64_runtime_library(program)
+    lifecycle :: (files.read("runtime.lifecycle") ?? panic("cannot read runtime.lifecycle")).split("\n").to_list()
+    library :: x64_runtime_library(program, lifecycle)
     if library.object.errors.len() > 0 {
         files.write("jet_runtime_jet.issues", library.object.errors.join("\n")) ?? panic("cannot write runtime library issues")
         panic("runtime library lowering failed; see jet_runtime_jet.issues")

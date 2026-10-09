@@ -1,0 +1,144 @@
+// Per-thread test state uses the scheduler's ONE dynamic TLS mechanism.
+// State136: print0, printFrames8, expect32, completed56, unmet80, timeouts88,
+// wholeSkip112, failureMessage120/failureDetail128. Lists are native word
+// headers; capture frames are [kind=1, previous owned E4 builder].
+// Begin/take nesting preserves the outer builder without copying its bytes.
+// Thread detach invokes the registered destructor, including on cancellation.
+
+test_stack_key := I64{0}
+
+// RuntimeLower resolves this checked function-address entry, never the body.
+fn rt_test_capture_abort_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+// runtime-init: 3
+#Export(c) fn jet_rt_test_capture_init() {
+    if (test_stack_key != I64{0}) {
+        return
+    }
+    closure :: jet_rt_alloc(I64{24}, I64{8})
+    trap_store(closure, I64{1})
+    trap_store(closure + I64{8}, rt_test_capture_abort_address())
+    trap_store(closure + I64{16}, I64{0})
+    test_stack_key = jet_rt_tls_key_new(closure)
+}
+
+fn test_capture_state() -> I64 {
+    if (test_stack_key == I64{0}) { return I64{0} }
+    jet_rt_tls_get(test_stack_key)
+}
+
+fn test_state_ensure() -> I64 {
+    state := test_capture_state()
+    if (state == I64{0}) {
+        state = jet_rt_alloc(I64{136}, I64{8})
+        thread_zero(state, I64{136})
+        jet_rt_tls_set(test_stack_key, state)
+    }
+    state
+}
+
+#Export(c) fn jet_rt_test_capture_begin() {
+    state :: test_state_ensure()
+    stack :: state + I64{8}
+    count :: trap_word(stack)
+    thread_words_grow(stack, count + I64{2})
+    data :: trap_word(stack + I64{16})
+    trap_store(data + count * I64{8}, I64{1})
+    trap_store(data + (count + I64{1}) * I64{8}, trap_word(state))
+    trap_store(stack, count + I64{2})
+    trap_store(state, test_text_new(I64{0}))
+}
+
+fn test_capture_state_drop(state: I64) {
+    stack :: state + I64{8}
+    capacity :: trap_word(stack + I64{8})
+    if (capacity != I64{0}) {
+        jet_rt_free(trap_word(stack + I64{16}), capacity * I64{8}, I64{8})
+    }
+    test_scope_state_drop(state)
+    jet_rt_free(state, I64{136}, I64{8})
+}
+
+#Export(c) fn jet_rt_test_capture_take() -> I64 {
+    state :: test_capture_state()
+    if (state == I64{0}) {
+        jet_rt_unreachable(I64{0}, I64{0})
+        return I64{0}
+    }
+    stack :: state + I64{8}
+    count :: trap_word(stack)
+    data :: trap_word(stack + I64{16})
+    if (count < I64{2} || trap_word(data + (count - I64{2}) * I64{8}) != I64{1}) {
+        jet_rt_unreachable(I64{0}, I64{0})
+        return I64{0}
+    }
+    result :: trap_word(state)
+    previous :: trap_word(data + (count - I64{1}) * I64{8})
+    trap_store(state, previous)
+    trap_store(stack, count - I64{2})
+    result
+}
+
+// The registry clears the TLS cell BEFORE calling this destructor, so it uses
+// its supplied state rather than looking up a cell that is already empty.
+#Export(c) fn jet_rt_test_capture_abort(_closure: I64, state: I64) -> I64 {
+    stack :: state + I64{8}
+    count := trap_word(stack)
+    data :: trap_word(stack + I64{16})
+    current := trap_word(state)
+    loop count > (I64{0}) {
+        if (count < I64{2} || trap_word(data + (count - I64{2}) * I64{8}) != I64{1}) {
+            jet_rt_unreachable(I64{0}, I64{0})
+            return I64{0}
+        }
+        test_text_drop(current)
+        current = trap_word(data + (count - I64{1}) * I64{8})
+        count -= I64{2}
+    }
+    test_capture_state_drop(state)
+    I64{0}
+}
+
+// Borrow text. Return false when this thread has no active test capture; the
+// host print path then writes normally. Raw stdout.write never calls this hook.
+#Export(c) fn jet_rt_test_capture_print(text: I64) -> Bool {
+    state :: test_capture_state()
+    if (state == I64{0}) { return false }
+    if (trap_word(state) == I64{0}) { return false }
+    builder :: trap_word(state)
+    old_data :: trap_word(builder)
+    old_len :: trap_word(builder + I64{8})
+    old_cap :: trap_word(builder + I64{16})
+    source := trap_word(text)
+    length :: trap_word(text + I64{8})
+    needed :: old_len + length + I64{1}
+    destination := old_data
+    if (needed > old_cap) {
+        capacity := if (old_cap == I64{0}) -> I64{8} else -> old_cap * I64{2}
+        if (capacity < needed) { capacity = needed }
+        destination = jet_rt_alloc(capacity, I64{1})
+        test_copy_bytes(destination, old_data, old_len)
+        // A borrowed view may alias the builder. Rebase it before freeing the
+        // old buffer; the append itself starts after all existing bytes.
+        if (source >= old_data && source - old_data <= old_len && length <= old_len - (source - old_data)) {
+            source = destination + (source - old_data)
+        }
+        trap_store(builder, destination)
+        trap_store(builder + I64{16}, capacity)
+        if (old_cap != I64{0}) { jet_rt_free(old_data, old_cap, I64{1}) }
+    }
+    test_copy_bytes(destination + old_len, source, length)
+    trap_put(destination + old_len + length, I64{10})
+    trap_store(builder + I64{8}, needed)
+    true
+}
+
+// Native test Print syntax must always execute inside its unit's capture.
+// The ordinary Rust tier retains the TEST_PRELUDE TLS print implementation.
+#Export(c) fn jet_rt_test_print(text: I64, _flush: Bool) {
+    if !jet_rt_test_capture_print(text) {
+        jet_rt_unreachable(I64{0}, I64{0})
+    }
+}

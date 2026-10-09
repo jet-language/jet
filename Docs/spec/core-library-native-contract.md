@@ -133,6 +133,145 @@ slots remain `I64` or `U64` words even when their payload is a float; byte and
 boolean carriers retain their separate checks. This is carrier validation, not
 a numeric conversion.
 
+`Collections.jet` owns the single runtime-wide `RT_HOST_U8_STRIDE` fact and
+`host_u8_get`/`host_u8_put` accessors. Later host layers reuse them; changing
+the compiler's U8 storage epoch flips this one fact with its byte-list fixtures.
+
+Native root Shared guards retain the existing cell and hold its canonical
+reader/writer permit for the entire consumer scope. Guard payload addresses
+borrow that cell's descriptor-owned storage; acquisition does not copy it or
+allocate a guard token. Concurrent readers coexist, writers exclude readers,
+and waiting writers precede new readers. Scope cleanup releases the permit
+before dropping its retained cell owner, so final payload cleanup runs outside
+the lock. An edit guard commits one revision on drop even without a write or
+on an already-delivered stop rail. Generation exhaustion also releases both
+permit and owner before delivering its stop.
+### Exact integer carrier
+
+An exact `Int` crosses the scalar ABI in one 64-bit word. Values whose two
+highest bits agree are their signed inline payload (`-2^62..2^62-1`).
+A boxed word has bit 62 set, bit 63 clear, and its remaining bits hold an
+8-byte-aligned pointer. The immutable C-layout node is 48 bytes: atomic owner
+count at byte 0, retired-list link at 8, sign word (`0` or `1`) at 16, limb
+pointer at 24, limb count at 32, and limb capacity at 40. Limbs are 32-bit
+base-1,000,000,000 digits, least-significant first. Zero is nonnegative;
+arithmetic normalizes leading zero limbs and returns to the inline form when
+possible. No Rust `Vec` layout is part of this ABI.
+
+Native task workers run a callback to completion on an OS thread. Cooperative
+waits park that thread; bounded compensation supplies progress for blocked
+workers. Cancellation requests deliver at wait points, while the native Check
+rail delivers explicit session interrupts. Post-call propagation observes only
+an already-delivered stop, so a new request cannot invalidate an initialized
+result. Shielded cleanup defers delivery until its outermost boundary exits.
+Context deadlines save and restore the absolute millisecond budget in a
+separate caller-owned 16-byte slot on every normal and stopped cleanup edge.
+Scheduler state, task controls, timers, completion frames, lexical groups and
+all/any/race selection are Jet-owned runtime carriers. A host entering a
+control preserves the native task-body marker: root/session panics remain
+process-fatal, while task-body panics become owned `TaskFailure.Panicked`
+outcomes and do not print stderr. Flattened body errors participate in
+completion-order selection, including heterogeneous tuple children.
+Core `Task` handles are move-only: one consuming joiner uses the completion
+park slot, while lexical cleanup drains the retained state with a wake-all
+completion word. Rejected bounded-group spawns return their admission permit.
+An exiting thread drops unrun `atexit` closures without invoking their bodies,
+matching the reference thread-local queue destructor.
+`Compiler/JetRuntime/Tests/run-scheduler-fixtures.mjs` compiles the actual
+runtime with Jet callback assertions and uses C only to transport callback
+addresses. Its run phase covers one-, two- and eight-worker pools; root panic
+is compared byte-for-byte to a supplied freshly rendered Rust-tier reference.
+The shared native affinity probe `scheduler_available_parallelism(fallback)`
+does not read the pool override: the worker pool retains its override and
+fallback 4, while joined parallel walking supplies fallback 1.
+
+Native resident-session reservations use the same heap as ordinary native
+storage, but return a null place for an invalid layout or allocation failure.
+A failed slab mapping releases the heap lock without publishing slab metadata;
+a failed direct mapping never publishes a payload or its allocation header.
+The ordinary allocation door still delivers its existing fatal layout/OOM
+diagnostic. Successful reservations retain their original size and alignment
+for the shared exact-layout free operation, including aligned zero-size places.
+
+`jet_rt_alloc_try(size: I64, align: I64) -> I64` is the shared native fallible
+door: zero means invalid layout, injected allocation failure, selected-program
+allocator refusal, or heap failure, without a Stop or stderr. The allocation
+fault channel observes before reservation; a refused reservation changes no
+accounting; a heap failure cancels its live reservation before returning.
+Ordinary `jet_rt_alloc` uses the same policy reserve and exact-layout free, but
+retains its fatal layout/OOM edge and does not observe the fallible fault rail.
+System-mode blocks keep the two-word heap header. Only counted payloads own
+private bypass-policy side-table nodes; freeing a tracked payload releases its
+reservation even after switching back to system mode. Policy facts retain
+historical allocation/request/high-water counters on cancelled heap requests,
+while live bytes and tracker nodes return to zero.
+
+The explicit native host policy edges are `jet_rt_program_allocator_configure`,
+`jet_rt_program_allocator_restore`, and `jet_rt_program_allocator_fact`
+(allocations, requested, live, high-water, cap, mode at indices 0..5). Hosts
+serialize run configuration, preserve mode and cap, and use the distinct
+restore edge to retain historical counters even after live bytes reach zero.
+Configure resets those counters only when no counted bytes remain live.
+These words carry unsigned source `usize` bits. The
+allocation schedule uses dynamic TLS, not a new task-control slot; its arming,
+fact and clearing edges implement the allocation channel only, not an effect
+path or the full fault-plan loop. `AllocationPolicyTests.jet` is included in
+the composed World/Sentry fixture and requires empty output, no pending Stop,
+fault/counting-cap refusal, cancellation after a real refused mmap, policy-
+switch-safe free, and zero live bytes/tracker nodes.
+
+The native runtime allocates nodes with `(size=48, align=8)` and limb buffers
+with `(size=capacity*4, align=4)` through the shared Jet allocator. A zero
+capacity uses the dangling limb pointer `4`, which is never freed. Borrowing
+arithmetic and conversion exports leave their input owners intact; arithmetic
+results and clones return owners. `jet_rt_int_drop` atomically consumes one
+owner. At zero it calls the explicitly registered memory-only
+`jet_rt_int_retire_zero` leaf: the existing shared hazard domain frees
+unhazarded nodes immediately, or links hazarded nodes through byte 8 and
+reclaims them when the last read guard clears. Atomic slots remove their owner
+before dropping it, and stale readers must revalidate the slot under a hazard.
+A second retirement list would be unsafe while Rust atomic consumers remain.
+The hazard-domain leaf dies when that domain ports to Jet. Native lowering
+must pair every owned boxed carrier with drop and copying with retain;
+the runtime export alone does not establish that compiler ownership glue.
+Private unpublished arithmetic workspaces use their unique-owner discard.
+Rust-tier seed/verification transport uses the identical C layout, with its
+allocator paired at construction and release; that registered transport dies
+at the Rust cutover, rather than defining a second numeric representation.
+
+
+Native iterator operations preserve the delivered stop rail. A stopped callback
+does not initialize its result slot. Borrowed pulls and cursor advances leave
+their input owner for caller cleanup; owning eager operations and cursor
+initialization discard every partial result before returning a neutral, unread
+value. Collection outputs in caller-provided storage are dropped and zeroed,
+not deallocated. Join checks the rail before using a show callback's text, and
+numeric terminals abandon partial reductions after a stopped drain.
+
+Channel receiver iterators likewise own their receiver and receive its element
+descriptor at construction, before any output slot is allocated. A blocking
+pull writes directly into that slot; closed and stopped pulls leave it
+unwritten. Dropping the iterator releases the receiver exactly once.
+
+Channel's Observe imports retain their explicit C symbol bindings, and Shared's
+process-pinned publication registry remains a mutable root initialized at
+runtime. Until formatter issue #4770 is fixed, diff-scoped formatting receipts
+preserve those declarations rather than accepting empty import bodies or
+rewriting the registry as an immutable binding.
+
+At native C byte boundaries, `List<U8>` retains its word-stride layout.
+`jet_rt_bytes_pack` borrows that header and returns an independently owned
+packed byte buffer; `jet_rt_bytes_free` releases it with its original length
+and alignment one. Empty packed bytes use the non-null dangling pointer `1`
+and require no deallocation. `jet_rt_bytes_unpack` copies C bytes into a fresh
+owned native list header and word-stride buffer; the empty header has all three
+words zero. Neither conversion transfers or frees its borrowed input.
+
+Native sentry scopes and unsafe function gates save the canonical per-thread
+gate/fence state in caller-owned frame storage. Normal and stopped cleanup
+edges restore that state exactly once, including nested policy scopes; file
+and reason strings remain borrowed module literals at the ABI boundary. The
+temporary Rust sentry marshal seam retires with the Jet sentry/TLS layer.
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

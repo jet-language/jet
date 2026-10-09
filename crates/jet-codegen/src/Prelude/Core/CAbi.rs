@@ -146,30 +146,7 @@ mod jet_c_abi {
         view(value).to_owned()
     }
 
-    fn builder(value: JetCString, mut source: *const u8, count: usize) {
-        // SAFETY: the caller lends the builder exclusively and source spans
-        // count valid UTF-8 bytes. It may be a window into this same buffer.
-        unsafe {
-            let value = &mut *value;
-            let len = value.len.checked_add(count)
-                .unwrap_or_else(|| super::jet_panic("<core.prelude>", 0, "String capacity overflow"));
-            let offset = (source as usize).wrapping_sub(value.ptr as usize);
-            let aliases = offset < value.len;
-            if len > value.cap {
-                let cap = len.max(value.cap.saturating_mul(2)).max(16);
-                let ptr = jet_rt_alloc(cap, 1);
-                std::ptr::copy_nonoverlapping(value.ptr, ptr, value.len);
-                if aliases { source = ptr.add(offset); }
-                if value.cap != 0 { jet_rt_free(value.ptr, value.cap, 1); }
-                value.ptr = ptr;
-                value.cap = cap;
-            }
-            std::ptr::copy(source, value.ptr.add(value.len), count);
-            value.len = len;
-        }
-    }
-
-    fn release(value: JetCString) {
+    pub(crate) fn release(value: JetCString) {
         // SAFETY: the caller transfers one live carrier and its buffer, both
         // allocated by jet_rt_alloc with the sizes recorded in the header.
         unsafe {
@@ -230,6 +207,32 @@ mod jet_c_abi {
         }
     }
 
+    // Interim native comptime budget publication; dies when comptime ports.
+    // The native pack uses Jet's current control, never a second Rust rail.
+    fn comptime_publish_stop(record: super::JetStopRecord) {
+        #[cfg(not(jet_native_pack))]
+        { super::jet_scheduler_native_publish(record); }
+        #[cfg(jet_native_pack)]
+        {
+            unsafe extern "C" {
+                fn jet_rt_control_publish_stop(kind: i64, jct: i64, owner: i64, start: i64, end: i64, bytes: *const u8, len: usize, form: i64) -> bool;
+            }
+            let kind = match record.kind {
+                super::JetStopKind::Cancelled => 1,
+                super::JetStopKind::Deadline => 2,
+                super::JetStopKind::BudgetFuel => 3,
+                super::JetStopKind::BudgetDepth => 4,
+                super::JetStopKind::Panic => 5,
+                super::JetStopKind::HostFault | super::JetStopKind::Trap => unreachable!("fatal comptime record on recoverable budget rail"),
+            };
+            unsafe {
+                jet_rt_control_publish_stop(kind, record.jct_status.map_or(-1, i64::from),
+                    record.owner.map_or(-1, |word| word as i64), record.start.map_or(-1, |word| word as i64),
+                    record.end.map_or(-1, |word| word as i64), record.message.as_ptr(), record.message.len(), 0);
+            }
+        }
+    }
+
     // Fatal hook (jet_native_comptime_fail): status 1 runtime panic, 4
     // foreign/host panic. Writes the stop record and exits.
     fn comptime_fatal(status: u32, message: &str) -> ! {
@@ -247,7 +250,7 @@ mod jet_c_abi {
             .clone();
         super::jet_native_comptime_spend_all();
         COMPTIME_STOPPED.store(true, std::sync::atomic::Ordering::Release);
-        super::jet_scheduler_native_publish(record);
+        comptime_publish_stop(record);
     }
 
     fn comptime_stop() -> Option<super::JetStopRecord> {
@@ -289,7 +292,7 @@ mod jet_c_abi {
             comptime_budget_stop(super::JetStopKind::BudgetDepth, 3);
         } else if COMPTIME_STOPPED.load(std::sync::atomic::Ordering::Acquire) {
             // Another thread spent the request's budget.
-            if let Some(record) = comptime_stop() { super::jet_scheduler_native_publish(record); }
+            if let Some(record) = comptime_stop() { comptime_publish_stop(record); }
         }
     }
     #[no_mangle]
@@ -657,142 +660,28 @@ mod jet_c_abi {
         fn jet_rt_free(ptr: *mut u8, size: usize, align: usize);
     }
 
-    // Strings.
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_string_from_static(ptr: *const u8, len: usize) -> JetCString {
-        guard(|| text_handle(&text(ptr, len)))
-    }
-
-    /// Borrow UTF-8 bytes for compiler/host marshaling. The pointer remains
-    /// valid until the caller mutates or drops the owning String handle.
-    #[no_mangle]
-    pub extern "C" fn jet_rt_string_data(value: JetCString) -> *const u8 {
-        guard(|| view(value).as_ptr())
-    }
-
-    /// Byte count paired with jet_rt_string_data, not Jet's character count.
-    #[no_mangle]
-    pub extern "C" fn jet_rt_string_byte_len(value: JetCString) -> usize {
-        guard(|| view(value).len())
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_string_clone(value: JetCString) -> JetCString {
-        guard(|| text_handle(view(value)))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_string_drop(value: JetCString) {
-        guard(|| {
-            if !value.is_null() {
-                release(value);
-            }
-        })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_string_eq(left: JetCString, right: JetCString) -> bool {
-        guard(|| view(left) == view(right))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_string_compare(left: JetCString, right: JetCString) -> i64 {
-        guard(|| match view(left).as_bytes().cmp(view(right).as_bytes()) {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
-        })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_char_len(value: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(super::jet_char_len(view(value))))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_string_is_empty(value: JetCString) -> bool {
-        guard(|| super::jet_string_is_empty(view(value)))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_string_contains(value: JetCString, needle: JetCString) -> bool {
-        guard(|| super::jet_string_contains(view(value), view(needle)))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_string_starts_with(value: JetCString, needle: JetCString) -> bool {
-        guard(|| super::jet_string_starts_with(view(value), view(needle)))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_string_ends_with(value: JetCString, needle: JetCString) -> bool {
-        guard(|| super::jet_string_ends_with(view(value), view(needle)))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_string_builder_new() -> JetCString {
-        guard(|| text_handle(""))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_string_builder_push_static(target: JetCString, ptr: *const u8, len: usize) {
-        guard(|| {
-            let suffix = text(ptr, len);
-            builder(target, suffix.as_ptr(), suffix.len())
-        })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_string_builder_push(target: JetCString, value: JetCString) {
-        // SAFETY: value is a live carrier, possibly the builder itself. Read
-        // its raw buffer coordinates before builder can grow or free it.
-        guard(|| unsafe { builder(target, (*value).ptr, (*value).len) })
-    }
-
-    /// The builder carrier becomes the String handle; no bytes are copied.
-    #[no_mangle]
-    pub extern "C" fn jet_rt_string_builder_finish(target: JetCString) -> JetCString {
-        target
-    }
-
-    /// A String slice by a range (Core.rs `JetSliceRange for String`): the
-    /// receiver is borrowed, bounds are native, and out-of-range bounds stop at
-    /// the Jet source location.
-    #[no_mangle]
-    pub extern "C" fn jet_rt_string_slice_range(
-        value: JetCString,
-        start: i64,
-        end: i64,
-        exclusive: u8,
-        file_ptr: *const u8,
-        file_len: usize,
-        line: i64,
-    ) -> JetCString {
-        guard(|| {
-            let sliced = super::jet_string_slice_value(view(value), start, end, exclusive != 0)
-                .unwrap_or_else(|message| super::jet_panic(&text(file_ptr, file_len), line_of(line), &message));
-            handle(sliced)
-        })
-    }
 
     // Display text, as generated Rust renders `print` and interpolation.
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_int_to_string(value: i64) -> JetCString {
         guard(|| handle(crate::jet_std::jet_int_to_string(value)))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_i64_to_string(value: i64) -> JetCString {
         guard(|| handle(value.to_string()))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_u64_to_string(value: u64) -> JetCString {
         guard(|| handle(value.to_string()))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_char_to_string(value: i64) -> JetCString {
         guard(|| {
@@ -801,17 +690,20 @@ mod jet_c_abi {
         })
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_bool_to_string(value: u8) -> JetCString {
         guard(|| handle((value != 0).to_string()))
     }
 
+    #[cfg(not(jet_native_pack))]
     /// A Float arrives in xmm0 as the double itself.
     #[no_mangle]
     pub extern "C" fn jet_rt_float_to_string(value: f64) -> JetCString {
         guard(|| handle(super::jet_fmt_display(&value)))
     }
 
+    #[cfg(not(jet_native_pack))]
     /// A Float's Debug text (`JetDebug for f64`, which differs from Display).
     #[no_mangle]
     pub extern "C" fn jet_rt_float_debug(value: f64) -> JetCString {
@@ -839,47 +731,71 @@ mod jet_c_abi {
         )*};
     }
 
+    #[cfg(not(jet_native_pack))]
     exact_int_binary!(jet_int_add, jet_int_sub, jet_int_mul, jet_int_bit_and, jet_int_bit_or, jet_int_bit_xor, jet_int_compare);
+    #[cfg(not(jet_native_pack))]
     exact_int_located!(jet_int_div, jet_int_rem, jet_int_floor_div, jet_int_mod, jet_int_pow, jet_int_shl, jet_int_shr, jet_int_div_euclid, jet_int_rem_euclid);
 
     /// An exact Int converted to a fixed-width integer (`int_checked_fixed`,
     /// stopping at the source location when out of range). Every fixed width
     /// the native backend lowers is at most 64 bits, so the checked value is
     /// its word (two's complement for a U64 above I64.MAX).
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_int_checked_fixed(value: i64, kind: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64 {
         guard(|| crate::jet_std::jet_int_checked_fixed(value, kind, &text(file_ptr, file_len), line_of(line)) as i64)
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_int_owned_from_i64(value: i64) -> i64 {
         guard(|| crate::jet_std::jet_int_owned_from_i64(value).into_raw())
     }
 
     /// A copy of an exact Int carrier word (a big-integer owner gains a reference).
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_int_clone(value: i64) -> i64 {
         // SAFETY: `value` is a live exact-Int carrier word the caller owns.
         guard(|| unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(value) }.into_raw())
     }
 
+    /// Rust-tier seed owner release. Native packs use Int.jet's atomic drop.
+    #[cfg(not(jet_native_pack))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_int_drop(value: i64) {
+        guard(|| unsafe { drop(crate::jet_foundation::Numeric::JetInt::from_raw_owned(value)) })
+    }
+
+    /// Remaining memory leaf: ONE domain while Rust atomic consumers remain.
+    /// Native Int.jet calls only after the final CAS has changed refs to zero.
+    #[cfg(jet_native_pack)]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_int_retire_zero(node: i64) {
+        guard(|| unsafe { crate::jet_foundation::Numeric::jet_int_retire_raw_zero(node) })
+    }
+
     /// An exact Int constant beyond the inline word range, from its decimal
     /// text (MIR `BigInt` constants; the JetBackend builds them at use).
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_int_from_static(ptr: *const u8, len: usize) -> i64 {
         guard(|| crate::jet_std::jet_int_from_str(&text(ptr, len)).unwrap_or_else(|message| panic!("{message}")))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_int_owned_to_i64(value: i64) -> i64 {
         guard(|| native(value))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_int_owned_to_f64(value: i64) -> f64 {
         guard(|| crate::jet_std::jet_int_to_f64(value))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_term_write_stdout_line(value: JetCString, flush: u8) {
         // Generated Rust ignores the stream result of `print` the same way.
@@ -888,6 +804,7 @@ mod jet_c_abi {
         })
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_loop_range_init(
         start: i64,
@@ -908,32 +825,44 @@ mod jet_c_abi {
         })
     }
 
+    #[cfg(not(jet_native_pack))]
     fn cursor<'a>(value: *mut super::JetLoopRangeCursor) -> &'a mut super::JetLoopRangeCursor {
         // SAFETY: `value` is a live cursor from `jet_loop_range_init` that the
         // caller owns for the duration of this call.
         unsafe { &mut *value }
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_loop_range_has_next(value: *mut super::JetLoopRangeCursor) -> bool {
         guard(|| super::jet_loop_range_has_next(cursor(value)))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_loop_range_value(value: *mut super::JetLoopRangeCursor) -> i64 {
         guard(|| crate::jet_std::jet_int_from_i64(super::jet_loop_range_value(cursor(value))))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_loop_range_advance(value: *mut super::JetLoopRangeCursor) {
         guard(|| super::jet_loop_range_advance(cursor(value)))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_loop_cursor_drop(value: *mut super::JetLoopRangeCursor) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned cursor.
             drop(unsafe { Box::from_raw(value) });
         }
+    }
+
+    // #29 host seam: L7b replaces this raw OS-presence query at Rust cutover.
+    // Unlike env_get, presence is independent of the value's UTF-8 validity.
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_env_present(key: JetCString) -> bool {
+        guard(|| std::env::var_os(view(key)).is_some())
     }
 }

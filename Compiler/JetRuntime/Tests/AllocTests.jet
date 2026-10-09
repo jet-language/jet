@@ -3,11 +3,15 @@
 // witness exits 1 without requiring text, containers or any other runtime layer.
 // Tests are single-threaded; raw metadata inspection owns the entire heap here.
 fn alloc_test_require(ok: Bool) {
-    if ok -> return
+    if ok {
+        return
+    }
     #Unsafe("a failed allocator witness terminates this isolated test process") {
         _ := os_syscall_i64(I64{231}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
-    loop {}
+    loop {
+
+    }
 }
 
 fn alloc_test_payload(size: I64, align: I64) {
@@ -91,9 +95,10 @@ fn alloc_test_full_slabs() {
         pointer :: jet_rt_alloc(I64{2048}, I64{16})
         #Unsafe("the test owns the full payload and can read its allocator header") {
             slab :: os_load_i64(wrapping(pointer - I64{16}))
-            if (count == I64{0}) -> first_slab = slab
-            if (count < I64{15}) -> alloc_test_require(slab == first_slab)
-            else -> alloc_test_require(slab != first_slab)
+            if (count == I64{0}) { first_slab = slab }
+            if (count < I64{15}) { alloc_test_require(slab == first_slab) } else {
+                alloc_test_require(slab != first_slab)
+            }
             os_store_i64(pointer, chain)
         }
         chain = pointer
@@ -116,6 +121,22 @@ fn alloc_test_full_slabs() {
     }
 }
 
+fn alloc_test_nullable() {
+    alloc_test_require(alloc_try(I64{1}, I64{0}) == I64{0})
+    alloc_test_require(alloc_try(I64{1}, I64{3}) == I64{0})
+    alloc_test_require(alloc_try(I64{-1}, I64{8}) == I64{0})
+    // Valid Layout, but the allocator's mapping overhead cannot fit.
+    alloc_test_require(alloc_try(I64{9223372036854775807}, I64{1}) == I64{0})
+    // The actual kernel refuses an address-space-sized mapping.
+    alloc_test_require(alloc_map_try(I64{-1}) == I64{0})
+    small :: alloc_try(I64{8}, I64{8})
+    alloc_test_require(small != I64{0})
+    jet_rt_free(small, I64{8}, I64{8})
+    aligned :: alloc_try(I64{0}, I64{8192})
+    alloc_test_require(aligned != I64{0} && (aligned & I64{8191}) == I64{0})
+    jet_rt_free(aligned, I64{0}, I64{8192})
+}
+
 fn alloc_tests() {
     jet_rt_alloc_init()
     jet_rt_alloc_init()
@@ -126,6 +147,7 @@ fn alloc_tests() {
     alloc_test_require(!alloc_layout_valid(I64{9223372036854775807}, I64{8}))
     // Null must remain a no-op even with an otherwise-invalid layout.
     jet_rt_free(I64{0}, I64{-1}, I64{0})
+    alloc_test_nullable()
     alloc_test_boundaries(I64{1})
     alloc_test_boundaries(I64{8})
     alloc_test_boundaries(I64{16})

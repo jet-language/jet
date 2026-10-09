@@ -1,0 +1,94 @@
+// Native allocation rail witnesses. All diagnostic/status bytes are observed
+// by run-world-sentry-fixtures.mjs; returning zero is not a fake OOM fallback.
+fn alloc_policy_tracker_empty() -> Bool {
+    #Unsafe("the single-threaded fixture reads the process-lifetime tracked-node count after all its payloads were freed") {
+        return os_load_i64(wrapping(alloc_root + I64{200})) == I64{0}
+    }
+}
+
+#Export(c) fn jet_rt_alloc_policy_fixture() -> I64 {
+    jet_rt_thread_attach()
+    control :: jet_rt_control_new()
+    previous :: jet_rt_alloc(I64{32}, I64{8})
+    jet_rt_control_enter(control, previous)
+    // Allocate fault state before selecting counting mode. Its observation
+    // path, policy reservation, facts and tracker allocate nothing themselves.
+    jet_rt_fault_allocation_arm(I64{2}, false)
+    jet_rt_program_allocator_configure(I64{1}, I64{16})
+    first :: jet_rt_alloc_try(I64{8}, I64{8})
+    if (first == I64{0}) { return I64{101} }
+    refused :: jet_rt_alloc_try(I64{16}, I64{8})
+    if (refused != I64{0} || jet_rt_control_status(control) != I64{0}) { return I64{102} }
+    if (jet_rt_fault_allocation_fact(I64{0}) != I64{2} || jet_rt_fault_allocation_fact(I64{1}) != I64{0}) {
+        return I64{103}
+    }
+    if (jet_rt_program_allocator_fact(I64{0}) != I64{1} || jet_rt_program_allocator_fact(I64{1}) != I64{8} || jet_rt_program_allocator_fact(I64{2}) != I64{8} || jet_rt_program_allocator_fact(I64{3}) != I64{8}) {
+        return I64{104}
+    }
+    jet_rt_free(first, I64{8}, I64{8})
+    if (jet_rt_program_allocator_fact(I64{2}) != I64{0} || !alloc_policy_tracker_empty()) {
+        return I64{105}
+    }
+
+    jet_rt_program_allocator_configure(I64{1}, I64{16})
+    jet_rt_fault_allocation_arm(I64{1}, true)
+    injected :: jet_rt_alloc_try(I64{8}, I64{8})
+    if (injected != I64{0} || jet_rt_control_status(control) != I64{0}) { return I64{106} }
+    if (jet_rt_program_allocator_fact(I64{0}) != I64{0} || jet_rt_program_allocator_fact(I64{2}) != I64{0} || jet_rt_fault_allocation_fact(I64{1}) != I64{1}) {
+        return I64{107}
+    }
+    recovered :: jet_rt_alloc_try(I64{8}, I64{8})
+    if (recovered == I64{0} || jet_rt_fault_allocation_fact(I64{0}) != I64{2} || jet_rt_fault_allocation_fact(I64{1}) != I64{1}) {
+        return I64{108}
+    }
+    jet_rt_free(recovered, I64{8}, I64{8})
+
+    // A valid layout reaches mmap, which cannot map 2^62 bytes on Linux x64.
+    // Reservation counters remain historical, but cancelled live bytes and
+    // the tracker return to zero before the fallible call returns.
+    jet_rt_program_allocator_configure(I64{1}, I64{0})
+    jet_rt_fault_allocation_arm(I64{0}, false)
+    huge :: I64{4611686018427387904}
+    heap_failed :: jet_rt_alloc_try(huge, I64{8})
+    if (heap_failed != I64{0} || jet_rt_control_status(control) != I64{0}) { return I64{109} }
+    if (jet_rt_program_allocator_fact(I64{0}) != I64{1} || jet_rt_program_allocator_fact(I64{1}) != huge || jet_rt_program_allocator_fact(I64{2}) != I64{0} || jet_rt_program_allocator_fact(I64{3}) != huge || !alloc_policy_tracker_empty()) {
+        return I64{110}
+    }
+    jet_rt_program_allocator_restore(I64{0}, I64{0})
+    if (jet_rt_program_allocator_fact(I64{0}) != I64{1} || jet_rt_program_allocator_fact(I64{1}) != huge || jet_rt_program_allocator_fact(I64{3}) != huge || jet_rt_program_allocator_fact(I64{4}) != I64{0} || jet_rt_program_allocator_fact(I64{5}) != I64{0}) {
+        return I64{116}
+    }
+
+    // Both allocation doors use one reservation kernel. Tracker nodes bypass
+    // it; restoring system policy cannot lose a still-live counted block.
+    jet_rt_program_allocator_configure(I64{1}, I64{16})
+    if (jet_rt_program_allocator_fact(I64{0}) != I64{0} || jet_rt_program_allocator_fact(I64{1}) != I64{0} || jet_rt_program_allocator_fact(I64{3}) != I64{0}) {
+        return I64{117}
+    }
+    regular :: jet_rt_alloc(I64{8}, I64{8})
+    if (jet_rt_program_allocator_fact(I64{0}) != I64{1} || jet_rt_program_allocator_fact(I64{2}) != I64{8}) {
+        return I64{111}
+    }
+    jet_rt_program_allocator_restore(I64{0}, I64{0})
+    untracked :: jet_rt_alloc_try(I64{8}, I64{8})
+    if (untracked == I64{0} || jet_rt_program_allocator_fact(I64{0}) != I64{1}) { return I64{112} }
+    jet_rt_free(untracked, I64{8}, I64{8})
+    if (jet_rt_program_allocator_fact(I64{2}) != I64{8}) { return I64{113} }
+    jet_rt_free(regular, I64{8}, I64{8})
+    jet_rt_program_allocator_restore(I64{0}, I64{0})
+    if (jet_rt_program_allocator_fact(I64{0}) != I64{1} || jet_rt_program_allocator_fact(I64{1}) != I64{8} || jet_rt_program_allocator_fact(I64{3}) != I64{8}) {
+        return I64{118}
+    }
+    if (jet_rt_program_allocator_fact(I64{2}) != I64{0} || !alloc_policy_tracker_empty()) {
+        return I64{114}
+    }
+    jet_rt_fault_allocation_clear()
+    if (jet_rt_fault_allocation_fact(I64{0}) != I64{0} || jet_rt_fault_allocation_fact(I64{1}) != I64{0}) {
+        return I64{115}
+    }
+    jet_rt_control_leave(previous)
+    jet_rt_scheduler_control_drop(control)
+    jet_rt_free(previous, I64{32}, I64{8})
+    jet_rt_thread_detach()
+    I64{0}
+}

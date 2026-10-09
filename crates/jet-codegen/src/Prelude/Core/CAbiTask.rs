@@ -320,7 +320,7 @@ mod jet_c_abi_task {
     /// `loop value in rx`: a lazy iterator of received values that ends when
     /// the channel is closed and drained (CAbiIter.rs cursor kernels).
     #[no_mangle]
-    pub unsafe extern "C" fn jet_rt_native_receiver_iter(rx: *mut NativeReceiver, by_value: u8) -> *mut JetIter<NativeValue> {
+    pub unsafe extern "C" fn jet_rt_native_receiver_iter(rx: *mut NativeReceiver, by_value: u8, _meta: *const NativeMeta) -> *mut JetIter<NativeValue> {
         guard(|| {
             let receiver = if by_value != 0 { *Box::from_raw(rx) } else { (*rx).clone() };
             Box::into_raw(Box::new(JetIter(Box::new(std::iter::from_fn(move || receiver.receive().ok())))))

@@ -9,13 +9,50 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+// Interim native-pack seam: every remaining Rust thread attaches to Jet's GS
+// TCB before it can call a Jet runtime export. Dies when each spawner ports.
+#[cfg(jet_native_pack)]
+pub struct JetNativeThreadAttachment;
+
+#[cfg(jet_native_pack)]
+impl JetNativeThreadAttachment {
+    pub fn enter() -> Self {
+        extern "C" {
+            #[link_name = "jet_rt_thread_bootstrap"]
+            fn bootstrap();
+        }
+        // SAFETY: this is the first operation on a new runtime-owned thread;
+        // inherited GS may point to a freed parent's TCB, so bootstrap never
+        // reads it and always installs a fresh TCB before any Jet work.
+        unsafe { bootstrap() };
+        Self
+    }
+}
+
+#[cfg(jet_native_pack)]
+impl Drop for JetNativeThreadAttachment {
+    fn drop(&mut self) {
+        extern "C" {
+            #[link_name = "jet_rt_thread_detach"]
+            fn detach();
+        }
+        // SAFETY: the guard outlives this thread's runtime work and drops last,
+        // running Jet TLS destructors before releasing its TCB.
+        unsafe { detach() };
+    }
+}
+
 struct Job { run:Box<dyn FnOnce()+Send>,blocking:bool }
 
 fn spawn_scheduler_worker(name: String, work: impl FnOnce() + Send + 'static) {
     thread::Builder::new()
         .name(name.clone())
         .stack_size(jet_foundation::CompilerStack::COMPILER_STACK_SIZE)
-        .spawn(work)
+        .spawn(move || {
+            #[cfg(jet_native_pack)]
+            let _jet_thread = crate::JetNativeThreadAttachment::enter();
+            work()
+        })
         .unwrap_or_else(|error| {
             jet_scheduler_fatal(&format!("could not start {name}: {error}"))
         });
@@ -3158,7 +3195,11 @@ fn jet_raw_io_poller() -> Arc<JetRawIoPoller> {
                 next_key: AtomicUsize::new(0),
             });
             let worker = poller.clone();
-            thread::spawn(move || worker.run());
+            thread::spawn(move || {
+                #[cfg(jet_native_pack)]
+                let _jet_thread = crate::JetNativeThreadAttachment::enter();
+                worker.run()
+            });
             poller
         })
         .clone()
@@ -3320,7 +3361,11 @@ fn io_poller() -> Arc<IOPoller> {
                 iocp_shutdown_done: AtomicBool::new(false),
             });
             let p = poller.clone();
-            thread::spawn(move || p.run());
+            thread::spawn(move || {
+                #[cfg(jet_native_pack)]
+                let _jet_thread = crate::JetNativeThreadAttachment::enter();
+                p.run()
+            });
             poller
         })
         .clone()
@@ -3930,11 +3975,22 @@ impl<T> ChannelInner<T> {
     }
 
     fn remove_waiter(&self, slot: &ParkSlot) {
-        self.state
-            .lock()
-            .unwrap()
-            .recv_waiters
-            .retain(|w| !std::ptr::eq(Arc::as_ptr(w), std::ptr::from_ref(slot)));
+        let waiter = {
+            let mut state = self.state.lock().unwrap();
+            let before = state.recv_waiters.len();
+            state.recv_waiters
+                .retain(|w| !std::ptr::eq(Arc::as_ptr(w), std::ptr::from_ref(slot)));
+            // A send already consumed this selector's registration, but the
+            // selector may have chosen an earlier arm. Hand its wake onward.
+            if before == state.recv_waiters.len() && !state.queue.is_empty() {
+                state.recv_waiters.pop()
+            } else {
+                None
+            }
+        };
+        if let Some(waiter) = waiter {
+            waiter.wake();
+        }
     }
 }
 
@@ -4690,12 +4746,18 @@ where
         world.task_spawned();
         let task_world = world.clone();
         let _ = thread::spawn(move || {
+            #[cfg(jet_native_pack)]
+            let _jet_thread = crate::JetNativeThreadAttachment::enter();
             let _world_scope = jet_scheduler_world_task_enter(Some(task_world));
             f();
         });
         return;
     }
-    let _ = thread::spawn(f);
+    let _ = thread::spawn(move || {
+        #[cfg(jet_native_pack)]
+        let _jet_thread = crate::JetNativeThreadAttachment::enter();
+        f()
+    });
 }
 
 /// Submit `f` to the M:N pool and return a join handle. An empty label keeps
@@ -5129,6 +5191,36 @@ mod interrupt_boundary_tests {
         });
         rx.recv_timeout(Duration::from_millis(250))
             .expect("select did not wake after every channel closed")
+    }
+
+    #[test]
+    fn select_deregistration_hands_consumed_late_arm_wake_to_plain_receiver() {
+        let early = JetSchedulerChannel::<u64>::new();
+        let late = JetSchedulerChannel::<u64>::new();
+        let early_sender = early.sender();
+        let late_sender = late.sender();
+        let plain = ParkSlot::new();
+        let master = ParkSlot::new();
+        late.inner.register_select_waiter(plain.clone());
+        let inners = vec![early.inner.clone(), late.inner.clone()];
+        let registration = SelectRegistration::new(&inners, master, None);
+
+        assert!(early_sender.send(10));
+        assert!(late_sender.send(20));
+        assert!(!plain.notified.load(Ordering::Acquire));
+        assert_eq!(late.inner.state.lock().unwrap().queue.len(), 1);
+        assert!(matches!(
+            jet_scheduler_try_select(inners, Vec::new()),
+            Some(JetSelectOutcome::Recv { arm: 0, value: 10 })
+        ));
+
+        // The earlier arm won; dropping the actual registration must return
+        // the later arm's consumed wake while its message remains queued.
+        drop(registration);
+        assert!(plain.notified.load(Ordering::Acquire));
+        assert!(late.inner.state.lock().unwrap().recv_waiters.is_empty());
+        assert_eq!(late.inner.state.lock().unwrap().queue.len(), 1);
+        assert_eq!(late.inner.try_pop(), Some(20));
     }
 
     #[test]
