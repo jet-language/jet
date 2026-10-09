@@ -688,6 +688,48 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_F32x4(value: *mut crate::jet_std::F32x4) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_F32x4(value: *mut crate::jet_std::F32x4) -> *mut crate::jet_std::F32x4 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_F32x8(value: *mut crate::jet_std::F32x8) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_F32x8(value: *mut crate::jet_std::F32x8) -> *mut crate::jet_std::F32x8 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_F64x2(value: *mut crate::jet_std::F64x2) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_F64x2(value: *mut crate::jet_std::F64x2) -> *mut crate::jet_std::F64x2 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_F64x4(value: *mut crate::jet_std::F64x4) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -4902,6 +4944,118 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_U16x16(value: *mut crate::jet_std::U16x16) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_U16x16(value: *mut crate::jet_std::U16x16) -> *mut crate::jet_std::U16x16 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_U16x8(value: *mut crate::jet_std::U16x8) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_U16x8(value: *mut crate::jet_std::U16x8) -> *mut crate::jet_std::U16x8 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_U32x4(value: *mut crate::jet_std::U32x4) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_U32x4(value: *mut crate::jet_std::U32x4) -> *mut crate::jet_std::U32x4 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_U32x8(value: *mut crate::jet_std::U32x8) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_U32x8(value: *mut crate::jet_std::U32x8) -> *mut crate::jet_std::U32x8 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_U64x2(value: *mut crate::jet_std::U64x2) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_U64x2(value: *mut crate::jet_std::U64x2) -> *mut crate::jet_std::U64x2 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_U64x4(value: *mut crate::jet_std::U64x4) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_U64x4(value: *mut crate::jet_std::U64x4) -> *mut crate::jet_std::U64x4 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_U8x16(value: *mut crate::jet_std::U8x16) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_U8x16(value: *mut crate::jet_std::U8x16) -> *mut crate::jet_std::U8x16 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_drop_U8x32(value: *mut crate::jet_std::U8x32) {
+        if !value.is_null() {
+            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
+            drop(unsafe { Box::from_raw(value) });
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_clone_U8x32(value: *mut crate::jet_std::U8x32) -> *mut crate::jet_std::U8x32 {
+        // SAFETY: `value` is a live handle the caller owns for this call.
+        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_UTF8Error(value: *mut crate::jet_std::UTF8Error) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -7208,6 +7362,24 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_F32x4(left: *mut crate::jet_std::F32x4, right: *mut crate::jet_std::F32x4) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_F32x8(left: *mut crate::jet_std::F32x8, right: *mut crate::jet_std::F32x8) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_F64x2(left: *mut crate::jet_std::F64x2, right: *mut crate::jet_std::F64x2) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_F64x4(left: *mut crate::jet_std::F64x4, right: *mut crate::jet_std::F64x4) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
@@ -8427,6 +8599,54 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_TLSTrust(left: *mut crate::jet_email::TLSTrust, right: *mut crate::jet_email::TLSTrust) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_U16x16(left: *mut crate::jet_std::U16x16, right: *mut crate::jet_std::U16x16) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_U16x8(left: *mut crate::jet_std::U16x8, right: *mut crate::jet_std::U16x8) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_U32x4(left: *mut crate::jet_std::U32x4, right: *mut crate::jet_std::U32x4) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_U32x8(left: *mut crate::jet_std::U32x8, right: *mut crate::jet_std::U32x8) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_U64x2(left: *mut crate::jet_std::U64x2, right: *mut crate::jet_std::U64x2) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_U64x4(left: *mut crate::jet_std::U64x4, right: *mut crate::jet_std::U64x4) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_U8x16(left: *mut crate::jet_std::U8x16, right: *mut crate::jet_std::U8x16) -> bool {
+        // SAFETY: both are live handles the caller lends for this call.
+        guard(|| unsafe { &*left } == unsafe { &*right })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_handle_eq_U8x32(left: *mut crate::jet_std::U8x32, right: *mut crate::jet_std::U8x32) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
     }
@@ -17646,6 +17866,18 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_plugin_load(unsafe { &*a0 }, unsafe { &*a1 }))))
     }
 
+    /// TIR/routes.rs
+    #[no_mangle]
+    pub extern "C" fn jet_plugin_call(a0: i64, a1: JetCString, a2: JetCString) -> JetCString {
+        guard(|| handle(crate::jet_plugin_call(fixed::<u64>(a0), view(a1), view(a2))))
+    }
+
+    /// core.plugin.load
+    #[no_mangle]
+    pub extern "C" fn jet_plugin_load(a0: JetCString, a1: JetCString) -> *mut crate::JetPlugin {
+        guard(|| Box::into_raw(Box::new(crate::jet_plugin_load(unsafe { &*a0 }, unsafe { &*a1 }))))
+    }
+
     /// core.handle.process.child.exited
     #[no_mangle]
     pub extern "C" fn jet_process_child_exited(a0: *mut crate::jet_std::ProcessChild, ok: *mut bool, err: *mut *mut crate::jet_std::IOError) -> i64 {
@@ -21551,9 +21783,9 @@ mod jet_c_abi_routes {
 
     /// TIR/tir_to_mir_expr.rs
     #[no_mangle]
-    pub extern "C" fn DBValue_blob(a0: *mut crate::jet_std::DBValue, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn DBValue_blob(a0: *mut crate::jet_std::DBValue, ok: *mut *mut u8, ok_len: *mut i64, err: *mut JetCString) -> i64 {
         guard(|| match crate::jet_std::DBValue::blob(unsafe { &*a0 }) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
+            Ok(value) => { let len = list_out(value.into_iter().map(|e| e).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
     }
