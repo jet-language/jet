@@ -2695,18 +2695,7 @@ pub fn apply_method(
             _ => Err(unsupported("index_of with a non-text argument", span)),
         },
         (CtValue::Str(s), "count") => match args.into_iter().next() {
-            Some(CtValue::Str(needle)) => {
-                if needle.is_empty() {
-                    return Ok(CtValue::Int(0));
-                }
-                let mut rest = s.as_str();
-                let mut count = 0i64;
-                while let Some(at) = rest.find(&needle) {
-                    count += 1;
-                    rest = &rest[at + needle.len()..];
-                }
-                Ok(CtValue::Int(count))
-            }
+            Some(CtValue::Str(needle)) => Ok(CtValue::Int(super::TextLite::string_count(s, &needle))),
             _ => Err(unsupported("count with a non-text argument", span)),
         },
         (CtValue::Str(s), "is_alphabetic") => Ok(CtValue::Bool(super::TextLite::is_alphabetic(s))),

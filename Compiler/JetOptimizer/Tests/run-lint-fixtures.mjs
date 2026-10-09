@@ -4,6 +4,7 @@
 //
 // usage: node Compiler/JetOptimizer/Tests/run-lint-fixtures.mjs <outdir>
 // then:  cd <outdir> && jet run unit.jet
+// --canonical-order selects the stable canonical row-sort regression unit.
 //
 // The fixtures reuse the MIR builders and example programs of the lowering
 // fixtures (Compiler/JetBackend/Tests/LowerFixtures.jet) without their
@@ -21,6 +22,8 @@ if (!outDir) {
   process.exit(64);
 }
 const read = (path) => readFileSync(`${repo}/${path}`, "utf8");
+const canonicalOrder = process.argv[3] === "--canonical-order";
+if (process.argv[3] && !canonicalOrder) throw new Error("unknown fixture selection");
 
 // The top-level item starting at the line that begins with `head`, through its
 // closing `}` at column 0 (or the line itself for a one-line item).
@@ -85,7 +88,15 @@ const parts = [
   body("Compiler/JetFoundation/Source/MIR/MIR.jet"),
   body("Compiler/JetOptimizer/Source/Verification/Lint.jet"),
   body("Compiler/JetBackend/Tests/LowerFixtures.jet", ["fn fx_report(", "fn fx_report_lir(", "fn fx_report_image(", "fn fx_report_executable(", "fn run("]),
-  body("Compiler/JetOptimizer/Tests/LintFixtures.jet"),
+  ...(canonicalOrder ? [
+    item("Compiler/JetFoundation/Source/Collections.jet", "pub fn compiler_apply_order<T>("),
+    item("Compiler/JetFoundation/Source/Collections.jet", "pub fn compiler_transfer_rows<T>("),
+    item("Compiler/JetOptimizer/Source/Facts/CanonicalOrdering.jet", "fn mir_pass_sort_functions("),
+    item("Compiler/JetCodegen/Source/Codegen/Functions.jet", "fn jet_codegen_sort_functions("),
+    item("Compiler/JetCodegen/Source/Codegen/Functions.jet", "pub fn jet_codegen_sorted_order("),
+    item("Compiler/JetCodegen/Source/Codegen/Functions.jet", "fn jet_codegen_order_before("),
+    body("Compiler/JetOptimizer/Tests/CanonicalOrderingFixtures.jet"),
+  ] : [body("Compiler/JetOptimizer/Tests/LintFixtures.jet")]),
 ];
 mkdirSync(outDir, { recursive: true });
 writeFileSync(`${outDir}/unit.jet`, parts.join("\n"));

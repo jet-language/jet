@@ -3610,6 +3610,12 @@ fallible destination-owned conversions; do not confuse their `Result` return
 with the module's Option helpers. The implementation is in
 [`Core/text/parse.jet`](../../../Core/text/parse.jet).
 
+The builtin method `text.count(needle)` uses the shared `jet_unicode_count`
+kernel in compile-time evaluation and at runtime. It counts non-overlapping,
+exact UTF-8 matches without normalization; an empty needle returns zero,
+including for empty text. This is a separate operation from the module function
+`core.text.parse.count(text, needle)`, whose empty-needle contract differs.
+
 | Signature | Result | Description |
 |---|---|---|
 | `split(text: String, sep: String) -> [String]` | list | Split on a separator. |
@@ -3759,6 +3765,9 @@ sockets, address conversion, readiness, timeouts, and DNS. Calls that need a
 provider report a typed `NetError` or `IOError`; the module does not silently
 turn a missing transport into a successful no-op. The implementation is
 [`Core/net/net.jet`](../../../Core/net/net.jet).
+
+DNS failures carry the built-in `NetDNSError` inside `NetError.DNS`: `NotFound`
+retains the queried name, while `Failure` retains the resolver's message.
 
 `SocketAddr` and `UDPPacket` retain the native provider carrier so resolver and
 socket results keep the nominal types accepted by transport operations. Jet owns

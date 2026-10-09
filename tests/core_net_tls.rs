@@ -1,6 +1,24 @@
 mod common;
 mod tir_support;
 
+#[test]
+fn core_net_dns_error_uses_canonical_acronym_type() {
+    let source = r#"
+use core.net as net
+
+fn wrap_dns(error: NetDNSError) -> NetError Never! {
+    NetError.DNS(error)
+}
+
+fn run() {
+    _ :: wrap_dns(NetDNSError.NotFound("example.test"))
+    _ :: wrap_dns(NetDNSError.Failure("resolver unavailable"))
+}
+"#;
+    tir_support::compile_source("core_net_dns_error_canonical", source)
+        .expect("core.net and both DNS variants must check without E0358");
+}
+
 const INVALID_DNS_LABEL_SOURCE: &str = r#"
 use core.net.tls as tls
 

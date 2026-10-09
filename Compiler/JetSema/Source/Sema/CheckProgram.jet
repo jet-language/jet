@@ -61,6 +61,7 @@ use jet_foundation.[
     compiler_threads_admit,
     compiler_threads_failure_text,
     compiler_threads_partition,
+    compiler_transfer_rows,
     expr_span,
     symbol_id,
     tir_symbol_local,
@@ -1819,7 +1820,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         memo_unbounded: false,
         is_reactive: func.is_reactive,
         reactive_upgrades: context.reactive_upgrades,
-        body: body,
+        body: ^body,
         is_inline: func.is_inline,
         is_inline_always: func.is_inline_always,
         is_scalar: false,
@@ -5508,7 +5509,7 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
         source :: final_graph.modules[source_index]
         &effect_inputs.push(SemaEffectModuleInput{
             module_identity: modules[module_index].module_identity,
-            functions: ^modules[module_index].functions,
+            functions: ^functions,
             sources: sema_comptime_effect_sources(source),
             call_facts: modules[module_index].call_facts,
             source_segments: source.source_segments,

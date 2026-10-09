@@ -662,6 +662,105 @@ fn jet_rust_emit_fold_line(lines: [String], index: Int) -> JetRustEmitFoldLine N
     JetRustEmitFoldLine{definition: definition, pure: pure, skippable: pure && !jet_rust_emit_fold_attributed(lines, index), identifiers: jet_rust_emit_fold_identifiers(lines[index].bytes())}
 }
 
+struct JetRustEmitFoldRead {
+    pub column: Int
+    pub start: Int
+    pub end: Int
+    pub count: Int
+    pub joined: Bool
+}
+
+struct JetRustEmitFoldReads {
+    pub ready: Bool
+    pub batchable: Bool
+    pub indent: Int
+    pub mentions: [JetRustEmitSlotMention]
+    pub matches: [String:JetRustEmitFoldRead]
+}
+
+struct JetRustEmitFoldEdit {
+    pub start: Int
+    pub end: Int
+    pub text: String
+}
+
+// Only an opaque, non-pure outer expression may retain its read positions.
+// Every pure_slot_expression spelling starts with punctuation, __jet_, or
+// JetInt::from_i64, or ends with .clone(). Substituting a balanced pure
+// expression into an interior read cannot change this alphabetic head or
+// fixed tail. All other consumers take the original eager rewrite below.
+fn jet_rust_emit_fold_batchable(line: String) -> Bool Never! {
+    if line.contains("|") -> return false
+    definition :: jet_rust_emit_fold_definition(line) ?? return false
+    text :: definition.payload
+    bytes :: text.bytes()
+    if bytes.len() == 0 -> return false
+    first :: bytes[0]
+    alphabetic :: (first >= (U8{65}) && first <= (U8{90})) || (first >= (U8{97}) && first <= (U8{122}))
+    alphabetic && !jet_rust_emit_fold_pure(text) && !text.starts_with("jet_foundation::Numeric::JetInt::from_i64(") && !text.ends_with(".clone()")
+}
+
+// Index all three read spellings in one pass, including occurrences in quoted
+// text and joined identifiers: the eager str::count path counts those too.
+fn jet_rust_emit_fold_reads(line: String) -> JetRustEmitFoldReads Never! {
+    bytes :: line.bytes()
+    mentions := [JetRustEmitSlotMention]{}
+    matches := [String:JetRustEmitFoldRead]{}
+    parts :: line.split("__jet_v_").to_list()
+    column := 0
+    loop (index, part) in parts {
+        part_bytes :: part.bytes()
+        if index > 0 {
+            digits := 0
+            loop digits < part_bytes.len() && part_bytes[digits] >= (U8{48}) && part_bytes[digits] <= (U8{57}) -> digits += 1
+            if digits > 0 {
+                id :: String.from_bytes(~(part_bytes[0..<digits])) ?? ""
+                at :: column - 8
+                name :: "__jet_v_{id}"
+                &mentions.push(JetRustEmitSlotMention{id: id, column: at})
+                forms :: [String]{"({name}.as_ref().expect(\"MIR value\")).clone()", "(*{name}.as_ref().expect(\"MIR value\"))", "{name}.take().expect(\"MIR value\")"}
+                loop (kind, form) in forms {
+                    start :: at - (if kind == 0 -> 1 else -> if kind == 1 -> 2 else -> 0)
+                    if !jet_rust_emit_bytes_at(bytes, form.bytes(), start) -> next
+                    key :: "{id}:{kind}"
+                    count :: if matches.get(key) == .Val(prior) -> prior.count + 1 else -> 1
+                    joined :: start == at && at > 0 && (jet_rust_emit_identifier_byte(bytes[at - 1]) || bytes[at - 1] == (U8{46}))
+                    matches[key] = JetRustEmitFoldRead{column: at, start: start, end: start + form.bytes().len(), count: count, joined: joined}
+                }
+            }
+        }
+        column += part_bytes.len() + 8
+    }
+    JetRustEmitFoldReads{ready: true, batchable: jet_rust_emit_fold_batchable(line), indent: jet_rust_emit_fold_indent(bytes), mentions: mentions, matches: matches}
+}
+
+// Read positions remain in the original coordinate system until this one
+// rebuild. Source-order iteration avoids sorting or repeatedly copying the
+// growing consumer. Edits cannot overlap: each consumes one distinct slot.
+fn jet_rust_emit_fold_apply(line: String, reads: JetRustEmitFoldReads, edits: [Int:JetRustEmitFoldEdit]) -> String Never! {
+    bytes :: line.bytes()
+    pieces := [String]{}
+    from := 0
+    loop mention in reads.mentions {
+        edit :: edits.get(mention.column) ?? next
+        if edit.start < from -> panic("overlapping Rust emitter slot folds")
+        &pieces.push(String.from_bytes(~(bytes[from..<edit.start])) ?? "")
+        &pieces.push(edit.text)
+        from = edit.end
+    }
+    &pieces.push(String.from_bytes(~(bytes[from..<bytes.len()])) ?? "")
+    pieces.join("")
+}
+
+// A batch removes exactly the read identifier and inserts the payload's
+// identifiers. Keep the same Fenwick counts as an eager full-line reindex;
+// definition/declaration removals still leave their old rows indexed.
+fn jet_rust_emit_fold_identifier_delta(indexed: &JetRustEmitFoldLine, tree: &[Int:Int], rows: &[String:Int], name: String, line: Int, count: Int, size: Int) Never! {
+    if indexed.identifiers.counts.get(name) == None -> &indexed.identifiers.names.push(name)
+    indexed.identifiers.counts[name] = (indexed.identifiers.counts.get(name) ?? 0) + count
+    jet_rust_emit_fold_index_add(&tree, jet_rust_emit_fold_row(&rows, name), line, count, size)
+}
+
 // MIRRust fold_value_slots: `lines[values_start..body_start]` are the value
 // declarations left after localization and every later line is the body. A
 // body slot defined as `Some(E)` from a pure expression `E` and read once, by
@@ -710,8 +809,20 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
     }
     removed := [Bool]{}
     loop _ in body -> &removed.push(false)
+    reads := [JetRustEmitFoldReads]{}
+    pending := [[Int:JetRustEmitFoldEdit]]{}
+    loop _ in body {
+        &reads.push(JetRustEmitFoldReads{ready: false, batchable: false, indent: 0, mentions: [JetRustEmitSlotMention]{}, matches: [String:JetRustEmitFoldRead]{}})
+        &pending.push([Int:JetRustEmitFoldEdit]{})
+    }
     folded := false
     loop index in first_body..<body.len() {
+        if pending[index].len() > 0 {
+            body[index] = jet_rust_emit_fold_apply(body[index], reads[index], pending[index])
+            pending[index] = [Int:JetRustEmitFoldEdit]{}
+            reads[index].ready = false
+            indexed[index] = jet_rust_emit_fold_line(body, index)
+        }
         definition :: indexed[index].definition ?? next
         expected :: if definition.hoisted -> 3 else -> 2
         if (mentions.get(definition.id) ?? 0) != expected -> next
@@ -722,6 +833,45 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
         barrier :: jet_rust_emit_fold_index_next(skippable, "{definition.indent}", index + 1, body.len(), true)
         consumer :: if mention < barrier -> mention else -> barrier
         if consumer >= body.len() -> next
+        // Batch only variable-free pure payloads into a proven opaque outer
+        // expression. No new slot/local/parameter dependency or closure is
+        // introduced, and its non-skippable status cannot change. Otherwise
+        // flush before the preexisting fold decisions see the changed text.
+        independent :: indexed[index].pure && !definition.payload.contains("|") && jet_rust_emit_fold_variables(definition.payload).len() == 0
+        if independent {
+            if !reads[consumer].ready -> reads[consumer] = jet_rust_emit_fold_reads(body[consumer])
+            if reads[consumer].batchable && reads[consumer].indent == definition.indent && !jet_rust_emit_fold_attributed(body, consumer) {
+                selected := JetRustEmitFoldRead?{None}
+                loop kind in 0..<3 {
+                    read :: reads[consumer].matches.get("{definition.id}:{kind}") ?? next
+                    if read.count == 1 {
+                        selected = Val(read)
+                        break
+                    }
+                }
+                if selected == .Val(read) {
+                    // A take inside a field/joined identifier is counted by
+                    // str::count but not by variable_mentions; leave it eager.
+                    if !read.joined {
+                        replacement :: "({definition.payload})"
+                        pending[consumer][read.column] = JetRustEmitFoldEdit{start: read.start, end: read.end, text: replacement}
+                        jet_rust_emit_fold_identifier_delta(&indexed[consumer], &mention_index, &rows, name, consumer, -1, size)
+                        inserted :: jet_rust_emit_fold_identifiers(replacement)
+                        loop variable in inserted.names -> jet_rust_emit_fold_identifier_delta(&indexed[consumer], &mention_index, &rows, variable, consumer, inserted.counts.get(variable) ?? 0, size)
+                        removed[index] = true
+                        if definition.hoisted -> removed[declarations.get(definition.id) ?? index] = true
+                        folded = true
+                        next
+                    }
+                }
+            }
+        }
+        if pending[consumer].len() > 0 {
+            body[consumer] = jet_rust_emit_fold_apply(body[consumer], reads[consumer], pending[consumer])
+            pending[consumer] = [Int:JetRustEmitFoldEdit]{}
+            reads[consumer].ready = false
+            indexed[consumer] = jet_rust_emit_fold_line(body, consumer)
+        }
         bytes :: body[consumer].bytes()
         indent :: jet_rust_emit_fold_indent(bytes)
         if indent != definition.indent || jet_rust_emit_fold_attributed(body, consumer) -> next
@@ -786,6 +936,7 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
             updated :: indexed[consumer].definition ?? next
             jet_rust_emit_fold_index_add(&skippable, "{updated.indent}", consumer, 1, body.len())
         }
+        reads[consumer].ready = false
         removed[index] = true
         if definition.hoisted -> removed[declarations.get(definition.id) ?? index] = true
         folded = true

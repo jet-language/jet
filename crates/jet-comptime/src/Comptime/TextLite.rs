@@ -1555,6 +1555,9 @@ pub(super) fn char_indices(s: &str) -> Vec<String> {
 pub(super) fn inspect(s: &str) -> Vec<String> {
     text_kernel::inspect(s)
 }
+pub(super) fn string_count(s: &str, needle: &str) -> i64 {
+    text_kernel::jet_unicode_count(s, needle)
+}
 pub(super) fn unicode_scalar_count(s: &str) -> i64 {
     text_kernel::unicode_scalar_count(s)
 }

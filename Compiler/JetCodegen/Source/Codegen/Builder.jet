@@ -326,19 +326,6 @@ fn jet_codegen_function_index_append(index: &JetCodegenFunctionIndex, functions:
     }
 }
 
-// Moves every row of `from` onto the end of `to` in order, leaving `from`
-// empty. Each pop moves one row, so the rows are never resident twice.
-pub fn jet_codegen_move_function_rows(to: &[TFunc], from: &[TFunc]) Never! {
-    reversed := [TFunc]{}
-    loop from.len() > 0 {
-        function := &from.pop() ?? { break }
-        &reversed.push(^function)
-    }
-    loop reversed.len() > 0 {
-        function := &reversed.pop() ?? { break }
-        &to.push(^function)
-    }
-}
 
 // The program-wide inputs of lowering, read-only while functions lower: every
 // function taking a builder takes this beside it, so compiler threads can

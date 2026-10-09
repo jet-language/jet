@@ -127,3 +127,46 @@ and projected to 1M lines. Floors come from
 to end. `--profile` re-runs the top rung of a failing series under perf and
 attributes samples per phase to source functions (`profile.mjs`). Exit 0
 pass, 1 failure, 2 invalid invocation; the receipt is JSON in `--work-dir`.
+
+The Jet emitter batches independent literal slot folds into opaque constructor
+expressions. It indexes the original read positions once and applies disjoint
+substitutions in one rebuild, rather than scanning and copying a long consumer
+for every operand. Dependency-bearing, attributed, closure and purity-sensitive
+cases keep eager folding; pending edits materialize before any such decision.
+The identifier index receives exact substitution deltas.
+
+For a focused semantic differential, `fold-slots-proof.mjs` extracts the actual
+Jet helpers from a reference revision and the current checkout, changing only
+their namespace identifiers. Its cases include a configurable table, all read
+forms, reverse operand order, deferred/eager dependencies, quoted spellings,
+attributes, closures, and hoisted declarations:
+
+```sh
+Tools/agent/jet-env node Tools/perf/scaling/fold-slots-proof.mjs \
+  --reference REV --jet /path/to/jet --root FRESH_PROOF_DIR --rows 512
+```
+
+This interpreted helper comparison proves text equivalence, not compile-speed
+improvement. Performance admission still requires the matched compiler corpus
+receipts and all required scaling cells; helper proof never replaces those.
+
+Import bindings retain the exact target module index resolved during their
+registration pass (including an absent Core namespace target). The pass memoizes
+each identity once; name-fact projection uses the stored index instead of
+resolving every alias in the dense implicit-import surface again. Registration
+graphs keep their module order through cloning and staged value application.
+
+The focused deterministic regression runs the unchanged comptime/files corpus
+at 128, 256, 512 and 1024 using an already-built Jet compiler:
+
+```sh
+Tools/agent/jet-env node Tools/perf/scaling/module-lookups-proof.mjs \
+  --compiler /path/to/built/jetc0 --root FRESH_PROOF_DIR
+```
+
+It requires a successful baseline and every rung, then bounds baseline-subtracted
+`counter.sema.check.module_lookups` by a linear envelope with 25% packing slack.
+The proof does not rebuild the compiler or invoke the generated Rust backend.
+It writes the complete scaling receipt and a focused counter verdict; unrelated
+gate failures remain visible in the complete receipt. Run it only on a compiler
+containing the binding-index change, not by retrying predecessor failures.

@@ -1289,6 +1289,21 @@ fn jet_eval_route_builtin(member: String, symbol: String, args: [TComptimeValue]
             }
             Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Map{entries: entries}})
         }
+        "string_count" -> {
+            if symbol != "jet_unicode_count" {
+                jet_eval_compiler_fail(&machine, span, "MIR String.count route has an unknown checked symbol")
+                return None
+            }
+            if args.len() != 2 {
+                jet_eval_compiler_fail(&machine, span, "MIR String.count route requires two Strings")
+                return None
+            }
+            text :: jet_eval_route_string_operand(args, 0, member, &machine, span) ?? return None
+            needle :: jet_eval_route_string_operand(args, 1, member, &machine, span) ?? return None
+            // Call the canonical runtime kernel: empty needle is zero and
+            // matches never overlap; this is not core.text.parse.count.
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: text.count(needle)}})
+        }
         "string_ends_with" -> {
             if symbol != "jet_string_ends_with" {
                 jet_eval_compiler_fail(&machine, span, "MIR String prefix/suffix route has an unknown checked symbol")
