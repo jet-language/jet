@@ -1,0 +1,69 @@
+// FSIoEnvOsTesting.rs:840-875 / EnvInit.rs:38-65 are the frozen policy:
+// flatten name,value in stored order, preserve OS encoded bytes, never sort or
+// decode Unicode. Lower/Routes.jet:706-749 requires compact nested List<U8>:
+// every header is [len,cap,data], inner stride 1 and outer stride 24. Each
+// result owns independent buffers (including when the logical table changes).
+fn compiler_env_columns_storage(pairs: I64, output: I64) -> I64 {
+    length :: pairs * I64{2}
+    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{24}, I64{8})
+    rt_text_store(output, length)
+    rt_text_store(output + I64{8}, length)
+    rt_text_store(output + I64{16}, data)
+    data
+}
+
+#Export(c) fn jet_rt_logical_env_columns(output: I64) {
+    jet_rt_logical_env_seed()
+    shared_acquire(logical_env_root, false)
+    pairs := I64{0}
+    entry := rt_text_word(logical_env_root + I64{56})
+    loop entry != (I64{0}) {
+        pairs += I64{1}
+        entry = rt_text_word(entry)
+    }
+    data :: compiler_env_columns_storage(pairs, output)
+    entry = rt_text_word(logical_env_root + I64{56})
+    at := I64{0}
+    loop entry != (I64{0}) {
+        host_startup_list(rt_text_word(entry + I64{8}), rt_text_word(entry + I64{16}), data + at * I64{48})
+        host_startup_list(rt_text_word(entry + I64{24}), rt_text_word(entry + I64{32}), data + at * I64{48} + I64{24})
+        entry = rt_text_word(entry)
+        at += I64{1}
+    }
+    shared_release(logical_env_root, false)
+}
+
+#Export(c) fn jet_rt_startup_env_columns(output: I64) {
+    host_arguments_require()
+    data :: compiler_env_columns_storage(host_env_length, output)
+    at := I64{0}
+    loop at < host_env_length {
+        row :: host_env_rows + at * I64{24}
+        key :: rt_text_word(row)
+        value :: key + rt_text_word(row + I64{16})
+        host_startup_list(key, rt_text_word(row + I64{8}), data + at * I64{48})
+        host_startup_list(value, host_startup_byte_length(value), data + at * I64{48} + I64{24})
+        at += I64{1}
+    }
+}
+
+// This pack's OS seed is Linux x86-64. Rust's non-Windows byte-vector branch
+// compares unsigned encoded bytes, case-sensitively, including invalid UTF-8.
+// Do NOT use String comparison/normalization or ASCII folding here. Windows
+// instead uses WTF-8 -> UTF-16 + CompareStringOrdinal(ignore_case=1), with an
+// ordinal UTF-16 fallback on failure/oversize; that is not this Unix OS seed.
+#Export(c) fn jet_rt_env_key_compare(left: I64, right: I64) -> I64 {
+    left_length :: rt_text_word(left)
+    right_length :: rt_text_word(right)
+    left_data :: rt_text_word(left + I64{16})
+    right_data :: rt_text_word(right + I64{16})
+    at := I64{0}
+    loop at < left_length && at < right_length {
+        a :: rt_text_byte(left_data + at)
+        b :: rt_text_byte(right_data + at)
+        if (a < b) -> return I64{-1}
+        if (a > b) -> return I64{1}
+        at += I64{1}
+    }
+    if (left_length < right_length) -> I64{-1} else -> if (left_length > right_length) -> I64{1} else -> I64{0}
+}
