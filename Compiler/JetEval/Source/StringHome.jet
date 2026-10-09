@@ -71,13 +71,13 @@ fn jet_eval_string_home_data(value: TComptimeValue, path: [JetEvalStringHomeProj
             }
         }
         .Payload(kind, _) -> {
-            if kind == .Option || kind == .Result(true) {
+            if kind == .Option || (kind == .Result(ok) && ok) {
                 if value == .Present(inner) {
                     &request.selectors.push(JetEvalStringHomeSelector.Present)
                     return jet_eval_string_home_data(inner, path, position + 1, frame, ^request, &machine, span)
                 }
             }
-            if kind == .Result(false) {
+            if kind == .Result(ok) && !ok {
                 if value == .Failed(report) {
                     if report == .Told(inner) {
                         &request.selectors.push(JetEvalStringHomeSelector.Told)

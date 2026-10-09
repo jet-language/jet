@@ -9705,7 +9705,7 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
         .BuildMap(entries) -> return jet_eval_build_map(&machine, entries, frame_index, span)
         .MapLookup(map, key, cache) -> {
             cached :: jet_eval_read_place(&machine, frame_index, cache, span) ?? return None
-            if cached == .Result(true, lookup) -> return Val(lookup)
+            if cached == .Result(ok, lookup) && ok -> return Val(lookup)
             data :: jet_eval_data(jet_eval_read_place(&machine, frame_index, map, span) ?? return None, &machine, span) ?? return None
             wanted :: jet_eval_data_key(jet_eval_data(jet_eval_value(&machine, frame_index, key, span) ?? return None, &machine, span) ?? return None, &machine, span) ?? return None
             if data == .Map(entries) {
