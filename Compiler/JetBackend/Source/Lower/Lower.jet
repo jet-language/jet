@@ -1958,14 +1958,21 @@ fn lower_initialize_uninit(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     if !fixed -> return
     if count < 0 || row.projections.len() != 0 || row.base == .Static(_) -> return lower_fail(&m, &f, "uninit {mir_type_display_name(row.ty)} of this shape is not lowered at O0 yet")
     slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
-    if c.slots[slot].cell || c.slots[slot].write_param >= 0 -> return lower_fail(&m, &f, "uninit {mir_type_display_name(row.ty)} in a cell or Write parameter is not lowered at O0 yet")
+    header := LIRValueID?{None}
+    if c.slots[slot].cell {
+        header = ~f.cells[slot]
+    } else if c.slots[slot].write_param >= 0 {
+        header = ~f.params[c.slots[slot].write_param]
+    } else {
+        header = Val(lower_new_storage(p, &f, row.ty))
+    }
+    storage :: header ?? return lower_fail(&m, &f, "uninit {mir_type_display_name(row.ty)} has no checked cell storage")
     length :: lower_const(&f, count)
     data :: lower_list_buffer(&m, &f, length, lower_list_stride(p, elem))
-    header :: lower_new_storage(p, &f, row.ty)
-    lower_emit(&f, LIRInst.Store{base: header, offset: 0, value: length})
-    lower_emit(&f, LIRInst.Store{base: header, offset: 8, value: length})
-    lower_emit(&f, LIRInst.Store{base: header, offset: 16, value: data})
-    lower_set_slot(&f, slot, Val(header))
+    lower_emit(&f, LIRInst.Store{base: storage, offset: 0, value: length})
+    lower_emit(&f, LIRInst.Store{base: storage, offset: 8, value: length})
+    lower_emit(&f, LIRInst.Store{base: storage, offset: 16, value: data})
+    lower_set_slot(&f, slot, Val(storage))
 }
 
 struct LowerFieldAddress {
