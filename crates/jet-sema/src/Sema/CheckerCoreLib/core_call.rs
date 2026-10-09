@@ -2587,6 +2587,21 @@ impl<'a> Checker<'a> {
             }
         }
         if module == "core.encoding"
+            && matches!(name, "__coerce_now" | "__coerce_emit")
+        {
+            let vetted = source_alias
+                .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
+                .is_some_and(|source| source.module == "core.encoding.json");
+            if !vetted || !self.in_unsafe {
+                self.diags.push(Diagnostic::error(
+                    "E0510", "JSON coercion host leaves are compiler-private",
+                    "the existing hidden Time/IO boundary is restricted to audited Core JSON source",
+                    "use the public JSON decoder", Some(span),
+                ));
+                return None;
+            }
+        }
+        if module == "core.encoding"
             && matches!(name, "__bytes_into_text" | "__string_byte"
                 | "__object_from_entries" | "__typed_text" | "__object_entries_view" | "__bytes_view")
             && !self.in_unsafe
