@@ -64,7 +64,9 @@ fn kit_steps_json_path(path: String) -> [String]? {
             }
             &parts.push(token)
             i += 1
-        } else -> return None
+        } else {
+            return None
+        }
     }
     Val(parts)
 }
@@ -334,7 +336,9 @@ fn kit_steps_json_test(text: String, mode: String, path: String, op: String, lit
     } else if op.starts_with("#") {
         count = Int.parse(literal) ?? return Val("JSON count must be a nonnegative integer")
         if count < 0 -> return Val("JSON count must be a nonnegative integer")
-    } else -> return Val("unknown JSON operator: {op}")
+    } else {
+        return Val("unknown JSON operator: {op}")
+    }
     if op == "#distinct=" {
         values := [Dyn]{}
         loop value in selected {
