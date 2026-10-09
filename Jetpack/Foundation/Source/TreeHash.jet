@@ -675,7 +675,9 @@ fn foundation_collect_held_tree(directory: Directory, relative: String, rows: &[
             if foundation_source_tree_ignored(name) -> next
             if rows.len() >= MAX_TREE_FILES -> return Err(IOError.InvalidData(foundation_io_context(.Read, path, "package tree contains too many files")))
             &rows.push(FoundationHeldTreeFile{relative: path, reader: reader, identity: opened})
-        } else -> return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "package tree contains a special entry")))
+        } else {
+            return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "package tree contains a special entry")))
+        }
     }
     if names != foundation_held_tree_names(directory) -> return Err(IOError.Other(foundation_io_context(.Read, relative, "package source changed while inspecting directory")))
 }
@@ -701,7 +703,9 @@ fn foundation_copy_held_tree(source: Directory, destination: Directory, relative
             if foundation_source_tree_ignored(name) -> next
             actual :: foundation_copy_held_reader(reader, destination, name)
             if actual != opened.size || !foundation_same_file_identity(opened, reader.stat()) -> return Err(IOError.Other(foundation_io_context(.Read, path, "package source file changed while copying")))
-        } else -> return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "package tree contains a special entry")))
+        } else {
+            return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "package tree contains a special entry")))
+        }
     }
     if names != foundation_held_tree_names(source) -> return Err(IOError.Other(foundation_io_context(.Read, relative, "package source changed while copying directory")))
 }
@@ -762,7 +766,9 @@ fn foundation_link_held_tree(source: Directory, destination: Directory, relative
             linked :: foundation_link_held_reader(reader, destination, name)
             if !linked -> foundation_copy_held_reader(reader, destination, name)
             if !foundation_same_file_identity(opened, reader.stat()) -> return Err(IOError.Other(foundation_io_context(.Read, path, "store source file changed while linking")))
-        } else -> return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "store entry contains a special entry")))
+        } else {
+            return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "store entry contains a special entry")))
+        }
     }
     if names != foundation_held_tree_names(source) -> return Err(IOError.Other(foundation_io_context(.Read, relative, "store entry changed while linking directory")))
 }

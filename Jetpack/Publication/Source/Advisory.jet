@@ -265,7 +265,9 @@ fn publication_parse_advisory_feed(text: String) -> PublicationAdvisoryFeed Publ
             if reason == "" || reviewer == "" || expiry <= issued || exception_keys.has_key(key) -> return Err(publication_advisory_bad("line {line_number} has an invalid or repeated exact exception"))
             exception_keys[key] = true
             &feed.exceptions.push(PublicationAdvisoryException{package: target.package, version: target.version, reason: reason, reviewer: reviewer, expires_at: expiry})
-        } else -> return Err(publication_advisory_bad("line {line_number} has an unknown record or field count"))
+        } else {
+            return Err(publication_advisory_bad("line {line_number} has an unknown record or field count"))
+        }
     }
     publication_validate_advisory_identity(feed)
     Ok(feed)
