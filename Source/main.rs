@@ -2201,8 +2201,8 @@ fn run_explain_reload(
         );
         (old, new)
     });
-    let (old_diagnostics, old_bundle, _) = checked.0;
-    let (new_diagnostics, new_bundle, _) = checked.1;
+    let (old_diagnostics, old_bundle, _, _) = checked.0;
+    let (new_diagnostics, new_bundle, _, _) = checked.1;
     let (old_bundle, new_bundle) = match (old_bundle, new_bundle) {
         (Some(old_bundle), Some(new_bundle)) => (old_bundle, new_bundle),
         (old_bundle, new_bundle) => {
