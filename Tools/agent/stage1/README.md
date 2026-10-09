@@ -95,4 +95,9 @@ requires every case outcome to be `PASS`. Logs and an incrementally written
 receipt preserve every failure while the runner continues through the census.
 Rust bootstrap tests are separately inventoried in `retired-with-Rust.json`;
 they are not Jet registry entries or cutover blockers.
+The owner-approved `Tools/testkit/retired-with-rust.tsv` is the single explicit
+retirement list for Rust-dependent cases. Both normal testkit discovery and
+the manifest's `retiredWithRust.testkitCases` read those exact IDs and reasons.
+Retirement changes the active corpus; the runner uses no CLI filter or shard,
+and accepts no skipped outcome among the remaining cases.
 

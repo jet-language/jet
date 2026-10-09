@@ -93,13 +93,21 @@ function inventory() {
 function testkitInventory() {
     const sources = readdirSync(join(repo, 'Tools/testkit')).filter(name => name.endsWith('.jet')).sort()
         .map(name => `Tools/testkit/${name}`);
-    sources.push('Tools/testkit/package.jet');
-    const cases = filesUnder(join(repo, 'tests/cases'), '.case').map(path => relative(repo, path));
+    const retirementPath = 'Tools/testkit/retired-with-rust.tsv';
+    sources.push('Tools/testkit/package.jet', retirementPath);
+    const retiredCases = readFileSync(join(repo, retirementPath), 'utf8').split('\n').flatMap(line => {
+        if (!line.trim() || line.startsWith('#')) return [];
+        const [path, reason, extra] = line.split('\t');
+        if (!path || !reason || extra !== undefined) throw Error('retired case rows need an exact ID and reason');
+        return [{ path, reason, ...(existsSync(join(repo, path)) ? { sha256: hash(readFileSync(join(repo, path))) } : {}) }];
+    });
+    const retiredIds = new Set(retiredCases.map(row => row.path));
+    const cases = filesUnder(join(repo, 'tests/cases'), '.case').map(path => relative(repo, path)).filter(path => !retiredIds.has(path));
     const rustToolRequirements = cases.flatMap(path => readFileSync(join(repo, path), 'utf8').split('\n')
         .flatMap((line, index) => /^(?:requires: tool:|when tool |step: )/.test(line) && /\b(?:cargo|rustc|rustup)\b/.test(line)
             ? [{ path, line: index + 1, source: line }] : []));
     return { sources: sources.map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) })),
-        cases: cases.map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) })), rustToolRequirements };
+        cases: cases.map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) })), retiredCases, rustToolRequirements };
 }
 function retiredBootstrapTests() {
     const path = 'Compiler/Bootstrap/Tests.rs';
@@ -174,7 +182,8 @@ function generate() {
             reason: `full testkit cases have ${kit.rustToolRequirements.length} active Rust tool requirements/guards; removing Rust would skip required case branches. See testkit.rustToolRequirements for exact paths/lines` } : {}) });
     if (options.head !== currentHead()) throw Error('head advanced during assembly; regenerate on the newest committed head');
     const manifest = { head: options.head, completeCompilerRegistries: true, repo, sourceManifests: manifests,
-        compilerSources: (sourceMap?.files ?? []).map(({ path, sha256 }) => ({ path, sha256 })), inventory: census, testkit: kit, entries };
+        compilerSources: (sourceMap?.files ?? []).map(({ path, sha256 }) => ({ path, sha256 })), inventory: census, testkit: kit, entries,
+        retiredWithRust: { testkitCases: kit.retiredCases, bootstrapTests: retiredBootstrapTests() } };
     json(join(out, 'manifest.json'), manifest);
     json(join(out, 'retired-with-Rust.json'), retiredBootstrapTests());
     console.log(JSON.stringify(manifest, null, 2));
@@ -207,6 +216,10 @@ function run() {
                 let command, child;
                 const started = Date.now();
                 if (entry.kind === 'testkit') {
+                    for (const source of manifest.testkit.sources) {
+                        const assembled = join(dirname(entry.path), source.path.split('/').at(-1));
+                        if (hash(readFileSync(assembled)) !== source.sha256) throw Error(`assembled testkit source changed: ${source.path}`);
+                    }
                     const build = spawnSync(options.jet, ['build', entry.path], { cwd: dirname(entry.path), env: environment(),
                         encoding: 'utf8', maxBuffer: 128 << 20, timeout: Number(process.env.JET_REGISTRY_TIMEOUT_MS ?? 3500000) });
                     writeFileSync(`${stem}.build.stdout`, build.stdout ?? ''); writeFileSync(`${stem}.build.stderr`, build.stderr ?? '');

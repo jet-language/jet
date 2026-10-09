@@ -18,8 +18,24 @@ fn kit_cases_collect(root: String, directory: String) -> [KitEntry] {
     entries
 }
 
+// Owner-retired Rust scenarios are outside the current case corpus, not host
+// skips or CLI filters. The same committed list seals the registry manifest.
+fn kit_cases_retired(root: String) -> [String] {
+    source :: kit_exec_optional(files.join(root, "Tools/testkit/retired-with-rust.tsv")) ?? ""
+    retired := [String]{}
+    loop raw in source.split("\n") {
+        line :: raw.trim()
+        if line == "" || line.starts_with("#") -> next
+        fields :: line.split("\t").to_list()
+        assert(fields.len() == 2 && fields[1] != "", "retired case rows need an exact ID and reason")
+        &retired.push(fields[0])
+    }
+    retired
+}
+
 fn kit_cases_discover(context: KitCtx) -> [KitEntry] {
-    entries := kit_cases_collect(context.root, "tests/cases")
+    retired :: kit_cases_retired(context.root)
+    entries := kit_cases_collect(context.root, "tests/cases").filter(entry -> !kit_expect_named(retired, entry.path))
     &entries.sort_by(entry -> entry.path)
     entries
 }
