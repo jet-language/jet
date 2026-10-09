@@ -186,6 +186,7 @@ fn config_from_env() -[Env, FS]> BrowserTestConfig BrowserError! {
 fn make_profile(name: String) -> BrowserProfile BrowserError! { profile(name) }
 
 // Browser.rs:578-594: no trimming, case folding, timeout clamping, or fallback.
+// Profile refusal uses the BrowserError kind carrier, not protocol enum variants.
 fn profile(name: String) -> BrowserProfile BrowserError! {
     version :: if name == {
         "bidi-2025.5" -> "2025.5"
@@ -193,21 +194,6 @@ fn profile(name: String) -> BrowserProfile BrowserError! {
         else -> { return Err(BrowserError{kind: "invalid profile"}) }
     }
     Ok(BrowserProfile{name: name, version: version})
-}
-
-fn profile(name: String) -> BrowserProfile BrowserError! {
-    if name != "bidi-2024.11" && name != "bidi-2025.5" -> return Err(BrowserError.Protocol)
-    Ok(make_profile(name))
-}
-
-fn profile(name: String) -> BrowserProfile BrowserError! {
-    if name != "bidi-2024.11" && name != "bidi-2025.5" -> return Err(BrowserError.Protocol)
-    Ok(make_profile(name))
-}
-
-fn profile(name: String) -> BrowserProfile BrowserError! {
-    if name != "bidi-2024.11" && name != "bidi-2025.5" -> return Err(BrowserError.Protocol)
-    Ok(make_profile(name))
 }
 
 fn timeout(ms: Int) -> BrowserTimeout BrowserError! {
@@ -523,7 +509,10 @@ fn esc_source(text: String) -> String Never! {
     loop invalid in ([String]{"", "default", "BIDI-2025.5", " bidi-2025.5", "bidi-2025.5 "}) {
         if profile(invalid) == {
             .Ok(_) -> panic("invalid profile accepted")
-            .Err(error) -> assert_eq("{error}", "browser profile is not supported")
+            .Err(error) -> {
+                assert_eq(error.kind, "invalid profile")
+                assert_eq("{error}", "browser profile is not supported")
+            }
         }
     }
 }
