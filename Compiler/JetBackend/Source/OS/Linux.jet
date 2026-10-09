@@ -1332,6 +1332,18 @@ fn os_clone_i64(flags: I64, stack: I64, parent_tid: I64, child_tid: I64) -> I64 
     """
 }
 
+// Lower/Closures.jet:291-315 indirect calls require a closure header and pass
+// it as argument zero; a C void(void) entry address is not that representation.
+#[Unsafe("calls a checked System V void(void) process entry that remains executable for the entire call"), FFI(asm)]
+fn os_call0_unit(address: I64) {
+    """
+    push {address}
+    pop r11
+    call r11
+    ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}
+
 #[Unsafe("calls a checked native runtime callback with one machine-word argument"), FFI(asm)]
 fn os_call1_i64(address: I64, a: I64) -> I64 {
     """

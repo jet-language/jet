@@ -2637,6 +2637,29 @@ after `jet_runtime_jet.o`; the strong-definition check rejects any replaced
 Rust export. Rust-tier allocator bodies are seed/verification inputs only,
 recorded for deletion at cutover, not a second native-pack implementation.
 
+`Source/Main.jet` provides the native normal-entry `jet_rt_main` boundary;
+the seed CAbi copy is excluded by `cfg(not(jet_native_pack))`. The host must
+capture argc/argv/envp before entry. Main validates the single logical Env
+seed, initializes native TLS and registries, starts Observe exactly once,
+and invokes the checked System V `void(void)` entry through `os_call0_unit`.
+This raw entry is not a Jet closure header. The process boundary has one atomic
+claimant and one pinned 32-byte state (winning tid/code and reusable output
+scratch). Normal return runs reverse-order exit handlers, obtains the parked
+report, drains the scheduler, and flushes the real stdout/stderr streams.
+It releases the claim before returning zero so a loaded-image host can enter
+again; a parked-report status exits the process instead. Its I64 result carries
+the existing C int32 status in eax; the loader normalizes those low 32 bits.
+Fatal headers claim and clean up before emitting their first diagnostic byte;
+footers flush and exit with the winning status. Explicit exit uses the same
+`jet_rt_process_exit` boundary. Neither fatal nor explicit exit drains or joins
+workers, avoiding a worker waiting for its own in-flight scheduler count.
+A concurrent loser parks until the winner's exit_group; a reentrant winner
+exits immediately without another report. OOM abort and unreachable/101
+host-fault paths remain independent. `Tests/run-main-fixtures.mjs` requires an
+explicit fresh native pack and covers entry reuse, reverse callbacks, real
+parked/worker/concurrent stops, stream byte order, and accepted Observe restart
+versus disabled process-once report guards.
+
 Controlled clocks use the native World128 state in `Source/World.jet`.
 The active capability is borrowed at TCB offset 104; zero means no World.
 `world_wall_ms(out)` and `world_monotonic_ns(out)` return presence separately

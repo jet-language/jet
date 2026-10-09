@@ -17,6 +17,7 @@ const rows = readFileSync(baseline, "utf8").trim().split("\n").map(line => line.
 const prior = new Map(rows.map(([stem, verdict]) => [stem, verdict]));
 if (prior.size !== rows.length || !rows.some(([, verdict]) => verdict === "pass")) throw Error("empty or duplicate baseline");
 const focused = ["filter_map", "fold_association", "iter_adapters", "iter_join", "iter_numeric_bounds", "lazy_iter", "list_surface", "lists", "map_surface", "operation_contract", "zip_family", "runtime_iter_core", "runtime_iter_cancelled"].map(stem => `collections/${stem}`);
+focused.push("text/runtime_text_core");
 const stems = [...new Set([...rows.filter(([, verdict]) => verdict === "pass").map(([stem]) => stem), ...focused])].sort();
 const available = new Map(collectGoldenEntries(join(root, "Examples/features")).map(entry => [entry.stem, entry]));
 const missing = stems.flatMap(stem => [
@@ -41,6 +42,7 @@ if (mode !== "--plan") {
     const defined = symbols(object, ["-g", "--defined-only"], "object-symbols.txt");
     const packed = symbols(pack, ["-g", "--defined-only"], "pack-symbols.txt");
     const required = ["Collections", "Iter", "IterNumeric"].flatMap(name => [...readFileSync(join(root, `Compiler/JetRuntime/Source/${name}.jet`), "utf8").matchAll(/#Export\(c\) fn (\w+)\(/gu)].map(match => match[1]));
+    required.push("jet_rt_native_iter_string_split", "jet_rt_native_iter_string_rsplit");
     if (!required.length || new Set(required).size !== required.length) throw Error("empty or duplicate collection exports");
     for (const name of required) for (const [label, records] of [["Jet object", defined], ["pack", packed]]) {
         const count = records.filter(([symbol, kind]) => symbol === name && kind === "T").length;

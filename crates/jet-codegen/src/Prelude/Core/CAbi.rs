@@ -278,6 +278,7 @@ mod jet_c_abi {
 
     // Process entry.
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_main(entry: extern "C" fn()) -> i32 {
         guard(|| {
