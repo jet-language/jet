@@ -37,5 +37,11 @@ fn run() {
     core_failure_record_check(io_source, "user/fixture", "E0119")
     copy_source :: "#Policy(copies: .Explicit)\nfn context(operation: IOOperation) -> IOContext Never! {{ IOContext{{operation: operation.copy(), resource: None, os_code: None, cause: None}} }}\nfn retain(operation: IOOperation) -> IOOperation Never! {{ operation.copy() }}\nfn run() {{}}"
     core_failure_record_check(copy_source, "<corelib>/fixture", "")
+    display_source :: "#Error struct AuthoredError {{ reason: String }}\nimpl AuthoredError.Display {{ fn display(self) -> String {{ self.reason.copy() }} }}\nfn render(error: AuthoredError) -> String {{ \"{{error}}\" }}\nfn run() {{}}"
+    core_failure_record_check(display_source, "user/fixture", "")
+    duplicate_display :: "{display_source}\nimpl AuthoredError.Display {{ fn display(self) -> String {{ \"duplicate\" }} }}"
+    core_failure_record_check(duplicate_display, "user/fixture", "E0908")
+    writer_source :: "module jetc {{ struct Writer {{ prefix: String }} }}\nfn prefix(writer: jetc.Writer) -> String {{ writer.prefix.copy() }}\nfn run() {{}}"
+    core_failure_record_check(writer_source, "user/fixture", "")
     print("Core failure record literals: passed")
 }

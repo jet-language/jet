@@ -200,6 +200,10 @@ catalog identity, independently of any renamed module import. Qualified types
 inside imported signatures and fields resolve in the declaring module's import
 scope. Native private carriers remain nameable only in their owning Core scope;
 this admission does not create a source declaration or a public export.
+A qualified nominal head selects the declaration in that module, even when
+its leaf name matches a builtin trait such as `Writer`. A qualified reference
+back to the current module's type denotes the same nominal as its local name;
+it does not introduce a second crypto or builtin identity.
 
 **D-SOLVER-LIB1 — Explicit solver library**: `core.compute.solve` ships a finite
 solver API with explicit `Solver` state, deterministic insertion-order
@@ -1927,6 +1931,14 @@ and Option routes separately when the failure handler needs `err`. No lambda,
 binder, or parentheses are added. The `?? (next)` value form in D-ORRETURN-CANON1 is unchanged;
 D-ERR-DECON1 owns the one bare-value-or-diverging-tail rule for fallback
 blocks.
+
+The consumer retains a direct call's carrier through parentheses and access
+marks (`&reader.next()`), without pre-propagating that call. A mixed carrier
+that must preserve absence while mapping its report uses a three-state
+`.Val(value)` / `.None` / `.Err(error)` table (D-OUTCOME-SHAPE1=A), rather
+than naming `err` in the shared `??` fallback. Internal compiler-call report
+types need not be public `Error` domains to be handled by such a table;
+written failure contracts still undergo their declaration-time validation.
 
 **D-ERR-DECON1=A — one `??` block tail** *(ratified 2026-08-19, card #2041)*:
 the existing fallback operator gains no new token or parallel mechanism. A

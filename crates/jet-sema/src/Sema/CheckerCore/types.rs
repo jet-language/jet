@@ -212,7 +212,7 @@ impl<'a> Checker<'a> {
         let (import_ns, leaf) = Self::split_type_name(name);
         let owner = self.struct_owner_module(leaf, import_ns)?;
         if owner == self.module_idx {
-            return None;
+            return Some(Type::Named(leaf.to_string()));
         }
         let module = self.modules?.get(owner)?;
         if module.trait_reg.is_trait_name(leaf) && !module.registry.contains(leaf) {
@@ -263,7 +263,7 @@ impl<'a> Checker<'a> {
         let (import_ns, leaf) = Self::split_type_name(name);
         let owner = self.struct_owner_module(leaf, import_ns)?;
         let module = self.modules?.get(owner)?;
-        if owner == self.module_idx || module.registry.enum_variants(leaf).is_some() {
+        if module.registry.enum_variants(leaf).is_some() {
             return None;
         }
         self.imported_nominal_type(name)
@@ -453,7 +453,10 @@ impl<'a> Checker<'a> {
                 if self.modules.is_some_and(|modules| {
                     self.imports
                         .get(n.rsplit_once('.').unwrap().0)
-                        .is_some_and(|&idx| modules[idx].trait_reg.is_trait_name(leaf))
+                        .is_some_and(|&idx| {
+                            !modules[idx].registry.contains(leaf)
+                                && modules[idx].trait_reg.is_trait_name(leaf)
+                        })
                 }) {
                     Type::TraitObject(vec![leaf.to_string()])
                 } else {

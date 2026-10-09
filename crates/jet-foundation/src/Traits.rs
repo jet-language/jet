@@ -2815,9 +2815,6 @@ impl TraitRegistry {
         self.trait_impls.insert(("PluginError".to_string(), DISPLAY.to_string()));
         self.auto_debug.insert("PluginError".to_string());
         self.auto_equatable.insert("PluginLimit".to_string());
-        // D-DATAFLOW1=A: DataError Display is the typed analytics/stream error law.
-        self.trait_impls
-            .insert(("DataError".to_string(), DISPLAY.to_string()));
         // D-VALIDATE-DECODE1=B: the one accumulated decode/validate failure is
         // `[FieldError]`, and a list is displayable exactly when its element is.
         // Without this row the contract was printable (`print(errs)` — FieldError

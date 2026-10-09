@@ -342,10 +342,10 @@ fn run() { print(prefix(jetc.make())) }\n";
 #[test]
 fn core_crypto_qualified_self_import_matches_local_secret_fields() {
     let crypto = "use core.crypto\nuse \"jetc.jet\" as jetc\n\
-struct Secret { bytes: [U8] }\n\
+struct Secret { label: Int }\n\
 fn verify(reader: jetc.Reader) -> Int {\n\
     key: Secret = reader.key\n\
-    key.bytes.len()\n\
+    key.label\n\
 }\n";
     let jetc = "use core.crypto\npub struct Reader { key: crypto.Secret }\n";
     let (_, diagnostics) = check_modules(&[
