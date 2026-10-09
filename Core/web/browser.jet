@@ -200,6 +200,11 @@ pub fn profile(name: String) -> BrowserProfile BrowserError! {
     Ok(make_profile(name))
 }
 
+pub fn profile(name: String) -> BrowserProfile BrowserError! {
+    if name != "bidi-2024.11" && name != "bidi-2025.5" -> return Err(BrowserError.Protocol)
+    Ok(make_profile(name))
+}
+
 pub fn timeout(ms: Int) -> BrowserTimeout BrowserError! {
     if ms < 1 || ms > 600000 -> return Err(BrowserError{kind: "invalid timeout"})
     Ok(BrowserTimeout{milliseconds: ms})
