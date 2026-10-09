@@ -919,9 +919,9 @@ fn queue_update_event(driver: &db.__QueueDb, record: StoredJob, state: JobQueueS
         assignments = "{assignments}, {pair.column} = ?"
         &bindings.push(pair.value)
     }
-    &bindings.push(DBValue.Text(record.authority))
-    &bindings.push(DBValue.Text(record.queue))
-    &bindings.push(DBValue.Text(record.id))
+    &bindings.push(.Text(record.authority.copy()))
+    &bindings.push(.Text(record.queue.copy()))
+    &bindings.push(.Text(record.id.copy()))
     changed :: queue_execute(&driver,
         "UPDATE jet_job_queue_jobs SET {assignments} WHERE authority = ? AND queue = ? AND id = ?",
         bindings, "transition") ?? return Err(err)
