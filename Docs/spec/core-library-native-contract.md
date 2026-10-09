@@ -828,6 +828,28 @@ deep ownership, every equality field, exact wire edges, projection lifetimes
 and capacity-sized frees. Runtime execution and route enrollment are separate
 admission steps; the witness source alone does not establish execution parity.
 
+Service workflow start, step, activity, retry and completion decisions live in
+`Core/service/service.jet`. They retain the exclusive tree borrow across durable
+synchronization, validation, replay checks and cursor updates. The existing
+durable append and handle creation operations remain registered bootstrap leaves;
+field leaves only project or assign the existing carrier and die at cutover.
+Handle-only `activity_wait`, `all` and `sleep` remain native and uncredited:
+their decisions inspect cursor/history/status under the handle's existing mutex,
+so independently locked getters/setters would change the atomic region.
+
+Delivery status and wait sample the existing durable read once. Receipt and
+event history framing, state spelling, error ordering and HMAC domains live in
+Jet; the read/cleanup provider keeps its original file-operation and authority
+mutex critical sections. Retry validates first, constructs the native
+zero-retention runtime in source, then invokes the existing runtime retry
+operation without changing its locks. Endpoint receive retains the original
+captured channel Arc and two registry acquisitions, rather than re-looking up
+the mailbox after the gate check. Its conditional queue-depth read and receive
+retain the native queue acquisitions. Private plain transport records are
+bootstrap marshalling only, not new authority or delivery state.
+Endpoint send and delivery cancel remain native and uncredited: their locks
+cover source-dependent policy and the enqueue or durable mutation, respectively.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency
