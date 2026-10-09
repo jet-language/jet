@@ -137,7 +137,7 @@ fn sema_policy_wrap(callee: TExpr, target: SemaCallDirectTarget, policy: Call, e
     (lowered, pins) := sema_call_check_bound_arguments_owned(&state, policy.name, params, None, true, binding, &arguments, environment, &scopes, &tail_store, &context, policy.name_span, &diagnostics) ?? return None
     captured := callee
     captured.ty = all_params[count].ty ?? return None
-    conventions := loop parameter in params -> parameter.convention
+    conventions := (loop parameter in params -> parameter.convention)
     value :: sema_tir_expr(callee.ty, TExprKind.FnValue{kind: TFnValueKind.Policy{fn_type: callee.ty, policy_args: lowered, policy_conventions: conventions, wrapper_name: Val(wrapper.symbol.id.key), captures: [TCapture]{}, callee: captured}}, policy.name_span)
     Val(sema_call_with_binder_pins(^pins, value, policy.name_span))
 }

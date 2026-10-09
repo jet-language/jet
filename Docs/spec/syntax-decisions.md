@@ -616,6 +616,9 @@ existing iterator adapters.
 
 Every statement-position loop header may use `-> statement`; the statement's
 value is discarded. A finite loop in value position keeps the collection arrow.
+A mutable binding of a collected loop value parenthesizes its right-hand side:
+`values := (loop item in items -> item.value)`. This keeps the collection
+mutable without spelling a mutable compile-time loop name (`E0988`).
 
 **S22 / S72 — Ranges**: `1..10` is **inclusive**. Source-loop stride is the
 optional third clause (`loop i in 0..10, 2`); `step` has no loop role.
@@ -949,6 +952,8 @@ and `!` negates Bool only.
 Retired infix arithmetic and compounds produce E0398 naming the method, with
 a precedence-preserving structured repair. Updates explicitly assign the
 method result back. `core.math.xor` and `core.math.pow` are removed.
+Generated Jet observers use these methods too: the MIR wire writer extracts
+its hexadecimal byte nibbles with `.bit_and(15)`, not retired infix arithmetic.
 
 Migration tooling: `Tools/agent/migrate-bit-operators.mjs --check` reports value
 operators in Compiler, Core, Jetpack, Tools/testkit, and Examples; `--write`

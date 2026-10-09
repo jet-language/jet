@@ -635,7 +635,7 @@ fn sema_pattern_matrix_list_rows(rows: [SemaPatternCoverageRow], length: Int, lo
 }
 
 fn sema_pattern_matrix_list_complete(rows: [SemaPatternCoverageRow], elem: Type, length: Int, long: Bool, tail: [Type], environment: SemaScopeEnvironment) -> Bool Never! {
-    types := loop _ in 0..<length -> elem
+    types := (loop _ in 0..<length -> elem)
     loop ty in tail -> &types.push(ty)
     sema_pattern_matrix_complete(sema_pattern_matrix_list_rows(rows, length, long), types, environment)
 }
@@ -698,7 +698,7 @@ fn sema_pattern_matrix_constructor_rows(rows: [SemaPatternCoverageRow], construc
     specialized := [SemaPatternCoverageRow]{}
     loop row in rows {
         if row.cells.len() == 0 -> next
-        cells := loop _ in constructor.payload -> SemaPatternCoverageCell.Any
+        cells := (loop _ in constructor.payload -> SemaPatternCoverageCell.Any)
         if row.cells[0] == {
             .Any -> {}
             .Refutable -> next
@@ -765,7 +765,7 @@ fn sema_pattern_matrix_complete(written_rows: [SemaPatternCoverageRow], types: [
             specialized := [SemaPatternCoverageRow]{}
             loop row in rows {
                 if row.cells.len() == 0 -> next
-                cells := loop _ in field_types -> SemaPatternCoverageCell.Any
+                cells := (loop _ in field_types -> SemaPatternCoverageCell.Any)
                 if row.cells[0] == .Shape(shape) && shape == .Struct(written, _, _) {
                     loop (index, declared) in nominal.fields {
                         loop field in written {

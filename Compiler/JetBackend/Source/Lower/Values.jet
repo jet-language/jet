@@ -404,7 +404,10 @@ fn lower_close_receiver_slot(c: LowerContext, f: LowerFunction, slot: Int) -> Bo
 fn lower_close_frame(p: MIRProgram, m: &LowerModule, f: &LowerFunction) Never! {
     ty :: f.closing ?? return
     receiver := (f.params[0].copy()) ?? return lower_fail(&m, &f, "Close receiver has no value")
-    if !lower_is_inline(p, ty) && lower_repr(p, ty) != .Boxed(_) | .Handle(_, _) -> receiver = lower_const(&f, 1)
+    if !lower_is_inline(p, ty) && !(lower_repr(p, ty) == {
+        .Boxed(_) | .Handle(_, _) -> true
+        else -> false
+    }) -> receiver = lower_const(&f, 1)
     cell :: lower_pointer(&f)
     lower_emit(&f, LIRInst.StackSlot{dst: cell, size: 8, align: 8})
     lower_emit(&f, LIRInst.Store{base: cell, offset: 0, value: receiver})
