@@ -51,6 +51,11 @@ fn rt_text_copy(ptr: I64, len: I64) -> I64 {
     rt_text_store(header, data)
     rt_text_store(header + I64{8}, len)
     rt_text_store(header + I64{16}, len)
+}
+
+fn rt_text_copy(ptr: I64, len: I64) -> I64 {
+    header :: jet_rt_alloc(I64{24}, I64{8})
+    rt_text_copy_into(header, ptr, len)
     header
 }
 

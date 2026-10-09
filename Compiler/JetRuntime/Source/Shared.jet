@@ -108,6 +108,21 @@ fn shared_revision_stop() {
     shared_borrow_unpin(shared)
 }
 
+// Both callback Shared and SourceData views use this one exhausted-revision
+// stop policy. On false it has released the acquired writer and retained cell.
+fn shared_revision_begin(shared: I64, revision: I64) -> Bool {
+    if (revision != I64{-1}) -> return true
+    shared_release(shared, true)
+    jet_rt_native_shared_drop(shared)
+    message :: channel_text(I64{3})
+    if !rt_task_panic_publish(sync_load(message), sync_load(message + I64{8}), I64{0}) {
+        scheduler_fatal(message)
+        return false
+    }
+    jet_rt_string_drop(message)
+    false
+}
+
 #Export(c) fn jet_rt_native_shared_edit(shared: I64, env: I64, invoke: I64, out: I64) {
     if !shared_borrow_pin(shared) -> return
     shared_acquire(shared, true)
