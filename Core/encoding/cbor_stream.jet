@@ -101,8 +101,9 @@ struct CBORPull {
             self.lookahead = None
             return Ok(Val(byte))
         }
-        byte :: if encoding.__read_byte(&self.input) == {
-            .Ok(value) -> value
+        byte := U8?{None}
+        if encoding.__read_byte(&self.input) == {
+            .Ok(value) -> { byte = value }
             .Err(cause) -> { return Err(io_error(self.total, self.path(), cause)) }
         }
         if byte == None -> return Ok(None)
@@ -110,7 +111,7 @@ struct CBORPull {
             if self.total >= maximum -> return Err(error(.Limit, self.total, self.path(), "max_total_bytes {maximum} exceeded"))
         }
         self.total += 1
-        Ok(byte)
+        Ok(Val(byte))
     }
 
     fn required(&self, start: Int, reason: String) -[IO, Time.Wait]> U8 EncodingError! {
@@ -278,7 +279,7 @@ struct CBORPull {
     fn next_inner(&self) -[IO, Time.Wait]> DataEvent? EncodingError! {
         if self.eof -> return Ok(None)
         closed :: &self.close_event()
-        if closed != None -> return Ok(closed)
+        if closed != None -> return Ok(Val(closed))
         if self.root_done {
             found :: &self.read_byte()
             if found == None {
@@ -296,7 +297,7 @@ struct CBORPull {
             }
             return Err(error(.Truncated, self.total, self.path(), "CBOR container ended before all items were present"))
         }
-        head :: Int.from_u8(next ?? panic("checked CBOR byte"))
+        head :: Int.from_u8(next)
         if head == 255 -> return Err(error(.Syntax, start, self.path(), "CBOR break outside an indefinite container"))
         major :: head >> 5
         additional :: head.bit_and(31)
@@ -353,8 +354,9 @@ struct CBORPull {
 
     fn next(&self) -[IO, Time.Wait]> DataEvent? EncodingError! {
         if self.terminal == .Val(first) -> return Err(first.copy())
-        value :: if &self.next_inner() == {
-            .Ok(event) -> event
+        value := DataEvent?{None}
+        if &self.next_inner() == {
+            .Ok(event) -> { value = event }
             .Err(failure) -> { return Err(&self.fail(^failure)) }
         }
         if value == None && self.eof -> &self.discard()
