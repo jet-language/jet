@@ -63,6 +63,13 @@ explicitly named `--frozen-reference` and `--frozen-evaluator` inputs; a live
 retired tier is never a prerequisite for the raw ABI and Float-bit witnesses.
 Official BLAKE3 fixtures regenerate from the team vectors alone, outside the
 immutable proof source, without reading a retired runtime implementation.
+Native runtime exit corpora accept `--results` pointing to the one Jet-front
+golden union's `results.tsv`; symbol, raw ABI, ownership and process-edge
+witnesses still execute independently. Shared results reject duplicate rows.
+Trap proofs compare the native status, signal and exact stdout/stderr against
+the committed golden, not a retired MIR/Rust execution. The freestanding
+display witness links the sealed C-client object and its provenance-listed C
+platform archives, rather than the program pack's startup.
 
 The compiler frontend receipt must retain the full foreign Cargo diagnostics,
 including cached bridge fingerprint output when an inline-FFI error hides

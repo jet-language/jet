@@ -8,12 +8,13 @@ import { fileURLToPath } from 'node:url';
 import { collectGoldenEntries, loadExampleStdin } from '../../../Tools/agent/compiler-diff.mjs';
 import { copyFeatureProject, featureProjectRoot, withoutWarningDiagnostics } from '../../../Tools/agent/run-feature-examples.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');
-const [output,mode]=process.argv.slice(2);
+import {readGoldenResults} from './golden-results.mjs';
+const [output,mode,resultsFlag,sharedResults]=process.argv.slice(2);
 if (mode === 'reference') {
   console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
   process.exit(0);
 }
-if(!output||!['prepare','reference','native'].includes(mode))throw Error('usage: run-host-goldens.mjs OUT prepare|reference|native');
+if(!output||!['prepare','reference','native'].includes(mode)||(resultsFlag&&(mode!=='native'||resultsFlag!=='--results'||!sharedResults))||process.argv.length>(sharedResults?6:4))throw Error('usage: run-host-goldens.mjs OUT prepare|native [--results fresh-results.tsv]');
 const out=resolve(output),features=join(root,'Examples/features'),list=join(out,'cases.list');
 const filters=['io/process_','io/env_overlay','io/os_','io/sys_','io/files','io/path','io/terminal_source'];
 mkdirSync(out,{recursive:true});
@@ -23,11 +24,12 @@ if(mode==='prepare') {
   writeFileSync(list,entries.map(entry=>entry.stem).join('\n')+'\n');
   writeFileSync(join(out,'selection.json'),JSON.stringify({filters,stems:entries.map(entry=>entry.stem)},null,2)+'\n');
 } else if(mode==='native') {
-  const result=spawnSync(process.execPath,[join(root,'Compiler/JetBackend/Tests/run-goldens.mjs'),join(out,'native'),'--front','jet','--case-list',list],{cwd:root,stdio:'inherit'});
-  if(result.error||result.status!==0)throw Error(`native host goldens: ${result.error?.message ?? result.status}`);
-  const rows=readFileSync(join(out,'native/results.tsv'),'utf8').trim().split('\n').map(line=>line.split('\t'));
+  const result=sharedResults?null:spawnSync(process.execPath,[join(root,'Compiler/JetBackend/Tests/run-goldens.mjs'),join(out,'native'),'--front','jet','--case-list',list],{cwd:root,stdio:'inherit'});
+  if(result&&(result.error||result.status!==0))throw Error(`native host goldens: ${result.error?.message ?? result.status}`);
+  const rows=readGoldenResults(sharedResults?resolve(sharedResults):join(out,'native/results.tsv'));
   const expected=readFileSync(list,'utf8').trim().split('\n');
-  if(rows.length!==expected.length||rows.some(row=>row[1]!=='pass'))throw Error(`native host corpus did not pass every selected case: ${JSON.stringify(rows)}`);
+  const failures=expected.filter(stem=>rows.get(stem)!=='pass');
+  if(failures.length||(!sharedResults&&rows.size!==expected.length))throw Error(`native host corpus did not pass every selected case: ${JSON.stringify(failures)}`);
 } else {
   const compiler=process.env.JET;if(!compiler)throw Error('JET must name the published matching compiler');
   const selected=new Set(readFileSync(list,'utf8').trim().split('\n'));

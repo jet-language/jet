@@ -1,32 +1,36 @@
 #!/usr/bin/env node
 // Native display proof against frozen oracle bytes; no live Rust reference.
 // Prepare: node run-display-goldens.mjs OUT --prepare [--baseline RESULTS.tsv]
-// Prove: node run-display-goldens.mjs OUT --object JET.o --pack JET_ONLY.o [--frozen RECEIPT_DIR]
+// Prove: node run-display-goldens.mjs OUT --object JET.o --pack JET_ONLY.o --provenance RECEIPT [--frozen RECEIPT_DIR] [--results fresh-results.tsv]
 // The object/pack must include --test FloatBits. All selected native goldens
 // and the 1M-float native formatting cell remain live.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {createHash} from "node:crypto";
 import { collectGoldenEntries } from "../../../Tools/agent/compiler-diff.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+import {readGoldenResults} from "./golden-results.mjs";
 const args = process.argv.slice(2);
 if (args.includes("--reference")) {
   console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
   process.exit(0);
 }
 const out = resolve(args.shift() ?? "");
-let prepare = false, baseline, object, pack, frozen;
+let prepare = false, baseline, object, pack, frozen, sharedResults, provenance;
 for (let i = 0; i < args.length; ++i) {
   if (args[i] === "--prepare") prepare = true;
   else if (args[i] === "--baseline") baseline = resolve(args[++i]);
   else if (args[i] === "--object") object = resolve(args[++i]);
   else if (args[i] === "--pack") pack = resolve(args[++i]);
   else if (args[i] === "--frozen") frozen = resolve(args[++i]);
+  else if (args[i] === "--results") sharedResults = resolve(args[++i]);
+  else if (args[i] === "--provenance") provenance = resolve(args[++i]);
   else throw new Error(`unknown argument ${args[i]}`);
 }
-if (process.argv.length < 4 || (!prepare && (!object || !pack))) throw new Error("usage: run-display-goldens.mjs OUT --prepare [--baseline RESULTS.tsv] | --object JET.o --pack JET_ONLY.o [--frozen RECEIPT_DIR]");
+if (process.argv.length < 4 || (!prepare && (!object || !pack || !provenance))) throw new Error("usage: run-display-goldens.mjs OUT --prepare [--baseline RESULTS.tsv] | --object JET.o --pack JET_ONLY.o --provenance RECEIPT [--frozen RECEIPT_DIR] [--results fresh-results.tsv]");
 mkdirSync(out, { recursive: true });
 const exports = ["jet_rt_bool_to_string", "jet_rt_char_to_string", "jet_rt_i64_to_string", "jet_rt_u64_to_string", "jet_rt_int_to_string", "jet_rt_float_to_string", "jet_rt_float_debug", "jet_rt_float32_to_string", "jet_rt_float32_debug"];
 const mask = (1n << 64n) - 1n, sign = 1n << 63n, fraction = (1n << 52n) - 1n;
@@ -128,7 +132,17 @@ const exactImports = [...symbols(undefinedJet.text).keys()].filter((name) => nam
 if (missingExports.length || unresolved.length || exactImports.length) ++failures;
 const cc = command("witness-compile", process.env.CC ?? "cc", ["-std=c11", "-O2", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-fno-pie", "-I", out, "-c", join(root, "Compiler/JetRuntime/Tests/DisplayWitness.c"), "-o", join(out, "witness.o")]);
 const oracle = { ok: true, text: readFileSync(join(frozenOut, "rust.stdout"), "utf8") };
-const linked = cc.ok && command("witness-link", process.env.LD ?? "ld", ["--gc-sections", "-o", join(out, "witness"), "--entry=_start", join(out, "witness.o"), pack]);
+const receipt = JSON.parse(readFileSync(provenance, "utf8"));
+const digest = file => createHash("sha256").update(readFileSync(file)).digest("hex");
+if (receipt.backend !== "jet-native" || receipt.rustObjects !== 0 || receipt.llvmObjects !== 0 ||
+    digest(object) !== receipt.objectSha256 || digest(pack) !== receipt.packSha256) throw Error("display inputs are not the sealed Jet-only runtime");
+const archives = receipt.cPlatformArchives.map(archive => {
+  if (archive.language !== "C" || archive.role !== "platform" || digest(archive.path) !== archive.sha256) throw Error("display platform archive is not sealed C");
+  return archive.path;
+});
+// This witness defines its own _start and executes the object's init array.
+// Link the C-client object once, never the startup-bearing program pack.
+const linked = cc.ok && command("witness-link", process.env.LD ?? "ld", ["--gc-sections", "-o", join(out, "witness"), "--entry=_start", join(out, "witness.o"), object, "--start-group", ...archives, "--end-group"]);
 const bits = readFileSync(join(out, "bits.txt"), "utf8");
 const native = linked?.ok ? command("native", join(out, "witness"), [], bits) : null;
 const mismatches = [];
@@ -157,14 +171,14 @@ if (native?.ok && oracle?.ok && !mismatches.length) {
   performance = { label: "runtime object unoptimized; Rust timing/digest frozen", frozen_receipt: frozenOut, iterations: 1000000, digest_equal: Boolean(n && r && n[1] === r[1]), native_ns: n ? Number(BigInt(`0x${n[2]}`)) : null, rust_ns: r ? Number(BigInt(`0x${r[2]}`)) : null, ratio: ok ? Number(BigInt(`0x${n[2]}`)) / Number(BigInt(`0x${r[2]}`)) : null, ok };
 }
 const goldenOut = join(out, "goldens");
-const goldenHarness = command("goldens", process.execPath, [join(root, "Compiler/JetBackend/Tests/run-goldens.mjs"), goldenOut, "--front", "jet", "--case-list", join(out, "golden.cases")], undefined, { timeout: 0, env: { ...process.env, JET_RUNTIME_PACK: pack, JET_MIR_EMIT: "0" } });
+const goldenHarness = sharedResults ? null : command("goldens", process.execPath, [join(root, "Compiler/JetBackend/Tests/run-goldens.mjs"), goldenOut, "--front", "jet", "--case-list", join(out, "golden.cases")], undefined, { timeout: 0, env: { ...process.env, JET_RUNTIME_PACK: pack, JET_MIR_EMIT: "0" } });
 const selected = readFileSync(join(out, "golden.cases"), "utf8").trim().split("\n");
 let goldenRows = new Map();
-try { goldenRows = new Map(readFileSync(join(goldenOut, "results.tsv"), "utf8").trim().split("\n").map((row) => row.split("\t")).map(([stem, verdict]) => [stem, verdict])); }
+try { goldenRows = readGoldenResults(sharedResults ?? join(goldenOut, "results.tsv")); }
 catch (error) { if (error.code !== "ENOENT") throw error; }
 const goldenFailures = selected.filter((stem) => goldenRows.get(stem) !== "pass");
 if (goldenFailures.length) ++failures;
-const summary = { ...JSON.parse(readFileSync(join(out, "corpus.json"), "utf8")), receipts, missingExports, unresolved, exactImports, mismatches: mismatches.length, byte_equal: Boolean(native?.ok && oracle?.ok && !mismatches.length), binary32_mismatches: mismatches32.length, binary32_byte_equal: Boolean(native32?.ok && oracle32?.ok && !mismatches32.length), performance, golden_passes: selected.length - goldenFailures.length, goldenFailures, goldens_ok: goldenHarness.ok && !goldenFailures.length, failures };
+const summary = { ...JSON.parse(readFileSync(join(out, "corpus.json"), "utf8")), receipts, missingExports, unresolved, exactImports, mismatches: mismatches.length, byte_equal: Boolean(native?.ok && oracle?.ok && !mismatches.length), binary32_mismatches: mismatches32.length, binary32_byte_equal: Boolean(native32?.ok && oracle32?.ok && !mismatches32.length), performance, golden_passes: selected.length - goldenFailures.length, goldenFailures, goldens_ok: (sharedResults ? true : goldenHarness.ok) && !goldenFailures.length, failures };
 writeFileSync(join(out, "mismatches.json"), JSON.stringify(mismatches, null, 2) + "\n");
 writeFileSync(join(out, "mismatches32.json"), JSON.stringify(mismatches32, null, 2) + "\n");
 writeFileSync(join(out, "summary.json"), JSON.stringify(summary, null, 2) + "\n");

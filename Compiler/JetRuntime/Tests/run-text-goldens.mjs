@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { candidateJetc0, runJetFront } from "../../JetBackend/Tests/jet-front.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+import {readGoldenResults} from "./golden-results.mjs";
 const [output, baseline, mode, sharedResults] = process.argv.slice(2);
 if (!output || !baseline || (mode && mode !== "--plan" && mode !== "--results") ||
     (mode === "--results" ? !sharedResults || process.argv.length !== 6 : process.argv.length > 5)) {
@@ -64,7 +65,7 @@ if (mode !== "--plan") {
     cwd: root, stdio: "inherit", env: process.env,
   });
   const resultsPath = sharedResults ? resolve(sharedResults) : join(out, "results.tsv");
-  const results = existsSync(resultsPath) ? new Map(readFileSync(resultsPath, "utf8").trim().split("\n").map((line) => line.split("\t"))) : new Map();
+  const results = existsSync(resultsPath) ? readGoldenResults(resultsPath) : new Map();
   failures.push(...stems.filter((stem) => results.get(stem) !== "pass").map((stem) => `${stem}: ${results.get(stem) ?? "missing"}`));
   if (harness && (harness.error || harness.status !== 0)) failures.push(`native harness: ${harness.error?.message ?? `rc=${harness.status}`}`);
   // The raw witness checks carrier ownership, lossy malformed UTF-8 and

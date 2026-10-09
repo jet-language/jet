@@ -8,11 +8,13 @@ import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectGoldenEntries, goldenFailureExit } from "../../../Tools/agent/compiler-diff.mjs";
+import {readGoldenResults} from "./golden-results.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const [output, baseline, mode] = process.argv.slice(2);
-if (!output || !baseline || (mode && mode !== "--plan") || process.argv.length > 5) {
-  throw new Error("usage: run-trap-goldens.mjs OUT BASELINE.results.tsv [--plan]");
+const [output, baseline, mode, sharedResults] = process.argv.slice(2);
+if (!output || !baseline || (mode && mode !== "--plan" && mode !== "--results") ||
+    (mode === "--results" ? !sharedResults || process.argv.length !== 6 : process.argv.length > 5)) {
+  throw new Error("usage: run-trap-goldens.mjs OUT BASELINE.results.tsv [--plan | --results fresh-results.tsv]");
 }
 const out = resolve(output);
 const expected = join(root, "Examples/features/expected");
@@ -35,48 +37,41 @@ writeFileSync(cases, stems.join("\n") + "\n");
 console.log(`${passingStderr.length} baseline stderr stems; ${trapStems.length} registered trap stems:\n${stems.join("\n")}`);
 if (mode !== "--plan") {
   if (!process.env.JET_RUNTIME_PACK) throw new Error("JET_RUNTIME_PACK must name the E2 pack containing the Jet trap object");
-  const harness = spawnSync(process.execPath, [join(root, "Compiler/JetBackend/Tests/run-goldens.mjs"), out, "--case-list", cases], {
-    cwd: root,
-    stdio: "inherit",
-    // Exit parity requires actual reference execution, not emit-only MIR.
-    env: { ...process.env, JET_MIR_EMIT: "0" },
+  const harness = mode === "--results" ? null : spawnSync(process.execPath, [join(root, "Compiler/JetBackend/Tests/run-goldens.mjs"), out, "--front", "jet", "--case-list", cases], {
+    cwd: root, stdio: "inherit", env: { ...process.env, JET_MIR_EMIT: "0" },
   });
+  const nativeRoot = sharedResults ? dirname(resolve(sharedResults)) : out;
+  const results = readGoldenResults(sharedResults ? resolve(sharedResults) : join(out, "results.tsv"));
   const failures = [];
   const rows = [];
   for (const stem of stems) {
     const slug = stem.replace(/[^A-Za-z0-9_-]+/gu, "_");
-    const refPath = join(out, "mir", `${slug}.ref`);
-    const refStdoutPath = join(out, "mir", `${slug}.stdout`);
-    const refStderrPath = join(out, "mir", `${slug}.stderr`);
-    const statusPath = join(out, "run", `${slug}.status.json`);
-    const stderrPath = join(out, "run", `${slug}.stderr`);
-    const stdoutPath = join(out, "run", `${slug}.stdout`);
+    const statusPath = join(nativeRoot, "run", `${slug}.status.json`);
+    const stderrPath = join(nativeRoot, "run", `${slug}.stderr`);
+    const stdoutPath = join(nativeRoot, "run", `${slug}.stdout`);
     const goldenStdoutPath = join(expected, `${stem}.out`);
     const failure = existsSync(join(expected, `${stem}.err.out`));
     const goldenPath = join(expected, `${stem}.${failure ? "err" : "stderr"}.out`);
-    if (![refPath, refStdoutPath, refStderrPath, statusPath, stdoutPath, stderrPath].every(existsSync)) {
-      failures.push(`${stem}: missing reference/native result`);
+    if (![statusPath, stdoutPath, stderrPath].every(existsSync)) {
+      failures.push(`${stem}: missing native result`);
       rows.push(`${stem}\tmissing`);
       continue;
     }
-    const reference = JSON.parse(readFileSync(refPath, "utf8"));
     const native = JSON.parse(readFileSync(statusPath, "utf8"));
     const stderr = readFileSync(stderrPath);
     const stdout = readFileSync(stdoutPath);
     const stdoutBytesMatch = stdout.equals(existsSync(goldenStdoutPath) ? readFileSync(goldenStdoutPath) : Buffer.alloc(0));
-    const stdoutReferenceMatch = stdout.equals(readFileSync(refStdoutPath));
     const goldenStderr = readFileSync(goldenPath);
     const expectedExit = failure ? goldenFailureExit(stem, goldenStderr.toString("utf8")) : 0;
     const bytesMatch = stderr.equals(goldenStderr);
-    const referenceMatch = stderr.equals(readFileSync(refStderrPath));
-    const exitMatch = expectedExit !== null && reference.mode === "run" && Number.isInteger(reference.status) &&
-      reference.status === expectedExit && native.status === reference.status && native.signal === null && native.error === null;
-    const ok = bytesMatch && referenceMatch && stdoutBytesMatch && stdoutReferenceMatch && exitMatch;
-    rows.push(`${stem}\t${ok ? "pass" : "wrong"}\texpected=${expectedExit ?? "ambiguous"}\tref=${reference.status}\tnative=${native.status ?? native.signal}\tgolden-stdout=${stdoutBytesMatch}\treference-stdout=${stdoutReferenceMatch}\tgolden-stderr=${bytesMatch}\treference-stderr=${referenceMatch}`);
+    const resultMatch = results.get(stem) === "pass";
+    const exitMatch = expectedExit !== null && native.status === expectedExit && native.signal === null && native.error === null;
+    const ok = resultMatch && bytesMatch && stdoutBytesMatch && exitMatch;
+    rows.push(`${stem}\t${ok ? "pass" : "wrong"}\texpected=${expectedExit ?? "ambiguous"}\tnative=${native.status ?? native.signal}\tgolden-stdout=${stdoutBytesMatch}\tgolden-stderr=${bytesMatch}\tresult=${results.get(stem) ?? "missing"}`);
     if (!ok) failures.push(`${stem}: ${expectedExit === null ? "ambiguous failure exit report" : "exact exit/stdout/stderr mismatch"}`);
   }
   writeFileSync(join(out, "trap-results.tsv"), rows.join("\n") + "\n");
   for (const failure of failures) console.error(failure);
-  if (harness.error) console.error(harness.error.message);
-  if (failures.length || harness.status !== 0) process.exitCode = 1;
+  if (harness?.error) console.error(harness.error.message);
+  if (failures.length || (harness && harness.status !== 0)) process.exitCode = 1;
 }

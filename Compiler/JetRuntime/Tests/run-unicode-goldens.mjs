@@ -8,11 +8,13 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectGoldenEntries } from "../../../Tools/agent/compiler-diff.mjs";
 import { candidateJetc0, runJetFront } from "../../JetBackend/Tests/jet-front.mjs";
+import {readGoldenResults} from "./golden-results.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const [output, mode] = process.argv.slice(2);
-if (!output || (mode && mode !== "--plan") || process.argv.length > 4) {
-  throw new Error("usage: run-unicode-goldens.mjs OUT [--plan]");
+const [output, mode, sharedResults] = process.argv.slice(2);
+if (!output || (mode && mode !== "--plan" && mode !== "--results") ||
+    (mode === "--results" ? !sharedResults || process.argv.length !== 5 : process.argv.length > 4)) {
+  throw new Error("usage: run-unicode-goldens.mjs OUT [--plan | --results fresh-results.tsv]");
 }
 const out = resolve(output);
 const symbols = ["count", "index_of", "last_index_of", "lower", "trim", "upper"].map((name) => `jet_unicode_${name}`);
@@ -59,19 +61,18 @@ if (mode !== "--plan") {
   if (illegalInts.length) failures.push(`unlisted exact-Int imports (Unicode itself has none): ${illegalInts.join(", ")}`);
   const unresolved = nm(pack, ["-u"], "unicode-pack-imports.txt");
   if (unresolved.length) failures.push(`unresolved final pack symbols: ${unresolved.map(([name]) => name).join(", ")}`);
-  const run = spawnSync(process.execPath, [join(root, "Compiler/JetBackend/Tests/run-goldens.mjs"), out, "--front", "jet", "--case-list", cases], {
+  const run = mode === "--results" ? null : spawnSync(process.execPath, [join(root, "Compiler/JetBackend/Tests/run-goldens.mjs"), out, "--front", "jet", "--case-list", cases], {
     cwd: root, stdio: "inherit", env: process.env,
   });
   // The general backend harness also reports unsupported results. This exit
   // witness requires EVERY selected stem to pass, not merely zero wrong cases.
-  let rows = [];
-  try { rows = readFileSync(join(out, "results.tsv"), "utf8").trim().split("\n").map((row) => row.split("\t")); }
+  let rows = new Map();
+  try { rows = readGoldenResults(sharedResults ? resolve(sharedResults) : join(out, "results.tsv")); }
   catch (error) { failures.push(`missing golden results: ${error.message}`); }
   for (const stem of stems) {
-    const matches = rows.filter(([name]) => name === stem);
-    if (matches.length !== 1 || matches[0][1] !== "pass") failures.push(`${stem}: ${matches.length === 1 ? matches[0][1] : "missing or duplicate result"}`);
+    if (rows.get(stem) !== "pass") failures.push(`${stem}: ${rows.get(stem) ?? "missing result"}`);
   }
-  if (run.error || run.status !== 0) failures.push(`native harness: ${run.error?.message ?? `rc=${run.status}`}`);
+  if (run && (run.error || run.status !== 0)) failures.push(`native harness: ${run.error?.message ?? `rc=${run.status}`}`);
   // NUL is not a quoted-text escape in Jet. The raw runtime-only witness also
   // observes Option payload writes and verifies that a miss leaves the slot
   // untouched. It uses the same assembler and Jet-native front-end path.
