@@ -100,16 +100,38 @@ enum WatchKind {
 }
 
 fn watch_domain_tag(value: WatchDomain) -> Int Never! {
-    if value == { .File -> 0; .Process -> 1; .Port -> 2 }
+    if value == {
+        .File -> 0
+        .Process -> 1
+        .Port -> 2
+    }
 }
 fn watch_kind_tag(value: WatchKind) -> Int Never! {
-    if value == { .Created -> 0; .Modified -> 1; .Removed -> 2; .Error -> 3; .Exited -> 4; .Ready -> 5 }
+    if value == {
+        .Created -> 0
+        .Modified -> 1
+        .Removed -> 2
+        .Error -> 3
+        .Exited -> 4
+        .Ready -> 5
+    }
 }
 fn watch_domain_name(value: WatchDomain) -> String Never! {
-    if value == { .File -> "File"; .Process -> "Process"; .Port -> "Port" }
+    if value == {
+        .File -> "File"
+        .Process -> "Process"
+        .Port -> "Port"
+    }
 }
 fn watch_kind_name(value: WatchKind) -> String Never! {
-    if value == { .Created -> "Created"; .Modified -> "Modified"; .Removed -> "Removed"; .Error -> "Error"; .Exited -> "Exited"; .Ready -> "Ready" }
+    if value == {
+        .Created -> "Created"
+        .Modified -> "Modified"
+        .Removed -> "Removed"
+        .Error -> "Error"
+        .Exited -> "Exited"
+        .Ready -> "Ready"
+    }
 }
 impl WatchDomain.Equatable {
     fn equal(self, other: WatchDomain) -> Bool Never! { watch_domain_tag(self) == watch_domain_tag(other) }
@@ -166,7 +188,11 @@ impl WatchEvent.Equatable {
     assert_eq(watch_kind_tag(.Error), 3)
     assert_eq(watch_kind_tag(.Ready), 5)
     old :: WatchEventKind.Ready
-    assert(if old == { .Ready -> true; else -> false })
+    ready :: if old == {
+        .Ready -> true
+        else -> false
+    }
+    assert(ready)
 }
 
 fn recursive(path: String) -[FS]> WatchHandle IOError! {
