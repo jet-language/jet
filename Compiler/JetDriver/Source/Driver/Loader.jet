@@ -56,10 +56,12 @@ use jet_lexer.[
     TOKEN_SEMI,
     TOKEN_STRING,
     Token,
+    TokenTables,
     lex,
     lex_config,
     lex_generated,
     token_decoded,
+    token_string_parts,
 ]
 use jet_parser.[
     parse_lexed_with_source,
@@ -1032,7 +1034,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                         "version" -> {
                             if version_seen -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package version is declared more than once", "dependency selection uses one declared package version", "keep one `version:` field"))
                             version_seen = true
-                            if valid_string -> version = Val(tokens[value_index].payload.decoded) else -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package version must be a string", "dependency selection uses the manifest's declared version", "write `version: \"0.1.0\"`"))
+                            if valid_string -> version = Val(token_decoded(tables, tokens[value_index])) else -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package version must be a string", "dependency selection uses the manifest's declared version", "write `version: \"0.1.0\"`"))
                         }
                         else -> {
                             if edition_seen -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package edition is declared more than once", "one manifest root selects one language edition", "keep one `edition:` field"))
@@ -1143,7 +1145,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                     loop config_index in (list_open + 1)..<list_close {
                         config_token :: tokens[config_index]
                         if jet_driver_is_manifest_string(config_token.kind) {
-                            path :: jet_driver_file_import_path("package.jet", config_token.payload.decoded)
+                            path :: jet_driver_file_import_path("package.jet", token_decoded(tables, config_token))
                             if path.valid -> &configs.push(path.path)
                         }
                     }
@@ -2622,22 +2624,22 @@ fn jet_driver_empty_core_identifier_demand() -> JetDriverCoreIdentifierDemand Ne
     JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false}
 }
 
-fn jet_driver_collect_core_identifier_demand(tokens: [Token], demand: &JetDriverCoreIdentifierDemand, collect_bare: Bool) Never! {
+// Interpolation tokens share the enclosing lexed source's spelling/literal table.
+fn jet_driver_collect_core_identifier_demand(tokens: [Token], tables: TokenTables, demand: &JetDriverCoreIdentifierDemand, collect_bare: Bool) Never! {
     loop index in 0..<tokens.len() {
         if tokens[index].kind == TOKEN_IDENT {
-            if tokens[index].payload.decoded == "or_err" -> demand.option_or_err = true
+            name :: token_decoded(tables, tokens[index])
+            if name == "or_err" -> demand.option_or_err = true
             if collect_bare {
                 loop bare in CORE_BARE_SOURCE_MODULES {
-                    if tokens[index].payload.decoded == bare.name || (bare.name == "URL" && tokens[index].payload.decoded == "url") {
+                    if name == bare.name || (bare.name == "URL" && name == "url") {
                         if !demand.bare_names.contains(bare.name) -> &demand.bare_names.push(bare.name)
                     }
                 }
             }
         }
-        loop part_index in 0..<tokens[index].payload.string_parts.len() {
-            if tokens[index].payload.string_parts[part_index].kind == STRING_PART_INTERPOLATION {
-                jet_driver_collect_core_identifier_demand(tokens[index].payload.string_parts[part_index].tokens, &demand, collect_bare)
-            }
+        loop part in token_string_parts(tables, tokens[index]) {
+            if part.kind == STRING_PART_INTERPOLATION -> jet_driver_collect_core_identifier_demand(part.tokens, tables, &demand, collect_bare)
         }
     }
 }
@@ -2650,7 +2652,7 @@ fn jet_driver_parse_user_unit(text: String, retain_demand: Bool) -> JetDriverPar
     source :: if carrier.found -> jet_driver_mask_inline_package(text, carrier).bytes() else -> text.bytes()
     lexed :: lex(source)
     demand := jet_driver_empty_core_identifier_demand()
-    if retain_demand -> jet_driver_collect_core_identifier_demand(lexed.tokens, &demand, true)
+    if retain_demand -> jet_driver_collect_core_identifier_demand(lexed.tokens, lexed.tables, &demand, true)
     parsed :: parse_lexed_with_source(lexed, source, parser_line_starts(source))
     JetDriverParsedUnit{parsed: ^parsed, demand: ^demand}
 }
@@ -2731,7 +2733,7 @@ fn jet_driver_parse_core_source(text: String, module_name: String, owned_members
     source :: jet_driver_mask_inline_package(text, jet_driver_inline_package(text)).bytes()
     lexed :: lex_generated(source)
     demand := jet_driver_empty_core_identifier_demand()
-    jet_driver_collect_core_identifier_demand(lexed.tokens, &demand, runtime_entry)
+    jet_driver_collect_core_identifier_demand(lexed.tokens, lexed.tables, &demand, runtime_entry)
     parsed := parse_lexed_with_source(lexed, source, parser_line_starts(source))
     kept := [Item]{}
     loop item in parsed.program.items {
