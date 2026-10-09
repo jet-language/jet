@@ -178,6 +178,26 @@ pub const CORE_CRYPTO_CT_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourceP
     },
 };
 
+pub const CORE_ENCODING_STREAM_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
+    owner: CORE_ENCODING_STREAM_OWNER,
+    source: CoreSourceModule {
+        module: CORE_ENCODING_STREAM_MODULE,
+        alias: CORE_ENCODING_STREAM_ALIAS,
+        path: "Core/encoding/stream.jet",
+        owned_members: &["json_reader", "json_writer", "int_is_binary64", "jcs_number", "utf16_units", "compare_units", "sort_by_units"],
+    },
+};
+
+pub const CORE_FILES_PATH_COMPONENTS_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
+    owner: "core.files",
+    source: CoreSourceModule {
+        module: "__core_files_path_components",
+        alias: "__core_files_path_components",
+        path: "Core/files/runtime/kernel_path_components.jet",
+        owned_members: &["from_text", "is_absolute", "components", "components_span", "next", "next_back", "parent_span", "strip_prefix_span", "owned_span", "push", "main_separator"],
+    },
+};
+
 /// All compiler-private source parts. Keep this separate from
 /// `CoreModuleExports::CORE_SOURCE_MODULES`: adding a row there would make the
 /// part publicly importable.

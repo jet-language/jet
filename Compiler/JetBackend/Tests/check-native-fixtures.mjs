@@ -247,5 +247,12 @@ if (runtimeLib && !process.argv.includes("--abi") && existsSync(`${outDir}/stop-
     }
   }
 }
+if (existsSync(`${outDir}/lists-swap-oob.elf`)) {
+  const ordinary = spawnSync(`${outDir}/lists-oob.elf`, [], { encoding: "utf8", timeout: 10000 });
+  const swap = spawnSync(`${outDir}/lists-swap-oob.elf`, [], { encoding: "utf8", timeout: 10000 });
+  const same = ordinary.status === 70 && swap.status === ordinary.status && swap.stderr === ordinary.stderr;
+  if (!same) failures += 1;
+  console.log(`lists-swap ordinary-index stop parity: ${same ? "ok" : "FAIL"}`);
+}
 console.log(failures === 0 ? "all native fixtures match" : `${failures} native fixture check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);
