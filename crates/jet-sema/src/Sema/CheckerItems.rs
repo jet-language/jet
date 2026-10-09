@@ -2933,12 +2933,16 @@ impl<'a> Checker<'a> {
             return None;
         }
         let (namespace, leaf) = Self::split_type_name(name);
-        let core_import = match namespace {
-            Some(namespace) => self.core_imports.get(namespace).map(|module| (module, leaf)),
-            None => self.core_imports.get(name).and_then(|module|
-                self.core_item_imports.get(name).map(|item| (module, item.as_str()))),
-        };
-        if let Some((module, leaf)) = core_import {
+        // A bare Core item import (`use core.crypto.[CryptoError]`) keeps the
+        // spelling its signatures resolve to (`-> T CryptoError!`), so a
+        // `CryptoError.Length` or contextual `.Length` literal and the declared
+        // failure type name one nominal.
+        if namespace.is_none() && self.core_imports.contains_key(name)
+            && self.core_item_imports.contains_key(name)
+        {
+            return Some(self.imported_nominal_head(name));
+        }
+        if let Some(module) = namespace.and_then(|namespace| self.core_imports.get(namespace)) {
             if let Some(owner) = self.core_source_enum_owner_module(module, leaf) {
                 return Some(self.canonical_nominal_name(owner, leaf));
             }
