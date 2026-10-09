@@ -30,12 +30,14 @@ use jet_foundation::AST::{AccessConvention, CtKey, CtReport, CtValue, Type};
 use jet_foundation::Diagnostics::Span;
 use jet_foundation::MIR::{
     MIR_SCHEMA_VERSION, MirAbi, MirAccess, MirArtifactId, MirArtifactKind, MirArtifactPlan,
+    mir_refine_function_ownership,
     MirArtifactRequest, MirArtifactTarget, MirAssociatedTypeDecl, MirAssociatedTypeValue,
     MirBasicBlock, MirBinaryDispatch, MirBinaryPatternPart, MirBlockId, MirCImportLink, MirCLib,
     MirCOverlayOverride, MirCallArg, MirCallFallibility, MirCallSignature, MirCallbackAdapter,
     MirCallbackId, MirCallee, MirCaptureFacts, MirCaptureOperand, MirCaptureParam, MirCffiFacts,
     MirCliCommand, MirCliDefault, MirCliEntry, MirCliInput, MirCliInputShape, MirCliValueKind,
     MirCloseAdapter, MirConstant, MirConstantDef, MirConstantId, MirCopyFact, MirCoreCallId, MirCoreClosureKind,
+    MirConversion,
     MirCoveragePoint, MirDbQueryMetadata, MirDbTableFact, MirDropAction, MirDropKind,
     MirEffectFacts, MirEntryKind, MirEntryOutput, MirEntrySpec, MirFailureCarrier, MirFieldId,
     MirForeign, MirForeignAbi, MirForeignId, MirForeignLanguage, MirFunction, MirFunctionForm,
@@ -1582,6 +1584,7 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
     inline_known_constant_reads(&mut functions, &program.declarations.constants, &constants);
 
     Ok(MirProgram {
+        native_pack: false,
         schema_version: MIR_SCHEMA_VERSION,
         package_identity: program.package_identity.clone(),
         facts: lower_package_facts(&program),
@@ -4541,7 +4544,7 @@ fn lower_function(
     scopes.sort_unstable_by_key(|scope| scope.id);
     let mut blocks = ctx.blocks;
     blocks.sort_unstable_by_key(|block| block.id);
-    let mir_function = MirFunction {
+    let mut mir_function = MirFunction {
         id: function_id,
         module_id: jet_foundation::MIR::MirModuleId(stable_id("mir-module", &f.module)),
         source_file,
@@ -4633,6 +4636,7 @@ fn lower_function(
     let nested_functions = ctx.nested_functions;
     let mut prelude_calls = ctx.prelude_calls;
     prelude_calls.sort_unstable_by_key(|call| call.id);
+    mir_refine_function_ownership(&mut mir_function, &prelude_calls);
     let mut callbacks = ctx.callbacks;
     callbacks.sort_unstable_by_key(|callback| callback.id);
     Ok((
@@ -6942,6 +6946,7 @@ impl<'a> LowerCtx<'a> {
             span,
             ty: ty.clone(),
             place,
+            ssa_value: None,
             mutable: true,
             ownership: MirOwnership {
                 moved: false,
@@ -7809,13 +7814,12 @@ impl<'a> LowerCtx<'a> {
     fn register_owned_drop(
         &mut self,
         place: MirPlaceId,
-        ty: &Type,
         ownership: MirOwnership,
         initialized: bool,
     ) -> Result<(), LowerError> {
-        if ownership.drop == MirDropKind::None
-            || matches!(self.ownership_for(ty).mode, MirOwnershipMode::Copy)
-        {
+        // Prerequisite tranche: preserve Rust cleanup emission until Copy+Value
+        // retirement and its flag-discipline validation land together.
+        if ownership.drop == MirDropKind::None || ownership.mode == MirOwnershipMode::Copy {
             return Ok(());
         }
         let split = !self.partial_move_roots.is_empty() && self.places.iter().find(|row| row.id == place)
@@ -8002,6 +8006,16 @@ impl<'a> LowerCtx<'a> {
                 last_use: false,
                 gc_root: false,
             }),
+            MirOperation::AttachTag { value, .. }
+            | MirOperation::Convert { value, conversion: MirConversion::Transparent | MirConversion::SendFn, .. } => {
+                let mut ownership = self.values.iter()
+                    .find(|(id, _, _, _)| id == value)
+                    .map(|(_, _, _, ownership)| *ownership)
+                    .ok_or_else(|| self.error(self.span(), "checked carrier transfer has no source ownership fact"))?;
+                ownership.moved = false;
+                ownership.last_use = false;
+                Ok(ownership)
+            }
             MirOperation::Phi { incoming } => self.phi_ownership(incoming),
             _ => Ok(self.ownership_for(&mir_type_as_ast(value_type))),
         }
@@ -8105,7 +8119,7 @@ impl<'a> LowerCtx<'a> {
                     .iter()
                     .rev()
                     .find(|row| row.0 == value)
-                    .map_or(fact, |row| fact.for_ownership(row.3.mode)),
+                    .map_or(fact, |row| fact.for_ownership(&row.3)),
             },
             operation => operation,
         };
@@ -8828,6 +8842,7 @@ impl<'a> LowerCtx<'a> {
             span: self.span(),
             ty: mir_ty,
             place,
+            ssa_value: None,
             mutable: matches!(access, MirAccess::Write),
             ownership: MirOwnership::from_access(access),
             comptime: false,
@@ -8844,7 +8859,7 @@ impl<'a> LowerCtx<'a> {
             mir_place.base = MirPlaceBase::Parameter(param_value);
         }
         if matches!(access, MirAccess::Move) {
-            self.register_owned_drop(place, ty, MirOwnership::from_access(access), true)?;
+            self.register_owned_drop(place, MirOwnership::from_access(access), true)?;
             self.register_file_owner(place)?;
         }
         Ok(())
@@ -8943,6 +8958,7 @@ impl<'a> LowerCtx<'a> {
             span: self.span(),
             ty: mir_ty,
             place,
+            ssa_value: None,
             mutable,
             ownership,
             comptime,
@@ -8951,7 +8967,7 @@ impl<'a> LowerCtx<'a> {
             string_view: false,
             gc_root: false,
         });
-        self.register_owned_drop(place, &ty, ownership, false)?;
+        self.register_owned_drop(place, ownership, false)?;
         Ok(place)
     }
     /// Bind a source-level place window to its checked owner place. A single
@@ -8981,6 +8997,7 @@ impl<'a> LowerCtx<'a> {
             span: self.span(),
             ty: mir_ty,
             place,
+            ssa_value: None,
             mutable,
             ownership: MirOwnership::from_access(if mutable { MirAccess::Write } else { MirAccess::Read }),
             comptime: false,
@@ -10530,6 +10547,7 @@ impl<'a> LowerCtx<'a> {
                     span,
                     ty: mir_ty.clone(),
                     place,
+                    ssa_value: None,
                     mutable: matches!(access, MirAccess::Write),
                     ownership: ownership.clone(),
                     comptime: false,
@@ -10542,7 +10560,7 @@ impl<'a> LowerCtx<'a> {
             if moved {
                 let source_local = TLocal::user(source.clone());
                 let source_place = self.place_for_local(&source_local, access)?;
-                self.register_owned_drop(source_place, ty, ownership, true)?;
+                self.register_owned_drop(source_place, ownership, true)?;
             }
         }
         Ok(())
@@ -11098,21 +11116,12 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn ownership_for(&self, ty: &Type) -> MirOwnership {
-        // D-TYPE2-SPELL1: an inline range is knowledge over its base carrier,
-        // not a runtime wrapper, so it carries exactly the base's ownership.
-        // Otherwise `range_fallible() ?? range_literal` joins an Owned payload
-        // with a Copy one at its Phi.
-        if let Type::InlineRange { base, .. } = ty {
-            return self.ownership_for(base);
-        }
-        if matches!(
-            ty,
-            Type::Int | Type::Float | Type::Float32 | Type::Bool | Type::Char
-        ) || matches!(ty, Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE || name == crate::Syntax::TYPE_NEVER)
-        {
-            MirOwnership::copy()
-        } else {
-            MirOwnership::Owned
+        match ty {
+            Type::Int => MirOwnership::copy_value(),
+            Type::Tagged { inner, .. } | Type::InlineRange { base: inner, .. } | Type::Quantity { base: inner, .. } => self.ownership_for(inner),
+            Type::Float | Type::Float32 | Type::Bool | Type::Char | Type::IntN { .. } => MirOwnership::copy(),
+            Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE || name == crate::Syntax::TYPE_NEVER => MirOwnership::copy(),
+            _ => MirOwnership::Owned,
         }
     }
 

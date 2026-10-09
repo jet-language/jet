@@ -29,10 +29,10 @@ use std::collections::{HashMap, HashSet};
 
 use jet_foundation::AST::Type;
 use jet_foundation::MIR::{
-    MirAccess, MirBlockId, MirCallArg, MirCaptureOperand, MirConstant, MirCopyFact, MirFieldId,
+    MirAccess, MirBlockId, MirCaptureOperand, MirConstant, MirFieldId,
     MirInstruction, MirLocalId, MirOpId, MirOperation, MirOwnershipMode, MirPlaceBase, MirPlaceId,
     MirPreludeCall, MirPreludeCallId, MirProjection, MirSemanticOp, MirTerminator, MirType,
-    MirTypeId, MirTypeKind, MirValueId, stable_id,
+    MirTypeId, MirTypeKind, MirValueId, MirValueConsumption, stable_id,
 };
 
 use super::mir::{LowerCtx, LowerError, checked_operation_place_refs, retain_place_access};
@@ -111,98 +111,14 @@ enum Event {
     Kill(usize),
 }
 
-/// How one operation treats one of its operand values.
-enum Consume {
-    /// The operation takes the value (stores, wraps or passes it owned).
-    Yes,
-    /// The operation's result carries the value onward.
-    Through,
-    /// The operation only inspects the value.
-    No,
-}
-
-fn consumes(
+/// Checked access metadata; the physical-consumption classifier is Foundation's.
+fn operation_borrow_mask<'a>(
     operation: &MirOperation,
-    value: MirValueId,
-    prelude: &HashMap<MirPreludeCallId, &MirPreludeCall>,
-) -> Consume {
-    let owned_arg = |args: &[MirCallArg]| {
-        if args.iter().any(|arg| arg.value == value && arg.access == MirAccess::Move) {
-            Consume::Yes
-        } else {
-            Consume::No
-        }
-    };
-    match operation {
-        MirOperation::WritePlace { value: stored, .. }
-        | MirOperation::ReplacePlace { value: stored, .. } => {
-            if *stored == value {
-                Consume::Yes
-            } else {
-                Consume::No
-            }
-        }
-        MirOperation::Move { .. }
-        | MirOperation::TraitBox { .. }
-        | MirOperation::Present { .. }
-        | MirOperation::ResultOk { .. }
-        | MirOperation::ResultErr { .. }
-        | MirOperation::BuildList { .. }
-        | MirOperation::BuildMap { .. }
-        | MirOperation::Struct { .. }
-        | MirOperation::Tuple { .. }
-        | MirOperation::Enum { .. }
-        | MirOperation::Semantic(MirSemanticOp::StructLiteral { .. }) => Consume::Yes,
-        MirOperation::Copy { fact, .. } => {
-            if matches!(fact, MirCopyFact::Explicit | MirCopyFact::ViewMaterialize) {
-                Consume::No
-            } else {
-                Consume::Through
-            }
-        }
-        MirOperation::Phi { .. }
-        | MirOperation::OptionValue { .. }
-        | MirOperation::ResultValue { .. }
-        | MirOperation::EnumPayload { .. } => Consume::Through,
-        MirOperation::Call { args, .. }
-        | MirOperation::IndirectCall { args, .. }
-        | MirOperation::CoreCall { args, .. }
-        | MirOperation::Semantic(
-            MirSemanticOp::StaticPreludeCall { args, .. }
-            | MirSemanticOp::HostCall { args, .. }
-            | MirSemanticOp::ClosureMethod { args, .. },
-        ) => owned_arg(args),
-        // A builtin method borrows its receiver; an argument is passed owned
-        // exactly when the route's borrow mask (receiver first) says so.
-        MirOperation::Semantic(MirSemanticOp::BuiltinMethod { call, receiver, args, .. }) => {
-            let owned = *receiver != value
-                && args.iter().enumerate().any(|(index, arg)| {
-                    *arg == value
-                        && prelude.get(call).is_some_and(|row| {
-                            row.signature.borrow_mask.get(index + 1) == Some(&false)
-                        })
-                });
-            if owned { Consume::Yes } else { Consume::No }
-        }
-        MirOperation::LoopIterInit { by_value, .. } => {
-            if *by_value {
-                Consume::Yes
-            } else {
-                Consume::No
-            }
-        }
-        MirOperation::Closure { captures, .. } => {
-            if captures
-                .iter()
-                .any(|capture| matches!(capture, MirCaptureOperand::Value(captured) if *captured == value))
-            {
-                Consume::Yes
-            } else {
-                Consume::No
-            }
-        }
-        _ => Consume::No,
-    }
+    prelude: &HashMap<MirPreludeCallId, &'a MirPreludeCall>,
+) -> &'a [bool] {
+    operation.consumption_route()
+        .and_then(|call| prelude.get(&call))
+        .map_or(&[], |row| row.signature.borrow_mask.as_slice())
 }
 
 /// The payload bindings of one subject value: their block and instruction
@@ -947,21 +863,15 @@ impl LowerCtx<'_> {
                 for &(block, index) in users.get(&value).into_iter().flatten() {
                     let row = &self.blocks[block];
                     let Some(instruction) = row.instructions.get(index) else {
-                        if matches!(
-                            &row.terminator,
-                            MirTerminator::Return { value: Some(returned) }
-                            | MirTerminator::Break { value: Some(returned), .. }
-                            | MirTerminator::Yield { value: returned, .. }
-                                if *returned == value
-                        ) {
+                        if row.terminator.value_consumption(value) != MirValueConsumption::No {
                             return true;
                         }
                         continue;
                     };
-                    match consumes(&instruction.operation, value, &prelude) {
-                        Consume::Yes => return true,
-                        Consume::Through => pending.extend(instruction.result),
-                        Consume::No => {}
+                    match instruction.operation.value_consumption(value, operation_borrow_mask(&instruction.operation, &prelude)) {
+                        MirValueConsumption::Yes { .. } => return true,
+                        MirValueConsumption::Through { .. } => pending.extend(instruction.result),
+                        MirValueConsumption::No => {}
                     }
                 }
             }

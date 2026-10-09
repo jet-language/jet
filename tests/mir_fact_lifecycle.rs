@@ -871,3 +871,68 @@ fn function_mut<'a>(
         .find(|function| function.name == name)
         .unwrap_or_else(|| panic!("missing MIR function {name}"))
 }
+
+#[test]
+fn int_physical_facts_and_ssa_association_survive_schema_seven_image() {
+    use jet_foundation::MIR::{
+        mir_program_from_image_bytes, mir_program_image_bytes, MirCopyFact,
+        MirDropKind, MirOwnershipMode, MIR_SCHEMA_VERSION,
+    };
+
+    let mut mir = lower_checked(r#"
+fn live_copy(value: ^Int) -> Int {
+    local := ^value
+    copied :: ~local
+    local = 7
+    return copied + local
+}
+fn moved(value: ^Int) -> Int { return ^value }
+fn run() {}
+"#);
+    assert_eq!(mir.schema_version, 7);
+    assert_eq!(MIR_SCHEMA_VERSION, 7);
+    let live = function(&mir, "live_copy");
+    assert!(live.locals.iter().any(|local|
+        local.name == "local"
+            && local.ownership.mode == MirOwnershipMode::Copy
+            && local.ownership.drop == MirDropKind::Value));
+    let copy_source = live.blocks.iter().flat_map(|block| &block.instructions)
+        .find_map(|instruction| match instruction.operation {
+            MirOperation::Copy { value, fact: MirCopyFact::Explicit } => Some(value),
+            _ => None,
+        }).expect("an explicit Int copy must keep its clone fact");
+    assert!(value_reads_place(live, copy_source,
+        live.locals.iter().find(|local| local.name == "local").unwrap().place,
+        &mut Vec::new()));
+    let moved = function(&mir, "moved");
+    assert!(moved.values.iter().any(|value|
+        value.3.mode == MirOwnershipMode::Move
+            && value.3.drop == MirDropKind::Value));
+
+    let live = function_mut(&mut mir, "live_copy");
+    let definition = live.blocks.iter().flat_map(|block| &block.instructions)
+        .find_map(|instruction| match instruction.operation {
+            MirOperation::Copy { fact: MirCopyFact::Explicit, .. } => instruction.result,
+            _ => None,
+        }).expect("copied Int has an SSA definition");
+    let copied_place = live.locals.iter().find(|local| local.name == "copied").unwrap().place;
+    // A bound definition initializes its own cell; there is no second store.
+    for block in &mut live.blocks {
+        block.instructions.retain(|instruction| !matches!(instruction.operation,
+            MirOperation::WritePlace { place, .. } if place == copied_place));
+    }
+    let digest_without_ssa = mir.deterministic_digest();
+    function_mut(&mut mir, "live_copy").locals.iter_mut()
+        .find(|local| local.name == "copied").unwrap().ssa_value = Some(definition);
+    let digest = mir.deterministic_digest();
+    assert_ne!(digest, digest_without_ssa, "SSA association is a canonical fact");
+    let bytes = mir_program_image_bytes(&mir).expect("encode schema-seven MIR");
+    let restored = mir_program_from_image_bytes(&bytes).expect("decode schema-seven MIR");
+    assert_eq!(restored.schema_version, 7);
+    assert_eq!(restored.deterministic_digest(), digest);
+    let restored_local = function(&restored, "live_copy").locals.iter()
+        .find(|local| local.name == "copied").unwrap();
+    assert_eq!(restored_local.ssa_value, Some(definition));
+    assert_eq!(restored_local.ownership.mode, MirOwnershipMode::Copy);
+    assert_eq!(restored_local.ownership.drop, MirDropKind::Value);
+}

@@ -18,6 +18,7 @@ use jet_foundation.[
     MIRLocalID,
     MIRLoopSourceKind,
     MIROperation,
+    MIROwnership,
     MIRParam,
     MIRPayloadKind,
     MIRPlace,
@@ -115,15 +116,19 @@ fn jet_rust_emit_value_type(ctx: JetRustEmitContext, function: MIRFunction, valu
     panic("Jet Rust emitter reached a MIR value without a checked type row")
 }
 
-fn jet_rust_emit_value_mode(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> MIROwnershipMode Never! {
+fn jet_rust_emit_value_ownership(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> MIROwnership Never! {
     if ctx.body_index.function == (Val(function.id)) {
         row :: ctx.body_index.value_rows.get(value.value) ?? panic("Jet Rust emitter reached a MIR value without a checked ownership row")
-        return function.values[row].ownership.mode
+        return function.values[row].ownership
     }
     loop row in function.values {
-        if row.id == value -> return row.ownership.mode
+        if row.id == value -> return row.ownership
     }
     panic("Jet Rust emitter reached a MIR value without a checked ownership row")
+}
+
+fn jet_rust_emit_value_mode(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> MIROwnershipMode Never! {
+    jet_rust_emit_value_ownership(ctx, function, value).mode
 }
 
 // The lookup rows of one function body (MIRRust FunctionIndex::new), built

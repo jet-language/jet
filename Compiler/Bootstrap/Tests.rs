@@ -768,11 +768,35 @@ fn __jet_bootstrap_harness_entry(
             ]),
         );
         assert!(crate::__jet_bootstrap_type_from_host(&zero_trait_ty).is_err());
+        for ssa_value in [None, Some(::jet_foundation::MIR::MirValueId(41))] {
+            let local = ::jet_foundation::MIR::MirLocal {
+                id: ::jet_foundation::MIR::MirLocalId(43),
+                name: "$int-owner".to_string(),
+                span: ::jet_foundation::Diagnostics::Span::new(1, 2),
+                ty: present.clone(),
+                place: ::jet_foundation::MIR::MirPlaceId(47),
+                ssa_value,
+                mutable: true,
+                ownership: ::jet_foundation::MIR::MirOwnership::copy_value(),
+                comptime: false,
+                uninit: false,
+                arena_view: false,
+                string_view: false,
+                gc_root: false,
+            };
+            let carrier = crate::__jet_bootstrap_mir_MIRLocal_from_host(&local)
+                .expect("Copy+Value local encoding");
+            let restored = crate::__jet_bootstrap_mir_MIRLocal_to_host(&carrier)
+                .expect("Copy+Value local decoding");
+            assert_eq!(restored.ssa_value, ssa_value);
+            assert_eq!(restored.ownership, local.ownership);
+            assert_eq!(restored.ty, local.ty);
+        }
         std::fs::write(&output_path, "identity=absent,present\ntrait=exact-id-name\n")
             .unwrap_or_else(|error| panic!("cannot write optional codec result: {error}"));
         std::fs::write(
             &receipt_path,
-            "mode=optional-roundtrip\nidentity_absent=roundtrip\nidentity_present=roundtrip\ntrait_id_name=roundtrip\ntrait_zero=rejected\n",
+            "mode=optional-roundtrip\nidentity_absent=roundtrip\nidentity_present=roundtrip\ntrait_id_name=roundtrip\ntrait_zero=rejected\nint_copy_value=roundtrip\nssa_value_absent_present=roundtrip\n",
         )
         .unwrap_or_else(|error| panic!("cannot write optional codec receipt: {error}"));
         return;
@@ -4723,10 +4747,12 @@ fn assert_optional_codec_roundtrip(binary: &Path, project: &Path, session: &Path
     assert!(receipt_text.lines().any(|line| line == "mode=optional-roundtrip"));
     assert!(receipt_text.lines().any(|line| line == "identity_absent=roundtrip"));
     assert!(receipt_text.lines().any(|line| line == "identity_present=roundtrip"));
+    assert!(receipt_text.lines().any(|line| line == "int_copy_value=roundtrip"));
+    assert!(receipt_text.lines().any(|line| line == "ssa_value_absent_present=roundtrip"));
     assert_eq!(
         fs::read_to_string(&output)
             .unwrap_or_else(|error| panic!("cannot read {stage} optional codec output: {error}")),
-        "identity=absent,present\n"
+        "identity=absent,present\ntrait=exact-id-name\n"
     );
 }
 fn assert_mir_optimizer_compiler_source(binary: &Path, compiler_project: &Path, session: &Path) {

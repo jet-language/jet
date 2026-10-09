@@ -844,7 +844,7 @@ fn mir_pass_validate_failure_carrier(carrier: MIRFailureCarrier) -> String? {
 
 fn mir_pass_ownership_valid(ownership: MIROwnership) -> Bool Never! {
     if ownership.mode == {
-        .Copy -> ownership.drop == .NoDrop && !ownership.moved
+        .Copy -> (ownership.drop == .NoDrop || ownership.drop == .Value) && !ownership.moved
         .Owned -> ownership.drop == .Value || ownership.drop == .ForeignHandle
         .Shared -> ownership.drop == .Shared
         .ReadBorrow -> ownership.drop == .NoDrop || ownership.drop == .View
@@ -2197,7 +2197,7 @@ fn mir_pass_validate_moves(
                 }
                 loop value in mir_pass_consumed_values(instruction.operation) {
                     ownership :: mir_pass_value_ownership(function, definitions, value) ?? return Val("consumed value has no ownership metadata")
-                    if ownership.mode == .Copy || ownership.mode == .ReadBorrow || ownership.mode == .WriteBorrow -> return Val("copy or borrowed value is consumed")
+                    if !mir_runtime_owned_ownership(ownership) -> return Val("dropless or borrowed value is consumed")
                     if consumed.get(value.value) != None -> return Val("value is consumed more than once")
                     &consumed.add(value.value, MIRPassMoveEvent{value: value, block: block.id, index: index, span: instruction.span}).drop("checked absent above")
                 }

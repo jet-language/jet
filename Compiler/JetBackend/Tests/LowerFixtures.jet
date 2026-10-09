@@ -222,7 +222,7 @@ fn fx_block(b: &FxBuilder, id: U64, terminator: MIRTerminator) Never! {
 fn fx_local(b: &FxBuilder, name: String, ty: MIRType, ownership: MIROwnership) -> MIRPlaceID Never! {
     local :: MIRLocalID{value: fx_word(U64{300}, b.locals.len())}
     place :: MIRPlaceID{value: fx_word(U64{500}, b.places.len())}
-    &b.locals.push(MIRLocal{id: local, name: name, span: fx_span(), ty: ty, place: place, mutable: true, ownership: ownership, is_comptime: false, uninit: false, arena_view: false, string_view: false, gc_root: false})
+    &b.locals.push(MIRLocal{id: local, name: name, span: fx_span(), ty: ty, place: place, ssa_value: None, mutable: true, ownership: ownership, is_comptime: false, uninit: false, arena_view: false, string_view: false, gc_root: false})
     &b.places.push(MIRPlace{id: place, span: fx_span(), ty: ty, base: MIRPlaceBase.Local{local: local}, projections: [MIRProjection]{}, access: MIRAccess.Write, persist_key: None})
     place
 }
@@ -412,6 +412,7 @@ fn fx_type_def(name: String, kind: MIRTypeDefKind) -> MIRTypeDef Never! {
 
 fn fx_program(functions: [MIRFunction], types: ^[MIRTypeDef]) -> MIRProgram Never! {
     MIRProgram{
+        native_pack: false,
         cffi: MIRCffiFacts{import_links: [MIRCImportLink]{}, libs: [MIRCLib]{}, overlay_overrides: [MIRCOverlayOverride]{}, boundaries: [MIRFFIBoundaryFacts]{}, direct_links: [String]{}, transitive_links: [String]{}, close_adapters: [MIRCloseAdapter]{}},
         schema_version: MIR_SCHEMA_VERSION,
         package_identity: "fixture",

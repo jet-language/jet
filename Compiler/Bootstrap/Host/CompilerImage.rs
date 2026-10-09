@@ -682,6 +682,7 @@ fn write_u64_values(
 fn mir_program_field_differences(native: &MirProgram, restored: &MirProgram) -> Vec<String> {
     let MirProgram {
         cffi,
+        native_pack,
         schema_version,
         package_identity,
         facts,
@@ -712,6 +713,7 @@ fn mir_program_field_differences(native: &MirProgram, restored: &MirProgram) -> 
     } = native;
     let mut diff = DebugFieldDiff::default();
     diff.value("cffi".into(), cffi, &restored.cffi);
+    diff.value("native_pack".into(), native_pack, &restored.native_pack);
     diff.value("schema_version".into(), schema_version, &restored.schema_version);
     diff.value("package_identity".into(), package_identity, &restored.package_identity);
     diff.value("facts".into(), facts, &restored.facts);
