@@ -1,0 +1,28 @@
+// Fields and methods have separate namespaces (D-MEMBER-NAMESPACE1=A).
+// Parentheses select an existing method; `.field.call` selects a callable field.
+struct Counter {
+    value: Int
+    step: fn(Int) -> Int
+    call: fn(Int) -> Int
+    fn value(self) -> Int Never! { self.value + 1 }
+    fn step(self, amount: Int) -> Int Never! { self.value + amount }
+    fn call(self, amount: Int) -> Int Never! { self.value + amount + 100 }
+}
+struct Callback { step: fn(Int) -> Int }
+fn make_callback() -> Callback {
+    print("receiver")
+    Callback{step: n -> n + 1}
+}
+fn run() {
+    counter :: Counter{value: 10, step: n -> n * 2, call: n -> n * 3}
+    print(counter.value)
+    print(counter.value())
+    print(counter.step(4))
+    print(counter.step.call(4))
+    print(counter.call(4))
+    print(counter.call.call(4))
+    callback :: Callback{step: n -> n + 1}
+    print(callback.step(4))
+    print(callback.step.call(4))
+    print(make_callback().step(4))
+}

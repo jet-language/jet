@@ -637,3 +637,11 @@ fn run() {
 "#;
     assert_tiers_agree("tir_card_2833_calendar_arithmetic", src, "29\n");
 }
+
+#[test]
+fn member_namespace_example_uses_the_same_checked_selection_on_each_tier() {
+    assert_example_cli_tiers_agree(
+        "callable/member_namespaces",
+        include_str!("../Examples/features/expected/callable/member_namespaces.out"),
+    );
+}

@@ -5412,6 +5412,13 @@ impl<'a> Checker<'a> {
                     resolved_ret,
                     operator_rhs,
                 );
+                // Callable-field normalization uses the existing `.call` head
+                // as well as its checked value route, so rechecking is stable.
+                if recv_type.as_deref() == Some(Syntax::INTERNAL_CALL_VALUE)
+                    && method != Syntax::METHOD_CALL
+                {
+                    *method = Syntax::METHOD_CALL.to_string();
+                }
                 self.finish_receiver_mark(receiver);
                 for (name, state) in fixed_uninit {
                     self.flow.uninit.set(&name, state);

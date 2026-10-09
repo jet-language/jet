@@ -2422,14 +2422,13 @@ fn register_type_methods_inner(
     error_on_duplicate: bool,
 ) {
     for item in items {
-        let (type_name, methods, field_names) = match item {
+        let (type_name, methods) = match item {
             Item::Struct(s) => (
                 s.name.as_str(),
                 s.methods.iter().map(|method| (method, None, None))
                     .chain(s.trait_impls.iter().flat_map(|block| block.methods.iter()
                         .map(move |method| (method, Some(block.trait_name.as_str()), block.operator_rhs.as_ref()))))
                     .collect::<Vec<_>>(),
-                registry.field_names(&s.name),
             ),
             Item::Enum(e) => (
                 e.name.as_str(),
@@ -2437,7 +2436,6 @@ fn register_type_methods_inner(
                     .chain(e.trait_impls.iter().flat_map(|block| block.methods.iter()
                         .map(move |method| (method, Some(block.trait_name.as_str()), block.operator_rhs.as_ref()))))
                     .collect::<Vec<_>>(),
-                Vec::new(),
             ),
             _ => continue,
         };
@@ -2454,9 +2452,6 @@ fn register_type_methods_inner(
             TypeDef::Distinct { .. } | TypeDef::Alias { .. } => continue,
         };
         for (m, trait_name, _) in &methods {
-            if field_names.iter().any(|f| f == &m.name) {
-                diags.push(method_field_clash(&m.name, type_name, m.name_span));
-            }
             if trait_name.is_some_and(is_operator_trait) {
                 if methods.iter().any(|(other, other_trait, _)| {
                     other.name == m.name && !other_trait.is_some_and(is_operator_trait)
@@ -2520,11 +2515,7 @@ pub(crate) fn register_impl_methods(
     for item in items {
         let Item::Impl(i) = item else { continue };
         if i.trait_name.as_deref().is_some_and(is_operator_trait) {
-            let field_names = registry.field_names(&i.type_name);
             for method in &i.methods {
-                if field_names.iter().any(|name| name == &method.name) {
-                    diags.push(method_field_clash(&method.name, &i.type_name, method.name_span));
-                }
                 if registry.method(&i.type_name, &method.name).is_some() {
                     diags.push(method_defined_twice(&method.name, &i.type_name, method.name_span, false));
                 }
@@ -2536,7 +2527,6 @@ pub(crate) fn register_impl_methods(
         if !registry.contains(&i.type_name) && !registry.source_owns_impl(&i.type_name) {
             continue;
         }
-        let field_names = registry.field_names(&i.type_name);
         let hook_signatures = &registry.operator_signatures;
         let methods_map = if registry.source_owns_impl(&i.type_name) {
             registry.opaque_methods.entry(i.type_name.clone()).or_default()
@@ -2550,9 +2540,6 @@ pub(crate) fn register_impl_methods(
             }
         };
         for m in &i.methods {
-            if field_names.iter().any(|f| f == &m.name) {
-                diags.push(method_field_clash(&m.name, &i.type_name, m.name_span));
-            }
             let hook_name_clash = hook_signatures.keys().any(|key| {
                 let Some((owner, tail)) = key.split_once("::") else { return false; };
                 let Some((_, method_rhs)) = tail.split_once("::") else { return false; };

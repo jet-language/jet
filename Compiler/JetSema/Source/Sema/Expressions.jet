@@ -2173,7 +2173,6 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
             if implementation.target_type_name != receiver_name -> next
             loop function in implementation.methods {
                 if function.symbol.name != method || function.parameters.len() == 0 -> next
-                if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, owner_row.module_identity, owner_row.package_identity) -> next
                 method_ref :: TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
                 candidate :: sema_call_method_candidate_from_registration(function.signature, function.generic_params, environment.registration_graph, caller_module, caller_package, environment.generic_params, Val(receiver_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
                 &candidates.push(candidate)
@@ -2199,7 +2198,6 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
         written_before :: candidates.len()
         loop function in nominal.methods {
             if function.symbol.name != method || function.parameters.len() == 0 -> next
-            if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[owner_index].module_identity, graph.modules[owner_index].package_identity) -> next
             method_signature :: sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
             method_ref := TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
             candidate :: sema_call_method_candidate_from_registration(method_signature, function.generic_params, environment.registration_graph, caller_module, caller_package, environment.generic_params, Val(owner_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
@@ -2239,7 +2237,7 @@ fn sema_expr_receiver_nominal_identity(environment: SemaScopeEnvironment, receiv
 // method of the same owner leaf and name (Core's `URL`/`MIME`, or a user type
 // spelled like a handle carrier); every other declared method keeps the
 // special routes, as in the Rust TIR lowering's handle_method_op gate.
-fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, receiver_type: Type, method: String) -> Bool Never! {
+fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, receiver_type: Type, method: String, needs_receiver: Bool) -> Bool Never! {
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return false
     // A resolved receiver carries its canonical identity (`module::URL`).
@@ -2249,7 +2247,7 @@ fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, receiver
         loop implementation in owner_row.impls {
             if implementation.target_type_name != base_name -> next
             loop function in implementation.methods {
-                if function.symbol.name == method && function.parameters.len() > 0 -> return true
+                if function.symbol.name == method && (!needs_receiver || function.parameters.len() > 0) -> return true
             }
         }
     }
@@ -2259,7 +2257,7 @@ fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, receiver
         methods :: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
         loop method_index in 0..<methods.len() {
             function :: methods[method_index]
-            if function.symbol.name == method && function.parameters.len() > 0 -> return true
+            if function.symbol.name == method && (!needs_receiver || function.parameters.len() > 0) -> return true
         }
     }
     false
@@ -2788,16 +2786,65 @@ fn sema_expr_inferred_new_owner(expected: Type?) -> Type? {
     }
 }
 
-// Whether the struct `receiver` names declares a field `name` of function type.
-fn sema_expr_function_field(receiver: Type, name: String, environment: SemaScopeEnvironment) -> Bool {
+// A callable field is the direct-call route only in the absence of a method.
+// Query declaration identity before visibility, inference, or argument shape:
+// a rejected method call must never become a successful field call.
+fn sema_expr_function_field(receiver: Type, name: String, method_name: String, environment: SemaScopeEnvironment) -> Bool {
     type_name :: sema_type_graph_base_name(sema_expr_unwrap_tag(receiver)) ?? return false
     definition :: sema_serde_type_definition(environment, type_name) ?? return false
+    callable := false
     if definition.kind == .Struct(fields, _) {
         loop field in fields {
-            if field.name == name -> return sema_call_type_is_function(sema_call_resolved_type(field.ty, environment))
+            if field.name == name {
+                callable = sema_call_type_is_function(sema_call_resolved_type(field.ty, environment))
+                break
+            }
         }
     }
-    false
+    if !callable -> return false
+    if sema_expr_declares_nominal_method(environment, sema_expr_unwrap_tag(receiver), method_name, false) -> return false
+    if environment.registration_graph == .Val(graph) {
+        if sema_type_resolve_nominal_row(graph, receiver, environment.module_identity) == .Val(row) {
+            nominal :: graph.modules[row.module_index].nominals[row.row]
+            loop implementation_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
+                implementation :: graph.modules[implementation_row.module_index].impls[implementation_row.row]
+                if implementation.target_identity_key != nominal.identity_key -> next
+                loop method in implementation.methods {
+                    if method.symbol.name == method_name -> return false
+                }
+                trait_symbol :: implementation.trait_symbol ?? next
+                trait_row :: sema_call_trait_row_for_symbol(graph, trait_symbol.id) ?? next
+                trait_nominal :: graph.modules[trait_row.module_index].nominals[trait_row.row]
+                loop method in trait_nominal.trait_methods {
+                    if method.declaration.name == method_name && (implementation.delegation_field != None || method.declaration.default_body != None) -> return false
+                }
+            }
+        }
+    } else {
+        loop declaration in environment.declarations {
+            if declaration.item == {
+                .Struct(value) -> {
+                    if value.name != definition.name -> next
+                    loop method in value.methods {
+                        if method.name == method_name -> return false
+                    }
+                    loop block in value.trait_impls {
+                        loop method in block.methods {
+                            if method.name == method_name -> return false
+                        }
+                    }
+                }
+                .Impl(value) -> {
+                    if value.type_name != definition.name -> next
+                    loop method in value.methods {
+                        if method.name == method_name -> return false
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+    true
 }
 
 fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -2864,9 +2911,9 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
         if !sema_expr_record_call_fact(environment, &scopes, &context, method_span, projected_value, &diagnostics) -> return None
         return Val(projected_value.value)
     }
-    // Rust `infer_method_call`: a struct field holding a function value is
-    // called through the field (`worker.step(4)`), ahead of method lookup.
-    if sema_expr_function_field(receiver_value.ty, method, environment) {
+    routed_method :: core_source_receiver_method(if method == "bool" && args.len() == 1 -> sema_expr_receiver_nominal_identity(environment, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
+    // D-MEMBER-NAMESPACE1=A: only method absence enables the callable field.
+    if sema_expr_function_field(receiver_value.ty, method, routed_method, environment) {
         call_end := method_span.end
         if args.len() > 0 -> call_end = expr_span(args[args.len() - 1].expr).end
         return sema_expr_check_indirect_call(Expr.Field{base: receiver, member: method, span: method_span}, args, Span{start: expr_span(receiver).start, end: call_end}, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2878,8 +2925,7 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     // A declared nominal owns the methods it declares, even when its leaf
     // spells a builtin carrier such as Core's `URL` or `MIME`; builtin handle
     // routes apply only when no declared method matches.
-    routed_method :: core_source_receiver_method(if method == "bool" && args.len() == 1 -> sema_expr_receiver_nominal_identity(environment, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
-    if !sema_expr_declares_nominal_method(environment, receiver_value.ty, routed_method) {
+    if !sema_expr_declares_nominal_method(environment, receiver_value.ty, routed_method, true) {
         special := sema_expr_try_method_special_routes(receiver, receiver_value, method, owner_type_args, type_args, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if special.handled -> return special.value
     }

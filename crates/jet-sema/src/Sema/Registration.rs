@@ -1743,20 +1743,6 @@ pub(crate) fn defined_twice(name: &str, why: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// E0105: a method's name collides with a field on the same type.
-pub(crate) fn method_field_clash(method: &str, type_name: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0105",
-        format!(
-            "method `{}` can't share a name with a field on `{}`",
-            method, type_name
-        ),
-        "a type's methods and fields must have different names".to_string(),
-        "rename the method or the field".to_string(),
-        Some(span),
-    )
-}
-
 /// E0105: a method name appears twice on the same type.
 /// `is_ctor` is true when the duplicate is a no-`self` static (a named
 /// constructor per D-CTOR1), so the fix hint teaches constructor naming.
