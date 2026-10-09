@@ -1,6 +1,11 @@
 // E4 text ownership: one heap header [data, byte length, capacity]. Empty
 // buffers use address 1 and are never freed. Only the audited OS leaves touch
 // carrier memory; all offsets and arithmetic are fixed-width machine words.
+// RuntimeLibrary replaces literal-only calls with a process-static raw E4 view.
+fn rt_static_text(_literal: String) -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
 fn rt_text_word(address: I64) -> I64 {
     #Unsafe("address borrows an initialized word in a live text or iterator header") {
         return os_load_i64(address)
@@ -300,6 +305,7 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
     header
 }
 
+// StaticText borrowed headers must never reach this drop: cap=0 still frees the header.
 #Export(c) fn jet_rt_string_drop(value: I64) {
     if (value == I64{0}) {
         return

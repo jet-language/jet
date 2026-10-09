@@ -1,0 +1,42 @@
+// Seed runtime.rs131617-131625 / HostServices.rs1368-1375; #4825.
+// Private success graphs, not Core carriers or Result-alias exports.
+fn ui_text_range_clone(value: I64) -> I64 {
+    if (value == I64{0}) -> return I64{0}
+    result :: jet_rt_alloc(UI_TEXT_RANGE_BYTES, I64{8})
+    ui_carrier_store(result + UI_TEXT_RANGE_START, ui_carrier_word(value + UI_TEXT_RANGE_START))
+    ui_carrier_store(result + UI_TEXT_RANGE_END, ui_carrier_word(value + UI_TEXT_RANGE_END))
+    result
+}
+fn ui_text_range_drop(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, UI_TEXT_RANGE_BYTES, I64{8})
+}
+fn ui_text_range_eq(a: I64, b: I64) -> Bool {
+    if (a == I64{0} || b == I64{0}) -> return a == b
+    ui_carrier_word(a + UI_TEXT_RANGE_START) == ui_carrier_word(b + UI_TEXT_RANGE_START) && ui_carrier_word(a + UI_TEXT_RANGE_END) == ui_carrier_word(b + UI_TEXT_RANGE_END)
+}
+fn ui_clipboard_text_clone(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_CLIPBOARD_TEXT_BYTES, I64{8})
+    ui_carrier_store(result + UI_CLIPBOARD_TEXT_TEXT, jet_rt_string_clone(ui_carrier_word(value + UI_CLIPBOARD_TEXT_TEXT)))
+    ui_carrier_store(result + UI_CLIPBOARD_TEXT_SELECTION, ui_text_range_clone(ui_carrier_word(value + UI_CLIPBOARD_TEXT_SELECTION)))
+    result
+}
+fn ui_clipboard_text_drop(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(ui_carrier_word(value + UI_CLIPBOARD_TEXT_TEXT))
+    ui_text_range_drop(ui_carrier_word(value + UI_CLIPBOARD_TEXT_SELECTION))
+    jet_rt_free(value, UI_CLIPBOARD_TEXT_BYTES, I64{8})
+}
+fn ui_clipboard_text_eq(a: I64, b: I64) -> Bool {
+    jet_rt_string_eq(ui_carrier_word(a + UI_CLIPBOARD_TEXT_TEXT), ui_carrier_word(b + UI_CLIPBOARD_TEXT_TEXT)) && ui_text_range_eq(ui_carrier_word(a + UI_CLIPBOARD_TEXT_SELECTION), ui_carrier_word(b + UI_CLIPBOARD_TEXT_SELECTION))
+}
+fn ui_clipboard_write_clone(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_CLIPBOARD_WRITE_BYTES, I64{8})
+    ui_carrier_store(result + UI_CLIPBOARD_WRITE_CHARACTERS, ui_carrier_word(value + UI_CLIPBOARD_WRITE_CHARACTERS))
+    result
+}
+fn ui_clipboard_write_drop(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, UI_CLIPBOARD_WRITE_BYTES, I64{8})
+}
+fn ui_clipboard_write_eq(a: I64, b: I64) -> Bool {
+    ui_carrier_word(a + UI_CLIPBOARD_WRITE_CHARACTERS) == ui_carrier_word(b + UI_CLIPBOARD_WRITE_CHARACTERS)
+}
