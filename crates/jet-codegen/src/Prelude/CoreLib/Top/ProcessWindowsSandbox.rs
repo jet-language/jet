@@ -326,7 +326,10 @@ mod jet_process_windows_sandbox {
         Ok(value.encode_utf16().chain(std::iter::once(0)).collect())
     }
 
-    fn hresult_error(name: &str, status: i32) -> io::Error {
+    fn hresult_error(name: &'static str, status: i32) -> io::Error {
+        #[cfg(jet_platform_seeds)]
+        return io::Error::new(io::ErrorKind::Other, crate::jet_platform_seed_abi::HresultCause { operation: name, status });
+        #[cfg(not(jet_platform_seeds))]
         io::Error::new(
             io::ErrorKind::Other,
             format!("{name} failed with HRESULT 0x{:08x}", status as u32),
@@ -372,7 +375,10 @@ mod jet_process_windows_sandbox {
     impl AppContainer {
         fn create(capability: Option<&mut SidAndAttributes>) -> io::Result<Self> {
             let id = PROFILE_COUNTER.fetch_add(1, Ordering::Relaxed);
-            let name = wide(&format!("JetpackBuild-{}-{id}", std::process::id()))?;
+            Self::create_named(wide(&format!("JetpackBuild-{}-{id}", std::process::id()))?, capability)
+        }
+
+        fn create_named(name: Vec<u16>, capability: Option<&mut SidAndAttributes>) -> io::Result<Self> {
             let display = wide("Jetpack package")?;
             let description = wide("One-shot Jetpack package isolation")?;
             let mut sid = null_handle();
@@ -518,7 +524,7 @@ mod jet_process_windows_sandbox {
     }
 
     struct AclProjection {
-        grants: Vec<(PathBuf, Grant)>,
+        grants: Vec<(Vec<u16>, Grant)>,
         sid: Sid,
     }
 
@@ -647,7 +653,12 @@ mod jet_process_windows_sandbox {
             if !seen.insert(key) {
                 return Ok(());
             }
-            let mut object_name = wide(&path.to_string_lossy())?;
+            use std::os::windows::ffi::OsStrExt;
+            let object_name: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+            self.add_prepared(object_name, access, inheritance, mode)
+        }
+
+        fn add_prepared(&mut self, mut object_name: Vec<u16>, access: u32, inheritance: u32, mode: u32) -> io::Result<()> {
             let mut old_dacl = null_handle();
             let mut security_descriptor = null_handle();
             // SAFETY: output pointers and the NUL-terminated object name are live
@@ -707,7 +718,7 @@ mod jet_process_windows_sandbox {
                 return Err(io::Error::from_raw_os_error(status as i32));
             }
             self.grants.push((
-                path.to_path_buf(),
+                object_name,
                 Grant {
                     access,
                     inheritance,
@@ -721,10 +732,7 @@ mod jet_process_windows_sandbox {
 
     impl Drop for AclProjection {
         fn drop(&mut self) {
-            for (path, grant) in self.grants.iter().rev() {
-                let Ok(mut object_name) = wide(&path.to_string_lossy()) else {
-                    continue;
-                };
+            for (object_name, grant) in self.grants.iter_mut().rev() {
                 let mut old_dacl = null_handle();
                 let mut security_descriptor = null_handle();
                 // SAFETY: this cleanup only targets the unique SID inserted by
@@ -822,6 +830,22 @@ mod jet_process_windows_sandbox {
                 )
             } == 0
             {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self(guard))
+        }
+
+        #[cfg(jet_platform_seeds)]
+        fn create_prepared(facts: &crate::jet_platform_seed_abi::WindowsLaunchFacts136) -> io::Result<Self> {
+            let guard = HandleGuard::new(unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) })?;
+            let mut limits: ExtendedLimitInformation = unsafe { std::mem::zeroed() };
+            limits.basic.limit_flags = facts.job_limit_flags;
+            limits.basic.active_process_limit = facts.job_active_processes;
+            limits.basic.per_process_user_time_limit = if facts.has_cpu != 0 { facts.cpu_ms.saturating_mul(10_000) } else { 0 };
+            limits.process_memory_limit = facts.job_process_memory as usize;
+            limits.job_memory_limit = facts.job_memory as usize;
+            if unsafe { SetInformationJobObject(guard.raw(), JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                (&mut limits as *mut ExtendedLimitInformation).cast(), std::mem::size_of_val(&limits) as u32) } == 0 {
                 return Err(io::Error::last_os_error());
             }
             Ok(Self(guard))
@@ -1063,7 +1087,7 @@ mod jet_process_windows_sandbox {
         format!(
         "filesystem={};process=appcontainer+job-kill-on-close+active-process=256;network={};environment=clear+declared;devices=appcontainer-default-deny;resources=memory-2GiB+active-process-256",
         match (source_readable, source_writable, output_dir.is_some()) {
-            (true, true, false) => "private-workspace-readwrite",
+            (true, true, _) => "private-workspace-readwrite",
             (true, false, true) => "source-readonly,output-readwrite",
             (true, false, false) => "source-readonly",
             (false, false, _) => "filesystem-none",
@@ -1566,6 +1590,179 @@ mod jet_process_windows_sandbox {
         }
         Ok(canonical)
     }
+
+    // Mechanical source-prepared launch. No ProcessSpec, authority parsing,
+    // path canonicalization, environment inheritance, capture budget or timeout.
+    #[cfg(jet_platform_seeds)]
+    pub(crate) struct SeedChild {
+        pub process: File,
+        pub pid: u32,
+        pub stdin: Option<File>,
+        pub stdout: Option<File>,
+        pub stderr: Option<File>,
+        // Drop order matches run(): process/pipe handles, job, ACL, profile.
+        job: Option<Job>,
+        acl: Option<AclProjection>,
+        profile: Option<AppContainer>,
+        capability: Option<CapabilitySid>,
+    }
+
+    #[cfg(jet_platform_seeds)]
+    impl SeedChild {
+        pub(crate) fn wait(&mut self, nohang: bool) -> io::Result<Option<u32>> {
+            use std::os::windows::io::AsRawHandle;
+            let handle = self.process.as_raw_handle();
+            let status = unsafe { WaitForSingleObject(handle, if nohang { 0 } else { INFINITE }) };
+            if status == 258 { return Ok(None); }
+            if status == WAIT_FAILED { return Err(io::Error::last_os_error()); }
+            let mut code = 0;
+            if unsafe { GetExitCodeProcess(handle, &mut code) } == 0 { return Err(io::Error::last_os_error()); }
+            // Closing the job after leader exit also closes descendants.
+            self.job.take();
+            Ok(Some(code))
+        }
+
+        pub(crate) fn kill(&self) -> io::Result<()> {
+            use std::os::windows::io::AsRawHandle;
+            if let Some(job) = self.job.as_ref() { return job.terminate(); }
+            if unsafe { TerminateProcess(self.process.as_raw_handle(), 1) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        }
+    }
+
+    #[cfg(jet_platform_seeds)]
+    fn seed_stdio(mode: i64, index: usize) -> io::Result<(Option<HandleGuard>, HandleGuard)> {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetStdHandle(id: u32) -> Handle;
+            fn GetCurrentProcess() -> Handle;
+            fn DuplicateHandle(source_process: Handle, source: Handle, target_process: Handle,
+                target: *mut Handle, access: u32, inherit: i32, options: u32) -> i32;
+        }
+        if mode == 1 {
+            let standard = unsafe { GetStdHandle(((-10i32) - index as i32) as u32) };
+            // std::process treats an absent parent standard handle as NULL.
+            if invalid_handle(standard) { return Ok((None, HandleGuard(null_handle()))); }
+            let mut duplicate = null_handle();
+            if unsafe { DuplicateHandle(GetCurrentProcess(), standard,
+                GetCurrentProcess(), &mut duplicate, 0, 1, 2) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            return Ok((None, HandleGuard::new(duplicate)?));
+        }
+        if mode == 3 {
+            let name = wide("NUL")?;
+            let mut attributes = SecurityAttributes { n_length: std::mem::size_of::<SecurityAttributes>() as u32,
+                lp_security_descriptor: std::ptr::null_mut(), b_inherit_handle: 1 };
+            let handle = unsafe { CreateFileW(name.as_ptr(), if index == 0 { GENERIC_READ } else { GENERIC_WRITE },
+                FILE_SHARE_READ | FILE_SHARE_WRITE, &mut attributes, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, null_handle()) };
+            return Ok((None, HandleGuard::new(handle)?));
+        }
+        let (read, write) = create_pipe()?;
+        if index == 0 {
+            if unsafe { SetHandleInformation(read.raw(), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) } == 0
+                || unsafe { SetHandleInformation(write.raw(), HANDLE_FLAG_INHERIT, 0) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok((Some(write), read))
+        } else { Ok((Some(read), write)) }
+    }
+    #[cfg(jet_platform_seeds)]
+    pub(crate) fn seed_spawn(
+        executable: &[u16], command_line: &mut [u16], environment: &mut [u16],
+        cwd: Option<&[u16]>, facts: &crate::jet_platform_seed_abi::WindowsLaunchFacts136,
+        profile_name: Vec<u16>,
+        stdio: [i64; 3],
+    ) -> Result<SeedChild, (u32, io::Error)> {
+        use crate::jet_platform_seed_abi::wide_wtf8;
+        let capability = if facts.internet_client != 0 {
+            Some(CapabilitySid::internet_client().map_err(|e| (21, e))?)
+        } else { None };
+        let mut capability_row = capability.as_ref().map(|sid| SidAndAttributes {
+            sid: sid.0, attributes: SE_GROUP_ENABLED,
+        });
+        let profile = if facts.appcontainer != 0 {
+            Some(AppContainer::create_named(profile_name, capability_row.as_mut()).map_err(|e| (20, e))?)
+        } else { None };
+        let mut acl = profile.as_ref().map(|profile| AclProjection { grants: Vec::with_capacity(facts.grant_count as usize), sid: profile.sid });
+        if let Some(acl) = acl.as_mut() {
+            // Source already chose and deduplicated these grants.
+            for index in 0..facts.grant_count as usize {
+                let bytes = unsafe { std::ffi::CStr::from_ptr((*facts.grant_paths.add(index)).cast()) }.to_bytes();
+                let wide = wide_wtf8(bytes);
+                unsafe { acl.add_prepared(wide, *facts.grant_access.add(index),
+                    *facts.grant_inheritance.add(index), *facts.grant_mode.add(index)) }
+                    .map_err(|e| (22, e))?;
+            }
+        }
+        let job = if facts.job != 0 { Some(Job::create_prepared(facts).map_err(|e| (23, e))?) } else { None };
+        let (parent_stdin, stdin) = seed_stdio(stdio[0], 0).map_err(|e| (26, e))?;
+        let (stdout_read, stdout_write) = seed_stdio(stdio[1], 1).map_err(|e| (26, e))?;
+        let (stderr_read, stderr_write) = seed_stdio(stdio[2], 2).map_err(|e| (26, e))?;
+        let mut attributes = AttributeList::create().map_err(|e| (24, e))?;
+        let security = SecurityCapabilities {
+            app_container_sid: profile.as_ref().map_or(null_handle(), |p| p.sid),
+            capabilities: capability_row.as_mut().map_or(std::ptr::null_mut(), |r| r),
+            capability_count: u32::from(capability_row.is_some()), reserved: 0,
+        };
+        if profile.is_some() {
+            attributes.update(PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+                (&security as *const SecurityCapabilities).cast(), std::mem::size_of_val(&security)).map_err(|e| (24, e))?;
+        }
+        let mut handles = [null_handle(); 3]; let mut handle_count = 0;
+        for handle in [stdin.raw(), stdout_write.raw(), stderr_write.raw()] {
+            if !invalid_handle(handle) { handles[handle_count] = handle; handle_count += 1; }
+        }
+        if handle_count != 0 {
+            attributes.update(PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles.as_ptr().cast(),
+                handle_count * std::mem::size_of::<Handle>()).map_err(|e| (24, e))?;
+        }
+        let mut startup: StartupInfoExW = unsafe { std::mem::zeroed() };
+        startup.startup_info.cb = std::mem::size_of::<StartupInfoExW>() as u32;
+        startup.startup_info.dw_flags = STARTF_USESTDHANDLES;
+        startup.startup_info.h_std_input = stdin.raw();
+        startup.startup_info.h_std_output = stdout_write.raw();
+        startup.startup_info.h_std_error = stderr_write.raw();
+        startup.attribute_list = attributes.list;
+        let mut information: ProcessInformation = unsafe { std::mem::zeroed() };
+        if unsafe { CreateProcessW(executable.as_ptr(), command_line.as_mut_ptr(),
+            std::ptr::null_mut(), std::ptr::null_mut(), 1,
+            facts.creation_flags | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
+            environment.as_mut_ptr().cast(), cwd.map_or(std::ptr::null(), |w| w.as_ptr()),
+            &mut startup.startup_info, &mut information) } == 0 {
+            return Err((27, io::Error::last_os_error()));
+        }
+        let process = HandleGuard::new(information.h_process).map_err(|e| (27, e))?;
+        let thread = match HandleGuard::new(information.h_thread) {
+            Ok(thread) => thread,
+            Err(e) => {
+                unsafe { TerminateProcess(process.raw(), 1); WaitForSingleObject(process.raw(), INFINITE); }
+                return Err((27, e));
+            }
+        };
+        drop(attributes); drop(stdin); drop(stdout_write); drop(stderr_write);
+        if let Some(job) = job.as_ref() {
+            if let Err(e) = job.assign(process.raw()) {
+                unsafe { TerminateProcess(process.raw(), 1); WaitForSingleObject(process.raw(), INFINITE); }
+                return Err((23, e));
+            }
+        }
+        if unsafe { ResumeThread(thread.raw()) } == INVALID_THREAD_RESUME {
+            let e = io::Error::last_os_error();
+            unsafe { TerminateProcess(process.raw(), 1); WaitForSingleObject(process.raw(), INFINITE); }
+            return Err((28, e));
+        }
+        Ok(SeedChild {
+            process: unsafe { File::from_raw_handle(process.into_raw()) },
+            pid: information.dw_process_id,
+            stdin: parent_stdin.map(|h| unsafe { File::from_raw_handle(h.into_raw()) }),
+            stdout: stdout_read.map(|h| unsafe { File::from_raw_handle(h.into_raw()) }),
+            stderr: stderr_read.map(|h| unsafe { File::from_raw_handle(h.into_raw()) }),
+            job, acl, profile, capability,
+        })
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -1574,3 +1771,5 @@ pub(crate) use jet_process_windows_sandbox::{
     status as windows_status, BackendOutput as WindowsSandboxOutput,
     BackendStatus as WindowsSandboxStatus, WindowsSandboxError,
 };
+#[cfg(all(target_os = "windows", jet_platform_seeds))]
+pub(crate) use jet_process_windows_sandbox::{seed_spawn as windows_seed_spawn, SeedChild as WindowsSeedChild};
