@@ -3749,10 +3749,10 @@ fn sema_check_body_part(shared: Shared<SemaCheckShared>, wave_state: Shared<Sema
 // (the body loop raises them itself), then the body check of
 // sema_check_module_method. `ordinal` is the method's body-loop ordinal.
 fn sema_check_parallel_method(source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, registered: SemaRegistrationFunction, owner_type: Type, trait_symbol: Symbol?, position: Int, ordinal: Int, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, wanted: Shared<SemaHostHookWanted>) -> SemaParallelBody {
-    memory_row := sema_function_memory_find(memory_plan, source_module.module_identity, sema_type_graph_base_name(owner_type) ?? "", registered.declaration.span)
+    memory_position := sema_function_memory_position(memory_plan, source_module.module_identity, sema_type_graph_base_name(owner_type) ?? "", registered.declaration.span)
     memory_func := registered.declaration
-    if memory_row == .Val(row) {
-        if row.function == .Val(planned) -> memory_func = planned
+    if memory_position == .Val(position) {
+        if memory_plan.functions[position].function == .Val(planned) -> memory_func = planned
     }
     base_generic_params :: ~environment.generic_params
     method_generic_params := ~environment.generic_params
@@ -3825,10 +3825,10 @@ fn sema_check_view_summaries(graph: SemaRegistrationGraph, source_module: SemaRe
                     summary_calls := [SemaCallSiteFact]{}
                     summary_comptime_requests := [SemaComptimeRequest]{}
                     summary_name_references := [SemaNameReferenceFact]{}
-                    summary_row := sema_function_memory_find(memory_plan, source_module.module_identity, "", func.span)
+                    memory_position := sema_function_memory_position(memory_plan, source_module.module_identity, "", func.span)
                     summary_func := func
-                    if summary_row == .Val(row) {
-                        if row.function == .Val(planned) -> summary_func = planned
+                    if memory_position == .Val(position) {
+                        if memory_plan.functions[position].function == .Val(planned) -> summary_func = planned
                     }
                     checked := sema_function_check(summary_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), TFuncKind.TopLevel, false, &environment, &scopes, host_hooks, &summary_diagnostics, &summary_calls, &summary_comptime_requests, &summary_name_references)
                     if checked.value == .Val(function) {
@@ -4024,9 +4024,9 @@ fn sema_check_body_part(shared: Shared<SemaCheckShared>, slot: Shared<SemaBodyPa
         item_index :: permit.value.items[index]
         if source_module.program.items[item_index] == .Func(func) {
             memory_func := func
-            memory_row := sema_function_memory_find(memory_plan, source_module.module_identity, "", func.span)
-            if memory_row == .Val(row) {
-                if row.function == .Val(planned) -> memory_func = planned
+            memory_position := sema_function_memory_position(memory_plan, source_module.module_identity, "", func.span)
+            if memory_position == .Val(position) {
+                if memory_plan.functions[position].function == .Val(planned) -> memory_func = planned
             }
             sema_host_hook_unwant(wanted)
             diagnostics := [Diagnostic]{}
@@ -6315,8 +6315,7 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
         source_index :: sema_registration_module_index(final_graph, modules[module_index].module_identity) ?? next
         source :: final_graph.modules[source_index]
         &effect_inputs.push(SemaEffectModuleInput{
-            module_identity: modules[module_index].module_identity,
-            functions: ^functions,
+            module_index: module_index,
             sources: sema_comptime_effect_sources(source),
             source_segments: source.source_segments,
             trait_bounds: sema_effect_trait_bounds(source.program.items),
@@ -6331,10 +6330,6 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> &diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
-    loop effect_module_index in 0..<effects.modules.len() {
-        effect_index :: sema_registration_module_index(final_graph, effects.modules[effect_module_index].module_identity) ?? next
-        modules[effect_index].functions = ^effects.modules[effect_module_index].functions
-    }
     sema_output_publish_solved_effects(&final_graph, &modules)
     compute_work := SemaComputeValidationWork{}
     compute_diagnostics := sema_compute_validate_autodiff_purity(modules, &compute_work)
@@ -6408,9 +6403,8 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     loop core_module_index < final_graph.modules.len() {
         graph_module :: final_graph.modules[core_module_index]
         checked_module :: modules[core_module_index]
-        generated_roots := sema_core_generated_roots(final_graph, graph_module)
         unshared := sema_core_source_unshared_functions(graph_module, checked_module.call_facts)
-        &core_modules.push(sema_core_module_usage_from_registration(graph_module, unshared, checked_module.exact_int_reachable, generated_roots))
+        &core_modules.push(sema_core_module_usage_from_registration(final_graph, graph_module, unshared, checked_module.exact_int_reachable))
         core_module_index += 1
     }
     &finalized.diagnostics.reverse()
@@ -6543,9 +6537,8 @@ fn sema_finalize_module(graph: SemaRegistrationGraph, modules: [SemaGraphModuleR
         }
     }
     if module_index < graph.modules.len() {
-        generated_roots :: sema_core_generated_roots(graph, graph.modules[module_index])
         unshared :: sema_core_source_unshared_functions(graph.modules[module_index], modules[module_index].call_facts)
-        &checked.cores.push(sema_core_module_usage_from_registration(graph.modules[module_index], unshared, modules[module_index].exact_int_reachable, generated_roots))
+        &checked.cores.push(sema_core_module_usage_from_registration(graph, graph.modules[module_index], unshared, modules[module_index].exact_int_reachable))
     }
 }
 

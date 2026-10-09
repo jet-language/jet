@@ -69,6 +69,35 @@ fn output_fixture_solved_effects(effects_source: String, failures: &[String]) {
         }
     }
     if !found -> &failures.push("solved effect publication: checked Output fact is missing")
+    // Effect inputs need not share the checked module order. Re-publish through
+    // the production in-place graph path and cover each manifest denial once.
+    effect_inputs := [SemaEffectModuleInput]{}
+    loop module_index in 0..<checked.modules.len() {
+        source_index :: sema_registration_module_index(graph, checked.modules[module_index].module_identity) ?? {
+            &failures.push("in-place effect publication: checked module has no source")
+            return
+        }
+        &effect_inputs.push(SemaEffectModuleInput{
+            module_index: module_index,
+            sources: sema_comptime_effect_sources(graph.modules[source_index]),
+            source_segments: graph.modules[source_index].source_segments,
+            trait_bounds: sema_effect_trait_bounds(graph.modules[source_index].program.items),
+        })
+    }
+    &effect_inputs.reverse()
+    republished :: sema_effects_check_modules(&checked.modules, effect_inputs, [String]{"Mem.Alloc", "Mem.Rc"})
+    if republished.memory_declarations.len() != 2 -> &failures.push("in-place effect publication: manifest memory declarations duplicated")
+    function_count := 0
+    loop module_row in checked.modules -> function_count += module_row.functions.len()
+    if republished.memory_projections.len() != 2 * function_count -> &failures.push("in-place effect publication: manifest projections omitted or duplicated")
+    launch_found := false
+    loop function in checked.modules[0].functions {
+        if function.key == key {
+            launch_found = true
+            if function.effects.solved != expected -> &failures.push("in-place effect publication: reordered inputs changed the solved caller row")
+        }
+    }
+    if !launch_found -> &failures.push("in-place effect publication: publishing moved the checked callable away")
 }
 
 fn output_fixture_visibility(label: String, main_source: String, bank_source: String, bridge_source: String?, bank_package: String, main_package: String, effects_source: String, expected_link: Bool, failures: &[String]) {
