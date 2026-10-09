@@ -1963,6 +1963,19 @@ pub fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [Se
             sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[root].module_index].source_segments, memory_diagnostics)
         }
     }
+    // Rust bundle_memory_inputs: a manifest guarantee covers every qualified
+    // function, including otherwise unreferenced bodies, not just entry.
+    loop name in package_memory_denials {
+        fact :: sema_effect_memory_fact(name) ?? next
+        declaration :: SemaMemoryFactDeclaration{fact: fact, roots: loop node in nodes -> node.display_key, span: Span{start: 0, end: 0}, source: "package.jet", provenance: "manifest denial `authority: {{ holds: {{ deny: [{name}] }} }}`"}
+        &memory_facts.declarations.push(declaration)
+        loop root in 0..<nodes.len() {
+            memory_diagnostics := [Diagnostic]{}
+            projection :: sema_effect_memory_project(nodes, node_by_key, root, EffectRowEntry{name: name, span: Span{start: 0, end: 0}}, &memory_diagnostics)
+            &memory_facts.projections.push(SemaMemoryProjectionRow{root: nodes[root].display_key, fact: fact, projection: projection})
+            sema_effect_publish_diagnostics(&diagnostics, &results, nodes[root].module_index, inputs[nodes[root].module_index].source_segments, memory_diagnostics)
+        }
+    }
     loop module_index in 0..<inputs.len() {
         module_row :: inputs[module_index]
         calls.current_module = module_index
