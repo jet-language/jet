@@ -1272,6 +1272,16 @@ one.
 Request and response body handles are single-use. Text projection rejects
 non-UTF-8 data and uses the shared body limit unless the caller selects an
 explicit bounded byte/text read.
+Cloning a request or response, or obtaining its body, does not create a fresh
+read: those body handles share the same single-use consumption state.
+
+Taking a chunk iterator consumes the body once, even if only part of it is
+read. Dropping that iterator or closing the body closes its backing resource
+exactly once; closing followed by dropping does not close it again. End of
+input marks a body drained. A read error or delivered task stop does not mark
+it drained, and a task stop keeps its cancellation, deadline, budget, or panic
+meaning rather than becoming an I/O error. The public `Body.Empty`,
+`Body.Text`, and `Body.Bytes` constructor variants remain unchanged.
 
 ### `core.http.server` — HTTP serving
 
