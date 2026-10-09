@@ -24,15 +24,19 @@ impl<'a> Checker<'a> {
             self.record_import_alias_reference(alias, alias_span);
             return Some(json_ty());
         }
-        if module == "core.encoding"
-            && matches!(alias, "DataEvent" | "EncodingErrorKind" | "EncodingFormat")
-            && self
-                .resolve_enum_variants_cloned(alias)
-                .is_some_and(|variants| variants.contains_key(name))
-        {
-            self.record_import_alias_reference(alias, alias_span);
-            return Some(Type::Named(self.import_qualified_nominal(alias)
-                .unwrap_or_else(|| alias.to_string())));
+        // A grouped public Core type import names the source enum, not its
+        // module. Query its declaring registry before the module-item route.
+        if let Some(item) = self.core_item_imports.get(alias) {
+            if let Some(owner) = self.core_source_enum_owner_module(module, item) {
+                let has_variant = self.modules.is_some_and(|states|
+                    states[owner].registry.enum_variants(item)
+                        .is_some_and(|variants| variants.contains_key(name)));
+                if has_variant {
+                    let identity = self.canonical_nominal_name(owner, item);
+                    self.record_import_alias_reference(alias, alias_span);
+                    return Some(Type::Named(identity));
+                }
+            }
         }
         // Canonical Core enum imports (`use core.compute.[ComputeError]`,
         // etc.) keep the imported item alongside its module alias. Resolve
@@ -55,9 +59,8 @@ impl<'a> Checker<'a> {
             }
         }
 
-        if module == "core.encoding"
-            && matches!(jet_foundation::CoreModuleExports::core_leaf_kind(module, name),
-                Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_)))
+        if matches!(jet_foundation::CoreModuleExports::core_leaf_kind(module, name),
+            Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_)))
         {
             if let Some(owner) = self.core_source_enum_owner_module(module, name) {
                 return Some(Type::Named(self.canonical_nominal_name(owner, name)));

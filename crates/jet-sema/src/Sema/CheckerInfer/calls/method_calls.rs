@@ -1915,13 +1915,10 @@ impl<'a> Checker<'a> {
                         }
                     }
                     if crate::Sema::CheckerCoreLib::core_module_type_item(&ns, leaf) {
-                        let type_name = if ns == "core.encoding"
-                            && matches!(jet_foundation::CoreModuleExports::core_leaf_kind(&ns, leaf),
-                                Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_)))
-                        {
+                        let type_name = if let Some(owner) =
                             self.core_source_enum_owner_module(&ns, leaf)
-                                .map(|owner| self.canonical_nominal_name(owner, leaf))
-                                .unwrap_or_else(|| leaf.clone())
+                        {
+                            self.canonical_nominal_name(owner, leaf)
                         } else if matches!(
                             ns.as_str(),
                             "core.http" | "core.http.client" | "core.http.server"
@@ -2357,15 +2354,12 @@ impl<'a> Checker<'a> {
                         return Some(ret);
                     }
                 }
-                if module == "core.encoding"
-                    && matches!(item.as_str(), "DataEvent" | "EncodingErrorKind" | "EncodingFormat")
-                {
-                    let identity = self.import_qualified_nominal(alias)
-                        .unwrap_or_else(|| item.clone());
-                    let has_variant = self
-                        .resolve_enum_variants_cloned(&identity)
-                        .is_some_and(|variants| variants.contains_key(method));
+                if let Some(owner) = self.core_source_enum_owner_module(&module, &item) {
+                    let has_variant = self.modules.is_some_and(|states|
+                        states[owner].registry.enum_variants(&item)
+                            .is_some_and(|variants| variants.contains_key(method)));
                     if has_variant {
+                        let identity = self.canonical_nominal_name(owner, &item);
                         let saved: Vec<Expr> = args
                             .iter_mut()
                             .map(|arg| {

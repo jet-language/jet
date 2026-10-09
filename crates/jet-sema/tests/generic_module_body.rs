@@ -174,6 +174,25 @@ impl EncodingError {
 }
 
 #[test]
+fn source_owned_core_enum_imports_precede_module_calls() {
+    let core = "#Error enum EnvError { InvalidValue(String), Unavailable }\n";
+    for source in [
+        "use core.sys.[EnvError]\n\
+fn invalid() -> EnvError Never! { EnvError.InvalidValue(\"invalid\") }\n\
+fn absent() -> EnvError Never! { EnvError.Unavailable }\nfn run() {}\n",
+        "use core.sys as sys\n\
+fn invalid() -> sys.EnvError Never! { sys.EnvError.InvalidValue(\"invalid\") }\n\
+fn absent() -> sys.EnvError Never! { sys.EnvError.Unavailable }\nfn run() {}\n",
+    ] {
+        let (_, diagnostics) = check_modules(&[
+            ("<corelib>/Core/sys.jet", core, &[]),
+            ("pkg-a/src/main.jet", source, &[]),
+        ]);
+        assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    }
+}
+
+#[test]
 fn arrowless_unit_failure_signature_checks_five_line_carrier_body() {
     let source = "#Error enum MyError { X }\n\
 fn f(bad: Bool) MyError! {\n\
@@ -301,6 +320,24 @@ fn io_operation_annotations_are_core_only() {
     assert!(error_codes(&diagnostics).is_empty(), "Core IOOperation: {diagnostics:?}");
     let (_, diagnostics) = check("fn retain(operation: IOOperation) {}\nfn run() {}\n");
     assert_eq!(error_codes(&diagnostics), ["E0119"], "{diagnostics:?}");
+}
+
+#[test]
+fn core_io_operation_copy_metadata_agrees_with_its_runtime_carrier() {
+    let source = r#"
+#Policy(copies: .Explicit)
+fn context(operation: IOOperation) -> IOContext Never! {
+    IOContext{operation: operation.copy(), resource: None, os_code: None, cause: None}
+}
+fn retain(operation: IOOperation) -> IOOperation Never! { operation.copy() }
+"#;
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/term/term.jet", source, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    let (_, diagnostics) = check("fn retain(operation: IOOperation) -> IOOperation Never! { operation.copy() }\nfn run() {}\n");
+    assert!(error_codes(&diagnostics).contains(&"E0119"), "{diagnostics:?}");
 }
 
 #[test]
