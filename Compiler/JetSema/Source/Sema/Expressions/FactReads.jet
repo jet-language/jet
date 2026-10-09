@@ -182,6 +182,7 @@ fn sema_fact_enum_menu(ty: Type, environment: SemaScopeEnvironment) -> [String]?
 }
 
 fn sema_fact_enum_unknown_variant(owner: String, variant: String, variants: [String], span: Span) -> Diagnostic {
+    if sema_fact_enum_variants(owner) == None -> return sema_error("E0302", span, "`{owner}` has no variant `{variant}`", "enum constructors must name a declared variant", "use one of the declared variants")
     sema_error("E0302", span, "`{owner}` has no variant `{variant}`", "`{owner}` is a closed compiler fact menu: {variants.join(", ")}", "use one of the listed variants")
 }
 
