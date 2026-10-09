@@ -21,7 +21,9 @@ fn stream_new(data: I64, len: I64, stride: I64, position: I64) -> I64 {
     handle
 }
 fn stream_drop(handle: I64) {
-    if (handle == I64{0}) { return }
+    if (handle == I64{0}) {
+        return
+    }
     capacity :: rt_text_word(handle + I64{16})
     if (capacity != I64{0}) { jet_rt_free(rt_text_data(handle), capacity, I64{1}) }
     jet_rt_free(handle, I64{32}, I64{8})
