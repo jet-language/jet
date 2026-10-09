@@ -1,0 +1,23 @@
+// Distinct modules may declare the same leaf name. Their checked identities
+// must survive returns, argument passing, field access, and Core calls.
+use "./left" as left
+use "./right" as right
+use core.encoding.hex as hex
+use core.time.[DateTime]
+
+fn run() {
+    first :: left.make().same()
+    second :: right.make()
+    print(left.reason(first))
+    print(right.reason(second))
+    print(second.code)
+    decoded :: hex.decode("00ff") ?? panic("valid hex was rejected")
+    print(decoded.len())
+    print(Int.from_u8(decoded[1]))
+    instant :: DateTime{"1970-01-01T00:00:01Z"}
+    print(instant.secs)
+    if hex.decode("not hex") == {
+        .Ok(_) -> panic("invalid hex was accepted")
+        .Err(error) -> print(error.reason.len() > 0)
+    }
+}

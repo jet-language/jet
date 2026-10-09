@@ -488,7 +488,7 @@ impl<'a> Parser<'a> {
         let Some(op) = op else { return Ok(lhs) };
         let op_span = self.bump().span;
         if op == BinOp::Eq {
-            if let Some(pat) = self.try_pattern_rhs(allow_struct_lit)? {
+            if let Some(pat) = self.try_comparison_pattern_rhs(allow_struct_lit)? {
                 let span = Span::new(lhs.span().start, pat_span(&pat).end.max(op_span.end));
                 return Ok(Expr::PatternTest {
                     subject: Box::new(lhs),

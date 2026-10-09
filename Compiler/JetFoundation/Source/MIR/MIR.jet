@@ -1630,6 +1630,22 @@ pub enum MIRGCEditKind { Clear Pop RemoveIndex InsertIndex Prepend Additive Plai
 
 pub enum MIRTypedHeadKind { SQL HTML Sh URL Path DateTime }
 
+// The shared boundary-head classification, mirrored by Syntax::typed_head_kind.
+pub fn mir_typed_head_kind(head: Type) -> MIRTypedHeadKind? {
+    if head == {
+        .Named(name) -> {
+            if name == "SQL" -> return Val(MIRTypedHeadKind.SQL)
+            if name == "HTML" -> return Val(MIRTypedHeadKind.HTML)
+            if name == "Sh" -> return Val(MIRTypedHeadKind.Sh)
+            if name == "URL" -> return Val(MIRTypedHeadKind.URL)
+            if name == "Path" -> return Val(MIRTypedHeadKind.Path)
+            if name == "DateTime" -> return Val(MIRTypedHeadKind.DateTime)
+        }
+        else -> {}
+    }
+    None
+}
+
 // The Core module whose runtime serves a boundary typed head (its usage and
 // linkage key), not necessarily a record of the same type.
 pub fn mir_boundary_head_owner_module(name: String) -> String? {
@@ -1639,12 +1655,12 @@ pub fn mir_boundary_head_owner_module(name: String) -> String? {
     None
 }
 
-// The Core module whose same-named record IS the built-in value: only
-// `core.net.url`'s `URL`. Every other Core record sharing a head's leaf
-// (`core.files.path`'s `Path`, `core.time`'s civil `DateTime`) is a
-// different type and never claims the bare spelling.
+// The Core module whose same-named record is the built-in value. URL and
+// DateTime use their checked source carriers; Path stays the native boundary
+// carrier, distinct from core.files.path's record.
 pub fn mir_boundary_head_carrier_module(name: String) -> String? {
     if name == "URL" -> return Val("core.net.url")
+    if name == "DateTime" -> return Val("core.time")
     None
 }
 

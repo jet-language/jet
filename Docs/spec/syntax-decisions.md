@@ -575,6 +575,13 @@ left to right; a dynamic nonpositive stride raises E0123 before the first pull.
 Stride N visits source indexes 0, N, 2N; exhaustion while advancing is normal.
 `in` joins a source binding to its source. Commas separate later loop header
 clauses. Semicolons remain statement boundaries only.
+
+For a typed-literal source, bind the literal first:
+`channels :: [Int]{0, 2, 4}`, then `loop channel in channels -> channel`.
+Both current parsers reject an unparenthesized typed head directly in the
+source slot (`loop channel in [Int]{0, 2, 4} -> channel`). This is current
+grammar guidance, not a ratification of additional loop-header syntax.
+
 **D-LOOP-HEADER3=D**: the old three-slot C-style counter (`loop i := 0, i < n, i += 1`)
 is retired with teaching diagnostic E0376; prefer `loop i in 0..<n` or a range step rule.
 **D-LOOPREAD1=A** *(ratified 2026-09-04, card #2896)* leaves this syntax
@@ -793,6 +800,12 @@ stay E0309, and `Val(x)` stays where nothing expects an optional
 `Val(...)`" row is retired. `jet fmt --simplify` drops a redundant `Val(x)` in
 a `-> T?` return when the payload is a name, field path, or `Bool`/`Char`
 literal.
+
+In an equality RHS, `Val(v)` with a bare name introduces the S31 binding even
+if that name is already in scope (ordinary no-shadowing checks still apply).
+`Val(true)`, `Val(object.field)`, and `Val(compute(value))` are constructor
+values instead. `!=` introduces no binding. Dispatch-arm and nested
+leading-dot patterns retain their own pattern grammar.
 
 **D-ENUMDOT1 / D-ENUMDOT2 — Leading-dot variants**: match-arm patterns require a
 leading dot (`.Circle(r)`, `.Empty`); bare `Circle(r)` / `Empty` is E0367.
@@ -1837,6 +1850,12 @@ Two-step dot access; `use math.*` wildcard rejected (E0612, D-GLOBIMPORT1).
 Re-export is `pub use` (D-MOD4); a directory module's summary file is
 `module.jet`. Ambiguous module resolution E0606/E0607. `import` is not a
 keyword.
+
+Types declared in different modules retain distinct checked identities even
+when their leaf names are equal. Import aliases select the declaring module;
+lowering consumes that resolved identity, never a bundle-wide leaf-name search.
+The executable witness is
+[`same_type_names`](../../Examples/features/modules/same_type_names/run.jet).
 
 `.[ ]` has one prefix-member law. In expression position, entries remain
 members and produce their values (`point.[x, y]`); after `use`, entries produce
