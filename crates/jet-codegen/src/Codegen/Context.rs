@@ -950,6 +950,7 @@ pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<String> {
 /// always inserts `jet_std::`.
 pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
     match name {
+        "__TablePlan" => Some("JetTablePlan"),
         n if n == Syntax::TYPE_MEMO_STATS => Some("JetMemoStats"),
         n if n == Syntax::TYPE_AUTHORITY => Some("JetAuthority"),
         n if n == Syntax::DETERMINISTIC_WORLD_TYPE => Some("JetDeterministicWorld"),

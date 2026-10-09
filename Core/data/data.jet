@@ -29,7 +29,7 @@ module plot
 
 module sketch
 
-#Equatable
+#[Copy, Comparable, Hashable, Equatable]
 pub enum DataFormat {
     CSV
     JSON
@@ -39,6 +39,7 @@ pub enum DataFormat {
 }
 
 
+#Equatable
 pub enum DataErrorKind {
     Decode
     Limit
@@ -55,9 +56,35 @@ pub enum DataErrorKind {
     WrongOwner
     StaleRevision
     InvalidValue
+    impl Display {
+        fn display(self) -> String Never! { data_error_kind_text(self) }
+    }
+    impl Debug {
+        fn debug(self) -> String Never! { data_error_kind_text(self) }
+    }
 }
 
-#Error
+fn data_error_kind_text(kind: DataErrorKind) -> String Never! {
+    if kind == {
+        .Decode -> "Decode"
+        .Limit -> "Limit"
+        .IO -> "IO"
+        .Empty -> "Empty"
+        .InvalidArgument -> "InvalidArgument"
+        .NonFinite -> "NonFinite"
+        .Overflow -> "Overflow"
+        .State -> "State"
+        .Bridge -> "Bridge"
+        .Unsupported -> "Unsupported"
+        .DuplicateKey -> "DuplicateKey"
+        .MissingKey -> "MissingKey"
+        .WrongOwner -> "WrongOwner"
+        .StaleRevision -> "StaleRevision"
+        .InvalidValue -> "InvalidValue"
+    }
+}
+
+#[Equatable, Error]
 pub struct DataError {
     pub kind: DataErrorKind
     pub operation: String
@@ -66,6 +93,12 @@ pub struct DataError {
     pub index: Int?
     pub reason: String
     pub cause: EncodingError?
+    impl Display {
+        fn display(self) -> String Never! { data_error_text(self) }
+    }
+    impl Debug {
+        fn debug(self) -> String Never! { data_error_text(self) }
+    }
 }
 
 impl DataError {
@@ -91,6 +124,14 @@ fn data_error(kind: DataErrorKind, message: String, operation: String) -> DataEr
         reason: message,
         cause: None,
     }
+}
+
+fn data_error_text(error: DataError) -> String Never! {
+    text := "{data_error_kind_text(error.kind)} {error.operation}"
+    if error.row == .Val(row) -> text = "{text}, row {row}"
+    if error.column == .Val(column) -> text = "{text}, column {column}"
+    if error.index == .Val(index) -> text = "{text}, index {index}"
+    "{text}: {error.reason}"
 }
 
 fn data_error_at(kind: DataErrorKind, message: String, operation: String, index: Int) -> DataError Never! {
@@ -123,6 +164,7 @@ pub struct DataLineOptions {
 }
 
 
+#[Copy, Comparable]
 pub enum DataFreshness {
     Pending
     Fresh
@@ -131,7 +173,7 @@ pub enum DataFreshness {
     Offline
     Cancelled
 }
-#Equatable
+#[Copy, Comparable, Equatable]
 pub enum DataInvalidationCause {
     NoCause
     Loader
@@ -144,6 +186,7 @@ pub enum DataInvalidationCause {
 }
 
 
+#Equatable
 pub struct DataStatus {
     pub step: String
     pub path: String
@@ -155,6 +198,7 @@ pub struct DataStatus {
 }
 
 
+#Equatable
 pub struct DataLimits {
     pub encoding: EncodingLimits
     pub max_groups: Int
@@ -226,6 +270,7 @@ pub struct DataLoader<T> {
     pub status: DataLoaderStatus
 }
 
+#Comparable
 pub struct DataLoaderStatus {
     pub identity: String
     pub freshness: DataFreshness
@@ -237,6 +282,7 @@ pub struct DataLoaderStatus {
     pub last_good: Bool
 }
 
+#Equatable
 pub struct DataWatchStatus {
     pub mode: String
     pub revision: Int
@@ -250,6 +296,16 @@ pub struct DataWatchStatus {
     pub invalidation_cause: String
     pub refreshing: Bool
     pub cancelled: Bool
+    impl Display {
+        fn display(self) -> String Never! { data_watch_status_text(self) }
+    }
+    impl Debug {
+        fn debug(self) -> String Never! { data_watch_status_text(self) }
+    }
+}
+
+fn data_watch_status_text(status: DataWatchStatus) -> String Never! {
+    "DataWatchStatus{{mode: {status.mode}, revision: {status.revision}, retained_rows: {status.retained_rows}, recomputations: {status.recomputations}, active: {status.active}, generation: {status.generation}, dirty: {status.dirty}, error: {status.error}, freshness_ms: {status.freshness_ms}, invalidation_cause: {status.invalidation_cause}, refreshing: {status.refreshing}, cancelled: {status.cancelled}}}"
 }
 
 pub struct DataStream<T> {
@@ -268,6 +324,7 @@ pub struct DataPivotCell {
     pub sum: Float
     pub mean: Float
 }
+#Equatable
 pub struct DataSummary {
     pub count: Int
     pub sum: Float
@@ -309,17 +366,38 @@ pub struct DataWatch<T> {
     pub status: DataWatchStatus
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotMark {
-    Bar
     Line
+    Bar
     Point
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Line -> "line"
+            .Bar -> "bar"
+            .Point -> "point"
+        }
+    }
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotChannel {
     X
     Y
     Color
     Size
+    Text
+    Detail
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .X -> "x"
+            .Y -> "y"
+            .Color -> "color"
+            .Size -> "size"
+            .Text -> "text"
+            .Detail -> "detail"
+        }
+    }
 }
 
 pub enum JetDataPlotAggregate {
@@ -330,13 +408,24 @@ pub enum JetDataPlotAggregate {
     Max
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotFilterOp {
-    Eq
-    Ne
-    Lt
-    Le
-    Gt
-    Ge
+    Equal
+    NotEqual
+    Less
+    LessEqual
+    Greater
+    GreaterEqual
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Equal -> "eq"
+            .NotEqual -> "ne"
+            .Less -> "lt"
+            .LessEqual -> "lte"
+            .Greater -> "gt"
+            .GreaterEqual -> "gte"
+        }
+    }
 }
 
 pub enum JetDataPlotValue {
@@ -351,10 +440,21 @@ pub enum JetDataPlotTransform {
     Aggregate
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotScaleKind {
     Linear
     Log
     Band
+    Point
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Linear -> "linear"
+            .Log -> "log"
+            .Band -> "band"
+            .Point -> "point"
+        }
+    }
+    fn needs_numeric(self) -> Bool Never! { self == .Linear || self == .Log }
 }
 
 pub enum JetDataPlotDomain {
@@ -362,33 +462,80 @@ pub enum JetDataPlotDomain {
     Explicit
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotLegendPosition {
     Top
+    Right
     Bottom
     Left
-    Right
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Top -> "top"
+            .Right -> "right"
+            .Bottom -> "bottom"
+            .Left -> "left"
+        }
+    }
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotFacetKind {
-    Wrap
-    Grid
+    Row
+    Column
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Row -> "row"
+            .Column -> "column"
+        }
+    }
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotInteraction {
     Hover
     Select
+    Zoom
     Pan
+    Brush
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Hover -> "hover"
+            .Select -> "select"
+            .Zoom -> "zoom"
+            .Pan -> "pan"
+            .Brush -> "brush"
+        }
+    }
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotBackend {
-    SVG
-    Text
+    Terminal
+    Browser
+    Native
+    Export
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Terminal -> "terminal"
+            .Browser -> "browser"
+            .Native -> "native"
+            .Export -> "export"
+        }
+    }
 }
 
+#[Copy, Comparable]
 pub enum JetDataPlotSupport {
-    Full
-    Partial
+    Supported
+    Degraded
     Unsupported
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Supported -> "supported"
+            .Degraded -> "degraded"
+            .Unsupported -> "unsupported"
+        }
+    }
 }
 
 pub enum JetDataPlotErrorKind {
@@ -966,12 +1113,12 @@ pub fn svg<T>(plot: JetDataPlot<T>) -> String DataError! {
 }
 
 pub fn show<T>(plot: JetDataPlot<T>) -> JetDataPlotRender DataError! {
-    render<T>(plot, JetDataPlotBackend.SVG)
+    render<T>(plot, JetDataPlotBackend.Browser)
 }
 
 pub fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPlotRender DataError! {
     plan :: normalize_plot_plan(plot.plan)
-    if backend == JetDataPlotBackend.Text {
+    if backend == JetDataPlotBackend.Terminal {
         return Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.Text, body: render_plot_text(plan)})
     }
     Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.SVG, body: render_plot_svg(plan)})

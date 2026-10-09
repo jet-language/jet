@@ -1940,6 +1940,10 @@ macro_rules! jet_lane_show {
             self.revision
         }
     }
+    // Mechanical generic free-function targets for checked Core data callers.
+    // The canonical revision stays in the existing Shared owner/ticket.
+    pub fn jet_shared_revision<T: 'static>(shared: &JetShared<T>) -> u64 { shared.revision() }
+    pub fn jet_shared_snapshot_revision<T: 'static, U: Clone>(snapshot: &JetSharedSnapshot<T, U>) -> u64 { snapshot.revision() }
     impl<T: 'static, U> Drop for JetSharedSnapshot<T, U> {
         fn drop(&mut self) {
             self.owner.release_logical_owner_during_drop();

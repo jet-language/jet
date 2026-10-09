@@ -898,6 +898,27 @@ fn resolved_core_fixed_sig(
     span: Span,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
+    if module == "core.mem" && matches!(name, "__shared_revision" | "__snapshot_revision") {
+        let snapshot = name == "__snapshot_revision";
+        let expected = if snapshot { 2 } else { 1 };
+        if type_args.len() != expected {
+            diags.push(Diagnostic::error(
+                "E0119",
+                format!("`{name}` expects {expected} type arguments"),
+                "the compiler-private revision primitive needs its checked owner and projection types".to_string(),
+                if snapshot { "write `__snapshot_revision<T, U>(snapshot)`".to_string() }
+                else { "write `__shared_revision<T>(shared)`".to_string() },
+                Some(span),
+            ));
+            return None;
+        }
+        let payload = if snapshot {
+            Type::Apply { name: Syntax::TYPE_SHARED_SNAPSHOT.to_string(), args: type_args.to_vec() }
+        } else {
+            Type::Shared(Box::new(type_args[0].clone()))
+        };
+        return Some((vec![(AccessConvention::Read, payload)], Some(Type::Int)));
+    }
     if module == "core.mem"
         && matches!(name, "__list_capacity" | "__list_reserve_exact" | "__type_size" | "__loader_new")
     {
