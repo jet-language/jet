@@ -1867,7 +1867,7 @@ function validateDispatcherIdentity(module, member, expression, sourceLine) {
   return actual;
 }
 
-function parseCoreSource(source) {
+function parseCoreSource(source, readSource = read) {
   const modules = [];
   const sourceModules = [];
   const bootstraps = [];
@@ -6389,6 +6389,7 @@ function hostileFixtures() {
 
 export {
   buildLedger,
+  parseCoreSource,
   coreSourceFacts,
   publicDispatcherRows,
   validatePublicDispatcher,
