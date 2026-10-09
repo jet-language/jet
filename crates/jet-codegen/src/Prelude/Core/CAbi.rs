@@ -972,6 +972,7 @@ mod jet_c_abi {
         })
     }
 
+    // Native C carriers import the Jet heap and retain its init-array entry.
     #[cfg(jet_native_pack)]
     unsafe extern "C" {
         pub(super) fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
